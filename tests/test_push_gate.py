@@ -10,9 +10,13 @@ identities the landed commits carry.
 
   - with no `loam.pushGate`, a landing pushes as it always has, whoever the
     commits are by (a project's own repository has no gate);
-  - with the gate on, a commit by another identity is held, `main` still
-    lands here, and the receipt says why; once origin has it no longer
-    matters;
+  - with the gate on, a commit made by hand under another identity is held,
+    `main` still lands here, and the receipt says why; once origin has it no
+    longer matters;
+  - a job tree from before the checkout's identity was set lands its commits
+    re-authored as the checkout's identity (same tree and dates), and a
+    commit a landing already put on `main` that way is re-authored by the
+    next push, but only when nothing but landings moved `main`;
   - a deny-list match in an added line, a path or a message is held; an
     `allow` line lets one file's match through; a missing list holds all;
   - a job begun before `main` was rewritten lands only its own commits,
@@ -120,18 +124,71 @@ try:
     git(proj.root, "config", "loam.pushGate", "true")
     git(proj.root, "config", "loam.pushDeny", str(deny))
     before = origin_main(origin)
+    # A person's commit, made by hand on the checkout's main: held, and a
+    # landing after it is held too (main moved other than by a landing).
+    (proj.root / "hand.txt").write_text("by hand\n")
+    git(proj.root, "add", "-A")
+    git(proj.root, "commit", "-qm", "by hand", who="someone-else")
+    hand = git(proj.root, "rev-parse", "main")
     r = start(proj, "20261116-100000-00000002")
-    commit(r, "b.txt", "b\n", who="someone-else")
+    commit(r, "b.txt", "b\n")
     result, text = land(proj, r)
-    check("gate: another identity's commit lands here but is held",
+    check("gate: a hand commit by another identity is held, main lands here",
           (result["state"], isinstance(result["pushed"], str), origin_main(origin)),
           ("landed", True, before))
     check("gate: the receipt says the push was held, and by what",
           "held by the push gate" in text and "someone-else" in text, True)
     check("gate: the sweep's push is held the same way",
           wt.push_origin(proj.root).startswith("held by the push gate"), True)
+    check("gate: the hand commit is never re-authored",
+          git(proj.root, "merge-base", "--is-ancestor", hand, "main") == "", True)
     # Taken by hand (the person decided): origin has it, so it is not asked again.
     git(proj.root, "push", "-q", "origin", "main")
+
+    # A job tree made before the checkout's identity was set: its commits
+    # are the engineer's, re-authored at the landing, and pushed.
+    r = start(proj, "20261116-100000-00000012")
+    git(Path(r["path"]), "config", "user.name", "old-box")
+    git(Path(r["path"]), "config", "user.email", "old@box")
+    commit(r, "old-tree.txt", "from an old tree\n")
+    first = git(Path(r["path"]), "rev-parse", "HEAD")
+    first_tree = git(Path(r["path"]), "rev-parse", "HEAD^{tree}")
+    first_date = git(Path(r["path"]), "log", "-1", "--format=%ad")
+    result, text = land(proj, r)
+    check("old tree: its commit is re-authored and pushed",
+          (result["state"], result["pushed"], result.get("reauthored"),
+           git(proj.root, "log", "-1", "--format=%an <%ae>|%cn <%ce>|%s", "main"),
+           origin_main(origin) == git(proj.root, "rev-parse", "main")),
+          ("landed", True, True, f"{NAME} <{EMAIL}>|{NAME} <{EMAIL}>|add old-tree.txt", True))
+    check("old tree: same tree and author date, a new hash; the receipt says so",
+          (git(proj.root, "rev-parse", "main^{tree}") == first_tree,
+           git(proj.root, "log", "-1", "--format=%ad", "main") == first_date,
+           git(proj.root, "rev-parse", "main") != first, "re-authored" in text),
+          (True, True, True, True))
+
+    # A commit a landing already put on main under another identity (the
+    # 2026-11-16 case: landed by a tree from before the gate, then held): the
+    # next push re-authors it, because only landings moved main since origin.
+    tree = root / "pre-gate-tree"
+    subprocess.run(["git", "clone", "-q", str(proj.root), str(tree)], check=True)
+    (tree / "held.txt").write_text("held\n")
+    git(tree, "add", "-A")
+    git(tree, "commit", "-qm", "landed while the gate came on", who="old-box")
+    git(proj.root, "fetch", "-q", str(tree), "main")
+    git(proj.root, "merge", "--quiet", "--ff-only", "FETCH_HEAD")
+    held = git(proj.root, "rev-parse", "main")
+    check("landed earlier: the gate would hold it",
+          bool(wt.push_gate(proj.root, origin_main(origin))), True)
+    pushed = wt.push_origin(proj.root)
+    check("landed earlier: the sweep's push re-authors it and pushes",
+          (pushed, git(proj.root, "log", "-1", "--format=%an|%s", "main"),
+           origin_main(origin) == git(proj.root, "rev-parse", "main"),
+           git(proj.root, "rev-parse", "main^{tree}") == git(proj.root, "rev-parse", f"{held}^{{tree}}"),
+           git(proj.root, "status", "--porcelain")),
+          (True, f"{NAME}|landed while the gate came on", True, True, ""))
+    check("landed earlier: a second push changes nothing",
+          (wt.push_origin(proj.root), wt.reauthor_landed(proj.root, origin_main(origin))),
+          (True, None))
 
     # Identity right, deny list clean: pushed.
     r = start(proj, "20261116-100000-00000003")
