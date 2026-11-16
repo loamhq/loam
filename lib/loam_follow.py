@@ -1046,9 +1046,10 @@ def memory_pins(hands: Hands) -> None:
 
 
 def clear_agy_files(dry: bool = False) -> list[dict]:
-    """Antigravity's per-conversation files for engineer jobs, cleared a
-    week after the job (2026-11-15, lib/loam_agy_files.py), as this nightly
-    pass's last step. Logged, never said in comms: it is housekeeping the
+    """Antigravity's per-conversation files, cleared after a week
+    (lib/loam_agy_files.py): an engineer job's a week after the job
+    (2026-11-15), every other conversation once idle a week (2026-11-16),
+    as this nightly pass's last step. Logged, never said in comms: it is housekeeping the
     owner agreed to, and a failure is retried the next night."""
     import loam_agy_files  # noqa: PLC0415
     try:

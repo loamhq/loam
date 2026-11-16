@@ -309,14 +309,150 @@ def push_gate(repo: Path, since: str | None, deny: Path | None = None,
     return problems
 
 
+# Re-authoring (2026-11-16). The gate was turned on while jobs were running
+# in trees cloned before the checkout's identity was set, so their commits
+# carried the box's old one and were held: `93df8bc` landed on `main` and
+# never reached `origin`. A job's commits are the engineer's work whatever
+# its tree's config said, so two places re-author them as the checkout's
+# identity -- same trees, messages, dates and parents, only the names:
+#
+#   - the landing, in the job's tree, before it merges (``adopt_identity``),
+#     which also gives an old tree the checkout's identity for what it
+#     commits next;
+#   - the push, for commits already on `main` that `origin` lacks
+#     (``reauthor_landed``), but only when `main`'s reflog says nothing but a
+#     landing's fast-forward moved it since `origin`'s head. A commit made
+#     on `main` by hand, a reset or a rebase there leaves the push held, as
+#     the gate says.
+#
+# Running jobs whose base was a re-authored commit are replayed by
+# ``replay_if_rewritten``, the path a rewritten `main` already takes.
+
+REAUTHOR_NOTE = "loam: re-author landed commits"
+
+
+def foreign(repo: Path, since: str, head: str, want: str) -> list[str]:
+    """The commits in `since..head` whose author or committer is not
+    ``want``."""
+    out = git(repo, "log", "--format=%H%x00%an <%ae>%x00%cn <%ce>",
+              f"{since}..{head}", check=False).stdout
+    rows = [line.split("\0") for line in out.splitlines() if line]
+    return [r[0] for r in rows if len(r) == 3 and (r[1] != want or r[2] != want)]
+
+
+def reauthor(repo: Path, since: str, head: str, name: str, email: str) -> str:
+    """`head` with every commit in `since..head` made again as ``name
+    <email>``: same tree, message, parents (mapped) and dates. A commit that
+    already has the identity comes out as itself, so this is idempotent.
+    Returns the new head; refs are not touched."""
+    shas = git(repo, "rev-list", "--topo-order", "--reverse",
+               f"{since}..{head}").stdout.split()
+    mapped: dict[str, str] = {}
+    for sha in shas:
+        raw = subprocess.run(["git", "-C", str(repo), "cat-file", "commit", sha],
+                             capture_output=True, check=True).stdout
+        header, _, message = raw.partition(b"\n\n")
+        tree, parents, dates = None, [], {}
+        for line in header.decode("utf-8", "replace").splitlines():
+            key, _, value = line.partition(" ")
+            if key == "tree":
+                tree = value
+            elif key == "parent":
+                parents.append(mapped.get(value, value))
+            elif key in ("author", "committer"):
+                dates[key] = " ".join(value.rsplit(" ", 2)[-2:])
+        env = dict(os.environ, GIT_AUTHOR_NAME=name, GIT_AUTHOR_EMAIL=email,
+                   GIT_COMMITTER_NAME=name, GIT_COMMITTER_EMAIL=email,
+                   GIT_AUTHOR_DATE=dates.get("author", ""),
+                   GIT_COMMITTER_DATE=dates.get("committer", ""))
+        argv = ["git", "-C", str(repo), "commit-tree", tree]
+        for p in parents:
+            argv += ["-p", p]
+        made = subprocess.run(argv, input=message, env=env, capture_output=True,
+                              check=False)
+        if made.returncode != 0:
+            raise WorktreeError(f"re-authoring {sha[:7]} failed: "
+                                f"{made.stderr.decode(errors='replace').strip()[:300]}")
+        mapped[sha] = made.stdout.decode().strip()
+    tip = rev(repo, head) or head
+    return mapped.get(tip, tip)
+
+
+def adopt_identity(project: eng.Project, repo: Path, tree: Path, branch: str,
+                   main_sha: str, say) -> str | None:
+    """Before a gated landing merges: give the job's tree the checkout's
+    identity and re-author the branch's own commits (`main..branch`) that
+    carry another. Returns the old tip when it moved, else None. A project
+    with a ``commit_identity`` commits as its person and is never touched."""
+    if not gate_on(repo) or loam_commit_identity.of(project.record) \
+            or not is_clone(tree):
+        return None
+    name, email = identity(repo)
+    if not name or not email:
+        return None
+    for key, value in (("user.name", name), ("user.email", email)):
+        if git(tree, "config", "--local", "--get", key, check=False).stdout.strip() != value:
+            git(tree, "config", key, value)
+    tip = branch_tip(tree, branch)
+    if not tip or not foreign(tree, main_sha, tip, f"{name} <{email}>"):
+        return None
+    new = reauthor(tree, main_sha, tip, name, email)
+    git(tree, "update-ref", f"refs/heads/{branch}", new, tip)
+    say(f"landing: re-authored the job's commits as {name} <{email}> "
+        f"({tip[:7]} -> {new[:7]})")
+    return tip
+
+
+def landings_only(repo: Path, since: str) -> bool:
+    """Whether every move of `main` since it last stood at a commit `origin`
+    has was a landing's fast-forward (`merge <sha>: Fast-forward`) or an
+    earlier re-authoring of this kind."""
+    out = git(repo, "reflog", "show", "--format=%H%x00%gs", f"refs/heads/{MAIN}",
+              check=False).stdout
+    for line in out.splitlines():
+        sha, _, subject = line.partition("\0")
+        if sha == since or is_ancestor(repo, sha, since):
+            return True
+        if not ((subject.startswith("merge ") and subject.endswith(": Fast-forward"))
+                or subject.startswith(REAUTHOR_NOTE)):
+            return False
+    return False
+
+
+def reauthor_landed(repo: Path, since: str | None) -> tuple[str, str] | None:
+    """Re-author the landed commits `origin` lacks when another identity
+    holds them and only landings put them there: (old main, new main), or
+    None when nothing was done."""
+    name, email = identity(repo)
+    head = rev(repo, MAIN)
+    if not since or not head or not name or not email \
+            or not is_ancestor(repo, since, head) \
+            or not foreign(repo, since, head, f"{name} <{email}>") \
+            or not landings_only(repo, since):
+        return None
+    mark = rev(repo, BACKUP_MARK) if has_remote(repo, BACKUP) else None
+    if mark and not is_ancestor(repo, mark, since):
+        return None         # the off-box copy already took them
+    new = reauthor(repo, since, head, name, email)
+    if new == head:
+        return None
+    # Same tree as `head`, so the checkout's index and files already match.
+    git(repo, "update-ref", "-m", f"{REAUTHOR_NOTE} as {name} <{email}>",
+        f"refs/heads/{MAIN}", new, head)
+    return head, new
+
+
 def push_origin(repo: Path) -> bool | str:
     """Push `main` to `origin`, through the gate when the checkout has
-    one: True, or why not."""
+    one: True, or why not. Gated, it first re-authors landed commits
+    (``reauthor_landed``), which may move `main`."""
     problems = []
     if gate_on(repo):
         git(repo, "fetch", "--quiet", "--no-tags", "origin", MAIN, check=False,
             timeout=120)
-        problems = push_gate(repo, rev(repo, f"origin/{MAIN}"))
+        since = rev(repo, f"origin/{MAIN}")
+        reauthor_landed(repo, since)
+        problems = push_gate(repo, since)
     if problems:
         shown = "; ".join(problems[:5]) + (
             f"; and {len(problems) - 5} more" if len(problems) > 5 else "")
@@ -503,10 +639,7 @@ def configure_clone(repo: Path, tree: Path, identity: dict | None = None) -> Non
     nothing else: no hooks, no remotes but the canonical one. A project with
     a ``commit_identity`` (lib/loam_commit_identity.py) commits as that person
     instead of as whatever the canonical checkout says."""
-    for key in ("user.name", "user.email"):
-        value = git(repo, "config", "--local", "--get", key, check=False).stdout.strip()
-        if value:
-            git(tree, "config", key, value)
+    configure_identity(repo, tree)
     apply_identity(tree, identity)
     git(tree, "config", "gc.auto", "0")
     info_src, info_dst = common_dir(repo) / "info", tree / ".git" / "info"
@@ -514,6 +647,13 @@ def configure_clone(repo: Path, tree: Path, identity: dict | None = None) -> Non
     for name in ("exclude", "attributes"):
         if (info_src / name).is_file():
             shutil.copy2(info_src / name, info_dst / name)
+
+
+def configure_identity(repo: Path, tree: Path) -> None:
+    for key in ("user.name", "user.email"):
+        value = git(repo, "config", "--local", "--get", key, check=False).stdout.strip()
+        if value:
+            git(tree, "config", key, value)
 
 
 def apply_identity(tree: Path, identity: dict | None) -> None:
@@ -821,6 +961,9 @@ def setup(project: eng.Project, job_id: str, job_dir: Path,
         reopened = "reused"
         if path.is_dir() and is_clone(path):
             refresh_main(repo, path)
+            if not identity:
+                # A tree made before the checkout's identity was set.
+                configure_identity(repo, path)
         elif path.is_dir() and path in worktrees(repo):
             reopened = convert_worktree(repo, path, branch)
         elif rev(repo, f"refs/heads/{branch}"):
@@ -1681,6 +1824,8 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
             f"`{MAIN}` was rewritten since this job began, and replaying the "
             f"job's own commits onto it stopped: {replay}"))
         return result
+    if adopt_identity(project, repo, tree, branch, main_sha, say):
+        result["reauthored"] = True
     tip = branch_tip(tree, branch)
     result["head"] = head_note(tree, branch)
 
@@ -1773,6 +1918,16 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
     if has_remote(repo):
         with timed(result, "push"):
             result["pushed"] = push_origin(repo)
+        now = rev(repo, MAIN)
+        if now and now != merged:
+            # The push re-authored landed commits (``reauthor_landed``): the
+            # same tree under new commits, and that is what landed.
+            say(f"landing: re-authored the commits origin lacked "
+                f"({merged[:7]} -> {now[:7]})")
+            result.update(sha=now, reauthored=True)
+            if keep_tree and branch_tip(tree, branch) == merged:
+                git(tree, "fetch", "--quiet", "--no-tags", str(repo), MAIN)
+                git(tree, "update-ref", f"refs/heads/{branch}", now, merged)
     backup = push_backup(repo)
     if backup is not None:
         result["backup"] = backup
@@ -2011,6 +2166,10 @@ def receipt_section(project: eng.Project, job_id: str, result: dict | None) -> s
         elif backup:
             push += (f" **The backup push failed**: `{backup}`; the next "
                      f"landing or recovery sweep tries again.")
+        if result.get("reauthored"):
+            push += (" Commits made under another identity were re-authored "
+                     "as this checkout's before the push (same trees and "
+                     "messages), so their hashes changed.")
         memory = (f" Memory merged back: {', '.join(result['memory'])}."
                   if result.get("memory") else "")
         kept = ("The worktree stays: the session is still in it, and its "

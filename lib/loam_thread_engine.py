@@ -51,6 +51,7 @@ fails with a plain sentence -- never the broker's route-level 429 text.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 
 import loam_agents
@@ -1060,6 +1061,32 @@ class ThreadEngine:
             return None
         return context
 
+    def agy_conversation_gone(self, turn: Turn, engine: str) -> str | None:
+        """The Antigravity conversation this member's kept session would
+        resume, when its files were cleared (lib/loam_agy_files.py
+        ``clear_idle``, a week idle; 2026-11-16): the turn then starts a fresh
+        session that is given the thread, since ``agy`` asked to resume a
+        conversation it no longer has starts an empty one. None otherwise."""
+        if engine != "antigravity":
+            return None
+        kept = threads.session_for(turn.thread_id, turn.persona)
+        if not kept or kept.get("engine") != engine or not kept.get("session_id"):
+            return None
+        sid = kept["session_id"]
+        live = (getattr(self.broker, "sessions", None) or {}).get(sid)
+        conversation = getattr(live, "thread_id", None) if live is not None else None
+        if conversation is None:
+            try:
+                conversation = json.loads((cfg.SESSION_DIR / f"{sid}.json")
+                                          .read_text(encoding="utf-8")).get("thread_id")
+            except (OSError, ValueError, AttributeError):
+                return None
+        if not conversation:
+            return None
+        import loam_agy_files  # noqa: PLC0415
+        db = loam_agy_files.root() / "conversations" / f"{conversation}.db"
+        return None if db.exists() else conversation
+
     async def _session(self, turn: Turn, meta: dict, engine: str,
                        model: str | None = None, fresh: bool = False,
                        effort: str | None = None):
@@ -1176,8 +1203,13 @@ class ThreadEngine:
                       f"{str(old.get('session_id'))[:8]} holds {rotated['used']} "
                       f"tokens (rotates at {rotate_at(rotated)}); this turn starts "
                       f"a fresh one")
+        gone = None if rotated is not None else self.agy_conversation_gone(turn, engine)
+        if gone:
+            steps.log(f"{turn.thread_id} {turn.persona}: Antigravity conversation "
+                      f"{gone[:8]} was cleared after a week idle; this turn "
+                      f"starts a fresh session")
         session, kept = await self._session(turn, meta, engine, model,
-                                            fresh=rotated is not None,
+                                            fresh=rotated is not None or bool(gone),
                                             effort=effort)
         # The thread as it stands now the session is open: another member may
         # have spoken while this one waited for its seat.

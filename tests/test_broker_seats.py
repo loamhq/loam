@@ -383,8 +383,11 @@ async def main() -> None:
             await asyncio.sleep(0.01)
         check("a chat's process runs at CHILD_OOM_SCORE_ADJ, first to go",
               adj, str(cfg.CHILD_OOM_SCORE_ADJ))
+        # The broker's unit runs at CORE_OOM_SCORE_ADJ; this test's own
+        # process may not (inside an engineer job or a landing it runs at
+        # AGENT_OOM_SCORE_ADJ since 2026-11-16, equal to the child's).
         check("...above the broker's own",
-              int(adj) > int(Path("/proc/self/oom_score_adj").read_text()), True)
+              int(adj) > cfg.lc.CORE_OOM_SCORE_ADJ, True)
     check("first_to_go keeps the command line whole behind choom",
           broker_mod.first_to_go(["claude", "-p"])[-2:], ["claude", "-p"])
     await stop_all(broker)

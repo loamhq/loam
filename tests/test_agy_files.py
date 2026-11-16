@@ -15,6 +15,12 @@
                    cleared the same way: a run directory is a job directory,
                    its verdict's time read from its run.json.
   continue_job     of a cleared job: refused with a sentence that says so.
+  idle (11-16)     a conversation no job names is cleared once nothing has
+                   touched it for 7 days and no agy process is on it, its
+                   summary rows with it; one resumed within the week stays.
+                   Implicit files no job names go at 7 days old. The thread
+                   engine starts a fresh session for a member whose kept
+                   conversation was cleared.
   the memory check leaves a job's own conversation out of its counts, so a
                    job's growth posts nothing; since 2026-11-16 a persona's
                    posts nothing either, and a new kind of entry under the
@@ -295,6 +301,111 @@ try:
     counts, grew = pm.check()
     check("...once", [g for g in grew if g.startswith("antigravity")], [])
     del base
+
+    # -- every other conversation: cleared once idle a week (2026-11-16) -----
+    def age(path: Path, days: float) -> None:
+        when = NOW - days * DAY
+        for p in [path, *path.rglob("*")] if path.is_dir() else [path]:
+            os.utime(p, (when, when))
+
+    for cid in ("IDLE", "RESUMED", "BUSY"):
+        conversation(cid)
+        age(HOME / "conversations" / f"{cid}.db", 20)
+        age(HOME / "brain" / cid, 20)
+    # Begun three weeks ago, resumed two days ago: the turn wrote its .db.
+    age(HOME / "conversations" / "RESUMED.db", 2)
+    # A summary row whose conversation's files are already gone.
+    con = sqlite3.connect(HOME / "conversation_summaries.db")
+    con.execute("INSERT INTO conversation_summaries (conversation_id, title) "
+                "VALUES ('ORPHAN', 'x')")
+    con.commit()
+    con.close()
+    for name, days in (("stale.pb", 9), ("young.pb", 3)):
+        (HOME / "implicit" / name).write_text("x")
+        age(HOME / "implicit" / name, days)
+    a_job("20261101-000000-00000008", "JOBIDLE", NOW - 2 * DAY, ["jobs-own.pb"])
+    (HOME / "implicit" / "jobs-own.pb").write_text("x")
+    age(HOME / "implicit" / "jobs-own.pb", 20)
+    conversation("JOBIDLE")
+    age(HOME / "conversations" / "JOBIDLE.db", 20)
+    age(HOME / "brain" / "JOBIDLE", 20)
+
+    real_running = af.running
+    af.running = lambda: {"BUSY"}           # an agy process is on it
+    try:
+        due_idle = af.idle(af.jobs(), NOW)
+        check("idle: a week untouched, no job names it, nothing running on it",
+              sorted(due_idle), ["IDLE", "ORPHAN"])
+        dry = af.clear(NOW, dry=True)
+        check("idle: the dry run says so and removes nothing",
+              ([r["conversation"] for r in dry],
+               (HOME / "conversations" / "IDLE.db").exists()),
+              (["IDLE", "ORPHAN", None], True))
+        done = af.clear(NOW)
+        by = {r["conversation"]: r for r in done}
+        check("idle: the idle conversation's .db and brain go, and its rows",
+              (sorted(by["IDLE"]["removed"]), by["IDLE"]["rows"], by["IDLE"]["error"],
+               "IDLE" in rows("conversation_summaries"), "IDLE" in rows("conversations_fts"),
+               "IDLE" in rows("conversation_parents")),
+              (["brain/IDLE", "conversations/IDLE.db"], 3, None, False, False, False))
+        check("idle: a summary row with no files left goes too",
+              ("ORPHAN" in rows("conversation_summaries"), by["ORPHAN"]["rows"]), (False, 1))
+        check("idle: resumed within the week, running now, or a job's: all stay",
+              sorted(p.stem for p in (HOME / "conversations").iterdir()
+                     if p.stem in ("RESUMED", "BUSY", "JOBIDLE")),
+              ["BUSY", "JOBIDLE", "RESUMED"])
+        check("idle: a week-old implicit file no job names goes; a young one "
+              "and a job's stay",
+              (by[None]["removed"], sorted(p.name for p in (HOME / "implicit").iterdir()
+                                           if p.name in ("young.pb", "jobs-own.pb"))),
+              (["implicit/stale.pb"], ["jobs-own.pb", "young.pb"]))
+        check("idle: a second pass clears nothing", af.clear(NOW), [])
+        af.running = lambda: set()
+        done = af.clear(NOW + 4 * DAY)
+        check("idle: four days on, only the one whose process ended goes",
+              [r["conversation"] for r in done if r["conversation"]], ["BUSY"])
+        done = af.clear(NOW + 5.1 * DAY)
+        check("idle: the resumed one goes a week after its last turn; the "
+              "job's a week after its job",
+              sorted(r["conversation"] for r in done if r["conversation"]),
+              ["JOBIDLE", "RESUMED"])
+    finally:
+        af.running = real_running
+    check("running: reads --conversation off the process table",
+          isinstance(af.running(), set), True)
+
+    # -- the thread engine starts a fresh session for a cleared one ----------
+    import loam_thread_engine as te  # noqa: E402
+    import loam_threads as threads_mod  # noqa: E402
+
+    class Live:
+        thread_id = "LIVE-CONV"
+
+    class Broker:
+        sessions = {"S-live": Live()}
+
+    conversation("LIVE-CONV")
+    engine = te.ThreadEngine.__new__(te.ThreadEngine)
+    engine.broker = Broker()
+    turn = type("T", (), {"thread_id": "t-1", "persona": "probe1"})()
+    saved_for, saved_dir = threads_mod.session_for, te.cfg.SESSION_DIR
+    te.cfg.SESSION_DIR = TMP / "broker-sessions"
+    te.cfg.SESSION_DIR.mkdir()
+    (te.cfg.SESSION_DIR / "S-disk.json").write_text(json.dumps(
+        {"provider": "antigravity", "thread_id": "IDLE"}))
+    try:
+        threads_mod.session_for = lambda t, p: {"session_id": "S-live",
+                                                "engine": "antigravity"}
+        check("engine: a kept session whose conversation is there resumes",
+              engine.agy_conversation_gone(turn, "antigravity"), None)
+        threads_mod.session_for = lambda t, p: {"session_id": "S-disk",
+                                                "engine": "antigravity"}
+        check("engine: one whose conversation was cleared starts fresh",
+              engine.agy_conversation_gone(turn, "antigravity"), "IDLE")
+        check("engine: another provider is never asked",
+              engine.agy_conversation_gone(turn, "codex"), None)
+    finally:
+        threads_mod.session_for, te.cfg.SESSION_DIR = saved_for, saved_dir
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 
