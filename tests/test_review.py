@@ -40,7 +40,9 @@ def main() -> int:
     rv = load_review()
     tmp = Path(tempfile.mkdtemp(prefix="review-test-"))
     saved = {k: getattr(rv, k) for k in ("AI_LABS", "COMMONS", "STATE", "RUNS", "MEMORY", "NOTES", "INBOX",
-                                         "VAULT", "LOG", "REVIEWER", "WAKE_STATE")}
+                                         "VAULT", "LOG", "REVIEWER", "WAKE_STATE", "PROVIDER",
+                                         "MODEL", "EFFORT", "MCP_FILE")}
+    saved_agy = rv.agy.AGY
     saved_lock = (rv.loam_lock.LOCK_DIR, rv.loam_lock.WAIT_SECONDS)
     saved_argv = sys.argv
     try:
@@ -161,11 +163,15 @@ def main() -> int:
         # --- refusals: every one is a line in the failure log
         refusals_reach_the_failure_log(rv, tmp, check)
 
+        # --- a run on Antigravity (2026-11-15)
+        on_antigravity(rv, tmp, check)
+
         print(f"\n{'ALL PASSED' if not failures else f'{failures} FAILED'}")
         return 1 if failures else 0
     finally:
         for k, v in saved.items():
             setattr(rv, k, v)
+        rv.agy.AGY = saved_agy
         rv.loam_lock.LOCK_DIR, rv.loam_lock.WAIT_SECONDS = saved_lock
         sys.argv = saved_argv
         shutil.rmtree(tmp, ignore_errors=True)
@@ -222,6 +228,166 @@ def refusals_reach_the_failure_log(rv, tmp: Path, check) -> None:
           "each refusal is also in the reviewer's own log")
     comms = rv.VAULT / "00_INBOX" / "from-agents" / "comms.md"
     check(not comms.exists(), "and none of them posts a comms line")
+
+
+# A stand-in for `agy` 1.5.9 in print mode: it records how it was started,
+# writes a note into the outbox the prompt names (as the reviewer does) and a
+# memory page, and answers in the CLI's stream-json events.
+FAKE_AGY = r'''#!/usr/bin/env python3
+import json, os, re, sys
+from pathlib import Path
+args = sys.argv[1:]
+prompt = next(a[len("--print="):] for a in args if a.startswith("--print="))
+Path(os.environ["FAKE_AGY_LOG"]).write_text(json.dumps(
+    {"argv": args, "cwd": os.getcwd(),
+     "claude_token": "CLAUDE_CODE_OAUTH_TOKEN" in os.environ}))
+outbox = re.search(r"write your one note as (\S+)/<persona>/", prompt).group(1)
+memory = re.search(r"Your memory is at (\S+)/\.", prompt).group(1)
+Path(outbox, "alpha").mkdir(parents=True, exist_ok=True)
+Path(outbox, "alpha", "stale-pointer.md").write_text("# A stale pointer\n\nfinding\n")
+Path(memory, "alpha.md").write_text("flagged a stale pointer\n")
+cid = "conv-review-1"
+def say(e): print(json.dumps(e), flush=True)
+say({"event": "init", "conversation_id": cid, "init": {"model": args[args.index("--model") + 1]}})
+say({"event": "step_update", "step_update": {"conversation_id": cid, "step_index": 1,
+     "state": "DONE", "step_type": "tool", "tool_name": "view_file",
+     "usage": {"input_tokens": 10, "output_tokens": 2}}})
+say({"event": "step_update", "step_update": {"conversation_id": cid, "step_index": 2,
+     "state": "DONE", "step_type": "agent_response", "usage": {"input_tokens": 5, "output_tokens": 1}}})
+say({"event": "result", "result": {"conversation_id": cid, "status": os.environ.get("FAKE_AGY_STATUS", "SUCCESS"),
+     "error": os.environ.get("FAKE_AGY_ERROR"), "num_turns": 1}})
+'''
+
+
+def on_antigravity(rv, tmp: Path, check) -> None:
+    """The reviewer on Antigravity: the same lane, prompt, delivery and
+    record as on Claude Code; the session is `agy` as the custom agent
+    `loam-reviewer`, with its tools, servers and deny rules."""
+    import loam_profile  # noqa: PLC0415
+    # The choice: Claude Code unless set; Antigravity's model defaults to
+    # gemini-4-hydrogen-high, with no effort; a Claude model is not carried over.
+    saved_env = os.environ.pop("LOAM_REVIEWER_PROVIDER", None)
+    saved_stored = loam_profile.reviewer_stored
+    try:
+        loam_profile.reviewer_stored = lambda: {}
+        check(loam_profile.reviewer_provider() == "claude-code",
+              "unset, the reviewer's provider is Claude Code")
+        loam_profile.reviewer_stored = lambda: {"provider": "antigravity"}
+        check(loam_profile.reviewer_provider() == "antigravity"
+              and loam_profile.reviewer_choice("fable") == ("gemini-4-hydrogen-high", None),
+              "on Antigravity its model defaults to gemini-4-hydrogen-high, no effort")
+        loam_profile.reviewer_stored = lambda: {"provider": "antigravity",
+                                                "model": "claude-opus-5-5-high"}
+        check(loam_profile.reviewer_choice("fable") == ("claude-opus-5-5-high", None),
+              "Claude Opus via Antigravity, when picked")
+        loam_profile.reviewer_stored = lambda: {"model": "opus", "effort": "high"}
+        check(loam_profile.reviewer_choice("fable", provider="antigravity")
+              == ("gemini-4-hydrogen-high", None),
+              "a Claude Code model and effort are never run on Antigravity")
+        os.environ["LOAM_REVIEWER_PROVIDER"] = "antigravity"
+        check(loam_profile.reviewer_provider() == "antigravity",
+              "LOAM_REVIEWER_PROVIDER names one for a one-off run")
+    finally:
+        loam_profile.reviewer_stored = saved_stored
+        os.environ.pop("LOAM_REVIEWER_PROVIDER", None)
+        if saved_env is not None:
+            os.environ["LOAM_REVIEWER_PROVIDER"] = saved_env
+
+    # write_denials: everything beside the way down to the writable folder.
+    tree = tmp / "denials"
+    for d in ("a/keep/inner", "a/other", "b", "a/keep-not"):
+        (tree / d).mkdir(parents=True)
+    (tree / "f.txt").write_text("x")
+    got = sorted(str(p.relative_to(tree)) for p in rv.write_denials(tree / "a" / "keep", tree))
+    check(got == ["a/keep-not", "a/other", "b", "f.txt"],
+          "write_denials: every entry beside the way down, and nothing on it")
+
+    # The lane's plugin servers file is live state; the test names none.
+    rv.contributions.lane_mcp_file = lambda lane: None
+    fake = tmp / "agy-fake"
+    fake.write_text(FAKE_AGY)
+    fake.chmod(0o755)
+    log = tmp / "agy-argv.json"
+    os.environ["FAKE_AGY_LOG"] = str(log)
+    os.environ["LOAM_AGY_CLI_HOME"] = str(tmp / "agy-home")
+    rv.agy.AGY = str(fake)
+    rv.PROVIDER, rv.MODEL, rv.EFFORT = "antigravity", "gemini-4-hydrogen-high", None
+    rv.MCP_FILE = tmp / "reviewer-mcp.json"
+    rv.MCP_FILE.write_text(json.dumps({"mcpServers": {"history": {"command": "h", "args": []}}}))
+    saved_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = "not-a-token"
+    try:
+        code = rv.run("alpha")
+    finally:
+        if saved_token is None:
+            os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        else:
+            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = saved_token
+    run_dir = sorted((p for p in rv.RUNS.iterdir() if (p / "runtime").is_file()),
+                     key=lambda p: p.name)[-1]
+    record = json.loads((run_dir / "run.json").read_text())
+    started = json.loads(log.read_text())
+    argv = started["argv"]
+    check(code == 0 and record["outcome"] == "completed" and record["persona"] == "alpha",
+          "a run on Antigravity completes and reviews the persona it was given")
+    delivered = Path(record["delivered"])
+    check(delivered.parent == rv.COMMONS / "alpha" / "inbox"
+          and re.fullmatch(r"\d{4}-\d\d-\d\d-reviewer-stale-pointer\.md", delivered.name)
+          and delivered.read_text() == "# A stale pointer\n\nfinding\n",
+          "its note is delivered the same way: the persona's inbox, the peer-note name, byte for byte")
+    check(record["memory_pages_written"] == ["alpha"] and record["provider"] == "antigravity"
+          and record["model"] == "gemini-4-hydrogen-high" and record["api_turns"] == 2
+          and record["session_id"] == "conv-review-1" and record["agy_usage"]["input_tokens"] == 15,
+          "the record: its memory page, the provider, the model, its round trips and tokens")
+    check(argv[argv.index("--agent") + 1] == "loam-reviewer"
+          and argv[argv.index("--model") + 1] == "gemini-4-hydrogen-high"
+          and "--effort" not in argv and "--dangerously-skip-permissions" in argv
+          and started["cwd"] == str(run_dir / "agy") and not started["claude_token"],
+          "agy runs as loam-reviewer on the model, in the run's own workspace, without the Claude login")
+    prompt = next(a for a in argv if a.startswith("--print="))
+    check("<instructions>" in prompt and "instructions" in prompt
+          and f"Your outbox for this run is {run_dir / 'outbox'}/" in prompt
+          and "pinned by hand to `alpha`" in prompt,
+          "the prompt is the Claude reviewer's, its instruction file ahead of it")
+    settings = json.loads(Path(argv[argv.index("--settings") + 1]).read_text())
+    deny = settings["permissions"]["deny"]
+    writes = [d[len("write_file("):-1] for d in deny if d.startswith("write_file(")]
+    check({"command(*)", "read_url(*)", "execute_url(*)",
+           f"read_file({rv.VAULT / '15_CONVERSATIONS'})"} <= set(deny),
+          "deny: the shell, the web, and the vault's 15_CONVERSATIONS/")
+    check(not any(rv.STATE.resolve() == Path(w) or rv.STATE.resolve().is_relative_to(Path(w))
+                  for w in writes)
+          and str(rv.AI_LABS) in [str(Path(w)) for w in writes]
+          and str(run_dir / "agy") in writes,
+          "deny: every write but the state directory's, and its own agent files")
+    agent = (run_dir / "agy" / ".agents" / "agents" / "loam-reviewer.md").read_text()
+    tools = re.findall(r"^  - (\S+)$", agent, re.M)
+    check(tools == ["view_file", "write_to_file", "replace_file_content",
+                    "multi_replace_file_content"]
+          and "inheritMcp: true" in agent and "subagent: false" in agent,
+          "the agent's tools are the file tools and nothing else (no shell, web, browser, subagent)")
+    servers = json.loads((run_dir / "agy" / ".agents" / "mcp_config.json").read_text())["mcpServers"]
+    check(set(servers) >= {"history", "files"}
+          and servers["files"]["env"]["LOAM_FILES_EXCLUDE"] == str(rv.VAULT / "15_CONVERSATIONS"),
+          "its servers: history, and files for listing and search, 15_CONVERSATIONS/ held out")
+    files = json.loads((run_dir / "antigravity.json").read_text())
+    check((run_dir / "runtime").read_text().strip() == "antigravity"
+          and files["conversations"] == ["conv-review-1"],
+          "the run directory names its conversation, for the 7-day clear")
+
+    import time  # noqa: PLC0415
+    time.sleep(1.1)       # a run id is its second
+    os.environ["FAKE_AGY_STATUS"], os.environ["FAKE_AGY_ERROR"] = "ERROR", "RESOURCE_EXHAUSTED"
+    try:
+        code = rv.run("alpha")
+    finally:
+        os.environ.pop("FAKE_AGY_STATUS")
+        os.environ.pop("FAKE_AGY_ERROR")
+    record = json.loads(sorted(p for p in rv.RUNS.glob("*/run.json")
+                               if (p.parent / "runtime").is_file())[-1].read_text())
+    check(code == 4 and "out of quota: RESOURCE_EXHAUSTED" in record["outcome"]
+          and not record["ok"],
+          "a failed Antigravity session is a failed run, and says why")
 
 
 if __name__ == "__main__":

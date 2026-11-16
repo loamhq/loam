@@ -12,7 +12,8 @@ Usage:
   gen-deploy [--dry-run]            render, show what changes, write, apply
   gen-deploy --show <name>          print one render: caddyfile | daemon |
                                     authelia | authelia-compose | browser |
-                                    firewall | firewall-unit | sudoers
+                                    firewall | firewall-unit | sudoers |
+                                    preview-sysctl
   gen-deploy --init-login <user>    ONCE: mint Authelia's secrets, the user
                                     with a generated password, start the
                                     login, pre-generate a TOTP device, write
@@ -221,6 +222,12 @@ def generate(dry: bool) -> int:
         write_root(path, files[path], dep.MODES.get(path, 0o644))
 
     # Apply. Each of these is idempotent and each says what it did.
+    # Before Caddy: the previews' listener binds an address docker may not
+    # have raised yet, and the kernel must allow that first.
+    if dep.PREVIEW_SYSCTL in changed or not dep.preview_sysctl_live():
+        res = run(["sysctl", "-q", "-p", str(dep.PREVIEW_SYSCTL)])
+        print(f"  sysctl: {dep.PREVIEW_SYSCTL_KEY} applied (exit {res.returncode})"
+              f"{': ' + res.stderr.strip() if res.stderr.strip() else ''}")
     if dep.CADDYFILE in changed:
         res = run(["systemctl", "reload", "caddy"])
         print(f"  caddy reloaded (exit {res.returncode}){': ' + res.stderr.strip() if res.stderr.strip() else ''}")
@@ -275,6 +282,7 @@ def show(name: str) -> int:
         "authelia": dep.authelia_config, "authelia-compose": dep.authelia_compose,
         "browser": dep.browser_compose, "sudoers": dep.sudoers,
         "firewall": dep.sight_firewall_script, "firewall-unit": dep.sight_firewall_unit,
+        "preview-sysctl": dep.preview_sysctl,
     }
     if name not in renders:
         die(f"--show takes one of {', '.join(renders)}")

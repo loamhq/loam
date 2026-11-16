@@ -43,6 +43,7 @@ from pathlib import Path
 import loam_config as lc
 
 import loam_broker as cfg
+import loam_provider_usage as usage_store
 
 # The official binary, as Google's installer puts it
 # (``curl -fsSL https://antigravity.google/cli/install.sh | bash``, 1.5.3 on
@@ -118,8 +119,43 @@ def _probe() -> dict:
             return {**base, "reason": "no login on the box"}
         return {**base, "reason": said.splitlines()[-1][:240] if said else
                 f"agy models exited {proc.returncode}"}
+    models = parse_models(proc.stdout)
+    keep_models(models)
     return {**base, "source": "google-account", "connected": True,
-            "account": _account(), "models": parse_models(proc.stdout)}
+            "account": _account(), "models": models}
+
+
+# The last list `agy models` gave (2026-11-15), kept on disk for a reader
+# outside the broker (bin/check-drift, as Codex's `codex-models.json` is).
+# The broker's own copy is the login probe's, asked again at most once a
+# LOGIN_CACHE_S behind the call, so a model Google adds shows within a
+# minute of the page asking and a self-update of the CLI needs nothing.
+MODELS_FILE = cfg.STATE_DIR / "antigravity" / "models.json"
+
+
+def keep_models(models: list[dict]) -> None:
+    if not models:
+        return
+    try:
+        if MODELS_FILE.is_file() and json.loads(
+                MODELS_FILE.read_text(encoding="utf-8")).get("models") == models:
+            return
+        MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = MODELS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"at": cfg.now_iso(), "models": models}) + "\n",
+                       encoding="utf-8")
+        tmp.replace(MODELS_FILE)
+    except (OSError, ValueError):
+        pass
+
+
+def read_models() -> list[dict]:
+    try:
+        data = json.loads(MODELS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    models = data.get("models") if isinstance(data, dict) else None
+    return models if isinstance(models, list) else []
 
 
 def _account() -> str | None:
@@ -136,16 +172,35 @@ def _account() -> str | None:
 
 
 def parse_models(text: str) -> list[dict]:
-    """``agy models`` as a list. The text form is not documented; a line
-    whose first word looks like a slug is a model. Read back after the first
-    signed-in run and tighten then."""
+    """``agy models`` as a list. Each model is one line, its id and its name
+    separated by a tab (1.5.9, 2026-11-15: ``gemini-4-hydrogen-high\tGemini
+    4 Hydrogen (High)``), under a "Fetching available models..." line. Until
+    2026-11-15 the line was split on a space, so the id came out joined to
+    the name by the tab, matched nothing, and every list was empty."""
     out = []
     for line in text.splitlines():
-        word = line.strip().split(" ")[0].strip("-*•")
-        if re.fullmatch(r"[a-z0-9][a-z0-9.\-_/]+", word or "") and any(
-                c.isdigit() for c in word):
-            out.append({"id": word, "name": line.strip()})
+        parts = line.strip().split(None, 1)
+        word = parts[0].strip("-*•") if parts else ""
+        if re.fullmatch(r"[a-z0-9][a-z0-9.\-_/]+", word) and "-" in word:
+            name = parts[1].strip() if len(parts) > 1 else word
+            out.append({"id": word, "name": name})
     return out
+
+
+# The thinking level, in Antigravity's model ids (2026-11-15, 1.5.9): most
+# ids end in it (`gemini-4-hydrogen-high`, `claude-opus-5-5-low`), and
+# `agy` refuses `--effort` beside such an id unless they agree ("--model
+# gemini-4-hydrogen-low conflicts with --effort=xhigh", exit 1). `--effort`
+# is also refused for an id that takes none ("--effort is not supported for
+# model \"gemini-pro-orchestrator\""), and a bare family id takes it
+# (`--model gemini-4-hydrogen --effort high` runs). So the one mapping Loam
+# uses: **the id from `agy models` is the whole choice, level included**,
+# and `--effort` is passed only beside an id that does not end in a level.
+LEVEL_RE = re.compile(r"-(low|medium|high|xhigh|max)$")
+
+
+def carries_level(model: str | None) -> bool:
+    return bool(model and LEVEL_RE.search(model))
 
 
 _refreshing = threading.Lock()
@@ -258,6 +313,248 @@ def sign_out() -> dict:
     return {"removed": removed, "login": row_login(login_state(fresh=True))}
 
 
+# -- usage on demand: the CLI's own /quota (2026-11-15) ---------------------
+#
+# Found in 1.5.9: ``agy -p /quota`` (``/usage`` is the same command) answers
+# without a turn. In ``--output-format stream-json`` it is one
+# ``command_result`` event and a ``result`` with ``num_turns`` 0, every token
+# count 0 and an empty ``conversation_id``: no model call, no conversation
+# made. Five reads on 2026-11-15 (three plain, two stream-json, ~1.9 s each)
+# moved no ``remaining_fraction`` in its last digit, so a read spends nothing
+# and it is read on the cadence the other two are (loam_provider_usage).
+#
+# What it answers, abridged: ``command.data.groups``, each a pool of models
+# (``Gemini Models``; ``Claude and GPT models``) with ``buckets``, each
+# ``{id, name, window: "weekly"|"5h", remaining_fraction, reset_time}``.
+# ``remaining_fraction`` is what is LEFT; the row's ``utilization`` is what
+# is USED, as Claude's and Codex's are, so it is ``1 - remaining``. The
+# printed form -- ``<pool>\t<window name>\t<percent left>%\t<reset ISO>`` per
+# line, in ``result.response`` -- is the fallback when the structured data is
+# absent, and a line it cannot read is kept under ``unparsed``, never fatal.
+#
+# Every bucket is served under the row's ``buckets``, keyed by Antigravity's
+# own id and labelled ``<pool> · <window>`` (``limit_name``), because there is
+# no one pool to call the row's own: a Gemini session and a Claude-on-agy
+# session spend different ones. ``/credits`` (paid overflow, ``useG1Credits``)
+# is read beside it and served as ``credits`` in Codex's shape, whose
+# ``hasCredits`` false the page draws as no line, so a balance of 0 shows
+# nothing and any other balance shows.
+
+QUOTA_ARGV = ("-p", "/quota", "--output-format", "stream-json")
+CREDITS_ARGV = ("-p", "/credits", "--output-format", "stream-json")
+USAGE_READ_TIMEOUT_S = 30
+USAGE_FILE = cfg.STATE_DIR / "antigravity" / "usage.json"
+WINDOW_MINS = {"5h": 300, "weekly": 10080}
+WINDOW_WORDS = {300: "5-hour", 10080: "Weekly"}
+WINDOW_MINS_KEYS = {v: k for k, v in WINDOW_MINS.items()}
+
+
+def window_mins(window) -> int | None:
+    """``"5h"``, ``"weekly"`` or a printed name ("Five Hour Limit
+    Remaining") as minutes, or None for one not recognised."""
+    if not isinstance(window, str):
+        return None
+    w = window.strip().lower()
+    if w in WINDOW_MINS:
+        return WINDOW_MINS[w]
+    if "week" in w:
+        return 10080
+    if re.search(r"\b(five|5)[\s-]*h(ou)?r?", w):
+        return 300
+    m = re.fullmatch(r"(\d+)\s*(h|d|m)", w)
+    if m:
+        return int(m.group(1)) * {"m": 1, "h": 60, "d": 1440}[m.group(2)]
+    return None
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "bucket"
+
+
+def _bucket(group: str, name, window, remaining, reset) -> dict:
+    mins = window_mins(window) or window_mins(name)
+    used = None
+    if isinstance(remaining, (int, float)) and not isinstance(remaining, bool):
+        used = round(min(1.0, max(0.0, 1.0 - float(remaining))), 6)
+    iso, epoch = cfg._iso_epoch(reset)
+    word = WINDOW_WORDS.get(mins) if mins else None
+    word = word or (name if isinstance(name, str) and name else window) or "window"
+    return {"utilization": used, "remaining": remaining,
+            "resets_at": iso, "resets_at_epoch": epoch, "window_mins": mins,
+            "limit_name": f"{group} · {word}" if group else str(word)}
+
+
+def _ordered(buckets: dict) -> dict:
+    """Pool by pool as Antigravity listed them, the shorter window first
+    within a pool, as the other rows lead with five_hour. Each bucket comes
+    in carrying ``_pool``, which goes out with it."""
+    pools = list(dict.fromkeys(b["_pool"] for b in buckets.values()))
+    items = sorted(buckets.items(), key=lambda kv: (
+        pools.index(kv[1]["_pool"]), kv[1]["window_mins"] or 10**9))
+    return {k: {x: y for x, y in v.items() if x != "_pool"} for k, v in items}
+
+
+def buckets_from_data(data) -> dict:
+    """``command.data`` of a ``/quota`` answer as ``{id: bucket}``."""
+    out: dict = {}
+    groups = data.get("groups") if isinstance(data, dict) else None
+    for group in groups if isinstance(groups, list) else ():
+        if not isinstance(group, dict):
+            continue
+        pool = group.get("name") if isinstance(group.get("name"), str) else ""
+        for raw in group.get("buckets") or ():
+            if not isinstance(raw, dict):
+                continue
+            bid = raw.get("id") if isinstance(raw.get("id"), str) and raw.get("id") \
+                else f"{_slug(pool)}-{_slug(str(raw.get('window') or raw.get('name')))}"
+            out[bid] = {**_bucket(pool, raw.get("name"), raw.get("window"),
+                                  raw.get("remaining_fraction"),
+                                  raw.get("reset_time")), "_pool": pool}
+    return _ordered(out)
+
+
+PERCENT_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*%\s*$")
+
+
+def buckets_from_text(text: str) -> tuple[dict, list[str]]:
+    """The printed form, ``<pool>\t<window>\t<N>%\t<reset>`` a line: the
+    buckets it names, and every non-blank line it could not read."""
+    out: dict = {}
+    unparsed: list[str] = []
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split("\t")]
+        m = PERCENT_RE.match(parts[2]) if len(parts) == 4 else None
+        if not m:
+            unparsed.append(line.strip())
+            continue
+        pool, name, _, reset = parts
+        mins = window_mins(name)
+        bid = f"{_slug(pool)}-{WINDOW_MINS_KEYS.get(mins) or _slug(name)}"
+        out[bid] = {**_bucket(pool, name, None, float(m.group(1)) / 100, reset),
+                    "_pool": pool}
+    return _ordered(out), unparsed
+
+
+
+def command_answer(stdout: str) -> tuple[dict | None, str]:
+    """``(command.data, result.response)`` out of one stream-json answer;
+    either may be missing. A turn that ran (``num_turns`` above 0) is not an
+    answer to a slash command, and yields neither."""
+    data, response, turns = None, "", 0
+    for line in (stdout or "").splitlines():
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        if obj.get("event") == "command_result":
+            data = ((obj.get("command") or {}).get("data"))
+        elif obj.get("event") == "result" and isinstance(obj.get("result"), dict):
+            r = obj["result"]
+            turns = r.get("num_turns") or 0
+            response = r.get("response") if isinstance(r.get("response"), str) else ""
+            if data is None:
+                data = (r.get("command") or {}).get("data")
+    if turns:
+        return None, ""
+    return (data if isinstance(data, dict) else None), response
+
+
+def credits_from(data: dict | None, response: str = "") -> dict | None:
+    """``/credits`` in Codex's ``credits`` shape, or None when unread."""
+    n = data.get("remaining_credits") if isinstance(data, dict) else None
+    if n is None:
+        m = re.search(r"Remaining credits\t\s*(\d+(?:\.\d+)?)", response or "")
+        n = float(m.group(1)) if m else None
+        n = int(n) if isinstance(n, float) and n.is_integer() else n
+    if not isinstance(n, (int, float)) or isinstance(n, bool):
+        return None
+    out = {"hasCredits": n > 0, "unlimited": False, "balance": str(n)}
+    if isinstance(data, dict) and isinstance(data.get("upgrade_uri"), str):
+        out["upgrade_uri"] = data["upgrade_uri"]
+    return out
+
+
+def usage_from_read(quota_stdout: str, credits_stdout: str | None = None,
+                    account: str | None = None) -> dict | None:
+    """One ``/quota`` (and ``/credits``) answer as a whole new reading, in
+    the row's shape; None when it names no bucket."""
+    data, response = command_answer(quota_stdout)
+    buckets = buckets_from_data(data)
+    unparsed: list[str] = []
+    if not buckets:
+        buckets, unparsed = buckets_from_text(response)
+    if not buckets:
+        return None
+    out: dict = {"provider": "antigravity", "seen_at": cfg.now_iso(),
+                 "source": "read", "session_id": None, "account": account,
+                 "status": None, "is_using_overage": None, "planType": None,
+                 "credits": None, "buckets": buckets}
+    if unparsed:
+        out["unparsed"] = unparsed
+    if credits_stdout is not None:
+        out["credits"] = credits_from(*command_answer(credits_stdout))
+    return out
+
+
+def _run(argv: tuple[str, ...]) -> str | None:
+    try:
+        proc = subprocess.run([AGY, *argv], stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, env=env(),
+                              cwd=str(cfg.STATE_DIR),
+                              timeout=USAGE_READ_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def read_usage() -> dict | None:
+    try:
+        data = json.loads(USAGE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def read_quota() -> dict | None:
+    """``read``: ``/quota`` and ``/credits``, kept on disk in place of the
+    last reading and answered. None, and the file untouched, when there is
+    no login or ``/quota`` names nothing; a failed ``/credits`` alone is a
+    reading with ``credits`` null."""
+    state = login_state()
+    if not state["connected"]:
+        return None
+    quota = _run(QUOTA_ARGV)
+    if quota is None:
+        return None
+    usage = usage_from_read(quota, _run(CREDITS_ARGV) or "", state["account"])
+    if usage is None:
+        return None
+    usage_store.write_json(USAGE_FILE, usage)
+    return usage
+
+
+def row_usage() -> dict | None:
+    """The row's ``usage``: the kept reading, if it was taken on the login
+    the box holds now, else None."""
+    usage = read_usage()
+    state = login_state()
+    if usage is None or not state["connected"] \
+            or usage.get("account") != state["account"]:
+        return None
+    return usage
+
+
+def reader() -> usage_store.Reader:
+    """Observe-nothing: a headless turn states tokens and no quota, so the
+    reading moves only by ``read``."""
+    return usage_store.Reader("antigravity", observe=lambda _event: None,
+                              kept=row_usage, read=read_quota)
+
+
 # -- the persona -----------------------------------------------------------
 
 def instructions(workspace: Path) -> str:
@@ -298,7 +595,8 @@ def argv(prompt: str, conversation: str | None, model: str | None,
         out += ["--conversation", conversation]
     if model:
         out += ["--model", model]
-    if effort:
+    if effort and not carries_level(model):
+        # An id that ends in its level carries it (LEVEL_RE above).
         out += ["--effort", effort]
     return out
 
@@ -337,7 +635,8 @@ def _usage(raw) -> dict | None:
 def _tool_input(step: dict) -> dict:
     info = step.get("tool_info")
     if isinstance(info, dict):
-        args = info.get("args") or info.get("input") or info.get("arguments")
+        args = (info.get("parameters") or info.get("args") or info.get("input")
+                or info.get("arguments"))
         if isinstance(args, dict):
             return args
         return {k: v for k, v in info.items() if isinstance(v, (str, int, float))}
@@ -390,7 +689,10 @@ class Translator:
                                permission_mode=init.get("permission_mode"),
                                tools=init.get("tools"))]
         if kind == "step_update":
-            return self._step(obj)
+            # The step is under its own key on the wire (1.5.9, read off a
+            # signed-in run 2026-11-15); flat in the shape first guessed.
+            inner = obj.get("step_update")
+            return self._step(inner if isinstance(inner, dict) else obj)
         if kind == "result":
             return [self.result(obj.get("result") or {})]
         return []

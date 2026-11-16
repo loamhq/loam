@@ -164,6 +164,17 @@ services:
       # falls back to the first install's old base domain, which stopped being
       # that box's domain that day.
       APPS_DOMAIN: "${LOAM_DOMAIN:?set by bin/deploy}"
+      # The Apps section's previews (2026-11-15; deploy/README.md, "Previews
+      # for the Apps section"): an internal route past the login that only
+      # this container's broker bridge reaches. A site's preview is
+      # http://<label>.<APPS_PREVIEW_BASE minus its scheme>/, where <label> is
+      # the first label of its Apps row's url host; nothing in DNS answers for
+      # those names, so the renderer maps every one of them to
+      # APPS_PREVIEW_ADDR itself (Chromium: --host-resolver-rules="MAP
+      # *.preview.internal <addr>"). Both from bin/deploy (origins_env); not
+      # secrets, and the route needs none.
+      APPS_PREVIEW_BASE: "${LOAM_PREVIEW_BASE:?set by bin/deploy}"
+      APPS_PREVIEW_ADDR: "${LOAM_PREVIEW_ADDR:?set by bin/deploy}"
       # A DICTATION_TOKEN was here 2026-09-28 to 2026-10-01: the bearer token
       # of POST /api/dictate, the Obsidian plugin's door past the login. The
       # plugin transcribes on its own key now; the app dropped the route in
@@ -231,8 +242,23 @@ services:
     # number. 128m is ~5.8x the measured peak and leaves room for one
     # maximum-size event on each of a few concurrent streams; the session cap
     # is 4 (lib/loam_broker.py), which bounds how many there can be.
-    mem_limit: 128m
-    pids_limit: 64
+    #
+    # That was 128m and pids 64 until 2026-11-15, when the app (loam-ui
+    # acbc110) began photographing the Apps section's pages with
+    # chromium-headless-shell inside this container, one capture at a time
+    # (src/app-media.js queues them). At 128m/64 every capture timed out and
+    # `docker exec` itself failed with "can't fork". Measured that day on the
+    # real image with these same flags and the limits lifted, capturing every
+    # app then listed through the internal preview route: an ordinary page
+    # peaks at ~145 MiB and ~110 pids for the whole cgroup; the worst page
+    # (`wall`, which runs to the 18s capture timeout) at 788 MiB anon, 831 MiB
+    # in all, and 120 pids. Add the server's own ~45 MiB and 12 pids and the
+    # worst case is ~880 MiB and ~132 pids; 1536m is ~1.75x that and 512 is
+    # ~4x. The profile is written under /storage (a disk volume), not /tmp,
+    # so the 16m tmpfs above was not raised. Node sizes its default heap from
+    # this limit, so the server's GC now sees the larger number too.
+    mem_limit: 1536m
+    pids_limit: 512
     init: true
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/up"]

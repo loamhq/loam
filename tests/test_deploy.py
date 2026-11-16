@@ -438,7 +438,9 @@ try:
           "(compress) {\n\tencode zstd gzip {" in text
           and "header Content-Type application/json*" in text
           and "event-stream" not in text and "header Content-Type text/*" not in text)
-    check("own domain: every block proxies the same upstream", text.count("reverse_proxy 127.0.0.1:8101") == 3 * 2)
+    # Three public blocks, two handles each, and one more on the previews'
+    # internal route (caddy_preview_block).
+    check("own domain: every block proxies the same upstream", text.count("reverse_proxy 127.0.0.1:8101") == 3 * 2 + 1)
     check("own domain: sight bypass on the extra hosts too", text.count(f"remote_ip {dep.SIGHT_SUBNET}") == 4)
     authelia = dep.authelia_config()
     check("own domain: a second session cookie with its own portal",
@@ -537,9 +539,10 @@ try:
     record("gamma", 'exposure = "shared"\n[share]\nexpires = 2026-09-01\n', COMPOSE_OK.format(name="gamma", port=8103))
     record("pages", f'exposure = "private"\nstatic_root = "{root}/www"\nhide = [".git", "private/notes"]\n')
 
-    check("generated() covers eight live paths", set(dep.generated(today)) == {
+    check("generated() covers nine live paths", set(dep.generated(today)) == {
         dep.CADDYFILE, dep.DAEMON_JSON, dep.AUTHELIA_CONFIG, dep.AUTHELIA_COMPOSE,
-        dep.BROWSER_COMPOSE, dep.SIGHT_FIREWALL_SCRIPT, dep.SIGHT_FIREWALL_UNIT, dep.SUDOERS})
+        dep.BROWSER_COMPOSE, dep.SIGHT_FIREWALL_SCRIPT, dep.SIGHT_FIREWALL_UNIT, dep.SUDOERS,
+        dep.PREVIEW_SYSCTL})
     check("is_loopback", dep.is_loopback("127.0.0.1:8000") and dep.is_loopback("[::1]:22")
           and not dep.is_loopback("*:443") and not dep.is_loopback("0.0.0.0:22"))
 finally:

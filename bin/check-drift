@@ -519,6 +519,19 @@ def runtime_findings(project, models: list | None = None) -> list[str]:
     if value not in eng.RUNTIMES:
         return [f"`runtime` is {value!r}, which is none of {eng.RUNTIMES}; the "
                 f"launcher runs it on Claude Code."]
+    if value == "antigravity":
+        # Since 2026-11-15: the CLI, and the built-in model in the last list
+        # `agy models` gave the broker (loam_antigravity.MODELS_FILE).
+        import loam_antigravity as agy  # noqa: PLC0415
+        out = []
+        if not Path(agy.AGY).exists():
+            out.append(f"{agy.AGY} is missing; no Antigravity job can start.")
+        listed = agy.read_models() if models is None else models
+        if listed and not any(m.get("id") == eng.AGY_ENGINEER_MODEL for m in listed):
+            out.append(f"`{eng.AGY_ENGINEER_MODEL}` (AGY_ENGINEER_MODEL) is not "
+                       f"in the models `agy models` lists; a job on the built-in "
+                       f"model would be refused at launch.")
+        return out
     if value != "codex":
         return []
     import loam_codex  # noqa: PLC0415
@@ -673,6 +686,24 @@ def check_broker(findings: list) -> list[str]:
                          f"container on the box can reach {brk.BIND_ADDR}:{brk.PORT}. "
                          f"`sudo systemctl restart {brk.WALL_SERVICE}`"))
 
+    # The Apps previews' route (2026-11-15) sits behind the same chain: it
+    # serves every app past the login, so a missing jump is every container
+    # on the box reading them.
+    wall = dep._sudo(["iptables", "-w", "5", "-C", "INPUT", "-p", "tcp",
+                      "-d", dep.PREVIEW_ADDR, "--dport", str(dep.PREVIEW_PORT),
+                      "-j", brk.WALL_CHAIN])  # noqa: SLF001
+    if wall.returncode != 0:
+        findings.append(("previews wall", "iptables -C",
+                         f"the jump into {brk.WALL_CHAIN} for the Apps previews is not "
+                         f"in INPUT, so every container on the box can reach "
+                         f"{dep.PREVIEW_ADDR}:{dep.PREVIEW_PORT}, every app past the "
+                         f"login. `sudo systemctl restart {brk.WALL_SERVICE}`"))
+    if not dep.preview_sysctl_live():
+        findings.append(("previews sysctl", f"/proc/sys ({dep.PREVIEW_SYSCTL_KEY})",
+                         f"is not 1, so Caddy cannot start before docker has raised "
+                         f"{dep.PREVIEW_ADDR}, and at boot it may not. `sudo sysctl -p "
+                         f"{dep.PREVIEW_SYSCTL}`"))
+
     net = dep._sudo(["docker", "network", "inspect", brk.NETWORK, "--format",
                      "{{(index .IPAM.Config 0).Subnet}}"])  # noqa: SLF001
     if net.returncode != 0:
@@ -689,6 +720,8 @@ def check_broker(findings: list) -> list[str]:
     notes.append(f"  broker {brk.BIND_ADDR}:{brk.PORT} on {brk.NETWORK} "
                  f"({brk.SUBNET}), admission by memory (reserve "
                  f"{brk.MEMORY_RESERVE_MB} MB, backstop {brk.MAX_SESSIONS} sessions)")
+    notes.append(f"  previews http://<app>.{dep.PREVIEW_SUFFIX}:{dep.PREVIEW_PORT} on "
+                 f"{dep.PREVIEW_ADDR}, behind the same wall")
     return notes
 
 

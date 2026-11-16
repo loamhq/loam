@@ -721,7 +721,12 @@ def wall_paths(project: eng.Project, record: dict, job_dir: Path) -> dict:
             "ro_after": keep(ro_after), "rw": keep(rw)}
 
 
-def wall_script(project: eng.Project, record: dict, job_dir: Path) -> str:
+def wall_script(project: eng.Project, record: dict, job_dir: Path,
+                protect: list[Path] = ()) -> str:
+    """The mounts, as one shell line. ``protect`` (since 2026-11-15): paths
+    inside the tree held read-only over its writable bind, for a CLI with no
+    write sandbox of its own to hold them (an Antigravity job's harness,
+    lib/loam_agy_job.py); a path that is not there is skipped."""
     paths = wall_paths(project, record, job_dir)
     stage_root = f"/tmp/loam-wall-{Path(record['path']).name}-{os.getpid()}"
     staged = paths["rw_broad"] + paths["rw"]
@@ -746,17 +751,25 @@ def wall_script(project: eng.Project, record: dict, job_dir: Path) -> str:
     offset = len(paths["rw_broad"])
     for i, path in enumerate(paths["rw"]):
         steps += place(offset + i, path)
+    for path in protect:
+        if path.exists():
+            steps += read_only(path)
     for i in range(len(staged)):
         steps.append(f"umount {_q(f'{stage_root}/{i}')}")
-    steps.append(f"rmdir {_q(stage_root)}/* {_q(stage_root)} 2>/dev/null || true")
+    # Braced (2026-11-15): bare, its `|| true` closed the whole `&&` chain,
+    # so a mount that failed skipped every mount after it and the CLI still
+    # ran behind a partial wall (caused from inside a job, where the nested
+    # remount of the worktrees fails). Now a failed mount ends the line and
+    # the session is not started.
+    steps.append(f"{{ rmdir {_q(stage_root)}/* {_q(stage_root)} 2>/dev/null || true; }}")
     return " && ".join(steps)
 
 
 def walled(project: eng.Project, record: dict, job_dir: Path,
-           argv: list[str]) -> list[str]:
+           argv: list[str], protect: list[Path] = ()) -> list[str]:
     """`argv`, run behind the wall as this user with this environment."""
     uid, gid = os.getuid(), os.getgid()
-    script = wall_script(project, record, job_dir)
+    script = wall_script(project, record, job_dir, list(protect))
     if project.platform:
         # sudo resets PATH to its secure_path and may reset HOME; both are
         # put back for the CLI by name rather than trusted to survive.

@@ -422,6 +422,11 @@ async def main():
               rows["webapp"]["effective"] == {"provider": "codex",
                                               "model": eng.CODEX_ENGINEER_MODEL,
                                               "effort": eng.CODEX_ENGINEER_EFFORT,
+                                              # Since 2026-11-15: no tier set,
+                                              # each runs on the model.
+                                              "tiers": {t: {"model": eng.CODEX_ENGINEER_MODEL,
+                                                            "from": "model"}
+                                                        for t in eng.TIERS},
                                               "source": "record"}
               and rows["webapp"]["deploy_on_land"] is False
               and rows["prproj"]["deploy_on_land"] is None
@@ -460,10 +465,33 @@ async def main():
                                   {"deploy_on_land": True})
         check("deploy_on_land on a project with an app: what the launcher reads",
               status == 200 and eng.deploy_default(eng.projects()["webapp"]), body)
+        # Antigravity (2026-11-15): a choice for a project engineer and the
+        # default, its level in its model id; never Loam's.
+        status, body = await http(port, "PATCH", "/v1/engineers/webapp",
+                                  {"provider": "antigravity"})
+        web = eng.projects()["webapp"]
+        row = next((r for r in body.get("engineers", []) if r["project"] == "webapp"), {})
+        check("Antigravity for a project engineer: its next job runs on agy",
+              status == 200 and web.runtime == "antigravity"
+              and eng.choice_for(web, "antigravity") == (eng.AGY_ENGINEER_MODEL, None)
+              and row.get("effective", {}).get("provider") == "antigravity"
+              and "antigravity" in row.get("providers", []), body)
+        status, body = await http(port, "PATCH", "/v1/engineers/webapp",
+                                  {"effort": "high"})
+        check("...its effort is refused: the level is in the model id",
+              status == 400 and "model id" in json.dumps(body), body)
+        status, body = await http(port, "PATCH", "/v1/engineers/default",
+                                  {"provider": "antigravity"})
+        check("...the default takes it too",
+              status == 200 and body["default"]["effective"]["provider"] == "antigravity"
+              and body["default"]["effective"]["model"] == eng.AGY_ENGINEER_MODEL, body)
+        await http(port, "PATCH", "/v1/engineers/default", {"provider": "claude-code"})
+        await http(port, "PATCH", "/v1/engineers/webapp",
+                   {"provider": "claude-code", "model": "opus", "effort": "high"})
         for name, patch, label in (("prproj", {"deploy_on_land": True}, "landing by PR"),
                                    ("Loam", {"deploy_on_land": True}, "Loam"),
                                    ("default", {"deploy_on_land": True}, "the default"),
-                                   ("webapp", {"provider": "antigravity"}, "Antigravity"),
+                                   ("Loam", {"provider": "antigravity"}, "Antigravity for Loam"),
                                    ("webapp", {"speed": 1}, "a setting there is none of")):
             status, body = await http(port, "PATCH", f"/v1/engineers/{name}", patch)
             check(f"refused: {label}", status == 400, body)
@@ -504,6 +532,45 @@ async def main():
                              ({"model": "gpt-6"}, "a model Claude Code does not take")):
             status, body = await http(port, "PATCH", "/v1/system/reviewer", patch)
             check(f"refused: {label}", status == 400, body)
+
+        # Antigravity as the reviewer's provider (2026-11-15): offered, and
+        # its model is one `agy models` lists (the login probe's list).
+        import loam_antigravity as agy_mod  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415
+        saved_login = agy_mod._login_cache
+        agy_mod._login_cache = (_time.monotonic() + 3600, {"models": [
+            {"id": "gemini-4-hydrogen-high"}, {"id": "claude-opus-5-5-high"}]})
+        try:
+            status, body = await http(port, "GET", "/v1/system/reviewer")
+            check("the reviewer's providers: Claude Code and Antigravity, on Claude Code",
+                  status == 200 and body["providers"] == ["claude-code", "antigravity"]
+                  and body["effective"]["provider"] == "claude-code", body)
+            status, body = await http(port, "PATCH", "/v1/system/reviewer",
+                                      {"provider": "antigravity"})
+            check("provider antigravity: gemini-4-hydrogen-high, no effort, the "
+                  "Claude level dropped",
+                  status == 200 and body["provider"] == "antigravity"
+                  and body["effective"] == {"provider": "antigravity",
+                                            "model": "gemini-4-hydrogen-high",
+                                            "effort": None}
+                  and profile.reviewer_stored() == {"provider": "antigravity"}, body)
+            status, body = await http(port, "PATCH", "/v1/system/reviewer",
+                                      {"model": "claude-opus-5-5-high"})
+            check("Claude Opus via Antigravity can be picked",
+                  status == 200 and body["effective"]["model"] == "claude-opus-5-5-high"
+                  and profile.reviewer_choice("fable") == ("claude-opus-5-5-high", None), body)
+            for patch, label in (({"model": "opus"}, "a model Antigravity does not list"),
+                                 ({"effort": "high"}, "an effort beside an Antigravity id")):
+                status, body = await http(port, "PATCH", "/v1/system/reviewer", patch)
+                check(f"refused on Antigravity: {label}", status == 400, body)
+            out = await cli(port, "set", "reviewer.provider", "claude-code")
+            check("bin/settings set reviewer.provider: back on Claude Code, its model dropped",
+                  out.get("ok") and out.get("value") == "claude-code"
+                  and profile.reviewer_stored() == {}
+                  and profile.reviewer_choice("fable") == ("fable", None), out)
+        finally:
+            agy_mod._login_cache = saved_login
+            profile.update_reviewer({"provider": None}, server.profile_check)
         status, body = await http(port, "PATCH", "/v1/system/reviewer",
                                   {"schedule": "daily at 04:20 PT"})
         timer = contrib.desired_units().get(profile.REVIEWER_TIMER, "")

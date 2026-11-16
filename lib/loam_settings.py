@@ -320,7 +320,9 @@ ENTRIES: list[Entry] = [
            "a model its provider lists (describe lists them), or null for the "
            "provider's own", "models", ("defaults", "effective", "model")),
           ("effort", "An agent's default thinking level",
-           "low, medium, high, xhigh or max (Codex: its own levels), or null",
+           "low, medium, high, xhigh or max (Codex: its own levels; "
+           "Antigravity: only beside a model id that does not end in its "
+           "level), or null",
            None, ("defaults", "effective", "effort")))],
 
     # -- Settings > Agents: making, archiving, restoring, the face ---------
@@ -400,14 +402,37 @@ ENTRIES: list[Entry] = [
                   else (a.get("effective") or {}).get(field)))
       for field, label, values in (
           ("provider", "An engineer's provider",
-           "claude-code or codex (Loam's: claude-code only); null to follow the "
-           "default (or the project's record)"),
+           "claude-code, codex or antigravity (Loam's: claude-code only); null "
+           "to follow the default (or the project's record)"),
           ("model", "An engineer's model",
-           "a model its provider lists, or null for the built-in"),
+           "a model its provider lists, or null for the built-in "
+           "(Antigravity's: gemini-4-hydrogen-high; its ids carry the level)"),
           ("effort", "An engineer's thinking level",
-           "a level its provider takes, or null for the built-in"),
+           "a level its provider takes, or null for the built-in "
+           "(Antigravity takes none: the level is in its model id)"),
           ("deploy_on_land", "Deploy when a job lands (a project with an app)",
            "true or false; a brief's own deploy still wins"))],
+    # Three tiers per engineer (2026-11-15): the model a brief at each tier
+    # runs on. A brief names the tier (the brief tool's `tier`), never the
+    # model; a tier left unset runs on engineer.model.
+    *[Entry(f"engineer.tiers.{tier}", "setting", label,
+            "PATCH /api/engineers/{engineer}", route="PATCH /v1/engineers/{engineer}",
+            target="project name, or default", unattended=False,
+            values=("a model its provider lists (on Antigravity the id carries "
+                    "its level), or null to run this tier on engineer.model"),
+            body=(lambda v, m, tier=tier: {"tiers": {tier: v}}),
+            read="GET /v1/engineers/{engineer}",
+            # What a brief at this tier runs on next: {"model", "from"},
+            # `from` "tier" when set, "model" when it falls back.
+            pick=(lambda a, m, tier=tier: (((a.get("effective") or {}).get("tiers"))
+                                           or {}).get(tier)))
+      for tier, label in (
+          ("quick", "An engineer's quick-tier model (small, mechanical, "
+                    "well-specified jobs)"),
+          ("standard", "An engineer's standard-tier model (most jobs; a brief "
+                       "that names no tier)"),
+          ("hard", "An engineer's hard-tier model (design-heavy work, subtle "
+                   "bugs, wide refactors)"))],
 
     # -- Settings > Agents > System: the nightly reviewer (2026-11-13) ------
     *[Entry(f"reviewer.{field}", "setting", label,
@@ -421,9 +446,11 @@ ENTRIES: list[Entry] = [
           ("schedule", "When the nightly reviewer runs",
            f'words, like "daily at 04:20 {lc.ZONE_TOKEN}" (the schedules\' grammar); null for '
            '04:20'),
-          ("provider", "The reviewer's provider", "claude-code (its only one)"),
+          ("provider", "The reviewer's provider",
+           "claude-code or antigravity, or null for claude-code"),
           ("model", "The reviewer's model",
-           "a Claude Code model, or null for fable"),
+           "a model its provider lists, or null for its default (fable on "
+           "Claude Code, gemini-4-hydrogen-high on Antigravity)"),
           ("effort", "The reviewer's thinking level",
            "low, medium, high, xhigh or max, or null"))],
 
@@ -672,6 +699,11 @@ PAGE_RELAY: dict[str, list[str] | str] = {
         "a read: a plugin's page/ and assets/ files, theme.css and PLUGIN.md",
     "rest === '/apps'": "a read: the Apps section's list, GET /v1/apps "
                         "(2026-11-12; broker/README.md, \"Apps\")",
+    "rest === '/apps/icon'": "a read: an app's site icon for the Apps "
+                             "launcher (loam-ui 58d593f5, 2026-11-15)",
+    "rest === '/apps/media'": "a read: every app's icon and cached page "
+                              "preview for the Apps launcher, and one preview "
+                              "image (loam-ui 11535026, 2026-11-15)",
     "rest === '/agents'": "a read",
     "rest === '/health'": "a read",
     "rest === '/limits'": "a read",

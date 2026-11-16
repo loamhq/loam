@@ -37,12 +37,21 @@
 # one value below that only this file asserts (check-drift compares the
 # module's SUBNET against the docker network, not against the rule inside
 # the chain), so it is the one to change in both places deliberately.
+#
+# The same chain holds a second port since 2026-11-15: Caddy's internal
+# route for the Apps section's previews (PREVIEW_PORT in lib/loam_deploy.py,
+# deploy/README.md "Previews for the Apps section"), which serves the apps
+# past the login and so must be exactly as walled as the broker: the box
+# itself and the broker's bridge, nobody else. One chain, two jumps, so the
+# two can never disagree about who is let in. check-drift asks the kernel for
+# both jumps.
 set -eu
 
 CHAIN=LOAM-BROKER-HOST
 SUBNET=172.31.0.0/24
 ADDR=172.31.0.1
 PORT=8932
+PREVIEW_PORT=8935
 
 # Rebuild the chain from empty every time. Appending to a chain that already
 # has the rule is how a wall grows a hundred copies of itself and how a
@@ -58,10 +67,12 @@ iptables -A "$CHAIN" -i lo -j ACCEPT
 iptables -A "$CHAIN" -s "$SUBNET" -j ACCEPT
 iptables -A "$CHAIN" -j DROP
 
-# One jump into it, for packets to the broker's address and port only. Docker
-# inserts its own rules at the top of INPUT on restart, so this goes in at
-# position 1 and is re-inserted rather than appended.
-while iptables -C INPUT -p tcp -d "$ADDR" --dport "$PORT" -j "$CHAIN" 2>/dev/null; do
-  iptables -D INPUT -p tcp -d "$ADDR" --dport "$PORT" -j "$CHAIN"
+# One jump into it per port, for packets to the broker's address and that
+# port only. Docker inserts its own rules at the top of INPUT on restart, so
+# each goes in at position 1 and is re-inserted rather than appended.
+for P in "$PORT" "$PREVIEW_PORT"; do
+  while iptables -C INPUT -p tcp -d "$ADDR" --dport "$P" -j "$CHAIN" 2>/dev/null; do
+    iptables -D INPUT -p tcp -d "$ADDR" --dport "$P" -j "$CHAIN"
+  done
+  iptables -I INPUT 1 -p tcp -d "$ADDR" --dport "$P" -j "$CHAIN"
 done
-iptables -I INPUT 1 -p tcp -d "$ADDR" --dport "$PORT" -j "$CHAIN"

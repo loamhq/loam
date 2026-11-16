@@ -64,6 +64,7 @@ Rendered by `sudo bin/gen-deploy` into, and diffed by `bin/check-drift` against:
 | `/etc/loam/browser/firewall.sh` | `loam_deploy.sight_firewall_script()`; check-drift also asks the kernel for every rule |
 | `/etc/systemd/system/loam-sight-firewall.service` | `loam_deploy.sight_firewall_unit()` |
 | `/etc/sudoers.d/loam-deploy` | `loam_deploy.sudoers()` |
+| `/etc/sysctl.d/60-loam-preview.conf` | `loam_deploy.preview_sysctl()`; check-drift also reads the kernel's value |
 
 Three things are never rendered: Authelia's secrets (`/etc/loam/authelia/secrets.env`,
 root-only, written once by `gen-deploy --init-login`), the users file (in the
@@ -465,6 +466,76 @@ them.
 **What the page still needs, which is the page's:** loam-ui's own CSP has
 `frame-src 'self' blob: <its content origin>`, so it will not frame a site
 until its engineer adds the site origins (or `https://*.<domain>`) there.
+
+## Previews for the Apps section
+
+*Added 2026-11-15, for loam-ui's preview renderer (headless Chromium inside
+the loam-ui container, empty profile, no credential), which captured a
+letter tile for every app because every app's public name is behind the
+login and the renderer copies no login on purpose.*
+
+**One more Caddy site, internal only.** `caddy_preview_block` renders a
+plain-HTTP site on `172.31.0.1:8935`: the gateway of the broker's bridge
+(`loam-broker`, `lib/loam_broker.BIND_ADDR`) and the port
+`PREVIEW_PORT`. It serves every row of the Apps list that has a host of its
+own, past the login and exactly as its public block serves it past the gate:
+
+- an agent's static site: the same root, the same hidden names (`.git`,
+  `.env`); an expired site answers 410 here as it does on its name;
+- an agent's port site, and a deployment record with a container that is not
+  Loam's page (an owner's own site, say): the same `reverse_proxy
+  127.0.0.1:<port>`, Host passed as the renderer sent it.
+
+Not on it: the vault, the commons' files, the login, loam-ui and its staging
+copy, and a plugin's row (that one is served on the page's own host at
+`/x/<id>/` and is the page's to fetch). A name it does not know is a 404.
+
+**Addressed by host**, so a page's root-relative assets resolve as on its
+real name: `http://<label>.preview.internal:8935/`, where `<label>` is the
+app's host label (the first label of its Apps row's `url`). `.internal` is
+reserved for private use and resolves nowhere; the renderer maps it to the
+address itself (Chromium `--host-resolver-rules="MAP *.preview.internal
+172.31.0.1"`). `bin/deploy` hands the app both halves, `LOAM_PREVIEW_BASE`
+(`http://preview.internal:8935`) and `LOAM_PREVIEW_ADDR` (`172.31.0.1`), and
+loam-ui's compose files pass them as `APPS_PREVIEW_BASE` and
+`APPS_PREVIEW_ADDR`.
+
+**Who can reach it, and the three layers.**
+
+- *Nothing outside the box.* No interface outside the box carries
+  172.31.0.1, no DNS name points at it, and Caddy binds that address only
+  (the `bind` line), never 0.0.0.0. The public names, their blocks and their
+  login are byte-identical with and without the route (tests/test_previews.py).
+- *The kernel*: `broker/firewall.sh` puts a second jump, for 8935, into the
+  broker's own chain `LOAM-BROKER-HOST`, which accepts the box itself (`lo`)
+  and `172.31.0.0/24` and drops the rest. So exactly the containers that
+  already reach the broker reach this: loam-ui and loam-ui-next today, and
+  only a record whose compose joins `loam-broker` (or a hand `docker network
+  connect`, which check-drift names) can add one. The personas' browser is on
+  `loam-sight`, whose wall rejects every RFC 1918 address. One chain, two
+  jumps, so the two ports cannot disagree about who is let in; check-drift
+  asks the kernel for both.
+- *Caddy*: `not remote_ip 172.31.0.0/24` is a 403 before any app. That
+  includes a process on the box itself: the kernel lets it in (`lo`), but
+  its source address is the box's public one (caused 2026-11-15, `curl
+  http://172.31.0.1:8935/` from the box logged the box's public address as `remote_ip` and
+  got 403), so a probe from the host is `docker exec loam-ui wget -S -O
+  /dev/null --header 'Host: <label>.preview.internal' http://172.31.0.1:8935/`.
+
+What a container on the bridge gains is what the owner's login shows of the
+apps, and nothing of the vault or the page. No credential is involved: the
+route is the credential, and the bridge is the lock.
+
+**Boot.** The address exists only once docker has raised the bridge, Caddy
+and docker are not ordered, and a listener that cannot bind fails Caddy's
+whole start. So `gen-deploy` renders `/etc/sysctl.d/60-loam-preview.conf`
+(`net.ipv4.ip_nonlocal_bind = 1`) and applies it before reloading Caddy;
+Caddy can bind first and the socket answers once the bridge is up. It makes
+nothing reachable: a packet for an address the box does not carry is never
+delivered. check-drift reads the kernel's value.
+
+Access lines go to `/var/log/caddy/access/preview.log`, with the same
+filters as every host.
 
 ## Exposure: two values, and public by construction only
 

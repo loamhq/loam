@@ -84,11 +84,19 @@ LEGACY_REVIEWER_TIMER = "loam-reviewer.timer"
 REVIEWER_DEFAULT_SCHEDULE = f"daily at 04:20 {lc.ZONE_TOKEN}"   # plugins/reviewer/PLUGIN.md
 REVIEWER_DROPIN = "schedule.conf"
 # The engineers' providers: the CLIs a job runs on (lib/loam_engineer.py).
-ENGINEER_PROVIDERS = ("claude-code", "codex")
+# Antigravity since 2026-11-15 (lib/loam_agy_job.py), offered and chosen by
+# nobody until the owner's trial says so.
+ENGINEER_PROVIDERS = ("claude-code", "codex", "antigravity")
 # The providers a persona's wake and cron run on (bin/wake): Codex since
 # 2026-11-13 (lib/loam_codex_wake.py). Antigravity is not one yet; see
 # ``lane_choice``.
 LANE_PROVIDERS = ("claude-code", "codex")
+# The reviewer's providers (bin/review): Antigravity since 2026-11-15, a
+# choice beside Claude Code, chosen by nobody until the owner says so. On
+# Antigravity its model is an id `agy models` lists, its thinking level in
+# the id (lib/loam_antigravity.py, LEVEL_RE), so there is no separate effort.
+REVIEWER_PROVIDERS = ("claude-code", "antigravity")
+REVIEWER_AGY_MODEL = os.environ.get("LOAM_AGY_REVIEWER_MODEL", "gemini-4-hydrogen-high")
 
 
 class ProfileError(Exception):
@@ -148,12 +156,30 @@ def reviewer_stored() -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def reviewer_choice(model: str, pinned: bool = False) -> tuple[str, str | None]:
+def reviewer_provider() -> str:
+    """The provider the nightly reviewer runs on: the owner's setting, else
+    Claude Code. ``LOAM_REVIEWER_PROVIDER`` names one for a probe or a
+    one-off run, as ``LOAM_REVIEWER_MODEL`` names a model."""
+    pinned = os.environ.get("LOAM_REVIEWER_PROVIDER")
+    if pinned in REVIEWER_PROVIDERS:
+        return pinned
+    value = reviewer_stored().get("provider")
+    return value if value in REVIEWER_PROVIDERS else "claude-code"
+
+
+def reviewer_choice(model: str, pinned: bool = False,
+                    provider: str | None = None) -> tuple[str, str | None]:
     """(model, effort) the nightly reviewer runs on: the owner's setting over
-    ``model`` (bin/review's), unless the environment pinned one."""
+    ``model`` (bin/review's), unless the environment pinned one. On
+    Antigravity the fallback is ``REVIEWER_AGY_MODEL`` and there is no
+    effort; a model stored for one provider is never run on the other."""
+    provider = provider or reviewer_provider()
     stored = reviewer_stored()
-    chosen = stored.get("model") if isinstance(stored.get("model"), str) else None
-    effort = stored.get("effort") if isinstance(stored.get("effort"), str) else None
+    same = (stored.get("provider") or "claude-code") == provider
+    chosen = stored.get("model") if same and isinstance(stored.get("model"), str) else None
+    effort = stored.get("effort") if same and isinstance(stored.get("effort"), str) else None
+    if provider == "antigravity":
+        return (model if pinned else chosen or REVIEWER_AGY_MODEL), None
     return (model if pinned or not chosen else chosen), effort
 
 
@@ -472,8 +498,30 @@ def schedule(agent: str) -> list[dict]:
 # Engineers
 # ---------------------------------------------------------------------------
 
-def _choice_row(provider, model, effort) -> dict:
-    return {"provider": provider, "model": model, "effort": effort}
+def _choice_row(provider, model, effort, tiers=None) -> dict:
+    """An engineer's own setting as the page reads it. ``tiers`` (since
+    2026-11-15) is always the three keys, null where unset."""
+    tiers = tiers if isinstance(tiers, dict) else {}
+    return {"provider": provider, "model": model, "effort": effort,
+            "tiers": {t: tiers.get(t) or None for t in ("quick", "standard", "hard")}}
+
+
+def tier_words(patch) -> str:
+    """A tiers change as General says it: "hard tier to X, quick tier back
+    to the engineer's model"."""
+    if not isinstance(patch, dict):
+        return f"tiers to {patch}"
+    return ", ".join(f"{t} tier to {v}" if v else f"{t} tier back to the engineer's model"
+                     for t, v in patch.items())
+
+
+def _effective_tiers(tiers: dict, model) -> dict:
+    """``{tier: {"model", "from"}}``: what a brief at each tier runs on --
+    the tier's model when set, else the engineer's model (``from``
+    ``model``), as lib/loam_engineer.py ``tier_choice`` resolves it."""
+    return {t: ({"model": tiers[t], "from": "tier"} if tiers.get(t)
+                else {"model": model, "from": "model"})
+            for t in ("quick", "standard", "hard")}
 
 
 def engineers(running: dict | None = None) -> dict:
@@ -507,10 +555,13 @@ def engineers(running: dict | None = None) -> dict:
                                     "its engineer edits; Files does not reach it"}
         rows.append({
             "project": name, "platform": project.platform, "repo": project.repo,
-            "own": (_choice_row(own.get("provider"), own.get("model"), own.get("effort"))
+            "own": (_choice_row(own.get("provider"), own.get("model"), own.get("effort"),
+                                own.get("tiers"))
                     if own.get("provider") else None),
             "effective": {"provider": eng.PROVIDER_OF[choice["runtime"]],
                           "model": choice["model"], "effort": choice["effort"],
+                          "tiers": _effective_tiers(eng.tier_models(project, stored),
+                                                    choice["model"]),
                           "source": choice["source"]},
             "providers": ["claude-code"] if project.platform else list(ENGINEER_PROVIDERS),
             "deploy_on_land": (own.get("deploy_on_land") is True) if app else None,
@@ -527,12 +578,15 @@ def engineers(running: dict | None = None) -> dict:
         model, effort = eng.builtin_choice(runtime)
         eff = {"provider": default["provider"], "model": default.get("model") or model,
                "effort": default.get("effort") or effort, "source": "own"}
+        tiers = default.get("tiers") if isinstance(default.get("tiers"), dict) else {}
+        eff["tiers"] = _effective_tiers(tiers, eff["model"])
     else:
         eff = {"provider": eng.PROVIDER_OF[eng.DEFAULT_RUNTIME], "model": builtin_model,
-               "effort": builtin_effort, "source": "record"}
+               "effort": builtin_effort, "source": "record",
+               "tiers": _effective_tiers({}, builtin_model)}
     return {"engineers": rows,
             "default": {"own": (_choice_row(default.get("provider"), default.get("model"),
-                                            default.get("effort"))
+                                            default.get("effort"), default.get("tiers"))
                                 if default.get("provider") else None),
                         "effective": eff,
                         "providers": list(ENGINEER_PROVIDERS),
@@ -558,7 +612,10 @@ def engineer(name: str, running: dict | None = None) -> dict:
 def update_engineer(name: str, patch: dict, check) -> dict:
     """One engineer's setting, or ``default``'s. ``provider`` null clears the
     engineer's own setting (it follows the default again); ``model`` and
-    ``effort`` null go back to the provider's built-in. ``deploy_on_land``
+    ``effort`` null go back to the provider's built-in. ``tiers`` (since
+    2026-11-15) is an object of any of ``quick``, ``standard``, ``hard``,
+    each a model the provider lists or null to unset that one (it then
+    runs on ``model``); the tiers not named are kept. ``deploy_on_land``
     is a project with an app's own. Answers ``engineers()``."""
     import loam_appearance  # noqa: PLC0415
     import loam_autodeploy  # noqa: PLC0415
@@ -566,13 +623,23 @@ def update_engineer(name: str, patch: dict, check) -> dict:
     if not isinstance(patch, dict):
         raise ProfileError("the body is an object")
     fields = set(patch) - {"by"}
-    unknown = sorted(fields - {"provider", "model", "effort", "deploy_on_land"})
+    unknown = sorted(fields - {"provider", "model", "effort", "tiers", "deploy_on_land"})
     if unknown:
         raise ProfileError(f"an engineer has no setting {', '.join(unknown)}; it "
-                           f"takes provider, model, effort and deploy_on_land")
+                           f"takes provider, model, effort, tiers and deploy_on_land")
     if not fields:
         raise ProfileError("name a setting to change: provider, model, effort, "
-                           "deploy_on_land")
+                           "tiers, deploy_on_land")
+    if "tiers" in patch:
+        tiers_patch = patch["tiers"]
+        if not isinstance(tiers_patch, dict) or not tiers_patch:
+            raise ProfileError("`tiers` is an object of quick, standard and/or "
+                               "hard, each a model its provider lists or null, "
+                               'like {"hard": "<model>"}')
+        bad = sorted(set(tiers_patch) - set(eng.TIERS))
+        if bad:
+            raise ProfileError(f"there is no tier {', '.join(bad)}; the tiers are "
+                               f"quick, standard and hard")
     is_default = name == "default"
     project = None if is_default else eng.projects().get(name)
     if not is_default and project is None:
@@ -601,7 +668,7 @@ def update_engineer(name: str, patch: dict, check) -> dict:
         if "provider" in patch:
             p = patch["provider"]
             if p is None:
-                for k in ("provider", "model", "effort"):
+                for k in ("provider", "model", "effort", "tiers"):
                     row.pop(k, None)
             elif p not in allowed:
                 raise ProfileError(
@@ -609,14 +676,16 @@ def update_engineer(name: str, patch: dict, check) -> dict:
                     f" is {' or '.join(allowed)}"
                     + ("; the platform engineer runs on Claude Code only"
                        if project is not None and project.platform else
-                       "; Antigravity does not run engineer jobs") + ", or null")
+                       "") + ", or null")
             else:
                 if row.get("provider") != p:
-                    for k in ("model", "effort"):
+                    # A provider's models are its own: its tiers go too.
+                    for k in ("model", "effort", "tiers"):
                         if k not in patch:
                             row.pop(k, None)
                 row["provider"] = p
-        if ("model" in patch or "effort" in patch) and not row.get("provider"):
+        if ("model" in patch or "effort" in patch or "tiers" in patch) \
+                and not row.get("provider"):
             # A model with no provider of its own: the provider it runs on now.
             if is_default:
                 row["provider"] = eng.PROVIDER_OF[eng.DEFAULT_RUNTIME]
@@ -627,8 +696,28 @@ def update_engineer(name: str, patch: dict, check) -> dict:
                 continue
             if patch[field] is None:
                 row.pop(field, None)
+            elif field == "effort" and row["provider"] == "antigravity":
+                # One mapping (lib/loam_antigravity.py, LEVEL_RE): the
+                # model id carries the level, so there is no second knob
+                # to disagree with it.
+                raise ProfileError(
+                    "an Antigravity engineer's thinking level is part of its "
+                    "model id (gemini-4-hydrogen-high, -xhigh, ...): set "
+                    "`model` to the id with the level you want")
             else:
                 row[field] = check(row["provider"], field, patch[field])
+        if "tiers" in patch:
+            tiers = dict(row["tiers"]) if isinstance(row.get("tiers"), dict) else {}
+            for tier, value in patch["tiers"].items():
+                if value is None or value == "":
+                    tiers.pop(tier, None)
+                else:
+                    # The same check as `model`: a model this provider lists.
+                    tiers[tier] = check(row["provider"], "model", value)
+            if tiers:
+                row["tiers"] = {t: tiers[t] for t in eng.TIERS if t in tiers}
+            else:
+                row.pop("tiers", None)
         if "deploy_on_land" in patch:
             if patch["deploy_on_land"]:
                 row["deploy_on_land"] = True
@@ -706,7 +795,8 @@ def expected_dropin() -> str | None:
 
 def reviewer(persona_fallback: str = "fable") -> dict:
     stored = reviewer_stored()
-    model, effort = reviewer_choice(persona_fallback)
+    provider = reviewer_provider()
+    model, effort = reviewer_choice(persona_fallback, provider=provider)
     words = reviewer_schedule()
     try:
         timer = _systemd().timers([REVIEWER_TIMER])[REVIEWER_TIMER]
@@ -722,9 +812,10 @@ def reviewer(persona_fallback: str = "fable") -> dict:
         "default_schedule": REVIEWER_DEFAULT_SCHEDULE,
         "next_fire": timer.get("next"), "last_fire": timer.get("last"),
         "running_since": timer.get("running_since"),
-        "provider": "claude-code", "providers": ["claude-code"],
+        "provider": stored.get("provider") or "claude-code",
+        "providers": list(REVIEWER_PROVIDERS),
         "model": stored.get("model"), "effort": stored.get("effort"),
-        "effective": {"provider": "claude-code", "model": model, "effort": effort},
+        "effective": {"provider": provider, "model": model, "effort": effort},
         "instructions": {"root": "system", "path": "Reviewer/CLAUDE.md"},
         "applies": "From the next run.",
     }
@@ -748,7 +839,10 @@ def apply_reviewer_schedule() -> None:
 
 def update_reviewer(patch: dict, check) -> dict:
     """The reviewer's ``schedule`` (the schedules' grammar, ``daily at 04:20
-    PT``), ``model`` and ``effort``; ``provider`` takes Claude Code only.
+    PT``), ``provider`` (Claude Code or, since 2026-11-15, Antigravity),
+    ``model`` and ``effort``. A change of provider drops the other
+    provider's model and effort unless the same patch names them. On
+    Antigravity the model id carries the level, so ``effort`` is refused.
     Null puts each back. Answers ``reviewer()``."""
     import loam_appearance  # noqa: PLC0415
     import loam_cron  # noqa: PLC0415
@@ -760,11 +854,21 @@ def update_reviewer(patch: dict, check) -> dict:
         raise ProfileError(f"the reviewer has no setting {', '.join(unknown)}; it "
                            f"takes schedule, provider, model and effort")
     if not fields:
-        raise ProfileError("name a setting to change: schedule, model, effort")
-    if "provider" in patch and patch["provider"] not in (None, "claude-code"):
-        raise ProfileError("the reviewer runs on Claude Code only (bin/review); "
-                           "`provider` is claude-code")
+        raise ProfileError("name a setting to change: schedule, provider, model, effort")
+    if "provider" in patch and patch["provider"] not in (None, *REVIEWER_PROVIDERS):
+        raise ProfileError(f"the reviewer's `provider` is "
+                           f"{' or '.join(REVIEWER_PROVIDERS)}, or null for claude-code")
+    stored_provider = reviewer_stored().get("provider") or "claude-code"
+    provider = (patch.get("provider") or "claude-code") if "provider" in patch \
+        else stored_provider
     clean: dict = {}
+    if "provider" in patch:
+        clean["provider"] = None if provider == "claude-code" else provider
+        if provider != stored_provider:
+            # A provider's models are its own (as an engineer's).
+            for k in ("model", "effort"):
+                if k not in patch:
+                    clean[k] = None
     if "schedule" in patch:
         if patch["schedule"] is None:
             clean["schedule"] = None
@@ -779,8 +883,13 @@ def update_reviewer(patch: dict, check) -> dict:
             clean["schedule"] = None if words == REVIEWER_DEFAULT_SCHEDULE else words
     for field in ("model", "effort"):
         if field in patch:
+            if patch[field] is not None and field == "effort" and provider == "antigravity":
+                raise ProfileError(
+                    "on Antigravity the reviewer's thinking level is part of its "
+                    "model id (gemini-4-hydrogen-high, claude-opus-5-5-high, ...): "
+                    "set `model` to the id with the level you want")
             clean[field] = (None if patch[field] is None
-                            else check("claude-code", field, patch[field]))
+                            else check(provider, field, patch[field]))
 
     def change(current):
         row = dict(current) if isinstance(current, dict) else {}

@@ -114,8 +114,11 @@ own `thread.*` rows cover the same things.
 | `engineer.model` | An engineer's model | PATCH /api/engineers/{engineer} | persona, conversation only | no |
 | `engineer.effort` | An engineer's thinking level | PATCH /api/engineers/{engineer} | persona, conversation only | no |
 | `engineer.deploy_on_land` | Deploy when a job lands, for a project with an app | PATCH /api/engineers/{engineer} | persona, conversation only | no (per brief only) |
+| `engineer.tiers.quick` | An engineer's quick-tier model: small, mechanical, well-specified jobs (2026-11-15); unset runs on `engineer.model` | PATCH /api/engineers/{engineer} | persona, conversation only | no |
+| `engineer.tiers.standard` | An engineer's standard-tier model: most jobs, and a brief that names no tier | PATCH /api/engineers/{engineer} | persona, conversation only | no |
+| `engineer.tiers.hard` | An engineer's hard-tier model: design-heavy work, subtle bugs, wide refactors | PATCH /api/engineers/{engineer} | persona, conversation only | no |
 | `reviewer.schedule` | When the nightly reviewer runs | PATCH /api/system/reviewer | persona, conversation only | no |
-| `reviewer.provider` | The reviewer's provider (Claude Code only) | PATCH /api/system/reviewer | persona, conversation only | no |
+| `reviewer.provider` | The reviewer's provider (Claude Code or Antigravity) | PATCH /api/system/reviewer | persona, conversation only | no |
 | `reviewer.model` | The reviewer's model | PATCH /api/system/reviewer | persona, conversation only | no |
 | `reviewer.effort` | The reviewer's thinking level | PATCH /api/system/reviewer | persona, conversation only | no |
 | `plugin.agent` | A plugin's settings for one agent (Read aloud's voice, once loam-ui reads it) | PATCH /api/plugins/{plugin}/agents/{agent} | persona, conversation only | no |

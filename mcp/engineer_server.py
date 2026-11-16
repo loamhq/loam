@@ -149,6 +149,13 @@ mcp = MCPServer("loam-engineer")
         "ones back to you. Name the boundaries: what it may change and what "
         "it must leave alone.\n"
         "\n"
+        "**`tier` — which of the engineer's three models.** `quick` for "
+        "small, mechanical, well-specified work; `standard` (left out) for "
+        "most work; `hard` for design-heavy work, subtle bugs and wide "
+        "refactors (hard may draw on a smaller quota). Name the tier, never "
+        f"a model: {lc.OWNER_NAME} sets each engineer's three in Settings. On "
+        "`continue_job` it is left out to keep the job's own model.\n"
+        "\n"
         "**`deploy` — land and go live in one job.** For a project whose app "
         f"runs on this box (loam-ui today), set `deploy: true` when {lc.OWNER_NAME}'s "
         "word for the job is to deploy it ('land and deploy', 'go and do it "
@@ -243,7 +250,9 @@ mcp = MCPServer("loam-engineer")
     # defaults to None since 2026-11-13: left out, the engineer's own
     # "Deploy when a job lands" setting decides (off unless the owner set it);
     # which app it means, and when it is refused, is the launcher's too
-    # (lib/loam_autodeploy.py).
+    # (lib/loam_autodeploy.py). `tier` (2026-11-15) defaults to "", which
+    # the launcher reads as `standard` on a fresh job and as "the job's own
+    # model" on a continuation (lib/loam_engineer.py, "Three tiers").
 )
 async def brief(
     project: str,
@@ -253,6 +262,7 @@ async def brief(
     max_minutes: int = 0,
     continue_job: str = "",
     deploy: bool | None = None,
+    tier: str = "",
 ) -> dict[str, Any]:
     # No timeout here. The launcher owns every clock in this system: it
     # kills the session at a ceiling only when the brief set one, and it
@@ -272,6 +282,7 @@ async def brief(
             "max_minutes": max_minutes,
             "continue_job": continue_job,
             "deploy": deploy,
+            "tier": tier,
         }).encode("utf-8"),
         check=False,
     )

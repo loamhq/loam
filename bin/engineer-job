@@ -163,6 +163,8 @@ import loam_contributions as contributions  # noqa: E402
 
 import loam_autodeploy  # noqa: E402
 import loam_broker  # noqa: E402
+import loam_agy_files as agy_files  # noqa: E402
+import loam_agy_job as agy_job  # noqa: E402
 import loam_codex_job as codex_job  # noqa: E402
 import loam_engineer as eng  # noqa: E402
 import loam_ci  # noqa: E402
@@ -369,6 +371,26 @@ and no `pull-request.md` to write. Your receipt is the deliverable."""
 # The session's scratch (since 2026-10-21; see loam_engineer.scratch_dir).
 # TMPDIR carries it to every tool that asks; this carries it to the session,
 # which until then named its own `/tmp/<job>-pnpm-store` and left it there.
+# The quota retry's word to the session (2026-11-15): a first attempt ran on
+# another model and stopped out of quota, so the tree may hold its work.
+QUOTA_RETRY_NOTE = """
+
+A first attempt at this job, on `{model}`, stopped out of quota, and this is
+the one retry, on the tier below. The tree may hold that attempt's work,
+committed or not: read `git status` and `git log main..HEAD` before you
+start, and keep what is sound. Say in the receipt that the job was retried.
+"""
+
+
+def shutil_copy(src: Path, dst: Path) -> None:
+    """A copy that never costs the job: the first attempt's stderr, kept."""
+    import shutil  # noqa: PLC0415
+    try:
+        shutil.copyfile(src, dst)
+    except OSError:
+        pass
+
+
 SCRATCH_NOTE = """
 
 Scratch for this job — package stores, throwaway checkouts, build output, \
@@ -783,11 +805,24 @@ def resolve_continuation(project: eng.Project, continue_job: str) -> tuple[str |
         )
     # The parent's CLI keeps the transcript: Claude's under ~/.claude, a Codex
     # thread's rollout under CODEX_HOME (since 2026-10-07).
-    codex = job_runtime(p) == "codex"
+    # An Antigravity conversation's file under ~/.gemini (since 2026-11-15):
+    # the CLI does not refuse an id it does not know, it starts a new
+    # conversation, so the refusal has to be here.
+    parent_runtime = job_runtime(p)
+    codex = parent_runtime == "codex"
+    if parent_runtime == "antigravity":
+        # Cleared a week after its last job (2026-11-15,
+        # lib/loam_agy_files.py): said as that, not as a file gone missing.
+        refusal = agy_files.cleared_refusal(p["dir"], continue_job, session_id)
+        if refusal:
+            return None, refusal
     found = (codex_job.rollout(session_id) if codex
+             else agy_job.conversation_file(session_id)
+             if parent_runtime == "antigravity"
              else loam_session.session_file(session_id))
     if found is None:
         where = (codex_job.loam_codex.CODEX_HOME / "sessions" if codex
+                 else agy_job.CONVERSATIONS if parent_runtime == "antigravity"
                  else loam_session.SESSIONS_DIR)
         return None, (
             f"Refused before starting: job {continue_job}'s session "
@@ -854,6 +889,10 @@ def read_brief_meta(p: dict[str, Path]) -> dict:
         "caller_session": head.get("caller_session") or "",
         "thread": head.get("thread") or "",
         "lane": head.get("lane") or "",
+        # The tier the brief named (2026-11-15), or "": `standard` on a
+        # fresh job, the parent's model on a continuation (`job_choice`).
+        "tier": (head.get("tier") or "").strip().lower()
+        if (head.get("tier") or "").strip().lower() in eng.TIERS else "",
         "body": text,
     }
 
@@ -1017,6 +1056,10 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
         argv.append(f"--property=EnvironmentFile=-{env_file}")
     if probe_seconds():
         argv.append(f"--setenv={PROBE_SECONDS_VAR}={probe_seconds()}")
+    if os.environ.get("LOAM_PROJECTS_DIR"):
+        # A scratch registry (lib/loam_engineer.py, PROJECTS_DIR): the inner
+        # must find the project the outer did.
+        argv.append(f"--setenv=LOAM_PROJECTS_DIR={eng.PROJECTS_DIR}")
     argv += [str(AGENTS / "bin" / "engineer-job"), project.name, job_id, "--in-unit"]
     subprocess.run(argv, check=True, capture_output=True, text=True)
 
@@ -1409,6 +1452,7 @@ what makes the two halves worth reading together.*
 | outcome | {outcome} |
 | turns | {turns} |
 | runtime | {runtime} |
+| model | {model_row} |
 | cost (CLI estimate) | {cost} |
 | last heartbeat | {heartbeat} |
 | unit | `{unit}.service` |
@@ -1777,6 +1821,107 @@ def take_slot(project: eng.Project, job_id: str, lane: str, p: dict[str, Path]):
         time.sleep(QUEUE_POLL_SECONDS)
 
 
+def job_choice(project: eng.Project, runtime: str, meta: dict,
+               continue_job: str | None) -> dict:
+    """``{"tier", "model", "effort", "from"}`` this job runs on (2026-11-15).
+
+    A fresh job: the brief's tier (`standard` when it names none), its
+    model as set, else the engineer's model (lib/loam_engineer.py
+    ``tier_choice``). A continuation that names no tier keeps the model its
+    parent ran on (``from`` ``parent``), and the parent's tier, so a hard
+    job continued is still on the hard model; one that names a tier runs on
+    that tier's model. The thinking level is the engineer's, as before."""
+    if continue_job and not meta.get("tier"):
+        parent = job_engine(paths(project, continue_job))
+        if parent.get("model"):
+            _, effort = eng.choice_for(project, runtime)
+            return {"tier": parent.get("tier"), "model": parent["model"],
+                    "effort": effort, "from": "parent"}
+    return eng.tier_choice(project, runtime, meta.get("tier") or None)
+
+
+def model_text(choice: dict, continue_job: str | None = None) -> str:
+    """The receipt's `model` row: the tier and the model it resolved to."""
+    if choice.get("from") == "parent":
+        text = (f"`{choice['model']}`, kept from job `{continue_job}` "
+                f"(no tier named; it ran at "
+                f"{'tier `' + choice['tier'] + '`' if choice.get('tier') else 'no recorded tier'})")
+    elif choice.get("from") == "tier":
+        text = f"tier `{choice['tier']}` → `{choice['model']}` (the tier's setting)"
+    else:
+        text = (f"tier `{choice['tier']}` → `{choice['model']}` (no {choice['tier']} "
+                f"model set: the engineer's model)")
+    retry = choice.get("retry")
+    if retry:
+        text += (f"; **out of quota on `{retry['from_model']}`, retried once on "
+                 f"tier `{retry['tier']}` → `{retry['model']}`**")
+    elif choice.get("no_retry"):
+        text += f"; out of quota, not retried: {choice['no_retry']}"
+    return text
+
+
+def quota_fallback(project: eng.Project, runtime: str, choice: dict) -> tuple[dict | None, str]:
+    """(the tier one down to retry on, or None and why not). Once, never a
+    loop: the caller retries at most one time."""
+    below = eng.tier_below(choice.get("tier") or eng.DEFAULT_TIER)
+    if below is None:
+        return None, "the quick tier has no tier below it"
+    down = eng.tier_choice(project, runtime, below)
+    if down["model"] == choice["model"]:
+        return None, (f"the {below} tier runs on the same model "
+                      f"(`{down['model']}`)")
+    return down, ""
+
+
+def run_antigravity(project: eng.Project, runtime: str, choice: dict, argv_for,
+                    argv: list[str], workdir: str, meta: dict, p: dict[str, Path],
+                    resume_from: str | None, prompt: str):
+    """One Antigravity session, and at most one retry (2026-11-15): out of
+    quota (lib/loam_agy_job.py QUOTA_RE) on the tier's model, it runs once
+    more on the tier below (``quota_fallback``), never a loop, and never
+    after a cancel or a ceiling, which are somebody's decision. ``choice``
+    gains ``retry`` (or ``no_retry`` and why) for the receipt. Afterwards
+    the job directory's ``antigravity.json`` names the conversations it ran
+    and the files it left, for the clearing a week on
+    (lib/loam_agy_files.py). Returns (returncode, run, timed_out, argv,
+    model, effort) as the last attempt ran."""
+    job_model, job_effort = choice["model"], choice["effort"]
+
+    def on_thread(cid: str) -> None:
+        p["session"].write_text(cid + "\n", encoding="utf-8")
+
+    before = agy_files.snapshot()
+    convs: list[str] = []
+    returncode, agy_run, timed_out = agy_job.run(
+        argv, workdir, ceiling_seconds(meta), p["dir"], p["stderr"],
+        on_thread=on_thread, resumed=resume_from)
+    convs.append(agy_run.conversation_id)
+    if agy_run.quota and not timed_out and not p["cancelled"].is_file():
+        down, why = quota_fallback(project, runtime, choice)
+        if down is None:
+            choice["no_retry"] = why
+        else:
+            choice["retry"] = {"from_model": job_model, "tier": down["tier"],
+                               "model": down["model"], "error": agy_run.failed}
+            shutil_copy(p["stderr"], p["dir"] / "session-stderr.quota.log")
+            p["session"].unlink(missing_ok=True)
+            job_model, job_effort = down["model"], down["effort"]
+            argv = argv_for(job_model, job_effort,
+                            prompt + QUOTA_RETRY_NOTE.format(model=choice["retry"]["from_model"]))
+            write_engine(p, runtime, argv, down["tier"])
+            returncode, agy_run, timed_out = agy_job.run(
+                argv, workdir, ceiling_seconds(meta), p["dir"], p["stderr"],
+                on_thread=on_thread, resumed=resume_from)
+            convs.append(agy_run.conversation_id)
+    try:
+        agy_files.write_record(p["dir"], agy_files.attribute(
+            before, [c for c in convs if c]))
+    except OSError as exc:
+        print(f"engineer-job: the Antigravity files record was not written: "
+              f"{exc}", file=sys.stderr)
+    return returncode, agy_run, timed_out, argv, job_model, job_effort
+
+
 def job_engine(p: dict[str, Path]) -> dict:
     """{"engine", "model"} the job's session was launched with: its
     `engine.json` (since 2026-11-12), else the `runtime` file's engine and no
@@ -1784,7 +1929,7 @@ def job_engine(p: dict[str, Path]) -> dict:
     try:
         data = json.loads(p["engine"].read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            return {k: data.get(k) for k in ("engine", "model", "effort")
+            return {k: data.get(k) for k in ("engine", "model", "effort", "tier")
                     if data.get(k)}
     except (OSError, ValueError):
         pass
@@ -1806,12 +1951,15 @@ def launched_model(argv: list[str]) -> tuple[str | None, str | None]:
     return model, effort
 
 
-def write_engine(p: dict[str, Path], runtime: str, argv: list[str]) -> None:
+def write_engine(p: dict[str, Path], runtime: str, argv: list[str],
+                 tier: str | None = None) -> None:
     model, effort = launched_model(argv)
     record = {"engine": loam_waiters.engine_id(runtime) or runtime,
               "model": model, "at": eng.iso(eng.now_utc())}
     if effort:
         record["effort"] = effort
+    if tier:
+        record["tier"] = tier
     try:
         p["engine"].write_text(json.dumps(record) + "\n", encoding="utf-8")
     except OSError:
@@ -2822,10 +2970,15 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     session_id = eng.new_session_id()
     probe = probe_seconds()
     codex = runtime == "codex"
+    # Antigravity since 2026-11-15 (lib/loam_agy_job.py): Codex's shape, a
+    # stream the launcher writes and an id the CLI chooses.
+    antigravity = runtime == "antigravity"
     p["runtime"].write_text(runtime + "\n", encoding="utf-8")
     # A Codex thread's id is Codex's to choose, so the stall is read off the
     # event stream the launcher writes, not a transcript found by id.
-    stream = p["dir"] / codex_job.STREAM if codex and not probe else None
+    stream = (p["dir"] / codex_job.STREAM if codex and not probe
+              else p["dir"] / agy_job.STREAM if antigravity and not probe
+              else None)
 
     stop = threading.Event()
     ticker = threading.Thread(
@@ -2856,12 +3009,14 @@ def run_inner(project: eng.Project, job_id: str) -> int:
 
     # The model and thinking level (since 2026-11-13): the engineer's
     # setting for this CLI (Settings > Agents > Engineers), else the
-    # built-in. lib/loam_engineer.py, `choice_for`.
-    job_model, job_effort = eng.choice_for(project, runtime)
+    # built-in. Since 2026-11-15 the brief's tier picks which of the
+    # engineer's three models (`job_choice`); unset, it is the model above.
+    choice = job_choice(project, runtime, meta, continue_job)
+    job_model, job_effort = choice["model"], choice["effort"]
     argv = [
         CLAUDE, "-p", prompt,
         "--model", job_model,
-        *(["--effort", job_effort] if job_effort and not codex else []),
+        *(["--effort", job_effort] if job_effort and runtime == "claude" else []),
         "--permission-mode", PERMISSION_MODE,
         "--output-format", "json",
         "--session-id", session_id,
@@ -2894,7 +3049,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     # L4): their MCP servers and their words, at launch, so the committed
     # harness in the tree never names a plugin.
     plugin_words = contributions.lane_prompt("engineer")
-    if not codex:
+    if runtime == "claude":
         plugin_mcp = contributions.lane_mcp_file("engineer")
         if plugin_mcp:
             argv += ["--mcp-config", str(plugin_mcp)]
@@ -2919,13 +3074,37 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             protected=[tree / name for name in codex_job.HARNESS
                        if (tree / name).exists()
                        and not wt.tracked(tree, name)])
-    argv = wt.walled(project, record, p["dir"], argv)
+    protect: list[Path] = []
+    agy_argv = None
+    if antigravity:
+        instructions = agy_job.instructions(workdir)
+        if plugin_words:
+            instructions = f"{instructions.rstrip()}\n\n{plugin_words}\n"
+        p["dir"].joinpath(agy_job.INSTRUCTIONS).write_text(
+            instructions, encoding="utf-8")
+        # Antigravity has no write sandbox to name the harness in, so the
+        # wall holds it, where the tree does not track it (as for Codex).
+        protect = [tree / name for name in agy_job.HARNESS
+                   if (tree / name).exists() and not wt.tracked(tree, name)]
+
+        def agy_argv(model: str, effort, text: str = prompt) -> list[str]:
+            """The walled command line for one Antigravity attempt: the
+            first, and the quota retry's on the tier below."""
+            line = agy_job.argv(
+                prompt=agy_job.prompt_arg(p["dir"], agy_job.compose(instructions, text)),
+                job_dir=p["dir"], conversation=resume_from,
+                model=model, effort=effort,
+                extra_dirs=[paths(project, continue_job)["dir"]] if resume_from else [])
+            return wt.walled(project, record, p["dir"], line, protect=protect)
+        argv = agy_argv(job_model, job_effort)
+    else:
+        argv = wt.walled(project, record, p["dir"], argv)
     os.environ.update(wt.wall_env())
     # What this session is started on, read off the command line it is
     # started with (since 2026-11-12), so Activity says the engine and model
     # a job ran on rather than what is configured today.
     if not probe:
-        write_engine(p, runtime, argv)
+        write_engine(p, runtime, argv, choice.get("tier"))
 
     # The session's scratch (since 2026-10-21): TMPDIR for everything it runs,
     # removed below when the session ends however it ends. The prompt names it
@@ -2941,6 +3120,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     returncode = -1
     timed_out = False
     codex_run = None
+    agy_run = None
     try:
         if p["cancelled"].is_file():
             # Cancelled between taking its admission and starting the
@@ -2971,6 +3151,15 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                         tid + "\n", encoding="utf-8"))
                 envelope = {"session_id": codex_run.thread_id,
                             "result": codex_run.failed}
+            elif antigravity:
+                # The conversation id, the moment the CLI names it.
+                p["session"].unlink(missing_ok=True)
+                returncode, agy_run, timed_out, argv, job_model, job_effort = \
+                    run_antigravity(project, runtime, choice, agy_argv, argv,
+                                    str(workdir), meta, p, resume_from, prompt)
+                envelope = {"session_id": agy_run.conversation_id,
+                            "result": agy_run.failed,
+                            "num_turns": agy_run.num_turns}
             else:
                 p["session"].write_text(session_id + "\n", encoding="utf-8")
                 returncode, envelope, timed_out = run_session(
@@ -3011,7 +3200,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     # preferred only so a future CLI that ignores the flag cannot make the
     # record and the transcript disagree. Either way it is on disk, because
     # the next job may resume it and a timed-out run printed no envelope.
-    ran_as = envelope.get("session_id") or (None if codex else session_id)
+    ran_as = envelope.get("session_id") or (None if codex or antigravity else session_id)
     if probe or not ran_as:
         ran_as = None
     elif ran_as != session_id:
@@ -3035,10 +3224,13 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     # its parent's entries; without it a continued job reports the previous
     # job's round trips as its own, against a cap that counts only this run's.
     api_turns = (codex_run.round_trips if codex_run
-                 else None if codex else loam_session.round_trips(ran_as, resume_from))
+                 else agy_run.round_trips if agy_run
+                 else None if codex or antigravity
+                 else loam_session.round_trips(ran_as, resume_from))
     if timed_out:
         outcome = f"cut off at the {meta['max_minutes']}-minute ceiling its brief set"
-    elif (codex_run.capped if codex_run else loam_session.turn_cap_hit(envelope)):
+    elif (codex_run.capped if codex_run else agy_run.capped if agy_run
+          else loam_session.turn_cap_hit(envelope)):
         outcome = f"cut off at the {eng.MAX_TURNS}-round-trip cap, mid-run"
     elif ceiling.get("oom_kill") and returncode != 0:
         # The CLI was the process killed (SIGKILL, so -9), or something it
@@ -3048,6 +3240,10 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                    f"{ceiling['oom_kill']} OOM kill(s) in the unit)")
     elif codex_run and (returncode != 0 or codex_run.failed):
         outcome = f"exited {returncode} (codex: {codex_run.failed or 'no error event'})"
+    elif agy_run and (returncode != 0 or agy_run.failed):
+        outcome = (f"exited {returncode} (antigravity: "
+                   f"{'out of quota: ' if agy_run.quota else ''}"
+                   f"{agy_run.failed or 'no error in its result'})")
     elif returncode != 0 or (subtype and subtype != "success"):
         outcome = f"exited {returncode} (subtype={subtype})"
     else:
@@ -3141,6 +3337,13 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                  f"{codex_run.turns} turn end); Codex `"
                  f"{(job_engine(p).get('model') or eng.CODEX_ENGINEER_MODEL)}`"
                  f", effort {job_engine(p).get('effort') or eng.CODEX_ENGINEER_EFFORT}")
+    if agy_run:
+        turns = (f"{api_turns} API round trips{of_cap} (model responses: "
+                 f"{agy_run.tool_calls} tool steps plus {agy_run.responses} "
+                 f"replies); {agy_run.num_turns if agy_run.num_turns is not None else '—'}"
+                 f" turns in the conversation; Antigravity `"
+                 f"{agy_run.model or job_engine(p).get('model') or eng.AGY_ENGINEER_MODEL}`"
+                 f" (its level is in the id)")
 
     facts = {
         "slug": eng.slug_for(meta["title"] or meta["body"]),
@@ -3152,11 +3355,18 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         "outcome": outcome,
         "turns": turns,
         "cost": (codex_job.usage_text(codex_run, ran_as) if codex_run else
+                 agy_job.usage_text(agy_run) if agy_run else
                  f"${envelope['total_cost_usd']:.2f}"
                  if envelope.get("total_cost_usd") is not None else "—"),
         "runtime": runtime,
+        # The tier and the model it resolved to (2026-11-15), and a quota
+        # retry on the tier below when there was one.
+        "model_row": ("—" if probe else model_text(choice, continue_job)),
+        "tier": choice.get("tier"), "resolved_model": job_model,
+        "quota_retry": choice.get("retry"),
         "codex_usage": codex_run.usage if codex_run else None,
         "codex_meters": codex_job.meters(ran_as) if codex_run else None,
+        "agy_usage": agy_run.usage if agy_run else None,
         "heartbeat": last_beat(p) or "none",
         # The transcript's last line and, if no line had landed for
         # STALL_MINUTES when the run ended, when the silence began. Both are
@@ -3251,7 +3461,10 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             "max_turns": eng.MAX_TURNS,
             "total_cost_usd": envelope.get("total_cost_usd"),
             "runtime": runtime, "codex_usage": facts["codex_usage"],
+            "tier": facts["tier"], "model": facts["resolved_model"],
+            "quota_retry": facts["quota_retry"],
             "codex_meters": facts["codex_meters"],
+            "agy_usage": facts.get("agy_usage"),
             "receipt": str(target), "max_minutes": meta["max_minutes"],
             "returncode": returncode,
             "session_id": ran_as, "continue_job": continue_job or None,
@@ -3386,6 +3599,16 @@ def accept(args: dict, briefed_by: str):
         _, refusal = resolve_continuation(project, continue_job)
         if refusal:
             return refusal
+    # Which of the engineer's three models (2026-11-15): a tier, never a
+    # model. Left out: `standard`, or on a continuation the job's own model.
+    tier = one_line(args.get("tier")).lower()
+    if tier and tier not in eng.TIERS:
+        return (f"tier {tier!r} is not one of the engineer's tiers: quick "
+                f"(small, mechanical, well-specified), standard (most work; "
+                f"the default) or hard (design-heavy, subtle bugs, wide "
+                f"refactors). Name one of those, or leave it out.")
+    if tier:
+        extra = {**(extra or {}), "tier": tier}
     # A title naming the pull request the job updates: open, on this
     # project's repository, or refused here (lib/loam_pr_target.py).
     refusal = pr_target_refusal(project, title)

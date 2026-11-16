@@ -228,6 +228,37 @@ SIGHT_WALL_HOST_CHAIN = "LOAM-SIGHT-HOST"
 SIGHT_WALL_SERVICE = "loam-sight-firewall.service"
 _REJECT = "-j REJECT --reject-with icmp-admin-prohibited"
 
+# The Apps section's previews (2026-11-15): an internal route to every app
+# in the Apps list, past the login, for loam-ui's preview renderer (headless
+# Chromium in the app's own container, empty profile, no credential). Every
+# app's public name is behind the login, so without this every preview is a
+# letter tile. Caddy serves one more site, plain HTTP, bound to the gateway
+# of the broker's bridge and nowhere else: no interface outside the box
+# carries that address, no DNS name points at it, and the broker's wall
+# (broker/firewall.sh, the same chain as the broker's port) lets only the
+# box itself and the `loam-broker` subnet reach the port -- the containers
+# that already reach the broker, loam-ui and its staging copy. The public
+# names and their login are untouched; see deploy/README.md, "Previews for
+# the Apps section".
+#
+# A preview is addressed by host, so a page's root-relative assets resolve
+# as they do on its real name: `http://<label>.<PREVIEW_SUFFIX>:<port>/`,
+# where <label> is the app's host label under the domain. `.internal` is
+# reserved for private use (ICANN, 2024) and resolves nowhere; the renderer
+# maps it to PREVIEW_ADDR itself (Chromium `--host-resolver-rules`).
+PREVIEW_ADDR = loam_broker.BIND_ADDR
+PREVIEW_PORT = 8935
+PREVIEW_SUFFIX = "preview.internal"
+PREVIEW_LOG = "preview"           # /var/log/caddy/access/preview.log
+# Caddy binds PREVIEW_ADDR, which exists only once docker has raised the
+# broker's bridge, and a listener that cannot bind fails Caddy's whole
+# start. Caddy and docker are not ordered at boot, so the kernel is told to
+# allow a bind to an address not (yet) on an interface. Nothing becomes
+# reachable by it: a packet for an address the box does not carry is never
+# delivered to the socket.
+PREVIEW_SYSCTL = Path("/etc/sysctl.d/60-loam-preview.conf")
+PREVIEW_SYSCTL_KEY = "net.ipv4.ip_nonlocal_bind"
+
 # The private static host for "local files": a persona writes a file under
 # this directory (the commons, writable by every persona, expired after
 # seven days like everything else there) and opens it in the browser as
@@ -1477,6 +1508,91 @@ def caddy_content_block(app: App) -> str:
     return "\n".join(lines) + "\n"
 
 
+def previewable(apps: list[App] | None = None,
+                agent_sites: list[App] | None = None) -> list[App]:
+    """What the Apps list shows that has a host of its own: every agent's
+    site, and every record with a container that is not Loam's page
+    (lib/loam_apps.listing, the same two filters). Sorted by host label, so
+    the render is deterministic. A plugin's row is served on the page's own
+    host and is not here."""
+    apps = records() if apps is None else apps
+    agent_sites = sites(apps) if agent_sites is None else agent_sites
+    rows = list(agent_sites) + [a for a in apps if a.compose is not None
+                                and not a.app_shell and not a.apex]
+    return sorted(rows, key=lambda a: a.host)
+
+
+def preview_url(app: App) -> str:
+    """The app's address on the internal route, as the renderer loads it."""
+    return f"http://{app.host}.{PREVIEW_SUFFIX}:{PREVIEW_PORT}/"
+
+
+def caddy_preview_block(rows: list[App]) -> str:
+    """The internal route: one plain-HTTP site on PREVIEW_ADDR:PREVIEW_PORT,
+    one host matcher per previewable app, serving exactly what that app's
+    public block serves past its gate (the same static root with the same
+    hidden names, or the same loopback upstream), and a 404 for any other
+    name. No gate, no share, no frame header (a preview is a top-level
+    page), and a request from outside the broker's subnet is refused here
+    as well as in the kernel. An expired site answers 410, as it does on its
+    public name. Rendered even when nothing is previewable, so the listener
+    does not come and go with the list."""
+    out = [
+        "# The Apps section's previews: internal only, on the broker bridge's",
+        f"# gateway, past the login. Served to {loam_broker.SUBNET} (loam-ui,",
+        "# loam-ui-next) only; broker/firewall.sh holds the port in the kernel.",
+        "# See deploy/README.md, \"Previews for the Apps section\".",
+        f"http://:{PREVIEW_PORT} {{",
+        f"\tbind {PREVIEW_ADDR}",
+        access_log_line(PREVIEW_LOG),
+        f"\t@outside not remote_ip {loam_broker.SUBNET}",
+        "\thandle @outside {",
+        "\t\trespond \"forbidden\" 403",
+        "\t}",
+    ]
+    for app in rows:
+        # A host label is [a-z0-9-] (NAME_RE), so these two names cannot
+        # collide across apps or with each other.
+        fq = f"{app.host}.{PREVIEW_SUFFIX}"
+        out.append(f"\t@app_{app.host} host {fq}")
+        out.append(f"\thandle @app_{app.host} {{")
+        if app.site_expires is not None:
+            out.append(f"\t\t@gone_{app.host} expression `int({{time.now.unix}}) >= "
+                       f"{_deadline_unix(app.site_expires)}`")
+            out.append(f"\t\trespond @gone_{app.host} \"expired\" 410")
+        out.append(f"\t\t{app.backend}")
+        out.append("\t}")
+    out += [
+        "\thandle {",
+        "\t\trespond \"no such app\" 404",
+        "\t}",
+        "}",
+    ]
+    return "\n".join(out) + "\n"
+
+
+def preview_sysctl() -> str:
+    return "\n".join([
+        "# GENERATED by agents/bin/gen-deploy (lib/loam_deploy.py, PREVIEW_SYSCTL).",
+        f"# Caddy binds the Apps previews' route to {PREVIEW_ADDR}, the broker",
+        "# bridge's gateway, which exists only once docker is up; Caddy and docker",
+        "# are not ordered at boot, and one listener that cannot bind fails Caddy's",
+        "# whole start. This lets the bind happen first. It makes nothing",
+        "# reachable: a packet for an address the box does not carry is never",
+        "# delivered.",
+        f"{PREVIEW_SYSCTL_KEY} = 1",
+    ]) + "\n"
+
+
+def preview_sysctl_live() -> bool:
+    """Whether the kernel allows the previews' early bind right now."""
+    try:
+        key = PREVIEW_SYSCTL_KEY.replace(".", "/")
+        return Path(f"/proc/sys/{key}").read_text().strip() == "1"
+    except OSError:
+        return False
+
+
 def caddy_claim_block(fq: str) -> str:
     """The app's host while the install has no login yet: `/claim` from the
     claim service, outside the login, and every other path sent there. The
@@ -1572,6 +1688,7 @@ def caddyfile(today: dt.date | None = None) -> str:
     for f in forwards():
         if f["host"] not in moved_hosts:
             out.append(caddy_forward_block(f))
+    out.append(caddy_preview_block(previewable(apps, agent_sites)))
     if unknown:
         out.append(f"# {PUBLIC_FILE} names {', '.join(sorted(unknown))}, which "
                    f"no deployment record defines. Nothing emitted for them.\n")
@@ -2064,6 +2181,7 @@ def generated(today: dt.date | None = None) -> dict[Path, str]:
         SIGHT_FIREWALL_SCRIPT: sight_firewall_script(),
         SIGHT_FIREWALL_UNIT: sight_firewall_unit(),
         SUDOERS: sudoers(),
+        PREVIEW_SYSCTL: preview_sysctl(),
     }
 
 

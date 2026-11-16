@@ -14,6 +14,9 @@ Usage:
       moves and nothing restarts for any provider; a newer build is still
       installed beside the live one and smoked.
   provider-follow watch       resume an open rollback window (after a reboot)
+  provider-follow clear-agy-files [--dry-run]
+      Antigravity's files for engineer jobs that finished over a week ago
+      (lib/loam_agy_files.py), cleared now; `run` does this as its last step.
   provider-follow status      each provider: signed in, live, latest, on disk
   provider-follow drill [--dir DIR]
       The rollback drill, on a throwaway: an older Claude Code build is
@@ -67,6 +70,8 @@ def cmd_run(args) -> int:
         f.log("box", "run", None, force=args.force, dry=args.dry_run,
               providers=args.provider or "all")
         plans = f.follow(providers(args.provider), hands, force=args.force)
+        # A week after an engineer job, its Antigravity files (2026-11-15).
+        f.clear_agy_files(dry=args.dry_run)
     bad = [p for p in plans if not p.passed]
     return 1 if bad else 0
 
@@ -76,6 +81,16 @@ def cmd_watch(args) -> int:
     with f.locked():
         f.watch(providers(None), f.Hands())
     return 0
+
+
+def cmd_clear_agy_files(args) -> int:
+    import loam_follow as f  # noqa: PLC0415
+    rows = f.clear_agy_files(dry=args.dry_run)
+    for row in rows:
+        print(json.dumps(row))
+    if not rows:
+        print("nothing due: no engineer job's Antigravity conversation is over a week old")
+    return 1 if any(r["error"] for r in rows) else 0
 
 
 def cmd_status(args) -> int:
@@ -179,6 +194,8 @@ def main() -> int:
     r.add_argument("--force", action="store_true")
     r.add_argument("--dry-run", action="store_true")
     sub.add_parser("watch")
+    c = sub.add_parser("clear-agy-files")
+    c.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
     d = sub.add_parser("drill")
     d.add_argument("--dir")
@@ -187,6 +204,7 @@ def main() -> int:
     d.add_argument("--keep", action="store_true")
     args = ap.parse_args()
     return {"run": cmd_run, "watch": cmd_watch, "status": cmd_status,
+            "clear-agy-files": cmd_clear_agy_files,
             "drill": cmd_drill}[args.cmd](args)
 
 

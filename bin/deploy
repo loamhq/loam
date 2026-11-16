@@ -281,13 +281,18 @@ def broker_env() -> dict:
 def origins_env() -> dict:
     """The install's own addresses, for a compose file to interpolate where
     it used to write this box's domain literally (first release L12): the
-    vault's and the commons' web folders and the app's content host. Not
-    secrets. On the first install each is exactly the literal it replaced."""
+    vault's and the commons' web folders, the app's content host, and the
+    Apps previews' internal route. Not secrets. On the first install each is exactly the literal it replaced."""
     dom = dep.domain()
     apps = {a.name: a for a in dep.records()}
     env = {"LOAM_DOMAIN": dom,
            "LOAM_VAULT_ORIGIN": f"https://{apps['vault'].fqdn}" if "vault" in apps else f"https://vault.{dom}",
            "LOAM_FILES_ORIGIN": f"https://{apps['files'].fqdn}" if "files" in apps else f"https://files.{dom}"}
+    # The Apps section's previews (2026-11-15): the internal route, as the
+    # base a site's label is prefixed to and the address every name under
+    # it resolves to (lib/loam_deploy.PREVIEW_*). Not secrets.
+    env["LOAM_PREVIEW_BASE"] = f"http://{dep.PREVIEW_SUFFIX}:{dep.PREVIEW_PORT}"
+    env["LOAM_PREVIEW_ADDR"] = dep.PREVIEW_ADDR
     for app in apps.values():
         if app.content_fqdn:
             key = "LOAM_CONTENT_ORIGIN_" + re.sub(r"[^A-Z0-9]", "_", app.name.upper())

@@ -40,6 +40,9 @@ os.environ.update({
     "LOAM_FOLLOW_VAULT": str(TMP / "vault"),
     "LOAM_FOLLOW_WAKE_LOGS": str(TMP / "wake-logs"),
     "LOAM_FOLLOW_WATCH_S": "0",
+    # The memory check's baseline, the test's own (the box's stores still
+    # count, but against a first-seen of this run's).
+    "LOAM_PROVIDER_MEMORY_BASELINE": str(TMP / "provider-memory.json"),
 })
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_follow as f  # noqa: E402

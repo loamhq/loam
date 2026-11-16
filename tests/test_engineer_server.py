@@ -272,8 +272,12 @@ def main() -> int:
             schema = (brief or {}).get("inputSchema", {})
             check("its parameters are unchanged",
                   sorted(schema.get("properties", {})),
+                  # `tier` since 2026-11-15: which of the engineer's three
+                  # models, optional.
                   ["brief", "continue_job", "deploy", "involvement",
-                   "max_minutes", "project", "title"])
+                   "max_minutes", "project", "tier", "title"])
+            check("`tier` is optional",
+                  "tier" in (schema.get("required") or []), False)
             check("max_minutes, continue_job and deploy are the optional ones",
                   sorted(schema.get("required", [])),
                   ["brief", "involvement", "project", "title"])

@@ -1045,6 +1045,22 @@ def memory_pins(hands: Hands) -> None:
         hands.comms("Important", text)
 
 
+def clear_agy_files(dry: bool = False) -> list[dict]:
+    """Antigravity's per-conversation files for engineer jobs, cleared a
+    week after the job (2026-11-15, lib/loam_agy_files.py), as this nightly
+    pass's last step. Logged, never said in comms: it is housekeeping the
+    owner agreed to, and a failure is retried the next night."""
+    import loam_agy_files  # noqa: PLC0415
+    try:
+        rows = loam_agy_files.clear(dry=dry)
+    except Exception as exc:  # noqa: BLE001 -- logged, not swallowed
+        log("antigravity", "clear-job-files", False, error=str(exc), dry=dry)
+        return []
+    for row in rows:
+        log("antigravity", "clear-job-files", row["error"] is None, dry=dry, **row)
+    return rows
+
+
 def rollback(p: Provider, hands: Hands, state: dict, reasons: list[str]) -> None:
     bad, back = state["live"], state["previous"]
     hands.repoint(p, back)

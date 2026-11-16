@@ -89,7 +89,9 @@ MAX_TURNS = (int(os.environ["LOAM_ENGINEER_MAX_TURNS"])
 # DEFAULT_RUNTIME into every new record, and `bin/check-drift` names a
 # record without one. Flipping one project back is `"runtime": "claude"` in
 # its record and nothing else.
-RUNTIMES = ("claude", "codex")
+# `antigravity` since 2026-11-15 (lib/loam_agy_job.py), as a choice: the
+# owner wants to try it before any engineer moves, so nothing defaults to it.
+RUNTIMES = ("claude", "codex", "antigravity")
 DEFAULT_RUNTIME = "codex"
 
 # The model and effort a Codex engineer runs on: the ONE home, as
@@ -100,6 +102,12 @@ DEFAULT_RUNTIME = "codex"
 # "Older generation". `bin/check-drift` says when the list stops offering it.
 CODEX_ENGINEER_MODEL = os.environ.get("LOAM_CODEX_ENGINEER_MODEL", "gpt-6.1-sol")
 CODEX_ENGINEER_EFFORT = "high"
+
+# An Antigravity engineer's built-in model (2026-11-15): the one the owner's
+# trial named, from `agy models` (1.5.9). Its id carries its thinking level
+# (lib/loam_antigravity.py, LEVEL_RE), so there is no separate effort.
+AGY_ENGINEER_MODEL = os.environ.get("LOAM_AGY_ENGINEER_MODEL",
+                                    "gemini-4-hydrogen-high")
 
 # No wall clock (2026-11-10, the owner, as above). Until then a job had 60
 # minutes unless its brief asked for more, up to 180, and a brief from an
@@ -415,7 +423,12 @@ def log_line(payload: dict) -> None:
 # have to name a path on this box.
 # ---------------------------------------------------------------------------
 
-PROJECTS_DIR = AGENTS / "projects"
+# `LOAM_PROJECTS_DIR` (2026-11-15) is a seam for a throwaway project, as
+# LOAM_HOST_SETTINGS is for the settings: a registry of one scratch record,
+# so a real job can be run on a runtime no registered project is on without
+# a record in this repository. Nothing in a unit or generator sets it; the
+# launcher hands it into the job's unit when its caller had it.
+PROJECTS_DIR = Path(os.environ.get("LOAM_PROJECTS_DIR") or AGENTS / "projects")
 PROJECT_STATE = lc.STATE / "projects"
 PROJECT_CHECKOUTS = lc.PROJECTS
 PROJECT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -462,7 +475,7 @@ class Project:
 
     @property
     def runtime(self) -> str:
-        """`claude` or `codex`: which CLI a job of this engineer runs. Since
+        """`claude`, `codex` or `antigravity`: which CLI a job of this engineer runs. Since
         2026-11-13 the engineer's setting (Settings > Agents > Engineers,
         `engineer_choice`) when one is made, else the record's `runtime`.
         The platform engineer is always Claude Code."""
@@ -503,8 +516,9 @@ class Project:
 # ---------------------------------------------------------------------------
 
 HOST_SETTINGS = lc.STATE / "broker" / "settings.json"
-# The page's provider ids for the two CLIs a job runs on.
-PROVIDER_OF = {"claude": "claude-code", "codex": "codex"}
+# The page's provider ids for the CLIs a job runs on.
+PROVIDER_OF = {"claude": "claude-code", "codex": "codex",
+               "antigravity": "antigravity"}
 RUNTIME_OF = {v: k for k, v in PROVIDER_OF.items()}
 
 
@@ -512,6 +526,8 @@ def builtin_choice(runtime: str) -> tuple[str, str | None]:
     """(model, effort) a runtime runs on when nobody chose."""
     if runtime == "codex":
         return CODEX_ENGINEER_MODEL, CODEX_ENGINEER_EFFORT
+    if runtime == "antigravity":
+        return AGY_ENGINEER_MODEL, None
     return ENGINEER_MODEL, None
 
 
@@ -562,6 +578,81 @@ def choice_for(project: "Project", runtime: str) -> tuple[str, str | None]:
     if choice["runtime"] == runtime:
         return choice["model"], choice["effort"]
     return builtin_choice(runtime)
+
+
+# ---------------------------------------------------------------------------
+# Three tiers per engineer (2026-11-15).
+#
+# The owner, 2026-11-15 20:53 PT: "Can we have personas have the ability to
+# pick between 3 models from the list models the provider provides based on
+# task? We set those three they can choose from?" So each engineer's setting
+# (a project's own, or `default`) may carry `tiers`: `{"quick": <model>,
+# "standard": <model>, "hard": <model>}`, each a model its provider lists
+# (on Antigravity the id carries its level). A brief names a tier, never a
+# model, so a brief survives model churn; left out it is `standard`. A tier
+# nobody set is the engineer's `model` (or the provider's built-in), exactly
+# as before tiers existed, so an engineer nobody set runs as it did. Tiers
+# belong to the setting's provider: a provider change drops them, as it
+# drops `model` and `effort` (lib/loam_profile.py, `update_engineer`).
+# ---------------------------------------------------------------------------
+
+TIERS = ("quick", "standard", "hard")
+DEFAULT_TIER = "standard"
+
+
+def tier_below(tier: str | None) -> str | None:
+    """The tier a quota failure falls back to: one down, and none below
+    `quick`."""
+    if tier not in TIERS:
+        return None
+    i = TIERS.index(tier)
+    return TIERS[i - 1] if i > 0 else None
+
+
+def _setting_row(project: "Project", stored: dict) -> dict | None:
+    """The setting row ``engineer_choice`` chose for this engineer, or
+    None when it runs on its record."""
+    own = (stored.get("projects") or {}).get(project.name)
+    default = stored.get("default")
+    if isinstance(own, dict) and own.get("provider") in RUNTIME_OF:
+        return own
+    if (not project.platform and isinstance(default, dict)
+            and default.get("provider") in RUNTIME_OF):
+        return default
+    return None
+
+
+def tier_models(project: "Project", settings: dict | None = None) -> dict:
+    """``{tier: model or None}`` as set for this engineer's next job: the
+    chosen setting row's ``tiers``, None for each one nobody set."""
+    stored = engineer_settings() if settings is None else settings
+    choice = engineer_choice(project, stored)
+    row = _setting_row(project, stored) if choice["source"] != "record" else None
+    tiers = (row or {}).get("tiers") if row else None
+    tiers = tiers if isinstance(tiers, dict) else {}
+    return {t: (tiers.get(t) if isinstance(tiers.get(t), str) and tiers.get(t)
+                else None) for t in TIERS}
+
+
+def tier_choice(project: "Project", runtime: str, tier: str | None,
+                settings: dict | None = None) -> dict:
+    """``{"tier", "model", "effort", "from"}`` for a job of this engineer
+    on ``runtime`` at ``tier`` (None: `standard`). ``from`` is ``tier``
+    when the tier is set, ``model`` when it falls back to the engineer's
+    model or the built-in. A tier set for another runtime than the one the
+    job runs on (a continuation of a job on an older provider) does not
+    apply, as ``choice_for``."""
+    tier = tier if tier in TIERS else DEFAULT_TIER
+    stored = engineer_settings() if settings is None else settings
+    choice = engineer_choice(project, stored)
+    if choice["runtime"] == runtime:
+        model, effort = choice["model"], choice["effort"]
+        set_model = tier_models(project, stored)[tier]
+    else:
+        (model, effort), set_model = builtin_choice(runtime), None
+    if set_model:
+        return {"tier": tier, "model": set_model, "effort": effort, "from": "tier"}
+    return {"tier": tier, "model": model, "effort": effort, "from": "model"}
 
 
 def deploy_default(project: "Project") -> bool:

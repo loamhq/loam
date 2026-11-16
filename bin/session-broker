@@ -3842,7 +3842,7 @@ class Broker:
         self.token = cfg.read_token()
         # Each provider's usage reader and when to read it (2026-10-14).
         self.usage = usage_store.Refresh(
-            [cfg.usage_reader(), codex.reader()],
+            [cfg.usage_reader(), codex.reader(), agy.reader()],
             live=self.live_providers,
             jobs=lambda: usage_store.running_jobs(self.job_roots()))
         # Everyone watching the live list. Sessions come and go; a subscriber
@@ -7171,8 +7171,10 @@ class Server:
                     print(f"profile: engineer {name} {fields} by {by or lc.OWNER_ID}",
                           file=sys.stderr, flush=True)
                     if by:
-                        words = ", ".join(f"{k} to {payload[k]}" if payload[k] is not None
-                                          else f"{k} back to its default" for k in fields)
+                        words = ", ".join(
+                            loam_profile.tier_words(payload[k]) if k == "tiers"
+                            else f"{k} to {payload[k]}" if payload[k] is not None
+                            else f"{k} back to its default" for k in fields)
                         self.say_in_general(
                             f"{threads_rec.display(by)} changed the "
                             f"{'default engineer' if name == 'default' else name + ' engineer'}"
@@ -7629,17 +7631,27 @@ class Server:
     def antigravity_row() -> dict:
         """The Antigravity row (2026-11-09), in the Claude row's shape. The
         login is read by asking the CLI (``loam_antigravity.login_state``,
-        cached a minute); usage is null and stays so -- headless mode states
-        tokens per turn but no quota."""
+        cached a minute). ``usage`` (2026-11-15) is the CLI's own ``/quota``
+        and ``/credits``, read on the cadence the other two are
+        (``loam_antigravity.read_quota``): every pool's window under
+        ``buckets`` with ``utilization`` USED, as the others', and
+        ``credits`` in Codex's shape. Null until a read has succeeded on the
+        login the box holds."""
         state = agy.login_state()
+        usage = agy.row_usage()
         return {
             "connected": state["connected"],
             "reason": state["reason"],
-            "usage": None,
-            "usage_reason": "Antigravity states no quota to a headless client",
+            "usage": usage,
+            "usage_reason": None if usage is not None else
+            "no reading yet: /quota has not answered on this login",
             "login": agy.row_login(state),
+            # A model whose id ends in its level takes no other
+            # (loam_antigravity.LEVEL_RE, 2026-11-15).
             "models": [{"id": m["id"], "name": m["name"], "default": False,
-                        "efforts": list(agy.EFFORTS), "context_window": None}
+                        "efforts": ([] if agy.carries_level(m["id"])
+                                    else list(agy.EFFORTS)),
+                        "context_window": None}
                        for m in state["models"]],
             "efforts": list(agy.EFFORTS) if state["connected"] else [],
         }

@@ -87,6 +87,10 @@ and published-off-loopback ports are refused for the same reason. So:
   `DOCKER-USER`, where the personas' sight wall lives, never sees it. The
   `loam-broker-firewall.service` unit is `PartOf=docker.service`, so a docker
   restart re-raises it.
+  Since 2026-11-15 the same chain has a second jump, for 8935, Caddy's
+  internal route for the Apps section's previews, which must be walled
+  exactly as the broker is (deploy/README.md, "Previews for the Apps
+  section").
 
 Caused, 2026-09-16, and this is the test to repeat after any change:
 
@@ -1554,6 +1558,51 @@ in **the Claude row's shape**, so the page draws it without a second reader:
   someone else the row answers `usage: null` until that login's first read.
 - **`source`** is `"read"` or `"event"`: which of the two below took it.
 
+#### Antigravity's `usage`, and `/quota` (2026-11-15)
+
+A headless Antigravity turn states tokens and no quota, so this row has no
+`observe`: its reading moves only by `read()`, which is the CLI's own
+`agy -p /quota --output-format stream-json` and then `agy -p /credits` the
+same way (`lib/loam_antigravity.py`, `read_quota`). Both answer with no turn:
+`num_turns` 0, every token count 0, an empty `conversation_id`. Kept in
+`state/broker/antigravity/usage.json`, keyed on the login's account as
+Codex's is.
+
+Antigravity meters by **pool** (today `Gemini Models`, and `Claude and GPT
+models`), each with a weekly and a five-hour window. No pool is the row's own,
+so every window is under `buckets`, keyed by Antigravity's own id, with
+`limit_name` the label the page draws. `remaining_fraction` is what is
+**left**. `utilization` is what is **used**, `1 - remaining`, as on the other
+two rows, and `remaining` is kept beside it as Antigravity said it:
+
+```jsonc
+"usage": {
+  "provider": "antigravity", "source": "read", "seen_at": "2026-11-16T06:00:33Z",
+  "account": "…", "session_id": null, "status": null,
+  "is_using_overage": null, "planType": null,
+  "credits": {"hasCredits": false, "unlimited": false, "balance": "0",
+              "upgrade_uri": "https://antigravity.google/g1-upgrade"},
+  "buckets": {
+    "gemini-5h":     {"utilization": 0.010597, "remaining": 0.9894033,
+                      "resets_at": "2026-11-16T10:36:17Z", "resets_at_epoch": 1794825377,
+                      "window_mins": 300,   "limit_name": "Gemini Models · 5-hour"},
+    "gemini-weekly": {"…": "…", "window_mins": 10080, "limit_name": "Gemini Models · Weekly"},
+    "3p-5h":         {"…": "…", "limit_name": "Claude and GPT models · 5-hour"},
+    "3p-weekly":     {"…": "…", "limit_name": "Claude and GPT models · Weekly"}
+  }
+  // "unparsed": ["…"]  only when the printed fallback met a line it could not read
+}
+```
+
+Buckets go pool by pool in the order Antigravity lists them, with the shorter
+window first in each pool. A pool or window the mapping does not know is still
+kept: an unknown window has `window_mins` null. When the structured
+`command.data` is absent, the printed form (`<pool>\t<window>\t<N>% left\t<reset>`)
+is read instead, and a line it cannot read goes under `unparsed`. `credits`
+is in Codex's shape, so a balance of 0 is `hasCredits: false`, which the page
+draws as no line. `credits` is null when `/credits` failed. A failed `/quota`
+is a failed read and keeps the last reading.
+
 #### Usage on demand: `read()` and the refresh loop (2026-10-14)
 
 Until 2026-10-14 both rows were observe-only, and the merge above kept a
@@ -1567,13 +1616,15 @@ that **replaces** the kept reading whole, plan and credits included.
 |---|---|---|
 | Codex | `account/rateLimits/read` on a short-lived `codex app-server` on the broker's `CODEX_HOME`; every limit from `rateLimitsByLimitId` | ~1 s; no turn, no model call |
 | Claude Code | the stream-json control request `{"subtype": "get_usage", "skip_behaviors": true}` to a short-lived `claude -p`, no prompt sent: what `/usage` draws. `utilization` there is a percent and is divided by 100; a model's own weekly limit (`rate_limits.limits[]`, `kind: weekly_scoped`) is `seven_day_<model>` | ~2–3.5 s; `total_cost_usd` 0, `total_api_duration_ms` 0. The SDK calls it `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`: an answer the mapping does not know is a failed read |
+| Antigravity | `agy -p /quota` then `agy -p /credits`, each `--output-format stream-json`: every pool's windows under `buckets`, `utilization` = 1 − `remaining_fraction` (above) | ~1.9 s + ~1.5 s; `num_turns` 0, tokens 0, and eleven reads on 2026-11-15 left the Claude-and-GPT pool unchanged in its last digit |
 | Grok, OpenCode | none; not wired | — |
 
 One loop, which knows no provider, decides when: on every `GET
 /v1/providers` (at most once a minute per provider, inside the route's
 thread, so the answer carries the read); every five minutes while the
 provider has a live session or a running engineer job (a heartbeat under
-120 s and no `result.json`, its `runtime` file naming the CLI); and once on
+120 s and no `result.json`, its `runtime` file naming the CLI: `claude`,
+`codex` or `antigravity`); and once on
 the first 30-second look after a job ends. Never otherwise. A failed read
 keeps the last reading. A wired provider with no `read()` says
 `observe-only: …` in `usage_reason`. `LOAM_USAGE_READS=off` turns every read
@@ -4260,7 +4311,7 @@ Answers 200 with the whole profile, as GET.
 | `emoji` | one emoji, at most 16 characters, no spaces | the agent's atlas note's |
 | `provider` | `claude-code`, `codex`, `antigravity` | Claude Code |
 | `model` | a model the (new) provider takes: Claude Code's aliases or a `claude-…` id, a model Codex's `model/list` gives, one Antigravity lists | the provider's own |
-| `effort` | Claude Code: `low` `medium` `high` `xhigh` `max`; Codex: its listed levels; Antigravity: the same five | the provider's own |
+| `effort` | Claude Code: `low` `medium` `high` `xhigh` `max`; Codex: its listed levels; Antigravity: the same five, passed only beside a model id that does not end in its own level (`-low` ... `-xhigh`; the id wins, since 2026-11-15) | the provider's own |
 
 A provider that changes clears `model` and `effort` unless the same body
 names them. Errors, each writing nothing: 400 for a field there is none of,
@@ -4319,24 +4370,45 @@ effective, providers, note, applies}`); 404 for an engineer nobody has.
 
 ### `PATCH /v1/engineers/<project or default>`
 
-Body: any of `provider`, `model`, `effort`, `deploy_on_land`. Answers 200
-with the whole `GET /v1/engineers`.
+Body: any of `provider`, `model`, `effort`, `tiers`, `deploy_on_land`.
+Answers 200 with the whole `GET /v1/engineers`.
 
-- `provider`: `claude-code` or `codex` (Loam's: `claude-code` only; 400
-  otherwise, and for `antigravity`). null clears the engineer's own setting:
-  it follows the default again (or its record). A change clears `model` and
-  `effort` unless named.
+- `provider`: `claude-code`, `codex` or `antigravity` (Loam's: `claude-code`
+  only; 400 otherwise). Antigravity since 2026-11-15, as a choice no engineer
+  is on until the owner moves one (`lib/loam_agy_job.py`). null clears the
+  engineer's own setting: it follows the default again (or its record). A
+  change clears `model` and `effort` unless named.
 - `model`, `effort`: as the provider takes them (the same checks as an
   agent's); null is the provider's built-in (Claude Code `claude-opus-5-5`
-  and the CLI's level; Codex `gpt-6.1-sol`, `high`). Set without a provider of
-  its own, the engineer's current provider becomes its own.
+  and the CLI's level; Codex `gpt-6.1-sol`, `high`; Antigravity
+  `gemini-4-hydrogen-high`). Set without a provider of its own, the
+  engineer's current provider becomes its own. **Antigravity's level is in
+  its model id** (`gemini-4-hydrogen-high`, `-xhigh`): `agy` refuses an
+  `--effort` that disagrees with the id, so an Antigravity engineer's
+  `effort` is a 400 and the level is chosen by choosing the id. The ids are
+  `agy models`' (the provider row, cached a minute; the last list is also
+  kept in `state/broker/antigravity/models.json` for `bin/check-drift`).
+- `tiers` (2026-11-15): an object of any of `quick`, `standard`, `hard`,
+  each a model the provider lists (the same check as `model`; on
+  Antigravity the id carries its level), or null to unset that one; the
+  tiers not named are kept. A brief names a tier (`mcp__engineer__brief`'s
+  `tier`, `standard` when left out), never a model; a tier unset runs on
+  `model` (or the built-in), so an engineer nobody set runs as before. A
+  provider change drops them. Rows carry `own.tiers` (`{quick, standard,
+  hard}`, null where unset) and `effective.tiers` (`{tier: {"model",
+  "from": "tier" | "model"}}`, what a brief at each runs on).
 - `deploy_on_land`: true or false, a project with an app only (400 for
   Loam, `default`, a project landing by pull request; 409 for a project with
   no app). A brief's own `deploy` still wins; a brief that leaves it out
   takes this.
 
 The launcher reads all of it on every job (`lib/loam_engineer.py`,
-`engineer_choice`); a running job is unchanged.
+`engineer_choice`, `tier_choice`); a running job is unchanged. A
+continuation that names no tier keeps the model its parent ran on
+(`engine.json`). An Antigravity job out of quota (`lib/loam_agy_job.py`
+`QUOTA_RE`) runs once more on the tier below, never past `quick` nor onto
+the same model; the receipt's `model` row says the tier, the model and any
+retry.
 
 ### `GET /v1/system/reviewer` and `PATCH /v1/system/reviewer`
 
@@ -4347,7 +4419,7 @@ The launcher reads all of it on every job (`lib/loam_engineer.py`,
  "default_schedule": "daily at 04:20 PT",
  "next_fire": "2026-11-14T12:20:00Z", "last_fire": "2026-11-13T12:20:04Z",
  "running_since": null,
- "provider": "claude-code", "providers": ["claude-code"],
+ "provider": "claude-code", "providers": ["claude-code", "antigravity"],
  "model": null, "effort": null,
  "effective": {"provider": "claude-code", "model": "fable", "effort": null},
  "instructions": {"root": "system", "path": "Reviewer/CLAUDE.md"},
@@ -4356,10 +4428,16 @@ The launcher reads all of it on every job (`lib/loam_engineer.py`,
 
 PATCH takes any of `schedule` (the schedules' grammar, `daily at 04:20 PT`,
 `Mondays and Thursdays at 05:00 PT`, `weekdays at …`; null for 04:20),
-`provider` (`claude-code` or null only), `model`, `effort` (Claude Code's;
-null for `fable` and the CLI's level). Answers 200 with the GET. 400, writing
-nothing, for a schedule that does not parse, another provider, or a value not
-taken. The schedule is applied at once as a systemd drop-in beside the
+`provider` (`claude-code` or, since 2026-11-15, `antigravity`; null for
+`claude-code`), `model` (one its provider lists; null for `fable` on Claude
+Code, `gemini-4-hydrogen-high` on Antigravity), `effort` (Claude Code's; on
+Antigravity the level is part of the model id, so `effort` is a 400). A
+change of provider drops the other provider's model and effort unless the
+same PATCH names them. `providers` lists `["claude-code", "antigravity"]`;
+`provider` is the stored choice, `effective` what the next run uses. How a
+run on Antigravity is held to the same reach is `bin/review`'s docstring.
+Answers 200 with the GET. 400, writing nothing, for a schedule that does not
+parse, another provider, or a value not taken. The schedule is applied at once as a systemd drop-in beside the
 tracked timer and a reload (the timer moves, nothing fires).
 
 ### `GET /v1/plugins/<id>/agents[/<agent>]` and `PATCH /v1/plugins/<id>/agents/<agent>`
@@ -4404,8 +4482,9 @@ First-party plugins get nothing more than this.
 
 `agent.display`, `agent.emoji`, `agent.provider`, `agent.model`,
 `agent.effort` (target the agent); `engineer.provider`, `engineer.model`,
-`engineer.effort`, `engineer.deploy_on_land` (target a project or
-`default`); `reviewer.schedule`, `reviewer.provider`, `reviewer.model`,
+`engineer.effort`, `engineer.deploy_on_land`, `engineer.tiers.quick`,
+`engineer.tiers.standard`, `engineer.tiers.hard` (target a project or
+`default`; a tier reads back `{"model", "from"}`); `reviewer.schedule`, `reviewer.provider`, `reviewer.model`,
 `reviewer.effort`; `plugin.agent` (target `<plugin>/<agent>`, value a JSON
 object). All conversation-only: a wake or cron is refused before any call.
 `persona.provider` is retired into `agent.provider`.

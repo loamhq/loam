@@ -31,6 +31,25 @@ the build was *"only hard-code the areas where it's necessary"*:
                    outbox, the memory pages that changed), never from what
                    it says.
 
+    the provider   Claude Code, or Antigravity since 2026-11-15 (the owner,
+                   in chat 11-15: "make all engineers and the reviewer
+                   Antigravity"; built as a choice, switched on his word).
+                   The lane, the facts, the prompt, the delivery and the
+                   record are this file's either way; only the session
+                   differs, and on Antigravity the reach the Claude
+                   reviewer's settings give it is rebuilt from the same
+                   lines (``agy_*`` below): a custom agent whose tools are
+                   file read, write and edit and nothing else (no shell, no
+                   web, no browser, no subagents, no schedule -- caused
+                   2026-11-15: Antigravity's permission rules do not stop
+                   search_web, invoke_subagent or schedule, but the agent's
+                   `tools:` list removes them), deny rules for every write
+                   outside its state directory and every read of
+                   `15_CONVERSATIONS/` (caused: a deny holds under
+                   --dangerously-skip-permissions), the history server, and
+                   mcp/files_server.py for listing and search, which that
+                   agent is not given on Antigravity.
+
 It is a static timer-fired unit like the persona wakes, not a transient one
 like the engineer's job. The 01:30 recycle restarts `loam-rc-*.service` and
 nothing else, so a oneshot fired by a timer is no more killable than a wake;
@@ -68,6 +87,9 @@ import loam_due  # noqa: E402
 import loam_contributions as contributions  # noqa: E402
 
 import loam_engineer as eng  # noqa: E402
+import loam_agy_files as agy_files  # noqa: E402
+import loam_agy_job as agy_job  # noqa: E402
+import loam_antigravity as agy  # noqa: E402
 import loam_lock  # noqa: E402
 import loam_profile  # noqa: E402
 import loam_session  # noqa: E402
@@ -101,8 +123,11 @@ MODEL = os.environ.get("LOAM_REVIEWER_MODEL", "fable")
 # Settings > Agents > System > Nightly reviewer): read from the broker's
 # host settings by lib/loam_profile.py, once per run. The environment's
 # model, for a probe, still wins.
+# The provider likewise (since 2026-11-15): the owner's setting, or
+# LOAM_REVIEWER_PROVIDER for a probe or a one-off run.
+PROVIDER = loam_profile.reviewer_provider()
 MODEL, EFFORT = loam_profile.reviewer_choice(
-    MODEL, pinned=bool(os.environ.get("LOAM_REVIEWER_MODEL")))
+    MODEL, pinned=bool(os.environ.get("LOAM_REVIEWER_MODEL")), provider=PROVIDER)
 MAX_TURNS = (int(os.environ["LOAM_REVIEWER_MAX_TURNS"])
              if os.environ.get("LOAM_REVIEWER_MAX_TURNS") else None)
 WALL_SECONDS = (int(os.environ["LOAM_REVIEWER_WALL_S"])
@@ -151,6 +176,138 @@ PINNED = (
     "started with --persona {persona}): review {persona} and skip the "
     "choice.\n\n"
 )
+
+
+# ---------------------------------------------------------------------------
+# The session on Antigravity (2026-11-15).
+# ---------------------------------------------------------------------------
+
+AGY_AGENT = "loam-reviewer"
+AGY_DIR = "agy"                 # the session's workspace, inside the run dir
+MCP_FILE = REVIEWER / ".mcp.json"
+FILES_SERVER = Path(__file__).resolve().parent.parent / "mcp" / "files_server.py"
+
+# Each tool is a name Antigravity 1.5.9's registry takes. `list_dir`,
+# `grep_search` and `find_by_name` are taken and then not offered to a custom
+# agent, so they are not listed; mcp/files_server.py is their stand-in.
+AGY_TOOLS = ("view_file", "write_to_file", "replace_file_content",
+             "multi_replace_file_content")
+
+AGY_PROVIDER_LINE = (
+    "You are running on Antigravity (`agy --print`), headless, as the custom "
+    "agent `loam-reviewer`. Your instruction file is below, unchanged, and it "
+    "binds you the same way. Where it names Claude Code's tools, yours are: "
+    "your file tools to read a file, and to write your note and your memory; "
+    "the `files` MCP server's `list` (a folder's entries, or files by glob) "
+    "and `grep` (a regular expression across files) for what Glob and Grep "
+    "would do; the `history` MCP server's `log`, `diff`, `blame` and "
+    "`file_at`, as described. You have no shell, no web, no browser and no "
+    "subagents. A write outside your state directory, or a read of the "
+    "vault's 15_CONVERSATIONS/, is refused by a deny rule before it runs; a "
+    "refusal is the design working, so do not route around one.")
+
+
+def agy_instructions() -> str:
+    text = (REVIEWER / "CLAUDE.md").read_text(encoding="utf-8").strip()
+    words = contributions.lane_prompt("reviewer")
+    return AGY_PROVIDER_LINE + "\n\n" + text + (f"\n\n{words}" if words else "")
+
+
+def agy_servers() -> dict:
+    """The reviewer's MCP servers on Antigravity: its committed `.mcp.json`
+    (history), the plugins' for its lane, and the files server."""
+    try:
+        servers = dict(json.loads(MCP_FILE.read_text(encoding="utf-8"))
+                       .get("mcpServers") or {})
+    except (OSError, ValueError):
+        servers = {}
+    plugin_mcp = contributions.lane_mcp_file("reviewer")
+    if plugin_mcp:
+        try:
+            servers.update(json.loads(plugin_mcp.read_text(encoding="utf-8"))
+                           .get("mcpServers") or {})
+        except (OSError, ValueError):
+            pass
+    servers["files"] = {
+        "command": str(Path(__file__).resolve().parent / "mcp-python"),
+        "args": [str(FILES_SERVER)],
+        "env": {"LOAM_FILES_ROOTS": ":".join(str(p) for p in (AI_LABS, VAULT, STATE)),
+                "LOAM_FILES_EXCLUDE": str(VAULT / "15_CONVERSATIONS")},
+    }
+    return servers
+
+
+def write_denials(keep: Path, under: Path = Path("/")) -> list[Path]:
+    """Every path a write must be refused under so that only ``keep`` stays
+    writable: at each folder from ``under`` down to ``keep``, every entry
+    beside the way down. Antigravity's deny wins over its allow (caused
+    2026-11-15: an allow inside a denied folder was refused), so writable
+    is said as everything else denied."""
+    out: list[Path] = []
+    keep = keep.resolve()
+    here = under
+    for part in keep.relative_to(under).parts:
+        nxt = here / part
+        try:
+            entries = sorted(here.iterdir())
+        except OSError:
+            entries = []
+        out += [e for e in entries if e.name != part]
+        here = nxt
+    return out
+
+
+def agy_settings(run_dir: Path) -> dict:
+    """The session's permission rules (``agy --settings``, never saved):
+    the Claude reviewer's settings.json deny list in Antigravity's words."""
+    deny = ["command(*)", "read_url(*)", "execute_url(*)",
+            f"read_file({VAULT / '15_CONVERSATIONS'})"]
+    deny += [f"write_file({p})" for p in write_denials(STATE)]
+    # Inside the writable state: the session's own agent and server files.
+    deny.append(f"write_file({run_dir / AGY_DIR})")
+    return {"permissions": {"deny": deny}}
+
+
+def agy_workspace(run_dir: Path) -> Path:
+    """The session's workspace: the custom agent and its MCP servers, in the
+    run directory, so nothing is generated into the runtime's tree."""
+    ws = run_dir / AGY_DIR
+    agents = ws / ".agents" / "agents"
+    agents.mkdir(parents=True, exist_ok=True)
+    tools = "".join(f"  - {t}\n" for t in AGY_TOOLS)
+    (agents / f"{AGY_AGENT}.md").write_text(
+        "---\n"
+        f"name: {AGY_AGENT}\n"
+        "description: Loam's nightly reviewer. Reads one persona's workspace "
+        "and writes one note and its own memory, nothing else.\n"
+        "mainAgent: true\n"
+        "subagent: false\n"
+        "inheritMcp: true\n"
+        f"tools:\n{tools}"
+        "---\n\n"
+        "# The reviewer\n\n"
+        "Your instructions are in the message you are given.\n",
+        encoding="utf-8")
+    (ws / ".agents" / "mcp_config.json").write_text(
+        json.dumps({"mcpServers": agy_servers()}, indent=2) + "\n", encoding="utf-8")
+    return ws
+
+
+def agy_argv(run_dir: Path, prompt: str) -> list[str]:
+    text = agy_job.compose(agy_instructions(), prompt)
+    # A file, not inline: the deny list is a line per entry beside the way
+    # down to the state directory, longer than one argv string may be.
+    settings = run_dir / AGY_DIR / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps(agy_settings(run_dir), indent=1) + "\n",
+                        encoding="utf-8")
+    line = [agy.AGY, f"--print={agy_job.prompt_arg(run_dir, text)}",
+            "--output-format", "stream-json", "--dangerously-skip-permissions",
+            "--disable-slash-commands", "--agent", AGY_AGENT, "--model", MODEL,
+            "--settings", str(settings)]
+    for d in (AI_LABS, VAULT, STATE):
+        line += ["--add-dir", str(d)]
+    return line
 
 
 def now_utc() -> datetime:
@@ -442,6 +599,11 @@ def preflight() -> str | None:
         return f"{REVIEWER}/.claude/settings.json is missing: `bin/provision --reviewer` renders it"
     if not roster():
         return f"no persona under {AI_LABS} carries an agent.json; nothing to review"
+    if PROVIDER == "antigravity" and not probe_seconds():
+        if not os.access(agy.AGY, os.X_OK):
+            return f"the reviewer's provider is Antigravity and {agy.AGY} is not installed"
+        if not FILES_SERVER.is_file():
+            return f"{FILES_SERVER} is missing: the reviewer on Antigravity lists and searches through it"
     return None
 
 
@@ -483,6 +645,7 @@ def run(pinned: str | None) -> int:
     ticker.start()
     before = memory_snapshot()
 
+    antigravity = PROVIDER == "antigravity"
     argv = [
         CLAUDE, "-p", prompt, "--model", MODEL,
         *(["--effort", EFFORT] if EFFORT else []),
@@ -499,14 +662,34 @@ def run(pinned: str | None) -> int:
     plugin_words = contributions.lane_prompt("reviewer")
     if plugin_words:
         argv += ["--append-system-prompt", plugin_words]
+    workdir = REVIEWER
+    if antigravity:
+        workdir = agy_workspace(run_dir)
+        argv = agy_argv(run_dir, prompt)
+        (run_dir / "runtime").write_text("antigravity\n", encoding="utf-8")
     envelope: dict = {}
     returncode = -1
     timed_out = False
+    agy_run = None
     probe = probe_seconds()
     try:
         if probe:
             time.sleep(probe)
             returncode = 0
+        elif antigravity:
+            before_files = agy_files.snapshot()
+            returncode, agy_run, timed_out = agy_job.run(
+                argv, str(workdir), WALL_SECONDS, run_dir,
+                run_dir / "session-stderr.log")
+            envelope = {"session_id": agy_run.conversation_id,
+                        "subtype": "success" if not agy_run.failed else "error",
+                        "num_turns": agy_run.num_turns}
+            try:
+                agy_files.write_record(run_dir, agy_files.attribute(
+                    before_files, [agy_run.conversation_id]))
+            except OSError as exc:
+                print(f"review: the Antigravity files record was not written: "
+                      f"{exc}", file=sys.stderr)
         else:
             result = subprocess.run(
                 argv, cwd=str(REVIEWER), capture_output=True, text=True,
@@ -536,10 +719,17 @@ def run(pinned: str | None) -> int:
 
     subtype = envelope.get("subtype")
     num_turns = envelope.get("num_turns")
-    api_turns = loam_session.round_trips(envelope.get("session_id"))
+    api_turns = (agy_run.round_trips if agy_run
+                 else loam_session.round_trips(envelope.get("session_id")))
     cost = envelope.get("total_cost_usd")
     if timed_out:
         outcome = "cut off at the wall clock"
+    elif agy_run and agy_run.capped:
+        outcome = f"cut off at the {MAX_TURNS}-round-trip cap"
+    elif agy_run and (returncode != 0 or agy_run.failed):
+        outcome = (f"exited {returncode} (antigravity: "
+                   f"{'out of quota: ' if agy_run.quota else ''}"
+                   f"{agy_run.failed or 'no error in its result'})")
     elif loam_session.turn_cap_hit(envelope):
         outcome = f"cut off at the {MAX_TURNS}-round-trip cap"
     elif returncode != 0 or (subtype and subtype != "success"):
@@ -563,7 +753,9 @@ def run(pinned: str | None) -> int:
         "note_copy": str(NOTES / persona / Path(delivered).name) if delivered else None,
         "memory_pages_written": pages, "runs_md_written": "runs.md" in changed,
         "num_turns": num_turns, "api_turns": api_turns, "max_turns": MAX_TURNS,
-        "total_cost_usd": cost, "model": MODEL, "ai_labs_head": head,
+        "total_cost_usd": cost, "provider": PROVIDER, "model": MODEL,
+        "effort": EFFORT, "ai_labs_head": head,
+        "agy_usage": agy_run.usage if agy_run else None,
         "returncode": returncode, "probe_seconds": probe or None,
         "session_id": envelope.get("session_id"),
         "candidates": [r["name"] for r in rows],
@@ -574,7 +766,8 @@ def run(pinned: str | None) -> int:
     log_line(record)
 
     if not ok:
-        cause = loam_session.api_error(envelope.get("session_id")) if not probe else None
+        cause = (None if probe or antigravity
+                 else loam_session.api_error(envelope.get("session_id")))
         notice(f"{LANE} run {run_id}: {outcome}"
                + (f" — {cause[:300]}" if cause else "")
                + f". Record: {run_dir}/run.json.")
@@ -624,7 +817,7 @@ def main() -> int:
     global LOCK_WAIT_S
     waiting_since = time.monotonic()
     try:
-        with loam_lock.hold(AGENT, LANE, info={"engine": "claude-code",
+        with loam_lock.hold(AGENT, LANE, info={"engine": PROVIDER,
                                                "model": MODEL}):
             LOCK_WAIT_S = round(time.monotonic() - waiting_since, 1)
             return run(pinned)

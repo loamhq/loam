@@ -50,7 +50,8 @@ POLL_S = 30
 JOB_STALE_S = 120
 # What runs a job, as the job directory's ``runtime`` file names it, to the
 # provider whose meter it spends.
-RUNTIME_PROVIDERS = {"claude": "claude-code", "codex": "codex"}
+RUNTIME_PROVIDERS = {"claude": "claude-code", "codex": "codex",
+                     "antigravity": "antigravity"}
 
 SOURCES = ("read", "event")
 
@@ -171,9 +172,18 @@ class Refresh:
         done = [p for p in self.readers if self._claim(p, FETCH_EVERY_S)]
         inline = [p for p in done if p not in self.ever_read]
         behind = [p for p in done if p in self.ever_read]
+        # In line, but side by side (2026-11-15): a third reader made the
+        # sum ~8 s on a fresh broker's first fetch; side by side it is the
+        # slowest one's, ~3.5 s.
         for provider in inline:
             self.ever_read.add(provider)
-            self.read(provider)
+        firsts = [threading.Thread(target=self.read, args=(p,),
+                                   name=f"provider-usage-first-{p}", daemon=True)
+                  for p in inline]
+        for t in firsts:
+            t.start()
+        for t in firsts:
+            t.join()
         if behind:
             t = threading.Thread(target=lambda: [self.read(p) for p in behind],
                                  name="provider-usage-read", daemon=True)

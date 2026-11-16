@@ -32,6 +32,14 @@ kept in `<state>/provider-memory.json`, and says so once per growth
 (the new count becomes the one compared). A store that grew is a provider
 writing memory of its own, and the caller says so where it will be read:
 the broker in the session's thread, `provider-follow` in comms.md.
+
+Antigravity's stores leave out what Loam's engineer jobs' own
+conversations made (2026-11-15, lib/loam_agy_files.py): the lead persona
+tested 11-15 that the CLI has no memory tools and nothing carries across
+conversations, so a job's `brain/<id>/`, its summary row and the implicit
+files that appeared while it ran are its transcript and a `/resume` index,
+cleared a week after the job. Everything else in those stores is counted,
+and its growth is said, as before.
 """
 
 from __future__ import annotations
@@ -76,7 +84,12 @@ CODEX_OVERRIDES = ("features.memories=false", "features.chronicle=false",
 
 ENV_D = lc.HOME / ".config" / "environment.d" / "60-loam-memory.conf"
 
-BASELINE = lc.STATE / "provider-memory.json"
+# `LOAM_PROVIDER_MEMORY_BASELINE` (2026-11-15) for a test: without it
+# tests/test_provider_follow.py compared the box's real stores with the
+# box's real baseline, and wrote it, so any real Antigravity run between two
+# test runs failed the test (and the test moved the box's baseline).
+BASELINE = Path(os.environ.get("LOAM_PROVIDER_MEMORY_BASELINE")
+                or lc.STATE / "provider-memory.json")
 
 
 def claude_settings_gaps(live: dict) -> list[str]:
@@ -141,7 +154,9 @@ def pin_memory() -> list[str]:
 
 # -- the check --------------------------------------------------------------------
 
-def _rows(db: Path, tables: tuple[str, ...]) -> int:
+def _rows(db: Path, tables: tuple[str, ...], skip: set[str] | None = None,
+          column: str = "conversation_id") -> int:
+    """Rows in ``tables``, less those whose ``column`` is in ``skip``."""
     if not db.exists():
         return 0
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
@@ -149,7 +164,11 @@ def _rows(db: Path, tables: tuple[str, ...]) -> int:
         total = 0
         for table in tables:
             try:
-                total += con.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0]
+                if skip:
+                    total += sum(1 for (cid,) in con.execute(
+                        f'SELECT "{column}" FROM "{table}"') if cid not in skip)
+                else:
+                    total += con.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0]
             except sqlite3.Error:
                 pass
         return total
@@ -157,27 +176,42 @@ def _rows(db: Path, tables: tuple[str, ...]) -> int:
         con.close()
 
 
-def _entries(path: Path) -> int:
+def _entries(path: Path, skip: set[str] | None = None) -> int:
+    """Entries in ``path``, less those named (a file's stem or a folder's
+    name) in ``skip``."""
     try:
-        return sum(1 for _ in path.iterdir())
+        return sum(1 for e in path.iterdir()
+                   if not skip or (e.name not in skip and e.stem not in skip))
     except OSError:
         return 0
+
+
+# The stores whose count may fall back (Antigravity's, as a week-old job's
+# files are cleared): a fall moves the baseline down with it, so the next
+# growth is measured from what is there. The other providers' are as before.
+FALLS = ("antigravity ",)
 
 
 def stores() -> dict[str, int]:
     """Each provider memory store and how much is in it now."""
     import loam_codex  # noqa: PLC0415
-    import loam_antigravity  # noqa: PLC0415
-    gemini = loam_antigravity.HOME / "antigravity-cli"
+    import loam_agy_files  # noqa: PLC0415
+    gemini = loam_agy_files.root()
     claude = sum(_entries(d) for d in (lc.CLAUDE_HOME / "projects").glob("*/memory"))
+    # What Loam's engineer jobs own on Antigravity: never counted.
+    try:
+        job_convs, job_implicit = loam_agy_files.owned()
+    except Exception:  # noqa: BLE001 -- a check never fails for want of it
+        job_convs, job_implicit = set(), set()
     return {
         "claude-code auto memory files": claude,
         "codex memories rows": _rows(loam_codex.CODEX_HOME / "memories_1.sqlite",
                                      ("stage1_outputs", "jobs")),
-        "antigravity brain entries": _entries(gemini / "brain"),
-        "antigravity implicit entries": _entries(gemini / "implicit"),
+        "antigravity brain entries": _entries(gemini / "brain", job_convs),
+        "antigravity implicit entries": _entries(gemini / "implicit", job_implicit),
         "antigravity conversation summaries": _rows(
-            gemini / "conversation_summaries.db", ("conversation_summaries",)),
+            gemini / "conversation_summaries.db", ("conversation_summaries",),
+            job_convs),
     }
 
 
@@ -200,6 +234,8 @@ def check(provider: str | None = None) -> tuple[dict, list[str]]:
                         f"keeping a memory of its own, and memory is Loam's "
                         f"(lib/loam_provider_memory.py).")
             seen[store] = count    # said once per growth, not at every start
+        elif count < seen[store] and store.startswith(FALLS):
+            seen[store] = count    # a job's files cleared: measured from here
     try:
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
         tmp = BASELINE.with_suffix(".tmp")
