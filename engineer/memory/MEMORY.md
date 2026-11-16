@@ -119,3 +119,31 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   old commits. The landing notices (the job's recorded base is not in
   `main`) and replays only the job's own commits onto the new `main`
   (`replay_if_rewritten`), so a merge never brings the old history back.
+
+## 2026-11-16 — memory: no ceilings on agents, an OOM order instead
+
+- **No agent run has a memory or swap ceiling.** Jobs, wakes, crons, RC
+  servers, the reviewer, the provider smoke runs and the broker's chats.
+  A per-run cap killed a job at 20% of RAM on a box with 20 GB free, and
+  the owner asked for none. Admission by memory still decides when a run
+  starts. Don't add a cap back; `tests/test_memory_order.py` renders every
+  generator and fails if one does.
+- **The order is two numbers in `lib/loam_config.py`:** agents 800, core
+  (the broker's own process and the plugins gateway) 100. The kernel kills
+  the highest (per-mille share of RAM + swap) + `oom_score_adj`, so a core
+  process goes first only if it alone holds 70% of the box more than the
+  agent does. Caddy, the claim service, Authelia and the app are at the
+  system's 0.
+- **100 is a floor, not a choice.** The user manager runs at 100
+  (systemd 252), and an unprivileged process can't go below what it
+  inherited. Caused: `systemd-run --user -p OOMScoreAdjust=50` ran nothing
+  and printed nothing, while 100 printed 100. Until 11-16 the broker was at
+  500, *above* every job and wake (200), so a global OOM took the broker
+  first. Read the order from `/proc/<pid>/oom_score_adj`, not from the
+  comments.
+- **Making it live without a restart.** `daemon-reload` re-applies
+  `MemoryMax=`/`MemoryHigh=` to running units, but `OOMScoreAdjust=` only
+  applies at exec. Raising a live process is `choom -p PID -n 800`, which
+  needs no privilege; lowering one is `sudo choom`.
+  `systemctl --user set-property --runtime` clears a running transient
+  unit's caps.
