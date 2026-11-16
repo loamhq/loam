@@ -1159,7 +1159,7 @@ if (process.argv[1] && import.meta.url === `file://${path.resolve(process.argv[1
   // Speech says at start whether it can run, and which model it will use.
   Promise.all([speech.start(), speech.chooseModel()])
     .catch((err) => log.error({ event: 'speech-config', message: String(err?.message ?? err) }))
-  server.listen(config.port, () => {
-    log.info({ event: 'listening', port: config.port })
+  server.listen(config.port, config.host, () => {
+    log.info({ event: 'listening', host: config.host, port: config.port })
   })
 }

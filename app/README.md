@@ -61,7 +61,7 @@ outcomes stay for ten minutes and open their receipt in Files. See
 The question this app exists around is answered in `project.md`, and the
 answer is load-bearing enough to repeat here:
 
-**The agent process does not run in this container.** It runs on the host, as
+**The agent process does not run in this app's process.** It runs on the host, as
 an ordinary process of the host's own user, in the agent's own working
 directory, with the coding CLI's real login and the host's session hooks —
 which is what makes it the same session you would get at a terminal there. A
@@ -88,9 +88,9 @@ environment variables and the routes in `project.md`.
 | **A markdown renderer written here** | The agents answer in markdown and the thread has to render it. Every well-known library renders to a *string of HTML*, which would mean `innerHTML` at the one place in this app that must never have it — and a lockfile and an install step in an image that has neither. `public/markdown.js` builds DOM nodes instead, so a reply cannot become markup by construction. About four hundred and sixty lines of code, with `test/markdown.test.js` beside it. [More below](#the-agent-writes-markdown-and-no-reply-is-ever-html). |
 | **Typefaces are served by this app** | Caprasimo, Figtree and JetBrains Mono are in `public/fonts/`, prepared by `tools/fetch-fonts.js`. Five additional first-party display faces live in their theme folders, prepared by `tools/fetch-theme-fonts.js`, and load only when active. Latin and Latin-ext WOFF2 files are committed; no font vendor is contacted at run time. See [Appearance](docs/appearance.md). |
 | **Server-sent events, browser ← app ← broker** | The broker already speaks SSE, so a websocket would mean translating one stream into another for no gain. SSE is one-directional and messages go back over ordinary `POST`s, which is what the broker's own interface expects. It also survives a reverse proxy without an upgrade handshake, and reconnects by asking for a position — which is exactly the `?from=<seq>` mechanism the broker gives us. |
-| **Cached app previews** | An isolated Chromium process photographs app pages from the web container, one at a time, including browser-only apps. Its empty profile receives no broker credential or browser login. JPEG previews and verified icons are served from this origin. The Docker image includes Chromium headless-shell and fonts; a native install without Chromium uses the designed fallback. [Preview lifecycle](docs/app-previews.md). |
+| **Cached app previews** | An isolated Chromium process photographs app pages beside the server, one at a time, including browser-only apps. Its empty profile receives no broker credential or browser login. JPEG previews and verified icons are served from this origin. A Loam install has Debian's `chromium-headless-shell` and Noto fonts on the host; without Chromium the designed fallback is shown. [Preview lifecycle](docs/app-previews.md). |
 | **Events passed through unchanged** | The app relays the broker's stream byte for byte and reduces it in the browser. Nothing invents a second vocabulary for the CLI's events. |
-| **No durable state of this app's own** | Sessions, costs and transcripts are the broker's, and the page draws them from the stream every time it opens one. This browser keeps device preferences, composer drafts and unsent messages per chat: whether the desktop's list column is hidden, how this device takes dictation (Settings → Plugins → Dictation), the Files voice, and Files shortcuts and inbox folder. Pin, archive and title are **not** among them — they are on the record, so a pin made on the phone is a pin on the laptop. `/storage` holds regenerable caches: read-aloud audio under `/storage/speech` (swept after 48 hours unplayed) and app previews/icons under `/storage/app-media` (bounded and swept after seven days without refresh). Neither is a user record. [Read aloud](#read-aloud-a-reply-as-speech). |
+| **No durable state of this app's own** | Sessions, costs and transcripts are the broker's, and the page draws them from the stream every time it opens one. This browser keeps device preferences, composer drafts and unsent messages per chat: whether the desktop's list column is hidden, how this device takes dictation (Settings → Plugins → Dictation), the Files voice, and Files shortcuts and inbox folder. Pin, archive and title are **not** among them — they are on the record, so a pin made on the phone is a pin on the laptop. The state directory holds regenerable caches: read-aloud audio under `SPEECH_DIR` (swept after 48 hours unplayed) and app previews/icons under `APP_MEDIA_DIR` (bounded and swept after seven days without refresh); a Loam install puts both under `/var/lib/loam-app/<app>/`. Neither is a user record. [Read aloud](#read-aloud-a-reply-as-speech). |
 
 ## Run it
 
@@ -106,16 +106,14 @@ Check the web half independently with `curl -i http://localhost:8080/up`:
 it returns 200 even when no broker is configured. The page still serves when
 configuration is absent and reports the broker failure.
 
-For a container:
-
-```sh
-docker build -t loam-ui . && docker run --rm -p 8080:8080 --read-only \
-  -v loam-ui-storage:/storage \
-  -e BROKER_URL=http://<broker-address>:<port> -e BROKER_TOKEN=<token> loam-ui
-```
-
-The named volume holds read-aloud audio. No host paths or CLI credentials
-are mounted. The host supplies its own proxy and TLS.
+On a Loam install the app is not started by hand: Loam runs it as the
+systemd unit `loam-app@<app>.service`, from a release of its checkout at a
+named commit, behind the install's proxy, login and TLS
+(`sudo bin/deploy loam-ui up <commit>`; the repository's
+`deploy/README.md`, "Loam's own app"). The unit gives it a uid of its own, a
+read-only system, a state directory for its caches and nothing else of the
+host. It listens on `127.0.0.1` (`APP_HOST`); the proxy is the one public
+listener.
 
 For an isolated UI preview with synthetic data, run `npm start` and open
 `http://localhost:8080/?threads=fixture`. It is labelled Design preview and
@@ -299,12 +297,14 @@ describes the runtime contract and staging checks. Owner identity comes from
 | `VAULT_BOARDS_FOLDER` | `00_INBOX/boards` | boards folder used by the design preview. Real thread board paths come from the broker. |
 | `VAULT_GENERAL_BOARD` | `00_INBOX/from-agents/comms.md` | general inbox board path whose quick notes use the runtime’s dated UTC format. |
 | `VAULT_ATTACHMENTS_FOLDER` | `98_ATTACHMENTS` | vault upload subtree used to resolve older absolute attachment paths; relative paths from the broker stay intact. |
-| `APP_MEDIA_DIR` | `/storage/app-media` | regenerable preview/icon cache and temporary capture profiles; the named storage volume keeps it writable with a read-only root. A native run can point this at a writable cache directory. |
-| `APP_PREVIEW_CHROME` | native: `chromium`; image: `chromium-headless-shell` | capture executable. The image uses the smaller headless-shell package; a native install can keep its existing Chromium. No browser login/profile is loaded. |
+| `APP_MEDIA_DIR` | `/storage/app-media` | regenerable preview/icon cache and temporary capture profiles. A Loam install sets `/var/lib/loam-app/<app>/app-media`, the unit's state directory. |
+| `APP_PREVIEW_CHROME` | `chromium` | capture executable. A Loam install sets Debian's smaller `chromium-headless-shell`. No browser login/profile is loaded. |
+| `APP_PREVIEW_OOM_SCORE_ADJ` | unset | the kernel OOM score (-1000..1000) the capture browser starts at, through util-linux's `choom`, so a page that balloons goes before the server. A Loam install sets the agents' 800. |
 | `APPS_PREVIEW_BASE` | unset | optional plain HTTP origin of the host’s internal preview route. Sites/projects use `<first-public-host-label>.<preview-host>` with the original path/query/fragment. Browser links retain the public URL. Unset, existing public capture behavior is unchanged. [Routing contract](docs/app-previews.md#optional-internal-route). |
 | `APPS_PREVIEW_ADDR` | unset | IP address for that route when its virtual hostnames have no DNS. Chromium receives a scoped resolver rule; the icon reader connects to this address with the virtual Host header. Used only with `APPS_PREVIEW_BASE`. |
 | `APP_PREVIEW_TTL_HOURS` | `6` | successful preview/icon refresh interval; catalog version/date changes also refresh. A failed capture retries after at most 30 minutes and retains a previous good preview. [Details](docs/app-previews.md). |
-| `APP_PORT` | `8080` | the one HTTP port the container listens on |
+| `APP_PORT` | `8080` | the one HTTP port the server listens on |
+| `APP_HOST` | `127.0.0.1` | the address it listens on. Loopback, because the host's proxy is the one public listener; `0.0.0.0` only on purpose. |
 | `BROKER_URL` | — | the session broker's base URL, e.g. `http://<address>:<port>`. Unset, the app still serves and the page says no broker is configured. |
 | `AVATAR_COLOURS` | `{}` | optional JSON object of persona IDs to semantic persona palette tokens, e.g. `{"persona-id":"persona-plum"}`. Numbered aliases and the six extra Newsprint-era names normalize to the fixed eleven-slot Palette at input. In Palette, only named personas change; all others keep their original ID mapping. Latte tones overrides every agent with its warm ramp. See [palette aliases](docs/design-system/tokens.md#runtime-avatar-references) and [Latte tones](docs/evidence/latte-tones/README.md). |
 | `AVATAR_VARIANTS` | `{}` | JSON object of agent IDs to unique permanent face slots 0–7, e.g. `{"persona-a":0,"persona-b":1}`. Shared by Latte pours and signature materials; append assignments without renumbering. Unlisted IDs retain their original hash. Delivered in the existing parser-blocking appearance boot. See [face identity](docs/appearance.md#permanent-face-identity). |
@@ -318,7 +318,7 @@ describes the runtime contract and staging checks. Owner identity comes from
 | `SPEECH_BRIEF_MODEL` | `gemini-flash-latest` | the text model for spoken briefs, Full’s table/diagram descriptions and thread openings; branch drafting uses the Read aloud plugin key and uses the broker's record-based fallback if generation is unavailable |
 | `SPEECH_VOICES` | — | fallback prebuilt voice for each agent (overridden by a stored profile voice), and a few words of its character: `agent=Voice:character;agent=Voice:character`, e.g. `scout=Iapetus:clear and direct`. The agents are this installation's, so they are configuration and never a literal here. An agent not listed — or every agent, when this is unset — reads in `Charon`, informative. A voice that is not one of the thirty prebuilt ones is dropped at start with a log line. |
 | `SPEECH_PACES` | — | measured word equivalents/minute per prebuilt voice, e.g. `Aoede=147;Aoede.brief=121;Charon=155`. `.brief` and `.verbatim` override one mode; an unsuffixed voice sets the base pace. Aoede defaults to the supplied Full measurement of 147 and brief measurement of about 121; its brief uses 121 unless `.brief` explicitly overrides it. Other voices inherit their base pace in either mode, provisionally 150 when unlisted. Invalid entries are logged and dropped. Synthesis and cache checks use the same pace. |
-| `SPEECH_DIR` | `/storage/speech` | where the MP3s and their sidecars are kept. Not writable, and speech says `no storage`. |
+| `SPEECH_DIR` | `/storage/speech` (a Loam install: `/var/lib/loam-app/<app>/speech`) | where the MP3s and their sidecars are kept. Not writable, and speech says `no storage`. |
 | `SPEECH_DOCUMENT_MAX_CHARS` | `250000` | the character cap for a Files note, separate from the chat reply cap. Full reads retain document seams when chunking; briefs pass the document to the writer in one request. |
 | `SPEECH_TTL_HOURS` | `48` | how long an MP3 is kept **from its last play**. Swept at start and hourly. |
 | `SPEECH_MAX_CHARS` | `60000` | the longest text one request will read; over it is a `413` |

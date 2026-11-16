@@ -30,7 +30,8 @@ over by then: what runs is this file's fixed command line with a sha the
 landing produced, never anything the engineer wrote.
 
 **Which app.** The deployment record named after the project
-(`deploy/<project>/deploy.toml`) that runs a container. Staging
+(`deploy/<project>/deploy.toml`) that runs a container, or, for Loam's own
+app (since 2026-11-16), a unit: `loam-ui`'s jobs deploy `loam-ui`. Staging
 (`loam-ui-next`) is never deployed this way: a brief that says "staging
 first" sets no `deploy`, lands only, and a persona asks for staging as a
 Loam deploy job, as before.
@@ -42,8 +43,9 @@ commit, under the app's live lock, so the earlier commit is never put back.
 
 **A failed deploy never fails the landing.** `main` has already moved and
 been pushed; the deploy's outcome is reported in the receipt beside it.
-bin/deploy leaves the previous container running when the build fails, and
-puts the previous image back when the new one is not healthy.
+bin/deploy leaves what runs alone when the build fails, and puts the
+previous image (a container) or release (Loam's own app) back when the new
+one is not healthy.
 """
 
 from __future__ import annotations
@@ -81,9 +83,9 @@ def app_for(project) -> tuple[str | None, str | None]:
     except dep.DeployError as exc:
         return None, f"deploy: the deployment records could not be read ({exc})."
     app = apps.get(project.name)
-    if app is None or app.compose is None:
+    if app is None or (app.compose is None and not app.service):
         return None, (f"deploy: {project.name} has no deployment record that "
-                      f"runs a container (deploy/{project.name}/deploy.toml), "
+                      f"runs a container or a unit (deploy/{project.name}/deploy.toml), "
                       f"so there is nothing for its landing to deploy. Send "
                       f"the brief without `deploy`.")
     return app.name, None

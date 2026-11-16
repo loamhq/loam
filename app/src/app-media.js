@@ -13,7 +13,7 @@ export function previewable(app, appsDomain) {
   if (app.kind === 'plugin') return /^\/x\/[a-z0-9][a-z0-9_-]*\/$/i.test(app.url) && app.on && app.state === 'running'
   try { const url = new URL(app.url); return url.protocol === 'https:' && !url.port && !url.username && !url.password && url.hostname.endsWith(`.${appsDomain}`) } catch { return false }
 }
-export function createAppMedia({ dir = '/storage/app-media', chrome = 'chromium', ttlHours = 6, appsDomain = '', previewBase = '', previewAddr = '' } = {}, {
+export function createAppMedia({ dir = '/storage/app-media', chrome = 'chromium', oomScoreAdj = null, ttlHours = 6, appsDomain = '', previewBase = '', previewAddr = '' } = {}, {
   capture = captureAppPage, icons = null, now = Date.now, log = null,
 } = {}) {
   icons ??= createAppIcons({ fetcher: createPreviewFetch({ base: previewBase, addr: previewAddr }) })
@@ -67,7 +67,7 @@ export function createAppMedia({ dir = '/storage/app-media', chrome = 'chromium'
     const target = previewTarget(app, { origin, base: previewBase, addr: previewAddr })
     const eligible = previewable(app, appsDomain)
     const [picture, mark] = await Promise.allSettled([
-      eligible ? photograph({ url: target.url, dir: path.join(dir, 'tmp'), executable: chrome, ...(target.hostResolverRules ? { hostResolverRules: target.hostResolverRules } : {}) }) : Promise.resolve(null),
+      eligible ? photograph({ url: target.url, dir: path.join(dir, 'tmp'), executable: chrome, ...(oomScoreAdj !== null ? { oomScoreAdj } : {}), ...(target.hostResolverRules ? { hostResolverRules: target.hostResolverRules } : {}) }) : Promise.resolve(null),
       icons(target.url, { icon: app.icon ? target.rewrite(new URL(app.icon, app.kind === 'plugin' ? origin : app.url).href) : null, rewrite: target.rewrite }),
     ])
     const note = { fingerprint: fingerprint(app), checked: now(), until: now() + ttlHours * HOUR,

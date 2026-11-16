@@ -22,6 +22,10 @@ export function readConfig(env = process.env) {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error(`APP_PORT is not a port number: ${env.APP_PORT}`)
   }
+  // The address the server listens on. Loopback by default: the host's proxy
+  // is the one public listener and reaches the app here. A container or a
+  // remote development box sets 0.0.0.0 on purpose.
+  const host = (env.APP_HOST ?? '').trim() || '127.0.0.1'
   const brokerUrl = (env.BROKER_URL ?? '').trim().replace(/\/+$/, '')
   const brokerToken = (env.BROKER_TOKEN ?? '').trim()
   // Credentials belong to the broker's plugin secret store. This URL lets
@@ -79,6 +83,7 @@ export function readConfig(env = process.env) {
   return {
     installation,
     port,
+    host,
     avatarColours: readAvatarColours(env.AVATAR_COLOURS ?? {}),
     avatarVariants: readFaceVariants(env.AVATAR_VARIANTS ?? {}),
     filesVaultUrls,
@@ -93,6 +98,10 @@ export function readConfig(env = process.env) {
     appMedia: {
       dir: (env.APP_MEDIA_DIR ?? '').trim() || '/storage/app-media',
       chrome: (env.APP_PREVIEW_CHROME ?? '').trim() || 'chromium',
+      // The kernel's OOM score for the preview browser (-1000..1000), above
+      // the server's own, so a page that balloons is what goes first. Empty
+      // leaves the browser at the server's score.
+      oomScoreAdj: oomScore(env.APP_PREVIEW_OOM_SCORE_ADJ),
       ttlHours: positive(env.APP_PREVIEW_TTL_HOURS, 6),
       appsDomain: installation.appsDomain,
       previewBase: previewRoute.base,
@@ -127,4 +136,12 @@ export function configComplaints(config) {
     out.push('BROKER_TOKEN is unset: the broker will answer 401 to everything but its health check.')
   }
   return out
+}
+
+// An OOM score adjustment, or null for anything that is not one.
+function oomScore(value) {
+  const text = String(value ?? '').trim()
+  if (!/^-?\d+$/.test(text)) return null
+  const n = Number(text)
+  return n >= -1000 && n <= 1000 ? n : null
 }

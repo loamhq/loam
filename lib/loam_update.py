@@ -117,6 +117,12 @@ TRIGGERS = {
     "provider-memory": {"script": "bin/provider-memory", "dirs": []},
     "broker": {"script": "bin/session-broker", "dirs": ["broker/", "plugins/"]},
     "gateway": {"script": "bin/plugin-gateway", "dirs": []},
+    # Loam's own app runs from a release of this checkout (2026-11-16): the
+    # deployment layer is re-rendered (its unit template among it), then the
+    # app is unpacked at the new commit and restarted, and put back on its
+    # old release if the new one does not answer.
+    "deploy": {"script": "bin/gen-deploy", "dirs": ["deploy/"]},
+    "app": {"script": "bin/deploy", "dirs": ["app/", "deploy/"]},
 }
 STEP_WORDS = {
     "preflight": "Checking the install",
@@ -131,6 +137,8 @@ STEP_WORDS = {
     "provider-memory": "Pinning the providers' memory off",
     "broker": "Restarting the broker when every session is idle",
     "gateway": "Restarting the plugin gateway",
+    "deploy": "Regenerating the web front and the app's unit",
+    "app": "Starting the app on the new release",
     "views": "Refreshing the agents' skill views",
     "undo-move": "Putting the previous release's code back",
     "undo-library": "Putting System/Loam back",
@@ -140,6 +148,8 @@ STEP_WORDS = {
     "undo-provider-memory": "Pinning the providers' memory again",
     "undo-broker": "Restarting the broker on the previous release",
     "undo-gateway": "Restarting the plugin gateway on the previous release",
+    "undo-deploy": "Regenerating the web front from the previous release",
+    "undo-app": "Starting the app on the previous release",
 }
 
 
@@ -858,6 +868,46 @@ class Box:
             raise RuntimeError(done.stderr.strip() or f"exit {done.returncode}")
         return "restarted"
 
+    def _root(self, *argv: str, timeout: float | None = 3600) -> str:
+        """A step that is root's (the deployment layer, the app's unit), by
+        sudo, which the install's user holds."""
+        done = subprocess.run(["sudo", "-n", "env", f"PYTHONPYCACHEPREFIX={ROOT_PYCACHE}",
+                               sys.executable, *argv], capture_output=True, text=True,
+                              check=False, timeout=timeout)
+        if done.returncode != 0:
+            raise RuntimeError((done.stderr or done.stdout).strip()[-1500:]
+                               or f"exit {done.returncode}")
+        return done.stdout.strip()[-1500:]
+
+    def deploy(self) -> str:
+        self._root(self.bin("gen-deploy"))
+        return "rendered"
+
+    def app(self) -> str:
+        """Every app that runs from this checkout, on what is checked out
+        now: the new release after a move, the old one on an undo."""
+        names = self._run("-c", OWN_APPS.format(lib=str(runtime() / "lib"))).split()
+        commit = head()
+        said = []
+        for name in names:
+            self._root(self.bin("deploy"), name, "up", commit)
+            said.append(f"{name} on {commit[:7]}")
+        return ", ".join(said) or "no app runs from this checkout"
+
+
+# Root's Python bytecode, outside the checkout (bin/loam-install's too).
+ROOT_PYCACHE = "/var/cache/loam/pycache"
+
+# The apps that run from this checkout, read by the code now in place.
+OWN_APPS = """
+import sys
+sys.path.insert(0, {lib!r})
+import loam_config as lc, loam_deploy as d
+root = lc.ROOT.resolve()
+print(" ".join(a.name for a in d.records()
+               if a.service and a.checkout and a.checkout.resolve() == root))
+"""
+
 
 def _main_pid(unit: str) -> int:
     done = subprocess.run(["systemctl", "--user", "show", "-p", "MainPID",
@@ -1003,7 +1053,7 @@ def verify(version: str) -> str:
     return f"{VERSION_FILE} says {version}"
 
 
-REGEN = ("units", "agents", "provider-memory", "broker", "gateway")
+REGEN = ("units", "agents", "provider-memory", "broker", "gateway", "deploy", "app")
 
 
 def _regenerate(run: Run, box: Box, old: str, new: str, changed: list[str],

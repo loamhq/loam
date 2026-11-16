@@ -12,6 +12,8 @@ files and against the running box.*
 deploy/loam.toml            the domain, in exactly one place
 deploy/<app>/deploy.toml    the app's record: exposure, host, policy, share, checkout
 deploy/<app>/compose.yaml   how the app runs (image, loopback publish, limits, volumes)
+                            -- or `[service]` in the record, for Loam's own app:
+                            a systemd unit, no container ("Loam's own app")
 /etc/loam/public            OPERATOR-authored, root-owned, outside every repo:
                             the apps that are public. The owner writes it; nothing
                             here does. It need not exist: absent means no app is
@@ -30,7 +32,9 @@ one wrinkle its comments explain: the official `caddy` image's binary
 carries a file capability, so `cap_drop` lists every default but
 `NET_BIND_SERVICE` instead of `[ALL]`.
 
-Since 2026-09-16, `loam-ui/` is the fourth: the slot for Loam's own web app,
+Since 2026-09-16, `loam-ui/` is the fourth: the slot for Loam's own web app
+(since 2026-11-16 not a container at all; see "Loam's own app" below, and
+read the rest of this paragraph as the history it is),
 private on `loam-ui.<domain>` with no `[domains]` table, because the
 wildcard A record already answers for it. What runs behind it today is a
 placeholder — one static page and a `GET /up`, from the project's own repo —
@@ -48,7 +52,7 @@ Since 2026-11-12, `loam-ui-next/` is the fifth: loam-ui's staging copy on
 `next.<domain>`; see "Staging: a second copy of loam-ui" below.
 
 **Three apps, three loopback ports.** `owner-site` publishes 8080,
-`loam-ui` 8081 and `loam-ui-next` 8082. `_loopback_port` checks the address and the count but not
+`loam-ui` listens on 8081 and `loam-ui-next` on 8082. `_loopback_port` checks the address and the count but not
 collisions across records, so `ss -ltn` before writing a compose file is the
 check until something does it properly.
 
@@ -141,7 +145,9 @@ exposure = "private"        # or "shared". There is no third value.
 #                           # it means passkey THEN password on a new device
 #                           # (a passkey login counts as one factor)
 # checkout = "/abs/path"    # where bin/deploy builds from; default is the
-#                           # project engineer's checkout from agents/projects/<app>.json
+#                           # project engineer's checkout from agents/projects/<app>.json.
+#                           # @ROOT@ is Loam's own checkout
+# context = "app"           # the folder of the checkout the app is (Loam's app)
 # static_root = "/abs/dir"  # a directory Caddy serves instead of a container
 # hide = [".git"]           # static_root only: entries the file server pretends
 #                           # are absent. A bare name matches at any depth; a
@@ -159,7 +165,81 @@ path = "/api/dictate"       # See "One request past the login".
 # app_shell = true          # this record serves Loam's own page: its origin may
 #                           # frame the agents' static sites, and the Apps list
 #                           # leaves it out; see "Framing a site in the app"
+[service]                   # Loam's own app, run by Loam as loam-app@<app>.service
+port = 8081                 # instead of a compose.yaml; see "Loam's own app"
 ```
+
+## Loam's own app
+
+*Since 2026-11-16. Until then the app was a project of its own (the
+`loam-ui` repository, with its own engineer) deployed as a container like
+any other, with a compose file here; its code is now Loam's `app/` folder,
+and Loam runs it.*
+
+The app is Node's standard library with no dependency and no build step, so
+the container gave it a wall and little else, and the wall had a cost: held
+to 128 MB and 64 pids, every page preview it took timed out (2026-11-15). A
+record with a `[service]` table is a third kind of app beside a container
+and a static host, and runs the way the broker does:
+
+```
+/etc/systemd/system/loam-app@.service      the unit, one template (gen-deploy,
+                                           lib/loam_deploy.service_unit)
+/var/lib/loam/app/<app>/releases/<sha>/    the app's folder at a commit, root's
+/var/lib/loam/app/<app>/current            -> the release that runs
+/var/lib/loam/app/<app>/previous           -> the one before it
+/var/lib/loam-app/<app>/                   its state: speech audio, page previews
+/run/loam/app/<app>.env                    its environment, root-only, in memory
+```
+
+```sh
+sudo bin/deploy loam-ui up <commit>     # unpack <commit>:app/, point current at it,
+                                        # restart, wait for GET /up; not healthy,
+                                        # the release before goes back
+sudo bin/deploy loam-ui up <earlier>    # a rollback is the same command
+sudo bin/deploy loam-ui status          # the unit, the commit, its health
+sudo bin/deploy loam-ui logs 200        # journalctl -u loam-app@loam-ui
+```
+
+- **A named commit, never the working tree.** `up` unpacks
+  `git archive <commit>:<context>` and nothing else of the repository, as
+  the container was built from `git archive <commit>`; a commit with no
+  `src/server.js` there is refused before anything moves. The commit must be
+  on the checkout's `main`, or, for Loam's own checkout, in what it has
+  checked out (a stock install sits on its release tag). The two newest
+  releases stay on disk and the rest are pruned.
+- **The same result line.** `up` prints the same `deploy-result:` JSON a
+  container's does (`deployed`, `carried`, `rolled_back`, `unhealthy`,
+  `build_failed`), so a job's `deploy: true` and `--forward-only` work
+  unchanged (lib/loam_autodeploy.py).
+- **The wall is systemd's.** A dynamic uid of its own (no login, nothing on
+  the box owned by it), the whole file system read-only but its state
+  directory, `/home` not there at all, its own `/tmp` and `/dev`, no
+  capabilities, no new privileges, and a loopback listener (`APP_HOST`):
+  Caddy is the only thing that reaches it. It reaches the broker and the
+  previews' internal route at the broker's address, which the host's own
+  processes reach on `lo` (broker/firewall.sh).
+- **Its environment is bin/deploy's `service_env`,** value for value what
+  the compose file handed the container: the broker's token (`broker_env`)
+  and the vendor key on the allowlist (`app_secrets`) read from the box as
+  the unit starts, by `bin/deploy <app> env` in `ExecStartPre` as root, into
+  `/run/loam/app/<app>.env` (0600, memory). Never in the repository or on
+  disk.
+- **No memory ceiling,** like every agent run since 2026-11-16, and the
+  core's OOM score beside the broker. Its page previews' Chromium (Debian's
+  `chromium-headless-shell`, installed on the host) starts at the agents'
+  score through `choom`, so a page that balloons is what the kernel ends.
+- **Logs** are the journal under the app's name (`SyslogIdentifier`), so
+  `journalctl -t loam-ui` and `bin/logs app loam-ui` read it as they read
+  the container's lines.
+- **Moving from the container.** The first `up` of a `[service]` record
+  stops the container of the same name (and sets it not to restart), so the
+  port is free, and starts the container again if the unit does not answer.
+  The container and its image are left, stopped; `check-drift` reports a
+  container of that name only if it runs again.
+
+Docker is still on the box, for the login, the agents' shared browser and
+an agent's own project; only the app left it.
 
 ## One request past the login
 
@@ -377,8 +457,10 @@ and iterate until it is excellent"), so a landed commit can be looked at in a
 browser before it reaches the address the owner uses.*
 
 `deploy/loam-ui-next/` is the same app at `next.<domain>`, behind the login
-like every record. Two commands, siblings, each printing the commit it
-leaves running (`<app>: healthy on <app>:<short> (was <short>)`):
+like every record; since 2026-11-16 a second instance of the same unit,
+`loam-app@loam-ui-next.service`, from Loam's checkout (`checkout = "@ROOT@"`,
+`context = "app"`, `[service] port = 8082`). Two commands, siblings, each
+printing the commit it leaves running (`<app>: healthy on <short> (was <short>)`):
 
 ```sh
 sudo bin/deploy loam-ui-next up main       # staging, main's tip
@@ -389,9 +471,7 @@ sudo bin/deploy loam-ui-next status        # "running commit: <short>"
 
 A persona runs them from its own shell (its config: "the shell, sudo, ...
 without asking"); no brief is needed for either. Both build only a commit on
-the loam-ui checkout's `main`, because both read `checkout =
-~/projects/loam-ui` and `resolve_commit` refuses a job's
-branch. Each takes its own app's live lock, so a staging deploy does not wait
+Loam's `main`, because `resolve_commit` refuses a job's branch. Each takes its own app's live lock, so a staging deploy does not wait
 on a loam-ui landing and a live one still does.
 
 **What the two copies share, and what each has of its own.** Read off
@@ -407,8 +487,8 @@ loam-ui at `c5fbcc0` before the record was written:
   bridge; the broker's wall admits the whole `loam-broker` subnet. So
   staging shows the owner's real data, and **anything done on staging is done
   for real**: a message sent there is sent, an End there ends the session.
-- **Its own, on purpose:** the `/storage` volume (`loam-ui-next_storage`),
-  which holds only the read-aloud cache, swept by each copy's own timer;
+- **Its own, on purpose:** its state directory (`/var/lib/loam-app/loam-ui-next`),
+  which holds only the read-aloud and preview caches, swept by each copy's own timer;
   and the content host, `next-content.<domain>`, because a preview URL is
   signed with a key the process makes at start (loam-ui `src/content.js`), so
   only the copy that issued it can serve it. The service worker and the
@@ -418,10 +498,9 @@ loam-ui at `c5fbcc0` before the record was written:
   app's manifest is built from the broker's idea of the app's URL
   (`loam_github_app.app_url`), so its callbacks return to live.
 
-`tests/test_staging.py` holds staging's compose file to live's with the
-named differences only (project, container and image name, the port, the
-content origin), so a variable added to live and not to staging fails the
-suite. When live's compose changes, staging's changes with it.
+Staging cannot drift from live: both are instances of one unit template and
+take their environment from one function (`service_env`), so the only
+differences are the record's own (the host, the port, the content host).
 
 ## Framing a site in the app
 
@@ -469,15 +548,20 @@ until its engineer adds the site origins (or `https://*.<domain>`) there.
 
 ## Previews for the Apps section
 
-*Added 2026-11-15, for loam-ui's preview renderer (headless Chromium inside
-the loam-ui container, empty profile, no credential), which captured a
+*Added 2026-11-15, for loam-ui's preview renderer (headless Chromium, then
+inside the loam-ui container and since 2026-11-16 beside the app on the
+host, empty profile, no credential), which captured a
 letter tile for every app because every app's public name is behind the
 login and the renderer copies no login on purpose.*
 
 **One more Caddy site, internal only.** `caddy_preview_block` renders a
 plain-HTTP site on `172.31.0.1:8935`: the gateway of the broker's bridge
 (`loam-broker`, `lib/loam_broker.BIND_ADDR`) and the port
-`PREVIEW_PORT`. It serves every row of the Apps list that has a host of its
+`PREVIEW_PORT`; and since 2026-11-16 on `127.0.0.1:8935` too, for Loam's
+app, which runs on the host now and photographs through loopback (a host
+process that connects to the bridge's address arrives from the box's public
+one and is refused, as the third layer below says). Loopback is not
+reachable from off the box. It serves every row of the Apps list that has a host of its
 own, past the login and exactly as its public block serves it past the gate:
 
 - an agent's static site: the same root, the same hidden names (`.git`,
@@ -495,10 +579,10 @@ real name: `http://<label>.preview.internal:8935/`, where `<label>` is the
 app's host label (the first label of its Apps row's `url`). `.internal` is
 reserved for private use and resolves nowhere; the renderer maps it to the
 address itself (Chromium `--host-resolver-rules="MAP *.preview.internal
-172.31.0.1"`). `bin/deploy` hands the app both halves, `LOAM_PREVIEW_BASE`
-(`http://preview.internal:8935`) and `LOAM_PREVIEW_ADDR` (`172.31.0.1`), and
-loam-ui's compose files pass them as `APPS_PREVIEW_BASE` and
-`APPS_PREVIEW_ADDR`.
+172.31.0.1"`). `bin/deploy` hands the app both halves as `APPS_PREVIEW_BASE`
+(`http://preview.internal:8935`) and `APPS_PREVIEW_ADDR` (`127.0.0.1` for
+the app on the host, `service_env`; `LOAM_PREVIEW_ADDR`, `172.31.0.1`, for a
+container that interpolates it).
 
 **Who can reach it, and the three layers.**
 
@@ -515,7 +599,8 @@ loam-ui's compose files pass them as `APPS_PREVIEW_BASE` and
   `loam-sight`, whose wall rejects every RFC 1918 address. One chain, two
   jumps, so the two ports cannot disagree about who is let in; check-drift
   asks the kernel for both.
-- *Caddy*: `not remote_ip 172.31.0.0/24` is a 403 before any app. That
+- *Caddy*: `not remote_ip 172.31.0.0/24 127.0.0.0/8` is a 403 before any
+  app (loopback since 2026-11-16, for the app on the host). That
   includes a process on the box itself: the kernel lets it in (`lo`), but
   its source address is the box's public one (caused 2026-11-15, `curl
   http://172.31.0.1:8935/` from the box logged the box's public address as `remote_ip` and

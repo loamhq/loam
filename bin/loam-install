@@ -311,7 +311,12 @@ def step_name(a, ans: dict) -> None:
 APT = ["git", "python3", "python3-yaml", "sqlite3", "ripgrep", "ffmpeg", "nftables",
        "iptables", "curl", "ca-certificates", "gnupg", "sudo", "dnsutils", "iproute2",
        "unzip",
-       "dbus-user-session", "procps", "lsof", "systemd-timesyncd"]
+       "dbus-user-session", "procps", "lsof", "systemd-timesyncd",
+       # Loam's app runs on the host, not in a container (2026-11-16): its page
+       # previews' browser, their fonts, and `choom` (util-linux) to start
+       # the browser at the agents' OOM score. ffmpeg above is its speech
+       # encoder; Node 24 comes from NodeSource below.
+       "chromium-headless-shell", "fonts-noto-core", "util-linux"]
 
 
 def clock_skew() -> float | None:
@@ -374,6 +379,8 @@ def step_packages(a, ans: dict) -> None:
     apt("caddy", "docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin", "nodejs")
     run(["systemctl", "enable", "--now", "docker", "caddy"])
     ensure_clock()
+    # Docker carries the login (Authelia) and the agents' shared browser, and
+    # is there for an agent's own project; Loam's app does not use it.
     say("Installed git, Python, Docker, Caddy, Node and the rest.", 2)
 
 

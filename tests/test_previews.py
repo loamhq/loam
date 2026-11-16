@@ -103,15 +103,15 @@ try:
 
     # -- where it listens -------------------------------------------------
     check("plain HTTP on the previews' port", block.startswith(f"http://:{dep.PREVIEW_PORT} {{\n"))
-    check("bound to the broker bridge's gateway and nothing else",
-          f"\tbind {brk.BIND_ADDR}\n" in block and block.count("\tbind ") == 1
+    check("bound to the broker bridge's gateway and loopback, nothing else",
+          f"\tbind {brk.BIND_ADDR} {dep.PREVIEW_LOCAL_ADDR}\n" in block and block.count("\tbind ") == 1
           and dep.PREVIEW_ADDR == brk.BIND_ADDR)
     check("the port is no runtime service's",
           dep.PREVIEW_PORT not in (brk.PORT, dep.BROWSER_PORT, dep.AUTHELIA_PORT,
                                    dep.CLAIM_PORT, dep.PLUGIN_GATEWAY_PORT))
     first_handle = block.index("\thandle ")
-    check("a client outside the broker's subnet is refused first",
-          block.index(f"@outside not remote_ip {brk.SUBNET}") < first_handle
+    check("a client outside the broker's subnet and the box itself is refused first",
+          block.index(f"@outside not remote_ip {brk.SUBNET} {dep.PREVIEW_LOCAL_NET}") < first_handle
           and block[first_handle:].startswith('\thandle @outside {\n\t\trespond "forbidden" 403'))
     check("an unknown name is a 404", block.rstrip().endswith(
         '\thandle {\n\t\trespond "no such app" 404\n\t}\n}'))
@@ -165,7 +165,7 @@ try:
         shutil.rmtree(deploy / d)
     text = dep.caddyfile(today)
     check("with nothing previewable the listener still renders",
-          f"http://:{dep.PREVIEW_PORT} {{\n\tbind {brk.BIND_ADDR}" in text
+          f"http://:{dep.PREVIEW_PORT} {{\n\tbind {brk.BIND_ADDR} {dep.PREVIEW_LOCAL_ADDR}" in text
           and "@app_" not in text)
 
     # -- the kernel's half, and the sysctl ---------------------------------
@@ -191,18 +191,13 @@ check("bin/deploy hands the base and the address",
       env.get("LOAM_PREVIEW_BASE") == f"http://{dep.PREVIEW_SUFFIX}:{dep.PREVIEW_PORT}"
       and env.get("LOAM_PREVIEW_ADDR") == brk.BIND_ADDR, str({k: v for k, v in env.items()
                                                               if "PREVIEW" in k}))
-# loam-ui is tracked; loam-ui-next is one install's own app, kept out of the
-# repository by `.git/info/exclude` (first release L16), so a fresh clone --
-# a job's tree, a release checkout -- has no copy, and its check runs only
-# where the install has one.
-for app in ("loam-ui", "loam-ui-next"):
-    path = AGENTS / "deploy" / app / "compose.yaml"
-    if app != "loam-ui" and not path.is_file():
-        continue
-    compose = path.read_text(encoding="utf-8")
-    check(f"{app}'s compose passes both to the page",
-          'APPS_PREVIEW_BASE: "${LOAM_PREVIEW_BASE:?set by bin/deploy}"' in compose
-          and 'APPS_PREVIEW_ADDR: "${LOAM_PREVIEW_ADDR:?set by bin/deploy}"' in compose)
+# The app is a unit since 2026-11-16, its staging copy too, and both are
+# handed the same environment by bin/deploy's service_env.
+source = (AGENTS / "bin" / "deploy").read_text(encoding="utf-8")
+body = source[source.index("def service_env("):source.index("def env_file_text(")]
+check("the app's environment passes both to the page",
+      '"APPS_PREVIEW_BASE": origins["LOAM_PREVIEW_BASE"]' in body
+      and '"APPS_PREVIEW_ADDR": dep.PREVIEW_LOCAL_ADDR' in body)
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

@@ -57,14 +57,14 @@ the server. Once the repository is public, none of this is needed.
 | — | bootstrap (`install.sh`) | root; git, curl, Python and certificates if missing; finds the newest release tag (`git ls-remote`), clones it to `/var/lib/loam/install/release`; runs that release's `bin/loam-install` |
 | 1 | preflight | Debian 12 or Ubuntu 24.04; memory, disk; ports 80 and 443 free (Caddy itself excepted, for a re-run); the box's public IPv4 from its route; the name, the owner's name and the zone; writes `/etc/loam/loam.toml` (never rewritten after: it is the person's) |
 | 2 | the name | `lib/loam_install.name_check` (below). Taken: stop. Here: go on. Not yet: print the two records and go on |
-| 3 | packages | git, python3 and python3-yaml, sqlite3, ripgrep, ffmpeg, nftables, iptables, sudo, dnsutils and the rest; Caddy, Docker CE and Node 24 from their own apt repositories |
+| 3 | packages | git, python3 and python3-yaml, sqlite3, ripgrep, ffmpeg, nftables, iptables, sudo, dnsutils and the rest, with Debian's `chromium-headless-shell` and `fonts-noto-core` for the app's page previews; Caddy, Docker CE (the login and the agents' browser run in it; the app does not) and Node 24 from their own apt repositories |
 | 4 | the user | `loam`, with lingering, `sudo` (NOPASSWD: the agents get the whole machine) and `docker`; the zone; `PYTHONPYCACHEPREFIX` for its services, shells and sudo, so Python never writes into the checkout; Docker's `daemon.json` before anything uses Docker |
 | 5 | Loam | the release cloned to `paths.root` (`/home/loam/loam`), `origin` set to the source; the vault, workspaces, projects and plugins folders (plugins a git repo); uv; the MCP servers' Python; `/usr/local/bin/loam` |
 | 6 | the vault | `bin/library seed-vault`; the vault and workspaces made git repos; **`<workspaces>/_shared/reach.md` written** (below) |
 | 7 | providers | Claude Code and Codex at the versions this release was tested on (`loam_install.TESTED`, installed by the same code `provider-follow` uses), Antigravity by Google's own script; then `provider-memory pin` and `check` |
 | 8 | Iris | `bin/library seed-starter`: Iris and the hello thread (docs/starter.md) |
 | 9 | units | the broker's bridge (`loam-broker`) and its wall; the system units; the user units from the templates; the broker and the plugin gateway started; every timer armed without firing (`loam_units.arm_timer`); waits for the broker to answer |
-| 10 | the edge | `gen-deploy --init-secrets` (the login's secrets, no user), `gen-deploy`, the app container (`bin/deploy loam-ui up <commit>`), `loam-claim.service`; then one `loam-await-dns` run: if the name resolves here the hosts go up now, otherwise the timer is left polling and the records are printed. Exits 0 either way |
+| 10 | the edge | `gen-deploy --init-secrets` (the login's secrets, no user), `gen-deploy`, the app (`bin/deploy loam-ui up <commit>`: the commit's `app/` unpacked to `/var/lib/loam/app/loam-ui/` and run as `loam-app@loam-ui.service`, no container), `loam-claim.service`; then one `loam-await-dns` run: if the name resolves here the hosts go up now, otherwise the timer is left polling and the records are printed. Exits 0 either way |
 | 11 | the claim | mints the one-time token (`/etc/loam/claim`, root 0600) and prints the link |
 
 ## What an install's configuration says: `[edge]`

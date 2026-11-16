@@ -232,7 +232,7 @@ try:
     refuses("authelia's port refused", dep.records, f"port {dep.AUTHELIA_PORT} already used by authelia")
     clear()
     record("alpha", 'exposure = "private"\n')
-    refuses("record with neither compose nor static_root", dep.records, "neither compose.yaml nor static_root")
+    refuses("record with neither compose nor static_root", dep.records, "neither compose.yaml, [service] nor static_root")
     clear()
     record("alpha", f'exposure = "private"\nhost = "{dep.SECOND_FACTOR_HOST}"\n', COMPOSE_OK.format(name="alpha", port=8101))
     refuses("the sentinel host refused to a record", dep.records, "reserved")
@@ -539,10 +539,10 @@ try:
     record("gamma", 'exposure = "shared"\n[share]\nexpires = 2026-09-01\n', COMPOSE_OK.format(name="gamma", port=8103))
     record("pages", f'exposure = "private"\nstatic_root = "{root}/www"\nhide = [".git", "private/notes"]\n')
 
-    check("generated() covers nine live paths", set(dep.generated(today)) == {
+    check("generated() covers ten live paths", set(dep.generated(today)) == {
         dep.CADDYFILE, dep.DAEMON_JSON, dep.AUTHELIA_CONFIG, dep.AUTHELIA_COMPOSE,
         dep.BROWSER_COMPOSE, dep.SIGHT_FIREWALL_SCRIPT, dep.SIGHT_FIREWALL_UNIT, dep.SUDOERS,
-        dep.PREVIEW_SYSCTL})
+        dep.PREVIEW_SYSCTL, dep.SERVICE_UNIT})
     check("is_loopback", dep.is_loopback("127.0.0.1:8000") and dep.is_loopback("[::1]:22")
           and not dep.is_loopback("*:443") and not dep.is_loopback("0.0.0.0:22"))
 finally:

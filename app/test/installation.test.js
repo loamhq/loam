@@ -143,3 +143,13 @@ test('existing runtime plugin state overrides changed shipped defaults across re
   }
   assert.ok(calls.every(([method, route]) => method === 'GET' && route === '/plugins'))
 })
+
+test('the server listens on loopback unless APP_HOST says otherwise, and reads the preview browser OOM score', async () => {
+  const { readConfig } = await import('../src/config.js')
+  assert.equal(readConfig({}).host, '127.0.0.1')
+  assert.equal(readConfig({ APP_HOST: '0.0.0.0' }).host, '0.0.0.0')
+  assert.equal(readConfig({}).appMedia.oomScoreAdj, null)
+  assert.equal(readConfig({ APP_PREVIEW_OOM_SCORE_ADJ: '800' }).appMedia.oomScoreAdj, 800)
+  assert.equal(readConfig({ APP_PREVIEW_OOM_SCORE_ADJ: '5000' }).appMedia.oomScoreAdj, null)
+  assert.equal(readConfig({ APP_PREVIEW_OOM_SCORE_ADJ: 'high' }).appMedia.oomScoreAdj, null)
+})

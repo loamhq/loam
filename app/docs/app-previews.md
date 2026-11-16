@@ -20,10 +20,12 @@ These are content images, with no change to theme/action tier tokens.
 
 ## Where capture happens
 
-`src/app-capture.js` starts the configured Chromium executable **inside the web
-container**, as its ordinary non-root user. The image installs `chromium-headless-shell` and
-`font-noto` alongside the existing speech encoder. A native run can set
-`APP_PREVIEW_CHROME` to an installed executable; absent Chromium or unwritable
+`src/app-capture.js` starts the configured Chromium executable **beside the
+server, as the server's own user**. On a Loam install that is the app's
+systemd unit (`loam-app@<app>.service`, since 2026-11-16; until then a Docker
+image with Alpine's package): the host has Debian's `chromium-headless-shell`,
+`fonts-noto-core` and the speech encoder `ffmpeg`, and `APP_PREVIEW_CHROME`
+names the headless shell. Any run can set `APP_PREVIEW_CHROME` to an installed executable; absent Chromium or unwritable
 storage produces the designed fallback. Capture failures also produce a
 structured `app-preview` warning.
 
@@ -37,9 +39,12 @@ origin; if that page itself requires a login, capture falls back.
 
 Chrome DevTools Protocol uses inherited pipes: no debugging listener, new HTTP
 port, bind mount or host permission is needed. Chromium runs with
-`--no-sandbox`; the existing container boundary, non-root user and read-only
-root filesystem are its isolation. All profile/cache writes stay in the
-existing named storage volume. The process group and temporary profile are
+`--no-sandbox`; the unit's sandbox is its isolation: a dynamic uid of its
+own, a read-only system with `/home` hidden, its own `/tmp` and `/dev`, no
+capabilities and no new privileges. All profile/cache writes stay in the
+unit's state directory. With `APP_PREVIEW_OOM_SCORE_ADJ` set (a Loam install
+sets the agents' 800) it starts through `choom`, so the browser and every
+process it starts are what the kernel ends first if memory runs out. The process group and temporary profile are
 removed on completion, failure or the 18-second budget expiring.
 
 One browser runs at a time. It photographs the page’s top at a 1280 × 800 CSS
@@ -66,7 +71,8 @@ Failure warnings retain their `fallback` or `kept` state.
 ## Optional internal route
 
 The host can supply two environment variables for a preview service available
-only to its application containers. Neither has an installation-specific default.
+only to the app: on a Loam install, Caddy on the broker's address, walled to the
+box itself and the broker's bridge. Neither has an installation-specific default.
 
 | Variable | Meaning |
 | --- | --- |
@@ -110,19 +116,19 @@ failure’s retry interval. The last good picture can remain visible meanwhile.
 
 ## Browser package
 
-The Docker image selects `chromium-headless-shell` through `APP_PREVIEW_CHROME`.
-Native installs still default to `chromium` unless they set that variable.
+A Loam install selects `chromium-headless-shell` through `APP_PREVIEW_CHROME`
+(Debian 12's package, 156.0.8078.79 at 2026-11-16, the same Chromium as the
+Alpine package the Docker image used). Other runs default to `chromium`
+unless they set that variable.
 The same CDP pipe, screenshots, font wait, host resolver mapping and empty-canvas
 check run against headless-shell in the native integration tests.
 
 At the 2026-11-15 check, Alpine v3.24’s `156.0.8078.79-r0` listings give
 headless-shell at **198.5 MiB installed**, versus
 **315.5 MiB** for the full Chromium package, before shared dependencies. This
-supports the package choice; it is not a measurement of the final Docker image.
+supported the package choice when the app was an Alpine image.
 [Headless-shell package](https://pkgs.alpinelinux.org/package/v3.24/community/x86_64/chromium-headless-shell),
 [full Chromium package](https://pkgs.alpinelinux.org/package/v3.24/community/x86_64/chromium).
-The exact image size and Alpine runtime still require the staging build when
-Docker is unavailable to a job.
 
 ## Icon resolution without probing
 
@@ -187,8 +193,8 @@ Chromium capture of local fixture pages, failure cases, server-only icon reads,
 zero-console-error checks and the inherited panel regression. The
 [internal-route follow-up](evidence/apps-internal-route/README.md) also exercises
 virtual Host/IP routing, redirects, cache invalidation and quieter fallback
-geometry. Real-site access and the image build remain staging checks when a
-job cannot enter the host’s application bridge or access Docker.
+geometry. Real-site access remains a staging check when a
+job cannot reach the host’s internal route.
 
 [Browser-only and unfinished-page checks](evidence/apps-all-previews/README.md)
 exercise bounded partial rendering, blank WebGL fallback, success logs and

@@ -1,20 +1,26 @@
-# loam-ui -- Loam's own web app: a browser-based, phone-installable chat
-# interface to the coding agents on this box, with a session per persona,
-# resume, usage and permission prompts. Provisioned 2026-09-16 as a project
-# with its own engineer. What runs behind this record today is the app itself:
-# the Node server from the `loam-ui` repo, serving the Chats, Settings and
-# Providers screens and answering `/api/*` from the session broker over the
-# `loam-broker` network (`GET /up` -> 200 is the container's health check).
+# loam-ui -- Loam's own web app: a browser-based, phone-installable page for
+# the agents on this box (threads, boards, Files, Apps, settings), answering
+# `/api/*` from the session broker. Its code is Loam's `app/` folder.
 #
-# `loam-ui` is a working name. The owner has not named the app, and a rename
-# is a rename of the repo, the checkout, this directory and the host.
+#   sudo bin/deploy loam-ui up <commit>     unpack that commit's app/ and run it
+#   sudo bin/deploy loam-ui up <earlier>    roll back: the same command
+#   sudo bin/deploy loam-ui status | logs [N]
+#
+# How it runs (since 2026-11-16): not in a container. The app is Node's
+# standard library with no dependency and no build, so it runs the way the
+# broker does, as the systemd unit `loam-app@loam-ui.service`, from a release
+# of the Loam checkout at a named commit; the unit, its sandbox and its
+# environment are lib/loam_deploy.py's (`service_unit`) and bin/deploy's
+# (`service_env`), the same for every [service] record. Until then it was
+# Docker, with a compose.yaml beside this file, built from the separate
+# loam-ui repository (deploy/README.md, "Loam's own app").
+#
+# `loam-ui` is the app's name for the records, the unit and the logs.
 #
 # No [domains] table, so no second login portal. Served at the domain itself
 # since 2026-11-15 (first release L14, `apex = true` below): the app is
-# https://<domain>/, and `loam-ui` stays its name for the records, the image
-# and the logs. Until then it was loam-ui.<domain> from the directory name. Private, like the other three: behind
-# the login on every request. Public is the operator file's to decide and
-# nobody else's.
+# https://<domain>/. Private, like every record: behind the login on every
+# request. Public is the operator file's to decide and nobody else's.
 exposure = "private"
 
 # The app at https://<domain>/ itself, and its host's `/_loam/login-code`
@@ -29,17 +35,28 @@ apex = true
 # deploy/README.md, "One request past the login".
 
 # The content host (2026-10-23): loam-ui-content.<domain>, a second origin on
-# the same container for the app's live HTML previews (loam-ui 2132b85,
-# docs/files-content-origin.md in its repo). Only /content/* reaches the app,
+# the same app for its live HTML previews (loam-ui 2132b85,
+# app/docs/files-content-origin.md). Only /content/* reaches the app,
 # with its Host kept and the login's cookie stripped; every other path is a
 # 404, and no response there sets a cookie. Always behind the login. Not
 # vault.<domain>: that origin serves the whole vault to whoever is logged
 # in, so a preview running there with `allow-same-origin` could fetch every
 # vault note, not only its own root; see deploy/README.md, "A content host".
-# The app reads the origin as FILES_CONTENT_ORIGIN in compose.yaml.
+# The app reads the origin as FILES_CONTENT_ORIGIN (bin/deploy, service_env).
 content_host = "loam-ui-content"
 
 # Loam's page (2026-11-12): its origin may frame the agents' static sites, for
 # the Apps section opening one in the main pane, and the Apps list
 # (GET /v1/apps) leaves it out. See lib/loam_deploy.App.app_shell.
 app_shell = true
+
+# Where it is built from: Loam's own checkout, its `app/` folder. An install
+# made by install.sh says the same in its edge (`edge.app_checkout`,
+# `edge.app_context`), which wins for the edge's app.
+checkout = "@ROOT@"
+context = "app"
+
+# Run by Loam itself (loam-app@loam-ui.service), listening on loopback here;
+# Caddy is the box's one public listener and the only thing that reaches it.
+[service]
+port = 8081

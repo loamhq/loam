@@ -9,6 +9,9 @@ Everything the internet can reach on this box is rendered here from
                             and any hostnames it also answers on under a
                             domain of its own (``[domains."<domain>"]``)
   deploy/<app>/compose.yaml how the app runs (image, loopback publish, limits)
+                            -- or, for Loam's own app, a `[service]` table in
+                            the record: run by systemd from a release of the
+                            checkout, no container (``service_unit`` below)
   /etc/loam/public          OPERATOR-authored, outside every repo: the apps
                             that are public. Read here, written by the owner.
 
@@ -23,6 +26,7 @@ and rendered into the live files ``bin/gen-deploy`` writes and
   /etc/loam/browser/firewall.sh        the wall around the browser's network
   /etc/systemd/system/loam-sight-firewall.service   raises it after docker
   /etc/sudoers.d/loam-deploy           bin/deploy, per app, and nothing else
+  /etc/systemd/system/loam-app@.service   Loam's own app, an instance per record
 
 **Exposure has two values and the generator has no third.** ``private`` is a
 host block behind ``forward_auth``; ``shared`` is the same block plus a
@@ -248,6 +252,13 @@ _REJECT = "-j REJECT --reject-with icmp-admin-prohibited"
 # maps it to PREVIEW_ADDR itself (Chromium `--host-resolver-rules`).
 PREVIEW_ADDR = loam_broker.BIND_ADDR
 PREVIEW_PORT = 8935
+# And on loopback, for Loam's own app since it runs on the host
+# (2026-11-16): a host process that connects to PREVIEW_ADDR arrives with
+# the box's public address as its source (caused 2026-11-15 and again
+# 2026-11-16), which the route refuses. Loopback is not reachable from off
+# the box, so the route stays as internal as it was.
+PREVIEW_LOCAL_ADDR = "127.0.0.1"
+PREVIEW_LOCAL_NET = "127.0.0.0/8"
 PREVIEW_SUFFIX = "preview.internal"
 PREVIEW_LOG = "preview"           # /var/log/caddy/access/preview.log
 # Caddy binds PREVIEW_ADDR, which exists only once docker has raised the
@@ -638,6 +649,15 @@ class App:
     # (`edge.app_context`).
     apex: bool = False
     context: str | None = None
+    # `[service]` in a record (2026-11-16): Loam's own app, run by Loam
+    # itself as `loam-app@<name>.service` from a release of its checkout,
+    # with no container; `port` is its loopback port (``service_unit``).
+    service: bool = False
+
+    @property
+    def unit(self) -> str | None:
+        """The systemd instance a service app runs as, else None."""
+        return f"{SERVICE_UNIT_PREFIX}{self.name}.service" if self.service else None
 
     @property
     def fqdn(self) -> str:
@@ -874,6 +894,150 @@ def _loopback_port(compose_path: Path, name: str, doc: dict) -> int:
     return ports[0]
 
 
+# ---------------------------------------------------------------------------
+# Loam's own app, run by Loam (2026-11-16)
+#
+# Until 2026-11-16 the app was a container like any project's. It is Node's
+# standard library and nothing else -- no dependency, no build -- so Docker
+# gave it a wall and little more, and the wall cost it: held to 128 MB and 64
+# pids, every page preview it took timed out (2026-11-15). Since the app
+# became part of Loam's own repository it runs the way the broker does, as a
+# systemd unit, from a RELEASE of the checkout: `bin/deploy <app> up <commit>`
+# unpacks `git archive <commit>:<context>` into SERVICE_RELEASES/<app>/<sha>/
+# (root's, read-only to the app), points `current` at it, and restarts
+# `loam-app@<app>.service`. A commit is still named, never the working tree,
+# so what runs is exactly what the record says, and a rollback is the same
+# command with the earlier commit; the release before is kept on disk.
+#
+# The unit is the wall the container was, from systemd's own sandbox: a
+# DynamicUser (no login, no home, a uid nothing else owns), the file system
+# read-only but its state directory, /home invisible, no capabilities, no
+# new privileges, its own /tmp and /dev. Its listener is loopback (APP_HOST).
+# Its environment -- the broker's token and the vendor key among it -- is
+# written by `bin/deploy <app> env` (ExecStartPre, as root) to
+# SERVICE_ENV_DIR, which is /run: memory, root-only, gone at boot and
+# written again at every start; never in the repository, never on disk.
+# No memory ceiling, like every agent run since 2026-11-16, and the core's
+# OOM score, beside the broker; its page previews' Chromium runs at the
+# agents' score (APP_PREVIEW_OOM_SCORE_ADJ), so a capture that balloons is
+# what the kernel ends, never the page.
+# ---------------------------------------------------------------------------
+
+SERVICE_UNIT_PREFIX = "loam-app@"
+SERVICE_UNIT = Path("/etc/systemd/system/loam-app@.service")
+SERVICE_RELEASES = Path("/var/lib/loam/app")
+SERVICE_ENV_DIR = Path("/run/loam/app")
+SERVICE_STATE = Path("/var/lib/loam-app")      # StateDirectory=loam-app/<app>
+SERVICE_NODE = "/usr/bin/node"
+# Root's Python bytecode, outside the checkout (bin/loam-install's too).
+ROOT_PYCACHE = "/var/cache/loam/pycache"
+# The listener's address. Caddy is the box's one public listener; the app
+# answers it on loopback only.
+SERVICE_HOST = "127.0.0.1"
+SERVICE_PORTS = range(1024, 65536)
+
+
+def _service_port(path: Path, raw) -> int:
+    """The `[service]` table's one key: the loopback port the app listens on."""
+    if not isinstance(raw, dict) or set(raw) != {"port"}:
+        raise DeployError(f"{path}: [service] holds `port = <loopback port>` and "
+                          f"nothing else; how it runs is lib/loam_deploy's "
+                          f"service_unit, the same for every record")
+    port = raw["port"]
+    if not isinstance(port, int) or isinstance(port, bool) or port not in SERVICE_PORTS:
+        raise DeployError(f"{path}: [service] port {port!r} is not a port of "
+                          f"{SERVICE_PORTS.start}-{SERVICE_PORTS.stop - 1}")
+    return port
+
+
+def service_unit() -> str:
+    """`loam-app@.service`: one template, an instance per `[service]` record.
+    Everything that differs between instances is the record's, read by
+    `bin/deploy <app> env` when the instance starts."""
+    deploy = f"{lc.ROOT}/bin/deploy"
+    return f"""\
+# GENERATED by bin/gen-deploy (lib/loam_deploy.service_unit). Do not edit.
+#
+# Loam's own app, one instance per deployment record with a [service]
+# table: loam-app@<app>.service. Started, restarted and rolled back by
+# `sudo bin/deploy <app> up <commit>`, which unpacks that commit's app into
+# {SERVICE_RELEASES}/<app>/<sha>/ and points `current` at it; this unit
+# runs whatever `current` names. deploy/README.md, "Loam's own app".
+[Unit]
+Description=Loam's app: %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The environment, the broker's token and any vendor key among it, written
+# as root to {SERVICE_ENV_DIR}/%i.env (memory, root-only) before every start,
+# and read by systemd for the process below. Never on disk.
+ExecStartPre=+/usr/bin/env PYTHONPYCACHEPREFIX={ROOT_PYCACHE} /usr/bin/python3 {deploy} %i env
+EnvironmentFile={SERVICE_ENV_DIR}/%i.env
+WorkingDirectory={SERVICE_RELEASES}/%i/current
+ExecStart={SERVICE_NODE} src/server.js
+Restart=always
+RestartSec=2s
+TimeoutStopSec=15s
+# Its own lines in the journal under the app's name: `journalctl -t %i`,
+# `bin/logs app %i`.
+SyslogIdentifier=%i
+# No memory ceiling (2026-11-16), and the core's OOM score, as the broker.
+OOMScoreAdjust={lc.CORE_OOM_SCORE_ADJ}
+# The wall. A uid of its own and nothing of the box: its state directory is
+# the one place it writes (speech audio, page previews), and /home is not
+# there at all.
+DynamicUser=yes
+StateDirectory=loam-app/%i
+Environment=HOME={SERVICE_STATE}/%i
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def service_apps(apps: list[App] | None = None) -> list[App]:
+    return [a for a in (records() if apps is None else apps) if a.service]
+
+
+def service_findings(apps: list[App] | None = None) -> list[tuple[str, str]]:
+    """(app, what is wrong) for each service app the box is not running as
+    its record says: its unit not active, or a container still holding its
+    name (the app left Docker on 2026-11-16)."""
+    out = []
+    for app in service_apps(apps):
+        res = _sudo(["systemctl", "is-active", app.unit])
+        state = res.stdout.strip() or "unknown"
+        if state != "active":
+            out.append((app.name, f"{app.unit} is {state}; "
+                                  f"`sudo bin/deploy {app.name} up <commit>` starts it"))
+        res = _sudo(["docker", "ps", "-q", "--filter", f"name=^{app.name}$"])
+        if res.returncode == 0 and res.stdout.strip():
+            out.append((app.name, f"a container named {app.name} is running beside "
+                                  f"{app.unit}; the app runs from its unit now"))
+    return out
+
+
 def records() -> list[App]:
     """Every `deploy/<app>/deploy.toml`, sorted by name. Refuses to return
     anything it could not render safely."""
@@ -911,6 +1075,10 @@ def records() -> list[App]:
         port = None
         containers: dict[str, tuple[str, ...]] = {}
         hide = rec.get("hide", [])
+        if "service" in rec and (static_root is not None or compose.is_file()):
+            raise DeployError(f"{path}: [service] is a kind of app of its own; a "
+                              f"record has a static_root, a compose.yaml or a "
+                              f"[service], never two")
         if static_root is not None:
             static_root = Path(static_root)
             if not static_root.is_absolute():
@@ -922,12 +1090,14 @@ def records() -> list[App]:
                                   f"paths without spaces, braces or quotes")
         elif hide:
             raise DeployError(f"{path}: hide is for a static_root host only")
+        elif "service" in rec:
+            port = _service_port(path, rec["service"])
         elif compose.is_file():
             doc = _compose_doc(compose)
             port = _loopback_port(compose, name, doc)
             containers = _compose_networks(compose, name, doc)
         else:
-            raise DeployError(f"{path}: neither compose.yaml nor static_root")
+            raise DeployError(f"{path}: neither compose.yaml, [service] nor static_root")
         share = rec.get("share") or {}
         expires = share.get("expires")
         if expires is not None and not isinstance(expires, dt.date):
@@ -979,7 +1149,11 @@ def records() -> list[App]:
         if not isinstance(rec_apex, bool):
             raise DeployError(f"{path}: apex is true or false")
         apex = (EDGE["app"] == name) if EDGE.get("app") else rec_apex
-        context = EDGE.get("app_context") if apex else None
+        # The folder of the checkout the app is built from: an install's
+        # `edge.app_context` for its edge app, else the record's `context`
+        # (the first install's loam-ui and its staging copy, 2026-11-16).
+        context = ((EDGE.get("app_context") if apex and EDGE.get("app") else None)
+                   or rec.get("context"))
         checkout = (EDGE.get("app_checkout") if apex else None) or rec.get("checkout")
         if checkout is not None:
             checkout = Path(lc.expand(checkout))
@@ -990,15 +1164,17 @@ def records() -> list[App]:
         if context is not None and (not isinstance(context, str)
                                     or not re.fullmatch(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*", context)
                                     or ".." in context.split("/")):
-            raise DeployError(f"{lc.CONFIG_FILE}: edge.app_context {context!r} is "
-                              f"not a relative folder of the checkout")
+            raise DeployError(f"{path}: the app's context {context!r} (the record's "
+                              f"`context`, or edge.app_context in {lc.CONFIG_FILE}) "
+                              f"is not a relative folder of the checkout")
         apps.append(App(name=name, exposure=exposure, host=host, policy=policy,
                         port=port, static_root=static_root, share_expires=expires,
                         compose=compose if compose.is_file() else None,
                         checkout=checkout, hide=tuple(hide), domains=domains,
                         containers=containers, bypass=bypass,
                         content_host=content_host, record=rec,
-                        app_shell=app_shell, apex=apex, context=context))
+                        app_shell=app_shell, apex=apex, context=context,
+                        service="service" in rec))
     at_apex = [a.name for a in apps if a.apex]
     if len(at_apex) > 1:
         raise DeployError(f"{DEPLOY}: {' and '.join(at_apex)} both say apex = true; "
@@ -1539,13 +1715,14 @@ def caddy_preview_block(rows: list[App]) -> str:
     does not come and go with the list."""
     out = [
         "# The Apps section's previews: internal only, on the broker bridge's",
-        f"# gateway, past the login. Served to {loam_broker.SUBNET} (loam-ui,",
-        "# loam-ui-next) only; broker/firewall.sh holds the port in the kernel.",
+        "# gateway and on loopback, past the login. Served to the broker's",
+        f"# bridge ({loam_broker.SUBNET}) and the box itself (Loam's app runs on",
+        "# the host) only; broker/firewall.sh holds the bridge port in the kernel.",
         "# See deploy/README.md, \"Previews for the Apps section\".",
         f"http://:{PREVIEW_PORT} {{",
-        f"\tbind {PREVIEW_ADDR}",
+        f"\tbind {PREVIEW_ADDR} {PREVIEW_LOCAL_ADDR}",
         access_log_line(PREVIEW_LOG),
-        f"\t@outside not remote_ip {loam_broker.SUBNET}",
+        f"\t@outside not remote_ip {loam_broker.SUBNET} {PREVIEW_LOCAL_NET}",
         "\thandle @outside {",
         "\t\trespond \"forbidden\" 403",
         "\t}",
@@ -2182,6 +2359,7 @@ def generated(today: dt.date | None = None) -> dict[Path, str]:
         SIGHT_FIREWALL_UNIT: sight_firewall_unit(),
         SUDOERS: sudoers(),
         PREVIEW_SYSCTL: preview_sysctl(),
+        SERVICE_UNIT: service_unit(),
     }
 
 

@@ -26,17 +26,18 @@ the page's `<form>`, `<iframe>` and `javascript:` link are left in the body
 and are inert only because the browser enforces `sandbox` and
 `default-src 'none'`.
 
-The published vault URL is the one `deploy/loam-ui/compose.yaml` hands the
-app (`FILES_VAULT_URLS`), read from that file, so a change there is tested
-here.
+The published vault URL is the one bin/deploy hands the app
+(`FILES_VAULT_URLS`, `service_env`), read from there, so a change there is
+tested here.
 
-Not in `tests/run-all`, on purpose: it needs another project's checkout and
-Node, and a change there must not fail a landing here. Run it by hand:
+Not in `tests/run-all`, on purpose: it starts a broker and the app and takes
+minutes. Run it by hand:
 
-  python3 tests/e2e_files_app.py [<loam-ui checkout>] [<git ref>]
+  python3 tests/e2e_files_app.py [<checkout>] [<git ref>]
 
-defaults to the install's projects/loam-ui and main. The checkout is only
-read (`git archive`). In a job's tree, run it under the tree's view of the
+defaults to this repository and `main`, and takes the app from its `app/`
+folder (since 2026-11-16 the app is Loam's own; before, a loam-ui checkout,
+whose root was the app). The checkout is only read (`git archive`). In a job's tree, run it under the tree's view of the
 runtime (`loam_worktree.platform_argv`) or it imports the live broker.
 """
 
@@ -64,27 +65,22 @@ spec.loader.exec_module(tbf)
 cfg, files, broker_mod = tbf.cfg, tbf.files, tbf.broker_mod
 check, results, SECRET = tbf.check, tbf.results, tbf.SECRET
 
-APP_REPO = Path(sys.argv[1]) if len(sys.argv) > 1 else cfg.lc.PROJECTS / "loam-ui"
+APP_REPO = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE.parent
 APP_REF = sys.argv[2] if len(sys.argv) > 2 else "main"
-COMPOSE = HERE.parent / "deploy" / "loam-ui" / "compose.yaml"
 
 
 def deployed_vault_urls() -> str:
-    """`FILES_VAULT_URLS` as the deployed app is given it: its compose file's
-    line, with the origin bin/deploy hands it (origins_env, since
-    2026-11-14) filled in. Not a secret."""
+    """`FILES_VAULT_URLS` as the deployed app is given it, from bin/deploy's
+    service_env with the install's origins (origins_env). Not a secret."""
     import importlib.machinery, importlib.util  # noqa: E401, PLC0415
     loader = importlib.machinery.SourceFileLoader("loam_deploy_cmd", str(HERE.parent / "bin" / "deploy"))
     spec = importlib.util.spec_from_loader("loam_deploy_cmd", loader)
     cmd = importlib.util.module_from_spec(spec)
     loader.exec_module(cmd)
-    env = cmd.origins_env()
-    for line in COMPOSE.read_text().splitlines():
-        key, _, value = line.strip().partition(":")
-        if key == "FILES_VAULT_URLS":
-            value = value.strip().strip('"')
-            return re.sub(r"\$\{(\w+):\?[^}]*\}", lambda m: env[m.group(1)], value)
-    raise SystemExit(f"{COMPOSE} sets no FILES_VAULT_URLS")
+    source = (HERE.parent / "bin" / "deploy").read_text()
+    if '"FILES_VAULT_URLS": origins["LOAM_VAULT_ORIGIN"] + "/"' not in source:
+        raise SystemExit("bin/deploy's service_env no longer hands FILES_VAULT_URLS as this reads it")
+    return cmd.origins_env()["LOAM_VAULT_ORIGIN"] + "/"
 
 
 VAULT_URLS = deployed_vault_urls()
@@ -626,7 +622,9 @@ def main() -> int:
                              capture_output=True, text=True, check=True).stdout.strip()
         app_dir = tmp / "app"
         app_dir.mkdir()
-        archive = subprocess.run(["git", "-C", str(APP_REPO), "archive", sha],
+        has_app = subprocess.run(["git", "-C", str(APP_REPO), "cat-file", "-e", f"{sha}:app/src/server.js"],
+                                 capture_output=True).returncode == 0
+        archive = subprocess.run(["git", "-C", str(APP_REPO), "archive", f"{sha}:app" if has_app else sha],
                                  capture_output=True, check=True).stdout
         subprocess.run(["tar", "-x", "-C", str(app_dir)], input=archive, check=True)
         print(f"INFO  app: {APP_REPO} at {APP_REF} = {sha}, exported to {app_dir}")

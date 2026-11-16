@@ -228,6 +228,13 @@ def generate(dry: bool) -> int:
         res = run(["sysctl", "-q", "-p", str(dep.PREVIEW_SYSCTL)])
         print(f"  sysctl: {dep.PREVIEW_SYSCTL_KEY} applied (exit {res.returncode})"
               f"{': ' + res.stderr.strip() if res.stderr.strip() else ''}")
+    # Loam's own app's unit template (2026-11-16). A changed template is
+    # loaded, never restarted from here: `bin/deploy <app> up <commit>` is
+    # what restarts an app, and it says what it did.
+    if dep.SERVICE_UNIT in changed:
+        res = run(["systemctl", "daemon-reload"])
+        print(f"  {dep.SERVICE_UNIT.name}: daemon-reload (exit {res.returncode}); "
+              f"running instances pick it up at their next `bin/deploy <app> up`")
     if dep.CADDYFILE in changed:
         res = run(["systemctl", "reload", "caddy"])
         print(f"  caddy reloaded (exit {res.returncode}){': ' + res.stderr.strip() if res.stderr.strip() else ''}")

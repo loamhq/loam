@@ -81,11 +81,12 @@ check("[app] reaches the compose environment",
               "LOAM_AVATAR_COLOURS": '{"b":"c54"}'}, got)
 got = child("", LOAD_DEPLOY)
 check("without [app], nothing is passed", got == "{}", got)
-compose = (ROOT / "deploy" / "loam-ui" / "compose.yaml").read_text(encoding="utf-8")
-check("compose reads the voices, generic by default",
-      'SPEECH_VOICES: "${LOAM_SPEECH_VOICES:-iris=Aoede:' in compose)
-check("compose reads the colours, none by default",
-      "AVATAR_COLOURS: '${LOAM_AVATAR_COLOURS:-}'" in compose)
+source = (ROOT / "bin" / "deploy").read_text(encoding="utf-8")
+body = source[source.index("def service_env("):source.index("def env_file_text(")]
+check("the app's environment reads the voices, generic by default",
+      '"SPEECH_VOICES": own.get("LOAM_SPEECH_VOICES", "iris=Aoede:' in body)
+check("...and the colours, none by default",
+      '"AVATAR_COLOURS": own.get("LOAM_AVATAR_COLOURS", "")' in body)
 
 # -- the platform engineer's harness -----------------------------------------
 repo = TMP / "repo"

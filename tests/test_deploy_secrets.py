@@ -124,17 +124,19 @@ def main() -> int:
     check("no Google-shaped key literal anywhere in agents/deploy/",
           not leaked, ", ".join(leaked) or "clean")
 
-    # And the app's compose file names the variable, which is what puts it in
-    # the container at all. Read as text, not YAML: the point is the literal
-    # `${GEMINI_API_KEY` interpolation, which YAML would resolve away.
-    compose = (AGENTS / "deploy" / "loam-ui" / "compose.yaml").read_text(encoding="utf-8")
+    # And the app's unit is handed what the allowlist gives it, by name, and
+    # nothing more (since 2026-11-16 the app is a unit, not a container: the
+    # compose file that interpolated the key is gone, and bin/deploy's
+    # service_env is its environment). Read as text: the point is that the
+    # key comes from app_secrets and from nowhere else.
+    source = (AGENTS / "bin" / "deploy").read_text(encoding="utf-8")
+    body = source[source.index("def service_env("):source.index("def env_file_text(")]
     # Optional since 2026-11-14: dictation ships off and a blank install has
     # no key until its person pastes one (first release, decision 2).
-    check("loam-ui's compose file interpolates GEMINI_API_KEY by name",
-          "${GEMINI_API_KEY:-}" in compose)
+    check("loam-ui's environment takes its keys from app_secrets, the allowlist",
+          "env.update(app_secrets(app))" in body and "GEMINI_API_KEY" not in body)
     # Retired 2026-10-01 with the app's POST /api/dictate.
-    check("loam-ui's compose file no longer interpolates DICTATION_TOKEN",
-          "${DICTATION_TOKEN" not in compose)
+    check("...and nothing hands it DICTATION_TOKEN", "DICTATION_TOKEN" not in body)
 
     print(f"\n{sum(results)}/{len(results)} passed")
     return 0 if all(results) else 1

@@ -105,3 +105,11 @@ test('a continuously animated WebGL canvas is photographed when it renders, othe
   t.diagnostic(JSON.stringify({ webgl: graphics, state: jpeg ? 'ok' : 'fallback', ms: Math.round(performance.now() - started) }))
   assert.deepEqual(await readdir(dir), [])
 })
+test('an OOM score starts the browser through choom, so the browser and its children carry it', {
+  skip: !process.env.APP_PREVIEW_OOM_CHECK && 'Set APP_PREVIEW_OOM_CHECK=1 on a Linux host with util-linux to exercise choom.',
+}, async t => {
+  const dir = await directory(t), executable = path.join(dir, 'browser')
+  await writeFile(executable, `#!${process.execPath}\nimport('node:fs').then(fs=>{fs.writeFileSync(${JSON.stringify(path.join(dir, 'oom'))},fs.readFileSync('/proc/self/oom_score_adj','utf8'));setInterval(()=>{},1000)})`, { mode: 0o700 })
+  await assert.rejects(captureAppPage({ url: 'https://example.org/', dir, executable, timeoutMs: 1500, oomScoreAdj: 800 }), /timed out/)
+  assert.equal((await readFile(path.join(dir, 'oom'), 'utf8')).trim(), '800')
+})

@@ -11,8 +11,8 @@ async function waitAtMost(promise, ms) {
 
 // A short-lived browser with an empty profile. CDP travels on inherited pipes,
 // never a listening debugging port. No broker token, login or host profile is
-// passed to the child. The container is its boundary, as for the web process.
-export async function captureAppPage({ url, dir, executable = 'chromium', timeoutMs = 18000, hostResolverRules = null }) {
+// passed to the child. The host's sandbox around the server is its boundary too.
+export async function captureAppPage({ url, dir, executable = 'chromium', timeoutMs = 18000, hostResolverRules = null, oomScoreAdj = null }) {
   const profile = await mkdtemp(path.join(dir, 'capture-'))
   let child, timer, next = 0, buffered = '', failed = false
   const pending = new Map(), listeners = new Map()
@@ -29,11 +29,16 @@ export async function captureAppPage({ url, dir, executable = 'chromium', timeou
     // Optional native-library/font paths are useful for a local installation;
     // credentials and the rest of the server environment are deliberately absent.
     for (const key of ['LD_LIBRARY_PATH', 'FONTCONFIG_PATH', 'FONTCONFIG_FILE']) if (process.env[key]) env[key] = process.env[key]
-    child = spawn(executable, ['--headless', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--mute-audio',
+    const args = ['--headless', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--mute-audio',
       '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-extensions',
       '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`,
-      ...(hostResolverRules ? [`--host-resolver-rules=${hostResolverRules}`] : []), '--remote-debugging-pipe', 'about:blank'],
-    { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], env })
+      ...(hostResolverRules ? [`--host-resolver-rules=${hostResolverRules}`] : []), '--remote-debugging-pipe', 'about:blank']
+    // At a higher OOM score than the server when one is set: util-linux's
+    // `choom` sets it and becomes the browser, so every process the browser
+    // starts inherits it. Raising one's own score needs no privilege.
+    child = oomScoreAdj === null
+      ? spawn(executable, args, { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], env })
+      : spawn('choom', ['-n', String(oomScoreAdj), '--', executable, ...args], { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], env })
     child.on('error', () => fail(new Error('Page preview browser is unavailable.')))
     child.on('exit', () => fail(new Error('Page preview browser ended.')))
     child.stdio[3].on('error', () => fail(new Error('Page preview pipe closed.')))

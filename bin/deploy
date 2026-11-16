@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""The deploy loop: a project reaches its own container, and only its own.
+"""The deploy loop: a project reaches its own container, and only its own;
+Loam's own app reaches its own unit.
 
     deploy <app> build <commit>      build <app>:<short commit> from the
                                      app's checkout at that commit
@@ -17,6 +18,19 @@
     deploy <app> status             compose ps, health, the image's commit
     deploy <app> logs [N]            the last N lines (default 100)
     deploy <app> exec <cmd...>       run a command inside the container
+    deploy <app> env                 (a [service] app; its unit runs this, as
+                                     root, before every start) write the app's
+                                     environment to /run/loam/app/<app>.env
+
+**Loam's own app is not a container** (since 2026-11-16). A record with a
+`[service]` table (deploy/loam-ui) runs as `loam-app@<app>.service`, the
+unit lib/loam_deploy.service_unit renders, from a release of its checkout:
+`build` unpacks `git archive <commit>:<context>` into
+/var/lib/loam/app/<app>/releases/<sha>/, and `up` points `current` at it and
+restarts the unit, waits for GET /up, and puts the release before back if the
+new one does not answer. The verbs and their result line are the same, so
+the launcher's deploy after a landing (lib/loam_autodeploy) and a rollback by
+hand do not change. `exec` is a container's verb; a service app has `env`.
 
 Constraint first, mechanism second (Move 10, task 5). No project ever holds
 the Docker socket, and a project acts on its own container and no other.
@@ -54,9 +68,11 @@ import json
 import os
 import pwd
 import re
+import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 import yaml
@@ -66,7 +82,7 @@ import loam_broker as brk  # noqa: E402
 import loam_config as lc  # noqa: E402
 import loam_deploy as dep  # noqa: E402
 
-VERBS = ("build", "up", "status", "logs", "exec", "prune")
+VERBS = ("build", "up", "status", "logs", "exec", "prune", "env")
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$|^[A-Za-z0-9._/-]{1,64}$")
 
 # The box's secret store: vendor API keys, root:<box user> 0640, outside every
@@ -93,6 +109,10 @@ APP_SECRETS = {
     "loam-ui-next": ("GEMINI_API_KEY",),
 }
 
+# How long a restarted service app has to answer GET /up. It answers in
+# well under a second; the margin is for a box under load.
+SERVICE_HEALTH_SECONDS = 60
+
 
 def die(msg: str, code: int = 1) -> None:
     print(f"deploy: {msg}", file=sys.stderr)
@@ -113,7 +133,7 @@ def app_named(name: str) -> dep.App:
     if name not in apps:
         die(f"no deployment record for {name!r} under {dep.DEPLOY}")
     app = apps[name]
-    if app.compose is None:
+    if app.compose is None and not app.service:
         die(f"{name} is a static host ({app.static_root}); nothing to build or run")
     if app.checkout is None or not app.checkout.is_dir():
         die(f"{name}: no checkout to build from (record has no `checkout`, "
@@ -143,7 +163,15 @@ def resolve_commit(app: dep.App, ref: str) -> str:
     has_main = run(["git", "-C", str(app.checkout), "rev-parse", "--verify",
                     "--quiet", "refs/heads/main"], capture_output=True,
                    **as_owner(app.checkout)).returncode == 0
-    if has_main and run(["git", "-C", str(app.checkout), "merge-base",
+    # Loam's own checkout also answers for what it has checked out: a stock
+    # install sits on its release tag, detached, with `main` where the
+    # installer cloned it, and an update moves HEAD, never `main`
+    # (docs/update.md). Its HEAD is a release or a landed main, never a job's.
+    own = app.checkout.resolve() == lc.ROOT.resolve()
+    on_head = own and run(["git", "-C", str(app.checkout), "merge-base",
+                           "--is-ancestor", full, "HEAD"], capture_output=True,
+                          **as_owner(app.checkout)).returncode == 0
+    if has_main and not on_head and run(["git", "-C", str(app.checkout), "merge-base",
                          "--is-ancestor", full, "refs/heads/main"],
                         capture_output=True, **as_owner(app.checkout)).returncode != 0:
         die(f"{ref!r} ({full[:7]}) is not on {app.checkout}'s main. A deploy "
@@ -386,8 +414,16 @@ def compose(app: dep.App, *args: str, env: dict | None = None, **kw) -> subproce
 
 
 def running_commit(app: dep.App) -> str | None:
-    """The full commit the running container was built from (its label), or
-    the image name for one built before labels, or None if not running."""
+    """The full commit what runs was built from: the unit's release for a
+    service app, else the container's label (or the image name for one built
+    before labels), or None if not running."""
+    if getattr(app, "service", False):
+        return service_running_commit(app)
+    return container_commit(app)
+
+
+def container_commit(app: dep.App) -> str | None:
+    """The full commit the app's running container was built from."""
     res = run(["docker", "inspect", "-f", "{{index .Config.Labels \"loam.commit\"}} {{.Config.Image}}",
                app.name], capture_output=True)
     if res.returncode != 0:
@@ -464,6 +500,9 @@ def rollback(app: dep.App, before: str | None) -> tuple[str | None, str]:
 
 
 def up(app: dep.App, ref: str, forward_only: bool = False) -> None:
+    if getattr(app, "service", False):
+        service_up(app, ref, forward_only=forward_only)
+        return
     full = resolve_commit(app, ref)
     tag = image_tag(app, full)
     before = running_commit(app)
@@ -516,7 +555,308 @@ def up(app: dep.App, ref: str, forward_only: bool = False) -> None:
     report(app, "deployed", full, before, running_commit(app), state)
 
 
+# ---------------------------------------------------------------------------
+# Loam's own app, run by Loam (2026-11-16): lib/loam_deploy.py, "Loam's own
+# app, run by Loam", says why; this is how.
+#
+#   /var/lib/loam/app/<app>/releases/<sha>/   one per commit unpacked, root's
+#   /var/lib/loam/app/<app>/current           -> releases/<sha>, what runs
+#   /var/lib/loam/app/<app>/previous          -> releases/<sha>, the one before
+#
+# `current` and `previous` are symlinks swapped by rename, so the unit never
+# finds the path missing. A release is the app's folder at that commit and
+# nothing else: no `.git`, no working-tree edit, no other folder of Loam.
+# ---------------------------------------------------------------------------
+
+def service_dir(app: dep.App) -> Path:
+    return dep.SERVICE_RELEASES / app.name
+
+
+def release_dir(app: dep.App, full: str) -> Path:
+    return service_dir(app) / "releases" / full
+
+
+def link_target(link: Path) -> str | None:
+    """The full commit a `current` or `previous` link names, or None."""
+    try:
+        name = Path(os.readlink(link)).name
+    except OSError:
+        return None
+    return name if re.fullmatch(r"[0-9a-f]{40}", name) else None
+
+
+def point(link: Path, full: str | None) -> None:
+    """Point `current` or `previous` at a release, by an atomic rename."""
+    if full is None:
+        link.unlink(missing_ok=True)
+        return
+    tmp = link.with_name(f".{link.name}.{os.getpid()}")
+    tmp.unlink(missing_ok=True)
+    os.symlink(f"releases/{full}", tmp)
+    os.replace(tmp, link)
+
+
+def release(app: dep.App, ref: str) -> str:
+    """Unpack the app's folder at a commit into its release directory, once.
+    Returns the full commit."""
+    full = resolve_commit(app, ref)
+    dest = release_dir(app, full)
+    if dest.is_dir():
+        print(f"  release {full[:7]} is unpacked; not again")
+        return full
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(dep.SERVICE_RELEASES, 0o755)
+    tmp = dest.with_name(f".{full}.{os.getpid()}")
+    subprocess.run(["rm", "-rf", str(tmp)], check=False)
+    tmp.mkdir(mode=0o755)
+    tree = f"{full}:{app.context}" if app.context else full
+    print(f"  unpacking {app.checkout} @ {full[:7]}{f' ({app.context}/)' if app.context else ''}")
+    archive = subprocess.Popen(
+        ["git", "-C", str(app.checkout), "archive", "--format=tar", tree],
+        stdout=subprocess.PIPE, **as_owner(app.checkout))
+    res = run(["tar", "-x", "--no-same-owner", "-C", str(tmp)], stdin=archive.stdout,
+              capture_output=True)
+    archive.stdout.close()
+    archive.wait()
+    if archive.returncode != 0 or res.returncode != 0:
+        subprocess.run(["rm", "-rf", str(tmp)], check=False)
+        die(f"unpacking {full[:7]} failed: git archive exit {archive.returncode}, "
+            f"tar exit {res.returncode} {res.stderr.strip()[-400:]}")
+    if not (tmp / "src" / "server.js").is_file():
+        subprocess.run(["rm", "-rf", str(tmp)], check=False)
+        die(f"{full[:7]}{f':{app.context}' if app.context else ''} has no "
+            f"src/server.js; it is not the app")
+    run(["chmod", "-R", "u=rwX,go=rX", str(tmp)])
+    os.replace(tmp, dest)
+    print(f"  unpacked {dest}")
+    return full
+
+
+def unit_state(app: dep.App) -> str:
+    res = run(["systemctl", "is-active", app.unit], capture_output=True)
+    return res.stdout.strip() or "unknown"
+
+
+def container_running(name: str) -> bool:
+    """Whether a Docker container by the app's name runs: the app before it
+    left Docker (2026-11-16). False on a box without Docker."""
+    if not shutil.which("docker"):
+        return False
+    res = run(["docker", "ps", "-q", "--filter", f"name=^{name}$"], capture_output=True)
+    return res.returncode == 0 and bool(res.stdout.strip())
+
+
+def service_running_commit(app: dep.App) -> str | None:
+    """The full commit the unit runs, or what the container it replaces
+    runs while that is still up, or None."""
+    if unit_state(app) == "active":
+        return link_target(service_dir(app) / "current")
+    if container_running(app.name):
+        return container_commit(app)
+    return None
+
+
+def service_health(app: dep.App) -> str:
+    """`healthy` when the unit is active and GET /up answers 200."""
+    state = unit_state(app)
+    if state != "active":
+        return state if state != "unknown" else "not running"
+    try:
+        with urllib.request.urlopen(f"http://{dep.SERVICE_HOST}:{app.port}/up", timeout=3) as r:
+            return "healthy" if r.status == 200 else f"answering {r.status}"
+    except (OSError, ValueError):
+        return "starting"
+
+
+def wait_service_healthy(app: dep.App, seconds: int = SERVICE_HEALTH_SECONDS) -> str:
+    deadline = time.time() + seconds
+    state = "?"
+    while time.time() < deadline:
+        state = service_health(app)
+        if state == "healthy":
+            return state
+        if state in ("failed",):
+            break
+        time.sleep(1)
+    return state
+
+
+def start_unit(app: dep.App) -> subprocess.CompletedProcess:
+    """Enable (it comes back at boot) and restart the app's unit."""
+    run(["systemctl", "enable", "--quiet", app.unit], capture_output=True)
+    return run(["systemctl", "restart", app.unit], capture_output=True)
+
+
+def stop_container(name: str) -> None:
+    """Stop the container the unit replaces, and keep it from restarting by
+    itself, so the port is free. It is kept, stopped: `docker start` is the
+    way back while the unit is new (service_rollback)."""
+    run(["docker", "update", "--restart=no", name], capture_output=True)
+    res = run(["docker", "stop", "-t", "10", name], capture_output=True)
+    print(f"  container {name} stopped (exit {res.returncode}); kept, not removed")
+
+
+def start_container(name: str) -> None:
+    run(["systemctl", "stop", f"{dep.SERVICE_UNIT_PREFIX}{name}.service"], capture_output=True)
+    run(["docker", "update", "--restart=unless-stopped", name], capture_output=True)
+    res = run(["docker", "start", name], capture_output=True)
+    print(f"  container {name} started again (exit {res.returncode})")
+
+
+def service_rollback(app: dep.App, prev: str | None, had_container: bool) -> tuple[str | None, str]:
+    """Put back what ran before a failed `up`: the release before, or the
+    container the unit was replacing. Returns (what runs now, its health)."""
+    if prev and release_dir(app, prev).is_dir():
+        print(f"  rolling back to {prev[:7]}")
+        point(service_dir(app) / "current", prev)
+        start_unit(app)
+        return link_target(service_dir(app) / "current"), wait_service_healthy(app)
+    if had_container:
+        start_container(app.name)
+        return container_commit(app), wait_healthy(app.name)
+    return service_running_commit(app), service_health(app)
+
+
+def service_prune(app: dep.App) -> None:
+    """Remove every release but `current` and `previous`. A removed release
+    costs an unpack, never a rollback: `up` unpacks a missing one."""
+    keep = {link_target(service_dir(app) / n) for n in ("current", "previous")} - {None}
+    rels = service_dir(app) / "releases"
+    if not rels.is_dir():
+        return
+    gone = [p for p in rels.iterdir() if p.name not in keep]
+    for p in gone:
+        subprocess.run(["rm", "-rf", str(p)], check=False)
+    print(f"  releases: kept {', '.join(sorted(k[:7] for k in keep)) or 'none'}; removed {len(gone)}")
+
+
+def service_up(app: dep.App, ref: str, forward_only: bool = False) -> None:
+    full = resolve_commit(app, ref)
+    before = service_running_commit(app)
+    had_container = container_running(app.name)
+    if (forward_only and before and before != full
+            and re.fullmatch(r"[0-9a-f]{40}", before)
+            and is_ancestor(app, full, before)):
+        state = service_health(app) if not had_container else health_of(app.name)
+        print(f"  {app.name}: already on {short(before)}, which carries "
+              f"{full[:7]}; nothing changed")
+        report(app, "carried", full, before, before, state)
+        return
+    try:
+        release(app, full)
+    except SystemExit:
+        report(app, "build_failed", full, before, before,
+               service_health(app) if not had_container else health_of(app.name),
+               "the release could not be unpacked; what runs was not touched")
+        raise
+    current = service_dir(app) / "current"
+    prev = link_target(current)
+    point(current, full)
+    if had_container:
+        stop_container(app.name)
+    res = start_unit(app)
+    state = wait_service_healthy(app) if res.returncode == 0 else "failed"
+    print(f"  {app.name}: {state} on {full[:7]}"
+          + (f" (was {short(before)})" if before != full else " (unchanged)"))
+    if state != "healthy":
+        logs = run(["journalctl", "-u", app.unit, "-n", "40", "--no-pager", "-o", "cat"],
+                   capture_output=True)
+        print(f"  the unit's last lines:\n{(res.stderr or '')[-800:]}{logs.stdout[-3000:]}")
+        now, now_state = service_rollback(app, prev if prev != full else None, had_container)
+        report(app, "rolled_back" if now == before and now != full else "unhealthy",
+               full, before, now, now_state, f"{full[:7]} was {state}")
+        die(f"{app.name} was {state} on {full[:7]}, not healthy; it runs "
+            f"{short(now)} ({now_state}) now", 2)
+    if prev and prev != full:
+        point(service_dir(app) / "previous", prev)
+    service_prune(app)
+    report(app, "deployed", full, before, service_running_commit(app), state)
+
+
+def service_env(app: dep.App) -> dict:
+    """Everything the app is handed, by name. The compose file's
+    `environment:` block was this until 2026-11-16, value for value; the
+    sources are the same functions (broker_env, app_secrets, origins_env,
+    app_env), so the token and the key still come from the box at the moment
+    the app starts and reach no file but /run."""
+    origins, own = origins_env(), app_env()
+    state = dep.SERVICE_STATE / app.name
+    env = {
+        "NODE_ENV": "production",
+        "APP_HOST": dep.SERVICE_HOST,
+        "APP_PORT": str(app.port),
+        # Read aloud: each agent's voice, the install's (`app.speech_voices`),
+        # else the starter agent's; and the measured pace of the one voice
+        # measured (Aoede, 147 words/minute, 2026-10-13: a voice not listed
+        # uses the app's 150).
+        "SPEECH_VOICES": own.get("LOAM_SPEECH_VOICES", "iris=Aoede:warm, natural and unhurried"),
+        "SPEECH_PACES": "Aoede=147",
+        "SPEECH_DIR": str(state / "speech"),
+        # Avatar colours the install overrides (`[app.avatar_colours]`).
+        "AVATAR_COLOURS": own.get("LOAM_AVATAR_COLOURS", ""),
+        # Files: the vault's and the commons' web origins, and this app's
+        # own content host for live HTML previews.
+        "FILES_VAULT_URLS": origins["LOAM_VAULT_ORIGIN"] + "/",
+        "FILES_WEB_URLS": json.dumps([{"root": "spaces", "path": "commons/www",
+                                       "url": origins["LOAM_FILES_ORIGIN"]}],
+                                     separators=(",", ":")),
+        # Apps: the domain the agents' sites are under, the internal route
+        # their previews are taken through, and the browser that takes them,
+        # at the agents' OOM score so a capture is what goes first.
+        "APPS_DOMAIN": origins["LOAM_DOMAIN"],
+        "APPS_PREVIEW_BASE": origins["LOAM_PREVIEW_BASE"],
+        # On the host, the route's loopback address: one on the bridge's
+        # would arrive from the box's public address and be refused.
+        "APPS_PREVIEW_ADDR": dep.PREVIEW_LOCAL_ADDR,
+        "APP_MEDIA_DIR": str(state / "app-media"),
+        "APP_PREVIEW_CHROME": "chromium-headless-shell",
+        "APP_PREVIEW_OOM_SCORE_ADJ": str(lc.AGENT_OOM_SCORE_ADJ),
+    }
+    if app.content_fqdn:
+        env["FILES_CONTENT_ORIGIN"] = f"https://{app.content_fqdn}"
+    env.update(broker_env())
+    env.update(app_secrets(app))
+    return env
+
+
+def env_file_text(env: dict) -> str:
+    """systemd's EnvironmentFile form: one `NAME="value"` a line, with `\\`,
+    `"` and newlines escaped, so a value with spaces, quotes or JSON comes
+    through whole."""
+    lines = ["# Written by bin/deploy <app> env as the unit starts. Do not edit."]
+    for name, value in env.items():
+        if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", name):
+            die(f"environment name {name!r}")
+        v = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        lines.append(f'{name}="{v}"')
+    return "\n".join(lines) + "\n"
+
+
+def write_env(app: dep.App) -> Path:
+    """The unit's EnvironmentFile, root's and 0600, in /run."""
+    dep.SERVICE_ENV_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(dep.SERVICE_ENV_DIR, 0o700)
+    path = dep.SERVICE_ENV_DIR / f"{app.name}.env"
+    tmp = path.with_name(f".{path.name}.{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(env_file_text(service_env(app)))
+    os.replace(tmp, path)
+    return path
+
+
+def service_status(app: dep.App) -> None:
+    run(["systemctl", "status", "--no-pager", "--lines=0", app.unit])
+    print(f"  running commit: {short(service_running_commit(app))} "
+          f"({service_health(app)}); previous: {short(link_target(service_dir(app) / 'previous'))}")
+    print(f"  record: {dep.record_path(app.name)} (exposure={app.exposure}, "
+          f"https://{app.fqdn}, {dep.SERVICE_HOST}:{app.port}, {app.unit})")
+
+
 def status(app: dep.App) -> None:
+    if app.service:
+        service_status(app)
+        return
     compose(app, "ps", "--format", "table {{.Name}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}")
     print(f"  running commit: {short(running_commit(app))}")
     print(f"  record: {dep.record_path(app.name)} (exposure={app.exposure}, "
@@ -533,10 +873,19 @@ def main(argv: list[str]) -> int:
     if not dep.NAME_RE.match(name):
         die(f"{name!r} is not an app name")
     app = app_named(name)
+    if app.service and verb == "exec":
+        die(f"{name} runs as {app.unit}, not in a container; `exec` is a "
+            f"container's verb (`systemctl status {app.unit}`, `deploy {name} logs`)")
+    if verb == "env":
+        if not app.service or rest:
+            die(f"`env` writes a [service] app's environment for its unit; "
+                f"{name} {'is a container' if not app.service else 'takes no arguments'}")
+        write_env(app)
+        return 0
     if verb == "build":
         if len(rest) != 1:
             usage()
-        build(app, rest[0])
+        release(app, rest[0]) if app.service else build(app, rest[0])
     elif verb == "up":
         forward_only = "--forward-only" in rest
         rest = [a for a in rest if a != "--forward-only"]
@@ -548,12 +897,15 @@ def main(argv: list[str]) -> int:
     elif verb == "prune":
         if rest:
             usage()
-        prune(app)
+        service_prune(app) if app.service else prune(app)
     elif verb == "logs":
         n = rest[0] if rest else "100"
         if not n.isdigit():
             usage()
-        compose(app, "logs", "--tail", n, "--no-color")
+        if app.service:
+            run(["journalctl", "-u", app.unit, "-n", n, "--no-pager", "-o", "short-iso"])
+        else:
+            compose(app, "logs", "--tail", n, "--no-color")
     elif verb == "exec":
         if not rest:
             usage()

@@ -872,6 +872,10 @@ def check_deploy(findings: list) -> list[str]:
         for container, why in dep.log_findings(apps):
             findings.append((f"deploy logging {container}", "docker inspect",
                              f"container {container} {why}"))
+        # Loam's own app runs as a unit, not a container (2026-11-16): is it
+        # up, and is nothing still holding its name in Docker.
+        for name, why in dep.service_findings(apps):
+            findings.append((f"deploy service {name}", "systemctl is-active / docker ps", why))
     except dep.DeployError as exc:
         findings.append(("deploy live state", "docker ps / ss", str(exc)))
     # The wall around the browser's network is rules in the kernel, and the
