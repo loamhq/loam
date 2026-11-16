@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Schedules: a record is live exactly when it says it is enabled.
 
-Against the real systemd user manager, in a scratch corner of it: a made-up
-agent in a temp `ai-labs`, its units in the runtime unit directory
-(/run/user/<uid>/systemd/user, on the manager's search path and gone at
-reboot), enabled with `--runtime` so nothing is linked into the persistent
-config. Every unit is removed at the end, pass or fail.
+Against a real systemd user manager -- a private one, started for this test
+alone (tests/private_systemd.py, since 2026-11-16), never the box's own: a
+made-up agent in a temp `ai-labs`, its units in that manager's runtime unit
+directory, enabled with `--runtime`. Until 11-16 this ran in the live user
+manager's /run/user/<uid>/systemd/user, beside every persona's timers. Every
+unit is removed at the end, pass or fail, and the manager is stopped.
 
 What it proves, each against the timer the manager actually holds:
   - a recurring record created, moved, paused, resumed, and deleted through
@@ -41,6 +42,7 @@ sys.path.insert(0, str(LIB))
 import loam_schedule as ls  # noqa: E402
 import loam_cron  # noqa: E402
 import loam_config as lc  # noqa: E402
+from private_systemd import PrivateManager  # noqa: E402
 OWNER = lc.OWNER_ID
 
 results: list[bool] = []
@@ -55,8 +57,10 @@ AGENT = f"zzsched{os.getpid()}"
 OTHER = f"zzother{os.getpid()}"
 TMP = Path(tempfile.mkdtemp(prefix="loam-schedule-test-"))
 LABS = TMP / "ai-labs"
-UNITS = Path(f"/run/user/{os.getuid()}/systemd/user")
-UNITS.mkdir(parents=True, exist_ok=True)
+# The test's own user manager; every `systemctl --user` below, this
+# process's and its children's, reaches it and not the box's.
+MANAGER = PrivateManager(TMP / "systemd").start()
+UNITS = MANAGER.unit_dir
 
 for name in (AGENT, OTHER):
     (LABS / name / "crons").mkdir(parents=True)
@@ -66,8 +70,9 @@ for name in (AGENT, OTHER):
 
 # The wake a fire launches: records the fire through the same call bin/wake
 # makes, pointed at this scratch box.
-# The stub runs under the user manager, outside any mount namespace a landing
-# runs this suite in, so it gets the code under test as a copy of its own.
+# The stub runs under the (private) user manager, so it gets the code under
+# test as a copy of its own rather than whatever the manager's view of the
+# runtime's path holds.
 STUB_LIB = TMP / "lib"
 shutil.copytree(LIB, STUB_LIB, ignore=shutil.ignore_patterns("__pycache__"))
 STUB = TMP / "wake-stub"
@@ -344,6 +349,19 @@ try:
                lane="conversation", systemd=SD)
     check("  pausing the reflection removes its timer",
           not (UNITS / f"loam-wake-{OTHER}.timer").exists())
+
+    # -- the box's own manager ---------------------------------------------------
+    live = subprocess.run(
+        ["systemctl", "--user", "list-units", "--all", "--no-legend", "--plain",
+         f"*{AGENT}*", f"*{OTHER}*"], capture_output=True, text=True, check=False,
+        env={**{k: v for k, v in os.environ.items() if k not in MANAGER.env()},
+             "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}"}, timeout=30)
+    live_dir = Path(f"/run/user/{os.getuid()}/systemd/user")
+    check("the box's own user manager never held one of this test's units",
+          live.stdout.strip() == "" and not any(
+              AGENT in f.name or OTHER in f.name
+              for f in (live_dir.iterdir() if live_dir.is_dir() else [])),
+          live.stdout.strip()[:200] or live.stderr.strip()[:200])
 finally:
     for unit in sorted(UNITS.glob("loam-*")):
         if AGENT in unit.name or OTHER in unit.name:
@@ -355,6 +373,7 @@ finally:
             if AGENT in link.name or OTHER in link.name:
                 link.unlink()
     SD.reload()
+    MANAGER.stop()
     shutil.rmtree(TMP, ignore_errors=True)
 
 failed = results.count(False)

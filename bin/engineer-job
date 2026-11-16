@@ -3455,6 +3455,11 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             "landing": landing.get("state"), "landed_sha": facts["landed_sha"],
             "release_tag": facts["release_tag"],
             "peak_rss_bytes": peak, "landing_timing": landing.get("timing"),
+            # Since 2026-11-16 a landing tests outside the live lock: how
+            # many times `main` moving made it test again, and whether the
+            # run that decided it held the lock (the fallback).
+            "landing_retests": landing.get("retests"),
+            "landing_tested_under_lock": landing.get("tested_under_lock"),
             "dispatched": (dispatch or {}).get("job_id"),
         })
     p["landing"].unlink(missing_ok=True)

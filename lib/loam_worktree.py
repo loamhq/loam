@@ -22,14 +22,17 @@ job directories are under `agents/engineer/jobs/`, so a worktree there would
 load the canonical `agents/engineer/CLAUDE.md` -- the live role, not the
 tree's -- on top of its own. Nothing above `state/worktrees/` carries one.
 
-**Landing** (`land`) runs under the project's live lock (lib/loam_lock.live):
-the branch's own tests, then a merge of the branch into `main` at its current
-head -- a fast-forward when `main` has not moved, a merge commit when it has,
-never a rebase of `main` and never a force-push -- then the tests again on the
-merged tree, then a fast-forward of the canonical `main` to that tested
-commit, the push, and the worktree's removal. Any failure leaves `main`,
-`origin` and the worktree exactly as they were and says why; the next stage
-hands that to a continuation automatically, this one writes the brief for it.
+**Landing** (`land`) merges the branch into `main` at its current head -- a
+fast-forward when `main` has not moved, a merge commit when it has, never a
+rebase of `main` and never a force-push -- in the job's own tree, and tests
+that merged tree OUTSIDE the project's live lock (lib/loam_lock.live, since
+2026-11-16; ``_land_tested``). The lock is then held only to confirm `main`
+has not moved since, fast-forward the canonical `main` to that tested commit
+and push; a `main` that moved means merging and testing again, and after
+``OUTSIDE_TRIES`` lost races the landing tests under the lock as it did
+before. Then the worktree's removal. Any failure leaves `main`, `origin` and
+the worktree exactly as they were and says why; the next stage hands that to
+a continuation automatically, this one writes the brief for it.
 What lands is the job branch's ref, never HEAD: a tree whose HEAD was
 detached elsewhere lands its branch, or nothing (``branch_tip``, 2026-10-13).
 A read-only brief -- its `involvement` opens with "Read-only" (bin/engineer-job
@@ -1595,9 +1598,16 @@ def land(project: eng.Project, record: dict, message: str, *,
     to what landed so the next landing starts from there.
 
     `cancelled`, a callable (since 2026-11-10: the job's `cancelled` marker
-    exists), is asked once the live lock is held and again immediately
-    before `main` moves or the branch is pushed; true either time, nothing
-    lands, the tree and branch are kept, and the reason is `cancelled`.
+    exists), is asked before each test run, once the live lock is held, and
+    again immediately before `main` moves or the branch is pushed; true any
+    time, nothing lands, the tree and branch are kept, and the reason is
+    `cancelled`.
+
+    A `main`-merging landing tests outside the live lock (``_land_tested``,
+    since 2026-11-16) and reports, beside ``timing``: ``retests`` (test runs
+    repeated because `main` moved under the one before) and
+    ``tested_under_lock`` (the run that decided it held the lock: the
+    fallback after ``OUTSIDE_TRIES`` lost races).
     """
     say = say or (lambda _text: None)
     repo, tree, branch = canonical(project), Path(record["path"]), record["branch"]
@@ -1617,21 +1627,8 @@ def land(project: eng.Project, record: dict, message: str, *,
             say(f"waiting for the {name} live lock, held by "
                 f"{loam_lock.describe(holder)}")
 
-        wall0, cpu0 = time.monotonic(), cpu_seconds()
-        with loam_lock.live(project.live_lock, f"land {branch}", on_wait=on_wait):
-            result.setdefault("timing", {})["lock_wait"] = {
-                "wall_s": round(time.monotonic() - wall0, 2),
-                "cpu_s": round(cpu_seconds() - cpu0, 2)}
-            say("landing: holding the live lock")
-            if stop_for_cancel(cancelled, result, say):
-                return result
-            if project.pull_request:
-                _land_pr_locked(project, repo, tree, branch, keep_tree, result,
-                                say, record, title or message, summary,
-                                target_pr, reply, cancelled)
-            else:
-                _land_locked(project, repo, tree, branch, message, keep_tree,
-                             result, say, record, cancelled)
+        def finish() -> None:
+            """The release tag, under the lock the landing still holds."""
             if release:
                 say(f"landing: release tag {release}")
                 try:
@@ -1642,7 +1639,21 @@ def land(project: eng.Project, record: dict, message: str, *,
                     result["release"] = {"tag": release, "state": "failed",
                                          "sha": result.get("sha"),
                                          "detail": str(exc)[:400]}
-            return result
+
+        lock = lambda: live_held(project, branch, result, on_wait)  # noqa: E731
+        if project.pull_request:
+            with lock():
+                say("landing: holding the live lock")
+                if stop_for_cancel(cancelled, result, say):
+                    return result
+                _land_pr_locked(project, repo, tree, branch, keep_tree, result,
+                                say, record, title or message, summary,
+                                target_pr, reply, cancelled)
+                finish()
+        else:
+            _land_tested(project, repo, tree, branch, message, keep_tree,
+                         result, say, record, cancelled, lock, finish)
+        return result
     except (WorktreeError, OSError, subprocess.SubprocessError,
             loam_lock.Busy) as exc:
         result.update(state="not_landed", reason="error", detail=str(exc))
@@ -1799,15 +1810,34 @@ def timed(result: dict, step: str):
                         "cpu_s": round(cpu_seconds() - cpu0, 2)}
 
 
-TIMED_STEPS = ("lock_wait", "branch_tests", "merge", "merge_tests", "push")
+# In the order a landing passes them. Since 2026-11-16 the tests come before
+# the lock: ``branch_tests`` is the fast-forward's run (or, after a failed
+# merge, the branch's), ``merge_tests`` the merged tree's, each summed over
+# every attempt; ``lock_held`` is the whole time the live lock was held.
+# A landing of before kept everything after ``lock_wait`` under the lock and
+# recorded no ``lock_held``.
+TIMED_STEPS = ("merge", "branch_tests", "merge_tests", "lock_wait", "lock_held",
+               "push")
 
 
 def timing_cell(result: dict | None) -> str:
-    """The receipt's landing-telemetry cell."""
-    timing = (result or {}).get("timing") or {}
-    parts = [f"{step.replace('_', ' ')} {timing[step]['wall_s']:.1f} s "
-             f"({timing[step]['cpu_s']:.1f} s CPU)"
-             for step in TIMED_STEPS if step in timing]
+    """The receipt's landing-telemetry cell: each step's wall and CPU time,
+    where the tests ran, and how many times `main` moving made them run
+    again."""
+    result = result or {}
+    timing = result.get("timing") or {}
+    parts = []
+    for step in TIMED_STEPS:
+        if step not in timing:
+            continue
+        label = step.replace("_", " ")
+        if step.endswith("_tests") and "tested_under_lock" in result:
+            label += (" (under the lock)" if result["tested_under_lock"]
+                      else " (outside the lock)")
+        parts.append(f"{label} {timing[step]['wall_s']:.1f} s "
+                     f"({timing[step]['cpu_s']:.1f} s CPU)")
+    if parts and "retests" in result:
+        parts.append(f"re-tests {result['retests']}")
     return "; ".join(parts) if parts else "—"
 
 
@@ -1823,17 +1853,103 @@ def stop_for_cancel(cancelled, result: dict, say) -> bool:
     return True
 
 
-def _land_locked(project, repo, tree, branch, message, keep_tree, result,
-                 say, record, cancelled=None) -> dict:
+# ---------------------------------------------------------------------------
+# A `main`-merging landing (since 2026-11-16): the merged tree is tested
+# OUTSIDE the live lock, and the lock is held only to confirm `main` has not
+# moved since, fast-forward it to the tested commit and push. Until then the
+# whole landing -- the branch's tests, the merge, the merge's tests, the push
+# -- ran under the lock, and the suite takes ~7 minutes: on 11-16 one job
+# waited ~6 minutes behind another's suite and then ran its own, and with
+# three jobs finishing together the last waited 15-20 minutes on nothing but
+# the queue.
+#
+# Every attempt merges the branch into `main` as it stands, in the job's own
+# tree, and tests exactly that commit. Under the lock, a `main` (or branch)
+# that moved since is a lost race: the lock is let go and the attempt is made
+# again on the new `main`. After OUTSIDE_TRIES lost races the next attempt
+# takes the lock first and keeps it -- the order of before, which cannot
+# lose -- so a landing beside a busy queue is slow, never starved. What
+# `main` is moved to is always the commit that was tested; nothing else is
+# ever pushed.
+#
+# The branch's own tests no longer run first. On a fast-forward the branch
+# IS the merged tree, so there was only ever one run; on a real merge the
+# branch run told the continuation which tree is broken, and that is still
+# told -- the branch is tested only when the merged tree fails, so a passing
+# landing pays for one suite, not two.
+# ---------------------------------------------------------------------------
+
+# Attempts outside the live lock before the landing tests under it.
+OUTSIDE_TRIES = 3
+
+# How often a landing re-tries the live lock. The lock's own five seconds
+# suit a holder of minutes; a landing's hold is now its last step, a second
+# or two, and a waiter that sleeps five past it is most of its wait (seen in
+# tests/test_land_outside_lock.py: 5.0 s waited on a 0.2 s hold). An flock
+# attempt is a syscall.
+LAND_POLL_S = 0.5
+
+# The tested commit is kept here in the job's tree between its test run and
+# the fast-forward under the lock, so nothing can collect it meanwhile.
+TESTED_REF = "refs/loam/tested"
+
+
+def add_time(result: dict, step: str, wall: float, cpu: float) -> None:
+    """Add one span to a step's total: a landing may wait for the lock, or
+    test, more than once."""
+    timing = result.setdefault("timing", {})
+    was = timing.get(step) or {"wall_s": 0.0, "cpu_s": 0.0}
+    timing[step] = {"wall_s": round(was["wall_s"] + wall, 2),
+                    "cpu_s": round(was["cpu_s"] + cpu, 2)}
+
+
+@contextmanager
+def live_held(project: eng.Project, branch: str, result: dict, on_wait):
+    """The project's live lock for one span, its wait and hold timed into
+    ``lock_wait`` and ``lock_held`` (both summed over the landing)."""
+    wall0, cpu0 = time.monotonic(), cpu_seconds()
+    with loam_lock.live(project.live_lock, f"land {branch}", on_wait=on_wait,
+                        poll=LAND_POLL_S):
+        wall1, cpu1 = time.monotonic(), cpu_seconds()
+        add_time(result, "lock_wait", wall1 - wall0, cpu1 - cpu0)
+        try:
+            yield
+        finally:
+            add_time(result, "lock_held", time.monotonic() - wall1,
+                     cpu_seconds() - cpu1)
+
+
+@contextmanager
+def timed_add(result: dict, step: str):
+    wall0, cpu0 = time.monotonic(), cpu_seconds()
+    try:
+        yield
+    finally:
+        add_time(result, step, time.monotonic() - wall0, cpu_seconds() - cpu0)
+
+
+def canonical_ready(repo: Path, result: dict) -> bool:
+    """Under the lock: the canonical checkout is on `main` and level with its
+    remote. False, with the reason in ``result``, when it is not."""
     if (git(repo, "symbolic-ref", "--short", "HEAD", check=False).stdout.strip()
             != MAIN):
         result.update(reason="canonical", detail=(
             f"the canonical checkout {repo} is not on {MAIN}"))
-        return result
+        return False
     diverged = sync_with_origin(repo)
     if diverged:
         result.update(reason="diverged", detail=diverged)
-        return result
+        return False
+    return True
+
+
+def _prepare(project, repo, tree, branch, message, result, say, record,
+             locked=False):
+    """Merge the branch into `main` as it stands now and test the merged
+    tree, touching nothing but the job's tree. Returns ``(main_sha, tip,
+    merged)``: ``merged`` is None when the branch has nothing `main` lacks,
+    and the whole return is None when the result is final (refused, a
+    conflict, failing tests)."""
     refresh_main(repo, tree)
     main_sha = rev(repo, MAIN)
     replay = replay_if_rewritten(repo, tree, branch, record, main_sha, say)
@@ -1841,7 +1957,7 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
         result.update(reason="rewritten", detail=(
             f"`{MAIN}` was rewritten since this job began, and replaying the "
             f"job's own commits onto it stopped: {replay}"))
-        return result
+        return None
     if adopt_identity(project, repo, tree, branch, main_sha, say):
         result["reauthored"] = True
     tip = branch_tip(tree, branch)
@@ -1851,43 +1967,18 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
         result.update(reason="scope", files=outside, detail=(
             f"{project.name} is the `{project.subdir}/` folder of this repository, "
             f"and its commits touch {len(outside)} path(s) outside it"))
-        return result
-
+        return None
     # Ancestry is asked of the tree: a clone has both commits, the canonical
     # repository does not have the branch's until the landing fetches it.
     if is_ancestor(tree, tip, main_sha):
-        # Nothing on the branch that main does not have -- either the job
-        # committed nothing, or what it committed is already on main because
-        # it landed earlier (a mid-job `--land`, or an earlier job of this
-        # tree). The two read differently, and the second is a landing.
-        earlier = landed_earlier(project, record)
-        result["memory"] = merge_memory_back(project, record)
-        if not keep_tree:
-            remove_tree(project, record, delete_branch=True)
-        if earlier:
-            result.update(state="landed_earlier", sha=earlier)
-        else:
-            result.update(state="nothing", sha=main_sha)
-        return result
+        return main_sha, tip, None
 
     onto_branch(tree, branch, result)
-    say("landing: testing the branch")
-    with timed(result, "branch_tests"):
-        passed, command, out = run_tests(project, tree)
-    result["test"] = {"command": command, "passed": passed, "tail": out,
-                      "tree": "branch"}
-    if passed is None:
-        result.update(reason="no_tests")
-        return result
-    if not passed:
-        result.update(reason="branch_tests")
-        return result
-
     if is_ancestor(tree, main_sha, tip):
-        merged = tip                     # a fast-forward: the tree is the merge
+        merged, which = tip, "branch"   # a fast-forward: the tree is the merge
     else:
-        say("landing: merging main")
-        with timed(result, "merge"):
+        say(f"landing: merging main ({main_sha[:7]})")
+        with timed_add(result, "merge"):
             git(tree, "checkout", "--quiet", "--detach", main_sha)
             out = git(tree, "merge", "--no-ff", "--no-edit", "-m", message,
                       branch, check=False)
@@ -1903,24 +1994,68 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
                           files=conflicts,
                           detail=(out.stdout + out.stderr).strip()[-800:],
                           main=main_sha)
-            return result
-        merged = rev(tree, "HEAD")
-        say("landing: testing the merge")
-        with timed(result, "merge_tests"):
-            passed, command, out_text = run_tests(project, tree)
-        result["test"] = {"command": command, "passed": passed,
-                          "tail": out_text, "tree": "merge"}
-        if not passed:
-            git(tree, "checkout", "--quiet", "-f", branch, check=False)
-            result.update(reason="merged_tests", main=main_sha)
-            return result
-        git(tree, "checkout", "--quiet", branch)
-        git(tree, "merge", "--quiet", "--ff-only", merged)
-
-    if stop_for_cancel(cancelled, result, say):
-        # The tree may be on the merge; the branch is what is kept.
+            return None
+        merged, which = rev(tree, "HEAD"), "merge"
+    step = "branch_tests" if which == "branch" else "merge_tests"
+    say(f"landing: testing the {which} ({merged[:7]})"
+        + ("" if locked else ", outside the live lock"))
+    with timed_add(result, step):
+        passed, command, out_text = run_tests(project, tree)
+    result["test"] = {"command": command, "passed": passed, "tail": out_text,
+                      "tree": which}
+    if passed is None:
         git(tree, "checkout", "--quiet", "-f", branch, check=False)
-        return result
+        result.update(reason="no_tests")
+        return None
+    if not passed:
+        git(tree, "checkout", "--quiet", "-f", branch, check=False)
+        if which == "branch":
+            result.update(reason="branch_tests")
+            return None
+        # Which tree is broken is what the continuation needs: the branch is
+        # tested now, and only now that the merge has failed.
+        say("landing: the merge fails its tests; testing the branch alone")
+        with timed_add(result, "branch_tests"):
+            b_passed, b_command, b_out = run_tests(project, tree)
+        if b_passed is False:
+            result["test"] = {"command": b_command, "passed": False,
+                              "tail": b_out, "tree": "branch"}
+            result.update(reason="branch_tests")
+        else:
+            result.update(reason="merged_tests", main=main_sha)
+        return None
+    git(tree, "update-ref", TESTED_REF, merged)
+    git(tree, "checkout", "--quiet", branch)
+    return main_sha, tip, merged
+
+
+def _finish_nothing(project, record, keep_tree, result, main_sha) -> None:
+    """Nothing on the branch that main does not have -- either the job
+    committed nothing, or what it committed is already on main because it
+    landed earlier (a mid-job `--land`, or an earlier job of this tree). The
+    two read differently, and the second is a landing. Under the lock: the
+    memory is merged into the canonical checkout."""
+    earlier = landed_earlier(project, record)
+    result["memory"] = merge_memory_back(project, record)
+    if not keep_tree:
+        remove_tree(project, record, delete_branch=True)
+    if earlier:
+        result.update(state="landed_earlier", sha=earlier)
+    else:
+        result.update(state="nothing", sha=main_sha)
+
+
+def _finish_landed(project, repo, tree, branch, keep_tree, result, say,
+                   record, cancelled, tip, merged) -> None:
+    """Under the lock, with `main` where the tested merge was made: move the
+    branch and then `main` to the tested commit, merge the memory, push."""
+    if merged != tip:
+        git(tree, "merge", "--quiet", "--ff-only", merged)
+    git(tree, "update-ref", "-d", TESTED_REF, check=False)
+    if stop_for_cancel(cancelled, result, say):
+        # The branch may be on the merge; the branch is what is kept.
+        git(tree, "checkout", "--quiet", "-f", branch, check=False)
+        return
     if is_clone(tree):
         # The one write into the canonical repository a job's work causes:
         # its objects, fetched by the landing, which holds the live lock. No
@@ -1932,7 +2067,7 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
         result.update(reason="canonical", detail=(
             f"the canonical checkout refused to fast-forward {MAIN} to "
             f"{merged[:7]}: {(out.stderr or out.stdout).strip()[:400]}"))
-        return result
+        return
     result.update(state="landed", sha=merged)
     result["memory"] = merge_memory_back(project, record)
     if keep_tree and result["memory"]:
@@ -1957,7 +2092,69 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
         result["backup"] = backup
     if not keep_tree:
         remove_tree(project, record, delete_branch=True)
-    return result
+
+
+def _land_tested(project, repo, tree, branch, message, keep_tree, result,
+                 say, record, cancelled, lock, finish) -> None:
+    """A `main`-merging landing; see the section above."""
+    result["retests"] = 0
+    result["tested_under_lock"] = False
+    for attempt in range(OUTSIDE_TRIES + 1):
+        if attempt == OUTSIDE_TRIES:
+            # Lost every race: today's order, under the lock throughout.
+            say(f"landing: main moved under {OUTSIDE_TRIES} test runs in a "
+                f"row; testing under the live lock")
+            result["tested_under_lock"] = True
+            with lock():
+                say("landing: holding the live lock")
+                if stop_for_cancel(cancelled, result, say) \
+                        or not canonical_ready(repo, result):
+                    return
+                ready = _prepare(project, repo, tree, branch, message, result,
+                                 say, record, locked=True)
+                if ready is None:
+                    return
+                main_sha, tip, merged = ready
+                if merged is None:
+                    _finish_nothing(project, record, keep_tree, result, main_sha)
+                else:
+                    _finish_landed(project, repo, tree, branch, keep_tree,
+                                   result, say, record, cancelled, tip, merged)
+                finish()
+            return
+
+        if stop_for_cancel(cancelled, result, say):
+            return
+        ready = _prepare(project, repo, tree, branch, message, result, say,
+                         record)
+        if ready is None:
+            return
+        main_sha, tip, merged = ready
+        with lock():
+            say("landing: holding the live lock")
+            if stop_for_cancel(cancelled, result, say):
+                git(tree, "update-ref", "-d", TESTED_REF, check=False)
+                return
+            if not canonical_ready(repo, result):
+                git(tree, "update-ref", "-d", TESTED_REF, check=False)
+                return
+            now, tip_now = rev(repo, MAIN), branch_tip(tree, branch)
+            if now == main_sha and tip_now == tip:
+                if merged is None:
+                    _finish_nothing(project, record, keep_tree, result, main_sha)
+                else:
+                    _finish_landed(project, repo, tree, branch, keep_tree,
+                                   result, say, record, cancelled, tip, merged)
+                finish()
+                return
+        # Lost the race: the lock is already let go.
+        git(tree, "update-ref", "-d", TESTED_REF, check=False)
+        moved = (f"main moved ({main_sha[:7]} -> {(now or '?')[:7]})"
+                 if now != main_sha else
+                 f"the branch moved ({tip[:7]} -> {(tip_now or '?')[:7]})")
+        if merged is not None:
+            result["retests"] += 1
+        say(f"landing: {moved} while it was tested; merging again")
 
 
 def read_only_result(project: eng.Project, record: dict, *,
