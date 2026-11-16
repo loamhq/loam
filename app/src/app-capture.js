@@ -29,7 +29,13 @@ export async function captureAppPage({ url, dir, executable = 'chromium', timeou
     // Optional native-library/font paths are useful for a local installation;
     // credentials and the rest of the server environment are deliberately absent.
     for (const key of ['LD_LIBRARY_PATH', 'FONTCONFIG_PATH', 'FONTCONFIG_FILE']) if (process.env[key]) env[key] = process.env[key]
-    const args = ['--headless', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--mute-audio',
+    // WebGL through SwiftShader, the software renderer Chromium ships: a
+    // headless host has no GPU, and Debian's build no longer falls back to it
+    // by itself, so without these two a WebGL page stalls the compositor and
+    // its capture times out (caused 2026-11-16 on the host, where Alpine's
+    // image had rendered it). The pages are the install's own agents' sites.
+    const args = ['--headless', '--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+      '--disable-dev-shm-usage', '--hide-scrollbars', '--mute-audio',
       '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-extensions',
       '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`,
       ...(hostResolverRules ? [`--host-resolver-rules=${hostResolverRules}`] : []), '--remote-debugging-pipe', 'about:blank']

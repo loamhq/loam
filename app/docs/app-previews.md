@@ -59,8 +59,12 @@ errors/cross-origin document redirects, and checks the
 actual screenshot pixels in a clean target. A nearly uniform image (including
 an empty canvas after a graphics failure), or an image with more than 98% of its
 sampled pixels near black, selects the fallback. A tiny loading label therefore
-does not turn a black WebGL canvas into a preview. Page subresources
-can load normally. No interaction is performed inside the photographed page.
+does not turn a black WebGL canvas into a preview. WebGL draws through
+SwiftShader, the software renderer Chromium ships (`--use-angle=swiftshader
+--enable-unsafe-swiftshader`): a headless host has no GPU, and Debian's
+build no longer falls back to it by itself, so without the two flags a WebGL
+page stalled the compositor and its capture timed out (2026-11-16). Page
+subresources can load normally. No interaction is performed inside the photographed page.
 
 Each successfully stored capture emits an info-level structured log:
 `{"event":"app-preview","app":"<catalog name>","state":"ok","ms":1234}`.
