@@ -61,7 +61,9 @@ import loam_broker as cfg  # noqa: E402
 import loam_deploy  # noqa: E402
 
 APP = "loam-ui"
-CHECKOUT = lc.PROJECTS / "loam-ui"
+# The app is `app/` of Loam's own checkout since 2026-11-16.
+CHECKOUT = lc.ROOT
+APP_DIR = "app/public"
 APP_ADDR, APP_PORT = "127.0.0.1", 8081
 WENT_THROUGH = "**The restart went through.**"
 DEPLOY_TIMEOUT_S = 15 * 60
@@ -157,11 +159,11 @@ def running_commit() -> str:
 def served_match(commit: str) -> tuple[int, int, list[str]]:
     """Hash every file under public/ at the commit against what the app
     serves at the same path. (matched, total, the paths that differ)."""
-    names = git("ls-tree", "-r", "--name-only", commit, "public").stdout.decode().split()
+    names = git("ls-tree", "-r", "--name-only", commit, APP_DIR).stdout.decode().split()
     differ = []
     for name in names:
         want = git("show", f"{commit}:{name}").stdout
-        status, body, _ = get(APP_ADDR, APP_PORT, "/" + name[len("public/"):])
+        status, body, _ = get(APP_ADDR, APP_PORT, "/" + name[len(APP_DIR) + 1:])
         if status != 200 or body != want:
             differ.append(f"{name} ({status if status is not None else 'no answer'})")
     return len(names) - len(differ), len(names), differ
@@ -347,7 +349,7 @@ def render(by: str, *, fired: str, commit: str, rollback: str, dry: bool,
         lines.append("Not checked.")
     else:
         lines.append(f"{served[0]}/{served[1]} served files equal "
-                     f"`git show {served_commit}:public/*`.")
+                     f"`git show {served_commit}:app/public/*`.")
         lines += [f"- differs: {d}" for d in served[2]]
     lines += ["", "## Through the relay", ""]
     lines += [f"- {r}" for r in relays] or ["Not called."]

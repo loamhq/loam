@@ -172,7 +172,7 @@ def check(label, ok, detail=""):
 
 # -- the registry against the page's relay -----------------------------------
 
-source = os.environ.get("LOAM_UI_SOURCE", str(cfg.lc.PROJECTS / "loam-ui"))
+source = os.environ.get("LOAM_UI_SOURCE", str((Path(__file__).resolve().parent.parent / "app")))
 if source == "none":
     print("SKIP  the page's relay: LOAM_UI_SOURCE=none")
 else:
@@ -288,13 +288,16 @@ else:
               declared_opts == set(real_cat) and real_cat, (declared_opts, real_cat))
         check("every choice of every option loam-ui's themes declare validates",
               not refused, refused[:3])
-        ui = cfg.lc.PROJECTS / "loam-ui" / "public"
+        # The app is Loam's `app/` folder since 2026-11-16: the shipped layer
+        # is wherever the box's app source is (lib/loam_plugins.ui_checkout).
+        import loam_plugins as _lp  # noqa: PLC0415
+        ui = (_lp.ui_checkout() or Path("/nonexistent")) / "public"
         check("on the box the shipped layer is the loam-ui checkout's theme "
               "and plugin folders",
               # and, since 2026-11-14 (L9), the runtime's own plugins/
               dirs[:2] == [ui / "themes", ui / "plugins"]
               and dirs[2:] == [Path(settings.lc.ROOT) / "plugins"]
-              or source != str(cfg.lc.PROJECTS / "loam-ui"), dirs)
+              , dirs)
         enums = {k: r["enum"] for k, r in rows.items() if k.endswith(".theme")}
         check("the handoff states the theme of both kinds", len(enums) == 2, enums)
         check("the themes read from loam-ui's folders are the handoff's ids",

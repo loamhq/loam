@@ -1226,11 +1226,14 @@ def ui_checkout() -> Path | None:
     and without this its Shipped layer had no themes or page plugins)."""
     record = cfg.AGENTS_ROOT / "projects" / f"{UI_PROJECT}.json"
     try:
-        checkout = json.loads(record.read_text(encoding="utf-8")).get("checkout")
+        data = json.loads(record.read_text(encoding="utf-8"))
+        checkout, sub = data.get("checkout"), data.get("subdir")
     except (OSError, ValueError, AttributeError):
-        checkout = None
+        checkout, sub = None, None
+    # Since 2026-11-16 the app project is the `app/` folder of Loam's own
+    # checkout (`subdir`); the app's source is that folder.
     if checkout:
-        return Path(checkout)
+        return Path(checkout) / sub if isinstance(sub, str) and sub.strip("/") else Path(checkout)
     bundled = cfg.AGENTS_ROOT / "app"
     return bundled if (bundled / "public").is_dir() else None
 

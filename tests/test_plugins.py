@@ -922,7 +922,7 @@ for where in ("none", str(TMP / "no-such-table.js")):
     check(f"no core table ({'none' if where == 'none' else 'unreadable'}): each "
           f"theme's own choices stand", took is not None)
 os.environ["LOAM_UI_CORE_OPTIONS"] = saved_core
-real_table = cfg.lc.PROJECTS / "loam-ui" / P.CORE_TABLE
+real_table = (Path(__file__).resolve().parent.parent / "app") / P.CORE_TABLE
 if real_table.is_file():
     real_core = P.parse_core_options(real_table.read_text(encoding="utf-8"))
     check("loam-ui's own theme-css.js has a core table the host can read",
@@ -1113,7 +1113,7 @@ check("files: and its light cover beside it", ctype == "image/webp", (path, ctyp
 ok, said = refuses(lambda: P.file_for("evening", ["e.webp"]), "")
 check("files: another image beside them is not", ok, said)
 
-real_themes = cfg.lc.PROJECTS / "loam-ui" / "public" / "themes"
+real_themes = (Path(__file__).resolve().parent.parent / "app") / "public" / "themes"
 # Held to the core table those themes ship beside, not this file's fixture:
 # loam-ui 05bcfb8 (2026-11-13) gave five themes `signature` and `face-content`,
 # which the fixture above does not know, and the check read them as broken.
