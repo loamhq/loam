@@ -127,6 +127,16 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   second rewrite the base was in neither the branch nor `main`, and the
   merge brought two scrubbed commits back. Reflog expiry (90 days) bounds
   it; the base is still asked as a fallback.
+- **The replay is cherry-picks, planned once** (`replay_plan`). It skips
+  any of the job's commits whose change `main` already has, by patch id,
+  and drops any pick that still comes out empty. `rebase --exec 'commit
+  --amend'` was wrong: an emptied pick stopped it ("would make it empty"),
+  and a dropped pick left the amend rewriting the commit before it.
+  `rev-list --cherry-mark main...tip` marks the matches with `=`.
+- **A landing at session end runs the launcher's code as it was when the
+  job started**, not what the job landed mid-job. To fix the landing
+  itself, land mid-job, then rebase your own branch onto `main`, so the
+  final landing never needs the code you just changed.
 - **The landing runs the push gate first**, on what it would add to
   `main` (`main..merged`), before the tests. A refused branch is reason
   `gate`, and the automatic continuation rewrites it. A brief's title

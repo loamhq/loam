@@ -539,38 +539,86 @@ def stale_points(repo: Path, tree: Path, record: dict, main_sha: str,
     return [c for c in dict.fromkeys(candidates) if c in brings]
 
 
-def replay_if_rewritten(repo: Path, tree: Path, branch: str, record: dict,
-                        main_sha: str, say) -> str | None:
-    """Replay the branch onto `main` if it carries commits a rewrite of
-    `main` left behind. Returns None (nothing to do, or done) or why it
-    could not."""
-    tip = branch_tip(tree, branch)
-    if not tip:
-        return None
+def replay_plan(repo: Path, tree: Path, record: dict, main_sha: str,
+                tip: str) -> dict | None:
+    """What a landing replays, and the only place that says it: None when
+    the branch carries nothing a rewrite left behind; else ``point`` (the
+    newest old `main` commit in the branch), ``commits`` (the job's own
+    after it, oldest first, merges left out), ``skipped`` (those of them
+    whose change `main` already has, by patch id -- a commit that landed
+    mid-job and was then rewritten), and ``apart`` (old `main` commits on
+    another line than ``point``, which make the job's own not one range)."""
     stale = stale_points(repo, tree, record, main_sha, tip)
     if not stale:
         return None
     point = stale[0]
     apart = [c for c in stale[1:] if not is_ancestor(tree, c, point)]
-    if apart:
+    commits = git(tree, "rev-list", "--reverse", "--topo-order", "--no-merges",
+                  tip, f"^{point}", f"^{main_sha}", check=False).stdout.split()
+    # `--cherry-pick` over main...tip marks, on the branch's side, each
+    # commit a commit of main's side matches by patch id.
+    marked = git(tree, "rev-list", "--left-right", "--cherry-mark", "--no-merges",
+                 f"{main_sha}...{tip}", f"^{point}", check=False).stdout.split()
+    same = {m[1:] for m in marked if m.startswith("=")}
+    return {"point": point, "apart": apart,
+            "commits": [c for c in commits if c not in same],
+            "skipped": [c for c in commits if c in same]}
+
+
+def replay_if_rewritten(repo: Path, tree: Path, branch: str, record: dict,
+                        main_sha: str, say) -> str | None:
+    """Replay the branch onto `main` if it carries commits a rewrite of
+    `main` left behind (``replay_plan``). Returns None (nothing to do, or
+    done) or why it could not.
+
+    Each commit of the plan is cherry-picked in turn onto `main` in a
+    detached HEAD; one that comes out empty (its change is already there
+    by another route than its patch id says) is skipped, not committed.
+    The result is re-authored as the checkout's identity (``reauthor``) and
+    the branch moved to it. Until 2026-11-16 this was `git rebase --onto
+    ... --exec 'commit --amend --reset-author'`: a pick that came out empty
+    stopped the rebase ("would make it empty"), and one that rebase dropped
+    left the exec amending the commit before it -- `main`'s own tip, when
+    it was the first."""
+    tip = branch_tip(tree, branch)
+    if not tip:
+        return None
+    plan = replay_plan(repo, tree, record, main_sha, tip)
+    if not plan:
+        return None
+    point = plan["point"]
+    if plan["apart"]:
         return (f"the branch carries old `{MAIN}` commits on more than one line "
-                f"({point[:7]}, {', '.join(c[:7] for c in apart[:3])}), so which "
-                f"commits are the job's own is not one range; rebase the job's "
-                f"own commits onto `{MAIN}` by hand")
+                f"({point[:7]}, {', '.join(c[:7] for c in plan['apart'][:3])}), "
+                f"so which commits are the job's own is not one range; rebase "
+                f"the job's own commits onto `{MAIN}` by hand")
     say(f"landing: main was rewritten since the branch took {point[:7]}; "
-        f"replaying the job's own commits onto it")
+        f"replaying the job's own commits onto it ({len(plan['commits'])}, "
+        f"{len(plan['skipped'])} already on main)")
     name, email = identity(repo)
-    if git(tree, "symbolic-ref", "--short", "HEAD", check=False).stdout.strip() != branch:
-        git(tree, "checkout", "--quiet", branch, check=False)
-    out = git(tree, "-c", f"user.name={name}", "-c", f"user.email={email}",
-              "rebase", "--quiet", "--autostash", "--onto", main_sha, point, branch,
-              "--exec", f"git -c user.name='{name}' -c user.email='{email}' "
-                        f"commit --amend --no-edit --quiet --reset-author",
-              check=False, timeout=600)
-    if out.returncode != 0:
-        git(tree, "rebase", "--abort", check=False)
-        return ((out.stderr or out.stdout).strip()[-600:]
-                or f"git rebase exited {out.returncode}")
+    ident = ["-c", f"user.name={name}", "-c", f"user.email={email}"]
+    git(tree, "checkout", "--quiet", "--detach", main_sha)
+    for sha in plan["commits"]:
+        out = git(tree, *ident, "cherry-pick", "--allow-empty",
+                  "--keep-redundant-commits", sha, check=False, timeout=600)
+        if out.returncode != 0:
+            conflicts = git(tree, "diff", "--name-only", "--diff-filter=U",
+                            check=False).stdout.split()
+            git(tree, "cherry-pick", "--abort", check=False)
+            git(tree, "checkout", "--quiet", "-f", branch, check=False)
+            return (f"replaying {sha[:7]} conflicts in "
+                    f"{', '.join(conflicts) or '?'}: "
+                    + ((out.stderr or out.stdout).strip()[-400:]
+                       or f"git cherry-pick exited {out.returncode}"))
+        head = rev(tree, "HEAD")
+        if rev(tree, f"{head}^{{tree}}") == rev(tree, f"{head}~1^{{tree}}") \
+                and rev(tree, f"{sha}^{{tree}}") != rev(tree, f"{sha}~1^{{tree}}"):
+            git(tree, "reset", "--quiet", "--hard", "HEAD~1")   # came out empty
+    new = rev(tree, "HEAD")
+    if new != main_sha and name and email:
+        new = reauthor(tree, main_sha, new, name, email)
+    git(tree, "update-ref", f"refs/heads/{branch}", new, tip)
+    git(tree, "checkout", "--quiet", "-f", branch)
     record["base"] = main_sha
     return None
 

@@ -30,7 +30,11 @@ identities the landed commits carry.
     `main` was rewritten lands only its own work, read from the reflog of
     `main` and not the record's base: once when the rewrite came after the
     base, once in the 2026-11-16 sequence (the base itself rewritten, a
-    replay, more mid-job landings, a second rewrite).
+    replay, more mid-job landings, a second rewrite);
+  - the replay skips a commit whose change main already has (a mid-job
+    landing then rewritten, the record's base deciding; or the same patch
+    landed by another job), and the dry check (`replay_plan`) names
+    exactly what the landing then does.
 
 Run: python3 tests/test_push_gate.py
 """
@@ -401,6 +405,80 @@ try:
           (False, False, False))
     check("predates (b): main is the rewritten main plus the job's last commit",
           subjects, ["add k3.txt", "scrubbed k2", "add k1.txt", "base 1", "start"])
+
+    def subjects_of(project) -> list[str]:
+        return git(project.root, "log", "--format=%s", "main").splitlines()
+
+    def plan_now(project, record):
+        """The dry check: what the landing's replay will do, read before it."""
+        tree = Path(record["path"])
+        git(tree, "fetch", "-q", "origin", "+main:main")
+        if not hasattr(wt, "replay_plan"):
+            return "no dry check"     # code from before 2026-11-16's second fix
+        fresh = wt.read_record(project.jobs / record["job"])
+        plan = wt.replay_plan(project.root, tree, fresh, git(tree, "rev-parse", "main"),
+                              git(tree, "rev-parse", record["branch"]))
+        return {k: [git(tree, "log", "-1", "--format=%s", c) for c in plan[k]]
+                for k in ("commits", "skipped")} if plan else None
+
+    # (c) The 2026-11-16 landing that stuck: a job lands mid-job, main is
+    # rewritten (the job's landed commit with it), the job commits again,
+    # and the final landing replays from the record's base -- here because
+    # the reflog of main is gone. The landed commit's change is already on
+    # main as its rewritten twin; replaying it comes out empty, and the
+    # replay must skip it, not stop.
+    proj, origin = make("stuck")
+    git(proj.root, "config", "loam.pushGate", "true")
+    (proj.root / "b.txt").write_text("b\n")
+    git(proj.root, "add", "-A")
+    git(proj.root, "commit", "-qm", "unscrubbed base")
+    git(proj.root, "push", "-q", "origin", "main")
+    root_commit = git(proj.root, "rev-list", "--max-parents=0", "main")
+    job = start(proj, "20261116-100000-0000000f")
+    commit(job, "m1.txt", "one\n", msg="unscrubbed m1")
+    first = land_from_disk(proj, job, keep_tree=True)
+    rewrite_main(proj, root_commit, "unscrubbed", "scrubbed")   # the base too
+    git(proj.root, "reflog", "expire", "--expire=now", "--all")
+    commit(job, "m2.txt", "two\n")
+    plan = plan_now(proj, job)
+    result = land_from_disk(proj, job)
+    check("stuck (c): the mid-job landing landed", first["state"], "landed")
+    check("stuck (c): the dry check names what the replay skips",
+          plan, {"commits": ["add m2.txt"], "skipped": ["unscrubbed m1"]})
+    check("stuck (c): the final landing lands and pushes",
+          (result["state"], result.get("reason"), result["pushed"]),
+          ("landed", None, True))
+    check("stuck (c): main is the rewritten main plus the job's new commit",
+          subjects_of(proj), ["add m2.txt", "scrubbed m1", "scrubbed base", "start"])
+
+    # (d) The reflog kept, and main already has one of the job's later
+    # changes by another route (another job landed the same patch) before
+    # the rewrite: the replay skips it and lands the rest.
+    proj, origin = make("same-patch")
+    git(proj.root, "config", "loam.pushGate", "true")
+    job = start(proj, "20261116-100000-00000010")
+    commit(job, "n1.txt", "one\n", msg="unscrubbed n1")
+    land_from_disk(proj, job, keep_tree=True)
+    commit(job, "fix.txt", "the same fix\n", msg="the fix, by this job")
+    commit(job, "n3.txt", "three\n")
+    other = start(proj, "20261116-100000-00000011")
+    commit(other, "fix.txt", "the same fix\n", msg="the fix, by another job")
+    land(proj, other)
+    rewrite_main(proj, job["base"], "unscrubbed", "scrubbed")
+    rewritten = git(proj.root, "rev-parse", "main")
+    plan = plan_now(proj, job)
+    result = land_from_disk(proj, job)
+    check("same patch (d): the dry check skips the change main has",
+          plan, {"commits": ["add n3.txt"], "skipped": ["the fix, by this job"]})
+    check("same patch (d): the final landing lands and pushes",
+          (result["state"], result.get("reason"), result["pushed"]),
+          ("landed", None, True))
+    check("same patch (d): main is the rewritten main plus the job's own",
+          subjects_of(proj),
+          ["add n3.txt", "the fix, by another job", "scrubbed n1", "start"])
+    check("same patch (d): main's own commits are untouched (a fast-forward)",
+          (in_main(proj, rewritten), origin_main(origin) == git(proj.root, "rev-parse", "main")),
+          (True, True))
 finally:
     wt.WORKTREES, loam_lock.LOCK_DIR = saved
     shutil.rmtree(root, ignore_errors=True)
