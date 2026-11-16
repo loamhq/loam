@@ -489,12 +489,10 @@ OnFailure=loam-wake-failed@%N.service
 
 [Service]
 Type=oneshot
-# Identical to the reflection wake's containment, and for the identical
-# reason: two OOM kills in 2026-08 were taken by the GLOBAL killer, which
-# chooses a victim by badness score rather than by who grew. These do not stop
-# the box filling up; they stop a run being an unattributed contributor to it.
-MemoryHigh=1G
-MemoryMax=1536M
+# Identical to the reflection wake's: no memory ceiling (2026-11-16; MemoryHigh
+# 1G / MemoryMax 1536M until then), and the agents' place in the kernel's OOM
+# order (lib/loam_config.py), so a runaway run goes before Loam's core.
+OOMScoreAdjust={lc.AGENT_OOM_SCORE_ADJ}
 # Pinned, not drifting. The CLI updated itself once with nobody choosing it;
 # upgrades are an operator decision taken with the changelog open.
 Environment=DISABLE_AUTOUPDATER=1

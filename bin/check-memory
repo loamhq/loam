@@ -97,24 +97,13 @@ SESSION_MB = 440
 # sessions is ordinary use now that the per-agent cap is sized to hold them.
 EXTRA_SESSIONS_WARN = 3
 
-# The per-agent cap in loam-rc-*.service. Named here so this script can say how
-# close an agent is to it; it is NOT this script's number to set.
-#
-# Raised from 900 to 1400 on 2026-09-03 so that an agent can hold two sessions
-# without being throttled the whole time it is being used. Five agents at this
-# cap exceed the box, deliberately: the per-agent caps are no longer a
-# collective guarantee, and THIS SCRIPT is a load-bearing part of what replaced
-# it. If it stops running, nothing is watching the global picture.
-#
-# Since 2026-11-06 the unit's cap is 19% of RAM (gen-rc-units), so it grows
-# when the box is resized; this follows it.
-RC_CAP_MB = int(Path("/proc/meminfo").read_text().split()[1]) // 1024 * 19 // 100
 
 # The session broker carries every web conversation in its own cgroup,
-# admitted by the box's memory (lib/loam_broker.py, since 2026-11-09), against
-# MemoryHigh in loam-session-broker.service (80% of RAM). Past MemoryHigh the kernel throttles and
-# reclaims every session at once, so 90% of it is the warning. The High is
-# read from the cgroup, never restated here.
+# admitted by the box's memory (lib/loam_broker.py, since 2026-11-09). Until
+# 2026-11-16 the unit had a MemoryHigh (80% of RAM), past which the kernel
+# throttles every session at once, and 90% of it was a warning. It has none
+# now, so the warning stays quiet; it is kept because the High is read from
+# the cgroup, never restated here, and would speak again if one came back.
 BROKER_UNIT = "loam-session-broker"
 BROKER_HIGH_WARN = 0.90
 
@@ -301,11 +290,6 @@ def main() -> int:
                 f"{name}: Remote Control server is running with no session -- "
                 f"the one it pre-creates at start did not stay up, so the app "
                 f"has nothing open for {name}")
-        elif cur > RC_CAP_MB * 0.85:
-            flag = "NEAR CAP"
-            warnings.append(
-                f"{name}: {cur} MB is {cur * 100 // RC_CAP_MB}% of the "
-                f"{RC_CAP_MB} MB per-agent cap ({len(sess)} sessions)")
         rows.append((name, cur, peak, len(sess), flag))
 
     wakes_that_fit = headroom // WAKE_PEAK_MB

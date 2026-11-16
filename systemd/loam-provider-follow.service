@@ -24,5 +24,7 @@ ExecStart=@ROOT@/bin/provider-follow run
 # A run waits for a quiet broker (never cutting a turn) and then watches for
 # an hour, so it has no clock.
 TimeoutStartSec=infinity
-MemoryHigh=2G
-MemoryMax=3G
+# No memory ceiling (2026-11-16; MemoryHigh 2G / MemoryMax 3G until then):
+# the smoke runs are agent runs, at the agents' place in the OOM order
+# (lib/loam_config.py).
+OOMScoreAdjust=@AGENT_OOM@

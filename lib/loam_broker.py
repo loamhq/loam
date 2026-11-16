@@ -150,8 +150,9 @@ SERVICE = "loam-session-broker.service"
 # have as much RAM and size as they need."
 #
 # So a start asks the box (`memory()`): the kernel's MemAvailable, and the
-# broker cgroup's own room under its MemoryMax, each less what the starts in
-# flight will take. A start is admitted while that leaves `MEMORY_RESERVE_MB`
+# broker cgroup's own room under a MemoryMax if it has one (since 2026-11-16
+# it has none, and that term is None), each less what the starts in flight
+# will take. A start is admitted while that leaves `MEMORY_RESERVE_MB`
 # for everything that is not a chat -- the system, sshd, Caddy, Authelia,
 # docker, the RC servers, the persona browser, the engineer jobs and wakes
 # yet to start -- plus `SESSION_START_MB` for the new process. Short, the
@@ -159,8 +160,8 @@ SERVICE = "loam-session-broker.service"
 # every session is busy is a start refused (`Broker.make_room`). An idle
 # session leaves memory on its own after `CLASSIC_IDLE_S` or `THREAD_IDLE_S`
 # and resumes by id. A session is not sized: it grows as large as it needs,
-# and what keeps a runaway one from taking the box with it is the unit's
-# MemoryMax and the OOM order (`CHILD_OOM_SCORE_ADJ`), not a per-session cap.
+# and what keeps a runaway one from taking the box with it is the OOM order
+# (`CHILD_OOM_SCORE_ADJ`), not a cap (the unit's MemoryMax went 2026-11-16).
 def _box_mb() -> int:
     try:
         for line in Path("/proc/meminfo").read_text().splitlines():
@@ -190,14 +191,14 @@ MEMORY_RESERVE_MB = max(2048, BOX_MB * 12 // 100)
 # 123 on the CX53 (~31,600 MB). Memory refuses long before either.
 MAX_SESSIONS = max(16, BOX_MB // 256)
 
-# Every chat's process tree is made the kernel's first choice when memory
-# runs out (2026-11-09): the unit runs at OOMScoreAdjust=500 and each CLI the
-# broker spawns is raised to this, which its MCP servers inherit. So the
-# killer takes a chat before the broker (500), an RC server, engineer job or
-# wake (the user manager's 200) or anything of the system's (0). Raising
-# one's own child is unprivileged; lowering is not, which is why the broker
-# raises the chats rather than lowering itself.
-CHILD_OOM_SCORE_ADJ = 800
+# Every chat's process tree is at the agents' place in the kernel's OOM order
+# (2026-11-09; lib/loam_config.py since 11-16): each CLI the broker spawns is
+# raised to this, which its MCP servers inherit, while the unit -- and so the
+# broker's own process -- runs at the core's 100. So the killer takes a chat,
+# a job or a wake (all 800) before the broker, and anything of the system's
+# (0) after that. Raising one's own child is unprivileged; lowering is not,
+# which is why the broker raises the chats rather than lowering itself.
+CHILD_OOM_SCORE_ADJ = lc.AGENT_OOM_SCORE_ADJ
 
 
 def _meminfo_mb(key: str) -> int | None:

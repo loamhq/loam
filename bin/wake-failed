@@ -194,9 +194,9 @@ def main() -> int:
         f"{lane} died mid-run without recording anything (started {started}; "
         f"systemd result={result} code={code} status={status}). Whatever it "
         f"had already written to disk stands; the rest of the run is lost. "
-        f"result=oom-kill means the box ran out of memory"
-        + (", or this job reached its own MemoryMax + MemorySwapMax and the "
-           "launcher was killed with the session." if agent == "engineer" else ".")
+        f"result=oom-kill means the box ran out of memory and the kernel's "
+        f"OOM order took this run first; no agent run has a memory ceiling "
+        f"of its own (2026-11-16)."
     )
     print(reason, file=sys.stderr)
     payload = {

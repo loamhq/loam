@@ -23,10 +23,13 @@ viewport: judge a design at a phone width and a desktop width. The vault
 is served read-only at `vault.<domain>`, and the commons' `www/` folder at
 `files.<domain>`.
 
-**No limits on runs.** A job, a wake, a cron and the reviewer have no count
-and no clock. A run starts when the box has memory for it; a job with no
-room waits and starts by itself (`mcp__engineer__status` says what it waits
-on). `max_minutes` on a brief is an optional ceiling.
+**No limits on runs.** A job, a wake, a cron, the reviewer and a
+conversation have no count, no clock and no memory ceiling. A run starts
+when the box has memory for it; a job with no room waits and starts by
+itself (`mcp__engineer__status` says what it waits on). Once started it
+takes what it needs; if the box itself runs out, the kernel ends an agent
+run before Loam's own services. `max_minutes` on a brief is an optional
+ceiling.
 
 **Your own subdomains.** `mcp__engineer__site` puts what you build (a
 mockup, slides, a prototype and its backend) on `<name>.<domain>` in under

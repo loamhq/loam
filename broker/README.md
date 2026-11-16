@@ -778,17 +778,21 @@ reserve because sessions grew -- the reaper also ends the least recently
 used idle session, one per minute's pass (`Broker.relieve`), before the
 kernel has to choose.
 
-**No per-session ceiling, and the wall around them.** A session grows as
-large as it needs. `loam-session-broker.service` has `MemoryHigh=80%` and
-`MemoryMax=88%` -- not a budget for N chats but the line a runaway one
-cannot cross -- and every chat's CLI is started under `choom -n 800`
-(`CHILD_OOM_SCORE_ADJ`), which its MCP servers inherit. The broker itself is
-at the unit's 500, the user manager's other units (RC servers, engineer
-jobs, wakes) at 200, the system at 0. So when memory runs out, in the
-cgroup or on the box, the kernel ends a chat first, then the broker (back in
-5 s, every id resumable), and reaches sshd, Caddy, Authelia, docker and the
-RC servers last. Until 11-09 the unit was `MemoryHigh=28%`/`MemoryMax=32%`,
-sized for a cap of four.
+**No ceiling, and an order.** A session grows as large as it needs, and
+since 2026-11-16 nothing bounds the chats together either:
+`loam-session-broker.service` has no `MemoryHigh` or `MemoryMax`. What
+stands if the box truly runs out is the kernel's OOM order
+(`lib/loam_config.py`): every chat's CLI is started under `choom -n 800`
+(`CHILD_OOM_SCORE_ADJ`, the agents' `AGENT_OOM_SCORE_ADJ`), which its MCP
+servers inherit, as is every other agent run on the box -- engineer jobs,
+wakes, crons, the reviewer, the RC servers. The broker itself runs at the
+unit's 100 (`CORE_OOM_SCORE_ADJ`, the lowest a user unit may take), the
+plugins gateway too, and Caddy, Authelia, the app and the claim service at
+the system's 0. So the kernel ends an agent run first, and reaches the
+broker and the rest of Loam's core only if one of them is itself the
+runaway. Until 11-16 the unit was `MemoryHigh=80%`/`MemoryMax=88%` at
+`OOMScoreAdjust=500`, which ranked the broker above every job and wake;
+until 11-09 `MemoryHigh=28%`/`MemoryMax=32%`, sized for a cap of four.
 
 #### The title, which is the transcript's title
 
