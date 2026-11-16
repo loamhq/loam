@@ -5046,6 +5046,21 @@ posted at the persona's next turn before that turn's own reply, marked
 a full record that fails to write, is a line in the broker's log
 (`threads: …`) and a number on `GET /v1/threads/writer`.
 
+**The stream's order is posting order (2026-11-16).** A message's id is
+taken, and its `message.done` published, when it is posted: a person's when
+it is sent, a reply at its harness turn's `result`, not when its words
+began. So a message sent while a member works (steered into its turn, or
+queued) has a lower id than the reply that took it in, and comes first on
+the stream, in the thread read and on a reconnect's `after=` replay. Words
+streamed before that message can still post after it: they belong to a
+reply whose `result` had not come. `turn.started` and the first
+`message.delta` can therefore come before messages that the reply will
+settle below; a client that reserves a reply's place at `turn.started` has
+to move the finished reply to its posting place, which the read gives.
+`tests/test_thread_completion_order.py` proves this through the stream route
+(the owner, 11-16 in t-153f9c43: "if the final message actually gets posted
+after other messages, then it should be ordered that way").
+
 **A turn that said nothing is not a reply (2026-11-10).** A persona message
 exists in the record and on the stream only when the persona said
 something; its text is what it said after its last step, or, when steps

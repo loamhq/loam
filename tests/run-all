@@ -52,6 +52,17 @@ def main() -> int:
     if not os.environ.get("LOAM_SCHEDULE_STATE"):
         schedules = tempfile.mkdtemp(prefix="loam-test-schedules-")
         os.environ["LOAM_SCHEDULE_STATE"] = schedules
+    # And host settings of its own, empty: the box's own say what a project
+    # engineer runs on (`engineers` in state/broker/settings.json,
+    # lib/loam_engineer.py). On 2026-11-16 at 16:43:43Z the default became
+    # Antigravity mid-landing, and test_engineer_walled, whose stub stands in
+    # for the Claude CLI only, launched a REAL Antigravity session instead
+    # (the stub never ran, its receipt and commit never came);
+    # test_engineer_codex read 'antigravity' where its record said codex.
+    settings = None
+    if not os.environ.get("LOAM_HOST_SETTINGS"):
+        settings = tempfile.mkdtemp(prefix="loam-test-settings-")
+        os.environ["LOAM_HOST_SETTINGS"] = os.path.join(settings, "settings.json")
     # No test's broker object reads the box's real usage through a real CLI
     # (lib/loam_provider_usage.py); the ones that build a Server say so too.
     os.environ["LOAM_USAGE_READS"] = "off"
@@ -71,6 +82,8 @@ def main() -> int:
             shutil.rmtree(locks, ignore_errors=True)
         if schedules:
             shutil.rmtree(schedules, ignore_errors=True)
+        if settings:
+            shutil.rmtree(settings, ignore_errors=True)
 
 
 def run_all() -> int:
