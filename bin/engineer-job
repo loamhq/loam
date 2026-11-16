@@ -2571,8 +2571,23 @@ def push_pending(project: eng.Project) -> dict | None:
     if lands_by_pr(project):
         return None
     repo = wt.canonical(project)
-    if not repo.is_dir() or not wt.git(repo, "remote", check=False).stdout.split():
+    if not repo.is_dir():
         return None
+    if not wt.has_remote(repo):
+        # A checkout with only an off-box copy (wt.BACKUP): pushed again
+        # when `main` has moved past the last backup push, which a failed
+        # landing push leaves it.
+        if not wt.backup_pending(repo):
+            return None
+        try:
+            with loam_lock.live(project.name, "recover push", wait_seconds=0):
+                local = wt.rev(repo, wt.MAIN)
+                pushed = wt.push_backup(repo)
+        except loam_lock.Busy:
+            return None
+        return {"project": project.name, "push": (local or "")[:7],
+                "remote": wt.BACKUP, "pushed": pushed is True,
+                "error": None if pushed is True else pushed}
     try:
         with loam_lock.live(project.name, "recover push", wait_seconds=0):
             fetched = wt.git(repo, "fetch", "--quiet", "origin", wt.MAIN, check=False,

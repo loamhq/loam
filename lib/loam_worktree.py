@@ -156,6 +156,44 @@ def rev(repo: Path, ref: str) -> str | None:
     return out.stdout.strip() or None
 
 
+# A canonical checkout's remotes (2026-11-16). `origin` is where `main` is
+# pushed and, on an install from a release, where its updates come from
+# (lib/loam_update.py reads release tags there). `backup` is an off-box copy
+# and nothing else: every landing pushes `main` to it, mapped by its own
+# `remote.backup.push` refspec when it has one, and nothing ever fetches from
+# it, so it can never be mistaken for the release source. A box whose code
+# lives nowhere else names its copy `backup`, not `origin`: caused by the
+# first install's own checkout (L16, 2026-11-15), which had no origin, and
+# whose old repository's `main` is unrelated history.
+BACKUP = "backup"
+# The last `main` the backup push took, so the recovery sweep can tell
+# without the network whether one is pending. Local only; nothing fetches it.
+BACKUP_MARK = "refs/loam/backup-pushed"
+
+
+def has_remote(repo: Path, name: str = "origin") -> bool:
+    return git(repo, "remote", "get-url", name, check=False).returncode == 0
+
+
+def push_backup(repo: Path) -> bool | str | None:
+    """Push `main` to the `backup` remote: True, git's words on a failure, or
+    None when there is no such remote. Tags and other branches are not pushed."""
+    if not has_remote(repo, BACKUP):
+        return None
+    sha = rev(repo, MAIN)
+    out = git(repo, "push", "--quiet", BACKUP, MAIN, check=False, timeout=180)
+    if out.returncode != 0:
+        return (out.stderr or out.stdout).strip()[:400] or f"exit {out.returncode}"
+    if sha:
+        git(repo, "update-ref", BACKUP_MARK, sha, check=False)
+    return True
+
+
+def backup_pending(repo: Path) -> bool:
+    """Whether `main` has moved past the last backup push (or none was made)."""
+    return has_remote(repo, BACKUP) and rev(repo, MAIN) != rev(repo, BACKUP_MARK)
+
+
 def is_ancestor(repo: Path, older: str, newer: str) -> bool:
     return git(repo, "merge-base", "--is-ancestor", older, newer,
                check=False).returncode == 0
@@ -1028,7 +1066,7 @@ def sync_with_origin(repo: Path) -> str | None:
     why it could not, or None. A fetch that fails is not a refusal -- the
     push will say so if the remote moved -- but a `main` that has diverged
     from its remote is, because no merge here may rewrite either."""
-    if not git(repo, "remote", check=False).stdout.split():
+    if not has_remote(repo):
         return None
     if git(repo, "fetch", "--quiet", "origin", MAIN, check=False,
            timeout=120).returncode != 0:
@@ -1350,7 +1388,7 @@ def cut_release(repo: Path, result: dict, tag: str) -> dict:
     if git(repo, "check-ref-format", f"refs/tags/{tag}",
            check=False).returncode != 0:
         return release_refused(tag, f"{tag!r} is not a valid tag name", sha)
-    if not git(repo, "remote", check=False).stdout.split():
+    if not has_remote(repo):
         return release_refused(tag, "the repository has no remote to push "
                                     "a tag to", sha)
     if state == "landed" and result.get("pushed") is not True:
@@ -1558,12 +1596,15 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
         # The tree goes on; what it has now is already in the canonical copy.
         shutil.rmtree(memory_base(record), ignore_errors=True)
         shutil.copytree(tree / "memory", memory_base(record), symlinks=True)
-    if git(repo, "remote", check=False).stdout.split():
+    if has_remote(repo):
         with timed(result, "push"):
             push = git(repo, "push", "--quiet", "origin", MAIN, check=False,
                        timeout=180)
         result["pushed"] = True if push.returncode == 0 else (
             (push.stderr or push.stdout).strip()[:400])
+    backup = push_backup(repo)
+    if backup is not None:
+        result["backup"] = backup
     if not keep_tree:
         remove_tree(project, record, delete_branch=True)
     return result
@@ -1791,6 +1832,12 @@ def receipt_section(project: eng.Project, job_id: str, result: dict | None) -> s
                 "No remote to push to." if pushed is None else
                 f"**The push failed**: `{pushed}` — `main` moved on this box "
                 f"and origin is behind it.")
+        backup = result.get("backup")
+        if backup is True:
+            push += f" Backed up off the box to `{BACKUP}`."
+        elif backup:
+            push += (f" **The backup push failed**: `{backup}`; the next "
+                     f"landing or recovery sweep tries again.")
         memory = (f" Memory merged back: {', '.join(result['memory'])}."
                   if result.get("memory") else "")
         kept = ("The worktree stays: the session is still in it, and its "
