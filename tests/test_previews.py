@@ -191,8 +191,15 @@ check("bin/deploy hands the base and the address",
       env.get("LOAM_PREVIEW_BASE") == f"http://{dep.PREVIEW_SUFFIX}:{dep.PREVIEW_PORT}"
       and env.get("LOAM_PREVIEW_ADDR") == brk.BIND_ADDR, str({k: v for k, v in env.items()
                                                               if "PREVIEW" in k}))
+# loam-ui is tracked; loam-ui-next is one install's own app, kept out of the
+# repository by `.git/info/exclude` (first release L16), so a fresh clone --
+# a job's tree, a release checkout -- has no copy, and its check runs only
+# where the install has one.
 for app in ("loam-ui", "loam-ui-next"):
-    compose = (AGENTS / "deploy" / app / "compose.yaml").read_text(encoding="utf-8")
+    path = AGENTS / "deploy" / app / "compose.yaml"
+    if app != "loam-ui" and not path.is_file():
+        continue
+    compose = path.read_text(encoding="utf-8")
     check(f"{app}'s compose passes both to the page",
           'APPS_PREVIEW_BASE: "${LOAM_PREVIEW_BASE:?set by bin/deploy}"' in compose
           and 'APPS_PREVIEW_ADDR: "${LOAM_PREVIEW_ADDR:?set by bin/deploy}"' in compose)
