@@ -7,6 +7,12 @@ in the code's comments and `docs/`. Add to this file as you learn by
 building: what you found, which premise expired when, what a change costs.
 Write for a reader you have never met.
 
+**This file ships.** It is in every release and in the public history, so
+write here only what is true of Loam on any install. Notes about one
+install's own machine -- its hosts, its people, its migrations, its remotes
+-- go in `engineer/memory/box.md` beside this file, which the checkout keeps
+untracked (`.git/info/exclude`) and which never leaves the box with the code.
+
 ## The shape
 
 - **One config file.** `/etc/loam/loam.toml` (or `$LOAM_CONFIG`) holds every
@@ -43,3 +49,73 @@ Write for a reader you have never met.
   user start in that user's home.
 - **Redact by value shape, not by key name.** A redaction keyed on
   `token|key|secret` misses `pem`.
+
+## Working on a live install
+
+- **Inside a job, the checkout and the other job trees are read-only bind
+  mounts.** The checkout's untracked provisioned files and a kept tree's
+  removal both go through `systemd-run --user --wait --pipe`, which runs in
+  the host mount namespace; so does any change to the checkout's
+  `.git/config`.
+- **A tree can be proved at the live path without moving anything:**
+  `sudo unshare -m --propagation private`, `mount --bind NEW ROOT`, then run
+  `check-drift`, `gen-deploy --dry-run` and a `docker compose config` as the
+  install's user inside. The generators read the new code with every live
+  path true, and nothing outside the namespace sees it.
+- **A change to the generators must be re-rendered, not just compared.**
+  `drift-watch` compares against the previous night's state, so a
+  comment-only change to every rendered unit is posted as new drift unless
+  the units are regenerated (`gen-units`, `gen-rc-units`, each agent's wake
+  unit, `provision --reviewer`) and `loam-check-drift.service` is run once.
+  Comment-only unit changes need a `daemon-reload` and no restart.
+- **`gen-rc-units` has no `--help`.** Any argument starting with `-` is
+  ignored and the run is live: `gen-rc-units --help` writes every rc unit.
+  Use `--dry-run`.
+
+## 2026-11-16 — a correct record can still draw in the wrong order
+
+- **When the page and the record disagree about order, replay the broker's
+  own stream through the page's reducer before guessing.** The thread
+  stream gives every `message.done` in posting order with rising ids
+  (`tests/test_thread_completion_order.py`, through `thread_stream` itself;
+  set `LOAM_ORDER_DUMP` to keep the events). loam-ui's `applyThreadEvent`
+  can be imported in plain node from its `public/` and fed those events. That
+  is how the "final reply above my second message" report was pinned to the
+  page: it put a reply into the slot it reserved at `turn.started`, above
+  anything sent during the turn.
+- **A reply's place in the record is its `result`, not its first word.**
+  Words streamed before a person's message can belong to a reply posted after
+  it (the end-of-turn race). Expect that order; it is the record's.
+- **Chromium for loam-ui's browser tests** needs a dozen libraries the box
+  lacks: `apt-get download` + `dpkg-deb -x` into the job's scratch, plus a
+  wrapper that sets `LD_LIBRARY_PATH`, named by `LOAM_CHROME` (loam-ui's own
+  memory has the list). Playwright 1.65.1 matches the cached chromium-1234.
+- **The suite must not read the box's engineer settings.** `tests/run-all`
+  gives every test an empty `LOAM_HOST_SETTINGS`. Without it, a test that
+  builds a project engineer resolves its runtime from the live
+  `state/broker/settings.json`: when the owner made Antigravity the default
+  mid-landing (2026-11-16), `test_engineer_walled` launched a real Antigravity
+  session in place of its Claude stub, and a branch failed for a setting.
+  Inside a job session `test_engineer.py` also fails (it writes the real,
+  read-only jobs directory); the landing runs it outside and it passes.
+
+## Where a landing pushes
+
+- **`origin` gets `main` on every landing; `backup`, when a checkout has
+  one, gets it too** (`lib/loam_worktree.py`, `_land_locked`,
+  `push_backup`). They differ on purpose: `lib/loam_update.py` reads release
+  tags from `origin`, so an off-box copy is never named that. `backup` takes
+  `main` only, by its `remote.backup.push` refspec, and is never fetched;
+  `refs/loam/backup-pushed` marks what it last took, so the recovery sweep
+  retries a failed backup push without touching the network otherwise.
+- **A checkout whose `origin` is shared turns the push gate on**
+  (`git config loam.pushGate true`, and `loam.pushDeny` naming a deny list in
+  `bin/scrub-check`'s format, kept outside the repository). Every commit
+  `origin` lacks must then be the checkout's own identity, with no denied
+  word in what it adds, its paths or its message; otherwise the push is held
+  and `main` stays landed locally. A word added and later removed is still
+  held: the history keeps it.
+- **A history rewritten before its first push** leaves running jobs on the
+  old commits. The landing notices (the job's recorded base is not in
+  `main`) and replays only the job's own commits onto the new `main`
+  (`replay_if_rewritten`), so a merge never brings the old history back.
