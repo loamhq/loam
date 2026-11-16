@@ -879,11 +879,18 @@ Done once, on 2026-11-15 (first release L14): the base domain became
   old wildcard is gone. Past `until`, `bin/check-drift` reports them as due;
   removing them is deleting the table, `sudo bin/gen-deploy`, and deleting
   exactly those A records.
+- **Paths that outlive the move.** `[[forward]]` keeps named paths of one
+  old host (a GitHub App's callback URLs, which no API can change) answering
+  with a 308 to the domain after `[moved]` is gone; the rest of that host
+  404s. While `[moved]` still lists the host its whole-host redirect covers
+  the paths and nothing extra renders. Its A record is not one to delete,
+  and check-drift's "due to go" list says so (2026-11-15).
 - **What does not follow.** Anything the browser keeps per origin (the
   app's theme and device settings in local storage) starts empty at the new
   name, and a passkey enrolled at `auth.<old>` does not sign in at
   `auth.<new>`. The GitHub App's registered callback URLs name the old app
-  host until they are edited on GitHub; the redirect covers them meanwhile.
+  host until they are edited on GitHub; `[[forward]]` covers them after the
+  redirects go.
 
 ## An install's edge, the claim and the relay
 
