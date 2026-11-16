@@ -925,7 +925,10 @@ def _loopback_port(compose_path: Path, name: str, doc: dict) -> int:
 
 SERVICE_UNIT_PREFIX = "loam-app@"
 SERVICE_UNIT = Path("/etc/systemd/system/loam-app@.service")
-SERVICE_RELEASES = Path("/var/lib/loam/app")
+# Not under /var/lib/loam, which an install keeps root-only (its own state,
+# edge.json): the unit's uid could not enter it (caused in the 2026-11-16
+# rehearsal, CHDIR: Permission denied).
+SERVICE_RELEASES = Path("/var/lib/loam-releases")
 SERVICE_ENV_DIR = Path("/run/loam/app")
 SERVICE_STATE = Path("/var/lib/loam-app")      # StateDirectory=loam-app/<app>
 SERVICE_NODE = "/usr/bin/node"

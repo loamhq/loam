@@ -185,9 +185,9 @@ and a static host, and runs the way the broker does:
 ```
 /etc/systemd/system/loam-app@.service      the unit, one template (gen-deploy,
                                            lib/loam_deploy.service_unit)
-/var/lib/loam/app/<app>/releases/<sha>/    the app's folder at a commit, root's
-/var/lib/loam/app/<app>/current            -> the release that runs
-/var/lib/loam/app/<app>/previous           -> the one before it
+/var/lib/loam-releases/<app>/releases/<sha>/    the app's folder at a commit, root's
+/var/lib/loam-releases/<app>/current            -> the release that runs
+/var/lib/loam-releases/<app>/previous           -> the one before it
 /var/lib/loam-app/<app>/                   its state: speech audio, page previews
 /run/loam/app/<app>.env                    its environment, root-only, in memory
 ```

@@ -12,7 +12,16 @@ have never met.
   the repository's root); it never sees a path of the server or a
   credential.
 - **The domain is the install's.** Nothing in the app names a domain; the
-  deploy layer hands the app its origins (`bin/deploy`, `origins_env`).
+  deploy layer hands the app its origins (`bin/deploy`, `service_env`).
+- **It runs on the host, not in a container** (since 2026-11-16): a systemd
+  unit with its own uid, a read-only system and a state directory
+  (`SPEECH_DIR`, `APP_MEDIA_DIR`). It listens on `APP_HOST`, loopback by
+  default. Nothing in the app may assume `/storage`, a container or a
+  writable `/tmp` beyond its own.
+- **Page previews** start the host's Chromium headless shell through `choom`
+  at `APP_PREVIEW_OOM_SCORE_ADJ`, with WebGL drawn by SwiftShader
+  (`--use-angle=swiftshader --enable-unsafe-swiftshader`): without those two,
+  a WebGL page stalls the screenshot until the capture times out.
 - **Themes and page plugins** live in `public/themes/` and
   `public/plugins/` and form the Shipped layer with the runtime's own
   `plugins/` (`docs/plugins.md` at the root).

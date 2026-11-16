@@ -685,7 +685,10 @@ def preflight(project: eng.Project, p: dict[str, Path], brief_meta: dict) -> str
             f"integration, and the integration is not installed. Connect "
             f"GitHub from the app's Integrations screen."
         )
-    if not project.platform and not lands_by_pr(project) and (
+    # A folder of Loam's own checkout (the app, since 2026-11-16) has no key
+    # of its own: its landing pushes Loam's `main`, through Loam's remote and
+    # its push gate, as the platform's landing does.
+    if not project.platform and not lands_by_pr(project) and not project.subdir and (
         project.deploy_key is None or not project.deploy_key.is_file()
     ):
         return (

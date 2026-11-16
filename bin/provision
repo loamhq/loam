@@ -1991,24 +1991,30 @@ def project_render(name: str, project_file: str | None,
     }
 
 
-def harness_tracked(checkout: Path) -> bool:
+def harness_tracked(checkout: Path, subdir: str | None = None) -> bool:
     """Whether this checkout's repository still commits the harness. True
     only of projects provisioned before 2026-10-01 that have not been
     recreated; their role keeps the sentence that the memory is committed."""
     return subprocess.run(
-        ["git", "-C", str(checkout), "ls-files", "--error-unmatch", "role.md"],
+        ["git", "-C", str(checkout), "ls-files", "--error-unmatch",
+         f"{subdir}/role.md" if subdir else "role.md"],
         capture_output=True, text=True, check=False).returncode == 0
 
 
 EXCLUDE_HEADER = "# This checkout's engineering setup: on disk, never in the repository."
 
 
-def exclude_harness(checkout: Path) -> bool:
-    """Append HARNESS_PATHS to `.git/info/exclude`, once. True if written."""
+def exclude_harness(checkout: Path, subdir: str | None = None) -> bool:
+    """Append HARNESS_PATHS (under a folder project's folder) to
+    `.git/info/exclude`, once. True if written."""
     exclude = checkout / ".git" / "info" / "exclude"
     current = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
     have = {line.strip() for line in current.splitlines()}
-    missing = [f"/{p}" for p in HARNESS_PATHS if f"/{p}" not in have]
+    pre = f"/{subdir}" if subdir else ""
+    # A folder project's memory is the repository's own (Loam's app keeps
+    # `app/memory/` in Loam's history), so it is never excluded.
+    paths = [p for p in HARNESS_PATHS if not (subdir and p == "memory/")]
+    missing = [f"{pre}/{p}" for p in paths if f"{pre}/{p}" not in have]
     if not missing:
         return False
     exclude.parent.mkdir(parents=True, exist_ok=True)
@@ -2034,17 +2040,22 @@ def rerender_project(name: str) -> None:
     record_path = eng.project_record_path(name)
     if not record_path.is_file():
         die(f"{name} is not registered ({record_path} missing)")
-    root = eng.load_project_record(record_path).root
-    if harness_tracked(root):
-        die(f"{root} commits its harness; a re-render there changes the "
+    project = eng.load_project_record(record_path)
+    root = project.root
+    # A folder project (the app, `app/` of Loam's checkout, since
+    # 2026-11-16) has its harness in that folder, excluded the same way.
+    sub = project.subdir
+    home = root / sub if sub else root
+    if harness_tracked(root, sub):
+        die(f"{home} commits its harness; a re-render there changes the "
             f"project's repository, which is its engineer's. Nothing written.")
     rev, date = craft_source_rev(), datetime.now().strftime("%Y-%m-%d")
     files = project_render(name, None, rev, date)
     for rel in ("CLAUDE.md", "role.md", ".claude/settings.json"):
-        target = root / rel
+        target = home / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         write_if_changed(target, files[rel])
-    if exclude_harness(root):
+    if exclude_harness(root, sub):
         print(f"  excluded the harness in {root / '.git/info/exclude'}")
 
 

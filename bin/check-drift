@@ -584,6 +584,8 @@ def check_projects(findings: list, prov) -> list[str]:
         if project.pull_request:
             for finding in adopted_harness(root, prov.ADOPT_CLASHES):
                 findings.append((f"project {project.name} history", str(root), finding))
+        elif project.subdir:
+            pass   # a folder of Loam's checkout pushes through Loam's remote
         elif project.deploy_key is None or not project.deploy_key.is_file():
             findings.append((f"project {project.name} deploy key",
                              str(project.deploy_key),
@@ -591,14 +593,18 @@ def check_projects(findings: list, prov) -> list[str]:
         remote = subprocess.run(
             ["git", "-C", str(root), "remote", "get-url", "origin"],
             capture_output=True, text=True, check=False).stdout.strip()
-        if remote != project.remote:
+        if remote != project.remote and not project.subdir:
             findings.append((f"project {project.name} remote", str(root),
                              f"origin is {remote!r}, registry says {project.remote!r}"))
 
-        live_role = root / "role.md"
+        # A folder project (the app, since 2026-11-16) keeps its harness in
+        # its folder of the checkout; everything below reads it there.
+        sub = project.subdir
+        home = root / sub if sub else root
+        live_role = home / "role.md"
         mark = prov.craft_mark_of(live_role.read_text(encoding="utf-8")) if live_role.is_file() else None
         rev, date = mark if mark else (prov.craft_source_rev(), "0000-00-00")
-        tracked = prov.harness_tracked(root) and not project.pull_request
+        tracked = prov.harness_tracked(root, sub) and not project.pull_request
         try:
             expected = prov.project_render(project.name, None, rev, date, tracked)
         except prov.CraftError as exc:
@@ -626,7 +632,9 @@ def check_projects(findings: list, prov) -> list[str]:
         if not tracked:
             exclude = root / ".git" / "info" / "exclude"
             have = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.is_file() else set()
-            missing = [f"/{p}" for p in prov.HARNESS_PATHS if f"/{p}" not in have]
+            pre = f"/{sub}" if sub else ""
+            missing = [f"{pre}/{p}" for p in prov.HARNESS_PATHS
+                       if f"{pre}/{p}" not in have and not (sub and p == "memory/")]
             if missing:
                 findings.append((
                     f"project {project.name} exclude", str(exclude),
@@ -637,16 +645,16 @@ def check_projects(findings: list, prov) -> list[str]:
         if expected is None:
             continue
         for rel in ("CLAUDE.md", "role.md", ".claude/settings.json"):
-            compare(findings, f"project {project.name} {rel}", root / rel, expected[rel])
+            compare(findings, f"project {project.name} {rel}", home / rel, expected[rel])
         for rel in ("project.md", "memory/MEMORY.md"):
-            live = root / rel
+            live = home / rel
             if not live.is_file() or not live.read_text(encoding="utf-8").strip():
                 findings.append((f"project {project.name} {rel}", str(live),
                                  "missing or empty."))
-        if (root / "project.md").is_file() and "(Filled at provisioning" in (
-            root / "project.md").read_text(encoding="utf-8"):
+        if (home / "project.md").is_file() and "(Filled at provisioning" in (
+            home / "project.md").read_text(encoding="utf-8"):
             findings.append((
-                f"project {project.name} project.md", str(root / "project.md"),
+                f"project {project.name} project.md", str(home / "project.md"),
                 "still the skeleton: the platform engineer has not written it "
                 "from the brief. The engineer will run without knowing what "
                 "it owns.",

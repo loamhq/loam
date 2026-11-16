@@ -166,3 +166,33 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Implicit files are not read on resume**: a conversation with its turn's
   implicit file moved away resumed with what it had been told, and each turn
   writes a new one. Idle is the newest mtime of the `.db`/`brain/` files.
+
+## 2026-11-16 — the app left Docker and joined the repository
+
+- **The app is `app/` and runs as `loam-app@<app>.service`** from a release
+  of the checkout (`bin/deploy <app> up <commit>`; deploy/README.md,
+  "Loam's own app"). A record with `[service]` is that kind of app; its
+  environment is `bin/deploy`'s `service_env`, written to `/run` by the
+  unit's `ExecStartPre`. `tests/test_app.py` runs the app's own suite.
+- **systemd reads `EnvironmentFile=` before `ExecStartPre` as well as
+  before `ExecStart`.** A file the pre step writes must be optional (`-`) or
+  the first start, and every boot, fails before the step can run.
+- **A host process that connects to the broker bridge's address arrives
+  with the box's public address as its source**, though `ip route get` says
+  otherwise. Caddy's `remote_ip` check refused it; the previews' internal
+  route binds loopback too for that reason. Check a source with the access
+  log, not with the routing table.
+- **Debian's `chromium-headless-shell` no longer falls back to software
+  WebGL**: a WebGL page stalls `Page.captureScreenshot` until the capture
+  times out. `--use-angle=swiftshader --enable-unsafe-swiftshader` draws it.
+  Compare a host capture with what the container gets the same day, not
+  with its cached picture: a site changes under its cache.
+- **A deploy-layer change is read by the broker too.** It parses the records
+  for the Apps list (`/v1/apps`), so a record kind the running broker does
+  not know breaks the Apps section until the broker restarts on the new
+  code. Land, then `restart-broker --when-idle`, before anything else.
+- **A folder project** (`"subdir"` in a project record) is one folder of a
+  larger repository, briefed like any project engineer: its session runs in
+  the folder, its landing refuses a branch that touches anything outside it
+  (`outside_scope`, reason `scope`), and a folder of Loam's own checkout
+  lands under Loam's live lock and pushes Loam's `main`, with no deploy key.

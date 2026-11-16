@@ -26,7 +26,7 @@ Loam's own app reaches its own unit.
 `[service]` table (deploy/loam-ui) runs as `loam-app@<app>.service`, the
 unit lib/loam_deploy.service_unit renders, from a release of its checkout:
 `build` unpacks `git archive <commit>:<context>` into
-/var/lib/loam/app/<app>/releases/<sha>/, and `up` points `current` at it and
+/var/lib/loam-releases/<app>/releases/<sha>/, and `up` points `current` at it and
 restarts the unit, waits for GET /up, and puts the release before back if the
 new one does not answer. The verbs and their result line are the same, so
 the launcher's deploy after a landing (lib/loam_autodeploy) and a rollback by
@@ -559,9 +559,9 @@ def up(app: dep.App, ref: str, forward_only: bool = False) -> None:
 # Loam's own app, run by Loam (2026-11-16): lib/loam_deploy.py, "Loam's own
 # app, run by Loam", says why; this is how.
 #
-#   /var/lib/loam/app/<app>/releases/<sha>/   one per commit unpacked, root's
-#   /var/lib/loam/app/<app>/current           -> releases/<sha>, what runs
-#   /var/lib/loam/app/<app>/previous          -> releases/<sha>, the one before
+#   /var/lib/loam-releases/<app>/releases/<sha>/   one per commit unpacked, root's
+#   /var/lib/loam-releases/<app>/current           -> releases/<sha>, what runs
+#   /var/lib/loam-releases/<app>/previous          -> releases/<sha>, the one before
 #
 # `current` and `previous` are symlinks swapped by rename, so the unit never
 # finds the path missing. A release is the app's folder at that commit and
@@ -605,7 +605,10 @@ def release(app: dep.App, ref: str) -> str:
         print(f"  release {full[:7]} is unpacked; not again")
         return full
     dest.parent.mkdir(parents=True, exist_ok=True)
-    os.chmod(dep.SERVICE_RELEASES, 0o755)
+    # Every folder down to the release is open to the unit's dynamic uid,
+    # whatever root's umask made them.
+    for d in (dep.SERVICE_RELEASES, service_dir(app), dest.parent):
+        os.chmod(d, 0o755)
     tmp = dest.with_name(f".{full}.{os.getpid()}")
     subprocess.run(["rm", "-rf", str(tmp)], check=False)
     tmp.mkdir(mode=0o755)

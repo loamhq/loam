@@ -120,11 +120,15 @@ def session_dir(project: eng.Project, tree: Path) -> Path:
     """Where the session runs: the tree's `engineer/` for Loam, whose engineer
     project is a subdirectory of the repository, and the tree itself for a
     project engineer."""
-    return tree / "engineer" if project.platform else tree
+    if project.platform:
+        return tree / "engineer"
+    return tree / project.subdir if project.subdir else tree
 
 
 def memory_rel(project: eng.Project) -> str:
-    return "engineer/memory/MEMORY.md" if project.platform else "memory/MEMORY.md"
+    if project.platform:
+        return "engineer/memory/MEMORY.md"
+    return f"{project.subdir}/memory/MEMORY.md" if project.subdir else "memory/MEMORY.md"
 
 
 def test_command(project: eng.Project) -> str | None:
@@ -579,7 +583,11 @@ PLATFORM_HARNESS = tuple(f"engineer/{name}" for name in
 
 
 def harness_names(project: eng.Project) -> tuple[str, ...]:
-    return PLATFORM_HARNESS if project.platform else HARNESS
+    if project.platform:
+        return PLATFORM_HARNESS
+    if project.subdir:
+        return tuple(f"{project.subdir}/{name}" for name in HARNESS)
+    return HARNESS
 
 
 def seed_harness(project: eng.Project, record: dict) -> list[str]:
@@ -1267,6 +1275,16 @@ def run_tests(project: eng.Project, tree: Path) -> tuple[bool | None, str, str]:
 # Landing.
 # ---------------------------------------------------------------------------
 
+def outside_scope(project: eng.Project, tree: Path, base: str, tip: str) -> list[str]:
+    """The paths a folder project's branch changes outside its folder, since
+    it left `main` (2026-11-16). [] for a whole-repository project."""
+    if not project.subdir:
+        return []
+    changed = git(tree, "diff", "--name-only", "--no-renames", f"{base}...{tip}",
+                  check=False).stdout.split()
+    return [p for p in changed if not p.startswith(project.subdir + "/")]
+
+
 def merge_memory_back(project: eng.Project, record: dict) -> list[str]:
     """Fold an untracked memory/ back into the canonical checkout, three-way
     by union against the copy the tree began with. Returns what changed."""
@@ -1600,7 +1618,7 @@ def land(project: eng.Project, record: dict, message: str, *,
                 f"{loam_lock.describe(holder)}")
 
         wall0, cpu0 = time.monotonic(), cpu_seconds()
-        with loam_lock.live(project.name, f"land {branch}", on_wait=on_wait):
+        with loam_lock.live(project.live_lock, f"land {branch}", on_wait=on_wait):
             result.setdefault("timing", {})["lock_wait"] = {
                 "wall_s": round(time.monotonic() - wall0, 2),
                 "cpu_s": round(cpu_seconds() - cpu0, 2)}
@@ -1828,6 +1846,12 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
         result["reauthored"] = True
     tip = branch_tip(tree, branch)
     result["head"] = head_note(tree, branch)
+    outside = outside_scope(project, tree, main_sha, tip)
+    if outside:
+        result.update(reason="scope", files=outside, detail=(
+            f"{project.name} is the `{project.subdir}/` folder of this repository, "
+            f"and its commits touch {len(outside)} path(s) outside it"))
+        return result
 
     # Ancestry is asked of the tree: a clone has both commits, the canonical
     # repository does not have the branch's until the landing fetches it.
@@ -1983,6 +2007,8 @@ REASONS = {
                  "could not be replayed onto the new main",
     "error": "a step of the landing failed",
     "cancelled": "the job was cancelled",
+    "scope": "its commits change files outside the folder of the repository "
+             "this project is, and a folder project changes that folder alone",
     "harness": "its commits touch the engineer's harness, which never enters "
                "this repository's history",
     "pull_request": "the broker could not push the branch or open the pull request",
@@ -2018,6 +2044,12 @@ def continuation_brief(project: eng.Project, job_id: str, result: dict) -> str:
                         f"uncommitted changes in {files}. Commit what belongs "
                         f"in the change and remove what does not; the launcher "
                         f"lands the branch when you finish."),
+        "scope": (f"Your branch `{branch}` did not land: it changes {files}, "
+                  f"outside the folder of the repository this project is. Take "
+                  f"those changes out of your branch (revert them in a new "
+                  f"commit) and say in your receipt what they were for: a change "
+                  f"there is the platform's, briefed to Loam. The launcher lands "
+                  f"the branch when you finish."),
         "branch_tests": (f"Your branch `{branch}` did not land: the tests fail "
                          f"on it. Make them pass on the branch and commit; the "
                          f"launcher lands it when you finish."),

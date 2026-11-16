@@ -64,7 +64,7 @@ the server. Once the repository is public, none of this is needed.
 | 7 | providers | Claude Code and Codex at the versions this release was tested on (`loam_install.TESTED`, installed by the same code `provider-follow` uses), Antigravity by Google's own script; then `provider-memory pin` and `check` |
 | 8 | Iris | `bin/library seed-starter`: Iris and the hello thread (docs/starter.md) |
 | 9 | units | the broker's bridge (`loam-broker`) and its wall; the system units; the user units from the templates; the broker and the plugin gateway started; every timer armed without firing (`loam_units.arm_timer`); waits for the broker to answer |
-| 10 | the edge | `gen-deploy --init-secrets` (the login's secrets, no user), `gen-deploy`, the app (`bin/deploy loam-ui up <commit>`: the commit's `app/` unpacked to `/var/lib/loam/app/loam-ui/` and run as `loam-app@loam-ui.service`, no container), `loam-claim.service`; then one `loam-await-dns` run: if the name resolves here the hosts go up now, otherwise the timer is left polling and the records are printed. Exits 0 either way |
+| 10 | the edge | `gen-deploy --init-secrets` (the login's secrets, no user), `gen-deploy`, the app (`bin/deploy loam-ui up <commit>`: the commit's `app/` unpacked to `/var/lib/loam-releases/loam-ui/` and run as `loam-app@loam-ui.service`, no container), `loam-claim.service`; then one `loam-await-dns` run: if the name resolves here the hosts go up now, otherwise the timer is left polling and the records are printed. Exits 0 either way |
 | 11 | the claim | mints the one-time token (`/etc/loam/claim`, root 0600) and prints the link |
 
 ## What an install's configuration says: `[edge]`

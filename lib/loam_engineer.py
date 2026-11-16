@@ -458,6 +458,33 @@ class Project:
         return "engineer" if self.platform else f"engineer-{self.name}"
 
     @property
+    def subdir(self) -> str | None:
+        """The folder of its checkout this project is, when it is one folder
+        of a larger repository (`"subdir"` in the record, since 2026-11-16):
+        the app, `app/` of Loam's own checkout. Its jobs run in that folder of
+        their tree, and a landing refuses a commit that touches anything
+        outside it, so an engineer every persona may brief changes the app
+        and never the runtime around it. None for a whole-repository project."""
+        if self.platform:
+            return None
+        value = self.record.get("subdir")
+        if not isinstance(value, str):
+            return None
+        value = value.strip("/")
+        if not re.fullmatch(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*", value) or ".." in value.split("/"):
+            return None
+        return value
+
+    @property
+    def live_lock(self) -> str:
+        """The live lock a landing of this project takes: its own name, or,
+        for a folder of Loam's own checkout, Loam's, because the two land on
+        one `main`."""
+        if self.subdir and self.root.resolve() == lc.ROOT.resolve():
+            return "Loam"
+        return self.name
+
+    @property
     def pull_request(self) -> bool:
         """Lands by pull request on a repository Loam does not own
         (`"landing": "pull_request"` in the record, since 2026-10-06): no

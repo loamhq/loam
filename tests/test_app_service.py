@@ -3,7 +3,7 @@
 bin/deploy's release, `up`, rollback and prune, and the unit's environment.
 
 Nothing here touches systemd, Docker or sudo. A real git repository stands
-in for the checkout, a scratch directory for /var/lib/loam/app, and the
+in for the checkout, a scratch directory for /var/lib/loam-releases, and the
 unit's state and health are answered in memory:
 
   the record     `[service]` is a kind of its own: one key, a loopback
@@ -313,11 +313,11 @@ check("an EnvironmentFile line keeps quotes, spaces, JSON and backslashes whole"
 
 # -- the unit ----------------------------------------------------------------------------------
 
-dep.SERVICE_RELEASES = Path("/var/lib/loam/app")
+dep.SERVICE_RELEASES = Path("/var/lib/loam-releases")
 unit = dep.service_unit()
 need = ["DynamicUser=yes", "CapabilityBoundingSet=\n", "NoNewPrivileges=yes", "ProtectHome=yes",
         "ProtectSystem=strict", f"OOMScoreAdjust={lc.CORE_OOM_SCORE_ADJ}",
-        "EnvironmentFile=-/run/loam/app/%i.env", "WorkingDirectory=/var/lib/loam/app/%i/current",
+        "EnvironmentFile=-/run/loam/app/%i.env", "WorkingDirectory=/var/lib/loam-releases/%i/current",
         f"ExecStartPre=+/usr/bin/env PYTHONPYCACHEPREFIX=/var/cache/loam/pycache /usr/bin/python3 {CHECKOUT}/bin/deploy %i env",
         "SyslogIdentifier=%i"]
 check("the unit template carries the wall, the core's OOM score and its env from /run",
