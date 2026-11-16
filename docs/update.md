@@ -30,11 +30,15 @@ Told apart by the checkout, not by a setting:
   is on.
 - **Development** (a contributor's box). HEAD has local commits. The
   update merges the tag into the branch. The local commits stay, and the
-  merge commit is named `Merge Loam release <v>`.
+  merge commit is named `Merge Loam release <v>`. A box that develops
+  Loam itself has `origin` at the development repository: its landings
+  push `main` there (through the push gate, `CONTRIBUTING.md`), and the
+  update reads only `origin`'s release tags, never its `main`. A tag the box
+  cut itself is already in its `main`, so it reads as not newer.
 
 "The running release" is the `version` in `manifest.json` at the
 repository's top. A checkout with no `manifest.json` is not a release
-install and is never updated this way (the first install's `agents` checkout today).
+install and is never updated this way.
 
 **What the installer must leave** (L12): a git clone of `loam`, with its
 `origin` set to where releases come from, checked out at the release tag.
