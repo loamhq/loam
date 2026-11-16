@@ -22,7 +22,10 @@ install, not pushed (`push_gate` in `lib/loam_worktree.py`).
 1. Fork the repository, or push a branch if you have write access, and open
    a pull request against `main`.
 2. Run `python3 tests/run-all` before you ask for review, and say what you
-   ran. A change to the app also runs `npm test` in `app/`.
+   ran. A change to the app also runs `npm test` in `app/`. The suite needs
+   a Linux box with systemd: `tests/test_schedule.py` starts a user manager
+   of its own for its timers (`tests/private_systemd.py`) and never touches
+   yours.
 3. Keep the change to one purpose. Say what must be true afterwards and how
    you checked it, the way the engineer's receipts do.
 4. Nothing personal goes in: no names, addresses, hosts, keys or captured
