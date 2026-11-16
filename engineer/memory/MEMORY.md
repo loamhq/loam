@@ -196,3 +196,25 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   the folder, its landing refuses a branch that touches anything outside it
   (`outside_scope`, reason `scope`), and a folder of Loam's own checkout
   lands under Loam's live lock and pushes Loam's `main`, with no deploy key.
+
+## 2026-11-16 — landing tests outside the live lock
+
+- **A landing merges and tests in the job's tree, then takes the lock only
+  to check `main`, fast-forward and push** (`_land_tested` in
+  lib/loam_worktree.py). A `main` that moved meanwhile means merging and
+  testing again; after `OUTSIDE_TRIES` (3) lost races it tests under the
+  lock, the old order. Telemetry: `lock_held`, `retests`,
+  `tested_under_lock`. Before, a Loam landing held the lock 385-866 s (one
+  or two ~7-minute suites); the branch-only run is now made only when the
+  merged tree fails, to say which tree is broken.
+- **`loam_lock.live` polls every 5 s.** A waiter on a short hold sleeps the
+  full poll after it; landings pass `poll=LAND_POLL_S` (0.5 s).
+- **A second systemd user manager runs fine as the same uid**, timers fire,
+  even inside the landing's `unshare -U` namespace: `XDG_RUNTIME_DIR` and
+  `XDG_CONFIG_HOME`/`XDG_DATA_HOME` in a temp dir, `SYSTEMD_UNIT_PATH` =
+  its runtime dir + `/usr/lib/systemd/user` (without that, "Unit
+  basic.target not found" or "Result: resources"), no
+  `DBUS_SESSION_BUS_ADDRESS`. It ignores SIGTERM; `systemctl --user exit`
+  stops it. **It moves every process of the cgroup it starts in into its
+  `init.scope`**: start it in a child cgroup of its own
+  (tests/private_systemd.py does), or it reorganises the calling unit.

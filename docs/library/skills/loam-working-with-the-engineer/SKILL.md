@@ -15,6 +15,6 @@ description: The essentials of handing work to the engineer - whether to, at whi
 
 5. **Check before trusting it.** Read what actually changed, not just the summary, and look at it yourself before it goes live.
 
-6. **One job per project at a time**, and send the next as soon as one comes back.
+6. **Run jobs side by side**: send each one when it is ready. Hold one back only when both change the same feature or screen, or one depends on the other, and then say in the brief which one wins.
 
 7. **Tell the owner the outcome in a few lines:** what is done and what they will see.

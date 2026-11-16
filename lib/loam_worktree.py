@@ -1640,7 +1640,7 @@ def land(project: eng.Project, record: dict, message: str, *,
                                          "sha": result.get("sha"),
                                          "detail": str(exc)[:400]}
 
-        lock = lambda: live_held(project, branch, result, on_wait)  # noqa: E731
+        lock = lambda: live_held(project, branch, result, on_wait, say)  # noqa: E731
         if project.pull_request:
             with lock():
                 say("landing: holding the live lock")
@@ -1904,9 +1904,11 @@ def add_time(result: dict, step: str, wall: float, cpu: float) -> None:
 
 
 @contextmanager
-def live_held(project: eng.Project, branch: str, result: dict, on_wait):
+def live_held(project: eng.Project, branch: str, result: dict, on_wait,
+              say=None):
     """The project's live lock for one span, its wait and hold timed into
-    ``lock_wait`` and ``lock_held`` (both summed over the landing)."""
+    ``lock_wait`` and ``lock_held`` (both summed over the landing), and the
+    span's hold said as the lock is let go."""
     wall0, cpu0 = time.monotonic(), cpu_seconds()
     with loam_lock.live(project.live_lock, f"land {branch}", on_wait=on_wait,
                         poll=LAND_POLL_S):
@@ -1915,8 +1917,11 @@ def live_held(project: eng.Project, branch: str, result: dict, on_wait):
         try:
             yield
         finally:
-            add_time(result, "lock_held", time.monotonic() - wall1,
-                     cpu_seconds() - cpu1)
+            held = time.monotonic() - wall1
+            add_time(result, "lock_held", held, cpu_seconds() - cpu1)
+            if say:
+                say(f"landing: let go of the live lock after {held:.1f} s "
+                    f"(waited {wall1 - wall0:.1f} s)")
 
 
 @contextmanager
