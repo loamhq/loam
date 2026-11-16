@@ -961,7 +961,7 @@ def service_unit() -> str:
 # Loam's own app, one instance per deployment record with a [service]
 # table: loam-app@<app>.service. Started, restarted and rolled back by
 # `sudo bin/deploy <app> up <commit>`, which unpacks that commit's app into
-# {SERVICE_RELEASES}/<app>/<sha>/ and points `current` at it; this unit
+# {SERVICE_RELEASES}/<app>/releases/<sha>/ and points `current` at it; this unit
 # runs whatever `current` names. deploy/README.md, "Loam's own app".
 [Unit]
 Description=Loam's app: %i
