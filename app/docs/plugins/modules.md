@@ -15,7 +15,9 @@ mutable values. The facade is not a credential or a write-policy boundary.
 | `page/transcript.js` | Copy/fold state, tool details, turn facts and normalized step rendering |
 | `plugins/read-aloud/page/engine.js` | Speech takes, lookup/generation, singleton audio, players, Media Session, Files reader/settings |
 | `page/settings.js` | Settings routes and views, account cards, appearance and Files preferences |
-| `page/layout.js` | Navigation, desktop panes, profiles and schedules |
+| `page/layout.js` | Navigator lists and the permanent desktop workspace; phone navigation and profiles |
+| `panel-items.js`, `panels.js` | Shared registered panel renderer, item addresses, moves/uniqueness and split geometry |
+| `page/side-panel.js`, `page/conversation.js` | Per-panel runtime services and conversation mounts |
 | `page/sheets.js` | Sheet ownership and overlays; shared `menu-surface.js`/`sheet-gesture.js` own phone gestures |
 
 The split preserves the original controller instances, rich draft nodes,

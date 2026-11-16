@@ -697,7 +697,7 @@ function barTake() {
 function playerBar() {
   const t = barTake()
   if (!t || (rowsPlaced.has(t) && t.inView)) return null
-  if (t.sample && host.state.sheet?.kind === 'settings' && host.state.sheet.page === 'voice' && t.request.voice === host.store.readAloud.voice) return null
+  if (t.sample && host.state.sheet?.kind === 'settings' && host.state.sheet.page === 'plugins' && host.pluginSettingsUI?.st.selected?.id === 'read-aloud' && t.request.voice === host.store.readAloud.voice) return null
   drawBar(t)
   return h('div', { class: 'playerbar-slot', key: `pb:${t.serial}` }, kept(t.bar))
 }
@@ -1401,7 +1401,7 @@ function settingsReadAloud({ back = true } = {}) {
   }
   return [
     back ? host.settingsBack('Settings', 'root') : null,
-    back ? host.settingsHead('Read aloud', 'The reading voice for this device.') : h('h3', { class: 'kicker', text: 'Read aloud' }),
+    back ? host.settingsHead('Read aloud', 'The reading voice for this device.') : h('p', { class: 'note', text: 'Reading preferences for this device. Agent voices are in each agent’s profile.' }),
     h('div', { class: 'rows' }, h('div', { class: 'setrow' },
       h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', id: 'read-aloud-describe-label', text: 'Describe tables and diagrams' }),
         h('div', { class: 'setrow-sub', id: 'read-aloud-describe-hint', text: 'Instead of skipping them, Full gives a sentence or two on what they show.' })),
@@ -1410,11 +1410,9 @@ function settingsReadAloud({ back = true } = {}) {
           host.store.readAloud = { ...host.store.readAloud, describeTablesAndDiagrams: host.store.readAloud.describeTablesAndDiagrams === false }
           host.schedule()
         } }, h('span')))),
-    h('div', { class: 'read-aloud-voice' },
-      h('label', { for: 'files-voice', text: 'Voice' }),
-      h('button', { class: 'pillbtn', id: 'files-voice', 'aria-label': 'Files voice', 'aria-haspopup': 'listbox', 'aria-expanded': String(Boolean(host.state.sheet?.voices)),
-        onclick: () => { host.state.sheet.voices = !host.state.sheet.voices; host.schedule() } }, voice, icon.chevronDown(16)),
-    ),
+    h('div', { class: 'rows read-aloud-voice' },
+      h('button', { class: 'setrow', id: 'files-voice', 'aria-label': 'Files voice', 'aria-haspopup': 'listbox', 'aria-expanded': String(Boolean(host.state.sheet?.voices)),
+        onclick: () => { host.state.sheet.voices = !host.state.sheet.voices; host.schedule() } }, h('span', { class: 'setrow-title', text: 'Files voice' }), h('span', { class: 'setrow-value', text: voice }), icon.chevronDown(16))),
     h('button', { class: 'pillbtn content-mark read-aloud-preview', type: 'button', disabled: !host.state.speechOn || phase === 'making', text: phase === 'making' ? 'Preparing sample…' : phase === 'ready' ? (isPlaying(t) ? 'Pause sample' : 'Play a sample') : 'Prepare a sample', onclick: () => {
       openRow(t)
       if (phase === 'ready') togglePlay(t)

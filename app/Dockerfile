@@ -5,19 +5,22 @@
 #     -e BROKER_URL=http://<broker-host>:<port> -e BROKER_TOKEN=<token> loam-ui
 #
 # The app is Node's standard library and nothing else, so there is no npm
-# install, no lockfile and no build: the image is the base, one system package
+# install, no lockfile and no build: the image is the base, system packages
 # and this repo's own files. The host builds it from a named commit and puts its own proxy and
 # certificate in front; this container knows nothing of any domain.
 
 FROM node:24-alpine
 
 ENV NODE_ENV=production \
-    APP_PORT=8080
+    APP_PORT=8080 \
+    APP_PREVIEW_CHROME=chromium-headless-shell
 
-# The one system package: `ffmpeg`, which turns the speech model's WAV into
+# `ffmpeg` turns the speech model's WAV into
 # the MP3 a reply is read aloud from (src/speech.js). Alpine's build carries
 # libmp3lame. Without it the app still runs and speech says "no encoder".
-RUN apk add --no-cache ffmpeg
+# The smaller headless shell captures previews without a desktop browser UI.
+# Its CDP interface uses pipes, never another port. Fonts are local packages.
+RUN apk add --no-cache ffmpeg chromium-headless-shell font-noto
 
 WORKDIR /app
 
@@ -27,7 +30,8 @@ COPY public ./public
 COPY tools/measure-speech.mjs ./tools/measure-speech.mjs
 
 # Durable state has one home. What this app keeps there is the read-aloud
-# audio under /storage/speech — ephemeral, swept 48 hours after its last play,
+# audio under /storage/speech and regenerable page previews under
+# /storage/app-media — audio is swept 48 hours after its last play,
 # and nothing that is not made again on asking. The directory is owned by the
 # user the app runs as: a named volume mounted over it inherits that ownership,
 # and a first write on a fresh volume would otherwise fail on a root-owned root.

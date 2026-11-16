@@ -59,15 +59,6 @@ function builtinSettingsDialog(sheet) {
       h('div', { class: 'app-modal-body', key: `settings:${page}:${sheet.detail?.kind ?? ''}:${sheet.detail?.id ?? ''}:${sheet.provider ?? ''}:${sheet.account ?? ''}` }, ...settingsBody({ ...sheet, page }, false))))
 }
 
-function settingsVoice({ back = true } = {}) {
-  const sections = host.registry.entries('settings.section').filter(entry => entry.group === 'voice')
-  return [back ? settingsBack('Settings', 'root') : null, settingsHead('Voice', 'Dictation and reading preferences for this device.'),
-    ...sections.map(entry => h('section', { class: 'settings-section', 'aria-label': entry.title }, ...host.registry.invoke(entry, 'render', { back: false }))),
-    !sections.length ? h('div', { class: 'plugin-empty' }, h('p', { class: 'note', text: 'No voice tools are enabled.' }),
-      h('button', { class: 'pillbtn content-mark', text: 'Manage plugins', onclick: () => goSettings('plugins') })) : null]
-}
-
-
 function settingsPlugins(options = {}) { return host.pluginSettingsUI.view(options) }
 
 
@@ -177,7 +168,7 @@ function settingsRoot() {
   const summaries = { appearance: `${({ system: 'System', sun: 'Sun', dark: 'Dark', light: 'Light' })[host.theme.value.mode]} · ${host.theme.value.size}%`,
     agents: `${host.state.agents.list.length} agents`, providers: connectedCount(host.state.providers).label,
     integrations: integrationCatalog(host.state).filter(service => service.connected).map(service => service.name).join(' · ') || 'Connect your services',
-    voice: 'Dictation and read aloud', files: 'Shortcuts and folders', plugins: 'Themes and extensions' }
+    files: 'Shortcuts and folders', plugins: 'Themes and extensions' }
   const jobs = host.activity.st.now
   const working = host.running.rows().filter(row => row.state === 'working').length
     + (jobs?.slots.filter(job => !job.free).length ?? 0) + (jobs?.landing.length ?? 0)
@@ -692,7 +683,6 @@ return Object.defineProperties({}, {
     settingsSheet: { enumerable: true, get: () => settingsSheet },
     settingsItems: { enumerable: true, get: () => settingsItems },
     settingsDialog: { enumerable: true, get: () => settingsDialog },
-    settingsVoice: { enumerable: true, get: () => settingsVoice },
     settingsPlugins: { enumerable: true, get: () => settingsPlugins },
     settingsAppearance: { enumerable: true, get: () => settingsAppearance },
     goSettings: { enumerable: true, get: () => goSettings },

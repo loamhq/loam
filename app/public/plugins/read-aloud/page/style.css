@@ -37,14 +37,12 @@
  * bottom edge, or its top when `.down`, so a second line grows it away from the
  * glyph, and the row's tile stays centred on the taller text. */
 .speakmenu .setrow-sub { white-space: normal; overflow: visible; text-overflow: clip; }
-.speech-choice { border-radius: 18px; margin-block: 4px; }
-.speech-choice.available {
-  background: color-mix(in srgb, var(--latte-foam) 32%, var(--paper-card));
-  border: 1px solid color-mix(in srgb, var(--latte-espresso) 24%, var(--paper-rule));
-}
+.speech-choice { margin-block: 4px; }
+/* Availability belongs to the audio icon, on the ordinary menu surface.
+ * Keep its action ink paired with its fill in every theme and during playback. */
+.speech-choice.available .setrow .icon-tile { background: var(--latte-foam); color: var(--latte-foam-ink); }
 .speech-choice-actions { display: flex; align-items: center; gap: 2px; }
-.speech-choice .setrow { flex: 1; min-width: 0; border-radius: 17px; }
-.speech-choice.available .setrow-sub { color: var(--paper-ink); }
+.speech-choice .setrow { flex: 1; min-width: 0; }
 .speech-regenerate {
   flex: none; align-self: stretch; min-height: 44px; padding: 10px; margin: 6px 6px 6px 0;
   border: 0; border-radius: 12px; background: transparent; color: var(--paper-ink);
@@ -56,7 +54,7 @@
 .speech-regenerate[aria-disabled=true] { cursor: wait; text-decoration: none; }
 .file-speech-regenerate { align-self: center; margin: 4px 0 0; }
 .speech-regeneration-note { padding: 4px 14px 10px; color: var(--paper-ink-2); font-size: 12px; line-height: 1.5; }
-@media (forced-colors: active) { .speech-choice.available { border: 2px solid Highlight; } }
+@media (forced-colors: active) { .speech-choice.available .icon-tile { outline: 2px solid Highlight; } }
 .speakbtn.open { color: var(--paper-ink-3); background: var(--paper-hover-alpha); }
 .speakbtn {
   border: 0; background: transparent; color: var(--paper-ink-3); border-radius: 8px;
@@ -201,25 +199,25 @@
 .playerbar-slot { flex: none; position: relative; z-index: 3; }
 .playerbar {
   position: relative; display: flex; align-items: center; gap: 8px;
-  min-height: 48px; padding: 4px 8px 6px 12px;
+  min-height: 56px; padding: 4px 8px 6px 12px;
   background: var(--paper-page-glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--paper-rule);
   animation: loamFadeIn .18s ease-out;
 }
 .playerbar-play {
-  flex: none; width: 32px; height: 32px; border: 0; border-radius: 999px;
-  background: var(--latte-espresso); color: var(--latte-espresso-ink); display: flex; align-items: center; justify-content: center;
+  flex: none; width: 44px; height: 44px; border: 0; border-radius: 999px;
+  background: var(--paper-card); color: var(--paper-card-ink); display: flex; align-items: center; justify-content: center;
 }
+.playerbar-close { width: 44px; height: 44px; }
 .playerbar-play:active { transform: scale(.96); }
 /* The bar's making form: a turning ring where ▶ would be, the same size. */
 .playerbar-spin {
-  flex: none; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  flex: none; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
 }
 .playerbar-spin::before {
   content: ''; width: 14px; height: 14px; box-sizing: border-box; border-radius: 999px;
   border: 2px solid var(--paper-ink-3); border-top-color: transparent; animation: loamSpin .9s linear infinite;
 }
-@media (pointer: coarse) { .playerbar-spin { width: 40px; height: 40px; } }
 @media (prefers-reduced-motion: reduce) { .playerbar-spin::before { animation: none; border-top-color: var(--paper-ink-3); opacity: .7; } }
 .playerbar-text {
   flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; border: 0; background: transparent;
@@ -230,20 +228,21 @@
 .playerbar-sep { flex: none; color: var(--paper-ink-3); }
 .playerbar-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--paper-ink-3); }
 .playerbar-text:active { background: var(--paper-hover-alpha); }
-.playerbar-rate { height: 28px; min-width: 44px; }
+/* Neutral surfaces keep these controls recognizable in every panel, including
+ * when a different pane owns the primary/secondary action colours. */
+.playerbar .playerbar-rate { height: 32px; min-width: 48px; background: var(--paper-card); color: var(--paper-card-ink); }
 /* The bar's own border is the empty line; the fill is drawn over it. The hit
  * area is ten pixels of the bar's foot, which is what a tap to seek needs. */
 .playerbar-track { --at: 0; position: absolute; left: 0; right: 0; bottom: -1px; height: 10px; cursor: pointer; touch-action: none; }
 .playerbar-fill { position: absolute; left: 0; bottom: 0; height: 2px; width: calc(var(--at) * 100%); background: var(--latte-espresso); }
 @media (hover: hover) {
-  .playerbar-play:hover { filter: brightness(1.08); }
+  .playerbar-play:hover, .playerbar .playerbar-rate:hover { background: var(--paper-hover); color: var(--paper-hover-ink); }
   .playerbar-text:hover { background: var(--paper-card); }
 }
-/* A thumb's targets on the phone: ▶ and the bar a little taller. */
+.playerbar-play:active, .playerbar .playerbar-rate:active { background: var(--paper-highlight); color: var(--paper-highlight-ink); }
+/* The speed pill joins play and close at the phone's 44px touch minimum. */
 @media (pointer: coarse) {
-  .playerbar { min-height: 56px; }
-  .playerbar-play { width: 40px; height: 40px; }
-  .playerbar-close { width: 36px; height: 36px; }
+  .playerbar .playerbar-rate { height: 44px; }
 }
 .chat-head + .playerbar-slot .playerbar { padding-left: 18px; padding-right: 20px; }
 @media (prefers-reduced-motion: reduce) {
@@ -343,7 +342,7 @@
 }
 .fs-player { margin: 0 20px 14px; flex: none; }
 .read-aloud-voice { display: flex; flex-direction: column; gap: 8px; }
-.read-aloud-voice label { font-size: 14px; font-weight: 600; }
+.read-aloud-voice .setrow-value { margin-left:auto; }
 .read-aloud-preview { align-self: flex-start; min-height: 44px; }
 .file-speech .file-speech-close { color:var(--latte-foam-ink); }
 [data-menu-surface].voice-menu { width:300px; }

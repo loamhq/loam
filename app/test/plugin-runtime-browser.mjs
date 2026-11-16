@@ -108,7 +108,7 @@ try {
       assert.match(await unavailable.innerText(), /Failing/)
       const running = page.getByRole('button', { name: 'Open Example running', exact: true })
       if (width === 1440) {
-        await running.getByRole('button', { name: 'Open Example running to the side', exact: true }).click()
+        await page.getByRole('button', { name: 'Open Example running to the side', exact: true }).click()
         await page.locator('[data-panel="side"] iframe').waitFor()
         assert.equal(await page.locator('[data-panel="side"] iframe').getAttribute('src'), '/x/server-running/')
         assert.equal(new URL(frameRequests.at(-1)).origin, app.url)
@@ -118,7 +118,7 @@ try {
         // The main catalog still says running. The side must read the current
         // catalog before creating a frame from that older row.
         app.runtime.find(row => row.id === 'server-running').service.state = 'failing'
-        await running.getByRole('button', { name: 'Open Example running to the side', exact: true }).click()
+        await page.getByRole('button', { name: 'Open Example running to the side', exact: true }).click()
         await page.locator('[data-panel="side"]').getByText('Example running · Failing', { exact: true }).waitFor()
         assert.equal(await page.locator('[data-panel="side"] iframe').count(), 0)
         app.runtime.find(row => row.id === 'server-running').service.state = 'running'
@@ -138,6 +138,10 @@ try {
         await openRunning()
         await page.locator('[data-panel="main"]').getByText('Example running · Failing', { exact: true }).waitFor()
         assert.equal(await page.locator('[data-panel="main"] iframe').count(), 0)
+        // Re-selecting the mounted item preserves it. Leave it first so this
+        // checks the fresh catalog on entry, rather than demanding a remount.
+        await page.evaluate(() => __runtime.panels.openMain({ kind: 'app', app: __runtime.apps.st.apps.find(app => app.plugin === 'server-stopped') }))
+        await page.locator('[data-panel="main"]').getByText('Example stopped · Off', { exact: true }).waitFor()
         app.runtime.find(row => row.id === 'server-running').service.state = 'running'
         await openRunning(); await page.locator('[data-panel="main"] iframe').waitFor()
         assert.equal(await page.locator('[data-panel="main"] iframe').getAttribute('src'), '/x/server-running/')

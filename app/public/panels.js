@@ -1,4 +1,5 @@
 import { h, icon } from './ui.js'
+import { itemDescriptor } from './panel-items.js'
 import { layoutPixels } from './scale.js'
 
 export const SIDE_MIN = 1180
@@ -7,31 +8,25 @@ export const DEFAULT_SPLIT = 56
 const key = 'loam.panels'
 const deviceStorage = () => { try { return globalThis.localStorage } catch { return null } }
 export function itemKey(item) {
-  if (!item) return null
+  if (!itemDescriptor(item)) return null
   if (item.kind === 'thread') return `thread:${item.id}`
   if (item.kind === 'file') return `file:${item.root}:${item.path}`
   if (item.kind === 'app' && (item.app?.url || item.url)) return `app:${item.app?.url ?? item.url}`
-  return null
+  return typeof item.kind === 'string' && item.id ? `${item.kind}:${item.id}` : null
 }
 export function readPanels(storage = deviceStorage()) {
   try {
     const value = JSON.parse(storage?.getItem(key) ?? '{}')
-    const valid = item => {
-      if (item?.kind === 'thread' && typeof item.id === 'string' && item.id) return { kind: 'thread', id: item.id }
-      if (item?.kind === 'file' && ['vault', 'spaces'].includes(item.root) && typeof item.path === 'string' && item.path) return { kind: 'file', root: item.root, path: item.path }
-      if (item?.kind === 'app' && typeof (item.url ?? item.app?.url) === 'string') return { kind: 'app', url: item.url ?? item.app.url }
-      return null
-    }
-    return { side: valid(value.side), main: valid(value.main),
+    return { side: itemDescriptor(value.side), legacy: value.version !== 1, legacyMain: itemDescriptor(value.main),
       split: Math.max(32, Math.min(68, Number(value.split) || DEFAULT_SPLIT)), sidebar: value.sidebar === true }
   } catch { return { side: null, split: DEFAULT_SPLIT, sidebar: false } }
 }
 
 // Attention is transient view state, independent of navigation destinations.
 // Each mounted view retains its own field, transport, selections and position.
-export function createPanels({ main, side, width = () => layoutPixels(globalThis.innerWidth ?? 0), changed, storage = deviceStorage() }) {
+export function createPanels({ main, side, width = () => layoutPixels(globalThis.innerWidth ?? 0), changed, address = () => {}, storage = deviceStorage() }) {
   const saved = readPanels(storage)
-  const st = { side: saved.side, savedMain: saved.main, split: saved.split, sidebar: saved.sidebar, loaded: false, version: 0, focused: saved.side ? 'side' : 'main' }
+  const st = { side: saved.side, split: saved.split, sidebar: saved.sidebar, loaded: false, version: 0, focused: saved.side ? 'side' : 'main' }
   let closing = null
   let dragging = false
   let storedValue = null
@@ -46,14 +41,11 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
   function persist() {
     const item = st.side
     // A file's capability/revision and an app's inventory are fresh host facts.
-    const descriptor = item => item?.kind === 'file' ? { kind: 'file', root: item.root, path: item.path }
-      : item?.kind === 'app' ? { kind: 'app', url: item.app?.url ?? item.url }
-        : item?.kind === 'thread' ? { kind: 'thread', id: item.id } : null
-    const value = JSON.stringify({ side: descriptor(item), main: descriptor(main.item()), split: st.split, sidebar: st.sidebar })
+    const value = JSON.stringify({ version: 1, side: itemDescriptor(item), split: st.split, sidebar: st.sidebar })
     if (value === storedValue) return
     try { storage?.setItem(key, value); storedValue = value } catch {}
   }
-  function notify() { persist(); changed() }
+  function notify() { persist(); address(st.side); changed() }
   function guard(endpoint, retry) { return endpoint.guard?.(retry) !== false }
   function transfer(from, to, item) { if (item?.kind === 'thread') from.transfer?.(to, item.id) }
   function close() {
@@ -74,6 +66,7 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
       if (item.kind === 'file' && side.item()?.mode) item = { ...item, mode: side.item().mode }
       cancelClose(); transfer(side, main, item); side.clear(); st.side = null; st.loaded = false; st.sidebar = false
     }
+    if (!item.message && !item.fragment && !item.mode && itemKey(item) === itemKey(main.item())) { st.focused = 'main'; notify(); return true }
     main.open(item); st.focused = 'main'; st.version++; notify(); return true
   }
   function openSide(item) {
@@ -116,7 +109,7 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
     if (st.loaded && side.empty?.()) { close(); return }
     const current = side.item()
     if (st.loaded && current) st.side = current
-    persist()
+    persist(); address(st.side)
   }
   function tucked() { return visible() && !st.closing && width() < SIDEBAR_MIN && !st.sidebar }
   function showSidebar() { st.sidebar = true; notify() }

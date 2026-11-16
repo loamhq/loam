@@ -597,7 +597,7 @@ export function createFiles({
 
   // Go to an address — a folder, or a file in its folder. `isFile` is known
   // when a row was clicked; an address loaded cold is asked about.
-  async function show(root, path = '', { isFile = null, row = null, fragment = null, mode = null } = {}) {
+  async function show(root, path = '', { isFile = null, row = null, fragment = null, mode = null, keepFile = false } = {}) {
     if (!st.renaming?.busy) st.renaming = null
     // The latest place asked for wins: a slow answer about an earlier one must
     // not close a file opened after it.
@@ -609,7 +609,7 @@ export function createFiles({
     if (!root) {
       st.root = null
       st.path = ''
-      closeFile()
+      if (!keepFile) closeFile()
       if (!st.roots.loaded) loadRoots()
       schedule()
       return
@@ -628,7 +628,7 @@ export function createFiles({
         // drawn where the listing would be and not swallowed.
         st.root = root
         st.path = path
-        closeFile()
+        if (!keepFile) closeFile()
         st.listing = { key: `${root}:${path}`, rows: [], folder: null, cursor: null, total: null, loading: false, error: err.message, status: err.status }
         schedule()
         return
@@ -643,7 +643,7 @@ export function createFiles({
     if (kindIsFile) {
       if (!(st.file && st.file.root === root && st.file.path === path)) openFile(root, path, known, { fragment, mode })
       else if (fragment) st.file.fragment = fragment
-    } else closeFile()
+    } else if (!keepFile) closeFile()
     schedule()
   }
 
@@ -656,7 +656,8 @@ export function createFiles({
   }
 
   async function openFile(root, path, row = null, { fragment = null, mode = null } = {}) {
-    const r = isRow(row) ? row : st.listing.rows.find((x) => x.path === path) ?? { root, path, name: nameOf(path), kind: 'file' }
+    const known = isRow(row) ? row : st.listing.rows.find((x) => x.path === path)
+    const r = known ?? { root, path, name: nameOf(path), kind: 'file' }
     const view = viewOf(r)
     closeFile()
     const file = {
@@ -669,6 +670,8 @@ export function createFiles({
       saved: '',
       draft: null,
       revision: null,
+      textLoaded: false,
+      metadataLoading: view === 'html' && !known?.capabilities,
       mode: mode === 'edit' || mode === 'preview' ? mode : view === 'markdown' || view === 'html' ? 'preview' : 'edit',
       loading: true,
       error: '',
@@ -683,19 +686,58 @@ export function createFiles({
     st.file = file
     schedule()
     prepareLink(file)
-    if (view === 'html') loadLive(file)
+    // Rendering HTML uses the isolated download path, not the text editor.
+    // In particular, embedded images can exceed the host's text-read limit.
+    if (view === 'html') {
+      // A cold panel address may contain only an identity. The old text read
+      // supplied its row; fetch metadata alone before offering file actions.
+      if (file.metadataLoading) {
+        try {
+          const got = await api('GET', `/files/stat?${q({ root, path })}`)
+          if (st.file !== file) return
+          file.row = got
+          file.caps = capsOf(got)
+          relist(got)
+        } catch (err) {
+          if (st.file !== file) return
+          file.metadataError = true
+          file.error = err.message
+          file.status = err.status
+          file.loading = false
+          schedule()
+          return
+        } finally { file.metadataLoading = false }
+      }
+      loadLive(file)
+      if (file.mode === 'preview') {
+        file.loading = false
+        schedule()
+        return
+      }
+    }
     if (view === 'image' || view === 'pdf') return loadBytes(file)
     if (view === 'other') {
       file.loading = false
       schedule()
       return
     }
+    await loadText(file)
+  }
+
+  async function loadText(file) {
+    if (file.textLoaded || file.textLoading) return
+    file.textLoading = true
+    file.loading = true
+    file.error = ''
+    schedule()
     try {
-      const got = readOf(await api('GET', `/files/read?${q({ root, path })}`))
+      const got = readOf(await api('GET', `/files/read?${q({ root: file.root, path: file.path })}`))
       if (st.file !== file) return
       file.text = got.text
       file.saved = got.text
       file.revision = got.revision
+      file.textLoaded = true
+      if (file.mode === 'edit' && file.draft === null) file.draft = got.text
       if (got.row) {
         file.row = got.row
         file.caps = capsOf(got.row)
@@ -711,6 +753,7 @@ export function createFiles({
       file.status = err.status
       file.errorBody = err.body ?? null
     }
+    file.textLoading = false
     file.loading = false
     schedule()
   }
@@ -925,7 +968,7 @@ export function createFiles({
   // the person's answer to a conflict saves nothing until they give it.
   function edit(text) {
     const file = st.file
-    if (!file) return
+    if (!file || (file.view === 'html' && !file.textLoaded)) return
     file.draft = text
     file.flash = ''
     file.failed = false
@@ -973,7 +1016,7 @@ export function createFiles({
   // confirmed it. If the file moves again, that save is refused too.
   async function save({ over = null } = {}) {
     const file = st.file
-    if (!file || !file.caps.write) return
+    if (!file || !file.caps.write || (file.view === 'html' && !file.textLoaded)) return
     if (file.renaming) return file.renameFlight.then(() => st.file === file ? save({ over }) : undefined)
     if (file.timer) timers.clear(file.timer)
     file.timer = null
@@ -1044,7 +1087,8 @@ export function createFiles({
 
   function setMode(mode) {
     if (!st.file) return
-    if (mode === 'edit' && st.file.draft === null) st.file.draft = st.file.text
+    if (mode === 'edit' && st.file.view === 'html' && !st.file.textLoaded) loadText(st.file)
+    else if (mode === 'edit' && st.file.draft === null) st.file.draft = st.file.text
     st.file.mode = mode
     schedule()
   }
@@ -1438,8 +1482,8 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
   )
 }
 
-// What a failure says. The host's sentence, always; a word of this page's own
-// only for the statuses a person can act on differently.
+// Host failures retain their sentence. Text size/type refusals are explained
+// by the viewer with its own actions, rather than exposing transport wording.
 function errorBox(message, status, retry, extra = null) {
   const lead = status === 401 ? 'The host would not let this page in.' : status === 403 ? 'The host does not allow this here.' : status === 404 ? 'Not found.' : status === 503 ? 'Files is not available from the host right now.' : null
   return h(
@@ -1452,8 +1496,8 @@ function errorBox(message, status, retry, extra = null) {
   )
 }
 
-function downloadButton(f, label = 'Download') {
-  return h('a', { class: 'pillbtn content-mark fs-dlbtn', href: downloadHref(f.root, f.path), download: nameOf(f.path), text: label })
+function downloadButton(f, label = 'Download', className = 'pillbtn content-mark fs-dlbtn') {
+  return h('a', { class: className, href: downloadHref(f.root, f.path), download: nameOf(f.path), text: label })
 }
 
 // One file: its header, its name and what it is, and the file — previewed,
@@ -1480,11 +1524,11 @@ function builtinFileView(files, { close, closeLabel, wide, field, onLink = null,
   const f = files.st.file
   if (!f) return null
   const name = nameOf(f.path)
-  const htmlPreview = f.view === 'html' && f.mode === 'preview' && !f.error && !f.loading && !renamingHere(files, f.row, 'title')
-  const editable = f.caps.write && !f.error && !f.loading && (f.view === 'markdown' || f.view === 'text' || f.view === 'html')
+  const htmlPreview = f.view === 'html' && f.mode === 'preview' && !f.metadataLoading && !f.metadataError && !renamingHere(files, f.row, 'title')
+  const editable = f.caps.write && !f.error && !f.loading && (f.view === 'markdown' || f.view === 'text' || (f.view === 'html' && f.textLoaded))
   const changed = files.dirty()
   const tabs =
-    (f.view === 'markdown' || f.view === 'html') && !f.error
+    (f.view === 'markdown' && !f.error) || f.view === 'html'
       ? segmentedControl({ label: 'File view', value: f.mode, choose: mode => files.setMode(mode),
           options: [{ id: 'preview', label: 'Preview' }, { id: 'edit', label: f.view === 'html' || !editable ? 'Source' : 'Edit' }] })
       : null
@@ -1547,13 +1591,20 @@ function builtinFileView(files, { close, closeLabel, wide, field, onLink = null,
       : null
 
   let body
-  if (f.loading) body = h('div', { class: 'fs-quiet', text: 'Opening…' })
-  else if (f.error) {
+  if (f.loading && !htmlPreview) body = h('div', { class: 'fs-quiet', text: 'Opening…' })
+  else if (f.error && !htmlPreview) {
+    const limited = f.status === 415 || f.status === 413
+    const size = f.errorBody?.size, max = f.errorBody?.max
+    const detail = f.status === 415 ? 'This file can’t be shown as text.'
+      : Number.isFinite(size) && Number.isFinite(max) ? `This file is ${bytes(size)}. The text view supports up to ${bytes(max)}.`
+      : 'This file is larger than the text view supports.'
     const extra =
-      f.status === 415 || f.status === 413
-        ? h('div', { class: 'fs-quiet', text: f.status === 415 ? 'It is not text, so it is not shown here.' : `It is ${bytes(f.errorBody?.size)}; the most shown here is ${bytes(f.errorBody?.max)}.` }, f.caps.download ? downloadButton(f) : null)
+      limited
+        ? h('div', { class: 'fs-error-detail' }, h('p', { text: detail }),
+            f.view === 'html' ? h('button', { class: 'fs-error-action', text: 'Back to preview', onclick: () => files.setMode('preview') }) : null,
+            f.caps.download ? downloadButton(f, 'Download', 'fs-error-action fs-dlbtn') : null)
         : null
-    body = errorBox(f.error, f.status, f.status === 415 || f.status === 413 ? null : () => files.openFile(f.root, f.path, f.row), extra)
+    body = errorBox(limited ? f.view === 'html' ? 'Source unavailable' : 'Text view unavailable' : f.error, f.status, limited ? null : () => files.openFile(f.root, f.path, f.row, { mode: f.mode }), extra)
   } else if (f.view === 'image' && f.blobUrl) body = h('div', { class: 'fs-media' }, h('img', { class: 'fs-img', src: f.blobUrl, alt: name }))
   else if (f.view === 'pdf' && f.blobUrl)
     body = h(
@@ -1580,7 +1631,7 @@ function builtinFileView(files, { close, closeLabel, wide, field, onLink = null,
       ...markdown(f.draft ?? f.text, { from: { root: f.root, path: f.path }, onLink, anchors: true, vault: true, onTask: f.caps.write && !f.conflict ? (n, checked) => files.tick(n, checked) : null, embed }),
     )
   else if (f.mode === 'preview' && f.view === 'html')
-    body = h(
+    body = f.liveLoading ? h('div', { class: 'fs-quiet', text: 'Opening preview…' }) : h(
       'div',
       { class: 'fs-htmlframe' },
       h('iframe', { class: 'fs-iframe', key: `html:${f.liveUrl ?? 'static'}:${f.liveReload ?? 0}:${f.revision}`, sandbox: f.liveUrl ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads' : '', referrerpolicy: 'no-referrer', title: `Preview of ${name}`, src: f.liveUrl ?? `${previewHref(f.root, f.path)}&rev=${encodeURIComponent(f.revision ?? '')}` }),

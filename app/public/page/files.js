@@ -5,6 +5,7 @@ import { createPicker } from "../filepicker.js"
 import { sessionFromAddress } from "../imported-threads.js"
 import { threadFromPath } from "../thread-opening.js"
 import { authenticatedFetch as fetch } from "../auth.js"
+import { withSide } from '../panel-items.js'
 import { fileShortcuts, toggleFileShortcut } from '../store.js'
 
 // Mounted once. Cross-module state and operations are explicit host services.
@@ -23,7 +24,7 @@ function herePath() {
 }
 
 function pushAddress(data, title, href) {
-  globalThis.history?.pushState?.(data, title, href)
+  globalThis.history?.pushState?.(data, title, host.panels && globalThis.location?.href ? withSide(href, host.panels.st.side) : href)
 }
 
 const files = createFiles({
@@ -60,10 +61,11 @@ function followRename(answer, broadcast = true, offered = []) {
     hiddenShortcuts: [...held.hiddenShortcuts.flatMap(s => { const next = renamedResource(s, answer); return next === s ? [s] : [s, next] }), ...followed.map(({ root, path }) => ({ root, path }))],
     inbox: folder(held.inbox),
   }
+  if (host.state.mainItem?.kind === 'file') host.state.mainItem = renamedResource(host.state.mainItem, answer)
   const at = parseFilesPath(herePath())
   if (navigation && at) {
     const next = renamedResource(at, answer)
-    if (next !== at) globalThis.history?.replaceState?.({ files: true }, '', filesHref(next.root, next.path) + (globalThis.location?.hash ?? ''))
+    if (next !== at) globalThis.history?.replaceState?.({ files: true }, '', withSide(filesHref(next.root, next.path) + (globalThis.location?.hash ?? ''), host.panels?.st.side))
   }
   if (broadcast) renameChannel?.postMessage(answer)
   host.schedule()
@@ -143,21 +145,35 @@ function builtinFileFieldFor(f, { readOnly, mono }) {
 
 // Go to a folder or a file. `push: false` is for an address the browser has
 // already moved to — a load, or Back.
+let fileDestination = 0
 function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null } = {}) {
+  const destination = ++fileDestination
+  if (navigation && host.state.wide && !routed && isFile === null && root && path) {
+    const request = ++host.importRequest
+    host.api('GET', `/files/stat?${new URLSearchParams({ root, path })}`).then(resource => {
+      if (destination === fileDestination && request === host.importRequest) goFiles(root, path, { isFile: !isFolder(resource), row: resource, push, fragment, mode })
+    }).catch(() => { if (destination === fileDestination && request === host.importRequest) files.show(root, path, { keepFile: true }) })
+    return true
+  }
   // Expose a panel's save guard before routing can pause this navigation.
   if (host.state.wide && ['settings', 'activity'].includes(host.state.sheet?.kind)) host.closeSheet()
   const beside = host.panels?.st.side
   const heldFile = beside?.kind === 'file' && beside.root === root && beside.path === path
   if (!routed && (isFile === true || (isFile === null && heldFile)) && host.panels) return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain']({ kind: 'file', root, path, row, fragment, push })
-  host.state.sidebarSection = null
+  if (!routed && host.panelId !== 'side') host.state.navigator = 'files'
   const hidden = root === 'system'
   if (hidden) { root = null; path = ''; isFile = false; row = null; fragment = null }
+  if (navigation && host.state.wide && !routed && isFile !== true) {
+    files.show(root, path, { isFile, row, fragment, mode, keepFile: true })
+    host.schedule(); return true
+  }
   const leavingFile = files.st.file && !(isFile && files.st.file.root === root && files.st.file.path === path)
   if (leavingFile && !files.guard(null)) {
     // The page's own sheet asks; going on from it comes back here, clean.
     files.st.sheet.proceed = proceedThen(() => goFiles(hidden ? 'system' : root, path, { isFile, row, fragment }))
     return false
   }
+  host.state.mainItem = root && path ? { kind: 'file', root, path } : null
   // Browsing a folder starts a Files navigation path of its own. Merely having
   // a chat to return to must not replace that folder's ordinary back button.
   files.st.chatFile = Boolean(isFile && (host.activeThread() || (host.state.screen === 'files' && files.st.chatFile)))
@@ -282,6 +298,7 @@ if (navigation) setFileLinks((ref, from, event) => openFileRef(ref, from, event)
 if (navigation) globalThis.addEventListener?.('popstate', () => {
   const session = sessionFromAddress(globalThis.location?.href ?? herePath() + (globalThis.location?.search ?? ''))
   if (session) { host.openImportedSession(session); return }
+  if (host.state.wide && host.routePanels) { host.routePanels(); return }
   const thread = threadFromPath(herePath())
   if (thread) {
     if (host.state.screen === 'files') {

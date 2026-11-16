@@ -45,7 +45,7 @@ test('server states, collapsed failure logs, listed packages and restart refusal
 test('plugin apps use local paths, all three source groups and icons; unavailable main/side mounts never frame', async () => {
   installDom()
   const plugin = { name: 'Demo', kind: 'plugin', source: 'loam', url: '/x/demo/', icon: '/api/plugins/demo/files/icon.svg', on: true, state: 'running' }
-  const opened = [], apps = createApps({ api: async () => ({ sources: ['yours', 'installed', 'loam'], apps: [plugin] }), redraw() {}, wide: () => true,
+  const opened = [], apps = createApps({ api: async (method, path) => path === '/apps/media' ? { apps: [{ url: plugin.url, preview: null, icon: '/api/apps/media/image?url=plugin&kind=icon', pending: false }] } : { sources: ['yours', 'installed', 'loam'], apps: [plugin] }, redraw() {}, wide: () => true,
     avatar: () => h('span'), agentName: id => id, newThread() {}, openBrowser: url => opened.push(url) })
   await apps.load()
   assert.equal(all(apps.view({ list: true }), 'apps-group')[0].getAttribute('aria-label'), 'Loam')

@@ -15,7 +15,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { readConfig, configComplaints } from './config.js'
-import { buildPreview, PREVIEW_POLICY } from './preview.js'
+import { buildPreview, PREVIEW_POLICY, PREVIEW_LIMITS } from './preview.js'
 import { createContent } from './content.js'
 import { fileLink } from './file-links.js'
 import { createBroker, BrokerNotConfigured } from './broker.js'
@@ -27,6 +27,7 @@ import { appearanceBoot } from './appearance.js'
 import { loadThemes } from './themes.js'
 import { createBranchDrafter } from './thread-branch.js'
 import { INSTALLATION_DEFAULTS } from '../public/installation.js'
+import { createAppMedia } from './app-media.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MAX_BODY = 1 << 20 // a message from a phone; not a file upload
@@ -56,6 +57,7 @@ const SECURITY_HEADERS = {
 export function createApp({
   config = readConfig(),
   broker = createBroker(config),
+  appMedia = null,
   transcriber = createTranscriber(config, { getKey: brokerSecret(broker, 'dictation') }),
   publicDir = path.join(ROOT, 'public'),
   log = createLog({ level: config.logLevel }),
@@ -63,6 +65,7 @@ export function createApp({
   branchDraft = createBranchDrafter(config, { getKey: brokerSecret(broker, 'read-aloud') }),
 } = {}) {
   const serveStatic = createStatic(publicDir)
+  appMedia ??= createAppMedia(config.appMedia, { log })
   const installation = config.installation ?? INSTALLATION_DEFAULTS
   const securityHeaders = { ...SECURITY_HEADERS, 'content-security-policy': SECURITY_HEADERS['content-security-policy'].replace("frame-src 'self' blob:", `frame-src 'self' blob: https://*.${installation.appsDomain}${config.filesContentOrigin ? ` ${config.filesContentOrigin}` : ''}`) }
   const fallbackThemes = loadThemes()
@@ -148,7 +151,7 @@ export function createApp({
         // A Files address — `/files/<root>/<path>` — is the page, which reads
         // the rest of it. Loaded directly, refreshed or come back to, it lands
         // on the same folder or file.
-        if (GITHUB_RETURNS.has(pathname) || pathname === '/files' || pathname.startsWith('/files/') || /^\/(?:threads|sessions)\/[^/]+\/?$/.test(pathname)) {
+        if (GITHUB_RETURNS.has(pathname) || ['/apps', '/panel'].includes(pathname) || pathname === '/files' || pathname.startsWith('/files/') || /^\/(?:threads|sessions)\/[^/]+\/?$/.test(pathname)) {
           await serveStatic(req, res, '/')
           note.static = true
           return
@@ -360,6 +363,29 @@ export function createApp({
       return await relayJson(res, 'GET', '/v1/owner', undefined, { signal: AbortSignal.timeout(5000) })
     }
     if (rest === '/apps' && method === 'GET') return await relayJson(res, 'GET', '/v1/apps')
+    if (['/apps/media', '/apps/media/image', '/apps/icon'].includes(rest) && method === 'GET') {
+      const href = url.searchParams.get('url')
+      // Revalidate against the current catalog, including cached image reads.
+      const catalog = await broker.json('GET', '/v1/apps')
+      if (catalog.status !== 200) { res.writeHead(catalog.status, { 'content-type': catalog.contentType, 'cache-control': 'no-store' }); return res.end(catalog.body) }
+      const apps = (JSON.parse(catalog.body).apps ?? []).filter(app => typeof app?.url === 'string')
+      const origin = `http://127.0.0.1:${server.address().port}`
+      if (rest === '/apps/media') return sendJson(res, 200, { apps: await Promise.all(apps.map(app => appMedia.resolve(app, { origin }))) })
+      const app = apps.find(app => app.url === href)
+      if (!app) return sendJson(res, 404, { error: 'That app is no longer available.' })
+      // Older open tabs receive only a verified same-origin icon, never paths
+      // to probe on the site. The current launcher uses the batch media route.
+      if (rest === '/apps/icon') { const media = await appMedia.resolve(app, { origin }); return sendJson(res, 200, { icons: media.icon ? [media.icon] : [] }) }
+      const image = await appMedia.image(app, url.searchParams.get('kind'))
+      const placeholder = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><rect width="160" height="100" rx="12" fill="#d9d5cf"/></svg>')
+      const body = image?.body ?? placeholder
+      res.writeHead(200, { 'content-type': image?.type ?? 'image/svg+xml', 'content-length': body.length,
+        'cache-control': image ? 'private, max-age=86400' : 'no-store',
+        // A remotely supplied SVG is safe as an image and remains sandboxed
+        // if somebody opens its URL as a document.
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" })
+      return res.end(body)
+    }
     const activityUndo = /^\/activity\/([^/]+)\/undo$/.exec(rest)
     const jobCancel = /^\/jobs\/([^/]+)\/cancel$/.exec(rest)
     if (method === 'POST' && (activityUndo || jobCancel)) {
@@ -692,10 +718,11 @@ export function createApp({
     }
     const bytesOf = async (r, p, max) => {
       const out = await broker.download(`/v1/files/download?root=${encodeURIComponent(r)}&path=${encodeURIComponent(p)}`)
-      if (!out.ok || !out.stream) throw new Error('unread')
+      if (!out.ok) throw Object.assign(new Error('unread'), { out: { status: out.status, contentType: out.contentType, body: out.body } })
+      if (!out.stream) throw new Error('unread')
       if (out.length && Number(out.length) > max) {
         out.stream.destroy()
-        throw new Error('too big')
+        throw Object.assign(new Error('too big'), { tooLarge: true })
       }
       const chunks = []
       let size = 0
@@ -703,7 +730,7 @@ export function createApp({
         size += chunk.length
         if (size > max) {
           out.stream.destroy()
-          throw new Error('too big')
+          throw Object.assign(new Error('too big'), { tooLarge: true })
         }
         chunks.push(chunk)
       }
@@ -714,9 +741,21 @@ export function createApp({
       html = await read(root, filePath)
     } catch (err) {
       if (!err.out) throw err
-      noteBrokerError(res, err.out)
-      res.writeHead(err.out.status, { 'content-type': err.out.contentType, 'cache-control': 'no-store' })
-      return res.end(err.out.body)
+      // Text editing stays subject to the host's text limit. A static HTML
+      // preview can instead read the offered download, with its own bound.
+      if (err.out.status === 413) {
+        try {
+          html = (await bytesOf(root, filePath, PREVIEW_LIMITS.htmlBytes)).toString('utf8')
+        } catch (downloadError) {
+          const status = downloadError.out?.status ?? (downloadError.tooLarge ? 413 : 502)
+          res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': PREVIEW_POLICY })
+          return res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:light dark}body{font:16px/1.5 system-ui;margin:32px;max-width:36em}</style><h1 style="font-size:20px">Static preview unavailable</h1><p>${downloadError.tooLarge ? 'This page is larger than the 16 MB static preview supports.' : 'This file’s download is unavailable. It may have moved or been deleted.'}</p><p>Use Source to return to Files and download the file.</p>`)
+        }
+      } else {
+        noteBrokerError(res, err.out)
+        res.writeHead(err.out.status, { 'content-type': err.out.contentType, 'cache-control': 'no-store' })
+        return res.end(err.out.body)
+      }
     }
     const doc = await buildPreview({ root, path: filePath, html, readText: read, readBytes: bytesOf })
     res.writeHead(200, {

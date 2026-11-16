@@ -1,7 +1,7 @@
 import { setOwner } from '../public/owner.js'
 import { createThreadFixture } from '../public/threads-fixture.js'
 import { fakeBroker, appAgainst, closing } from './harness.js'
-export async function oneProductFixture(env = {}) {
+export async function oneProductFixture(env = {}, overrides = {}) {
   setOwner({ id: 'you', name: 'Sam', accepts: ['you', 'owner', 'person'] })
   const f = createThreadFixture(), streams = new Map(), json = (res, value, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(value)) }
   const decorate = (row) => {
@@ -50,6 +50,6 @@ export async function oneProductFixture(env = {}) {
     routes[`GET /v1/threads/${id}/events`] = (req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': open ping=15000\n\n'); if (!streams.has(id)) streams.set(id, new Set()); streams.get(id).add(res); const stop = f.subscribe(id, (e) => res.write(`data: ${JSON.stringify(e)}\n\n`)); res.on('close', () => { stop(); streams.get(id).delete(res) }) }
   }
   for (const t of threads) addThread(t.id)
-  const broker = await fakeBroker(routes), app = await appAgainst(broker, env)
+  const broker = await fakeBroker(routes), app = await appAgainst(broker, env, overrides)
   return { ...app, f, broker, records, events, routes, addThread, emit: (id, e) => { for (const stream of streams.get(id) ?? []) stream.write(`data: ${JSON.stringify(e)}\n\n`) }, close: closing(app, broker) }
 }

@@ -3,7 +3,6 @@ import * as helpers from './dictate.js'
 import { createPreferences } from './settings.js'
 export function activate(loam) {
   loam.ui.styles.add('page/style.css')
-  const secrets = loam.ui.createSecretSettings?.({ id: 'dictation', request: loam.data.request, redraw: () => loam.ui.host.schedule() })
   const store = createPreferences(loam.settings)
   const owners = loam.ui.host.panelHosts?.() ?? [loam.ui.host]
   const mounts = new Map(owners.map(owner => {
@@ -38,16 +37,15 @@ export function activate(loam) {
     const n = local.takeNotice
     return !n || host.activeThread() ? null : loam.ui.h('div', { class: 'listnotice inline', role: 'status' }, loam.ui.h('span', { text: n.offer ? `${n.text} · ` : n.text }), n.offer ? loam.ui.h('button', { class: 'noticerow-act', type: 'button', text: n.offer.label, onclick: service.actOnNotice }) : null)
   } })
-  loam.places.settings.section.add({ id: 'dictation', group: 'voice', title: 'Dictation', order: 0, render: () => [mounts.get('main').service.settingsDictation({ back: false }), secrets?.view()] })
+  loam.places.settings.section.add({ id: 'dictation', group: 'plugin', title: 'Dictation preferences', render: () => mounts.get('main').service.settingsDictation({ back: false }) })
   loam.events.on('field.reset', detail => { const service = at(detail)?.service; service?.discardTake(); service?.hush() })
   loam.events.on('field.closed', detail => { const service = at(detail)?.service; if (service?.takeIn(detail.target)) service.discardTake() })
   loam.events.on('field.input', detail => at(detail)?.service.hush())
   loam.events.on('key.escape', event => { const entry = at(event); if (entry?.local.rec) { entry.service.discardTake(); event.preventDefault() } })
   loam.events.on('page.visible', () => { for (const { service } of mounts.values()) service.screen.shown() })
   loam.events.on('rendered', () => { for (const { service } of mounts.values()) service.followTake() })
-  loam.events.on('settings.opened', ({ page }) => { if (page === 'voice') { const { service } = mounts.get('main'); service.loadMicrophones(); service.loadTermsNote() } })
+  loam.events.on('plugin.settings.opened', ({ id }) => { if (id === 'dictation') { const { service } = mounts.get('main'); service.loadMicrophones(); service.loadTermsNote() } })
   const cleanup = () => { for (const { service, local } of mounts.values()) { service.discardTake(); service.stopLive(); service.dispose(); local.takeNotice = null } }
-  loam.events.on('settings.opened', ({ page }) => { if (page === 'voice') secrets?.load() })
   loam.events.on('page.leaving', cleanup)
   return cleanup
 }

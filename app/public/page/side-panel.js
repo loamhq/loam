@@ -12,10 +12,11 @@ import { h, icon, blob } from '../ui.js'
 import { copyText } from '../clipboard.js'
 import { panelDOM } from '../panels.js'
 import { menuSurface } from '../menu-surface.js'
+import { renderPanel, itemDescriptor } from '../panel-items.js'
 import { anchorOf } from '../markdown.js'
 
 export function mountSidePanel(base) {
-  const local = { screen: 'home', attach: createAttachments(), sheet: null, pop: null, editor: false,
+  const local = { screen: 'home', mainItem: null, attach: createAttachments(), sheet: null, pop: null, editor: false,
     draftFocused: false, dragging: false, lastNotice: null, profileAgent: null }
   const state = new Proxy(local, {
     get: (target, name) => name === 'collapsed' ? false : Object.hasOwn(target, name) ? target[name] : base.state[name],
@@ -88,30 +89,28 @@ export function mountSidePanel(base) {
   own.threads = mountConversation(host, {
     messageState, dom: own.root, sidePanel: true, side: () => base.panels,
     navigate: item => base.panels.openSide(item), address: () => {}, visible: () => base.panels.visible(),
-    enter: () => { host.files.closeFile(); state.screen = 'threads'; state.sheet = null; base.schedule() },
+    enter: item => { state.mainItem = item; host.files.closeFile(); state.screen = 'threads'; state.sheet = null; base.schedule() },
     leave: () => base.panels.close(),
   })
   own.apps = createApps({ registry: own.registry, api: base.api, redraw: base.schedule, wide: () => true,
     avatar: id => blob(agentLook(id, state.agents), { size: 40, font: 18 }), agentName: id => state.agents.list.find(a => a.id === id)?.name ?? id,
-    newThread: () => base.threads.create(), copy: copyText, navigate: item => base.panels.openSide(item), side: () => base.panels,
+    newThread: () => base.threads.create(), copy: copyText, leave: () => base.panels.close(), navigate: item => base.panels.openSide(item), side: () => base.panels,
   })
   let request = 0
   function item() {
-    if (state.screen === 'threads' && own.threads.st.open) return { kind: 'thread', id: own.threads.st.open.thread.id }
-    const f = host.files.st.file
-    if (state.screen === 'files' && f) return { kind: 'file', root: f.root, path: f.path, mode: f.mode }
-    if (state.screen === 'apps' && own.apps.st.selected) return { kind: 'app', app: own.apps.st.selected }
-    if (state.screen === 'apps' && state.requestedApp) return { kind: 'app', url: state.requestedApp }
-    return null
+    const at = state.mainItem
+    if (at?.kind === 'file' && host.files.st.file) return { ...at, mode: host.files.st.file.mode }
+    if (at?.kind === 'app' && own.apps.st.selected) return { kind: 'app', app: own.apps.st.selected }
+    return at
   }
   function clear() {
-    request++; state.requestedApp = null; state.appMenu = false
+    request++; state.mainItem = null; state.appMenu = false
     host.registry.emit('field.reset', { host }); own.threads.close({ navigate: false }); host.files.closeFile(); own.apps.st.selected = null
     state.screen = 'home'; state.editor = false; state.pop = null; state.sheet = null
   }
   function open(item) {
     const ticket = ++request
-    state.requestedApp = null; state.appMenu = false
+    state.mainItem = itemDescriptor(item); state.appMenu = false
     own.apps.st.selected = null
     if (item.kind === 'thread') {
       const pending = own.threads.open(item.id, { routed: true })
@@ -121,10 +120,10 @@ export function mountSidePanel(base) {
     own.threads.close({ navigate: false })
     host.files.closeFile()
     if (item.kind === 'file') return host.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, push: false, routed: true })
-    state.screen = 'apps'
+    state.screen = item.kind === 'app' ? 'apps' : 'item'
+    if (item.kind !== 'app') { base.schedule(); return }
     if (item.app && item.app.kind !== 'plugin') return own.apps.open(item.app, null, { routed: true })
     const url = item.url ?? item.app?.url
-    state.requestedApp = url
     own.apps.load().then(() => {
       if (request !== ticket) return
       if (own.apps.st.error) return
@@ -143,7 +142,7 @@ export function mountSidePanel(base) {
   }
   function header() {
     const at = item(), f = host.files.st.file
-    const label = at?.kind === 'app' ? at.app?.name ?? (own.apps.st.error ? 'App unavailable' : 'Opening app…') : f ? nameOf(f.path) : 'Files'
+    const label = at?.kind === 'app' ? at.app?.name ?? (own.apps.st.error ? 'App unavailable' : 'Opening app…') : f ? nameOf(f.path) : at?.id ?? 'Files'
     const location = at?.kind === 'app' ? at.app ? appAddress(at.app.url) : at.url : f ? [ROOT_LOOK[f.root]?.name ?? f.root, ...splitPath(parentOf(f.path))].join(' / ') : ''
     const controls = base.panels.controls()
     return h('header', { class: 'side-head' },
@@ -155,21 +154,18 @@ export function mountSidePanel(base) {
       } }, icon.dots(18)), controls[2])
   }
   function view() {
-    const f = host.files.st.file
-    const body = state.screen === 'threads' ? own.threads.pane()
-      : [header(), state.screen === 'apps' ? own.apps.view()
-        : f ? fileView(host.files, { wide: true, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onLink: host.openFileRef,
-          onTool: host.applyTool, embed: host.embedFor, ...host.fileDictation() })
-          : folderView(host.files, { wide: true, go: host.goFiles, home: host.filesHome() })]
     const app = own.apps.st.selected
     const appMenu = state.appMenu && app ? menuSurface(h('div', { class: 'popover side-app-menu' },
       !appUnavailable(app) ? h('a', { class: 'setrow', href: app.url, target: '_blank', rel: 'noopener noreferrer', text: 'Open in browser' }) : null,
       h('button', { class: 'setrow', text: own.apps.st.copied ? 'Copied' : 'Copy link', onclick: own.apps.copyLink }),
       own.apps.st.copyError ? h('span', { role: 'status', text: own.apps.st.copyError }) : null),
     { title: 'App actions', anchor: '[data-panel="side"] [aria-label="Item actions"]', close: () => { state.appMenu = false; base.schedule() } }) : null
-    return h('section', { class: 'pane side-pane', 'data-panel': 'side', 'aria-label': 'Side panel', key: 'side-pane' }, ...body, appMenu,
-      host.editorNodes(), ...host.sheetNodes())
+    return renderPanel({ host, item: item(), header: item()?.kind === 'thread' ? null : header(),
+      after: [appMenu, host.editorNodes(), ...host.sheetNodes()] })
   }
+  own.filePanelView = () => host.files.st.file ? fileView(host.files, { wide: true, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onLink: host.openFileRef,
+    onTool: host.applyTool, embed: host.embedFor, ...host.fileDictation() }) : folderView(host.files, { wide: true, go: host.goFiles, home: host.filesHome() })
+
   function afterRender() {
     if (state.screen === 'threads') own.threads.afterRender()
     host.fitToolOutputs(); host.fitMine(); host.files.focusRename()

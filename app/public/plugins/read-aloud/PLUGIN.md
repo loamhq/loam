@@ -23,10 +23,10 @@ Reads replies, briefs and Files aloud. The server contacts the declared speech
 provider; the browser never receives its credential. Reply/file text is sent
 only when speech is requested. Saved audio and local voice/rate choices retain
 their existing lifetimes. Turning this plugin off stops playback and removes
-its reader controls and Voice preferences.
+its reader controls and settings. Saved preferences stay in place.
 
 Full describes tables and diagram fences in one or two sentences by default.
-“Describe tables and diagrams” in this plugin’s settings (also under Voice)
+“Describe tables and diagrams” in Settings → Plugins → Read aloud
 is a device preference beside the Files voice. Turning it off restores skip
 notices. Descriptions use the same server-side Gemini key, are cached, and
 fall back to skip notices if their writer fails. Ordinary code and Brief keep

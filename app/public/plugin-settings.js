@@ -14,16 +14,21 @@ export function touchSentences(declaration = {}) {
 }
 const external = source => { try { const u = new URL(source?.url); return u.protocol === 'https:' ? u.href : null } catch { return null } }
 export function createPluginSettings({ loader, theme, host, changed = () => {} }) {
-  const st = { selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', url: '', ref: '', path: '', preview: null, request: null, installError: '', busy: false, guide: false, allDeclarations: false, refOptions: false, focusPreview: false, restarting: null, serviceError: null, logs: new Set() }
+  const st = { selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', url: '', ref: '', path: '', preview: null, request: null, installError: '', busy: false, guide: false, allDeclarations: false, refOptions: false, focusPreview: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set() }
   let hostSettings = null, secretSettings = null
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, text, onclick, ...props })
   const notice = (text, bad = true) => text ? h('p', { class: `plugin-notice${bad ? ' err' : ''}`, role: bad ? 'alert' : 'status', text }) : null
   const meta = row => [row.author || 'Unknown author', row.version || 'Version unknown', sourceLine(row.source)].join(' · ')
   const declarations = (declaration, title = 'What it touches') => h('section', { class: 'plugin-declaration', 'aria-label': title }, h('h3', { class: 'kicker', text: title }),
     touchSentences(declaration).length ? h('ul', {}, ...touchSentences(declaration).map(text => h('li', { text }))) : h('p', { class: 'note', text: 'Declares no network, record or memory access.' }))
+  function opened() {
+    const row = loader.st.rows.find(row => row.key === st.selected?.key)
+    if (row?.on) host.registry?.emit('plugin.settings.opened', { id: row.id })
+  }
   async function open(row) {
     hostSettings = null; secretSettings = null
-    st.selected = row; st.detail = null; st.detailError = ''; st.opening = true; st.guide = false; st.remove = false; st.error = ''; changed()
+    st.selected = row; st.detail = null; st.detailError = ''; st.opening = true; st.guide = false; st.remove = false; st.error = ''; st.focusDetail = true; changed()
+    opened()
     try {
       const out = await host.api('GET', `/plugins/${encodeURIComponent(row.id)}`)
       if (st.selected?.key === row.key) {
@@ -33,7 +38,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           catch (e) { if (st.selected?.key === row.key) st.detailError = e.message }
         }
         if (st.selected?.key === row.key && (out.plugin?.contributes || row.contributes)?.['settings.secret']?.length) {
-          secretSettings = createSecretSettings({ id: row.id, request: host.api, redraw: changed }); secretSettings.load()
+          secretSettings = createSecretSettings({ id: row.id, request: host.api, redraw: changed })
         }
         if (out.plugin) loader.st.rows = loader.st.rows.map(current => current.key === row.key ? { ...current, ...out.plugin, key: current.key } : current)
       }
@@ -43,7 +48,10 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   }
   async function toggle(row) {
     st.error = ''; changed()
-    try { await loader.toggle(row.id, !row.on) } catch (error) { st.error = error.message }
+    try {
+      await loader.toggle(row.id, !row.on)
+      if (st.selected?.id === row.id && loader.st.rows.some(current => current.id === row.id && current.effective && current.on)) host.registry?.emit('plugin.settings.opened', { id: row.id })
+    } catch (error) { st.error = error.message }
     changed()
   }
   async function remove(row) {
@@ -104,6 +112,9 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       row.edited ? h('p', { class: 'note', text: 'Edited here since it was installed.' }) : null,
       notice(row.broken), notice(loader.st.failures.get(row.id)), notice(st.error), notice(st.detailError),
       st.opening ? h('p', { class: 'note', role: 'status', text: 'Reading plugin details…' }) : null,
+      row.switch === 'plugin' && row.id !== 'daily-notes' && !row.broken ? h('div', { class: 'rows plugin-enable' }, h('div', { class: 'setrow' },
+        h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: row.on ? 'On' : 'Off' }), h('div', { class: 'setrow-sub', text: row.on ? 'Settings are kept when you turn this off.' : 'Turn on to use this plugin and its settings.' })),
+        h('button', { class: 'schedule-switch', role: 'switch', 'aria-label': `Enable ${row.name || row.id}`, 'aria-checked': String(Boolean(row.on)), disabled: st.opening || loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span')))) : null,
       row.id === 'daily-notes' ? h('section', { class: 'plugin-host-settings', 'aria-label': 'Daily notes settings' },
         h('div', { class: 'profile-choice' }, h('span', { text: 'Daily notes' }), h('button', { class: 'schedule-switch', role: 'switch', 'aria-label': 'Enable daily notes', 'aria-checked': String(Boolean(row.on)), disabled: loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span'))),
         hostSettings ? h('form', { onsubmit: async e => {
@@ -112,9 +123,9 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           catch (e) { st.error = e.message }
           changed()
         } }, h('label', { for: 'daily-note-folder', text: 'Daily notes folder' }), h('input', { id: 'daily-note-folder', class: 'field-input', value: hostSettings.values.folder, disabled: !row.on }), h('p', { class: 'note', text: 'Daily notes use YYYY-MM-DD.md in this vault folder.' }), h('button', { class: 'pillbtn', type: 'submit', disabled: !row.on, text: 'Save folder' })) : null, notice(st.done, false)) : null,
-      ...((host.registry?.entries('settings.section') ?? []).filter(entry => entry.plugin === row.id)
-        .flatMap(entry => host.registry.invoke(entry, 'render', { plugin: true }))),
-      secretSettings?.view(),
+      ...(row.on ? (host.registry?.entries('settings.section') ?? []).filter(entry => entry.plugin === row.id || (entry.group === 'plugin' && entry.owner === row.id))
+        .map(entry => h('section', { class: 'plugin-preferences', key: `${entry.owner}:${entry.id}`, 'aria-label': entry.title }, host.registry.invoke(entry, 'render', { plugin: true, back: false }))) : []),
+      row.on ? secretSettings?.view() : null,
       declarations(declaration), ...(row.warnings ?? []).map(warning => notice(typeof warning === 'string' ? warning : JSON.stringify(warning), false)),
       st.detail?.plugin?.guide ? h('details', { class: 'plugin-guide', open: st.guide, ontoggle: event => { st.guide = event.currentTarget.open } }, h('summary', { text: 'About this plugin' }), h('div', { class: 'md' }, host.markdown?.(st.detail.plugin.guide) ?? h('p', { text: st.detail.plugin.guide }))) : null,
       loader.st.failures.has(row.id) ? button('Try again', () => loader.refresh(), 'pillbtn content-mark') : null,
@@ -169,11 +180,20 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       installView()]
   }
   function sync() {
+    if (st.focusDetail && st.selected) {
+      const back = document.querySelector('.settings .plugin-back')
+      if (back) {
+        st.focusDetail = false
+        back.focus({ preventScroll: true })
+        const scroll = back.closest('.app-modal-body') ?? back.closest('.setmain') ?? back.closest('.settings')
+        if (scroll) scroll.scrollTop = 0
+      }
+    }
     const question = document.getElementById('plugin-install-question')
     if (!st.focusPreview || !question) return
     st.focusPreview = false
     question.querySelector('h3')?.focus({ preventScroll: true })
     question.scrollIntoView({ block: 'start' })
   }
-  return { st, view, open, sync }
+  return { st, view, open, opened, sync }
 }

@@ -83,27 +83,6 @@
       "accountOperations": "GitHub lists personal accounts, installations and organizations in host order. Refresh/disconnect use the encoded account login; personal disconnect confirms disconnect_also. Adding uses the existing GitHub manifest/install callbacks. Older hosts without the accounts route retain the legacy shared flow."
     },
     {
-      "id": "voice",
-      "previous": [
-        "dictation",
-        "read-aloud"
-      ],
-      "browserPreferences": {
-        "loam-ui.dictation": [
-          "mode",
-          "polish",
-          "maxMinutes",
-          "deviceId"
-        ],
-        "loam-ui.read-aloud": [
-          "voice",
-          "describeTablesAndDiagrams"
-        ]
-      },
-      "route": null,
-      "runtimeRequired": "Define a device-scoped host settings route and register these existing preferences; bind page and persona tool to the same contract."
-    },
-    {
       "id": "files",
       "browserPreferences": {
         "loam-ui.files": [
@@ -123,7 +102,32 @@
       "enabledBy": "Plugin on/off switch; themes through appearance.<device>.theme; listed packages have no switch",
       "route": "/v1/plugins",
       "restartRoute": "/v1/plugins/:plugin/restart",
-      "service": "Host state; failing rows expose collapsed log and Restart. No host paths or process controls enter the page."
+      "service": "Host state; failing rows expose collapsed log and Restart. No host paths or process controls enter the page.",
+      "settingsPlace": "settings.section with group: plugin, owned by the active plugin",
+      "browserPreferences": {
+        "read-aloud": {
+          "loam-ui.read-aloud": [
+            "voice",
+            "describeTablesAndDiagrams"
+          ],
+          "loam-ui.speech": [
+            "listenFrom",
+            "briefFrom",
+            "rate"
+          ]
+        },
+        "dictation": {
+          "loam-ui.dictation": [
+            "mode",
+            "polish",
+            "maxMinutes",
+            "deviceId",
+            "terms"
+          ]
+        }
+      },
+      "deviceSettingsRoute": null,
+      "runtimeRequired": "Device-scoped host settings route is still absent. A host contract for device identity, import of browser preferences and live delivery of persona changes is required before page/persona parity can be claimed."
     },
     {
       "id": "signin",
@@ -148,9 +152,10 @@
   },
   "redirects": {
     "provider": "providers/detail",
-    "dictation": "voice",
-    "read-aloud": "voice",
+    "dictation": "plugins",
+    "read-aloud": "plugins",
     "running": "activity",
-    "accounts": "integrations"
+    "accounts": "integrations",
+    "voice": "plugins"
   }
 }

@@ -1,5 +1,5 @@
 /** API 0: stable conveniences, not a sandbox. See docs/stable-parts.md. */
-export type PlaceName = 'agent.profile' | 'rail.section' | 'app.overlay' | 'settings.section' | 'thread.list.decoration' | 'thread.header.action' | 'message.renderer' | 'message.footer.action' | 'composer.tool' | 'files.viewer' | 'files.action' | 'activity.kind' | 'apps.source' | 'command'
+export type PlaceName = 'agent.profile' | 'rail.section' | 'panel.item' | 'app.overlay' | 'settings.section' | 'thread.list.decoration' | 'thread.header.action' | 'message.renderer' | 'message.footer.action' | 'composer.tool' | 'files.viewer' | 'files.action' | 'activity.kind' | 'apps.source' | 'command'
 export type ComponentId = 'core.thread-list' | 'core.message' | 'core.composer' | 'core.files.viewer' | 'core.files.editor' | 'core.rail' | 'core.activity' | 'core.apps' | 'core.settings'
 export type View = Node | string | number | boolean | null | undefined | View[]
 export interface Handle { remove(): void }
@@ -14,11 +14,14 @@ export interface Registration {
   slot?: string
   component?: ComponentId | (string & {})
   when?: (context: Context) => boolean
+  list?: (context: Context) => any
+  load?: (context: Context) => any
   render?: (context: Context) => any
   title?: string
   icon?: string | ((size: number) => View)
+  /** settings.section: 'plugin' renders only inside the owner’s enabled detail. */
   group?: string
-  /** Also render this settings.section in Settings > Plugins > this id. */
+  /** Legacy opt-in: also render in this plugin’s enabled detail. */
   plugin?: string
   children?: string
   /** group:'integrations': row facts; null omits the row. */
@@ -36,6 +39,7 @@ export interface Place { add(registration: Registration): Handle }
 export type Places = Record<PlaceName, Place> & {
   agent: { profile: Place }
   rail: { section: Place }
+  panel: { item: Place }
   app: { overlay: Place }
   settings: { section: Place }
   thread: { list: { decoration: Place }; header: { action: Place } }

@@ -129,6 +129,31 @@ preview, fills the pane, and plainly says the live origin is not configured.
 Source, editing and Download remain available. No existing preview capability
 is removed to force a host change.
 
+## Large HTML documents
+
+Opening HTML in Preview does not read its source into the editor. The isolated
+live frame streams the broker's offered download directly, including embedded
+images and scripts. Source reads only when selected; the broker's text-read
+limit and the app's save-body limit still apply. A source refusal keeps Preview
+available, explains the size/type limitation in readable language, and offers
+Back to preview and Download. No empty source can be saved after a failed read.
+Cold panel addresses obtain their action capabilities from stat, without
+fetching source; missing or denied metadata still blocks opening.
+
+The static fallback still asks the broker to read the HTML. If that read is
+refused specifically for size (413), it uses the offered download instead,
+buffering at most 16 MiB before applying the existing script-free sandbox.
+Both Content-Length and actual streamed bytes are checked; an over-limit stream
+is destroyed. Missing or denied downloads retain their HTTP status and show a
+plain explanation. The existing 32-asset, 2 MiB per-image, 8 MiB total-image,
+and 256 KiB per-stylesheet guards remain in place. No text, upload or save limit
+is raised. The live content origin and its permissions are unchanged.
+
+[Large HTML evidence](evidence/large-html/README.md) records a synthetic
+3,232,179-byte prototype with four embedded PNGs at phone and desktop sizes,
+including the desktop side pane. It distinguishes that reproducible local
+check from verification of a private original on staging.
+
 ## Reproduce the evidence
 
 The normal suite includes `test/files-content.test.js`: authority separation,

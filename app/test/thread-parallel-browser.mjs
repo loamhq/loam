@@ -62,13 +62,13 @@ try {
     const thread = async () => { await page.evaluate((id) => __parallel.threads.open(id), id); await page.waitForFunction(() => __parallel.threads.st.open && !__parallel.threads.st.open.loading); await activity('sprout').waitFor(); await settle() }
     const list = async () => { await page.evaluate(() => { __parallel.threads.close(); __parallel.goChats() }); await page.locator('.tt-row').waitFor(); await settle() }
     try {
-      await page.goto(app.url); await page.locator('.tt-row').waitFor(); await thread()
+      await page.goto(app.url); await page.locator('.tt-row').waitFor(); await page.waitForFunction(() => globalThis.__parallel); await thread()
       emit({ type: 'message.delta', persona: 'sprout', draft: 'I’m reviewing the plan and keeping the next step small.' })
       await draft('sprout').getByText('I’m reviewing the plan and keeping the next step small.').waitFor()
       await page.locator('#draft').fill('@quill Please check the details while Sprout works.')
       await page.evaluate(() => __parallel.threads.send())
       await activity('quill').waitFor(); assert.equal(posts.length, 1)
-      assert.deepEqual(await order(), ['m40', 'draft:sprout', 'm41', 'draft:quill'], 'an actively generating member has a waiting slot')
+      assert.deepEqual(await order(), ['m40', 'm41', 'draft:sprout', 'draft:quill'], 'an actively generating member has a waiting slot below the record')
       emit({ type: 'message.delta', persona: 'quill', draft: 'I’m checking the details alongside Sprout.' })
       await draft('quill').getByText('I’m checking the details alongside Sprout.').waitFor()
       await pair('parallel', 'Two members · streaming independently', 'Interleaved tools · replies keep their place', async () => {}, async () => {
@@ -77,7 +77,7 @@ try {
         emit({ type: 'message.delta', persona: 'sprout', draft: 'The plan is ready. Two helpers are checking the remaining details.' })
         await draft('sprout').getByText('The plan is ready. Two helpers are checking the remaining details.').waitFor()
         await draft('quill').getByText('The details line up. I’m checking one last note.').waitFor()
-        assert.deepEqual(await order(), ['m40', 'draft:sprout', 'm41', 'draft:quill'])
+        assert.deepEqual(await order(), ['m40', 'm41', 'draft:sprout', 'draft:quill'])
         assert.equal(await draft('quill').getByText('I’m reviewing the plan and keeping the next step small.').count(), 0)
       })
       const reply = { id: 'm42', author: 'sprout', kind: 'message', engine: 'claude-code', at, text: 'The plan is ready. Two helpers are checking the remaining details.' }; messages.push(reply); emit({ type: 'message.done', message: reply })
@@ -130,7 +130,7 @@ try {
       }
       members = members.map((m) => ({ ...m, working: false, busy: false, running: false })); turns = []; publish()
       await page.locator('[data-message-id="m44"]').waitFor()
-      assert.ok((await order()).indexOf('m44') < (await order()).indexOf('m43'), 'live start positions survive reverse completion')
+      assert.ok((await order()).indexOf('m43') < (await order()).indexOf('m44'), 'replies settle in completion order, as the record has them')
       tailLimit = 2
       await page.evaluate(async (id) => { __parallel.threads.close(); await __parallel.threads.open(id) }, id)
       await page.waitForFunction(() => !__parallel.threads.st.open.loading && !__parallel.threads.st.open.refreshing)

@@ -1281,9 +1281,12 @@ async function openDictation() {
   if (back) back.fire('click')
   await until(() => all(root, 'roundbtn').some((b) => b.getAttribute('title') === 'Settings'))
   all(root, 'roundbtn').find((b) => b.getAttribute('title') === 'Settings').fire('click')
-  await until(() => all(root, 'setrow').some((r) => /^Voice/.test(text(r))))
-  const row = all(root, 'setrow').find((r) => /^Voice/.test(text(r)))
+  await until(() => all(root, 'setrow').some((r) => /^Plugins/.test(text(r))))
+  const row = all(root, 'setrow').find((r) => /^Plugins/.test(text(r)))
   row.fire('click')
+  await until(() => card('Mode') || all(root, 'plugin-row').some(r => r.getAttribute('aria-label') === 'About Dictation'))
+  if (card('Mode')) return
+  all(root, 'plugin-row').find(r => r.getAttribute('aria-label') === 'About Dictation').fire('click')
   await until(() => card('Mode'))
 }
 

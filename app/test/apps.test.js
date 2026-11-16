@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { installDom } from './fakedom.js'
 import { all, find, text } from './browser.js'
 import { h } from '../public/ui.js'
-import { createApps, appURL, canFrame, readApps } from '../public/apps.js'
+import { createApps, appURL, canFrame, readApps, appLetter } from '../public/apps.js'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
 
 export const catalog = { sources: ['yours'], apps: [
@@ -37,15 +37,53 @@ test('Apps relay preserves the catalog, bearer and host errors; it permits GET o
   assert.match(policy, /frame-src 'self' blob: https:\/\/\*\.example\.com http: https:;/)
   assert.doesNotMatch(policy, /unsafe-inline|unsafe-eval/)
 })
-test('catalog rows show owner, address, access and expiry and create no empty Installed group', async () => {
+test('catalog rows use two quiet lines and distinct app tiles; one group needs no heading', async () => {
   const { apps } = setup(); await apps.load()
   const view = apps.view({ list: true })
   assert.deepEqual(all(view, 'apps-group').map(node => node.getAttribute('aria-label')), ['Yours'])
   assert.equal(all(view, 'apps-row').length, 2)
-  assert.match(text(view), /GardenBy Sprout · garden.example.comPrivateExpires/)
-  assert.match(text(view), /JournalBy you · journal.example.orgPublic/)
+  assert.match(text(all(view, 'apps-secondary')[0]), /Sprout · Private/)
+  assert.match(text(all(view, 'apps-secondary')[1]), /you · Public/)
+  assert.equal(all(view, 'kicker').length, 0)
+  assert.equal(all(view, 'apps-icon').length, 2)
+  assert.equal(all(view, 'apps-owner').length, 2)
+  assert.deepEqual(all(view, 'apps-monogram').map(text), ['G', 'J'])
+  assert.doesNotMatch(text(view), /garden.example.com|journal.example.org/)
   apps.st.apps.push({ ...catalog.apps[0], name: 'Installed app', source: 'installed', url: 'https://installed.example.com/' })
   assert.equal(all(apps.view({ list: true }), 'apps-group').length, 2)
+  assert.equal(all(apps.view({ list: true }), 'kicker').length, 2)
+})
+test('only near expiry is on a row; details retain the full address, access, date and copy', async () => {
+  const { apps, copied } = setup({ wide: false })
+  await apps.load()
+  apps.st.apps[0] = { ...catalog.apps[0], expires: new Date(Date.now() + 3 * 864e5).toISOString() }
+  apps.st.apps[1] = { ...catalog.apps[1], expires: new Date(Date.now() + 30 * 864e5).toISOString() }
+  let view = apps.view()
+  assert.equal(all(view, 'apps-expiry').length, 1)
+  assert.equal(text(all(view, 'apps-expiry')[0]), '3d left')
+  all(view, 'apps-details-button')[1].fire('click')
+  view = apps.view()
+  assert.match(text(all(view, 'apps-details')[0]), /youPublicjournal.example.orgEnds.*Open in browserCopy link/)
+  all(view, 'pillbtn').find(node => text(node) === 'Copy link').fire('click')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(copied, [catalog.apps[1].url]); assert.match(text(apps.view()), /Copied/)
+})
+test('the client loads only verified same-origin media and falls back without probing another path', async () => {
+  const src = '/api/apps/media/image?url=garden&kind=preview&v=one', calls = []
+  const { apps } = setup({ api: async (method, path) => { calls.push(path); return path === '/apps/media' ? { apps: [{ url: catalog.apps[0].url, preview: src, icon: 'https://remote.example.org/favicon.svg', pending: false }] } : catalog } })
+  await apps.load()
+  let view = apps.view({ list: true })
+  assert.equal(all(view, 'apps-preview-image')[0].getAttribute('src'), src)
+  assert.equal(all(view, 'apps-site-icon').length, 0)
+  all(view, 'apps-preview-image')[0].fire('error')
+  view = apps.view({ list: true })
+  assert.equal(all(view, 'apps-preview-image').length, 0)
+  assert.equal(text(all(view, 'apps-monogram')[0]), 'G')
+  assert.deepEqual(calls, ['/apps', '/apps/media'])
+})
+test('fallback letters use the distinguishing part of a family name', () => {
+  const names = ['Atlas', 'Atlas-bench', 'Atlas demo', 'Atlas_design', 'Atlas.maps'].map((name, i) => ({ name, url: `https://app-${i}.example.org` }))
+  assert.deepEqual(names.map(app => appLetter(app, names)), ['A', 'B', 'D', 'S', 'M'])
 })
 test('wide framing keeps one iframe, names it, and offers copy and browser escape', async () => {
   const { apps, opened, copied } = setup(); await apps.load()

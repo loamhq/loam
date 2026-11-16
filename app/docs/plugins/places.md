@@ -27,10 +27,11 @@ before `when`. A render gets the same context regardless of its author.
 
 | Place | Register; context; return; example |
 | --- | --- |
-| `rail.section` | `{id,title,icon,render,open?,selected?,hidden?,screens?,frame?}`. `icon` is a shared icon name or `(size)=>DOM`. The rail/nav use its metadata; selecting runs `open()` or opens the plugin section. `render({wide})` returns destination DOM in a generic section frame; `frame:'full'` supplies the complete screen. `screens` maps existing route names, `hidden` omits the nav entry, and `selected()` can supply selection state. The core uses these same public fields. Example: `add({id:'notes',title:'Notes',icon:'folder',render:()=>loam.ui.h('main',{},'Notes')})`. |
+| `rail.section` | `{id,title,icon,list?,load?,render?,open?,selected?,hidden?,screens?,frame?}`. On desktop, selecting changes only the navigator and calls optional `load({host})`; `list({host,wide:true,collapse})` supplies list-column contents. Existing `render` is used as its fallback. On phone, `render({wide:false})`, `open`, `selected`, `screens` and `frame:'full'` keep their existing screen behavior. A desktop section never owns a panel or the workspace frame. `hidden` omits the rail/nav entry. |
+| `panel.item` | `{id,render}`. `id` is an item kind, preferably namespaced. `render({host,item,panel,wide:true})` returns panel contents in either slot. `host` is that slot's mount, `panel` is `main` or `side`, and `item` is `{kind,id}` for a plugin kind. Keep any view state scoped by panel and item. Open with `loam.commands.run('panel.open',{item:{kind:'notes.note',id:'one'},panel:'main'})`. Identities get addresses and obey the shared uniqueness/move/save rules; no section change occurs. Disposing the registration leaves an unavailable-item explanation until it returns. |
 | `app.overlay` | `{id,render,when?}`; `{screen,wide}`; overlay DOM appended after the normal dialogs. Manage positioning/focus with shared components. Example: `add({id:'pet',render:()=>loam.ui.h('aside',{class:'my-pet'},'Hello')})`. |
 | `agent.profile` | `{id,render,when?}`; `{agent,plugin,busy,error,save,defaultView}`. For an enabled plugin with declared fields, `defaultView(fields?)` supplies host-backed choice/text rows (all fields by default). `save(values)` uses the profile's ordinary guarded PATCH and returns whether it succeeded; `busy` disables controls during writes and `error` carries the host's refusal. A plugin can decorate these with the same public place as any extension. With no registration the declared fields render automatically. |
-| `settings.section` | `{id,title,icon,render,group?,plugin?}`; `{back,sheet}`; an array of Settings DOM. No `group` means a new navigation section; `group:'voice'` contributes inside Voice; `group:'integrations'` contributes a service row and detail (below). Optional `plugin:'<id>'` also renders the section inside that plugin's details, with `{plugin:true}`. Example: `add({id:'my-voice',title:'My voice',group:'voice',render:()=>[loam.ui.h('p',{},'Voice preferences')]})`. |
+| `settings.section` | `{id,title,icon?,render,group?,plugin?}`; `{back,sheet}`; an array of Settings DOM. No `group` means a navigation section; `group:'plugin'` renders only inside the owning plugin’s detail while on, with `{plugin:true,back:false}`; `group:'integrations'` contributes a service row and detail (below). The optional legacy `plugin:'<id>'` also renders inside that plugin’s details while on. Example: `add({id:'preferences',title:'Reading preferences',group:'plugin',render:()=>[loam.ui.h('p',{},'Choose how to read')]})`. |
 | `thread.list.decoration` | `{id,render}`; `{thread,open}`; noninteractive decoration inside a thread row. `component:'core.thread-list'` instead replaces the complete list with `{args,state,defaultView}`. Example: `add({id:'tag',render:({thread})=>loam.ui.h('span',{},thread.pinned?'Pinned':'')})`. |
 | `thread.header.action` | `{id,render}`; `{thread,state,open,patch}`; actions immediately below the shared header, above the conversation. Example: `add({id:'rename',render:({patch})=>loam.ui.h('button',{onclick:()=>patch({title:'Notes'})},'Name Notes')})`. |
 | `message.renderer` | `{id,when,render}`; `{message,thread,state}`; a specialized complete message DOM. `component:'core.message'` replaces all messages and receives `{message,thread,args,state,defaultView}`. Whole-component overrides take precedence over specialized renderers. Example: `add({id:'notice',when:c=>c.message.kind==='notice',render:c=>loam.ui.h('aside',{},c.message.text)})`. |
@@ -180,7 +181,12 @@ and its `has.page_main` determine whether its page code runs.
 
 `sheet.changing` fires before shared `openSheet`, `closeSheet` or `goSettings`
 replaces a sheet, with `{previous, sheet}`; `sheet` is null on close. Use it to
-stop polls and clear transient form values. `settings.opened` retains `{page}`;
+stop polls and clear transient form values. `plugin.settings.opened` sends `{id}` when an enabled plugin detail opens or its
+switch is turned back on in that detail. Load device choices or auxiliary
+resources there. Settings sections are removed with their owner’s scope;
+preferences are retained. The host renders manifest-declared secret fields once,
+below plugin preferences, only while on; the plugin must not duplicate them.
+`settings.opened` retains `{page}`;
 `opening: true` additionally identifies a shared `openSheet` Settings entry,
 when a plugin may refresh its state/reset last-visit notices. Ordinary Settings
 section navigation omits that flag. A custom `dismiss()` still owns its own
@@ -199,7 +205,8 @@ const keys = loam.ui.createSecretSettings({
   id: 'my-plugin', request: loam.data.request,
   redraw: () => loam.ui.host.schedule(),
 })
-// Add keys.view() inside the plugin's settings.section renderer.
+// For a custom surface only: add keys.view() there. Plugin details render
+// manifest-declared secret fields automatically; do not add a second copy.
 ```
 
 `load()` refreshes metadata. Values typed into the form are cleared on submit;

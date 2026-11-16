@@ -1,6 +1,6 @@
 # Wide panels
 
-The left is where you are; the right is what you explicitly keep beside it.
+The navigator chooses a list. Main and side each own an explicitly chosen item.
 This implements the two-panel design approved on 2026-11-13. It adds device
 view state, with no broker route, server setting or deployment change.
 
@@ -74,20 +74,52 @@ durations; reduced motion removes those transitions.
 At pane widths of 700 pixels or less, author labels stay in normal flow and
 their sticky backdrops disappear, so they scroll away without covering prose.
 
-`localStorage["loam.panels"]` holds the split, the sidebar override and minimal
-item addresses. A file stores root/path, a thread stores its ID, and an app
+`localStorage["loam.panels"]` holds the split, the sidebar override and a minimal
+side descriptor for address-less hosts. Browser URLs are authoritative for both slots. A file stores root/path, a thread stores its ID, and an app
 stores its URL. No file capabilities, revisions, app inventory, messages or
 credentials are persisted there. Apps are looked up again on reload; removed
 or no-longer-frameable apps show an explanation. A missing or invalid device
 store falls back to the ordinary single pane.
 
-The address bar is authoritative for main threads and Files. The existing
-main-app address remains `/`; its item is restored from the same device view
-store. Side actions and resizing do not add browser history entries. **Back
-and Forward navigate main only**, leaving side's choice alone, except when the
-destination is side's own item: that item moves to main under the same rule.
-Modal-only history entries close or restore Settings/Activity without navigating
-either panel. Copy-link actions continue to use the item owning that action.
+The address bar follows main's item, never the navigator. Threads and files
+retain their paths; apps use `/apps?url=<encoded app URL>`. Plugin items use
+`/panel?kind=<kind>&id=<id>`. The `side` query is a JSON identity descriptor,
+encoded by `URLSearchParams`; it contains no app inventory or file capabilities.
+Side actions replace the current entry's query; choosing a new main item pushes
+an entry carrying the current side. Resizing and rail browsing add no entries.
+Reload and Back/Forward restore both slots from that entry, using the same
+uniqueness and save guards. Modal-only history entries still preserve both
+mounts. Copy-link actions continue to use the item owning that action.
+The former main-app fallback in device storage becomes a one-time upgrade:
+old app/side identities are converted to URLs before the new store format is
+written. After that, `/` means an empty main and an app has its own shareable,
+reloadable address.
+
+## Panel ownership
+
+`state.navigator` names the desktop list. `state.mainItem` names main's typed
+identity, and the side mount owns its own typed identity. `state.screen` remains
+the phone route and a compatibility lifecycle label for existing controllers;
+it never chooses the desktop shell or panel contents.
+
+`page/layout.js` builds one workspace with permanent list and panel-pair slots.
+It no longer adapts whole section frames by searching and moving their DOM.
+`panel-items.js` renders either panel through `panel.item` registrations and
+provides identity/address serialization. The existing conversation, Files and
+Apps controllers still own their transports, drafts, editors and views. A rail
+command only sets the navigator, reveals its list and calls that section's
+optional loader. No occupied-item inference or leave/save guard runs there.
+Files folders browse that list without closing a main file or changing its
+address. Actual file picks and links still use the panel's guard.
+
+Core and plugins register `rail.section.list({host,wide,collapse})` and
+`panel.item.render({host,item,panel,wide})` through the same public registry.
+Legacy section `render` remains the desktop list fallback and the phone screen;
+`frame`, `open` and `selected` retain their phone meaning. A desktop section
+cannot replace the workspace. `panel.open` opens `{item,panel:'main'|'side'}`.
+Plugin items use `{kind,id}` identities and receive the owning mount as `host`.
+An unavailable kind keeps its identity and displays an explanation until its
+plugin registers again. See [the contract](plugins/places.md).
 
 ## Mounts and former single-item assumptions
 
@@ -107,7 +139,7 @@ page integration still assumed one open item:
 | Sidebar hidden is one boolean | Manual hidden state is preserved; automatic tuck and its override are panel view state. |
 | The desktop breakpoint alone determines content layout | The window controls availability; named pane containers control split content. |
 
-`panels.js` owns destination and uniqueness rules. The side runtime composes
+`panels.js` owns destination and uniqueness rules; `panel-items.js` owns panel rendering and addresses. The side runtime composes
 the existing page mounts and delegates shared host facts, settings and audio
 to the application. It does not reproduce a reduced transcript, editor or
 composer. No new provider-specific interpretation or broker vocabulary was
@@ -161,3 +193,8 @@ entry points and conversion from phone Activity when the window widens.
 The [sidebar/main regression and before/after captures](evidence/sidebar-main/README.md)
 reproduce the subsequent rail-clearing bug in all three core lists and check
 that list visibility and main-document navigation now remain independent.
+
+The [panel ownership record](evidence/panel-items/README.md) supersedes the
+section-owned desktop frame described in earlier implementation notes. It
+includes the delayed Files/Apps opening reproduction, all ordered rail pairs,
+plugin item reloads and history entries with different side items.

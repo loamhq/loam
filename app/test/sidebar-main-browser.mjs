@@ -113,7 +113,7 @@ try {
         assert.equal(await page.locator('.apps-list .apps-row[aria-current=page]').count(), 0)
         await rail('Files').click(); await listShown('Files')
         await page.locator('.listcol .fs-entry .setrow').filter({ hasText: 'plan.md' }).click(); await ready('files')
-        assert.equal(await page.evaluate(() => __sidebar.state.sidebarSection), null)
+        assert.equal(await page.evaluate(() => __sidebar.state.navigator), 'files')
         if (beside) assert.equal(await side.frameLocator('iframe').locator('#counter').innerText(), '1')
         checks.push('Choosing rows from each revealed list still opens that item in main and leaves side running')
         await rail('Chats').click(); await listShown('Chats'); await saveIdentity('files')

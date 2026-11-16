@@ -141,11 +141,12 @@ export function mountProfile(host, { controller = host.profiles, activity = host
   const file = (title, ref, sub = null, right = null, { folder = false, unavailable = 'Not reachable from Files' } = {}) => ref?.root && ref.exists !== false
     ? settingsRow({ title, sub, right, lead: (folder ? icon.folder : icon.file)(18), onclick: () => open(ref, { folder }) })
     : h('div', { class: 'setrow profile-file-unavailable' }, h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: title }), h('div', { class: 'setrow-sub', text: ref?.exists === false ? 'Not available' : unavailable })))
-  function select(label, value, choices, choose, { fixed = false } = {}) {
+  function select(label, value, choices, choose, { fixed = false, hint = null, hintId = null } = {}) {
     if (fixed) return h('div', { class: 'profile-choice', key: label }, h('span', { class: 'setrow-title', text: label }), h('span', { class: 'profile-fixed', text: choices.find(o => o.id === value)?.name || value }))
-    return h('label', { class: 'profile-choice', key: label }, h('span', { class: 'setrow-title', text: label }),
-      h('span', { class: 'settings-select' }, h('select', { 'aria-label': label, disabled: st.busy || fixed, onchange: e => choose(e.target.value || null) },
-        choices.map(o => h('option', { value: o.id ?? '', selected: (o.id ?? '') === (value ?? ''), disabled: o.disabled, text: o.name || o.label || o.id }))), icon.chevronDown(14)))
+    return h('label', { class: `profile-choice${hint ? ' profile-choice-hinted' : ''}`, key: label }, h('span', { class: 'setrow-title', text: label }),
+      h('span', { class: 'settings-select' }, h('select', { 'aria-label': label, 'aria-describedby': hintId, disabled: st.busy || fixed, onchange: e => choose(e.target.value || null) },
+        choices.map(o => h('option', { value: o.id ?? '', selected: (o.id ?? '') === (value ?? ''), disabled: o.disabled, text: o.name || o.label || o.id }))), icon.chevronDown(14)),
+      hint ? h('span', { class: 'setrow-sub profile-choice-hint', id: hintId, text: hint }) : null)
   }
   function runs(data, kind) {
     const defaults = kind === 'agent' ? data.defaults : data
@@ -163,6 +164,14 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     return group('Runs on', [
       select('Provider', effective.provider, allowed.map(id => ({ id, name: providerName(id), disabled: !host.state.providers.find(p => p.id === id)?.connected })), value => c.patch({ provider: value }), { fixed: allowed.length === 1 }),
       select('Model', own.model, choices, value => c.patch({ model: value, ...(!effortFits(provider, value, own.effort) ? { effort: null } : {}) })),
+      kind === 'engineer' ? ['quick', 'standard', 'hard'].map(tier => {
+        const setting = effective.tiers?.[tier], value = setting?.from === 'tier' ? setting.model : null
+        const options = [{ id: '', name: `Default${setting?.from === 'model' && setting.model ? ` · ${models.find(m => m.id === setting.model)?.name || setting.model}` : ''}` }, ...models]
+        if (value && !models.some(m => m.id === value)) options.push({ id: value, name: value, disabled: true })
+        return select(tier[0].toUpperCase() + tier.slice(1), value, options, model => c.patch({ tiers: { [tier]: model } }), {
+          hint: { quick: 'Small mechanical jobs', standard: 'Most work', hard: 'Design-heavy and subtle work' }[tier], hintId: `engineer-tier-${tier}-hint`,
+        })
+      }) : null,
       select('Thinking', own.effort, levels, value => c.patch({ effort: value })),
       kind === 'engineer' && data.own && data.project !== 'default' ? settingsRow({ title: 'Use the default engineer settings', onclick: () => c.patch({ provider: null }) }) : null,
     ], applies, defaults.not_honoured?.length ? 'Wakes and scheduled runs stay on Claude Code for now.' : null)

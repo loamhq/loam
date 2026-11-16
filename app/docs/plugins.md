@@ -58,11 +58,16 @@ changing DOM directly remains allowed.
 Read aloud and Dictation own their page code, helpers, styles, controller
 state and existing device preferences inside `public/plugins/`. They use the
 same public interface available to personal packages. Disabling both leaves
-no mic, reader, agent voice field or Voice destination and loads neither
+no mic, reader or agent voice field and loads neither
 package on a fresh page. Generic fields, sheets, lifecycle, navigation,
 normalization, browser audio focus and UI primitives stay core. Server speech,
 transcription and authenticated relays remain server infrastructure; this
 page-only change does not retire them or change vendor credentials.
+
+Each audio plugin declares its settings through `settings.section` with
+`group: 'plugin'`. Settings → Plugins renders them only in their owner’s
+detail while it is on; there is no separate Voice destination. See the
+[preference inventory and host route gap](plugin-preferences.md).
 
 Plugin-owned services can contribute rows, details and notices inside
 Integrations through the [settings contract](plugins/places.md#plugin-owned-integrations).

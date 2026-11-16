@@ -196,7 +196,7 @@ export function applyThreadEvent(open, e) {
     for (const id of open.liveReplies.keys()) if (!continuing.has(id)) open.liveReplies.delete(id)
     open.turns = turns
     // A reconnect snapshot states liveness, not replacement draft text. Keep
-    // each continuing member's prose and its place between human messages.
+    // each continuing member's prose; live replies stay below the record.
     open.messages = open.messages.filter((m) => !m.streaming || continuing.has(m.author))
     for (const turn of turns) {
       open.activeTurns.add(turn.persona)
@@ -280,7 +280,9 @@ export function applyThreadEvent(open, e) {
       open.progress.delete(message.author)
       const member = open.thread.members.find((m) => m.persona === message.author)
       if (open.activeTurns.has(message.author) || open.typing.has(message.author) || member?.working || member?.background > 0) open.liveReplies.set(message.author, message.id)
-      if (draftAt >= 0) open.messages.splice(draftAt, 1, message)
+      // The finished reply takes its posting place, not the draft's (owner,
+      // 2026-11-16): whatever was posted while it worked stays above it.
+      if (draftAt >= 0) open.messages.splice(draftAt, 1)
       if (!open.activeTurns.has(message.author)) open.typing.delete(message.author)
       open.steps.delete(message.author); open.waiting.delete(message.author)
     }
@@ -294,7 +296,7 @@ export function applyThreadEvent(open, e) {
         while (open.messages[anchor + 1]?.after === message.after) anchor++
         open.messages.splice(anchor + 1, 0, message)
       }
-    } else open.messages.push(message)
+    } else settle(open.messages, message)
     if (!open.after || messageNumber(message.id) > messageNumber(open.after)) open.after = message.id
     // The accepted own message may reach SSE before its HTTP response.
     if (open.pending?.text === message.text && isOwner(message.author)) open.pending = null
@@ -315,6 +317,26 @@ export function applyThreadEvent(open, e) {
     apply(open.permissionState, { ...e, seq: undefined })
     open.permissions.delete(e.request_id)
   }
+}
+// Durable messages stand in posting order and live replies follow them all:
+// a new one goes after the last durable message posted before it, ahead of
+// any draft still streaming. The thread read gives the same order. An id
+// with no number (a fixture's, a local one) has no posting place: it goes last.
+// Branch notices keep their anchor's place so intervening settlements cannot
+// split a notice from the message it branched out of.
+function settle(messages, message) {
+  const n = /\d+$/.test(String(message.id)) ? messageNumber(message.id) : Infinity
+  let at = messages.length
+  while (at > 0 && (messages[at - 1].streaming || messageNumber(messages[at - 1].after ?? messages[at - 1].id) > n)) at--
+  messages.splice(at, 0, message)
+}
+// Where a message being sent is drawn: after the settled record, ahead of
+// the live replies, where its durable copy will stand.
+export function withPending(messages, pending) {
+  if (!pending) return messages
+  let at = messages.length
+  while (at > 0 && messages[at - 1].streaming) at--
+  return [...messages.slice(0, at), pending, ...messages.slice(at)]
 }
 export function messageNumber(id) { return Number(String(id).match(/(\d+)$/)?.[1] ?? 0) }
 

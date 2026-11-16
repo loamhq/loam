@@ -50,6 +50,28 @@ explanatory text, with no link, chevron or folder icon. Recent jobs and All jobs
 filtered by project; pagination can load older host pages. Every other project
 has neither instructions nor jobs. Changes apply to the next job.
 
+Engineers also have Quick, Standard and Hard model pickers directly beneath
+Model, with short hints for small mechanical jobs, most work, and design-heavy
+and subtle work. Each uses the effective provider's same model catalog.
+`effective.tiers.<tier>` supplies the selected model and `from` (`tier` or
+`model`); a fallback reads “Default · <model name>”. An unavailable selected
+model remains visible as a disabled option, as in Model.
+
+Each picker sends only `{"tiers":{"<tier>":"<model id>"}}` through the existing
+`PATCH /api/engineers/<project or default>` route. Selecting Default sends
+`null` for that tier and restores the engineer's model. The answer is the
+whole engineer listing; the controller replaces both the listing and the
+open detail from it. A provider change clears tiers on the host, so all three
+pickers redraw from that answer with the new catalog and fallback. Host
+refusals remain visible and restore the saved choice. Personas use the same
+host PATCH contract (`engineer.tiers.<tier>`); there is no page-only store
+or write route. Agent and reviewer profiles retain their existing pickers.
+
+The tier contract was supplied in the implementation brief. Its referenced
+host receipt was not available in the checkout or through connected tools;
+no live host settings were read or changed. See
+[tier verification and captures](evidence/engineer-tiers/README.md).
+
 The reviewer uses `/api/system/reviewer`. Its time picker preserves the
 existing recurrence and PT grammar; Recurrence can edit the entire expression
 for weekdays or named days. Model and thinking apply from the next run. Last

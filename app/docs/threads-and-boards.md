@@ -392,9 +392,18 @@ flight in start order: `{persona, engine, model, started_at, on_background?,
 waiting?}`. Several members may be `running`/`busy` at once. The legacy `turn`
 is the earliest; the page reads it only when `turns` is absent. An explicit
 empty array means no turns. A snapshot states liveness, not replacement text:
-continuing members keep their independent drafts, accumulated prose and place
-between human messages; ended or replaced turns lose only their own draft.
-`turn.started` reserves that member's reply position before its first text.
+continuing members keep their independent drafts and accumulated prose; ended
+or replaced turns lose only their own draft. `turn.started` opens that member's
+live reply before its first text, below the record.
+**Durable messages stand in posting order; live replies follow them
+(2026-11-16).** The owner, in t-153f9c43: "if the final message actually gets
+posted after other messages, then it should be ordered that way." A message
+posted while a member works -- sent here, from another device, or replayed
+on a reconnect -- goes above that member's live reply, and a message being
+sent is drawn there too. A finished reply settles after the last durable
+message posted before it, which is where the thread read puts it, so the live
+page and a reload agree. Words streamed before a message can post after it:
+the broker posts a reply at its harness turn's end.
 The composer stays available while other members answer; the runtime queues
 additional messages per member and admits different members in parallel. `message.delta {persona,text,draft}` replaces that
 persona's displayed draft with `draft`. `turn.step {persona,label,steps}`
@@ -409,7 +418,8 @@ slot, whether the record is streaming or already completed with tool labels.
 Files and actionable permission cards remain content. Parked members occupy no
 space in the message flow or above the composer. Background work is available
 only through the count beside Board in the header.
-Interleaved steps and completions keep each reply in its reserved position.
+Interleaved steps keep each live reply in place; completions settle in
+posting order.
 A completed reply stays in the record while another member streams. Repeated
 or older replayed completions cannot erase another turn's draft. Cached
 revisits deduplicate by ID when adopting the host's fresh tail in durable
@@ -419,7 +429,7 @@ member that is generating. `turn.finished {persona}` clears live turn state,
 including failed turns with only a system line. The older non-marking record
 check remains only when the list stream is unavailable.
 
-`message.done {message}` gives the draft its durable ID in place. A separate,
+`message.done {message}` gives the draft its durable ID at its posting place. A separate,
 page-local view key keeps the article, author run and prose mounted across
 completion, repeated snapshots and the lazy steps read. The open tool fold
 keeps its identity and disclosure state when full steps arrive. Newly streamed

@@ -2129,6 +2129,10 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-more { align-self: center; }
 .banner.banner-retry { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .fs-errlead { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; color: var(--text-inverse); }
+.fs-error-detail { color: inherit; display: flex; flex-wrap: wrap; gap: 10px; }
+.fs-error-detail p { flex-basis: 100%; margin: 0; font-size: 14px; }
+.fs-error-action { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 999px; background: transparent; color: inherit; border: 1px solid currentColor; font-size: 14px; font-weight: 600; text-decoration: none; }
+.fs-error-action:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 /* The host's own sentence under the page's: the box's ink, quieter, and still
  * well past 4.5:1 on its red in both themes. */
 .fs-hostline { font-size: 13px; color: var(--text-inverse); opacity: .75; overflow-wrap: anywhere; }
@@ -2536,11 +2540,11 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .copyblk { min-width:44px; min-height:44px; }
 
 /* Selected chrome remains a control. Send/Save/Confirm alone use primary paint. */
-:is(.iconbtn.on,.iconbtn.ghost.on,.plusbtn.on,.modelbtn.on,.chip.on,.navbtn.on,.railtab.on,.railround.on,.nav .settings-utility.on,.segmented button.on,.editor-done,.accounttile,.player-play,.playerbar-play) {
+:is(.iconbtn.on,.iconbtn.ghost.on,.plusbtn.on,.modelbtn.on,.chip.on,.navbtn.on,.railtab.on,.railround.on,.nav .settings-utility.on,.segmented button.on,.editor-done,.accounttile,.player-play) {
   background:var(--latte-control-selected); color:var(--latte-control-selected-ink);
 }
 @media (hover: hover) {
-  :is(.iconbtn.on,.iconbtn.ghost.on,.plusbtn.on,.modelbtn.on,.chip.on,.navbtn.on,.railtab.on,.railround.on,.nav .settings-utility.on,.segmented button.on,.editor-done,.accounttile,.player-play,.playerbar-play):hover {
+  :is(.iconbtn.on,.iconbtn.ghost.on,.plusbtn.on,.modelbtn.on,.chip.on,.navbtn.on,.railtab.on,.railround.on,.nav .settings-utility.on,.segmented button.on,.editor-done,.accounttile,.player-play):hover {
     background:var(--latte-control-selected); color:var(--latte-control-selected-ink);
   }
 }
@@ -2550,6 +2554,9 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-row-error,.plugin-notice.err { color:var(--danger); }
 .plugin-row-error { margin-top:5px; font-size:12px; overflow-wrap:anywhere; }
 .plugin-notice { font-size:14px; line-height:1.5; overflow-wrap:anywhere; }
+.plugin-preferences { display:flex; flex-direction:column; gap:16px; min-width:0; margin:20px 0; }
+.plugin-preferences > .note { margin:0; }
+.plugin-preferences > .card { margin:0; }
 .plugin-declaration { margin:24px 0; }
 .plugin-declaration > .kicker { margin-bottom:10px; }
 .plugin-declaration ul { padding-left:20px; margin:0; }
@@ -2602,6 +2609,8 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .profile-choice .settings-select { background:transparent; }
 .profile-choice select { text-align:right; font-size:14px; }
 .profile-choice .field-input { min-width:0; width:100%; }
+.profile-choice-hinted { row-gap:0; padding-block:10px; }
+.profile-choice-hint { grid-column:1 / -1; margin-top:0; }
 .profile-face,.profile-name { background:transparent; border:0; color:inherit; padding:0; min-height:44px; cursor:pointer; }
 .profile-face { border-radius:50%; }
 @media (hover: hover) { .profile-face:hover { transform:rotate(-4deg); } }

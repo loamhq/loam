@@ -19,7 +19,7 @@ Threads retain the shared rich composer, dictation, file/image uploads,
 Files picker, expanded editor, permission/question cards, detailed nested
 steps, Reply/Branch/Copy and Read aloud. The three sections are **Chats, Files,
 Apps**. **Activity** combines live sessions, jobs and history; **Settings** has
-Appearance, Agents, Providers, Integrations, Voice, Files and Plugins. The phone puts Activity
+Appearance, Agents, Providers, Integrations, Files and Plugins. The phone puts Activity
 first inside Settings, beside the three tabs; desktop keeps Activity and Settings
 at the foot of the rail.
 See [application shape and runtime handoff](docs/app-shape.md).
@@ -33,6 +33,8 @@ secondary New thread and Newspaper Search. Navigation keeps its original
 selected Latte treatment, exempt from action tiers; utility actions stay in ink.
 See the [rule](docs/design-system/tokens.md#three-tiers-of-action)
 and [before/after captures and control inventory](docs/evidence/button-tiers/README.md).
+The sticky listening bar keeps a neutral Play/Pause circle and speed pill,
+with a quiet Close control. See its [states and checks](docs/evidence/sticky-audio-controls/README.md).
 
 Use **Branch into a new thread** beneath a completed message to take a topic
 elsewhere. Choose an agent, edit the drafted opening, then **Start thread**.
@@ -81,13 +83,14 @@ environment variables and the routes in `project.md`.
 
 | choice | why |
 |---|---|
-| **Node, standard library only** | Zero dependencies: no lockfile, no install step in the image, no supply chain, nothing to explain. `node:http` serves the page, `fetch` calls the broker, `node --test` runs the tests. |
+| **Node, standard library only** | Zero npm dependencies: no lockfile or npm install step. The image includes system packages for speech encoding and page previews. `node:http` serves the page, `fetch` calls the broker, `node --test` runs the tests. |
 | **No front-end framework, no build step** | The page is a handful of ES modules the browser loads directly. What is in `public/` is what runs — no bundle, no source map, nothing to rebuild before a change is visible. The whole of the "view layer" is `public/ui.js`: `h()` turns a tag and some properties into a DOM node, and `morph()` puts a freshly built screen into the page **by keeping the nodes already there**. A screen is still built whole on every change, which keeps one code path per row; what reaches the DOM is only the difference, so a stream tick that changes nothing touches nothing and the element under a finger is the same element a second later. A deployed build that replaced the page on every tick lost two automated taps in a row, and a thumb would have lost them too. `key` says which row is which so a row that moves up the list moves rather than being rebuilt; everything else is matched by position. A framework would buy the same diffing and cost an install step, a lockfile and a build stage in the image. |
 | **A markdown renderer written here** | The agents answer in markdown and the thread has to render it. Every well-known library renders to a *string of HTML*, which would mean `innerHTML` at the one place in this app that must never have it — and a lockfile and an install step in an image that has neither. `public/markdown.js` builds DOM nodes instead, so a reply cannot become markup by construction. About four hundred and sixty lines of code, with `test/markdown.test.js` beside it. [More below](#the-agent-writes-markdown-and-no-reply-is-ever-html). |
 | **Typefaces are served by this app** | Caprasimo, Figtree and JetBrains Mono are in `public/fonts/`, prepared by `tools/fetch-fonts.js`. Five additional first-party display faces live in their theme folders, prepared by `tools/fetch-theme-fonts.js`, and load only when active. Latin and Latin-ext WOFF2 files are committed; no font vendor is contacted at run time. See [Appearance](docs/appearance.md). |
 | **Server-sent events, browser ← app ← broker** | The broker already speaks SSE, so a websocket would mean translating one stream into another for no gain. SSE is one-directional and messages go back over ordinary `POST`s, which is what the broker's own interface expects. It also survives a reverse proxy without an upgrade handshake, and reconnects by asking for a position — which is exactly the `?from=<seq>` mechanism the broker gives us. |
+| **Cached app previews** | An isolated Chromium process photographs app pages from the web container, one at a time, including browser-only apps. Its empty profile receives no broker credential or browser login. JPEG previews and verified icons are served from this origin. The Docker image includes Chromium headless-shell and fonts; a native install without Chromium uses the designed fallback. [Preview lifecycle](docs/app-previews.md). |
 | **Events passed through unchanged** | The app relays the broker's stream byte for byte and reduces it in the browser. Nothing invents a second vocabulary for the CLI's events. |
-| **No durable state of this app's own** | Sessions, costs and transcripts are the broker's, and the page draws them from the stream every time it opens one. This browser keeps device preferences, composer drafts and unsent messages per chat: whether the desktop's list column is hidden, how this device takes dictation (Settings → Voice), the Files voice, and Files shortcuts and inbox folder. Pin, archive and title are **not** among them — they are on the record, so a pin made on the phone is a pin on the laptop. `/storage` holds one thing: the read-aloud audio, under `/storage/speech`, which is a cache and not a record — swept after 48 hours unplayed, and made again on asking. [Read aloud](#read-aloud-a-reply-as-speech). |
+| **No durable state of this app's own** | Sessions, costs and transcripts are the broker's, and the page draws them from the stream every time it opens one. This browser keeps device preferences, composer drafts and unsent messages per chat: whether the desktop's list column is hidden, how this device takes dictation (Settings → Plugins → Dictation), the Files voice, and Files shortcuts and inbox folder. Pin, archive and title are **not** among them — they are on the record, so a pin made on the phone is a pin on the laptop. `/storage` holds regenerable caches: read-aloud audio under `/storage/speech` (swept after 48 hours unplayed) and app previews/icons under `/storage/app-media` (bounded and swept after seven days without refresh). Neither is a user record. [Read aloud](#read-aloud-a-reply-as-speech). |
 
 ## Run it
 
@@ -135,8 +138,8 @@ capture command and 390/1440 light/dark evidence are documented
 provider, dictation, read-aloud, Files, schedules and Running now suites remain.
 
 At 1180 layout pixels and above, rows and file links offer **Open to the side**
-(also Alt/Option-click). The left panel remains the navigation destination;
-the right holds the thread, file or app explicitly sent there. See
+(also Alt/Option-click). The navigator selects a list; main and side each hold
+the thread, file, app or plugin item explicitly opened there. See
 [wide panels](docs/wide-panels.md) for resizing, reload/Back behaviour and the
 [1180/1440/1920 and phone captures](docs/evidence/wide-panels/README.md).
 The interaction matrix runs with an external browser installation:
@@ -164,9 +167,30 @@ Apps uses the desktop list column too: choose a row for main, or use its panel
 icon / Alt-click for side. An empty main says “Pick an app”. Activity always
 uses its desktop dialog, including after resizing from phone width, and now
 matches Settings' dimensions. See the [current checks and captures](docs/evidence/apps-list-activity/README.md).
+Apps show a cached preview of the page itself. Desktop uses small thumbnails;
+phones use two-column preview cards, with the name and one quiet author line.
+A failed capture uses a smaller distinguishing letter on a softened field, or a centred site icon when one is available. Details
+open from the card’s inside ⋯ or a long-press. Icons are resolved and cached
+server-side; the browser makes no site-icon probes. See the
+[preview contract](docs/app-previews.md) and [current routing/fallback captures](docs/evidence/apps-internal-route/README.md).
 Choosing Chats, Files or Apps in the desktop rail reveals that list and keeps
 the current main document open until another item is chosen. See the
-[sidebar regression and before/after captures](docs/evidence/sidebar-main/README.md).
+[panel ownership checks and before/after captures](docs/evidence/panel-items/README.md).
+Desktop sections register lists and item kinds register panel contents; both
+slots use one renderer. App addresses use `/apps?url=…`; thread and file paths
+keep their existing shape. The `side` query carries the other item's identity.
+Reload and Back/Forward restore those panels, independently of rail browsing.
+Existing stored app/side views are converted to addresses once on upgrade.
+Run the complete rail matrix with
+`LOAM_PLAYWRIGHT=/path/to/playwright/index.mjs node test/panel-items-browser.mjs`,
+and the delayed-opening regression with
+`LOAM_PLAYWRIGHT=/path/to/playwright/index.mjs node test/panel-opening-browser.mjs`.
+See the [plugin section/item contract](docs/plugins/places.md).
+
+Read aloud and Dictation preferences live in **Settings → Plugins → the plugin**
+and show only while it is on. Existing device choices and host-managed keys
+keep their storage. See the [setting inventory and remaining host API gap](docs/plugin-preferences.md)
+and [390/1440 browser evidence](docs/evidence/plugin-preferences/README.md).
 
 The [Settings and Activity review](docs/evidence/settings-activity-review/README.md)
 includes a before/after gallery, the Providers/Integrations split, every Settings
@@ -275,6 +299,11 @@ describes the runtime contract and staging checks. Owner identity comes from
 | `VAULT_BOARDS_FOLDER` | `00_INBOX/boards` | boards folder used by the design preview. Real thread board paths come from the broker. |
 | `VAULT_GENERAL_BOARD` | `00_INBOX/from-agents/comms.md` | general inbox board path whose quick notes use the runtime’s dated UTC format. |
 | `VAULT_ATTACHMENTS_FOLDER` | `98_ATTACHMENTS` | vault upload subtree used to resolve older absolute attachment paths; relative paths from the broker stay intact. |
+| `APP_MEDIA_DIR` | `/storage/app-media` | regenerable preview/icon cache and temporary capture profiles; the named storage volume keeps it writable with a read-only root. A native run can point this at a writable cache directory. |
+| `APP_PREVIEW_CHROME` | native: `chromium`; image: `chromium-headless-shell` | capture executable. The image uses the smaller headless-shell package; a native install can keep its existing Chromium. No browser login/profile is loaded. |
+| `APPS_PREVIEW_BASE` | unset | optional plain HTTP origin of the host’s internal preview route. Sites/projects use `<first-public-host-label>.<preview-host>` with the original path/query/fragment. Browser links retain the public URL. Unset, existing public capture behavior is unchanged. [Routing contract](docs/app-previews.md#optional-internal-route). |
+| `APPS_PREVIEW_ADDR` | unset | IP address for that route when its virtual hostnames have no DNS. Chromium receives a scoped resolver rule; the icon reader connects to this address with the virtual Host header. Used only with `APPS_PREVIEW_BASE`. |
+| `APP_PREVIEW_TTL_HOURS` | `6` | successful preview/icon refresh interval; catalog version/date changes also refresh. A failed capture retries after at most 30 minutes and retains a previous good preview. [Details](docs/app-previews.md). |
 | `APP_PORT` | `8080` | the one HTTP port the container listens on |
 | `BROKER_URL` | — | the session broker's base URL, e.g. `http://<address>:<port>`. Unset, the app still serves and the page says no broker is configured. |
 | `AVATAR_COLOURS` | `{}` | optional JSON object of persona IDs to semantic persona palette tokens, e.g. `{"persona-id":"persona-plum"}`. Numbered aliases and the six extra Newsprint-era names normalize to the fixed eleven-slot Palette at input. In Palette, only named personas change; all others keep their original ID mapping. Latte tones overrides every agent with its warm ramp. See [palette aliases](docs/design-system/tokens.md#runtime-avatar-references) and [Latte tones](docs/evidence/latte-tones/README.md). |

@@ -24,5 +24,6 @@ Dictate into the composer, expanded editor or Files editor. Reads agent/thread
 names and the host's dictation terms to bias recognition. Inserts words in the
 current draft; writing a file or sending a message remains the person's action.
 Turning this plugin off releases the microphone and removes its controls and
-Voice preferences. Live recognition may send audio to the browser vendor's
+settings. Saved preferences stay in place. Open Settings → Plugins → Dictation
+to choose mode, polish, recording length and microphone. Live recognition may send audio to the browser vendor's
 service; use recorded mode for the app server's configured transcription path.

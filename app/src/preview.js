@@ -15,6 +15,7 @@ export const PREVIEW_POLICY =
   "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
 
 export const PREVIEW_LIMITS = {
+  htmlBytes: 16 * 1024 * 1024, // static document, including embedded images
   assets: 32, // local files fetched for one page, images and stylesheets together
   imageBytes: 2 * 1024 * 1024, // one image
   totalBytes: 8 * 1024 * 1024, // every image in the page together

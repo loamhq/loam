@@ -1,7 +1,8 @@
 import { h, icon, blob } from "../ui.js"
 import { agentLook } from "../sessions.js"
 import { folderView, fileView } from "../files.js"
-import { panelHeader, emptyConversation } from "../chat-ui.js"
+import { renderPanel } from '../panel-items.js'
+import { panelHeader } from "../chat-ui.js"
 
 // Mounted once. Cross-module state and operations are explicit host services.
 export function mount(host) {
@@ -18,7 +19,7 @@ function nav() {
       'div',
       { class: 'navpill' },
       ...host.registry.entries('rail.section').filter(entry => !entry.component && !entry.hidden).map(section => h('button', {
-        class: `navbtn${section.selected?.() || host.state.screen === `plugin:${section.id}` ? ' on' : ''}`, text: section.title,
+        class: `navbtn${(host.state.wide ? host.state.navigator === section.id : section.selected?.() || host.state.screen === `plugin:${section.id}`) ? ' on' : ''}`, text: section.title,
         onclick: () => host.commands.run('section.open', { id: section.id }),
       })),
     ),
@@ -68,10 +69,10 @@ function profileBody(agent) {
 // Which layout is drawn is read from the window on every draw, so a window
 // dragged across 1100px is a redraw and nothing else.
 
-function desk() {
+function desk(beside = null) {
   return h(
     'div',
-    { class: `desk${host.state.collapsed ? ' collapsed' : ''}`, key: 'screen:desk' },
+    { class: `desk${host.state.mainItem?.kind === 'thread' ? ' tt-shell has-thread' : ''}${host.state.collapsed ? ' collapsed' : ''}`, key: 'screen:workspace' },
     rail(),
     // **The column stays in the tree when it is hidden**, which is what makes
     // hiding it an animation rather than a jump: the owner, 2026-09-22, "the
@@ -80,8 +81,9 @@ function desk() {
     // are the stylesheet's to run down over `.desk.collapsed`, and the pane
     // grows into the space as it goes. It is `inert` while it is closed so that
     // nothing invisible can be tabbed to or read out.
-    listColumn(),
-    mainPane(),
+    h('div', { class: 'workspace-list', key: 'workspace-list' }, listColumn()),
+    h('div', { class: `panel-pair${host.panels.visible() ? ' split' : ''}${host.panels.st.closing ? ' closing' : ''}${host.panels.st.swap ? ` swapped-${host.panels.st.swap}` : ''}`, key: 'panel-pair', 'data-focused-panel': host.panels.focused(), style: { '--panel-main': `${host.panels.st.split}%` } },
+      mainPane(), beside ? host.panels.divider() : null, beside),
   )
 }
 
@@ -102,7 +104,7 @@ function builtinRail() {
     { class: 'rail' },
     h('img', { class: 'brand', src: '/icon.svg', alt: 'Loam' }),
     h('div', { class: 'rail-tabs' }, ...host.registry.entries('rail.section').filter(entry => !entry.component && !entry.hidden).map(section =>
-      h('button', { class: `railtab${section.selected?.() || host.state.screen === `plugin:${section.id}` ? ' on' : ''}`, title: section.title,
+      h('button', { class: `railtab${(host.state.wide ? host.state.navigator === section.id : section.selected?.() || host.state.screen === `plugin:${section.id}`) ? ' on' : ''}`, title: section.title,
         onclick: () => host.commands.run('section.open', { id: section.id }) },
         typeof section.icon === 'function' ? section.icon(20) : (icon[section.icon] ?? icon.apps)(20), h('span', { text: section.title })))),
     h(
@@ -121,35 +123,26 @@ function builtinRail() {
 // The 372px list column: the same header the phone has, plus the button that
 // hides the column, and the same list under it.
 function listColumn() {
-  const section = host.state.sidebarSection ?? host.state.screen
-  if (!['files', 'apps'].includes(section)) return host.threads.list(true)
+  const section = host.registry.entries('rail.section').find(entry => !entry.component && entry.id === host.state.navigator)
   const collapse = h('button', { class: 'iconbtn', title: 'Hide sidebar for a focused view', onclick: () => setCollapsed(true) }, icon.panelLeft(18))
-  return h('aside', host.state.collapsed ? { class: 'listcol away', inert: true, 'aria-hidden': 'true' } : { class: 'listcol' },
-    section === 'apps' ? host.apps.view({ list: true, collapse })
-      : folderView(host.files, { go: host.goFiles, wide: true, home: host.filesHome(), collapse }))
+  const content = section ? host.registry.invoke(section, section.list ? 'list' : 'render', { host, wide: true, navigator: true, collapse }) : null
+  if (content?.classList?.contains('listcol')) return content
+  return h('aside', host.state.collapsed ? { class: 'listcol away', inert: true, 'aria-hidden': 'true' } : { class: 'listcol' }, content)
 }
 
-// A desktop rail choice changes the list, not the document being read. Item
-// navigation still uses the ordinary main-panel router and its save guard.
+function filesList(collapse) {
+  return folderView(host.files, { go: host.goFiles, wide: true, home: host.filesHome(), collapse })
+}
+
+// No panel reads the navigator. A rail move has exactly one destination: list.
 function browseSection(id) {
   host.closeSheet()
   setCollapsed(false)
-  const screen = host.state.screen
-  const occupied = screen === 'threads' && host.threads.st.open
-    || screen === 'files' && host.files.st.file
-    || screen === 'apps' && host.apps.st.selected
-    || screen === 'profile'
-  if (!occupied) {
-    host.state.sidebarSection = null
-    return id === 'chats' ? host.goChats() : id === 'files' ? host.goFiles(null, '') : host.goApps()
-  }
-  host.state.sidebarSection = id
-  if (id === 'chats') host.threads.load({ quiet: true })
-  if (id === 'files' && !host.files.st.roots.loaded) host.files.loadRoots()
-  if (id === 'apps' && !host.apps.st.loaded && !host.apps.st.loading) host.apps.load()
+  host.state.navigator = id
+  const section = host.registry.entries('rail.section').find(entry => !entry.component && entry.id === id)
+  if (section?.load) host.registry.invoke(section, 'load', { host })
   host.schedule()
 }
-
 
 
 // Hidden or shown, and remembered on this device — like the theme and unlike a
@@ -162,24 +155,9 @@ function setCollapsed(value) {
 }
 
 function mainPane() {
-  const body =
-    host.state.screen === 'files'
-      ? filesPane()
-      : host.state.screen === 'apps'
-        ? host.apps.view()
-      : host.state.screen === 'profile'
-        ? profilePane()
-        : paneEmpty()
-  return h(
-    'main',
-    { class: 'pane', 'data-panel': 'main' },
-    // With the column hidden, the way back to it sits in the pane itself; the
-    // headers carry a spacer so nothing of theirs is underneath it.
-    host.state.collapsed
-      ? h('button', { class: 'iconbtn showbar', key: 'show-sidebar', title: 'Show sidebar', onclick: () => setCollapsed(false) }, icon.panelLeft(18))
-      : null,
-    body,
-  )
+  const empty = host.state.mainItem ? null : host.state.navigator === 'files' ? filesPane(true) : host.state.navigator === 'apps' ? host.apps.view({ empty: true }) : host.threads.pane({ empty: true })
+  return renderPanel({ host, item: host.state.mainItem, empty,
+    before: host.state.collapsed ? [h('button', { class: 'iconbtn showbar', key: 'show-sidebar', title: 'Show sidebar', onclick: () => setCollapsed(false) }, icon.panelLeft(18))] : [] })
 }
 
 function profilePane() {
@@ -198,8 +176,8 @@ function profilePane() {
 // it was opened from the list.
 function backToChat() { if (host.state.backToThread) host.threads.open(host.state.backToThread); else host.goChats() }
 
-function filesPane() {
-  const f = host.files.st.file
+function filesPane(empty = false) {
+  const f = empty ? null : host.files.st.file
   if (!f) {
     return h(
       'div',
@@ -220,23 +198,19 @@ function filesPane() {
   )
 }
 
-function paneEmpty() {
-  return h('div', { class: 'pane-body', key: 'pane:empty' }, host.registry.draw('app.overlay', { slot: 'player' }),
-    emptyConversation({ title: 'Pick a chat', body: 'One on the left, or a new one from an agent at the top of the list.' }))
-}
 return Object.defineProperties({}, {
     nav: { enumerable: true, get: () => nav },
     profileScreen: { enumerable: true, get: () => profileScreen },
     profileBody: { enumerable: true, get: () => profileBody },
     desk: { enumerable: true, get: () => desk },
     rail: { enumerable: true, get: () => rail },
+    filesList: { enumerable: true, get: () => filesList },
     listColumn: { enumerable: true, get: () => listColumn },
     browseSection: { enumerable: true, get: () => browseSection },
     setCollapsed: { enumerable: true, get: () => setCollapsed },
     mainPane: { enumerable: true, get: () => mainPane },
     profilePane: { enumerable: true, get: () => profilePane },
     backToChat: { enumerable: true, get: () => backToChat },
-    filesPane: { enumerable: true, get: () => filesPane },
-    paneEmpty: { enumerable: true, get: () => paneEmpty }
+    filesPane: { enumerable: true, get: () => filesPane }
 })
 }

@@ -6,7 +6,6 @@ import { threadSpeechSet } from './reply.js'
 import { createVoicePicker } from './voice-picker.js'
 export function activate(loam) {
   loam.ui.styles.add('page/style.css')
-  const secrets = loam.ui.createSecretSettings?.({ id: 'read-aloud', request: loam.data.request, redraw: () => loam.ui.host.schedule() })
   const store = createPreferences(loam.settings)
   const local = { speech: store.speech, speechOn: false, speakMenu: null }
   Object.defineProperty(local, 'rec', { get: () => ['draft', 'editor', 'file'].map(target => loam.ui.host.fieldActivity(target)).find(state => state?.phase === 'recording') })
@@ -25,7 +24,7 @@ export function activate(loam) {
     return set ? service.turnRow(context.leading, set, context.trailing) : context.view
   } })
   loam.places.files.viewer.add({ id: 'read-aloud.file', slot: 'action', render: context => service.fileSpeech(context.file) })
-  loam.places.settings.section.add({ id: 'read-aloud', plugin: 'read-aloud', group: 'voice', title: 'Read aloud', order: 10, render: ({ plugin = false } = {}) => [service.settingsReadAloud({ back: false }), plugin ? null : secrets?.view()] })
+  loam.places.settings.section.add({ id: 'read-aloud', group: 'plugin', title: 'Reading preferences', render: () => service.settingsReadAloud({ back: false }) })
   loam.places.app.overlay.add({ id: 'read-aloud.player', slot: 'player', render: () => service.playerBar() })
   loam.places.app.overlay.add({ id: 'read-aloud.sheets', slot: 'sheet', render: ({ sheet }) => {
     if (sheet.kind === 'file-speech') {
@@ -55,7 +54,6 @@ export function activate(loam) {
     if (host.state.sheet) host.state.sheet.voices = false
     local.speakMenu = null
   }
-  loam.events.on('settings.opened', ({ page }) => { if (page === 'voice') secrets?.load() })
   loam.events.on('page.leaving', cleanup)
   return cleanup
 }

@@ -57,10 +57,13 @@ export function logInto(lines) {
   return createLog({ level: 'debug', write: (line) => lines.push(JSON.parse(line)) })
 }
 
-export async function appAgainst(broker, env = {}) {
+export async function appAgainst(broker, env = {}, overrides = {}) {
   const config = readConfig({ BROKER_URL: broker.url, BROKER_TOKEN: TOKEN, ...env })
   const lines = []
-  const { server } = createApp({ config, broker: fixtureBroker(config), log: logInto(lines) })
+  // Fixtures never capture/fetch their synthetic catalog on the network.
+  // Media integration tests explicitly install a real loopback-backed cache.
+  const appMedia = { resolve: async app => ({ url: app.url, preview: null, icon: null, pending: false }), image: async () => null }
+  const { server } = createApp({ config, broker: fixtureBroker(config), log: logInto(lines), appMedia, ...overrides })
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   return { server, lines, config, url: `http://127.0.0.1:${server.address().port}` }

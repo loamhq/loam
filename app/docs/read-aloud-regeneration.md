@@ -1,8 +1,10 @@
 # Available audio and regeneration
 
-The Read aloud menu gives cached Listen/Brief takes a subtle theme-derived
-fill and border, a play mark, and “Ready to play” with the duration. An unmade
-take stays neutral and describes the time needed to make it. Each available
+The Read aloud menu gives cached Listen/Brief takes a play icon with the
+theme's secondary-action fill and matching ink, and “Ready to play” with the
+duration. Both rows sit on the ordinary menu background, without a ready
+card, tint or border. An unmade take keeps its neutral Newspaper icon and
+describes the time needed to make it. Each available
 take has a separate Regenerate button beside its playback control. Files has
 the same action for the selected Full or brief listening time. No new setting
 or persona route is needed.
@@ -37,4 +39,6 @@ are ignored, and a delayed pre-regeneration lookup cannot restore stale
 metadata. Thread take identity includes explicit voice/style options so a
 changed persona choice cannot reuse a take for earlier options.
 
-Validation and browser evidence: [read-aloud-ready](evidence/read-aloud-ready/README.md).
+The icon-only treatment supersedes the earlier ready card in every theme.
+Current visual and regeneration checks: [read-aloud-icon](evidence/read-aloud-icon/README.md).
+Original service/cache validation: [read-aloud-ready](evidence/read-aloud-ready/README.md).

@@ -77,7 +77,7 @@ for (const width of [390, 1440]) for (const mode of ['light', 'dark']) {
     assert.equal(await page.evaluate(() => __audios.at(-1).paused), true, 'capture pauses playback through the public event')
     await page.locator('.takebtn.discard').click(); await page.locator('.take').waitFor({ state: 'detached' })
     await page.locator('.player-close:visible,.playerbar-close:visible').first().click()
-    await page.evaluate(() => __open.goSettings('voice')); await page.locator('#files-voice').waitFor(); await capture('both-on-voice')
+    await page.evaluate(() => __open.goSettings('plugins')); await page.getByRole('button', { name: 'About Read aloud', exact: true }).click(); await page.locator('#files-voice').waitFor(); await capture('both-on-voice')
     await page.locator('#files-voice').click(); await page.locator('.voice-menu').waitFor(); await page.getByRole('option', { name: 'Kore', exact: true }).click()
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('loam-ui.read-aloud')).voice), 'Kore')
     await capture('voice-reader-preferences')

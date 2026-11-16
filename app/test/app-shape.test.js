@@ -11,10 +11,10 @@ import { rootsAnswer } from './fixtures/files-contract.js'
 import { readFile } from 'node:fs/promises'
 
 test('removed settings destinations resolve to the current settings catalog', () => {
-  assert.deepEqual(SETTINGS_SECTIONS.map(item => item.label), ['Appearance', 'Agents', 'Providers', 'Integrations', 'Voice', 'Files', 'Plugins', 'Sign-in', 'Update'])
+  assert.deepEqual(SETTINGS_SECTIONS.map(item => item.label), ['Appearance', 'Agents', 'Providers', 'Integrations', 'Files', 'Plugins', 'Sign-in', 'Update'])
   for (const page of ['providers', 'integrations']) assert.equal(settingsHome(page), page)
   assert.equal(settingsHome('accounts'), 'integrations')
-  for (const page of ['dictation', 'read-aloud']) assert.equal(settingsHome(page), 'voice')
+  for (const page of ['voice', 'dictation', 'read-aloud']) assert.equal(settingsHome(page), 'plugins')
   assert.equal(settingsHome('provider'), 'provider')
 })
 test('the settings registry handoff preserves all destinations and Appearance keys', async () => {

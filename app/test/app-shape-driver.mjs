@@ -44,14 +44,13 @@ try {
   const face = find(root, 'blob')
   assert.match(face.style.background, /^var\(--agent-avatar-tone-\d+, var\(--persona-/)
 
-  for (const label of ['Appearance', 'Agents', 'Providers', 'Integrations', 'Voice', 'Files', 'Plugins', 'Sign-in', 'Update']) {
+  for (const label of ['Appearance', 'Agents', 'Providers', 'Integrations', 'Files', 'Plugins', 'Sign-in', 'Update']) {
     click(utility('Settings')); await until(() => find(root, 'settings'))
     const destinations = width >= 1100 ? all(root, 'navrow').map(text) : all(root, 'setrow-title').map(text)
-    assert.deepEqual(destinations, [...(width < 1100 ? ['Activity'] : []), 'Appearance', 'Agents', 'Providers', 'Integrations', 'Voice', 'Files', 'Plugins', 'Sign-in', 'Update'])
+    assert.deepEqual(destinations, [...(width < 1100 ? ['Activity'] : []), 'Appearance', 'Agents', 'Providers', 'Integrations', 'Files', 'Plugins', 'Sign-in', 'Update'])
     if (width < 1100) await until(() => text(find(setting('Activity'), 'setrow-sub')) === '1 working')
     click(setting(label))
     await until(() => all(root, 'sheet-title').some(node => text(node) === label))
-    if (label === 'Voice') assert.match(text(find(root, 'settings')), /Dictation[\s\S]*Read aloud/)
     if (label === 'Plugins') {
       assert.equal(all(root, 'plugin-row').length, (await loadThemes()).themes.length + 2)
       assert.ok(all(root, 'plugin-row').some(node => /Latte[\s\S]*Theme/.test(text(node))))
@@ -112,5 +111,5 @@ try {
   click(all(root, 'apps-row')[1]); assert.equal(browserOpens.at(-1), apps[1].url)
   click(section('Chats')); await until(() => all(root, 'tt-row').length === 4)
   assert.ok(find(root, 'tt-unread'), 'Chats retain their own unread dots')
-  console.log(JSON.stringify({ width, mode, sections: 3, settings: 7, roots: 2, activitySeenWrites: 0, workIndicators: 0, apps: 2, result: 'passed', visualLayout: 'not evaluated' }))
+  console.log(JSON.stringify({ width, mode, sections: 3, settings: 8, roots: 2, activitySeenWrites: 0, workIndicators: 0, apps: 2, result: 'passed', visualLayout: 'not evaluated' }))
 } finally { page.unwatch(); page.stop(); await app.close(); setImmediate(() => process.exit(process.exitCode ?? 0)) }

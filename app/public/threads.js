@@ -26,7 +26,7 @@ import { providerMark } from './marks.js'
 import { readEvents } from './sse.js'
 import { createLink } from './link.js'
 import { readField, caretPoint, setMarkdown } from './compose.js'
-import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuotes, editBoard, markBoardSeen, addBoardItem, applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readThreadBoard, readAcceptedMessage, messageSegments, firstMessageTitle, groupJoinNotices } from './thread-record.js'
+import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuotes, editBoard, markBoardSeen, addBoardItem, applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readThreadBoard, readAcceptedMessage, messageSegments, firstMessageTitle, groupJoinNotices, withPending } from './thread-record.js'
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
@@ -327,7 +327,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   }
   async function open(id, { push = true, listing = null, routed = false } = {}) {
     if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing })
-    close({ navigate: false }); enter()
+    close({ navigate: false }); enter({ kind: 'thread', id })
     clearReturn()
     const ticket = generation
     const savedVisit = visits.get(id), summary = st.threads.find((t) => t.id === id)
@@ -624,7 +624,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   }
   function create(persona = null) {
     if (st.creating) return
-    close(); enter(); st.creating = true; st.error = ''
+    close(); enter({ kind: 'thread', id: 'new-thread' }); st.creating = true; st.error = ''
     const ticket = generation
     const o = st.open = { thread: { id: 'new-thread', title: 'New thread', default: persona, members: persona ? [{ persona, engine: 'claude-code' }] : [] },
       messages: [], loading: false, creating: true, typing: new Set(), permissions: new Map(), steps: new Map(),
@@ -1499,9 +1499,12 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
           !section.lines.some((l) => l.item) && (section.key !== 'top' || sections.length === 1) ? listEnd(section) : null)),
           !lines.some((l) => l.item) && !o.board.markdown.replace(/^#+.*$/gm, '').trim() ? h('p', { class: 'tt-board-caption', text: 'A short list for this thread. You and the agents can edit it.' }) : null))
   }
+  function emptyThread() {
+    return h('div', { class: 'pane-body' }, registry.draw('app.overlay', { slot: 'player' }), emptyConversation({ title: 'Good things start here.', body: 'Choose a conversation or start a new thread.', face: icon.chat(38) }))
+  }
   function thread() {
     const o = st.open
-    if (!o) return h('div', { class: 'pane-body' }, registry.draw('app.overlay', { slot: 'player' }), emptyConversation({ title: 'Good things start here.', body: 'Choose a conversation or start a new thread.', face: icon.chat(38) }))
+    if (!o) return emptyThread()
     if (st.manage) return details()
     const general = o.thread.general || o.thread.id === 'general'
     syncTasks(o)
@@ -1534,7 +1537,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       mentionButton: round(st.mention ? 'Remove mention' : 'Mention an agent', '@', toggleMention, { class: `plusbtn tt-mention-button${st.mention ? ' on' : ''}`, onpointerdown: (e) => e.preventDefault(), disabled: o.sending || Boolean(compose.dictating?.()), 'aria-expanded': String(Boolean(st.mention)) }) })
     // Place player rows before asking for the bar: visible rows own playback.
     const messageRows = [
-      ...messageRuns(groupJoinNotices(o.messages, catalog())), o.pending ? message(o.pending) : null, ...unmatched.map(permission),
+      ...messageRuns(groupJoinNotices(withPending(o.messages, o.pending), catalog())), ...unmatched.map(permission),
     ]
     const listeners = listeningFaces()
     o.listeningInset = listeningInset(o.listeners.size > 0, o.listeningInset, o.atEnd)
@@ -1602,8 +1605,9 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     }
     return shell
   }
-  function pane() {
+  function pane({ empty = false } = {}) {
     st.wide = true
+    if (empty) return [emptyThread()]
     if (st.open) rememberReading(st.open)
     clearTimeout(awaitTimer); awaitTimer = null; awaitDue = Infinity
     const body = thread()

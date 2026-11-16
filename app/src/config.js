@@ -2,10 +2,12 @@ import { readAvatarColours } from '../public/avatar-colours.js'
 import { readFaceVariants } from '../public/face-identity.js'
 import { readFileWebUrls } from './file-links.js'
 import { INSTALLATION_DEFAULTS } from '../public/installation.js'
+import { readPreviewRoute } from './app-preview-route.js'
 // Every knob this app has. All of it arrives in the environment; none of it is
 // a literal anywhere else, and no default is a secret.
 
 export function readConfig(env = process.env) {
+  const previewRoute = readPreviewRoute({ base: env.APPS_PREVIEW_BASE, addr: env.APPS_PREVIEW_ADDR })
   const installation = { ...INSTALLATION_DEFAULTS }
   for (const [key, variable] of Object.entries({ appsDomain: 'APPS_DOMAIN', timeZone: 'APP_TIME_ZONE', inbox: 'VAULT_INBOX_FOLDER', boards: 'VAULT_BOARDS_FOLDER', generalBoard: 'VAULT_GENERAL_BOARD', attachments: 'VAULT_ATTACHMENTS_FOLDER' })) {
     installation[key] = (env[variable] ?? '').trim() || installation[key]
@@ -88,6 +90,14 @@ export function readConfig(env = process.env) {
     polishModel,
     logLevel,
     speech,
+    appMedia: {
+      dir: (env.APP_MEDIA_DIR ?? '').trim() || '/storage/app-media',
+      chrome: (env.APP_PREVIEW_CHROME ?? '').trim() || 'chromium',
+      ttlHours: positive(env.APP_PREVIEW_TTL_HOURS, 6),
+      appsDomain: installation.appsDomain,
+      previewBase: previewRoute.base,
+      previewAddr: previewRoute.addr,
+    },
     // What the app can say about itself without leaking the token.
     get brokerConfigured() {
       return brokerUrl !== ''

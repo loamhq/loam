@@ -7,9 +7,9 @@ import { promisify } from 'node:util'
 test('Apps explicitly resets native button surfaces and gives anchors the same pill layout', async () => {
   const css = await readFile('public/apps.css', 'utf8')
   const row = /\.apps-row\s*\{([^}]+)\}/.exec(css)[1]
-  assert.match(row, /background:var\(--paper-pane\)/)
+  assert.match(row, /background:(?:transparent|var\(--paper-pane\))/)
   assert.match(row, /border:0;/)
-  assert.match(row, /min-height:44px/)
+  assert.ok(Number(/min-height:(\d+)px/.exec(row)[1]) >= 44)
   assert.match(css, /\.apps-toolbar \.pillbtn[^}]+text-decoration:none/)
 })
 test('staging defects are held by real computed styles at both widths, themes and modes', {

@@ -71,7 +71,8 @@ import { markdown, strip } from './markdown.js'
 import { copyText } from './clipboard.js'
 import { appFrame, sameFrame } from './viewport.js'
 import { layoutPixels } from './scale.js'
-import { createPanels, panelDOM } from './panels.js'
+import { itemDescriptor, itemHref, itemFromURL, sideFromURL, withSide, migratePanelURL } from './panel-items.js'
+import { createPanels, panelDOM, itemKey, readPanels } from './panels.js'
 import { mount as mountConversation } from './page/conversation.js'
 import { mountSidePanel } from './page/side-panel.js'
 
@@ -107,7 +108,8 @@ const state = {
   // that has to remember which side it was on.
   wide: false,
   collapsed: store.sidebarHidden,
-  sidebarSection: null, // desktop list choice; main keeps its document
+  navigator: 'chats', // desktop list only; never selects panel contents
+  mainItem: null, // typed panel identity, independent of the navigator
   // The + menu, where the desktop draws it: a popover anchored above the +,
   // with two sub-pages it drills into. The phone draws the same content as the
   // + sheet, so below the width threshold this stays `null` and `state.sheet`
@@ -217,11 +219,12 @@ const moved = Object.fromEntries(Object.entries({
   accounts: "loadGithub githubStep keepGithub setupGithub connectOrg installGithub refreshGithub disconnectGithub githubReturn providerSignIn connectKeys orgField orgAppField",
   composer: "DRAFT_MAX_PX MAC draft editorDraft openEditor closeEditor sendFromEditor fileChooser imageChooser growDraft submitDraft attachStrip chipSub loginNotice activeThread composer expandGlyph editorNodes menuPage menuRootOf menuOpen openPage openMenu togglePlus closeMenus composerMenu menuRow menuSheet menuGroups menuPopover",
   transcript: "lineKeys lineCount keyOf MINE_MAX_PX MINE_SLACK_PX fitMine COPIED_MS copied copyWithCue copyButton stepItems stepChildren itemNode foldCard stepNode askLine openBlocks longToolDetails toggleOpen toolNode toolDetail fitToolOutputs answeredLine openTurns toggleTurn turnModelName turnFacts turnLine",
-  settings: "settingsBody settingsSheet settingsItems settingsDialog settingsVoice settingsPlugins settingsAppearance goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks",
-  layout: "nav profileScreen profileBody desk rail listColumn browseSection setCollapsed mainPane profilePane backToChat filesPane paneEmpty",
+  settings: "settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks",
+  layout: "nav profileScreen profileBody desk rail filesList listColumn browseSection setCollapsed mainPane profilePane backToChat filesPane",
   sheets: "openSheet closeSheet sheetTop SHEET_SETTLE_MS pickerNodes filesSheetNodes sheetNodes"
 }).flatMap(([group, names]) => names.split(' ').map(name => [name, group])))
 const shell = Object.defineProperties({}, {
+  routePanels: { get: () => routePanels },
   panels: { get: () => panels },
   panelId: { get: () => 'main' },
   panelDOM: { get: () => panelDOM('main') },
@@ -378,18 +381,20 @@ const threads = mountConversation(page, { messageState, dom: panelDOM('main'),
   navigate: (item) => panels.openMain(item),
   side: () => panels,
   address: (id) => {
+    if (id) state.mainItem = { kind: 'thread', id }
+    else if (state.mainItem?.kind === 'thread') state.mainItem = null
     const href = id ? threadHref(id) : '/'
     if ((id || threadFromPath(page.herePath())) && page.herePath() !== href) page.pushAddress(null, '', href)
   },
-  enter: () => { importRequest++; closeThread(); state.screen = 'threads'; state.sidebarSection = null; page.closeSheet(); schedule() },
+  enter: item => { importRequest++; closeThread(); state.screen = 'threads'; state.mainItem = item; if (!state.wide) state.navigator = 'chats'; page.closeSheet(); schedule() },
   leave: goChats,
 })
 const apps = createApps({ registry, api, redraw: schedule, wide: () => state.wide,
   isCurrent: () => state.screen === 'apps',
   side: () => panels, navigate: item => panels.openMain(item),
-  avatar: id => isOwner(id) ? blob({ initial: ownerInitial(), color: 'var(--latte-espresso)', ink: 'var(--latte-espresso-ink)', shape: '50%' }, { size: 40, font: 18 }) : blob(agentLook(id, state.agents), { size: 40, font: 18 }),
+  avatar: (id, { size = 40, font = 18 } = {}) => isOwner(id) ? blob({ initial: ownerInitial(), color: 'var(--latte-espresso)', ink: 'var(--latte-espresso-ink)', shape: '50%' }, { size, font }) : blob(agentLook(id, state.agents), { size, font }),
   agentName: id => isOwner(id) ? 'you' : state.agents.list.find(agent => agent.id === id)?.name ?? id ?? 'Unknown',
-  newThread: () => threads.create(), copy: copyText,
+  newThread: () => threads.create(), copy: copyText, leave: () => goApps(),
 })
 function goApps() {
   if (state.screen === 'files') {
@@ -399,7 +404,8 @@ function goApps() {
   importRequest++; page.closeSheet(); threads.close(); closeThread()
   if (page.herePath() !== '/') page.pushAddress(null, '', '/')
   apps.st.selected = null
-  state.sidebarSection = null
+  state.navigator = 'apps'
+  state.mainItem = null
   state.screen = 'apps'; const pending = apps.load(); schedule(); return pending
 }
 function appsScreen() { return h('div', { class: 'screen apps-screen', key: 'screen:apps' }, apps.view(), page.nav()) }
@@ -576,12 +582,13 @@ function goHome() {
   importRequest++
   closeThread()
   state.screen = 'home'
-  state.sidebarSection = null
+  state.navigator = 'chats'
+  state.mainItem = null
   state.profileAgent = null
   schedule()
 }
 
-function goProfile(agent) {
+function goProfile(agent, { push = true } = {}) {
   importRequest++
   state.backToThread = page.activeThread()?.thread.id ?? null
   threads.close()
@@ -590,7 +597,8 @@ function goProfile(agent) {
   // — so what is kept is the id, not the connection.
   closeThread()
   state.screen = 'profile'
-  state.sidebarSection = null
+  state.mainItem = { kind: 'profile', id: agent }
+  if (isWide() && push) page.pushAddress(null, '', itemHref(state.mainItem))
   state.profileAgent = agent
   state.profileTab = 'activity'
   profileActivity.st.kind = ''; profileActivity.st.project = ''
@@ -792,41 +800,20 @@ function render() {
   if (!panels.visible() && ['draft', 'editor', 'file'].some(target => sidePanel.host.fieldActivity(target))) registry.emit('field.reset', { host: sidePanel.host })
   if (state.screen.startsWith('plugin:') && !registry.entries('rail.section').some(entry => entry.id === state.screen.slice(7))) goChats()
   const modern = state.screen === 'threads' || state.screen === 'home'
-  if (previousSection !== state.screen) { registry.emit('section.changed', { from: previousSection, section: state.screen }); previousSection = state.screen }
+  const currentSection = state.wide ? state.navigator : state.screen
+  if (previousSection !== currentSection) { registry.emit('section.changed', { from: previousSection, section: currentSection }); previousSection = currentSection }
   const section = registry.entries('rail.section').find(entry => !entry.component &&
     (state.screen.startsWith('plugin:') ? entry.id === state.screen.slice(7) : entry.screens?.includes(state.screen)))
   // Register visible side speech rows before the main surface asks for the one
   // floating player, so it never duplicates controls already beside it.
   const beside = panels.visible() ? sidePanel.view() : null
-  const content = section ? registry.invoke(section, 'render', { wide: state.wide, screen: state.screen }) : null
+  const content = !state.wide && section ? registry.invoke(section, 'render', { wide: false, screen: state.screen }) : null
   const welcoming = onboarding.checking || onboarding.needed
   const screen = authExpired() ? h('main', { class: 'signin-again' }, h('p', { text: 'Your session has ended.' }), h('a', { class: 'pillbtn', href: globalThis.location?.href ?? '/', text: 'Sign in again' }))
     : welcoming ? welcomeScreen({ checking: onboarding.checking, providers: state.providers, signIn: page.providerSignIn, continueWith: finishWelcome, retry: loadProviders, error: state.providersError })
-    : section?.frame === 'full' ? content : h('div', { class: state.wide ? 'desk' : 'screen plugin-screen' }, state.wide ? page.rail() : null, content, !state.wide ? page.nav() : null)
-  if (state.wide && !authExpired() && !welcoming) {
-    screen.__key = 'screen:workspace'
-    let main = [...screen.childNodes].find(node => node.nodeType === 1 && node.classList.contains('pane'))
-    if (main) {
-      // Keep both slot parents in place when main changes destination. Moving
-      // an iframe's ancestor through the DOM reloads its document in browsers.
-      const list = [...screen.childNodes].find(node => node.nodeType === 1 && node.classList.contains('listcol'))
-      const listSlot = h('div', { class: 'workspace-list', key: 'workspace-list' })
-      screen.insertBefore(listSlot, list ?? main)
-      if (list) listSlot.appendChild(list)
-      if (main.nodeName !== 'MAIN') {
-        const wrapped = h('main', { class: 'pane' })
-        screen.insertBefore(wrapped, main); wrapped.appendChild(main); main = wrapped
-      }
-      main.__key = 'main-pane'
-      if (!main.classList.contains('pane')) main.className += ' pane'
-      main.setAttribute('data-panel', 'main')
-      const pair = h('div', { class: `panel-pair${panels.visible() ? ' split' : ''}${panels.st.closing ? ' closing' : ''}${panels.st.swap ? ` swapped-${panels.st.swap}` : ''}`, key: 'panel-pair', 'data-focused-panel': panels.focused(), style: { '--panel-main': `${panels.st.split}%` } })
-      screen.insertBefore(pair, main); pair.appendChild(main)
-      if (beside) { pair.appendChild(panels.divider()); pair.appendChild(beside) }
-    }
-  }
+    : state.wide ? page.desk(beside) : section?.frame === 'full' ? content : h('div', { class: 'screen plugin-screen' }, content, page.nav())
   morph(root, authExpired() || welcoming ? [screen] : [screen, ...registry.draw('app.overlay', { slot: 'overlay', screen: state.screen, wide: state.wide })])
-  page.fitToolOutputs(); if (modern || state.wide && state.sidebarSection === 'chats') threads.afterRender()
+  page.fitToolOutputs(); if (modern || state.wide && state.navigator === 'chats') threads.afterRender()
   if (panels.visible()) sidePanel.afterRender()
   activity.syncDialog(); profileActivity.syncDialog(); engineerActivity.syncDialog(); profileUI.syncFocus(); settingsProfileUI.syncFocus()
   running.syncDialog(); fitPreviewTables(root); page.fitMine(); landOnFragment(); menuSurfaces.sync(); files.focusRename(); revealThemeChoice(); registry.emit('rendered', { root, screen: state.screen })
@@ -917,37 +904,86 @@ const sidePanel = mountSidePanel(page)
 const mainPanel = {
   threads,
   pending: () => Boolean(threads.st.open?.creating || threads.st.open?.createFailed),
-  item: () => state.screen === 'threads' && threads.st.open ? { kind: 'thread', id: threads.st.open.thread.id }
-    : state.screen === 'files' && files.st.file ? { kind: 'file', root: files.st.file.root, path: files.st.file.path, mode: files.st.file.mode }
-      : state.screen === 'apps' && apps.st.selected ? { kind: 'app', app: apps.st.selected } : null,
+  item: () => state.mainItem?.kind === 'file' && files.st.file ? { ...state.mainItem, mode: files.st.file.mode }
+    : state.mainItem?.kind === 'app' && apps.st.selected ? { kind: 'app', app: apps.st.selected } : state.mainItem,
   guard: retry => {
     if (!files.dirty()) return true
     files.guard(null); files.st.sheet.proceed = page.proceedThen(retry); return false
   },
   transfer: (to, id) => threads.transferTo(to.threads, id),
-  clear: () => { threads.close({ navigate: false }); files.closeFile(); apps.st.selected = null; closeThread(); if (state.screen !== 'apps') state.screen = 'home' },
+  clear: () => { state.mainItem = null; threads.close({ navigate: false }); files.closeFile(); apps.st.selected = null; closeThread(); if (state.screen !== 'apps') state.screen = 'home' },
   emptyAddress: () => { if (page.herePath() !== '/') page.pushAddress(null, '', '/') },
   open: item => {
-    state.sidebarSection = null
     if (item.kind === 'thread') {
-      files.closeFile(); const pending = threads.open(item.id, { routed: true, push: item.push !== false, listing: item.listing })
+      files.closeFile(); apps.st.selected = null
+      const pending = threads.open(item.id, { routed: true, push: item.push !== false, listing: item.listing })
       if (item.message && threads.st.open) Object.assign(threads.st.open, { replyJump: item.message, jumpKind: 'quote' })
       return pending
     }
     if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false })
-    if (item.app && item.app.kind !== 'plugin') { goApps(); return apps.open(item.app, null, { routed: true }) }
-    const url = item.url ?? item.app?.url, ticket = importRequest + 1
+    if (item.kind === 'profile') return goProfile(item.id, { push: item.push !== false })
+    const ticket = ++importRequest
+    threads.close({ navigate: false }); files.closeFile(); closeThread(); page.closeSheet()
+    state.mainItem = itemDescriptor(item)
+    state.screen = item.kind === 'app' ? 'apps' : 'item'
+    if (item.push !== false) page.pushAddress(null, '', itemHref(item))
+    if (item.kind !== 'app') { schedule(); return }
+    const url = item.url ?? item.app?.url
     apps.st.selected = null
-    goApps()?.then(() => {
-      if (state.screen !== 'apps' || importRequest !== ticket || apps.st.error) return
+    if (item.app && item.app.kind !== 'plugin') { apps.open(item.app, null, { routed: true }); return }
+    apps.load().then(() => {
+      if (state.mainItem?.kind !== 'app' || importRequest !== ticket || apps.st.error) return
       const app = apps.st.apps.find(app => app.url === url)
       if (app && canFrame(app)) apps.open(app, null, { routed: true })
-      else if (app) { apps.st.error = 'This app opens in a browser.'; schedule() }
-      else { apps.st.error = 'That app is no longer available.'; schedule() }
+      else { apps.st.error = app ? 'This app opens in a browser.' : 'That app is no longer available.'; schedule() }
     })
   },
 }
-const panels = createPanels({ main: mainPanel, side: sidePanel, changed: schedule })
+
+let routingPanels = false
+const panels = createPanels({ main: mainPanel, side: sidePanel, changed: schedule,
+  address: side => {
+    if (routingPanels || !globalThis.location?.href || !globalThis.history?.replaceState) return
+    const href = withSide(location.href, side)
+    if (href !== location.pathname + location.search + location.hash) globalThis.history?.replaceState?.(globalThis.history.state, '', href)
+  },
+})
+// A URL restores both slots. Device storage retains geometry, not authority
+// over which main document a shared link or a browser history entry opens.
+if (globalThis.location?.href) {
+  const migrated = migratePanelURL(location.href, readPanels())
+  if (globalThis.history?.replaceState && migrated !== location.pathname + location.search + location.hash) history.replaceState(history.state, '', migrated)
+  panels.st.side = sideFromURL(location.href)
+}
+function routePanels(value = globalThis.location?.href) {
+  if (!value) return
+  const item = itemFromURL(value), side = sideFromURL(value)
+  const apply = () => {
+    const sideChanges = JSON.stringify(itemDescriptor(panels.st.side)) !== JSON.stringify(side)
+    const mainChanges = itemKey(item) !== itemKey(mainPanel.item())
+    const movesSide = item && itemKey(item) === itemKey(panels.st.side)
+    if ((mainChanges && !mainPanel.guard(apply)) || ((sideChanges || movesSide) && !sidePanel.guard(apply))) {
+      globalThis.history?.replaceState?.(globalThis.history.state, '', withSide(itemHref(mainPanel.item()), panels.st.side))
+      schedule(); return
+    }
+    routingPanels = true
+    try {
+      if (sideChanges) {
+        if (item?.kind === 'thread' && itemKey(item) === itemKey(sidePanel.item())) sidePanel.transfer(mainPanel, item.id)
+        if (side?.kind === 'thread' && itemKey(side) === itemKey(mainPanel.item())) mainPanel.transfer(sidePanel, side.id)
+        if (!panels.close()) return
+      }
+      if (item) panels.openMain({ ...item, push: false })
+      else { mainPanel.clear(); state.screen = 'home'; schedule() }
+      if (sideChanges && side && itemKey(side) !== itemKey(mainPanel.item())) {
+        panels.st.side = side; panels.st.loaded = false; panels.restore()
+      }
+      globalThis.history?.replaceState?.(globalThis.history.state, '', withSide(value, panels.st.side))
+    } finally { routingPanels = false }
+  }
+  apply()
+}
+
 panels.sideHost = sidePanel.host
 // Capture before a control can stop propagation. This observes interaction
 // without moving keyboard focus, changing navigation or rebuilding a mount.
@@ -962,7 +998,7 @@ root.addEventListener('focusin', event => focusPanel(event.target), true)
 window.addEventListener('blur', () => {
   if (document.activeElement?.tagName === 'IFRAME') focusPanel(document.activeElement)
 })
-const { herePath, pushAddress, files, filesUploadChooser, chooseUpload, fileField, fileNameField, fileFieldFor, goFiles, leaveFiles, proceedThen, openFileRef, refNotice, picker, pickFromFiles, applyTool, embeds, embedFor, loadEmbed, fileDictation, filesScreen, filesHome, returnToChatButton, loadGithub, githubStep, keepGithub, setupGithub, connectOrg, installGithub, refreshGithub, disconnectGithub, githubReturn, providerSignIn, connectKeys, orgField, orgAppField, DRAFT_MAX_PX, MAC, draft, editorDraft, openEditor, closeEditor, sendFromEditor, fileChooser, imageChooser, growDraft, submitDraft, attachStrip, chipSub, loginNotice, activeThread, composer, expandGlyph, editorNodes, menuPage, menuRootOf, menuOpen, openPage, openMenu, togglePlus, closeMenus, composerMenu, menuRow, menuSheet, menuGroups, menuPopover, lineKeys, keyOf, MINE_MAX_PX, MINE_SLACK_PX, fitMine, COPIED_MS, copyWithCue, copyButton, stepItems, stepChildren, itemNode, foldCard, stepNode, askLine, openBlocks, longToolDetails, toggleOpen, toolNode, toolDetail, fitToolOutputs, answeredLine, openTurns, toggleTurn, turnModelName, turnFacts, turnLine, settingsBody, settingsSheet, settingsItems, settingsDialog, settingsVoice, settingsPlugins, settingsAppearance, goSettings, settingsBack, settingsHead, tile, settingsRoot, filesFolderFields, settingsFiles, settingsAgents, settingsProviders, settingsProvider, usageCard, providersWarn, integrationsWarn, listWords, settingsIntegrations, githubOutcome, connectCard, githubCard, GH_PILLS, githubPills, githubConfirm, githubLinks, nav, profileScreen, profileBody, desk, rail, listColumn, setCollapsed, mainPane, profilePane, backToChat, filesPane, paneEmpty, openSheet, closeSheet, sheetTop, SHEET_SETTLE_MS, pickerNodes, filesSheetNodes, sheetNodes } = page
+const { herePath, pushAddress, files, filesUploadChooser, chooseUpload, fileField, fileNameField, fileFieldFor, goFiles, leaveFiles, proceedThen, openFileRef, refNotice, picker, pickFromFiles, applyTool, embeds, embedFor, loadEmbed, fileDictation, filesScreen, filesHome, returnToChatButton, loadGithub, githubStep, keepGithub, setupGithub, connectOrg, installGithub, refreshGithub, disconnectGithub, githubReturn, providerSignIn, connectKeys, orgField, orgAppField, DRAFT_MAX_PX, MAC, draft, editorDraft, openEditor, closeEditor, sendFromEditor, fileChooser, imageChooser, growDraft, submitDraft, attachStrip, chipSub, loginNotice, activeThread, composer, expandGlyph, editorNodes, menuPage, menuRootOf, menuOpen, openPage, openMenu, togglePlus, closeMenus, composerMenu, menuRow, menuSheet, menuGroups, menuPopover, lineKeys, keyOf, MINE_MAX_PX, MINE_SLACK_PX, fitMine, COPIED_MS, copyWithCue, copyButton, stepItems, stepChildren, itemNode, foldCard, stepNode, askLine, openBlocks, longToolDetails, toggleOpen, toolNode, toolDetail, fitToolOutputs, answeredLine, openTurns, toggleTurn, turnModelName, turnFacts, turnLine, settingsBody, settingsSheet, settingsItems, settingsDialog, settingsPlugins, settingsAppearance, goSettings, settingsBack, settingsHead, tile, settingsRoot, filesFolderFields, settingsFiles, settingsAgents, settingsProviders, settingsProvider, usageCard, providersWarn, integrationsWarn, listWords, settingsIntegrations, githubOutcome, connectCard, githubCard, GH_PILLS, githubPills, githubConfirm, githubLinks, nav, profileScreen, profileBody, desk, rail, listColumn, setCollapsed, mainPane, profilePane, backToChat, filesPane, openSheet, closeSheet, sheetTop, SHEET_SETTLE_MS, pickerNodes, filesSheetNodes, sheetNodes } = page
 
 registerPage({ ...coreScope, ui: { host: page } })
 let previousSection = null
@@ -988,7 +1024,7 @@ function cameBack() {
   running.wake()
   if (authExpired()) return
   fitViewport()
-  threads.tick(['threads', 'home', 'activity', 'profile'].includes(state.screen) || state.wide && state.sidebarSection === 'chats')
+  threads.tick(['threads', 'home', 'activity', 'profile'].includes(state.screen) || state.wide && state.navigator === 'chats')
   sidePanel.threads.tick(panels.visible() && sidePanel.host.state.screen === 'threads')
   schedule()
 }
@@ -1101,7 +1137,7 @@ window.addEventListener('focus', cameBack)
 const pageHeartbeat = setInterval(() => {
   running.wake()
   if (document.visibilityState !== 'hidden') {
-    threads.tick(['threads', 'home', 'activity', 'profile'].includes(state.screen) || state.wide && state.sidebarSection === 'chats')
+    threads.tick(['threads', 'home', 'activity', 'profile'].includes(state.screen) || state.wide && state.navigator === 'chats')
     sidePanel.threads.tick(panels.visible() && sidePanel.host.state.screen === 'threads')
     activity.tick(state.screen === 'activity' || state.sheet?.kind === 'activity')
     if (state.screen === 'profile') { profileActivity.tick(true); profiles.refresh() }
@@ -1139,7 +1175,8 @@ else {
     } catch { /* An unavailable starter leaves ordinary Chats accessible. */ }
   }
   if (!onboarding.hello && landedThread) threads.open(landedThread, { push: false, listing })
-  else if (!onboarding.hello && page.herePath() === '/' && panels.st.savedMain?.kind === 'app') panels.openMain(panels.st.savedMain)
+  else if (!onboarding.hello && itemFromURL(globalThis.location?.href ?? page.herePath())?.kind === 'app') { state.navigator = 'apps'; panels.openMain({ ...itemFromURL(location.href), push: false }) }
+  else if (!onboarding.hello && page.herePath() === '/panel') panels.openMain({ ...itemFromURL(location.href), push: false })
   else if (!onboarding.hello) { const session = sessionFromAddress(globalThis.location?.href ?? page.herePath() + (globalThis.location?.search ?? '')) ?? (!parseFilesPath(page.herePath()) ? lastClassicSession : null); if (session) openImportedSession(session) }
 }
 onboarding.checking = false
@@ -1154,7 +1191,7 @@ page.githubReturn()
 // choices, and a pre-retirement stored session is resolved once into its
 // imported thread above before the obsolete storage key is forgotten.
 const landedOn = parseFilesPath(page.herePath())
-if (landedOn) page.goFiles(landedOn.root, landedOn.path, { push: false })
+if (landedOn) { state.navigator = 'files'; page.goFiles(landedOn.root, landedOn.path, { push: false }) }
 else render()
 // Initial main routing may finish after the saved side was mounted during
 // startup. With no interaction yet, the restored side owns attention.

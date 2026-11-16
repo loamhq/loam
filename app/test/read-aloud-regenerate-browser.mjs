@@ -16,7 +16,10 @@ const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME,
 const source = await readFile('public/app.js', 'utf8'), reports = []
 const response = 'Keep a little room for the week. Gather the loose ends before adding something new. '.repeat(20).trim()
 const native = process.argv.includes('--native')
-const looks = native ? ['latte'] : process.argv.includes('--core-themes') ? ['latte', 'plain'] : ['latte', 'plain', 'yosemite', 'mist-trail', 'deep-forest', 'autumn', 'foundry']
+const themes = ['latte', 'plain', 'yosemite', 'mist-trail', 'deep-forest', 'autumn', 'foundry']
+const selected = process.argv.find(arg => arg.startsWith('--themes='))?.slice('--themes='.length).split(',')
+if (selected) assert.ok(selected.length && selected.every(id => themes.includes(id)), 'Unknown theme selection')
+const looks = native ? ['latte'] : selected ?? (process.argv.includes('--core-themes') ? ['latte', 'plain'] : themes)
 const wav = Buffer.alloc(44 + 24000 * 2 * 60)
 wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16)
 wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(24000, 24); wav.writeUInt32LE(48000, 28)
@@ -90,7 +93,7 @@ try {
       const page = await context.newPage(), errors = []
       page.setDefaultTimeout(12000); page.on('pageerror', e => errors.push(e.message))
       const hit = node => width === 390 ? node.tap() : node.click()
-      const shot = async state => { if (['latte', 'plain'].includes(look)) await page.screenshot({ path: path.join(out, `${state}-${look}-${width}-${mode}.png`), animations: 'disabled' }) }
+      const shot = async state => { if (state === 'ready' || ['latte', 'plain'].includes(look)) await page.screenshot({ path: path.join(out, `${state}-${look}-${width}-${mode}.png`), animations: 'disabled' }) }
       const openMenu = async () => { await page.locator('.speakbtn').last().scrollIntoViewIfNeeded(); await page.locator('.speakbtn').last().click(); await page.locator('.speakmenu').waitFor() }
       try {
         await page.goto(app.url); await page.locator('.tt-row').first().waitFor()
@@ -104,13 +107,27 @@ try {
         assert.equal(await menu.locator('button button').count(), 0)
         const paint = await choices.first().evaluate(n => {
           const s = getComputedStyle(n), b = n.querySelector('button'), t = n.querySelector('.setrow-sub'), r = n.querySelector('.speech-regenerate'), rect = r.getBoundingClientRect()
+          const menu = n.closest('.speakmenu'), unmade = menu.querySelector('.speech-choice:not(.available)'), tile = n.querySelector('.icon-tile')
           const canvas = document.createElement('canvas'), c = canvas.getContext('2d')
           const rgb = value => { c.fillStyle = value; c.fillRect(0, 0, 1, 1); return '#' + [...c.getImageData(0, 0, 1, 1).data].slice(0, 3).map(v => v.toString(16).padStart(2, '0')).join('') }
-          return { background: rgb(s.backgroundColor), ink: rgb(getComputedStyle(t).color), regenInk: rgb(getComputedStyle(r).color), width: rect.width, height: rect.height, mainRight: b.getBoundingClientRect().right, regenLeft: rect.left }
+          const iconPaint = el => { const s = getComputedStyle(el); return { background: rgb(s.backgroundColor), ink: rgb(s.color) } }
+          return { background: rgb(getComputedStyle(menu).backgroundColor), rowBackground: s.backgroundColor, rowBorder: s.borderWidth, rowShadow: s.boxShadow,
+            unmadeBackground: getComputedStyle(unmade).backgroundColor, unmadeBorder: getComputedStyle(unmade).borderWidth,
+            readyIcon: iconPaint(tile), unmadeIcon: iconPaint(unmade.querySelector('.icon-tile')),
+            action: { background: rgb(s.getPropertyValue('--latte-foam')), ink: rgb(s.getPropertyValue('--latte-foam-ink')) },
+            neutral: { background: rgb(s.getPropertyValue('--paper-card')), ink: rgb(s.getPropertyValue('--paper-ink-2')) },
+            ink: rgb(getComputedStyle(t).color), regenInk: rgb(getComputedStyle(r).color), width: rect.width, height: rect.height, mainHeight: b.getBoundingClientRect().height, mainRight: b.getBoundingClientRect().right, regenLeft: rect.left }
         })
+        assert.equal(paint.rowBackground, 'rgba(0, 0, 0, 0)', 'ready row must use the menu surface')
+        assert.equal(paint.unmadeBackground, paint.rowBackground)
+        assert.equal(paint.rowBorder, '0px'); assert.equal(paint.unmadeBorder, '0px'); assert.equal(paint.rowShadow, 'none')
+        assert.deepEqual(paint.readyIcon, paint.action, 'ready icon uses this theme’s action pair')
+        assert.deepEqual(paint.unmadeIcon, paint.neutral, 'unmade icon remains Newspaper')
+        assert.notDeepEqual(paint.readyIcon, paint.unmadeIcon)
+        assert.ok(contrast(paint.readyIcon.ink, paint.readyIcon.background) >= 3, JSON.stringify(paint))
         assert.ok(contrast(paint.ink, paint.background) >= 4.5, JSON.stringify(paint))
         assert.ok(contrast(paint.regenInk, paint.background) >= 4.5)
-        assert.ok(paint.width >= 44 && paint.height >= 44)
+        assert.ok(paint.width >= 44 && paint.height >= 44 && paint.mainHeight >= 44)
         assert.ok(paint.mainRight <= paint.regenLeft + 1, 'separate targets overlap')
         await page.evaluate(() => document.fonts.ready); await shot('ready')
         // The keyboard reaches the independent regeneration action.
@@ -145,6 +162,9 @@ try {
         assert.equal(await page.locator('.msgs').evaluate(n => n.scrollTop), scroll)
         pending = false
         await menu.getByRole('status').filter({ hasText: 'New audio ready' }).waitFor()
+        assert.equal(await choices.first().locator('.icon-tile').evaluate(n => getComputedStyle(n).backgroundColor), await choices.first().evaluate(n => {
+          const probe = document.createElement('span'); probe.style.backgroundColor = getComputedStyle(n).getPropertyValue('--latte-foam'); return probe.style.backgroundColor
+        }), 'playing take retains its ready icon treatment')
         const continuity = await page.evaluate(() => ({ same: __oldPlayer === __players.at(-1), row: __oldRow === document.querySelector('.player'), position: __oldPlayer.currentTime, playing: !__oldPlayer.paused, count: __players.length, src: __oldPlayer.src }))
         assert.ok(continuity.position >= old.position && continuity.position < old.position + 10, JSON.stringify({ continuity, old }))
         assert.deepEqual({ ...continuity, position: 37 }, { same: true, row: true, position: 37, playing: true, count: old.count, src: old.src })
@@ -168,7 +188,7 @@ try {
         assert.deepEqual(errors, [])
         assert.equal(app.broker.seen.filter(r => r.method === 'POST' && r.path.endsWith('/messages')).length, 0)
         reports.push({ look, width, mode, native, paint: { ...paint, noteInk }, continuity, posts: posts.map(({ text, ...b }) => ({ ...b, words: text.split(/\s+/).length })), errors })
-        console.log(`PASS ${look} ${width} ${mode}: ready cue, independent targets, contrast, force, duplicate guard, failure, continuity, Brief, Files`)
+        console.log(`PASS ${look} ${width} ${mode}: plain rows, themed ready/neutral unmade icons, independent targets, contrast, force, duplicate guard, failure, continuity, Brief, Files`)
       } catch (error) {
         console.error({ look, width, mode, native, errors, url: page.url(), body: (await page.locator('body').innerText()).slice(0, 600) })
         await shot('unexpected-failure')

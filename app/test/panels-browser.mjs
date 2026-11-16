@@ -72,6 +72,11 @@ try {
         load() {} removeAttribute() {}
       }
     })
+    // Audio plugins are off on a fresh install; this workflow opts them in.
+    await context.route('**/shipped-plugins.json', async route => {
+      const response = await route.fetch(), body = await response.json()
+      await route.fulfill({ json: { ...body, plugins: body.plugins.map(plugin => plugin.switch === 'plugin' ? { ...plugin, on: true } : plugin) } })
+    })
     await context.route('**/api/health', route => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
     let audioSerial = 0
     await context.route(/\/api\/speech(?:\/.*)?$/, route => route.fulfill({ json: route.request().url().endsWith('/lookup') ? { status: 'none' }
@@ -115,7 +120,7 @@ try {
       await page.waitForFunction(() => !__panels.sidePanel.threads.st.open.loading && !__panels.sidePanel.threads.st.open.refreshing)
       assert.equal(await page.evaluate(() => __panels.threads.st.open.thread.id), a)
       assert.equal(await page.evaluate(() => __panels.panels.st.side.id), b)
-      assert.ok(page.url().endsWith(`/threads/${a}`), 'opening side never changes the main address')
+      assert.ok(new URL(page.url()).pathname.endsWith(`/threads/${a}`), 'opening side never changes the main address')
       assert.equal(await page.locator('.desk').evaluate(node => node.classList.contains('collapsed')), width < 1700)
       if (process.env.PANELS_REVIEW) {
         // A rail choice must expose its list in the same click. At 1920 the
@@ -381,7 +386,8 @@ try {
       await side.locator('.apps-embed').contentFrame().getByRole('button', { name: 'Growing' }).waitFor()
       await capture('thread-app')
       await page.evaluate(() => __panels.goFiles('vault', 'Notes', { isFile: false }))
-      await main.getByText('Pick a file', { exact: true }).waitFor()
+      await main.locator('.tt-thread').waitFor()
+      assert.equal(await page.evaluate(() => __panels.threads.st.open.thread.id), a, 'browsing a folder only changes the navigator')
       await side.locator('.apps-embed').contentFrame().getByRole('button', { name: 'Growing', exact: true }).waitFor()
       await page.evaluate(a => __panels.threads.open(a), a)
       await side.locator('.apps-embed').contentFrame().getByRole('button', { name: 'Growing', exact: true }).waitFor()

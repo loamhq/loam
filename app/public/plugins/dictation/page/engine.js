@@ -907,7 +907,7 @@ async function allowMicrophone() {
 }
 
 function devicesChanged() {
-  if (host.state.sheet?.kind === 'settings' && host.state.sheet.page === 'voice') loadMicrophones()
+  if (host.state.sheet?.kind === 'settings' && host.state.sheet.page === 'plugins' && host.pluginSettingsUI?.st.selected?.id === 'dictation') loadMicrophones()
 }
 globalThis.navigator?.mediaDevices?.addEventListener?.('devicechange', devicesChanged)
 
@@ -992,7 +992,7 @@ function settingsDictation({ back = true } = {}) {
 
   return [
     back ? host.settingsBack('Settings', 'root') : null,
-    back ? host.settingsHead('Dictation', 'For this device.') : h('h3', { class: 'kicker', text: 'Dictation' }),
+    back ? host.settingsHead('Dictation', 'For this device.') : h('p', { class: 'note', text: 'Dictation preferences for this device.' }),
 
     h(
       'div',

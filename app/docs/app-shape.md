@@ -3,13 +3,13 @@
 The navigation has three sections, in order: **Chats**, **Files**, **Apps**.
 Desktop puts **Activity** and **Settings** at the foot of the rail. The phone
 has four bottom-bar controls: the same three tabs and Settings. Activity is
-the first Settings row, above and apart from the seven settings sections, with a
+the first Settings row, above and apart from the settings sections, with a
 live work summary. Neither Settings nor Activity carries a notification
 indicator. Settings stays selected while phone Activity is open; its Back button
 returns to the previous destination (including the Files location). Appearance
 is reached through Settings; its former rail toggle is removed.
 
-The seven settings sections are declared in `public/app-shape.js`:
+The settings sections are declared in `public/app-shape.js`:
 
 | Section | Contents |
 | --- | --- |
@@ -17,16 +17,15 @@ The seven settings sections are declared in `public/app-shape.js`:
 | Agents | Agent profiles, workspace and schedules |
 | Providers | AI providers, plan, usage and sign-in |
 | Integrations | Connected and available services, then each service’s accounts |
-| Voice | Dictation, then read aloud |
 | Files | File folders and preferences, shortcut removal; links remain on Files home |
-| Plugins | Themes and extensions; version/source in detail, one shared enable switch |
+| Plugins | Themes and extensions; plugin preferences while on, version/source and enable switch in detail |
 
-The old Accounts destination resolves to Integrations; Dictation and Read aloud
-resolve to Voice. Provider details return to Providers. Account is reserved for
+The old Accounts destination resolves to Integrations; Voice, Dictation and Read aloud
+resolve to Plugins. Provider details return to Providers. Account is reserved for
 a future personal Loam account. Old Running now requests resolve
 to Activity. The thread provider/model sheet remains about the current thread.
 The developer preview remains available at `/?threads=fixture`; its Settings
-shortcut is removed so a host outage does not introduce an eighth section.
+shortcut is removed so a host outage does not introduce another section.
 
 Plugins uses the validated host catalog. Theme selection uses the Appearance
 route; extension enablement uses the existing plugin route. Metadata and
@@ -106,10 +105,18 @@ capabilities are refused as well.
 contract is `{apps: [...], sources: ["yours"]}`. Rows carry `name`, `url`,
 `also_at`, `source`, `kind`, `owner`, `project`, `access`, `expires`,
 `shared_until`, `serves`, `frame`, `created`. No installation inventory is
-hard-coded. Yours precedes Installed; empty groups are omitted. Rows use explicit token surfaces, borders and grouped radii. The app name is
-the title; owner and address share one quiet secondary line. Access and expiry
-remain at the trailing edge on phones, and sit below the address in the
-desktop list column. The toolbar anchor and button share the same
+hard-coded. Yours precedes Installed; empty groups and a lone group heading are
+omitted. Desktop rows show the name and one author/access line; a small badge
+appears for end dates within fourteen days. A small rounded page thumbnail
+identifies each app; the author’s small face appears once in its quiet line. Main selection and the side-panel mark
+follow the existing panel controller. The side action appears on hover/focus.
+Phones use a two-column grid of rounded 16:10 preview cards with the name and
+author below. Browser-only apps have one quiet marker. The ⋯ stays inside the
+card with a 44px target. Long-press and right-click also open the shared details
+sheet/menu:
+author, access, address, full end date, Open in browser and Copy link. No
+ownership/access/end-date information is removed from that details view.
+The toolbar anchor and button share the same
 aligned, non-underlined pill layout. Unknown owners retain
 their supplied ID. An empty catalog offers to start a thread to build an app.
 404/405 shows an unavailable message and retry, rather than the empty catalog.
@@ -132,6 +139,25 @@ scripts/styles retain their self-only policy. Each site must still permit the
 app's origin through its own `frame-ancestors` response. The follow-up staging report confirmed live framing. This job verifies computed
 styles and interactions in a local Chromium with fixture apps; it does not
 claim another live deployment check.
+
+`GET /api/apps/media` returns same-origin preview/icon URLs and background-job
+state for the current catalog. `GET /api/apps/media/image?url=…&kind=…` serves
+verified cached bytes after checking the catalog again. The older icon route
+returns only a resolved same-origin icon for existing tabs. No conventional
+icon paths are probed by either the client or metadata reader.
+
+A single isolated Chromium process captures one frameable page at a time,
+with an empty temporary profile and a minimal environment. It loads the
+catalog URL from the container’s network, without a browser login or broker
+bearer. Failed, inaccessible and blank-canvas captures use a designed tile.
+Fallback letters use a distinguishing name part (including a different letter
+when sibling suffixes share a prefix); deterministic palette allocation gives
+neighboring apps distinct persona-accent colours, with their paired inks.
+A published icon may appear as a small mark on the phone card.
+
+See [page capture, caching, configuration and boundaries](app-previews.md) and
+[before/after evidence](evidence/apps-previews/README.md). Chromium and fonts
+are system packages in the image, with no npm dependency or new broker route.
 
 ## Settings tool parity and effort
 
@@ -156,7 +182,7 @@ controls. Removing `session.effort` from a host tool does not remove parity with
 an active page control. The runtime should expose the same thread provider/model
 operations to personas; its current tool coverage cannot be verified here.
 
-Voice dictation, Files voice and Files shortcuts/folders remain the preexisting
+Plugin dictation/reading preferences and Files shortcuts/folders remain the preexisting
 device-local preferences. They have no broker read/write route in the supplied
 contract. Full persona parity for these settings needs a host-owned settings
 contract and registry integration, followed by binding the page to that same
