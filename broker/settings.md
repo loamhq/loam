@@ -164,9 +164,9 @@ values or defaults part from the registry's or the store's.
 themes reads as `latte` and its first write adds the field. The installed ids
 are not listed in this repo: they are the theme plugins of the plugin host's
 one list (`lib/loam_plugins.py`, `docs/plugins.md`), in force in either
-layer. Shipped, that is loam-ui's `public/themes/<id>/` folders in the
-checkout both copies of the page are built from (`projects/loam-ui.json`,
-`checkout`), read by the rule of the page's own loader (`src/themes.js`:
+layer. Shipped, that is the app's `public/themes/<id>/` folders, in Loam's
+own `app/` since 2026-11-16 (`projects/loam-ui.json`'s `checkout` and
+`subdir` where the box develops it as a project; `lib/loam_plugins.ui_checkout`), read by the rule of the page's own loader (`src/themes.js`:
 `manifest.json`, `schemaVersion` 1, its `id` the folder's name, modes light
 and dark, `theme.css`), or a `PLUGIN.md` whose `kind` includes `theme`; in
 Yours (`~/plugins`), the same shapes, and a Yours theme with a
