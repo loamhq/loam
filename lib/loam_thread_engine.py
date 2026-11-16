@@ -1646,16 +1646,26 @@ class ThreadEngine:
         """Every provider's own memory off, re-pinned and checked at each
         session start (first release L8; lib/loam_provider_memory.py): a CLI
         that updated itself can have turned one back on. A store that grew
-        is said in the thread, once per growth. Never stops the turn."""
+        is said once per growth, in comms.md under Important and never in
+        the thread (2026-11-16: the owner read such lines in a fresh chat as
+        an error; bookkeeping is not the conversation's). Never stops the
+        turn."""
         try:
             def run() -> list[str]:
                 # Codex's pins ride CODEX_HOME/config.toml, which the broker
                 # renders whole at every Codex thread start (trust_config).
                 provider_memory.pin_claude()
                 provider_memory.pin_env()
-                return provider_memory.check(engine)[1]
-            for text in await asyncio.to_thread(run):
-                self.system_line(thread_id, text)
+                grew = provider_memory.check(engine)[1]
+                import loam_inbox  # noqa: PLC0415
+                for text in grew:
+                    steps.log(f"{thread_id}: provider memory: {text}")
+                    loam_inbox.append_comms(
+                        lc.VAULT, "loam", text,
+                        "`lib/loam_provider_memory.py` (the broker's check at a "
+                        "session start)", section="Important")
+                return grew
+            await asyncio.to_thread(run)
         except Exception as exc:  # noqa: BLE001 -- a check never costs a turn
             steps.log(f"{thread_id}: the provider memory check failed: {exc}")
 

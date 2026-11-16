@@ -16,7 +16,9 @@
                    its verdict's time read from its run.json.
   continue_job     of a cleared job: refused with a sentence that says so.
   the memory check leaves a job's own conversation out of its counts, so a
-                   job's growth posts nothing, and a persona's still does.
+                   job's growth posts nothing; since 2026-11-16 a persona's
+                   posts nothing either, and a new kind of entry under the
+                   tree is what is said.
 
 Run: python3 tests/test_agy_files.py
 """
@@ -278,19 +280,20 @@ try:
           ([g for g in grew if g.startswith("antigravity")],
            counts["antigravity brain entries"]), ([], 1))
     conversation("PERSONA2")
+    (HOME / "implicit" / "persona2.pb").write_text("x")
     counts, grew = pm.check()
-    check("memory check: a persona's new conversation still alerts",
-          sorted(g.split(":")[0] for g in grew if g.startswith("antigravity")),
-          ["antigravity brain entries", "antigravity conversation summaries"])
-    shutil.rmtree(HOME / "brain" / "PERSONA2")
-    counts, grew = pm.check()
+    check("memory check: a persona's new conversation posts nothing either "
+          "(2026-11-16, working state)", [g for g in grew if g.startswith("antigravity")], [])
     seen = json.loads(pm.BASELINE.read_text())
-    check("memory check: a fall moves Antigravity's baseline down with it",
+    check("...and its baseline is kept current",
           seen["antigravity brain entries"], counts["antigravity brain entries"])
-    (HOME / "brain" / "PERSONA3").mkdir()
+    (HOME / "knowledge").mkdir()
     counts, grew = pm.check()
-    check("...so the next growth is still said",
-          any(g.startswith("antigravity brain entries") for g in grew), True)
+    check("memory check: a store Antigravity adds under its tree is said",
+          [g.split(":")[0] for g in grew if g.startswith("antigravity")],
+          ["antigravity other entries"])
+    counts, grew = pm.check()
+    check("...once", [g for g in grew if g.startswith("antigravity")], [])
     del base
 finally:
     shutil.rmtree(TMP, ignore_errors=True)

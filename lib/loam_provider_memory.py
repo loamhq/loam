@@ -31,7 +31,8 @@ The check counts each store and compares it with the count first seen,
 kept in `<state>/provider-memory.json`, and says so once per growth
 (the new count becomes the one compared). A store that grew is a provider
 writing memory of its own, and the caller says so where it will be read:
-the broker in the session's thread, `provider-follow` in comms.md.
+in comms.md, by the broker at a session start and by `provider-follow`
+after a switch.
 
 Antigravity's stores leave out what Loam's engineer jobs' own
 conversations made (2026-11-15, lib/loam_agy_files.py): the lead persona
@@ -40,6 +41,19 @@ conversations, so a job's `brain/<id>/`, its summary row and the implicit
 files that appeared while it ran are its transcript and a `/resume` index,
 cleared a week after the job. Everything else in those stores is counted,
 and its growth is said, as before.
+
+Then not even that (2026-11-16): the owner read three such lines, posted in
+a fresh chat after his first message to a persona on Antigravity, as an
+error. Every Antigravity conversation, a persona's as much as a job's, makes
+the same per-conversation files, and the owner's 11-15 decision made them
+accepted working state. So the three per-conversation stores (``WORKING``)
+are still counted, for the log, and their baseline kept current, but their
+growth is never said. What the check says for Antigravity now is anything
+under its tree that is none of the kinds known on 2026-11-16
+(``AGY_KNOWN``): a new store a later build adds is the one thing a memory of
+its own would look like. And nothing it says goes into a conversation: the
+broker posts a growth line in comms.md under Important, as
+`provider-follow` does, never in the session's thread.
 """
 
 from __future__ import annotations
@@ -191,6 +205,22 @@ def _entries(path: Path, skip: set[str] | None = None) -> int:
 # growth is measured from what is there. The other providers' are as before.
 FALLS = ("antigravity ",)
 
+# Antigravity's per-conversation files (2026-11-16, the module's note):
+# accepted working state, counted and never said.
+WORKING = frozenset({"antigravity brain entries", "antigravity implicit entries",
+                     "antigravity conversation summaries"})
+
+# Every entry of Antigravity's tree as read on 2026-11-16 (agy 1.5.9). One
+# not named here is counted as "antigravity other entries", whose growth is
+# said: a store a later build adds is what a memory of its own would be.
+AGY_KNOWN = frozenset({
+    "antigravity-oauth-token", "bin", "brain", "builtin", "cache", "cli.log",
+    "conversations", "conversation_summaries.db", "conversation_summaries.db-shm",
+    "conversation_summaries.db-wal", "conversation_summaries.db-journal",
+    "crashes", "implicit", "installation_id", "jetbox_summaries_proto.pb",
+    "jetski_state.pbtxt", "last_check.timestamp", "log", "mcp",
+    "persistent_terminals", "presence", "updater"})
+
 
 def stores() -> dict[str, int]:
     """Each provider memory store and how much is in it now."""
@@ -212,6 +242,7 @@ def stores() -> dict[str, int]:
         "antigravity conversation summaries": _rows(
             gemini / "conversation_summaries.db", ("conversation_summaries",),
             job_convs),
+        "antigravity other entries": _entries(gemini, AGY_KNOWN),
     }
 
 
@@ -228,6 +259,9 @@ def check(provider: str | None = None) -> tuple[dict, list[str]]:
     for store, count in now.items():
         if store not in seen:
             seen[store] = count
+            continue
+        if store in WORKING:
+            seen[store] = count    # working state: kept current, never said
             continue
         if count > seen[store] and (provider is None or store.startswith(provider)):
             grew.append(f"{store}: {count}, was {seen[store]}. A provider is "

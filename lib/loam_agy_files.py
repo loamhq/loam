@@ -22,8 +22,9 @@ conversation, so a chain keeps it until a week after its last job), by the
 nightly ``provider-follow`` pass (``clear``). Only conversations a Loam job
 record names are touched: a persona's own conversation, or the owner's, is
 named by no job and is never cleared. The provider-memory check
-(lib/loam_provider_memory.py) leaves the same files out of its counts, so a
-job's conversation does not post a growth line, and anything else still does.
+(lib/loam_provider_memory.py) leaves the same files out of its counts, and
+since 2026-11-16 says no growth of these per-conversation stores at all, a
+persona's conversation's included: only a new kind of entry under the tree.
 
 The reviewer's runs on Antigravity (since 2026-11-15, bin/review) are
 cleared the same way: its run directories (``<reviewer state>/runs/<id>``)

@@ -158,8 +158,12 @@ is what the installer runs.
   and `.external_agent_memory_import` false; `[memories]` with
   `generate_memories` and `use_memories` false; `history.persistence = "none"`.
 - **Antigravity** has no setting that turns its memory off, so for it
-  "pinned off" means "checked empty".
+  "pinned off" means "checked empty". Its per-conversation files
+  (`brain/`, `implicit/`, `conversation_summaries.db`) are accepted working
+  state (2026-11-16): counted for the log, never said. What is said is an
+  entry under its tree of a kind not known on 2026-11-16
+  (`AGY_KNOWN`), which is what a store of its own would look like.
 
-The checks run at every session start (the thread hears of a store that
-grew), after each provider-follow switch (comms.md, Important), and on
-`bin/provider-memory check`.
+The checks run at every session start, after each provider-follow switch,
+and on `bin/provider-memory check`. A store that grew is said once, in
+comms.md under Important; never in a conversation's thread (2026-11-16).

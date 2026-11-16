@@ -128,7 +128,8 @@ check("...and it parses, the trust table after them",
 with tempfile.TemporaryDirectory() as tmp:
     real_base, real_stores = pm.BASELINE, pm.stores
     pm.BASELINE = Path(tmp) / "provider-memory.json"
-    counts = {"codex memories rows": 0, "antigravity brain entries": 0}
+    counts = {"codex memories rows": 0, "antigravity other entries": 0,
+              "antigravity brain entries": 0}
     pm.stores = lambda: dict(counts)
     try:
         _, grew = pm.check()
@@ -138,11 +139,14 @@ with tempfile.TemporaryDirectory() as tmp:
         check("a store that grew is said", len(grew) == 1 and "codex memories rows: 3" in grew[0], grew)
         _, grew = pm.check("codex")
         check("...once, not at every start", grew == [], grew)
-        counts["antigravity brain entries"] = 1
+        counts["antigravity other entries"] = 1
         _, grew = pm.check("codex")
         check("another provider's growth waits for its own start", grew == [], grew)
         _, grew = pm.check("antigravity")
         check("...and is said there", len(grew) == 1, grew)
+        counts["antigravity brain entries"] = 5
+        _, grew = pm.check("antigravity")
+        check("Antigravity's per-conversation files are never said (2026-11-16)", grew == [], grew)
     finally:
         pm.BASELINE, pm.stores = real_base, real_stores
 
