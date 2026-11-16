@@ -63,8 +63,10 @@ job's reply on it (lib/loam_pr_target.py).
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+import re
 import resource
 import shutil
 import subprocess
@@ -161,10 +163,10 @@ def rev(repo: Path, ref: str) -> str | None:
 # (lib/loam_update.py reads release tags there). `backup` is an off-box copy
 # and nothing else: every landing pushes `main` to it, mapped by its own
 # `remote.backup.push` refspec when it has one, and nothing ever fetches from
-# it, so it can never be mistaken for the release source. A box whose code
-# lives nowhere else names its copy `backup`, not `origin`: caused by the
-# first install's own checkout (L16, 2026-11-15), which had no origin, and
-# whose old repository's `main` is unrelated history.
+# it, so it can never be mistaken for the release source. A checkout with no
+# `origin` of its own names an off-box copy `backup`, never `origin`, and
+# its refspec can put `main` on a branch of a repository whose own `main`
+# is something else.
 BACKUP = "backup"
 # The last `main` the backup push took, so the recovery sweep can tell
 # without the network whether one is pending. Local only; nothing fetches it.
@@ -192,6 +194,171 @@ def push_backup(repo: Path) -> bool | str | None:
 def backup_pending(repo: Path) -> bool:
     """Whether `main` has moved past the last backup push (or none was made)."""
     return has_remote(repo, BACKUP) and rev(repo, MAIN) != rev(repo, BACKUP_MARK)
+
+
+# The gate in front of `origin` (2026-11-16), for a checkout whose `origin`
+# is shared beyond its owner -- Loam's own, pushing to the project's public
+# home. A commit once pushed there is expensive to take back. A checkout
+# turns it on in its own git config, `git config loam.pushGate true`; then
+# before every push of `main` to `origin` (a landing's, and the recovery
+# sweep's), each commit `origin` does not have yet is checked:
+#
+#   - its author and committer are the checkout's own `user.name` and
+#     `user.email`: the identity a job's clone is given (``configure_clone``),
+#     so a commit made any other way -- by hand, as a person, before the
+#     identity was set -- is held rather than published under that name;
+#   - when `loam.pushDeny` names a deny list (a file in bin/scrub-check's
+#     format, kept outside the repository because the list is itself the
+#     names it guards), no line the commit adds, no path it touches and
+#     nothing in its message matches it.
+#
+# A project's own repository is its owner's, private, and full of its own
+# names, so it has no gate unless its checkout asks for one. A held push
+# leaves `main` landed here and says why; nothing is rewritten, and the
+# recovery sweep tries again.
+GATE_COMMITS = 200
+
+
+def identity(repo: Path) -> tuple[str, str]:
+    return (git(repo, "config", "user.name", check=False).stdout.strip(),
+            git(repo, "config", "user.email", check=False).stdout.strip())
+
+
+def read_deny_list(path: Path) -> tuple[list[str], list[tuple[str, re.Pattern]]]:
+    """bin/scrub-check's format: one ERE per line, `allow PATH REGEX`,
+    `@box-ip` (this machine's public addresses), `#` comments."""
+    pats, allows = [], []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == "@box-ip":
+            out = subprocess.run(["ip", "-o", "addr", "show", "scope", "global"],
+                                 capture_output=True, text=True, check=False).stdout
+            for row in out.splitlines():
+                parts = row.split()
+                if len(parts) > 3 and parts[2] in ("inet", "inet6"):
+                    ip = parts[3].split("/")[0]
+                    try:
+                        if ipaddress.ip_address(ip).is_global:
+                            pats.append(re.escape(ip))
+                    except ValueError:
+                        pass
+        elif line.startswith("allow "):
+            _, where, rx = line.split(None, 2)
+            allows.append((where, re.compile(rx)))
+        else:
+            pats.append(line)
+    return pats, allows
+
+
+def gate_on(repo: Path) -> bool:
+    return git(repo, "config", "--type=bool", "loam.pushGate",
+               check=False).stdout.strip() == "true"
+
+
+def push_deny_file(repo: Path) -> Path | None:
+    value = git(repo, "config", "loam.pushDeny", check=False).stdout.strip()
+    return Path(value).expanduser() if value else None
+
+
+def push_gate(repo: Path, since: str | None, deny: Path | None = None,
+              head: str = MAIN) -> list[str]:
+    """Why `head` may not be pushed past `since` (what the remote has; None
+    for a remote that has nothing). Empty when it may. ``deny`` defaults to
+    the checkout's `loam.pushDeny`."""
+    spec = [f"{since}..{head}"] if since else [head]
+    commits = git(repo, "rev-list", "--reverse", *spec, check=False).stdout.split()
+    if not commits:
+        return []
+    if len(commits) > GATE_COMMITS:
+        return [f"{len(commits)} commits to push, more than the gate reads "
+                f"({GATE_COMMITS}); push them by hand after checking them"]
+    problems = []
+    name, email = identity(repo)
+    want = f"{name} <{email}>"
+    deny = deny if deny is not None else push_deny_file(repo)
+    if deny and not deny.is_file():
+        problems.append(f"the deny list `loam.pushDeny` names ({deny}) is missing")
+    pats, allows = read_deny_list(deny) if deny and deny.is_file() else ([], [])
+    big = re.compile("|".join(f"(?:{p})" for p in pats)) if pats else None
+    for sha in commits:
+        meta = git(repo, "show", "-s", "--format=%an <%ae>%x00%cn <%ce>%x00%B",
+                   sha).stdout
+        author, committer, body = (meta.split("\0", 2) + ["", ""])[:3]
+        for role, who in (("author", author), ("committer", committer)):
+            if who != want:
+                problems.append(f"{sha[:7]}: {role} is {who!r}, not this "
+                                f"checkout's {want!r}")
+        if not big:
+            continue
+        for m in big.finditer(body):
+            problems.append(f"{sha[:7]}: its message names {m.group(0)!r}")
+        diff = git(repo, "show", "--format=", "-U0", "--no-color", "--no-renames",
+                   "--no-ext-diff", "--text", sha, check=False).stdout
+        path = None
+        for line in diff.splitlines():
+            if line.startswith("+++ "):
+                path = line[6:] if line.startswith("+++ b/") else None
+                for m in big.finditer(path or ""):
+                    problems.append(f"{sha[:7]}: path {path} names {m.group(0)!r}")
+            elif line.startswith("+") and path:
+                for m in big.finditer(line[1:]):
+                    if not any(path == w and rx.search(m.group(0)) for w, rx in allows):
+                        problems.append(f"{sha[:7]}: {path} adds {m.group(0)!r}")
+    return problems
+
+
+def push_origin(repo: Path) -> bool | str:
+    """Push `main` to `origin`, through the gate when the checkout has
+    one: True, or why not."""
+    problems = []
+    if gate_on(repo):
+        git(repo, "fetch", "--quiet", "--no-tags", "origin", MAIN, check=False,
+            timeout=120)
+        problems = push_gate(repo, rev(repo, f"origin/{MAIN}"))
+    if problems:
+        shown = "; ".join(problems[:5]) + (
+            f"; and {len(problems) - 5} more" if len(problems) > 5 else "")
+        return f"held by the push gate: {shown}"
+    push = git(repo, "push", "--quiet", "origin", MAIN, check=False, timeout=180)
+    return True if push.returncode == 0 else (
+        (push.stderr or push.stdout).strip()[:400] or f"exit {push.returncode}")
+
+
+# A job whose `main` was rewritten under it (2026-11-16). A history that is
+# rewritten before it is first published (to take an install's own notes or
+# names out of it) leaves every running job's branch on the old commits, and a
+# plain merge would bring all of them back. When the job's recorded base is
+# no longer in `main` but is in its branch, the landing replays only the
+# job's own commits (`base..branch`) onto `main`, as the checkout's identity,
+# and lands those. A replay that conflicts is not landed.
+def replay_if_rewritten(repo: Path, tree: Path, branch: str, record: dict,
+                        main_sha: str, say) -> str | None:
+    """Replay the branch onto `main` if `main` was rewritten since the job
+    began. Returns None (nothing to do, or done) or why it could not."""
+    base = record.get("base")
+    tip = branch_tip(tree, branch)
+    if not base or not tip or not rev(tree, base):
+        return None
+    if is_ancestor(tree, base, main_sha) or not is_ancestor(tree, base, tip):
+        return None
+    say(f"landing: main was rewritten since {base[:7]}; replaying the job's "
+        f"own commits onto it")
+    name, email = identity(repo)
+    if git(tree, "symbolic-ref", "--short", "HEAD", check=False).stdout.strip() != branch:
+        git(tree, "checkout", "--quiet", branch, check=False)
+    out = git(tree, "-c", f"user.name={name}", "-c", f"user.email={email}",
+              "rebase", "--quiet", "--autostash", "--onto", main_sha, base, branch,
+              "--exec", f"git -c user.name='{name}' -c user.email='{email}' "
+                        f"commit --amend --no-edit --quiet --reset-author",
+              check=False, timeout=600)
+    if out.returncode != 0:
+        git(tree, "rebase", "--abort", check=False)
+        return ((out.stderr or out.stdout).strip()[-600:]
+                or f"git rebase exited {out.returncode}")
+    record["base"] = main_sha
+    return None
 
 
 def is_ancestor(repo: Path, older: str, newer: str) -> bool:
@@ -1507,7 +1674,14 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
         result.update(reason="diverged", detail=diverged)
         return result
     refresh_main(repo, tree)
-    main_sha, tip = rev(repo, MAIN), branch_tip(tree, branch)
+    main_sha = rev(repo, MAIN)
+    replay = replay_if_rewritten(repo, tree, branch, record, main_sha, say)
+    if replay:
+        result.update(reason="rewritten", detail=(
+            f"`{MAIN}` was rewritten since this job began, and replaying the "
+            f"job's own commits onto it stopped: {replay}"))
+        return result
+    tip = branch_tip(tree, branch)
     result["head"] = head_note(tree, branch)
 
     # Ancestry is asked of the tree: a clone has both commits, the canonical
@@ -1598,10 +1772,7 @@ def _land_locked(project, repo, tree, branch, message, keep_tree, result,
         shutil.copytree(tree / "memory", memory_base(record), symlinks=True)
     if has_remote(repo):
         with timed(result, "push"):
-            push = git(repo, "push", "--quiet", "origin", MAIN, check=False,
-                       timeout=180)
-        result["pushed"] = True if push.returncode == 0 else (
-            (push.stderr or push.stdout).strip()[:400])
+            result["pushed"] = push_origin(repo)
     backup = push_backup(repo)
     if backup is not None:
         result["backup"] = backup
@@ -1653,6 +1824,8 @@ REASONS = {
                 "lands untested",
     "canonical": "the canonical checkout would not take it",
     "diverged": "the canonical main and its remote have diverged",
+    "rewritten": "main was rewritten since the job began, and its own commits "
+                 "could not be replayed onto the new main",
     "error": "a step of the landing failed",
     "cancelled": "the job was cancelled",
     "harness": "its commits touch the engineer's harness, which never enters "
@@ -1831,7 +2004,7 @@ def receipt_section(project: eng.Project, job_id: str, result: dict | None) -> s
         push = ("Pushed to origin." if pushed is True else
                 "No remote to push to." if pushed is None else
                 f"**The push failed**: `{pushed}` — `main` moved on this box "
-                f"and origin is behind it.")
+                f"and origin is behind it; the recovery sweep tries again.")
         backup = result.get("backup")
         if backup is True:
             push += f" Backed up off the box to `{BACKUP}`."

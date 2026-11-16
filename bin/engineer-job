@@ -2599,11 +2599,10 @@ def push_pending(project: eng.Project) -> dict | None:
             if not local or not remote or local == remote or not wt.is_ancestor(
                     repo, remote, local):
                 return None
-            out = wt.git(repo, "push", "--quiet", "origin", wt.MAIN, check=False,
-                         timeout=180)
+            pushed = wt.push_origin(repo)
             return {"project": project.name, "push": local[:7],
-                    "pushed": out.returncode == 0,
-                    "error": (out.stderr or "").strip()[:300] or None}
+                    "pushed": pushed is True,
+                    "error": None if pushed is True else str(pushed)[:300]}
     except loam_lock.Busy:
         return None                    # a landing holds it, and pushes itself
 

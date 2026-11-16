@@ -66,6 +66,16 @@ def main() -> int:
     # No test's broker object reads the box's real usage through a real CLI
     # (lib/loam_provider_usage.py); the ones that build a Server say so too.
     os.environ["LOAM_USAGE_READS"] = "off"
+    # And none of the owner's own settings: the engineers' provider and
+    # models (lib/loam_engineer.engineer_choice) are read from the broker's
+    # settings file, so the day the owner chose another provider for every
+    # engineer, every landing failed test_engineer_codex and
+    # test_engineer_walled (2026-11-16). A test that needs settings names
+    # its own file; the rest read a file that is not there, as a fresh
+    # install does.
+    if not os.environ.get("LOAM_HOST_SETTINGS"):
+        unset = tempfile.mkdtemp(prefix="loam-test-settings-")
+        os.environ["LOAM_HOST_SETTINGS"] = str(Path(unset) / "settings.json")
     # And nothing off the box: no real credential read and no socket off
     # loopback, in this process and every one a test spawns
     # (lib/loam_offline.py). A test of the move once repointed every real
