@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Run bin/check-drift once a night and say so only when something is new.
+
+check-drift was built to be run "from cron or by hand", and until 2026-10-14
+it was only ever run by hand. The one part of it that ran unattended was the
+lane-model check, because `bin/rc-preflight` carries a copy of it into every
+Remote Control start at the 01:30 recycle; the other checks -- generators
+against the live files, the static units, the crons, the deployment layer --
+waited for someone to remember them. loam-check-drift.timer runs this at
+01:40 Pacific, after the recycle has restarted every RC server and before
+the first wake at 02:00.
+
+What it says, and where:
+
+  clean        nothing, anywhere the owner looks. The run is in the log.
+  drift        one line under Important in `comms.md` per finding that was
+               not in the previous night's run. A finding that stays is the
+               same item, and comms is not a log; a finding that clears and
+               comes back is new again.
+  check broke  one line in the failure log (and its Urgent comms line), as
+               every wake failure has: check-drift exited with something
+               other than 0 or 1, timed out, or said "drift" without a
+               finding this could read. The last is an error on purpose:
+               Python exits 1 on an uncaught traceback too, and neither a
+               traceback nor a change to check-drift's report format may
+               read as a quiet night.
+
+Every run's full output is appended to logs/drift-check.log with a stamp,
+the same shape as memory-check.log beside it. The previous night's findings
+are in state/drift-watch.json.
+
+Usage: drift-watch     exit 0 = the check ran (clean or not), 2 = it did not
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+from loam_inbox import append_comms, record_failure  # noqa: E402
+
+AGENTS = lc.ROOT
+VAULT = lc.VAULT
+CHECK = [str(AGENTS / "bin" / "check-drift"), "--quiet"]
+LOG = lc.LOGS / "drift-check.log"
+STATE = lc.STATE / "drift-watch.json"
+POSTER = "loam"
+LINK = "`agents/logs/drift-check.log`"
+# check-drift takes 1.5 s on this box (2026-10-14). Five minutes is the
+# point at which it is stuck, not slow.
+TIMEOUT_S = 300
+
+# `report()` in bin/check-drift is the one place a finding is printed, and
+# this is the line it prints for each: `### <label>  [<where>]`.
+FINDING = re.compile(r"^### (.+)$", re.MULTILINE)
+
+
+def findings(output: str) -> list[str]:
+    """Each finding's heading line, which is its identity from night to night.
+    The diff under it is not: it carries counts and paths that move."""
+    return [m.group(1).strip() for m in FINDING.finditer(output)]
+
+
+def load_previous(state: Path) -> set[str]:
+    try:
+        return set(json.loads(state.read_text(encoding="utf-8"))["findings"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return set()
+
+
+def save(state: Path, found: list[str], stamp: str) -> None:
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps({"at": stamp, "findings": found}, indent=2) + "\n",
+                     encoding="utf-8")
+
+
+def log(path: Path, stamp: str, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"\n{stamp}\n{text.rstrip()}\n")
+
+
+def watch(check: list[str] = CHECK, vault: Path = VAULT, log_path: Path = LOG,
+          state: Path = STATE, timeout: float = TIMEOUT_S) -> int:
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        run = subprocess.run(check, capture_output=True, text=True,
+                             timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log(log_path, stamp, f"drift-watch: check-drift did not run: {exc}")
+        record_failure(POSTER, vault,
+                       f"The nightly check-drift did not run: {exc}. Nothing "
+                       f"was compared tonight; {LINK} has the run.")
+        return 2
+
+    output = run.stdout + (f"\n[stderr]\n{run.stderr}" if run.stderr.strip() else "")
+    log(log_path, stamp, output + f"\n[exit {run.returncode}]")
+    found = findings(run.stdout)
+
+    if run.returncode not in (0, 1) or (run.returncode == 1 and not found):
+        last = (run.stderr.strip().splitlines() or ["no stderr"])[-1]
+        record_failure(POSTER, vault,
+                       f"The nightly check-drift failed (exit {run.returncode}): "
+                       f"{last}. Nothing was compared tonight; {LINK} has the "
+                       f"whole output.")
+        return 2
+
+    previous = load_previous(state)
+    for item in found:
+        if item not in previous:
+            append_comms(vault, POSTER, f"new drift — {item}", LINK,
+                         section="Important")
+    save(state, found, stamp)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(watch())

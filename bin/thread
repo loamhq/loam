@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Post into a Loam thread from a wake, a cron or a turn (2026-11-08).
+
+    thread post <thread-id|general> <text> [--bulletin] [--by <persona>]
+                [--reply-to <message-id>]
+    thread rename <thread-id> <title> [--by <persona>]
+    thread branch <thread-id> <message-id> [--persona <p>] [--title <t>]
+                  [--text <draft>] [--by <persona>]
+    thread list
+
+The author is ``LOAM_AGENT`` (or ``--by``). ``--bulletin`` marks a wake
+bulletin ("woke"), which belongs in General, short, and only when there is
+something worth saying. A post is appended to the thread's record in the
+vault; it gives nobody a turn -- an @mention here is text. Boards are edited
+as files. ``rename`` (2026-11-10) is the app's own rename -- the
+details page's PATCH -- through ``loam_threads.update``: the record's
+``title:``, its file name, and the board's file and ``board:`` key move
+together, General refuses, and the open app sees it on its list stream's
+two-second look at the records. Like the app's, it leaves no line in the
+thread. ``--reply-to m12`` (2026-11-11) makes the post a reply to message
+m12 of that thread, as the app's reply does; a text opening with ``↩ m12``
+means the same, the marker taken off. An id the thread does not hold is
+refused. ``branch`` (2026-11-11) is the app's Branch into a new thread:
+a new thread with ``--persona`` (the source's default if not given) as its
+default, titled ``--title`` (or the draft's first line), its first line
+linking back to the message and a line under the message linking forward,
+and ``--text`` waiting in its composer for the owner, unsent; with no
+``--text`` it waits with a plain opening made from the message. Prints one
+JSON object. ``mcp__engineer__thread`` calls this.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_threads as threads  # noqa: E402
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="thread")
+    sub = ap.add_subparsers(dest="action", required=True)
+    post = sub.add_parser("post")
+    post.add_argument("thread")
+    post.add_argument("text")
+    post.add_argument("--bulletin", action="store_true")
+    post.add_argument("--reply-to", default="")
+    post.add_argument("--by", default=os.environ.get("LOAM_AGENT", ""))
+    ren = sub.add_parser("rename")
+    ren.add_argument("thread")
+    ren.add_argument("title")
+    ren.add_argument("--by", default=os.environ.get("LOAM_AGENT", ""))
+    br = sub.add_parser("branch")
+    br.add_argument("thread")
+    br.add_argument("message")
+    br.add_argument("--persona", default="")
+    br.add_argument("--title", default="")
+    br.add_argument("--text", default="")
+    br.add_argument("--by", default=os.environ.get("LOAM_AGENT", ""))
+    sub.add_parser("list")
+    args = ap.parse_args()
+    try:
+        threads.ensure_general()
+        if args.action == "list":
+            rows = [{"id": r["id"], "title": r["title"],
+                     "members": [m["persona"] for m in r["members"]],
+                     "board": str(threads.VAULT / r["board"])}
+                    for r in threads.listing()]
+            print(json.dumps({"ok": True, "threads": rows}))
+            return 0
+        by = (args.by or "").strip().lower()
+        if by not in threads.roster():
+            raise threads.ThreadError(
+                400, "who is posting? set LOAM_AGENT or pass --by <persona>")
+        if args.action == "branch":
+            source = args.thread.strip()
+            persona = args.persona.strip().lower() or None
+            text = args.text
+            if not text.strip():
+                smeta, smsgs, _ = threads.read(source)
+                text = threads.fallback_branch(
+                    smeta, threads.branch_window(smsgs, args.message.strip(), source))["draft"]
+            made = threads.branch(source, args.message.strip(), persona,
+                                  title=args.title.strip() or None, draft=text, by=by)
+            meta = made["meta"]
+            print(f"thread: {by} branched {source} at {args.message} into "
+                  f"{meta['id']} {meta['title']!r}", file=sys.stderr)
+            print(json.dumps({"ok": True, "thread": meta["id"], "title": meta["title"],
+                              "persona": meta["default"], "from": source,
+                              "message": args.message.strip(),
+                              "window": made["window"],
+                              "record": str(threads.record_path(meta["id"])),
+                              "lines": {"from": made["from"]["id"],
+                                        "into": made["into"]["id"]}}))
+            return 0
+        if args.action == "rename":
+            if args.thread.strip().lower() == threads.GENERAL_ID:
+                raise threads.ThreadError(400, "General can't be renamed")
+            if not args.title.strip():
+                raise threads.ThreadError(400, "the title is empty")
+            before = threads.read(args.thread)[0]["title"]
+            meta = threads.update(args.thread, title=args.title)
+            path = threads.record_path(args.thread)
+            print(f"thread: {by} renamed {args.thread} {before!r} -> "
+                  f"{meta['title']!r}", file=sys.stderr)
+            print(json.dumps({"ok": True, "thread": args.thread,
+                              "title": meta["title"], "was": before,
+                              "record": str(path),
+                              "board": str(threads.VAULT / meta["board"])}))
+            return 0
+        if not args.text.strip():
+            raise threads.ThreadError(400, "the text is empty")
+        meta, _, _ = threads.read(args.thread)
+        if by not in meta["members"]:
+            threads.update(args.thread, add=[by])
+        text, marked = threads.take_reply_mark(args.text)
+        reply_to = args.reply_to.strip() or marked
+        if not reply_to:
+            text = args.text
+        if not text.strip():
+            raise threads.ThreadError(400, "the text is empty")
+        msg = threads.append(args.thread, by, text,
+                             kind="bulletin" if args.bulletin else "message",
+                             **({"reply_to": reply_to} if reply_to else {}))
+        print(json.dumps({"ok": True, "thread": args.thread, "message": msg}))
+        return 0
+    except threads.ThreadError as exc:
+        print(json.dumps({"ok": False, "error": exc.message}))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

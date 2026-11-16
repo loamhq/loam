@@ -1,0 +1,33 @@
+# Secrets. wake.env holds the Claude Code OAuth token, secrets.env the
+# Gemini key. Both are required to run and neither is ever tracked; if this
+# tree is ever restored from a clone, they have to be recreated by hand.
+wake.env
+secrets.env
+
+# Runtime state, not source: last-wake markers, transcript idempotency
+# sidecars, titler scratch, and quarantined probe transcripts. Machine-local
+# and regenerated. Committing it would make every wake a dirty working tree.
+state/
+
+# Per-agent wake and RC logs. ~85 MB and growing without bound.
+logs/
+
+# ~87 MB of installed packages. Rebuild from mcp/requirements.txt:
+#   uv venv --python 3.11 mcp/.venv
+#   uv pip install --python mcp/.venv/bin/python -r mcp/requirements.txt
+mcp/.venv/
+
+__pycache__/
+*.pyc
+
+# Hand-made pre-edit backups. Having history is what replaces these.
+.bak/
+
+# Engineer job directories: one per job, holding the brief, the heartbeat, the
+# engineer's half of the receipt and the launcher's verdict. Runtime state, not
+# source -- the durable copy of every receipt is the vault file under
+# 40_PROJECTS/<project>/receipts/, which is where the owner reads it and what
+# survives a waiter that died. `engineer/memory/` is deliberately NOT here:
+# decision 21 puts an engineer's memory in the repo, committed and readable by
+# any contributor.
+engineer/jobs/

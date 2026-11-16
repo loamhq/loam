@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""A thread's engineer jobs (2026-11-13): briefed from a thread, seen on it.
+
+A job briefed from a thread's turn -- by the persona or by any subagent of
+its session, which share the session's process tree -- records that thread
+in its brief's header, derived on the server (lib/loam_waiters.caller), not
+passed by the caller. The thread's record, ``GET /v1/threads/{id}``, then
+carries ``thread.jobs``: the jobs queued, running, landing, or finished in
+the last ten minutes, read from the launcher's job state
+(lib/loam_activity.job_rows), never from the persona's session.
+
+  1. `accept()`, as the brief tool calls it, from a conversation whose
+     session is a thread member's: the header says the thread. From a cron,
+     and from the shell, it says none. A `thread` argument passed by the
+     caller is not what decides it.
+  2. The caller walk from a subagent's tool call: the session id is found on
+     the CLI's own process, several levels up.
+  3. Every state through the broker's route: a running job (a real run lock
+     held), a queued one, a landing one, one finished five minutes ago and
+     landed, one finished and deployed, one cut off, one finished twenty
+     minutes ago (gone), another thread's (absent), a cron's (absent). Each
+     row has the contract's fields; the receipt is a vault path.
+  4. The same list read as a persona would: `bin/settings get thread.jobs`.
+  5. The outcome words, from the launcher's verdicts.
+
+Run: python3 tests/test_thread_jobs.py
+"""
+
+import asyncio
+import importlib.machinery
+import importlib.util
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+AGENTS = Path(__file__).resolve().parent.parent
+TMP = Path(tempfile.mkdtemp())
+os.environ["LOAM_VAULT"] = str(TMP / "vault")
+os.environ["LOAM_AI_LABS"] = str(TMP / "ai-labs")
+os.environ["LOAM_THREADS_STATE"] = str(TMP / "state")
+os.environ["LOAM_WAITERS_DIR"] = str(TMP / "waiters")
+os.environ["LOAM_LOCK_DIR"] = str(TMP / "locks")
+os.environ["LOAM_HOST_SETTINGS"] = str(TMP / "broker" / "settings.json")
+os.environ["LOAM_UI_SOURCE"] = "none"
+(TMP / "locks").mkdir()
+sys.path.insert(0, str(AGENTS / "lib"))
+import loam_config  # noqa: E402
+
+# The briefer is the configured one: a brief from anyone else is refused.
+LEAD = loam_config.LEAD_AGENT
+for who in dict.fromkeys((LEAD, "iris")):
+    (TMP / "ai-labs" / who).mkdir(parents=True)
+    (TMP / "ai-labs" / who / "agent.json").write_text(
+        json.dumps({"name": who, "display": who.capitalize()}))
+(TMP / "vault" / "15_CONVERSATIONS").mkdir(parents=True)
+(TMP / "vault" / "00_INBOX" / "from-agents").mkdir(parents=True)
+(TMP / "vault" / "00_INBOX" / "from-agents" / "comms.md").write_text("# From agents\n")
+
+sys.path.insert(0, str(AGENTS / "lib"))
+import loam_broker as cfg  # noqa: E402
+cfg.memory = lambda: {"available": None, "cgroup_room": None,
+                      "reserve": cfg.MEMORY_RESERVE_MB}
+import loam_activity as activity  # noqa: E402
+import loam_engineer as eng  # noqa: E402
+import loam_lock  # noqa: E402
+import loam_threads as threads  # noqa: E402
+import loam_waiters as w  # noqa: E402
+
+cfg.roster = threads.roster
+cfg.roster_cards = lambda: [{"id": p} for p in threads.roster()]
+cfg.VAULT = TMP / "vault"
+eng.VAULT = TMP / "vault"
+# Memory always admits: this box's own pressure is not this test's subject.
+(TMP / "meminfo").write_text("MemAvailable:   64000000 kB\n")
+loam_lock.MEMINFO = str(TMP / "meminfo")
+
+# One platform engineer of the test's own, with an agent.json the launcher's
+# composition check reads; every reader goes through eng.projects().
+ROOT = TMP / "engineer"
+ROOT.mkdir()
+(ROOT / "agent.json").write_text(json.dumps({"kind": "engineer"}))
+PROJECT = eng.Project("Loam", ROOT, ROOT / "jobs", platform=True)
+eng.projects = lambda: {"Loam": PROJECT}
+
+
+def load(name, path):
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+job = load("engineer_job_thread_jobs", AGENTS / "bin" / "engineer-job")
+broker_mod = load("session_broker_thread_jobs", AGENTS / "bin" / "session-broker")
+engine_mod = broker_mod.loam_thread_engine
+
+results = []
+
+
+def check(label, ok, detail=""):
+    results.append(bool(ok))
+    print(f"{'PASS' if ok else 'FAIL'}  {label:72}"
+          f"{'  | ' + str(detail)[:300] if detail != '' else ''}")
+
+
+def iso(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+NOW = datetime.now(timezone.utc)
+
+# -- 1. accept() records the thread the session serves ------------------------
+
+home = threads.create(LEAD, "Themes")["id"]
+other = threads.create(LEAD, "Elsewhere")["id"]
+state = TMP / "state"
+(state / "steps" / "sessions").mkdir(parents=True, exist_ok=True)
+(state / "sessions.json").write_text(json.dumps(
+    {home: {LEAD: {"session_id": "sess-lead"}},
+     other: {LEAD: {"session_id": "sess-lead-2"}}}))
+
+
+def brief(title, env, args=None):
+    """`accept` with the environment the brief tool's launcher would have."""
+    keep = {k: os.environ.get(k) for k in ("LOAM_WAKE", w.SESSION_ENV, "LOAM_AGENT")}
+    for k in keep:
+        os.environ.pop(k, None)
+    os.environ.update(env)
+    try:
+        got = job.accept({"project": "Loam", "title": title, "brief": "Do it.",
+                          "involvement": "go and do it", **(args or {})},
+                         env.get("LOAM_AGENT", LEAD))
+    finally:
+        for k, v in keep.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+    assert not isinstance(got, str), got
+    return got[1], got[2]
+
+
+run_id, run_p = brief("Running from the thread",
+                      {"LOAM_AGENT": LEAD, w.SESSION_ENV: "sess-lead"},
+                      {"thread": other})
+meta = job.read_brief_meta(run_p)
+check("a brief from a thread member's session records that thread",
+      (meta["caller"], meta["caller_session"], meta["thread"])
+      == ("conversation", "sess-lead", home),
+      (meta["caller"], meta["caller_session"], meta["thread"]))
+check("...derived on the server: a `thread` the caller passed is not it",
+      meta["thread"] != other, meta["thread"])
+
+cron_id, cron_p = brief("From a cron",
+                        {"LOAM_AGENT": LEAD, "LOAM_WAKE": "cron:infra-watch",
+                         w.SESSION_ENV: "sess-lead"})
+check("a brief from a cron records no thread",
+      job.read_brief_meta(cron_p)["thread"] == "", job.read_brief_meta(cron_p)["thread"])
+shell_id, shell_p = brief("From the shell", {"LOAM_AGENT": LEAD})
+check("a brief from the shell (no session anywhere above it) records no thread",
+      job.read_brief_meta(shell_p)["thread"] == "",
+      job.read_brief_meta(shell_p)["thread"])
+
+# -- 2. from a subagent: the session is the CLI's, levels up ------------------
+
+
+def fake_proc(chain):
+    root = TMP / f"proc-{len(list(TMP.glob('proc-*')))}"
+    for pid, ppid, env, argv in chain:
+        d = root / str(pid)
+        d.mkdir(parents=True)
+        (d / "stat").write_text(f"{pid} (x) S {ppid} 1 1 0 -1 0 0 0 0 0 0 0 0 0 0 "
+                                f"20 0 1 0 {1000 + pid} 0 0\n")
+        (d / "environ").write_bytes(b"\0".join(f"{k}={v}".encode()
+                                               for k, v in env.items()))
+        (d / "cmdline").write_bytes(b"\0".join(a.encode() for a in argv))
+    return root
+
+
+# A background subagent runs inside the session's own CLI process; its
+# engineer tool call is the same MCP server, child of that CLI.
+proc = fake_proc([(50, 40, {}, ["python3", "engineer-job", "--brief"]),
+                  (40, 30, {"LOAM_AGENT": LEAD}, ["python", "engineer_server.py"]),
+                  (30, 20, {w.SESSION_ENV: "sess-lead"},
+                   ["/home/x/.local/bin/claude", "-p", "--session-id", "sess-lead"]),
+                  (20, 1, {}, ["python3", "session-broker"])])
+check("from a subagent's tool call: the thread of the session above it",
+      w.caller({"LOAM_AGENT": LEAD}, 50, proc, state).get("thread") == home,
+      w.caller({"LOAM_AGENT": LEAD}, 50, proc, state))
+
+# -- 3. every state, on the thread's record -----------------------------------
+
+queued_id, queued_p = brief("Queued from the thread",
+                            {"LOAM_AGENT": LEAD, w.SESSION_ENV: "sess-lead"})
+(queued_p["dir"] / "queued").write_text(json.dumps(
+    {"joined": iso(NOW - timedelta(minutes=1)), "held_by": "memory"}))
+
+landing_id, landing_p = brief("Landing from the thread",
+                              {"LOAM_AGENT": LEAD, w.SESSION_ENV: "sess-lead"})
+(landing_p["dir"] / "owner.json").write_text(json.dumps(
+    {"pid": os.getpid(), "since": iso(NOW - timedelta(minutes=30))}))
+(landing_p["dir"] / "landing").write_text(json.dumps(
+    {"pid": os.getpid(), "since": iso(NOW - timedelta(minutes=2)), "phase": "ci",
+     "until": (NOW + timedelta(minutes=5)).timestamp()}))
+
+
+def finished(title, ago, result, env=None):
+    jid, p = brief(title, env or {"LOAM_AGENT": LEAD, w.SESSION_ENV: "sess-lead"})
+    receipt = TMP / "vault" / "40_PROJECTS" / "Loam" / "receipts" / f"{jid}.md"
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write_text("receipt\n")
+    (p["dir"] / "result.json").write_text(json.dumps({
+        "started": iso(NOW - ago - timedelta(minutes=12)),
+        "finished": iso(NOW - ago), "vault_receipt": str(receipt), **result}))
+    return jid
+
+
+landed_id = finished("Landed five minutes ago", timedelta(minutes=5),
+                     {"ok": True, "stage": "done", "outcome": "completed",
+                      "landing_state": "landed"})
+deployed_id = finished("Deployed a minute ago", timedelta(minutes=1),
+                       {"ok": True, "stage": "done", "outcome": "completed",
+                        "landing_state": "landed",
+                        "deploy": {"exit": 0, "result": {"action": "deployed"}}})
+cut_id = finished("Cut off", timedelta(minutes=3),
+                  {"ok": False, "stage": "done",
+                   "outcome": "cut off at its 60-minute wall clock",
+                   "landing_state": "not_landed"})
+old_id = finished("Finished twenty minutes ago", timedelta(minutes=20),
+                  {"ok": True, "stage": "done", "outcome": "completed",
+                   "landing_state": "landed"})
+iris_id = finished("Another thread's", timedelta(minutes=2),
+                   {"ok": True, "stage": "done", "outcome": "completed",
+                    "landing_state": "landed"},
+                   {"LOAM_AGENT": LEAD, w.SESSION_ENV: "sess-lead-2"})
+
+FIELDS = {"job", "project", "title", "briefed_by", "thread", "state", "phase",
+          "since", "started", "finished", "elapsed_seconds", "outcome",
+          "outcome_detail", "ok", "receipt", "position", "held_by"}
+
+
+class FakeBroker:
+    def __init__(self):
+        self.sessions = {}
+        self.token = "test-token"
+
+    async def start_session(self, *a, **k):
+        raise AssertionError("no turn is started in this test")
+
+
+TOKEN = TMP / "token"
+TOKEN.write_text("test-token")
+
+
+async def http(port, method, path):
+    import urllib.request  # noqa: PLC0415
+
+    def go():
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}{path}", method=method,
+            headers={"Authorization": "Bearer test-token"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, json.loads(r.read())
+    return await asyncio.to_thread(go)
+
+
+async def cli(port, *argv):
+    env = dict(os.environ, LOAM_BROKER_URL=f"http://127.0.0.1:{port}",
+               LOAM_BROKER_TOKEN_FILE=str(TOKEN), LOAM_AGENT=LEAD)
+    env.pop("LOAM_WAKE", None)
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, str(AGENTS / "bin" / "settings"), *argv, env=env,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    out, err = await proc.communicate()
+    try:
+        return json.loads(out)
+    except ValueError:
+        return {"ok": False, "error": f"no JSON: {out!r} {err[-400:]!r}"}
+
+
+async def main():
+    server = broker_mod.Server.__new__(broker_mod.Server)
+    fake = FakeBroker()
+    server.broker = fake
+    server.threads = engine_mod.ThreadEngine(fake)
+    tcp = await asyncio.start_server(server.handle, "127.0.0.1", 0)
+    port = tcp.sockets[0].getsockname()[1]
+    try:
+        # The running job holds a real run lock, as its inner does.
+        with loam_lock.hold("engineer", f"job:{run_id}", wait_seconds=5):
+            activity._ROWS.clear()
+            status, body = await http(port, "GET", f"/v1/threads/{home}?limit=1&seen=0")
+            rows = body["thread"].get("jobs")
+            check("GET /v1/threads/{id} answers with thread.jobs",
+                  status == 200 and isinstance(rows, list)
+                  and body["thread"].get("jobs_error") is None, body["thread"].get("jobs_error"))
+            by_id = {r["job"]: r for r in rows}
+            check("...this thread's jobs, and only those",
+                  set(by_id) == {run_id, queued_id, landing_id, landed_id,
+                                 deployed_id, cut_id}, sorted(by_id))
+            check("...not a cron's, not the shell's, not another thread's, "
+                  "not one finished 20 minutes ago",
+                  not {cron_id, shell_id, iris_id, old_id} & set(by_id))
+            check("...every row has the contract's fields",
+                  all(set(r) == FIELDS for r in rows),
+                  [sorted(set(r) ^ FIELDS) for r in rows])
+            check("...active first (running and landing by start, then "
+                  "queued), then the finished, newest first",
+                  [r["job"] for r in rows]
+                  == [landing_id, run_id, queued_id, deployed_id, cut_id, landed_id],
+                  [r["title"] for r in rows])
+            r = by_id[run_id]
+            check("running: state, start, elapsed, who briefed it",
+                  r["state"] == "running" and r["started"] and r["elapsed_seconds"] is not None
+                  and r["briefed_by"] == LEAD and r["project"] == "Loam"
+                  and r["title"] == "Running from the thread" and r["outcome"] is None, r)
+            r = by_id[queued_id]
+            check("queued: position and what it waits on, not started",
+                  r["state"] == "queued" and r["position"] == 1
+                  and r["held_by"] == "memory" and r["started"] is None
+                  and r["elapsed_seconds"] is None, r)
+            r = by_id[landing_id]
+            check("landing: its phase, started when its session did",
+                  r["state"] == "landing" and r["phase"] == "ci"
+                  and r["started"] == iso(NOW - timedelta(minutes=30))
+                  and r["elapsed_seconds"] >= 30 * 60 - 5, r)
+            r = by_id[landed_id]
+            check("finished: landed, its receipt's vault path, elapsed to its finish",
+                  r["state"] == "finished" and r["outcome"] == "landed"
+                  and r["ok"] is True and r["elapsed_seconds"] == 12 * 60
+                  and r["receipt"] == f"40_PROJECTS/Loam/receipts/{landed_id}.md", r)
+            check("finished: deployed", by_id[deployed_id]["outcome"] == "deployed",
+                  by_id[deployed_id])
+            check("finished: cut off, with the launcher's own words beside it",
+                  by_id[cut_id]["outcome"] == "cut off"
+                  and by_id[cut_id]["outcome_detail"].startswith("cut off at"),
+                  by_id[cut_id])
+
+            status, body = await http(port, "GET", f"/v1/threads/{other}?limit=1&seen=0")
+            check("the other thread sees its own job alone",
+                  [r["job"] for r in body["thread"]["jobs"]] == [iris_id],
+                  body["thread"]["jobs"])
+
+            # 4. a persona reads the same list through the settings tool.
+            out = await cli(port, "get", "thread.jobs", "--target", home)
+            check("bin/settings get thread.jobs: the same list",
+                  out.get("ok") and [r["job"] for r in out.get("value") or []]
+                  == [r["job"] for r in rows], out)
+        # The run lock let go and a verdict written: the job is finished.
+        (run_p["dir"] / "result.json").write_text(json.dumps({
+            "ok": False, "stage": "cancelled", "outcome": "cancelled",
+            "started": iso(NOW), "finished": iso(datetime.now(timezone.utc))}))
+        activity._ROWS.clear()
+        status, body = await http(port, "GET", f"/v1/threads/{home}?limit=1&seen=0")
+        r = {x["job"]: x for x in body["thread"]["jobs"]}.get(run_id) or {}
+        check("a job that ends stays on the thread as finished, with its outcome",
+              r.get("state") == "finished" and r.get("outcome") == "cancelled", r)
+    finally:
+        tcp.close()
+        await tcp.wait_closed()
+
+
+asyncio.run(main())
+
+# -- 5. the outcome words ------------------------------------------------------
+
+cases = [
+    ({"stage": "cancelled", "ok": False}, "cancelled"),
+    ({"stage": "interrupted", "ok": False, "outcome": "needs_persona"}, "interrupted"),
+    ({"stage": "done", "ok": False, "outcome": "cut off at the 100-round-trip cap"}, "cut off"),
+    ({"stage": "refused", "ok": False}, "failed"),
+    ({"stage": "done", "ok": False, "outcome": "exited 1"}, "failed"),
+    ({"stage": "done", "ok": True, "deployed": True, "landing": "landed"}, "deployed"),
+    ({"stage": "done", "ok": True, "deployed": False, "landing": "landed"}, "deploy failed"),
+    ({"stage": "done", "ok": True, "landing": "landed_earlier"}, "landed"),
+    ({"stage": "done", "ok": True, "landing": "pull_request"}, "pull request"),
+    ({"stage": "done", "ok": True, "landing": "not_landed"}, "not landed"),
+    ({"stage": "done", "ok": True, "landing": "read_only"}, "finished"),
+    ({"stage": "done", "ok": True, "landing": None}, "finished"),
+]
+got = [activity.outcome_word(item) for item, _ in cases]
+check("outcome words from the launcher's verdicts", got == [w_ for _, w_ in cases], got)
+check("...each one of OUTCOMES", set(got) <= set(activity.OUTCOMES))
+
+print(f"\n{sum(results)}/{len(results)} passed")
+sys.exit(0 if results and all(results) else 1)

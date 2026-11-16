@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily inbox expiry sweep
+
+[Timer]
+# 08:17 UTC = 01:17 Pacific. The same daily cadence as the commons sweep at
+# 08:07, offset ten minutes so the two sweeps do not interleave in the
+# journal, and both clear of the 01:30 RC recycle and the 02:00 wake grid.
+OnCalendar=*-*-* 08:17:00 UTC
+Persistent=true
+Unit=loam-inbox-expiry.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Loam schedule reconciler: records under ai-labs/*/crons/ to their timers
+# lib/loam_schedule.py. A record is live exactly when it says `enabled: true`;
+# this installs, moves, pauses and removes timers to match, marks a one-off
+# that never fired, and logs every act to state/schedules/events.jsonl. It
+# never starts a wake or cron service: it arms `.timer` units only.
+
+[Service]
+Type=oneshot
+ExecStart=@ROOT@/bin/schedule reconcile
+TimeoutStartSec=120

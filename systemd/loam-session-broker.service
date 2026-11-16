@@ -1,0 +1,58 @@
+[Unit]
+Description=Loam session broker: persona sessions for the web half
+# The bridge it binds to is docker's, so docker has to have made it. A user
+# unit cannot depend on a system unit, so this is a wait rather than an
+# ordering: the address either exists or the unit restarts until it does.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Runs as the box's user, and that is the entire point. The login at ~/.claude is
+# this user's, the persona workspaces are this user's, and a session the
+# broker starts has to be indistinguishable from a session started at a
+# terminal here. No credential is passed in: there is nothing to pass, the
+# session uses the login where it lives.
+Type=simple
+Restart=always
+RestartSec=5s
+# The sessions the broker starts are its children and live in this cgroup.
+#
+# **Since 2026-11-09 this is not sized for a number of chats.** The owner:
+# "my sessions can grow to have as much RAM and size as they need." The
+# broker admits a session by the box's memory (lib/loam_broker.py: a start
+# is admitted while MemAvailable leaves MEMORY_RESERVE_MB for the rest of the
+# box), ends idle ones under pressure, and has no per-session ceiling. So the
+# limits here are not a budget; they are the wall that keeps a runaway chat
+# from taking the box:
+#
+#   * MemoryMax=88% is the hard wall. Past it the kernel OOM-kills inside
+#     this cgroup, and the 12% left -- 930 MB on the 7,750 MB CX33, 3.8 GB
+#     on the CX53 -- is never this unit's to take. MemoryHigh=80% starts
+#     reclaim a little before, so a chat that is growing slows down before
+#     anything dies.
+#   * The OOM order picks the victim. This unit's 500 is inherited by the
+#     broker; every chat's CLI (and the MCP servers under it) is started at
+#     800 through `choom` (CHILD_OOM_SCORE_ADJ). The user manager's units --
+#     RC servers, engineer jobs, wakes -- run at 200 and the system's at 0.
+#     So in this cgroup's OOM, or the box's, a chat goes first, then the
+#     broker (back in 5 s, its chats' ids resumable), and sshd, Caddy,
+#     Authelia, docker and the RC servers are the last the killer reaches.
+#
+# Until 11-09: High 28% / Max 32%, sized in 2026-10 for a cap of four chats
+# at ~394 MiB each plus the broker's 225 MiB (engineer/memory, 2026-10-14).
+MemoryHigh=80%
+MemoryMax=88%
+OOMScoreAdjust=500
+Environment=DISABLE_AUTOUPDATER=1
+Environment=PATH=@UNIT_PATH@
+WorkingDirectory=@ROOT@
+ExecStart=/usr/bin/python3 @ROOT@/bin/session-broker
+# stdout carries the listening line and the idle reaper; stderr carries a
+# session's own stderr, prefixed with which session it came from. Both are
+# worth keeping and neither redraws itself, so unlike the Remote Control
+# units this keeps both.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

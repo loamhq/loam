@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Per lane, over the last n days: what the runs spent, and how much the cache served.
+
+Reads the wake log (``logs/wake-<agent>.jsonl``) and nothing else. A lane is
+an agent's reflection or one of its crons -- ``ada reflection`` and
+``ada cron:market-watch`` are two rows. Runs are the wakes that launched a
+session (a lock skip or a refused preflight spent nothing and is not one).
+
+The token columns come from the envelope's ``usage`` on each line, which
+bin/wake has kept since 2026-09-30 (lib/loam_usage.py). A line from before
+then has no usage, and a lane none of whose runs has any says "no usage
+recorded" rather than zeros. ``cost`` is the sum of the CLI's own
+``total_cost_usd``: an estimate at list price, not a bill. ``cached`` is the
+share of input served from cache: cache reads over all input (uncached +
+cache writes + cache reads), over the runs that recorded usage.
+
+Supersedes the hand-built week in the 09-15 paid-services report.
+``bin/cache-report`` is the older reconstruction from session transcripts,
+for dates before the envelope was kept.
+
+usage: usage-by-lane [days]     (default 7)
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+LOG_DIR = lc.LOGS
+DEFAULT_DAYS = 7
+
+
+def launched(row: dict) -> bool:
+    if row.get("ok"):
+        return True
+    stage = row.get("stage")
+    return stage in ("turn_cap", "invoke") or (
+        stage == "account_refused" and row.get("refused_at") == "invoke")
+
+
+def tally(log_dir: Path, days: int, now: datetime) -> dict:
+    since = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    lanes: dict = defaultdict(lambda: {
+        "runs": 0, "with_usage": 0, "input": 0, "output": 0,
+        "cache_read": 0, "cache_write": 0, "cost": 0.0,
+    })
+    for path in sorted(log_dir.glob("wake-*.jsonl")):
+        agent = path.stem[len("wake-"):]
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(row.get("ts", "")) < since or not launched(row):
+                continue
+            t = lanes[(agent, row.get("lane") or "reflection")]
+            t["runs"] += 1
+            cost = row.get("total_cost_usd")
+            if isinstance(cost, (int, float)):
+                t["cost"] += cost
+            usage = row.get("usage")
+            if not isinstance(usage, dict):
+                continue
+            t["with_usage"] += 1
+            t["input"] += usage.get("input_tokens", 0)
+            t["output"] += usage.get("output_tokens", 0)
+            t["cache_read"] += usage.get("cache_read_input_tokens", 0)
+            t["cache_write"] += usage.get("cache_creation_input_tokens", 0)
+    return dict(lanes)
+
+
+def human(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.2f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(n)
+
+
+def render(lanes: dict, days: int) -> str:
+    head = (f"{'lane':34} {'runs':>7} {'input':>8} {'output':>8} "
+            f"{'cache rd':>9} {'cache wr':>9} {'cost est':>9} {'cached':>7}")
+    out = [f"Wake lanes, last {days} day{'' if days == 1 else 's'} "
+           f"(cost is the CLI's estimate at list price, not a bill)", "",
+           head, "-" * len(head)]
+    for (agent, lane), t in sorted(lanes.items()):
+        name = f"{agent} {lane}"
+        runs = str(t["runs"]) if t["with_usage"] in (0, t["runs"]) else (
+            f"{t['with_usage']}/{t['runs']}")
+        cost = f"${t['cost']:.2f}"
+        if not t["with_usage"]:
+            out.append(f"{name:34} {runs:>7} {'no usage recorded':>36} "
+                       f"{cost:>9} {'':>7}")
+            continue
+        total_in = t["input"] + t["cache_write"] + t["cache_read"]
+        cached = f"{100.0 * t['cache_read'] / total_in:.1f}%" if total_in else "-"
+        out.append(
+            f"{name:34} {runs:>7} {human(t['input']):>8} "
+            f"{human(t['output']):>8} {human(t['cache_read']):>9} "
+            f"{human(t['cache_write']):>9} {cost:>9} {cached:>7}")
+    if not lanes:
+        out.append("(no runs in the window)")
+    if any(0 < t["with_usage"] < t["runs"] for t in lanes.values()):
+        out += ["", "runs a/b: a of b runs recorded usage; the token columns "
+                "and `cached` cover those a, cost covers all b."]
+    return "\n".join(out)
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) > 1 or (argv and not argv[0].isdigit()) or argv == ["0"]:
+        print("usage: usage-by-lane [days]", file=sys.stderr)
+        return 64
+    days = int(argv[0]) if argv else DEFAULT_DAYS
+    print(render(tally(LOG_DIR, days, datetime.now(timezone.utc)), days))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -1,0 +1,22 @@
+[Unit]
+Description=Loam plugin gateway: /x/<id>/ to each server plugin's own port
+# bin/plugin-gateway. Caddy sends /x/* on the app's host here, behind the
+# login; this passes each request to the plugin's loopback port from
+# state/plugins/ports.json. It runs no plugin code: each plugin's server is
+# its own transient unit, loam-plugin-<id>.service (lib/loam_plugin_servers.py),
+# and neither a plugin nor this touches the broker.
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=2s
+MemoryMax=128M
+OOMScoreAdjust=300
+NoNewPrivileges=yes
+WorkingDirectory=@ROOT@
+ExecStart=/usr/bin/python3 @ROOT@/bin/plugin-gateway
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

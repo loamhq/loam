@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Run every tests/test_*.py, each as the script it is, and exit non-zero if
+any fails. This is the agents repository's test command: what a landing runs
+on a job's branch and on the merged tree (lib/loam_worktree.py).
+
+Each test is run with the interpreter its own docstring names on its `Run:`
+line when that is the MCP venv -- a test of an MCP server imports `mcp`, which
+lives only there -- and with python3 otherwise.
+
+Run: python3 tests/run-all
+"""
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "lib"))
+import loam_config  # noqa: E402
+
+VENV = loam_config.MCP_VENV / "bin" / "python"
+
+
+def interpreter(test: Path) -> str:
+    head = test.read_text(encoding="utf-8")[:4000]
+    if re.search(r"^Run: mcp/\.venv/bin/python", head, re.MULTILINE):
+        return str(VENV)
+    return sys.executable
+
+
+def main() -> int:
+    # A lock table of the suite's own unless the caller chose one, as a
+    # landing's run_tests already does (lib/loam_worktree.py). test_cron_locks
+    # and test_wake_failed take run slots and wait for them; run from a job's
+    # session, they took the box's REAL slots beside the live jobs and left
+    # their holder lines in state/locks (probeone 17:40Z, wakefailedselftest
+    # 17:47Z on 2026-10-13), and with every slot held they would wait out
+    # their 1200 s budget.
+    locks = None
+    if not os.environ.get("LOAM_LOCK_DIR"):
+        locks = tempfile.mkdtemp(prefix="loam-test-locks-")
+        os.environ["LOAM_LOCK_DIR"] = locks
+        os.environ.pop("LOAM_LIVE_LOCKS", None)
+    # And a schedule log of its own: a test that runs bin/wake records a fire
+    # (lib/loam_schedule.py), which must not land in the box's real log.
+    schedules = None
+    if not os.environ.get("LOAM_SCHEDULE_STATE"):
+        schedules = tempfile.mkdtemp(prefix="loam-test-schedules-")
+        os.environ["LOAM_SCHEDULE_STATE"] = schedules
+    # No test's broker object reads the box's real usage through a real CLI
+    # (lib/loam_provider_usage.py); the ones that build a Server say so too.
+    os.environ["LOAM_USAGE_READS"] = "off"
+    # And nothing off the box: no real credential read and no socket off
+    # loopback, in this process and every one a test spawns
+    # (lib/loam_offline.py). A test of the move once repointed every real
+    # A DNS record to 5.6.7.8 with a real key from secrets.env
+    # (2026-11-10, 02:29Z, 1 h 56 min down).
+    os.environ["LOAM_OFFLINE"] = "1"
+    offline = str(ROOT / "tests" / "offline")
+    os.environ["PYTHONPATH"] = os.pathsep.join(
+        [offline] + [x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x])
+    try:
+        return run_all()
+    finally:
+        if locks:
+            shutil.rmtree(locks, ignore_errors=True)
+        if schedules:
+            shutil.rmtree(schedules, ignore_errors=True)
+
+
+def run_all() -> int:
+    failed, tails = [], []
+    started = time.monotonic()
+    for test in sorted((ROOT / "tests").glob("test_*.py")):
+        t0 = time.monotonic()
+        try:
+            out = subprocess.run([interpreter(test), str(test)], cwd=ROOT,
+                                 capture_output=True, text=True, timeout=600,
+                                 stdin=subprocess.DEVNULL)
+            code, text = out.returncode, out.stdout + out.stderr
+        except subprocess.TimeoutExpired:
+            code, text = "timeout", ""
+        mark = "ok  " if code == 0 else "FAIL"
+        print(f"{mark} {test.name} ({time.monotonic() - t0:.0f} s)", flush=True)
+        if code != 0:
+            failed.append(test.name)
+            lines = text.rstrip().splitlines()
+            tails.append((test.name, code, "\n".join(lines[-15:]),
+                          [ln for ln in lines[:-15] if ln.lstrip().startswith("FAIL")]))
+            print(tails[-1][2], flush=True)
+    # Each failure's tail again, at the end. A landing quotes only the last
+    # TAIL_LINES of this output (lib/loam_worktree.py), so a failure early in
+    # the alphabet was quoted as its name alone, behind the `ok` lines that
+    # followed it: a login test on 2026-11-08, never reproduced after.
+    # Its FAIL lines first: test_schedule prints 29 checks and its tail can be
+    # all PASS (caused, the same day).
+    for name, code, text, fails in tails:
+        print(f"--- {name} (exit {code}) ---", flush=True)
+        if fails:
+            print("\n".join(fails[:10]), flush=True)
+        print(text, flush=True)
+    print(f"{len(failed)} failed in {time.monotonic() - started:.0f} s"
+          + (f": {', '.join(failed)}" if failed else ""))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

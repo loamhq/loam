@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Import every classic chat as an archived thread (2026-11-11).
+
+Classic chats are retired; their history is kept inside threads. Each chat
+the app listed becomes an archived thread: same title, its persona the only
+member and the default, its messages in order with their authors and
+times, and every step of every reply in the thread's full record where the
+broker's session log has them. Nothing is deleted or moved: the transcript
+in ``15_CONVERSATIONS/`` and the session's own files stay, and the thread's
+frontmatter names them (``imported_from``, ``source``). How it reads a chat
+is in ``lib/loam_classic_import.py``.
+
+Idempotent: a chat already imported is not imported again, so a second
+run imports nothing twice; what the chat said since is appended to its
+thread while nobody has written in the thread. Says what it imported, what
+it caught up and what it could not.
+
+Usage: bin/import-classic-chats [--dry-run] [SESSION_ID_PREFIX ...]
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+import loam_classic_import as importer  # noqa: E402
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    dry = "--dry-run" in args
+    only = [a for a in args if not a.startswith("--")]
+    counts = importer.run(dry=dry, only=only or None)
+    print(f"{counts['chats']} classic chats: {counts['imported']} imported"
+          f"{' (dry run)' if dry else ''}, {counts['already']} already imported, "
+          f"{len(counts['skipped'])} could not be; {counts['messages']} messages, "
+          f"{counts['entries']} with full steps")
+    for sid, thread_id, added in counts["caught_up"]:
+        print(f"  caught up: {sid} -> {thread_id}, {added} later message(s)")
+    for sid, title, why in counts["skipped"]:
+        print(f"  not imported: {sid} {title!r}: {why}")
+    if counts["live"]:
+        print(f"  live when imported (what is said next is added by the next run): "
+              f"{', '.join(s[:8] for s in counts['live'])}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Every loam-ui setting, from a persona's hands (2026-11-10).
+
+    settings describe [<setting>] [--target T] [--member P]
+    settings get <setting> [--target T] [--member P]
+    settings set <setting> <value> [--target T] [--member P] [--by P] [--reason R]
+    settings do <action> [<value>] [--target T] [--by P] [--reason R]
+
+The registry is lib/loam_settings.py: every setting the page can change,
+the broker route the page's relay sends it to, and whose hands it is in.
+`set` and `do` call that same route with `by` (``LOAM_AGENT`` or ``--by``),
+so the change is validated and written by the code the page's click runs,
+an open page draws it at once, and a thread gets a line saying who made it.
+A value is JSON when it reads as JSON (``true``, ``null``, ``["iris"]``),
+else text. `target` is a thread id, a session id, or ``<agent>/<name>`` for
+a schedule; `member` is the thread member whose engine or model it is.
+Prints one JSON object. ``mcp__engineer__settings`` calls this.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_settings as settings  # noqa: E402
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="settings")
+    ap.add_argument("action", choices=("describe", "get", "set", "do"))
+    ap.add_argument("setting", nargs="?", default="")
+    ap.add_argument("value", nargs="?", default=None)
+    ap.add_argument("--target", default="")
+    ap.add_argument("--member", default="")
+    ap.add_argument("--by", default=os.environ.get("LOAM_AGENT", ""))
+    ap.add_argument("--reason", default="")
+    args = ap.parse_args()
+    try:
+        if args.action == "describe":
+            out = settings.describe(args.setting, args.target, args.member)
+        elif args.action == "get":
+            out = settings.get(args.setting, args.target, args.member)
+        else:
+            e = settings.entry(args.setting)
+            if args.action == "set" and e.kind != "setting":
+                raise settings.SettingsError(
+                    f"{e.key} is an action: `do` it")
+            if args.action == "do" and e.kind != "action":
+                raise settings.SettingsError(
+                    f"{e.key} is a setting: `set` it to a value")
+            if args.action == "set" and args.value is None:
+                raise settings.SettingsError(f"{e.key} needs a value ({e.values})")
+            value = True if args.value is None else args.value
+            out = settings.change(args.setting, value, args.by, args.target,
+                                  args.member, args.reason)
+            print(f"settings: {out['by']} {args.action} {args.setting}"
+                  f"{' ' + args.target if args.target else ''}", file=sys.stderr)
+        print(json.dumps(out, ensure_ascii=False))
+        return 0
+    except settings.SettingsError as exc:
+        print(json.dumps({"ok": False, "error": exc.message}, ensure_ascii=False))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

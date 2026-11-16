@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Update Loam: check for a newer release, apply it, or roll it back.
+
+  loam-update status              the running release, the last check, the
+                                  last or current run, and whether a
+                                  rollback is possible
+  loam-update check               ask for the newest release; say whether it
+                                  can be applied now, and what an update
+                                  would replace in System/Loam
+  loam-update diff                System/Loam's edits: how it differs from
+                                  the library of the release that is running
+  loam-update apply [--to V] [--yes]
+                                  move to the newest release (or V). With
+                                  edits in System/Loam it shows them and
+                                  asks first; --yes says yes. Runs as its own
+                                  unit and follows it here.
+  loam-update rollback [--yes]    put back the release the last update
+                                  replaced, in one command
+
+  --json         print the record instead of sentences
+  --foreground   run apply or rollback in this process (what the unit runs;
+                 never from inside an agent's turn: the broker restart at
+                 the end waits for that turn to finish)
+  --no-tell      check without leaving the person's agent a notice
+
+Only what Loam ships is replaced: this checkout and <vault>/<system>/Loam/.
+lib/loam_update.py is the whole of the rules; docs/update.md the contract.
+Exit: 0 done (or nothing to do), 1 failed, 3 refused, 4 needs a yes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+# No bytecode beside the code: on a stock install anything in the checkout
+# that no release put there, ignored files included, refuses the next update.
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_update as up  # noqa: E402
+
+
+def say(text: str = "") -> None:
+    print(text, flush=True)
+
+
+def show_edits(lib: dict | None) -> None:
+    if not lib or not lib.get("any"):
+        say("System/Loam has no edits: it is the running release's library.")
+        return
+    say(f"System/Loam ({lib['folder']}) has edits that an update replaces:")
+    for key, sign in (("edited", "~"), ("added", "+"), ("deleted", "-")):
+        for name in lib.get(key) or []:
+            say(f"  {sign} {name}")
+    if lib.get("diff"):
+        say("")
+        say(lib["diff"].rstrip())
+
+
+def show_status(st: dict) -> None:
+    cur = st.get("current") or {}
+    if cur.get("error"):
+        say(f"Running: unknown ({cur['error']})")
+    else:
+        say(f"Running: {cur.get('version') or 'no release version'} "
+            f"({cur.get('kind')}, {cur.get('commit', '')[:12]}"
+            + (f", {cur['local_commits']} local commit(s)" if cur.get("local_commits") else "")
+            + ")")
+    chk = st.get("check")
+    if chk:
+        latest = (chk.get("latest") or {}).get("version")
+        say(f"Last check: {chk.get('checked_at')}: newest release "
+            f"{latest or 'none'}" + (", available" if chk.get("available") else ""))
+        if chk.get("error"):
+            say(f"  {chk['error'].get('message')}")
+        if chk.get("blocked"):
+            say(f"  It cannot be applied now: {chk['blocked']['message']}")
+            for f in chk["blocked"].get("files") or []:
+                say(f"    {f}")
+    run = st.get("run")
+    if run:
+        say(f"Last run: {run.get('action')} {run.get('outcome')}"
+            + (f" ({run.get('from_version')} → {run.get('to_version')})"
+               if run.get("to_version") else "")
+            + (f": {run['message']}" if run.get("message") else ""))
+    if st.get("rollback"):
+        rb = st["rollback"]
+        say(f"Rollback: `loam-update rollback` puts {rb['to_version']} back "
+            f"(replacing {rb['from_version']}).")
+
+
+def follow(run_id: str | None) -> dict:
+    """Print each step of the run as it moves, until it ends. Inside an
+    agent's turn it stops at the broker's step, which waits for that turn."""
+    printed: set[tuple[str, str]] = set()
+    in_turn = bool(os.environ.get("LOAM_SESSION_ID"))
+    while True:
+        rec = up.read_json("apply.json") or {}
+        if run_id and rec.get("id") != run_id:
+            time.sleep(0.5)
+            continue
+        for s in rec.get("steps") or []:
+            key = (s["name"], s["status"])
+            if key in printed or s["status"] == "running" and (s["name"], "done") in printed:
+                continue
+            printed.add(key)
+            mark = {"running": "…", "done": "✓", "skipped": "·",
+                    "failed": "✗", "refused": "✗"}.get(s["status"], " ")
+            detail = f" ({s['detail']})" if s.get("detail") and s["status"] != "running" else ""
+            say(f"  {mark} {s['words']}{detail}")
+        if rec.get("outcome") not in ("running", "starting", None):
+            return rec
+        st = up.status()
+        if (st.get("run") or {}).get("outcome") == "interrupted":
+            return st["run"]
+        if in_turn and rec.get("phase") == "broker":
+            say("  The broker restarts once every session is idle, this one "
+                "included; the rest of the update finishes on its own. "
+                "`loam-update status` says how it ended.")
+            return rec
+        time.sleep(1)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="loam-update", add_help=True,
+                                 description=__doc__.split("\n")[0])
+    ap.add_argument("action", choices=["status", "check", "diff", "apply", "rollback"])
+    ap.add_argument("--to", default=None)
+    ap.add_argument("--yes", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--foreground", action="store_true")
+    ap.add_argument("--no-tell", action="store_true")
+    ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--run-id", default=None)
+    ap.add_argument("--by", default=os.environ.get("LOAM_AGENT") or None)
+    a = ap.parse_args()
+
+    if a.action == "status":
+        st = up.status()
+        say(json.dumps(st, indent=2, ensure_ascii=False)) if a.json else show_status(st)
+        return 0
+    if a.action == "check":
+        st = up.check(tell=not a.no_tell)
+        if a.json:
+            say(json.dumps(st, indent=2, ensure_ascii=False))
+        else:
+            show_status(st)
+            chk = st.get("check") or {}
+            if chk.get("available"):
+                ch = chk.get("changes") or {}
+                n = sum(len(v) for v in ch.values())
+                say(f"The release changes {n} file(s) in System/Loam.")
+                show_edits(chk.get("library"))
+        err = (st.get("check") or {}).get("error")
+        return 1 if err and err.get("code") in ("error", "unreachable", "no-git") else 0
+    if a.action == "diff":
+        lib = up.library_edits("HEAD")
+        say(json.dumps(lib, indent=2, ensure_ascii=False)) if a.json else show_edits(lib)
+        return 0
+
+    if a.foreground:
+        fn = up.apply if a.action == "apply" else up.rollback
+        kwargs = {"run_id": a.run_id, "by": a.by}
+        if a.action == "apply":
+            kwargs.update(target=a.to, accept_library_edits=a.yes)
+        rec = fn(**kwargs)
+        if a.json:
+            say(json.dumps(rec, indent=2, ensure_ascii=False))
+        elif not a.quiet:
+            for s in rec.get("steps") or []:
+                say(f"  {s['status']:8} {s['words']}"
+                    + (f" ({s['detail']})" if s.get("detail") else ""))
+            say(rec.get("message") or "")
+    else:
+        try:
+            first = up.start(a.action, a.to, a.yes, a.by)
+        except up.Refusal as r:
+            if r.code == "library-edits":
+                show_edits(r.detail.get("library"))
+                if sys.stdin.isatty() and not a.json:
+                    answer = input("Replace System/Loam with the release's, keeping a "
+                                   "copy of yours? [y/N] ").strip().lower()
+                    if answer in ("y", "yes"):
+                        try:
+                            first = up.start(a.action, a.to, True, a.by)
+                        except up.Refusal as r2:
+                            say(r2.message)
+                            return 3
+                    else:
+                        say("Nothing was changed.")
+                        return 4
+                else:
+                    say("Nothing was changed. Run again with --yes to go ahead; a "
+                        "copy of System/Loam is kept.")
+                    return 4
+            else:
+                if a.json:
+                    say(json.dumps({"outcome": "refused", "refusal": r.as_dict()},
+                                   indent=2, ensure_ascii=False))
+                else:
+                    say(f"Refused: {r.message}")
+                    for f in r.detail.get("files") or []:
+                        say(f"  {f}")
+                return 3
+        except RuntimeError as exc:
+            say(f"The update could not start: {exc}")
+            return 1
+        if not a.json:
+            say(f"{'Updating' if a.action == 'apply' else 'Rolling back'} "
+                f"(run {first.get('id')}):")
+        rec = follow(first.get("id"))
+        if a.json:
+            say(json.dumps(rec, indent=2, ensure_ascii=False))
+        else:
+            say(rec.get("message") or "")
+    outcome = rec.get("outcome")
+    if outcome in ("applied", "rolled-back", "running"):
+        return 0
+    if outcome == "refused":
+        return 4 if (rec.get("refusal") or {}).get("code") == "library-edits" else 3
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

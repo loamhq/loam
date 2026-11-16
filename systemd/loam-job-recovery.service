@@ -1,0 +1,19 @@
+[Unit]
+Description=Loam — reconcile engineer jobs against their workers (recovery sweep)
+# bin/engineer-job --recover: relaunches a queued job whose unit is gone,
+# finalizes a cancelled one, reconciles an interrupted one (a receipt already
+# published, a branch already on main, or one bounded automatic continuation)
+# and completes a push a landing advanced main for. Until 2026-10-02 only
+# another launcher finishing did any of that, so work stranded by a kill with
+# nothing else running stayed stranded. Runtime-owned: no persona, no wake.
+
+[Service]
+Type=oneshot
+ExecStart=@ROOT@/bin/engineer-job --recover
+# The sweep's report goes to state/engineer-recovery.json (the last sweep)
+# and logs/engineer-recovery.jsonl (every sweep that changed something), not
+# the journal; stdout is the same JSON and is not needed twice.
+StandardOutput=null
+StandardError=journal
+MemoryMax=256M
+TimeoutStartSec=600

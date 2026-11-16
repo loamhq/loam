@@ -1,0 +1,420 @@
+#!/usr/bin/env python3
+"""Deploy loam-ui at a commit once a scheduled broker restart has gone
+through, then write what happened.
+
+For a deploy nobody is watching that depends on routes only the restarted
+broker serves: a one-shot timer armed on a persona's brief fires this after
+the restart's own timer (bin/restart-broker-report). It deploys only if:
+
+- the restart's report exists (waited for up to --wait minutes, since the
+  restart's live lock can wait out a landing first) and says the restart
+  went through;
+- the broker answers `GET /v1/schedules` with 200, and every row carries
+  the fields the page reads (SCHEDULE_FIELDS).
+
+Then it runs `sudo bin/deploy loam-ui up <commit>`, the usual way, hashes
+every file under `public/` at the commit against what the app serves, and
+calls `GET /api/schedules` and `GET /api/activity?limit=5` through the app's
+relay on 127.0.0.1:8081, as the page does. Then it checks the content host
+from the personas' browser network, which passes the login gate (`/up`, the
+content host's 404s, a signed `/content/` path refused on the app host, the
+same-site relay probe refused, the CSPs), reads one Schedule row back and
+opens a cron file through the relay to see it writable. Every check is a
+GET. One Markdown file says all of it,
+with the rollback command; if a precondition failed, it says the deploy did
+not happen and why. An existing file at the path is never overwritten.
+
+--dry-run checks everything and deploys nothing: the report is read once
+without waiting, sudo is proved by `deploy loam-ui status`, the served-file
+match is taken against the commit running now, and the report is printed
+instead of written.
+
+Usage: loam-ui-deploy-report <report.md> --commit C --rollback R
+           --after <restart-report.md> [--wait MIN] [--by "[[<persona>]]"]
+           [--html ROOT:PATH] [--dry-run]
+
+Armed, for example, with:
+    systemd-run --user --unit=loam-ui-deploy-<stamp> \\
+        --on-calendar='2026-10-15 05:10:00 UTC' --timer-property=AccuracySec=1s \\
+        <root>/bin/loam-ui-deploy-report <report.md> ...
+which is transient: it is gone after it fires and does not survive a reboot.
+"""
+
+from __future__ import annotations
+
+import argparse
+import http.client
+import json
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+from urllib.parse import quote
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "lib"))
+import loam_broker as cfg  # noqa: E402
+import loam_deploy  # noqa: E402
+
+APP = "loam-ui"
+CHECKOUT = lc.PROJECTS / "loam-ui"
+APP_ADDR, APP_PORT = "127.0.0.1", 8081
+WENT_THROUGH = "**The restart went through.**"
+DEPLOY_TIMEOUT_S = 15 * 60
+# What a Schedule row carries since the broker's 10-15 schedule change
+# (aa795d9); a broker started before it answers 200 without them.
+SCHEDULE_FIELDS = ("state", "state_words", "last_edit", "changed_since_seen", "file")
+BROWSER = "loam-browser"
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def get(host: str, port: int, path: str, token: str | None = None) -> tuple[int | None, bytes, str]:
+    """One GET: (status, body, error). Status None when nothing answered."""
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=30)
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        conn.request("GET", path, headers=headers)
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        return resp.status, body, ""
+    except (OSError, http.client.HTTPException) as exc:
+        return None, b"", f"{type(exc).__name__}: {exc}"
+
+
+def restart_result(path: Path, wait_s: int) -> tuple[bool, str]:
+    """Whether the restart's report exists and says it went through,
+    waiting up to wait_s for it to appear."""
+    deadline = time.monotonic() + wait_s
+    while not path.exists() and time.monotonic() < deadline:
+        time.sleep(15)
+    if not path.exists():
+        return False, f"`{path}` does not exist (waited {wait_s // 60} min)"
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if WENT_THROUGH in text:
+        return True, f"`{path}` exists and says {WENT_THROUGH}"
+    return False, f"`{path}` exists but does not say {WENT_THROUGH}"
+
+
+def broker_schedules() -> tuple[bool, str]:
+    said = "the broker's `GET /v1/schedules`:"
+    status, body, error = get(cfg.BIND_ADDR, cfg.PORT, "/v1/schedules", cfg.read_token())
+    if status is None:
+        return False, f"{said} no answer ({error})"
+    if status != 200:
+        return False, f"{said} HTTP {status}"
+    try:
+        rows = json.loads(body).get("schedules") or []
+    except (ValueError, AttributeError):
+        return False, f"{said} HTTP 200 but not the JSON the contract names"
+    if not rows:
+        return False, f"{said} HTTP 200 but no rows to read the fields from"
+    missing = sorted({k for row in rows for k in SCHEDULE_FIELDS if k not in row})
+    if missing:
+        return False, (f"{said} HTTP 200, {len(rows)} schedules, but rows lack "
+                       + ", ".join(f"`{k}`" for k in missing))
+    return True, (f"{said} HTTP 200, {len(rows)} schedules, every row with "
+                  + ", ".join(f"`{k}`" for k in SCHEDULE_FIELDS))
+
+
+def git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(CHECKOUT), *args], capture_output=True,
+                          check=False, timeout=60)
+
+
+def on_main(commit: str) -> tuple[bool, str]:
+    res = git("merge-base", "--is-ancestor", commit, "refs/heads/main")
+    return res.returncode == 0, (f"`{commit}` is on {CHECKOUT}'s main"
+                                 if res.returncode == 0 else
+                                 f"`{commit}` is not on {CHECKOUT}'s main")
+
+
+def deploy(*args: str) -> tuple[int | None, str]:
+    try:
+        res = subprocess.run(["sudo", "-n", str(ROOT / "bin" / "deploy"), APP, *args],
+                             capture_output=True, text=True, check=False,
+                             timeout=DEPLOY_TIMEOUT_S, stdin=subprocess.DEVNULL)
+        return res.returncode, (res.stdout + res.stderr).strip()
+    except subprocess.TimeoutExpired:
+        return None, f"timed out after {DEPLOY_TIMEOUT_S} s"
+
+
+def running_commit() -> str:
+    code, out = deploy("status")
+    for line in out.splitlines():
+        if line.strip().startswith("running commit:"):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def served_match(commit: str) -> tuple[int, int, list[str]]:
+    """Hash every file under public/ at the commit against what the app
+    serves at the same path. (matched, total, the paths that differ)."""
+    names = git("ls-tree", "-r", "--name-only", commit, "public").stdout.decode().split()
+    differ = []
+    for name in names:
+        want = git("show", f"{commit}:{name}").stdout
+        status, body, _ = get(APP_ADDR, APP_PORT, "/" + name[len("public/"):])
+        if status != 200 or body != want:
+            differ.append(f"{name} ({status if status is not None else 'no answer'})")
+    return len(names) - len(differ), len(names), differ
+
+
+def relay(path: str, key: str) -> str:
+    """One call through the app's relay, as the page makes it."""
+    status, body, error = get(APP_ADDR, APP_PORT, path)
+    if status is None:
+        return f"`GET {path}`: no answer ({error})"
+    said = f"`GET {path}`: HTTP {status}"
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return said + ", not JSON"
+    if status != 200:
+        return said + f", {json.dumps(data)[:200]}"
+    rows = data.get(key) if isinstance(data, dict) else None
+    count = f"{len(rows)} {key}" if isinstance(rows, list) else f"no `{key}` list"
+    extra = "".join(f", {k} {data[k]}" for k in ("total", "unread") if k in data)
+    return said + f", {count}{extra}"
+
+
+# One node script in the personas' browser container: each request is a
+# GET, redirects are not followed, and the answer is status plus the
+# headers a check reads.
+PROBE_JS = """
+const reqs = JSON.parse(process.argv[1]);
+(async () => {
+  const out = [];
+  for (const r of reqs) {
+    try {
+      const res = await fetch(r.url, { headers: r.headers || {}, redirect: 'manual' });
+      out.push({ status: res.status, csp: res.headers.get('content-security-policy'),
+                 cookie: res.headers.get('set-cookie') });
+      await res.arrayBuffer();
+    } catch (e) { out.push({ error: String(e.cause?.code || e.message) }); }
+  }
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+def browser_probe(reqs: list[dict]) -> list[dict]:
+    """GETs from the browser network, which passes the login gate."""
+    try:
+        res = subprocess.run(["sudo", "-n", "docker", "exec", BROWSER, "node", "-e",
+                              PROBE_JS, json.dumps(reqs)], capture_output=True,
+                             text=True, check=False, timeout=120, stdin=subprocess.DEVNULL)
+        got = json.loads(res.stdout.strip().splitlines()[-1])
+        if isinstance(got, list) and len(got) == len(reqs):
+            return got
+        error = "unexpected answer"
+    except (subprocess.TimeoutExpired, ValueError, IndexError) as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    return [{"error": error}] * len(reqs)
+
+
+def answer(got: dict) -> str:
+    return (f"HTTP {got['status']}" if "status" in got
+            else f"no answer ({got.get('error')})")
+
+
+def after_checks(html: str | None) -> list[tuple[bool, str]]:
+    """What the deploy must be true of, read with GETs only."""
+    app = next(a for a in loam_deploy.records() if a.name == APP)
+    site, content = f"https://{app.fqdn}", f"https://{app.content_fqdn}"
+    checks = []
+    status, _, error = get(APP_ADDR, APP_PORT, "/up")
+    checks.append((status == 200, f"`GET /up` on 127.0.0.1:{APP_PORT}: "
+                   + (f"HTTP {status}" if status else f"no answer ({error})")))
+
+    signed = None
+    if html:
+        root, _, path = html.partition(":")
+        query = f"/api/files/live?root={quote(root)}&path={quote(path)}"
+        status, body, error = get(APP_ADDR, APP_PORT, query)
+        try:
+            url = json.loads(body).get("url", "") if status == 200 else ""
+        except (ValueError, AttributeError):
+            url = ""
+        if url.startswith(content + "/content/"):
+            signed = url[len(content):]
+            checks.append((True, f"`GET {query}`: HTTP 200, a signed URL on {content}"))
+        else:
+            checks.append((False, f"`GET {query}`: "
+                           + (f"HTTP {status}" if status else f"no answer ({error})")
+                           + (f", URL not on {content}" if status == 200 else "")))
+
+    reqs = [{"url": content + p, "want": 404, "say": f"content host `{p}`"}
+            for p in ("/api/agents", "/api/sessions", "/app.js", "/files",
+                      "/content/anything")]
+    reqs.append({"url": site + "/api/agents", "want": 403,
+                 "say": f"same-site relay probe `GET {site}/api/agents` from {content}",
+                 "headers": {"sec-fetch-site": "same-site", "origin": content}})
+    reqs.append({"url": site + "/", "want": 200, "say": f"app `{site}/`", "csp": content})
+    if signed:
+        reqs.append({"url": site + signed, "want": 404,
+                     "say": "a signed `/content/` path on the app host"})
+        reqs.append({"url": content + signed, "want": 200,
+                     "say": "the signed URL on the content host", "csp": f"connect-src {content}"})
+    for req, got in zip(reqs, browser_probe(reqs)):
+        ok = got.get("status") == req["want"] and not got.get("cookie")
+        said = f"{req['say']}, from {BROWSER}: {answer(got)} (want {req['want']})"
+        if got.get("cookie"):
+            said += ", with a Set-Cookie"
+        if "csp" in req:
+            csp = got.get("csp") or ""
+            ok = ok and req["csp"] in csp
+            said += f"; CSP has `{req['csp']}`: {'yes' if req['csp'] in csp else 'NO'}"
+            said += f"\n  `{csp}`" if csp else ""
+        checks.append((ok, said))
+
+    status, body, error = get(APP_ADDR, APP_PORT, "/api/schedules")
+    try:
+        rows = (json.loads(body).get("schedules") or []) if status == 200 else []
+    except (ValueError, AttributeError):
+        rows = []
+    row = next((r for r in rows if r.get("kind") == "cron"), rows[0] if rows else None)
+    if row is None:
+        checks.append((False, "`GET /api/schedules`: "
+                       + (f"HTTP {status}, no rows" if status else f"no answer ({error})")))
+        return checks
+    shown = {k: row.get(k) for k in ("agent", "name", "kind", "state", "state_words", "file")}
+    checks.append((all(k in row for k in SCHEDULE_FIELDS),
+                   f"one Schedule row through the relay: `{json.dumps(shown)}`"))
+    file = row.get("file") or {}
+    query = (f"/api/files/read?root={quote(str(file.get('root')))}"
+             f"&path={quote(str(file.get('path')))}")
+    status, body, error = get(APP_ADDR, APP_PORT, query)
+    try:
+        caps = (json.loads(body).get("capabilities") or {}) if status == 200 else {}
+    except (ValueError, AttributeError):
+        caps = {}
+    checks.append((caps.get("write") is True,
+                   f"its file in Files, `GET {query}`: "
+                   + (f"HTTP {status}, capabilities {json.dumps(caps)}" if status
+                      else f"no answer ({error})")))
+    return checks
+
+
+def render(by: str, *, fired: str, commit: str, rollback: str, dry: bool,
+           checks: list[tuple[bool, str]], deployed: tuple[int | None, str] | None,
+           served: tuple[int, int, list[str]] | None, served_commit: str,
+           relays: list[str], after: list[tuple[bool, str]] | None = None) -> str:
+    go = all(ok for ok, _ in checks)
+    lines = [
+        "---",
+        f'created_by: "{by}"',
+        f'last_modified_by: "{by}"',
+        "---",
+        "",
+        f"# Scheduled {APP} deploy" + (" (dry run)" if dry else ""),
+        "",
+        f"*Fired {fired} by bin/loam-ui-deploy-report"
+        + (", which deploys nothing in a dry run.*" if dry else ".*"),
+        "",
+    ]
+    if dry:
+        lines.append(f"**Dry run: a real run {'would' if go else 'would not'} "
+                     f"deploy `{commit}` now.**")
+    elif not go:
+        lines.append(f"**Not deployed: a precondition failed. `{APP}` was left "
+                     f"as it was.**")
+    elif deployed and deployed[0] == 0:
+        failed = sum(not ok for ok, _ in after or [])
+        lines.append(f"**Deployed `{APP}` at `{commit}`"
+                     + (f"; {failed} of {len(after)} checks after it failed.**"
+                        if failed else ".**"))
+    else:
+        lines.append(f"**The deploy of `{commit}` failed; how it was left is below.**")
+    lines += ["", "## Preconditions", ""]
+    lines += [f"- {'yes' if ok else 'NO'}: {said}" for ok, said in checks]
+    lines += ["", "## The deploy", ""]
+    if deployed is None:
+        lines.append("Not run.")
+    else:
+        lines.append(f"`sudo bin/deploy {APP} up {commit}` exit: "
+                     f"{deployed[0] if deployed[0] is not None else 'did not finish'}")
+        lines += ["", "```", deployed[1], "```"]
+    lines += ["", "## Served files", ""]
+    if served is None:
+        lines.append("Not checked.")
+    else:
+        lines.append(f"{served[0]}/{served[1]} served files equal "
+                     f"`git show {served_commit}:public/*`.")
+        lines += [f"- differs: {d}" for d in served[2]]
+    lines += ["", "## Through the relay", ""]
+    lines += [f"- {r}" for r in relays] or ["Not called."]
+    lines += ["", "## After the deploy" + (" (against the app running now)" if dry else ""), ""]
+    lines += [f"- {'yes' if ok else 'NO'}: {said}" for ok, said in after or []] or ["Not checked."]
+    lines += ["", "## Rollback", "",
+              f"`sudo {lc.ROOT}/bin/deploy {APP} up {rollback}`", ""]
+    return "\n".join(lines)
+
+
+def free_path(path: Path, fired: datetime) -> Path:
+    if not path.exists():
+        return path
+    return path.with_name(f"{path.stem}-{fired.strftime('%H%M%SZ')}{path.suffix}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("report", type=Path)
+    parser.add_argument("--commit", required=True)
+    parser.add_argument("--rollback", required=True)
+    parser.add_argument("--after", type=Path, required=True,
+                        help="the restart's report, which must say it went through")
+    parser.add_argument("--wait", type=int, default=45,
+                        help="minutes to wait for the restart's report to appear")
+    parser.add_argument("--by", default=f"[[{lc.LEAD_AGENT.title()}]]")
+    parser.add_argument("--html", metavar="ROOT:PATH",
+                        help="an HTML file to sign a preview URL for")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
+    fired = datetime.now(timezone.utc)
+    checks = [restart_result(args.after, 0 if args.dry_run else args.wait * 60),
+              broker_schedules(),
+              on_main(args.commit)]
+    deployed = None
+    if args.dry_run:
+        current = running_commit()
+        checks.append((bool(current), f"sudo -n bin/deploy {APP} status answered; "
+                       f"running commit `{current or '?'}`"))
+        served_commit = current or args.rollback
+        served = served_match(served_commit)
+    elif all(ok for ok, _ in checks):
+        deployed = deploy("up", args.commit)
+        served_commit = args.commit
+        served = served_match(args.commit) if deployed[0] == 0 else None
+    else:
+        served_commit, served = args.commit, None
+    relays = ([relay("/api/schedules", "schedules"),
+               relay("/api/activity?limit=5", "items")]
+              if args.dry_run or deployed else [])
+    after = (after_checks(args.html)
+             if args.dry_run or (deployed and deployed[0] == 0) else None)
+
+    text = render(args.by, fired=fired.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  commit=args.commit, rollback=args.rollback, dry=args.dry_run,
+                  checks=checks, deployed=deployed, served=served,
+                  served_commit=served_commit, relays=relays, after=after)
+    if args.dry_run:
+        print(text)
+        return 0
+    path = free_path(args.report, fired)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    print(f"loam-ui-deploy-report: wrote {path}")
+    return 0 if deployed and deployed[0] == 0 and all(ok for ok, _ in after or []) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

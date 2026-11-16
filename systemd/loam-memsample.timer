@@ -1,0 +1,14 @@
+[Unit]
+Description=Sample the box's memory and disk every 5 minutes
+
+[Timer]
+# Every 5 minutes: a 10-20 minute wake lands in at least two samples, and the
+# broker's climb toward its MemoryHigh is a trend over hours. bin/memsample's
+# docstring has the arithmetic.
+OnCalendar=*:0/5
+AccuracySec=30s
+Persistent=false
+Unit=loam-memsample.service
+
+[Install]
+WantedBy=timers.target

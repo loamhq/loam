@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""What each turn of a thread carried in, read from the broker's own logs.
+
+For every turn of the thread (a ``broker.user_message`` whose text is a
+thread prompt naming the thread's id, in any session the thread's full
+record or ``sessions.json`` names), the first top-level request the model
+answered after it:
+
+  input   the tokens that request held -- input + cache read + cache
+          creation, the broker's ``context_used`` sum, from the
+          ``message_start`` usage the CLI streams
+  ttft    the CLI's own ``ttft_ms`` on that request: time to first token
+  fresh   whether that turn opened its session (the session's first prompt)
+  prompt  the characters of the prompt the broker sent
+
+Made 2026-11-11 to measure the small fresh window per turn (broker/README.md,
+"What a persona carries into a turn") before and after. Read-only.
+
+Usage:  thread-context-report <thread id> [--since 2026-11-11T00:00:00Z] [--json]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import statistics
+import sys
+from pathlib import Path
+
+AGENTS = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(AGENTS / "lib"))
+import loam_broker as cfg  # noqa: E402
+import loam_threads as threads  # noqa: E402
+
+SESSIONS = Path(os.environ.get("LOAM_BROKER_SESSIONS") or cfg.SESSION_DIR)
+
+
+def session_ids(thread_id: str) -> list[str]:
+    seen: list[str] = []
+    path = threads.STATE / "steps" / f"{thread_id}.jsonl"
+    try:
+        lines = path.read_text("utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        try:
+            sid = json.loads(line).get("session_id")
+        except json.JSONDecodeError:
+            continue
+        if sid and sid not in seen:
+            seen.append(sid)
+    for row in (threads.load_state("sessions.json").get(thread_id) or {}).values():
+        if row.get("session_id") and row["session_id"] not in seen:
+            seen.append(row["session_id"])
+    return seen
+
+
+def turns_of(sid: str, thread_id: str) -> list[dict]:
+    try:
+        record = json.loads((SESSIONS / f"{sid}.json").read_text("utf-8"))
+    except (OSError, json.JSONDecodeError):
+        record = {}
+    ended = [t.get("ts") for t in record.get("turns") or []]
+    out, current, first, results = [], None, True, 0
+    try:
+        log = open(SESSIONS / f"{sid}.jsonl", encoding="utf-8")
+    except OSError:
+        return []
+    with log:
+        for line in log:
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            kind = e.get("type")
+            if kind == "broker.user_message":
+                text = e.get("text") or ""
+                current = None
+                if text.startswith("[Loam thread") and f"(id {thread_id})" in text:
+                    current = {"session": sid, "seq": e.get("seq"), "fresh": first,
+                               "prompt_chars": len(text), "input": None, "ttft_ms": None,
+                               "persona": record.get("agent"),
+                               "engine": record.get("provider"),
+                               "ended_at": None, "result_index": results}
+                    out.append(current)
+                first = False
+            elif kind == "stream_event" and current is not None \
+                    and current["input"] is None and e.get("parent_tool_use_id") is None:
+                inner = e.get("event") or {}
+                if inner.get("type") == "message_start":
+                    usage = (inner.get("message") or {}).get("usage")
+                    current["input"] = cfg.context_used(usage)
+                    current["ttft_ms"] = e.get("ttft_ms")
+            elif kind == "assistant" and current is not None and current["input"] is None \
+                    and e.get("parent_tool_use_id") is None:
+                # Codex and Antigravity stream no message_start: the first
+                # top-level assistant message's usage is the request.
+                current["input"] = cfg.context_used((e.get("message") or {}).get("usage"))
+            elif kind == "result" and e.get("parent_tool_use_id") is None:
+                results += 1
+    for turn in out:
+        # The time the turn's first result was recorded, from the session
+        # record (the event log carries no clock).
+        index = turn.pop("result_index")
+        if index < len(ended):
+            turn["ended_at"] = ended[index]
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("thread")
+    ap.add_argument("--since", default=None, help="UTC ISO; turns ended at or after")
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args()
+    rows = []
+    for sid in session_ids(args.thread):
+        rows.extend(turns_of(sid, args.thread))
+    rows.sort(key=lambda r: r.get("ended_at") or "")
+    if args.since:
+        rows = [r for r in rows if (r.get("ended_at") or "") >= args.since]
+    if args.json:
+        print(json.dumps(rows, indent=1))
+        return 0
+    print(f"{'ended (UTC)':20} {'persona':8} {'session':8} {'fresh':5} "
+          f"{'prompt':>7} {'input':>8} {'ttft_ms':>7}")
+    for r in rows:
+        print(f"{(r.get('ended_at') or '?'):20} {str(r.get('persona')):8} "
+              f"{r['session'][:8]} {'yes' if r['fresh'] else '':5} "
+              f"{r['prompt_chars']:>7} {str(r['input']):>8} {str(r['ttft_ms']):>7}")
+    inputs = [r["input"] for r in rows if isinstance(r["input"], int)]
+    ttfts = [r["ttft_ms"] for r in rows if isinstance(r["ttft_ms"], (int, float))]
+    if inputs:
+        print(f"\n{len(rows)} turns; input median {int(statistics.median(inputs))}, "
+              f"max {max(inputs)}; ttft_ms median "
+              f"{int(statistics.median(ttfts)) if ttfts else None}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

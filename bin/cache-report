@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""Per-wake token accounting: how much of each wake's input was served from cache.
+
+Exists because the wake log records total_cost_usd and num_turns but no token
+breakdown, and the 2.1.260 prompt-caching fix is only observable in the split
+between cache_read and uncached input_tokens. Reads the CLI's own session
+transcript, which is the only place that split is recorded.
+
+usage: cache-report [YYYY-MM-DD ...]     (default: today, UTC)
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+AGENTS = lc.ROOT
+PROJECTS = lc.CLAUDE_HOME / "projects"
+AI_LABS = lc.WORKSPACES
+
+# Fable 5 list price, $/Mtok. Cache multipliers are Anthropic's: reads 0.1x,
+# 1h writes 2x, 5m writes 1.25x. Modelled, not billed -- the wake log's
+# total_cost_usd stays the authority on spend. This exists to attribute that
+# spend to a layer, which is the thing the caching fix moves.
+IN_PER_MTOK = 10.0
+OUT_PER_MTOK = 50.0
+
+
+def roster() -> list[str]:
+    return sorted(
+        d.name for d in AI_LABS.iterdir()
+        if d.is_dir() and (d / "agent.json").is_file()
+    )
+
+
+def wake_records(agent: str, dates: set[str]) -> list[dict]:
+    path = lc.LOGS / f"wake-{agent}.jsonl"
+    if not path.is_file():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("ts", "")[:10] in dates:
+            out.append(rec)
+    return out
+
+
+def find_session(agent: str, finished: str) -> tuple[Path | None, float]:
+    """The wake's transcript is the session whose mtime lands on its finish.
+
+    Matched by clock rather than by content: a wake writes no marker into its
+    own transcript, and the identity preflight runs a second, much smaller
+    session in the same directory seconds earlier. Time separates them
+    cleanly; nothing else here does.
+    """
+    directory = PROJECTS / re.sub(r"[^A-Za-z0-9]", "-", str(lc.WORKSPACES / agent))
+    if not directory.is_dir():
+        return None, -1.0
+    target = datetime.fromisoformat(finished.replace("Z", "+00:00")).timestamp()
+    best, best_delta = None, None
+    for path in directory.glob("*.jsonl"):
+        delta = abs(path.stat().st_mtime - target)
+        if best_delta is None or delta < best_delta:
+            best, best_delta = path, delta
+    if best_delta is None or best_delta > 120:
+        return None, best_delta if best_delta is not None else -1.0
+    return best, best_delta
+
+
+def tally(path: Path) -> dict:
+    """Sum usage across the transcript, one count per assistant message.
+
+    Deduped by message id: a resumed or retried turn is written again, and
+    double-counting a retry would read exactly like a caching regression.
+    """
+    seen: set[str] = set()
+    total = {
+        "input": 0, "cache_write": 0, "cache_read": 0, "output": 0,
+        "messages": 0, "sidechain": 0, "cache_write_1h": 0, "cache_write_5m": 0,
+    }
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        message = rec.get("message") or {}
+        usage = message.get("usage")
+        if not usage:
+            continue
+        key = message.get("id") or rec.get("requestId")
+        if key:
+            if key in seen:
+                continue
+            seen.add(key)
+        creation = usage.get("cache_creation") or {}
+        total["input"] += usage.get("input_tokens", 0)
+        total["cache_write"] += usage.get("cache_creation_input_tokens", 0)
+        total["cache_read"] += usage.get("cache_read_input_tokens", 0)
+        total["output"] += usage.get("output_tokens", 0)
+        total["cache_write_1h"] += creation.get("ephemeral_1h_input_tokens", 0)
+        total["cache_write_5m"] += creation.get("ephemeral_5m_input_tokens", 0)
+        total["messages"] += 1
+        if rec.get("isSidechain"):
+            total["sidechain"] += 1
+    return total
+
+
+def modelled_cost(t: dict) -> float:
+    return (
+        t["input"] * IN_PER_MTOK
+        + t["cache_read"] * IN_PER_MTOK * 0.1
+        + t["cache_write_1h"] * IN_PER_MTOK * 2.0
+        + t["cache_write_5m"] * IN_PER_MTOK * 1.25
+        + t["output"] * OUT_PER_MTOK
+    ) / 1_000_000
+
+
+def human(n: int) -> str:
+    return f"{n/1_000_000:.2f}M" if n >= 1_000_000 else f"{n/1000:.1f}k"
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    verbose = "-v" in args
+    dates = {a for a in args if not a.startswith("-")} or {
+        datetime.now(timezone.utc).date().isoformat()}
+    print(f"cache-report  dates={','.join(sorted(dates))}  (UTC)")
+    header = (
+        f"{'agent':8} {'turns':>5} {'calls':>5} {'uncached':>9} {'cache_wr':>9} "
+        f"{'cache_rd':>9} {'output':>8} {'cached%':>8} {'unc/call':>8} "
+        f"{'model$':>8} {'billed$':>8}"
+    )
+    print(header)
+    print("-" * len(header))
+
+    grand = {k: 0 for k in
+             ("input", "cache_write", "cache_read", "output",
+              "cache_write_1h", "cache_write_5m")}
+    grand["messages"] = 0
+    grand_billed = 0.0
+    grand_turns = 0
+    rows = 0
+
+    for agent in roster():
+        for rec in wake_records(agent, dates):
+            if not rec.get("ok"):
+                print(f"{agent:8} {'--':>5}  wake not ok: "
+                      f"stage={rec.get('stage')} {rec.get('error','')}")
+                continue
+            finished = rec.get("finished")
+            if not finished:
+                continue
+            path, delta = find_session(agent, finished)
+            if path is None:
+                print(f"{agent:8} {'--':>5}  no transcript within 120s "
+                      f"(closest {delta:.0f}s)")
+                continue
+            t = tally(path)
+            total_in = t["input"] + t["cache_write"] + t["cache_read"]
+            cached_pct = (100.0 * t["cache_read"] / total_in) if total_in else 0.0
+            billed = rec.get("total_cost_usd") or 0.0
+            print(
+                f"{agent:8} {rec.get('num_turns', 0):>5} {t['messages']:>5} "
+                f"{human(t['input']):>9} {human(t['cache_write']):>9} "
+                f"{human(t['cache_read']):>9} {human(t['output']):>8} "
+                f"{cached_pct:>7.1f}% "
+                f"{(t['input']/t['messages'] if t['messages'] else 0):>8.0f} "
+                f"{modelled_cost(t):>8.2f} {billed:>8.2f}"
+            )
+            for k in grand:
+                grand[k] += t[k]
+            grand["messages"] = grand.get("messages", 0) + t["messages"]
+            if verbose:
+                print(f"         -> {path.name}  (mtime delta {delta:.0f}s)")
+            grand_billed += billed
+            grand_turns += rec.get("num_turns", 0) or 0
+            rows += 1
+
+    if rows:
+        total_in = grand["input"] + grand["cache_write"] + grand["cache_read"]
+        cached_pct = (100.0 * grand["cache_read"] / total_in) if total_in else 0.0
+        print("-" * len(header))
+        print(
+            f"{'TOTAL':8} {grand_turns:>5} {grand['messages']:>5} "
+            f"{human(grand['input']):>9} {human(grand['cache_write']):>9} "
+            f"{human(grand['cache_read']):>9} {human(grand['output']):>8} "
+            f"{cached_pct:>7.1f}% "
+            f"{(grand['input']/grand['messages'] if grand['messages'] else 0):>8.0f} "
+            f"{modelled_cost(grand):>8.2f} {grand_billed:>8.2f}"
+        )
+        print(f"\n{rows} wakes · {grand['messages']} API calls · "
+              f"uncached input {grand['input']/grand['messages']:,.0f} tok/call")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

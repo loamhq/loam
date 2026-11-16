@@ -1,0 +1,17 @@
+[Unit]
+Description=Daily: every signed-in provider follows its latest release, tested
+
+[Timer]
+# 02:50 @ZONE_WORD@ (the box's own zone). Quiet: after the 01:30 Remote Control
+# recycle and the 02:00-02:40 wakes have started, before the owner's day. And
+# early in the wake grid on purpose: Juno 03:00, Ada 03:20, Otto 03:40,
+# Iris 04:00 and the reviewer 04:20 start inside a switch's first hour, so
+# the rollback watch sees real lanes start on the new build. Persistent=false
+# like the wake timers: a run missed while the box was down waits for the
+# next night rather than firing into the owner's day.
+OnCalendar=*-*-* 02:50:00 @TZ@
+Persistent=false
+Unit=loam-provider-follow.service
+
+[Install]
+WantedBy=timers.target

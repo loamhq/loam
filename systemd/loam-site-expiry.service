@@ -1,0 +1,9 @@
+[Unit]
+Description=Loam — remove the agents' sites whose expiry date has passed
+# bin/site holds the what and the why. An expired site already answers 410
+# from Caddy at its deadline (the record renders the matcher); this takes the
+# record and the host block away. Its files stay where the agent wrote them.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I -X pycache_prefix=@PYCACHE@ @ROOT@/bin/site prune

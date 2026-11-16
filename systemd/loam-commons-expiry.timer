@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily commons expiry sweep
+
+[Timer]
+OnCalendar=*-*-* 08:07:00 UTC
+Persistent=true
+Unit=loam-commons-expiry.service
+
+[Install]
+WantedBy=timers.target

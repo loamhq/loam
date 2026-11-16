@@ -1,0 +1,11 @@
+[Unit]
+Description=Reconcile schedule records to timers every minute
+
+[Timer]
+OnCalendar=minutely
+AccuracySec=5s
+Persistent=false
+Unit=loam-schedules.service
+
+[Install]
+WantedBy=timers.target

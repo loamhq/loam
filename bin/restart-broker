@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Restart the session broker, under Loam's live lock.
+
+The broker reads the runtime's files when it starts, so a restart is the step
+that makes a landed change to them live -- and it must not run while a landing
+of Loam is halfway through moving `main` under it. Since 2026-10-02 every job
+edits its own worktree and lands by a tested merge (lib/loam_worktree.py); a
+restart waits for any landing in progress, says so, and then restarts.
+
+`--when-idle` (2026-11-12) first waits until no session is producing a turn:
+`lib/loam_live.restart_blockers`, the one rule (`working` or `asking` holds
+it; a session waiting on background work does not, and an engineer job's
+receipt reaches its thread anyway, lib/loam_waiters.py). Three clear reads
+`--poll` seconds apart, so a thread turn on its way to sending is not cut;
+a failed read is busy. `--max-wait` seconds (default: no limit) ends the
+wait with exit 75 and no restart. Each change in what holds it is printed.
+
+Usage: restart-broker [--when-idle [--poll S] [--max-wait S]]
+"""
+
+import argparse
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_lock  # noqa: E402
+
+UNIT = "loam-session-broker.service"
+CLEAR_READS = 3
+
+
+def wait_idle(poll: float, max_wait: float | None) -> bool:
+    import loam_follow  # noqa: PLC0415 -- the live list's reader
+    import loam_live  # noqa: PLC0415
+    started, clear, last = time.monotonic(), 0, None
+    while True:
+        why = loam_live.restart_blockers(loam_follow.broker_rows())
+        if why != last:
+            print(f"restart-broker: {'held by ' + ', '.join(why) if why else 'quiet'}",
+                  flush=True)
+            last = why
+        clear = 0 if why else clear + 1
+        if clear >= CLEAR_READS:
+            return True
+        if max_wait is not None and time.monotonic() - started >= max_wait:
+            return False
+        time.sleep(poll)
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(prog="restart-broker")
+    ap.add_argument("--when-idle", action="store_true")
+    ap.add_argument("--poll", type=float, default=20.0)
+    ap.add_argument("--max-wait", type=float, default=None)
+    args = ap.parse_args()
+    if args.when_idle and not wait_idle(args.poll, args.max_wait):
+        print(f"restart-broker: still held after {args.max_wait:.0f} s; "
+              f"not restarted", flush=True)
+        sys.exit(75)
+    with loam_lock.live("Loam", "restart-broker"):
+        # The live lock can be held for minutes by a landing, and a session
+        # can begin a turn in that time; quiet is read again once it is ours
+        # (2026-11-14: a restart waited five minutes here and went without
+        # looking).
+        if args.when_idle and not wait_idle(args.poll, args.max_wait):
+            print(f"restart-broker: still held after {args.max_wait:.0f} s; "
+                  f"not restarted", flush=True)
+            sys.exit(75)
+        sys.exit(subprocess.run(["systemctl", "--user", "restart", UNIT],
+                                check=False).returncode)

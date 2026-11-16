@@ -1,0 +1,410 @@
+#!/usr/bin/env python3
+"""The claim, and the login's one-time codes relayed to the owner.
+
+A system service on loopback (`loam-claim.service`, port 8934), root because
+both halves touch the login's own files. Caddy reaches it on two paths of the
+app's host and on nothing else (lib/loam_deploy.py, `[edge]`):
+
+  /claim                  OUTSIDE the login, rendered only while the install
+                          is unclaimed (/etc/loam/claim exists).
+    GET                   the claim page (the app's `public/claim.html` when
+                          it ships one, otherwise the page below)
+    POST {token, username, password}
+                          the token from the link's fragment; the username and
+                          password become the login's one user. Then the token
+                          is deleted and /etc/loam/claimed written, the
+                          Caddyfile is rendered without this
+                          route, the login starts, and the answer says where
+                          to sign in.
+
+  /_loam/login-code       BEHIND the login, ahead of the browser's subnet.
+    GET                   the newest one-time code the login wrote to its
+                          file notifier, to the signed-in owner and nobody
+                          else (Remote-User, set by the gate, must be the
+                          users file's one admin). This is how a person
+                          without a shell adds a passkey: Authelia asks for
+                          a code it "emailed", and this box has no mail.
+
+docs/install.md has the page contract both answer to. First release L12.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import hmac
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+# No bytecode beside the code: anything in the checkout a release did not
+# put there refuses the next update (L13's clean-tree rule).
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+import loam_deploy as dep  # noqa: E402
+import loam_install as li  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+USERNAME_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
+MIN_PASSWORD = 10
+MAX_BODY = 8192
+# A wrong token is answered slowly, and a run of them is refused for a while:
+# the token is 192 bits, so this is manners, not the lock.
+FAILS: list[float] = []
+FAIL_WINDOW, FAIL_LIMIT = 600, 20
+LOCK = threading.Lock()
+CODE_MAX_AGE = 15 * 60   # a code older than this is not shown
+
+
+def log(msg: str) -> None:
+    print(f"loam-claim: {msg}", flush=True)
+
+
+def run(argv: list[str], **kw) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, capture_output=True, text=True, check=False, **kw)
+
+
+# ---------------------------------------------------------------------------
+# The login's files, in its data volume
+# ---------------------------------------------------------------------------
+
+def volume_dir() -> Path | None:
+    res = run(["docker", "volume", "inspect", "authelia-data", "-f", "{{.Mountpoint}}"])
+    path = res.stdout.strip()
+    return Path(path) if res.returncode == 0 and path else None
+
+
+def users() -> dict:
+    vol = volume_dir()
+    if vol is None:
+        return {}
+    try:
+        import yaml  # noqa: PLC0415
+        doc = yaml.safe_load((vol / "users_database.yml").read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return {}
+    return doc.get("users") or {}
+
+
+def hash_password(password: str) -> str:
+    """argon2id by Authelia's own CLI, as `gen-deploy --init-login` does. The
+    password goes in on stdin through the container's environment-free
+    shell, so it is in no argv on the host."""
+    res = run(["docker", "run", "--rm", "-i", "--network", "none",
+               "--entrypoint", "sh", dep.AUTHELIA_IMAGE, "-c",
+               'IFS= read -r PW; exec authelia crypto hash generate argon2 --password "$PW"'],
+              input=password + "\n", timeout=120)
+    m = re.search(r"Digest:\s*(\S+)", res.stdout)
+    if res.returncode or not m:
+        raise RuntimeError(f"hashing failed: {(res.stderr or res.stdout).strip()[:300]}")
+    return m.group(1)
+
+
+def write_users(username: str, display: str, digest: str) -> None:
+    domain = dep.domain()
+    text = (
+        "# The login's users. Written by the claim (bin/loam-claim); Authelia\n"
+        "# rewrites it when the password changes. Lives in the authelia-data\n"
+        "# volume, never in a repo.\n"
+        "users:\n"
+        f"  {username}:\n"
+        "    disabled: false\n"
+        f"    displayname: {json.dumps(display)}\n"
+        f"    password: '{digest}'\n"
+        f"    email: '{username}@{domain}'\n"
+        "    groups:\n"
+        "      - 'admins'\n")
+    res = run(["docker", "run", "--rm", "-i", "--network", "none", "-v",
+               "authelia-data:/data", "--entrypoint", "sh", dep.AUTHELIA_IMAGE, "-c",
+               "umask 077; cat > /data/users_database.yml.new && "
+               "mv /data/users_database.yml.new /data/users_database.yml"],
+              input=text, timeout=120)
+    if res.returncode:
+        raise RuntimeError(f"writing the users file failed: {res.stderr.strip()[:300]}")
+
+
+def finish_claim(first_wait: float = 1) -> bool:
+    """After the answer has gone: render without the claim route, which also
+    starts the login now that it has a user. Tried a few times, and again
+    whenever this service starts and finds the claim made but the Caddyfile
+    still unclaimed (unfinished_claim), so a person is never left claimed
+    and unable to sign in."""
+    time.sleep(first_wait)
+    for attempt in range(1, 6):
+        res = run([sys.executable, str(ROOT / "bin" / "gen-deploy")], timeout=900)
+        log(f"gen-deploy after the claim (try {attempt}): exit {res.returncode}")
+        if res.returncode == 0:
+            return True
+        log((res.stdout[-1500:] + res.stderr[-1500:]).strip())
+        time.sleep(10 * attempt)
+    return False
+
+
+def unfinished_claim() -> bool:
+    """Claimed, but the live Caddyfile still carries the claim block."""
+    try:
+        live = dep.CADDYFILE.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return not dep.unclaimed() and "# UNCLAIMED:" in live
+
+
+# ---------------------------------------------------------------------------
+# The notifier's file: the newest one-time code
+# ---------------------------------------------------------------------------
+
+# Authelia 4.39's message puts the code alone on a line between two rules of
+# dashes ("----...\nYJPUQML7\n----..."), read off the real file in the first
+# rehearsal. The second form is a lone line of capitals and digits, for a
+# version that drops the rules. Case-sensitive: a word of the prose ("should")
+# matched a case-blind first try.
+CODE_RES = (
+    re.compile(r"(?m)^-{8,}\s*\n\s*([A-Z0-9]{6,16})\s*\n\s*-{8,}"),
+    re.compile(r"(?m)^\s*([A-Z0-9]{6,16})\s*$"),
+)
+
+
+def newest_code() -> dict:
+    """{"code", "subject", "at", "age_seconds"} from the notifier's file, or
+    {"code": None} when it holds none recent enough to be the live one."""
+    vol = volume_dir()
+    path = vol / "notification.txt" if vol else None
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace") if path else ""
+        mtime = path.stat().st_mtime if path else 0
+    except OSError:
+        return {"code": None}
+    # The file notifier writes one message per send; take the last one.
+    blocks = re.split(r"(?m)^(?=Date: )", text)
+    last = blocks[-1] if blocks else ""
+    subject = (re.search(r"(?m)^Subject:\s*(.+)$", last) or [None, ""])[1].strip()
+    code = None
+    for pat in CODE_RES:
+        m = pat.search(last)
+        if m:
+            code = m.group(1)
+            break
+    age = int(time.time() - mtime)
+    if code is None or age > CODE_MAX_AGE:
+        return {"code": None}
+    return {"code": code, "subject": subject,
+            "at": dt.datetime.fromtimestamp(mtime, dt.timezone.utc).isoformat(timespec="seconds"),
+            "age_seconds": age}
+
+
+# ---------------------------------------------------------------------------
+# The page
+# ---------------------------------------------------------------------------
+
+def page() -> bytes:
+    apps = [a for a in dep.records() if a.apex]
+    if apps and apps[0].checkout:
+        shipped = apps[0].checkout / (apps[0].context or "") / "public" / "claim.html"
+        try:
+            return shipped.read_bytes()
+        except OSError:
+            pass
+    return CLAIM_PAGE.replace("{{OWNER}}", _html(lc.OWNER_NAME)).encode()
+
+
+def _html(text: str) -> str:
+    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+CLAIM_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Welcome to Loam</title>
+<style>
+ :root { color-scheme: light dark; --fg:#1d1b18; --bg:#f6f3ee; --card:#fff; --muted:#6b655c; --accent:#3f6b4f; --bad:#a3352b; }
+ @media (prefers-color-scheme: dark) { :root { --fg:#ece8e1; --bg:#171614; --card:#22201d; --muted:#a39d93; --accent:#7fb08f; --bad:#e0796f; } }
+ * { box-sizing: border-box }
+ body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg);
+        font: 17px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 24px }
+ main { width:100%; max-width:420px; background:var(--card); border-radius:16px; padding:32px 28px;
+        box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.06) }
+ h1 { font-size:1.5rem; margin:0 0 8px }
+ p { margin: 0 0 16px; color: var(--muted) }
+ label { display:block; font-weight:600; margin: 16px 0 6px }
+ .hint { font-weight:400; color:var(--muted); font-size:.9rem }
+ input { width:100%; font:inherit; padding:12px 14px; border-radius:10px; border:1px solid #bbb3a6; background:transparent; color:inherit }
+ button { margin-top:24px; width:100%; font:inherit; font-weight:600; padding:14px; border:0; border-radius:10px;
+          background:var(--accent); color:#fff; cursor:pointer }
+ button[disabled] { opacity:.6; cursor:default }
+ #error { color:var(--bad); margin-top:16px; min-height:1.5em }
+</style></head>
+<body><main>
+ <div id="form-view">
+  <h1>Welcome to Loam</h1>
+  <p>This is your own Loam. Choose the name and password you will sign in with. Only you will have them.</p>
+  <form id="claim" autocomplete="on">
+   <label for="username">Username <span class="hint">lowercase letters and numbers</span></label>
+   <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required pattern="[a-z][a-z0-9_-]{1,31}">
+   <label for="password">Password <span class="hint">at least 10 characters</span></label>
+   <input id="password" name="password" type="password" autocomplete="new-password" minlength="10" required>
+   <label for="again">The same password again</label>
+   <input id="again" type="password" autocomplete="new-password" minlength="10" required>
+   <button id="go" type="submit">Make my sign-in</button>
+   <div id="error" role="alert"></div>
+  </form>
+ </div>
+ <div id="no-link" hidden>
+  <h1>This link is not complete</h1>
+  <p>Open the whole link the installer printed, the part after <b>#</b> included. If you no longer have it, whoever set up this server can see it again by typing <b>loam status</b> on it.</p>
+ </div>
+ <div id="done-view" hidden>
+  <h1>You're in</h1>
+  <p>Your sign-in is made. Next, sign in with it. Taking you there…</p>
+ </div>
+</main>
+<script>
+const token = decodeURIComponent(location.hash.slice(1));
+history.replaceState(null, '', location.pathname);
+const $ = (id) => document.getElementById(id);
+if (!token) { $('form-view').hidden = true; $('no-link').hidden = false; }
+$('claim').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  $('error').textContent = '';
+  const username = $('username').value.trim().toLowerCase();
+  const password = $('password').value;
+  if (password !== $('again').value) { $('error').textContent = 'The two passwords are not the same.'; return; }
+  $('go').disabled = true;
+  try {
+    const res = await fetch('/claim', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token, username, password }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) { $('error').textContent = body.error || 'Something went wrong. Try again.'; $('go').disabled = false; return; }
+    $('form-view').hidden = true; $('done-view').hidden = false;
+    setTimeout(() => { location.href = body.next; }, (body.wait_seconds || 8) * 1000);
+  } catch (e) {
+    $('error').textContent = 'Could not reach your Loam. Check the connection and try again.';
+    $('go').disabled = false;
+  }
+});
+</script>
+</body></html>
+"""
+
+
+# ---------------------------------------------------------------------------
+# The server
+# ---------------------------------------------------------------------------
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "loam-claim"
+    sys_version = ""
+
+    def log_message(self, fmt, *args):   # no request line carries a secret, but say little
+        log(f"{self.command} {self.path.split('?')[0]} {args[1] if len(args) > 1 else ''}")
+
+    def send(self, status: int, body: bytes, ctype: str = "application/json") -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if ctype.startswith("text/html"):
+            self.send_header("Content-Security-Policy",
+                             "default-src 'none'; style-src 'unsafe-inline'; font-src data:; "
+                             "script-src 'unsafe-inline'; connect-src 'self'; "
+                             "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def json(self, status: int, obj: dict) -> None:
+        self.send(status, json.dumps(obj).encode())
+
+    def do_GET(self):  # noqa: N802
+        path = self.path.split("?")[0]
+        if path == dep.CLAIM_PATH:
+            if not dep.unclaimed():
+                return self.json(410, {"error": "This Loam already has its owner. Sign in instead."})
+            return self.send(200, page(), "text/html; charset=utf-8")
+        if path == dep.RELAY_PATH:
+            return self.relay()
+        return self.json(404, {"error": "not found"})
+
+    def relay(self) -> None:
+        who = (self.headers.get("Remote-User") or "").strip()
+        known = users()
+        owners = {name for name, u in known.items()
+                  if not u.get("disabled") and "admins" in (u.get("groups") or [])}
+        if not who or who not in owners:
+            return self.json(403, {"error": "only the owner, signed in, sees the login's codes"})
+        return self.json(200, newest_code())
+
+    def do_POST(self):  # noqa: N802
+        if self.path.split("?")[0] != dep.CLAIM_PATH:
+            return self.json(404, {"error": "not found"})
+        with LOCK:
+            if not dep.unclaimed():
+                return self.json(410, {"error": "This Loam already has its owner. Sign in instead."})
+            now = time.time()
+            FAILS[:] = [t for t in FAILS if now - t < FAIL_WINDOW]
+            if len(FAILS) >= FAIL_LIMIT:
+                return self.json(429, {"error": "Too many tries. Wait ten minutes, then open the link again."})
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length > MAX_BODY:
+                    raise ValueError
+                body = json.loads(self.rfile.read(length) or b"{}")
+                token, username, password = (str(body.get(k) or "") for k in
+                                             ("token", "username", "password"))
+            except (ValueError, TypeError):
+                return self.json(400, {"error": "That did not arrive whole. Try again."})
+            want = li.claim_token() or ""
+            if not want or not hmac.compare_digest(token.encode(), want.encode()):
+                FAILS.append(now)
+                time.sleep(1)
+                return self.json(403, {"error": "This link is not the right one for this Loam. "
+                                                "Open the whole link the installer printed."})
+            username = username.strip().lower()
+            if not USERNAME_RE.match(username):
+                return self.json(400, {"error": "A username is 2 to 32 lowercase letters, numbers, "
+                                                "- or _, starting with a letter."})
+            if len(password) < MIN_PASSWORD:
+                return self.json(400, {"error": f"Choose a password of at least {MIN_PASSWORD} characters."})
+            if len(password) > 256:
+                return self.json(400, {"error": "That password is longer than Loam accepts (256)."})
+            try:
+                write_users(username, lc.OWNER_NAME, hash_password(password))
+            except (RuntimeError, subprocess.SubprocessError) as exc:
+                log(str(exc))
+                return self.json(500, {"error": "Your sign-in could not be saved. Try again in a minute."})
+            when = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+            dep.CLAIMED_FILE.write_text(json.dumps({"username": username, "at": when}) + "\n",
+                                        encoding="utf-8")
+            li.CLAIM_FILE.unlink(missing_ok=True)
+            log(f"claimed by {username}")
+        domain = dep.domain()
+        auth = dep.config()["auth_host"]
+        threading.Thread(target=finish_claim, daemon=True).start()
+        self.json(200, {"ok": True, "username": username, "wait_seconds": 8,
+                        "next": f"https://{auth}.{domain}/?rd=https%3A%2F%2F{domain}%2F"})
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        print("loam-claim: runs as root (loam-claim.service)", file=sys.stderr)
+        return 2
+    server = ThreadingHTTPServer(("127.0.0.1", dep.CLAIM_PORT), Handler)
+    log(f"listening on 127.0.0.1:{dep.CLAIM_PORT} "
+        f"({'unclaimed' if dep.unclaimed() else 'claimed'})")
+    if unfinished_claim():
+        log("the claim was made but its render did not finish; finishing it")
+        threading.Thread(target=finish_claim, args=(0,), daemon=True).start()
+    server.serve_forever()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

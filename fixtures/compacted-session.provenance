@@ -1,0 +1,17 @@
+# Provenance of fixtures/compacted-session.jsonl
+#
+# The user, assistant and system entries of one real Claude Code session file,
+# copied byte-for-byte and in order; the attachment, queue-operation,
+# last-prompt, atis-latch and cost-state lines were left out. Made 2026-09-30
+# by the probe for the compaction brief: CLI 2.1.281, --model haiku, stream-json
+# in and out, cwd /tmp/compact-probe, four short turns, then `/compact` sent as a
+# user message, then one more question. So the shapes are the CLI's own for a
+# manual compaction: the system/compact_boundary, the isCompactSummary summary,
+# the isMeta caveat, the <command-name>/compact</command-name> entry and the
+# <local-command-stdout>Compacted</local-command-stdout> entry -- the last two
+# carrying no promptSource, which is what keeps them out of a transcript.
+# The probe's own words were neutral already; on 2026-11-15, for the public
+# release, the one home directory in the summary's transcript path was
+# renamed, and nothing else in the file changed.
+#
+# source: ~/.claude/projects/-tmp-compact-probe/3f0c1f5e-8c1a-4b7e-9a51-0c0ffee00001.jsonl

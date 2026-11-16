@@ -1,0 +1,36 @@
+#!/bin/sh
+# `loam <verb>`: the person's command, on their PATH as /usr/local/bin/loam
+# (install.sh puts it there). Each verb is bin/loam-<verb> beside this file
+# and is listed in VERBS: first release L12 `status`, L13 `update`. The
+# other bin/loam-* files are the runtime's own (the installer, the claim
+# service, the DNS timer) and are not verbs.
+set -eu
+VERBS="status update"
+here=$(dirname "$(readlink -f "$0")")
+# Python's bytecode never lands in the checkout, however `loam` was reached
+# (a root shell over ssh reads no profile): an update refuses a tree with
+# anything in it that the release did not put there.
+if [ -z "${PYTHONPYCACHEPREFIX:-}" ]; then
+  if [ "$(id -u)" = 0 ]; then PYTHONPYCACHEPREFIX=/var/cache/loam/pycache
+  else PYTHONPYCACHEPREFIX="$HOME/.cache/loam/pycache"; fi
+  export PYTHONPYCACHEPREFIX
+fi
+verb=${1:-help}
+case "$verb" in
+  help|-h|--help)
+    echo "loam: the command for this server's Loam."
+    echo
+    for name in $VERBS; do
+      f="$here/loam-$name"
+      [ -x "$f" ] || continue
+      line=$(sed -n '2,12{s/^"""//;s/^# *//;p}' "$f" | grep -m1 . || true)
+      printf '  loam %-8s %s\n' "$name" "$line"
+    done
+    exit 0 ;;
+esac
+shift
+case " $VERBS " in
+  *" $verb "*) [ -x "$here/loam-$verb" ] && exec "$here/loam-$verb" "$@" ;;
+esac
+echo "loam: there is no \"$verb\". Type: loam help" >&2
+exit 2

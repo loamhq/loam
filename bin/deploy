@@ -1,0 +1,556 @@
+#!/usr/bin/env python3
+"""The deploy loop: a project reaches its own container, and only its own.
+
+    deploy <app> build <commit>      build <app>:<short commit> from the
+                                     app's checkout at that commit
+    deploy <app> up <commit>         build if that image is missing, then
+                                     (re)start the container on it, then
+                                     prune: keep its tag and the one before.
+                                     Unhealthy, it goes back to the image
+                                     that was running before it.
+    deploy <app> up <commit> --forward-only
+                                     the same, unless what runs already
+                                     carries <commit> (a later main): then
+                                     nothing changes. The launcher's form,
+                                     after a landing (lib/loam_autodeploy)
+    deploy <app> prune               the same sweep on its own
+    deploy <app> status             compose ps, health, the image's commit
+    deploy <app> logs [N]            the last N lines (default 100)
+    deploy <app> exec <cmd...>       run a command inside the container
+
+Constraint first, mechanism second (Move 10, task 5). No project ever holds
+the Docker socket, and a project acts on its own container and no other.
+So this command is owned by the runtime (`agents/`), runs as root, and
+reads everything it does from the app's deployment record in
+`agents/deploy/<app>/`: the checkout it builds from, the compose file it
+starts, the loopback port it publishes. The caller names the app and a
+verb; the record decides the rest, and lib/loam_deploy refuses a record
+that would publish off loopback, bind-mount the box, or hand the container
+a capability. The sudoers file gen-deploy renders lets one unix user run
+`deploy <app> *` per app; see deploy/README.md for why that file is inert
+on this box today.
+
+Two kinds of credential cross this command, by the same mechanism and
+neither ever written to a file here or printed. The session broker's bearer
+token, read from the broker's state directory at run time (broker_env
+below, and deploy/README.md "How an app gets the broker's token"); and a
+vendor API key an app is entitled to, read from the box's secret store at
+run time (app_secrets below, and the same README's "How an app gets a
+vendor API key"). Both are passed to compose as environment variables that
+an app's compose file interpolates by name, so a compose file that does not
+name one never sees it.
+
+The build is from a NAMED commit, not from whatever the working tree
+holds: `git archive <commit>` is the build context, so an uncommitted edit
+in the checkout cannot reach the image, and the image tag says exactly
+what is running. The git call runs as the checkout's owner, because git
+refuses to read a repository owned by another user and this process is
+root.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pwd
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_broker as brk  # noqa: E402
+import loam_deploy as dep  # noqa: E402
+
+VERBS = ("build", "up", "status", "logs", "exec", "prune")
+COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$|^[A-Za-z0-9._/-]{1,64}$")
+
+# The box's secret store: vendor API keys, root:<box user> 0640, outside every
+# repo and older than Loam (it carries the chassis service's keys). This
+# command runs as root, so it can read it; nothing else here can.
+SECRETS_ENV = Path("/etc/chassis/secrets.env")
+
+# Which app may be handed which key, by name, and nothing wider. An allowlist
+# rather than "pass the store through and let each compose file take what it
+# names": the store holds ten keys, several of them the owner's spend on other
+# vendors, and an app's compose file is edited by that app's own engineer. A
+# name has to be added HERE, in the runtime, for an app to reach a key --
+# which is the same shape as every other boundary in this layer.
+APP_SECRETS = {
+    # loam-ui: Gemini, for the dictation feature. Staged 2026-09-25 and read
+    # by nothing yet; the app's compose file names it, so it is in the
+    # container's environment from the next deploy on.
+    # DICTATION_TOKEN stood beside it 2026-09-28 to 2026-10-01, the bearer
+    # token of the Obsidian plugin's POST /api/dictate; the route and the
+    # token were retired together and the line left the store.
+    "loam-ui": ("GEMINI_API_KEY",),
+    # loam-ui-next: the staging copy (2026-11-12) dictates and reads aloud
+    # like live, on the same key, so a change to either is seen working there.
+    "loam-ui-next": ("GEMINI_API_KEY",),
+}
+
+
+def die(msg: str, code: int = 1) -> None:
+    print(f"deploy: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def usage() -> None:
+    die(f"usage: deploy <app> {{{'|'.join(VERBS)}}} [args]\n"
+        f"       build <commit> | up <commit> [--forward-only] | prune | logs [N] | exec <cmd...>", 64)
+
+
+def run(argv: list[str], **kw) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, text=True, check=False, **kw)
+
+
+def app_named(name: str) -> dep.App:
+    apps = {a.name: a for a in dep.records()}
+    if name not in apps:
+        die(f"no deployment record for {name!r} under {dep.DEPLOY}")
+    app = apps[name]
+    if app.compose is None:
+        die(f"{name} is a static host ({app.static_root}); nothing to build or run")
+    if app.checkout is None or not app.checkout.is_dir():
+        die(f"{name}: no checkout to build from (record has no `checkout`, "
+            f"and agents/projects/{name}.json names none on disk)")
+    return app
+
+
+def as_owner(path: Path) -> dict:
+    """subprocess arguments that run a command as the path's owner, with
+    that user's HOME, so git reads its own config and not root's."""
+    pw = pwd.getpwuid(path.stat().st_uid)
+    return {"user": pw.pw_name, "env": {"HOME": pw.pw_dir, "PATH": os.environ.get("PATH", "/usr/bin:/bin")}}
+
+
+def resolve_commit(app: dep.App, ref: str) -> str:
+    if not COMMIT_RE.match(ref):
+        die(f"{ref!r} is not a commit or a ref name")
+    res = run(["git", "-C", str(app.checkout), "rev-parse", "--verify", "--quiet",
+               f"{ref}^{{commit}}"], capture_output=True, **as_owner(app.checkout))
+    full = res.stdout.strip()
+    if res.returncode != 0 or not full:
+        die(f"{ref!r} is not a commit in {app.checkout}")
+    # A landed main sha, never a job's branch (since 2026-10-02). Every job's
+    # branch shares this checkout's object store, so without this a commit
+    # that never passed a landing's tests would build as happily as one that
+    # did. A checkout with no `main` is not held to it.
+    has_main = run(["git", "-C", str(app.checkout), "rev-parse", "--verify",
+                    "--quiet", "refs/heads/main"], capture_output=True,
+                   **as_owner(app.checkout)).returncode == 0
+    if has_main and run(["git", "-C", str(app.checkout), "merge-base",
+                         "--is-ancestor", full, "refs/heads/main"],
+                        capture_output=True, **as_owner(app.checkout)).returncode != 0:
+        die(f"{ref!r} ({full[:7]}) is not on {app.checkout}'s main. A deploy "
+            f"builds a landed main sha; a job's branch lands by a tested merge "
+            f"first (bin/engineer-job).")
+    return full
+
+
+def image_tag(app: dep.App, full: str) -> str:
+    return f"{app.name}:{full[:7]}"
+
+
+def image_exists(tag: str) -> bool:
+    return run(["docker", "image", "inspect", tag], capture_output=True).returncode == 0
+
+
+def build(app: dep.App, ref: str) -> str:
+    full = resolve_commit(app, ref)
+    tag = image_tag(app, full)
+    print(f"  building {tag} from {app.checkout} @ {full}")
+    # The context is the committed tree and nothing else: no working-tree
+    # edits, no .venv, no .git. The Dockerfile must be at the repo root,
+    # which is where a self-contained project keeps it.
+    # An install's app builds from its folder of the release (`edge.app_context`,
+    # first release L12): the same commit, that subtree as the context root.
+    tree = f"{full}:{app.context}" if app.context else full
+    archive = subprocess.Popen(
+        ["git", "-C", str(app.checkout), "archive", "--format=tar", tree],
+        stdout=subprocess.PIPE, **as_owner(app.checkout))
+    res = run(["docker", "build", "--quiet", "-t", tag,
+               "--label", f"loam.app={app.name}", "--label", f"loam.commit={full}", "-"],
+              stdin=archive.stdout, capture_output=True)
+    archive.stdout.close()
+    archive.wait()
+    if archive.returncode != 0:
+        die(f"git archive failed (exit {archive.returncode})")
+    if res.returncode != 0:
+        die(f"docker build failed:\n{res.stderr.strip()[-2000:]}")
+    print(f"  built {tag} ({res.stdout.strip()})")
+    return tag
+
+
+def tags_to_remove(tags: list[tuple[str, str]], running: str | None,
+                   previous: str | None) -> list[str]:
+    """Which of an app's image tags go, given (tag, created) pairs.
+
+    Kept: the running tag and the one before it -- `previous` when the
+    caller knows it (an `up` does: it is what was running a moment ago),
+    else the newest other tag by creation time. Every tag is a named commit
+    and `up` builds a missing one, so a removed tag costs a rebuild, never a
+    rollback. Nothing is removed while no container is running: with no
+    running tag there is nothing to measure "before" against.
+    """
+    if not running:
+        return []
+    names = [t for t, _ in tags]
+    keep = {running}
+    if previous and previous != running and previous in names:
+        keep.add(previous)
+    else:
+        others = sorted(((c, t) for t, c in tags if t != running), reverse=True)
+        if others:
+            keep.add(others[0][1])
+    return [t for t in names if t not in keep]
+
+
+def prune(app: dep.App, previous: str | None = None) -> None:
+    """Remove the app's image tags but the running one and the one before
+    it. Called after every healthy `up`, and as its own verb for a sweep;
+    until 2026-09-30 nothing removed a tag and loam-ui held 33 of them.
+    A tag Docker refuses to remove (a stopped container still uses it) is
+    reported and left; the deploy has already succeeded by then."""
+    res = run(["docker", "image", "ls", app.name, "--format", "{{.Tag}}"], capture_output=True)
+    names = [t for t in res.stdout.split() if t and t != "<none>"]
+    if not names:
+        return
+    res = run(["docker", "image", "inspect", "-f", "{{.Created}}",
+               *[f"{app.name}:{t}" for t in names]], capture_output=True)
+    created = res.stdout.split()
+    if res.returncode != 0 or len(created) != len(names):
+        print(f"  prune skipped: could not read creation times for {app.name}'s images")
+        return
+    running = short(running_commit(app))
+    if running == "not running":
+        running = None
+    gone = tags_to_remove(list(zip(names, created)), running, previous)
+    for t in gone:
+        r = run(["docker", "image", "rm", f"{app.name}:{t}"], capture_output=True)
+        if r.returncode != 0:
+            print(f"  kept {app.name}:{t}: {r.stderr.strip()[-200:]}")
+    kept = [t for t in names if t not in gone]
+    print(f"  images: kept {', '.join(kept)}; removed {len(gone)}")
+
+
+def broker_env() -> dict:
+    """The session broker's address and its bearer token, read from the box
+    at the moment a compose command runs and handed to the container as
+    environment variables.
+
+    The deployment layer had no secret path an app's own compose file could
+    use. Its two existing ones do not fit: Authelia's secrets are an
+    `env_file` at a root-owned path outside every repo, which only the
+    generator writes, and a share token is read by the generator and rendered
+    into the Caddyfile. An app's compose file lives in THIS repo, so a
+    literal there is a credential in git. So this, the narrowest thing that
+    works: the token is read here, passed to `docker compose` as an
+    environment variable, and interpolated by name into the compose file's
+    `environment:` block. It is never rendered to disk, never in the repo,
+    never in the image, and never printed. An app whose compose file does not
+    name the variables never sees them.
+
+    Deliberately NOT `brk.read_token()`, which creates the token when it is
+    missing: this process is root, and a root-owned 0600 token file is one
+    the broker (running as the box's user) could not read or rewrite. The token
+    is the broker's to mint on its own first start. Absent here means the
+    compose file's `:?` message says so and nothing starts.
+    """
+    # The attachment cap was passed here too, until 2026-09-22: the broker's
+    # number, so an app could refuse a too-large upload before a phone spent a
+    # minute on it. No app ever read it -- the broker answers `/v1/limits`,
+    # which is one number asked for at the moment it is needed rather than two
+    # that can disagree, and that is what the app uses. Dropped rather than
+    # kept "in case": an environment variable nothing reads is a fact about
+    # this box that reads as true and is not.
+    env = {"BROKER_URL": f"http://{brk.BIND_ADDR}:{brk.PORT}"}
+    try:
+        token = brk.TOKEN_PATH.read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, PermissionError):
+        return env
+    if token:
+        env["BROKER_TOKEN"] = token
+    return env
+
+
+def origins_env() -> dict:
+    """The install's own addresses, for a compose file to interpolate where
+    it used to write this box's domain literally (first release L12): the
+    vault's and the commons' web folders and the app's content host. Not
+    secrets. On the first install each is exactly the literal it replaced."""
+    dom = dep.domain()
+    apps = {a.name: a for a in dep.records()}
+    env = {"LOAM_DOMAIN": dom,
+           "LOAM_VAULT_ORIGIN": f"https://{apps['vault'].fqdn}" if "vault" in apps else f"https://vault.{dom}",
+           "LOAM_FILES_ORIGIN": f"https://{apps['files'].fqdn}" if "files" in apps else f"https://files.{dom}"}
+    for app in apps.values():
+        if app.content_fqdn:
+            key = "LOAM_CONTENT_ORIGIN_" + re.sub(r"[^A-Z0-9]", "_", app.name.upper())
+            env[key] = f"https://{app.content_fqdn}"
+    return env
+
+
+def read_secrets(path: Path, names: tuple[str, ...]) -> dict:
+    """The named variables, and only those, out of a systemd EnvironmentFile.
+
+    Deliberately not `dotenv` and not a shell `source`: this file is read by
+    a root process, and `source` would execute whatever a line contained.
+    The format it must handle is the one /etc/chassis/secrets.env actually
+    uses -- `NAME=value`, one per line, `#` comments, blank lines, no
+    `export`, no quoting -- and surrounding quotes are stripped anyway
+    because systemd accepts them and a future editor may add a pair.
+
+    A name that is absent, or present and empty, is simply not returned: the
+    compose file's `:?` then fails loudly with its own message, which says
+    what is missing better than anything this function could raise.
+    """
+    found: dict = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (FileNotFoundError, PermissionError):
+        return found
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name = name.strip()
+        if name not in names:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if value:
+            found[name] = value
+    return found
+
+
+def app_secrets(app: dep.App) -> dict:
+    """The vendor API keys this app is entitled to, read from the box at the
+    moment a compose command runs and handed to the container as environment
+    variables.
+
+    Same shape and the same reasoning as broker_env() above, for the same
+    reason: an app's compose file lives in THIS repo, so a key written there
+    is a key in git. So the key stays in the store, is read here, is
+    interpolated by name, and reaches no file, no repo, no image and no log.
+
+    Every verb, not just `up`. A `:?` variable a compose file names has to
+    resolve for `ps`, `logs` and `exec` too, which is the trap broker_env's
+    caller already documents.
+    """
+    names = APP_SECRETS.get(app.name)
+    if not names:
+        return {}
+    return read_secrets(SECRETS_ENV, names)
+
+
+def compose(app: dep.App, *args: str, env: dict | None = None, **kw) -> subprocess.CompletedProcess:
+    # The compose file names its image by ${LOAM_COMMIT} with no default, so
+    # a bare `docker compose up` fails loudly. Every verb but `up` wants the
+    # running container's own tag, or a value that matches nothing.
+    commit = (env or {}).get("LOAM_COMMIT") or (running_commit(app) or "none")[:7]
+    # Every verb, not just `up`: a `:?` variable a compose file names has to
+    # be there for `ps`, `logs` and `exec` too, or those stop working the
+    # moment an app starts using one.
+    full_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LOAM_COMMIT": commit,
+                **origins_env(), **broker_env(), **app_secrets(app), **(env or {})}
+    return run(["docker", "compose", "-f", str(app.compose), *args], env=full_env, **kw)
+
+
+def running_commit(app: dep.App) -> str | None:
+    """The full commit the running container was built from (its label), or
+    the image name for one built before labels, or None if not running."""
+    res = run(["docker", "inspect", "-f", "{{index .Config.Labels \"loam.commit\"}} {{.Config.Image}}",
+               app.name], capture_output=True)
+    if res.returncode != 0:
+        return None
+    label, _, image = res.stdout.strip().partition(" ")
+    return label or image
+
+
+def short(commit: str | None) -> str:
+    if not commit:
+        return "not running"
+    return commit[:7] if re.fullmatch(r"[0-9a-f]{40}", commit) else commit
+
+
+def wait_healthy(name: str, seconds: int = 90) -> str:
+    deadline = time.time() + seconds
+    state = "?"
+    while time.time() < deadline:
+        res = run(["docker", "inspect", "-f", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", name],
+                  capture_output=True)
+        state = res.stdout.strip() or "?"
+        if state in ("healthy", "running"):
+            return state
+        time.sleep(3)
+    return state
+
+
+# The last line of every `up` that got as far as reading what runs, on
+# stdout: one JSON object the launcher reads into a receipt rather than
+# parsing sentences meant for a person (lib/loam_autodeploy.parse_result).
+RESULT_PREFIX = "deploy-result: "
+
+
+def report(app: dep.App, action: str, target: str, before: str | None,
+           after: str | None, health: str, detail: str = "") -> None:
+    """action: deployed | carried | rolled_back | unhealthy | build_failed |
+    compose_failed. `before` and `after` are what ran before this `up` and
+    what runs now, full commits where the container has a label."""
+    print(RESULT_PREFIX + json.dumps({
+        "app": app.name, "action": action, "target": target,
+        "before": before, "after": after, "health": health,
+        **({"detail": detail[-600:]} if detail else {})}), flush=True)
+
+
+def health_of(name: str) -> str:
+    res = run(["docker", "inspect", "-f", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", name],
+              capture_output=True)
+    return res.stdout.strip() or "not running"
+
+
+def is_ancestor(app: dep.App, older: str, newer: str) -> bool:
+    return run(["git", "-C", str(app.checkout), "merge-base", "--is-ancestor",
+                older, newer], capture_output=True,
+               **as_owner(app.checkout)).returncode == 0
+
+
+def rollback(app: dep.App, before: str | None) -> tuple[str | None, str]:
+    """Put back the image that ran before a failed `up` (since 2026-11-12).
+    The image is still on the box: prune keeps the running tag and the one
+    before, and nothing is pruned until an `up` is healthy. Returns (what
+    runs now, its health). A container that ran an unlabelled image, or no
+    container at all, has nothing to go back to and is left as it is."""
+    if not before or not re.fullmatch(r"[0-9a-f]{40}", before):
+        return running_commit(app), health_of(app.name)
+    if not image_exists(image_tag(app, before)):
+        return running_commit(app), health_of(app.name)
+    print(f"  rolling back to {image_tag(app, before)}")
+    res = compose(app, "up", "-d", "--remove-orphans",
+                  env={"LOAM_COMMIT": before[:7]}, capture_output=True)
+    if res.returncode != 0:
+        print(f"  rollback's compose up failed: {res.stderr.strip()[-400:]}")
+    state = wait_healthy(app.name)
+    return running_commit(app), state
+
+
+def up(app: dep.App, ref: str, forward_only: bool = False) -> None:
+    full = resolve_commit(app, ref)
+    tag = image_tag(app, full)
+    before = running_commit(app)
+    # Forward only (since 2026-11-12): two landings close together each ask
+    # for a deploy of their own main, and the second's main carries the
+    # first's. Whichever deploy runs second must not put the earlier commit
+    # back, so a commit already contained in what runs is not deployed. This
+    # runs under the app's live lock (the bottom of this file), so the read
+    # and the `up` cannot be split by another deploy.
+    if (forward_only and before and before != full
+            and re.fullmatch(r"[0-9a-f]{40}", before)
+            and is_ancestor(app, full, before)):
+        state = health_of(app.name)
+        print(f"  {app.name}: already on {short(before)}, which carries "
+              f"{full[:7]}; nothing changed")
+        report(app, "carried", full, before, before, state)
+        return
+    if not image_exists(tag):
+        try:
+            build(app, full)
+        except SystemExit:
+            report(app, "build_failed", full, before, running_commit(app),
+                   health_of(app.name), "docker build failed; the running "
+                   "container was not touched")
+            raise
+    else:
+        print(f"  image {tag} exists; not rebuilding")
+    res = compose(app, "up", "-d", "--remove-orphans", env={"LOAM_COMMIT": full[:7]},
+                  capture_output=True)
+    if res.returncode != 0:
+        now, state = rollback(app, before) if running_commit(app) != before else (
+            before, health_of(app.name))
+        report(app, "compose_failed", full, before, now, state,
+               res.stderr.strip())
+        die(f"compose up failed:\n{res.stderr.strip()[-2000:]}")
+    state = wait_healthy(app.name)
+    print(f"  {app.name}: {state} on {tag}"
+          + (f" (was {short(before)})" if before != full else " (unchanged)"))
+    if state != "healthy":
+        logs = compose(app, "logs", "--tail", "40", "--no-color",
+                       capture_output=True, env={"LOAM_COMMIT": full[:7]})
+        print(f"  the unhealthy container's last lines:\n{logs.stdout[-3000:]}")
+        now, now_state = rollback(app, before) if before and before != full else (
+            running_commit(app), state)
+        report(app, "rolled_back" if now == before and now != full else "unhealthy",
+               full, before, now, now_state, f"{tag} was {state}")
+        die(f"{app.name} was {state} on {tag}, not healthy; it runs "
+            f"{short(now)} ({now_state}) now", 2)
+    prune(app, previous=short(before) if before and before != full else None)
+    report(app, "deployed", full, before, running_commit(app), state)
+
+
+def status(app: dep.App) -> None:
+    compose(app, "ps", "--format", "table {{.Name}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}")
+    print(f"  running commit: {short(running_commit(app))}")
+    print(f"  record: {dep.record_path(app.name)} (exposure={app.exposure}, "
+          f"https://{app.fqdn}, publish 127.0.0.1:{app.port})")
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2 or argv[1] not in VERBS:
+        usage()
+    if os.geteuid() != 0:
+        die("must run as root: `sudo bin/deploy ...`; the sudoers file gen-deploy "
+            "renders allows exactly this command per app", 77)
+    name, verb, rest = argv[0], argv[1], argv[2:]
+    if not dep.NAME_RE.match(name):
+        die(f"{name!r} is not an app name")
+    app = app_named(name)
+    if verb == "build":
+        if len(rest) != 1:
+            usage()
+        build(app, rest[0])
+    elif verb == "up":
+        forward_only = "--forward-only" in rest
+        rest = [a for a in rest if a != "--forward-only"]
+        if len(rest) != 1:
+            usage()
+        up(app, rest[0], forward_only=forward_only)
+    elif verb == "status":
+        status(app)
+    elif verb == "prune":
+        if rest:
+            usage()
+        prune(app)
+    elif verb == "logs":
+        n = rest[0] if rest else "100"
+        if not n.isdigit():
+            usage()
+        compose(app, "logs", "--tail", n, "--no-color")
+    elif verb == "exec":
+        if not rest:
+            usage()
+        service = next(iter(yaml.safe_load(app.compose.read_text())["services"]))
+        return compose(app, "exec", "-T", service, *rest).returncode
+    return 0
+
+
+# The live lock (since 2026-10-02): a step that changes what runs takes its
+# app's lock for the step, so a deploy and a landing of the same project's
+# main never interleave. Reading verbs take nothing.
+MUTATING = ("build", "up", "prune", "exec")
+
+if __name__ == "__main__":
+    try:
+        args = sys.argv[1:]
+        if len(args) >= 2 and args[1] in MUTATING and dep.NAME_RE.match(args[0]):
+            import loam_lock  # noqa: PLC0415
+            with loam_lock.live(args[0], f"deploy {args[0]} {args[1]}"):
+                sys.exit(main(args))
+        sys.exit(main(args))
+    except dep.DeployError as exc:
+        die(str(exc))

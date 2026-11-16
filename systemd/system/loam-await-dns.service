@@ -1,0 +1,14 @@
+[Unit]
+Description=Loam: put this install on the web once its name points here
+# One check (bin/loam-await-dns): until <name> and *.<name> resolve to this
+# box, no site block is rendered, so Caddy asks Let's Encrypt for nothing.
+# When they do, it renders the hosts, waits for the certificate and turns
+# its own timer off. First release L12; docs/install.md.
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PYTHONPYCACHEPREFIX=@PYCACHE@
+ExecStart=/usr/bin/python3 @ROOT@/bin/loam-await-dns --quiet
+TimeoutStartSec=20min

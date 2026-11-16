@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""Check that a repository is a clean cut: one commit, the expected refs, and
+nothing in it from a deny list.
+
+  scrub-check REPO --deny FILE [--ref REF]... [--at REV] [--show] [--json]
+
+REPO is a local repository or a URL. A URL is cloned fresh (`--mirror`, so
+every ref the server has comes down) into a temporary folder that is removed
+afterwards; a private one needs git to have a credential for it already
+(`LOAM_INSTALL_TOKEN` in the environment is handed to git as an
+`http.extraHeader`, the way install.sh does, and written nowhere).
+
+It passes only when all of these hold:
+
+  - `git rev-list --all --count` is 1: the history is one root commit;
+  - the refs are exactly the `--ref`s given (default: `refs/heads/main`),
+    every one of them at that commit;
+  - no deny pattern matches any text file's lines, any path, the commit's
+    message or its author and committer, or a tag's message and tagger.
+
+The deny list is the caller's, never the repository's: the list is itself
+the names it guards. One extended regular expression per line (`git grep
+-E`, case-sensitive); blank lines and `#` lines are skipped. Two forms are
+not patterns:
+
+  @box-ip                 this machine's own public addresses (from `ip`),
+                          so a list need not write them down
+  allow PATH REGEX        a match of REGEX in PATH (a file in the repo) is
+                          allowed, e.g. an installer's default domain
+
+`--at REV` scans that commit instead of the root (for a tree on its way to
+being cut); the history and refs rules still apply to the verdict.
+
+Binary files are skipped (`-I`); leave out of a cut what grep cannot read.
+Hits are counted by default and listed with `--show` (file:line and the
+term, not the line). Exit 0 when clean, 1 when not, 2 on a usage error.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import ipaddress
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+
+
+def git(repo: Path | None, *args: str, check: bool = True, env: dict | None = None) -> str:
+    cmd = ["git"] + (["-C", str(repo)] if repo else []) + list(args)
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    if check and res.returncode not in (0, 1):
+        raise SystemExit(f"scrub-check: {' '.join(cmd[:4])}...: {res.stderr.strip()}")
+    return res.stdout
+
+
+def box_ips() -> list[str]:
+    out = subprocess.run(["ip", "-o", "addr", "show", "scope", "global"],
+                         capture_output=True, text=True).stdout
+    ips = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) > 3 and parts[2] in ("inet", "inet6"):
+            ip = parts[3].split("/")[0]
+            # The public ones: a container bridge's gateway is configuration.
+            if ipaddress.ip_address(ip).is_global:
+                ips.append(ip)
+    return ips
+
+
+def read_deny(path: Path) -> tuple[list[str], list[tuple[str, re.Pattern]]]:
+    pats, allows = [], []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == "@box-ip":
+            pats += [re.escape(ip) for ip in box_ips()]
+        elif line.startswith("allow "):
+            _, where, rx = line.split(None, 2)
+            allows.append((where, re.compile(rx)))
+        else:
+            re.compile(line)  # a bad pattern fails here, by name
+            pats.append(line)
+    if not pats:
+        raise SystemExit(f"scrub-check: {path} has no patterns")
+    return pats, allows
+
+
+def clone(url: str, into: Path) -> Path:
+    env = dict(os.environ)
+    token = env.pop("LOAM_INSTALL_TOKEN", "")
+    if token:
+        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        env.update({"GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+                    "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}"})
+    dest = into / "repo.git"
+    res = subprocess.run(["git", "clone", "--quiet", "--mirror", url, str(dest)],
+                         capture_output=True, text=True, env=env)
+    if res.returncode != 0:
+        raise SystemExit(f"scrub-check: clone failed: {res.stderr.strip()}")
+    return dest
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="scrub-check", add_help=True,
+                                 description=__doc__.split("\n\n")[0])
+    ap.add_argument("repo")
+    ap.add_argument("--deny", required=True, type=Path)
+    ap.add_argument("--ref", action="append", dest="refs")
+    ap.add_argument("--at")
+    ap.add_argument("--show", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+    pats, allows = read_deny(a.deny)
+    expected = sorted(a.refs or ["refs/heads/main"])
+
+    tmp = Path(tempfile.mkdtemp(prefix="scrub-check-"))
+    try:
+        local = Path(a.repo)
+        repo = local if local.exists() else clone(a.repo, tmp)
+        commits = int(git(repo, "rev-list", "--all", "--count").strip() or 0)
+        refs = {}
+        for line in git(repo, "for-each-ref", "--format=%(refname) %(objecttype) %(objectname) "
+                        "%(*objectname)").splitlines():
+            name, kind, obj, peeled = (line.split() + [""])[:4]
+            refs[name] = peeled if kind == "tag" else obj
+        roots = git(repo, "rev-list", "--all", "--max-parents=0").split()
+        root = roots[0] if len(roots) == 1 else None
+        refs_ok = sorted(refs) == expected and all(v == root for v in refs.values())
+
+        hits: list[dict] = []
+
+        def allowed(where: str, text: str) -> bool:
+            return any(where == p and rx.search(text) for p, rx in allows)
+
+        big = re.compile("|".join(f"(?:{p})" for p in pats))
+        target = git(repo, "rev-parse", "--verify", f"{a.at}^{{commit}}").strip() if a.at else root
+        if target:
+            # Lines in every text file at the one commit.
+            args = ["grep", "-I", "-n", "-o", "-E"]
+            for p in pats:
+                args += ["-e", p]
+            for line in git(repo, *args, target, "--").splitlines():
+                # <commit>:<path>:<line>:<match>
+                rest = line[len(target) + 1:]
+                path, num, term = rest.split(":", 2)
+                if not allowed(path, term):
+                    hits.append({"where": "file", "path": path, "line": int(num), "term": term})
+            # Paths.
+            for path in git(repo, "ls-tree", "-r", "--name-only", target).splitlines():
+                for m in big.finditer(path):
+                    hits.append({"where": "path", "path": path, "term": m.group(0)})
+            # The commit: message, author, committer.
+            meta = git(repo, "show", "-s", "--format=%an <%ae>%n%cn <%ce>%n%B", target)
+            for m in big.finditer(meta):
+                hits.append({"where": "commit", "path": target[:12], "term": m.group(0)})
+            # Tags: message and tagger.
+            for name in refs:
+                if name.startswith("refs/tags/"):
+                    body = git(repo, "for-each-ref", "--format=%(taggername) %(taggeremail)%0a"
+                               "%(contents)", name)
+                    for m in big.finditer(body):
+                        hits.append({"where": "tag", "path": name, "term": m.group(0)})
+        files = sorted({h["path"] for h in hits if h["where"] == "file"})
+        ok = commits == 1 and refs_ok and not hits
+        report = {"ok": ok, "commits": commits, "refs": sorted(refs), "expected_refs": expected,
+                  "refs_ok": refs_ok, "hits": len(hits), "files_hit": len(files),
+                  "patterns": len(pats), "allows": len(allows)}
+        if a.json:
+            if a.show:
+                report["list"] = hits
+            print(json.dumps(report, indent=2))
+        else:
+            print(f"commits      {commits}{'' if commits == 1 else '   (want 1)'}")
+            print(f"refs         {', '.join(sorted(refs)) or '(none)'}"
+                  f"{'' if refs_ok else '   (want ' + ', '.join(expected) + ', all at the root)'}")
+            print(f"deny list    {len(pats)} patterns, {len(allows)} allowed")
+            print(f"hits         {len(hits)} ({len(files)} files)")
+            if a.show:
+                for h in hits:
+                    at = f"{h['path']}:{h['line']}" if "line" in h else f"{h['where']} {h['path']}"
+                    print(f"  {at}  {h['term']}")
+            print("clean" if ok else "NOT CLEAN")
+        return 0 if ok else 1
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

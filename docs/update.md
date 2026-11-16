@@ -1,0 +1,334 @@
+# Updating Loam: `loam update`
+
+An install moves to a newer release in one tap (Settings › Update) or one
+command (`loam update apply`). Only what Loam ships is replaced; everything
+that is the person's is never touched. Added 2026-11-14 (first release,
+job L13). The rules are all in `lib/loam_update.py`; the command is
+`bin/loam-update` (`loam update …` through `bin/loam`).
+
+## What an update replaces, and what it never touches
+
+| Replaced (ships) | Never touched (the person's) |
+|---|---|
+| the checkout (`paths.root`'s repository), moved to a release tag | every agent workspace (`paths.workspaces`), the starter agent's included |
+| `<vault>/<system>/Loam/`, replaced whole from the library (`docs/library/`) | the rest of the vault, `System/skills/` included |
+| | Yours (`paths.plugins`) |
+| | `/etc/loam/` |
+| | `paths.state` (except `<state>/update/`, the updater's own), `paths.logs`, jobs, provider homes |
+| | `<workspaces>/_shared/reach.md` |
+
+What the new code then regenerates is the generators' own output, as on any
+install: the user units (`gen-units`), each live agent's provisioned files
+(`provision`), the providers' memory pins (`provider-memory pin`).
+
+## The two kinds of install
+
+Told apart by the checkout, not by a setting:
+
+- **Stock.** HEAD holds no commit the running release's tag lacks. The
+  update checks out the tag (detached), or fast-forwards the branch HEAD
+  is on.
+- **Development** (a contributor's box). HEAD has local commits. The
+  update merges the tag into the branch. The local commits stay, and the
+  merge commit is named `Merge Loam release <v>`.
+
+"The running release" is the `version` in `manifest.json` at the
+repository's top. A checkout with no `manifest.json` is not a release
+install and is never updated this way (the first install's `agents` checkout today).
+
+**What the installer must leave** (L12): a git clone of `loam`, with its
+`origin` set to where releases come from, checked out at the release tag.
+It must leave nothing in the tree that the release did not put there. A
+tarball cannot be updated.
+
+## The clean-tree rule
+
+The update refuses, and hands the job to the person's agent, when:
+
+- **(a) stock:** `git status --porcelain --ignored` is not empty. Anything
+  there means state leaked into the tree or someone edited it. Refusal
+  code `dirty`; the files are listed.
+- **(b) development:** the merge with the tag would conflict. This is found
+  with `git merge-tree` before anything moves. Code `conflict`; the files
+  are listed.
+- **Development, uncommitted:** `git status --porcelain` (ignored files
+  allowed) is not empty, because a merge would mix those changes in. Code
+  `uncommitted`.
+
+Other refusals:
+
+| Code | When |
+|---|---|
+| `no-version` | the checkout has no release version |
+| `no-release` | no release has been published yet |
+| `no-such-release` | the requested `to` does not exist |
+| `not-newer` | the target is not newer than what is running |
+| `bad-release` | the tag's `manifest.json` names a different version |
+| `busy` | an apply or rollback is already running |
+| `unreachable` | `origin` could not be read |
+| `library-edits` | System/Loam has edits, and the request did not say yes to them (below) |
+
+Every refusal except `library-edits` leaves a notice for the person's
+agent (below). The notice names what was found and asks the agent to
+explain it and, with the person's yes, put it right. `library-edits` is the
+person looking at their own diff, so the agent gets no notice for it.
+
+## System/Loam: shown first, replaced whole, kept
+
+Before the update, `<system>/Loam/` is compared with the library of the
+release that is running now (HEAD's `docs/library/`). Any difference is
+somebody's edit:
+
+- `edited`: changed files;
+- `added`: files that exist only in the vault;
+- `deleted`: library files missing from the vault;
+- a unified diff of all of them (`shipped/<file>` against `yours/<file>`),
+  cut at 400 lines.
+
+`check`, `diff` and `GET /v1/update` show these edits. An apply with edits
+waits for a yes (`--yes`, or `accept_library_edits: true`). Whether or not
+there are edits, the whole folder is copied to
+`<state>/update/backups/<run>/Loam/` before it is replaced. The last five
+copies are kept.
+
+## After the move
+
+Each step runs from the new code, and only when something it reads has
+changed between the two commits. "What it reads" means the script, plus
+every `lib/loam_*.py` it imports (followed transitively, read from both
+commits), plus the folders listed:
+
+| Step | Script | Also |
+|---|---|---|
+| `library` | always: `bin/library install` (System/Loam, then the skill views) | |
+| `units` | `bin/gen-units` | `systemd/`, except `systemd/system/` (still installed by hand) |
+| `agents` | `bin/provision`, once for each live agent | `engineer-template/` |
+| `provider-memory` | `bin/provider-memory pin` | |
+| `broker` | `bin/session-broker` | `broker/`, `plugins/` |
+| `gateway` | `bin/plugin-gateway` | |
+
+- **The broker** is restarted by `restart-broker --when-idle`. That waits
+  until no session is working or asking, and it has no time limit. The
+  wait's lines ("held by iris (working)") become the step's `detail` as
+  they come. The step then requires a new main process that answers `/up`
+  within 90 s.
+- **The gateway** gets `systemctl --user try-restart`.
+- **A timer is never stopped or started** (docs/config.md, "Timers: reload,
+  never restart"). `gen-units` daemon-reloads.
+
+### A failed apply
+
+A step that fails puts the previous release back:
+
+1. the checkout returns to its old commit (`git reset --hard`, under Loam's
+   live lock);
+2. System/Loam is restored from the backup, then the skill views are
+   refreshed;
+3. every regeneration that ran is run again from the old code;
+4. the broker is restarted again if it had been restarted, or if its
+   restart was the step that failed.
+
+The record's `outcome` is `failed`, with `failed_step`, and `rolled_back`
+is true when the undo finished. The message says the old version is
+running.
+
+### An apply that stopped without finishing
+
+A run can be killed mid-way, by a reboot or the OOM killer. To cover that,
+the rollback point is written to `<state>/update/pending.json` before
+anything moves. Three things update it as the run goes: the backup's path,
+the merged commit, and whether System/Loam has been replaced yet. It is
+removed when the run applies, or when a failure's undo finishes.
+
+While the file stands and no run holds the lock:
+
+- `status` reports the run as `interrupted`;
+- it offers a rollback marked `"interrupted": true`;
+- `rollback` puts the previous release back from that point. It skips
+  restoring System/Loam if the run had not replaced it yet.
+
+### Rollback
+
+`loam update rollback` (or `POST /v1/update/rollback`) puts back the
+release the last successful apply replaced, in one command. It refuses
+(`moved-since`) when the checkout has moved since that apply, because a
+rollback would discard that too. It also refuses `dirty` and
+`nothing-to-roll-back`. It restores System/Loam exactly as that apply's
+backup has it, the person's edits included. Before doing so, it backs up
+the current System/Loam.
+
+## Release notes go to the person's agent
+
+The update never shows the person a changelog. It leaves a notice in
+`<state>/update/notices/`. On its 30-second delivery pass, the broker:
+
+- posts the notice's `line` in General as a Loam line;
+- gives General's default agent (Iris on a fresh install) a turn whose
+  input is the notice's `note`.
+
+The note names the notes file (`<state>/update/notes/<version>.md`) and
+asks the agent to tell the owner, briefly and in its own words, what the
+release means for them (`ThreadEngine.deliver_note`).
+
+The notes come from the release's own `docs/releases/<version>.md`. If
+there is none, the annotated tag's message is used. If neither exists, the
+commit subjects since the running release are used, labelled as material
+for the agent.
+
+| Notice | When | Once? |
+|---|---|---|
+| `available` | a check finds a newer release | once per version |
+| `applied` | an apply landed; names the kept copy if System/Loam had edits, and the rollback command | each time |
+| `refused` | an apply was refused (not `library-edits`) | once per version, code and file count |
+| `failed` | an apply or rollback failed; says whether the undo finished | each time |
+| `rolled-back` | a rollback landed | each time |
+
+## The command
+
+```
+loam update status              the running release, the last check and run, rollback
+loam update check [--no-tell]   the newest release; can it be applied now; System/Loam's edits
+loam update diff                System/Loam's edits against the running release's library
+loam update apply [--to V] [--yes]
+loam update rollback
+        --json for the record; --foreground runs in this process
+```
+
+`apply` and `rollback` start the run as its own transient user unit
+(`systemd-run --user --unit=loam-update-<run>`) and then follow it. Started
+by the broker, a plain child process would sit in the broker's cgroup and
+die in the restart the run ends with. Inside an agent's turn
+(`LOAM_SESSION_ID` set), following stops at the broker step, because that
+step waits for the turn to end. `--foreground` is what the unit itself
+runs; never use it from inside a turn.
+
+Exit codes: 0 done or nothing to do, 1 failed, 3 refused, 4 waiting for a
+yes to System/Loam's edits.
+
+## The page contract (U4: the Update control in Settings)
+
+Every route needs the broker's bearer token, like the rest of `/v1`. The
+app reaches them through its relay (`rest === '/update'…`). Every answer is
+`Cache-Control: no-store`.
+
+### `GET /v1/update`: the state
+
+```json
+{
+  "current": {"version": "1.0.0", "commit": "…", "branch": null,
+              "kind": "stock", "local_commits": 0},
+  "check": {
+    "checked_at": "2026-11-15T05:11:40Z",
+    "latest": {"version": "1.1.0", "tag": "1.1.0", "commit": "…"},
+    "available": true,
+    "blocked": null,
+    "changes": {"added": [], "removed": [], "changed": ["README.md"]},
+    "library": {"folder": "…/System/Loam", "any": true, "installed": true,
+                "edited": ["README.md"], "added": [], "deleted": [],
+                "diff": "--- shipped/README.md\n+++ yours/README.md\n…"},
+    "error": null
+  },
+  "run": { …the last or current run, below… },
+  "running": false,
+  "rollback": {"to_version": "0.9.0", "from_version": "1.0.0", "at": "…"}
+}
+```
+
+- `check` is null until the first check.
+- `check.available` is worked out against the running version on every
+  read. After an apply, it is false without a new check.
+- `check.blocked` is a refusal (`{code, message, files}`) that an apply
+  would meet now: the clean-tree rule.
+- `check.error` is `{code, message}`. Its codes are `no-release`,
+  `no-version`, `unreachable` and `error`.
+- `rollback` is non-null only while the checkout is still at the commit the
+  last apply left.
+
+### `POST /v1/update/check`
+
+This runs a check (a few seconds; it reads `origin`), then answers as
+`GET`. The first time a version is seen, the person's agent is told it is
+available.
+
+### `POST /v1/update/apply`: `{"to"?: "1.1.0", "accept_library_edits"?: true, "by"?: "<agent>"}`
+
+- **202** `{"run": {…, "outcome": "starting"}}`: the run started as its
+  own process. Follow it.
+- **409** `{"error": "<sentence>", "refusal": {"code", "message", "files"?,
+  "library"?, "to"?}}`: nothing moved. For `library-edits`,
+  `refusal.library` is the edits block above. Show the diff, then send
+  again with `accept_library_edits: true` once the person says yes.
+- **400**: `to` is not a string.
+- **503**: the run could not be started as its own unit.
+
+### `POST /v1/update/rollback`: `{"by"?}`
+
+The same answers as apply. Its refusals are `nothing-to-roll-back`,
+`moved-since`, `dirty` and `busy`.
+
+### `GET /v1/update/progress`: the run alone
+
+```json
+{"id": "20261115-051633-3786eb", "action": "apply", "outcome": "running",
+ "phase": "broker", "from_version": "1.0.0", "to_version": "1.1.0",
+ "started_at": "…", "ended_at": null, "by": null, "message": null,
+ "backup": "…/state/update/backups/…/Loam",
+ "steps": [
+   {"name": "preflight", "words": "Checking the install", "status": "done", …},
+   {"name": "broker", "words": "Restarting the broker when every session is idle",
+    "status": "running", "detail": "restart-broker: held by iris (working)"}
+ ]}
+```
+
+`outcome` is one of:
+
+| Outcome | Meaning |
+|---|---|
+| `starting` | the run is starting |
+| `running` | the run is in progress |
+| `applied` | the apply landed |
+| `rolled-back` | the rollback landed |
+| `refused` | with `refusal` |
+| `failed` | with `failed_step` and `rolled_back` |
+| `interrupted` | the process ended without finishing (a reboot, a kill); `rollback` is then offered (`"interrupted": true`) and puts the previous release back |
+
+Each step has:
+
+- `words`: the sentence to show;
+- `status`: `running`, `done`, `skipped`, `failed` or `refused`;
+- `detail`: what it said, or why it was skipped.
+
+Undo steps are named `undo-<step>`.
+
+**Following it.** Poll about every two seconds until `outcome` is neither
+`starting` nor `running`. During the `broker` step the broker restarts. For
+a moment the relay answers 502 or 503 and the page's own streams drop. Keep
+polling; the record is on disk and the new broker serves it. The page
+should reload once the run has `applied`, because the app's code may have
+changed with it.
+
+## Seams, for tests and rehearsals
+
+- `LOAM_UPDATE_STATE`: the updater's folder (default `<state>/update`).
+- `LOAM_UPDATE_RESTART`: a shell command that stands in for the broker step
+  (restart and verify).
+- `LOAM_UPDATE_NO_UNIT=1`: start a run as a detached process rather than a
+  unit.
+
+`tests/test_update.py` builds releases in temporary git repositories. The
+job that built this also proved the update on a scratch install of the real
+tree, with two local tags.
+
+## Not yet
+
+- **Nothing checks on a schedule.** The agent mentions a new version once a
+  check has found it (Settings opening Update, or `loam update check`). A
+  daily check timer is one unit away. It waits for the owner's word, because
+  "not automatic for now" (11-14) was about applying, and a check is not
+  an apply.
+- **The app's container** is not rebuilt by an update. The app is not in
+  this tree until the cut (L15). When it is, its deploy joins the table
+  above as a step that reads `app/`.
+- **`systemd/system/`** units that changed are named in the run's
+  `warnings` and in the agent's `applied` notice, but they are not
+  installed. They still need root and are installed by hand, as today.

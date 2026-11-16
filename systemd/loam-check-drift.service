@@ -1,0 +1,15 @@
+[Unit]
+Description=Loam — compare the generators with the live box, report what is new
+# bin/drift-watch runs bin/check-drift and decides what reaches the owner: one
+# comms line per finding the previous night did not have, the failure log if
+# the check itself breaks, nothing when the box is clean. The script holds
+# that reasoning; this unit only decides when it runs.
+#
+# Unprivileged on purpose. check-drift under sudo reported user units it
+# could not see as drift until 2026-09-16, and run as the box's user it reaches
+# what it needs as root through `sudo -n` -- the "truthful run" of
+# engineer/memory.
+
+[Service]
+Type=oneshot
+ExecStart=@ROOT@/bin/drift-watch

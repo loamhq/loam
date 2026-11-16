@@ -1,0 +1,15 @@
+[Unit]
+Description=Loam — one sample of the box's memory and disk history
+# bin/memsample holds the what and the why (and the rotation bound); this unit
+# only runs it. The history it appends to, logs/memsample.jsonl, is what the
+# daily check-memory reads for its 24 h peak and disk delta lines.
+
+[Service]
+Type=oneshot
+# A sample is a few reads of /proc and the cgroup tree; the once-a-day `du`
+# of the big holders is the only slow part, and memsample bounds each walk at
+# 300 s. The ceiling here is that plus room, so a hung du cannot stack runs.
+TimeoutStartSec=20min
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 @ROOT@/bin/memsample

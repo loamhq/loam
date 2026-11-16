@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Memory pressure: `pressure tick` (what loam-pressure.timer runs each
+minute) and `pressure status` (the reading now). lib/loam_pressure.py."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_pressure as p  # noqa: E402
+
+
+def main(argv: list[str]) -> int:
+    if argv == ["tick"]:
+        print(json.dumps(p.tick()))
+        return 0
+    if argv in ([], ["status"]):
+        print(json.dumps({**p._read(p.PRESSURE), "now": p.reading(p.meminfo())}, indent=1))
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

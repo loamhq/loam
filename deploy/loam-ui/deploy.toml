@@ -1,0 +1,45 @@
+# loam-ui -- Loam's own web app: a browser-based, phone-installable chat
+# interface to the coding agents on this box, with a session per persona,
+# resume, usage and permission prompts. Provisioned 2026-09-16 as a project
+# with its own engineer. What runs behind this record today is the app itself:
+# the Node server from the `loam-ui` repo, serving the Chats, Settings and
+# Providers screens and answering `/api/*` from the session broker over the
+# `loam-broker` network (`GET /up` -> 200 is the container's health check).
+#
+# `loam-ui` is a working name. The owner has not named the app, and a rename
+# is a rename of the repo, the checkout, this directory and the host.
+#
+# No [domains] table, so no second login portal. Served at the domain itself
+# since 2026-11-15 (first release L14, `apex = true` below): the app is
+# https://<domain>/, and `loam-ui` stays its name for the records, the image
+# and the logs. Until then it was loam-ui.<domain> from the directory name. Private, like the other three: behind
+# the login on every request. Public is the operator file's to decide and
+# nobody else's.
+exposure = "private"
+
+# The app at https://<domain>/ itself, and its host's `/_loam/login-code`
+# relay to the signed-in owner (loam-claim.service; deploy/README.md, "An
+# install's edge, the claim and the relay"). At most one record says it.
+apex = true
+
+# No [[bypass]] since 2026-10-01. One stood here from 2026-09-28 for the
+# Obsidian plugin's `POST /api/dictate`; the plugin now transcribes on its
+# own key, the app dropped the route (d4dbb4d), and every request on this
+# host meets the login again. The generator's feature is unchanged; see
+# deploy/README.md, "One request past the login".
+
+# The content host (2026-10-23): loam-ui-content.<domain>, a second origin on
+# the same container for the app's live HTML previews (loam-ui 2132b85,
+# docs/files-content-origin.md in its repo). Only /content/* reaches the app,
+# with its Host kept and the login's cookie stripped; every other path is a
+# 404, and no response there sets a cookie. Always behind the login. Not
+# vault.<domain>: that origin serves the whole vault to whoever is logged
+# in, so a preview running there with `allow-same-origin` could fetch every
+# vault note, not only its own root; see deploy/README.md, "A content host".
+# The app reads the origin as FILES_CONTENT_ORIGIN in compose.yaml.
+content_host = "loam-ui-content"
+
+# Loam's page (2026-11-12): its origin may frame the agents' static sites, for
+# the Apps section opening one in the main pane, and the Apps list
+# (GET /v1/apps) leaves it out. See lib/loam_deploy.App.app_shell.
+app_shell = true

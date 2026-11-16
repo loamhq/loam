@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""An agent's own subdomain, behind the login: ``<name>.<domain>``.
+
+The owner, 2026-11-08: behind the existing login, agents stand things up
+freely (mockups, slides, prototypes and their backends) on subdomains of
+their own, without asking anyone; anything on the open web without the login
+waits for his direct yes each time. This is the command for the first half
+and the one deliberate act for the second.
+
+    site up <name> --by <agent> [--root DIR | --port N] [--expires DATE | --for 2d]
+    site down <name>
+    site publish <name> --yes "<the owner's words, with the date>"
+    site private <name>
+    site list
+    site prune               the expired ones go (loam-site-expiry.timer, hourly)
+
+Every verb prints one JSON object. A site is one TOML file under
+``state/sites/`` (lib/loam_deploy.sites reads it) and a regenerate:
+``sudo bin/gen-deploy`` renders it into the Caddyfile and reloads Caddy.
+Authelia does not change, because its ``*.<domain>`` rule already covers
+every name, and DNS does not change, because ``*`` is an A record to this
+box; Caddy gets the certificate over HTTP-01 on the reload.
+
+**Private by default, by construction.** A record carries ``public`` only
+when ``publish`` wrote it with the owner's words quoted; nothing else writes
+the key, and a record without it renders behind the gate. The personas'
+browser passes the gate by its network, as on every private host, so an
+agent can open what it built.
+
+A static site (the default) is a directory Caddy serves, by default
+``ai-labs/<agent>/sites/<name>/``, created with a placeholder page; write
+files there. A backend is a container the agent runs, published on
+``127.0.0.1:<port>`` (deploy/README.md's app conventions), and ``--port``
+proxies the name to it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+import loam_deploy as dep  # noqa: E402
+
+GEN_DEPLOY = dep.AGENTS / "bin" / "gen-deploy"
+DURATION_RE = re.compile(r"^(\d+)([dh])$")
+PLACEHOLDER = """<!doctype html>
+<meta charset="utf-8">
+<title>{name}</title>
+<p>{name}.{domain} is up. This page is a placeholder in {root}; replace it.</p>
+"""
+
+
+def say(obj: dict) -> int:
+    print(json.dumps(obj, indent=2, default=str))
+    return 0 if obj.get("ok") else 1
+
+
+def record_file(name: str) -> Path:
+    return dep.SITES_DIR / f"{name}.toml"
+
+
+def read(name: str) -> dict | None:
+    import tomllib
+    path = record_file(name)
+    if not path.is_file():
+        return None
+    return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def toml_value(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, dt.date)):
+        return value.isoformat() if isinstance(value, dt.date) else str(value)
+    return json.dumps(str(value), ensure_ascii=False)   # a TOML basic string
+
+
+def write(name: str, rec: dict) -> None:
+    dep.SITES_DIR.mkdir(parents=True, exist_ok=True)
+    lines = [f"# {name}.{dep.domain()} -- written by bin/site; see `bin/site --help`."]
+    lines += [f"{k} = {toml_value(v)}" for k, v in rec.items() if v is not None]
+    path = record_file(name)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def regenerate() -> tuple[bool, str]:
+    """Render and reload, as root. `sudo -n` because nobody can answer a
+    password prompt from a tool call."""
+    if os.geteuid() == 0:
+        argv = [str(GEN_DEPLOY)]
+    else:
+        # The live lock is held by this process; the variable that says so
+        # must survive sudo's env_reset or gen-deploy waits on its caller.
+        import loam_lock  # noqa: PLC0415
+        argv = ["sudo", "-n", f"--preserve-env={loam_lock.LIVE_HELD_VAR}", str(GEN_DEPLOY)]
+    run = subprocess.run(argv, capture_output=True, text=True, check=False)
+    out = (run.stdout + run.stderr).strip()
+    return run.returncode == 0, out[-1500:]
+
+
+def change(name: str, rec: dict | None, before: dict | None) -> tuple[bool, str]:
+    """Write (or remove, for None) the record, render it, and put the
+    previous record back if the generator refuses: a site the generator
+    will not render must not sit there failing every other regenerate."""
+    path = record_file(name)
+    if rec is None:
+        path.unlink(missing_ok=True)
+    else:
+        write(name, rec)
+    try:
+        dep.sites()
+    except dep.DeployError as exc:
+        restore(name, before)
+        return False, f"refused: {exc}"
+    ok, out = regenerate()
+    if not ok:
+        restore(name, before)
+        regenerate()
+    return ok, out
+
+
+def restore(name: str, before: dict | None) -> None:
+    if before is None:
+        record_file(name).unlink(missing_ok=True)
+    else:
+        write(name, before)
+
+
+def url(name: str) -> str:
+    return f"https://{name}.{dep.domain()}/"
+
+
+def expiry(args) -> dt.date | None:
+    if args.expires:
+        return dt.date.fromisoformat(args.expires)
+    if args.for_:
+        m = DURATION_RE.match(args.for_)
+        if not m:
+            raise ValueError(f"--for {args.for_!r}: say 2d or 36h")
+        n, unit = int(m.group(1)), m.group(2)
+        delta = dt.timedelta(days=n) if unit == "d" else dt.timedelta(hours=n)
+        return (dt.datetime.now(dt.timezone.utc) + delta).date()
+    return None
+
+
+def cmd_up(args) -> int:
+    name = args.name
+    if not dep.NAME_RE.match(name):
+        return say({"ok": False, "error": f"{name!r}: a lowercase label, letters, digits and -"})
+    if not args.by or not dep.NAME_RE.match(args.by):
+        return say({"ok": False, "error": "--by <your agent name> is required"})
+    if args.root and args.port:
+        return say({"ok": False, "error": "one of --root or --port, not both"})
+    before = read(name)
+    if before and before.get("owner") != args.by:
+        return say({"ok": False, "error": f"{name} is {before.get('owner')}'s site; "
+                    f"pick another name or ask {before.get('owner')}"})
+    try:
+        expires = expiry(args)
+    except ValueError as exc:
+        return say({"ok": False, "error": str(exc)})
+    rec = {"owner": args.by, "created": (before or {}).get("created")
+           or dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    made = None
+    if args.port:
+        rec["port"] = args.port
+    else:
+        root = Path(args.root) if args.root else (
+            Path(before["root"]) if before and before.get("root")
+            else dep.AI_LABS / args.by / "sites" / name)
+        if not root.is_absolute():
+            return say({"ok": False, "error": f"--root {root} must be absolute"})
+        if not root.exists():
+            root.mkdir(parents=True)
+            (root / "index.html").write_text(PLACEHOLDER.format(
+                name=name, domain=dep.domain(), root=root), encoding="utf-8")
+            made = str(root)
+        rec["root"] = str(root)
+    rec["expires"] = expires if (args.expires or args.for_) else (before or {}).get("expires")
+    # `public` survives a re-up only as it was: `up` never adds it.
+    rec["public"] = (before or {}).get("public")
+    ok, out = change(name, rec, before)
+    if not ok:
+        return say({"ok": False, "error": out})
+    return say({"ok": True, "url": url(name), "access": "public" if rec["public"] else
+                "private: behind the login; the personas' browser passes",
+                "root": rec.get("root"), "port": rec.get("port"),
+                "created_root": made, "expires": rec["expires"],
+                "record": str(record_file(name))})
+
+
+def cmd_down(args) -> int:
+    before = read(args.name)
+    if before is None:
+        return say({"ok": False, "error": f"no site {args.name}"})
+    ok, out = change(args.name, None, before)
+    if not ok:
+        return say({"ok": False, "error": out})
+    return say({"ok": True, "removed": url(args.name),
+                "kept": before.get("root") and f"the files in {before['root']} are untouched"})
+
+
+def cmd_publish(args) -> int:
+    before = read(args.name)
+    if before is None:
+        return say({"ok": False, "error": f"no site {args.name}"})
+    words = " ".join((args.yes or "").split())
+    if len(words) < 8:
+        return say({"ok": False, "error": f"--yes takes {lc.OWNER_NAME}'s own words with the date, "
+                    "quoted; going public waits for his direct yes each time"})
+    ok, out = change(args.name, {**before, "public": words}, before)
+    if not ok:
+        return say({"ok": False, "error": out})
+    return say({"ok": True, "url": url(args.name), "access": "public: no login",
+                "on_the_word_of": words})
+
+
+def cmd_private(args) -> int:
+    before = read(args.name)
+    if before is None:
+        return say({"ok": False, "error": f"no site {args.name}"})
+    ok, out = change(args.name, {**before, "public": None}, before)
+    if not ok:
+        return say({"ok": False, "error": out})
+    return say({"ok": True, "url": url(args.name), "access": "private"})
+
+
+def cmd_list(_args) -> int:
+    try:
+        found = dep.sites()
+    except dep.DeployError as exc:
+        return say({"ok": False, "error": str(exc)})
+    return say({"ok": True, "sites": [{
+        "url": url(s.name), "owner": s.site_owner,
+        "access": "public" if s.site_public else "private",
+        "root": str(s.static_root) if s.static_root else None, "port": s.port,
+        "expires": s.site_expires} for s in found]})
+
+
+def cmd_prune(_args) -> int:
+    today = dt.datetime.now(dt.timezone.utc).date()
+    gone = []
+    for path in sorted(dep.SITES_DIR.glob("*.toml")) if dep.SITES_DIR.is_dir() else []:
+        rec = read(path.stem) or {}
+        expires = rec.get("expires")
+        if isinstance(expires, dt.date) and expires < today:
+            path.unlink()
+            gone.append(path.stem)
+    if not gone:
+        return say({"ok": True, "pruned": []})
+    ok, out = regenerate()
+    return say({"ok": ok, "pruned": gone, **({} if ok else {"error": out})})
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="site", description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="verb", required=True)
+    up = sub.add_parser("up")
+    up.add_argument("name")
+    up.add_argument("--by", required=True)
+    up.add_argument("--root")
+    up.add_argument("--port", type=int)
+    up.add_argument("--expires", help="YYYY-MM-DD, the last day it answers (UTC)")
+    up.add_argument("--for", dest="for_", help="2d, 36h: expires that far from now")
+    for verb in ("down", "private"):
+        sub.add_parser(verb).add_argument("name")
+    pub = sub.add_parser("publish")
+    pub.add_argument("name")
+    pub.add_argument("--yes", required=True, help=f"{lc.OWNER_NAME}'s words and the date")
+    sub.add_parser("list")
+    sub.add_parser("prune")
+    args = ap.parse_args()
+    import loam_lock  # noqa: PLC0415
+    verbs = {"up": cmd_up, "down": cmd_down, "publish": cmd_publish,
+             "private": cmd_private, "list": cmd_list, "prune": cmd_prune}
+    if args.verb == "list":
+        return cmd_list(args)
+    # One change at a time: two agents' `up` must not interleave a record
+    # write with the other's render. gen-deploy takes the same live lock and
+    # sees it held (LOAM_LIVE_LOCKS), so it does not wait on itself.
+    with loam_lock.live("Loam", f"site {args.verb} {getattr(args, 'name', '')}".strip()):
+        return verbs[args.verb](args)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except dep.DeployError as exc:
+        sys.exit(say({"ok": False, "error": str(exc)}))

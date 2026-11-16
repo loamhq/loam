@@ -1,0 +1,21 @@
+# vault -- the vault itself, read-only, at https://vault.<domain>. Not a
+# container: Caddy serves the tree with directory listing on, so the shared
+# browser can walk to any file and open it, HTML rendered as HTML and
+# everything else as it is on disk. This is how a persona reads a vault HTML
+# file on every lane, including the unattended ones (2026-09-09): the
+# browser image blocks file:// and has no path into this box, so a URL is
+# the only way it sees a file. Same exposure as `files`: behind the login
+# for a phone, open to the browser by its own network.
+#
+# Caddy's file_server follows symlinks and has no switch to stop at the
+# root; the vault has one (README.md -> a note inside it). `hide` names the
+# entries the server pretends are absent, at any depth: the repo's own
+# internals, which are not vault content, and on the owner's word
+# (2026-09-09: "hide the conversations and the syncing items ... the other
+# major folders can be accessible via the web") the transcripts and
+# the sync tool's version store. Both stay readable on disk. Nothing else is
+# hidden.
+
+exposure = "private"
+static_root = "@VAULT@"
+hide = [".git", "15_CONVERSATIONS", ".stversions"]

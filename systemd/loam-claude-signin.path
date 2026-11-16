@@ -1,0 +1,17 @@
+# The Claude Code sign-in arms the Remote Control servers (bin/rc-arm). Each
+# change to the login file -- made by a sign-in in the app or at the CLI,
+# rewritten at a token refresh, removed by a sign-out -- runs
+# loam-claude-signin.service. PathChanged, not PathExists: PathExists would run the
+# service again each time it exits while the file stands. systemd watches
+# the nearest existing parent until ~/.claude/ is made, so a fresh box with
+# no ~/.claude/ is covered. Enabled by the installer (bin/loam-install) and
+# by hand on a box that predates it, with the `.path` suffix.
+[Unit]
+Description=Loam: arm the Remote Control servers when Claude Code is signed in
+
+[Path]
+PathChanged=@HOME@/.claude/.credentials.json
+Unit=loam-claude-signin.service
+
+[Install]
+WantedBy=default.target

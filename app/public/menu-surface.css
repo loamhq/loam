@@ -1,0 +1,64 @@
+/* The shared shell. Position comes only from menu-surface.js, in the top layer. */
+[data-menu-surface] {
+  --menu-safe-top: env(safe-area-inset-top, 0px);
+  --menu-safe-bottom: env(safe-area-inset-bottom, 0px);
+  color: var(--paper-ink); background: var(--paper-page); border: 0;
+  box-sizing: border-box; overscroll-behavior: contain; z-index: 50;
+}
+[data-menu-surface][data-menu-layout="anchored"] {
+  border-radius: 24px; padding: var(--space-lg); overflow: auto;
+  box-shadow: var(--shadow-popover); animation: menuArrive var(--motion-fast) var(--ease-standard) backwards;
+}
+[data-menu-surface][data-menu-layout="sheet"] {
+  border-radius: 30px 30px 0 0; padding: var(--space-lg) var(--space-xl) calc(var(--space-xl) + env(safe-area-inset-bottom, 0px) / var(--ui-scale, 1));
+  overflow: auto; box-shadow: var(--shadow-popover); animation: menuSheetArrive var(--motion-normal) var(--ease-standard) backwards;
+}
+[data-menu-surface]::backdrop { background: transparent; }
+[data-menu-surface][data-menu-layout="sheet"]::backdrop { background: var(--scrim); opacity:var(--sheet-scrim-opacity, 1); transition:var(--sheet-scrim-transition, none); }
+/* The top-layer backdrop owns dimming; the shared handler owns outside taps. */
+:root:has([data-menu-layout="sheet"]:popover-open) .scrim { visibility:hidden; }
+.surface-heading { display:flex; align-items:center; justify-content:space-between; gap:var(--space-lg); padding:var(--space-xs) var(--space-xs) var(--space-lg); flex:none; }
+.surface-heading h2 { font-size:22px; margin:0; }
+[data-menu-surface] .surface-close { width:44px; height:44px; flex:none; }
+[data-menu-surface] .setrow { min-height:44px; }
+[data-menu-surface] .sheet-top { display:flex; }
+[data-menu-surface][data-menu-layout="anchored"] .grip { visibility:hidden; }
+[data-menu-surface][data-menu-layout="anchored"] .surface-handle { display:none; }
+[data-menu-surface][data-menu-layout="sheet"] .surface-close { display:none; }
+[data-menu-layout="sheet"] .surface-heading { touch-action:none; }
+[data-menu-layout="sheet"] .surface-handle { margin-bottom:0; }
+[data-menu-surface].settings.twopane { display:flex; flex-direction:row; }
+@keyframes menuArrive { from { opacity:0; transform:scale(.96); } to { opacity:1; transform:scale(1); } }
+@keyframes menuSheetArrive { from { opacity:0; transform:translateY(100%); } to { opacity:1; transform:translateY(0); } }
+@keyframes menuFade { from { opacity:0; } to { opacity:1; } }
+@media (prefers-reduced-motion:reduce) { [data-menu-surface][data-menu-layout] { animation:menuFade var(--motion-fast) var(--ease-standard) backwards !important; } }
+[data-menu-surface].settings.twopane { height:640px; padding:0; gap:0; overflow:hidden; }
+[data-menu-surface].settings.twopane .setnav { width:200px; }
+
+/* App-wide desktop dialogs share the menu shell and its focus/dismissal rules.
+ * Only their placement and internal scrollers differ from anchored menus. */
+[data-menu-centered] { border-radius:24px; box-shadow:var(--shadow-popover); }
+[data-menu-centered]::backdrop { background:var(--scrim); }
+:root:has([data-menu-centered]:popover-open) .scrim { visibility:hidden; }
+:root:has([data-menu-centered]:popover-open) .rail-foot { position:relative; z-index:11; }
+[data-menu-centered] > .surface-handle { display:none; }
+[data-menu-centered].settings.twopane { height:720px; }
+[data-menu-centered].settings.twopane .setnav { width:220px; }
+[data-menu-centered].settings.twopane .setmain { padding:0; overflow:hidden; gap:0; }
+[data-menu-centered].settings.twopane .setmain { position:relative; }
+.app-modal-head.settings-modal-close { position:absolute; z-index:2; top:12px; right:16px; padding:0; border:0; }
+.settings-modal-close + .app-modal-body > .sheet-head { padding-right:48px; }
+.app-modal-head { display:flex; align-items:center; justify-content:space-between; gap:var(--space-lg); flex:none; padding:16px 24px; border-bottom:1px solid var(--paper-rule); }
+.app-modal-head h2 { font-size:24px; margin:0; }
+.app-modal-head .iconbtn { width:44px; height:44px; flex:none; }
+.app-modal-head .iconbtn:not(:active) { background:transparent; color:var(--paper-ink); }
+.app-modal-body { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding:24px 32px; display:flex; flex-direction:column; gap:var(--space-xl); }
+[data-menu-centered].activity-modal { display:flex; flex-direction:column; height:720px; padding:0; overflow:hidden; }
+.activity-modal .activity-page { min-height:0; padding:24px 32px; }
+.activity-modal .activity-head { display:none; }
+[data-menu-centered] .theme-picker { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); overflow:visible; }
+[data-menu-centered] .theme-choice { max-width:none; }
+@media (max-width:1099px) {
+  /* Settings retains its pre-existing tablet/phone content layout. */
+  .app-modal-head { display:none; }
+}

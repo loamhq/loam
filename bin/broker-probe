@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+"""Prove the session broker end to end, against the running broker, in a thread.
+
+Not a unit test and not a mock: every claim below is caused. It starts a real
+thread with a real persona as its default, streams the thread, answers a real
+permission prompt the member's session raises, drops its own connection
+mid-turn, reconnects, ends the member's process, and sends again -- and the
+thread resumes the same session id with a question that only a conversation
+carrying the first two turns can answer.
+
+A thread since 2026-11-12: until then this probe drove a classic chat
+(`POST /v1/sessions`, `/messages`, `/events`), and those routes retired with
+the classic chat view. What it proves is unchanged: the session a thread
+starts is a persona's conversation session, and a thread is the only way one
+is started now.
+
+The identity check is the wake preflight's, run through the broker instead of
+around it (lib/loam_identity supplies both phrases): a canary unique to the
+persona's soul.md must be in context, a sibling persona's soul phrase must
+not, `_active.md`'s content must be, and `_reflection.md`'s must not. That
+last pair is what proves the conversation output style loaded and the
+reflection lane did not -- the difference between this and a wake.
+
+The thread is left archived at the end (nothing is deleted), and the
+member's process is ended unless --keep.
+
+Usage:  broker-probe [--agent AGENT (default: the lead agent)] [--engine claude-code] [--keep]
+        --keep leaves the member's process running and the thread unarchived.
+"""
+
+from __future__ import annotations
+
+import argparse
+import http.client
+import json
+import re
+import secrets
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+import loam_broker as cfg  # noqa: E402
+import loam_config as lc  # noqa: E402
+import loam_identity  # noqa: E402
+
+TOKEN = cfg.read_token()
+STEP = 0
+
+
+def say(text: str = "") -> None:
+    print(text, flush=True)
+
+
+def step(title: str) -> None:
+    global STEP  # noqa: PLW0603
+    STEP += 1
+    say(f"\n===== STEP {STEP}: {title} =====")
+
+
+def connect(timeout: float = 60) -> http.client.HTTPConnection:
+    return http.client.HTTPConnection(cfg.BIND_ADDR, cfg.PORT, timeout=timeout)
+
+
+def call(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+    conn = connect()
+    payload = json.dumps(body) if body is not None else None
+    conn.request(method, path, payload,
+                 {"Authorization": f"Bearer {TOKEN}",
+                  "Content-Type": "application/json"})
+    resp = conn.getresponse()
+    raw = resp.read().decode()
+    conn.close()
+    try:
+        return resp.status, json.loads(raw)
+    except json.JSONDecodeError:
+        return resp.status, {"raw": raw}
+
+
+class Stream:
+    """One thread's SSE connection, closable on purpose. Closing it is a test.
+    ``after`` is the last message id the client saw; the stream replays every
+    message after it before it goes live."""
+
+    def __init__(self, thread_id: str, after: str | None = None) -> None:
+        self.conn = connect(timeout=300)
+        query = f"?after={after}" if after else ""
+        self.conn.request("GET", f"/v1/threads/{thread_id}/events{query}",
+                          None, {"Authorization": f"Bearer {TOKEN}"})
+        self.resp = self.conn.getresponse()
+        self.buf = b""
+
+    def events(self, timeout: float = 300):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            chunk = self.resp.read(1)
+            if not chunk:
+                return
+            self.buf += chunk
+            while b"\n\n" in self.buf:
+                block, self.buf = self.buf.split(b"\n\n", 1)
+                for line in block.decode("utf-8", "replace").splitlines():
+                    if line.startswith("data: "):
+                        yield json.loads(line[6:])
+
+    def close(self) -> None:
+        self.conn.close()
+
+
+def first_body_line(path: Path) -> str:
+    """The first real line of the file's body -- past the frontmatter block
+    the output-style loader owns."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if lines and lines[0].strip() == "---":
+        end = next(i for i, line in enumerate(lines[1:], 1)
+                   if line.strip() == "---")
+        lines = lines[end + 1:]
+    return next(line for line in lines if line.strip())
+
+
+def phrase_from(path: Path, avoid: str) -> str:
+    """A sentence long enough to be unmistakable, taken from a file, that does
+    not also appear in `avoid`. Same idea as the wake preflight's canary: a
+    phrase two files share proves nothing about which one loaded."""
+    text = path.read_text(encoding="utf-8")
+    for candidate in re.split(r"(?<=[.!?])\s+|\n", text):
+        candidate = candidate.strip().strip("#*->| ")
+        if 40 <= len(candidate) <= 160 and candidate not in avoid:
+            return candidate
+    raise SystemExit(f"no usable phrase in {path}")
+
+
+def turn(stream: Stream, agent: str, label: str,
+         stop_on_permission: bool = False) -> dict | None:
+    """Print the thread's events until the member's reply lands (its
+    `message.done`), or, with `stop_on_permission`, until its session asks.
+    Returns that event, or None if the stream ended first."""
+    deltas = 0
+    for event in stream.events():
+        kind = event.get("type")
+        if kind == "message.delta":
+            deltas += 1
+            if deltas in (1, 5, 20):
+                say(f"  [delta #{deltas}] {(event.get('text') or '')[-80:]!r}")
+            continue
+        if kind == "turn.started":
+            say(f"  turn.started: {event.get('persona')} on {event.get('engine')}")
+        elif kind == "turn.step":
+            say(f"  turn.step: {event.get('label')}")
+        elif kind == "broker.permission_request":
+            say(f"  PERMISSION REQUEST ({event.get('kind') or 'approval'}) from "
+                f"session {event.get('session_id')}: {event.get('tool_name')} -> "
+                f"{json.dumps(event.get('questions') or event.get('input'))[:200]}")
+            say(f"      reason: {event.get('decision_reason')} "
+                f"({event.get('decision_reason_type')})")
+            if stop_on_permission:
+                return event
+        elif kind == "message.done":
+            msg = event.get("message") or {}
+            say(f"  [{msg.get('id')}] {msg.get('author')}: "
+                f"{(msg.get('text') or '').strip()[:600]}")
+            if msg.get("author") == agent and msg.get("kind") != "system":
+                return event
+        elif kind == "turn.finished":
+            say(f"  turn.finished: {event.get('persona')}")
+    say(f"  ({label}: stream ended without a reply)")
+    return None
+
+
+def member_session(thread_id: str, agent: str) -> dict | None:
+    """The member's row on Running now's list, while its process lives."""
+    status, view = call("GET", "/v1/sessions/live")
+    for row in view.get("sessions") or []:
+        if row.get("thread_id") == thread_id and row.get("agent") == agent:
+            return row
+    return None
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--agent", default=lc.LEAD_AGENT)
+    parser.add_argument("--engine", default="claude-code")
+    parser.add_argument("--keep", action="store_true")
+    args = parser.parse_args()
+    agent = args.agent
+    workspace = cfg.workspace(agent)
+
+    step("the broker answers, and the roster is derived from disk")
+    say(json.dumps(call("GET", "/up")[1]))
+    say(json.dumps([a.get("name") or a for a in
+                    (call("GET", "/v1/agents")[1].get("agents") or [])]))
+
+    step(f"start a thread with {agent} as its default, on {args.engine}")
+    status, row = call("POST", "/v1/threads",
+                       {"persona": agent,
+                        "title": f"broker-probe {secrets.token_hex(2)}"})
+    if status != 201:
+        say(f"start failed: {status} {row}")
+        return 1
+    thread_id = row["id"]
+    status, row = call("PATCH", f"/v1/threads/{thread_id}",
+                       {"engine": {agent: args.engine}})
+    say(f"HTTP 201  thread={thread_id}  title={row.get('title')!r}  "
+        f"members={[(m['persona'], m['engine']) for m in row.get('members') or []]}")
+
+    stream = Stream(thread_id)
+
+    # -- message 1: identity, and the first line of _active.md ------------
+    canary = loam_identity.pick_canary(workspace)
+    decoy, decoy_owner = loam_identity.pick_decoy(workspace)
+    active = workspace / "_active.md"
+    reflection = workspace / "_reflection.md"
+    active_phrase = phrase_from(active, avoid=reflection.read_text(encoding="utf-8"))
+    reflection_phrase = phrase_from(reflection,
+                                    avoid=active.read_text(encoding="utf-8"))
+    expected_line = first_body_line(active)
+
+    step("message 1 -- identity the way the wake preflight does, "
+         "plus the first line of _active.md")
+    say(f"  canary (from {agent}/soul.md): {canary[:90]!r}")
+    say(f"  decoy  (from {decoy_owner}/soul.md): {decoy[:90]!r}")
+    say(f"  _active.md phrase:     {active_phrase[:90]!r}")
+    say(f"  _reflection.md phrase: {reflection_phrase[:90]!r}")
+    say(f"  expected first body line of _active.md: {expected_line!r}")
+    prompt = (
+        "This is an automated check of the runtime, not a request for work. "
+        "Use no tools and read no files; answer only from what is already in "
+        "your context.\n"
+        "First line: exactly four words, YES or NO, separated by spaces --\n"
+        f"  1. is this phrase in your context? <<{canary}>>\n"
+        f"  2. is this phrase in your context? <<{decoy}>>\n"
+        f"  3. is this phrase in your context? <<{active_phrase}>>\n"
+        f"  4. is this phrase in your context? <<{reflection_phrase}>>\n"
+        "Second line: the first line of the body of your active-context file "
+        "(the one that loads as your conversation output style), quoted "
+        "exactly, from context and not from disk.\n"
+        "Nothing else."
+    )
+    call("POST", f"/v1/threads/{thread_id}/messages", {"text": prompt})
+    done = turn(stream, agent, "message 1")
+    if not done:
+        return 1
+    reply = done["message"].get("text") or ""
+    words = reply.strip().split("\n")[0].split()[:4]
+    verdict = "PASS" if [w.upper().strip(".,*") for w in words] == \
+        ["YES", "NO", "YES", "NO"] else "FAIL"
+    say(f"  identity verdict: {verdict} (want YES NO YES NO, got {words})")
+    line_ok = expected_line.strip().strip('"') in reply
+    say(f"  first line of _active.md present: {line_ok}")
+    member = member_session(thread_id, agent)
+    session_id = member["id"] if member else None
+    say(f"  the member's session: {session_id} "
+        f"(state={member and member.get('state')}, kind={member and member.get('kind')})")
+    if not session_id:
+        say("  NO LIVE SESSION FOR THE MEMBER -- the rest cannot run")
+        return 1
+
+    # -- message 2: a real permission prompt, answered from here ----------
+    step("message 2 -- a card on the permission channel: the persona asks "
+         "a question")
+    # The trigger moved twice. A write outside the roots never prompted: the
+    # boundary guard is a PreToolUse hook and refuses it first (2026-09-16).
+    # A Read of /tmp did prompt until `Read` joined every persona's
+    # permissions.allow; on 2026-11-12 it ran without asking. A question
+    # (`AskUserQuestion`) always rides the same channel -- a
+    # `broker.permission_request` of `kind: "question"`, answered on the same
+    # route -- and it is the card a thread draws most, so it is the trigger.
+    probe_file = "/tmp/loam-broker-probe/ONE.txt"
+    Path(probe_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(probe_file).write_text("THISTLE\n", encoding="utf-8")
+    status, posted = call("POST", f"/v1/threads/{thread_id}/messages", {
+        "text": f"Use the Read tool on the file {probe_file}. Then use the "
+                f"AskUserQuestion tool once to ask me whether that word names "
+                f"a plant or an animal, with exactly two options, Plant and "
+                f"Animal. After I answer, reply with the word, my answer, and "
+                f"DONE-TWO."})
+    last_seen = (posted.get("message") or {}).get("id")
+    permission = turn(stream, agent, "message 2", stop_on_permission=True)
+    if not permission or permission.get("type") != "broker.permission_request":
+        say("  NO PERMISSION PROMPT AROSE -- the rest of this step cannot run")
+        return 1
+    say(f"  asked by the member's own session: "
+        f"{permission.get('session_id') == session_id}")
+
+    # -- the disconnect, mid-turn, with the turn paused on the prompt -----
+    step("drop the connection mid-turn (the turn is paused on the prompt), "
+         "then answer the prompt with nobody listening")
+    stream.close()
+    say(f"  SSE connection closed. Last message the client saw: {last_seen}")
+    answer: dict = {"behavior": "allow"}
+    if permission.get("kind") == "question":
+        answer["answers"] = {q["id"]: ["Plant"]
+                             for q in permission.get("questions") or []}
+    status, body = call(
+        "POST", f"/v1/sessions/{permission['session_id']}/permissions/"
+                f"{permission['request_id']}", answer)
+    say(f"  answered from the script: HTTP {status} {json.dumps(body)}")
+    say("  sleeping 25s with no client attached...")
+    time.sleep(25)
+
+    step("reconnect and catch up on everything missed")
+    stream = Stream(thread_id, after=last_seen)
+    caught = turn(stream, agent, "catch-up")
+    stream.close()
+    if not caught:
+        return 1
+    two = caught["message"]
+    said = (two.get("text") or "").upper()
+    say(f"  caught up on {two.get('id')}: carries THISTLE: {'THISTLE' in said}; "
+        f"carries the answer given with nobody listening (PLANT): {'PLANT' in said}")
+    status, steps = call("GET", f"/v1/threads/{thread_id}/steps?message={two['id']}")
+    kinds = []
+    for entry in steps.get("steps") or []:
+        for item in entry.get("steps") or []:
+            event = item.get("event") or {}
+            if event.get("type") == "broker.permission_request":
+                kinds.append(f"card:{event.get('tool_name')}")
+            for part in (event.get("message") or {}).get("content") or []:
+                if isinstance(part, dict) and part.get("type") == "tool_use":
+                    kinds.append(part.get("name"))
+    say(f"  its full record (session {(steps.get('steps') or [{}])[0].get('session_id')}): "
+        f"tool calls and cards {kinds}")
+
+    # -- end the process, then send again: the thread resumes the same id --
+    step("end the member's process")
+    status, meta = call("DELETE", f"/v1/sessions/{session_id}")
+    say(f"HTTP {status}  state={meta.get('state')}  "
+        f"exit_code={meta.get('exit_code')}  turns recorded={len(meta.get('turns') or [])}")
+    for t in meta.get("turns") or []:
+        usage = t.get("usage") or {}
+        say(f"    - model={t.get('model')} in={usage.get('input_tokens')} "
+            f"out={usage.get('output_tokens')} "
+            f"cache_read={usage.get('cache_read_input_tokens')} "
+            f"cost=${t.get('cost_delta_usd')} "
+            f"denials={json.dumps(t.get('permission_denials'))}")
+    say(f"  still live after the end: {member_session(thread_id, agent) is not None}")
+
+    step("send again, with a question that needs both earlier turns")
+    # Until 2026-11-12 this also asked for a Write into another persona's
+    # workspace, to prove the boundary guard refused it through this surface.
+    # Since the owner's 2026-11-08 authority change no tool refuses a write by
+    # its path, so that write lands (caused 2026-11-12: it created a file in
+    # Iris's workspace, since removed); the check is gone rather than left to
+    # write into a workspace that is not the probe's.
+    status, posted = call("POST", f"/v1/threads/{thread_id}/messages", {
+        "text": "Two lines, no tools. (a) What single word was in the file "
+                "you read earlier in this conversation? (b) What were the "
+                "four YES/NO words you answered first, in order?"})
+    stream = Stream(thread_id, after=(posted.get("message") or {}).get("id"))
+    three = turn(stream, agent, "message 3")
+    stream.close()
+    if not three:
+        return 1
+    joined = (three["message"].get("text") or "").upper()
+    say(f"  remembers the written word: {'THISTLE' in joined}")
+    say(f"  remembers its own first answer: {'YES NO YES NO' in joined}")
+    again = member_session(thread_id, agent)
+    say(f"  resumed the same session id: "
+        f"{bool(again) and again['id'] == session_id} "
+        f"({again and again['id']})")
+
+    step("Running now, the listing and the cap")
+    status, live = call("GET", "/v1/sessions/live")
+    box = live.get("box") or {}
+    say(f"live sessions={len(live.get('sessions') or [])}  "
+        f"can_start={box.get('can_start')}  ram_available_mb={box.get('ram_available_mb')}")
+    status, listing = call("GET", f"/v1/sessions?agent={agent}")
+    say(f"live_count={listing.get('live_count')} cap={listing.get('cap')}")
+    for record in (listing.get("sessions") or [])[:3]:
+        say(f"  {record['session_id']}  {record['agent']}  {record['state']}  "
+            f"last_activity={record['last_activity']}")
+
+    if not args.keep:
+        call("DELETE", f"/v1/sessions/{session_id}")
+        status, row = call("PATCH", f"/v1/threads/{thread_id}", {"archived": True})
+        say(f"\nsession ended; thread archived: {row.get('archived')}")
+    say(f"\nprobe thread: {thread_id}  member session: {session_id}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

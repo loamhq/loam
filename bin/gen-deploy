@@ -1,0 +1,494 @@
+#!/usr/bin/env python3
+"""Render the deployment layer and put it live. The generator for the proxy.
+
+Same rule as provision and gen-rc-units: derives from disk, never copies, and
+rewrites nothing it would not change. What it renders is in
+lib/loam_deploy.py; this file is the hands -- it writes as root, validates
+the Caddyfile before it lands, reloads Caddy, and brings the runtime's two
+containers up on their compose files. bin/check-drift diffs the same renders
+against the same live paths, so a hand edit to any of them is reported.
+
+Usage:
+  gen-deploy [--dry-run]            render, show what changes, write, apply
+  gen-deploy --show <name>          print one render: caddyfile | daemon |
+                                    authelia | authelia-compose | browser |
+                                    firewall | firewall-unit | sudoers
+  gen-deploy --init-login <user>    ONCE: mint Authelia's secrets, the user
+                                    with a generated password, start the
+                                    login, pre-generate a TOTP device, write
+                                    the first-login file (root-only). Prints
+                                    no secret.
+  gen-deploy --init-secrets         an install's login before its claim:
+                                    the secrets and the data volume, no
+                                    user (bin/loam-claim writes the user)
+  gen-deploy --share <app>          mint (or re-mint) the app's share token
+                                    and regenerate; prints the link once
+  gen-deploy --unshare <app>        delete the token and regenerate
+  gen-deploy --link <app>           print the live share link from the
+                                    existing token (no minting)
+
+Secrets never pass through this process's stdout. The password and TOTP
+secret are written to /etc/loam/authelia/first-login.txt, mode 0600, root,
+and the receipt says where it is and not what it holds.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import difflib
+import os
+import pwd
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_deploy as dep  # noqa: E402
+
+DOCKER = ["docker"]
+CADDY_USER = "caddy"   # the Debian package's unit runs Caddy as this user
+
+
+def die(msg: str, code: int = 1) -> None:
+    print(f"gen-deploy: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def as_root() -> None:
+    """Everything here writes under /etc; re-exec under sudo once."""
+    if os.geteuid() == 0:
+        return
+    os.execvp("sudo", ["sudo", "-n", sys.executable, os.path.abspath(__file__), *sys.argv[1:]])
+
+
+def run(argv: list[str], **kw) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, capture_output=True, text=True, check=False, **kw)
+
+
+def write_root(path: Path, content: str, mode: int = 0o644) -> bool:
+    """Atomic replace, root-owned, given mode. False if already identical."""
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".gen-deploy-tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.chmod(tmp, mode)
+    os.chown(tmp, 0, 0)
+    os.replace(tmp, path)
+    return True
+
+
+def ensure_access_log_dir(dry: bool) -> None:
+    """The access logs' directory, owned by the user Caddy runs as, before
+    anything opens a log writer. Owned by caddy and closed to others: the
+    lines carry addresses and paths, and reading them is a sudo."""
+    d = dep.ACCESS_LOG_DIR
+    pw = pwd.getpwnam(CADDY_USER)
+    if d.is_dir() and d.stat().st_uid == pw.pw_uid:
+        return
+    print(f"  {'would create' if dry else 'created'} {d} (caddy:caddy 0750)")
+    if not dry:
+        d.mkdir(parents=True, exist_ok=True)
+        os.chown(d, pw.pw_uid, pw.pw_gid)
+        os.chmod(d, 0o750)
+
+
+def validate_caddyfile(content: str) -> None:
+    # Validated AS the caddy user, not as root. Validating provisions every
+    # log writer, which opens (creates) each access log file; as root that
+    # left eight root-owned 0600 files the caddy process could not open, and
+    # the reload after it failed (caused 2026-09-28; the old config kept
+    # serving, which is what a failed reload does).
+    with tempfile.NamedTemporaryFile("w", suffix=".Caddyfile", delete=False) as fh:
+        fh.write(content)
+        tmp = fh.name
+    os.chmod(tmp, 0o644)
+    pw = pwd.getpwnam(CADDY_USER)
+    try:
+        res = run(["caddy", "validate", "--config", tmp, "--adapter", "caddyfile"],
+                  user=pw.pw_uid, group=pw.pw_gid, extra_groups=[],
+                  env={"HOME": pw.pw_dir, "PATH": "/usr/bin:/bin"})
+    finally:
+        os.unlink(tmp)
+    if res.returncode != 0:
+        die(f"the rendered Caddyfile does not validate; nothing written:\n"
+            f"{res.stderr.strip() or res.stdout.strip()}")
+
+
+def compose(path: Path, *args: str) -> subprocess.CompletedProcess:
+    return run([*DOCKER, "compose", "-f", str(path), *args])
+
+
+def diff(path: Path, new: str) -> str:
+    old = path.read_text(encoding="utf-8") if path.exists() else ""
+    return "\n".join(difflib.unified_diff(
+        old.splitlines(), new.splitlines(),
+        fromfile=f"live:{path}", tofile="generator", lineterm="", n=1))
+
+
+def validate_authelia(content: str) -> None:
+    """Authelia's own validator on the render before it lands. Authelia does
+    not reload its file, so a bad render is a force-recreate into a crash
+    loop with the login down; the validator runs the same code the daemon
+    runs at startup. Needs the secrets as environment, exactly as the
+    container has them; nothing is printed but the verdict. Skipped when the
+    login is not initialised (no secrets yet) or docker is not on the box."""
+    if not dep.AUTHELIA_SECRETS.exists() or not shutil.which("docker"):
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as fh:
+        fh.write(content)
+        tmp = fh.name
+    try:
+        os.chmod(tmp, 0o644)
+        res = run([*DOCKER, "run", "--rm", "--env-file", str(dep.AUTHELIA_SECRETS),
+                   "-v", f"{tmp}:/config/configuration.yml:ro",
+                   "--entrypoint", "authelia", dep.AUTHELIA_IMAGE,
+                   "config", "validate", "--config", "/config/configuration.yml"])
+    finally:
+        os.unlink(tmp)
+    if res.returncode != 0:
+        die(f"the rendered Authelia configuration does not validate; nothing written:\n"
+            f"{(res.stdout + res.stderr).strip()[-1500:]}")
+
+
+def warn_unresolved() -> None:
+    """A host on an app's own domain that does not resolve here yet: Caddy
+    will ask for its certificate on every reload and fail the challenge
+    until the DNS record lands. Said, not refused: the record is the
+    decision, and DNS landing later needs no regenerate."""
+    for name, why in dep.unresolved_hosts():
+        print(f"  warning: {name} {why}; Caddy cannot obtain its certificate "
+              f"until an A record points it at this box (its own logs will "
+              f"say so on every attempt)")
+
+
+def validate_sudoers(content: str) -> None:
+    """visudo on the render before it lands: a syntax error in sudoers.d
+    is not one file broken, it is every sudo on the box refused."""
+    with tempfile.NamedTemporaryFile("w", suffix=".sudoers", delete=False) as fh:
+        fh.write(content)
+        tmp = fh.name
+    try:
+        os.chmod(tmp, 0o440)
+        res = run(["visudo", "-c", "-q", "-f", tmp])
+    finally:
+        os.unlink(tmp)
+    if res.returncode != 0:
+        die(f"the rendered sudoers file does not validate; nothing written:\n"
+            f"{res.stderr.strip() or res.stdout.strip()}")
+
+
+def ensure_static_roots(dry: bool) -> None:
+    """A static host's directory must exist for Caddy to serve it. Owned by
+    the owner of ai-labs, because the personas write there."""
+    owner = os.stat(dep.AI_LABS)
+    for root in dep.static_roots():
+        if root.is_dir():
+            continue
+        print(f"  {'would create' if dry else 'created'} {root}")
+        if not dry:
+            root.mkdir(parents=True)
+            os.chown(root, owner.st_uid, owner.st_gid)
+
+
+def generate(dry: bool) -> int:
+    files = dep.generated()
+    ensure_access_log_dir(dry)
+    validate_caddyfile(files[dep.CADDYFILE])
+    validate_sudoers(files[dep.SUDOERS])
+    validate_authelia(files[dep.AUTHELIA_CONFIG])
+    ensure_static_roots(dry)
+    warn_unresolved()
+    changed: list[Path] = []
+    for path, content in files.items():
+        d = diff(path, content)
+        if not d:
+            print(f"  unchanged {path}")
+            continue
+        changed.append(path)
+        print(f"  {'would write' if dry else 'wrote'} {path}")
+        if dry:
+            print("\n".join("    " + line for line in d.splitlines()))
+    if dry:
+        print("  [dry-run] nothing written, nothing reloaded")
+        return 0
+    for path in changed:
+        write_root(path, files[path], dep.MODES.get(path, 0o644))
+
+    # Apply. Each of these is idempotent and each says what it did.
+    if dep.CADDYFILE in changed:
+        res = run(["systemctl", "reload", "caddy"])
+        print(f"  caddy reloaded (exit {res.returncode}){': ' + res.stderr.strip() if res.stderr.strip() else ''}")
+    if dep.DAEMON_JSON in changed:
+        print("  daemon.json changed. NOT restarting docker from here: "
+              "`systemctl restart docker` applies it (live-restore keeps "
+              "containers up); do it on a brief and say so.")
+    if dep.unclaimed():
+        print(f"  authelia: not started; this install is unclaimed (no "
+              f"{dep.CLAIMED_FILE}), so the login has no user. The claim starts it.")
+    elif dep.AUTHELIA_SECRETS.exists():
+        args = ["up", "-d", "--remove-orphans"]
+        if dep.AUTHELIA_CONFIG in changed:
+            args.append("--force-recreate")   # Authelia does not reload its config
+        res = compose(dep.AUTHELIA_COMPOSE, *args)
+        print(f"  authelia: compose up (exit {res.returncode})")
+        if res.returncode:
+            print(res.stderr.strip())
+    else:
+        print(f"  authelia: {dep.AUTHELIA_SECRETS} is absent; run --init-login "
+              f"<user> first. The gate still holds: forward_auth to a dead "
+              f"upstream answers 502, not the app.")
+    res = compose(dep.BROWSER_COMPOSE, "up", "-d", "--remove-orphans")
+    print(f"  browser: compose up (exit {res.returncode})")
+    if res.returncode:
+        print(res.stderr.strip())
+    # The wall. A changed script or unit is re-applied by restarting the
+    # unit (the script rebuilds both chains); an unchanged one is only made
+    # sure of, because check-drift will ask the kernel either way.
+    if dep.SIGHT_FIREWALL_UNIT in changed or dep.SIGHT_FIREWALL_SCRIPT in changed:
+        run(["systemctl", "daemon-reload"])
+        res = run(["systemctl", "enable", "--now", dep.SIGHT_WALL_SERVICE])
+        res = run(["systemctl", "restart", dep.SIGHT_WALL_SERVICE])
+        print(f"  wall: {dep.SIGHT_WALL_SERVICE} restarted (exit {res.returncode})"
+              f"{': ' + res.stderr.strip() if res.stderr.strip() else ''}")
+    else:
+        res = run(["systemctl", "enable", "--now", dep.SIGHT_WALL_SERVICE])
+        print(f"  wall: {dep.SIGHT_WALL_SERVICE} enabled (exit {res.returncode})")
+    missing = dep.sight_wall_missing()
+    print("  wall: every rule present" if not missing else
+          "  wall: MISSING\n" + "\n".join("    " + m for m in missing))
+    for app in dep.records():
+        if app.exposure == "shared" and app.share_active(dt.date.today()) is None:
+            print(f"  note: {app.name} is recorded as shared but has no live "
+                  f"share (no token, or expired); rendered private.")
+    return 0
+
+
+def show(name: str) -> int:
+    renders = {
+        "caddyfile": dep.caddyfile, "daemon": dep.daemon_json,
+        "authelia": dep.authelia_config, "authelia-compose": dep.authelia_compose,
+        "browser": dep.browser_compose, "sudoers": dep.sudoers,
+        "firewall": dep.sight_firewall_script, "firewall-unit": dep.sight_firewall_unit,
+    }
+    if name not in renders:
+        die(f"--show takes one of {', '.join(renders)}")
+    sys.stdout.write(renders[name]())
+    return 0
+
+
+def wait_healthy(container: str, seconds: int = 90) -> str:
+    deadline = time.time() + seconds
+    state = "?"
+    while time.time() < deadline:
+        res = run([*DOCKER, "inspect", "-f", "{{.State.Health.Status}}", container])
+        state = res.stdout.strip()
+        if state == "healthy":
+            return state
+        time.sleep(3)
+    return state
+
+
+def init_secrets() -> int:
+    """An install's login, before anyone has claimed it (first release L12):
+    Authelia's three secrets and its data volume, and no user. The claim
+    (bin/loam-claim) writes the user; the old --init-login is the first install's
+    history and an operator's alternative."""
+    for d, mode in ((dep.ETC, 0o755), (dep.AUTHELIA_DIR, 0o755), (dep.SHARE_DIR, 0o700)):
+        d.mkdir(parents=True, exist_ok=True)
+        os.chmod(d, mode)
+    if dep.AUTHELIA_SECRETS.exists():
+        print(f"  {dep.AUTHELIA_SECRETS} exists; kept")
+    else:
+        write_root(dep.AUTHELIA_SECRETS, _secrets_env(), 0o600)
+        print(f"  wrote {dep.AUTHELIA_SECRETS} (0600 root, three secrets)")
+    res = run([*DOCKER, "volume", "create", "authelia-data"])
+    if res.returncode:
+        die(f"could not create the authelia-data volume: {res.stderr.strip()[:300]}")
+    print("  authelia-data volume present")
+    return 0
+
+
+def _secrets_env() -> str:
+    return "\n".join(
+        f"{k}={secrets.token_hex(32)}" for k in (
+            "AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET",
+            "AUTHELIA_SESSION_SECRET",
+            "AUTHELIA_STORAGE_ENCRYPTION_KEY",
+        )) + "\n"
+
+
+def init_login(user: str) -> int:
+    if not re.match(r"^[a-z][a-z0-9_-]{1,31}$", user):
+        die(f"username {user!r}: lowercase, digits, - and _")
+    if dep.AUTHELIA_SECRETS.exists():
+        die(f"{dep.AUTHELIA_SECRETS} exists; the login is already initialised. "
+            f"Remove it and the authelia-data volume by hand to start over.")
+    dom = dep.domain()
+    for d, mode in ((dep.ETC, 0o755), (dep.AUTHELIA_DIR, 0o755), (dep.SHARE_DIR, 0o700)):
+        d.mkdir(parents=True, exist_ok=True)
+        os.chmod(d, mode)
+
+    # 1. The three secrets, root-only, environment form (Authelia accepts
+    #    either; a file per secret would have to be readable by the
+    #    container's remapped root, which is exactly what root-only forbids).
+    env = "\n".join(
+        f"{k}={secrets.token_hex(32)}" for k in (
+            "AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET",
+            "AUTHELIA_SESSION_SECRET",
+            "AUTHELIA_STORAGE_ENCRYPTION_KEY",
+        )) + "\n"
+    write_root(dep.AUTHELIA_SECRETS, env, 0o600)
+    print(f"  wrote {dep.AUTHELIA_SECRETS} (0600 root, three secrets)")
+
+    run([*DOCKER, "volume", "create", "authelia-data"])
+
+    # 2. The user, with a generated first password hashed by Authelia's own
+    #    CLI. The password is passed to the child's argv and never printed.
+    password = secrets.token_urlsafe(18)
+    res = run([*DOCKER, "run", "--rm", dep.AUTHELIA_IMAGE, "authelia", "crypto",
+               "hash", "generate", "argon2", "--password", password])
+    m = re.search(r"Digest:\s*(\S+)", res.stdout)
+    if res.returncode or not m:
+        die(f"hash generation failed: {res.stderr.strip()[:300]}")
+    users = (
+        "# Authelia's users. Written once by gen-deploy --init-login; Authelia\n"
+        "# rewrites it when the password changes. Lives in the authelia-data\n"
+        "# volume, never in a repo.\n"
+        "users:\n"
+        f"  {user}:\n"
+        "    disabled: false\n"
+        f"    displayname: '{user.capitalize()}'\n"
+        f"    password: '{m.group(1)}'\n"
+        f"    email: '{user}@{dom}'\n"
+        "    groups:\n"
+        "      - 'admins'\n"
+    )
+    res = run([*DOCKER, "run", "--rm", "-i", "-v", "authelia-data:/data",
+               "--entrypoint", "sh", dep.AUTHELIA_IMAGE, "-c",
+               "cat > /data/users_database.yml && chmod 600 /data/users_database.yml"],
+              input=users)
+    if res.returncode:
+        die(f"seeding the users file failed: {res.stderr.strip()[:300]}")
+    print("  seeded users_database.yml in the authelia-data volume")
+
+    # 3. Config and container.
+    write_root(dep.AUTHELIA_CONFIG, dep.authelia_config())
+    write_root(dep.AUTHELIA_COMPOSE, dep.authelia_compose())
+    res = compose(dep.AUTHELIA_COMPOSE, "up", "-d")
+    if res.returncode:
+        die(f"authelia would not start: {res.stderr.strip()[:500]}")
+    print(f"  authelia: {wait_healthy('loam-authelia')}")
+
+    # 4. A TOTP device, so the first session can be two-factor and therefore
+    #    elevated without a one-time code this box cannot mail.
+    res = compose(dep.AUTHELIA_COMPOSE, "exec", "-T", "authelia", "authelia",
+                  "storage", "user", "totp", "generate", user, "--issuer", dom,
+                  "--force", "--config", "/config/configuration.yml")
+    url = re.search(r"(otpauth://\S+)", res.stdout)
+    if res.returncode or not url:
+        die(f"TOTP generation failed: {(res.stderr or res.stdout).strip()[:300]}")
+    print("  TOTP device generated for the user (secret not shown)")
+
+    # 5. The handover file. Root-only, outside every repo and the vault.
+    text = (
+        f"Loam login -- first credentials for {user}, written {dt.date.today()}\n"
+        f"by gen-deploy --init-login. Read this once, then delete it.\n\n"
+        f"portal:    https://{dep.config()['auth_host']}.{dom}\n"
+        f"username:  {user}\n"
+        f"password:  {password}\n"
+        f"TOTP:      {url.group(1)}\n\n"
+        f"First login: password, then the TOTP code from an authenticator app\n"
+        f"that has the otpauth URL above (any app: add by URL or by secret).\n"
+        f"Then Settings -> Two-Factor Authentication -> WebAuthn Credentials ->\n"
+        f"Add a passkey (Face ID / Touch ID), and change the password under\n"
+        f"Settings -> Security while you are there. After that\n"
+        f"the passkey is the login and the password is the fallback.\n"
+    )
+    write_root(dep.AUTHELIA_FIRST_LOGIN, text, 0o600)
+    print(f"  first-login file at {dep.AUTHELIA_FIRST_LOGIN} (0600 root). "
+          f"`sudo cat` it from the operator session; delete it after.")
+    return 0
+
+
+def share(app_name: str) -> int:
+    apps = {a.name: a for a in dep.records()}
+    if app_name not in apps:
+        die(f"no deployment record for {app_name!r}")
+    app = apps[app_name]
+    if app.exposure != "shared" or app.share_expires is None:
+        die(f"{dep.record_path(app_name)} must say exposure = \"shared\" and "
+            f"carry [share] expires = <date> before a token is minted; the "
+            f"record is the decision, the token is the mechanism")
+    if app.share_expires < dt.date.today():
+        die(f"share.expires {app.share_expires} has passed; move the date first")
+    dep.SHARE_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(dep.SHARE_DIR, 0o700)
+    token = secrets.token_urlsafe(24)
+    write_root(dep.SHARE_DIR / f"{app_name}.token", token + "\n", 0o600)
+    print(f"  minted {dep.SHARE_DIR / (app_name + '.token')}")
+    generate(dry=False)
+    print(f"\nshare link (valid through {app.share_expires} UTC, revoked by "
+          f"--unshare or by an earlier date in the record):\n"
+          f"  https://{app.fqdn}/?share={token}")
+    return 0
+
+
+def link(app_name: str) -> int:
+    """Print the app's live share link from the existing token, without
+    minting. For the operator session: a persona cannot read the token."""
+    apps = {a.name: a for a in dep.records()}
+    if app_name not in apps:
+        die(f"no deployment record for {app_name!r}")
+    share = apps[app_name].share_active(dt.date.today())
+    if share is None:
+        die(f"{app_name} has no live share (not shared, expired, or no token minted)")
+    token, expires = share
+    print(f"https://{apps[app_name].fqdn}/?share={token}   (through {expires} UTC)")
+    return 0
+
+
+def unshare(app_name: str) -> int:
+    path = dep.SHARE_DIR / f"{app_name}.token"
+    if path.exists():
+        path.unlink()
+        print(f"  deleted {path}")
+    else:
+        print(f"  no token at {path}")
+    return generate(dry=False)
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if "--show" in argv:
+        return show(argv[argv.index("--show") + 1])
+    as_root()
+    if "--init-login" in argv:
+        return init_login(argv[argv.index("--init-login") + 1])
+    if "--init-secrets" in argv:
+        return init_secrets()
+    if "--share" in argv:
+        return share(argv[argv.index("--share") + 1])
+    if "--unshare" in argv:
+        return unshare(argv[argv.index("--unshare") + 1])
+    if "--link" in argv:
+        return link(argv[argv.index("--link") + 1])
+    return generate("--dry-run" in argv)
+
+
+if __name__ == "__main__":
+    try:
+        # The live lock (since 2026-10-02): rendering and reloading the
+        # deployment layer is Loam's live state. Reading it takes nothing.
+        if "--dry-run" in sys.argv or "--show" in sys.argv:
+            sys.exit(main())
+        import loam_lock  # noqa: E402
+        with loam_lock.live("Loam", "gen-deploy " + " ".join(sys.argv[1:])):
+            sys.exit(main())
+    except dep.DeployError as exc:
+        die(str(exc))

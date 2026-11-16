@@ -1,0 +1,10 @@
+/* Acme's card: GitHub's, with the account linked inside the one line. Its
+ * Connect sheet: the token field with its Show beside it, and — when the token
+ * reaches several accounts — those accounts, one pill each, full width. */
+.icon-tile.glyph.acme { background:var(--paper-card); color:var(--paper-card-ink); }
+a.bcaccount { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
+.bcfield { display: flex; align-items: center; gap: 8px; }
+.bcshow { width: auto; padding: 0 10px; font-size: 13px; font-weight: 600; color: var(--paper-ink-2); }
+.bcaccounts .bcpick { width: 100%; text-align: left; }
+/* Match the shared integration link treatment after the card defaults. */
+a.bcaccount { color:var(--paper-ink); text-decoration:underline; text-decoration-color:var(--signal-crema); text-underline-offset:3px; }

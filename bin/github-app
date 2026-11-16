@@ -1,0 +1,285 @@
+#!/usr/bin/env python3
+"""An app owned by a GitHub organization, from the box (2026-10-06).
+
+loam-ui draws one GitHub app: the first, on the personal account. Until it
+draws an organization's, the links for one are minted here and relayed by
+the persona. Every GitHub click is the org owner's; nothing here creates,
+installs or changes anything on GitHub.
+
+  github-app org-manifest <org> [--name NAME]
+      A ``data:`` URL holding a one-button form that posts the manifest
+      (lib/loam_github_app.py, ``ORG_PERMISSIONS``) to
+      ``https://github.com/organizations/<org>/settings/apps/new``. It is
+      pasted into a desktop browser's address bar -- a page cannot link to
+      a data: URL. Its state is good for an hour.
+  github-app org-manifest <org> --page DIR [--for 48h]
+      The same form as an https page instead: DIR/index.html, which posts
+      itself to GitHub on opening (the button is there if scripts are off).
+      DIR is served behind the login with ``bin/site up <name> --root DIR``,
+      so the link is a plain https one that a phone or a chat can open, and
+      nobody pastes anything (2026-11-15, Loam HQ's app). ``--for`` keeps the
+      state alive that long (at most a week), for a person who clicks later;
+      GitHub's own code still lives an hour from Create.
+  github-app org-watch <org> --note PATH [--for 48h] [--repo NAME] [--site NAME]
+      Wait for the org's app to be installed and authorized (the broker's
+      store says so), then write a short note to PATH: the app's slug, the
+      installation's account and repositories as GitHub answers them now,
+      and with ``--repo`` that repository's visibility and who can reach it.
+      With ``--site``, that site goes down after. If the time runs out
+      first, the note says so. Meant to run as a transient unit
+      (``systemd-run --user``); it holds no secret and prints none.
+  github-app org-install <org>
+      GitHub's install page for that org's app, with a state good for an
+      hour. Needed only if the install offered after Create was not taken.
+  github-app status
+      What the broker's GET answers: no token, key or secret.
+  github-app org-forget <org>
+      Forget the org's app here, and print the GitHub pages where the org
+      uninstalls and deletes it.
+
+``org-manifest`` and ``org-install`` refuse unless the running broker
+answers with ``org_apps``: GitHub sends the browser back through loam-ui to
+the broker, and a broker on the code from before org apps would refuse the
+state after GitHub had already made the app.
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_broker as cfg  # noqa: E402
+import loam_github_app as app  # noqa: E402
+
+
+def broker_knows_org_apps() -> str | None:
+    """None if the running broker serves org apps; otherwise why not."""
+    base = os.environ.get("LOAM_BROKER_URL") or f"http://{cfg.BIND_ADDR}:{cfg.PORT}"
+    token_file = Path(os.environ.get("LOAM_BROKER_TOKEN_FILE") or cfg.TOKEN_PATH)
+    try:
+        bearer = token_file.read_text(encoding="utf-8").strip()
+        req = urllib.request.Request(base + "/v1/integrations/github",
+                                     headers={"Authorization": f"Bearer {bearer}"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            view = json.loads(resp.read())
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        return f"the broker did not answer: {exc}"
+    if "org_apps" not in view:
+        return ("the running broker is on the code from before org apps; it "
+                "must be restarted (bin/restart-broker) before anyone clicks")
+    return None
+
+
+DURATION_RE = re.compile(r"^(\d+)([hd])$")
+
+
+def duration(text: str) -> int:
+    m = DURATION_RE.match(text or "")
+    if not m:
+        raise app.IntegrationError(f"{text!r} is not a duration like 48h or 2d")
+    return int(m.group(1)) * (3600 if m.group(2) == "h" else 86400)
+
+
+def form_html(org: str, started: dict, autosubmit: bool) -> str:
+    return (
+        "<!doctype html><meta charset=utf-8><title>Create the GitHub App</title>"
+        "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+        "<meta name=referrer content=no-referrer>"
+        "<body style=\"font:16px system-ui;margin:3em\">"
+        f"<p>Creates <b>{html.escape(started['manifest']['name'])}</b>, owned by "
+        f"<b>{html.escape(org)}</b>, private. GitHub shows its own page next; "
+        "Create is clicked there.</p>"
+        f"<form id=f method=post action=\"{html.escape(started['post_url'])}\">"
+        "<input type=hidden name=manifest value=\""
+        f"{html.escape(json.dumps(started['manifest']))}\">"
+        "<button type=submit style=\"font-size:1.1em\">Continue to GitHub</button>"
+        "</form>"
+        + ("<script>document.getElementById('f').submit()</script>" if autosubmit else ""))
+
+
+def manifest_page(org: str, name: str | None,
+                  ttl_s: int | None = None) -> tuple[str, dict]:
+    started = app.start_manifest(name, org, ttl_s)
+    body = form_html(org, started, autosubmit=False)
+    return "data:text/html;charset=utf-8," + urllib.parse.quote(body, safe=""), started
+
+
+def write_page(org: str, name: str | None, ttl_s: int | None, root: Path) -> dict:
+    started = app.start_manifest(name, org, ttl_s)
+    root.mkdir(parents=True, exist_ok=True)
+    page = root / "index.html"
+    tmp = root / ".index.html.tmp"
+    tmp.write_text(form_html(org, started, autosubmit=True), encoding="utf-8")
+    tmp.chmod(0o644)
+    tmp.replace(page)
+    return started
+
+
+# ---------------------------------------------------------------- org-watch
+
+WATCH_EVERY_S = 60
+
+
+def _gh_cli(path: str) -> object | None:
+    """``gh api`` as the account the box's gh is signed in to, for what an
+    org app's own token cannot read (a repository's collaborators). None when
+    gh is absent or refuses; the note says so."""
+    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_TOKEN", "GH_TOKEN")}
+    try:
+        out = subprocess.run(["gh", "api", path], env=env, capture_output=True,
+                             text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    try:
+        return json.loads(out.stdout)
+    except ValueError:
+        return None
+
+
+def watch_evidence(org: str, own: dict, repo: str | None) -> list[str]:
+    key = org.lower()
+    lines: list[str] = []
+    a, inst = own.get("app") or {}, own.get("installation") or {}
+    try:
+        _, live = app.api("GET", f"/app/installations/{inst['installation_id']}",
+                          app._jwt(own))
+        lines.append(f"- App `{live.get('app_slug') or a.get('slug')}` "
+                     f"(id {live.get('app_id') or a.get('id')}), "
+                     f"installed on `{(live.get('account') or {}).get('login')}` "
+                     f"({(live.get('account') or {}).get('type')}), repositories: "
+                     f"`{live.get('repository_selection')}`; GitHub's answer to "
+                     f"`GET /app/installations/{inst['installation_id']}` at "
+                     f"{app.iso(app.now())}.")
+        lines.append(f"- Permissions granted: `{json.dumps(live.get('permissions'), sort_keys=True)}`.")
+    except app.IntegrationError as exc:
+        lines.append(f"- App `{a.get('slug')}`; asking GitHub about installation "
+                     f"{inst.get('installation_id')} failed: {exc}")
+    user = own.get("user") or {}
+    lines.append(f"- Authorized as `{user.get('login')}`, at {user.get('authorized_at')}.")
+    if repo:
+        full = f"{key}/{repo}"
+        try:
+            tok = app.installation_token(full)["token"]
+            _, r = app.api("GET", f"/repos/{full}", tok)
+            lines.append(f"- `{r.get('full_name')}`: `private: {str(r.get('private')).lower()}`, "
+                         f"`visibility: {r.get('visibility')}`, size {r.get('size')} KB, "
+                         f"default branch `{r.get('default_branch')}`; read with the "
+                         f"org app's own token, so the app reaches it.")
+        except (app.IntegrationError, KeyError) as exc:
+            lines.append(f"- `{full}` through the org app's token: {exc}")
+        people = _gh_cli(f"repos/{full}/collaborators")
+        invites = _gh_cli(f"repos/{full}/invitations")
+        members = _gh_cli(f"orgs/{key}/members")
+        if isinstance(people, list):
+            lines.append("- Who can reach it (`gh api repos/" + full + "/collaborators`): "
+                         + ", ".join(f"`{p.get('login')}` ({p.get('role_name')})" for p in people)
+                         + f"; pending invitations: {len(invites) if isinstance(invites, list) else 'unread'}"
+                         + "; org members: "
+                         + (", ".join(f"`{m.get('login')}`" for m in members)
+                            if isinstance(members, list) else "unread") + ".")
+        else:
+            lines.append("- Collaborators were not read (the box's gh did not answer).")
+    return lines
+
+
+def watch(org: str, note: Path, ttl_s: int, repo: str | None, site: str | None) -> int:
+    key = org.lower()
+    deadline = time.time() + ttl_s
+    while True:
+        own = app.org_apps(app.load()).get(key) or {}
+        if own.get("installation") and own.get("user"):
+            body = [f"# {org}'s GitHub App is installed", "",
+                    f"*Written by `bin/github-app org-watch` when the broker's "
+                    f"store recorded the installation, {app.iso(app.now())}.*", "",
+                    *watch_evidence(org, own, repo), ""]
+            break
+        if time.time() >= deadline:
+            seen = ("registered (Create was clicked) but not installed"
+                    if own.get("app") else "not registered (Create was not clicked)")
+            body = [f"# {org}'s GitHub App: the wait ran out", "",
+                    f"*Written by `bin/github-app org-watch`, {app.iso(app.now())}.*", "",
+                    f"- The app is {seen}. The link's state has expired; a new "
+                    f"link is `bin/github-app org-manifest {org} --page DIR`.", ""]
+            break
+        time.sleep(WATCH_EVERY_S)
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text("\n".join(body), encoding="utf-8")
+    print(f"github-app: wrote {note}")
+    if site:
+        subprocess.run([str(Path(__file__).resolve().parent / "site"), "down", site],
+                       capture_output=True, text=True, timeout=300)
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="github-app")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    m = sub.add_parser("org-manifest")
+    m.add_argument("org")
+    m.add_argument("--name")
+    m.add_argument("--page", type=Path)
+    m.add_argument("--for", dest="ttl")
+    w = sub.add_parser("org-watch")
+    w.add_argument("org")
+    w.add_argument("--note", type=Path, required=True)
+    w.add_argument("--for", dest="ttl", default="48h")
+    w.add_argument("--repo")
+    w.add_argument("--site")
+    i = sub.add_parser("org-install")
+    i.add_argument("org")
+    sub.add_parser("status")
+    f = sub.add_parser("org-forget")
+    f.add_argument("org")
+    args = parser.parse_args(argv)
+
+    try:
+        if args.cmd == "status":
+            print(json.dumps(app.public_view(), indent=2))
+            return 0
+        if args.cmd == "org-forget":
+            print(json.dumps(app.forget(args.org), indent=2))
+            return 0
+        if args.cmd == "org-watch":
+            return watch(args.org, args.note, duration(args.ttl), args.repo, args.site)
+        why = broker_knows_org_apps()
+        if why:
+            print(f"github-app: refused: {why}", file=sys.stderr)
+            return 1
+        if args.cmd == "org-manifest":
+            ttl_s = duration(args.ttl) if args.ttl else None
+            until = app.iso(app.now() + (ttl_s or app.STATE_TTL_S))
+            if args.page:
+                started = write_page(args.org, args.name, ttl_s, args.page)
+                url = str(args.page / "index.html")
+            else:
+                url, started = manifest_page(args.org, args.name, ttl_s)
+            print(f"# {started['manifest']['name']} for {args.org}: "
+                  f"permissions {json.dumps(started['manifest']['default_permissions'])}")
+            print(f"# posts to {started['post_url'].split('?')[0]}; "
+                  f"good until {until}")
+            print(url)
+            return 0
+        started = app.start_install(args.org)
+        print(f"# good for one hour (until {app.iso(app.now() + app.STATE_TTL_S)})")
+        print(started["url"])
+        return 0
+    except app.IntegrationError as exc:
+        print(f"github-app: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

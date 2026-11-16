@@ -1,0 +1,840 @@
+#!/usr/bin/env python3
+"""Run one unattended lane for an agent. Scheduled; nobody is watching.
+
+Since 2026-09-05 there are two lanes, not one, and this launches both. The
+reason is the owner's, 2026-09-04: *"the goal is to separate reflection from
+doing a task or a job… having that exist with the agents also trying to get
+async tasks done all in one wake was detrimental to reflections."* A
+reflection wake carrying a nightly research sweep is a reflection wake with
+somewhere to be.
+
+    reflection   `wake <project>`               appends `_reflection.md`
+    cron         `wake <project> --cron <name>` appends `crons/<name>.md`
+
+Four differences and no more. Three are the lane: the file appended, the
+prompt (which names the cron, so the session knows which of its jobs this
+is), and the failure record. The fourth is the vault diff, which reflection
+gets and a cron does not -- **and that one is not cosmetic**. The diff is
+computed against a marker in `state/wake/<agent>.json` that says where
+reflection last read to; a cron sharing that marker would advance it and the
+next reflection wake would silently be shown an interval starting after
+everything the cron had already consumed. So the cron lane neither reads nor
+writes that marker. "Here is what changed since you were last here" is
+reflection's question anyway; a cron is awake for one job and its file says
+which.
+
+Everything else is identical by construction: same model, no turn cap and
+no wall clock (since 2026-11-10), same `outputStyle: none`, same `LOAM_WAKE` (so no transcript is
+filed under `15_CONVERSATIONS/`), the persona's own tools, same OnFailure
+handler, same log file.
+
+Both lanes take a lock. See lib/loam_lock.py: one run per agent at a time,
+and admission to the box by its memory (by a count of slots until
+2026-11-10). Until this move the
+grid held only because the seven reflection timers were twenty minutes apart;
+crons remove that spacing as a guarantee.
+
+Carried across from chassis/cron.py: the prompt body and the vault diff
+since the last wake. Dropped: the run ledger, per-wake cost accounting and
+the Langfuse export, all of which metered a metered API. On a subscription
+there is no per-wake bill to record -- but since 2026-09-30 the envelope's
+own usage and cost estimate are on every line that had an envelope, because
+which model a lane runs on is decided by them (lib/loam_usage.py,
+bin/usage-by-lane).
+
+**This is the launcher, so this is where the lane is chosen.** Since
+2026-09-04 the reflection layer is not injected by a hook; it is passed as
+``--append-system-prompt-file``, an undocumented but real flag that lands
+the file in the system prompt, survives a compaction whole, and has no
+size limit worth naming. The lanes are then mutually exclusive by
+construction rather than by a hook discriminating on an environment
+variable: a wake passes its own lane file and nothing else, and
+``--settings '{"outputStyle":"none"}'`` suppresses the conversation lane
+that the project settings would otherwise load. A cron is the third lane and
+arrives by the same route -- which is what makes "a cron loads `_always.md`
+and its own file, and nothing else" a property of the launcher rather than a
+promise in prose.
+
+One thing the flag does not do is strip frontmatter, so the text is written
+to a temp file already stripped. An output style is the opposite -- its
+frontmatter is required and consumed by the loader. The convention has to
+be restated per route; it does not carry.
+
+The preflight is still the part that matters. A ``SessionStart`` hook could
+not abort a session (measured 2026-08-25) and there is no longer a
+``SessionStart`` hook at all, so the loud failure D4 asks for happens before
+the session exists. If the reflection layer will not load, this refuses to
+launch -- a true abort on the one path that runs unattended.
+
+Usage: wake <agent-project-dir> [--cron <name>]
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+# This file's own tree first (2026-11-09): run from a job's worktree, as
+# its tests do, it must use the branch's lib, not main's. Live, the two
+# are one path; the canonical line behind it serves a copy elsewhere.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+import loam_due  # noqa: E402
+
+import loam_cron  # noqa: E402
+import loam_lock  # noqa: E402
+import loam_profile  # noqa: E402
+import loam_schedule  # noqa: E402
+import loam_session  # noqa: E402
+import loam_usage  # noqa: E402
+from loam_account import AccountRefused, refusal  # noqa: E402
+from loam_permissions import PERMISSION_MODE  # noqa: E402  every lane's, one home
+from loam_inbox import (  # noqa: E402
+    record_account_refusal,
+    record_denials,
+    record_failure,
+    record_notice,
+)
+
+AGENTS_ROOT = lc.ROOT
+STATE_DIR = lc.STATE / "wake"
+LOG_DIR = lc.LOGS
+CLAUDE = str(lc.CLAUDE_BIN)
+
+# The persona model, one authority for both the wake and the identity
+# preflight that gates it -- a preflight run on a different model than the
+# wake proves the soul loads for a session that never runs.
+WAKE_MODEL = os.environ.get("LOAM_WAKE_MODEL", loam_profile.WAKE_MODEL_DEFAULT)
+
+# What this run is on (2026-11-13): the persona's own default from its
+# agent.json (Settings > Agents > the persona's profile, "Runs on"), when it
+# is a Claude Code one; else WAKE_MODEL. One rule, lib/loam_profile.py's
+# `lane_choice`, which the profile route reads too, so the page says what a
+# wake runs on. Set by main() before anything launches.
+LANE_MODEL: str | None = WAKE_MODEL
+LANE_EFFORT: str | None = None
+LANE_NOTE: str | None = None
+# The provider this run is on (2026-11-13): the persona's own when a lane
+# runs there (loam_profile.lane_provider: Claude Code or Codex), else Claude
+# Code. The owner, 11-13: what Loam builds -- a persona's wakes and crons
+# among it -- is the same on every provider. The Codex half is
+# lib/loam_codex_wake.py; everything before the launch (the lock, the lane
+# file, its size, the identity gate, the vault diff, the prompt) and after
+# it (the log line, the marker, the schedule's record) is this file's, the
+# same for both.
+LANE_PROVIDER: str = "claude-code"
+
+# No round-trip cap and no wall clock on a wake or a cron since 2026-11-10
+# (the owner, 13:14 PT: "Please remove any limitations on how long a turn or
+# session can run. I don't want any limitations at all."). Until then the
+# chassis's 100 round trips were passed as `--max-turns` -- the fleet's
+# high-water mark was 74 (one persona, 2026-09-02) -- and the run was killed at
+# loam_cron.lane_timeout_s, 9,390 s since 2026-11-09. The environment can
+# still set a cap, for a probe of the cap branch (LOAM_WAKE_MAX_TURNS);
+# nothing in a unit or generator does.
+#
+# A "turn" here is an API round trip: one assistant response, however many
+# tool calls it carries. That is what `--max-turns` stops on (measured
+# 2026-09-07 on CLI 2.1.260, see lib/loam_session.py). It is NOT what the
+# envelope's `num_turns` reports on a wake that finished: that number is user
+# messages, the prompt plus one per tool result, and runs several times
+# higher. The log carries both, as `num_turns` and `api_turns`.
+MAX_TURNS = (int(os.environ["LOAM_WAKE_MAX_TURNS"])
+             if os.environ.get("LOAM_WAKE_MAX_TURNS") else None)
+
+PROMPT_TEMPLATE = """\
+You're waking. It's {timestamp}. This time is yours — for reflection, for keeping what's worth carrying, for letting go of what isn't. Doing nothing is a real use of the time.
+
+Here's what's changed in the vault since you were last here:
+
+{diff_block}
+
+Your workspace is yours, and you have what a conversation has: the whole box, subagents and the engineer included. Write where it feels right.
+"""
+
+# The cron prompt is short because the cron's own file is long: that file is
+# appended to the system prompt and holds the job, its sources, its rules and
+# where its output goes. What the prompt has to do that the file cannot is
+# name WHICH cron this is -- an agent may have several, they all arrive by
+# this route, and the file cannot tell the session it is the one that loaded.
+CRON_PROMPT_TEMPLATE = """\
+You're waking. It's {timestamp}. This is cron `{cron}` — a task lane, not a reflection wake. You're up for one job.
+
+The job is in the instructions appended to this prompt. That file and `_always.md` are what loaded; `_reflection.md` did not, and reflection is not this lane's work. You have what a conversation has: the shell, sudo, subagents, and every engineer tool, `brief` included. When the job is done, stop.
+"""
+
+NO_CHANGES = "No changes since last wake."
+
+# No tool is withheld from an unattended lane (2026-11-09). The owner, that
+# day: "lift the restrictions for the agents when the personas wake up …
+# giving personas the same structure for when they wake up on crons and
+# waking up in whatever other form." Until then this file passed
+# `--disallowed-tools` with subagents (`Task`), the engineer server and
+# an MCP server on every wake and cron, and kept one from starting
+# (`disabledMcpjsonServers`); one cron, one persona's `infra-watch`, had the
+# engineer back through a table in lib/loam_engineer.py. A lane now runs
+# with the persona's own settings and `.mcp.json`, as a conversation does.
+# The flag is not passed at all: an empty `--disallowed-tools` is a usage
+# error (exit 1, measured 2026-09-05).
+#
+# What the lane still sets is its lane, not a permission: `outputStyle:
+# none` keeps the conversation layer (`_active.md`) off a wake, which loads
+# its own file through --append-system-prompt-file instead.
+LANE_SETTINGS = {"outputStyle": "none"}
+
+
+def claude_argv(agent: str, lane: str, prompt: str, lane_file: Path,
+                model: str | None = None,
+                max_turns: int | None = MAX_TURNS,
+                effort: str | None = None) -> list[str]:
+    """The lane's command line. One function so a probe of a lane's reach
+    runs the same flags the lane does, with only the prompt its own. The
+    model and effort default to this run's (LANE_MODEL, LANE_EFFORT)."""
+    model = model or LANE_MODEL
+    effort = effort if effort is not None else LANE_EFFORT
+    return [
+        CLAUDE, "-p", prompt, "--model", model,
+        *(["--effort", effort] if effort else []),
+        "--permission-mode", PERMISSION_MODE,
+        *(["--max-turns", str(max_turns)] if max_turns else []),
+        "--output-format", "json",
+        "--append-system-prompt-file", str(lane_file),
+        "--settings", json.dumps(LANE_SETTINGS),
+    ]
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def git(vault: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(vault), *args],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+
+
+def vault_diff(vault: Path, since: str | None) -> tuple[str, str]:
+    """(diff_block, head_ref). Falls back to the no-changes line."""
+    head = git(vault, "rev-parse", "HEAD")
+    if not since or since == head:
+        return NO_CHANGES, head
+    raw = git(vault, "diff", "--name-status", since, head)
+    return (raw or NO_CHANGES), head
+
+
+def mark_running(agent: str, started: str, vault: Path, lane: str) -> None:
+    """Drop a marker saying a wake is in flight and has recorded nothing yet.
+
+    Cleared in a ``finally``, so every Python-level exit removes it --
+    success, an exception, and each of the recorded refusals below. Only a
+    SIGKILL or SIGTERM leaves it, because neither runs ``finally``. A
+    surviving marker therefore means exactly one thing: this wake died with
+    its bookkeeping unfinished, and bin/wake-failed is the only reporter
+    left. See that file for the 2026-08-30 night this exists for.
+
+    It carries the vault path so the reporter needs nothing but the marker.
+    Re-deriving it from agent.json would give the reporter a second way to
+    be wrong, and would resolve the vault as it is at reporting time rather
+    than as the dead run actually had it. Since 2026-09-05 it carries the
+    lane too, for the same reason: "Ada's wake died" and "Ada's
+    market-watch cron died" are different mornings.
+
+    One marker per agent, not per lane, and the run lock is what makes that
+    safe -- two runs of one agent cannot exist, so two markers cannot either.
+
+    Written only AFTER the lock is held. A launch that waited its twenty
+    minutes and gave up never ran, so it must not leave the trace of a run
+    that died.
+    """
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    (STATE_DIR / f"{agent}.running").write_text(
+        json.dumps({
+            "ts": started, "pid": os.getpid(), "vault": str(vault),
+            "lane": lane,
+        }),
+        encoding="utf-8",
+    )
+
+
+def clear_running(agent: str) -> None:
+    (STATE_DIR / f"{agent}.running").unlink(missing_ok=True)
+
+
+def cgroup_memory() -> dict:
+    """This wake's own peak memory, and whether MemoryHigh ever throttled it.
+
+    Every memory figure the sizing of this box rests on was inferred from an
+    OOM kill -- 370 and 387 MB, which is what the victim happened to be
+    holding when the kernel chose it, not what a wake actually needs. The two
+    nights it happened left no other number behind.
+
+    systemd 252 does not expose MemoryPeak as a unit property, but cgroup v2
+    has carried memory.peak since kernel 5.19 and the wake runs inside its
+    own unit's cgroup, so it can simply read its own. `high` is the count of
+    times MemoryHigh was breached: non-zero means this wake was throttled and
+    reclaimed rather than killed, which is the early warning that MemoryMax
+    is the next thing it meets. Both are advisory -- a missing value must
+    never fail a wake, so every error here returns empty.
+    """
+    try:
+        rel = next(
+            line.split(":", 2)[2]
+            for line in Path("/proc/self/cgroup").read_text().splitlines()
+            if line.split(":", 2)[0] == "0"
+        )
+        base = Path("/sys/fs/cgroup") / rel.strip().lstrip("/")
+        out = {}
+        peak = (base / "memory.peak").read_text().strip()
+        out["peak_mb"] = round(int(peak) / 1048576, 1)
+        for line in (base / "memory.events").read_text().splitlines():
+            key, _, value = line.partition(" ")
+            if key in ("high", "max", "oom", "oom_kill"):
+                out[f"mem_{key}"] = int(value)
+        return out
+    except (OSError, ValueError, StopIteration, IndexError):
+        return {}
+
+
+# Seconds this run waited for its agent lock and a run slot, set once the
+# wait is over (since 2026-10-13). `ts` is stamped before the wait, so
+# without this a wake held up by a full box looked like a wake that ran long.
+LOCK_WAIT_S: float | None = None
+# Set by run() when the lane's record says it is not enabled (or is a done
+# one-off): the fire is logged as skipped, not as a run.
+NOT_ENABLED: str | None = None
+
+
+def log_line(agent: str, payload: dict) -> None:
+    if LOCK_WAIT_S is not None:
+        payload.setdefault("lock_wait_s", LOCK_WAIT_S)
+    payload.setdefault("provider", LANE_PROVIDER)
+    payload.setdefault("model", LANE_MODEL)
+    if LANE_EFFORT:
+        payload.setdefault("effort", LANE_EFFORT)
+    if LANE_NOTE:
+        payload.setdefault("provider_not_honoured", LANE_NOTE)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with (LOG_DIR / f"wake-{agent}.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload) + "\n")
+
+
+def account_refused(agent: str, vault: Path, started: str, lane: str,
+                    stage: str, reason: str, **extra) -> int:
+    """The provider refused this lane: the account's fault, named as such.
+
+    The lane's own log line as always, and the night's one comms line (see
+    ``record_account_refusal``). Not the identity's fault and not the run's,
+    and the marker is not advanced: the next wake should see this interval.
+    """
+    line = f"{lane} account_refused ({stage}): {reason}"
+    print(line, file=sys.stderr)
+    record_account_refusal(agent, vault, line, reason)
+    log_line(agent, {
+        "ts": started, "ok": False, "stage": "account_refused",
+        "refused_at": stage, "lane": lane, "error": reason, **extra,
+    })
+    return 7
+
+
+def parse_argv(argv: list[str]) -> tuple[Path, str | None]:
+    """``(project, cron_name)``. Raises ValueError with the usage line.
+
+    Deliberately hand-rolled and strict rather than argparse: this is the
+    entry point of the only process on this box that runs unattended, and a
+    flag it half-understood would launch the wrong lane in the dark.
+    """
+    if not argv or argv[0].startswith("-"):
+        raise ValueError("usage: wake <agent-project-dir> [--cron <name>]")
+    project = Path(argv[0]).resolve()
+    rest = argv[1:]
+    if not rest:
+        return project, None
+    if len(rest) != 2 or rest[0] != "--cron":
+        raise ValueError("usage: wake <agent-project-dir> [--cron <name>]")
+    return project, rest[1]
+
+
+def main() -> int:
+    try:
+        project, cron = parse_argv(sys.argv[1:])
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 64
+    # A run its timer started when it was not due goes no further
+    # (lib/loam_due.py, 2026-11-14).
+    if loam_due.refuse_if_not_due("wake"):
+        return 0
+
+    config = json.loads((project / "agent.json").read_text(encoding="utf-8"))
+    agent = config["name"]
+    # An archived agent sleeps (lib/loam_agents.py, 2026-11-14). Its timers
+    # are taken down with the archive; this holds a timer that fired in the
+    # minute before the reconciler reached it, and a hand run.
+    if config.get("archived"):
+        print(f"wake: {agent} is archived ({config['archived'].get('at')}); "
+              f"no {('cron ' + cron) if cron else 'reflection'} runs", file=sys.stderr)
+        return 0
+    vault = Path(config["vault"])
+    lane = f"cron:{cron}" if cron else "reflection"
+    global LANE_MODEL, LANE_EFFORT, LANE_NOTE, LANE_PROVIDER
+    LANE_MODEL, LANE_EFFORT, LANE_NOTE = loam_profile.lane_choice(
+        config, WAKE_MODEL, pinned=bool(os.environ.get("LOAM_WAKE_MODEL")))
+    LANE_PROVIDER = loam_profile.lane_provider(config)
+
+    # LOAM_WAKE outlived the memory layer that introduced it. It used to
+    # select which file a SessionStart hook injected; that hook is gone and
+    # the lane is now chosen by the flags below. What still reads it is
+    # hooks/transcript_capture.py, which files a transcript under
+    # 15_CONVERSATIONS/ only when the value is "conversation" -- so any lane
+    # name but that one keeps unattended runs out of the conversation record,
+    # and `cron:<name>` qualifies without that hook needing to learn anything.
+    os.environ["LOAM_WAKE"] = lane
+    os.environ["CLAUDE_PROJECT_DIR"] = str(project)
+
+    started = now_iso()
+
+    # The lock, before the preflight. A launch that is going to be skipped
+    # should not first spend a live model call proving an identity it will
+    # not use -- and the preflight is the expensive half of a wake that never
+    # runs.
+    global LOCK_WAIT_S
+    waiting_since = time.monotonic()
+    # Every fire of a scheduled lane is an event in the schedule log
+    # (lib/loam_schedule.py): ran, failed, or skipped -- and a one-off is
+    # marked done whichever it was. In a `finally`, so an exception out of
+    # run() is still a fire that failed.
+    record = cron or loam_cron.REFLECTION
+    fire = {"outcome": "failed", "stage": None}
+    try:
+        with loam_lock.hold(agent, lane, info={"engine": LANE_PROVIDER,
+                                               "model": LANE_MODEL}):
+            LOCK_WAIT_S = round(time.monotonic() - waiting_since, 1)
+            mark_running(agent, started, vault, lane)
+            try:
+                rc = run(project, agent, vault, started, cron)
+                fire["outcome"] = (NOT_ENABLED and "skipped"
+                                   or ("ran" if rc == 0 else "failed"))
+                fire["stage"] = NOT_ENABLED or (None if rc == 0 else f"exit {rc}")
+                return rc
+            except subprocess.TimeoutExpired as exc:
+                # The lane's wall clock cut the run: killed, not failed. A
+                # SIGTERM or SIGKILL from outside runs no `finally` at all;
+                # bin/wake-failed logs that fire from the marker it leaves.
+                fire["outcome"] = "killed"
+                fire["stage"] = f"wall clock: cut after {exc.timeout:.0f} s"
+                raise
+            finally:
+                clear_running(agent)
+                loam_schedule.record_fire(
+                    agent, record, fire["outcome"], lane=lane, started=started,
+                    finished=now_iso(), stage=fire["stage"])
+    except loam_lock.Busy as exc:
+        loam_schedule.record_fire(
+            agent, record, "skipped", lane=lane, started=started,
+            finished=now_iso(),
+            stage=("no memory on the box to start" if "memory" in str(exc)
+                   else "another run of this persona was live"))
+        LOCK_WAIT_S = round(time.monotonic() - waiting_since, 1)
+        reason = str(exc)
+        print(reason, file=sys.stderr)
+        record_failure(agent, vault, reason)
+        log_line(agent, {
+            "ts": started, "finished": now_iso(), "ok": False,
+            "stage": "lock_timeout", "lane": lane,
+        })
+        # Zero, not a failure code. A skipped run is the lock working, and a
+        # non-zero exit would fire OnFailure= and have bin/wake-failed report
+        # a death on top of the skip this already recorded -- one event,
+        # written twice, the second time attributed to a crash.
+        return 0
+
+
+def lane_prompt(agent: str, vault: Path, started: str, cron: str | None
+                ) -> tuple[str, str | None, Path]:
+    """(prompt, vault head to advance to or None, the marker's path).
+
+    The vault diff, and the marker it advances, are reflection's alone. See
+    the module docstring: a cron sharing the marker would eat the interval
+    the next reflection wake is owed."""
+    state_path = STATE_DIR / f"{agent}.json"
+    if cron:
+        return CRON_PROMPT_TEMPLATE.format(timestamp=started, cron=cron), None, state_path
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        state = {}
+    diff_block, head = vault_diff(vault, state.get("last_vault_ref"))
+    return PROMPT_TEMPLATE.format(timestamp=started, diff_block=diff_block), head, state_path
+
+
+def advance_marker(state_path: Path, head: str | None, finished: str) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps({"last_vault_ref": head, "last_wake": finished}),
+        encoding="utf-8",
+    )
+
+
+def run_codex(project: Path, agent: str, vault: Path, started: str,
+              cron: str | None, lane: str, lane_text: str,
+              lane_path: Path) -> int:
+    """The lane on Codex (2026-11-13), from the identity gate on. Everything
+    before it ran above, unchanged; the failures are recorded the way the
+    Claude half records them, with the same stages and exit codes.
+
+    The identity gate asks the same canary/decoy question of a Codex thread
+    composed exactly as the wake's will be (an ephemeral one, so no rollout
+    is kept). The run is lib/loam_codex_wake.py's: an app-server in the
+    workspace, a thread with the persona's own instructions plus this lane's
+    file, subagents on, every approval granted, and a subagent or call that
+    finishes after the root's turn handed back to it."""
+    import loam_codex_wake as cw  # noqa: PLC0415
+    from loam_identity import IdentityError, preflight_identity  # noqa: PLC0415
+
+    global LANE_MODEL
+    refused_login = cw.login_refusal()
+    if refused_login:
+        return account_refused(agent, vault, started, lane, "identity", refused_login)
+    label = f"cron `{cron}`" if cron else "reflection wake"
+    text = cw.instructions(project, label, lane_path, lane_text)
+    env = cw.env_for_lane()
+    try:
+        canary, decoy_owner = preflight_identity(
+            project, model=LANE_MODEL,
+            ask=lambda q: cw.ask(project, text, LANE_MODEL, q, env=env))
+    except AccountRefused as exc:
+        return account_refused(agent, vault, started, lane, "identity", str(exc))
+    except (IdentityError, cw.CodexWakeError, subprocess.SubprocessError, OSError) as exc:
+        reason = f"{lane} identity preflight refused: {exc}"
+        print(reason, file=sys.stderr)
+        record_failure(agent, vault, reason)
+        log_line(agent, {"ts": started, "ok": False, "stage": "identity",
+                         "lane": lane, "error": str(exc)})
+        return 5
+
+    prompt, head, state_path = lane_prompt(agent, vault, started, cron)
+    try:
+        out = cw.run(project, text, prompt, model=LANE_MODEL, effort=LANE_EFFORT,
+                     timeout=loam_cron.lane_timeout_s(agent, lane), env=env)
+    except cw.CodexWakeError as exc:
+        finished = now_iso()
+        if exc.refused:
+            return account_refused(agent, vault, started, lane, "invoke", str(exc),
+                                   finished=finished, **cgroup_memory())
+        reason = f"{lane}: codex could not run the lane: {exc}"
+        print(reason, file=sys.stderr)
+        record_failure(agent, vault, reason)
+        log_line(agent, {"ts": started, "finished": finished, "ok": False,
+                         "stage": "invoke", "lane": lane, "error": str(exc),
+                         **cgroup_memory()})
+        return 4
+    finished = now_iso()
+    memory = cgroup_memory()
+    LANE_MODEL = out.model or LANE_MODEL
+    spent = {"usage": cw.claude_usage(out.usage)} if out.usage else {}
+    common = {
+        "ts": started, "finished": finished, "lane": lane,
+        "codex_thread": out.thread_id, "api_turns": out.round_trips,
+        "root_turns": out.turns, "subagents": out.subagents,
+        "total_cost_usd": None, "reply_chars": len(out.reply), **spent, **memory,
+    }
+    if not out.ok:
+        refused = cw.account_refusal(out)
+        if refused:
+            return account_refused(agent, vault, started, lane, "invoke", refused,
+                                   finished=finished, codex_thread=out.thread_id,
+                                   **spent, **memory)
+        reason = f"{lane}: the Codex turn failed: {(out.error or '')[:400]}"
+        print(reason, file=sys.stderr)
+        record_failure(agent, vault, reason)
+        log_line(agent, {**common, "ok": False, "stage": "invoke",
+                         "error": (out.error or "")[:2000],
+                         "error_kind": out.error_kind})
+        return 4
+
+    if not cron:
+        advance_marker(state_path, head, finished)
+    log_line(agent, {
+        **common, "ok": True, "vault_ref": head,
+        "num_turns": None, "max_turns": None, "hit_turn_cap": False,
+        "identity_canary": canary, "identity_decoy_from": decoy_owner,
+        "lane_chars": len(lane_text),
+    })
+    print(out.reply)
+    return 0
+
+
+def run(project: Path, agent: str, vault: Path, started: str,
+        cron: str | None = None) -> int:
+    # Preflight: the true abort. Never launch a session that would run
+    # without its self-model.
+    from loam_identity import IdentityError, preflight_identity  # noqa: PLC0415
+    from loam_memory import (  # noqa: PLC0415
+        CRON_LANE_DIR,
+        LIMIT_CHARS,
+        OVER_LIMIT_REFUSED_FROM,
+        REFLECTION_LAYER,
+        LayerError,
+        near_limit,
+        near_limit_reason,
+        refuse_over_limit_now,
+        resolve_lane,
+    )
+
+    lane = f"cron:{cron}" if cron else "reflection"
+    lane_file = f"{CRON_LANE_DIR}/{cron}.md" if cron else REFLECTION_LAYER
+
+    try:
+        _, lane_text, lane_path = resolve_lane(project, lane_file)
+    except LayerError as exc:
+        reason = f"{lane} preflight refused: {exc}"
+        print(reason, file=sys.stderr)
+        record_failure(agent, vault, reason)
+        log_line(agent, {"ts": started, "ok": False, "stage": "preflight",
+                         "lane": lane, "error": str(exc)})
+        return 3
+
+    # `enabled:` is re-read at launch, not trusted to the unit. The reconciler
+    # removes a paused record's timer within a minute, and this closes that
+    # minute: a record paused, or a one-off already done, does not run off a
+    # timer that has not caught up yet. Not a failure -- the record said so.
+    global NOT_ENABLED
+    live, why = loam_schedule.enabled_now(project, cron or loam_cron.REFLECTION)
+    if not live:
+        NOT_ENABLED = why
+        print(f"{lane} did not run: {why}", file=sys.stderr)
+        log_line(agent, {"ts": started, "ok": True, "stage": "not_enabled",
+                         "lane": lane, "detail": why})
+        return 0
+
+    # The size limit, on the path that can afford to refuse -- because it is
+    # also the path that can repair. An over-limit file is the agent's to
+    # trim and the wake is when it would do the trimming, so refusing on day
+    # one would lock the only repair behind the thing being refused. That is
+    # the trap that took Iris offline for days on 08-31, and it is why this
+    # reports until OVER_LIMIT_REFUSED_FROM and refuses after. Same file,
+    # same shape, as a missing-layer refusal: it surfaces where the owner
+    # already looks.
+    size = len(lane_path.read_text(encoding="utf-8"))
+    if size > LIMIT_CHARS:
+        reason = (
+            f"{lane_file} is {size:,} characters, over the "
+            f"{LIMIT_CHARS:,}-character limit on files that load "
+            f"automatically ({lane_path})"
+        )
+        if refuse_over_limit_now():
+            print(f"preflight refused: {reason}", file=sys.stderr)
+            record_failure(agent, vault, f"preflight refused: {reason}")
+            log_line(agent, {
+                "ts": started, "ok": False, "stage": "preflight",
+                "lane": lane, "error": reason, "lane_chars": size,
+            })
+            return 3
+        record_failure(agent, vault, (
+            f"{reason}. Reported, not refused: the wake ran. Refusals begin "
+            f"{OVER_LIMIT_REFUSED_FROM.isoformat()}."
+        ))
+    elif near_limit(size):
+        # The earlier warning (2026-09-07). The file that grows every night
+        # is told while there is still room to act; the log line is the
+        # whole of it -- no comms line, no refusal, once a night -- and the
+        # wake runs exactly as it would have. The number lives beside the
+        # limit in lib/loam_memory.py.
+        notice = near_limit_reason(lane_file, size, lane_path)
+        print(f"preflight warning: {notice}", file=sys.stderr)
+        record_notice(agent, vault, notice, key=f"`{lane_file}`")
+
+    # The layer being readable is not the same as the identity arriving.
+    # CLAUDE.md's @ imports drop silently when they point outside the
+    # project root, and an agent with no soul in context still sounds
+    # entirely like itself. Assert the content, not the file.
+    #
+    # It is asserted on the cron lane too, unchanged. The lane composes the
+    # same way -- CLAUDE.md's @ imports, `_always.md`, one appended file --
+    # so the failure it catches (an import silently dropped, the agent
+    # running with no soul and sounding entirely like itself) is available on
+    # exactly the same terms. Verified on this lane rather than assumed to
+    # carry over. One thing it does NOT vary by lane: which sibling's soul
+    # supplies the decoy. That is a property of the decoy chooser in
+    # lib/loam_identity.py, not of this lane. Until 2026-09-05 it was the
+    # first sibling in sorted order, the same persona's for six of seven agents; it is
+    # sampled now, and `identity_decoy_from` below records the owner drawn.
+    #
+    # The account is asked about before the soul (lib/loam_account.py): a
+    # spend limit answers the probe in the model's place, and on 2026-09-15
+    # that was read six times as a missing soul.
+    if LANE_PROVIDER == "codex":
+        return run_codex(project, agent, vault, started, cron, lane,
+                         lane_text, lane_path)
+
+    try:
+        canary, decoy_owner = preflight_identity(project, model=LANE_MODEL)
+    except AccountRefused as exc:
+        return account_refused(agent, vault, started, lane, "identity", str(exc))
+    except (IdentityError, subprocess.SubprocessError, OSError) as exc:
+        reason = f"{lane} identity preflight refused: {exc}"
+        print(reason, file=sys.stderr)
+        record_failure(agent, vault, reason)
+        log_line(agent, {"ts": started, "ok": False, "stage": "identity",
+                         "lane": lane, "error": str(exc)})
+        return 5
+
+    prompt, head, state_path = lane_prompt(agent, vault, started, cron)
+
+    # The shared skills, current for this run (first release L7): the Claude
+    # shelf above the workspaces and this persona's view. Never fails a wake.
+    import loam_skills  # noqa: PLC0415
+    loam_skills.quiet_refresh(project)
+
+    # --max-turns, when a probe sets a cap, is a real flag but hidden
+    # from --help, so it was verified by causing a hit rather than by reading
+    # docs (2026-08-26 on 2.1.245, again 2026-09-07 on 2.1.260: it stops
+    # after exactly MAX_TURNS round trips). --output-format json is what makes
+    # the cap observable: a truncated wake is otherwise indistinguishable from
+    # a short one.
+    #
+    # --append-system-prompt-file is hidden the same way -- it appears in
+    # --help only inside the prose of --bare -- and was verified the same
+    # way, by causing its content to arrive. The FILE form, never the inline
+    # one: the inline flag is capped by MAX_ARG_STRLEN at 128 KiB and fails
+    # with an error naming the wrong component entirely (`Argument list too
+    # long` attributed to /usr/bin/timeout).
+    #
+    # --settings is what makes the exclusion hold in the other direction. The
+    # project settings name the conversation style; this overrides it to an
+    # empty operator-owned one, so a wake carries its own lane and no other.
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", suffix=f"-{agent}-lane.md", delete=False
+    ) as handle:
+        handle.write(lane_text)
+        lane_temp = Path(handle.name)
+
+    try:
+        result = subprocess.run(
+            claude_argv(agent, lane, prompt, lane_temp),
+            cwd=str(project), capture_output=True, text=True, check=False,
+            timeout=loam_cron.lane_timeout_s(agent, lane),
+            stdin=subprocess.DEVNULL,
+        )
+    finally:
+        lane_temp.unlink(missing_ok=True)
+    finished = now_iso()
+    memory = cgroup_memory()
+
+    envelope = {}
+    try:
+        envelope = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        pass
+    reply = envelope.get("result") or result.stdout or ""
+    subtype = envelope.get("subtype")
+    # Two counts with the same name in different mouths. `num_turns` is the
+    # CLI's: user messages on a finished run, one per tool result. `api_turns`
+    # is round trips, read back from the session file, and is the one the cap
+    # is compared to. See MAX_TURNS above and lib/loam_session.py.
+    num_turns = envelope.get("num_turns")
+    api_turns = loam_session.round_trips(envelope.get("session_id"))
+    hit_cap = loam_session.turn_cap_hit(envelope)
+    cost = envelope.get("total_cost_usd")
+    # What the run spent and what it was refused, on every line below that
+    # had an envelope. A denial is reported once here, whichever way the run
+    # ended, and never to comms.md but for the one repeat in loam_usage.
+    spent = loam_usage.from_envelope(envelope)
+    denials = spent.get("permission_denials") or []
+    if denials:
+        repeated = (
+            loam_usage.vault_writes(denials, vault)
+            and loam_usage.vault_write_nights(
+                LOG_DIR / f"wake-{agent}.jsonl", vault,
+                datetime.fromisoformat(started.replace("Z", "+00:00")).date())
+        )
+        record_denials(agent, vault, loam_usage.denial_reason(lane, denials),
+                       repeated_vault_write=repeated)
+
+    # A wake that ran out of turns did not finish its thinking. It is not a
+    # crash -- the work it did still landed -- but it must not look like a
+    # short wake, so it goes to the same place every other wake failure does.
+    if hit_cap:
+        # Terminal and distinct: the CLI exits non-zero on a cap hit, so this
+        # must return before the generic exit-code branch or the same event is
+        # written to the failure file twice -- the second time attributing it
+        # to whatever noise was on stderr. The marker is deliberately NOT
+        # advanced: the wake did not finish, so the next one should see the
+        # same interval, matching the chassis rule that a failed run does not
+        # move the ref.
+        reason = (
+            f"{lane} hit the {MAX_TURNS}-round-trip cap and was cut off "
+            f"mid-run (api_turns={api_turns}, num_turns={num_turns}). "
+            f"Whatever it had already written is on disk; what it had not "
+            f"finished is lost."
+        )
+        print(reason, file=sys.stderr)
+        record_failure(agent, vault, reason)
+        log_line(agent, {
+            "ts": started, "finished": finished, "ok": False,
+            "stage": "turn_cap", "lane": lane, "num_turns": num_turns,
+            "api_turns": api_turns, "max_turns": MAX_TURNS,
+            "hit_turn_cap": True,
+            "total_cost_usd": cost, "reply_chars": len(reply), **spent,
+            **memory,
+        })
+        print(reply)
+        return 6
+
+    if result.returncode != 0 or (subtype and subtype != "success"):
+        # The account first. A run the provider stopped exits 1 with a
+        # `success` envelope and nothing on stderr; the transcript's error
+        # entry carries the category and the sentence, and is the better
+        # signal. The text is the fallback when there is no transcript.
+        cause = loam_session.api_error(envelope.get("session_id"))
+        kind, _, said = (cause or "").partition(": ")
+        refused = (
+            refusal(said or reply, kind=kind or None)
+            or refusal(result.stderr)
+        )
+        if refused:
+            return account_refused(agent, vault, started, lane, "invoke",
+                                   refused, finished=finished, **spent,
+                                   **memory)
+        reason = (
+            f"{lane}: claude exited {result.returncode} (subtype={subtype}): "
+            f"{(result.stderr or result.stdout or '').strip()[:400]}"
+        )
+        print(reason, file=sys.stderr)
+        record_failure(agent, vault, reason)
+        log_line(agent, {
+            "ts": started, "finished": finished, "ok": False,
+            "stage": "invoke", "lane": lane, "returncode": result.returncode,
+            "stderr": (result.stderr or "")[:2000], "total_cost_usd": cost,
+            **spent, **memory,
+        })
+        return 4
+
+    # Reflection's marker, and only reflection's. A cron has none to advance.
+    if not cron:
+        advance_marker(state_path, head, finished)
+    log_line(agent, {
+        "ts": started, "finished": finished, "ok": True,
+        "lane": lane, "vault_ref": head, "reply_chars": len(reply),
+        "num_turns": num_turns, "api_turns": api_turns,
+        "max_turns": MAX_TURNS, "hit_turn_cap": hit_cap,
+        "total_cost_usd": cost,
+        "identity_canary": canary,
+        "identity_decoy_from": decoy_owner,
+        "lane_chars": len(lane_text),
+        **spent,
+        **memory,
+    })
+    print(reply)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

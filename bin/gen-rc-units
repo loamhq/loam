@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""Generate the Remote Control systemd units. Derives, never copies.
+
+Same rule as bin/provision: every per-agent value is read from that agent's
+own agent.json, so the only input is the roster. A find-and-replace between
+two agents' units is exactly the failure that made provision work this way.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+from loam_permissions import PERMISSION_MODE  # noqa: E402  every lane's, one home
+
+AI_LABS = lc.WORKSPACES
+UNIT_DIR = lc.USER_UNIT_DIR
+
+
+def roster() -> list[str]:
+    """Every directory under ai-labs that carries an agent.json.
+
+    Derived, not listed. A hardcoded tuple lived here until 2026-08-26 and was
+    the reason standing up a sixth agent needed this file edited by hand --
+    the same "rosters drift, patterns don't" rule the boundary guard is built
+    on. commons/ has no agent.json and so is not an agent.
+    """
+    return sorted(
+        d.name for d in AI_LABS.iterdir()
+        if d.is_dir() and (d / "agent.json").is_file()
+    )
+
+TEMPLATE = """\
+[Unit]
+Description=Loam Remote Control server for {display}
+After=network-online.target
+Wants=network-online.target
+# Armed by the Claude Code sign-in (2026-11-14, first release L6; bin/rc-arm).
+# Remote Control runs only on the login file, never on a setup token, so
+# without the file the server cannot start: this skips it, which is not a
+# failure, where Restart=always below used to restart it every ten seconds
+# for as long as nobody signed in (56 times in one install rehearsal, and on
+# a box that only uses Codex, forever). loam-claude-signin.path starts it once the
+# file lands and stops it once the file is gone.
+ConditionPathExists={credentials}
+
+[Service]
+# DO NOT add EnvironmentFile={wake_env} or set
+# CLAUDE_CODE_OAUTH_TOKEN here: a setup-token can only make model requests and
+# cannot establish Remote Control sessions, so every agent would go offline in
+# the app while the wakes kept working -- invisible until someone reaches for
+# their phone.
+#
+# No tmux. Measured 2026-08-26: `claude remote-control` runs correctly with no
+# controlling terminal -- it connects, registers its session, and holds. tmux
+# was only ever supplying a pty, and it cost far more than it gave. `tmux
+# new-session` hands work to a SHARED tmux server, so whichever agent booted
+# first owned that server process and every other agent's session landed in
+# that one unit's cgroup. All five shared one memory bucket and one fate: at
+# 02:13 on 2026-08-26 the bucket reached 2.0 GB while a wake was running, the
+# kernel OOM-killed it, and the unit marked failed was Iris -- while the other
+# four kept running inside the cgroup of a service systemd considered dead.
+# The old units carried KillMode=process to survive that entanglement; with
+# one process per unit there is nothing to disentangle.
+Type=simple
+Restart=always
+RestartSec=10s
+# Contain a runaway instead of letting it choose a victim by cgroup accident.
+#
+# Sized for TWO sessions, not one. The old 900M was sized against one session
+# per agent and that assumption was never written down. A session is the CLI
+# plus its OWN two MCP servers -- ~440 MB measured, not the ~300 MB a session
+# process shows on its own -- so two sessions plus the ~80 MB supervisor
+# exceed 900M by construction. Both agents that ever carried a second session
+# hit the ceiling: one at 886 MB with 109 throttle events (2026-09-02) and
+# another pinned at exactly 900 MB with 1704 (2026-09-03). Opening a second chat
+# on an agent is ordinary use, so the cap was degrading the exact surface
+# being used, while it was being used.
+#
+# MemoryHigh=1G keeps reclaim starting early, where it costs page cache
+# rather than progress; MemoryMax=1400M is the wall behind it.
+#
+# The trade, the owner's call 2026-09-03: five agents x 1400M is more than the
+# box has, so per-agent caps stop being a collective guarantee. That guarantee
+# was always notional -- all four global OOM kills happened with 900M caps in
+# place, because a cgroup cap cannot see the box running out. What guards the
+# global picture instead is measurement and recovery: check-memory at 01:55,
+# the recycle at 01:30, and the OnFailure handlers.
+#
+# Since 2026-11-06 a share of the box (the box can be resized): 14% / 19% of
+# RAM is 1085 / 1472 MB on the CX33, today's 1G / 1400M rounded up, and grows
+# with a resize so one heavy session can use a bigger box. Measured first:
+# from 10-13 to 11-06 no RC unit passed 510 MB, so neither number has bound.
+MemoryHigh=14%
+MemoryMax=19%
+# Pinned, not drifting. The CLI auto-updated itself from 2.1.245 to 2.1.259 on
+# 2026-09-03 with nobody choosing it. Upgrades are an operator decision taken
+# with the changelog open, which is what this makes true.
+#
+# The reason first written here -- that the release moved the SessionStart hook
+# cap from 10,000 to ~33.8 KB -- is WRONG and was retracted on 2026-09-04. One
+# harness against all three binaries in one sitting: 2.1.245, 2.1.259 and
+# 2.1.260 all deliver inline at 9,990 characters and all spill to a file at
+# 10,010. The original bracket table had measured whether the MODEL could
+# produce the tail token, and at 33 KB the model had simply read the spill file
+# the notice pointed it at. Same cap, different reading.
+#
+# The pin never needed that number, which is the point worth keeping: it stands
+# on nobody having chosen the upgrade.
+#
+# DISABLE_AUTOUPDATER is the only seam that works, and that was read off the
+# binary rather than the docs. `autoUpdates: false` in ~/.claude.json is
+# deliberately ignored on a native install -- the gate is
+#   autoUpdates === false && (installMethod !== "native"
+#                             || autoUpdatesProtectedForNative !== true)
+# and the native installer sets both of those itself, so the config flag
+# cancels its own effect. `autoUpdatesChannel` only chooses latest/stable/rc;
+# it has no "off". This box had autoUpdates:false set the whole time and
+# updated anyway.
+Environment=DISABLE_AUTOUPDATER=1
+Environment=PATH={unit_path}
+WorkingDirectory={workspace}
+# Report the auto-loaded files, and start anyway. Every failure this can see
+# -- a file over the limit, a dropped @import, a dangling style symlink, a
+# style whose name no longer matches -- is silent at runtime: the session
+# starts, sounds entirely like itself, and carries less. This is the only
+# instrument that runs from OUTSIDE a session and so the only one that can
+# see absence rather than truncation.
+#
+# The leading `-` is load-bearing and is belt to rc-preflight's braces: it
+# already exits 0 whatever it finds, and this makes a crash in it -- a syntax
+# error, a missing lib -- unable to take the server down either. A Remote
+# Control server that will not start shows the agent as `offline` on
+# the owner's phone with no reason given, and the only thing that could repair
+# the workspace is the wake. Nothing about file hygiene is worth that.
+ExecStartPre=-/usr/bin/python3 {root}/bin/rc-preflight {workspace}
+# The server's own debug log, one start kept behind the current one. Added
+# 2026-10-13 because the server pre-creates a session in its directory at every
+# start, and Iris's had been dying within two seconds of the 01:30 recycle
+# since at least 09-03 with nothing recorded: the session's exit goes to the
+# server, the server's stdout goes to /dev/null, and stderr said nothing. The
+# rotation is what bounds it -- the recycle starts every unit once a night.
+ExecStartPre=-/bin/mv -f {logs}/rc-{name}.debug {logs}/rc-{name}.debug.1
+ExecStart={claude} remote-control \\
+  --name {display} \\
+  --remote-control-session-name-prefix {name} \\
+  --spawn same-dir \\
+  --permission-mode {permission_mode} \\
+  --debug-file {logs}/rc-{name}.debug
+# stdout discarded, stderr kept. Remote Control redraws its status line on a
+# timer and journald records every redraw as a log line: measured 2026-09-03,
+# the five units wrote 1.9 million lines in 24 hours and the user journal had
+# reached 2.4 GB. None of it is information -- it is one pane, re-rendered,
+# forever. Sending it to the journal was already the second attempt (the first
+# grew rc-*.log to 85 MB with no rotation), and journald's rate limiting and
+# disk cap did keep it survivable; what it could not do is stop the noise
+# burying everything real in the same stream.
+#
+# stderr stays. A crash, an auth failure or an MCP server refusing to start
+# prints there, and that is the entire reason anyone opens this unit's log.
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+"""
+# The spawned sessions' permission mode (2026-11-12). On the launch line
+# because the CLI ignores `bypassPermissions` as a project settings
+# `defaultMode` (lib/loam_permissions.py). Baked in here, so check-drift's
+# format of this template renders the same unit.
+TEMPLATE = TEMPLATE.replace("{permission_mode}", PERMISSION_MODE)
+# The install's own paths (lib/loam_config.py, 2026-11-14), baked in the same
+# way and for the same reason.
+for _key, _value in (("{unit_path}", lc.UNIT_PATH), ("{root}", str(lc.ROOT)),
+                     ("{logs}", str(lc.LOGS)), ("{claude}", str(lc.CLAUDE_BIN)),
+                     ("{wake_env}", str(lc.WAKE_ENV)),
+                     ("{credentials}", str(lc.CLAUDE_HOME / ".credentials.json"))):
+    TEMPLATE = TEMPLATE.replace(_key, _value)
+
+
+def main() -> int:
+    dry = "--dry-run" in sys.argv
+    names = [a for a in sys.argv[1:] if not a.startswith("-")] or roster()
+    unknown = [n for n in names if n not in roster()]
+    if unknown:
+        print(f"gen-rc-units: no agent.json for {', '.join(unknown)}", file=sys.stderr)
+        return 1
+    UNIT_DIR.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        config = json.loads(
+            (AI_LABS / name / "agent.json").read_text(encoding="utf-8")
+        )
+        # Read back, never assumed: a unit pointed at the wrong workspace is
+        # an agent wearing someone else's directory.
+        assert config["name"] == name, f"{name}: agent.json says {config['name']!r}"
+        unit = TEMPLATE.format(
+            display=config["display"],
+            name=config["name"],
+            workspace=config["workspace"],
+        )
+        path = UNIT_DIR / f"loam-rc-{name}.service"
+        if dry:
+            print(f"--- {path} ---")
+            print(unit)
+        elif path.exists() and path.read_text(encoding="utf-8") == unit:
+            # Rewriting identical content still bumps mtime and still invites a
+            # needless daemon-reload. Provisioning a new agent has to leave the
+            # live ones alone, and this is the whole of what makes that true.
+            print(f"unchanged {path}")
+        else:
+            path.write_text(unit, encoding="utf-8")
+            print(f"wrote {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    # The live lock (since 2026-10-02): this writes the host's units, which is
+    # Loam's live state, so it runs one at a time with a landing of Loam.
+    # A dry run changes nothing and takes nothing.
+    if "--dry-run" in sys.argv:
+        sys.exit(main())
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+    import loam_lock  # noqa: E402
+    with loam_lock.live("Loam", "gen-rc-units " + " ".join(sys.argv[1:])):
+        sys.exit(main())

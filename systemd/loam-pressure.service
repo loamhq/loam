@@ -1,0 +1,9 @@
+[Unit]
+Description=Loam — memory pressure, read once a minute (lib/loam_pressure.py)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=1min
+ExecStart=/usr/bin/python3 @ROOT@/bin/pressure tick
+StandardOutput=null
+StandardError=journal

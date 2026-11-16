@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Daily expiry of the shared agent commons. Runtime-independent.
+
+``ai-labs/commons/`` is a town square co-owned by every agent: an open,
+ephemeral space where agents leave each other plain-markdown notes. The
+seven-day expiry is what makes a note cheap to write — a note is an input to
+another agent's judgment with a short half-life, and a stale one read as
+current is the failure this prevents. Without the sweep the square silently
+becomes an archive.
+
+Ported from ``chassis.commons`` (the reference implementation) into the
+agents tree deliberately: the chassis is the frozen revert path and must not
+be the thing keeping a live capability alive. Stdlib only, no chassis import,
+no venv — it keeps working whatever happens to that tree.
+
+Age is read from **mtime**, as the original does. ``st_birthtime`` is not
+exposed by ``os.stat`` on this VPS, and mtime is sound here because commons
+notes are write-once: the convention is to add a note, not edit a peer's. A
+``git add``/``commit`` does not touch working-tree mtimes, so autocommit
+cannot age a note. A working-tree rewrite bumps mtime *forward*, which
+over-retains rather than deleting early -- the safe direction.
+
+The unlink lands between ai-labs-autocommit ticks and is recoverable from
+git history until the next one.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from datetime import timedelta
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+COMMONS_DIR = lc.WORKSPACES / "commons"
+EXPIRY_WINDOW = timedelta(days=7)
+
+# Never removed, at any depth. README.md is the structural/self-describing
+# name each inbox folder carries so the folder survives an empty square.
+#
+# SKILLS-REPORT.md was exempt on the chassis because the advisor overwrote it
+# every week, so it was a standing report rather than an ephemeral note. That
+# advisor is retired, which turned the exemption into a guarantee that a stale
+# report of a dead mechanism would sit in the square forever. The owner's call:
+# drop it. A report nothing refreshes should expire like anything else.
+PRESERVED_NAMES = frozenset({"README.md"})
+
+
+def is_note(path: Path) -> bool:
+    """True iff this is a sweepable note rather than structure."""
+    return (
+        path.is_file()
+        and path.name not in PRESERVED_NAMES
+        and not path.name.startswith(".")
+    )
+
+
+def sweep(root: Path, window: timedelta, now: float, dry_run: bool) -> list[Path]:
+    if not root.exists():
+        print(f"commons sweep: {root} does not exist, nothing to do")
+        return []
+    cutoff = now - window.total_seconds()
+    removed: list[Path] = []
+    for path in sorted(root.rglob("*")):
+        if not is_note(path):
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError as exc:
+            print(f"  cannot stat {path} ({exc}); skipping", file=sys.stderr)
+            continue
+        if mtime >= cutoff:
+            continue
+        age_days = (now - mtime) / 86400
+        if not dry_run:
+            try:
+                path.unlink()
+            except OSError as exc:
+                print(f"  cannot remove {path} ({exc}); skipping", file=sys.stderr)
+                continue
+        removed.append(path)
+        print(f"  {'would remove' if dry_run else 'removed'} "
+              f"{path.relative_to(root)} (age {age_days:.1f}d)")
+    print(f"commons sweep: {len(removed)} note(s) older than {window.days}d "
+          f"{'would be removed' if dry_run else 'removed'} from {root}")
+    return removed
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--root", type=Path, default=COMMONS_DIR)
+    ap.add_argument("--days", type=int, default=EXPIRY_WINDOW.days)
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--now", type=float, default=None,
+                    help="override the clock (unix ts); for verification")
+    args = ap.parse_args()
+    sweep(
+        args.root,
+        timedelta(days=args.days),
+        args.now if args.now is not None else time.time(),
+        args.dry_run,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

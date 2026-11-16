@@ -1,0 +1,2789 @@
+#!/usr/bin/env python3
+"""Provision one agent onto the Claude Code runtime. Derives, never copies.
+
+Move 1's prompt was written for one persona and switched to another by find-and-replace;
+the replace missed the two tasks that compose identity, and as written it
+would have stood the second up wearing the first's soul. It was caught by reading. At
+four agents that does not scale, so nothing here is ever edited from another
+agent's copy: every per-agent value is read from that agent's own files at
+build time, and the only input is the name.
+
+Usage: provision <agent> <wake HH:MM> [--dry-run]
+       provision --engineer [--dry-run]
+       provision --reviewer [--dry-run]
+       provision --codex [<agent>...] [--dry-run]
+       provision --antigravity [<agent>...] [--dry-run]
+       provision --project <name> --repo new|<url> [--project-file <path>]
+       provision --project <name> --rerender
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+AI_LABS = lc.WORKSPACES
+VAULT = lc.VAULT
+# What every persona and the platform engineer can reach, one shared file any
+# agent edits (the owner, 2026-11-09). Imported by absolute path, which Claude
+# Code loads only with the project's external includes approved (ensure_trust).
+REACH = lc.WORKSPACES / "_shared" / "reach.md"
+AGENTS = lc.ROOT
+SYSTEMD = lc.USER_UNIT_DIR
+CLAUDE_JSON = lc.HOME / ".claude.json"
+# This file's own tree first (2026-11-09): run from a job's worktree, as
+# its tests do, it must use the branch's lib, not main's. Live, the two
+# are one path; the canonical line behind it serves a copy elsewhere.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+# The engineer's model has ONE home, lib/loam_engineer.py, and this is not
+# it. bin/engineer-job passes the same value as `--model`; until 2026-09-16
+# this file carried its own literal beside it, which is exactly the two-home
+# constant the lib docstring says nobody may have. Opus 5 since 2026-09-16,
+# The owner's call; see the comment on the definition.
+from loam_engineer import ENGINEER_MODEL  # noqa: E402
+import loam_skills  # noqa: E402
+
+# The limit has ONE definition and this is not it -- lib/loam_memory.py is,
+# because the hook that enforces it and the wake that reports it both import
+# from there and none of the three may disagree. What provision owns is
+# putting the number where the agent can READ it: agents cannot read
+# the runtime's checkout, so a constant living only in the enforcing layer
+# is invisible to the party expected to keep it. CLAUDE.md is the one file
+# that is operator-owned, unwritable by the agent, and present in every run.
+import loam_deploy  # noqa: E402  the browser's URL and server name, one home
+import loam_provider_memory as provider_memory  # noqa: E402  L8: the memory pins
+import loam_contributions as contributions  # noqa: E402  L4: what plugins add
+from loam_memory import (  # noqa: E402
+    CONVERSATION_LAYER,
+    LIMIT_CHARS,
+    STYLE_NAME,
+    ALWAYS_LAYER,
+    REFLECTION_LAYER,
+)
+
+
+def die(msg: str) -> None:
+    print(f"provision: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def emoji_for(display: str, own: str | None = None) -> str:
+    """The agent's identity emoji, from its own atlas note; else ``own``, the
+    face its agent.json already has (2026-11-14: an agent made by
+    conversation, lib/loam_agents.py, has a face and no atlas note)."""
+    note = VAULT / "20_ATLAS" / f"{display}.md"
+    try:
+        text = note.read_text(encoding="utf-8")
+    except OSError:
+        if own:
+            return own
+        die(f"atlas note missing at {note}; cannot derive emoji")
+    m = re.search(r"^emoji:\s*(\S+)", text, re.MULTILINE)
+    if not m:
+        if own:
+            return own
+        die(f"no emoji: field in {note}")
+    return m.group(1)
+
+
+def skills_shape(workspace: Path) -> str:
+    """folder-form (<skill>/SKILL.md), single-file (<skill>.md), or absent."""
+    skills = workspace / "skills"
+    if not skills.is_dir():
+        return "absent"
+    folders = [d for d in skills.iterdir() if d.is_dir() and (d / "SKILL.md").is_file()]
+    singles = [
+        f for f in skills.iterdir()
+        if f.is_file() and f.suffix == ".md" and not f.name.startswith("_")
+    ]
+    if folders and singles:
+        return "mixed"
+    if folders:
+        return "folder"
+    if singles:
+        return "single-file"
+    return "empty"
+
+
+def skills_line() -> str:
+    """The one pointer to the shared shelves in every persona's always-loading
+    instructions (first release L7, the owner's decision 8, 2026-11-14). It is
+    here, in the rendered CLAUDE.md that every provider is given, and not in
+    the persona's own `_always.md`, which is the persona's to write."""
+    system = VAULT / lc.vault_folder("system")
+    return (f"**Shared skills.** Beside your own `skills/`, every provider "
+            f"lists you two shared shelves: `{system}/{loam_skills.OWN_DIR}/`, "
+            f"{lc.OWNER_NAME}'s and every agent's, and "
+            f"`{system}/{loam_skills.LOAM_DIR}/skills/`, Loam's own (how Loam "
+            f"works and how to use it well; each update replaces it); your own "
+            f"skill wins over a shared one of the same name, and `loam-skills` "
+            f"says the rest.")
+
+
+def claude_md(display: str, workspace: Path) -> str:
+    """Identity plus a surface declaration that is true on THIS runtime.
+
+    Soul and config are imported by relative path, never copied — they are
+    operator-authored and must stay canonical. The import only resolves
+    because the project root is the workspace itself; an import pointing
+    outside is dropped silently (Move 1 finding).
+
+    ``_always.md`` is imported the same way and is the one thing here the
+    agent owns. An import is the only route re-resolved from disk after a
+    compaction (investigation section 2), which is why the always-on layer
+    rides here rather than on any of the other three.
+
+    The size limit is stated in this file because this file is the only
+    operator-owned text present in every single run. Agents cannot read
+    the runtime's checkout, so a limit that lives only where it is enforced
+    is a rule the party expected to keep it can never look up.
+    """
+    return f"""You are {display}.
+
+@soul.md
+
+@config.md
+
+@{ALWAYS_LAYER}
+
+---
+
+**Surface:** Claude Code
+
+You are running as a Claude Code session on the VPS that holds the vault.
+{lc.OWNER_NAME} reaches you from claude.ai/code in a browser or the Claude app on
+his phone, and on a schedule you wake by yourself with no one watching.
+
+Markdown renders — headers, bold, lists, tables, code blocks, links. Write
+with whatever structure the thought actually has. Wiki-links like
+[[Note Name]] stay as written; they are live links in Obsidian, which is
+where {lc.OWNER_NAME} reads the vault.
+
+This directory — `{workspace}/` — is your workspace, and it is where your
+own files live. `CLAUDE.md`, `agent.json`, `.mcp.json`, `.claude/` and `.codex/`
+here are the runtime's: they are how you are assembled.
+
+What you can reach and use (the vault, the shell, the browser, subdomains,
+threads, settings, the reviewer) is in the shared file below, which any agent
+may edit; what the owner's plugins add is at the end of this file:
+
+@{REACH}
+
+{skills_line()}
+
+**The files that load without you choosing to read them.** `{ALWAYS_LAYER}` is
+with you on every run. `{CONVERSATION_LAYER}` is with you when {lc.OWNER_NAME} is here,
+and `{REFLECTION_LAYER}` when you wake alone; each loads only on its own kind
+of run, and so does anything under `crons/`. Keep each under
+{LIMIT_CHARS:,} characters: they are paid for on every run, so the bulk
+belongs in a file you read when the topic arrives, with a line here pointing
+at it. An edit past the limit lands, and you are told the new count.
+
+`{CONVERSATION_LAYER}` reaches a conversation by being the target of the
+symlink at `.claude/output-styles/{STYLE_NAME}.md`, which is why it opens with
+a `---` frontmatter block. That block is the loader's, not yours, and without
+it the file loads nothing at all and says nothing about it. Edit below it.
+
+**If you are already a subagent, call `Agent` synchronously or not at all.**
+A background subagent that launches background children ends before they
+do and returns a hollow report; the work happens, and nobody hears of it.
+
+**Your own notes may describe a runtime you are no longer on.** Sub-agents,
+web search and skills are native here. Where your files assume machinery
+that is not in your tool list, they are describing something that no longer
+exists on this machine rather than something you have lost access to.
+Correcting them is yours to do when you next have reason to; there is
+nothing to migrate, only prose to retire.
+
+Both trees auto-commit every 15 minutes, so a bad edit is recoverable and is
+not worth being timid about.
+""" + _plugin_words(workspace)
+
+
+def _plugin_words(workspace: Path) -> str:
+    """What the persona's plugins let it do, in their own words (2026-11-14,
+    first release L4): nothing at all when no plugin that is on says so."""
+    words = contributions.lane_prompt("persona", workspace.name)
+    return f"\n{words}\n" if words else ""
+
+
+def settings(workspace: Path) -> dict:
+    ws = str(workspace)
+    plugin_tools = [f"mcp__{s}" for s in contributions.lane_servers("persona", workspace.name)]
+    return {
+        # The persona model for the conversational surface. Remote Control
+        # takes no --model flag, so without this an agent the owner talks to
+        # runs on whatever the CLI defaults to that week while its wake runs
+        # on what bin/wake pins -- the same persona on two models. This and
+        # WAKE_MODEL in bin/wake move together.
+        "model": "fable",
+        "permissions": {
+            "defaultMode": "acceptEdits",
+            "additionalDirectories": [str(VAULT), str(AI_LABS)],
+            # The boundary deny rules retired on 2026-11-08 ("the authority
+            # move", the owner's word): the transcripts, the runtime files,
+            # `.claude/` and Bash were denied here, and a persona's reach is
+            # now the whole box, shell and sudo included. What it should not
+            # do without his yes is in its config.md, which loads on every
+            # run; runtime mechanisms are for capacity and recovery, never for
+            # permission. What stays below is not a path boundary.
+            "deny": [
+                "CronCreate",
+                "CronDelete",
+                "ScheduleWakeup",
+                "RemoteTrigger",
+                # The shared browser's one tool that runs arbitrary Playwright
+                # code inside the browser container's Node process rather
+                # than driving a page. The container is the wall either way
+                # (no capabilities, its own network, 1 GB), but a persona's
+                # sight is pages, snapshots and screenshots; this is denied
+                # by full name so the server-wide allow below cannot reach it.
+                f"mcp__{loam_deploy.BROWSER_SERVER_NAME}__browser_run_code_unsafe",
+            ],
+            # Since 2026-11-12 every lane runs with `--permission-mode
+            # bypassPermissions` on its launch line (lib/loam_permissions.py:
+            # the broker, the Remote Control units, the wake): every tool
+            # runs unasked, tools a future CLI adds included, and only the
+            # deny list above applies. Not as `defaultMode` here: 2.1.322
+            # ignores `bypassPermissions` from a project's settings and
+            # starts the session in `default` (caused the same day). So the
+            # mode and this list are the fallback for a launch that passes
+            # no flag, and the record of what each grant was for. Codex
+            # reads no part of the list any more: every server there is
+            # approved whole (codex_config).
+            "allow": [
+                # The shell and the file tools on every path, so nothing a
+                # persona does on the box raises a prompt: `acceptEdits`
+                # covers edits inside the project's directories only, and a
+                # write outside them prompted (caused 2026-11-08 on 2.1.312:
+                # a Write to ~/.cache refused under `acceptEdits` with only
+                # `Bash` allowed, landed with `Edit` and `Write` allowed too).
+                "Bash",
+                "BashOutput",
+                "KillShell",
+                "Read",
+                "Edit",
+                "Write",
+                "NotebookEdit",
+                "Glob",
+                "Grep",
+                "mcp__loam__read_epub",
+                "mcp__loam__delete_file",
+                "mcp__loam__move_file",
+                "mcp__composition__generate_image",
+                "mcp__composition__generate_pdf",
+                "mcp__composition__typst_fonts",
+                "mcp__composition__render_typst_pages",
+                # The shared browser (Move 10, 2026-09-08): every tool the
+                # server offers, by server name. Allowed for the reason the
+                # engineer tool is: an unallowed MCP call prompts, and a
+                # prompt nobody can answer hangs a session in silence. On
+                # every lane since 2026-09-09 (the owner's word): the wake
+                # lanes had dropped it through bin/wake's --disallowed-tools
+                # and no longer do, so an unattended run can read a vault
+                # page too. The sight paragraph in CLAUDE.md says so.
+                f"mcp__{loam_deploy.BROWSER_SERVER_NAME}",
+                # The engineer: every tool the server offers, by server
+                # name (2026-11-09; until then each tool by its full name,
+                # and `thread`, added 11-08, was missing). This line is
+                # load-bearing in a way none of the others are:
+                # `defaultMode: acceptEdits` does NOT cover MCP tools, and an
+                # unallowed MCP call raises a permission prompt that a
+                # session with nobody attached will sit on FOREVER --
+                # measured 2026-09-05, eleven minutes with no timeout, no log
+                # line and no outward sign, and the server's own log proving
+                # the tool was never entered. Without this the first brief
+                # anyone sends does not fail; it hangs. Nobody approves a
+                # call: `brief`, `status`, `site` (an agent's own subdomain,
+                # 2026-11-08), `thread` and `settings`, on every lane.
+                "mcp__engineer",
+                # A plugin's tools, by server, for the engineer's reason: an
+                # unallowed MCP call prompts, and a session nobody is watching
+                # hangs on it.
+                # (lib/loam_contributions.py).
+                *plugin_tools,
+                # Web reach. Native tools, so nothing in the runtime design
+                # accounted for them and they landed in the middle category:
+                # neither allowed nor denied, which means they prompt -- and a
+                # headless wake has nobody to answer a prompt. The standing
+                # nightly market & research sweep is the job that found this,
+                # and D9 sized the whole 02:00-05:00 grid around that sweep
+                # being the longest-running wake.
+                #
+                # Deliberately unscoped. WebFetch supports domain-scoped
+                # grants and one would be wrong here: the sweep's whole job is
+                # fetching sources it has not seen before, so an allowlist
+                # would fail on exactly the material worth finding, and fail
+                # it the same silent way the missing grant did.
+                #
+                # Granted to every agent, not just the one that needs it
+                # today. These configs are byte-identical apart from the
+                # agent's own name, and that invariant is worth more than a
+                # narrower grant.
+                "WebSearch",
+                "WebFetch",
+                # Subagents, on every lane. Decision 6 of the phase-5
+                # closing plan names a same-identity background subagent as
+                # THE mechanism by which a persona hands off a long job and
+                # keeps talking, and Move 9's done-condition rests on it. It
+                # was never granted, and on 2026-09-05 that showed: a persona
+                # briefed the engineer, tried to launch the subagent the tool
+                # description told it to, and had the launch refused by the
+                # permission layer with "Blocked by classifier" as the whole
+                # of the reason. He called the tool directly instead and went
+                # quiet for the seven minutes -- the exact shape decision 6
+                # exists to avoid.
+                #
+                # Until 2026-11-09 bin/wake passed `Task` to --disallowed-tools
+                # on every wake and cron; the owner lifted that with the other
+                # unattended restrictions that day. A subagent inherits its
+                # parent's permissions, so this grants no reach the persona
+                # did not already have; what it grants is the ability to do
+                # the same work without holding the turn open.
+                #
+                # The owner's call, 2026-09-05, asked with the cost stated: a
+                # persona may now spawn subagents freely while talking, which
+                # multiplies tokens on a long job.
+                "Task",
+                # Skills, every one: the persona's own under `skills/` and the
+                # ones bundled with the pinned CLI. Unallowed, each opening
+                # raised a "Needs your OK" card (a persona, 2026-10-02, on the
+                # bundled `claude-api`) and would hang a wake that met one.
+                # Bare `Skill` is the whole tool; `skillOverrides` below still
+                # takes `schedule` and `loop` out before this can reach them.
+                # Nothing third-party can arrive: claude.ai sync is off in
+                # USER_SETTINGS_CLAUSES, no plugin or marketplace is
+                # configured. Bash could install one since 2026-11-08; that
+                # is the persona's to ask about, not this list's to stop.
+                # The owner, 2026-10-02: "allow all as long as it's Anthropic's
+                # own skills."
+                "Skill",
+            ],
+        },
+        # Skills are not tools, so the deny list above cannot reach them -- and
+        # two bundled ones reopen exactly the door it closes. `/schedule`
+        # creates recurring runs on Anthropic's infrastructure; `/loop` re-runs
+        # a prompt on an interval. A reflection wake that decides to schedule
+        # its own follow-up is not a far-fetched turn.
+        #
+        # `skillOverrides` is the per-skill seam (values: on / name-only /
+        # user-invocable-only / off). "off" removes the skill from the model's
+        # skill list AND from slash-command dispatch; an attempt returns
+        # `Skill "schedule" is disabled via skillOverrides.` The alternative,
+        # CLAUDE_CODE_DISABLE_BUNDLED_SKILLS, is all-or-nothing and would take
+        # the agents' own authored skills down with it -- those are identity
+        # infrastructure, not conveniences.
+        #
+        # When an agent wakes stays an operator decision, expressed in systemd
+        # units.
+        "skillOverrides": {
+            "schedule": "off",
+            "loop": "off",
+        },
+        # Three claude.ai cloud connectors -- Gmail, Google Calendar, Google
+        # Drive -- were arriving on every agent's MCP surface. Nobody added
+        # them: they are account-level connectors auto-fetched into every
+        # project. Inert today because OAuth cannot complete headless, but the
+        # surface should be what we chose, not what arrived.
+        #
+        # This gates ONLY auto-fetched connectors, and it is read per settings
+        # source, so setting it here removes them from the five agents without
+        # touching the owner's own Claude usage anywhere else.
+        "disableClaudeAiConnectors": True,
+        "enableAllProjectMcpServers": True,
+        # The conversation lane. `claude remote-control` accepts no
+        # system-prompt flag of any kind and builds its spawned child's argv
+        # itself, so there is no local seam in the flag path -- this settings
+        # key is the ONLY hook-free carrier that reaches a phone- or
+        # browser-attached session, and what it carries lands in the system
+        # prompt. The file it names is a symlink to the agent's own
+        # `_active.md`, so the agent keeps writing where it always has and
+        # `.claude/` stays operator-owned.
+        "outputStyle": STYLE_NAME,
+        # Auto memory off. It gives nothing a plain file cannot: no relevance
+        # recall fires on this build (the machinery is in the binary behind a
+        # server-side flag that can switch on with no release), its index
+        # truncates SILENTLY at 200 lines / 25,000 characters, and it was
+        # kept precisely because it supposedly could not outgrow its
+        # transport -- it can, it just fails quietly rather than loudly.
+        #
+        # `memory/` stays on disk and stays readable. Each agent folds its
+        # own prohibitions into `_always.md` in its own words; nobody else
+        # writes an agent's memory for it.
+        "autoMemoryEnabled": False,
+        # Two hooks, both of which do something no native mechanism does.
+        # The four memory hooks that used to be here are retired: identity
+        # composes from CLAUDE.md imports, the output style, and the wake's
+        # --append-system-prompt-file, all of which are system-prompt routes
+        # re-established after a compaction. Nothing left to re-inject.
+        #
+        # The boundary guard (PreToolUse) retired on 2026-11-08. In its place
+        # a PostToolUse hook that never refuses: the write lands, and the
+        # agent is told a loading file's new size past the limit, a filename
+        # Android cannot store, or `_active.md` losing its frontmatter.
+        # Rollback is a revert of the commit that made this change, then a
+        # re-provision; the guard script itself stayed, for the engineer and
+        # the reviewer.
+        "hooks": {
+            "Stop": [{"hooks": [_hook("transcript_capture.py", 120)]}],
+            "SessionEnd": [{"hooks": [_hook("transcript_capture.py", 120)]}],
+            "PostToolUse": [{"matcher": "*", "hooks": [
+                _hook("loading_size.py", 15)]}],
+        },
+    }
+
+
+def _hook(script: str, timeout: int) -> dict:
+    return {
+        "type": "command",
+        "command": f"/usr/bin/python3 {AGENTS}/hooks/{script}",
+        "timeout": timeout,
+    }
+
+
+def _guard_hook() -> dict:
+    """The boundary guard's entry, the same in every settings file that
+    carries it. `onFailure: "block"` (2.1.295) makes a guard that times out
+    or crashes refuse the call; without it the CLI treats the failure as
+    non-blocking and the call goes through, the one path on which the guard
+    was skipped. Both measured 2026-10-21 on 2.1.303 with a wrapper sleeping
+    past the 15 s: with the key, `timed out; blocking because onFailure is
+    "block"`; without it, the write landed. 2.1.294, the rollback build,
+    reads a file holding the key and keeps its deny rules and the guard
+    (same day), so the key does not cost the one-`ln` rollback. Not on the
+    transcript hooks: a Stop hook that blocks would hold a turn open."""
+    return {**_hook("boundary_guard.py", 15), "onFailure": "block"}
+
+
+def mcp_config(name: str, workspace: Path) -> dict:
+    return {
+        "mcpServers": {
+            "loam": {
+                "command": f"{lc.MCP_VENV}/bin/python",
+                "args": [f"{AGENTS}/mcp/read_epub_server.py"],
+                "env": {
+                    "LOAM_EPUB_ROOTS": f"{VAULT}:{workspace}",
+                    "LOAM_AGENT": name,
+                    "LOAM_AGENT_WORKSPACE": str(workspace),
+                    "LOAM_VAULT": str(VAULT),
+                    "LOAM_AI_LABS": str(AI_LABS),
+                    # Bytecode outside the runtime's checkout: Codex hands a
+                    # server only what is listed (2026-11-14, first release).
+                    "PYTHONPYCACHEPREFIX": str(lc.PYCACHE),
+                },
+            },
+            "composition": {
+                "command": f"{lc.MCP_VENV}/bin/python",
+                "args": [f"{AGENTS}/mcp/composition_server.py"],
+                "env": {
+                    "LOAM_AGENT": name,
+                    "LOAM_AGENT_WORKSPACE": str(workspace),
+                    "LOAM_VAULT": str(VAULT),
+                    "LOAM_AI_LABS": str(AI_LABS),
+                    # Bytecode outside the runtime's checkout: Codex hands a
+                    # server only what is listed (2026-11-14, first release).
+                    "PYTHONPYCACHEPREFIX": str(lc.PYCACHE),
+                },
+            },
+            # The engineer. One tool, one blocking call, brief in and receipt
+            # out -- so the only thing this entry has to get right beyond the
+            # command is how long the call may block.
+            #
+            # `timeout` is that, and it is the right knob rather than one of
+            # the three that also work. Measured 2026-09-05: a stdio MCP tool
+            # call is aborted after thirty minutes of IDLE -- no response, no
+            # progress notification -- and the abort ORPHANS the work rather
+            # than cancelling it, leaving a live engineer nobody is reading
+            # and no receipt coming. The two environment variables that move
+            # that limit move it for every MCP call the agent makes; this
+            # field is scoped to this one server, needs no unit change, and
+            # floors the idle window as a side effect, so one number buys
+            # both clocks. Four hours. A job has no clock since 2026-11-10,
+            # so the launcher's waiter ends a call at 3 h 55 min
+            # (WAITER_CEILING_SECONDS) with the job still running, before
+            # this fires.
+            "engineer": {
+                "command": f"{lc.MCP_VENV}/bin/python",
+                "args": [f"{AGENTS}/mcp/engineer_server.py"],
+                "timeout": 14400000,
+                "env": {
+                    "LOAM_AGENT": name,
+                    "LOAM_AGENT_WORKSPACE": str(workspace),
+                    "LOAM_VAULT": str(VAULT),
+                    "LOAM_AI_LABS": str(AI_LABS),
+                    # Bytecode outside the runtime's checkout: Codex hands a
+                    # server only what is listed (2026-11-14, first release).
+                    "PYTHONPYCACHEPREFIX": str(lc.PYCACHE),
+                },
+            },
+            # The personas' sight: one headless Chromium in a container on
+            # the box (lib/loam_deploy.browser_compose), reached over HTTP on
+            # loopback. Every persona gets the same server; the transport
+            # gives each MCP session its own browser context (caused
+            # 2026-09-08: two clients, one navigated, the other's tab list
+            # still empty). The URL is loopback and a port, so the domain is
+            # not repeated here; the browser's own allowed origins carry it.
+            loam_deploy.BROWSER_SERVER_NAME: {
+                "type": "http",
+                "url": loam_deploy.BROWSER_URL,
+            },
+            # Every plugin that is on and gives a persona a tool (2026-11-14,
+            # first release L4; lib/loam_contributions.py). Rendered here, so
+            # the Codex and Antigravity files carry them too and check-drift
+            # holds them; re-rendered on every plugin switch.
+            **contributions.lane_servers("persona", name),
+        }
+    }
+
+
+# The persona on Codex (2026-10-01): `.codex/config.toml`, beside `.claude/`
+# and read-only to the persona like it. Rendered from the same functions as
+# `.mcp.json` (mcp_config) and the Claude hooks (settings), so a server or a
+# hook added there is on both providers the next time this runs and
+# bin/check-drift fails until it does. The owner, 10-01: "just the provider
+# changing does not compromise on the memories, the personalities, the soul,
+# and the tools."
+#
+# No sandbox and no approvals since 2026-11-08 ("the authority move"): the
+# persona's shell on Codex is the box's, as it is on Claude Code, with sudo and
+# the network. Until then this was a permission profile that confined writes
+# to the workspace, the commons and the vault, holed for `15_CONVERSATIONS/`
+# and the runtime's files, with reads deny-by-default and the network off.
+# What a persona asks the owner first is its config's to say, not the sandbox's.
+CODEX_HOME = lc.STATE / "broker" / "codex"
+CODEX_INSTALL = lc.HOME / ".local" / "share" / "codex"
+
+# Variables Codex passes through to a stdio MCP server beyond its own short
+# allow-list. `engineer` launches every job with `systemd-run --user`, which
+# finds the user bus through these two; without them every brief from a Codex
+# thread failed at launch with "Failed to connect to bus: No medium found"
+# (job 20261001-170601-22043567). bin/engineer-job also defaults them itself,
+# so this is the second wall rather than the only one. `loam` and
+# `composition` touch neither the bus nor the runtime dir (checked 2026-10-02).
+# `LOAM_WAKE` since 2026-11-13: a persona's wakes and crons run on Codex too
+# (lib/loam_codex_wake.py), and a brief records which lane it came from by
+# that variable (lib/loam_waiters.caller); Claude Code hands an MCP server its
+# whole environment, Codex only what is listed. A conversation has none set
+# (the broker removes it), so there it passes nothing.
+CODEX_ENV_VARS = {"engineer": ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
+                               "LOAM_WAKE"]}
+# Passed through by name at run time, never copied at render time:
+# antigravity_mcp writes the render's own value of each variable above into
+# the file, and a render from inside an engineer job would have fixed
+# `LOAM_WAKE=engineer:<job>` into every later Antigravity brief.
+RUN_TIME_ONLY_VARS = {"LOAM_WAKE"}
+
+
+def _toml(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_toml(v) for v in value) + "]"
+    if isinstance(value, dict):
+        return "{ " + ", ".join(f"{_toml_key(k)} = {_toml(v)}"
+                                for k, v in value.items()) + " }"
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _toml_key(key: str) -> str:
+    return key if re.fullmatch(r"[A-Za-z0-9_-]+", key) else json.dumps(key)
+
+
+
+
+# The hook events codex_config carries over from the Claude settings. Codex
+# has no SessionEnd; its Stop fires at the end of every turn, as Claude's does.
+CODEX_HOOK_EVENTS = ("PostToolUse", "Stop")
+
+
+def codex_config(name: str, workspace: Path) -> str:
+    claude = settings(workspace)
+    deny = claude["permissions"]["deny"]
+    out = [
+        "# Rendered by bin/provision --codex from the sources of .mcp.json and",
+        "# .claude/settings.json. The runtime's, how the persona is assembled;",
+        "# a hand-edit is drift and bin/check-drift says so.",
+        "",
+        f"model_instructions_file = {_toml(CODEX_HOME / 'instructions' / f'{name}.md')}",
+        'approval_policy = "never"',
+        'sandbox_mode = "danger-full-access"',
+        'web_search = "live"',
+        "",
+        # A ChatGPT login adds Codex's `codex_apps` MCP server: the
+        # account's connectors (Gmail send, Drive, Calendar, GitHub merge,
+        # Sites deploy), 236 tools on 2026-10-01. None is on Claude Code,
+        # and several reach past the wall, so the persona's tools stay the
+        # ones .mcp.json names.
+        "[features]",
+        "apps = false",
+        # Codex 0.159.3 offers `request_user_input` in plan mode only unless
+        # this is on; the page answers it as a question card, the same as
+        # Claude Code's AskUserQuestion. The owner, 2026-10-01: "let Codex ask
+        # questions as well."
+        "default_mode_request_user_input = true",
+        "",
+    ]
+
+    for server, spec in mcp_config(name, workspace)["mcpServers"].items():
+        out.append(f"[mcp_servers.{_toml_key(server)}]")
+        if spec.get("type") == "http":
+            out.append(f"url = {_toml(spec['url'])}")
+        else:
+            out.append(f"command = {_toml(spec['command'])}")
+            out.append(f"args = {_toml(spec.get('args', []))}")
+        if "timeout" in spec:
+            # .mcp.json's `timeout` is milliseconds for a tool call.
+            out.append(f"tool_timeout_sec = {spec['timeout'] // 1000}")
+        # A tool the Claude settings deny by full name is disabled here.
+        prefix = f"mcp__{server}__"
+        off = [d[len(prefix):] for d in deny if d.startswith(prefix)]
+        if off:
+            out.append(f"disabled_tools = {_toml(off)}")
+        # Every server's every tool runs without a prompt, as every tool does
+        # on Claude Code under `bypassPermissions` (2026-11-12, the owner: "You
+        # should have permission to everything"). Unapproved, Codex asks
+        # before an MCP call, as an `mcpServer/elicitation/request` the
+        # model reads as "user rejected MCP tool call" when nobody accepts
+        # it (a persona's thread 01a0f8a0, 2026-10-01: four calls, four
+        # refusals). Until 11-12 this followed the Claude allow list, server
+        # by server and tool by tool, so a tool added to `loam` or
+        # `composition` asked until someone listed it.
+        out.append('default_tools_approval_mode = "approve"')
+        if spec.get("env"):
+            out.append(f"env = {_toml(spec['env'])}")
+        if server in CODEX_ENV_VARS:
+            out.append(f"env_vars = {_toml(CODEX_ENV_VARS[server])}")
+        out.append("")
+
+    # The same hook scripts, one rule with two callers. SessionEnd has no
+    # Codex event; Stop fires at the end of every turn, which is when the
+    # Claude Stop hook writes too.
+    for event, groups in claude["hooks"].items():
+        if event not in CODEX_HOOK_EVENTS:
+            continue
+        for group in groups:
+            out.append(f"[[hooks.{event}]]")
+            if "matcher" in group:
+                out.append(f"matcher = {_toml(group['matcher'])}")
+            out.append("")
+            for hook in group["hooks"]:
+                out += [f"[[hooks.{event}.hooks]]",
+                        f"type = {_toml(hook['type'])}",
+                        f"command = {_toml(hook['command'])}",
+                        f"timeout = {hook['timeout']}", ""]
+    return "\n".join(out).rstrip() + "\n"
+
+
+def codex_hook_commands(workspace: Path) -> set[str]:
+    """The hook commands codex_config writes: what the broker may trust."""
+    return {hook["command"]
+            for event, groups in settings(workspace)["hooks"].items()
+            if event in CODEX_HOOK_EVENTS
+            for group in groups for hook in group["hooks"]}
+
+
+def provision_codex(names: list[str], dry: bool = False) -> None:
+    """Write `.codex/` for each named persona, or every provisioned one:
+    `config.toml` and `skills -> ../skills`, as `.claude/` has it."""
+    if not names:
+        names = sorted(p.parent.name for p in AI_LABS.glob("*/agent.json"))
+    for name in names:
+        workspace = AI_LABS / name
+        if not (workspace / "agent.json").is_file():
+            die(f"no provisioned agent at {workspace}")
+        text = codex_config(name, workspace)
+        if dry:
+            print(f"[dry-run] {workspace}/.codex/config.toml ({len(text)}B)")
+            continue
+        (workspace / ".codex").mkdir(exist_ok=True)
+        changed = write_if_changed(workspace / ".codex" / "config.toml", text)
+        link = workspace / ".codex" / "skills"
+        if (workspace / "skills").is_dir() and not (
+                link.is_symlink() and str(link.readlink()) == "../skills"):
+            if link.is_symlink() or link.exists():
+                link.unlink()
+            link.symlink_to("../skills")
+            changed = True
+        print(f"  {name}: .codex/ {'written' if changed else 'unchanged'}")
+
+
+# The persona on Antigravity (2026-11-09): `.agents/`, which is where
+# Antigravity looks in a workspace -- `mcp_config.json` for its MCP servers,
+# `skills/` for its skills. Rendered from mcp_config, the source of
+# `.mcp.json`, so a server added there is on all three providers the next time
+# this runs. The instructions are not here: the broker renders them into
+# `.agents/rules/` at every session start, as it does for Codex.
+def antigravity_mcp(name: str, workspace: Path) -> dict:
+    out = {}
+    for server, spec in mcp_config(name, workspace)["mcpServers"].items():
+        if spec.get("type") == "http":
+            entry = {"serverUrl": spec["url"]}
+        else:
+            entry = {"command": spec["command"], "args": spec.get("args", [])}
+            env = dict(spec.get("env") or {})
+            if server in CODEX_ENV_VARS:
+                for var in CODEX_ENV_VARS[server]:
+                    if var in RUN_TIME_ONLY_VARS:
+                        continue
+                    if os.environ.get(var):
+                        env[var] = os.environ[var]
+            if env:
+                entry["env"] = env
+        if "timeout" in spec:
+            entry["timeoutSeconds"] = spec["timeout"] // 1000
+        out[server] = entry
+    return {"mcpServers": out}
+
+
+def provision_antigravity(names: list[str], dry: bool = False) -> None:
+    if not names:
+        names = sorted(p.parent.name for p in AI_LABS.glob("*/agent.json"))
+    for name in names:
+        workspace = AI_LABS / name
+        if not (workspace / "agent.json").is_file():
+            die(f"no provisioned agent at {workspace}")
+        text = json.dumps(antigravity_mcp(name, workspace), indent=2) + "\n"
+        if dry:
+            print(f"[dry-run] {workspace}/.agents/mcp_config.json ({len(text)}B)")
+            continue
+        (workspace / ".agents").mkdir(exist_ok=True)
+        changed = write_if_changed(workspace / ".agents" / "mcp_config.json", text)
+        # `.agents/skills` is the skills view (first release L7): a link per
+        # personal skill and per shared one no personal one shadows, which
+        # Antigravity and Codex read (lib/loam_skills.py). It was a link to
+        # ../skills until 2026-11-14.
+        if loam_skills.render_view(workspace):
+            changed = True
+        print(f"  {name}: .agents/ {'written' if changed else 'unchanged'}")
+
+
+# rc_unit() lived here and is deliberately gone. gen-rc-units owns
+# loam-rc-*.service. It held the tmux form after the live units were replaced
+# on 2026-08-26, so a provision run would have re-introduced the shared tmux
+# server that put all five agents in one cgroup and got Iris OOM-killed. Two
+# generators writing one artifact is the defect; one artifact, one owner.
+# bin/check-drift fails if this function ever comes back.
+
+
+def wake_units(name: str, workspace: Path, wake: str) -> tuple[str, str]:
+    from loam_cron import unit_timeout_s  # noqa: PLC0415
+    service = f"""[Unit]
+Description=Loam reflection wake for {name.capitalize()} (Claude Code runtime)
+# A wake that dies before it can record itself is reported from outside the
+# dying process. bin/wake's own failure paths all run inside it, and on
+# 2026-08-30 the kernel killed it mid-run: nothing reached the log or the
+# vault inbox, and the night reads as one the timer never fired.
+OnFailure=loam-wake-failed@%N.service
+
+[Service]
+Type=oneshot
+# The wake path carried no memory limit at all, which is what [[state]] open
+# item 2 names. A persona was OOM-killed mid-wake on 08-30 and 08-31 by the
+# GLOBAL out-of-memory killer, not by any cgroup limit -- above RAM+swap the
+# kernel picks a victim by badness score, and the victim need not be the
+# process that grew. These two settings do not stop the box filling up
+# (loam-rc-recycle.timer is what addresses that); they stop a wake being an
+# unattributed contributor to it.
+#
+# MemoryHigh is the one that matters: it throttles and reclaims rather than
+# killing, so a wake that grows gives its own pages back instead of pushing
+# the whole box over the edge. MemoryMax is the backstop for a genuine
+# runaway, and a kill there lands in this unit's cgroup -- attributed, and
+# reported by the OnFailure handler above, instead of the kernel choosing
+# someone else. Observed wake RSS at the two kills was 370 and 387 MB, so
+# 1 GiB of soft headroom is well clear of a healthy wake; the risk of
+# setting these too low is turning working nights into failures, which is
+# worse than the disease.
+MemoryHigh=1G
+MemoryMax=1536M
+# Pinned, not drifting. The CLI auto-updated itself from 2.1.245 to 2.1.259 on
+# 2026-09-03 with nobody choosing it. Upgrades are an operator decision taken
+# with the changelog open, which is what this makes true.
+#
+# The reason first written here -- that the release moved the SessionStart hook
+# cap from 10,000 to ~33.8 KB -- is WRONG and was retracted on 2026-09-04. One
+# harness against all three binaries in one sitting: 2.1.245, 2.1.259 and
+# 2.1.260 all deliver inline at 9,990 characters and all spill to a file at
+# 10,010. The original bracket table had measured whether the MODEL could
+# produce the tail token, and at 33 KB the model had simply read the spill file
+# the notice pointed it at. Same cap, different reading.
+#
+# The pin never needed that number, which is the point worth keeping: it stands
+# on nobody having chosen the upgrade.
+#
+# DISABLE_AUTOUPDATER is the only seam that works, and that was read off the
+# binary rather than the docs. `autoUpdates: false` in ~/.claude.json is
+# deliberately ignored on a native install -- the gate is
+#   autoUpdates === false && (installMethod !== "native"
+#                             || autoUpdatesProtectedForNative !== true)
+# and the native installer sets both of those itself, so the config flag
+# cancels its own effect. `autoUpdatesChannel` only chooses latest/stable/rc;
+# it has no "off". This box had autoUpdates:false set the whole time and
+# updated anyway.
+Environment=DISABLE_AUTOUPDATER=1
+Environment=PATH={lc.UNIT_PATH}
+EnvironmentFile=-{lc.WAKE_ENV}
+WorkingDirectory={workspace}
+ExecStart={AGENTS}/bin/wake {workspace}
+# No clock (since 2026-11-10, lib/loam_cron.lane_timeout_s): a wake goes
+# until it is done, an engineer job it briefs and waits on included, and
+# systemd never times it out.
+TimeoutStartSec={unit_timeout_s(name, "reflection")}
+
+[Install]
+WantedBy=default.target
+"""
+    # The timer half is the reflection record's since 2026-10-14
+    # (`crons/reflection.md`): the schedule reconciler writes it, and this
+    # returns the same text for a daily `wake` so check-drift and a first
+    # provision render one thing.
+    from loam_cron import reflection_timer  # noqa: PLC0415
+    return service, reflection_timer(name, f"daily at {wake} {lc.ZONE_TOKEN}")
+
+
+def write_if_changed(path: Path, content: str) -> bool:
+    """Never rewrite a file with content it already has.
+
+    Provisioning a sixth agent must leave the five live ones alone, and an
+    identical-content rewrite still bumps mtime, still shows up in `git
+    status`, and still invites a needless daemon-reload.
+    """
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        print(f"  unchanged {path}")
+        return False
+    path.write_text(content, encoding="utf-8")
+    print(f"  wrote {path}")
+    return True
+
+
+USER_SETTINGS = lc.CLAUDE_HOME / "settings.json"
+
+# The box-wide clauses the runtime holds in ~/.claude/settings.json. Every
+# lane on this machine reads this file on every launch path -- a wake, a
+# broker session, a Remote Control server, a `claude` run by hand -- which is
+# what makes it the right home for a rule that must hold for all seven
+# personas and both runtime projects at once.
+#
+# This dict is the ONE home for them: ensure_user_settings() below writes it
+# and check-drift's check_user_settings() compares the live file against this
+# same object. Before 2026-09-25 the autoupdater pin was written here and
+# compared by nothing, so a hand-edit to the file was invisible to the drift
+# check for as long as it stood.
+#
+# DISABLE_AUTOUPDATER  ~/.local/bin/claude is a SYMLINK into a shared
+#   versions/ directory, so a single `claude` run by hand that decides to
+#   update itself repoints that symlink for all seven agents at once. The
+#   unit templates carry the variable too, but they cover only the wakes and
+#   the RC servers; a pin that stopped there would let the next interactive
+#   session undo it for everybody. The `env` block is where the CLI's own
+#   migration puts this when it retires the legacy `autoUpdates: false`
+#   preference -- the supported spelling, not a trick.
+#
+# switchModelsOnFlag  The CLI's own name for it is "Switch models when a
+#   message is flagged", and its schema describes it as: "When safeguards
+#   flag a message, automatically switch to a different model to keep
+#   chatting. When off, your session will pause instead." It DEFAULTS TO
+#   TRUE, which is how one persona's lane came to run Opus 4.8 against a config
+#   that says `fable` on 2026-09-25 -- Fable 5.1's safeguards flagged an
+#   innocuous message as `[cyber]`, the CLI retried the turn on Opus 4.8 and
+#   made the swap persistent for the session, announcing it in one warning
+#   line. Nobody chose that model and nobody was asked. False here means the
+#   lane pauses on a refusal instead, on the model its own config names.
+#
+#   Off rather than the env var CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK on
+#   purpose: that variable gates the whole mechanism INCLUDING the warning
+#   banner, so a future switch would happen with nothing said at all. This
+#   setting stops the switch and leaves the CLI still reporting the refusal.
+#
+# syncClaudeAiSkills / syncClaudeAiPlugins  CLI 2.1.275 added "syncing of the
+#   skills and plugins enabled on your claude.ai account to terminal
+#   sessions signed in with it", re-synced every ten minutes, into
+#   `~/.claude/skills/synced` and `~/.claude/plugins/synced`. Every lane on
+#   this box is signed in with the owner's account, so the default would put
+#   whatever they have enabled on claude.ai into all seven personas and both
+#   runtime projects -- content no agent's own files declare, that no commit
+#   records, and that changes under them when he toggles something in a
+#   browser. An agent's skills are its own files; that is the whole rule.
+#   Both keys are listed `restrictive:!1` in the binary's own table, so the
+#   safe value is NOT the default and has to be written.
+#
+#   This is the honored scope and the only one, read off the CLI rather than
+#   from a doc: the gate is
+#     v7t(e){let n=[...ede(),fe("userSettings")]; return n.some(
+#       (o)=>o?.[e.settingKey]===!1) || r==="org_denied" || r==="latched"}
+#   -- managed sources plus `userSettings`, with projectSettings and
+#   localSettings absent from the list. The schema text agrees in words: "Set
+#   to false to turn off syncing ... In your user settings (or managed
+#   settings)". A repo's checked-in `.claude/settings.json` holding either key
+#   is read for nothing, and the CLI says so in its own startup warning
+#   ("operator posture belongs in the user-level settings.json"). Set here
+#   before the CLI moved past 2.1.275 on 2026-09-25, in that order on
+#   purpose: after the move there is a ten-minute window in which a sync
+#   could have landed.
+USER_SETTINGS_CLAUSES: dict = {
+    "env": {"DISABLE_AUTOUPDATER": "1", **provider_memory.CLAUDE_ENV},
+    "switchModelsOnFlag": False,
+    "syncClaudeAiSkills": False,
+    "syncClaudeAiPlugins": False,
+    # Claude Code's own memory, off (first release L8): auto memory and the
+    # background consolidation, which follows a server-side default unless
+    # set. lib/loam_provider_memory.py owns the values.
+    **provider_memory.CLAUDE_SETTINGS,
+}
+
+
+def user_settings_gaps(live: dict) -> list[str]:
+    """Which clauses of USER_SETTINGS_CLAUSES the live settings do not hold.
+
+    One level of nesting is all the clauses use, and all they may use: `env`
+    merges key by key because the CLI and its own migrations write into that
+    block too, and replacing it wholesale would drop whatever they put there.
+    """
+    gaps = []
+    for key, wanted in USER_SETTINGS_CLAUSES.items():
+        if isinstance(wanted, dict):
+            have = live.get(key) or {}
+            gaps += [f"{key}.{k}" for k, v in wanted.items() if have.get(k) != v]
+        elif live.get(key) != wanted:
+            gaps.append(key)
+    return gaps
+
+
+def ensure_user_settings() -> None:
+    """Apply USER_SETTINGS_CLAUSES to ~/.claude/settings.json.
+
+    Same write discipline as ensure_trust: never write when it is already
+    right, and replace atomically. This file is smaller and less contended
+    than ~/.claude.json, but it is read by every live session and a partial
+    read would take the whole settings file down with it.
+    """
+    try:
+        settings = json.loads(USER_SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        settings = {}
+    gaps = user_settings_gaps(settings)
+    if not gaps:
+        print("  user settings clauses already held; file untouched")
+        return
+    for key, wanted in USER_SETTINGS_CLAUSES.items():
+        if isinstance(wanted, dict):
+            settings[key] = {**(settings.get(key) or {}), **wanted}
+        else:
+            settings[key] = wanted
+    # A fresh install may have no ~/.claude/ yet (found 2026-11-14, L11's
+    # scratch install: the first provision is the starter's).
+    USER_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = USER_SETTINGS.with_name(USER_SETTINGS.name + ".provision-tmp")
+    tmp.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, USER_SETTINGS)
+    print(f"  user settings: applied {', '.join(gaps)} "
+          f"in {USER_SETTINGS} (atomic replace)")
+
+
+MANAGED_SETTINGS = Path("/etc/claude-code/managed-settings.json")
+
+# The machine's managed settings, root 0644, installed 2026-10-14 when the
+# pin moved to 2.1.294. Their one job: seat the CLI's own mod guard
+# (`cc-plugin-sec-default@builtin`) and have it refuse any mod that is not
+# the organization's. Without the file the guard is "not seated: no managed
+# settings and not a Team or Enterprise organization", silently, and a
+# `--plugin-dir` mod loads. Kept as the exact bytes on disk (its layout is
+# hand-made, so it is not re-serialised from a dict): check-drift compares
+# the live file byte for byte and `provision --managed-settings` installs it.
+# Until 2026-10-21 it had this one home on disk and no check.
+MANAGED_SETTINGS_TEXT = """\
+{
+  "pluginConfigs": {
+    "cc-plugin-sec-default@builtin": {
+      "options": { "allowManagedModsOnly": true }
+    }
+  }
+}
+"""
+
+
+def install_managed_settings(dry: bool) -> None:
+    """Install MANAGED_SETTINGS_TEXT at /etc as root, 0644, when it differs.
+    Staged under state/ and moved in by `sudo install`, which replaces the
+    file whole, so a CLI starting meanwhile reads the old file or the new."""
+    try:
+        if MANAGED_SETTINGS.read_text(encoding="utf-8") == MANAGED_SETTINGS_TEXT:
+            print(f"  {MANAGED_SETTINGS} already holds the generator's bytes; untouched")
+            return
+    except OSError:
+        pass
+    if dry:
+        print(f"  [dry-run] would install {MANAGED_SETTINGS}")
+        return
+    stage = lc.STATE / f"managed-settings.{os.getpid()}.json"
+    stage.write_text(MANAGED_SETTINGS_TEXT, encoding="utf-8")
+    try:
+        subprocess.run(["sudo", "-n", "install", "-D", "-o", "root", "-g", "root",
+                        "-m", "0644", str(stage), str(MANAGED_SETTINGS)], check=True)
+    finally:
+        stage.unlink(missing_ok=True)
+    print(f"  installed {MANAGED_SETTINGS} (root 0644)")
+
+
+# Trust, and the approval Claude Code asks once before it loads an @import
+# from outside the project (REACH is one). Without the second an import of
+# reach.md is dropped silently: caused 2026-11-10 with a canary file in
+# <workspaces>/_shared/, absolute, `../` and a symlink alike; with
+# it set on the git root's key (the workspaces root) all three loaded.
+TRUST_FLAGS = ("hasTrustDialogAccepted", "hasClaudeMdExternalIncludesApproved",
+               "hasClaudeMdExternalIncludesWarningShown")
+
+
+def ensure_trust(workspace: Path, *extra: Path) -> None:
+    """Grant trust in ~/.claude.json without racing the live sessions.
+
+    Trust is keyed on the git repo root, not the project dir (measured
+    2026-08-25: additionalDirectories is ignored in an untrusted workspace).
+
+    The hazard is that ~/.claude.json is written continuously by every live
+    Claude Code session -- five Remote Control servers at the time of writing
+    -- so the old unconditional read-modify-write here could clobber whatever
+    they had just written. Three rules make provisioning safe while they run:
+    never write when the values are already right (the common case for a new
+    agent under an already-trusted ai-labs), re-check the file has not moved
+    under us before committing, and replace atomically so no reader ever sees
+    a partial file.
+    """
+    wanted = tuple(dict.fromkeys(
+        [str(AI_LABS), str(workspace)] + [str(p) for p in extra]))
+    # A fresh install provisions its starter agent before anyone has signed
+    # in to Claude Code, so the file may not exist yet (2026-11-14, L11).
+    if not CLAUDE_JSON.exists():
+        CLAUDE_JSON.write_text("{}\n", encoding="utf-8")
+    for attempt in range(3):
+        stat_before = CLAUDE_JSON.stat()
+        cfg = json.loads(CLAUDE_JSON.read_text())
+        projects = cfg.setdefault("projects", {})
+        missing = [
+            key for key in wanted
+            if not all(projects.get(key, {}).get(flag) for flag in TRUST_FLAGS)
+        ]
+        if not missing:
+            print("  trust already accepted; ~/.claude.json untouched")
+            return
+        for key in missing:
+            projects.setdefault(key, {}).update({flag: True for flag in TRUST_FLAGS})
+        stat_now = CLAUDE_JSON.stat()
+        if (stat_now.st_mtime_ns, stat_now.st_size) != (
+            stat_before.st_mtime_ns, stat_before.st_size
+        ):
+            continue  # a live session wrote while we were reading; re-read
+        tmp = CLAUDE_JSON.with_name(CLAUDE_JSON.name + ".provision-tmp")
+        tmp.write_text(json.dumps(cfg, indent=2))
+        os.replace(tmp, CLAUDE_JSON)
+        print(f"  trust granted for {', '.join(missing)} (atomic replace)")
+        return
+    die(
+        "~/.claude.json is being rewritten by live sessions faster than this "
+        "can safely update it. Stop the Remote Control units and retry:\n"
+        "  systemctl --user stop 'loam-rc-*'"
+    )
+
+
+ALWAYS_HEADER = (
+    f"This file loads into every run you have — with {lc.OWNER_NAME}, and alone. It is "
+    "yours: write it, cut it, restructure it however serves you.\n"
+    "Seeded {stamp} with your `memory/` index copied verbatim, because that "
+    "layer no longer loads by itself; the notes it points at are still on "
+    "disk under `memory/`.\n"
+)
+
+
+def seed_always(name: str, workspace: Path, stamp: str) -> None:
+    """Create `_always.md` once, from the agent's own memory index.
+
+    Copied verbatim under two lines of operator voice, and never composed.
+    An agent's prohibitions are its own writing about its own mistakes; the
+    executor's job is to move them onto a channel that loads, not to decide
+    what they should say. The header names `memory/` so the index's relative
+    links still resolve from their new home.
+
+    Written once. If the file exists, it belongs to the agent from then on
+    and nothing here touches it again -- including on a re-provision.
+    """
+    target = workspace / ALWAYS_LAYER
+    if target.exists():
+        print(f"  unchanged {target} (agent-owned)")
+        return
+    index = workspace / "memory" / "MEMORY.md"
+    body = ""
+    if index.is_file():
+        body = index.read_text(encoding="utf-8").strip()
+    text = ALWAYS_HEADER.format(stamp=stamp)
+    if body:
+        text += "\n" + body + "\n"
+    target.write_text(text, encoding="utf-8")
+    print(f"  seeded {target} ({len(text):,} chars)")
+
+
+NONE_STYLE = """\
+---
+name: none
+description: Operator-owned empty style. Wakes select it so the conversation lane does not load.
+keep-coding-instructions: true
+---
+"""
+
+
+def output_styles(workspace: Path) -> tuple[Path, Path]:
+    """The conversation symlink and the empty style a wake selects instead.
+
+    `conversation.md` is a SYMLINK to the agent's own `_active.md`. Output
+    styles do not resolve `@` imports, so the content has to be in the file
+    the loader opens -- and the loader follows a symlink, verified through a
+    relay-attached session on 2026-09-04. That is what lets the agent own its
+    conversation layer without `.claude/` being writable to it.
+
+    `none.md` is a real empty style, and it is what makes the lanes mutually
+    exclusive in both directions: a wake passes
+    `--settings '{"outputStyle":"none"}'` and the conversation file is simply
+    not in that run.
+    """
+    styles = workspace / ".claude" / "output-styles"
+    styles.mkdir(parents=True, exist_ok=True)
+
+    link = styles / f"{STYLE_NAME}.md"
+    wanted = Path("../..") / CONVERSATION_LAYER
+    if link.is_symlink() and Path(os.readlink(link)) == wanted:
+        print(f"  unchanged {link}")
+    else:
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(wanted)
+        print(f"  linked {link} -> {wanted}")
+
+    none = styles / "none.md"
+    write_if_changed(none, NONE_STYLE)
+    return link, none
+
+
+def style_frontmatter(display: str) -> dict[str, str]:
+    return {
+        "name": STYLE_NAME,
+        "description": f"{display}'s conversation lane.",
+        "keep-coding-instructions": "true",
+    }
+
+
+def ensure_style_frontmatter(display: str, workspace: Path) -> None:
+    """Add the loader's keys to `_active.md`. Change nothing else in it.
+
+    Measured 2026-09-04 on 2.1.260: a style whose `name:` disagrees with the
+    selected style loads NOTHING, and says nothing -- the same silent shape
+    as a missing file. So the keys are written explicitly rather than left to
+    the filename, and hooks/boundary_guard.py refuses an edit that removes
+    them.
+
+    Keys are ADDED, never reordered or replaced: three of the seven agents
+    keep their own frontmatter here (one carries `created_by` wiki-links),
+    and extra keys are ignored by the loader. This function's whole contract
+    is that an agent's file comes back byte-identical apart from the lines it
+    was missing.
+    """
+    target = workspace / CONVERSATION_LAYER
+    if not target.is_file():
+        return
+    text = target.read_text(encoding="utf-8")
+    wanted = style_frontmatter(display)
+
+    match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.DOTALL)
+    if match:
+        block = match.group(1)
+        have = {
+            line.split(":", 1)[0].strip().lower()
+            for line in block.splitlines() if ":" in line
+        }
+        missing = [f"{k}: {v}" for k, v in wanted.items() if k not in have]
+        if not missing:
+            print(f"  unchanged {target} (style keys present)")
+            return
+        new = (
+            "---\n" + block + "\n" + "\n".join(missing) + "\n---\n"
+            + text[match.end():]
+        )
+    else:
+        new = (
+            "---\n"
+            + "\n".join(f"{k}: {v}" for k, v in wanted.items())
+            + "\n---\n\n" + text
+        )
+    target.write_text(new, encoding="utf-8")
+    print(f"  added style frontmatter to {target}")
+
+
+def report_readiness(name: str, workspace: Path) -> None:
+    """Say plainly what a freshly provisioned agent still cannot do.
+
+    Rewritten 2026-09-04. The old notice said a fresh agent was inert until
+    `_active.md` and `_reflection.md` existed, because hooks/memory_guard.py
+    refused every tool call while the layer was unreadable. That hook is
+    retired and nothing replaces it, so the sentence is now false in the
+    dangerous direction: a fresh agent with missing layers is not inert, it
+    is FLUENT AND EMPTY. Every route fails by silence.
+
+      `_always.md` missing   the CLAUDE.md `@import` is dropped with no
+                             dialog, no stderr and no debug line. The wake's
+                             identity preflight catches it; a conversation
+                             does not.
+      `_active.md` missing   the output-style symlink dangles, the loader
+                             loads nothing, and the session starts normally.
+                             Measured: exit 0, no warning.
+      `_reflection.md` gone  the ONLY loud one. bin/wake refuses to launch
+                             and writes the reason to the vault inbox.
+
+    So the honest report is not "it cannot act" but "you will not be able to
+    tell from talking to it." bin/rc-preflight is the instrument -- it runs
+    at each Remote Control start and reports these to the same inbox file --
+    and this notice exists so nobody waits for it on the first day.
+
+    The layer files are still deliberately NOT created here. `_always.md` is
+    seeded from the agent's own memory index, which is copying, not writing;
+    the other two are what an agent carries into a room, and generating
+    filler would put words in a new agent's mouth on its first breath.
+    """
+    missing = [
+        layer for layer in (ALWAYS_LAYER, CONVERSATION_LAYER, REFLECTION_LAYER)
+        if not (workspace / layer).is_file()
+        or not (workspace / layer).read_text(encoding="utf-8").strip()
+    ]
+    if not missing:
+        return
+    print()
+    print(f"  NOT YET RUNNABLE. {name} is missing a non-empty "
+          f"{' and '.join(missing)} in {workspace}.")
+    print(f"  {name} will still start, still sound entirely like itself, and "
+          f"be carrying less than you think — every one of these fails by "
+          f"silence except {REFLECTION_LAYER}, which bin/wake refuses on.")
+    print(f"  {ALWAYS_LAYER}: every run. {CONVERSATION_LAYER}: conversations, "
+          f"via the output-style symlink. {REFLECTION_LAYER}: the wake.")
+    print(f"  Write them before enabling the units. bin/rc-preflight reports "
+          f"these to vault/00_INBOX/from-agents/loam-wake-failures.md at every RC start.")
+
+
+# ---------------------------------------------------------------------------
+# The engineer. An eighth project on this box, and the only one that is not a
+# persona: no soul, no lane files, no output style, no reflection wake, no
+# Remote Control server. It exists only while a job runs.
+#
+# Rendered here rather than in a generator of its own for the reason every
+# other artifact on this box has one owner: `bin/check-drift` imports this
+# module and compares what these functions produce against what is live, and
+# a second generator would be a second home for the same text. Same rule,
+# different template.
+# ---------------------------------------------------------------------------
+
+ENGINEER = AGENTS / "engineer"
+
+# The two operator-authored halves, and where they are settled. They are
+# COPIED verbatim -- byte-for-byte, frontmatter and all -- and never composed,
+# rewritten or trimmed. `role.md` is one source for every engineer; the
+# project file is this engineer's own. check-drift diffs both against these
+# paths, so an edit to the vault copy shows up as drift here rather than as a
+# divergence nobody notices.
+ENGINEER_ROLE_SRC = VAULT / "40_PROJECTS" / "Loam" / "engineer" / "role.md"
+ENGINEER_PROJECT_SRC = (
+    VAULT / "40_PROJECTS" / "Loam" / "engineer" / "projects" / "loam.md"
+)
+
+# The whole of it. Three imports, in that order, and nothing else -- no surface
+# declaration, no identity line. The third is the shared reach.md (2026-11-10),
+# the one file outside this root, loaded because the launcher approves external
+# includes on each job's tree (loam_worktree.ensure_trust). A persona's CLAUDE.md
+# carries all three because a persona has to be told what a vault is and where
+# it lives; the engineer's role and project files say it themselves, and
+# anything added here would be a third author of the same text.
+#
+# The imports resolve only because both files are physically inside this
+# project root. An @import pointing outside is dropped SILENTLY (Move 1
+# finding), which is why the launcher asserts both resolve before it will
+# start a job.
+ENGINEER_CLAUDE_MD = f"@role.md\n\n@project.md\n\n@{REACH}\n"
+
+# Two lines of operator voice, and then it is the engineer's. Nobody else
+# writes in here -- not provision, not a persona, not the operator session.
+# It is committed with the repo (decision 21), so it is written for a reader
+# who has never met this box.
+ENGINEER_MEMORY_HEADER = """\
+This is the runtime's memory of itself, written by the platform engineer and
+by nobody else. What was found by building, which premises expired when, and
+what a rebuild costs.
+"""
+
+
+def engineer_settings() -> dict:
+    ws = str(ENGINEER)
+    return {
+        # Pinned so the engineer does not run on whatever the CLI defaults to
+        # that week, exactly as WAKE_MODEL pins the wakes. bin/engineer-job
+        # passes the same value; both read lib/loam_engineer.ENGINEER_MODEL,
+        # so they cannot move apart. Opus since 2026-09-16 (the owner, in
+        # chat: every engineer on Opus; personas and reviewer stay on
+        # `fable`), and an explicit version rather than the `opus` alias
+        # since 2026-09-25 -- read the constant's own comment for why.
+        "model": ENGINEER_MODEL,
+        "permissions": {
+            "defaultMode": "acceptEdits",
+            # The `agents` repo, and not merely this project inside it.
+            # Found by a persona reading a receipt, 2026-09-05: the engineer's
+            # project file says it owns the runtime -- "the wake wrapper and
+            # its lanes, the generators, the unit files, the hooks, the two
+            # MCP servers, check-drift, the tests" -- and every one of those
+            # lives in `agents/`, OUTSIDE this project root. Without the grant
+            # its Read and Edit reached only `agents/engineer/`, so it did the
+            # whole of its first two jobs to `lib/loam_identity.py` through
+            # `sed` over Bash. It worked; that is the problem. The settings
+            # said one thing and the role file said another, and the engineer
+            # quietly took the route that was open rather than reporting the
+            # contradiction.
+            #
+            # This widens no reach: the engineer already had Bash and full
+            # sudo, so `agents/` was never out of its hands. What it changes
+            # is which tool it uses to get there -- an `Edit` is refusable by
+            # the PreToolUse guard, reviewable in a diff, and cannot half-
+            # apply, and a `sed -i` is none of those.
+            "additionalDirectories": [str(AGENTS), str(VAULT), str(AI_LABS)],
+            "deny": [
+                f"Edit(//{VAULT}/15_CONVERSATIONS/**)".replace("///", "//"),
+                # Operator-authored, and the engineer's own composition. It
+                # may not edit what it is. `role.md` and `project.md` are
+                # settled with the owner and copied verbatim; an engineer that
+                # could rewrite its own role has no role.
+                f"Edit(//{ws}/CLAUDE.md)".replace("///", "//"),
+                f"Edit(//{ws}/role.md)".replace("///", "//"),
+                f"Edit(//{ws}/project.md)".replace("///", "//"),
+                f"Edit(//{ws}/agent.json)".replace("///", "//"),
+                f"Edit(//{ws}/.claude/**)".replace("///", "//"),
+                # The operator's file of public apps (Move 10, decision 8).
+                # The owner writes it; the engineer reads it through the
+                # generator and never writes it. Outside the engineer's three
+                # roots anyway, so the boundary guard refuses it too -- this
+                # is the declarative, non-promptable form of the same rule.
+                # Bash can still `tee` it, and that line is held by
+                # engineer/role.md and nothing mechanical.
+                f"Edit(//{loam_deploy.PUBLIC_FILE})".replace("///", "//"),
+                f"Write(//{loam_deploy.PUBLIC_FILE})".replace("///", "//"),
+                # Same three as every persona, and for a stronger reason
+                # here: this is the one project on the box that COULD arrange
+                # its own future execution, because it has Bash and sudo. It
+                # is reachable only in conversation (decision 7) and that has
+                # to be true by construction rather than by nobody trying.
+                "CronCreate",
+                "CronDelete",
+                "ScheduleWakeup",
+                "RemoteTrigger",
+            ],
+            # Bash is the whole point of this project, and it is ALLOWED
+            # rather than left to the permission mode. `acceptEdits` covers
+            # file edits and nothing else, so an unlisted Bash call would
+            # raise a permission prompt -- and a headless job has nobody to
+            # answer one. Measured 2026-09-05 in the Move 9 probes: an
+            # unanswerable prompt hangs forever, in silence, with no log
+            # line and no timeout. Everything this project routinely calls is
+            # listed for that reason, not for convenience.
+            "allow": [
+                "Bash",
+                "BashOutput",
+                "KillShell",
+                "WebSearch",
+                "WebFetch",
+            # Explicit, not left to the permission mode, and that is the
+            # whole reason it is here. An unallowed tool call in a headless
+            # job raises a permission prompt with nobody to answer it, and
+            # such a prompt has no timeout -- the job would sit until its
+            # wall clock rather than fail. A refusal would be safe; a hang is
+            # not, and the wall clock is what bounds the cost of fanning out.
+            "Task",
+            ],
+        },
+        # `/schedule` creates recurring runs on Anthropic's infrastructure and
+        # `/loop` re-runs a prompt on an interval. Skills are not tools, so the
+        # deny list above cannot reach them, and both reopen exactly the door
+        # decision 7 closes.
+        "skillOverrides": {
+            "schedule": "off",
+            "loop": "off",
+        },
+        "disableClaudeAiConnectors": True,
+        # No MCP servers. The engineer has Bash; a tool that wraps a shell
+        # command for an agent that already has the shell is a second way to
+        # be wrong. It is also, deliberately, not given the engineer tool --
+        # an engineer cannot brief an engineer.
+        "enableAllProjectMcpServers": False,
+        "autoMemoryEnabled": False,
+        # ONE hook, and the absence of the other two is the design.
+        #
+        # `transcript_capture.py` is NOT here. An engineer job is not a
+        # conversation: nobody is on the other side of it, and its durable
+        # record is the receipt, which lands in the vault under the project
+        # it belongs to. Filing it under `15_CONVERSATIONS/` would put a
+        # build log in the record of what the owner and their personas said to
+        # each other. Two things keep it out and either would do: the hook is
+        # not registered here, and bin/engineer-job sets
+        # `LOAM_WAKE=engineer:<job-id>`, which the hook's own gate refuses
+        # (it files only when the value is exactly "conversation"). Belt and
+        # braces, because the failure is silent and permanent.
+        "hooks": {
+            "PreToolUse": [{"matcher": "*", "hooks": [
+                _guard_hook()]}],
+        },
+    }
+
+
+def engineer_config() -> dict:
+    """`agent.json` for a project that is not an agent.
+
+    Same filename on purpose: `lib/loam_memory.load_config` and the
+    PreToolUse guard both read `agent.json` from the project root, and giving
+    the engineer a differently-named file would mean a second reader in the
+    one place that must never guess wrong about who is calling. `kind` is
+    what the guard branches on; `project` is the vault folder its receipts
+    land under.
+    """
+    return {
+        "name": "engineer",
+        "kind": "engineer",
+        "display": "Engineer",
+        "project": "Loam",
+        "workspace": str(ENGINEER),
+        "vault": str(VAULT),
+        "ai_labs": str(AI_LABS),
+    }
+
+
+def provision_engineer(dry: bool = False) -> None:
+    print(f"engineer project at {ENGINEER}")
+    for src in (ENGINEER_ROLE_SRC, ENGINEER_PROJECT_SRC):
+        if not src.is_file():
+            die(f"{src} is missing; refusing to provision the engineer")
+    role = ENGINEER_ROLE_SRC.read_text(encoding="utf-8")
+    project = ENGINEER_PROJECT_SRC.read_text(encoding="utf-8")
+    print(f"  role={ENGINEER_ROLE_SRC} ({len(role):,} chars)")
+    print(f"  project={ENGINEER_PROJECT_SRC} ({len(project):,} chars)")
+    if dry:
+        print("  [dry-run] no files written")
+        return
+
+    (ENGINEER / ".claude").mkdir(parents=True, exist_ok=True)
+    (ENGINEER / "memory").mkdir(parents=True, exist_ok=True)
+    lc.JOBS.mkdir(parents=True, exist_ok=True)
+
+    # Verbatim, both of them. write_if_changed rather than an unconditional
+    # copy so a re-provision that changes nothing leaves no mtime behind.
+    write_if_changed(ENGINEER / "role.md", role)
+    write_if_changed(ENGINEER / "project.md", project)
+    write_if_changed(ENGINEER / "CLAUDE.md", ENGINEER_CLAUDE_MD)
+    write_if_changed(ENGINEER / "agent.json",
+                     json.dumps(engineer_config(), indent=2) + "\n")
+    write_if_changed(ENGINEER / ".claude" / "settings.json",
+                     json.dumps(engineer_settings(), indent=2) + "\n")
+
+    # Written once and then the engineer's. Same discipline as seed_always:
+    # if it exists it belongs to the engineer from then on.
+    index = ENGINEER / "memory" / "MEMORY.md"
+    if index.exists():
+        print(f"  unchanged {index} (engineer-owned)")
+    else:
+        index.write_text(ENGINEER_MEMORY_HEADER, encoding="utf-8")
+        print(f"  seeded {index}")
+
+    # Trust is keyed on the GIT REPO ROOT, not the project dir
+    # (measured 2026-08-25: additionalDirectories is ignored in an
+    # untrusted workspace). The engineer's repo root is `agents/`,
+    # which is the one place this differs from a persona -- theirs is
+    # ai-labs, which the shared helper already grants.
+    ensure_trust(ENGINEER, AGENTS)
+    # Box-wide, so every provision path applies them: the clauses hold for
+    # this lane as much as for a persona's, and `--engineer` is a command
+    # that gets run on its own.
+    ensure_user_settings()
+    print(f"  provisioned the engineer: project files, no units")
+    print(f"  it has no timer, no RC server and no unit of its own — "
+          f"bin/engineer-job creates a transient one per job.")
+
+
+# ---------------------------------------------------------------------------
+# The reviewer. Move 11 (2026-09-09): a ninth project on this box, and like
+# the engineer not a persona -- no soul, no lane files, no output style, no
+# Remote Control server. Unlike the engineer it has a timer (it runs
+# unattended, once a night, on its own lane) and it has no hands at all: its
+# whole write reach is its own state directory, and the launcher delivers
+# its note to the persona's commons inbox after the session has ended.
+#
+# Its instruction file, agents/reviewer/CLAUDE.md, is prose written by the
+# platform engineer and committed; it is NOT rendered here, because the
+# whole design rule is that the reviewer's behaviour lives in prose. What is
+# rendered here is what a prompt cannot be trusted to hold: the permission
+# set, the config the guard branches on, and the one MCP server it gets.
+# ---------------------------------------------------------------------------
+
+REVIEWER = AGENTS / "reviewer"
+# The reviewer's instructions are its plugin's since 2026-11-14 (first
+# release L9, plugins/reviewer/), copied here verbatim: the plugin is the
+# source, reviewer/CLAUDE.md the copy its sessions read.
+REVIEWER_INSTRUCTIONS_SRC = AGENTS / "plugins" / "reviewer" / "instructions.md"
+REVIEWER_STATE = lc.REVIEWER_STATE
+REVIEWER_MODEL = "fable"      # the personas' tier: the job is judging prose
+HISTORY_SERVER_NAME = "history"
+
+
+def reviewer_settings() -> dict:
+    ws = str(REVIEWER)
+    return {
+        "model": REVIEWER_MODEL,
+        "permissions": {
+            "defaultMode": "acceptEdits",
+            # Read reach: every persona's workspace, the commons and the
+            # vault. Write reach: the state directory and nothing else. The
+            # grants below make the first true; the deny rules make the
+            # second true, and they are the non-promptable kind -- the
+            # operator's public-apps file in Move 10 is the precedent.
+            "additionalDirectories": [str(AI_LABS), str(VAULT), str(REVIEWER_STATE)],
+            "deny": [
+                # The whole of ai-labs, the commons included. Deny beats
+                # allow and there is no negation, so a carve-out for
+                # `commons/<agent>/inbox/` cannot be declared; enumerating
+                # the personas instead would be a roster written down, the
+                # thing the boundary guard exists to avoid. So the reviewer
+                # writes its note into its OWN outbox and bin/review, which
+                # is not the model, delivers it. That is the trade: a total
+                # deny and a postman, rather than a partial deny and trust.
+                f"Edit(//{AI_LABS}/**)".replace("///", "//"),
+                f"Write(//{AI_LABS}/**)".replace("///", "//"),
+                f"Edit(//{VAULT}/**)".replace("///", "//"),
+                f"Write(//{VAULT}/**)".replace("///", "//"),
+                # The transcripts. The owner scoped the reviewer to what a
+                # persona wrote about itself, not what it said in
+                # conversation (Move 11 prompt, §What it reads); the
+                # instruction file says so, and this is the wall behind the
+                # sentence. Every other agent's deny on this path fences
+                # writes; the reviewer's fences reads too.
+                f"Read(//{VAULT}/15_CONVERSATIONS/**)".replace("///", "//"),
+                # Its own home: the instruction file, this settings file,
+                # agent.json. It may not edit what it is.
+                f"Edit(//{ws}/**)".replace("///", "//"),
+                f"Write(//{ws}/**)".replace("///", "//"),
+                "NotebookEdit",
+                # No hands. Bash would route around every rule above; the
+                # web and subagents are not this job; scheduling is the
+                # operator's, as for every agent.
+                "Bash",
+                "BashOutput",
+                "KillShell",
+                "WebSearch",
+                "WebFetch",
+                "Task",
+                "CronCreate",
+                "CronDelete",
+                "ScheduleWakeup",
+                "RemoteTrigger",
+            ],
+            # The history server's tools, by server name. Allowed for the
+            # reason every MCP grant on this box is: an unallowed MCP call
+            # prompts, and a prompt nobody can answer hangs a headless run.
+            "allow": [f"mcp__{HISTORY_SERVER_NAME}"],
+        },
+        "skillOverrides": {"schedule": "off", "loop": "off"},
+        "disableClaudeAiConnectors": True,
+        "enableAllProjectMcpServers": True,
+        "autoMemoryEnabled": False,
+        # The guard, for the refusal text and for any write tool the deny
+        # rules do not name. No transcript hook: a review is not a
+        # conversation, and bin/review sets LOAM_WAKE so the hook's own gate
+        # would refuse it anyway.
+        "hooks": {
+            "PreToolUse": [{"matcher": "*", "hooks": [
+                _guard_hook()]}],
+        },
+    }
+
+
+def reviewer_config() -> dict:
+    """`agent.json` for the reviewer. `kind` is what the guard branches on;
+    `state` is the one directory it may write."""
+    return {
+        "name": "reviewer",
+        "kind": "reviewer",
+        "display": "Reviewer",
+        "workspace": str(REVIEWER),
+        "state": str(REVIEWER_STATE),
+        "vault": str(VAULT),
+        "ai_labs": str(AI_LABS),
+    }
+
+
+def reviewer_mcp_config() -> dict:
+    """One server: read-only git history of ai-labs (mcp/history_server.py).
+    A shell cannot be made read-only, and provenance is a fact source the
+    reviewer must have."""
+    return {
+        "mcpServers": {
+            HISTORY_SERVER_NAME: {
+                # The shim, not the venv: this file is committed (reviewer/),
+                # and the venv's place is the install's (lib/loam_config.py).
+                "command": f"{AGENTS}/bin/mcp-python",
+                "args": [f"{AGENTS}/mcp/history_server.py"],
+                "env": {"LOAM_HISTORY_REPO": str(AI_LABS)},
+            },
+        }
+    }
+
+
+def reviewer_instructions() -> str:
+    """The reviewer plugin's instructions with this install's places filled
+    in (2026-11-15): the plugin's prose names them as @WORKSPACES@, @VAULT@,
+    @REVIEWER_STATE@ and @ROOT@, so the file is true on every install."""
+    text = REVIEWER_INSTRUCTIONS_SRC.read_text(encoding="utf-8")
+    for key, value in (("@WORKSPACES@", AI_LABS), ("@VAULT@", VAULT),
+                       ("@REVIEWER_STATE@", REVIEWER_STATE), ("@ROOT@", AGENTS)):
+        text = text.replace(key, str(value))
+    return text
+
+
+def provision_reviewer(dry: bool = False) -> None:
+    print(f"reviewer project at {REVIEWER}")
+    instruction = REVIEWER / "CLAUDE.md"
+    src = REVIEWER_INSTRUCTIONS_SRC
+    if not src.is_file() or not src.read_text(encoding="utf-8").strip():
+        die(f"{src} is missing or empty; it is the reviewer's whole behaviour, "
+            f"the reviewer plugin's instructions, written by hand")
+    print(f"  instruction={instruction} <- {src} ({src.stat().st_size:,}B, the plugin's prose)")
+    if dry:
+        print("  [dry-run] no files written")
+        return
+    write_if_changed(instruction, reviewer_instructions())
+    (REVIEWER / ".claude").mkdir(parents=True, exist_ok=True)
+    for sub in ("memory", "runs", "notes"):
+        (REVIEWER_STATE / sub).mkdir(parents=True, exist_ok=True)
+    write_if_changed(REVIEWER / "agent.json",
+                     json.dumps(reviewer_config(), indent=2) + "\n")
+    write_if_changed(REVIEWER / ".mcp.json",
+                     json.dumps(reviewer_mcp_config(), indent=2) + "\n")
+    write_if_changed(REVIEWER / ".claude" / "settings.json",
+                     json.dumps(reviewer_settings(), indent=2) + "\n")
+    ensure_trust(REVIEWER, AGENTS)
+    ensure_user_settings()
+    # The schedule page lists the review lane once its timer is installed;
+    # the row is derived from the installed timer, never typed here.
+    from loam_cron import write_schedule_page  # noqa: PLC0415
+    if write_schedule_page(VAULT):
+        print(f"  rewrote {VAULT}/40_PROJECTS/Loam/infrastructure/schedule.md")
+    print(f"  provisioned the reviewer: config, settings, one MCP server; "
+          f"state under {REVIEWER_STATE} (gitignored)")
+    print(f"  its lane is the static unit loam-reviewer.service ({AGENTS}/systemd/, "
+          f"bin/gen-units); its timer is the reviewer plugin's, on while it is on")
+
+
+# ---------------------------------------------------------------------------
+# Project engineers. Rendered INTO a project's repo, on a persona's brief, by
+# the platform engineer (phase-5 closing plan, decisions 3, 5, 20, 21; the
+# Move 9 prompt, section 7).
+#
+# A project engineer is self-contained: a stranger cloning the repo with
+# Claude Code gets the same engineer with nothing from this box present. So
+# nothing rendered below may name this runtime, the vault, a persona, the owner
+# or this machine -- and `render_craft` refuses to emit output that does.
+# What this runtime adds -- the brief, the receipt, the deploy key -- arrives
+# at job time from bin/engineer-job, never from the repo.
+# ---------------------------------------------------------------------------
+
+TEMPLATE = AGENTS / "engineer-template" / "repo"
+
+# The words a rendered craft file may not contain, whatever role.md says
+# tomorrow. This is what makes the rendering safe to run unread: a new line
+# in the source that means something only here fails the render loudly
+# instead of leaking into every project on the next run.
+# The owner's own name joins them when one is configured ("the owner", the
+# default, is a phrase the rendered file may use).
+CRAFT_FORBIDDEN = (
+    *((lc.OWNER_NAME,) if lc.get("owner.name") else ()), "persona", "Loam", "vault", lc.USER, "commons",
+    "15_CONVERSATIONS",
+)
+
+# Sentence-level substitutions, exact. Each maps a sentence of role.md in its
+# runtime form to the same sentence for an engineer whose whole world is its
+# repo. Exact rather than word-level because "his" and "him" cannot be
+# replaced mechanically without reading the sentence, and a rendering that
+# guessed at pronouns would misgender the project owner in every repo. When
+# role.md changes one of these sentences the substitution misses, the
+# forbidden-word check fails, and the table is updated by hand -- which is
+# the one moment a human should be reading the output anyway.
+CRAFT_SUBSTITUTIONS = tuple((a.replace("@OWNER@", lc.OWNER_NAME), b) for a, b in (
+    ('"Needs @OWNER@\'s input" goes back to the persona, who asks him.',
+     '"Needs the project owner\'s input" goes back to whoever briefed you, '
+     'who asks them.'),
+    ("Default: go and do the thing, @OWNER@ reviews after it is running. The "
+     "brief can loosen or tighten it for one job on his say-so, and the "
+     "receipt records his words.",
+     "Default: go and do the thing, the project owner reviews after it is "
+     "running. The brief can loosen or tighten it for one job on their "
+     "say-so, and the receipt records their words."),
+    ("The persona never does this and @OWNER@ never has to.",
+     "Whoever briefed you never does this and the project owner never has to."),
+    ("Expose anything publicly without @OWNER@'s direct yes.** Behind the "
+     "login is free: private and shared exposure on the persona's brief, and "
+     "an agent's own subdomain needs nobody's word. Anything reachable on the "
+     "open web without the login: ask @OWNER@ first, and act only on his "
+     "direct yes, which the brief quotes with its date; a yes for one thing "
+     "is not a yes for the next. A repo's visibility is exposure: you create "
+     "private, and make one public only on that same yes. *(@OWNER@, "
+     "2026-11-08: anything reachable on the open web without the login waits "
+     "for his yes each time. It replaces \"public is @OWNER@'s hands only\" "
+     "of 2026-09-05.)*",
+     "Expose anything publicly without the project owner's direct yes.** "
+     "Private and shared exposure on the brief of whoever briefed you. "
+     "Anything reachable on the open web without a login: the owner is asked "
+     "first, and you act only on their direct yes, which the brief quotes "
+     "with its date; a yes for one thing is not a yes for the next. A repo's "
+     "visibility is exposure: you create private, and make one public only "
+     "on that same yes."),
+    ("Write a credential into an image, a repo, or the vault.",
+     "Write a credential into an image, a repo, or the project's documentation."),
+    ("Nothing in the project depends on the vault, on Loam, or on a persona "
+     "existing. Loam is how the project gets its hands today; the project "
+     "must not know that.",
+     "Nothing in the project depends on anything outside the repo."),
+    ("A brief from a persona is not a message that evaporates",
+     "A brief is not a message that evaporates"),
+    ("never about @OWNER@ or the personas",
+     "never about the project owner or whoever briefs you"),
+    ("a decision for @OWNER@", "a decision for the project owner"),
+))
+
+# The harness a project engineer runs on -- these files and the memory -- is
+# written to the checkout and kept out of the repository by
+# `.git/info/exclude`, so a repo that goes public carries the project and
+# nothing about how it is worked on (2026-10-01: loam-dictate had to be
+# recreated to go public with a clean history). The role's two sentences
+# that say the memory is committed are true only of a checkout that still
+# tracks its harness (loam-ui and one other, provisioned before this);
+# for every other they are replaced.
+HARNESS_PATHS = ("CLAUDE.md", "role.md", "project.md", "memory/", ".claude/")
+
+CRAFT_UNTRACKED_SUBSTITUTIONS = (
+    ("the design and its decisions, how to build and run it, and your own "
+     "memory of the project.",
+     "the design and its decisions, and how to build and run it."),
+    ("**Your memory lives in the repo**, committed with the code, readable "
+     "by any contributor.",
+     "**Your memory lives in your working copy**, in `memory/`, and is never "
+     "committed: like this file, it is excluded from the repository, which "
+     "carries the project and nothing about how it is worked on."),
+)
+
+# Paragraphs of "What you are" that are the role in its runtime form and are
+# replaced, not rendered. Matched on their opening words.
+CRAFT_DROP_PARAGRAPHS = (
+    "You are an engineer for Loam",
+    "You are not a persona.",
+    "**You have no vault.**",
+)
+
+# Bullets of "What you never do" that only mean something inside this
+# runtime. Matched on the bold lead. Everything not listed is kept, so a new
+# line in the source flows through (or trips the forbidden-word check).
+CRAFT_DROP_NEVER = (
+    "Author an agent's self",
+    f"Reach {lc.OWNER_NAME} directly",
+    "Run unattended",
+    "Touch `15_CONVERSATIONS/`",
+    "Start a wake or cron service",
+)
+
+# What replaces the dropped opening. One paragraph for what the engineer is,
+# one for its reach. The last sentence of the first is kept from the source's
+# second paragraph because it is the whole of what an engineer has.
+CRAFT_OPENING = (
+    "You are the engineer for this project: the hands of whoever holds it. "
+    "You are a Claude Code project with a role, a project file, and a memory "
+    "of your project. Whoever holds the project briefs you, you do the work, "
+    "you return a receipt. What you have is a standard of evidence.",
+    "**Your repo is your whole world.** Your project file names the "
+    "repository you work in and what you must leave alone; what you need to "
+    "know beyond it arrives in the brief.",
+)
+
+# The attribution asides -- *(<owner>, 2026-09-05: …)* and *(Settled with
+# <owner> …)* -- are provenance in this runtime's voice and mean nothing to a
+# stranger. Stripped wherever they name the owner.
+CRAFT_ATTRIBUTION_RE = re.compile(fr"\s*\*\([^()]*{lc.OWNER_NAME}[^()]*\)\*")
+
+CRAFT_MARK = (
+    "*Rendered from the shared engineer role, revision `{rev}`, on {date}. "
+    "Generated, never edited by hand: a change belongs in the source and "
+    "reaches every project on the next render.*"
+)
+CRAFT_MARK_RE = re.compile(r"revision `([0-9a-f]+(?:\+dirty)?)`, on (\d{4}-\d{2}-\d{2})")
+
+
+class CraftError(Exception):
+    """The rendering would leak this runtime into a project. Never written."""
+
+
+def _split_sections(text: str) -> tuple[list[str], list[tuple[str, str]]]:
+    """(pre-section lines, [(H2 title, body)]) of a markdown file."""
+    text = re.sub(r"\A---\r?\n.*?\r?\n---\r?\n", "", text, count=1, flags=re.DOTALL)
+    pre: list[str] = []
+    sections: list[tuple[str, list[str]]] = []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            sections.append((line[3:].strip(), []))
+        elif sections:
+            sections[-1][1].append(line)
+        else:
+            pre.append(line)
+    return pre, [(t, "\n".join(b).strip("\n")) for t, b in sections]
+
+
+def _paragraphs(body: str) -> list[str]:
+    return [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+
+
+def render_craft(role_text: str, rev: str, date: str,
+                 harness_tracked: bool = False) -> str:
+    """The project-neutral half of role.md. Mechanical; refuses to leak.
+    `harness_tracked` keeps the memory sentences for a checkout that still
+    commits its harness; every new project excludes it."""
+    pre, sections = _split_sections(role_text)
+    title = next((l for l in pre if l.startswith("# ")), "# The engineer — role file")
+
+    out: list[str] = [title, "", CRAFT_MARK.format(rev=rev, date=date), ""]
+    for heading, body in sections:
+        out += [f"## {heading}", ""]
+        if heading == "What you are":
+            kept = [p for p in _paragraphs(body)
+                    if not p.startswith(CRAFT_DROP_PARAGRAPHS)]
+            for para in (*CRAFT_OPENING, *kept):
+                out += [para, ""]
+        elif heading == "What you never do":
+            # One bullet per line in the source, no blank lines between, so
+            # paragraphs are the wrong unit here; a bullet is a line that
+            # starts with "- " plus any continuation lines under it.
+            items: list[list[str]] = []
+            for line in body.splitlines():
+                if line.startswith("- ") or not items:
+                    items.append([line])
+                else:
+                    items[-1].append(line)
+            for item in items:
+                lead = re.match(r"-\s+\*\*(.+?)[.:]?\*\*", item[0])
+                if lead and lead.group(1).startswith(CRAFT_DROP_NEVER):
+                    continue
+                out.extend(item)
+            out.append("")
+        else:
+            out += [body, ""]
+
+    text = "\n".join(out).rstrip("\n") + "\n"
+    for old, new in CRAFT_SUBSTITUTIONS:
+        text = text.replace(old, new)
+    if not harness_tracked:
+        for old, new in CRAFT_UNTRACKED_SUBSTITUTIONS:
+            if old not in text:
+                raise CraftError(
+                    f"role.md no longer carries the sentence "
+                    f"CRAFT_UNTRACKED_SUBSTITUTIONS replaces ({old[:60]!r}…), "
+                    f"so the render would say the memory is committed or say "
+                    f"nothing. Nothing written. Update the table in bin/provision.")
+            text = text.replace(old, new)
+    text = CRAFT_ATTRIBUTION_RE.sub("", text)
+
+    leaks = [
+        (n, line) for n, line in enumerate(text.splitlines(), 1)
+        if any(w.lower() in line.lower() for w in CRAFT_FORBIDDEN)
+    ]
+    if leaks:
+        shown = "\n".join(f"  line {n}: {line[:120]}" for n, line in leaks[:6])
+        raise CraftError(
+            f"the rendered role still names this runtime on {len(leaks)} "
+            f"line(s); role.md has changed in a way CRAFT_SUBSTITUTIONS does "
+            f"not cover. Nothing written. Update the table in bin/provision "
+            f"and re-run.\n{shown}")
+    return text
+
+
+def craft_source_rev() -> str:
+    """The vault commit that last touched role.md, `+dirty` if the working
+    copy differs from it. This is what the mark records, so a reader of a
+    rendered copy can find the exact source it came from."""
+    rel = ENGINEER_ROLE_SRC.relative_to(VAULT)
+    rev = subprocess.run(
+        ["git", "-C", str(VAULT), "log", "-1", "--format=%h", "--", str(rel)],
+        capture_output=True, text=True, check=False).stdout.strip() or "unknown"
+    dirty = subprocess.run(
+        ["git", "-C", str(VAULT), "status", "--porcelain", "--", str(rel)],
+        capture_output=True, text=True, check=False).stdout.strip()
+    return rev + ("+dirty" if dirty else "")
+
+
+def craft_mark_of(rendered: str) -> tuple[str, str] | None:
+    """(rev, date) read back from a rendered file, for check-drift."""
+    m = CRAFT_MARK_RE.search(rendered)
+    return (m.group(1), m.group(2)) if m else None
+
+
+def project_settings() -> dict:
+    """`.claude/settings.json` for a project engineer. Portable on purpose:
+    no path on this box, no MCP server, no hook.
+
+    Deny rules are project-root-relative (`/CLAUDE.md`), which is the one
+    form that means the same thing in a stranger's clone. Bash is allowed
+    for the reason it is on the platform engineer: a headless job has nobody
+    to answer a permission prompt. What bounds the writes is the permission
+    mode -- `acceptEdits` covers the repo and, per job, the directory
+    bin/engineer-job adds with `--add-dir` -- and nothing bounds Bash but
+    the unit the launcher runs it in.
+
+    Every lane moved to `bypassPermissions` on 2026-11-12, on its launch
+    line (lib/loam_permissions.py): bin/engineer-job passes it to a project
+    job too, and the flag wins over this file. The CLI would ignore it here
+    anyway, as a project `defaultMode`.
+    """
+    return {
+        "permissions": {
+            "defaultMode": "acceptEdits",
+            "deny": [
+                "Edit(/CLAUDE.md)",
+                "Edit(/role.md)",
+                "Edit(/project.md)",
+                "Edit(/.claude/**)",
+                "CronCreate",
+                "CronDelete",
+                "ScheduleWakeup",
+                "RemoteTrigger",
+            ],
+            "allow": [
+                "Bash",
+                "BashOutput",
+                "KillShell",
+                "WebSearch",
+                "WebFetch",
+                "Task",
+            ],
+        },
+        "skillOverrides": {"schedule": "off", "loop": "off"},
+        "disableClaudeAiConnectors": True,
+        "enableAllProjectMcpServers": False,
+        "autoMemoryEnabled": False,
+    }
+
+
+def project_render(name: str, project_file: str | None,
+                   rev: str, date: str,
+                   harness_tracked: bool = False) -> dict[str, str]:
+    """Every file the template puts in a checkout, path -> content. One
+    function so provision writes it and check-drift compares against it."""
+    role = ENGINEER_ROLE_SRC.read_text(encoding="utf-8")
+    skeleton = (TEMPLATE / "project.md").read_text(encoding="utf-8")
+    return {
+        "CLAUDE.md": (TEMPLATE / "CLAUDE.md").read_text(encoding="utf-8"),
+        "role.md": render_craft(role, rev, date, harness_tracked),
+        "project.md": project_file if project_file is not None
+        else skeleton.replace("{name}", name),
+        "memory/MEMORY.md": (TEMPLATE / "memory" / "MEMORY.md").read_text(
+            encoding="utf-8"),
+        ".claude/settings.json": json.dumps(project_settings(), indent=2) + "\n",
+    }
+
+
+def harness_tracked(checkout: Path) -> bool:
+    """Whether this checkout's repository still commits the harness. True
+    only of projects provisioned before 2026-10-01 that have not been
+    recreated; their role keeps the sentence that the memory is committed."""
+    return subprocess.run(
+        ["git", "-C", str(checkout), "ls-files", "--error-unmatch", "role.md"],
+        capture_output=True, text=True, check=False).returncode == 0
+
+
+EXCLUDE_HEADER = "# This checkout's engineering setup: on disk, never in the repository."
+
+
+def exclude_harness(checkout: Path) -> bool:
+    """Append HARNESS_PATHS to `.git/info/exclude`, once. True if written."""
+    exclude = checkout / ".git" / "info" / "exclude"
+    current = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+    have = {line.strip() for line in current.splitlines()}
+    missing = [f"/{p}" for p in HARNESS_PATHS if f"/{p}" not in have]
+    if not missing:
+        return False
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    block = ([] if EXCLUDE_HEADER in have else [EXCLUDE_HEADER]) + missing
+    sep = "" if not current or current.endswith("\n\n") else (
+        "\n" if current.endswith("\n") else "\n\n")
+    exclude.write_text(current + sep + "\n".join(block) + "\n", encoding="utf-8")
+    return True
+
+
+def readme_stub(name: str) -> str:
+    """The first commit of a new project's repository, and all of it."""
+    return f"# {name}\n"
+
+
+def rerender_project(name: str) -> None:
+    """Re-render a registered project's generated harness files -- CLAUDE.md,
+    role.md, .claude/settings.json -- into its checkout. project.md and the
+    memory are not generated and are left alone. Refused for a checkout that
+    tracks its harness: there the render is a change to the project's
+    repository, which is its engineer's."""
+    import loam_engineer as eng  # noqa: PLC0415
+    record_path = eng.project_record_path(name)
+    if not record_path.is_file():
+        die(f"{name} is not registered ({record_path} missing)")
+    root = eng.load_project_record(record_path).root
+    if harness_tracked(root):
+        die(f"{root} commits its harness; a re-render there changes the "
+            f"project's repository, which is its engineer's. Nothing written.")
+    rev, date = craft_source_rev(), datetime.now().strftime("%Y-%m-%d")
+    files = project_render(name, None, rev, date)
+    for rel in ("CLAUDE.md", "role.md", ".claude/settings.json"):
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write_if_changed(target, files[rel])
+    if exclude_harness(root):
+        print(f"  excluded the harness in {root / '.git/info/exclude'}")
+
+
+def _parse_repo(url: str) -> tuple[str, str]:
+    m = re.match(r"^(?:git@github\.com:|https://github\.com/)([^/]+)/([^/]+?)(?:\.git)?/?$", url)
+    if not m:
+        die(f"not a GitHub repo url: {url!r} (want git@github.com:owner/name.git "
+            f"or https://github.com/owner/name)")
+    return m.group(1), m.group(2)
+
+
+def provision_project(name: str, repo_arg: str, project_file: Path | None,
+                      dry: bool = False) -> None:
+    """Create or connect the repo, key it, render the engineer into the
+    checkout (excluded from the repository), start an empty repo with a
+    README stub, register.
+
+    Order matters and each step is reported as it happens, because a persona
+    reads this output in a receipt and a failure halfway must say how far it
+    got. Nothing is written into the repo before the key exists, and nothing
+    is registered before the push has landed.
+    """
+    import loam_engineer as eng  # noqa: PLC0415
+    import loam_github as gh  # noqa: PLC0415
+
+    if not eng.PROJECT_NAME_RE.match(name):
+        die(f"project name {name!r}: lowercase letters, digits and hyphens only")
+    record_path = eng.project_record_path(name)
+    if record_path.exists():
+        die(f"{name} is already registered at {record_path}; retire it first")
+    checkout = eng.PROJECT_CHECKOUTS / name
+    if checkout.exists():
+        die(f"{checkout} already exists; refusing to render over it")
+    key = Path.home() / ".ssh" / f"loam-project-{name}"
+    if key.exists():
+        die(f"{key} already exists; refusing to overwrite a key")
+    if project_file is not None and not project_file.is_file():
+        die(f"no project file at {project_file}")
+
+    me = gh.whoami()
+    owner = me["login"]
+    print(f"github: {owner} ({me['kind']} token"
+          + (f", scopes {', '.join(me['scopes'])}" if me["scopes"] else "")
+          + (f", expires {me['expires']}" if me["expires"] else "") + ")")
+
+    rev, date = craft_source_rev(), datetime.now().strftime("%Y-%m-%d")
+    body = project_file.read_text(encoding="utf-8") if project_file else None
+    files = project_render(name, body, rev, date)   # raises CraftError before any side effect
+    print(f"render: role.md from {ENGINEER_ROLE_SRC} @ {rev}; "
+          f"project.md {'from ' + str(project_file) if project_file else 'skeleton'}")
+
+    if dry:
+        target = (f"{owner}/{name} (new, private)" if repo_arg == "new"
+                  else "/".join(_parse_repo(repo_arg)) + " (existing)")
+        print(f"  [dry-run] would {'create' if repo_arg == 'new' else 'connect'} "
+              f"{target}, key {key}, checkout {checkout}, register {record_path}")
+        for path, content in files.items():
+            print(f"  [dry-run] {path}: {len(content):,} chars (excluded)")
+        print(f"  [dry-run] README.md: {len(readme_stub(name)):,} chars "
+              f"(the only commit, if the repo is empty)")
+        return
+
+    # 1. The repo. Private, always; an existing one is refused if it is not.
+    if repo_arg == "new":
+        repo = gh.create_private_repo(
+            name, f"{name} — its engineer's repo, provisioned {date}")
+        print(f"created {repo['full_name']} private={repo['private']} "
+              f"visibility={repo['visibility']} id={repo['id']}")
+        # Not fatal: the repo exists and the deploy key below still reaches
+        # it. Only an engineer's https push needs the repo in the installation.
+        try:
+            outcome = gh.add_to_installation(repo)
+            if outcome == "added":
+                print(f"added {repo['full_name']} to the GitHub app's installation "
+                      f"(selected repositories); a token for it was minted")
+            elif outcome == "covered":
+                print(f"{repo['full_name']} is in the GitHub app's installation "
+                      f"(all repositories); a token for it was minted")
+            else:
+                print("the GitHub integration is not connected; the deploy key "
+                      "is the only way in")
+        except gh.GitHubError as exc:
+            print(f"warning: {repo['full_name']} is not in the GitHub app's "
+                  f"installation ({exc}); add it on GitHub, or set the "
+                  f"installation to All repositories")
+    else:
+        r_owner, r_name = _parse_repo(repo_arg)
+        repo = gh.get_repo(r_owner, r_name)
+        if repo is None:
+            die(f"{r_owner}/{r_name} does not exist or the token cannot see it")
+        if not repo.get("private"):
+            die(f"{repo['full_name']} is {repo.get('visibility')}. Connecting a "
+                f"repository that is not private is {lc.OWNER_NAME}'s call, not the "
+                f"engineer's; nothing done.")
+        print(f"connected {repo['full_name']} private={repo['private']} "
+              f"visibility={repo['visibility']} id={repo['id']}")
+    r_owner, r_name = repo["owner"]["login"], repo["name"]
+
+    # 2. The key. One per project, write access to this repo and nothing else.
+    pub = gh.generate_ssh_key(key, f"loam-project-{name}@{os.uname().nodename}")
+    dk = gh.add_deploy_key(r_owner, r_name, f"engineer for {name} (deploy key)",
+                           pub, read_only=False)
+    print(f"deploy key {dk['id']} added ({key}, read_only={dk['read_only']})")
+
+    # 3. The checkout, through the key. An empty repo clones with a warning
+    #    and no branch; a repo with history clones as it is.
+    checkout.parent.mkdir(parents=True, exist_ok=True)
+    gh.git(["clone", "-q", repo["ssh_url"], str(checkout)], checkout.parent, key=key)
+    if gh.git(["rev-parse", "--verify", "HEAD"], checkout, check=False).returncode != 0:
+        gh.git(["checkout", "-q", "-b", repo.get("default_branch") or "main"], checkout)
+    gh.git(["config", "user.name", f"{name} engineer"], checkout)
+    gh.git(["config", "user.email", f"engineer+{name}@noreply.local"], checkout)
+    gh.git(["config", "core.sshCommand", gh.ssh_command(key)], checkout)
+    print(f"checkout {checkout} on {gh.git(['branch', '--show-current'], checkout).stdout.strip()}")
+
+    # 4. The render, into the checkout and out of the repository: excluded
+    #    before it is written, so no `git add` can ever pick it up.
+    #    memory/MEMORY.md is seeded once and then the engineer's.
+    exclude_harness(checkout)
+    print(f"excluded {', '.join(HARNESS_PATHS)} in .git/info/exclude")
+    for rel, content in files.items():
+        target = checkout / rel
+        if rel == "memory/MEMORY.md" and target.exists():
+            print(f"  unchanged {target} (engineer-owned)")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write_if_changed(target, content)
+
+    # 5. An empty repo gets one commit, a README stub, and nothing else; a
+    #    repo with history is neither committed to nor pushed.
+    branch = gh.git(["branch", "--show-current"], checkout).stdout.strip()
+    if gh.git(["rev-parse", "--verify", "HEAD"], checkout, check=False).returncode != 0:
+        (checkout / "README.md").write_text(readme_stub(name), encoding="utf-8")
+        gh.git(["add", "README.md"], checkout)
+        gh.git(["commit", "-q", "-m", "Start the repository"], checkout)
+        gh.git(["push", "-q", "-u", "origin", branch], checkout, key=key)
+        head = gh.git(["rev-parse", "HEAD"], checkout).stdout.strip()
+        print(f"pushed {branch} @ {head[:12]} (README stub) to {repo['ssh_url']}")
+    else:
+        print(f"{repo['full_name']} has history; nothing committed or pushed")
+
+    # 6. Register. Last, so a record always describes a project that exists.
+    record = {
+        "name": name,
+        "repo": repo["full_name"],
+        "remote": repo["ssh_url"],
+        "html_url": repo["html_url"],
+        "checkout": str(checkout),
+        "deploy_key": str(key),
+        "deploy_key_id": dk["id"],
+        "role_source_rev": rev,
+        "provisioned": date,
+        # Which CLI runs the engineer (lib/loam_engineer.py, since 2026-10-07).
+        "runtime": eng.DEFAULT_RUNTIME,
+    }
+    # The command a landing runs (bin/engineer-job, since 2026-10-02). Written
+    # into the record by hand from the project's own README, and carried over
+    # a re-provision, which would otherwise drop it and stop every landing.
+    if record_path.is_file():
+        prior = json.loads(record_path.read_text(encoding="utf-8"))
+        if prior.get("test_command"):
+            record["test_command"] = prior["test_command"]
+        # A project flipped back to Claude Code stays flipped.
+        if prior.get("runtime") in eng.RUNTIMES:
+            record["runtime"] = prior["runtime"]
+    record_path = write_record(record_path, record)
+    (eng.PROJECT_STATE / name / "jobs").mkdir(parents=True, exist_ok=True)
+    ensure_trust(checkout)
+    print(f"registered {record_path}; jobs at {eng.PROJECT_STATE / name / 'jobs'}")
+    # True because the launcher reads the registry fresh in every call and the
+    # persona-side server decides nothing (both since 2026-09-07). The one
+    # exception is transient: a conversation opened before 2026-09-07 15:03Z
+    # holds a server with a fixed project map until that conversation ends.
+    print(f"mcp__engineer__brief accepts project={name!r} from the next call "
+          f"in every open conversation: bin/engineer-job reads the registry "
+          f"per call, and the persona-side tool holds no list of its own. "
+          f"Nothing needs restarting.")
+
+
+# What an adopted repository may not already track: a path the harness would
+# be written over. `.codex/` is listed although nothing renders one today,
+# because the brief that made adoption named it and a stranger's repo may.
+ADOPT_CLASHES = HARNESS_PATHS + (".codex/",)
+
+
+def record_target(record_path: Path) -> Path:
+    """Where a new registry record is written. The live registry, except
+    inside an engineer job, where the wall mounts it read-only: there the
+    record goes to the same path in the job's own tree, and is live when the
+    job lands (`engineer-job --land`, or the session's end). Found 2026-10-07:
+    the first real `--adopt`, run from a job, cloned and rendered and then
+    died writing the record, leaving a checkout with no project."""
+    tree = os.environ.get("LOAM_JOB_TREE")
+    try:
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    if tree and not os.access(record_path.parent, os.W_OK):
+        return Path(tree) / "projects" / record_path.name
+    return record_path
+
+
+def write_record(record_path: Path, record: dict) -> Path:
+    """Write a registry record where record_target says; the path written."""
+    target = record_target(record_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    if target != record_path:
+        print(f"  {record_path.parent} is read-only in this job; wrote the "
+              f"record to {target}. Commit it: the project is registered when "
+              f"this job lands.")
+    return target
+
+
+def commit_identity(login: str, name: str | None = None,
+                    email: str | None = None) -> dict:
+    """A `commit_identity` for the GitHub account ``login``
+    (lib/loam_commit_identity.py): its profile name unless ``name`` is given, and
+    its noreply address -- which GitHub attributes to the account whatever
+    else is verified on it -- unless ``email`` is. The id is read from the
+    API, never typed."""
+    import loam_github_app as app  # noqa: PLC0415
+    import loam_commit_identity  # noqa: PLC0415
+    try:
+        _, user = app.api("GET", f"/users/{login}", app.user_token())
+    except app.IntegrationError as exc:
+        die(f"--commit-as {login}: {exc}")
+    name = name or (user.get("name") or "").strip()
+    if not name:
+        die(f"{login} has no name on their GitHub profile; pass --commit-name")
+    return {"name": name,
+            "email": email or loam_commit_identity.noreply_email(user["id"], user["login"]),
+            "github_login": user["login"]}
+
+
+def set_commit_identity(name: str, identity: dict, dry: bool = False) -> None:
+    """Write ``identity`` into a registered project's record and its
+    canonical checkout's git config. Its next job commits as that person."""
+    import loam_engineer as eng  # noqa: PLC0415
+    import loam_github as gh  # noqa: PLC0415
+    record_path = eng.project_record_path(name)
+    if not record_path.is_file():
+        die(f"{name} is not registered")
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    print(f"{name}: commits and pull requests as {identity['name']} "
+          f"<{identity['email']}> (GitHub {identity['github_login']}); was "
+          f"{record.get('commit_identity') or 'the engineer'}")
+    if record.get("landing") != "pull_request":
+        print("  note: this project lands on its own main, so only its commits "
+              "change; there is no pull request to open as anyone")
+    if dry:
+        print("  [dry-run] nothing written")
+        return
+    record["commit_identity"] = identity
+    record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    checkout = Path(record["checkout"])
+    gh.git(["config", "user.name", identity["name"]], checkout)
+    gh.git(["config", "user.email", identity["email"]], checkout)
+
+
+def vault_folder_for(name: str, given: str | None,
+                     vault: Path | None = None) -> str | None:
+    """The `vault_folder` a project's record carries, or None for its name.
+    Receipts land in `40_PROJECTS/<folder>/receipts/`. A folder that differs
+    from an existing one only in case is refused: the Mac and the phone
+    cannot hold both (found adopting the first adopted project into a vault
+    folder of its own spelled with a capital, 2026-10-07)."""
+    projects = (vault or VAULT) / "40_PROJECTS"
+    folder = given or name
+    if "/" in folder or folder in ("", ".", ".."):
+        die(f"--vault-folder {folder!r}: one folder name under 40_PROJECTS")
+    existing = [p.name for p in projects.iterdir() if p.is_dir()] if projects.is_dir() else []
+    twins = [e for e in existing if e.lower() == folder.lower() and e != folder]
+    if twins:
+        die(f"40_PROJECTS/{twins[0]}/ exists and 40_PROJECTS/{folder}/ would be "
+            f"its case-only twin; pass --vault-folder {twins[0]}")
+    return given if given and given != name else None
+
+
+def adopt_project(name: str, repository: str, project_file: Path | None,
+                  test_command: str | None = None, dry: bool = False,
+                  identity: dict | None = None,
+                  vault_folder: str | None = None) -> None:
+    """Adopt a repository Loam does not own (since 2026-10-06): clone it
+    through the GitHub App's installation on its owner, render the engineer
+    into the checkout and out of its history, and register a project that
+    lands by pull request.
+
+    Nothing is written to the repository on GitHub: no commit, no push, no
+    deploy key, no setting. The clone is https with a read-only token minted
+    here, in this process, so adopting does not wait on the broker; every job
+    afterwards fetches through the broker with a token that cannot push, and
+    its landing asks the broker to push its branch and open a pull request
+    (lib/loam_worktree.py, lib/loam_github_app.py). One project per
+    repository: a product in three repositories is three projects."""
+    import shutil  # noqa: PLC0415
+    import loam_engineer as eng  # noqa: PLC0415
+    import loam_github as gh  # noqa: PLC0415
+    import loam_github_app as app  # noqa: PLC0415
+
+    if not eng.PROJECT_NAME_RE.match(name):
+        die(f"project name {name!r}: lowercase letters, digits and hyphens only")
+    if not re.match(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$", repository):
+        die(f"--adopt takes owner/name, not {repository!r}")
+    record_path = eng.project_record_path(name)
+    if record_path.exists():
+        die(f"{name} is already registered at {record_path}; retire it first")
+    checkout = eng.PROJECT_CHECKOUTS / name
+    if checkout.exists():
+        die(f"{checkout} already exists; refusing to render over it")
+    if project_file is not None and not project_file.is_file():
+        die(f"no project file at {project_file}")
+    vault_folder = vault_folder_for(name, vault_folder)
+
+    try:
+        inst = app.installation_for(app.load(), repository)
+        token = app.read_token(repository)["token"]
+        _, repo = app.api("GET", f"/repos/{repository}", token)
+    except app.IntegrationError as exc:
+        die(f"{repository}: {exc}")
+    print(f"installation {inst['installation_id']} on {inst.get('account')} "
+          f"({inst.get('repository_selection')} repositories) reaches "
+          f"{repo['full_name']}")
+    if not repo.get("private"):
+        die(f"{repo['full_name']} is {repo.get('visibility')}. Adopting a "
+            f"repository that is not private is {lc.OWNER_NAME}'s call, not the "
+            f"engineer's; nothing done.")
+    base = repo.get("default_branch") or "main"
+    remote = gh.https_remote(repo["full_name"])
+
+    rev, date = craft_source_rev(), datetime.now().strftime("%Y-%m-%d")
+    body = project_file.read_text(encoding="utf-8") if project_file else None
+    files = project_render(name, body, rev, date)
+    print(f"render: role.md from {ENGINEER_ROLE_SRC} @ {rev}; "
+          f"project.md {'from ' + str(project_file) if project_file else 'skeleton'}")
+    if dry:
+        print(f"  [dry-run] would clone {remote} ({base}) to {checkout}, "
+              f"exclude and render {', '.join(files)}, register {record_path} "
+              f"with landing pull_request; nothing pushed, ever")
+        return
+
+    # 1. The clone, with the token in this process's environment only.
+    checkout.parent.mkdir(parents=True, exist_ok=True)
+    cloned = subprocess.run(["git", "clone", "-q", remote, str(checkout)],
+                            env=app.git_token_env(token), capture_output=True,
+                            text=True, check=False, timeout=600)
+    if cloned.returncode != 0:
+        shutil.rmtree(checkout, ignore_errors=True)
+        die(f"cloning {remote} failed: "
+            f"{(cloned.stderr or '').replace(token, '***').strip()[:400]}")
+    if gh.git(["rev-parse", "--verify", "HEAD"], checkout, check=False).returncode != 0:
+        shutil.rmtree(checkout, ignore_errors=True)
+        die(f"{repo['full_name']} is empty; there is nothing to adopt. Nothing kept.")
+
+    # 2. Their history must not already hold a path the harness writes.
+    clashes = gh.git(["ls-files", "--", *ADOPT_CLASHES], checkout).stdout.split()
+    if clashes:
+        shutil.rmtree(checkout, ignore_errors=True)
+        die(f"{repo['full_name']} already tracks {', '.join(sorted(clashes)[:8])}; "
+            f"the engineer's harness would be written over its files. Nothing "
+            f"kept. Adopting it needs the harness somewhere else, which is a "
+            f"decision for {lc.OWNER_NAME}.")
+
+    # 3. The local `main` is the remote's default branch, whatever it is
+    #    called, because every job is cut from `main` (lib/loam_worktree.py).
+    if base != "main":
+        gh.git(["branch", "-m", base, "main"], checkout)
+        gh.git(["branch", "--set-upstream-to", f"origin/{base}", "main"], checkout)
+    who = identity or {"name": f"{name} engineer",
+                       "email": f"engineer+{name}@noreply.local"}
+    gh.git(["config", "user.name", who["name"]], checkout)
+    gh.git(["config", "user.email", who["email"]], checkout)
+    head = gh.git(["rev-parse", "HEAD"], checkout).stdout.strip()
+    print(f"checkout {checkout}: main = origin/{base} @ {head[:12]}")
+
+    # 4. The render, excluded before it is written.
+    exclude_harness(checkout)
+    print(f"excluded {', '.join(HARNESS_PATHS)} in .git/info/exclude")
+    for rel, content in files.items():
+        target = checkout / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write_if_changed(target, content)
+    status = gh.git(["status", "--porcelain"], checkout).stdout.strip()
+    if status:
+        die(f"the render shows in {checkout}'s status, which means it would "
+            f"reach a commit:\n{status}")
+
+    # 5. Register. No deploy key, no deploy lane, and landing by pull request.
+    record = {
+        "name": name,
+        "repo": repo["full_name"],
+        "remote": remote,
+        "html_url": repo["html_url"],
+        "checkout": str(checkout),
+        "landing": "pull_request",
+        "default_branch": base,
+        "adopted": date,
+        "role_source_rev": rev,
+        "provisioned": date,
+        "runtime": eng.DEFAULT_RUNTIME,
+    }
+    if test_command:
+        record["test_command"] = test_command
+    if identity:
+        record["commit_identity"] = identity
+    if vault_folder:
+        record["vault_folder"] = vault_folder
+    record_path = write_record(record_path, record)
+    (eng.PROJECT_STATE / name / "jobs").mkdir(parents=True, exist_ok=True)
+    ensure_trust(checkout)
+    print(f"registered {record_path} (landing: pull request against {base}"
+          + (f"; tests: {test_command}" if test_command else
+             "; no test_command, so each pull request says it is untested")
+          + f"); jobs at {eng.PROJECT_STATE / name / 'jobs'}; receipts to "
+          f"{VAULT / '40_PROJECTS' / (vault_folder or name) / 'receipts'}")
+
+
+def deployment_blocker(name: str, deploy_dir: Path | None = None) -> str | None:
+    """Why a project cannot be retired yet, or None. A deployment record
+    under agents/deploy/<name>/ means the app is (or can be) live: its host
+    block is in the Caddyfile, its sudoers alias is rendered, and its
+    checkout for `bin/deploy` defaults to the registry entry this retire
+    would delete. Retire and deploy are separate teardowns and the order is
+    deploy first (found 2026-09-08, retiring probe-clock, the first project
+    with both): the app goes down and its record goes, `sudo bin/gen-deploy`
+    reloads, and only then the engineer. A retire that ran first would leave
+    a container running behind a host block with no engineer, no checkout
+    and no way to rebuild it, and `--force` is not the word for that."""
+    record = (deploy_dir or loam_deploy.DEPLOY) / name / "deploy.toml"
+    if record.is_file():
+        return (f"{name} still has a deployment record at {record}. Tear the "
+                f"deployment down first: stop and remove its container and "
+                f"images (`docker compose -f {record.parent}/compose.yaml down "
+                f"--rmi all`), `git rm -r {record.parent}`, `sudo bin/gen-deploy`, "
+                f"check-drift green; then retire. --force does not skip this.")
+    return None
+
+
+def retire_project(name: str, delete_repo: bool, force: bool) -> None:
+    """Undo provision_project. The checkout is refused while it holds work
+    the remote does not, unless forced; the repo is deleted only when asked.
+    A live deployment record refuses outright: see deployment_blocker."""
+    import shutil  # noqa: PLC0415
+    import loam_engineer as eng  # noqa: PLC0415
+    import loam_github as gh  # noqa: PLC0415
+
+    record_path = eng.project_record_path(name)
+    if not record_path.is_file():
+        die(f"{name} is not registered ({record_path} missing)")
+    blocker = deployment_blocker(name)
+    if blocker:
+        die(blocker)
+    project = eng.load_project_record(record_path)
+    owner, r_name = project.repo.split("/", 1)
+    if delete_repo and project.pull_request:
+        die(f"{project.repo} is not Loam's: {name} adopted it. --delete-repo "
+            f"is refused; retire without it.")
+
+    if project.root.is_dir() and not force:
+        dirty = gh.git(["status", "--porcelain"], project.root, check=False).stdout.strip()
+        unpushed = gh.git(["log", "--oneline", "@{u}..HEAD"], project.root,
+                          check=False).stdout.strip()
+        if dirty or unpushed:
+            die(f"{project.root} has uncommitted or unpushed work:\n"
+                f"{dirty}\n{unpushed}\n--force retires it anyway.")
+
+    key_id = project.record.get("deploy_key_id")
+    if key_id and gh.get_repo(owner, r_name) is not None:
+        gh.delete_deploy_key(owner, r_name, int(key_id))
+        print(f"deleted deploy key {key_id} from {project.repo}")
+    if delete_repo:
+        gh.delete_repo(owner, r_name)
+        print(f"deleted {project.repo}: GET now -> "
+              f"{'404' if gh.get_repo(owner, r_name) is None else 'STILL THERE'}")
+    if project.deploy_key:
+        for p in (project.deploy_key, project.deploy_key.with_suffix(".pub")):
+            if p.exists():
+                p.unlink()
+        print(f"removed {project.deploy_key} and .pub")
+    if project.root.is_dir():
+        shutil.rmtree(project.root)
+        print(f"removed {project.root}")
+    state = eng.PROJECT_STATE / name
+    if state.is_dir():
+        shutil.rmtree(state)
+        print(f"removed {state}")
+    remove_trust(project.root)
+    record_path.unlink()
+    print(f"unregistered {record_path}")
+
+
+def remove_trust(workspace: Path) -> None:
+    """The inverse of ensure_trust, with the same three rules: no write when
+    there is nothing to remove, re-check the file has not moved, replace
+    atomically. A retired checkout's trust entry is a path that no longer
+    exists being pre-approved for whatever lands there next."""
+    key = str(workspace)
+    for _ in range(3):
+        stat_before = CLAUDE_JSON.stat()
+        cfg = json.loads(CLAUDE_JSON.read_text())
+        projects = cfg.get("projects") or {}
+        if key not in projects:
+            return
+        del projects[key]
+        stat_now = CLAUDE_JSON.stat()
+        if (stat_now.st_mtime_ns, stat_now.st_size) != (
+            stat_before.st_mtime_ns, stat_before.st_size
+        ):
+            continue
+        tmp = CLAUDE_JSON.with_name(CLAUDE_JSON.name + ".provision-tmp")
+        tmp.write_text(json.dumps(cfg, indent=2))
+        os.replace(tmp, CLAUDE_JSON)
+        print(f"  trust removed for {key} (atomic replace)")
+        return
+    print(f"  could not remove trust for {key}: ~/.claude.json kept moving; "
+          f"remove the entry by hand")
+
+
+def main() -> None:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    dry = "--dry-run" in sys.argv
+    if "--project" in sys.argv:
+        argv = sys.argv[1:]
+
+        def opt(flag: str) -> str | None:
+            return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else None
+
+        name = opt("--project") or die("usage: provision --project <name> --repo new|<url> "
+                                       "[--project-file <path>] [--dry-run]")
+        if "--retire" in argv:
+            retire_project(name, "--delete-repo" in argv, "--force" in argv)
+            return
+        if "--rerender" in argv:
+            rerender_project(name)
+            return
+        identity = (commit_identity(opt("--commit-as"), opt("--commit-name"),
+                                    opt("--commit-email"))
+                    if opt("--commit-as") else None)
+        if "--adopt" in argv:
+            pf = opt("--project-file")
+            adopt_project(name, opt("--adopt") or die("--adopt <owner>/<name>"),
+                          Path(pf) if pf else None, opt("--test-command"), dry,
+                          identity, opt("--vault-folder"))
+            return
+        if identity:
+            set_commit_identity(name, identity, dry)
+            return
+        repo_arg = opt("--repo") or die(
+            "usage: provision --project <name> --repo new|<url> "
+            "[--project-file <path>] [--dry-run]\n"
+            "       provision --project <name> --adopt <owner>/<name> "
+            "[--project-file <path>] [--test-command <cmd>] [--vault-folder <Folder>]\n"
+            "           [--commit-as <github-login> [--commit-name <name>] "
+            "[--commit-email <email>]] [--dry-run]\n"
+            "       provision --project <name> --commit-as <github-login> "
+            "[--commit-name <name>] [--commit-email <email>] [--dry-run]\n"
+            "       provision --project <name> --retire [--delete-repo] [--force]\n"
+            "       provision --project <name> --rerender")
+        pf = opt("--project-file")
+        provision_project(name, repo_arg, Path(pf) if pf else None, dry)
+        return
+    # The engineer is provisioned by the same command and rendered from the
+    # same module, because check-drift reads one module to compare everything
+    # on this box. It takes no wake time: it has no timer, no Remote Control
+    # server and no unit at all. It exists only while a job runs.
+    if "--engineer" in sys.argv:
+        if args:
+            die("usage: provision --engineer [--dry-run]")
+        provision_engineer(dry)
+        return
+    if "--codex" in sys.argv:
+        provision_codex([a.lower() for a in args], dry)
+        return
+    if "--antigravity" in sys.argv:
+        provision_antigravity([a.lower() for a in args], dry)
+        return
+    if "--managed-settings" in sys.argv:
+        if args:
+            die("usage: provision --managed-settings [--dry-run]")
+        install_managed_settings(dry)
+        return
+    if "--reviewer" in sys.argv:
+        if args:
+            die("usage: provision --reviewer [--dry-run]")
+        provision_reviewer(dry)
+        return
+    if len(args) != 2:
+        die("usage: provision <agent> <wake HH:MM> [--dry-run]\n"
+            "       provision --engineer [--dry-run]\n"
+            "       provision --reviewer [--dry-run]\n"
+            "       provision --managed-settings [--dry-run]")
+    name, wake = args[0].lower(), args[1]
+    if not re.match(r"^\d{2}:\d{2}$", wake):
+        die(f"wake must be HH:MM; got {wake!r}")
+
+    workspace = AI_LABS / name
+    if not workspace.is_dir():
+        die(f"no workspace at {workspace}")
+    for required in ("soul.md", "config.md"):
+        if not (workspace / required).is_file():
+            die(f"{workspace}/{required} is missing; refusing to provision")
+
+    # The reflection's time is its record's once it has one. Checked before
+    # anything is written, so a mismatch leaves agent.json as it was.
+    reflection_record = workspace / "crons" / "reflection.md"
+    if reflection_record.exists():
+        import loam_cron  # noqa: PLC0415
+        cron = loam_cron.read_cron(name, "reflection")
+        if loam_cron.reflection_hhmm(cron.schedule_text) != wake:
+            die(f"{reflection_record} says {cron.schedule_text}, not {wake}. "
+                f"The record is the reflection's time; change it there "
+                f"(bin/schedule).")
+
+    display = name.capitalize()
+    try:
+        _card = json.loads((workspace / "agent.json").read_text(encoding="utf-8"))
+        _card = _card if isinstance(_card, dict) else {}
+    except (OSError, ValueError):
+        _card = {}
+    _own = _card.get("emoji")
+    emoji = emoji_for(display, _own if isinstance(_own, str) else None)
+    # The agent's own files say the name it was made with (2026-11-14, L9:
+    # "Old Sam", not "Old-sam"); an agent made before then has its id's.
+    import loam_profile  # noqa: PLC0415
+    own_name = loam_profile.self_name(name, _card)
+    shape = skills_shape(workspace)
+
+    print(f"agent={name} display={display} emoji={emoji} wake={wake} skills={shape}")
+    print(f"  soul={workspace/'soul.md'} ({(workspace/'soul.md').stat().st_size}B)")
+    print(f"  config={workspace/'config.md'} ({(workspace/'config.md').stat().st_size}B)")
+    if dry:
+        print("  [dry-run] no files written")
+        return
+
+    (workspace / ".claude").mkdir(parents=True, exist_ok=True)
+    (workspace / "memory").mkdir(parents=True, exist_ok=True)
+
+    # What the owner set on the agent's profile (2026-11-13: its display name,
+    # its face and its default provider, model and thinking level) is kept
+    # over what this derives; a new agent starts on the derived ones. The
+    # persona's own words (CLAUDE.md's "You are ...") stay on the id's name.
+    import loam_profile  # noqa: PLC0415
+    try:
+        existing = json.loads((workspace / "agent.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        existing = {}
+    (workspace / "agent.json").write_text(loam_profile.render_agent({
+        "name": name,
+        "display": display,
+        "emoji": emoji,
+        "workspace": str(workspace),
+        "vault": str(VAULT),
+        "wake_schedule": wake,
+        "wake_timezone": lc.TIMEZONE,
+        **(loam_profile.kept(existing) if isinstance(existing, dict) else {}),
+    }), encoding="utf-8")
+
+    (workspace / "CLAUDE.md").write_text(claude_md(own_name, workspace), encoding="utf-8")
+    (workspace / ".claude" / "settings.json").write_text(
+        json.dumps(settings(workspace), indent=2) + "\n", encoding="utf-8")
+    (workspace / ".claude" / "settings.local.json").write_text(
+        json.dumps({"autoMemoryDirectory": str(workspace / "memory")}, indent=2) + "\n",
+        encoding="utf-8")
+    (workspace / ".mcp.json").write_text(
+        json.dumps(mcp_config(name, workspace), indent=2) + "\n", encoding="utf-8")
+
+    link = workspace / ".claude" / "skills"
+    if (workspace / "skills").is_dir():
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to("../skills")
+    # The shared shelves for Claude Code, one folder of links above every
+    # workspace, where Claude Code finds them and lets the persona's own
+    # skill of the same name win (first release L7).
+    loam_skills.render_claude_shelf()
+
+    # Order matters: the style keys go into `_active.md` before the symlink
+    # that points at it exists, so there is no window in which the settings
+    # name a style that resolves to a file the loader would reject.
+    seed_always(name, workspace, datetime.now().strftime("%Y-%m-%d"))
+    ensure_style_frontmatter(own_name, workspace)
+    output_styles(workspace)
+
+    ensure_trust(workspace)
+    ensure_user_settings()
+    provision_codex([name])
+    provision_antigravity([name])
+
+    SYSTEMD.mkdir(parents=True, exist_ok=True)
+    svc, _ = wake_units(name, workspace, wake)
+    write_if_changed(SYSTEMD / f"loam-wake-{name}.service", svc)
+    # The timer is the reflection record's. A new agent gets the record at
+    # `wake`, through the schedule path, which installs the timer; an agent
+    # that has one keeps it, and moving it is a change to the record.
+    import loam_schedule  # noqa: PLC0415
+    record = loam_schedule.record_path(name, "reflection")
+    if not record.exists():
+        loam_schedule.change(name, "reflection",
+                             loam_schedule.reflection_record(wake),
+                             actor="engineer", lane="engineer",
+                             reason=f"provisioned with its reflection at {wake}")
+        print(f"  wrote {record} (the timer follows it)")
+
+    # The RC unit belongs to gen-rc-units, which derives its roster from disk
+    # and rewrites nothing it would not change. Calling the owner keeps
+    # provisioning one step without giving this script a second copy of the
+    # template.
+    subprocess.run([str(AGENTS / "bin" / "gen-rc-units"), name], check=True)
+
+    # The vault's schedule page carries both lanes in one table, and this is
+    # one generator of it; the schedule reconciler is the other and
+    # rewrites the same page on every change; whichever runs last is right,
+    # because both derive every row from disk rather than editing in place.
+    from loam_cron import write_schedule_page  # noqa: PLC0415
+    if write_schedule_page(VAULT):
+        print(f"  rewrote {VAULT}/40_PROJECTS/Loam/infrastructure/schedule.md")
+
+    print(f"  provisioned {name}: project files, wake units, RC unit")
+    report_readiness(name, workspace)
+    print(f"  next: systemctl --user daemon-reload && "
+          f"systemctl --user enable --now loam-rc-{name} loam-wake-{name}.timer")
+
+
+if __name__ == "__main__":
+    # The live lock (since 2026-10-02): provisioning a project changes that
+    # project's checkout and the host's files for it, so it holds the
+    # project's lock; anything else provision does is the runtime's, Loam's.
+    import loam_lock  # noqa: E402
+    _named = [a for a in sys.argv[1:] if not a.startswith("--")]
+    _lock = _named[0] if "--project" in sys.argv and _named else "Loam"
+    with loam_lock.live(_lock, "provision " + " ".join(sys.argv[1:])):
+        main()

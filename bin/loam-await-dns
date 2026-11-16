@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Put the install on the web once its name points here, and not before.
+
+One run (`loam-await-dns.service`, root, started every 30 seconds by
+`loam-await-dns.timer` until it is done; the installer's step 10 runs it once
+first). Each run:
+
+1. asks DNS for `<name>.<base>` and `loam-check.<name>.<base>` (the wildcard);
+2. until both answer with this box's address, writes what it found to
+   /var/lib/loam/edge.json for `loam status` and stops there: the Caddyfile
+   has no host block yet, so Caddy asks Let's Encrypt for nothing;
+3. when both do, records `"dns": "resolved"`, runs gen-deploy (which renders
+   the hosts), waits for the certificate, records it, and turns its own timer
+   off. `loam status` then shows the claim link as ready to open.
+
+  loam-await-dns            one run, as above
+  loam-await-dns --quiet    the same, printing nothing (the timer's form)
+
+Exit 0 whether or not the name resolves yet: waiting is not a failure.
+First release L12 (2026-11-14); docs/install.md.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+# No bytecode beside the code: anything in the checkout a release did not
+# put there refuses the next update (L13's clean-tree rule).
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_deploy as dep  # noqa: E402
+import loam_install as li  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+TIMER = "loam-await-dns.timer"
+CERT_WAIT = 180
+
+
+def now() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def write_state(state: dict) -> None:
+    dep.EDGE_STATE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dep.EDGE_STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, dep.EDGE_STATE)
+
+
+def stop_timer() -> None:
+    subprocess.run(["systemctl", "disable", "--now", TIMER],
+                   capture_output=True, text=True, check=False)
+
+
+def main(argv: list[str]) -> int:
+    quiet = "--quiet" in argv
+    say = (lambda *_: None) if quiet else print
+    if os.geteuid() != 0:
+        os.execvp("sudo", ["sudo", "-n", sys.executable, os.path.abspath(__file__), *argv])
+    edge = dep.EDGE
+    if not edge.get("domain"):
+        say("loam-await-dns: this box has no [edge] in its configuration; nothing to wait for")
+        stop_timer()
+        return 0
+    domain, address = edge["domain"], edge.get("address", "")
+    internal = edge.get("tls") == "internal"
+    state = dep.edge_state()
+    if state.get("domain") != domain:
+        state = {"domain": domain}
+
+    if state.get("dns") != "resolved":
+        base = domain.split(".", 1)[1]
+        found = li.name_check(edge["name"], address, base=base,
+                              resolver=edge.get("resolver", "public"))
+        state.update({"checked": now(), "last": found["state"],
+                      "apex": found["apex"], "wildcard": found["wildcard"]})
+        if found["state"] != "here":
+            state["dns"] = found["state"]
+            write_state(state)
+            say(f"{domain} does not point here yet ({found['state']}); checking again in 30 seconds")
+            return 0
+        state.update({"dns": "resolved", "resolved_at": now()})
+        write_state(state)
+        say(f"{domain} points here. Putting it on the web…")
+
+    if not (state.get("certificate") or {}).get("ok"):
+        res = subprocess.run([sys.executable, str(ROOT / "bin" / "gen-deploy")],
+                             capture_output=True, text=True, check=False, timeout=900)
+        state["rendered_at"] = now()
+        state["render_exit"] = res.returncode
+        if res.returncode:
+            state["render_error"] = (res.stderr or res.stdout).strip()[-1500:]
+            write_state(state)
+            say(f"gen-deploy failed (exit {res.returncode}); trying again in 30 seconds")
+            return 0
+        state.pop("render_error", None)
+        deadline = time.time() + CERT_WAIT
+        cert = {"ok": False, "why": "not asked yet"}
+        while time.time() < deadline:
+            cert = li.certificate(domain, internal=internal)
+            if cert["ok"]:
+                break
+            time.sleep(5)
+        state["certificate"] = {**cert, "checked": now()}
+        write_state(state)
+        if not cert["ok"]:
+            say(f"no certificate for {domain} yet ({cert.get('why')}); checking again in 30 seconds")
+            return 0
+        say(f"{domain} has its certificate ({cert.get('issuer')}).")
+
+    state["ready_at"] = state.get("ready_at") or now()
+    write_state(state)
+    stop_timer()
+    link = li.claim_link(domain)
+    if link and dep.unclaimed():
+        say(f"Ready. Open this link to make your sign-in:\n\n  {link}\n")
+    else:
+        say(f"Ready: https://{domain}/")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

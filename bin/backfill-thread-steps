@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""Backfill threads' full records from the broker's session logs (2026-11-10).
+
+The full record (``lib/loam_thread_steps.py``) starts with the broker that
+writes it. The replies made before it are still in the broker's own session
+event logs (``state/broker/sessions/<id>.jsonl``), which keep every event.
+This writes one entry per such reply, marked ``backfilled``, and never one
+for a message that already has an entry.
+
+How a reply is found: each thread turn sends its session one prompt, which
+the log holds as ``broker.user_message``; the events from one prompt to the
+next are one turn. A persona's replies in a thread map to its session's
+turns in order -- but only when the counts agree (the same, or one more turn
+when the last is still running). A persona whose earlier replies came from
+another session (an engine switch, a lost session record) is skipped and
+said, never guessed.
+
+One turn before 2026-11-10 could hold several replies merged into one
+message (the bug this record came with): its entry keeps every event of the
+turn and says ``replies: n``, so the texts the readable record lost are here.
+
+**A placeholder message** (2026-11-10). Before the 11-10 writer, a turn
+that died wrote a persona message reading "(no reply: the turn ended by
+timeout)", and its spoken replies survived only as `Said:` labels and in the
+session log. The mapping above skips such a message, rightly: its text is
+not the turn's. ``--force-placeholder THREAD:MSG[,MSG…]`` recovers it on
+purpose. The turn is found by session and ``seq`` -- the message's own full
+record entry when it has one, else the session's last prompt before the
+message -- and proved by the message's ``Said:`` labels, each of which must
+open something the turn said. Each harness turn in it that said something
+becomes a message, as the live writer makes them, at the time it was said,
+marked ``late: true``: the first keeps the placeholder's id, the rest take
+the next free ids and sit after it, and no other message's bytes change. A
+reply already in the thread (the live late-reply path posted it) is not
+posted twice; a placeholder left with nothing to say is removed. Each
+recovered message gets its full-record entry, ``recovered: true``.
+
+Usage: bin/backfill-thread-steps [--dry-run]
+       bin/backfill-thread-steps [--dry-run] --force-placeholder THREAD:MSG[,MSG…]
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+import loam_broker as cfg  # noqa: E402
+import loam_thread_engine as engine  # noqa: E402
+import loam_thread_steps as steps  # noqa: E402
+import loam_threads as threads  # noqa: E402
+
+PLACEHOLDER = "(no reply"
+
+
+def turns_of(log: Path) -> list[list[dict]]:
+    out: list[list[dict]] = []
+    with log.open(encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") == "broker.user_message":
+                out.append([])
+            if out and steps.keep(event):
+                out[-1].append(event)
+    return out
+
+
+def _when(events: list[dict]) -> str | None:
+    """The time of the last event in a run that carries one, as the record
+    writes times."""
+    for event in reversed(events):
+        stamp = event.get("timestamp") or event.get("ts")
+        if isinstance(stamp, str) and len(stamp) >= 19:
+            return stamp[:19] + "Z"
+    return None
+
+
+def _first(events: list[dict]) -> str | None:
+    """The time of the first event in a run that carries one."""
+    return _when(events[:1]) or next(
+        (_when([e]) for e in events if _when([e])), None)
+
+
+def _norm(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def recover(thread_id: str, msg_id: str, dry: bool) -> bool:
+    """One placeholder message, recovered from its session's log."""
+    _, msgs, _ = threads.read(thread_id)
+    msg = next((m for m in msgs if m.get("id") == msg_id), None)
+    if msg is None:
+        print(f"{thread_id} {msg_id}: no such message")
+        return False
+    if not (msg.get("text") or "").startswith(PLACEHOLDER):
+        print(f"{thread_id} {msg_id}: its text is not a placeholder; nothing forced")
+        return False
+    row = (threads.load_state("sessions.json").get(thread_id) or {}).get(msg["author"])
+    if not row:
+        print(f"{thread_id} {msg_id}: no session on record for {msg['author']}")
+        return False
+    log = cfg.SESSION_DIR / f"{row['session_id']}.jsonl"
+    turns = turns_of(log) if log.exists() else []
+    # By seq: the message's own entry says where it is in the log.
+    entry = steps.read(thread_id, msg_id).get(msg_id) or {}
+    seq = (entry.get("seq") or [None])[0] if entry.get("session_id") == row["session_id"] else None
+    turn = None
+    if isinstance(seq, int):
+        turn = next((t for t in turns if t and t[0].get("seq", 0) <= seq <= t[-1].get("seq", 0)), None)
+    else:
+        # Else the last prompt the session was sent before the message.
+        before = [t for t in turns if t and (_first(t) or "~") <= msg["at"]]
+        turn = before[-1] if before else None
+    if turn is None:
+        print(f"{thread_id} {msg_id}: no turn in {row['session_id'][:8]} matches; skipped")
+        return False
+    # Chunks as the live writer cuts them; a silent one carries its events on.
+    replies, carry = [], []
+    for chunk in steps.split_replies(turn):
+        reply = engine.Reply.of(carry + chunk)
+        if reply.spoken():
+            replies.append((reply, carry + chunk, _when(chunk)))
+            carry = []
+        else:
+            carry = carry + chunk
+    if carry and replies:
+        replies[-1] = (replies[-1][0], replies[-1][1] + carry, replies[-1][2])
+    # The proof: every `Said:` label on the placeholder opens something said.
+    heard = [_norm(seg["text"]) for reply, _, _ in replies
+             for seg in reply.ordered if "text" in seg]
+    labels = [_norm(d["label"][len("Said: "):]) for d in msg.get("did") or []
+              if str(d.get("label", "")).startswith("Said: ")]
+    if not labels and not isinstance(seq, int):
+        print(f"{thread_id} {msg_id}: nothing proves the turn is this message's; skipped")
+        return False
+    missing = [l for l in labels if not any(h.startswith(l.rstrip("…").strip()) for h in heard)]
+    if missing:
+        print(f"{thread_id} {msg_id}: {len(missing)} Said: label(s) not in turn "
+              f"seq {turn[0].get('seq')}-{turn[-1].get('seq')}; skipped")
+        return False
+    have = {_norm(m.get("text")) for m in msgs if m.get("id") != msg_id}
+    new, chunks = [], []
+    for reply, events, said_at in replies:
+        if _norm(reply.spoken()) in have:
+            print(f"{thread_id} {msg_id}: \"{reply.spoken()[:50]}…\" is already in "
+                  f"the thread; not posted twice")
+            continue
+        extra = {"engine": msg.get("engine") or "claude-code", "late": True}
+        before = reply.before()
+        if before and any("text" in seg for seg in before):
+            extra["segments"] = before
+        new.append({"author": msg["author"], "at": said_at or msg["at"],
+                    "kind": "message", "text": reply.spoken(), "did": reply.did,
+                    **extra})
+        chunks.append(events)
+    print(f"{thread_id} {msg_id}: turn seq {turn[0].get('seq')}-{turn[-1].get('seq')} "
+          f"of {row['session_id'][:8]}; {len(new)} repl{'y' if len(new) == 1 else 'ies'} "
+          f"to post{' (dry run)' if dry else ''}")
+    for m in new:
+        print(f"    {m['at']}  {m['text'][:70]!r}")
+    if dry:
+        return True
+    out = threads.replace_message(thread_id, msg_id, new)
+    print(f"{thread_id} {msg_id}: " + (", ".join(m["id"] for m in out) + " written"
+                                       if out else "removed, nothing left to say"))
+    for m, events in zip(out, chunks):
+        if not steps.write(thread_id, steps.entry(m, thread_id, row["session_id"], events,
+                                                  backfilled=True, recovered=True,
+                                                  ended="late")):
+            return False
+    return True
+
+
+def main() -> int:
+    dry = "--dry-run" in sys.argv[1:]
+    if "--force-placeholder" in sys.argv[1:]:
+        arg = sys.argv[sys.argv.index("--force-placeholder") + 1]
+        thread_id, _, ids = arg.partition(":")
+        ok = all([recover(thread_id, mid.strip(), dry) for mid in ids.split(",") if mid.strip()])
+        return 0 if ok else 1
+    sessions = threads.load_state("sessions.json")
+    written = 0
+    for thread_id in sorted(threads.index()):
+        try:
+            _, msgs, _ = threads.read(thread_id)
+        except threads.ThreadError as exc:
+            print(f"{thread_id}: unreadable ({exc}); skipped")
+            continue
+        have = steps.read(thread_id)
+        for persona, row in sorted((sessions.get(thread_id) or {}).items()):
+            replies = [m for m in msgs if m.get("author") == persona
+                       and m.get("kind") == "message" and m.get("engine")]
+            log = cfg.SESSION_DIR / f"{row['session_id']}.jsonl"
+            if not log.exists():
+                print(f"{thread_id} {persona}: no session log {log.name}; skipped")
+                continue
+            turns = turns_of(log)
+            if len(turns) not in (len(replies), len(replies) + 1):
+                print(f"{thread_id} {persona}: {len(replies)} replies but "
+                      f"{len(turns)} turns in {row['session_id'][:8]}; skipped")
+                continue
+            for msg, events in zip(replies, turns):
+                if msg["id"] in have:
+                    continue
+                n = sum(1 for e in events if e.get("type") == "result"
+                        and e.get("parent_tool_use_id") is None)
+                # The proof the mapping is right: what the turn said last,
+                # by the writer's own rule, is the message's text.
+                chunks = [c for c in steps.split_replies(events) if steps.said(c)]
+                last = steps.said(chunks[-1]) if chunks else ""
+                if " ".join(last.split()) != " ".join((msg.get("text") or "").split()):
+                    print(f"{thread_id} {msg['id']} {persona}: the turn's last words "
+                          f"are not the message's text; skipped")
+                    continue
+                record = steps.entry(msg, thread_id, row["session_id"], events,
+                                     backfilled=True, replies=n)
+                print(f"{thread_id} {msg['id']} {persona}: {len(record['steps'])} "
+                      f"steps, {n} harness turn(s), seq {record['seq']}"
+                      f"{' (dry run)' if dry else ''}")
+                if not dry:
+                    if not steps.write(thread_id, record):
+                        return 1
+                    written += 1
+    print(f"{written} entr{'y' if written == 1 else 'ies'} written")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

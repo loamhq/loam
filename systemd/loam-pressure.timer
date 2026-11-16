@@ -1,0 +1,13 @@
+[Unit]
+Description=Read memory pressure every minute
+
+[Timer]
+# Every minute, on the half: the cadence this reading had before it was its
+# own unit (until 2026-11-14).
+OnCalendar=*:*:30
+AccuracySec=5s
+Persistent=false
+Unit=loam-pressure.service
+
+[Install]
+WantedBy=timers.target

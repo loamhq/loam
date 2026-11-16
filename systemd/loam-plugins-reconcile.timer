@@ -1,0 +1,12 @@
+[Unit]
+Description=Reconcile plugin servers at start and every five minutes
+
+[Timer]
+OnStartupSec=20s
+OnUnitActiveSec=5min
+AccuracySec=10s
+Persistent=false
+Unit=loam-plugins-reconcile.service
+
+[Install]
+WantedBy=timers.target

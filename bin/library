@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Loam's shared library and the shelves of skills every agent sees.
+
+  library install            replace <vault>/<system>/Loam/ with docs/library/,
+                             printing what changed (an edit there is named)
+  library seed-vault [DIR]   the starter vault at DIR (default: paths.vault),
+                             folder names from the configuration; writes only
+                             what is missing, plus the library
+  library seed-starter       the starter agent (Iris) and the hello thread,
+                             from docs/starter/, once per install; does
+                             nothing when an agent of that id exists
+  library refresh [AGENT]    render the skill views (every agent's, or one's)
+  library list AGENT         what that agent is shown: name, shelf, folder
+  library check              exit 1 if the vault's copy or a view is behind
+
+The rules (which shelf wins a name, what each provider reads) are in
+lib/loam_skills.py and docs/skills.md.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+import loam_skills as sk  # noqa: E402
+
+
+def show_diff(diff: dict) -> None:
+    for key, sign in (("added", "+"), ("removed", "-"), ("changed", "~")):
+        for name in diff[key]:
+            print(f"  {sign} {name}")
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "install" and not rest:
+        diff = sk.install_library()
+        if any(diff.values()):
+            print(f"{sk.loam_dir()}: replaced from {sk.LIBRARY}")
+            show_diff(diff)
+        else:
+            print(f"{sk.loam_dir()}: already the library")
+        for line in sk.refresh():
+            print(f"  {line}")
+        return 0
+    if cmd == "seed-vault" and len(rest) <= 1:
+        vault = Path(rest[0]) if rest else lc.VAULT
+        made = sk.seed_vault(vault)
+        print(f"{vault}: " + (", ".join(made) if made else "nothing missing"))
+        return 0
+    if cmd == "seed-starter" and not rest:
+        import json  # noqa: PLC0415
+        import loam_starter  # noqa: PLC0415
+        print(json.dumps(loam_starter.seed(), indent=2, ensure_ascii=False))
+        return 0
+    if cmd == "refresh" and len(rest) <= 1:
+        ws = lc.WORKSPACES / rest[0] if rest else None
+        if ws and not (ws / "agent.json").is_file():
+            print(f"library: no agent named {rest[0]!r}", file=sys.stderr)
+            return 2
+        changed = sk.refresh(ws)
+        print("\n".join(changed) if changed else "views current")
+        return 0
+    if cmd == "list" and len(rest) == 1:
+        ws = lc.WORKSPACES / rest[0]
+        if not (ws / "agent.json").is_file():
+            print(f"library: no agent named {rest[0]!r}", file=sys.stderr)
+            return 2
+        for name, (shelf, folder) in sorted(sk.seen_by(ws).items()):
+            print(f"{name}\t{shelf}\t{folder}")
+        return 0
+    if cmd == "check" and not rest:
+        diff = sk.library_diff()
+        stale = sk.behind()
+        if any(diff.values()):
+            print(f"{sk.loam_dir()} differs from {sk.LIBRARY}:")
+            show_diff(diff)
+        for line in stale:
+            print(line)
+        return 1 if any(diff.values()) or stale else 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

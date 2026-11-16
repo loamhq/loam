@@ -1,0 +1,17 @@
+[Unit]
+Description=Loam session broker wall (INPUT, broker port)
+# Same shape as loam-sight-firewall.service, for the same reason: docker
+# rewrites the kernel's chains when it starts, so a wall raised before it is
+# a wall that is not there afterwards. PartOf makes a `systemctl restart
+# docker` re-raise this too.
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/etc/loam/broker/firewall.sh
+
+[Install]
+WantedBy=multi-user.target

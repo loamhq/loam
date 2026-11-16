@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""Restart the session broker by the normal path, then write what happened.
+
+For a restart nobody is watching: a one-shot timer armed on a persona's
+brief, with the owner's yes, fires this instead of `bin/restart-broker` so that
+the result reaches the vault without an engineer in the loop. The restart
+itself is `bin/restart-broker`, unchanged and under its live lock; this only
+reads around it and writes one Markdown file:
+
+- the stop: when systemd began it and when the new broker started, whether
+  the 90 s stop timed out into SIGKILL, and whether the broker's own
+  shutdown dump (bin/session-broker, ShutdownWatch) reached the journal;
+- the chats it ended (lib/loam_broker.ended_by_restart, the list a job
+  receipt carries);
+- the new broker's PID and the commit of the checkout it started from;
+- one live `GET /v1/providers`, answered or not;
+- the unit's memory a minute after the start (cgroup current and peak
+  against MemoryHigh/MemoryMax, and each process in it), since the provider
+  usage reads (389690b) spawn a CLI child with the broker near its ceiling.
+
+A failed restart writes the same file, saying so and how the unit was left.
+An existing file at the path is never overwritten; the report goes beside it
+with the time in its name.
+
+Usage: restart-broker-report <report.md> [--by "[[<persona>]]"]
+        --by is the provenance written as created_by / last_modified_by.
+
+Armed, for example, with:
+    systemd-run --user --unit=loam-broker-restart-<stamp> \\
+        --on-calendar='2026-10-14 02:55:39 UTC' --timer-property=AccuracySec=1s \\
+        <root>/bin/restart-broker-report <report.md>
+which is transient: it is gone after it fires and does not survive a reboot.
+"""
+
+from __future__ import annotations
+
+import argparse
+import http.client
+import json
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "lib"))
+import loam_broker as cfg  # noqa: E402
+import loam_config as lc  # noqa: E402
+
+RESTART_TIMEOUT_S = 30 * 60   # the live lock waits out a landing first
+UP_WAIT_S = 120               # startup backfills every record before it listens
+MEMORY_AT_S = 60              # read the unit's memory this long after the start
+MIB = 1024 * 1024
+
+
+def unit_state() -> dict:
+    out = subprocess.run(
+        ["systemctl", "--user", "show", cfg.SERVICE, "-p",
+         "MainPID,ActiveState,SubState,Result,ActiveEnterTimestamp"],
+        capture_output=True, text=True, check=False, timeout=30).stdout
+    return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+
+
+def head_commit() -> str:
+    return subprocess.run(
+        ["git", "-C", str(ROOT), "log", "-1", "--format=%h %s"],
+        capture_output=True, text=True, check=False, timeout=30).stdout.strip()
+
+
+def journal(since: datetime, until: datetime) -> list[tuple[datetime, str]]:
+    out = subprocess.run(
+        ["journalctl", "--user", "-u", cfg.SERVICE, "-o", "json", "--no-pager",
+         "--since", f"@{int(since.timestamp())}",
+         "--until", f"@{int(until.timestamp()) + 1}"],
+        capture_output=True, text=True, check=False, timeout=60,
+        stdin=subprocess.DEVNULL).stdout
+    rows = []
+    for line in out.splitlines():
+        try:
+            entry = json.loads(line)
+            at = datetime.fromtimestamp(
+                int(entry["__REALTIME_TIMESTAMP"]) / 1e6, timezone.utc)
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            continue
+        if isinstance(entry.get("MESSAGE"), str):
+            rows.append((at, entry["MESSAGE"]))
+    return rows
+
+
+def read_stop(rows: list[tuple[datetime, str]]) -> dict:
+    """The stop as the journal tells it: the first "Stopping", the first
+    "Started" after it, and whether SIGKILL or the shutdown dump came
+    between."""
+    stop: dict = {"stopping": None, "started": None, "sigkill": False,
+                  "dump": False, "dump_at": None, "kill_lines": []}
+    for at, message in rows:
+        if stop["stopping"] is None:
+            if message.startswith("Stopping "):
+                stop["stopping"] = at
+            continue
+        if stop["started"] is not None:
+            break
+        if message.startswith("Started "):
+            stop["started"] = at
+        elif "SIGKILL" in message or "timed out. Killing" in message:
+            stop["sigkill"] = True
+            stop["kill_lines"].append(message)
+        elif message.startswith("shutdown: ") and "has not exited" in message:
+            stop["dump"] = True
+            stop["dump_at"] = stop["dump_at"] or at
+    return stop
+
+
+def probe() -> tuple[bool, str]:
+    """One GET /v1/providers, retried until the broker listens or UP_WAIT_S
+    runs out. Says the status and each provider's id and whether it is
+    connected -- nothing from the token or a login."""
+    deadline = time.monotonic() + UP_WAIT_S
+    last = "no answer"
+    while True:
+        try:
+            conn = http.client.HTTPConnection(cfg.BIND_ADDR, cfg.PORT, timeout=30)
+            conn.request("GET", "/v1/providers",
+                         headers={"Authorization": f"Bearer {cfg.read_token()}"})
+            resp = conn.getresponse()
+            body = resp.read()
+            conn.close()
+            if resp.status == 200:
+                rows = json.loads(body).get("providers") or []
+                names = ", ".join(
+                    f"{p.get('id')} ({'connected' if p.get('connected') else 'not connected'})"
+                    for p in rows if isinstance(p, dict)) or "an empty list"
+                return True, f"HTTP 200 at {now_iso()}: {names}"
+            last = f"HTTP {resp.status}"
+        except (OSError, http.client.HTTPException, ValueError) as exc:
+            last = f"{type(exc).__name__}: {exc}"
+        if time.monotonic() > deadline:
+            return False, f"no 200 within {UP_WAIT_S} s; last: {last}"
+        time.sleep(3)
+
+
+def memory() -> dict:
+    """The unit's cgroup as it stands: current, peak, high, max (bytes, or
+    "max" for no limit), the count of memory.high breaches, and each process
+    in it with its resident set. Read from /sys and /proc, nothing spawned."""
+    group = subprocess.run(
+        ["systemctl", "--user", "show", cfg.SERVICE, "-p", "ControlGroup",
+         "--value"], capture_output=True, text=True, check=False,
+        timeout=30).stdout.strip()
+    base = Path("/sys/fs/cgroup") / group.lstrip("/")
+    mem: dict = {"at": now_iso(), "procs": []}
+    for key in ("current", "peak", "high", "max"):
+        try:
+            raw = (base / f"memory.{key}").read_text().strip()
+            mem[key] = raw if raw == "max" else int(raw)
+        except (OSError, ValueError):
+            mem[key] = None
+    try:
+        events = (base / "memory.events").read_text().split()
+        mem["high_events"] = int(events[events.index("high") + 1])
+    except (OSError, ValueError, IndexError):
+        mem["high_events"] = None
+    try:
+        pids = (base / "cgroup.procs").read_text().split()
+    except OSError:
+        pids = []
+    for pid in pids:
+        try:
+            status = Path(f"/proc/{pid}/status").read_text()
+            name = Path(f"/proc/{pid}/comm").read_text().strip()
+        except OSError:
+            continue
+        rss = next((int(line.split()[1]) * 1024 for line in status.splitlines()
+                    if line.startswith("VmRSS:")), 0)
+        mem["procs"].append((pid, name, rss))
+    return mem
+
+
+def mib(value) -> str:
+    if value is None:
+        return "unreadable"
+    if value == "max":
+        return "no limit"
+    return f"{value / MIB:.0f} MiB"
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def stamp(at: datetime | None) -> str:
+    if at is None:
+        return "not in the journal"
+    local = at.astimezone().strftime("%H:%M:%S %Z")
+    return f"{at.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z ({local})"
+
+
+def render(by: str, *, fired: datetime, before: dict, after: dict, code: int | None,
+           error: str, stop: dict, chats: list[dict] | None, commit: str,
+           probed: tuple[bool, str] | None, mem: dict | None = None) -> str:
+    ok = (code == 0 and after.get("ActiveState") == "active"
+          and before.get("MainPID") != after.get("MainPID")
+          and bool(probed and probed[0]))
+    lines = [
+        "---",
+        f'created_by: "{by}"',
+        f'last_modified_by: "{by}"',
+        "---",
+        "",
+        "# Scheduled broker restart",
+        "",
+        f"*Fired {stamp(fired)} by bin/restart-broker-report, which ran "
+        f"bin/restart-broker.*",
+        "",
+        ("**The restart went through.**" if ok else
+         "**The restart did not complete cleanly; how the unit was left is "
+         "below.**"),
+        "",
+        "## The stop",
+        "",
+        f"- `bin/restart-broker` exit: "
+        f"{code if code is not None else 'did not finish'}"
+        + (f" ({error})" if error else ""),
+        f"- Stopping: {stamp(stop.get('stopping'))}",
+        f"- Started: {stamp(stop.get('started'))}",
+    ]
+    if stop.get("stopping") and stop.get("started"):
+        took = (stop["started"] - stop["stopping"]).total_seconds()
+        lines.append(f"- The stop took {took:.1f} s.")
+    lines.append(f"- SIGKILL: {'yes' if stop.get('sigkill') else 'no'}"
+                 + "".join(f"\n  - `{k}`" for k in stop.get("kill_lines", [])))
+    lines.append(f"- Shutdown dump in the journal: "
+                 f"{'yes' if stop.get('dump') else 'no'}")
+    if stop.get("dump_at"):
+        # The dump lives only in the journal; say how to read it back.
+        since = int(stop["dump_at"].timestamp())
+        until = int((stop.get("started") or stop["dump_at"]).timestamp()) + 1
+        lines.append(f"  - From {stamp(stop['dump_at'])}; read it with "
+                     f"`journalctl --user -u {cfg.SERVICE} --no-pager "
+                     f"--since @{since} --until @{until}`")
+    lines += ["", "## The chats it ended", ""]
+    if chats is None:
+        lines.append("Unreadable (lib/loam_broker.ended_by_restart raised).")
+    elif not chats:
+        lines.append("None.")
+    else:
+        lines += [f"{len(chats)} chat{'s' if len(chats) != 1 else ''}:", ""]
+        lines += [
+            f"- \"{c.get('title') or 'untitled'}\" — {c.get('agent') or '?'}, "
+            f"{c.get('provider') or '?'}, last turn {c.get('last_turn') or 'none'}; "
+            f"ended {c['ended']} (`{c['session_id'][:8]}`)"
+            for c in chats]
+    lines += [
+        "",
+        "## The broker",
+        "",
+        "| | PID | State | Since |",
+        "|---|---|---|---|",
+        f"| Before | {before.get('MainPID', '?')} | {before.get('ActiveState', '?')} | "
+        f"{before.get('ActiveEnterTimestamp', '?')} |",
+        f"| After | {after.get('MainPID', '?')} | {after.get('ActiveState', '?')}/"
+        f"{after.get('SubState', '?')} ({after.get('Result', '?')}) | "
+        f"{after.get('ActiveEnterTimestamp', '?')} |",
+        "",
+        f"Commit: `{commit}` — the head of the checkout the new broker read "
+        f"when it started.",
+        "",
+        "## Live check",
+        "",
+        f"`GET /v1/providers`: "
+        + (probed[1] if probed else "not tried (the restart did not finish)."),
+        "",
+        f"## Memory {MEMORY_AT_S} s after the start",
+        "",
+    ]
+    if mem is None:
+        lines.append("Not read (the restart did not finish).")
+    else:
+        lines += [
+            f"Read {mem['at']} from the unit's cgroup.",
+            "",
+            f"- Current: {mib(mem.get('current'))}; peak since the start: "
+            f"{mib(mem.get('peak'))}",
+            f"- MemoryHigh: {mib(mem.get('high'))}; MemoryMax: {mib(mem.get('max'))}",
+            f"- memory.high breaches since the start: "
+            f"{mem.get('high_events') if mem.get('high_events') is not None else 'unreadable'}",
+            "- Processes: " + ("; ".join(
+                f"{name} ({pid}) {mib(rss)}" for pid, name, rss in mem["procs"])
+                or "none readable"),
+        ]
+    lines.append("")
+    return "\n".join(lines)
+
+
+def free_path(path: Path, fired: datetime) -> Path:
+    if not path.exists():
+        return path
+    return path.with_name(f"{path.stem}-{fired.strftime('%H%M%SZ')}{path.suffix}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("report", type=Path)
+    parser.add_argument("--by", default=f"[[{lc.LEAD_AGENT.title()}]]")
+    args = parser.parse_args()
+
+    fired = datetime.now(timezone.utc)
+    before = unit_state()
+    code: int | None = None
+    error = ""
+    try:
+        code = subprocess.run([str(ROOT / "bin" / "restart-broker")],
+                              check=False, timeout=RESTART_TIMEOUT_S).returncode
+    except subprocess.TimeoutExpired:
+        error = f"timed out after {RESTART_TIMEOUT_S} s"
+    except OSError as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    restarted = time.monotonic()
+    probed = probe() if code == 0 else None
+    mem = None
+    if code == 0:
+        time.sleep(max(0.0, restarted + MEMORY_AT_S - time.monotonic()))
+        try:
+            mem = memory()
+        except (OSError, subprocess.TimeoutExpired):
+            mem = None
+    finished = datetime.now(timezone.utc)
+    after = unit_state()
+    commit = head_commit()
+    try:
+        stop = read_stop(journal(fired, finished))
+    except (OSError, subprocess.TimeoutExpired):
+        stop = {}
+    try:
+        chats = cfg.ended_by_restart(fired, finished)
+    except Exception:  # noqa: BLE001 - the report is never lost to this list
+        chats = None
+
+    text = render(args.by, fired=fired, before=before, after=after, code=code,
+                  error=error, stop=stop, chats=chats, commit=commit,
+                  probed=probed, mem=mem)
+    path = free_path(args.report, fired)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    print(f"restart-broker-report: wrote {path}")
+    return 0 if code == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

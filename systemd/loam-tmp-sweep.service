@@ -1,0 +1,16 @@
+[Unit]
+Description=Loam — remove /tmp entries no live process holds, quiet for 2 days
+# bin/sweep-tmp holds the what and the why. It is the backstop behind each
+# engineer job's own scratch (removed when the job ends): a unit killed before
+# its `finally`, a path typed by hand. Caused 2026-10-21, `/` full of ~30 GB
+# of ended jobs' scratch. What it removes is one line each in
+# logs/sweep-tmp.jsonl; the summary is in this unit's journal.
+
+[Service]
+Type=oneshot
+# The walk stops at the first fresh file of a busy tree; a stale one is
+# walked whole and then measured, which on 10-21's /tmp took a few minutes.
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 -I -X pycache_prefix=@PYCACHE@ @ROOT@/bin/sweep-tmp

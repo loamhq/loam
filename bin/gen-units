@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Render the static user units from systemd/ and install them.
+
+  gen-units            write every rendered unit whose installed copy differs,
+                       then `systemctl --user daemon-reload` if any changed
+  gen-units --dry-run  say which would change, write nothing
+  gen-units NAME...    only these units (`loam-reviewer.service`, ...)
+
+The templates' tokens are filled from lib/loam_config.py (lib/loam_units.py
+says which). It never enables or starts anything: a timer is enabled by hand,
+with the `.timer` suffix, as it always was. bin/check-drift compares the
+installed units against the same rendering.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+import loam_units  # noqa: E402
+
+
+def main(argv: list[str]) -> int:
+    dry = "--dry-run" in argv
+    names = [a for a in argv if not a.startswith("-")]
+    units = loam_units.rendered()
+    unknown = [n for n in names if n not in units]
+    if unknown:
+        print(f"gen-units: no template for {', '.join(unknown)}", file=sys.stderr)
+        return 2
+    changed = []
+    for name, text in units.items():
+        if names and name not in names:
+            continue
+        path = lc.USER_UNIT_DIR / name
+        try:
+            same = path.read_text(encoding="utf-8") == text
+        except FileNotFoundError:
+            same = False
+        if same:
+            continue
+        changed.append(name)
+        if not dry:
+            lc.USER_UNIT_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(path.suffix + ".gen-units")
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(path)
+    verb = "would write" if dry else "wrote"
+    print(f"gen-units: {verb} {len(changed)} of {len(units)}"
+          + (f": {', '.join(changed)}" if changed else ""))
+    if changed and not dry:
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

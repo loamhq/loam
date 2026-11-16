@@ -1,0 +1,305 @@
+{
+  "runtime_commit": "34b5668",
+  "environment": "isolated synthetic workspaces; actual route methods and record/engine modules",
+  "responses": {
+    "list": {
+      "status": 200,
+      "body": {
+        "threads": [
+          {
+            "id": "general",
+            "title": "General",
+            "default": "quill",
+            "members": [
+              {
+                "persona": "quill",
+                "engine": "claude-code"
+              },
+              {
+                "persona": "sprout",
+                "engine": "claude-code"
+              }
+            ],
+            "last": null,
+            "unread": 0,
+            "board_new": 0,
+            "board": "00_INBOX/from-agents/comms.md",
+            "pinned": true,
+            "created": "2026-11-08T18:34:41Z"
+          }
+        ],
+        "agents": [
+          {
+            "id": "quill",
+            "name": "Quill",
+            "emoji": null
+          },
+          {
+            "id": "sprout",
+            "name": "Sprout",
+            "emoji": null
+          }
+        ]
+      }
+    },
+    "create": {
+      "status": 201,
+      "body": {
+        "id": "t-fd34c978",
+        "title": "A little room",
+        "default": "sprout",
+        "members": [
+          {
+            "persona": "sprout",
+            "engine": "claude-code"
+          }
+        ],
+        "last": null,
+        "unread": 0,
+        "board_new": 0,
+        "board": "00_INBOX/boards/A little room — board.md",
+        "pinned": false,
+        "created": "2026-11-08T18:34:41Z"
+      }
+    },
+    "message": {
+      "status": 200,
+      "body": {
+        "accepted": true,
+        "message": {
+          "id": "m1",
+          "author": "you",
+          "at": "2026-11-08T18:34:41Z",
+          "kind": "message",
+          "text": "A small next step",
+          "did": []
+        }
+      }
+    },
+    "detail": {
+      "status": 200,
+      "body": {
+        "thread": {
+          "id": "t-fd34c978",
+          "title": "A little room",
+          "default": "sprout",
+          "members": [
+            {
+              "persona": "sprout",
+              "engine": "claude-code"
+            }
+          ],
+          "last": {
+            "author": "sprout",
+            "text": "I gathered the open questions.",
+            "at": "2026-11-08T18:34:41Z"
+          },
+          "unread": 0,
+          "board_new": 0,
+          "board": "00_INBOX/boards/A little room — board.md",
+          "pinned": false,
+          "created": "2026-11-08T18:34:41Z"
+        },
+        "messages": [
+          {
+            "id": "m2",
+            "author": "sprout",
+            "at": "2026-11-08T18:34:41Z",
+            "kind": "message",
+            "did": [
+              {
+                "label": "Said: Looking together."
+              },
+              {
+                "label": "Read: notes.md"
+              },
+              {
+                "label": "↳ Read: questions.md"
+              }
+            ],
+            "engine": "claude-code",
+            "text": "I gathered the open questions."
+          }
+        ],
+        "has_more": true,
+        "turn": {
+          "persona": "sprout",
+          "engine": "claude-code"
+        },
+        "board": {
+          "path": "00_INBOX/boards/A little room — board.md",
+          "markdown": "# A little room — board\n\n"
+        }
+      }
+    },
+    "history": {
+      "status": 200,
+      "body": {
+        "thread": {
+          "id": "t-fd34c978",
+          "title": "A little room",
+          "default": "sprout",
+          "members": [
+            {
+              "persona": "sprout",
+              "engine": "claude-code"
+            }
+          ],
+          "last": {
+            "author": "sprout",
+            "text": "I gathered the open questions.",
+            "at": "2026-11-08T18:34:41Z"
+          },
+          "unread": 0,
+          "board_new": 0,
+          "board": "00_INBOX/boards/A little room — board.md",
+          "pinned": false,
+          "created": "2026-11-08T18:34:41Z"
+        },
+        "messages": [
+          {
+            "id": "m1",
+            "author": "you",
+            "at": "2026-11-08T18:34:41Z",
+            "kind": "message",
+            "did": [],
+            "text": "A small next step"
+          }
+        ],
+        "has_more": false,
+        "turn": {
+          "persona": "sprout",
+          "engine": "claude-code"
+        },
+        "board": {
+          "path": "00_INBOX/boards/A little room — board.md",
+          "markdown": "# A little room — board\n\n"
+        }
+      }
+    },
+    "patch": {
+      "status": 200,
+      "body": {
+        "id": "t-fd34c978",
+        "title": "A little room",
+        "default": "sprout",
+        "members": [
+          {
+            "persona": "sprout",
+            "engine": "codex"
+          }
+        ],
+        "last": {
+          "author": "sprout",
+          "text": "I gathered the open questions.",
+          "at": "2026-11-08T18:34:41Z"
+        },
+        "unread": 0,
+        "board_new": 0,
+        "board": "00_INBOX/boards/A little room — board.md",
+        "pinned": false,
+        "created": "2026-11-08T18:34:41Z"
+      }
+    },
+    "board_put": {
+      "status": 200,
+      "body": {
+        "path": "00_INBOX/boards/A little room — board.md",
+        "markdown": "# A little room\n\n## Next\n\n- [ ] A small step <!-- Sprout · new -->\n",
+        "board_new": 1
+      }
+    },
+    "board_get": {
+      "status": 200,
+      "body": {
+        "path": "00_INBOX/boards/A little room — board.md",
+        "markdown": "# A little room\n\n## Next\n\n- [ ] A small step <!-- Sprout · new -->\n",
+        "board_new": 1
+      }
+    },
+    "events": {
+      "status": 200,
+      "events": [
+        {
+          "type": "thread.snapshot",
+          "thread": "t-fd34c978",
+          "turn": {
+            "persona": "sprout",
+            "engine": "claude-code"
+          }
+        },
+        {
+          "type": "message.done",
+          "thread": "t-fd34c978",
+          "message": {
+            "id": "m1",
+            "author": "you",
+            "at": "2026-11-08T18:34:41Z",
+            "kind": "message",
+            "did": [],
+            "text": "A small next step"
+          }
+        }
+      ]
+    }
+  },
+  "engine_events": [
+    {
+      "type": "turn.started",
+      "persona": "sprout",
+      "engine": "claude-code",
+      "thread": "t-fd34c978"
+    },
+    {
+      "type": "message.delta",
+      "persona": "sprout",
+      "text": "Looking together.",
+      "draft": "Looking together.",
+      "thread": "t-fd34c978"
+    },
+    {
+      "type": "turn.step",
+      "persona": "sprout",
+      "label": "Read: notes.md",
+      "steps": 2,
+      "thread": "t-fd34c978"
+    },
+    {
+      "type": "turn.step",
+      "persona": "sprout",
+      "label": "↳ Read: questions.md",
+      "steps": 3,
+      "thread": "t-fd34c978"
+    },
+    {
+      "type": "message.delta",
+      "persona": "sprout",
+      "text": "I gathered the open questions.",
+      "draft": "I gathered the open questions.",
+      "thread": "t-fd34c978"
+    },
+    {
+      "type": "message.done",
+      "message": {
+        "id": "m2",
+        "author": "sprout",
+        "at": "2026-11-08T18:34:41Z",
+        "kind": "message",
+        "text": "I gathered the open questions.",
+        "did": [
+          {
+            "label": "Said: Looking together."
+          },
+          {
+            "label": "Read: notes.md"
+          },
+          {
+            "label": "↳ Read: questions.md"
+          }
+        ],
+        "engine": "claude-code"
+      },
+      "thread": "t-fd34c978"
+    }
+  ]
+}

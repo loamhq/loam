@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+#
+# Moved here from chassis/scripts/ on 2026-09-04 (Move 5, the chassis
+# retirement). The recovery floor cannot live inside the tree being removed:
+# if this stops committing there is no symptom, only a missing safety net.
+# Body is byte-identical to the chassis version; only this note was added.
+# Log stays at ~/logs/ so its history keeps one location.
+# Auto-commit and push ai-labs changes. Designed for cron (every 15 min).
+# Symmetric with vault-autocommit; see that script for the design notes.
+#
+# Identity for the commit is forced to the install's `git.autocommit` identity (bin/loam-config) via -c flags
+# so automated commits are visibly distinct from manual commits without
+# touching the repo's persistent user.name / user.email config.
+#
+# Idempotent on no-change. If a previous push failed, retries on next run
+# (unpushed local commits are detected via comparison with refs/remotes/origin/main).
+
+set -euo pipefail
+
+CFG="$(dirname "$(readlink -f "$0")")/loam-config"
+AI_LABS_DIR="$("$CFG" get paths.workspaces)"
+LOG_FILE="$("$CFG" get paths.home)/logs/ai-labs-autocommit.log"
+GIT_NAME="$("$CFG" get git.autocommit.name)"
+GIT_EMAIL="$("$CFG" get git.autocommit.email)"
+
+# Cron's PATH is minimal — set explicitly. /usr/bin has git and ssh on Debian.
+export PATH="/usr/local/bin:/usr/bin:/bin"
+
+# Ensure log dir exists (script may be invoked before any prior run).
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+  printf '[%s] %s\n' "$(date -Iseconds)" "$*" >> "$LOG_FILE"
+}
+
+cd "$AI_LABS_DIR" 2>/dev/null || { log "FAIL: cannot cd to $AI_LABS_DIR"; exit 1; }
+
+git add -A
+
+# Make a new commit if there are staged changes.
+if ! git diff --cached --quiet; then
+  TS=$(date -u +'%Y-%m-%dT%H:%MZ')
+  if ! git -c user.name="$GIT_NAME" -c user.email="$GIT_EMAIL" \
+         commit --quiet -m "ai-labs: $TS" 2>>"$LOG_FILE"; then
+    log "FAIL: git commit returned non-zero"
+    exit 1
+  fi
+  log "commit $(git rev-parse --short HEAD): ai-labs: $TS"
+fi
+
+# Push if local is ahead of our cached view of origin/main. This covers both
+# the just-committed case and the retry-after-failed-push case.
+HEAD_SHA=$(git rev-parse HEAD)
+ORIGIN_SHA=$(git rev-parse refs/remotes/origin/main 2>/dev/null || echo '')
+
+if [ "$HEAD_SHA" = "$ORIGIN_SHA" ]; then
+  # Nothing to push. If we also didn't commit, this is a silent no-op.
+  exit 0
+fi
+
+if git push --quiet origin main 2>>"$LOG_FILE"; then
+  log "push ok: $(git rev-parse --short HEAD)"
+else
+  log "FAIL: push failed (commit preserved; will retry next run)"
+  exit 1
+fi

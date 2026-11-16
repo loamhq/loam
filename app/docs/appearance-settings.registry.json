@@ -1,0 +1,388 @@
+{
+  "status": "broker integration required",
+  "route": "/v1/settings/appearance",
+  "settings": [
+    {
+      "key": "appearance.location",
+      "type": [
+        "object",
+        "null"
+      ],
+      "default": null,
+      "additionalProperties": false,
+      "required": [
+        "latitude",
+        "longitude",
+        "source",
+        "timeZone"
+      ],
+      "properties": {
+        "latitude": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90,
+          "multipleOf": 0.1
+        },
+        "longitude": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180,
+          "multipleOf": 0.1
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "geolocation",
+            "timezone"
+          ]
+        },
+        "timeZone": {
+          "type": "string",
+          "description": "IANA time zone for dates and switch-time labels"
+        }
+      }
+    },
+    {
+      "key": "appearance.phone.mode",
+      "type": "string",
+      "enum": [
+        "light",
+        "dark",
+        "sun",
+        "system"
+      ],
+      "default": "system"
+    },
+    {
+      "key": "appearance.phone.size",
+      "type": "integer",
+      "minimum": 75,
+      "maximum": 150,
+      "multipleOf": 5,
+      "default": 100
+    },
+    {
+      "key": "appearance.phone.theme",
+      "type": "string",
+      "enum": [
+        "latte",
+        "autumn",
+        "deep-forest",
+        "foundry",
+        "mist-trail",
+        "plain",
+        "yosemite"
+      ],
+      "default": "latte"
+    },
+    {
+      "key": "appearance.phone.options.latte.agent-colours",
+      "type": "string",
+      "enum": [
+        "palette",
+        "latte-tones"
+      ],
+      "default": "palette"
+    },
+    {
+      "key": "appearance.phone.options.latte.agent-shapes",
+      "type": "string",
+      "enum": [
+        "distinct",
+        "circle",
+        "rounded-square",
+        "latte-art"
+      ],
+      "default": "circle"
+    },
+    {
+      "key": "appearance.phone.options.latte.latte-mug",
+      "type": "string",
+      "enum": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    },
+    {
+      "key": "appearance.phone.options.latte.latte-inside",
+      "type": "string",
+      "enum": [
+        "pour",
+        "initials"
+      ],
+      "default": "pour"
+    },
+    {
+      "key": "appearance.phone.options.autumn.agent-shapes",
+      "type": "string",
+      "enum": [
+        "signature",
+        "distinct",
+        "circle",
+        "rounded-square"
+      ],
+      "default": "circle"
+    },
+    {
+      "key": "appearance.phone.options.autumn.face-content",
+      "type": "string",
+      "enum": [
+        "mark",
+        "initials"
+      ],
+      "default": "mark"
+    },
+    {
+      "key": "appearance.phone.options.deep-forest.agent-shapes",
+      "type": "string",
+      "enum": [
+        "signature",
+        "distinct",
+        "circle",
+        "rounded-square"
+      ],
+      "default": "circle"
+    },
+    {
+      "key": "appearance.phone.options.deep-forest.face-content",
+      "type": "string",
+      "enum": [
+        "mark",
+        "initials"
+      ],
+      "default": "mark"
+    },
+    {
+      "key": "appearance.phone.options.foundry.agent-shapes",
+      "type": "string",
+      "enum": [
+        "signature",
+        "distinct",
+        "circle",
+        "rounded-square"
+      ],
+      "default": "rounded-square"
+    },
+    {
+      "key": "appearance.phone.options.foundry.face-content",
+      "type": "string",
+      "enum": [
+        "mark",
+        "initials"
+      ],
+      "default": "mark"
+    },
+    {
+      "key": "appearance.phone.options.mist-trail.agent-shapes",
+      "type": "string",
+      "enum": [
+        "signature",
+        "distinct",
+        "circle",
+        "rounded-square"
+      ],
+      "default": "circle"
+    },
+    {
+      "key": "appearance.phone.options.mist-trail.face-content",
+      "type": "string",
+      "enum": [
+        "mark",
+        "initials"
+      ],
+      "default": "mark"
+    },
+    {
+      "key": "appearance.phone.options.yosemite.agent-shapes",
+      "type": "string",
+      "enum": [
+        "signature",
+        "distinct",
+        "circle",
+        "rounded-square"
+      ],
+      "default": "circle"
+    },
+    {
+      "key": "appearance.phone.options.yosemite.face-content",
+      "type": "string",
+      "enum": [
+        "mark",
+        "initials"
+      ],
+      "default": "mark"
+    },
+    {
+      "key": "appearance.desktop.mode",
+      "type": "string",
+      "enum": [
+        "light",
+        "dark",
+        "sun",
+        "system"
+      ],
+      "default": "system"
+    },
+    {
+      "key": "appearance.desktop.size",
+      "type": "integer",
+      "minimum": 75,
+      "maximum": 150,
+      "multipleOf": 5,
+      "default": 100
+    },
+    {
+      "key": "appearance.desktop.theme",
+      "type": "string",
+      "enum": [
+        "latte",
+        "autumn",
+        "deep-forest",
+        "foundry",
+        "mist-trail",
+        "plain",
+        "yosemite"
+      ],
+      "default": "latte"
+    },
+    {
+      "key": "appearance.desktop.options.latte.agent-colours",
+      "type": "string",
+      "enum": [
+        "palette",
+        "latte-tones"
+      ],
+      "default": "palette"
+    },
+    {
+      "key": "appearance.desktop.options.latte.agent-shapes",
+      "type": "string",
+      "enum": [
+        "distinct",
+        "circle",
+        "rounded-square",
+        "latte-art"
+      ],
+      "default": "circle"
+    },
+    {
+      "key": "appearance.desktop.options.latte.latte-mug",
+      "type": "string",
+      "enum": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    },
+    {
+      "key": "appearance.desktop.options.latte.latte-inside",
+      "type": "string",
+      "enum": [
+        "pour",
+        "initials"
+      ],
+      "default": "pour"
+    },
+    {
+      "key": "appearance.desktop.options.autumn.agent-shapes",
+      "type": "string",
+      "enum": [
+        "signature",
+        "distinct",
+        "circle",
+        "rounded-square"
+      ],
+      "default": "circle"
+    },
+    {
+      "key": "appearance.desktop.options.autumn.face-content",
+      "type": "string",
+      "enum": [
+        "mark",
+        "initials"
+      ],
+      "default": "mark"
+    },
+    {
+      "key": "appearance.desktop.options.deep-forest.agent-shapes",
+      "type": "string",
+      "enum": [
+        "signature",
+        "distinct",
+        "circle",
+        "rounded-square"
+      ],
+      "default": "circle"
+    },
+    {
+      "key": "appearance.desktop.options.deep-forest.face-content",
+      "type": "string",
+      "enum": [
+        "mark",
+        "initials"
+      ],
+      "default": "mark"
+    },
+    {
+      "key": "appearance.desktop.options.foundry.agent-shapes",
+      "type": "string",
+      "enum": [
+        "signature",
+        "distinct",
+        "circle",
+        "rounded-square"
+      ],
+      "default": "rounded-square"
+    },
+    {
+      "key": "appearance.desktop.options.foundry.face-content",
+      "type": "string",
+      "enum": [
+        "mark",
+        "initials"
+      ],
+      "default": "mark"
+    },
+    {
+      "key": "appearance.desktop.options.mist-trail.agent-shapes",
+      "type": "string",
+      "enum": [
+        "signature",
+        "distinct",
+        "circle",
+        "rounded-square"
+      ],
+      "default": "circle"
+    },
+    {
+      "key": "appearance.desktop.options.mist-trail.face-content",
+      "type": "string",
+      "enum": [
+        "mark",
+        "initials"
+      ],
+      "default": "mark"
+    },
+    {
+      "key": "appearance.desktop.options.yosemite.agent-shapes",
+      "type": "string",
+      "enum": [
+        "signature",
+        "distinct",
+        "circle",
+        "rounded-square"
+      ],
+      "default": "circle"
+    },
+    {
+      "key": "appearance.desktop.options.yosemite.face-content",
+      "type": "string",
+      "enum": [
+        "mark",
+        "initials"
+      ],
+      "default": "mark"
+    }
+  ]
+}

@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""Daily backstop for /tmp. Stdlib only, no runtime import.
+
+Engineer jobs filled the root disk with their scratch on 2026-10-21: ~30 GB
+of pnpm stores, review checkouts and build trees under /tmp, made by jobs that
+had long since ended, and nothing removed them. `/` reached 2.5 MB free and
+running jobs failed their commands. A job now gets its own scratch directory
+that the launcher removes when the job ends (`bin/engineer-job`,
+`loam_engineer.scratch_dir`); this sweep is for what slips past that -- a
+unit killed before its `finally`, a tool that ignores TMPDIR, a session that
+names `/tmp/<something>` by hand.
+
+What it removes: a top-level entry of /tmp that is
+
+  - owned by the user running the sweep (the box's user; root's entries and
+    other users' are never touched),
+  - a plain file, directory or symlink (sockets and FIFOs are some live
+    program's, whatever their age),
+  - not a mount point, and not named like the system's own entries
+    (`systemd-private-*`, `.X11-unix`, `claude-<uid>` ...),
+  - not named for a running engineer job (its id appears in the name and its
+    `state/wake/engineer-job-<id>.running` marker exists),
+  - not held by a live process: no process of this user has its cwd, root,
+    an open file or a mapped file inside it,
+  - and quiet for longer than the threshold: the NEWEST mtime or ctime of
+    anything inside it is older than that. Newest, because a directory made a
+    week ago that a build wrote to an hour ago is in use. ctime as well as
+    mtime, because an unpacked archive carries its sender's mtimes and only
+    the ctime says when it arrived here.
+
+Removal is `rm -rf --one-file-system`, so a mount found inside an entry stops
+the removal there instead of being descended into.
+
+Every removal is one JSON line in logs/sweep-tmp.jsonl (name, bytes, age);
+a run that removes nothing writes nothing there. The summary goes to stdout,
+which is the journal under the unit `loam-tmp-sweep.{service,timer}`.
+
+    sweep-tmp                   remove what is older than 2 days
+    sweep-tmp --hours 12        a different threshold (the one-off of 10-21)
+    sweep-tmp --dry-run         say what would go, remove nothing
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+ROOT = Path("/tmp")
+AGENTS = lc.ROOT
+RUNNING = lc.STATE / "wake"
+LOG = lc.LOGS / "sweep-tmp.jsonl"
+DEFAULT_HOURS = 48
+
+# Names that belong to the system or to a program's long-lived per-user
+# directory, never swept at any age. `claude-<uid>` is Claude Code's own
+# scratch for every session on the box, broker and Remote Control included.
+KEEP_RE = re.compile(
+    r"^(systemd-private-|snap-private-tmp|tmux-|claude-\d+$|"
+    r"\.(X11|ICE|XIM|font|Test)-unix$)")
+
+JOB_ID_RE = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{4,16}")
+
+
+def running_jobs(running: Path = RUNNING) -> set[str]:
+    try:
+        return {m.name[len("engineer-job-"):-len(".running")]
+                for m in running.glob("engineer-job-*.running")}
+    except OSError:
+        return set()
+
+
+def live_names(root: Path = ROOT, proc: Path = Path("/proc")) -> set[str]:
+    """The top-level names under `root` that a readable process is in: its
+    cwd, root, executable, an open file or a mapped file."""
+    prefix = str(root).rstrip("/") + "/"
+    names: set[str] = set()
+
+    def note(path: str) -> None:
+        if path.startswith(prefix):
+            names.add(path[len(prefix):].split("/", 1)[0].removesuffix(" (deleted)"))
+
+    for pid in proc.iterdir():
+        if not pid.name.isdigit():
+            continue
+        for link in ("cwd", "root", "exe"):
+            try:
+                note(os.readlink(pid / link))
+            except OSError:
+                pass
+        try:
+            for fd in (pid / "fd").iterdir():
+                try:
+                    note(os.readlink(fd))
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        try:
+            with open(pid / "maps", encoding="utf-8", errors="replace") as maps:
+                for line in maps:
+                    parts = line.split(None, 5)
+                    if len(parts) == 6:
+                        note(parts[5].strip())
+        except OSError:
+            pass
+    return names
+
+
+def newest_change(path: Path, since: float) -> float:
+    """The newest mtime/ctime at or under `path`, without following links or
+    leaving its filesystem. Stops at the first one newer than `since`, which
+    is all the caller needs to know, so a busy tree costs one hit."""
+    try:
+        top = path.lstat()
+    except OSError:
+        return time.time()          # vanished or unreadable: not ours to judge
+    newest = max(top.st_mtime, top.st_ctime)
+    if newest > since or not stat.S_ISDIR(top.st_mode):
+        return newest
+    for dirpath, dirnames, filenames in os.walk(path, onerror=lambda e: None):
+        here = Path(dirpath)
+        keep = []
+        for name in dirnames + filenames:
+            try:
+                st = (here / name).lstat()
+            except OSError:
+                continue
+            newest = max(newest, st.st_mtime, st.st_ctime)
+            if newest > since:
+                return newest
+            if stat.S_ISDIR(st.st_mode) and st.st_dev == top.st_dev:
+                if name in dirnames:
+                    keep.append(name)
+        dirnames[:] = keep
+    return newest
+
+
+def size_of(path: Path) -> int:
+    out = subprocess.run(["du", "-sxB1", "--", str(path)], capture_output=True,
+                         text=True, check=False)
+    try:
+        return int(out.stdout.split()[0])
+    except (IndexError, ValueError):
+        return 0
+
+
+def candidates(hours: float, root: Path = ROOT, uid: int | None = None,
+               live: set[str] | None = None, jobs: set[str] | None = None,
+               now: float | None = None) -> tuple[list[dict], list[dict]]:
+    """(to remove, kept with a reason). Each row: name, path, age_h."""
+    uid = os.getuid() if uid is None else uid
+    live = live_names(root) if live is None else live
+    jobs = running_jobs() if jobs is None else jobs
+    now = time.time() if now is None else now
+    since = now - hours * 3600
+    remove, kept = [], []
+    for entry in sorted(root.iterdir(), key=lambda p: p.name):
+        name = entry.name
+        row = {"name": name, "path": str(entry)}
+        try:
+            st = entry.lstat()
+        except OSError:
+            continue
+        reason = None
+        if st.st_uid != uid:
+            reason = "not ours"
+        elif not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)
+                  or stat.S_ISLNK(st.st_mode)):
+            reason = "socket or device"
+        elif KEEP_RE.match(name):
+            reason = "system"
+        elif os.path.ismount(entry):
+            reason = "mount point"
+        elif any(j in jobs for j in JOB_ID_RE.findall(name)):
+            reason = "running job"
+        elif name in live:
+            reason = "live process"
+        else:
+            newest = newest_change(entry, since)
+            row["age_h"] = round((now - newest) / 3600, 1)
+            if newest > since:
+                reason = "recent"
+        (kept if reason else remove).append({**row, "kept": reason} if reason else row)
+    return remove, kept
+
+
+def remove(path: str) -> bool:
+    return subprocess.run(["rm", "-rf", "--one-file-system", "--", path],
+                          capture_output=True, check=False).returncode == 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--hours", type=float, default=DEFAULT_HOURS)
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--root", type=Path, default=ROOT)
+    ap.add_argument("--log", type=Path, default=LOG)
+    args = ap.parse_args(argv)
+
+    doomed, kept = candidates(args.hours, root=args.root)
+    removed, failed, freed = [], [], 0
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for row in doomed:
+        row["bytes"] = size_of(Path(row["path"]))
+    # Asked again once everything is measured, which on a full /tmp takes
+    # minutes: a job may have started using an entry in the meantime.
+    live = set() if args.dry_run else live_names(args.root)
+    for row in doomed:
+        if args.dry_run:
+            removed.append(row)
+            continue
+        if row["name"] in live:
+            kept.append({**row, "kept": "live process"})
+            continue
+        if remove(row["path"]):
+            removed.append(row)
+            freed += row["bytes"]
+        else:
+            failed.append(row)
+    if removed and not args.dry_run:
+        args.log.parent.mkdir(parents=True, exist_ok=True)
+        with args.log.open("a", encoding="utf-8") as log:
+            for row in removed:
+                log.write(json.dumps({"at": stamp, "name": row["name"],
+                                      "bytes": row["bytes"],
+                                      "age_h": row.get("age_h")}) + "\n")
+    for row in sorted(removed, key=lambda r: -r["bytes"]):
+        print(f"{'would remove' if args.dry_run else 'removed'} "
+              f"{row['bytes'] / 2**20:10.1f} MiB  {row.get('age_h', '?'):>7} h  "
+              f"{row['name']}")
+    for row in failed:
+        print(f"FAILED to remove {row['name']}", file=sys.stderr)
+    held = {}
+    for row in kept:
+        held[row["kept"]] = held.get(row["kept"], 0) + 1
+    total = sum(r["bytes"] for r in removed)
+    print(f"{'would free' if args.dry_run else 'freed'} "
+          f"{(total if args.dry_run else freed) / 2**30:.2f} GiB in "
+          f"{len(removed)} entries; kept {len(kept)} "
+          f"({', '.join(f'{k}: {v}' for k, v in sorted(held.items()))})")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

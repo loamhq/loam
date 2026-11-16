@@ -1,0 +1,15 @@
+{
+  "source": "Alias catalog described in the continuation brief; live fetch pending a configured app URL",
+  "live_capture": false,
+  "providers": [
+    { "id": "claude-code", "name": "Claude Code", "connected": true,
+      "models": [
+        { "id": "fable", "name": "Fable" },
+        { "id": "opus", "name": "Opus" },
+        { "id": "sonnet", "name": "Sonnet" },
+        { "id": "haiku", "name": "Haiku" }
+      ] },
+    { "id": "codex", "name": "Codex", "connected": true,
+      "models": [ { "id": "gpt-6.1-sol", "name": "GPT-6.1-Sol" } ] }
+  ]
+}

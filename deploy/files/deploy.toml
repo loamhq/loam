@@ -1,0 +1,9 @@
+# files -- the private static host at https://files.<domain>, the personas'
+# "local files". Not a container: Caddy serves a directory. A persona writes
+# a file under the directory (the shared commons, writable by every persona,
+# swept after seven days like the rest of it) and opens the URL in the
+# shared browser; the browser image blocks file:// and has no path into
+# this box, so a URL is the only way it sees a file.
+
+exposure = "private"
+static_root = "@WORKSPACES@/commons/www"

@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""The schedule path from a terminal. Every write goes through
+lib/loam_schedule.change(), the same call the broker's routes and the agent's
+tool make, so an operator's change is validated, logged and reconciled
+exactly like theirs.
+
+Usage:
+  schedule reconcile                        what loam-schedules.timer runs
+  schedule migrate                          approved: -> enabled:, reflection records
+  schedule set <agent> <name> <file>        write a record from a file
+  schedule pause|resume|delete <agent> <name>
+  schedule log [<n>]                        the last n events (default 20)
+
+  set, pause, resume and delete take --actor <owner|engineer|<agent>>
+  (default engineer), --lane <lane> (default engineer) and --reason "<why>",
+  required for anyone but the owner.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+import loam_schedule  # noqa: E402
+
+
+def opt(argv: list[str], flag: str, default: str | None = None) -> str | None:
+    if flag in argv:
+        i = argv.index(flag)
+        if i + 1 < len(argv):
+            value = argv[i + 1]
+            del argv[i:i + 2]
+            return value
+    return default
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    actor = opt(argv, "--actor", "engineer")
+    lane = opt(argv, "--lane", "engineer")
+    reason = opt(argv, "--reason")
+    if not argv:
+        print(__doc__, file=sys.stderr)
+        return 64
+    cmd, rest = argv[0], argv[1:]
+    try:
+        if cmd == "reconcile":
+            for action in loam_schedule.reconcile():
+                print(json.dumps(action))
+            return 0
+        if cmd == "migrate":
+            for event in loam_schedule.migrate():
+                print(f"{event['op']:7} {event['agent']}/{event['record']}")
+            return 0
+        if cmd == "log":
+            n = int(rest[0]) if rest else 20
+            for event in loam_schedule.events()[-n:]:
+                slim = {k: v for k, v in event.items()
+                        if k not in ("before", "after")}
+                print(json.dumps(slim, ensure_ascii=False))
+            return 0
+        kw = dict(actor=actor, lane=lane, reason=reason)
+        if cmd == "set" and len(rest) == 3:
+            text = Path(rest[2]).read_text(encoding="utf-8")
+            event = loam_schedule.change(rest[0], rest[1], text, **kw)
+        elif cmd in ("pause", "resume") and len(rest) == 2:
+            event = loam_schedule.set_key(
+                rest[0], rest[1], "enabled",
+                "false" if cmd == "pause" else "true", **kw)
+        elif cmd == "delete" and len(rest) == 2:
+            event = loam_schedule.change(rest[0], rest[1], None, **kw)
+        else:
+            print(__doc__, file=sys.stderr)
+            return 64
+    except loam_schedule.Refused as exc:
+        print(f"schedule: refused: {exc}", file=sys.stderr)
+        return 1
+    print(f"{event['op']} {event['agent']}/{event['record']} "
+          f"by {event['actor']} ({event['lane']}): {event['reason']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

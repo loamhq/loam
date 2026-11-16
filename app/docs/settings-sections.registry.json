@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "status": "UI destinations and runtime integration handoff; not an installed host registry",
+  "sections": [
+    {
+      "id": "appearance",
+      "registry": "appearance-settings.registry.json",
+      "route": "/v1/settings/appearance",
+      "fields": [
+        "location",
+        "phone.mode",
+        "phone.size",
+        "phone.theme",
+        "phone.options.latte.agent-colours",
+        "phone.options.latte.agent-shapes",
+        "phone.options.latte.latte-mug",
+        "phone.options.latte.latte-inside",
+        "phone.options.autumn.agent-shapes",
+        "phone.options.autumn.face-content",
+        "phone.options.deep-forest.agent-shapes",
+        "phone.options.deep-forest.face-content",
+        "phone.options.foundry.agent-shapes",
+        "phone.options.foundry.face-content",
+        "phone.options.mist-trail.agent-shapes",
+        "phone.options.mist-trail.face-content",
+        "phone.options.yosemite.agent-shapes",
+        "phone.options.yosemite.face-content",
+        "desktop.mode",
+        "desktop.size",
+        "desktop.theme",
+        "desktop.options.latte.agent-colours",
+        "desktop.options.latte.agent-shapes",
+        "desktop.options.latte.latte-mug",
+        "desktop.options.latte.latte-inside",
+        "desktop.options.autumn.agent-shapes",
+        "desktop.options.autumn.face-content",
+        "desktop.options.deep-forest.agent-shapes",
+        "desktop.options.deep-forest.face-content",
+        "desktop.options.foundry.agent-shapes",
+        "desktop.options.foundry.face-content",
+        "desktop.options.mist-trail.agent-shapes",
+        "desktop.options.mist-trail.face-content",
+        "desktop.options.yosemite.agent-shapes",
+        "desktop.options.yosemite.face-content"
+      ]
+    },
+    {
+      "id": "agents",
+      "views": [
+        "profile",
+        "workspace",
+        "schedules"
+      ],
+      "routes": [
+        "/v1/agents",
+        "/v1/agents/:agent",
+        "/v1/engineers",
+        "/v1/engineers/:project",
+        "/v1/system/reviewer",
+        "/v1/plugins/:plugin/agents/:agent",
+        "/v1/schedules/:agent"
+      ]
+    },
+    {
+      "id": "providers",
+      "routes": [
+        "/v1/providers",
+        "/v1/providers/:id/login"
+      ]
+    },
+    {
+      "id": "integrations",
+      "views": [
+        "service",
+        "account"
+      ],
+      "routes": [
+        "/v1/integrations/github",
+        "/v1/integrations/github/accounts",
+        "/v1/integrations/github/accounts/:login/refresh",
+        "/v1/integrations/github/accounts/:login"
+      ],
+      "accountOperations": "GitHub lists personal accounts, installations and organizations in host order. Refresh/disconnect use the encoded account login; personal disconnect confirms disconnect_also. Adding uses the existing GitHub manifest/install callbacks. Older hosts without the accounts route retain the legacy shared flow."
+    },
+    {
+      "id": "voice",
+      "previous": [
+        "dictation",
+        "read-aloud"
+      ],
+      "browserPreferences": {
+        "loam-ui.dictation": [
+          "mode",
+          "polish",
+          "maxMinutes",
+          "deviceId"
+        ],
+        "loam-ui.read-aloud": [
+          "voice",
+          "describeTablesAndDiagrams"
+        ]
+      },
+      "route": null,
+      "runtimeRequired": "Define a device-scoped host settings route and register these existing preferences; bind page and persona tool to the same contract."
+    },
+    {
+      "id": "files",
+      "browserPreferences": {
+        "loam-ui.files": [
+          "inbox",
+          "daily",
+          "shortcuts",
+          "hiddenShortcuts"
+        ]
+      },
+      "route": null,
+      "runtimeRequired": "Define a host settings route and register file preferences; preserve existing shortcuts during migration."
+    },
+    {
+      "id": "plugins",
+      "readOnly": false,
+      "catalog": "Effective host plugin catalog with shipped fallback",
+      "enabledBy": "Plugin on/off switch; themes through appearance.<device>.theme; listed packages have no switch",
+      "route": "/v1/plugins",
+      "restartRoute": "/v1/plugins/:plugin/restart",
+      "service": "Host state; failing rows expose collapsed log and Restart. No host paths or process controls enter the page."
+    },
+    {
+      "id": "signin",
+      "route": "/_loam/login-code",
+      "fields": []
+    },
+    {
+      "id": "update",
+      "route": "/v1/update",
+      "fields": []
+    }
+  ],
+  "threadConfiguration": {
+    "route": "/v1/threads/:id",
+    "method": "PATCH",
+    "fields": [
+      "engine.<persona>",
+      "model.<persona>"
+    ],
+    "effortControl": false,
+    "runtimeRequired": "Ensure the persona settings tool exposes these same per-member operations. Existing host coverage is unverified."
+  },
+  "redirects": {
+    "provider": "providers/detail",
+    "dictation": "voice",
+    "read-aloud": "voice",
+    "running": "activity",
+    "accounts": "integrations"
+  }
+}

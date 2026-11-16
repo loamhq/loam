@@ -1,0 +1,30 @@
+2026-10-24 — Document summary qualifier rule
+
+Command: timeout 180s npm test
+Exit: 0
+Output summaries, main suite then tools suite:
+ℹ tests 1149
+ℹ suites 0
+ℹ pass 1145
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 4
+ℹ todo 0
+ℹ duration_ms 56964.172845
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12810.430671
+
+Main skips: two optional Chromium paints and two real-ffmpeg tests.
+The writer is a fixture; no live Gemini or audio-fidelity evaluation was run.
+
+Command: git diff --check
+Exit: 0 (no output)
+
+qualifier-rule.patch is git diff -- src/speech.js test/speech-server.test.js
+captured before committing. The exported document prompt is checked by the test.

@@ -1,0 +1,24 @@
+[Unit]
+Description=Loam reviewer — one persona's workspace read by a non-author, one note left (Move 11)
+# The same handler every wake carries: a kill that runs no `finally` is
+# reported from outside the dying process. bin/wake-failed knows this unit's
+# name and the marker bin/review drops under state/wake/.
+OnFailure=loam-wake-failed@%N.service
+
+[Service]
+Type=oneshot
+# A wake's numbers, for a wake-shaped session: the CLI plus the history MCP
+# server it spawns. Attributed if it ever grows, throttled before killed.
+MemoryHigh=1G
+MemoryMax=1536M
+Environment=DISABLE_AUTOUPDATER=1
+Environment=PATH=@UNIT_PATH@
+EnvironmentFile=-@WAKE_ENV@
+WorkingDirectory=@ROOT@/reviewer
+ExecStart=@ROOT@/bin/review
+# No clock (since 2026-11-10; 5100 s until then, the run's 3600 and a
+# 1200 s lock wait): a review goes until it is done, as a wake does.
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=default.target

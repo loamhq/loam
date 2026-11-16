@@ -1,0 +1,18 @@
+#!/usr/bin/python3
+"""The MCP servers' interpreter, by a path that never moves.
+
+Execs the install's MCP venv (`paths.mcp_venv`, lib/loam_config.py) with the
+same arguments. A config that is committed to this repository (reviewer/'s
+.mcp.json) names this file rather than the venv, so moving the venv changes
+nothing that is tracked. Added 2026-11-14 (first release, job L1).
+"""
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+python = str(lc.MCP_VENV / "bin" / "python")
+os.execv(python, [python, *sys.argv[1:]])

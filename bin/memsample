@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""The box's memory and disk history. Reads, never writes anything but its log.
+
+One sample per run, one JSON line per sample, appended to
+logs/memsample.jsonl. loam-memsample.timer runs it every 5 minutes; the
+daily bin/check-memory reads it back for the last 24 h peak per unit and the
+disk delta per mount (`history_report` there).
+
+Rewritten 2026-10-13. The first version (2026-09-02) was a one-night
+instrument run as a transient unit, and when its night ended nothing sampled
+again: two health checks (10-06, 10-13) could not answer the week's memory
+peak or what grew the disk ~2 GB. This one is a standing record.
+
+Every sample carries:
+  mem     box RAM and swap, MB
+  units   every loam-* service under app.slice -- the broker, each
+          loam-rc-*, and whichever wake, cron, engineer job or reviewer is
+          running -- by its cgroup: current, peak, swap, and its MemoryHigh /
+          MemoryMax (null when unset). Globbed, never listed: a unit that
+          exists is sampled, and rosters drift where patterns don't.
+  mounts  used and size per real filesystem, MB (statvfs, so cheap enough
+          for every sample)
+
+and the first sample of each day at or after 01:45 also carries:
+  holders `du` of the big holders named on 2026-10-06, MB. du walks the
+          tree, so once a day is enough; 01:45 puts it ten minutes before
+          check-memory, which then compares it with the day before's.
+
+Why 5 minutes: a wake runs 10-20 minutes, so every wake lands in at least
+two samples, and the broker's climb toward its MemoryHigh is a trend over
+hours. 288 lines a day at ~1.5 KB is ~0.4 MB a day.
+
+Rotation: when the live file passes MAX_BYTES it becomes memsample.jsonl.1,
+replacing the previous one. Two files at most, so the history can never
+pass 2 x MAX_BYTES plus one line: 8 MiB, which is 9-18 days of samples.
+
+Usage:  memsample          take one sample
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+CG = lc.USER_SLICE / "app.slice"
+OUT = lc.LOGS / "memsample.jsonl"
+MAX_BYTES = 4 * 1024 * 1024
+VERSION = 2
+
+HOME = lc.HOME
+# The holders the 10-06 health check named. vault includes vault/.git; both
+# are kept because the git store is what grows on its own (autocommit every
+# 15 minutes). runroot-4a hard-links some of the vault's packs, so the
+# holders overlap and do not sum to a mount: the mount's `used` is what the
+# disk pays. The one root-only tree is read with `sudo -n du`.
+HOLDERS = {
+    "vault": HOME / "vault",
+    "vault/.git": HOME / "vault/.git",
+    "runroot-4a": HOME / "runroot-4a",
+    "~/.cache": HOME / ".cache",
+    "/var/log/journal": Path("/var/log/journal"),
+    "/var/lib/docker": Path("/var/lib/docker"),
+}
+SUDO_HOLDERS = {"/var/lib/docker"}
+HOLDERS_AFTER = dt.time(1, 45)
+REAL_FS = {"ext4", "ext3", "xfs", "btrfs", "vfat", "zfs"}
+
+
+def now() -> dt.datetime:
+    return dt.datetime.now().astimezone()
+
+
+def mb_of(path: Path) -> int | None:
+    try:
+        raw = path.read_text().strip()
+    except OSError:
+        return None
+    return None if raw == "max" else int(raw) // 1048576
+
+
+def meminfo() -> dict:
+    want = {"MemTotal": "total", "MemAvailable": "avail",
+            "SwapTotal": "swap_total", "SwapFree": "swap_free"}
+    out = {}
+    for line in Path("/proc/meminfo").read_text().splitlines():
+        k, _, v = line.partition(":")
+        if k in want:
+            out[want[k]] = int(v.split()[0]) // 1024
+    out["used"] = out["total"] - out["avail"]
+    out["swap_used"] = out["swap_total"] - out["swap_free"]
+    return out
+
+
+def units() -> dict:
+    out = {}
+    for d in sorted(CG.glob("loam-*.service")):
+        if not d.is_dir():
+            continue
+        out[d.name.removesuffix(".service")] = {
+            "cur": mb_of(d / "memory.current"),
+            "peak": mb_of(d / "memory.peak"),
+            "swap": mb_of(d / "memory.swap.current"),
+            "high": mb_of(d / "memory.high"),
+            "max": mb_of(d / "memory.max"),
+        }
+    return out
+
+
+def mounts() -> dict:
+    out, seen = {}, set()
+    for line in Path("/proc/mounts").read_text().splitlines():
+        dev, target, fstype = line.split()[:3]
+        if fstype not in REAL_FS or dev in seen:
+            continue
+        seen.add(dev)
+        target = target.replace("\\040", " ")
+        st = os.statvfs(target)
+        out[target] = {"used": (st.f_blocks - st.f_bfree) * st.f_frsize // 1048576,
+                       "size": st.f_blocks * st.f_frsize // 1048576}
+    return out
+
+
+def du(label: str, path: Path) -> int | None:
+    cmd = ["du", "-sxm", str(path)]
+    if label in SUDO_HOLDERS:
+        cmd = ["sudo", "-n", *cmd]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
+                           stdin=subprocess.DEVNULL)
+        return int(r.stdout.split()[0])
+    except (subprocess.TimeoutExpired, OSError, ValueError, IndexError):
+        return None
+
+
+def history(out: Path = OUT) -> list[dict]:
+    """Every v2 sample in the rotated file and the live one, oldest first.
+    Lines from the one-night instrument of 09-02 and anything unparseable
+    are skipped, not fatal: the reader of a log must survive the log."""
+    rows = []
+    for path in (out.with_name(out.name + ".1"), out):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("v") == VERSION:
+                rows.append(row)
+    return rows
+
+
+def holders_due(at: dt.datetime, out: Path = OUT) -> bool:
+    """True for the first sample of the day at or after HOLDERS_AFTER. A
+    text scan of the live file, not a parse: this runs every 5 minutes, and
+    a rotation that took today's line with it costs one extra du, no more."""
+    if at.time() < HOLDERS_AFTER:
+        return False
+    today = f'"ts":"{at.date().isoformat()}'
+    try:
+        text = out.read_text(encoding="utf-8")
+    except OSError:
+        return True
+    return not any(today in line and '"holders":' in line
+                   for line in text.splitlines())
+
+
+def sample(at: dt.datetime, out: Path = OUT) -> dict:
+    row: dict = {"v": VERSION, "ts": at.isoformat(timespec="seconds"),
+                 "mem": meminfo(), "units": units(), "mounts": mounts()}
+    if holders_due(at, out):
+        row["holders"] = {k: du(k, p) for k, p in HOLDERS.items()}
+    return row
+
+
+def append(line: str, out: Path = OUT, max_bytes: int = MAX_BYTES) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if out.stat().st_size >= max_bytes:
+            out.replace(out.with_name(out.name + ".1"))
+    except FileNotFoundError:
+        pass
+    with out.open("a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+
+
+def main() -> int:
+    at = now()
+    try:
+        line = json.dumps(sample(at), separators=(",", ":"))
+    except Exception as exc:                                      # noqa: BLE001
+        line = json.dumps({"v": VERSION, "ts": at.isoformat(timespec="seconds"),
+                           "error": repr(exc)})
+        append(line)
+        return 1
+    append(line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

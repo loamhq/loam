@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Open the right log. The map of every log on the box is docs/logs.md; this
+is its last column made runnable.
+
+usage: logs                          the list of names, and where each lives
+       logs <name> [arg] [-n N] [-f] the last N lines (default 50); -f follows
+
+  caddy <host|app>     one host's access log, JSON (sudo: the files are caddy's)
+  caddy-errors         Caddy's own log: reloads, certificates, upstream errors
+  app <app>            an app container's stdout, from the journal
+  broker               the session broker's service log
+  broker-session <id>  one persona session's event log (the record, not a log
+                       of the broker; see broker/README.md)
+  wake <agent>         one persona's wake and cron runs, one JSON line each
+  wake-journal <agent> the wake service's stderr, from the journal
+  cron <agent-name>    one cron's service log, from the journal, e.g.
+                       `cron ada-infra-watch`
+  reviewer             the reviewer's runs, one JSON line each
+  engineer [job-id]    engineer jobs, one JSON line each; with an id, that
+                       job's session stderr and, after it, its journal
+  transcripts          the transcript writer's own log
+  memory               the box's memory and disk history, one JSON line per
+                       5-minute sample (bin/memsample)
+  memory-check         the daily check-memory reports
+  drift-check          the nightly check-drift runs (bin/drift-watch)
+  authelia | browser   the login's and the persona browser's containers
+
+Every command it runs is printed first, on stderr, so the command is the thing
+learned and this helper is only a shortcut to it.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+import loam_deploy as dep  # noqa: E402
+
+AGENTS = lc.ROOT
+LOGS = lc.LOGS
+NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+
+def die(msg: str, code: int = 64) -> None:
+    print(f"logs: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def tail(path: Path, n: int, follow: bool, sudo: bool = False) -> list[str]:
+    return [*(["sudo", "-n"] if sudo else []), "tail", "-n", str(n),
+            *(["-F"] if follow else []), str(path)]
+
+
+def journal(n: int, follow: bool, *match: str, user: bool = False) -> list[str]:
+    return ["journalctl", *(["--user"] if user else []), *match, "-n", str(n),
+            "-o", "short-iso", "--no-pager", *(["-f"] if follow else [])]
+
+
+def caddy_host(arg: str) -> str:
+    """An app name or a hostname, to the hostname its access log is named by."""
+    for app in dep.records():
+        if arg == app.name:
+            return app.fqdn
+        if arg in app.hostnames or arg == app.content_fqdn:
+            return arg
+    cfg = dep.config()
+    portals = {f"{cfg['auth_host']}.{d}" for d in [cfg["domain"], *dep.extra_domains()]}
+    if arg in portals:
+        return arg
+    die(f"no host or app {arg!r}; `sudo ls {dep.ACCESS_LOG_DIR}` lists them")
+    return ""
+
+
+def command(name: str, arg: str | None, n: int, follow: bool) -> list[str]:
+    def need() -> str:
+        if not arg or not NAME_RE.match(arg):
+            die(f"`logs {name}` needs a name after it")
+        return arg
+    if name == "caddy":
+        return tail(dep.ACCESS_LOG_DIR / f"{caddy_host(need())}.log", n, follow, sudo=True)
+    if name == "caddy-errors":
+        return journal(n, follow, "-u", "caddy")
+    if name == "app":
+        return journal(n, follow, "-t", need())
+    if name == "broker":
+        return journal(n, follow, "-u", "loam-session-broker", user=True)
+    if name == "broker-session":
+        return tail(lc.STATE / "broker" / "sessions" / f"{need()}.jsonl", n, follow)
+    if name == "wake":
+        return tail(LOGS / f"wake-{need()}.jsonl", n, follow)
+    if name == "wake-journal":
+        return journal(n, follow, "-u", f"loam-wake-{need()}", user=True)
+    if name == "cron":
+        return journal(n, follow, "-u", f"loam-cron-{need()}", user=True)
+    if name == "reviewer":
+        return tail(LOGS / "reviewer.jsonl", n, follow)
+    if name == "engineer":
+        if arg is None:
+            return tail(LOGS / "engineer.jsonl", n, follow)
+        job = need()
+        stderr = lc.JOBS / job / "session-stderr.log"
+        if stderr.exists():
+            subprocess.run(tail(stderr, n, False), check=False)
+        return journal(n, follow, "-u", f"loam-engineer-{job}", user=True)
+    if name == "transcripts":
+        return tail(LOGS / "transcript-capture.log", n, follow)
+    if name == "memory":
+        return tail(LOGS / "memsample.jsonl", n, follow)
+    if name == "memory-check":
+        return tail(LOGS / "memory-check.log", n, follow)
+    if name == "drift-check":
+        return tail(LOGS / "drift-check.log", n, follow)
+    if name in ("authelia", "browser"):
+        return ["sudo", "-n", "docker", "logs", "--tail", str(n), *(["-f"] if follow else []),
+                dep.AUTHELIA_PROJECT if name == "authelia" else dep.BROWSER_PROJECT]
+    die(f"no log named {name!r}; `logs` with no arguments lists them")
+    return []
+
+
+def main(argv: list[str]) -> int:
+    n, follow, rest = 50, False, []
+    it = iter(argv)
+    for a in it:
+        if a == "-f":
+            follow = True
+        elif a == "-n":
+            v = next(it, "")
+            if not v.isdigit():
+                die("-n takes a number")
+            n = int(v)
+        else:
+            rest.append(a)
+    if not rest or rest[0] in ("-h", "--help"):
+        print(__doc__.split("\n\n", 1)[1].split("\nEvery command")[0])
+        return 0
+    if len(rest) > 2:
+        die("one name and at most one argument")
+    argv_ = command(rest[0], rest[1] if len(rest) == 2 else None, n, follow)
+    print("$ " + " ".join(argv_), file=sys.stderr)
+    os.execvp(argv_[0], argv_)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

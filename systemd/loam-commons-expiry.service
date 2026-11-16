@@ -1,0 +1,14 @@
+[Unit]
+Description=Loam — expire notes older than 7 days from the shared agent commons
+
+[Service]
+# Deliberately independent of the chassis: stdlib only, no venv, no
+# chassis import. The commons sweep is a live Loam capability and the
+# chassis is the frozen revert path, so the revert path must not be the
+# thing keeping this alive. Replaces the chassis-side loam-sweep-commons,
+# which is disabled and stays that way.
+Type=oneshot
+ExecStart=@ROOT@/bin/sweep-commons
+
+[Install]
+WantedBy=default.target

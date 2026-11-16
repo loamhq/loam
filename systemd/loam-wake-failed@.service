@@ -1,0 +1,11 @@
+[Unit]
+Description=Record the Loam wake %i that died before it could record itself
+# Instantiated by OnFailure= on each loam-wake-<agent>.service. %i is that
+# unit's name. Deliberately not a per-agent unit: the roster belongs in
+# ai-labs/*/agent.json, and a template is how systemd expresses "one handler,
+# any instance" without a generator having to enumerate anybody.
+
+[Service]
+Type=oneshot
+Environment=PATH=@UNIT_PATH@
+ExecStart=@ROOT@/bin/wake-failed %i

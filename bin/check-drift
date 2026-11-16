@@ -1,0 +1,1272 @@
+#!/usr/bin/env python3
+"""Compare what the generators would produce against what is actually live.
+
+The defect this exists for is not any one stale value -- it is that live
+state and the generators drift in BOTH directions, and both directions have
+now bitten:
+
+  generator -> live   `provision.rc_unit()` held the tmux form after the live
+                      units were replaced. Running it would have re-introduced
+                      the shape that put five agents in one cgroup and got
+                      Iris OOM-killed.
+  live -> generator   `WebSearch`/`WebFetch` and `mcp__loam__move_file` were
+                      hand-edited into all five live settings and never
+                      reached `provision.settings()`. The next provision run
+                      would have silently revoked a working grant.
+
+Neither was visible by reading either side alone. So this reads both and
+diffs them. Boring on purpose: no fixing, no writing, just a report and an
+exit code, so it can be run from cron or by hand before any provision run.
+
+Usage: check-drift [--quiet]   exit 0 = no drift, 1 = drift found
+"""
+
+from __future__ import annotations
+
+import difflib
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+from collections import Counter
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+AI_LABS = lc.WORKSPACES
+AGENTS = lc.ROOT
+UNIT_DIR = lc.USER_UNIT_DIR
+STATIC_UNITS = AGENTS / "systemd"
+# This file's own tree first (2026-11-13, as bin/provision since 11-09): run
+# from a job's worktree, as its tests do, it must import the branch's lib
+# (lib/loam_profile.py did not exist on main when this read it). Live, the
+# two are one path.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_broker as brk  # noqa: E402
+import loam_profile  # noqa: E402
+import loam_cron  # noqa: E402
+import loam_memory  # noqa: E402
+import loam_schedule  # noqa: E402
+import loam_session as sess  # noqa: E402
+import loam_units  # noqa: E402
+import loam_contributions as contributions  # noqa: E402
+import loam_skills  # noqa: E402
+
+
+def check_skills(findings: list) -> None:
+    """The shared skills library (first release L7). `<system>/Loam/` in the
+    vault is generated from this repository's `docs/library/`, and the skill
+    views (the Claude shelf above the workspaces, each persona's
+    `.agents/skills`) from the shelves; each is drift when it differs."""
+    diff = loam_skills.library_diff()
+    if any(diff.values()):
+        lines = [f"{sign} {name}" for key, sign in
+                 (("added", "+"), ("removed", "-"), ("changed", "~"))
+                 for name in diff[key]]
+        findings.append((
+            "shared library", str(loam_skills.loam_dir()),
+            "differs from docs/library/, its generator:\n  " + "\n  ".join(lines)
+            + "\nRun bin/library install (it replaces the folder whole; an "
+              "edit made there is lost, so move it to the shared shelf first)."))
+    stale = loam_skills.behind()
+    if stale:
+        findings.append((
+            "skill views", str(loam_skills.claude_shelf_dir()),
+            "behind the shelves:\n  " + "\n  ".join(stale)
+            + "\nRun bin/library refresh (every session start does too)."))
+
+
+def check_plugin_contributions(findings: list) -> None:
+    """What plugins add to the machine (2026-11-14, first release L4;
+    lib/loam_contributions.py): the contributed timers as the plugins in
+    force want them, and each plugin's own drift check. The personas' plugin
+    tools and words are in provision's rendering, compared above."""
+    try:
+        want, live = contributions.desired_units(), contributions.live_units()
+    except Exception as exc:  # noqa: BLE001
+        findings.append(("plugin contributions", "lib/loam_contributions.py",
+                         f"could not be read: {exc}"))
+        return
+    for name in sorted(set(want) | set(live)):
+        if name not in live:
+            findings.append((f"plugin unit {name}", str(UNIT_DIR / name),
+                             "wanted by a plugin that is on, not installed. "
+                             "`bin/plugin-servers reconcile` installs it."))
+        elif name not in want:
+            findings.append((f"plugin unit {name}", str(UNIT_DIR / name),
+                             "no plugin that is on wants it. The reconcile "
+                             "removes it."))
+        elif want[name] != live[name]:
+            compare(findings, f"plugin unit {name}", UNIT_DIR / name, want[name])
+    findings.extend(contributions.drift_findings())
+
+
+def load(name: str, path: Path):
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def roster() -> list[str]:
+    """Derived, never listed. A hardcoded roster is the thing that goes stale."""
+    return sorted(
+        d.name for d in AI_LABS.iterdir()
+        if d.is_dir() and (d / "agent.json").is_file()
+    )
+
+
+def user_systemctl(*args: str) -> str:
+    """`systemctl --user ...` asked of WRITEMIND's manager, whoever is asking.
+
+    check-drift is normally run with sudo, because the kernel half of it needs
+    root. Under sudo, `systemctl --user` talks to ROOT's user manager, which
+    knows none of these units and answers `unknown` or fails to find a bus --
+    so every user unit on the box reported as drift while every one of them
+    was running. Caused 2026-09-16, and it had been reporting the reviewer's
+    timer as not enabled since the timer was installed; the timer was enabled
+    the whole time. Returns the first word of stdout, or the empty string.
+    """
+    argv = ["systemctl", "--user", *args]
+    if os.geteuid() == 0:
+        argv = ["sudo", "-n", "-u", lc.USER,
+                f"XDG_RUNTIME_DIR={lc.RUNTIME_DIR}", *argv]
+    run = subprocess.run(argv, capture_output=True, text=True, check=False)
+    return run.stdout.strip()
+
+
+def compare(findings: list, label: str, live_path: Path, expected: str) -> None:
+    if not live_path.exists():
+        findings.append((label, f"MISSING on disk: {live_path}", ""))
+        return
+    actual = live_path.read_text(encoding="utf-8")
+    if actual == expected:
+        return
+    diff = "\n".join(
+        difflib.unified_diff(
+            actual.splitlines(), expected.splitlines(),
+            fromfile=f"live:{live_path}", tofile="generator", lineterm="", n=1,
+        )
+    )
+    findings.append((label, str(live_path), diff))
+
+
+def config_clauses(text: str, name: str, display: str,
+                   keep: set[str] = frozenset()) -> dict[str, str]:
+    """Split a config.md into H2 clauses, with the agent's own identity masked.
+
+    `config.md` has no generator -- it is operator-authored and provision only
+    refuses when it is absent -- so nothing has ever compared the seven copies
+    of the shared clauses to each other. That is the same two-homes defect as
+    a stale generator, arriving from the other direction: a clause added to
+    six configs and missed on the seventh leaves that agent quietly working to
+    a different protocol, and no artifact on this box disagrees with itself.
+
+    Masking is what makes the copies comparable: every legitimate difference
+    between them is the agent's own name or its own workspace path. What is
+    left over is either identical or it is drift.
+    """
+    def mask(line: str) -> str:
+        if line in keep:
+            return line
+        line = re.sub(rf"\b{re.escape(display)}\b", "<Agent>", line)
+        return re.sub(rf"\b{re.escape(name)}\b", "<agent>", line)
+    masked = "\n".join(mask(line) for line in text.splitlines())
+    clauses: dict[str, str] = {}
+    title, buf = "(preamble)", []
+    for line in masked.splitlines():
+        if line.startswith("## "):
+            clauses[title] = "\n".join(buf).strip()
+            title, buf = line[3:].strip(), []
+        else:
+            buf.append(line)
+    clauses[title] = "\n".join(buf).strip()
+    return clauses
+
+
+def _own_name(name: str) -> str:
+    """The name an agent's own files use (loam_profile.self_name)."""
+    try:
+        cfg = json.loads((AI_LABS / name / "agent.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cfg = {}
+    return loam_profile.self_name(name, cfg)
+
+
+def check_config_clauses(findings: list, names: list[str]) -> None:
+    """Every shared clause must be byte-identical, and present everywhere.
+
+    A clause carried by a MAJORITY of the roster is a shared clause: missing
+    from one agent is a finding. A clause carried by a minority is a
+    deliberate per-agent rule -- one persona's own clause is the only one
+    today -- and is left alone. The roster is derived, so this cannot go
+    stale as agents are added or retired.
+    """
+    raw = {}
+    for name in names:
+        path = AI_LABS / name / "config.md"
+        if not path.exists():
+            findings.append((f"{name} config.md", str(path), "MISSING on disk"))
+            continue
+        raw[name] = path.read_text(encoding="utf-8")
+    if len(raw) < 2:
+        return
+
+    # A line byte-identical in a majority of the raw configs is compared raw.
+    # Masking exists for each agent's own name, and a fleet-wide sentence that
+    # names one agent ("Today's only grant: Ada's `infra-watch`", 2026-10-06)
+    # would otherwise mask in that agent's copy alone and read as drift there.
+    # A majority rather than all, so one config diverging in that sentence is
+    # reported against itself and not also against the agent it names.
+    lines = Counter(l for t in raw.values() for l in set(t.splitlines()))
+    shared = {l for l, n in lines.items() if n >= len(raw) // 2 + 1}
+    per_agent = {name: config_clauses(text, name, _own_name(name), shared)
+                 for name, text in raw.items()}
+
+    titles = sorted({t for c in per_agent.values() for t in c})
+    majority = len(per_agent) // 2 + 1
+    for title in titles:
+        present = {n: c[title] for n, c in per_agent.items() if title in c}
+        missing = sorted(set(per_agent) - set(present))
+        if len(present) < majority:
+            continue  # a deliberate per-agent clause, not a shared one
+        if missing:
+            findings.append((
+                f"config.md clause '{title}'", "ai-labs/*/config.md",
+                f"carried by {len(present)} of {len(per_agent)} configs but "
+                f"missing from: {', '.join(missing)}. A shared clause on some "
+                f"agents and not others is a protocol only some of them know.",
+            ))
+        modal, _ = Counter(present.values()).most_common(1)[0]
+        for agent in sorted(n for n, body in present.items() if body != modal):
+            findings.append((
+                f"config.md clause '{title}' in {agent}",
+                str(AI_LABS / agent / "config.md"),
+                "\n".join(difflib.unified_diff(
+                    present[agent].splitlines(), modal.splitlines(),
+                    fromfile=f"live:{agent}", tofile="the other configs",
+                    lineterm="", n=1)),
+            ))
+
+
+def check_crons(findings: list, names: list[str]) -> list[str]:
+    """The schedule records against their timers, both directions.
+
+    Since 2026-10-14 the reconciler (lib/loam_schedule.py, every minute)
+    keeps them together, so a finding here is the backstop catching the
+    reconciler: a record it refused (an agent's change with no reason, a
+    one-off past the caps), a record it has not reached, a unit no record
+    wants, a reflection with no record, or the reconciler's timer off. Every
+    record is rendered from the FILE, so a refused edit shows as the file and
+    the box disagreeing, which is what it is.
+
+    Returns the note lines (paused and done records); findings in the list.
+    """
+    notes: list[str] = []
+    wanted: dict[str, str | None] = {}
+    for agent, name, path in loam_cron.proposals(names):
+        text = path.read_text(encoding="utf-8")
+        label = f"schedule {agent}/{name}"
+        try:
+            units = loam_schedule.desired_units(agent, name, text)
+        except loam_cron.CronError as exc:
+            findings.append((label, str(path), f"the record does not parse: "
+                             f"{str(exc).splitlines()[0]}"))
+            continue
+        applied = loam_schedule.read_text(loam_schedule.applied_path(agent, name))
+        if applied != text:
+            why = next((e.get("why") for e in reversed(loam_schedule.events())
+                        if (e.get("agent"), e.get("record")) == (agent, name)
+                        and e.get("kind") == "refused"), None)
+            findings.append((label, str(path), (
+                f"refused by the reconciler: {why}" if why else
+                "changed and not yet reconciled (the reconciler runs every "
+                "minute; is loam-schedules.timer running?)")))
+        wanted.update(units)
+        for filename, content in units.items():
+            live = loam_cron.UNIT_DIR / filename
+            if content is None:
+                if live.exists():
+                    findings.append((label, str(live), "the record is paused "
+                                     "or done and its unit still stands"))
+            else:
+                compare(findings, f"{label} {filename.rsplit('.', 1)[1]}",
+                        live, content)
+        if name == loam_cron.REFLECTION:
+            cron = loam_cron.parse_record(agent, name, text, check_systemd=False)
+            hhmm = loam_cron.reflection_hhmm(cron.schedule_text)
+            cfg = json.loads((AI_LABS / agent / "agent.json").read_text(
+                encoding="utf-8"))
+            if cfg.get("wake_schedule") != hhmm:
+                findings.append((label, str(AI_LABS / agent / "agent.json"),
+                                 f"wake_schedule {cfg.get('wake_schedule')} "
+                                 f"disagrees with the record's {hhmm}"))
+            if not cron.enabled:
+                notes.append(f"  {agent}/reflection — paused ({path})")
+        elif not loam_cron.parse_record(agent, name, text,
+                                        check_systemd=False).live:
+            notes.append(f"  {agent}/{name} — paused or done ({path})")
+
+    for agent in names:
+        if not loam_cron.cron_path(AI_LABS / agent, loam_cron.REFLECTION).exists():
+            findings.append((
+                f"schedule {agent}/reflection", str(AI_LABS / agent / "crons"),
+                "no reflection record: the nightly wake is not on the "
+                "schedule path (`bin/schedule migrate` gives it one)"))
+        for unit in loam_cron.UNIT_DIR.glob(f"{loam_cron.UNIT_PREFIX}{agent}-*"):
+            if unit.name not in wanted:
+                try:
+                    if loam_cron.split_unit(unit.name, names)[0] != agent:
+                        continue
+                except loam_cron.CronError:
+                    continue
+                findings.append((f"schedule orphan {unit.name}", str(unit),
+                                 "no record wants this unit"))
+
+    enabled = user_systemctl("is-enabled", "loam-schedules.timer")
+    if enabled != "enabled":
+        findings.append((
+            "schedule reconciler", "systemctl --user is-enabled "
+            "loam-schedules.timer", f"{enabled or 'unknown'}: nothing turns a "
+            "record into a timer while this is off"))
+    return notes
+
+
+def check_engineer(findings: list, prov) -> None:
+    """The eighth project, and the only one that is not an agent.
+
+    Different template, same rule: what the generator would produce, against
+    what is live. Two things here have no analogue on a persona and both are
+    the reason this function exists rather than a loop iteration.
+
+    **The verbatim copies.** `role.md` and `project.md` are settled with
+    the owner in the vault and copied byte-for-byte into the project, because a
+    CLAUDE.md @import resolves ONLY inside the project root. That makes the
+    vault copy and the project copy two homes for one text -- exactly the
+    defect this file exists for -- so both directions are diffed here. An edit
+    to the vault file that never reached the project shows up as drift, and so
+    does the reverse, which would be the engineer having rewritten its own
+    role.
+
+    **The absence of units.** A persona is checked against a wake service, a
+    timer and an RC unit. The engineer must have NONE of those: it is
+    reachable only in conversation (decision 7), and a timer or a Remote
+    Control server would be exactly the thing that makes it reachable
+    otherwise. So the check is inverted -- any unit bearing its name is a
+    finding, not a comparison.
+    """
+    engineer = prov.ENGINEER
+    if not (engineer / "agent.json").is_file():
+        findings.append((
+            "engineer", str(engineer),
+            "not provisioned. `agents/bin/provision --engineer` renders it.",
+        ))
+        return
+
+    for label, src, live in (
+        ("role.md", prov.ENGINEER_ROLE_SRC, engineer / "role.md"),
+        ("project.md", prov.ENGINEER_PROJECT_SRC, engineer / "project.md"),
+    ):
+        if not src.is_file():
+            findings.append((
+                f"engineer {label}", str(src),
+                "the operator-authored source is gone from the vault. The "
+                "project copy is now the only home for text that is supposed "
+                f"to be settled with {lc.OWNER_NAME}.",
+            ))
+            continue
+        compare(findings, f"engineer {label} (verbatim from the vault)",
+                live, src.read_text(encoding="utf-8"))
+
+    compare(findings, "engineer CLAUDE.md",
+            engineer / "CLAUDE.md", prov.ENGINEER_CLAUDE_MD)
+    compare(findings, "engineer agent.json", engineer / "agent.json",
+            json.dumps(prov.engineer_config(), indent=2) + "\n")
+    compare(findings, "engineer settings.json",
+            engineer / ".claude" / "settings.json",
+            json.dumps(prov.engineer_settings(), indent=2) + "\n")
+
+    if not (engineer / "memory" / "MEMORY.md").is_file():
+        findings.append((
+            "engineer memory", str(engineer / "memory" / "MEMORY.md"),
+            "missing. It is the runtime's memory of itself and it is "
+            "committed with the repo; re-provision seeds the header.",
+        ))
+
+    # loam-job-recovery.{service,timer} (2026-10-02, the owner's approval of
+    # unattended recovery) is NOT the engineer's and is outside this prefix on
+    # purpose: it is the runtime's sweep, runs no session of its own, and
+    # only relaunches or continues a job a conversation already started --
+    # "a job started in conversation may outlive it" -- never a new one.
+    strays = sorted(
+        u.name for u in UNIT_DIR.iterdir()
+        if u.name.startswith(("loam-engineer-", "loam-wake-engineer",
+                              "loam-rc-engineer"))
+        and not u.name.startswith("loam-engineer-2")   # a live job's own unit
+    )
+    if strays:
+        findings.append((
+            "engineer units", str(UNIT_DIR),
+            f"{', '.join(strays)} exist. The engineer has no timer, no Remote "
+            f"Control server and no unit of its own -- it is reachable only "
+            f"in conversation (decision 7), and a unit is how that stops "
+            f"being true. bin/engineer-job creates a transient unit per job "
+            f"and `--collect` removes it.",
+        ))
+
+
+def check_reviewer(findings: list, prov) -> None:
+    """The ninth project: not a persona, and unlike the engineer it HAS a
+    timer. Its instruction file is prose and has no generator, so it is
+    checked for presence; its config, settings and MCP file are rendered by
+    provision and diffed; its unit and timer are static files under
+    agents/systemd/ and the static loop below compares them, but their
+    absence from the user unit dir is a finding here too, because a reviewer
+    with no timer is a lane that never fires and nothing else would say so.
+    """
+    reviewer = prov.REVIEWER
+    if not (reviewer / "agent.json").is_file():
+        findings.append((
+            "reviewer", str(reviewer),
+            "not provisioned. `agents/bin/provision --reviewer` renders it.",
+        ))
+        return
+    # Its instructions are the reviewer plugin's (2026-11-14, first release L9):
+    # plugins/reviewer/instructions.md, its places filled in by provision --reviewer.
+    instruction = reviewer / "CLAUDE.md"
+    src = prov.REVIEWER_INSTRUCTIONS_SRC
+    if src.is_file():
+        compare(findings, "reviewer CLAUDE.md", instruction, prov.reviewer_instructions())
+    elif not instruction.is_file() or not instruction.read_text(encoding="utf-8").strip():
+        findings.append((
+            "reviewer CLAUDE.md", str(instruction),
+            "missing or empty, and so is its source in plugins/reviewer/; "
+            "bin/review refuses to run without it.",
+        ))
+    compare(findings, "reviewer agent.json", reviewer / "agent.json",
+            json.dumps(prov.reviewer_config(), indent=2) + "\n")
+    compare(findings, "reviewer .mcp.json", reviewer / ".mcp.json",
+            json.dumps(prov.reviewer_mcp_config(), indent=2) + "\n")
+    compare(findings, "reviewer settings.json",
+            reviewer / ".claude" / "settings.json",
+            json.dumps(prov.reviewer_settings(), indent=2) + "\n")
+    if not (UNIT_DIR / "loam-reviewer.service").exists():
+        findings.append((
+            "reviewer loam-reviewer.service", str(UNIT_DIR / "loam-reviewer.service"),
+            "not installed: the reviewer's lane. `bin/gen-units "
+            "loam-reviewer.service` installs it.",
+        ))
+    # The timer is the plugin's own (`loam-plugin-reviewer--nightly`), held by
+    # check_plugin_contributions while the plugin is on. The static timer and
+    # its schedule drop-in it replaced must be gone, or two timers fire.
+    for legacy in (UNIT_DIR / loam_profile.LEGACY_REVIEWER_TIMER,
+                   loam_profile.dropin_dir() / loam_profile.REVIEWER_DROPIN):
+        if legacy.exists():
+            findings.append((
+                "reviewer legacy timer", str(legacy),
+                "the static reviewer timer (or its drop-in) still stands beside "
+                "the plugin's; `systemctl --user disable --now "
+                "loam-reviewer.timer`, remove it, daemon-reload.",
+            ))
+    if loam_profile.reviewer_on():
+        timer = UNIT_DIR / loam_profile.REVIEWER_TIMER
+        enabled = user_systemctl("is-enabled", loam_profile.REVIEWER_TIMER)
+        if timer.exists() and enabled != "enabled":
+            findings.append((
+                "reviewer timer", f"systemctl --user is-enabled {loam_profile.REVIEWER_TIMER}",
+                f"installed but {enabled or 'not enabled'}; the reviewer never fires.",
+            ))
+
+
+def adopted_harness(root: Path, clashes=("CLAUDE.md", "role.md", "project.md",
+                                         "memory/", ".claude/", ".codex/")) -> list[str]:
+    """For a project that lands by pull request (a repository Loam does not
+    own): every place the engineer's harness has entered history -- the
+    canonical `main` (the remote's default branch) or a job branch waiting
+    in the canonical repository. Each is a commit the landing would refuse,
+    or one that came from somewhere else; either way someone must look."""
+    paths = [p.rstrip("/") for p in clashes]
+    refs = subprocess.run(
+        ["git", "-C", str(root), "for-each-ref", "--format=%(refname:short)",
+         "refs/heads/"], capture_output=True, text=True, check=False).stdout.split()
+    out = []
+    for ref in refs:
+        hit = subprocess.run(
+            ["git", "-C", str(root), "ls-tree", "-r", "--name-only", ref, "--", *paths],
+            capture_output=True, text=True, check=False).stdout.split()
+        if hit:
+            out.append(f"`{ref}` commits the harness ({', '.join(hit[:5])}); it "
+                       f"must never enter a repository Loam does not own")
+    return out
+
+
+def runtime_findings(project, models: list | None = None) -> list[str]:
+    """What is wrong with the CLI a project engineer runs on (since
+    2026-10-07): a record with no `runtime`, or one this launcher does not
+    know, or a Codex model or effort the login's `model/list` no longer
+    offers. The list is the broker's cache of it (`codex-models.json`)."""
+    import loam_engineer as eng  # noqa: PLC0415
+    value = project.record.get("runtime")
+    if value is None:
+        return [f"no `runtime` in the record, so it runs on Claude Code; new "
+                f"records get {eng.DEFAULT_RUNTIME!r}. Write the one it should "
+                f"run on."]
+    if value not in eng.RUNTIMES:
+        return [f"`runtime` is {value!r}, which is none of {eng.RUNTIMES}; the "
+                f"launcher runs it on Claude Code."]
+    if value != "codex":
+        return []
+    import loam_codex  # noqa: PLC0415
+    out = []
+    if not Path(loam_codex.CODEX).exists():
+        out.append(f"{loam_codex.CODEX} is missing; no Codex job can start.")
+    listed = loam_codex.read_models() if models is None else models
+    if listed:
+        model = next((m for m in listed if m.get("id") == eng.CODEX_ENGINEER_MODEL), None)
+        if model is None:
+            out.append(f"`{eng.CODEX_ENGINEER_MODEL}` (CODEX_ENGINEER_MODEL) is not "
+                       f"in Codex's model list: {[m.get('id') for m in listed]}.")
+        elif eng.CODEX_ENGINEER_EFFORT not in (model.get("efforts") or []):
+            out.append(f"effort {eng.CODEX_ENGINEER_EFFORT!r} is not one "
+                       f"`{eng.CODEX_ENGINEER_MODEL}` takes: {model.get('efforts')}.")
+    return out
+
+
+def check_projects(findings: list, prov) -> list[str]:
+    """Every registered project engineer against the template. Returns the
+    names, for the summary line.
+
+    Two homes again, in a new place: the template in `agents/` and a copy in
+    a repo the platform engineer must otherwise stay out of. Compared in the
+    one direction that matters -- what the template would render now against
+    what the checkout holds -- with the render's revision mark read from the
+    live file, so a checkout rendered from an older role.md is reported as
+    "role.md moved" rather than as a diff of the mark line.
+
+    `project.md` has no generator: it is written from the brief. Checked
+    for presence and for the skeleton's placeholders only.
+    """
+    import loam_engineer as eng  # noqa: PLC0415
+    names: list[str] = []
+    for path in sorted(eng.PROJECTS_DIR.glob("*.json")) if eng.PROJECTS_DIR.is_dir() else []:
+        try:
+            project = eng.load_project_record(path)
+        except (OSError, ValueError, KeyError) as exc:
+            findings.append((f"project record {path.name}", str(path),
+                             f"unreadable: {exc}"))
+            continue
+        names.append(project.name)
+        for finding in runtime_findings(project):
+            findings.append((f"project {project.name} runtime", str(path), finding))
+        root = project.root
+        if not root.is_dir():
+            findings.append((f"project {project.name} checkout", str(root),
+                             "registered but not on disk. Retire it or re-provision."))
+            continue
+        if project.pull_request:
+            for finding in adopted_harness(root, prov.ADOPT_CLASHES):
+                findings.append((f"project {project.name} history", str(root), finding))
+        elif project.deploy_key is None or not project.deploy_key.is_file():
+            findings.append((f"project {project.name} deploy key",
+                             str(project.deploy_key),
+                             "missing; the engineer cannot push without it."))
+        remote = subprocess.run(
+            ["git", "-C", str(root), "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=False).stdout.strip()
+        if remote != project.remote:
+            findings.append((f"project {project.name} remote", str(root),
+                             f"origin is {remote!r}, registry says {project.remote!r}"))
+
+        live_role = root / "role.md"
+        mark = prov.craft_mark_of(live_role.read_text(encoding="utf-8")) if live_role.is_file() else None
+        rev, date = mark if mark else (prov.craft_source_rev(), "0000-00-00")
+        tracked = prov.harness_tracked(root) and not project.pull_request
+        try:
+            expected = prov.project_render(project.name, None, rev, date, tracked)
+        except prov.CraftError as exc:
+            findings.append((f"project {project.name} render", str(prov.ENGINEER_ROLE_SRC),
+                             str(exc)))
+            expected = None
+        # A newer source revision is drift only if it renders differently.
+        # role.md lines that mean something only in this runtime are dropped
+        # from the render (CRAFT_DROP_NEVER), so an edit to one of them moves
+        # the source's revision and changes no project's file; asking three
+        # project engineers to commit a new mark and nothing else is churn.
+        # Caused 2026-10-06 by the per-cron grant edit to "Run unattended".
+        live_text = live_role.read_text(encoding="utf-8") if live_role.is_file() else None
+        if mark and mark[0] != prov.craft_source_rev() \
+                and (expected is None or live_text != expected["role.md"]):
+            findings.append((
+                f"project {project.name} role.md", str(live_role),
+                f"rendered from role.md @ {mark[0]}; the source is now @ "
+                f"{prov.craft_source_rev()}. Re-render so the change reaches "
+                f"this project"
+                + (": its repository commits the harness, so that is a commit "
+                   "in it, its engineer's." if tracked else
+                   f": `bin/provision --project {project.name} --rerender`."),
+            ))
+        if not tracked:
+            exclude = root / ".git" / "info" / "exclude"
+            have = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.is_file() else set()
+            missing = [f"/{p}" for p in prov.HARNESS_PATHS if f"/{p}" not in have]
+            if missing:
+                findings.append((
+                    f"project {project.name} exclude", str(exclude),
+                    f"{', '.join(missing)} not excluded, so a `git add -A` puts "
+                    f"the harness in the repository. `bin/provision --project "
+                    f"{project.name} --rerender` adds them.",
+                ))
+        if expected is None:
+            continue
+        for rel in ("CLAUDE.md", "role.md", ".claude/settings.json"):
+            compare(findings, f"project {project.name} {rel}", root / rel, expected[rel])
+        for rel in ("project.md", "memory/MEMORY.md"):
+            live = root / rel
+            if not live.is_file() or not live.read_text(encoding="utf-8").strip():
+                findings.append((f"project {project.name} {rel}", str(live),
+                                 "missing or empty."))
+        if (root / "project.md").is_file() and "(Filled at provisioning" in (
+            root / "project.md").read_text(encoding="utf-8"):
+            findings.append((
+                f"project {project.name} project.md", str(root / "project.md"),
+                "still the skeleton: the platform engineer has not written it "
+                "from the brief. The engineer will run without knowing what "
+                "it owns.",
+            ))
+    return names
+
+
+def check_broker(findings: list) -> list[str]:
+    """The session broker: the unit, the wall, the bridge, and the file that
+    is copied rather than generated.
+
+    Four things that fail in four different silences. A dead unit shows the
+    app an unreachable broker; a missing wall shows EVERY container on the box
+    a broker (the bind address is the host's, so other bridges route to it);
+    a missing network means the app has nothing to join; and a drifted
+    firewall script means the wall in the kernel is not the wall in the repo.
+    The kernel is asked, not a file read -- `ufw reload` flushes every chain
+    and leaves the rendered file exactly as it was.
+    """
+    notes: list[str] = []
+    compare(findings, "broker firewall script", brk.FIREWALL_SCRIPT,
+            (AGENTS / "broker" / "firewall.sh").read_text(encoding="utf-8"))
+
+    active = user_systemctl("is-active", brk.SERVICE)
+    if active != "active":
+        findings.append(("broker unit", f"systemctl --user is-active {brk.SERVICE}",
+                         f"{active or 'unknown'}; no app can start a session. "
+                         f"`systemctl --user restart {brk.SERVICE}`"))
+
+    import loam_deploy as dep  # noqa: PLC0415
+    wall = dep._sudo(["iptables", "-w", "5", "-C", "INPUT", "-p", "tcp",
+                      "-d", brk.BIND_ADDR, "--dport", str(brk.PORT),
+                      "-j", brk.WALL_CHAIN])  # noqa: SLF001
+    if wall.returncode != 0:
+        findings.append(("broker wall", "iptables -C",
+                         f"the jump into {brk.WALL_CHAIN} is not in INPUT, so every "
+                         f"container on the box can reach {brk.BIND_ADDR}:{brk.PORT}. "
+                         f"`sudo systemctl restart {brk.WALL_SERVICE}`"))
+
+    net = dep._sudo(["docker", "network", "inspect", brk.NETWORK, "--format",
+                     "{{(index .IPAM.Config 0).Subnet}}"])  # noqa: SLF001
+    if net.returncode != 0:
+        findings.append(("broker network", f"docker network inspect {brk.NETWORK}",
+                         f"the network does not exist; the app has nothing to join. "
+                         f"`sudo docker network create --subnet {brk.SUBNET} --gateway "
+                         f"{brk.BIND_ADDR} -o com.docker.network.bridge.name="
+                         f"br-loambroker {brk.NETWORK}`"))
+    elif net.stdout.strip() != brk.SUBNET:
+        findings.append(("broker network", f"docker network inspect {brk.NETWORK}",
+                         f"subnet is {net.stdout.strip()}, not {brk.SUBNET}; the wall "
+                         f"is written against the subnet and would let the wrong "
+                         f"containers through."))
+    notes.append(f"  broker {brk.BIND_ADDR}:{brk.PORT} on {brk.NETWORK} "
+                 f"({brk.SUBNET}), admission by memory (reserve "
+                 f"{brk.MEMORY_RESERVE_MB} MB, backstop {brk.MAX_SESSIONS} sessions)")
+    return notes
+
+
+def check_deploy(findings: list) -> list[str]:
+    """The deployment layer: what the internet can reach on this box.
+
+    Move 10 (2026-09-08). Every file here is rendered by bin/gen-deploy from
+    agents/deploy/ and the operator's public file, so the first half is the
+    familiar diff. The second half reads the BOX rather than a file, because
+    the exposure story has more than one way to stop being true and only one
+    of them is a stale render:
+
+      the Caddyfile is right and the process is serving something else
+      (a reload that failed, an edit through the admin API);
+      a host block has no gate and the operator file does not name it;
+      a container publishes on 0.0.0.0, which the daemon default forbids
+      but a compose file can override;
+      something other than sshd, caddy or a listener a plugin that is on
+      declares (box.listener) answers off-loopback;
+      the box's user is in the docker group, which is root-equivalent.
+
+    Each is a finding with the datum quoted. Returns summary lines.
+    """
+    import loam_deploy as dep  # noqa: PLC0415
+    notes: list[str] = []
+    try:
+        renders = dep.generated()
+        apps = dep.records()
+        public = dep.public_names()
+        agent_sites = dep.sites(apps)
+    except dep.DeployError as exc:
+        findings.append(("deploy records", str(dep.DEPLOY),
+                         f"the generator refuses to render: {exc}"))
+        return notes
+    for path, expected in renders.items():
+        live = dep.read_root_text(path)
+        if live is None:
+            findings.append((f"deploy {path.name}", str(path),
+                             f"MISSING on disk: {path}. `sudo bin/gen-deploy` writes it."))
+        elif live != expected:
+            findings.append((f"deploy {path.name}", str(path), "\n".join(difflib.unified_diff(
+                live.splitlines(), expected.splitlines(),
+                fromfile=f"live:{path}", tofile="generator", lineterm="", n=1))))
+
+    live_caddy = dep.read_root_text(dep.CADDYFILE) or ""
+    # Every name an app answers on: its host under the runtime's domain and
+    # any hosts on a domain of its own. The extra domains' portal blocks
+    # proxy to Authelia and read as gated, like the primary portal. A
+    # content host is the app's too, and is never meant to be ungated.
+    by_host = {fq: a.name for a in apps for fq in a.hostnames}
+    by_host |= {a.content_fqdn: a.name for a in apps if a.content_fqdn}
+    # An agent's site is ungated only when its own record quotes the owner's
+    # yes (2026-11-08); that record is the site's public file.
+    by_host |= {s.fqdn: s.name for s in agent_sites}
+    site_public = {s.name for s in agent_sites if s.site_public}
+    # An old name (deploy/loam.toml `[moved]`, 2026-11-15) is ungated by
+    # design: its block is the redirect alone, and the diff above proves the
+    # live block is exactly the render.
+    # A `[[forward]]` host (2026-11-15) keeps some paths past `until`: its
+    # block is ungated for the same reason, and its record is not due to go.
+    try:
+        moved = {old for old, _ in dep.moved_targets(apps)}
+        overdue = dep.moved_overdue()
+        kept = dep.forward_hosts()
+    except dep.DeployError as exc:
+        findings.append(("deploy moved", str(dep.CONFIG_PATH), str(exc)))
+        moved, overdue, kept = set(), None, set()
+    if overdue:
+        stays = sorted(moved & kept)
+        findings.append((
+            "deploy moved", str(dep.CONFIG_PATH),
+            f"the old names' redirects were kept until {overdue.isoformat()} and are "
+            f"due to go: delete `[moved]` from deploy/loam.toml, run `sudo "
+            f"bin/gen-deploy`, and delete these A records in Cloudflare: "
+            f"{', '.join(sorted(moved - kept))}."
+            + (f" Keep {', '.join(stays)} and its record: `[[forward]]` still "
+               f"needs it." if stays else "")))
+    for host, gated in dep.live_host_blocks(live_caddy):
+        app = by_host.get(host)
+        if not gated and (host in moved or host in kept):
+            continue
+        if not gated and app not in public and app not in site_public:
+            findings.append((
+                f"deploy host {host}", str(dep.CADDYFILE),
+                f"the live host block for {host} has no gate (no `import gate`) "
+                f"and {dep.PUBLIC_FILE} does not name "
+                f"{app or 'any app for it'}. Every host is gated unless the "
+                f"operator wrote its name there."))
+    # Every host writes its own access log (2026-09-28). The diff above
+    # catches a stale render; this reads the live file the way the gate
+    # check does, so a block that stops logging is named by its host.
+    for host in dep.live_hosts_unlogged(live_caddy):
+        findings.append((
+            f"deploy access log {host}", str(dep.CADDYFILE),
+            f"the live host block for {host} does not `import access_log {host}` "
+            f"(or the `(access_log)` snippet is gone), so its requests are not "
+            f"logged under {dep.ACCESS_LOG_DIR}/. `sudo bin/gen-deploy` renders it."))
+    unknown = public - {a.name for a in apps}
+    if unknown:
+        notes.append(f"  {dep.PUBLIC_FILE} names {', '.join(sorted(unknown))}, "
+                     f"which no deployment record defines")
+    running = dep.caddy_running()
+    adapted = dep.caddy_adapted(dep.CADDYFILE)
+    if running is None:
+        findings.append(("deploy caddy", dep.CADDY_ADMIN,
+                         "the caddy admin API does not answer on loopback; is "
+                         "caddy.service running?"))
+    elif adapted is not None and running != adapted:
+        findings.append(("deploy caddy running config", dep.CADDY_ADMIN,
+                         "the config caddy is serving is not the live Caddyfile as "
+                         "adapted. The file is not the process: `systemctl reload "
+                         "caddy` applies the file, and a reload that failed says so "
+                         "in the journal."))
+
+    try:
+        for name, pub in dep.live_publishes():
+            host_part = pub.split("->", 1)[0]
+            if not dep.is_loopback(host_part):
+                findings.append((f"deploy publish {name}", "docker ps",
+                                 f"container {name} publishes {pub}; only 127.0.0.1 "
+                                 f"leaves the proxy as the box's one listener."))
+        plugin_listeners = contributions.listeners()
+        for addr, proc in dep.live_listeners():
+            # The session broker is off loopback and is meant to be: it binds
+            # the gateway of its own Docker bridge, which is the only way a
+            # container reaches a host service on a box that refuses bind
+            # mounts. It is exempted by ADDRESS, not by process name -- "a
+            # python3 may listen off loopback" would be a much bigger grant
+            # than this needs, and the address is the thing the wall is built
+            # around. check_broker() below asserts that wall is up.
+            if addr == f"{brk.BIND_ADDR}:{brk.PORT}":
+                continue
+            allowed = dep.ALLOWED_PUBLIC_LISTENERS | set(plugin_listeners)
+            if not dep.is_loopback(addr) and proc not in allowed:
+                findings.append((f"deploy listener {addr}", "ss -tlnp",
+                                 f"{proc} listens on {addr}, off loopback. Only "
+                                 f"{', '.join(sorted(allowed))} may (a plugin "
+                                 f"that is on may declare one: box.listener)."))
+        # Which networks each container is on. The generator refuses a compose
+        # file that joins anything but the app's own default and the broker's
+        # (2026-09-25); this is the same question asked of the running box,
+        # because a container can be attached to a network by a hand
+        # `docker network connect` that no file records, and a container on
+        # `loam-sight` is inside the one login bypass this box has.
+        for container, why in dep.network_findings(apps):
+            findings.append((f"deploy network {container}", "docker ps",
+                             f"container {container} {why}"))
+        for container, why in dep.log_findings(apps):
+            findings.append((f"deploy logging {container}", "docker inspect",
+                             f"container {container} {why}"))
+    except dep.DeployError as exc:
+        findings.append(("deploy live state", "docker ps / ss", str(exc)))
+    # The wall around the browser's network is rules in the kernel, and the
+    # kernel is not a file: `ufw reload` flushes every chain, Docker's and
+    # ours, and leaves both rendered files exactly as they were. Ask it.
+    try:
+        missing = dep.sight_wall_missing()
+    except dep.DeployError as exc:
+        findings.append(("deploy wall", "iptables", str(exc)))
+    else:
+        if missing:
+            findings.append(("deploy wall", "iptables -C / systemctl is-enabled",
+                             f"{len(missing)} rule(s) of the browser wall are not in the "
+                             f"kernel. `sudo systemctl restart {dep.SIGHT_WALL_SERVICE}` "
+                             f"raises it (after `systemctl restart docker` if a ufw reload "
+                             f"took Docker's chains too):\n" + "\n".join("  " + m for m in missing)))
+    members = dep.docker_group_members()
+    if lc.USER in members:
+        findings.append(("deploy docker group", "/etc/group",
+                         f"docker group members: {', '.join(members)}. The socket is "
+                         f"root-equivalent and every job on the box runs as {lc.USER}."))
+    # A bypass is not an exposure, but it is a hole in the login, so the
+    # summary names each one rather than leaving it to the render diff.
+    notes.append(f"  {len(apps)} app(s): " + ", ".join(
+        f"{a.name} ({'PUBLIC' if a.name in public else a.exposure}"
+        + "".join(f"; login bypassed for {m} {p}" for m, p in a.bypass) + ")"
+        for a in apps))
+    return notes
+
+
+def check_user_settings(findings: list, prov) -> None:
+    """The box-wide clauses in ~/.claude/settings.json, against provision.
+
+    This file held the autoupdater pin from 2026-08 and was compared by
+    nothing until 2026-09-25: provision wrote it once at provisioning time
+    and no check ever looked again, so a hand-edit or a CLI migration that
+    dropped a clause was invisible for as long as it stood. Every lane on
+    the box reads this file on every launch path, which is exactly why a
+    silent revert here is worth a finding.
+    """
+    try:
+        live = json.loads(prov.USER_SETTINGS.read_text(encoding="utf-8"))
+    except OSError:
+        findings.append(("user settings", str(prov.USER_SETTINGS),
+                         "MISSING on disk. provision.ensure_user_settings() "
+                         "writes it; every lane reads it."))
+        return
+    except json.JSONDecodeError as exc:
+        findings.append(("user settings", str(prov.USER_SETTINGS),
+                         f"not valid JSON ({exc}). Every lane on the box "
+                         f"reads this file at startup."))
+        return
+    gaps = prov.user_settings_gaps(live)
+    if gaps:
+        findings.append((
+            "user settings clauses", str(prov.USER_SETTINGS),
+            f"live file does not hold: {', '.join(gaps)}\n"
+            f"wanted: {json.dumps(prov.USER_SETTINGS_CLAUSES, indent=2)}\n"
+            f"live:   {json.dumps(live, indent=2)}\n\n"
+            f"`bin/provision <agent>` re-applies them.",
+        ))
+
+
+def check_managed_settings(findings: list, prov) -> None:
+    """/etc/claude-code/managed-settings.json, byte for byte, and root's.
+
+    The file seats the CLI's mod guard; deleted or changed, the guard stops
+    refusing mods with no line anywhere saying so. Root-owned and not
+    writable by anyone else, or a lane could write its own policy.
+    """
+    path = prov.MANAGED_SETTINGS
+    fix = "`agents/bin/provision --managed-settings` installs it."
+    try:
+        st = path.stat()
+    except OSError:
+        findings.append(("managed settings", str(path),
+                         f"MISSING on disk. The CLI's mod guard is not seated "
+                         f"without it. {fix}"))
+        return
+    compare(findings, "managed settings", path, prov.MANAGED_SETTINGS_TEXT)
+    if st.st_uid != 0 or st.st_mode & 0o022:
+        findings.append(("managed settings", str(path),
+                         f"owner uid {st.st_uid}, mode {st.st_mode & 0o777:o}: "
+                         f"it must be root's and writable by root alone. {fix}"))
+
+
+def check_lane_models(findings: list, names: list[str], prov) -> list[str]:
+    """Every lane's EFFECTIVE model against the model its own config names.
+
+    The alarm this file was missing. On 2026-09-25 one persona's lane ran most of a
+    conversation on Opus 4.8 while `ai-labs/ada/.claude/settings.json` said
+    `fable`, and the only thing that said so was one warning line in the
+    scroll, which the owner happened to catch. Nothing on this box compared
+    the two. A config is a statement of intent; this reads what actually
+    happened and reports when they differ, so an unchosen model is a finding
+    rather than a thing someone notices.
+
+    The comparison rule and the transcript read live in loam_session, not
+    here, because bin/rc-preflight asks the same question once a night per
+    agent and the two must not be able to answer it differently.
+    """
+    notes = []
+    # Each lane's configured model is what it launches on now: a persona's
+    # own default when it set a Claude Code one (2026-11-13, its profile;
+    # loam_profile.lane_choice, as bin/wake reads it), the platform
+    # engineer's and the reviewer's settings when the owner made them.
+    import loam_engineer as eng  # noqa: PLC0415
+    lanes = []
+    for n in names:
+        try:
+            card = json.loads((AI_LABS / n / "agent.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            card = {}
+        # A persona whose lanes run on Codex (2026-11-13) has no Claude
+        # session to read a model family from; its model is Codex's to name.
+        if loam_profile.lane_provider(card) != "claude-code":
+            notes.append(f"  {n}: wakes and crons on "
+                         f"{loam_profile.PROVIDER_NAMES[loam_profile.lane_provider(card)]}"
+                         f" -- no Claude family to check")
+            continue
+        lanes.append((n, AI_LABS / n, loam_profile.lane_choice(
+            card, prov.settings(AI_LABS / n)["model"])[0]))
+    lanes.append(("engineer", AGENTS / "engineer",
+                  eng.engineer_choice(eng.platform_project())["model"]))
+    lanes.append(("reviewer", AGENTS / "reviewer",
+                  loam_profile.reviewer_choice(prov.REVIEWER_MODEL)[0]))
+
+    for label, ws, configured in lanes:
+        # `best` and `opusplan` name a policy, not a family; there is no
+        # model id they could be compared against. Nothing sets them today.
+        if configured in ("best", "opusplan"):
+            notes.append(f"  {label}: configured {configured} -- no family to check")
+            continue
+        seen = sess.effective_model(ws)
+        if seen is None:
+            notes.append(f"  {label}: no session on disk yet")
+            continue
+        model, session, refusal = seen[:3]
+        # A chat that asked for a model is the owner choosing, not a lane
+        # drifting -- on the broker's record, or by a `/model` in the session
+        # itself (the Claude Code app's model menu sends one). Noted, never a
+        # finding: an alarm that fires on a deliberate pick is an alarm that
+        # gets ignored. The rule is loam_session's, shared with rc-preflight.
+        verdict, why = sess.model_verdict(
+            configured, seen, brk.chosen_model(Path(session).stem))
+        if verdict == "ok":
+            notes.append(f"  {label}: {model} (config {configured})")
+            continue
+        if verdict == "chosen":
+            notes.append(f"  {label}: {model} — chosen: {why} "
+                         f"(config {configured})")
+            continue
+        exact = configured.startswith("claude-")
+        findings.append((
+            f"{label} effective model", str(ws / ".claude" / "settings.json"),
+            f"config names {configured!r}; the lane's most recent session ran "
+            f"its last turn on {model!r}.\n"
+            f"session: {sess.SESSIONS_DIR / str(ws).replace('/', '-') / session}\n"
+            f"{'an explicit id must match exactly' if exact else 'family mismatch'}"
+            + (f"\n\nCause, from the session's own record: {refusal}. That "
+               f"switch is the `switchModelsOnFlag` behaviour; provision "
+               f"holds it off in ~/.claude/settings.json."
+               if refusal and seen.refusal_to == model else "")
+            + (f"\n\nThe session also carries a refusal record, but to "
+               f"another model: {refusal}." if refusal and seen.refusal_to != model
+               else ""),
+        ))
+    return notes
+
+
+def report(findings: list, quiet: bool) -> int:
+    """The one place drift is printed, so an early exit and the full run say
+    it the same way."""
+    print(f"check-drift: DRIFT -- {len(findings)} mismatch(es)\n")
+    for label, where, diff in findings:
+        print(f"### {label}  [{where}]")
+        if diff and not quiet:
+            print(diff)
+        print()
+    return 1
+
+
+def main() -> int:
+    quiet = "--quiet" in sys.argv
+    prov = load("provision", AGENTS / "bin" / "provision")
+    genrc = load("gen_rc_units", AGENTS / "bin" / "gen-rc-units")
+
+    names = roster()
+    findings: list = []
+
+    # The deployment records first, and on their own, because far more than
+    # check_deploy() reads them: `provision.claude_md` renders every persona's
+    # sight paragraph from `loam_deploy.records()`, so a record the generator
+    # refuses ended this whole file as a TRACEBACK inside the agent loop --
+    # before the deploy section, which has the handler for exactly this, was
+    # ever reached. Found 2026-09-25 by causing one (a compose file joining a
+    # third network); it was true of every DeployError since Move 10, and of a
+    # third exposure value and a bind mount just the same. One finding, and
+    # stop: nothing below can be compared against a generator that will not
+    # render, and a traceback is not a report.
+    import loam_deploy as dep  # noqa: PLC0415
+    try:
+        dep.records()
+    except dep.DeployError as exc:
+        return report([(
+            "deploy records", str(dep.DEPLOY),
+            f"the generator refuses to render: {exc}\n\n"
+            f"Nothing else was checked: every persona's CLAUDE.md is rendered "
+            f"from these records too, so until this is fixed there is no "
+            f"generator to compare the box against. `sudo bin/gen-deploy "
+            f"--dry-run` refuses with the same sentence.",
+        )], quiet)
+
+    for name in names:
+        ws = AI_LABS / name
+        cfg = json.loads((ws / "agent.json").read_text(encoding="utf-8"))
+        # The persona's own words are rendered on the id's name: a display
+        # name set on its profile (2026-11-13) is the app's, not its self's.
+        # The name it was made with when it has one (`self_name`, 2026-11-14).
+        display, wake = loam_profile.self_name(name, cfg), cfg["wake_schedule"]
+
+        compare(findings, f"{name} settings.json",
+                ws / ".claude" / "settings.json",
+                json.dumps(prov.settings(ws), indent=2) + "\n")
+
+        compare(findings, f"{name} .mcp.json",
+                ws / ".mcp.json",
+                json.dumps(prov.mcp_config(name, ws), indent=2) + "\n")
+
+        compare(findings, f"{name} CLAUDE.md",
+                ws / "CLAUDE.md",
+                prov.claude_md(display, ws))
+
+        # The same persona on Codex (2026-10-01): `.codex/` beside `.claude/`,
+        # rendered from the same sources, and its skills link as `.claude/`
+        # has it.
+        compare(findings, f"{name} .codex/config.toml",
+                ws / ".codex" / "config.toml",
+                prov.codex_config(name, ws))
+        codex_skills = ws / ".codex" / "skills"
+        if (ws / "skills").is_dir() and not (
+                codex_skills.is_symlink()
+                and str(codex_skills.readlink()) == "../skills"):
+            findings.append((
+                f"{name} .codex/skills", str(codex_skills),
+                "not a link to ../skills, so a Codex thread does not see the "
+                "persona's skills. Run bin/provision --codex " + name + ".",
+            ))
+
+        # agent.json against what provision renders. The display name, the
+        # emoji and the default provider, model and thinking level are the
+        # profile's (2026-11-13: the owner sets them on the page), so the file's
+        # own values are expected; until then the emoji was held to the atlas
+        # note, which is now only a new agent's first face.
+        expected_agent = loam_profile.render_agent({
+            "name": name,
+            "display": name.capitalize(),
+            "emoji": prov.emoji_for(name.capitalize(), cfg.get("emoji")),
+            "workspace": str(ws),
+            "vault": str(prov.VAULT),
+            "wake_schedule": wake,
+            "wake_timezone": lc.TIMEZONE,
+            **loam_profile.kept(cfg),
+        })
+        compare(findings, f"{name} agent.json", ws / "agent.json", expected_agent)
+
+        # The conversation lane, which is three artifacts that have to agree
+        # and which all fail SILENTLY when they do not: settings names a
+        # style, the style file is a symlink, and the file it points at
+        # carries the frontmatter the loader selects on. Break any one and
+        # the session starts normally carrying no conversation layer. Nothing
+        # at runtime says so, which is exactly the class this file exists for.
+        styles = ws / ".claude" / "output-styles"
+        link = styles / f"{prov.STYLE_NAME}.md"
+        wanted_link = f"../../{prov.CONVERSATION_LAYER}"
+        if not link.is_symlink():
+            findings.append((
+                f"{name} conversation style", str(link),
+                "not a symlink. It must point at the agent's own "
+                f"{prov.CONVERSATION_LAYER}; a real file here would be text "
+                "the agent cannot edit, in its own system prompt.",
+            ))
+        elif str(link.readlink()) != wanted_link:
+            findings.append((
+                f"{name} conversation style", str(link),
+                f"points at {link.readlink()}, expected {wanted_link}",
+            ))
+        elif not link.exists():
+            findings.append((
+                f"{name} conversation style", str(link),
+                f"dangling: {prov.CONVERSATION_LAYER} does not exist, so no "
+                "conversation layer loads at all.",
+            ))
+
+        compare(findings, f"{name} none style", styles / "none.md",
+                prov.NONE_STYLE)
+
+        active = ws / prov.CONVERSATION_LAYER
+        if active.is_file():
+            body = active.read_text(encoding="utf-8")
+            missing = [
+                k for k in prov.style_frontmatter(display)
+                if k not in loam_memory.style_keys(body)
+            ]
+            if missing:
+                findings.append((
+                    f"{name} {prov.CONVERSATION_LAYER} frontmatter", str(active),
+                    f"missing style key(s): {', '.join(missing)}. The loader "
+                    f"selects by name and loads NOTHING when the key is "
+                    f"absent or disagrees — with no error. Re-run provision.",
+                ))
+
+        svc, tmr = prov.wake_units(name, ws, wake)
+        compare(findings, f"{name} wake.service",
+                UNIT_DIR / f"loam-wake-{name}.service", svc)
+        # The timer is the reflection record's (check_crons) once it has one.
+        if not loam_cron.cron_path(ws, loam_cron.REFLECTION).exists():
+            compare(findings, f"{name} wake.timer",
+                    UNIT_DIR / f"loam-wake-{name}.timer", tmr)
+
+        compare(findings, f"{name} rc.service",
+                UNIT_DIR / f"loam-rc-{name}.service",
+                genrc.TEMPLATE.format(
+                    display=display, name=name, workspace=str(ws)))
+
+    check_config_clauses(findings, names)
+    check_user_settings(findings, prov)
+    check_managed_settings(findings, prov)
+    model_notes = check_lane_models(findings, names, prov)
+    check_engineer(findings, prov)
+    check_reviewer(findings, prov)
+    project_names = check_projects(findings, prov)
+    cron_notes = check_crons(findings, names)
+    broker_notes = check_broker(findings)
+    deploy_notes = check_deploy(findings)
+    check_plugin_contributions(findings)
+    check_skills(findings)
+
+    # A box-move plugin keeps its own checks (drift.check, run above).
+
+    # Static units -- the ones with no per-agent instance. They are edited in
+    # agents/systemd/ and installed by hand into the user unit dir, which is
+    # rare enough not to earn a generator but often enough to drift. Compared
+    # both ways round: an edit that was never installed and an install that
+    # was never committed look identical from either side alone.
+    # Templates since 2026-11-14 (lib/loam_units.py): compared as rendered for
+    # this install, which is what bin/gen-units installs.
+    for name, text in loam_units.rendered(STATIC_UNITS).items():
+        compare(findings, f"static {name}", UNIT_DIR / name, text)
+    # The sign-in arms the Remote Control servers (bin/rc-arm, 2026-11-14):
+    # with the watch off, a sign-in starts none of them.
+    armed = user_systemctl("is-active", "loam-claude-signin.path")
+    if armed != "active":
+        findings.append((
+            "Remote Control arming", "systemctl --user is-active loam-claude-signin.path",
+            f"{armed or 'unknown'}: a Claude Code sign-in starts no Remote Control "
+            f"server while this is off. `systemctl --user enable --now "
+            f"loam-claude-signin.path`"))
+
+    # agents/systemd/ held a second copy of the five loam-rc-*.service files
+    # until 2026-09-02. gen-rc-units writes only to the user unit dir, so
+    # nothing kept them current and nothing compared them -- they were four
+    # days stale and still read as the source of truth. Deleted; this keeps
+    # them deleted. Same defect as provision.rc_unit(), same remedy.
+    #
+    # loam-cron-* joined the rule on 2026-09-05 for the identical reason: they
+    # are generated per-cron by the schedule reconciler (lib/loam_schedule.py) straight into the user unit
+    # dir, and a copy parked here would be a second, unrefreshed home for a
+    # definition that lives in the agent's own file.
+    strays = sorted(
+        u.name for u in STATIC_UNITS.iterdir()
+        if u.name.startswith(("loam-rc-", "loam-cron-"))
+    )
+    if strays:
+        findings.append((
+            "agents/systemd strays", "agents/systemd",
+            f"{', '.join(strays)} duplicate generated units. gen-rc-units and "
+            f"the reconciler write only to {UNIT_DIR}; a copy here is never "
+            f"refreshed and never checked, and reads as authoritative anyway.",
+        ))
+
+    # The generator must not itself hold a second copy of an artifact someone
+    # else owns. This is the exact shape of the rc_unit() trap.
+    if hasattr(prov, "rc_unit"):
+        findings.append((
+            "provision.rc_unit", "bin/provision",
+            "provision still defines rc_unit(); gen-rc-units is the owner of "
+            "loam-rc-*.service. Two generators for one artifact is what "
+            "re-introduced the shared-cgroup crash.",
+        ))
+
+    print(f"check-drift: {len(names)} agents ({', '.join(names)})")
+    engineer_state = ("provisioned"
+                      if (prov.ENGINEER / "agent.json").is_file()
+                      else "NOT provisioned")
+    print(f"check-drift: engineer {engineer_state} ({prov.ENGINEER})")
+    reviewer_state = ("provisioned"
+                      if (prov.REVIEWER / "agent.json").is_file()
+                      else "NOT provisioned")
+    print(f"check-drift: reviewer {reviewer_state} ({prov.REVIEWER})")
+    print(f"check-drift: {len(project_names)} project engineer(s)"
+          + (" (" + ", ".join(project_names) + ")" if project_names else ""))
+    live_crons = loam_cron.installed(names)
+    print(f"check-drift: {len(live_crons)} installed cron(s)" + (
+        " (" + ", ".join(f"{a}/{n}" for a, n in live_crons) + ")"
+        if live_crons else ""))
+    if cron_notes:
+        # Not a finding: a paused record is the schedule saying so.
+        print("check-drift: schedule records not live:")
+        for note in cron_notes:
+            print(note)
+    print("check-drift: session broker:")
+    for note in broker_notes:
+        print(note)
+    print("check-drift: deployment layer:")
+    for note in deploy_notes:
+        print(note)
+    # Printed whether or not it found anything: "which model is each lane
+    # actually on" is a question worth being able to answer by running this,
+    # not only a thing that fires when it is already wrong.
+    print("check-drift: effective models:")
+    for note in model_notes:
+        print(note)
+    if not findings:
+        print("check-drift: OK -- live state matches the generators")
+        return 0
+    return report(findings, quiet)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

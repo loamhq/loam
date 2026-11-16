@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Hourly: remove every board item whose ``until`` day has passed.
+
+The boards under ``vault/00_INBOX/boards/`` and General's, which is
+``00_INBOX/from-agents/comms.md``. An item is a list line carrying
+``<!-- … · until YYYY-MM-DD -->``; the date is the last day it stays. Lines
+without ``until`` are left alone -- comms.md's own 14-day sweep
+(``bin/sweep-inbox``) stays their timer there, and elsewhere they stay until
+someone removes them. Seeing never removes an item. Git is the recovery floor.
+
+    sweep-boards [--dry-run] [--today YYYY-MM-DD]
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from datetime import date
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_threads as threads  # noqa: E402
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="sweep-boards")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--today")
+    args = ap.parse_args()
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    total = 0
+    for path in threads.board_files():
+        text = path.read_text("utf-8")
+        kept, gone = threads.sweep_board(text, today)
+        if not gone:
+            continue
+        total += len(gone)
+        for line in gone:
+            print(f"{path.relative_to(threads.VAULT)}: {line.strip()}")
+        if not args.dry_run:
+            threads._write_atomic(path, kept)
+    print(f"sweep-boards: {total} line(s) {'would go' if args.dry_run else 'removed'}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

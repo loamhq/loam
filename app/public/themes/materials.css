@@ -1,0 +1,111 @@
+@import url('/themes/face-paints.css');
+/* First-party material rendering belongs to core, not the token-only plugin
+ * language. All effects are static backgrounds; nothing overlays reading ink. */
+.signature-art { display:none; }
+.signature-art [data-material] { display:none; }
+:root[data-option-agent-shapes="signature"] {
+  --agent-avatar-shape:28%;
+  --agent-avatar-tone-0:var(--face-edge); --agent-avatar-tone-1:var(--face-edge);
+  --agent-avatar-tone-2:var(--face-edge); --agent-avatar-tone-3:var(--face-edge);
+  --agent-avatar-tone-4:var(--face-edge); --agent-avatar-tone-5:var(--face-edge);
+  --agent-avatar-tone-6:var(--face-edge); --agent-avatar-tone-7:var(--face-edge);
+  --agent-avatar-tone-8:var(--face-edge); --agent-avatar-tone-9:var(--face-edge);
+  --agent-avatar-tone-10:var(--face-edge);
+}
+:root[data-option-agent-shapes="signature"] .blob[data-face-initial] { background:none !important; border-radius:0 !important; box-shadow:none; }
+:root[data-option-agent-shapes="signature"] .blob[data-face-initial] > .blob-letter,
+:root[data-option-agent-shapes="signature"] .blob[data-face-initial]::before { display:none; }
+:root[data-option-agent-shapes="signature"] .signature-art { display:block; position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+:root[data-look="deep-forest"] [data-material="deep-forest"],
+:root[data-look="autumn"] [data-material="autumn"],
+:root[data-look="yosemite"] [data-material="yosemite"],
+:root[data-look="mist-trail"] [data-material="mist-trail"],
+:root[data-look="foundry"] [data-material="foundry"] { display:inline; }
+.blob[data-face-small] .face-detail { display:none; }
+:root[data-option-face-content="initials"] .face-mark { display:none; }
+:root[data-option-agent-shapes="signature"][data-option-face-content="initials"] .blob[data-face-initial]::after {
+  content:attr(data-face-initial); position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-family:var(--font-body); font-size:.9em; font-weight:800; line-height:1; color:var(--face-ink);
+  text-shadow:0 1px 0 var(--face-light); pointer-events:none;
+}
+:root[data-option-agent-shapes="signature"] .avatar-wrap:has(> .blob[data-face-initial]) .breathe { background:var(--face-edge) !important; border-radius:28% !important; }
+
+:root[data-look="mist-trail"] {
+  --face-body:#71817B; --face-edge:#43564E; --face-light:#AFC2BA; --face-line:#263C32; --face-moss:#536A3D; --face-ink:#050E08;
+  --mist-light:rgba(222,242,235,.55);
+}
+:root[data-look="mist-trail"][data-theme="dark"] {
+  --face-body:#3E554C; --face-edge:#263B32; --face-light:#6A897B; --face-line:#9EB4AA; --face-moss:#5F7948; --face-ink:#F0F7F1;
+  --mist-light:rgba(165,218,199,.035);
+}
+:root[data-look="mist-trail"] :is(.pane,.screen,.setbody,.sheet) {
+  background-image:linear-gradient(to bottom,var(--mist-light),transparent 85px); background-repeat:no-repeat; background-size:100% 85px;
+}
+:root[data-look="mist-trail"] .appearance-stepper input { accent-color:var(--latte-coffee-2); }
+:root[data-look="mist-trail"] .theme-choice.on { border-color:var(--signal-crema); }
+:root[data-look="mist-trail"] .theme-choice-check { background:var(--latte-foam); color:var(--latte-foam-ink); }
+
+:root[data-look="deep-forest"] {
+  --face-body:#C7AB78; --face-edge:#3C4B32; --face-light:#E7D9B2; --face-line:#796039; --face-moss:#6D7E47; --face-ink:#2D2314;
+  --forest-light:rgba(129,156,100,.045);
+}
+:root[data-look="deep-forest"][data-theme="dark"] {
+  --face-body:#917B51; --face-edge:#303F2C; --face-light:#BEA777; --face-line:#584528; --face-moss:#748956; --face-ink:#0B1209;
+  --forest-light:rgba(169,197,119,.025);
+}
+:root[data-look="deep-forest"] :is(body,.pane,.screen,.setbody) {
+  background-image:radial-gradient(ellipse at 15% 0,var(--forest-light),transparent 62%),radial-gradient(ellipse at 84% 20%,var(--forest-light),transparent 48%);
+}
+
+:root[data-look="autumn"] {
+  --face-leaf-0:#CC9134; --face-leaf-1:#C8792E; --face-leaf-2:#D9B255; --face-leaf-3:#BE6835;
+  --face-edge:#805021; --face-line:#74461F; --face-light:transparent; --face-ink:#100803;
+  --autumn-light:rgba(231,167,63,.045);
+}
+:root[data-look="autumn"][data-theme="dark"] {
+  --face-leaf-0:#CC6E3E; --face-leaf-1:#CB5C46; --face-leaf-2:#DDA955; --face-leaf-3:#C37D41;
+  --face-edge:#874733; --face-line:#693B29; --face-ink:#100803;
+  --autumn-light:rgba(222,114,42,.045);
+}
+:root[data-look="autumn"] :is(body,.pane,.screen,.setbody) {
+  background-image:radial-gradient(ellipse at 0 0,var(--autumn-light),transparent 70%); background-repeat:no-repeat;
+}
+
+:root[data-look="yosemite"] {
+  --face-sky:#A8C8D7; --face-cloud:#DFEBED; --face-body:#C4C5B8; --face-edge:#838E8B;
+  --face-light:#EBEDE0; --face-line:#77847E; --face-moss:#6F7D4A; --face-ink:#243239;
+}
+:root[data-look="yosemite"][data-theme="dark"] {
+  --face-sky:#345266; --face-cloud:#738D98; --face-body:#9EA99F; --face-edge:#5C7378;
+  --face-light:#C9D4C8; --face-line:#526968; --face-moss:#63754D; --face-ink:#162731;
+}
+:root[data-look="yosemite"] :is(.card,.tt-board-item,.tt-row) {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='113' height='107'%3E%3Cg fill='%23566C74' opacity='.025'%3E%3Ccircle cx='8' cy='17' r='.7'/%3E%3Ccircle cx='48' cy='71' r='1'/%3E%3Ccircle cx='82' cy='28' r='.8'/%3E%3Ccircle cx='96' cy='94' r='.6'/%3E%3Ccircle cx='33' cy='42' r='.5'/%3E%3C/g%3E%3C/svg%3E");
+}
+:root[data-look="deep-forest"] .display { font-weight:550; font-optical-sizing:auto; }
+:root[data-look="yosemite"] .display { font-weight:600; }
+
+:root[data-look="foundry"] {
+  --face-body:#303D43; --face-edge:#68747A; --face-light:#929F9E; --face-line:#A5ABA2; --face-ink:#E4E4D4;
+}
+:root[data-look="foundry"][data-theme="dark"] {
+  --face-body:#29373E; --face-edge:#87745C; --face-light:#819398; --face-line:#ACB4AF; --face-ink:#E8DBBD;
+}
+:root[data-look="foundry"] :is(body,.pane,.screen,.setbody,.sheet) {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.83' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23808080' opacity='.025' filter='url(%23n)' d='M0 0h128v128H0z'/%3E%3C/svg%3E");
+}
+:root[data-look="foundry"] .display { font-weight:800; letter-spacing:.025em; }
+:root[data-look="foundry"] .theme-preview[data-look="foundry"] :is(.theme-choice-name,.theme-miniature .primary) { font-weight:800; letter-spacing:.025em; }
+:root[data-look="foundry"] :is(.tt-section-heading,.tt-details-section h3,.theme-option h4) { text-transform:uppercase; letter-spacing:.12em; font-size:11px; }
+:root[data-look="foundry"] :is(.iconbtn,.pillbtn,.chip,.navbtn,.roundbtn,.plusbtn,.modelbtn,.roundsend,.roundmic,.thread-tile,.segmented,.segmented button,.appearance-modes,.appearance-modes button,.navrow,.railtab,.theme-preview,.theme-choice-check,.tt-board-item,.tt-list-item,.card,.setrow) { border-radius:var(--radius-md); }
+:root[data-look="foundry"] :is(.composer,.composer-box,.tt-compose,.navpill,.popover,.menu-surface,.theme-choice) { border-radius:var(--radius-lg); }
+:root[data-look="foundry"] :is(.pane,.tt-board,.tt-tasks-panel,.tt-configuration,.settings,.pinned-card,.rows,.card.card-group,.fs-rootcard,.fs-preview,.fs-field,.fs-media,.fs-pdf,.apps-desk > main) { border-radius:var(--radius-xl); }
+:root[data-look="foundry"] [data-menu-surface] { border-radius:var(--radius-xl); }
+:root[data-look="foundry"] :is(.fold,.actions,.approve) { border-radius:var(--radius-lg); }
+:root[data-look="foundry"][data-theme="dark"] :is(.pane,.setbody,.sheet) { box-shadow:inset 1px 0 rgba(170,201,216,.12); }
+:root[data-look="foundry"][data-theme="dark"] :is(.pillbtn:not(.primary),.iconbtn,.appearance-modes button.on) { box-shadow:0 0 12px rgba(215,161,93,.045),inset 0 1px rgba(233,192,136,.09); }
+
+:root[data-look="yosemite"][data-option-agent-shapes="signature"] .blob[data-face-initial]::after { padding-top:28%; font-size:.8em; }
+:root[data-look="autumn"][data-option-face-content="initials"] .face-detail { display:none; }
+/* Carved initials use the AA body/facet pair, clear of glints, moss and grain. */
+:root:is([data-look="mist-trail"],[data-look="deep-forest"],[data-look="yosemite"])[data-option-face-content="initials"] .face-detail { display:none; }

@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily Remote Control recycle, before the wake grid opens
+
+[Timer]
+# 01:30 @ZONE_WORD@: after the commons sweep at 01:07, a clear half hour before
+# Iris wakes at 02:00, and inside the window where nobody is holding a
+# conversation. Persistent=false to match the wake timers -- a recycle missed
+# because the box was down should not fire late into the wake grid.
+OnCalendar=*-*-* 01:30:00 @TZ@
+Persistent=false
+Unit=loam-recycle-rc.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,820 @@
+#!/usr/bin/env python3
+"""The installer's eleven steps (first release L12). Started by install.sh,
+which fetched this release; run as root.
+
+  loam-install [--name NAME] [--owner "NAME"] [--timezone ZONE] [--yes]
+               [--source URL] [--version TAG]
+  rehearsal only: [--address IP] [--resolver system] [--local-certs]
+                  [--base DOMAIN]
+
+Each step writes /var/lib/loam/install/<n>-<step>.done when it has finished,
+and a run starts at the first step without one, so running the install
+command again carries on where the last run stopped. Every step is also
+safe to repeat. What each step runs goes to /var/log/loam-install.log; the
+screen gets one plain line per step, written for someone who has never used
+a terminal. docs/install.md is the whole account.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import pwd
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import textwrap
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent.parent          # this release's code
+LOG = Path("/var/log/loam-install.log")
+STATE = Path("/var/lib/loam/install")
+ANSWERS = STATE / "answers.json"
+CONFIG = Path("/etc/loam/loam.toml")
+ROOT_PYCACHE = "/var/cache/loam/pycache"               # root's bytecode, never the tree
+DEFAULT_SOURCE = "https://github.com/loamhq/loam.git"
+
+os.environ["PYTHONPYCACHEPREFIX"] = ROOT_PYCACHE
+os.environ.setdefault("LOAM_CONFIG", str(CONFIG))
+# No bytecode beside the code: anything in the checkout a release did not
+# put there refuses the next update (L13's clean-tree rule).
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(HERE / "lib"))
+import loam_install as li  # noqa: E402  (no loam_config yet: the file may not exist)
+
+WIDTH = 72
+
+
+class Stop(Exception):
+    """A step cannot go on. `say` is for the person; the log has the rest."""
+
+    def __init__(self, say: str, fix: str = "") -> None:
+        super().__init__(say)
+        self.say, self.fix = say, fix
+
+
+# ---------------------------------------------------------------------------
+# Saying things, and running things
+# ---------------------------------------------------------------------------
+
+def logline(text: str) -> None:
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    with LOG.open("a", encoding="utf-8") as fh:
+        fh.write(f"{dt.datetime.now().isoformat(timespec='seconds')} {text}\n")
+
+
+def say(text: str = "", indent: int = 0) -> None:
+    pad = " " * indent
+    for para in text.split("\n"):
+        print(textwrap.fill(para, WIDTH, initial_indent=pad, subsequent_indent=pad)
+              if para else "", flush=True)
+    logline(f"SAY {text}")
+
+
+def run(argv: list[str] | str, *, check: bool = True, input: str | None = None,
+        env: dict | None = None, timeout: int = 3600, cwd: str | None = None,
+        quiet_fail: bool = False, shown: str | None = None) -> subprocess.CompletedProcess:
+    full = argv if isinstance(argv, str) else " ".join(shlex.quote(a) for a in argv)
+    shown = shown or full
+    logline(f"RUN {full}")
+    res = subprocess.run(argv, shell=isinstance(argv, str), capture_output=True, text=True,
+                         input=input, env={**os.environ, **(env or {})}, timeout=timeout,
+                         cwd=cwd, check=False)
+    for stream in (res.stdout, res.stderr):
+        if stream.strip():
+            with LOG.open("a", encoding="utf-8") as fh:
+                fh.write(stream if stream.endswith("\n") else stream + "\n")
+    logline(f"EXIT {res.returncode}")
+    if check and res.returncode != 0 and not quiet_fail:
+        name = shown if len(shown) <= 70 else shown[:67] + "..."
+        raise Stop(f"one of the commands it runs did not work ({name})")
+    return res
+
+
+def user_env(cfg: dict) -> dict:
+    uid = pwd.getpwnam(cfg["user"]).pw_uid
+    home = cfg["home"]
+    return {"HOME": home, "USER": cfg["user"], "LOGNAME": cfg["user"],
+            "XDG_RUNTIME_DIR": f"/run/user/{uid}",
+            "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus",
+            "PATH": f"{home}/.local/bin:/usr/local/bin:/usr/bin:/bin",
+            "LOAM_CONFIG": str(CONFIG),
+            "PYTHONPYCACHEPREFIX": f"{home}/.cache/loam/pycache"}
+
+
+def as_user(cfg: dict, argv: list[str], **kw) -> subprocess.CompletedProcess:
+    """A command as Loam's user, in its home (a tool started in root's
+    working directory reads root's files: uv read /root/uv.toml and was
+    refused, found in the first rehearsal)."""
+    env = user_env(cfg)
+    kw.setdefault("cwd", cfg["home"])
+    kw.setdefault("shown", " ".join(shlex.quote(a) for a in argv))
+    return run(["runuser", "-u", cfg["user"], "--", "env", "-i",
+                *(f"{k}={v}" for k, v in env.items()), *argv], **kw)
+
+
+def ask(question: str, default: str = "", *, check=None) -> str:
+    """One question, from the terminal even when the script came down a pipe."""
+    try:
+        tty = open("/dev/tty", "r+", encoding="utf-8")
+    except OSError:
+        if default:
+            return default
+        raise Stop(f"The installer needs an answer and has no way to ask: {question}",
+                   "run it again with the answer given as an option (see --help)")
+    with tty:
+        while True:
+            hint = f" [{default}]" if default else ""
+            tty.write(f"\n{question}{hint}: ")
+            tty.flush()
+            answer = tty.readline().strip() or default
+            why = check(answer) if check else (None if answer else "an answer is needed")
+            if not why:
+                logline(f"ASKED {question} -> {answer}")
+                return answer
+            tty.write(f"  {why}\n")
+
+
+# ---------------------------------------------------------------------------
+# The answers this install keeps between runs
+# ---------------------------------------------------------------------------
+
+def load_answers() -> dict:
+    try:
+        return json.loads(ANSWERS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_answers(ans: dict) -> None:
+    STATE.mkdir(parents=True, exist_ok=True)
+    tmp = ANSWERS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(ans, indent=2) + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, ANSWERS)
+
+
+def config_values() -> dict:
+    import tomllib  # noqa: PLC0415
+    raw = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
+    paths = raw.get("paths", {})
+    return {"user": raw.get("user", li.USER), "home": paths["home"], "root": paths["root"],
+            "vault": paths["vault"], "workspaces": paths["workspaces"],
+            "projects": paths["projects"], "plugins": paths["plugins"],
+            "edge": raw.get("edge", {}), "timezone": raw.get("timezone", "UTC"),
+            "owner": raw.get("owner", {}).get("name", "")}
+
+
+def mark_done(n: int) -> None:
+    STATE.mkdir(parents=True, exist_ok=True)
+    li.step_file(n).write_text(dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds") + "\n")
+
+
+# ---------------------------------------------------------------------------
+# 1. Preflight
+# ---------------------------------------------------------------------------
+
+def os_release() -> dict:
+    out = {}
+    for line in Path("/etc/os-release").read_text().splitlines():
+        k, _, v = line.partition("=")
+        out[k] = v.strip().strip('"')
+    return out
+
+
+def listeners(port: int) -> list[str]:
+    res = run(["ss", "-Htlnp", f"( sport = :{port} )"], check=False)
+    names = re.findall(r'users:\(\("([^"]+)"', res.stdout)
+    return sorted(set(names)) if res.stdout.strip() else []
+
+
+def step_preflight(a, ans: dict) -> None:
+    osr = os_release()
+    ok_os = (osr.get("ID") == "debian" and osr.get("VERSION_ID") == "12") or \
+            (osr.get("ID") == "ubuntu" and osr.get("VERSION_ID") == "24.04")
+    if not ok_os:
+        raise Stop(f"Loam installs on Debian 12 or Ubuntu 24.04. This server is "
+                   f"{osr.get('PRETTY_NAME', 'something else')}.",
+                   "make a new server with Debian 12, then run the install command on it")
+    mem_mb = int(re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text()).group(1)) // 1024
+    if mem_mb < 3600:
+        raise Stop(f"Loam needs a server with at least 4 GB of memory; this one has "
+                   f"{mem_mb / 1024:.1f} GB.", "choose a bigger server size and run it again")
+    free_gb = shutil.disk_usage("/").free / 1e9
+    if free_gb < 15:
+        raise Stop(f"Loam needs at least 15 GB of free disk; this server has {free_gb:.0f} GB.",
+                   "choose a server with a bigger disk")
+    for port in (80, 443):
+        held = [n for n in listeners(port) if n != "caddy"]
+        if held:
+            raise Stop(f"Something else on this server already answers on port {port} "
+                       f"({', '.join(held)}). Loam needs ports 80 and 443 for itself.",
+                       "install Loam on a fresh server, or stop that program first")
+
+    # The address the name must point at.
+    address = a.address or ans.get("address") or li.primary_address()
+    if not address or (not li.is_public(address) and not a.address):
+        raise Stop(f"This server has no public internet address of its own "
+                   f"(it sends from {address or 'nowhere'}), so nobody could reach Loam on it.",
+                   "use a server with a public IPv4 address (Hetzner, DigitalOcean and "
+                   "the like give every server one)")
+
+    if CONFIG.exists():
+        cfg = config_values()
+        name = cfg["edge"].get("name")
+        if a.name and name and a.name != name:
+            raise Stop(f"This server is already set up as {cfg['edge'].get('domain')}.",
+                       f"run the install command with --name {name}, or without --name")
+        ans.update({"name": name, "owner": cfg["owner"], "timezone": cfg["timezone"],
+                    "address": cfg["edge"].get("address", address)})
+        save_answers(ans)
+        say(f"This server is already set up for {cfg['edge'].get('domain')}; carrying on.", 2)
+        return
+
+    base = a.base or ans.get("base") or li.BASE_DOMAIN
+    name = a.name or ans.get("name") or ask(
+        f"Choose your name. Your Loam will be at <name>.{base}",
+        check=li.valid_name)
+    why = li.valid_name(name)
+    if why:
+        raise Stop(f"\"{name}\" cannot be used: {why}.", "run it again with another --name")
+    owner = a.owner or ans.get("owner") or ask("Your first name, as Loam should call you")
+    tz_default = run(["timedatectl", "show", "-p", "Timezone", "--value"],
+                     check=False).stdout.strip() or "UTC"
+    tz = a.timezone or ans.get("timezone") or ask(
+        "Your time zone (for example Europe/Berlin or America/New_York)",
+        tz_default if not a.yes else tz_default, check=valid_zone)
+    if valid_zone(tz):
+        raise Stop(f"\"{tz}\" is not a time zone this server knows.",
+                   "use a name like Europe/Berlin or America/Los_Angeles")
+    ans.update({"name": name, "owner": owner, "timezone": tz, "address": address,
+                "base": base, "resolver": a.resolver, "tls": "internal" if a.local_certs else "acme",
+                "source": a.source or ans.get("source") or DEFAULT_SOURCE,
+                "version": ans.get("version") or a.version})
+    save_answers(ans)
+    home = f"/home/{li.USER}"
+    text = li.render_config(name=name, owner=owner, timezone=tz, address=address, home=home,
+                            base=base, resolver=a.resolver,
+                            tls="internal" if a.local_certs else "acme")
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG.write_text(text, encoding="utf-8")
+    os.chmod(CONFIG, 0o644)
+    say(f"Your Loam will be {name}.{base}, for {owner}, in {tz}.", 2)
+
+
+def valid_zone(zone: str) -> str | None:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # noqa: PLC0415
+    try:
+        ZoneInfo(zone)
+        return None
+    except (ZoneInfoNotFoundError, ValueError):
+        return "that is not a time zone name this server knows"
+
+
+# ---------------------------------------------------------------------------
+# 2. The name
+# ---------------------------------------------------------------------------
+
+def step_name(a, ans: dict) -> None:
+    cfg = config_values()
+    edge = cfg["edge"]
+    base = edge["domain"].split(".", 1)[1]
+    found = li.name_check(edge["name"], edge["address"], base=base,
+                          resolver=edge.get("resolver", "public"))
+    ans["name_check"] = found
+    save_answers(ans)
+    if found["state"] == "taken":
+        raise Stop(f"{edge['domain']} is already someone else's: it points to another server "
+                   f"({', '.join(found['apex'])}).",
+                   "choose another name and run the install command again with --name")
+    if found["state"] == "here":
+        say(f"{edge['domain']} already points to this server.", 2)
+    elif found["state"] == "unknown":
+        say("The name could not be checked right now (no answer from DNS). Carrying on; "
+            "it is checked again before Loam goes on the web.", 2)
+    else:
+        say(f"{edge['domain']} does not point to this server yet. That is fine: everything "
+            f"until the last steps works without it. Two DNS records are needed:", 2)
+        for rec in li.records_to_ask_for(edge["name"], edge["address"], base):
+            say(rec, 6)
+
+
+# ---------------------------------------------------------------------------
+# 3. System packages
+# ---------------------------------------------------------------------------
+
+APT = ["git", "python3", "python3-yaml", "sqlite3", "ripgrep", "ffmpeg", "nftables",
+       "iptables", "curl", "ca-certificates", "gnupg", "sudo", "dnsutils", "iproute2",
+       "unzip",
+       "dbus-user-session", "procps", "lsof", "systemd-timesyncd"]
+
+
+def clock_skew() -> float | None:
+    """Seconds this box's clock is off, read against the Date header of an
+    HTTPS answer (second resolution; enough to see minutes)."""
+    import email.utils  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+    for url in ("https://deb.debian.org/", "https://www.cloudflare.com/"):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=10) as r:
+                stamp = email.utils.parsedate_to_datetime(r.headers["Date"]).timestamp()
+            return time.time() - stamp
+        except (OSError, TypeError, ValueError):
+            continue
+    return None
+
+
+def ensure_clock() -> None:
+    """The login refuses to start on a clock that is off (Authelia's NTP
+    check), and passkeys and one-time codes need the time. Time sync on;
+    then, if the clock is still minutes out, set it once from the answer
+    above and say so in the log (found in the first rehearsal: a box an
+    hour behind, with no time sync, left the login in a restart loop)."""
+    run(["timedatectl", "set-ntp", "true"], check=False)
+    for _ in range(10):
+        skew = clock_skew()
+        if skew is None or abs(skew) < 5:
+            return
+        time.sleep(3)
+    logline(f"CLOCK off by {skew:.0f}s after time sync was turned on; setting it once")
+    run(["date", "-u", "-s", f"@{int(time.time() - skew)}"], check=False)
+
+
+def apt(*pkgs: str) -> None:
+    env = {"DEBIAN_FRONTEND": "noninteractive"}
+    run(["apt-get", "install", "-y", "-q", "--no-install-recommends", *pkgs], env=env, timeout=3600)
+
+
+def add_repo(name: str, key_url: str, line: str) -> None:
+    keyring = Path(f"/usr/share/keyrings/{name}.gpg")
+    if not keyring.exists():
+        run(f"curl -fsSL {shlex.quote(key_url)} | gpg --dearmor -o {keyring}")
+    Path(f"/etc/apt/sources.list.d/{name}.list").write_text(line.format(keyring=keyring) + "\n")
+
+
+def step_packages(a, ans: dict) -> None:
+    osr = os_release()
+    distro, codename = osr["ID"], osr.get("VERSION_CODENAME", "bookworm")
+    env = {"DEBIAN_FRONTEND": "noninteractive"}
+    run(["apt-get", "update", "-q"], env=env)
+    apt(*APT)
+    arch = run(["dpkg", "--print-architecture"]).stdout.strip()
+    add_repo("caddy-stable", "https://dl.cloudsmith.io/public/caddy/stable/gpg.key",
+             "deb [signed-by={keyring}] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main")
+    add_repo("docker", f"https://download.docker.com/linux/{distro}/gpg",
+             f"deb [arch={arch} signed-by={{keyring}}] https://download.docker.com/linux/{distro} {codename} stable")
+    add_repo("nodesource", "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key",
+             "deb [signed-by={keyring}] https://deb.nodesource.com/node_24.x nodistro main")
+    run(["apt-get", "update", "-q"], env=env)
+    apt("caddy", "docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin", "nodejs")
+    run(["systemctl", "enable", "--now", "docker", "caddy"])
+    ensure_clock()
+    say("Installed git, Python, Docker, Caddy, Node and the rest.", 2)
+
+
+# ---------------------------------------------------------------------------
+# 4. The user
+# ---------------------------------------------------------------------------
+
+def step_user(a, ans: dict) -> None:
+    cfg = config_values()
+    user, home = cfg["user"], cfg["home"]
+    try:
+        pwd.getpwnam(user)
+    except KeyError:
+        run(["useradd", "--create-home", "--home-dir", home, "--shell", "/bin/bash", user])
+    run(["usermod", "-aG", "sudo,docker", user])
+    sudoers = Path("/etc/sudoers.d/loam")
+    text = (f"# Loam's agents get the whole machine (first release, decision 1).\n"
+            f"{user} ALL=(ALL) NOPASSWD: ALL\n"
+            f'Defaults env_keep += "PYTHONPYCACHEPREFIX LOAM_CONFIG"\n')
+    tmp = sudoers.with_suffix(".tmp")
+    tmp.write_text(text)
+    os.chmod(tmp, 0o440)
+    run(["visudo", "-cf", str(tmp)])
+    os.replace(tmp, sudoers)
+    run(["loginctl", "enable-linger", user])
+    uid = pwd.getpwnam(user).pw_uid
+    for _ in range(30):
+        if Path(f"/run/user/{uid}/bus").exists():
+            break
+        time.sleep(1)
+    else:
+        raise Stop("Loam's user was made, but its background services did not start.",
+                   "restart the server and run the install command again")
+    tz = cfg["timezone"]
+    if run(["timedatectl", "set-timezone", tz], check=False).returncode != 0:
+        Path("/etc/localtime").unlink(missing_ok=True)
+        os.symlink(f"/usr/share/zoneinfo/{tz}", "/etc/localtime")
+        Path("/etc/timezone").write_text(tz + "\n")
+    # Setting the zone can move the clock: the kernel's first settimeofday
+    # with a zone shifts it by the zone's offset unless systemd told it at
+    # boot that the hardware clock is UTC, which a systemd that is not the
+    # machine's own first process cannot (the rehearsal's sandbox: an hour
+    # behind, and the login refused to start). So the clock is checked again.
+    ensure_clock()
+    # Python's bytecode never lands in the checkout: for the user's services,
+    # its shells, and root's runs.
+    pyc = f"{home}/.cache/loam/pycache"
+    envd = Path(home) / ".config" / "environment.d"
+    as_user(cfg, ["mkdir", "-p", str(envd), pyc])
+    as_user(cfg, ["sh", "-c", f"printf 'PYTHONPYCACHEPREFIX={pyc}\\nLOAM_CONFIG={CONFIG}\\n' "
+                              f"> {envd}/50-loam.conf"])
+    profile = Path(home) / ".profile"
+    have = profile.read_text(errors="ignore") if profile.exists() else ""
+    for line in (f"export PYTHONPYCACHEPREFIX={pyc}", f"export LOAM_CONFIG={CONFIG}"):
+        if line not in have:
+            as_user(cfg, ["sh", "-c", f"printf '\\n{line}\\n' >> {profile}"])
+    Path("/etc/profile.d/loam.sh").write_text(
+        f"# Loam (install.sh): Python's bytecode outside Loam's checkout.\n"
+        f'if [ "$(id -u)" = 0 ]; then export PYTHONPYCACHEPREFIX={ROOT_PYCACHE}; fi\n')
+    as_user(cfg, ["systemctl", "--user", "set-environment",
+                  f"PYTHONPYCACHEPREFIX={pyc}", f"LOAM_CONFIG={CONFIG}"])
+    # Docker's daemon.json before anything uses Docker: loopback publishes and
+    # userns-remap move where Docker keeps everything, so it is set once, here.
+    import loam_deploy as dep  # noqa: PLC0415
+    want = dep.daemon_json()
+    if not dep.DAEMON_JSON.exists() or dep.DAEMON_JSON.read_text() != want:
+        dep.DAEMON_JSON.parent.mkdir(parents=True, exist_ok=True)
+        dep.DAEMON_JSON.write_text(want)
+        run(["systemctl", "restart", "docker"])
+    say(f"Made the user \"{user}\" that Loam and its agents run as.", 2)
+
+
+# ---------------------------------------------------------------------------
+# 5. Loam
+# ---------------------------------------------------------------------------
+
+def git_env() -> dict:
+    """The install token, for a private repository, as an HTTP header that
+    lives only in this process's environment: never in a file, a URL, or a
+    git config on disk."""
+    token = os.environ.get("LOAM_INSTALL_TOKEN", "")
+    if not token:
+        return {}
+    import base64  # noqa: PLC0415
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraHeader",
+            "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}"}
+
+
+def step_loam(a, ans: dict) -> None:
+    cfg = config_values()
+    user, root = cfg["user"], Path(cfg["root"])
+    release = Path(os.environ.get("LOAM_RELEASE_DIR", str(HERE)))
+    version = ans.get("version") or run(["git", "-C", str(release), "describe", "--tags",
+                                         "--exact-match"], check=False).stdout.strip()
+    if not (root / ".git").is_dir():
+        run(["git", "clone", "--quiet", "--no-hardlinks", str(release), str(root)])
+        run(["chown", "-R", f"{user}:{user}", str(root)])
+    as_user(cfg, ["git", "-C", str(root), "remote", "set-url", "origin",
+                  ans.get("source") or DEFAULT_SOURCE])
+    head = as_user(cfg, ["git", "-C", str(root), "rev-parse", "HEAD"]).stdout.strip()
+    want = run(["git", "-C", str(release), "rev-parse", "HEAD"]).stdout.strip()
+    if head != want:
+        as_user(cfg, ["git", "-C", str(root), "fetch", "--quiet", str(release), "--tags"])
+        as_user(cfg, ["git", "-C", str(root), "checkout", "--quiet", want])
+    ans["commit"], ans["version"] = want, version or ans.get("version")
+    save_answers(ans)
+    for key in ("vault", "workspaces", "projects", "plugins"):
+        as_user(cfg, ["mkdir", "-p", cfg[key]])
+    as_user(cfg, ["mkdir", "-p", f"{cfg['home']}/.local/state/loam",
+                  f"{cfg['home']}/.config/loam", f"{cfg['home']}/.local/bin"])
+    if not (Path(cfg["plugins"]) / ".git").is_dir():
+        as_user(cfg, ["git", "-C", cfg["plugins"], "init", "--quiet"])
+    # uv, then the MCP servers' Python.
+    if not Path(f"{cfg['home']}/.local/bin/uv").exists():
+        as_user(cfg, ["sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | "
+                                  "env UV_NO_MODIFY_PATH=1 sh"], timeout=900)
+    venv = f"{cfg['home']}/.local/share/loam/mcp-venv"
+    if not Path(venv, "bin", "python").exists():
+        as_user(cfg, [f"{cfg['home']}/.local/bin/uv", "venv", "--quiet", "--python",
+                      "/usr/bin/python3", venv])
+    as_user(cfg, [f"{cfg['home']}/.local/bin/uv", "pip", "install", "--quiet", "--python",
+                  f"{venv}/bin/python", "-r", str(root / "mcp" / "requirements.txt")], timeout=1800)
+    link = Path("/usr/local/bin/loam")
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.symlink_to(root / "bin" / "loam")
+    say(f"Loam {ans.get('version') or want[:7]} is at {root}.", 2)
+
+
+# ---------------------------------------------------------------------------
+# 6. The starter vault
+# ---------------------------------------------------------------------------
+
+def step_vault(a, ans: dict) -> None:
+    cfg = config_values()
+    root = cfg["root"]
+    as_user(cfg, ["python3", f"{root}/bin/library", "seed-vault"])
+    ident = ["-c", "user.name=loam", "-c", f"user.email=loam@{cfg['edge']['domain']}"]
+    for key in ("vault", "workspaces"):
+        where = cfg[key]
+        if not Path(where, ".git").is_dir():
+            as_user(cfg, ["git", "-C", where, "init", "--quiet"])
+            as_user(cfg, ["git", "-C", where, *ident, "add", "-A"])
+            as_user(cfg, ["git", "-C", where, *ident, "commit", "--quiet", "--allow-empty",
+                          "-m", "Loam: the starting point"])
+    reach = Path(cfg["workspaces"]) / "_shared" / "reach.md"
+    if not reach.exists():
+        text = as_user(cfg, ["python3", "-c",
+                             f"import sys; sys.path.insert(0, {root + '/lib'!r}); "
+                             "import loam_install; print(loam_install.reach_text(), end='')"]).stdout
+        as_user(cfg, ["mkdir", "-p", str(reach.parent)])
+        as_user(cfg, ["sh", "-c", f"cat > {shlex.quote(str(reach))}"], input=text)
+    say(f"Made your vault at {cfg['vault']} (Inbox, Conversations, Projects, "
+        f"Attachments, System).", 2)
+
+
+# ---------------------------------------------------------------------------
+# 7. The providers
+# ---------------------------------------------------------------------------
+
+PROVIDERS_PY = """
+import sys
+sys.path.insert(0, {lib!r})
+import loam_follow as f
+which, version = sys.argv[1], sys.argv[2]
+p = {{"claude-code": f.ClaudeCode, "codex": f.Codex}}[which]()
+if version not in p.installed():
+    p.install(version)
+p.link.parent.mkdir(parents=True, exist_ok=True)
+p.repoint(version)
+print(p.version_of(p.link))
+"""
+
+
+def step_providers(a, ans: dict) -> None:
+    cfg = config_values()
+    root, home = cfg["root"], cfg["home"]
+    script = PROVIDERS_PY.format(lib=f"{root}/lib")
+    got = {}
+    for which, label in (("claude-code", "Claude Code"), ("codex", "Codex")):
+        want = li.TESTED[which]
+        res = as_user(cfg, ["python3", "-c", script, which, want], timeout=1800, check=False)
+        version = res.stdout.strip().splitlines()[-1:] or [""]
+        if res.returncode != 0 or version[0] != want:
+            raise Stop(f"{label} {want} could not be installed.",
+                       "check this server can reach the internet, then run the install "
+                       "command again")
+        got[which] = version[0]
+    agy = Path(home) / ".local" / "bin" / "agy"
+    if not agy.exists():
+        as_user(cfg, ["sh", "-c", "curl -fsSL https://antigravity.google/cli/install.sh | bash"],
+                timeout=1800)
+    res = as_user(cfg, [str(agy), "--version"], check=False)
+    got["antigravity"] = (re.search(r"\d+\.\d+\.\d+", res.stdout) or [""])[0] if res.returncode == 0 else ""
+    if not got["antigravity"]:
+        raise Stop("Antigravity could not be installed.",
+                   "check this server can reach the internet, then run the install command again")
+    # Every provider's own memory off, and proved off.
+    as_user(cfg, ["python3", f"{root}/bin/provider-memory", "pin"])
+    check = as_user(cfg, ["python3", f"{root}/bin/provider-memory", "check"], check=False)
+    if check.returncode != 0:
+        raise Stop("The AI tools' own memory could not be confirmed off.",
+                   "the details are at the end of /var/log/loam-install.log")
+    ans["providers"] = got
+    save_answers(ans)
+    say(f"Installed Claude Code {got['claude-code']}, Codex {got['codex']} and "
+        f"Antigravity {got['antigravity']}, each with its own memory switched off "
+        f"(Loam keeps the memory).", 2)
+
+
+# ---------------------------------------------------------------------------
+# 8. Iris and the hello thread
+# ---------------------------------------------------------------------------
+
+def step_starter(a, ans: dict) -> None:
+    cfg = config_values()
+    res = as_user(cfg, ["python3", f"{cfg['root']}/bin/library", "seed-starter"],
+                  check=False, timeout=3600)
+    try:
+        out = json.loads(res.stdout)
+    except ValueError:
+        out = {}
+    if res.returncode != 0 or not (out.get("thread") or "seeded at" in out.get("skipped", "")):
+        raise Stop("Iris, your first agent, could not be made.",
+                   "run the install command again; a half-made Iris is set aside and made again")
+    ans["starter"] = out
+    save_answers(ans)
+    say("Made Iris, your first agent, and your first conversation with her.", 2)
+
+
+# ---------------------------------------------------------------------------
+# 9. Units
+# ---------------------------------------------------------------------------
+
+SYSTEM_UNITS = ("loam-broker-firewall.service", "loam-claim.service",
+                "loam-await-dns.service", "loam-await-dns.timer")
+
+
+def system_unit_text(name: str, cfg: dict) -> str:
+    text = (Path(cfg["root"]) / "systemd" / "system" / name).read_text(encoding="utf-8")
+    return (text.replace("@ROOT@", cfg["root"]).replace("@PYCACHE@", ROOT_PYCACHE))
+
+
+def install_system_units(cfg: dict) -> bool:
+    changed = False
+    for name in SYSTEM_UNITS:
+        path = Path("/etc/systemd/system") / name
+        text = system_unit_text(name, cfg)
+        if not path.exists() or path.read_text() != text:
+            path.write_text(text)
+            changed = True
+    if changed:
+        run(["systemctl", "daemon-reload"])
+    return changed
+
+
+def step_units(a, ans: dict) -> None:
+    cfg = config_values()
+    root = cfg["root"]
+    sys.path.insert(0, f"{root}/lib")
+    import loam_broker as brk  # noqa: PLC0415
+    # The broker's bridge and the wall around its port, before the broker binds.
+    if run(["docker", "network", "inspect", brk.NETWORK], check=False).returncode != 0:
+        run(["docker", "network", "create", "--subnet", brk.SUBNET, "--gateway", brk.BIND_ADDR,
+             "-o", "com.docker.network.bridge.name=br-loambroker", brk.NETWORK])
+    fw = Path(root) / "broker" / "firewall.sh"
+    run(["install", "-D", "-o", "root", "-g", "root", "-m", "755", str(fw), str(brk.FIREWALL_SCRIPT)])
+    install_system_units(cfg)
+    run(["systemctl", "enable", "--now", brk.WALL_SERVICE])
+    # The user's units, rendered from the templates; services started and
+    # timers armed so that none fires on the spot (lib/loam_units.py).
+    as_user(cfg, ["python3", f"{root}/bin/gen-units"])
+    as_user(cfg, ["systemctl", "--user", "daemon-reload"])
+    # loam-claude-signin.path: the Claude Code sign-in starts the agents' Remote
+    # Control servers, which wait until there is one (bin/rc-arm).
+    for svc in (brk.SERVICE, "loam-plugins-gateway.service", "loam-claude-signin.path"):
+        as_user(cfg, ["systemctl", "--user", "enable", "--now", svc])
+    arm = (f"import sys; sys.path.insert(0, {root + '/lib'!r}); import loam_units as u\n"
+           "for t in sorted(n for n in u.rendered() if n.endswith('.timer')):\n"
+           "    print(t, u.arm_timer(t))\n")
+    as_user(cfg, ["python3", "-c", arm])
+    up = False
+    for _ in range(60):
+        if run(["curl", "-fsS", "-o", "/dev/null", f"http://{brk.BIND_ADDR}:{brk.PORT}/up"],
+               check=False).returncode == 0:
+            up = True
+            break
+        time.sleep(2)
+    if not up:
+        raise Stop("Loam's engine (the session broker) did not start.",
+                   f"its log: sudo -u {cfg['user']} journalctl --user -u {brk.SERVICE} -n 50")
+    say("Started Loam's engine, its plugin host and its timers.", 2)
+
+
+# ---------------------------------------------------------------------------
+# 10. The edge
+# ---------------------------------------------------------------------------
+
+def step_edge(a, ans: dict) -> None:
+    cfg = config_values()
+    root, edge = cfg["root"], cfg["edge"]
+    py = sys.executable
+    run([py, f"{root}/bin/gen-deploy", "--init-secrets"])
+    run([py, f"{root}/bin/gen-deploy"], timeout=1800)
+    commit = ans.get("commit") or run(["git", "-C", root, "rev-parse", "HEAD"]).stdout.strip()
+    run([py, f"{root}/bin/deploy", edge.get("app", "loam-ui"), "up", commit], timeout=3600)
+    install_system_units(cfg)
+    run(["systemctl", "enable", "--now", "loam-claim.service"])
+    res = run([py, f"{root}/bin/loam-await-dns"], timeout=1800, check=False)
+    sys.path.insert(0, f"{root}/lib")
+    import loam_deploy as dep  # noqa: PLC0415
+    state = dep.edge_state()
+    if state.get("ready_at"):
+        say(f"Loam is on the web at https://{edge['domain']}/ with its certificate.", 2)
+        return
+    run(["systemctl", "enable", "--now", "loam-await-dns.timer"])
+    if state.get("dns") == "resolved":
+        say(f"{edge['domain']} points here; its certificate is on its way. Loam keeps "
+            f"checking by itself.", 2)
+    else:
+        base = edge["domain"].split(".", 1)[1]
+        say(f"Everything is ready except the name: {edge['domain']} does not point to this "
+            f"server yet. Add these two DNS records (type A, not proxied):", 2)
+        for rec in li.records_to_ask_for(edge["name"], edge["address"], base):
+            say(rec, 6)
+        say("Loam checks every 30 seconds and goes on the web by itself as soon as they "
+            "work. Nothing else needs doing here.", 2)
+    if res.returncode:
+        logline("loam-await-dns exited non-zero; the timer will carry on")
+
+
+# ---------------------------------------------------------------------------
+# 11. The claim
+# ---------------------------------------------------------------------------
+
+def step_claim(a, ans: dict) -> None:
+    cfg = config_values()
+    sys.path.insert(0, f"{cfg['root']}/lib")
+    import loam_deploy as dep  # noqa: PLC0415
+    if not dep.unclaimed():
+        say("This Loam already has its owner.", 2)
+        return
+    li.mint_claim()
+    os.chmod(li.CLAIM_FILE, 0o600)
+    say("Made the one-time link that creates your sign-in.", 2)
+
+
+# ---------------------------------------------------------------------------
+
+STEP_FUNCS = {1: step_preflight, 2: step_name, 3: step_packages, 4: step_user,
+              5: step_loam, 6: step_vault, 7: step_providers, 8: step_starter,
+              9: step_units, 10: step_edge, 11: step_claim}
+
+
+def finale() -> None:
+    cfg = config_values()
+    sys.path.insert(0, f"{cfg['root']}/lib")
+    import loam_deploy as dep  # noqa: PLC0415
+    domain = cfg["edge"]["domain"]
+    state = dep.edge_state()
+    print()
+    say("Loam is installed.")
+    print()
+    if dep.unclaimed():
+        link = li.claim_link(domain)
+        if state.get("ready_at"):
+            say("Open this link in your browser to make your sign-in. It works once; "
+                "whoever opens it first becomes this Loam's owner, so keep it private:")
+        else:
+            say("This is your link to make your sign-in. It starts working once the name "
+                "points here (Loam checks by itself every 30 seconds). Keep it private: "
+                "whoever opens it first becomes this Loam's owner.")
+        print(f"\n    {link}\n")
+        say("To see how everything is doing, or to see this link again, type:  loam status")
+    else:
+        say(f"Open https://{domain}/ and sign in.")
+        print()
+        say("To see how everything is doing, type:  loam status")
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(prog="install.sh", description="Install Loam on this server.")
+    p.add_argument("--name", help="your name on the web: <name>.<domain>")
+    p.add_argument("--owner", help="your first name, as Loam should call you")
+    p.add_argument("--timezone", help="for example Europe/Berlin")
+    p.add_argument("--yes", action="store_true", help="take the defaults; ask nothing")
+    p.add_argument("--source", help=argparse.SUPPRESS)
+    p.add_argument("--version", help=argparse.SUPPRESS)
+    p.add_argument("--address", help=argparse.SUPPRESS)       # rehearsal: behind NAT
+    p.add_argument("--resolver", default="public", choices=("public", "system"),
+                   help=argparse.SUPPRESS)                     # rehearsal: /etc/hosts
+    p.add_argument("--local-certs", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--base", help=argparse.SUPPRESS)          # rehearsal: a .test name
+    a = p.parse_args()
+    if os.geteuid() != 0:
+        print("The installer needs to run as root: put  sudo  in front of the command.")
+        return 2
+    STATE.mkdir(parents=True, exist_ok=True)
+    ans = load_answers()
+    logline(f"=== install.sh {' '.join(sys.argv[1:])}")
+    start = li.first_unfinished()
+    if start is None:
+        say("Every step of the install has already finished. Nothing to do.")
+        finale()
+        return 0
+    if start > 1:
+        say(f"Carrying on from step {start} of 11; steps 1 to {start - 1} finished earlier.")
+    for n, _key, label in li.STEPS:
+        if n < start:
+            continue
+        print()
+        say(f"Step {n} of 11: {label}")
+        t0 = time.time()
+        try:
+            STEP_FUNCS[n](a, ans)
+        except Stop as stop:
+            logline(f"STOP step {n}: {stop.say}")
+            print()
+            say(f"The install stopped at step {n} of 11 ({label[0].lower() + label[1:]}): {stop.say}")
+            if stop.fix:
+                say(f"What to do: {stop.fix}.")
+            say("Running the same install command again carries on from this step; "
+                "everything before it is kept. If it stops here again, send the file "
+                f"{LOG} to whoever helps you with Loam.")
+            return 1
+        except Exception as exc:  # noqa: BLE001 -- the person gets a sentence, the log the trace
+            import traceback  # noqa: PLC0415
+            logline("TRACE " + traceback.format_exc())
+            print()
+            say(f"The install stopped at step {n} of 11, on something unexpected "
+                f"({exc.__class__.__name__}: {str(exc)[:160]}).")
+            say("Running the same install command again carries on from this step. If it "
+                "stops here again, send /var/log/loam-install.log to whoever helps you "
+                "with Loam.")
+            return 1
+        mark_done(n)
+        logline(f"DONE step {n} in {time.time() - t0:.0f}s")
+    finale()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

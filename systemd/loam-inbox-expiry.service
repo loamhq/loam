@@ -1,0 +1,12 @@
+[Unit]
+Description=Loam — expire the inbox archive at 30 days and from-agents lines at 14
+
+[Service]
+# Same independence as the commons sweep: stdlib only, no venv, no runtime
+# import. The two things it deletes are the two things decision 13 declared
+# temporary, and nothing else under 00_INBOX/ is in its reach.
+Type=oneshot
+ExecStart=@ROOT@/bin/sweep-inbox
+
+[Install]
+WantedBy=default.target

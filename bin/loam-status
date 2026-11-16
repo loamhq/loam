@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""Whether this Loam is running, and what to do if a part is not.
+
+  loam status          every part in plain words, and the sign-in link while
+                       the install is unclaimed
+  loam status --json   the same as one JSON object
+
+The parts: the install's steps, the name on the web (DNS) and its
+certificate, the session broker, the plugin gateway, the app, the login, the
+agents' browser, the claim service and the timers. Runs as root (it re-runs
+itself under sudo), because the sign-in link is root's to read. First
+release L12; docs/install.md.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+# No bytecode beside the code: anything in the checkout a release did not
+# put there refuses the next update (L13's clean-tree rule).
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+import loam_deploy as dep  # noqa: E402
+import loam_install as li  # noqa: E402
+import loam_units  # noqa: E402
+
+OK, BAD, WAIT = "ok", "problem", "waiting"
+
+
+def run(argv: list[str], **kw) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, capture_output=True, text=True, check=False, timeout=30, **kw)
+
+
+def user_systemctl(*args: str) -> str:
+    env = {"XDG_RUNTIME_DIR": f"/run/user/{lc.UID}", "PATH": "/usr/bin:/bin"}
+    argv = ["systemctl", "--user", *args]
+    if os.geteuid() == 0 and lc.UID != 0:
+        argv = ["runuser", "-u", lc.USER, "--", "env",
+                *(f"{k}={v}" for k, v in env.items()), *argv]
+    return run(argv).stdout.strip()
+
+
+def container_health(name: str) -> str:
+    res = run(["docker", "inspect", "-f",
+               "{{.State.Status}}{{if .State.Health}} {{.State.Health.Status}}{{end}}", name])
+    return res.stdout.strip() if res.returncode == 0 else "absent"
+
+
+def broker_up() -> bool:
+    import loam_broker as brk  # noqa: PLC0415
+    try:
+        with urllib.request.urlopen(f"http://{brk.BIND_ADDR}:{brk.PORT}/up", timeout=4) as r:
+            return r.status == 200
+    except OSError:
+        return False
+
+
+def gather() -> dict:
+    edge = dep.EDGE
+    domain = edge.get("domain") or dep.domain()
+    out: dict = {"domain": domain, "parts": []}
+
+    def part(key: str, label: str, state: str, say: str, fix: str = "") -> None:
+        out["parts"].append({"key": key, "label": label, "state": state,
+                             "say": say, **({"fix": fix} if fix else {})})
+
+    # The install itself.
+    if edge:
+        nxt = li.first_unfinished()
+        if nxt is None:
+            part("install", "Install", OK, "every step finished")
+        else:
+            label = dict((n, t) for n, _, t in li.STEPS)[nxt]
+            part("install", "Install", BAD, f"stopped at step {nxt} of 11 ({label.lower()})",
+                 "run the install command again; it carries on from there")
+
+    # The name and its certificate.
+    state = dep.edge_state()
+    if edge.get("dns_gate"):
+        if state.get("dns") == "resolved":
+            part("dns", "Name", OK, f"{domain} points to this server")
+        else:
+            last = state.get("dns") or "not checked yet"
+            records = li.records_to_ask_for(edge["name"], edge.get("address", "?"),
+                                            domain.split(".", 1)[1])
+            if last == "taken":
+                say, st = f"{domain} points to a different server: the name is someone else's", BAD
+            else:
+                say, st = f"{domain} does not point here yet (checked every 30 seconds)", WAIT
+            part("dns", "Name", st, say,
+                 "these two DNS records are needed (type A, not proxied):\n" +
+                 "\n".join(f"             {r}" for r in records))
+        if state.get("dns") == "resolved":
+            cert = li.certificate(domain, internal=edge.get("tls") == "internal")
+            if cert["ok"]:
+                part("certificate", "Certificate", OK, f"valid, from {cert.get('issuer')}, "
+                     f"until {cert.get('until')}")
+            else:
+                part("certificate", "Certificate", WAIT,
+                     f"not ready yet ({cert.get('why')})",
+                     "it usually takes under a minute once the name points here")
+
+    # The runtime's own services.
+    import loam_broker as brk  # noqa: PLC0415
+    active = user_systemctl("is-active", brk.SERVICE)
+    if active == "active" and broker_up():
+        part("broker", "Agents' engine", OK, "running")
+    else:
+        part("broker", "Agents' engine", BAD, f"not answering ({active or 'unknown'})",
+             f"sudo -u {lc.USER} systemctl --user restart {brk.SERVICE}")
+    gw = user_systemctl("is-active", "loam-plugins-gateway.service")
+    part("gateway", "Plugins", OK if gw == "active" else BAD,
+         "running" if gw == "active" else f"not running ({gw or 'unknown'})",
+         "" if gw == "active" else
+         f"sudo -u {lc.USER} systemctl --user restart loam-plugins-gateway.service")
+    app_name = edge.get("app") or "loam-ui"
+    app = container_health(app_name)
+    part("app", "App", OK if app.endswith("healthy") and "unhealthy" not in app else BAD,
+         "running" if app == "running healthy" else app,
+         "" if app == "running healthy" else f"sudo {lc.ROOT}/bin/deploy {app_name} logs 40")
+    login = container_health(dep.AUTHELIA_PROJECT)
+    if dep.unclaimed():
+        part("login", "Sign-in", WAIT, "starts when you claim this Loam with the link below")
+    else:
+        up = login.startswith("running") and "unhealthy" not in login and "starting" not in login
+        part("login", "Sign-in", OK if up else BAD, "running" if up else login,
+             "" if up else f"sudo {lc.ROOT}/bin/gen-deploy")
+        try:
+            stale = "# UNCLAIMED:" in dep.CADDYFILE.read_text(encoding="utf-8")
+        except OSError:
+            stale = False
+        if stale:
+            part("claim-render", "Sign-in page", BAD,
+                 "claimed, but the web still shows the claim page",
+                 "sudo systemctl restart loam-claim.service (it finishes the claim)")
+    browser = container_health("loam-browser")
+    part("browser", "Agents' browser", OK if browser.startswith("running") else BAD,
+         "running" if browser.startswith("running") else browser,
+         "" if browser.startswith("running") else f"sudo {lc.ROOT}/bin/gen-deploy")
+    if edge:
+        claim = run(["systemctl", "is-active", "loam-claim.service"]).stdout.strip()
+        part("claim-service", "Sign-in helper", OK if claim == "active" else BAD,
+             "running" if claim == "active" else f"not running ({claim})",
+             "" if claim == "active" else "sudo systemctl restart loam-claim.service")
+
+    # The timers this release ships.
+    timers = sorted(n for n in loam_units.rendered() if n.endswith(".timer"))
+    listed = user_systemctl("list-units", "--type=timer", "--state=active",
+                            "--no-legend", "--plain", "--all")
+    on = {line.split()[0] for line in listed.splitlines() if line.strip()}
+    off = [t for t in timers if t not in on and t not in SKIPPED_TIMERS]
+    if off:
+        part("timers", "Timers", BAD, f"{len(off)} of {len(timers)} not running: " + ", ".join(off),
+             f"sudo -u {lc.USER} systemctl --user enable --now " + " ".join(off))
+    else:
+        part("timers", "Timers", OK, f"{len(timers) - len(SKIPPED_TIMERS & set(timers))} running")
+
+    # The claim.
+    if dep.unclaimed():
+        link = li.claim_link(domain)
+        out["claim_link"] = link
+        out["claim_ready"] = bool(dep.edge_ready() and (state.get("certificate") or {}).get("ok"))
+    out["ok"] = all(p["state"] == OK or (p["state"] == WAIT and p["key"] == "login")
+                    for p in out["parts"])
+    return out
+
+
+# Timers an install leaves off on purpose (docs/install.md says why).
+SKIPPED_TIMERS: set[str] = set()
+
+MARK = {OK: "  ok   ", BAD: "  !!   ", WAIT: "  ..   "}
+
+
+def main(argv: list[str]) -> int:
+    if os.geteuid() != 0:
+        os.execvp("sudo", ["sudo", "-n", sys.executable, os.path.abspath(__file__), *argv])
+    data = gather()
+    if "--json" in argv:
+        print(json.dumps(data, indent=2))
+        return 0
+    print(f"Loam at {data['domain']}\n")
+    for p in data["parts"]:
+        print(f"{MARK[p['state']]}{p['label']}: {p['say']}")
+        if p.get("fix"):
+            print(f"         what to do: {p['fix']}")
+    if data.get("claim_link"):
+        print()
+        if data.get("claim_ready"):
+            print("Nobody has claimed this Loam yet. Open this link to make your sign-in:")
+        else:
+            print("Nobody has claimed this Loam yet. This link makes the sign-in; it works")
+            print("once the name points here and the certificate is ready (see above):")
+        print(f"\n    {data['claim_link']}\n")
+        print("Keep it private: whoever opens it first becomes this Loam's owner.")
+    elif data["ok"]:
+        print(f"\nEverything is running. Open https://{data['domain']}/")
+    return 0 if data["ok"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

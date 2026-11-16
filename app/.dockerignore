@@ -1,0 +1,9 @@
+.git
+.github
+.claude
+memory
+test
+tools
+*.md
+!README.md
+!public/**/PLUGIN.md

@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Every provider's own memory, pinned off and checked (first release L8).
+
+  provider-memory pin      write each pin not already held, then check
+  provider-memory check    each store's count now; exit 1 if one grew
+  provider-memory show     the pins as written on this box, then check
+
+What is pinned, and why Antigravity's "pinned off" means "checked empty",
+is lib/loam_provider_memory.py's docstring. The installer runs `pin` after
+installing the CLIs; provider-follow re-pins after each switch; the thread
+engine re-pins Claude Code and checks at every session start.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+import loam_codex  # noqa: E402
+import loam_provider_memory as pm  # noqa: E402
+
+
+def show() -> None:
+    try:
+        live = json.loads((lc.CLAUDE_HOME / "settings.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        live = {}
+    print(f"claude-code  {lc.CLAUDE_HOME / 'settings.json'}:")
+    for key in pm.CLAUDE_SETTINGS:
+        print(f"  {key} = {json.dumps(live.get(key))}")
+    for key in pm.CLAUDE_ENV:
+        print(f"  env.{key} = {json.dumps((live.get('env') or {}).get(key))}")
+    try:
+        env_d = pm.ENV_D.read_text().strip().splitlines()[-1]
+    except OSError:
+        env_d = "(absent)"
+    print(f"  {pm.ENV_D}: {env_d}")
+    print(f"codex  {loam_codex.HOME_CONFIG}:")
+    try:
+        text = loam_codex.HOME_CONFIG.read_text()
+    except OSError:
+        text = ""
+    block = text.split("[projects.", 1)[0]
+    for line in block.splitlines():
+        if line and not line.startswith("#") and "=" in line or line.startswith("["):
+            print(f"  {line}")
+    print("antigravity: no setting exists to write (checked empty instead)")
+
+
+def check() -> int:
+    counts, grew = pm.check()
+    for store, count in counts.items():
+        print(f"  {store}: {count}")
+    for text in grew:
+        print(f"GREW: {text}")
+    return 1 if grew else 0
+
+
+def main(argv: list[str]) -> int:
+    if argv == ["pin"]:
+        for line in pm.pin_memory() or ["every pin already held"]:
+            print(f"pinned: {line}")
+        return check()
+    if argv == ["check"]:
+        return check()
+    if argv == ["show"]:
+        show()
+        print("check:")
+        return check()
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

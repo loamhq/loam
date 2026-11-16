@@ -1,0 +1,11 @@
+[Unit]
+Description=Loam — remove board items whose until date has passed
+
+[Service]
+# Stdlib only (lib/loam_threads.py), like the inbox sweep. It touches only
+# list lines that carry an `until` in their metadata comment.
+Type=oneshot
+ExecStart=@ROOT@/bin/sweep-boards
+
+[Install]
+WantedBy=default.target

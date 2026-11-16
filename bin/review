@@ -1,0 +1,640 @@
+#!/usr/bin/env python3
+"""Run the reviewer once: one persona read, one note delivered, one record.
+
+Move 11 (phase-5 closing plan, 2026-09-09). The reviewer is a session that
+wakes on its own lane once a night, reads one persona's workspace as an
+observer that did not write it, and leaves that persona a note. Everything
+about HOW it reviews is prose in `agents/reviewer/CLAUDE.md`; this file is
+the lane around that prose, and it holds only what a prompt cannot be
+trusted to hold. Each of those is named here, because the owner's rule for
+the build was *"only hard-code the areas where it's necessary"*:
+
+    the lane       lock, memory admission, heartbeat, run marker -- the
+                   Move 8 machinery every unattended run on this box
+                   carries. No turn cap, wall clock or recycle refusal
+                   since 2026-11-10, as no wake has them.
+    the facts      which personas exist, when each was first seen, when
+                   each was last reviewed, how much has moved since. Read
+                   from the roster, from git and from this file's own
+                   records, and written as a sheet for the reviewer to read.
+                   The CHOICE stays the reviewer's; a model computing seven
+                   git ranges by hand is the wrong tool for a fact.
+    the delivery   the reviewer's write reach is its own state directory and
+                   nothing else (a total deny, non-promptable), so its note
+                   is written into an outbox here and THIS file copies it
+                   into the persona's commons inbox, named the way peer
+                   notes are named. One persona a night is enforced at this
+                   step: two notes, or notes to two personas, deliver
+                   nothing and are recorded as a defect.
+    the record     which persona, started, finished, turns, cost, what was
+                   written where -- read from what the reviewer wrote (the
+                   outbox, the memory pages that changed), never from what
+                   it says.
+
+It is a static timer-fired unit like the persona wakes, not a transient one
+like the engineer's job. The 01:30 recycle restarts `loam-rc-*.service` and
+nothing else, so a oneshot fired by a timer is no more killable than a wake;
+the engineer's transient form answers a waiter that lives inside a Remote
+Control session, and the reviewer has no waiter. So since 2026-11-10 nothing
+refuses a run at the recycle (a refusal was kept until then for a hand-fired
+run at 01:00).
+
+Usage: review [--persona <name>] [--dry-run]
+       --persona pins tonight's choice by hand (the prototype, a re-run);
+                 the record says it was pinned.
+       --dry-run prints the facts sheet and launches nothing.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+# Then this tree's own lib ahead of it, as bin/wake and bin/engineer-job do,
+# so a branch's tests load the branch's modules (lib/loam_permissions.py,
+# 2026-11-12, failed to import from main's lib in a job tree). Live, the
+# two are one path.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+import loam_due  # noqa: E402
+import loam_contributions as contributions  # noqa: E402
+
+import loam_engineer as eng  # noqa: E402
+import loam_lock  # noqa: E402
+import loam_profile  # noqa: E402
+import loam_session  # noqa: E402
+from loam_inbox import record_ledger  # noqa: E402
+from loam_permissions import PERMISSION_MODE  # noqa: E402  every lane's, one home
+
+AGENTS = lc.ROOT
+AI_LABS = lc.WORKSPACES
+VAULT = lc.VAULT
+COMMONS = AI_LABS / "commons"
+REVIEWER = AGENTS / "reviewer"
+STATE = lc.REVIEWER_STATE
+RUNS = STATE / "runs"
+MEMORY = STATE / "memory"
+NOTES = STATE / "notes"            # the launcher's copy of every delivered note
+INBOX = COMMONS / "reviewer"       # where personas talk back
+WAKE_STATE = lc.STATE / "wake"
+LOG = lc.LOGS / "reviewer.jsonl"
+CLAUDE = str(lc.CLAUDE_BIN)
+
+AGENT = "reviewer"
+LANE = "review"
+
+# The personas' tier. The job is judging prose, so not a cheaper model (the
+# prompt, §The lane). No round-trip cap and no wall clock since 2026-11-10,
+# as the personas' lanes have none (the owner: "I don't want any limitations
+# at all"); they were 100 and 3600 s. The environment sets either for a
+# probe only.
+MODEL = os.environ.get("LOAM_REVIEWER_MODEL", "fable")
+# The thinking level, and the model when the owner chose one (2026-11-13,
+# Settings > Agents > System > Nightly reviewer): read from the broker's
+# host settings by lib/loam_profile.py, once per run. The environment's
+# model, for a probe, still wins.
+MODEL, EFFORT = loam_profile.reviewer_choice(
+    MODEL, pinned=bool(os.environ.get("LOAM_REVIEWER_MODEL")))
+MAX_TURNS = (int(os.environ["LOAM_REVIEWER_MAX_TURNS"])
+             if os.environ.get("LOAM_REVIEWER_MAX_TURNS") else None)
+WALL_SECONDS = (int(os.environ["LOAM_REVIEWER_WALL_S"])
+                if os.environ.get("LOAM_REVIEWER_WALL_S") else None)
+HEARTBEAT_SECONDS = 30
+
+# A newborn waits this long before its first review (the owner's default).
+# Stated on the sheet as a fact ("first seen N days ago"); the rule that
+# uses it is prose.
+NEWBORN_DAYS = 7
+
+# The same seam bin/engineer-job has: a run that is a sleep instead of a
+# session, so the lane can be proved -- two runs cannot overlap -- with a real lock, marker, heartbeat
+# and record, and no model call. Nothing in a unit sets it.
+PROBE_VAR = "LOAM_REVIEWER_PROBE_SECONDS"
+
+# Belt and braces with the settings' deny list. With the flag on, the tool
+# is absent from the session's list entirely rather than refused when
+# called (caused 2026-09-05 for the engineer tool on the wake lanes).
+DISALLOWED_TOOLS = ("Task", "WebSearch", "WebFetch", "Bash")
+
+INBOX_README = """\
+# Inbox: reviewer
+
+Notes left here are for the reviewer -- the nightly non-author observer that
+reads one persona's workspace and leaves a note in that persona's inbox.
+Disagree with a finding, or tell it a convention you hold, in any shape you
+like; it reads every file here before every run and folds what it reads
+into its memory of you. Swept after 7 days like everything in the commons.
+See `../README.md`.
+"""
+
+PROMPT = """\
+You are the reviewer, waking. It's {timestamp}. This is run `{run_id}`.
+
+Your run directory is {run_dir}. The facts sheet for tonight is at {facts}. \
+Your outbox for this run is {outbox}/ — write your one note as \
+{outbox}/<persona>/<slug>.md and nothing else there. Your memory is at \
+{memory}/. Your inbox of replies from the personas is {inbox}/.
+
+{pinned}Your instruction file says the rest. When you are done, stop.
+"""
+
+PINNED = (
+    "Tonight's persona is pinned by hand to `{persona}` (the launcher was "
+    "started with --persona {persona}): review {persona} and skip the "
+    "choice.\n\n"
+)
+
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def iso(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def probe_seconds() -> int:
+    try:
+        return max(0, int(os.environ.get(PROBE_VAR) or 0))
+    except ValueError:
+        return 0
+
+
+def git(*args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(AI_LABS), *args],
+        capture_output=True, text=True, check=False, timeout=60,
+    ).stdout.strip()
+
+
+# ---------------------------------------------------------------------------
+# The roster and the records.
+# ---------------------------------------------------------------------------
+
+def roster() -> list[str]:
+    """Every directory under ai-labs with an agent.json. Derived, never
+    listed -- the same rule as provision, gen-rc-units and check-drift."""
+    import loam_agents  # noqa: PLC0415 -- an archived agent is asleep
+    return loam_agents.live(sorted(
+        d.name for d in AI_LABS.iterdir()
+        if d.is_dir() and (d / "agent.json").is_file()
+    ), AI_LABS)
+
+
+def run_records() -> list[dict]:
+    """Every run.json this file has written, oldest first."""
+    out = []
+    if RUNS.is_dir():
+        for path in sorted(RUNS.glob("*/run.json")):
+            try:
+                out.append(json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
+    return out
+
+
+def reviewed(record: dict) -> bool:
+    """Did this run READ a persona? A note delivered, or a memory page
+    written, is the evidence; a run that produced neither reviewed nobody,
+    whatever its session may have said."""
+    return bool(record.get("persona")) and record.get("outcome") in (
+        "completed", "completed, no note")
+
+
+def last_reviews(records: list[dict]) -> dict[str, str]:
+    last: dict[str, str] = {}
+    for record in records:
+        if reviewed(record):
+            last[record["persona"]] = record["started"]
+    return last
+
+
+def first_seen(name: str) -> str | None:
+    """The date the persona's workspace first entered git: the commit that
+    added its agent.json, else the first commit touching the path."""
+    out = git("log", "--diff-filter=A", "--format=%ad", "--date=short",
+              "--reverse", "--", f"{name}/agent.json")
+    if not out:
+        out = git("log", "--format=%ad", "--date=short", "--reverse", "--", f"{name}/")
+    return out.splitlines()[0] if out else None
+
+
+def commits_since(name: str, since: str | None) -> int:
+    args = ["rev-list", "--count", "HEAD"]
+    if since:
+        args.append(f"--since={since}")
+    args += ["--", f"{name}/"]
+    out = git(*args)
+    return int(out) if out.isdigit() else 0
+
+
+def workspace_size(name: str) -> tuple[int, int]:
+    """(files, bytes) under the workspace, `.claude/` excluded."""
+    files = total = 0
+    for path in (AI_LABS / name).rglob("*"):
+        if ".claude" in path.parts or not path.is_file():
+            continue
+        files += 1
+        try:
+            total += path.stat().st_size
+        except OSError:
+            pass
+    return files, total
+
+
+def days_between(earlier: str | None, moment: datetime) -> int | None:
+    if not earlier:
+        return None
+    try:
+        then = datetime.fromisoformat(earlier.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return (moment - then).days
+
+
+def facts(moment: datetime, pinned: str | None) -> tuple[str, list[dict]]:
+    """The sheet the reviewer reads to choose. Facts only; the rules that
+    use them are in its instruction file. Ordered least recently reviewed
+    first, never-reviewed ahead of reviewed, alphabetical within a tie."""
+    last = last_reviews(run_records())
+    rows = []
+    for name in roster():
+        seen = first_seen(name)
+        last_at = last.get(name)
+        files, size = workspace_size(name)
+        rows.append({
+            "name": name,
+            "first_seen": seen,
+            "days_old": days_between(seen, moment),
+            "last_reviewed": last_at,
+            "days_since_review": days_between(last_at, moment),
+            "commits_since": commits_since(name, last_at),
+            "files": files,
+            "bytes": size,
+            "memory_page": (MEMORY / f"{name}.md").is_file(),
+        })
+    rows.sort(key=lambda r: (r["last_reviewed"] or "", r["name"]))
+
+    inbox_files = sorted(p for p in INBOX.rglob("*") if p.is_file() and p.name != "README.md") \
+        if INBOX.is_dir() else []
+    head = git("rev-parse", "--short", "HEAD")
+
+    lines = [
+        f"# Tonight's facts — {moment.strftime('%Y-%m-%d')} ({iso(moment)})",
+        "",
+        f"ai-labs is at commit `{head}`. The roster is every directory under "
+        f"`{AI_LABS}/` with an `agent.json`; there are {len(rows)} tonight. "
+        f"Ordered least recently reviewed first; never-reviewed personas come "
+        f"before reviewed ones, alphabetically. A newborn is a persona first "
+        f"seen fewer than {NEWBORN_DAYS} days ago. The rules that use these "
+        f"numbers are in your instruction file; these are only the numbers.",
+        "",
+        "| persona | first seen | days old | last reviewed | days since | "
+        "commits since | files | memory page |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        lines.append(
+            f"| {r['name']} | {r['first_seen'] or '?'} | "
+            f"{r['days_old'] if r['days_old'] is not None else '?'} | "
+            f"{(r['last_reviewed'] or 'never')[:10]} | "
+            f"{r['days_since_review'] if r['days_since_review'] is not None else '—'} | "
+            f"{r['commits_since']} | {r['files']} ({r['bytes'] // 1024} KB) | "
+            f"{'yes' if r['memory_page'] else 'no'} |")
+    lines += ["", f"**Commits since** counts ai-labs commits touching the "
+              f"workspace since your last review of it, or all of them if "
+              f"never reviewed. The repository auto-commits every fifteen "
+              f"minutes, so a count is activity, not authorship.", ""]
+    if pinned:
+        lines += [f"**Pinned by hand:** tonight's persona is `{pinned}`.", ""]
+    lines.append(f"## Your inbox ({INBOX})")
+    lines.append("")
+    if inbox_files:
+        for p in inbox_files:
+            stamp = datetime.fromtimestamp(p.stat().st_mtime, timezone.utc)
+            lines.append(f"- `{p.relative_to(INBOX)}` ({stamp:%Y-%m-%d %H:%M}Z, "
+                         f"{p.stat().st_size:,} B)")
+    else:
+        lines.append("Empty: no persona has written to you.")
+    lines.append("")
+    return "\n".join(lines), rows
+
+
+# ---------------------------------------------------------------------------
+# The run.
+# ---------------------------------------------------------------------------
+
+def new_run_id(moment: datetime) -> str:
+    return f"{moment.astimezone(eng.PACIFIC):%Y%m%d-%H%M%S}"
+
+
+# Seconds this run waited for its lock and a run slot (since 2026-10-13), as
+# bin/wake records it: `started` is stamped after the wait, so the wait was
+# otherwise invisible.
+LOCK_WAIT_S: float | None = None
+
+
+def log_line(payload: dict) -> None:
+    if LOCK_WAIT_S is not None:
+        payload.setdefault("lock_wait_s", LOCK_WAIT_S)
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    with LOG.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload) + "\n")
+
+
+def notice(reason: str) -> None:
+    """The failure ledger, log line only. Never the comms line: the
+    reviewer produces nothing for the owner by design, and a dead lane is
+    reported where every other lane's failures are. Every refusal and every
+    failed run is its own line, as bin/wake's are; until 2026-10-13 this
+    was deduplicated once a night, which dropped the second refusal of a
+    date."""
+    print(reason, file=sys.stderr)
+    record_ledger(AGENT, VAULT, reason)
+
+
+def heartbeat(path: Path, stop: threading.Event) -> None:
+    while not stop.is_set():
+        try:
+            path.write_text(iso(now_utc()), encoding="utf-8")
+        except OSError:
+            pass
+        stop.wait(HEARTBEAT_SECONDS)
+
+
+def memory_snapshot() -> dict[str, float]:
+    if not MEMORY.is_dir():
+        return {}
+    return {p.name: p.stat().st_mtime for p in MEMORY.glob("*.md")}
+
+
+def slugify(stem: str, today: str) -> str:
+    """The reviewer's file name, reduced to the slug the convention wants.
+    A leading date and a `reviewer-` prefix are stripped so a name the
+    reviewer already wrote in full is not doubled."""
+    stem = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", stem)
+    stem = re.sub(r"^reviewer-", "", stem)
+    slug = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")[:80].rstrip("-")
+    return slug or "note"
+
+
+def deliver(outbox: Path, run_dir: Path, names: list[str], today: str) -> tuple[str | None, str | None, str | None]:
+    """(persona, delivered path, defect). Exactly one persona and one note,
+    or nothing moves and the defect is recorded."""
+    if not outbox.is_dir():
+        return None, None, None
+    dirs = sorted(d for d in outbox.iterdir() if d.is_dir())
+    files = sorted(p for p in outbox.rglob("*") if p.is_file())
+    if not files:
+        return None, None, None
+    if len(dirs) != 1:
+        return None, None, (f"outbox holds notes for {len(dirs)} personas "
+                            f"({', '.join(d.name for d in dirs)}); one a night")
+    persona = dirs[0].name
+    if persona not in names:
+        return None, None, f"outbox names {persona!r}, which is not on the roster"
+    notes = [p for p in files if p.parent == dirs[0] and p.suffix == ".md"]
+    if len(notes) != 1 or len(files) != 1:
+        return persona, None, (f"outbox for {persona} holds {len(files)} files; "
+                               f"one note a night")
+    note = notes[0]
+    text = note.read_text(encoding="utf-8")
+    if not text.strip():
+        return persona, None, f"the note for {persona} is empty"
+
+    name = f"{today}-reviewer-{slugify(note.stem, today)}.md"
+    target = COMMONS / persona / "inbox" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target = target.with_name(f"{today}-reviewer-{slugify(note.stem, today)}-{run_dir.name[-6:]}.md")
+    shutil.copyfile(note, target)
+    keep = NOTES / persona / target.name
+    keep.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(note, keep)
+    return persona, str(target), None
+
+
+def ensure_inbox() -> None:
+    """The reviewer's own commons folder, so a persona has somewhere to
+    reply from the first night. Structural, created by the launcher and not
+    by the model; README.md is what the sweep never removes."""
+    INBOX.mkdir(parents=True, exist_ok=True)
+    readme = INBOX / "README.md"
+    if not readme.exists():
+        readme.write_text(INBOX_README, encoding="utf-8")
+
+
+def preflight() -> str | None:
+    instruction = REVIEWER / "CLAUDE.md"
+    if not instruction.is_file() or not instruction.read_text(encoding="utf-8").strip():
+        return f"{instruction} is missing or empty: the reviewer has no instructions"
+    if not (REVIEWER / ".claude" / "settings.json").is_file():
+        return f"{REVIEWER}/.claude/settings.json is missing: `bin/provision --reviewer` renders it"
+    if not roster():
+        return f"no persona under {AI_LABS} carries an agent.json; nothing to review"
+    return None
+
+
+def run(pinned: str | None) -> int:
+    started_at = now_utc()
+    started = iso(started_at)
+    run_id = new_run_id(started_at)
+    run_dir = RUNS / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    outbox = run_dir / "outbox"
+    outbox.mkdir(exist_ok=True)
+    MEMORY.mkdir(parents=True, exist_ok=True)
+    ensure_inbox()
+
+    names = roster()
+    sheet, rows = facts(started_at, pinned)
+    (run_dir / "facts.md").write_text(sheet, encoding="utf-8")
+    head = git("rev-parse", "--short", "HEAD")
+
+    os.environ["LOAM_WAKE"] = f"{LANE}:{run_id}"
+    os.environ["CLAUDE_PROJECT_DIR"] = str(REVIEWER)
+
+    prompt = PROMPT.format(
+        timestamp=started, run_id=run_id, run_dir=run_dir,
+        facts=run_dir / "facts.md", outbox=outbox, memory=MEMORY, inbox=INBOX,
+        pinned=PINNED.format(persona=pinned) if pinned else "",
+    )
+    (run_dir / "prompt.md").write_text(prompt, encoding="utf-8")
+
+    WAKE_STATE.mkdir(parents=True, exist_ok=True)
+    marker = WAKE_STATE / f"{AGENT}.running"
+    marker.write_text(json.dumps({
+        "ts": started, "pid": os.getpid(), "vault": str(VAULT), "lane": LANE,
+        "run": run_id,
+    }), encoding="utf-8")
+
+    stop = threading.Event()
+    ticker = threading.Thread(target=heartbeat, args=(run_dir / "heartbeat", stop), daemon=True)
+    ticker.start()
+    before = memory_snapshot()
+
+    argv = [
+        CLAUDE, "-p", prompt, "--model", MODEL,
+        *(["--effort", EFFORT] if EFFORT else []),
+        "--permission-mode", PERMISSION_MODE,
+        *(["--max-turns", str(MAX_TURNS)] if MAX_TURNS else []),
+        "--output-format", "json",
+        "--disallowed-tools", *DISALLOWED_TOOLS,
+    ]
+    # What plugins that are on give the reviewer (2026-11-14, first release
+    # L4), at launch: its committed reviewer/ files never name a plugin.
+    plugin_mcp = contributions.lane_mcp_file("reviewer")
+    if plugin_mcp:
+        argv += ["--mcp-config", str(plugin_mcp)]
+    plugin_words = contributions.lane_prompt("reviewer")
+    if plugin_words:
+        argv += ["--append-system-prompt", plugin_words]
+    envelope: dict = {}
+    returncode = -1
+    timed_out = False
+    probe = probe_seconds()
+    try:
+        if probe:
+            time.sleep(probe)
+            returncode = 0
+        else:
+            result = subprocess.run(
+                argv, cwd=str(REVIEWER), capture_output=True, text=True,
+                check=False, timeout=WALL_SECONDS, stdin=subprocess.DEVNULL,
+            )
+            returncode = result.returncode
+            (run_dir / "session-stderr.log").write_text(result.stderr or "", encoding="utf-8")
+            try:
+                envelope = json.loads(result.stdout or "{}")
+            except json.JSONDecodeError:
+                envelope = {}
+    except subprocess.TimeoutExpired:
+        timed_out = True
+    finally:
+        stop.set()
+        marker.unlink(missing_ok=True)
+
+    finished_at = now_utc()
+    after = memory_snapshot()
+    changed = sorted(n for n, t in after.items() if before.get(n) != t)
+    pages = [n[:-3] for n in changed if n != "runs.md"]
+
+    today = started_at.astimezone(eng.PACIFIC).strftime("%Y-%m-%d")
+    persona, delivered, defect = deliver(outbox, run_dir, names, today)
+    if persona is None and len(pages) == 1 and pages[0] in names:
+        persona = pages[0]
+
+    subtype = envelope.get("subtype")
+    num_turns = envelope.get("num_turns")
+    api_turns = loam_session.round_trips(envelope.get("session_id"))
+    cost = envelope.get("total_cost_usd")
+    if timed_out:
+        outcome = "cut off at the wall clock"
+    elif loam_session.turn_cap_hit(envelope):
+        outcome = f"cut off at the {MAX_TURNS}-round-trip cap"
+    elif returncode != 0 or (subtype and subtype != "success"):
+        outcome = f"exited {returncode} (subtype={subtype})"
+    elif defect:
+        outcome = f"delivery refused: {defect}"
+    elif delivered:
+        outcome = "completed"
+    elif persona:
+        outcome = "completed, no note"
+    else:
+        outcome = "completed, reviewed nobody"
+    ok = outcome.startswith("completed")
+
+    record = {
+        "run": run_id, "lane": LANE, "persona": persona, "pinned": pinned,
+        "started": started, "finished": iso(finished_at),
+        "duration_s": round((finished_at - started_at).total_seconds()),
+        "outcome": outcome, "ok": ok,
+        "delivered": delivered,
+        "note_copy": str(NOTES / persona / Path(delivered).name) if delivered else None,
+        "memory_pages_written": pages, "runs_md_written": "runs.md" in changed,
+        "num_turns": num_turns, "api_turns": api_turns, "max_turns": MAX_TURNS,
+        "total_cost_usd": cost, "model": MODEL, "ai_labs_head": head,
+        "returncode": returncode, "probe_seconds": probe or None,
+        "session_id": envelope.get("session_id"),
+        "candidates": [r["name"] for r in rows],
+    }
+    tmp = run_dir / "run.json.tmp"
+    tmp.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    os.replace(tmp, run_dir / "run.json")
+    log_line(record)
+
+    if not ok:
+        cause = loam_session.api_error(envelope.get("session_id")) if not probe else None
+        notice(f"{LANE} run {run_id}: {outcome}"
+               + (f" — {cause[:300]}" if cause else "")
+               + f". Record: {run_dir}/run.json.")
+    print(json.dumps({k: record[k] for k in (
+        "run", "persona", "outcome", "delivered", "api_turns", "total_cost_usd")}))
+    return 0 if ok else 4
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    # A run its timer started when it was not due goes no further
+    # (lib/loam_due.py, 2026-11-14).
+    if loam_due.refuse_if_not_due("review"):
+        return 0
+    # The reviewer is a first-party plugin since 2026-11-14 (first release L9,
+    # plugins/reviewer/): off means no review, by its timer or by hand, and
+    # no facts sheet either.
+    if not loam_profile.reviewer_on():
+        print("review: the reviewer plugin is off (Settings › Plugins); "
+              "nothing runs", file=sys.stderr)
+        return 0
+    pinned = None
+    if "--persona" in argv:
+        i = argv.index("--persona")
+        if i + 1 >= len(argv):
+            print("usage: review [--persona <name>] [--dry-run]", file=sys.stderr)
+            return 64
+        pinned = argv[i + 1]
+        if pinned not in roster():
+            print(f"{pinned!r} is not on the roster: {', '.join(roster())}", file=sys.stderr)
+            return 64
+    if "--dry-run" in argv:
+        sheet, _ = facts(now_utc(), pinned)
+        print(sheet)
+        return 0
+
+    refusal = preflight()
+    if refusal:
+        notice(f"{LANE} preflight refused: {refusal}")
+        log_line({"ts": iso(now_utc()), "ok": False, "stage": "preflight",
+                  "lane": LANE, "error": refusal})
+        return 3
+
+    # No refusal at the 01:30 recycle since 2026-11-10: it restarts only
+    # the Remote Control servers (bin/recycle-rc), never this unit.
+
+    global LOCK_WAIT_S
+    waiting_since = time.monotonic()
+    try:
+        with loam_lock.hold(AGENT, LANE, info={"engine": "claude-code",
+                                               "model": MODEL}):
+            LOCK_WAIT_S = round(time.monotonic() - waiting_since, 1)
+            return run(pinned)
+    except loam_lock.Busy as exc:
+        LOCK_WAIT_S = round(time.monotonic() - waiting_since, 1)
+        notice(str(exc))
+        log_line({"ts": iso(now_utc()), "ok": False, "stage": "lock_timeout",
+                  "lane": LANE, "error": str(exc)})
+        return 0   # a skipped run is the lock working, not a failure
+
+
+if __name__ == "__main__":
+    sys.exit(main())

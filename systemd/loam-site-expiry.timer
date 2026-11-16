@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly sweep of expired agent sites
+
+[Timer]
+# Hourly at :41, clear of the wake grid's quarter hours. Expiry is by date,
+# so the first run after midnight UTC does the work and the rest find nothing.
+OnCalendar=*-*-* *:41:00 UTC
+Persistent=true
+Unit=loam-site-expiry.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <!-- `interactive-widget=resizes-content` is the one line that asks Chrome on
+         Android to shorten the layout viewport when the keyboard comes up,
+         instead of sliding the keyboard over a page that still thinks it is
+         full height. With it, `100dvh` is already the box above the keyboard
+         and there is nothing for the page to correct. Browsers that ignore it
+         are still corrected from `window.visualViewport` — see viewport.js —
+         so this is a simplification of the common case and not a replacement
+         for the model. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- The name the installed app already carries in the manifest, so the tab
+         and the home screen say the same thing. -->
+    <title>Loam</title>
+    <!-- `use-credentials`, although the manifest is on this same origin: without
+         a crossorigin attribute a browser fetches a manifest with no cookies at
+         all, so a login portal in front of the app answers it with a redirect
+         to sign in, the manifest never parses, and Chrome offers a shortcut
+         rather than an install. The icons are generated: tools/make-icons.py. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/caprasimo-400-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/figtree-400-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- Parser-blocking host preferences, then local application, before paint.
+         External scripts respect this page’s self-only content policy. -->
+    <script src="/appearance-state.js"></script>
+    <script src="/sun.js"></script>
+    <script src="/theme-fonts.js"></script>
+    <script src="/theme-boot.js"></script>
+    <link rel="stylesheet" href="/fonts/fonts.css" />
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/activity.css" />
+    <link rel="stylesheet" href="/apps.css" />
+    <link rel="stylesheet" href="/threads.css" />
+    <link rel="stylesheet" href="/running.css" />
+    <link rel="stylesheet" href="/onboarding.css" />
+    <link rel="stylesheet" href="/menu-surface.css" />
+    <link rel="stylesheet" href="/themes/materials.css" />
+    <link rel="stylesheet" href="/themes.css" />
+    <link rel="stylesheet" href="/panels.css" />
+    <link rel="stylesheet" href="/button-tiers.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

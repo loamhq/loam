@@ -1,0 +1,97 @@
+/* Newsprint for reading; latte for controls. Override only core differences. */
+:root[data-look="latte"] {
+  /* Avatar option: ten fixed warm tones, independent of mode and controls. */
+  --agent-latte-foam: #FFF8EE;
+  --agent-latte-coffee: #2A1C13;
+  --agent-latte-0: #F4ECE0;
+  --agent-latte-1: #EBDDC9;
+  --agent-latte-2: #E0CCB2;
+  --agent-latte-3: #D4B998;
+  --agent-latte-4: #C4A27C;
+  --agent-latte-5: #AE845D;
+  --agent-latte-6: #A2774F;
+  --agent-latte-7: #8C6444;
+  --agent-latte-8: #77553A;
+  --agent-latte-9: #634733;
+  --font-thread: 'Thread Figtree', Figtree, system-ui, sans-serif;
+  --font-body: Figtree, system-ui, sans-serif;
+  --font-display: Caprasimo, Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --text-code: #ECE7DF;
+  --text-code-muted: #C6B8A8;
+  --text-code-danger: #E3A196;
+  --text-code-accent: #D5BFA9;
+  --rule-code: #655950;
+  --surface-attention: #40362D;
+  --surface-danger: #4A2825;
+  --text-inverse: #F7EFE4;
+}
+
+:root[data-look="latte"][data-theme="light"] {
+  --paper-page: #EEEAE3;
+  --paper-pane: #F6F3EE;
+  --paper-raised: #FAF8F4;
+  --paper-card: #E9E4DC;
+  --paper-hover: #E9E5DE;
+  --paper-ink: #1C1B19;
+  --paper-ink-2: #4B4741;
+  --paper-ink-3: #645F59;
+  --paper-rule: rgba(28,27,25,.13);
+  --paper-rule-strong: rgba(28,27,25,.28);
+  --paper-hover-alpha: rgba(28,27,25,.045);
+  --paper-pressed: rgba(28,27,25,.09);
+  --paper-page-glass: rgba(238,234,227,.94);
+  --paper-pane-glass: rgba(246,243,238,.94);
+  --paper-highlight: #DED8CD;
+  /* Visible milk foam and caramel controls, confined to daylight mode. */
+  --latte-foam: #DFC9AE;
+  --latte-track: #DDC5A8;
+  --latte-hover: #D9C2A6;
+  --latte-coffee: #2F2017;
+  --latte-coffee-2: #6B4A33;
+  --latte-espresso: #916844;
+  --latte-espresso-ink: #FFF8EE;
+  --latte-espresso-hover: #8B6340;
+  --latte-espresso-pressed: #845D3C;
+  --latte-disabled: #DDC5A8;
+  --signal-crema: #B4733A;
+  --danger: #8D3D32;
+  --warning: #736013;
+  --success: #475F3C;
+  --surface-code: #2F2017;
+  --shadow-ink: rgba(28,27,25,.18);
+  --scrim: rgba(28,27,25,.45);
+}
+
+:root[data-look="latte"][data-theme="dark"] {
+  --paper-page: #1A1917;
+  --paper-pane: #22211F;
+  --paper-raised: #302E2A;
+  --paper-card: #2A2825;
+  --paper-hover: #33312E;
+  --paper-ink: #ECE7DF;
+  --paper-ink-2: #BEB7AD;
+  --paper-ink-3: #A0998F;
+  --paper-rule: rgba(236,231,223,.12);
+  --paper-rule-strong: rgba(236,231,223,.26);
+  --paper-hover-alpha: rgba(236,231,223,.05);
+  --paper-pressed: rgba(236,231,223,.10);
+  --paper-page-glass: rgba(26,25,23,.94);
+  --paper-pane-glass: rgba(34,33,31,.94);
+  --paper-highlight: #454038;
+  --latte-foam: #382B21;
+  --latte-track: #45352A;
+  --latte-hover: #524033;
+  --latte-coffee: #F1E2CF;
+  --latte-coffee-2: #CDAF8E;
+  --latte-espresso: #E9D5BB;
+  --latte-espresso-ink: #2A1C13;
+  --latte-espresso-hover: #F4E4CE;
+  --latte-espresso-pressed: #DAC4A7;
+  --latte-disabled: #45352A;
+  --signal-crema: #D89A5B;
+  --danger: #E3A196;
+  --warning: #D1BD75;
+  --success: #A9BE96;
+  --surface-code: #141310;
+}

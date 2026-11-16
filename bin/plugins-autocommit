@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+#
+# Auto-commit the plugin host's Yours layer (2026-11-12). Designed for cron,
+# every 15 minutes, beside vault-autocommit and ai-labs-autocommit, whose
+# shape it keeps. The layer is its own folder and repository,
+# `paths.plugins` (lib/loam_plugins.py, docs/plugins.md); the owner,
+# 2026-11-12: plugins are not ai-labs, which "has a very specific usecase".
+#
+# Differences from the other two, each on purpose:
+#   - The folder appears on the first plugin change, not at install, so a
+#     run with no folder is a silent no-op, and a folder with no repository
+#     yet is made one here (`git init -b main`). History starts with the
+#     first run after the first change.
+#   - It pushes only when the repository has an `origin`. Since 2026-11-13
+#     it has one: a private repository of the owner's,
+#     reached as `git@github-plugins:…` through a deploy key scoped to that
+#     one repository (~/.ssh/github_personal_loam_plugins, the `github-plugins`
+#     host in ~/.ssh/config, as ai-labs and the vault are reached). Another
+#     install adds its own `origin` and this script needs no change.
+#
+# LOAM_PLUGINS_DIR overrides the folder (the tests, another install), as it
+# does for the host itself.
+
+set -euo pipefail
+
+CFG="$(dirname "$(readlink -f "$0")")/loam-config"
+PLUGINS_DIR="${LOAM_PLUGINS_DIR:-$("$CFG" get paths.plugins)}"
+LOG_FILE="${LOAM_PLUGINS_AUTOCOMMIT_LOG:-$("$CFG" get paths.home)/logs/plugins-autocommit.log}"
+GIT_NAME="$("$CFG" get git.autocommit.name)"
+GIT_EMAIL="$("$CFG" get git.autocommit.email)"
+
+export PATH="/usr/local/bin:/usr/bin:/bin"
+
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+  printf '[%s] %s\n' "$(date -Iseconds)" "$*" >> "$LOG_FILE"
+}
+
+[ -d "$PLUGINS_DIR" ] || exit 0
+cd "$PLUGINS_DIR" 2>/dev/null || { log "FAIL: cannot cd to $PLUGINS_DIR"; exit 1; }
+
+if [ ! -d .git ]; then
+  if git init --quiet -b main 2>>"$LOG_FILE"; then
+    log "init: $PLUGINS_DIR is a repository now"
+  else
+    log "FAIL: git init returned non-zero"
+    exit 1
+  fi
+fi
+
+git add -A
+
+if ! git diff --cached --quiet; then
+  TS=$(date -u +'%Y-%m-%dT%H:%MZ')
+  if ! git -c user.name="$GIT_NAME" -c user.email="$GIT_EMAIL" \
+         commit --quiet -m "plugins: $TS" 2>>"$LOG_FILE"; then
+    log "FAIL: git commit returned non-zero"
+    exit 1
+  fi
+  log "commit $(git rev-parse --short HEAD): plugins: $TS"
+fi
+
+git remote get-url origin >/dev/null 2>&1 || exit 0
+
+HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo '')
+ORIGIN_SHA=$(git rev-parse refs/remotes/origin/main 2>/dev/null || echo '')
+[ -n "$HEAD_SHA" ] || exit 0
+[ "$HEAD_SHA" = "$ORIGIN_SHA" ] && exit 0
+
+if git push --quiet origin main 2>>"$LOG_FILE"; then
+  log "push ok: $(git rev-parse --short HEAD)"
+else
+  log "FAIL: push failed (commit preserved; will retry next run)"
+  exit 1
+fi

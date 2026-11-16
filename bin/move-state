@@ -1,0 +1,576 @@
+#!/usr/bin/env python3
+"""Move what the runtime writes out of its checkout, once, at a quiet moment.
+
+  move-state plan                 what would move where, and what holds it now
+  move-state run [--wait]         do it; --wait polls until the box is quiet
+  move-state verify               the checks the run ends with, on their own
+
+Written 2026-11-14 (first release, job L1). Until it runs, this box's
+/etc/loam/loam.toml names the old places (the checkout's `state/`, `logs/`,
+`engineer/jobs/`, `secrets.env`, `wake.env`, `mcp/.venv`), and every part of
+the runtime reads its paths from that file (lib/loam_config.py), so nothing
+moved when the code landed. The run moves each of them to the fresh-install
+layout and rewrites the file in the same breath, so there is no moment at
+which a running part reads one place and writes the other:
+
+  1. Prepare, with everything still running: a new MCP venv at the new place,
+     built from mcp/requirements.txt (a venv cannot be moved).
+  2. Wait until the box is quiet: no engineer job, wake, cron or review
+     running, no broker session working or asking (lib/loam_live's rule,
+     the one `restart-broker --when-idle` uses), no Remote Control server
+     holding a call on a job. Never a cut: a run that is not quiet waits.
+  3. Stop what holds the old paths open: every loam timer, the broker, the
+     Remote Control servers, the plugin gateway and plugin servers.
+  4. Rename each old place to its new one (one filesystem, so each is a
+     rename, not a copy), carry what records the old paths (Codex's thread
+     table, Claude Code's per-directory session folders for job trees), and
+     rewrite /etc/loam/loam.toml.
+  5. Regenerate what names those paths: the static units (gen-units), the
+     Remote Control units, every agent's provisioned files, the reconciled
+     cron units, and the Caddyfile (sudo gen-deploy).
+  6. Start everything that was running, then verify (`move-state verify`)
+     and write the report.
+
+A failure in 3-5 puts everything back (the renames reversed, the old file
+restored) and starts what was stopped; the report says what failed. The run
+writes its report to the commons inbox of the persona who briefed the job
+(`--report`, default a fixed persona's) and to logs/move-state.md.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import time
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+ROOT = lc.ROOT
+HOME = lc.HOME
+CONFIG = lc.CONFIG_FILE
+
+# Where each thing goes: the fresh-install layout (lib/loam_config._DEFAULTS).
+NEW_STATE = HOME / ".local" / "state" / "loam"
+NEW = {
+    "state": NEW_STATE,
+    "logs": NEW_STATE / "logs",
+    "jobs": NEW_STATE / "jobs",
+    "secrets_env": HOME / ".config" / "loam" / "secrets.env",
+    "wake_env": HOME / ".config" / "loam" / "wake.env",
+    "mcp_venv": HOME / ".local" / "share" / "loam" / "mcp-venv",
+}
+OLD = {
+    "state": ROOT / "state",
+    "logs": ROOT / "logs",
+    "jobs": ROOT / "engineer" / "jobs",
+    "secrets_env": ROOT / "secrets.env",
+    "wake_env": ROOT / "wake.env",
+    "mcp_venv": ROOT / "mcp" / ".venv",
+}
+# The order of the renames: the state directory first, because logs/ and
+# jobs/ land inside it.
+ORDER = ("state", "logs", "jobs", "secrets_env", "wake_env")
+# Not paths the runtime reads, but untracked things in the checkout.
+STRAYS = {ROOT / "jobs": NEW_STATE / "jobs-2026-09",   # one job folder from 09-25
+          ROOT / ".bak": NEW_STATE / "bak-2026-08"}    # hand-made backups, 08-26
+PYCACHE_ENV = f"PYTHONPYCACHEPREFIX={HOME}/.cache/loam/pycache"
+ENV_D = HOME / ".config" / "environment.d" / "50-loam.conf"
+SUDOERS = Path("/etc/sudoers.d/loam-pycache")
+POLL_S = 30
+APP_UP = "http://127.0.0.1:8081/up"
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def say(line: str, log: list[str]) -> None:
+    line = f"{now()} {line}"
+    print(line, flush=True)
+    log.append(line)
+
+
+def sh(argv: list[str], check: bool = False, **kw) -> subprocess.CompletedProcess:
+    out = subprocess.run(argv, capture_output=True, text=True, check=False, **kw)
+    if check and out.returncode:
+        raise RuntimeError(f"{' '.join(argv)} -> {out.returncode}: "
+                           f"{(out.stderr or out.stdout).strip()[-600:]}")
+    return out
+
+
+def units(pattern: str, state: str = "active") -> list[str]:
+    out = sh(["systemctl", "--user", "list-units", "--plain", "--no-legend",
+              f"--state={state}", pattern])
+    return [line.split()[0] for line in out.stdout.splitlines() if line.strip()]
+
+
+def early_only(path: Path) -> bool:
+    """The new state directory holds only what was moved before the run:
+    the reviewer's state (paths.reviewer_state), moved at the landing."""
+    return {p.name for p in path.iterdir()} <= {"reviewer"}
+
+
+def moved() -> bool:
+    return lc.STATE == NEW["state"]
+
+
+# -- what holds the move -------------------------------------------------------
+
+def blockers() -> list[str]:
+    why = []
+    for pattern, what in (("loam-engineer-*.service", "engineer job"),
+                          ("loam-wake-*.service", "wake"),
+                          ("loam-cron-*.service", "cron"),
+                          ("loam-reviewer.service", "review"),
+                          ("loam-provider-follow.service", "provider follow")):
+        why += [f"{what} {u}" for u in units(pattern)
+                if not u.startswith("loam-wake-failed@")]
+    try:
+        import loam_follow
+        import loam_live
+        why += loam_live.restart_blockers(loam_follow.broker_rows())
+    except Exception as exc:  # noqa: BLE001 -- a broker we cannot read is busy
+        why.append(f"the broker's live list could not be read ({exc})")
+    why += rc_calls()
+    return why
+
+
+def rc_calls() -> list[str]:
+    """Remote Control servers holding an engineer call (bin/recycle-rc's rule)."""
+    held = []
+    for unit in units("loam-rc-*.service"):
+        cg = sh(["systemctl", "--user", "show", "-p", "ControlGroup", "--value",
+                 unit]).stdout.strip()
+        procs = Path("/sys/fs/cgroup") / cg.lstrip("/") / "cgroup.procs"
+        try:
+            pids = procs.read_text().split()
+        except OSError:
+            continue
+        for pid in pids:
+            try:
+                cmd = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ")
+            except OSError:
+                continue
+            if b"bin/engineer-job" in cmd:
+                held.append(f"{unit} holds an engineer call (pid {pid})")
+    return held
+
+
+# -- the steps -----------------------------------------------------------------
+
+def plan() -> list[str]:
+    rows = [f"config: {CONFIG}", f"moved already: {moved()}"]
+    for key in ORDER + ("mcp_venv",):
+        old, new = OLD[key], NEW[key]
+        rows.append(f"{key}: {old} ({'present' if old.exists() else 'absent'}) "
+                    f"-> {new} ({'present' if new.exists() else 'absent'})")
+    for old, new in STRAYS.items():
+        rows.append(f"stray: {old} ({'present' if old.exists() else 'absent'}) -> {new}")
+    if OLD["state"].exists() and NEW_STATE.parent.exists():
+        same = os.stat(OLD["state"]).st_dev == os.stat(NEW_STATE.parent).st_dev
+        rows.append(f"one filesystem: {same}")
+    held = blockers()
+    rows.append("quiet now" if not held else "held by: " + "; ".join(held))
+    return rows
+
+
+def prepare(log: list[str]) -> None:
+    venv = NEW["mcp_venv"]
+    py = venv / "bin" / "python"
+    if not py.exists():
+        venv.parent.mkdir(parents=True, exist_ok=True)
+        uv = str(lc.UV_BIN)
+        version = sh([str(OLD["mcp_venv"] / "bin" / "python"), "-c",
+                      "import sys; print('%d.%d' % sys.version_info[:2])"])
+        sh([uv, "venv", "--python", version.stdout.strip() or "3.11", str(venv)],
+           check=True)
+        # The same packages at the same versions as the venv in use.
+        frozen = sh([uv, "pip", "freeze", "--python",
+                     str(OLD["mcp_venv"] / "bin" / "python")], check=True).stdout
+        req = NEW_STATE.parent / "loam-mcp-requirements.lock"
+        req.write_text(frozen)
+        sh([uv, "pip", "install", "--python", str(py), "-r", str(req)], check=True)
+        req.unlink()
+    sh([str(py), "-c", "import mcp, bs4, ebooklib"], check=True)
+    say(f"prepared: MCP venv at {venv}", log)
+    # Bytecode outside the checkout, for every way Python is started here.
+    ENV_D.parent.mkdir(parents=True, exist_ok=True)
+    ENV_D.write_text("# bin/move-state: Python's bytecode cache outside the "
+                     "runtime's checkout.\n" + PYCACHE_ENV + "\n")
+    sh(["systemctl", "--user", "set-environment", PYCACHE_ENV], check=True)
+    os.environ["PYTHONPYCACHEPREFIX"] = PYCACHE_ENV.split("=", 1)[1]   # and this run's children
+    for rc in (HOME / ".profile", HOME / ".bashrc"):
+        text = rc.read_text() if rc.exists() else ""
+        if PYCACHE_ENV not in text:
+            rc.write_text(text + f"\n# bin/move-state (Loam)\nexport {PYCACHE_ENV}\n")
+    cron = sh(["crontab", "-l"]).stdout
+    if PYCACHE_ENV not in cron:
+        sh(["crontab", "-"], input=f"{PYCACHE_ENV}\n{cron}", check=True)
+    rule = 'Defaults env_keep += "PYTHONPYCACHEPREFIX"\n'
+    sh(["sudo", "-n", "sh", "-c",
+        f"printf '%s' '{rule}' > {SUDOERS}.new && chmod 440 {SUDOERS}.new && "
+        f"visudo -cf {SUDOERS}.new && mv {SUDOERS}.new {SUDOERS}"], check=True)
+    say("prepared: PYTHONPYCACHEPREFIX for units, shells, cron and sudo", log)
+
+
+def stop_all(log: list[str]) -> dict:
+    # Timers are never stopped (2026-11-14): starting a standing timer again
+    # fires every non-persistent one on the spot (lib/loam_due.py says why;
+    # it is what this run did at 18:51:47Z the first time). A timer that
+    # fires in the window finds the lanes held by the quiet check, and a
+    # changed timer is moved by daemon-reload alone.
+    stopped = {"timers": [],
+               "services": [u for u in units("loam-*.service")
+                            if u.startswith(("loam-session-broker", "loam-rc-",
+                                             "loam-plugins-gateway",
+                                             "loam-plugin-"))]}
+    if stopped["timers"]:
+        sh(["systemctl", "--user", "stop", *stopped["timers"]], check=True)
+    if stopped["services"]:
+        sh(["systemctl", "--user", "stop", *stopped["services"]], check=True)
+    say(f"stopped {len(stopped['timers'])} timers and "
+        f"{', '.join(stopped['services'])}", log)
+    return stopped
+
+
+def start_all(stopped: dict, log: list[str]) -> None:
+    sh(["systemctl", "--user", "daemon-reload"])
+    services = [u for u in stopped["services"] if not u.startswith("loam-plugin-")]
+    if services:
+        sh(["systemctl", "--user", "start", *services])
+    if stopped["timers"]:
+        sh(["systemctl", "--user", "start", *stopped["timers"]])
+    # Plugin servers come back from the reconcile (docs/plugins.md).
+    sh(["systemctl", "--user", "start", "loam-plugins-reconcile.service"])
+    say(f"started {len(services)} services and {len(stopped['timers'])} timers", log)
+
+
+def config_text(paths: dict[str, Path]) -> str:
+    text = CONFIG.read_text()
+    out, section = [], None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            section = stripped
+        key = stripped.split("=", 1)[0].strip() if "=" in stripped else None
+        if section == "[paths]" and key in paths:
+            line = f'{key} = "{paths[key]}"'
+        out.append(line)
+    text = "\n".join(out) + "\n"
+    return text.replace("The state paths below are still the\n# checkout's own until bin/move-state runs; the move rewrites this file.",
+                        f"bin/move-state moved the state paths out of the\n# checkout on {now()}.")
+
+
+def write_config(text: str) -> None:
+    sh(["sudo", "-n", "tee", f"{CONFIG}.new"], input=text, check=True)
+    sh(["sudo", "-n", "sh", "-c",
+        f"chmod 644 {CONFIG}.new && mv {CONFIG}.new {CONFIG}"], check=True)
+
+
+def carry_codex(old: Path, new: Path, log: list[str]) -> None:
+    """Codex records each thread's rollout file by absolute path."""
+    db = new / "broker" / "codex" / "state_5.sqlite"
+    if not db.exists():
+        return
+    con = sqlite3.connect(db)
+    with con:
+        n = con.execute("UPDATE threads SET rollout_path = replace(rollout_path, ?, ?) "
+                        "WHERE rollout_path LIKE ?",
+                        (f"{old}/", f"{new}/", f"{old}/%")).rowcount
+    con.close()
+    say(f"carried: {n} Codex thread rollout paths", log)
+
+
+def encoded(path: Path) -> str:
+    return "".join(c if c.isalnum() else "-" for c in str(path))
+
+
+def carry_claude(old: Path, new: Path, log: list[str], back: bool = False) -> int:
+    """Claude Code keeps a session under its working directory's name; a job
+    tree's sessions follow the tree so a continuation can still resume."""
+    projects = lc.CLAUDE_HOME / "projects"
+    src, dst = (encoded(new), encoded(old)) if back else (encoded(old), encoded(new))
+    n = 0
+    for d in sorted(projects.glob(src + "-*")) + ([projects / src] if (projects / src).exists() else []):
+        target = projects / (dst + d.name[len(src):])
+        if not target.exists():
+            d.rename(target)
+            n += 1
+    say(f"carried: {n} Claude Code session folders", log)
+    return n
+
+
+def regenerate(log: list[str]) -> None:
+    bin_ = ROOT / "bin"
+    steps = [[str(bin_ / "gen-units")], [str(bin_ / "gen-rc-units")]]
+    for ws in sorted(lc.WORKSPACES.iterdir()):
+        cfg = ws / "agent.json"
+        if cfg.is_file():
+            data = json.loads(cfg.read_text())
+            steps.append([str(bin_ / "provision"), data["name"], data["wake_schedule"]])
+    steps += [[str(bin_ / "provision"), "--codex"],
+              [str(bin_ / "provision"), "--antigravity"],
+              [str(bin_ / "provision"), "--engineer"],
+              [str(bin_ / "provision"), "--reviewer"],
+              [str(bin_ / "schedule"), "reconcile"],
+              ["sudo", "-n", str(bin_ / "gen-deploy")]]
+    env = {**os.environ, "PYTHONPYCACHEPREFIX": PYCACHE_ENV.split("=", 1)[1]}
+    for argv in steps:
+        out = sh(argv, env=env)
+        if out.returncode:
+            raise RuntimeError(f"{' '.join(argv[-3:])} -> {out.returncode}: "
+                               f"{(out.stderr or out.stdout).strip()[-800:]}")
+        say(f"regenerated: {' '.join(Path(a).name for a in argv[-3:])}", log)
+
+
+def run(args, log: list[str]) -> int:
+    if moved():
+        say("already moved: the config names the new places", log)
+        return 0
+    for key in ORDER:
+        if NEW[key].exists() and not (key == "state" and early_only(NEW[key])):
+            say(f"refused: {NEW[key]} already exists", log)
+            return 1
+    if os.stat(OLD["state"]).st_dev != os.stat(HOME).st_dev:
+        say("refused: the state directory is not on the home filesystem", log)
+        return 1
+    prepare(log)
+    while True:
+        held = blockers()
+        if not held:
+            break
+        if not args.wait:
+            say("held by: " + "; ".join(held), log)
+            return 75
+        say("waiting: " + "; ".join(held), log)
+        time.sleep(POLL_S)
+    old_config = CONFIG.read_text()
+    stopped = stop_all(log)
+    # Quiet is re-read after the stop: a timer that fired in between.
+    late = [b for b in blockers() if not b.startswith(("the broker's live list",))]
+    if late:
+        say("a run started as the timers stopped: " + "; ".join(late), log)
+        start_all(stopped, log)
+        return 75
+    done: list[tuple[Path, Path | None]] = []
+    try:
+        for key in ORDER:
+            old, new = OLD[key], NEW[key]
+            if not old.exists():
+                continue
+            new.parent.mkdir(parents=True, exist_ok=True)
+            if key in ("secrets_env", "wake_env"):
+                new.parent.chmod(0o700)
+            if key == "state" and new.exists():
+                # Already holds what moved early (the reviewer's state, at
+                # the landing): the rest goes in beside it, entry by entry.
+                for child in sorted(old.iterdir()):
+                    child.rename(new / child.name)
+                    done.append((child, new / child.name))
+                old.rmdir()
+                done.append((old, None))
+                say(f"moved: {old}/* -> {new}/", log)
+                continue
+            old.rename(new)
+            done.append((old, new))
+            say(f"moved: {old} -> {new}", log)
+        for old, new in STRAYS.items():
+            if old.exists() and not new.exists():
+                old.rename(new)
+                done.append((old, new))
+                say(f"moved: {old} -> {new}", log)
+        carry_codex(OLD["state"], NEW["state"], log)
+        carry_claude(OLD["state"], NEW["state"], log)
+        write_config(config_text(NEW))
+        say(f"rewrote {CONFIG}", log)
+        regenerate(log)
+    except Exception as exc:  # noqa: BLE001 -- every failure is put back
+        say(f"FAILED, putting everything back: {exc}", log)
+        try:
+            carry_claude(OLD["state"], NEW["state"], log, back=True)
+            carry_codex(NEW["state"], OLD["state"], log) if (NEW["state"] / "broker").exists() else None
+        except Exception as inner:  # noqa: BLE001
+            say(f"while putting back the carried records: {inner}", log)
+        for old, new in reversed(done):
+            if new is None:
+                old.mkdir(exist_ok=True)
+                continue
+            if new.exists() and not old.exists():
+                new.rename(old)
+                say(f"put back: {new} -> {old}", log)
+        write_config(old_config)
+        say(f"restored {CONFIG}", log)
+        start_all(stopped, log)
+        return 1
+    start_all(stopped, log)
+    shutil.rmtree(OLD["mcp_venv"], ignore_errors=True)
+    say(f"removed the old venv {OLD['mcp_venv']}", log)
+    for d in ROOT.rglob("__pycache__"):
+        if ".git" not in d.parts:
+            shutil.rmtree(d, ignore_errors=True)
+    say("removed the checkout's __pycache__ folders", log)
+    return 0
+
+
+# -- after -----------------------------------------------------------------------
+
+def lanes() -> int:
+    """Every lane's files resolve and every command a lane starts exists.
+    No model is called: this is the structure a wake, a cron, a conversation,
+    the engineer and the reviewer stand on, read after the move."""
+    import re
+    import loam_identity
+    import loam_memory
+    bad, seen = [], 0
+
+    def commands(mcp_json: Path) -> None:
+        nonlocal seen
+        if not mcp_json.is_file():
+            return
+        for name, server in json.loads(mcp_json.read_text()).get("mcpServers", {}).items():
+            cmd = server.get("command")
+            seen += 1
+            if cmd and cmd.startswith("/") and not Path(cmd).exists():
+                bad.append(f"{mcp_json}: {name} runs {cmd}, which is missing")
+            for arg in server.get("args", []):
+                if isinstance(arg, str) and arg.startswith(str(HOME)) and not Path(arg).exists():
+                    bad.append(f"{mcp_json}: {name} names {arg}, which is missing")
+
+    personas = sorted(d for d in lc.WORKSPACES.iterdir() if (d / "agent.json").is_file())
+    for ws in personas:
+        name = json.loads((ws / "agent.json").read_text())["name"]
+        try:
+            loam_identity.assert_imports_resolve(ws)
+            loam_memory.resolve_lane(ws, loam_memory.REFLECTION_LAYER)
+            for cron in sorted((ws / loam_memory.CRON_LANE_DIR).glob("*.md")):
+                loam_memory.resolve_lane(ws, f"{loam_memory.CRON_LANE_DIR}/{cron.name}")
+        except Exception as exc:  # noqa: BLE001
+            bad.append(f"{name}: {exc}")
+        commands(ws / ".mcp.json")
+        unit = lc.USER_UNIT_DIR / f"loam-wake-{name}.service"
+        if unit.is_file():
+            for path in re.findall(r"^(?:EnvironmentFile=-?|ExecStart=)(\S+)", unit.read_text(), re.M):
+                if not Path(path).exists():
+                    bad.append(f"{unit.name}: {path} is missing")
+    commands(ROOT / "engineer" / ".mcp.json")
+    commands(ROOT / "reviewer" / ".mcp.json")
+    for unit in sorted(lc.USER_UNIT_DIR.glob("loam-*.service")):
+        for path in re.findall(r"^EnvironmentFile=-?(\S+)", unit.read_text(), re.M):
+            if not Path(path).exists():
+                bad.append(f"{unit.name}: EnvironmentFile {path} is missing")
+    print(f"{len(personas)} personas, {seen} MCP servers, "
+          f"{len(list(lc.USER_UNIT_DIR.glob('loam-*.service')))} units read")
+    for line in bad:
+        print("missing:", line)
+    return 1 if bad else 0
+
+
+def verify(log: list[str]) -> bool:
+    """The lane checks. Re-imports nothing: each is a fresh process, so it
+    reads the config as it now is."""
+    ok = True
+    env = {**os.environ, "PYTHONPYCACHEPREFIX": PYCACHE_ENV.split("=", 1)[1]}
+
+    def check(label: str, argv: list[str], want: int = 0, show: int = 6) -> None:
+        nonlocal ok
+        out = sh(argv, env=env)
+        good = out.returncode == want
+        ok = ok and good
+        text = (out.stdout + out.stderr).strip().splitlines()
+        say(f"{'ok ' if good else 'BAD'} {label}: exit {out.returncode}; "
+            + " | ".join(text[-show:]), log)
+
+    bin_ = ROOT / "bin"
+    check("config", [str(bin_ / "loam-config"), "get", "paths.state"])
+    # check-drift: green but for the findings that predate this move.
+    out = sh([str(bin_ / "check-drift")], env=env)
+    tail = [l for l in out.stdout.splitlines() if l.startswith("### ")]
+    say(f"{'ok ' if out.returncode in (0, 1) else 'BAD'} check-drift: exit "
+        f"{out.returncode}; findings: {tail or 'none'}", log)
+    for unit in ("loam-session-broker.service", "loam-plugins-gateway.service"):
+        state = sh(["systemctl", "--user", "is-active", unit]).stdout.strip()
+        ok = ok and state == "active"
+        say(f"{'ok ' if state == 'active' else 'BAD'} {unit}: {state}", log)
+    rcs = units("loam-rc-*.service", "active")
+    say(f"ok  Remote Control servers active: {len(rcs)}", log)
+    # One dry check per lane type.
+    check("lanes, dry (every persona's imports, reflection and cron lane "
+          "files, MCP commands and wake unit paths; the engineer's and the "
+          "reviewer's MCP commands)", [sys.executable, __file__, "lanes"], show=12)
+    check(f"conversation lane (rc-preflight {lc.LEAD_AGENT})",
+          [sys.executable, str(bin_ / "rc-preflight"), str(lc.WORKSPACES / lc.LEAD_AGENT)], show=3)
+    check("provision persona (dry)", [str(bin_ / "provision"), lc.LEAD_AGENT, "03:20", "--dry-run"], show=2)
+    check("provision engineer (dry)", [str(bin_ / "provision"), "--engineer", "--dry-run"], show=2)
+    check("provision reviewer (dry)", [str(bin_ / "provision"), "--reviewer", "--dry-run"], show=2)
+    check("crons and schedules (the reconciler's last event)", [str(bin_ / "schedule"), "log", "1"], show=1)
+    check("engineer status", [str(bin_ / "engineer-job"), "--status"], show=4)
+    check("sites", [str(bin_ / "site"), "list"], show=3)
+    check("plugins", [str(bin_ / "plugin-servers"), "status"], show=3)
+    try:
+        with urllib.request.urlopen(APP_UP, timeout=10) as resp:
+            say(f"ok  app {APP_UP}: {resp.status}", log)
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        say(f"BAD app {APP_UP}: {exc}", log)
+    status = sh(["git", "-C", str(ROOT), "status", "--porcelain", "--ignored"]).stdout
+    clean = not status.strip()
+    ok = ok and clean
+    say(f"{'ok ' if clean else 'BAD'} git status --porcelain --ignored: "
+        + (status.strip().replace(chr(10), ' | ') or "(nothing)"), log)
+    return ok
+
+
+def report(log: list[str], result: int, verified: bool | None, inbox: Path) -> None:
+    body = ["# Loam: the state moved out of the checkout" if result == 0
+            else "# Loam: the state move did not complete", "",
+            f"`bin/move-state run`, {now()}. Exit {result}"
+            + ("" if verified is None else f"; verification {'passed' if verified else 'FAILED'}") + ".",
+            "", "```", *log, "```", ""]
+    text = "\n".join(body)
+    # This process read the config before the move: the new place is NEW's.
+    for path in (NEW["logs"] / "move-state.md" if result == 0 else OLD["logs"] / "move-state.md",
+                 inbox / f"{datetime.now():%Y-%m-%d}-engineer-state-move.md"):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        except OSError as exc:
+            print(f"move-state: report to {path}: {exc}", file=sys.stderr)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="move-state")
+    ap.add_argument("verb", choices=("plan", "run", "verify", "lanes"))
+    ap.add_argument("--wait", action="store_true")
+    ap.add_argument("--report", default=str(lc.WORKSPACES / "commons" / lc.LEAD_AGENT / "inbox"))
+    args = ap.parse_args()
+    log: list[str] = []
+    if args.verb == "plan":
+        print("\n".join(plan()))
+        return 0
+    if args.verb == "lanes":
+        return lanes()
+    if args.verb == "verify":
+        return 0 if verify(log) else 1
+    result = run(args, log)
+    verified = None
+    if result == 0:
+        # The verification is a fresh process: this one imported the old config.
+        out = sh([sys.executable, __file__, "verify"])
+        log += out.stdout.splitlines()
+        verified = out.returncode == 0
+    if result != 75 or args.wait:
+        report(log, result, verified, Path(args.report))
+    return result
+
+
+if __name__ == "__main__":
+    sys.exit(main())

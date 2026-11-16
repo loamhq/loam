@@ -1,0 +1,23 @@
+# Provenance of fixtures/harness-session.jsonl
+#
+# Every line but one is a session entry copied out of a real Claude Code
+# session file, so the shapes under test are the CLI's own and not a guess at
+# them. On 2026-11-15, for the public release, the words a person or an agent
+# wrote in them were replaced with neutral text of the same shape and about
+# the same length, and the home directory and agent names in paths were
+# renamed; keys, types, order, uuids, timestamps and every harness envelope
+# (<task-notification>, <cross-session-message>, <system-reminder>) are as the
+# CLI wrote them. The file is a splice of three sessions, which is why the
+# timestamps are not monotonic: each line keeps the timestamp it was written
+# with. Nothing here is read for chronology.
+#
+# source session | entry uuid | timestamp | shape
+#
+persona session A | acb600b6-e6f5-43bb-b920-3f068bdad575 | 2026-08-25T14:16:16.642Z | a typed prompt, origin null (the shape a Loam-interface turn has)
+persona session A | 1ed73f06-8a8a-4102-8e2c-108e0048c478 | 2026-08-25T14:18:18.503Z | the agent's reply before the notification
+persona session A | 39b3eb93-2eba-4e7b-8ee7-883d60c5bdf3 | 2026-08-25T14:18:18.633Z | a pure task-notification, user role, origin kind task-notification
+persona session A | 52904d0b-f317-4853-aa8b-ac58b9fed123 | 2026-08-25T14:18:33.329Z | the agent's reply after the notification, which is what the person read
+persona session B | af6801d2-5cc7-47c7-9d81-6a83b0eca490 | 2026-09-05T18:58:21.546Z | a typed message whose PROSE mentions <task-notification> with no closing tag; 2.5 KB of a person's words that a greedy rule would eat
+scratch session C | 127040e7-ad04-4916-895c-8bc126cd7483 | 2026-09-04T02:57:14.192Z | a peer message: harness preamble, <cross-session-message> envelope, harness trailer
+SYNTHESIZED | fixture-wrapped-0001 | 2026-09-04T02:57:14.900Z | a typed sentence wrapped in <system-reminder> blocks. The only line not copied from a session file: across all 42 project directories on the first install (2026-09-23) no user entry carrying a promptSource has a reminder inside its text blocks -- this CLI version keeps them in tool_result blocks and in entries with no promptSource, both of which the writer already drops. The reminder text is real, lifted from a tool_result in session B; the sentence around it is marked as a fixture line so it can never be read as something a person said.
+scratch session C | 176a9f7f-7c82-4441-8e2a-73d6bc36b519 | 2026-09-04T02:57:15.615Z | the agent's reply after the peer message

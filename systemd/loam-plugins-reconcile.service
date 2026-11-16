@@ -1,0 +1,12 @@
+[Unit]
+Description=Loam plugin servers: start what should run, stop what should not
+# lib/loam_plugin_servers.reconcile. A plugin that is on and has a server is a
+# transient unit, which a reboot or a user-manager restart does not keep; this
+# starts each one that is wanted and not loaded, and stops a loaded one that
+# is no longer wanted. It never restarts a failed unit: a crash loop stays
+# visible in Settings > Plugins until someone acts.
+
+[Service]
+Type=oneshot
+ExecStart=@ROOT@/bin/plugin-servers reconcile
+TimeoutStartSec=120

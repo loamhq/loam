@@ -1,0 +1,172 @@
+{
+  "deep-forest": {
+    "light": {
+      "page": "#E1E7DF",
+      "pane": "#EDF1E9",
+      "raised": "#F6F8F1",
+      "card": "#D7DFD2",
+      "ink": "#172019",
+      "ink2": "#3E4A3E",
+      "ink3": "#56644F",
+      "rule": "rgba(23,32,25,.13)",
+      "foam": "#C9D3C6",
+      "coffee": "#18251C",
+      "coffee2": "#3E5444",
+      "esp": "#3F5A47",
+      "espink": "#F2F5F1",
+      "signal": "#8A5C2B"
+    },
+    "dark": {
+      "page": "#101914",
+      "pane": "#16221B",
+      "raised": "#233229",
+      "card": "#1B2A21",
+      "ink": "#E3EBDD",
+      "ink2": "#B5C3AF",
+      "ink3": "#99AC93",
+      "rule": "rgba(227,235,221,.13)",
+      "foam": "#2C3A31",
+      "coffee": "#DCE6DD",
+      "coffee2": "#A9BDAE",
+      "esp": "#9DB8A3",
+      "espink": "#0F1712",
+      "signal": "#D19A5C"
+    }
+  },
+  "autumn": {
+    "light": {
+      "page": "#F0E4D1",
+      "pane": "#F8EFDF",
+      "raised": "#FFF9EF",
+      "card": "#E8D7BE",
+      "ink": "#291E17",
+      "ink2": "#594638",
+      "ink3": "#715B47",
+      "rule": "rgba(41,30,23,.13)",
+      "foam": "#E6CBA4",
+      "coffee": "#3A220F",
+      "coffee2": "#7A4A22",
+      "esp": "#A0561C",
+      "espink": "#FFF8EE",
+      "signal": "#B23A26"
+    },
+    "dark": {
+      "page": "#211518",
+      "pane": "#2A1C20",
+      "raised": "#38262A",
+      "card": "#322126",
+      "ink": "#F2E5DE",
+      "ink2": "#D0B8AE",
+      "ink3": "#BCA094",
+      "rule": "rgba(242,229,222,.13)",
+      "foam": "#4A2A2A",
+      "coffee": "#F2DCD6",
+      "coffee2": "#D6AFA6",
+      "esp": "#E3A27A",
+      "espink": "#1E1210",
+      "signal": "#E3B23C"
+    }
+  },
+  "yosemite": {
+    "light": {
+      "page": "#DEE9EE",
+      "pane": "#EDF3F6",
+      "raised": "#F7FAFB",
+      "card": "#D0DDE3",
+      "ink": "#1D2528",
+      "ink2": "#414F55",
+      "ink3": "#58666B",
+      "rule": "rgba(29,37,40,.13)",
+      "foam": "#D3D6BF",
+      "coffee": "#262A17",
+      "coffee2": "#555B38",
+      "esp": "#5E6B3A",
+      "espink": "#F7F8F0",
+      "signal": "#436985"
+    },
+    "dark": {
+      "page": "#131C23",
+      "pane": "#1A252D",
+      "raised": "#27343D",
+      "card": "#202D36",
+      "ink": "#E5EBEA",
+      "ink2": "#B6C4C8",
+      "ink3": "#9BAEB7",
+      "rule": "rgba(229,235,234,.13)",
+      "foam": "#343A27",
+      "coffee": "#E2E6D2",
+      "coffee2": "#BCC39F",
+      "esp": "#B8C48E",
+      "espink": "#161A0E",
+      "signal": "#8DB4CF"
+    }
+  },
+  "mist-trail": {
+    "light": {
+      "page": "#E8EEEB",
+      "pane": "#F1F5F3",
+      "raised": "#F8FAF9",
+      "card": "#DDE5E1",
+      "ink": "#16201C",
+      "ink2": "#3F5148",
+      "ink3": "#57685F",
+      "rule": "rgba(22,32,28,.13)",
+      "foam": "#E4CDBE",
+      "coffee": "#492719",
+      "coffee2": "#78452D",
+      "esp": "#8E3F22",
+      "espink": "#FFF7F0",
+      "signal": "#286C73"
+    },
+    "dark": {
+      "page": "#101814",
+      "pane": "#15201A",
+      "raised": "#203029",
+      "card": "#1A2620",
+      "ink": "#E1EAE5",
+      "ink2": "#B1C2B8",
+      "ink3": "#93ABA0",
+      "rule": "rgba(225,234,229,.13)",
+      "foam": "#3F2D24",
+      "coffee": "#F0D8C8",
+      "coffee2": "#CDA88F",
+      "esp": "#D7906B",
+      "espink": "#1C0F09",
+      "signal": "#94C7C6"
+    }
+  },
+  "foundry": {
+    "light": {
+      "page": "#E4E0D9",
+      "pane": "#F0EDE7",
+      "raised": "#F9F7F2",
+      "card": "#D8D3CB",
+      "ink": "#202122",
+      "ink2": "#494741",
+      "ink3": "#625F58",
+      "rule": "rgba(32,33,34,.13)",
+      "foam": "#D8C3AC",
+      "coffee": "#2A1C10",
+      "coffee2": "#5E4330",
+      "esp": "#202224",
+      "espink": "#EEEDEA",
+      "signal": "#3F5D74"
+    },
+    "dark": {
+      "page": "#121314",
+      "pane": "#191C1E",
+      "raised": "#282C2F",
+      "card": "#222628",
+      "ink": "#E8E5DF",
+      "ink2": "#C1BBB1",
+      "ink3": "#AAA297",
+      "rule": "rgba(232,229,223,.13)",
+      "foam": "#4B3826",
+      "coffee": "#F1E3D3",
+      "coffee2": "#D2B79C",
+      "esp": "#D5D3CE",
+      "espink": "#141516",
+      "signal": "#8FB2CC"
+    }
+  }
+}

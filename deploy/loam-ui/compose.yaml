@@ -1,0 +1,253 @@
+# loam-ui -- how it runs on the box. The record beside it (deploy.toml) says
+# how it is exposed; this file says nothing about that on purpose.
+#
+#   sudo bin/deploy loam-ui up <commit>     build the image from the checkout
+#                                           at that commit and (re)start on it
+#   sudo bin/deploy loam-ui status | logs | exec <cmd>
+#
+# LOAM_COMMIT is set by bin/deploy to the short commit the image was built
+# from; the tag has no default so a bare `docker compose up` fails loudly
+# rather than starting whatever was tagged last.
+#
+# Loopback only: the publish address is 127.0.0.1 here AND the daemon's
+# default publish address is 127.0.0.1 (/etc/docker/daemon.json "ip"). The
+# generator refuses any other address, and any bind mount.
+#
+# THE REAL APP RUNS HERE AS OF 2026-09-16: the project's own image, Node on
+# node:24-alpine, no dependencies and no build step, running as the image's
+# `node` user (uid 1000) with a read-only root. The health check is GET /up,
+# which is the convention's endpoint and the one the app's own Dockerfile
+# HEALTHCHECK reads too. The placeholder (caddy:2-alpine, one static page,
+# uid 65534) is gone, and the three parts of this file it had shaped --
+# capabilities, the tmpfs uid and mem_limit -- were settled at that deploy
+# against the real image and are noted where they sit.
+#
+# Capabilities: [ALL], which is where this list was always meant to end up.
+# The placeholder kept NET_BIND_SERVICE for a reason that was never about
+# needing the port: the official caddy image ships /usr/bin/caddy with the
+# file capability `cap_net_bind_service=ep`, and the kernel refuses to exec a
+# binary whose effective file capabilities are outside the bounding set, so
+# `cap_drop: [ALL]` killed it on `exec caddy failed: Operation not
+# permitted` (caused on another app's caddy container, 2026-09-10, ten restarts).
+# node:24-alpine's binary carries no file capabilities, and it was caused
+# both ways before this line changed: `docker run --cap-drop ALL
+# loam-ui:ee0cc4f node -e ...` ran.
+
+name: loam-ui
+
+services:
+  web:
+    image: loam-ui:${LOAM_COMMIT:?set by bin/deploy}
+    container_name: loam-ui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"
+    networks:
+      # Its own network AND the broker's. Naming any network here means
+      # `default` must be named too: a service that declares `networks:` no
+      # longer joins the implicit default, and dropping it would take the
+      # proxy's route to the container with it.
+      #
+      # These two and no third: the generator refuses any other network by
+      # name, resolving the alias first, because Caddy lets the browser's
+      # subnet past a private host's login and that bypass is one container
+      # wide (deploy/README.md, "The two networks an app may join").
+      - default
+      - broker
+    environment:
+      # Convention 4: config by environment. The app's README carries the
+      # table; this block says where each value comes from.
+      APP_PORT: "8080"
+      # The session broker (agents/broker/README.md): the host-side half that
+      # starts persona sessions, on the `loam-broker` bridge below. Both
+      # values are supplied by `bin/deploy` at the moment it runs compose --
+      # the URL from lib/loam_broker's constants, the token read there and
+      # then from agents/state/broker/token, which is gitignored, 0600, and
+      # in no repo and no image. NEITHER IS EVER A LITERAL IN THIS FILE, and
+      # `:?` means a bare `docker compose up` fails loudly rather than
+      # starting a container with an empty credential, exactly as LOAM_COMMIT
+      # does above.
+      BROKER_URL: "${BROKER_URL:?set by bin/deploy from lib/loam_broker}"
+      BROKER_TOKEN: "${BROKER_TOKEN:?read by bin/deploy from the broker state directory; if it is absent the broker has never started}"
+      # Google's Gemini API, for the dictation feature. Supplied by
+      # `bin/deploy` (app_secrets) at the moment it runs compose, read from
+      # the box's secret store at /etc/chassis/secrets.env, which is
+      # root:<box user> 0640 and outside every repo. THE SAME RULE AS THE TWO
+      # ABOVE: never a literal in this file, because this file is in git.
+      # Which apps may be handed which keys is an allowlist in bin/deploy,
+      # not something this file decides by naming one.
+      #
+      # Staged 2026-09-25 and read since 66ba808 (deployed the same day) by
+      # the app's POST /api/transcribe, which forwards a take to
+      # gemini-3.5-transcribe. It was `:?` until 2026-11-14, so that an app
+      # holding an empty credential failed here rather than in front of a
+      # person dictating. Since the first release, dictation and read aloud
+      # ship OFF and a person turns one on by pasting their own key into its
+      # settings (decision 2), so a blank install has no key by design and
+      # the app starts without one. On this box the store still has it.
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      # Read aloud (339a8f6, deployed 2026-10-02): which prebuilt Gemini voice
+      # each agent speaks in, and a few words of its character, as
+      # `agent=Voice:character;...`. It is here and not in the app because
+      # the agents are this installation's and the app's repo names none.
+      # An agent not listed reads in the app's default voice (Charon). Not a
+      # secret, so a literal; the key above is what the call is made with.
+      # Every other SPEECH_* setting is left to the app's defaults (its
+      # README's table), which are the design. /storage below is where the
+      # audio is cached.
+      #
+      # Corrected 2026-10-02 at 1045038: each voice's gender now matches the
+      # agent's soul, checked against Google's Gemini-TTS voice table. One
+      # persona went from Achird (male) to Sulafat (female), another from
+      # Pulcherrima (female) to Sadachbia (male).
+      SPEECH_VOICES: "iris=Aoede:warm, natural and unhurried"
+      # Measured spoken words/minute per voice, which the app's per-chunk
+      # duration check (e75c170, deployed 2026-10-13) expects each chunk to
+      # land near: words x 60 / pace, accepted at 0.65-1.30 of that. A voice
+      # not listed uses the app's provisional 150. Aoede is pooled from the
+      # seven chunks of three Full reads that transcribed back word for word
+      # (Files, gemini-3.8-flash-tts, the page's document style), 2026-10-13:
+      # 938 words in 382.0 s = 147.3. Chunks ranged 116.5-177.1 wpm, so the
+      # slow edge of the band sits close to faithful speech. Measure a voice
+      # before adding it here.
+      SPEECH_PACES: "Aoede=147"
+      # Avatar colours (loam-ui 6b3b802, deployed 2026-11-09): a JSON object
+      # of persona ID -> palette token, overriding only the personas named;
+      # every other persona keeps the colour its ID hashes to. One persona's
+      # hashed colour sat too close to another's blue at avatar size, so it
+      # takes the palette's plum, c54, which no other persona uses (the app's
+      # docs/evidence/thread-round-two/colours.json). Here and not in the app
+      # for the same reason as SPEECH_VOICES: the personas are this
+      # installation's, and the app's repo names none. Not a secret, so a
+      # literal; single-quoted so the JSON's double quotes survive YAML.
+      AVATAR_COLOURS: '{}'
+      # Files (0f67dc1/5148de9): the published vault's address, so a link to
+      # it in a note or a message opens in Files instead of leaving the app.
+      # The vault app (deploy/vault) is served at `vault.<domain>`; the domain
+      # is deploy/loam.toml's, and this is the one place it is repeated,
+      # because the app reads a whole URL and compose cannot derive one.
+      # Since 2026-11-14 (first release L12) bin/deploy hands it the vault's
+      # origin as LOAM_VAULT_ORIGIN (origins_env), so an install on another
+      # name gets its own; on the first install it was
+      # https://vault.<domain>, the literal it replaced. Comma-separated if there are ever more; the app
+      # drops a trailing slash and anything not https://.
+      # tests/e2e_files_app.py reads this line and drives the app with it.
+      FILES_VAULT_URLS: "${LOAM_VAULT_ORIGIN:?set by bin/deploy}/"
+      # Files' Copy link for the commons' web folder (loam-ui 1a48444,
+      # deployed 2026-11-13): a JSON array of {root, path, url}, where path
+      # is relative to a Files root, never a host path. AI Spaces is root
+      # `spaces` (lib/loam_files.ROOTS, served from ai-labs/), so the folder
+      # deploy/files serves (static_root, ai-labs/commons/www) is
+      # `commons/www`, and its host is `files.<domain>`. A page there copies
+      # its files.<domain> address instead of the app link (LOAM_FILES_ORIGIN
+      # from bin/deploy since 2026-11-14, as above). Not a secret;
+      # single-quoted so the JSON survives YAML.
+      FILES_WEB_URLS: '[{"root":"spaces","path":"commons/www","url":"${LOAM_FILES_ORIGIN:?set by bin/deploy}"}]'
+      # Live HTML previews (2132b85): the origin the app frames an HTML file
+      # from, which is deploy.toml's content_host under the domain -- a
+      # second hostname on this same container, never the app's own. Added
+      # 2026-10-23 with the host block, before any deploy carried 2132b85; a
+      # commit older than that ignores it, and without it the app keeps its
+      # script-free preview. Not a secret. From bin/deploy since 2026-11-14
+      # (origins_env, the record's content_host under the install's domain),
+      # so an install never frames previews from another box's content host.
+      FILES_CONTENT_ORIGIN: "${LOAM_CONTENT_ORIGIN_LOAM_UI:?set by bin/deploy}"
+      # The domain the agents' sites are under (2026-11-15, first release
+      # L14): the app's CSP frames `https://*.<domain>` and its Apps section
+      # opens only a site there (loam-ui src/config.js, U1). Unset, the app
+      # falls back to the first install's old base domain, which stopped being
+      # that box's domain that day.
+      APPS_DOMAIN: "${LOAM_DOMAIN:?set by bin/deploy}"
+      # A DICTATION_TOKEN was here 2026-09-28 to 2026-10-01: the bearer token
+      # of POST /api/dictate, the Obsidian plugin's door past the login. The
+      # plugin transcribes on its own key now; the app dropped the route in
+      # d4dbb4d, and the token left this file, bin/deploy and the store.
+      # An ATTACHMENT_MAX_BYTES was here until 2026-09-22, so the composer
+      # could refuse a too-large file before a phone spent a minute on it.
+      # The app never read it: it asks the broker's `/v1/limits`, which is one
+      # number at the moment it is needed rather than two that can disagree.
+    # Where stdout goes: the box's journal, tagged with the container's name,
+    # so it outlives a restart AND a redeploy (a json-file log is deleted with
+    # the container, and every new commit is a new container). Exactly this
+    # block; lib/loam_deploy.APP_LOGGING is the other home and the generator
+    # refuses anything else. Read it with `bin/logs loam-ui` (docs/logs.md).
+    logging:
+      driver: journald
+      options:
+        tag: "{{.Name}}"
+    read_only: true
+    tmpfs:
+      # uid/gid are the image's `node` user, which is who the app runs as.
+      # The mode a tmpfs gets here is 1777, so the previous value (65534,
+      # the placeholder's user) was writable by uid 1000 anyway -- caused
+      # 2026-09-16, `touch /tmp/probe` inside the running container as
+      # `node` succeeded with the old value. It is corrected because a uid
+      # in this file that names nobody in the image is a fact that reads as
+      # true and is not, not because anything was broken by it.
+      - /tmp:size=16m,uid=1000,gid=1000
+    volumes:
+      # Convention 3: durable state is SQLite under a single mounted
+      # /storage, and one directory is the whole backup. A NAMED volume, not
+      # a path on the box -- the generator refuses a bind mount outright.
+      #
+      # Since 339a8f6 (2026-10-02) the app writes one thing here: read-aloud
+      # audio under /storage/speech, an MP3 and a JSON sidecar each, swept 48
+      # hours after its last play. A cache, not a record -- lose the volume
+      # and the next Listen makes it again. Before that the mount was empty,
+      # kept so the slot was the conventions' shape, and this first stateful
+      # use needed no change to this file. The trap to know about, measured
+      # 2026-09-16: Docker creates a fresh named volume owned by root:root at
+      # mode 0755, and the container does not run as root, so the first
+      # process that tries to write /storage gets EACCES. The app's image
+      # fixes that at build time (`RUN mkdir -p /storage && chown node:node
+      # /storage`), because Docker seeds a new volume's ownership from the
+      # image's directory underneath it -- verified on the running container,
+      # where /storage is `node node`. Fixing it by hand on the live volume
+      # would be state no generator knows about.
+      - storage:/storage
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Measured on the real image, not guessed. `docker stats loam-ui` sampled
+    # every 2s across the live smoke test of 2026-09-16 (one persona session,
+    # three turns, an SSE stream held open throughout, a reconnect and a
+    # resume): 18.9 MiB idle, 20.5 MiB at the first request, 22.1 MiB peak.
+    #
+    # So why 128m and not, say, 32m, when the thing peaks at 22? Because the
+    # steady state is not what this limit has to survive. Two things sit
+    # above it. First, the largest SINGLE event the broker will ever pass
+    # through: bin/session-broker reads the CLI's stdout with a 16 MiB line
+    # limit, because one tool result can be a whole file, and an event that
+    # size crosses this app on its way to the browser. Second, Node sizes its
+    # own heap from the cgroup limit it finds, so a tight limit here does not
+    # merely cap the app, it makes the app's GC behaviour a function of this
+    # number. 128m is ~5.8x the measured peak and leaves room for one
+    # maximum-size event on each of a few concurrent streams; the session cap
+    # is 4 (lib/loam_broker.py), which bounds how many there can be.
+    mem_limit: 128m
+    pids_limit: 64
+    init: true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/up"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+volumes:
+  storage:
+
+networks:
+  # `loam-broker`, 172.31.0.0/24, created and owned by the runtime and not by
+  # this file: `external: true` means compose joins it and never creates,
+  # renames or removes it. check-drift asserts it exists with that subnet and
+  # that the kernel wall around the broker's port is up.
+  #
+  # Joining it is the WHOLE of how this container reaches the broker: no bind
+  # mount, no host networking, no published port, nothing the generator
+  # refuses. It is not an authorisation either -- the broker answers only
+  # /up without the bearer token above, and 401s every other route.
+  broker:
+    name: loam-broker
+    external: true

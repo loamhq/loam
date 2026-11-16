@@ -1,0 +1,10 @@
+[Unit]
+Description=Loam: check every 30 seconds whether this install's name points here
+
+[Timer]
+OnActiveSec=5s
+OnUnitInactiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

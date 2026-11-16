@@ -1,0 +1,162 @@
+{
+ "_note": "A Codex 0.159.3 web search as app-server sent it, 2026-10-02 (Iris's chat c09982fe, seq 500-501). item/started is what the broker drew from; item/completed is the item the broker received, snippets dropped. The query, titles, URLs and domains were replaced with neutral example ones on 2026-11-15; the shape is Codex's own.",
+ "item/started": {
+  "item": {
+   "type": "webSearch",
+   "id": "exec-61bc3702-b195-49a4-8222-12a28145b161",
+   "query": "",
+   "action": null,
+   "results": null
+  }
+ },
+ "item/completed": {
+  "item": {
+   "type": "webSearch",
+   "id": "exec-61bc3702-b195-49a4-8222-12a28145b161",
+   "query": "site.plotbook.example.org allotment API plot booking integrations garden ...",
+   "action": {
+    "type": "search",
+    "query": null,
+    "queries": [
+     "site.plotbook.example.org allotment API plot booking integrations garden",
+     "site.docs.plotbook.example.org plots availability waiting list booking allotment"
+    ]
+   },
+   "results": [
+    {
+     "type": "text_result",
+     "domain": "plotbook.example.org",
+     "ref_id": "turn1search0",
+     "title": "Allotment Society APIs | Plot booking by Plotbook",
+     "url": "https://plotbook.example.org/products"
+    },
+    {
+     "type": "text_result",
+     "domain": "plotbook.example.org",
+     "ref_id": "turn1search1",
+     "title": "Plotbook API - The Community Garden Booking Platform",
+     "url": "https://plotbook.example.org/"
+    },
+    {
+     "type": "text_result",
+     "domain": "plotbook.example.org",
+     "ref_id": "turn1search2",
+     "title": "What Is Plotbook? | Unified Allotment Management API",
+     "url": "https://plotbook.example.org/what-is-plotbook"
+    },
+    {
+     "type": "text_result",
+     "domain": "plotbook.example.org",
+     "ref_id": "turn1search3",
+     "title": "Plotbook API Features - Real-Time Plot Availability | Plotbook",
+     "url": "https://plotbook.example.org/features"
+    },
+    {
+     "type": "text_result",
+     "domain": "docs.plotbook.example.org",
+     "ref_id": "turn1search4",
+     "title": "Waiting List Configuration Guide",
+     "url": "https://docs.plotbook.example.org/docs/waiting-list-configuration-guide"
+    },
+    {
+     "type": "text_result",
+     "domain": "plotbook.example.org",
+     "ref_id": "turn1search5",
+     "title": "API Use Cases | Build Garden Apps That Help Societies",
+     "url": "https://plotbook.example.org/use-cases"
+    },
+    {
+     "type": "text_result",
+     "domain": "plotbook.example.org",
+     "ref_id": "turn1search6",
+     "title": "Plotbook API V3: Post rents, read tenancies, plot maps | Plotbook",
+     "url": "https://plotbook.example.org/blog/plotbook-api-v3"
+    },
+    {
+     "type": "text_result",
+     "domain": "docs.plotbook.example.org",
+     "ref_id": "turn1search7",
+     "title": "Installing the Plotbook Sync Agent",
+     "url": "https://docs.plotbook.example.org/docs/plotbook-sync-installation-guide-1"
+    },
+    {
+     "type": "text_result",
+     "domain": "docs.plotbook.example.org",
+     "ref_id": "turn1search8",
+     "title": "What's possible with Plotbook",
+     "url": "https://docs.plotbook.example.org/docs/whats-possible-with-plotbook"
+    },
+    {
+     "type": "text_result",
+     "domain": "docs.plotbook.example.org",
+     "ref_id": "turn1search9",
+     "title": "Cloud based sync setup",
+     "url": "https://docs.plotbook.example.org/docs/copy-of-sync-installation-details"
+    },
+    {
+     "type": "text_result",
+     "domain": "plotbook.example.org",
+     "ref_id": "turn1search10",
+     "title": "Pricing - Plotbook API",
+     "url": "https://plotbook.example.org/pricing"
+    },
+    {
+     "type": "text_result",
+     "domain": "github.com",
+     "ref_id": "turn1search11",
+     "title": "GitHub - plotbook-api/quickstart · GitHub",
+     "url": "https://github.com/plotbook-api/quickstart"
+    },
+    {
+     "type": "text_result",
+     "domain": "www.example.com",
+     "ref_id": "turn1search12",
+     "title": "A modern allotment experience",
+     "url": "https://www.example.com/uploads/pdf/garden/plotbook-integration-datasheet.pdf"
+    },
+    {
+     "type": "text_result",
+     "domain": "garden-tools.example.net",
+     "ref_id": "turn1search13",
+     "title": "7. Plotbook– Plot letting and waiting list platform",
+     "url": "https://garden-tools.example.net/webpdf.pdf"
+    },
+    {
+     "type": "text_result",
+     "domain": "patents.example.org",
+     "ref_id": "turn1search14",
+     "title": "US 20140000000A1",
+     "url": "https://patents.example.org/US20140000000A1.pdf"
+    },
+    {
+     "type": "text_result",
+     "domain": "www.reddit.com",
+     "ref_id": "turn1reddit15",
+     "title": "Anyone using Plotbook for their allotment?",
+     "url": "https://www.reddit.com/r/gardening/comments/1abcdef"
+    },
+    {
+     "type": "text_result",
+     "domain": "saas-directory.example.com",
+     "ref_id": "turn1search16",
+     "title": "May2020 - Plotbook Product Overview Flyer",
+     "url": "https://saas-directory.example.com/uploads/plotbook/1.pdf"
+    },
+    {
+     "type": "text_result",
+     "domain": "files.example.org",
+     "ref_id": "turn1search17",
+     "title": "Ideal Societies",
+     "url": "https://files.example.org/users/plots/f_0000000000000000.pdf?filename=f_0000000000000000.pdf"
+    },
+    {
+     "type": "text_result",
+     "domain": "www.example.net",
+     "ref_id": "turn1search18",
+     "title": "FAQ Plot Booking Notifications",
+     "url": "https://www.example.net/guides/FAQ%20Plot%20Booking%20Notifications.pdf"
+    }
+   ]
+  }
+ }
+}

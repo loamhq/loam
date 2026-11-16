@@ -1,0 +1,38 @@
+[Unit]
+Description=Loam — restart the Remote Control servers to reclaim leaked memory
+# The CLI's idle Remote Control sessions grow. Measured 2026-09-02, after
+# uptimes of 2-7 days: the box sat at 3149/3818 MB RAM and 1866/2047 MB swap
+# (91%), and restarting the five units returned it to 2369 MB and 416 MB --
+# 1.4 GB that was slack, not work. Idle sessions had each accrued 90+ minutes
+# of CPU doing nothing but redrawing a status line.
+#
+# That slack is what made the wake window fatal. One persona's wake was OOM-killed
+# on 08-30 and 08-31 and Iris's RC server on 09-01, all three by the *global*
+# OOM killer rather than any cgroup limit -- so MemoryMax on the individual
+# units could not have stopped them. The only fix at that level is to stop
+# the box reaching the ceiling.
+#
+# Unconditional rather than pressure-triggered, on purpose. A conditional
+# recycle is a threshold to tune and a branch that can fail to fire; this is
+# a restart in the dead zone before the first wake. Sessions the owner has open
+# in the app live server-side and resume, so the cost is bounded to whatever
+# is in flight at 01:30 Pacific.
+#
+# The roster is globbed, never listed. Rosters drift, patterns don't -- the
+# same rule bin/gen-rc-units and the boundary guard are built on.#
+# NOT named loam-rc-*: this unit globs that namespace, and a unit that
+# matches its own pattern restarts itself mid-command. Measured 2026-09-02 --
+# the five agents came back and the recycler died of SIGTERM reporting
+# failure, which is a mitigation that works while looking broken every night.
+# The loam-rc-* namespace belongs to the per-agent servers gen-rc-units owns.
+
+#
+# It yields to a waiting engineer job since 2026-11-10 (bin/recycle-rc): a
+# server holding a call open on a job is restarted when the call ends, or
+# skipped tonight if it has not ended by 01:55, and the log says which. Until
+# then the restart was unconditional and a brief that would cross it was
+# refused; a job has no clock since that day, so the recycle waits instead.
+
+[Service]
+Type=oneshot
+ExecStart=@ROOT@/bin/recycle-rc

@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""The nightly Remote Control recycle, which yields to a waiting engineer job.
+
+loam-recycle-rc.timer fires this at 01:30 Pacific. Until 2026-11-10 the unit
+ran `systemctl --user restart loam-rc-*.service` unconditionally, and the
+engineer launcher refused any brief whose clock would cross 01:30, because
+the restart kills the call a persona has open on a job from inside one of
+those servers (the job itself is its own transient unit and survives). Since
+that day a job has no clock (the owner, 2026-11-10: "I don't want any
+limitations at all"), so the boundary cannot be computed at brief time, and
+the recycle yields instead:
+
+  1. Every active `loam-rc-*.service` whose cgroup holds no waiting call --
+     no `bin/engineer-job` process outside a job's own unit -- is restarted
+     at once, together, as before.
+  2. A unit that does hold one is waited for: re-read every POLL_S seconds
+     and restarted the moment its last waiting call ends, for up to WAIT_S
+     (25 minutes, so the recycle is done before the 02:00 wake grid opens,
+     which is why it runs at 01:30 at all).
+  3. A unit still holding a call after that is skipped tonight, and recycled
+     tomorrow. Its memory is the cost, and on the cpx62 (32 GB) one server's
+     day of leak is small.
+
+Every decision is printed (the unit's journal) and appended as one line to
+`logs/recycle.jsonl`: which units were restarted, which were waited for and
+for how long, which were skipped and the pids of the calls that held them.
+
+The roster is globbed, never listed, as the unit always did. Engineer jobs
+run as `loam-engineer-*.service`, wakes and crons as `loam-wake-*` /
+`loam-cron-*`, the broker as `loam-session-broker.service`: none of them
+matches `loam-rc-*`, so none is ever restarted here.
+
+Usage: recycle-rc [--dry-run]     (--dry-run decides and restarts nothing)
+LOAM_RECYCLE_WAIT_S and LOAM_RECYCLE_POLL_S move the two numbers for a probe;
+nothing in a unit sets them.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+import loam_due  # noqa: E402
+
+AGENTS = Path(__file__).resolve().parent.parent
+LOG = Path(os.environ.get("LOAM_RECYCLE_LOG") or lc.LOGS / "recycle.jsonl")
+PATTERN = "loam-rc-*.service"
+WAIT_S = int(os.environ.get("LOAM_RECYCLE_WAIT_S", "1500"))
+POLL_S = float(os.environ.get("LOAM_RECYCLE_POLL_S", "60"))
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+
+
+def iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def systemctl(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["systemctl", "--user", *args],
+                          capture_output=True, text=True, check=False)
+
+
+def active_units() -> list[str]:
+    out = systemctl("list-units", PATTERN, "--state=active", "--plain",
+                    "--no-legend").stdout
+    return sorted(line.split()[0] for line in out.splitlines() if line.strip())
+
+
+def unit_pids(unit: str) -> list[int]:
+    """Every pid in the unit's cgroup, its sub-cgroups included."""
+    cg = systemctl("show", "-p", "ControlGroup", "--value", unit).stdout.strip()
+    if not cg:
+        return []
+    pids: list[int] = []
+    for procs in (CGROUP_ROOT / cg.lstrip("/")).rglob("cgroup.procs"):
+        try:
+            pids += [int(x) for x in procs.read_text().split()]
+        except (OSError, ValueError):
+            continue
+    return pids
+
+
+def cmdline(pid: int) -> list[str]:
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return []
+    return [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a]
+
+
+def is_waiter(argv: list[str]) -> bool:
+    """A launcher process waiting on a job: `bin/engineer-job` in the
+    command line and not the job's own inner (`--in-unit`, which runs in
+    the job's transient unit and would never be in an RC cgroup anyway)."""
+    # The program or the script it runs (`python3 .../engineer-job`), never
+    # a later argument: a session's prompt can name the launcher.
+    return (any(a.endswith("/engineer-job") or a == "engineer-job" for a in argv[:2])
+            and "--in-unit" not in argv)
+
+
+def waiters(unit: str, pids=unit_pids, read=cmdline) -> list[int]:
+    return [pid for pid in pids(unit) if is_waiter(read(pid))]
+
+
+def restart(units: list[str], dry_run: bool) -> str | None:
+    """Restart these units together; the error text, or None."""
+    if not units or dry_run:
+        return None
+    out = systemctl("restart", *units)
+    return None if out.returncode == 0 else (out.stderr or "").strip()[:400]
+
+
+def say(line: str) -> None:
+    print(line, flush=True)
+
+
+def recycle(dry_run: bool = False, units=active_units, find=waiters,
+            do_restart=restart, wait_s: float = WAIT_S,
+            poll_s: float = POLL_S, sleep=time.sleep) -> dict:
+    record: dict = {"ts": iso(), "dry_run": dry_run, "restarted": [],
+                    "waited": {}, "skipped": {}, "errors": []}
+    held = {}
+    free = []
+    for unit in units():
+        pids = find(unit)
+        (held.__setitem__(unit, pids) if pids else free.append(unit))
+    error = do_restart(free, dry_run)
+    if error:
+        record["errors"].append(error)
+    record["restarted"] += free
+    say(f"{'would restart' if dry_run else 'restarted'} {len(free)} Remote Control "
+        f"server(s): {', '.join(free) or 'none'}")
+    for unit, pids in held.items():
+        say(f"{unit} holds a call waiting on an engineer job (pid "
+            f"{', '.join(map(str, pids))}); waiting for it, up to "
+            f"{round(wait_s / 60)} min")
+    started = time.monotonic()
+    while held and time.monotonic() - started < wait_s:
+        sleep(min(poll_s, max(0.0, wait_s - (time.monotonic() - started))))
+        for unit in list(held):
+            pids = find(unit)
+            if pids:
+                held[unit] = pids
+                continue
+            del held[unit]
+            error = do_restart([unit], dry_run)
+            if error:
+                record["errors"].append(error)
+            record["restarted"].append(unit)
+            record["waited"][unit] = round(time.monotonic() - started)
+            say(f"{unit}: its waiting call ended after "
+                f"{record['waited'][unit]} s; restarted")
+    for unit, pids in held.items():
+        record["skipped"][unit] = pids
+        say(f"{unit} SKIPPED tonight: it still holds a call waiting on an "
+            f"engineer job (pid {', '.join(map(str, pids))}). The job runs "
+            f"on; the server is recycled tomorrow.")
+    record["finished"] = iso()
+    return record
+
+
+def main(argv: list[str]) -> int:
+    # A run its timer started when it was not due goes no further
+    # (lib/loam_due.py, 2026-11-14).
+    if loam_due.refuse_if_not_due("recycle-rc"):
+        return 0
+    record = recycle(dry_run="--dry-run" in argv)
+    if "--dry-run" not in argv:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with LOG.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+    else:
+        print(json.dumps(record))
+    return 1 if record["errors"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

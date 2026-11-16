@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""The address of every server plugin: /x/<id>/ (2026-11-13).
+
+Caddy sends `/x/*` on the app's host (loam-ui, and its staging copy) here,
+behind the same login as the page (lib/loam_deploy.py, PLUGIN_GATEWAY).
+This passes each request to the plugin's own port on 127.0.0.1, read from
+the port table lib/loam_plugin_servers.py keeps (state/plugins/ports.json),
+with `/x/<id>` taken off the path and given as `X-Forwarded-Prefix`, so a
+plugin serves `/` and its relative links work under the prefix. Nothing
+here runs a plugin's code; the broker never carries a plugin's traffic.
+
+One request per connection to the plugin (`Connection: close` on the way
+up), so a connection never carries two plugins' requests; a WebSocket's
+upgrade goes through and is piped as it is. Its own unit
+(systemd/loam-plugins-gateway.service): a plugin crashing or restarting
+touches neither this nor the broker.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+import loam_plugin_servers as servers  # noqa: E402
+
+HEAD_MAX = 64 * 1024
+PATH = re.compile(r"^/x/([a-z][a-z0-9-]*)(/[^?#]*)?(\?.*)?$")
+HOP = {"connection", "keep-alive", "proxy-connection", "te", "trailer",
+       "x-forwarded-prefix"}
+
+
+def answer(status: int, reason: str, text: str, extra: str = "") -> bytes:
+    body = (text + "\n").encode()
+    return (f"HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain; charset=utf-8\r\n"
+            f"Content-Length: {len(body)}\r\nCache-Control: no-store\r\n{extra}"
+            f"Connection: close\r\n\r\n").encode() + body
+
+
+async def pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        while True:
+            chunk = await reader.read(65536)
+            if not chunk:
+                break
+            writer.write(chunk)
+            await writer.drain()
+    except (ConnectionError, asyncio.IncompleteReadError):
+        pass
+    finally:
+        try:
+            if writer.can_write_eof():
+                writer.write_eof()
+        except (OSError, RuntimeError):
+            pass
+
+
+async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        try:
+            head = await reader.readuntil(b"\r\n\r\n")
+        except asyncio.LimitOverrunError:
+            writer.write(answer(431, "Request Header Fields Too Large", "headers too large"))
+            return
+        except asyncio.IncompleteReadError:
+            return
+        lines = head.decode("latin-1").split("\r\n")
+        try:
+            method, target, version = lines[0].split(" ", 2)
+        except ValueError:
+            writer.write(answer(400, "Bad Request", "not an HTTP request"))
+            return
+        if target == "/up":
+            writer.write(answer(200, "OK", "ok"))
+            return
+        m = PATH.match(target)
+        if not m:
+            writer.write(answer(404, "Not Found", "a plugin's address is /x/<id>/"))
+            return
+        pid, rest, query = m.group(1), m.group(2), m.group(3) or ""
+        if rest is None:
+            writer.write(answer(308, "Permanent Redirect", f"/x/{pid}/",
+                                f"Location: /x/{pid}/{query}\r\n"))
+            return
+        port = servers.read_ports().get(pid)
+        if port is None:
+            writer.write(answer(404, "Not Found", f"no plugin {pid!r} has a server here"))
+            return
+        headers = []
+        upgrade = False
+        for line in lines[1:]:
+            if not line:
+                continue
+            name = line.split(":", 1)[0].strip().lower()
+            if name == "upgrade":
+                upgrade = True
+            if name in HOP:
+                continue
+            headers.append(line)
+        headers.append("Connection: upgrade" if upgrade else "Connection: close")
+        headers.append(f"X-Forwarded-Prefix: /x/{pid}")
+        up_head = f"{method} {rest}{query} {version}\r\n" + "\r\n".join(headers) + "\r\n\r\n"
+        try:
+            up_reader, up_writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", port), 5)
+        except (OSError, asyncio.TimeoutError):
+            writer.write(answer(502, "Bad Gateway",
+                                f"{pid}'s server is not answering: it is off, starting "
+                                f"or failing (Settings > Plugins shows which)"))
+            return
+        up_writer.write(up_head.encode("latin-1"))
+        await up_writer.drain()
+        # The exchange is over when the plugin's side ends: the request went
+        # up with `Connection: close`, so the plugin closes after answering
+        # (and a WebSocket's end closes it too). The client's side is left
+        # open by Caddy's keep-alive and would never end on its own.
+        upward = asyncio.create_task(pipe(reader, up_writer))
+        await pipe(up_reader, writer)
+        upward.cancel()
+        up_writer.close()
+    except Exception as exc:  # noqa: BLE001 -- one request never takes the gateway
+        print(f"plugin-gateway: {exc!r}", file=sys.stderr, flush=True)
+    finally:
+        try:
+            await writer.drain()
+            writer.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def main() -> None:
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else servers.GATEWAY_PORT
+    server = await asyncio.start_server(handle, "127.0.0.1", port, limit=HEAD_MAX)
+    print(json.dumps({"listening": f"127.0.0.1:{port}"}), flush=True)
+    async with server:
+        await server.serve_forever()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

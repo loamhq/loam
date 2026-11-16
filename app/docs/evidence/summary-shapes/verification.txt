@@ -1,0 +1,55 @@
+$ timeout 90s node --test test/speech-server.test.js test/document-speech.test.js test/speech.test.js test/speech-desktop.test.js
+ℹ tests 125
+ℹ suites 0
+ℹ pass 123
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 14749.386492
+exit 0
+
+$ timeout 180s npm test
+ℹ tests 1148
+ℹ suites 0
+ℹ pass 1144
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 4
+ℹ todo 0
+ℹ duration_ms 57858.745821
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13352.910382
+exit 0
+
+$ timeout 90s node --test test/speech-server.test.js
+ℹ tests 63
+ℹ suites 0
+ℹ pass 61
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 5887.840615
+exit 0
+
+The server-only check was repeated after aligning the existing cleanup fixture with the summary-first wording. Production code was unchanged after the full suite.
+
+Skipped in the full suite: two optional Chromium layout checks and two real-encoder checks (ffmpeg unavailable).
+
+$ PLAYWRIGHT_BROWSERS_PATH="$TMPDIR/browser-cache" LOAM_PLAYWRIGHT="$TMPDIR/browser/node_modules/playwright/index.mjs" FILES_SPEECH_EVIDENCE="$TMPDIR/summary-shapes/browser" timeout 60s node test/files-speech-browser.mjs
+exit 1 before rendering
+Chromium 156.0.8078.4: error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory
+No browser screenshots or passing browser assertions are claimed.
+
+Environment: Node v24.21.0. GEMINI_API_KEY unset. No live Gemini or audio generation. Reference text provenance is in README.md.
+
+$ git diff --check
+(no output)
+exit 0

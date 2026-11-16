@@ -1,0 +1,25 @@
+# The runtime's deployment configuration. Read by lib/loam_deploy.py and by
+# nothing else directly; every file that carries a value from here is
+# generated from it (the Caddyfile, Authelia's configuration, the browser's
+# allowed origins, the agents' MCP settings), so changing a value is one
+# edit here and one `bin/gen-deploy` plus `bin/provision` per agent.
+#
+# An install made by install.sh does not read this file for its names: its
+# `[edge]` table in /etc/loam/loam.toml carries the domain (docs/install.md).
+# This file is the default for a box set up by hand.
+#
+# Changing the domain also re-binds the login: the session cookie and every
+# passkey are tied to the name, so passkeys are re-enrolled and every shared
+# link dies. Nothing else has to change.
+
+# Every host is `<name>.<domain>`; an app record with `apex = true` is the
+# domain itself. DNS: the domain and `*.<domain>` as A records to this box.
+domain = "example.com"
+
+# Where the login portal answers, as `<auth_host>.<domain>`.
+auth_host = "auth"
+
+# When the domain changes, the old names can keep answering with a 308 for a
+# while (`[moved]`), and an old host's paths can outlive that (`[[forward]]`,
+# for a callback URL registered somewhere that cannot be changed by API).
+# Both are described in lib/loam_deploy.py, "Old names".

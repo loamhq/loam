@@ -1,0 +1,99 @@
+/* Attention is explicit: Newspaper by default, foam for a secondary action,
+ * espresso for the one main action. This sheet changes paint only. The shared
+ * component rules still own dimensions, spacing, targets and placement. */
+/* Navigation keeps its component paint, including shared icon/round buttons. */
+:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.settings-select,.provider-chip,.player-rate,.player-retry,.playerbar-play,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile) {
+  background:transparent; color:var(--paper-ink); border-color:transparent; box-shadow:none;
+}
+/* Keep border boxes the same size; borderless controls have no painted edge. */
+:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.provider-chip,.player-rate,.player-retry,.playerbar-play,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile):is(:hover,:active,:focus-visible) {
+  background:var(--paper-hover); color:var(--paper-ink); border-color:transparent; box-shadow:none;
+}
+/* Selection is information, not an action tier. A paper thumb and an underline
+ * retain the chosen option without spending the secondary-action allowance. */
+:root :is(.iconbtn,.plusbtn,.modelbtn,.chip,.provider-chip,.segmented button).on:not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile) {
+  background:var(--paper-hover); color:var(--paper-ink); border-color:transparent; box-shadow:none;
+}
+:root :is(.chip,.provider-chip,.segmented button).on {
+  text-decoration:underline; text-underline-offset:4px;
+}
+:root .segmented button.on:is(:hover,:active,:focus-visible) { background:var(--paper-hover); color:var(--paper-ink); }
+:root :is(.chip .count,.chip.on .count) { background:var(--paper-hover); color:var(--paper-ink); }
+:root .provider-chip .dot { background:var(--paper-ink); }
+:root .provider-chip.add { border-color:transparent; }
+:root :is(.navrow.on,.setrow.on,.tt-configuration-options .setrow.on) { background:var(--paper-hover); color:var(--paper-ink); }
+:root :is(.search .clear,.theme-choice-check) { background:var(--paper-pane); color:var(--paper-ink); }
+:root .theme-choice.on { border-color:var(--paper-ink); }
+:root .fs-rootcard:active { background:var(--paper-hover); }
+/* Preference/selection indicators are Newspaper too; their existing thumb,
+ * check and movement still communicate state without another Latte action. */
+:root input { accent-color:var(--paper-ink); }
+:root .schedule-switch::before { background:var(--paper-rule-strong); }
+:root .schedule-switch[aria-checked="true"]::before { background:var(--paper-ink); }
+:root .schedule-switch span { background:var(--paper-page); }
+:root :is(.srow-check.on,.fs-check.on,.qmark.on) { background:var(--paper-ink); color:var(--paper-page); border-color:var(--paper-ink); }
+:root .md .md-task:checked::before { background:var(--paper-ink); border-color:var(--paper-ink); }
+:root .md .md-task:checked::after { border-color:var(--paper-page); }
+:root .iconbtn.primary { padding:0; }
+/* Deprioritising a primary keeps its original typography and dimensions. */
+:root .primary.quiet-primary { background:transparent; color:var(--paper-ink); }
+:root .primary.quiet-primary:is(:hover,:active) { background:var(--paper-hover); color:var(--paper-ink); }
+
+/* The thread's two secondary actions; plugins use the same role pairs. */
+:root :is(.secondary,.roundmic,.player-play) {
+  background:var(--latte-foam); color:var(--latte-foam-ink); border-color:transparent; box-shadow:none;
+}
+@media (hover:hover) {
+  :root :is(.secondary,.roundmic,.player-play):hover { background:var(--latte-hover); color:var(--latte-hover-ink); filter:none; }
+}
+:root :is(.secondary,.roundmic,.player-play):active { background:var(--latte-hover); color:var(--latte-hover-ink); }
+
+/* Disabled actions do not advertise a next step. */
+:root :is(.primary,.roundsend,.secondary,.roundmic):is(:disabled,[aria-disabled="true"]) {
+  background:var(--paper-hover); color:var(--paper-ink-3);
+}
+/* Every tier has a high-contrast paper focus ring, including plugin controls. */
+:root :is(button,a,select,summary,[role="button"],[tabindex]):not(.nav *,.rail *,.accounttile):focus-visible { outline:2px solid var(--paper-ink); outline-offset:2px; }
+
+/* Repeated preference forms have no single main action at rest. Only the form
+ * being completed promotes its save action. Other saves remain Newspaper. */
+:root .plugin-secret-settings .primary,
+:root .agent-drafts .primary,
+:root .welcome-providers .provider-sign-in:not(:has(.loginflow)) .primary,
+:root .welcome:has(.loginflow) .welcome-continue .primary,
+:root .update-control:has(.update-rollback .primary) .update-release .primary {
+  background:transparent; color:var(--paper-ink); border-color:transparent; box-shadow:none;
+}
+:root .plugin-secret-settings form:focus-within:has(input:not(:placeholder-shown)) .primary:not(:disabled) {
+  background:var(--latte-espresso); color:var(--latte-espresso-ink);
+}
+
+/* Only the last-used pane owns the action budget. The other keeps exactly
+ * the existing supplementary paint, regardless of either pane's content. */
+:root :is(.panel-pair.split[data-focused-panel="main"] > [data-panel="side"],.panel-pair.split[data-focused-panel="side"] > [data-panel="main"]) :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary) {
+  background:var(--paper-hover); color:var(--paper-ink); border-color:transparent; box-shadow:none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .panel-pair.split > [data-panel] :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary) {
+    transition:background-color 140ms ease-out,color 140ms ease-out,border-color 140ms ease-out,box-shadow 140ms ease-out;
+  }
+}
+
+/* An open task/menu, editor or Settings surface owns attention. Suppress the
+ * actions behind it, including a drafted Send, without moving or disabling it. */
+#app:has([data-menu-surface]:popover-open) :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary):not([data-menu-surface] *,dialog *),
+#app:has(dialog[open]) :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary):not(dialog *),
+#app:has(.sheet.settings) :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary):not(.settings *,[data-menu-surface] *,dialog *) {
+  background:var(--paper-hover); color:var(--paper-ink); border-color:transparent;
+}
+#app:has(.editor) :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary):not(.editor *) {
+  background:var(--paper-hover); color:var(--paper-ink); border-color:transparent;
+}
+:root .tt-thread:has(> .tt-board) > .tt-conversation :is(.roundsend,.takebtn.keep,.roundmic,.player-play) {
+  background:var(--paper-hover); color:var(--paper-ink);
+}
+/* Several saved takes may be open. Only the latest player gets foam. */
+:root .tt-stream :is(div,article,section):has(~ :is(div,article,section) .player-play) .player-play,
+:root .playerline:has(~ .playerline) .player-play {
+  background:transparent; color:var(--paper-ink);
+}

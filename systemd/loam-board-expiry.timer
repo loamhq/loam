@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly board expiry sweep
+
+[Timer]
+# Hourly at :23, clear of the :00/:30 wake grid and the inbox sweep at :17.
+OnCalendar=*-*-* *:23:00
+Persistent=true
+Unit=loam-board-expiry.service
+
+[Install]
+WantedBy=timers.target

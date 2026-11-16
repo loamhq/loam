@@ -1,0 +1,15 @@
+[Unit]
+Description=Engineer-job recovery sweep: at user-manager start, then every 5 minutes
+
+[Timer]
+# OnStartupSec counts from the user manager's start, which is boot on this box
+# (the box's user lingers) and also any restart of the manager -- the two moments
+# every running job's unit is gone at once. Then a steady sweep, so a job
+# killed on its own is recovered without waiting for anything else to finish.
+OnStartupSec=90s
+OnUnitActiveSec=5min
+Persistent=false
+Unit=loam-job-recovery.service
+
+[Install]
+WantedBy=timers.target

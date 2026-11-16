@@ -1,0 +1,162 @@
+# The install's configuration: `/etc/loam/loam.toml`
+
+One file says where everything of one install is, who it is for, and when
+it is. Every part of the runtime reads its paths, its user, its owner, the
+vault's folder names, its time zone and its commit identity from it, through
+`lib/loam_config.py`. Nothing in `bin/`, `lib/`, `mcp/` or `hooks/` names a
+place on a particular machine. Added 2026-11-14 (first release, job L1).
+
+- **Where it is.** `/etc/loam/loam.toml`, or the file `$LOAM_CONFIG` names
+  (the tests and a rehearsal use that). It is root's, mode 644, and holds no
+  secret. It names the files that do (`paths.secrets_env`, `paths.wake_env`).
+- **A missing key** takes the fresh install's value (the table below). A
+  missing file means every key does. On an install that predates the file,
+  the file carries that install's own values, so nothing moved when the
+  code started reading it.
+- **Reading it.** `bin/loam-config show` prints every key as this install
+  resolves it. `bin/loam-config get paths.vault` prints one, for shell
+  scripts.
+
+## The keys
+
+| Key | What | Fresh install |
+|---|---|---|
+| `user` | the Unix user the runtime runs as | the running user |
+| `timezone` | the owner's zone: the clock line, the engineer's job ids, the cron grammar's `PT` until L3 | `UTC` |
+| `owner.id`, `owner.name`, `owner.link` | the person, on the wire and in files (`owner.link` is the provenance value Files writes) | `owner`, `the owner` |
+| `paths.home` | the user's home | from the password file |
+| `paths.root` | this checkout, the live runtime | this file's own checkout |
+| `paths.vault` | the record | `~/vault` |
+| `paths.workspaces` | the agents' workspaces | `~/ai-labs` |
+| `paths.projects` | project engineers' checkouts | `~/projects` |
+| `paths.plugins` | the Yours plugin layer | `~/plugins` |
+| `paths.state` | everything the runtime writes: the broker, locks, threads, worktrees, schedules, … | `~/.local/state/loam` |
+| `paths.logs` | its logs | `<state>/logs` |
+| `paths.jobs` | the platform engineer's job folders | `<state>/jobs` |
+| `paths.reviewer_state` | the reviewer's notes and memory (its own key: `reviewer/`'s committed config names it) | `<state>/reviewer` |
+| `paths.secrets_env`, `paths.wake_env` | the key files (wake.env: the agents' OAuth token) | `~/.config/loam/` |
+| `paths.mcp_venv` | the MCP servers' Python | `~/.local/share/loam/mcp-venv` |
+| `paths.pycache` | Python's bytecode cache (`PYTHONPYCACHEPREFIX`) | `~/.cache/loam/pycache` |
+| `bin.claude`, `bin.codex`, `bin.agy`, `bin.uv` | the CLIs | `~/.local/bin/<name>` |
+| `vault.inbox`, `vault.boards`, `vault.general_board`, `vault.conversations`, `vault.projects`, `vault.attachments`, `vault.system` | the vault's own folders, relative to it | `Inbox`, `Inbox/boards`, `Inbox/boards/general.md`, `Conversations`, `Projects`, `Attachments`, `System` |
+| `git.autocommit.name`, `.email` | the identity of the 15-minute vault, workspace and plugin commits | `loam`, `loam@<user>` |
+| `git.identity.name`, `.email` | the Loam HQ bot that makes releases and the `loam` repository's root commit. Never a person's address. | unset until that bot exists |
+| `engineer.briefers` | the personas who may brief the platform engineer, a list of names (`["ada"]`); a project engineer is open to every persona whatever this says (lib/loam_engineer.py, "Who may brief which project") | absent: every persona |
+| `edge.*` | an install's name on the web: its domain, address, the app at the domain itself, the records it serves, how DNS is asked, local certificates for a rehearsal, the DNS gate (first release L12; docs/install.md) | absent: the deploy layer reads `deploy/loam.toml` and serves every record, as the first install always has |
+
+`lib/loam_broker` and `lib/loam_engineer` re-export the paths under their
+historical names (`AGENTS_ROOT`, `AI_LABS`, `VAULT`, `STATE_DIR`, …), so
+modules that import those two did not change.
+
+## What uses the keys besides Python
+
+- **Units.** `systemd/` holds templates. Each path in them is a token
+  (`@ROOT@`, `@STATE@`, `@LOGS@`, `@WAKE_ENV@`, `@UNIT_PATH@`, …;
+  `lib/loam_units.py` lists them). `bin/gen-units` installs the rendering,
+  and `bin/check-drift` compares against the same rendering. The units
+  generated elsewhere (`bin/gen-rc-units`, `bin/provision`, the schedule
+  reconciler) fill the same values. `systemd/system/` is still installed by
+  hand.
+- **Deploy records.** `static_root` and `checkout` in `deploy/*/deploy.toml`
+  take `@VAULT@`, `@WORKSPACES@`, `@PROJECTS@`, `@ROOT@`, `@STATE@`,
+  `@HOME@` (`loam_config.expand`).
+- **Shell.** The autocommit scripts call `bin/loam-config`.
+- **The MCP servers' interpreter.** Committed config (the reviewer's
+  `.mcp.json`) names `bin/mcp-python`, which execs `paths.mcp_venv`, so
+  moving the venv changes nothing tracked.
+
+## Moving the state out of a checkout: `bin/move-state`
+
+The first install predates the file. Its runtime wrote `state/`, `logs/`,
+`engineer/jobs/`, `secrets.env`, `wake.env` and `mcp/.venv` inside this
+checkout. `bin/move-state` moves them to the fresh-install layout, once:
+
+1. builds the new venv;
+2. waits until no engineer job, wake, cron or review runs, no broker
+   session is working or asking, and no Remote Control server holds an
+   engineer call;
+3. stops the timers, the broker, the Remote Control servers and the plugin
+   gateway;
+4. renames each place (one filesystem, so each move is a rename);
+5. carries what records the old paths: Codex's thread table, and Claude
+   Code's session folders for job trees, so a continuation still resumes;
+6. rewrites this file;
+7. regenerates units, agents' files, cron units and the Caddyfile;
+8. starts everything again, then verifies.
+
+If anything fails in steps 3 to 7, everything is put back. `move-state plan`
+says what it would do and what holds it. `move-state verify` runs the
+checks alone. After the move, `git status --porcelain --ignored` in the
+checkout is empty: bytecode goes to `paths.pycache`, set for units, shells,
+cron and sudo.
+
+## The owner on the wire (2026-11-14, first release L2)
+
+The app learns who the owner is from the broker and never assumes it.
+
+- **`GET /v1/owner`** (the page's relay: `rest === '/owner'`) answers
+  `{"id": "<owner.id>", "name": "<owner.name>", "accepts": [...]}`.
+  - `id` is what the runtime writes for the owner: as a thread message's
+    `author`, an Activity item's `actor`, a schedule change's actor, a
+    plugin's `installed_by`.
+  - `accepts` is every id the broker takes as the owner's: `owner.id` and
+    any `owner.legacy_ids` the install's config names (a new install has none).
+  - `name` is what to show.
+- **Coming in**, a request that names the owner (`by`, `actor`) may say
+  `owner.id`, say a legacy id, or say nothing; all three mean the owner. A
+  persona's `by` is its own name.
+- **Records already on disk** keep the id they were written with, so the
+  app compares an author against `accepts`, never against a literal.
+- **Two wire names name a kind, not a person**: a setting's `reach` value
+  `"owner"` (only the owner's hands) and Activity's actor kind `"owner"`.
+
+## The zone (2026-11-14, first release L3)
+
+`timezone` is the owner's IANA zone. Schedules end with a zone token:
+`daily at 05:00 PT`. The install writes its own token (`timezone_token`,
+derived: `PT`, `MT`, `CT`, `ET`, `UTC`, or the IANA name itself) and
+accepts its own, those short names, or any IANA zone spelled out. `PT`
+always means America/Los_Angeles: every record before this day says it.
+Every calendar timer carries its zone on its `OnCalendar=` line, so no timer
+leans on the box's zone.
+
+## Timers: reload, never restart (2026-11-14)
+
+Starting a timer that has stood clears its last trigger. systemd 252
+(`src/core/timer.c`, `timer_start`) then dates the next elapse of a timer
+without a stamp file (every `Persistent=false` one) from the unit's previous
+activation. When that activation is older than the timer's last calendar
+time, the next elapse is already past and the timer fires on the spot.
+That is what fired every wake, the reviewer and recycle-rc when the state
+move restarted the timers, and it was reproduced on `loam-headroom.timer`.
+
+- **Tooling never stops and starts a standing timer.** A changed timer is
+  moved by `systemctl --user daemon-reload` alone, which keeps its last
+  trigger. `gen-units`, `gen-rc-units`, `provision`, the schedule
+  reconciler, `move-state` and the installer and updater to come all follow
+  this rule.
+- **A lane checks for itself.** The wake (reflection and cron), the
+  reviewer, recycle-rc and provider-follow call `loam_due.not_due()` first.
+  A run its timer started when none of the timer's calendar times fell in
+  the ten minutes before goes no further, with a line in its journal and
+  in `logs/not-due.jsonl`. A run started by hand or by "Run now" is never
+  refused.
+
+## Provider memory (2026-11-14, first release L8)
+
+Memory is Loam's on every provider. `lib/loam_provider_memory.py` pins each
+provider's own memory off and checks its stores; `bin/provider-memory pin`
+is what the installer runs.
+
+- **Claude Code** (user settings): `autoMemoryEnabled: false`,
+  `autoDreamEnabled: false`, and `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
+  the last also in the user manager's environment.
+- **Codex** (`CODEX_HOME/config.toml`): `features.memories`, `.chronicle`
+  and `.external_agent_memory_import` false; `[memories]` with
+  `generate_memories` and `use_memories` false; `history.persistence = "none"`.
+- **Antigravity** has no setting that turns its memory off, so for it
+  "pinned off" means "checked empty".
+
+The checks run at every session start (the thread hears of a store that
+grew), after each provider-follow switch (comms.md, Important), and on
+`bin/provider-memory check`.

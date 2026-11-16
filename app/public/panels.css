@@ -1,0 +1,110 @@
+/* A pane is its own responsive surface. The outer window only decides whether
+   the second slot exists; content responds to the space each slot receives. */
+.panel-pair { flex:1; min-width:0; min-height:0; display:flex; overflow:hidden; margin:12px 12px 12px 0; }
+.workspace-list { display:flex; flex:none; min-width:0; min-height:0; }
+.panel-pair > .pane { margin:0; }
+.panel-pair > [data-panel=main] { flex:0 0 100%; transition:flex-basis 220ms ease; }
+.panel-pair.split > .pane { container-type:inline-size; container-name:pane; }
+.panel-pair.split > [data-panel=main] { flex:0 0 calc(var(--panel-main) - 6px); }
+.panel-pair.split > .side-pane { flex:1; min-width:0; }
+.panel-pair.split > .apps-page { padding:32px; }
+.panel-pair .activity-page { margin:0; border-radius:0; }
+.panel-pair.closing > [data-panel=main] { flex-basis:100%; transition:flex-basis 220ms ease; }
+.panel-pair.closing > .side-pane { flex:0 1 0; opacity:0; transition:opacity 160ms ease,flex-grow 220ms ease; }
+.panel-pair.closing > .panel-divider { flex-basis:0; overflow:hidden; transition:flex-basis 220ms ease; }
+.panel-divider { flex:0 0 12px; display:flex; align-items:center; justify-content:center; cursor:col-resize; touch-action:none; outline-offset:-2px; }
+.panel-divider > span { width:3px; height:36px; border-radius:8px; background:var(--paper-ink-3); opacity:.22; transition:opacity 160ms; }
+.panel-pair:has(> .panel-divider.dragging) > [data-panel=main] { transition:none; }
+.panel-divider:hover > span,.panel-divider:focus-visible > span,.panel-divider.dragging > span { opacity:.8; }
+.side-pane { animation:panel-arrive 220ms ease-out; }
+@keyframes panel-arrive { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:none; } }
+.panel-pair.swapped-1 > .pane { animation:panel-swap-one 160ms ease-out; }
+.panel-pair.swapped-2 > .pane { animation:panel-swap-two 160ms ease-out; }
+@keyframes panel-swap-one { from { opacity:.6; } to { opacity:1; } }
+@keyframes panel-swap-two { from { opacity:.6; } to { opacity:1; } }
+.side-head { display:flex; align-items:center; flex:none; gap:6px; min-height:72px; padding:12px 16px; }
+.side-heading { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.side-heading strong { font:600 16px/1.3 var(--font-body); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.side-heading > span { color:var(--paper-ink-3); font-size:11px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.side-face { width:32px; display:flex; align-items:center; justify-content:center; flex:none; }
+.side-head .iconbtn { width:38px; height:40px; flex:none; }
+.side-head .iconbtn,.side-pane .tt-head .iconbtn,.side-pane .tt-details-head .iconbtn { background:transparent; color:var(--paper-ink-2); }
+.side-head .iconbtn:hover,.side-pane .tt-head .iconbtn:hover,.side-pane .tt-details-head .iconbtn:hover { background:var(--paper-hover-alpha); color:var(--paper-ink); }
+.side-head .iconbtn:active,.side-pane .tt-head .iconbtn:active,.side-pane .tt-details-head .iconbtn:active { background:var(--latte-foam); color:var(--latte-foam-ink); }
+.side-pane .tt-details-head { gap:6px; padding:12px; flex-wrap:wrap; }
+.side-pane .tt-details-head .display,.side-pane .tt-rename { font-family:var(--font-body); font-size:16px; }
+.side-pane .tt-details-head .iconbtn { width:38px; height:40px; }
+.side-pane .tt-head .headtitle-text > .display { font-family:var(--font-body); font-size:16px; font-weight:600; }
+.desk.collapsed .side-pane .chat-head { padding-left:16px; }
+.side-pane .tt-head { gap:6px; padding:12px 16px; min-height:72px; }
+.side-pane .tt-head .iconbtn { width:38px; height:40px; }
+.side-pane .tt-head .agentbtn { flex:none; }
+.side-pane .tt-head .agentbtn .blob { width:32px !important; height:32px !important; }
+.side-pane .tt-head .headspace { display:none; }
+.side-pane .apps-frame { min-height:0; }
+.side-pane .apps-toolbar { display:none; }
+.side-pane .fs-edtitle,.side-pane .fs-titles > .fs-sub,.side-pane .fs-htmlmark,.side-pane .fs-htmlname { display:none; }
+.side-pane .fs-titles { padding-top:0; padding-bottom:0; }
+.side-pane .fs-head .fs-filemenu,.side-pane .fs-livehead .fs-filemenu { display:none; }
+.row-side-action { opacity:0; transition:opacity 160ms; flex:none; color:var(--paper-ink-3); }
+.tt-row,.apps-row,.fs-entry { position:relative; }
+.tt-row > .row-side-action { position:absolute; right:12px; top:50%; transform:translateY(-50%); width:32px; height:36px; display:flex; align-items:center; justify-content:center; border-radius:10px; }
+.tt-row:has(.row-side-action):hover .srow-time,.tt-row:has(.row-side-action):focus-within .srow-time { opacity:0; }
+.tt-row:hover > .row-side-mark,.tt-row:focus-within > .row-side-mark { opacity:0; }
+.row-side-mark { color:var(--paper-ink-3); flex:none; display:inline-flex; align-items:center; justify-content:center; }
+.tt-row > .row-side-mark { position:absolute; right:14px; bottom:6px; }
+.fs-entry > .row-side-action > .iconbtn { width:32px; height:38px; }
+.row-side-action .iconbtn { background:transparent; color:var(--paper-ink-3); }
+.row-side-action .iconbtn:active { background:var(--latte-foam); color:var(--latte-foam-ink); }
+.row-side-action:hover { color:var(--paper-ink); background:var(--paper-hover-alpha); }
+.tt-row:hover .row-side-action,.apps-row:hover .row-side-action,.fs-entry:hover .row-side-action,
+.tt-row:focus-within .row-side-action,.apps-row:focus-within .row-side-action,.fs-entry:focus-within .row-side-action { opacity:1; }
+.filelink-side { display:inline-flex; align-items:center; vertical-align:middle; justify-content:center; width:18px; height:22px; padding:0; border:0; border-radius:6px; background:none; color:var(--paper-ink-3); opacity:0; cursor:pointer; }
+.filelink:hover + .filelink-side,.filelink:focus-visible + .filelink-side,.filelink-side:hover,.filelink-side:focus-visible { opacity:1; }
+@media (hover:none) { .row-side-action,.filelink-side { opacity:1; } }
+@container pane (max-width:700px) {
+  /* Narrow reading columns keep the author in flow, clear of the prose. */
+  .tt-speaker { position:static; z-index:auto; }
+  .tt-speaker::before,.tt-author-pill::before { display:none; }
+  .tt-head { gap:6px; padding:12px 14px; }
+  .tt-head .tt-title { font-size:17px; }
+  .tt-head .tt-title .display { font-size:17px; }
+  .tt-head .agentbtn { padding:2px; }
+  .tt-head .iconbtn { width:34px; height:38px; }
+  .tt-thread .tt-stream { padding-left:18px; padding-right:18px; }
+  .tt-conversation .thread-dock { padding-left:14px; padding-right:14px; }
+  .tt-conversation .composer { width:100%; }
+  .tt-conversation .hint { font-size:11px; }
+  .tt-details-nav { width:130px; padding:16px 8px; }
+  .tt-details-scroll { padding:16px; }
+  .fs-head,.fs-livehead { gap:6px; padding-left:14px; padding-right:14px; flex-wrap:wrap; }
+  .fs-head .iconbtn { width:34px; height:38px; }
+  .fs-preview { padding-left:18px; padding-right:18px; }
+  .fs-tools { flex-wrap:wrap; }
+  .apps-page { padding:24px 18px; }
+  .apps-row { gap:10px; }
+  .apps-meta { max-width:25%; font-size:12px; }
+}
+@container pane (max-width:490px) {
+  .tt-author-model { max-width:16ch; }
+  .tt-head .tt-title .display { font-size:16px; }
+  .tt-thread .tt-stream { padding-left:14px; padding-right:14px; }
+  .tt-conversation .thread-dock { padding-left:10px; padding-right:10px; }
+  .tt-head .blob { width:32px !important; height:32px !important; }
+  .side-head,.side-pane .tt-head { padding:10px; }
+  .side-head .iconbtn,.side-pane .tt-head .iconbtn { width:36px; }
+}
+@media (hover:none) {
+  .tt-row > .row-side-action { width:44px; height:44px; }
+  .tt-row:has(.row-side-action) .srow-meta { padding-right:52px; }
+  .tt-row:has(.row-side-action) .srow-time { opacity:1; }
+  .tt-row > .row-side-mark { right:58px; opacity:1; }
+  .row-side-action .iconbtn,.side-head .iconbtn,.side-pane .tt-head .iconbtn { width:40px; height:44px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .side-pane { animation:none; }
+  .panel-pair > [data-panel=main] { transition:none; }
+  .panel-pair.swapped-1 > .pane,.panel-pair.swapped-2 > .pane { animation:none; }
+  .panel-divider > span,.row-side-action { transition:none; }
+  .panel-pair.closing > .pane,.panel-pair.closing > .panel-divider { transition:none; }
+}
