@@ -116,9 +116,27 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   and `main` stays landed locally. A word added and later removed is still
   held: the history keeps it.
 - **A history rewritten before its first push** leaves running jobs on the
-  old commits. The landing notices (the job's recorded base is not in
-  `main`) and replays only the job's own commits onto the new `main`
-  (`replay_if_rewritten`), so a merge never brings the old history back.
+  old commits. The landing notices and replays only the job's own commits
+  onto the new `main` (`replay_if_rewritten`), so a merge never brings the
+  old history back. **It reads the canonical reflog of `main`, not the
+  job's recorded base**: a commit the branch would bring in that `main`
+  once pointed at and no longer contains marks the old history, and the
+  newest one is where the job's own commits begin. The base alone failed
+  on 11-16. A replay moves the branch off the base and the record is never
+  rewritten, and mid-job landings make the branch *be* `main`. So after a
+  second rewrite the base was in neither the branch nor `main`, and the
+  merge brought two scrubbed commits back. Reflog expiry (90 days) bounds
+  it; the base is still asked as a fallback.
+- **The landing runs the push gate first**, on what it would add to
+  `main` (`main..merged`), before the tests. A refused branch is reason
+  `gate`, and the automatic continuation rewrites it. A brief's title
+  that trips the deny list is dropped from the merge message. Before
+  11-16 the gate ran at the push alone, so a held commit sat on `main`
+  and blocked every later push until `main` was rewritten by hand.
+- **Rewriting canonical `main` from a job** means holding the live lock
+  yourself, from the host's mount namespace (the job's wall mounts the
+  checkout read-only). When the rewrite range starts at `origin/main`, the
+  push afterwards is a fast-forward, never a force.
 
 ## 2026-11-16 — memory: no ceilings on agents, an OOM order instead
 

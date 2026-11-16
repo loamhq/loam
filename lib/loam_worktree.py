@@ -223,6 +223,15 @@ def backup_pending(repo: Path) -> bool:
 # names, so it has no gate unless its checkout asks for one. A held push
 # leaves `main` landed here and says why; nothing is rewritten, and the
 # recovery sweep tries again.
+#
+# The landing asks the same question first (since 2026-11-16, in
+# ``_prepare``), of the commits it would add to `main` only, before testing
+# them: a branch the gate would hold is not landed (reason `gate`), and the
+# automatic continuation rewrites it in the job's tree. Until then the gate
+# ran at the push alone, so a held commit was already on `main` and every
+# later landing was held behind it until someone rewrote `main` by hand
+# (de809e8, a persona's name in a test, 2026-11-16). A brief's title that
+# trips the deny list is dropped from the landing's merge message.
 GATE_COMMITS = 200
 
 
@@ -269,28 +278,40 @@ def push_deny_file(repo: Path) -> Path | None:
     return Path(value).expanduser() if value else None
 
 
+def deny_rules(repo: Path, deny: Path | None = None
+               ) -> tuple[re.Pattern | None, list[tuple[str, re.Pattern]], list[str]]:
+    """The checkout's deny list as one pattern, its `allow` lines, and what
+    is wrong with it (a list `loam.pushDeny` names that is missing)."""
+    deny = deny if deny is not None else push_deny_file(repo)
+    problems = []
+    if deny and not deny.is_file():
+        problems.append(f"the deny list `loam.pushDeny` names ({deny}) is missing")
+    pats, allows = read_deny_list(deny) if deny and deny.is_file() else ([], [])
+    big = re.compile("|".join(f"(?:{p})" for p in pats)) if pats else None
+    return big, allows, problems
+
+
 def push_gate(repo: Path, since: str | None, deny: Path | None = None,
-              head: str = MAIN) -> list[str]:
+              head: str = MAIN, objects: Path | None = None) -> list[str]:
     """Why `head` may not be pushed past `since` (what the remote has; None
     for a remote that has nothing). Empty when it may. ``deny`` defaults to
-    the checkout's `loam.pushDeny`."""
+    the checkout's `loam.pushDeny`. ``objects`` is the repository the
+    commits are read from when it is not ``repo`` (a landing asks of the
+    job's clone before the canonical checkout has its commits); the
+    identity and the deny list are always ``repo``'s."""
+    objects = objects or repo
     spec = [f"{since}..{head}"] if since else [head]
-    commits = git(repo, "rev-list", "--reverse", *spec, check=False).stdout.split()
+    commits = git(objects, "rev-list", "--reverse", *spec, check=False).stdout.split()
     if not commits:
         return []
     if len(commits) > GATE_COMMITS:
         return [f"{len(commits)} commits to push, more than the gate reads "
                 f"({GATE_COMMITS}); push them by hand after checking them"]
-    problems = []
     name, email = identity(repo)
     want = f"{name} <{email}>"
-    deny = deny if deny is not None else push_deny_file(repo)
-    if deny and not deny.is_file():
-        problems.append(f"the deny list `loam.pushDeny` names ({deny}) is missing")
-    pats, allows = read_deny_list(deny) if deny and deny.is_file() else ([], [])
-    big = re.compile("|".join(f"(?:{p})" for p in pats)) if pats else None
+    big, allows, problems = deny_rules(repo, deny)
     for sha in commits:
-        meta = git(repo, "show", "-s", "--format=%an <%ae>%x00%cn <%ce>%x00%B",
+        meta = git(objects, "show", "-s", "--format=%an <%ae>%x00%cn <%ce>%x00%B",
                    sha).stdout
         author, committer, body = (meta.split("\0", 2) + ["", ""])[:3]
         for role, who in (("author", author), ("committer", committer)):
@@ -301,7 +322,7 @@ def push_gate(repo: Path, since: str | None, deny: Path | None = None,
             continue
         for m in big.finditer(body):
             problems.append(f"{sha[:7]}: its message names {m.group(0)!r}")
-        diff = git(repo, "show", "--format=", "-U0", "--no-color", "--no-renames",
+        diff = git(objects, "show", "--format=", "-U0", "--no-color", "--no-renames",
                    "--no-ext-diff", "--text", sha, check=False).stdout
         path = None
         for line in diff.splitlines():
@@ -472,27 +493,77 @@ def push_origin(repo: Path) -> bool | str:
 # A job whose `main` was rewritten under it (2026-11-16). A history that is
 # rewritten before it is first published (to take an install's own notes or
 # names out of it) leaves every running job's branch on the old commits, and a
-# plain merge would bring all of them back. When the job's recorded base is
-# no longer in `main` but is in its branch, the landing replays only the
-# job's own commits (`base..branch`) onto `main`, as the checkout's identity,
-# and lands those. A replay that conflicts is not landed.
+# plain merge would bring all of them back. When the branch carries a commit
+# that was once `main` and no longer is in it, the landing replays only the
+# job's own commits -- those after the newest such commit -- onto `main`, as
+# the checkout's identity, and lands those. A replay that conflicts is not
+# landed (reason `rewritten`).
+#
+# Which commits were once `main` is read from the canonical checkout's reflog
+# of `main`, not from the job's recorded base alone. Caused 2026-11-16, job
+# 20261116-111835-e406819c: it was cut at a8fdeb8; a re-authoring of `main`
+# moved that commit, and its first mid-job landing replayed the branch onto
+# the new `main` (record["base"] was set in memory, never written). It then
+# landed mid-job five more times, so its branch was `main`, commit for
+# commit. A filter-branch over `main` (to scrub two commits the push gate
+# held) followed, and the final landing asked only: is the recorded base
+# a8fdeb8 in the branch? It was not -- the first replay had moved the branch
+# off it -- so nothing was replayed, the merge brought both scrubbed commits
+# back, and the push was held again. Every position `main` has been in is in
+# the reflog (a landing's fast-forward, a re-authoring, a filter-branch, a
+# reset), and a branch only ever gets `main`'s commits by starting from one,
+# merging one or landing at one, so the reflog says it whatever the record
+# says. The record's base is still asked too, for a reflog that has expired.
+
+def former_mains(repo: Path) -> list[str]:
+    """Every commit `main` has pointed at in the canonical checkout, newest
+    first, each once."""
+    out = git(repo, "reflog", "show", "--format=%H", f"refs/heads/{MAIN}",
+              check=False).stdout.split()
+    return list(dict.fromkeys(out))
+
+
+def stale_points(repo: Path, tree: Path, record: dict, main_sha: str,
+                 tip: str) -> list[str]:
+    """The commits the branch would bring into `main` that were once `main`
+    and are not in it now -- left behind by a rewrite of `main` (or a reset
+    of it) -- newest first. Empty for a branch that is safe to merge."""
+    brings = set(git(tree, "rev-list", tip, f"^{main_sha}",
+                     check=False).stdout.split())
+    if not brings:
+        return []
+    candidates = former_mains(repo)
+    base = record.get("base")
+    if base:
+        candidates.append(rev(tree, base) or base)
+    return [c for c in dict.fromkeys(candidates) if c in brings]
+
+
 def replay_if_rewritten(repo: Path, tree: Path, branch: str, record: dict,
                         main_sha: str, say) -> str | None:
-    """Replay the branch onto `main` if `main` was rewritten since the job
-    began. Returns None (nothing to do, or done) or why it could not."""
-    base = record.get("base")
+    """Replay the branch onto `main` if it carries commits a rewrite of
+    `main` left behind. Returns None (nothing to do, or done) or why it
+    could not."""
     tip = branch_tip(tree, branch)
-    if not base or not tip or not rev(tree, base):
+    if not tip:
         return None
-    if is_ancestor(tree, base, main_sha) or not is_ancestor(tree, base, tip):
+    stale = stale_points(repo, tree, record, main_sha, tip)
+    if not stale:
         return None
-    say(f"landing: main was rewritten since {base[:7]}; replaying the job's "
-        f"own commits onto it")
+    point = stale[0]
+    apart = [c for c in stale[1:] if not is_ancestor(tree, c, point)]
+    if apart:
+        return (f"the branch carries old `{MAIN}` commits on more than one line "
+                f"({point[:7]}, {', '.join(c[:7] for c in apart[:3])}), so which "
+                f"commits are the job's own is not one range; rebase the job's "
+                f"own commits onto `{MAIN}` by hand")
+    say(f"landing: main was rewritten since the branch took {point[:7]}; "
+        f"replaying the job's own commits onto it")
     name, email = identity(repo)
     if git(tree, "symbolic-ref", "--short", "HEAD", check=False).stdout.strip() != branch:
         git(tree, "checkout", "--quiet", branch, check=False)
     out = git(tree, "-c", f"user.name={name}", "-c", f"user.email={email}",
-              "rebase", "--quiet", "--autostash", "--onto", main_sha, base, branch,
+              "rebase", "--quiet", "--autostash", "--onto", main_sha, point, branch,
               "--exec", f"git -c user.name='{name}' -c user.email='{email}' "
                         f"commit --amend --no-edit --quiet --reset-author",
               check=False, timeout=600)
@@ -1581,7 +1652,8 @@ def land(project: eng.Project, record: dict, message: str, *,
         state    landed | nothing | not_landed
                  (read_only is `read_only_result`'s, never this one's)
         reason   uncommitted | branch_tests | conflict | merged_tests |
-                 no_tests | canonical | diverged | error | cancelled
+                 no_tests | canonical | diverged | rewritten | gate | scope |
+                 error | cancelled
                  (not_landed only)
         sha      the commit `main` now points at (landed)
         files    the uncommitted or conflicting paths
@@ -1979,6 +2051,15 @@ def _prepare(project, repo, tree, branch, message, result, say, record,
         return main_sha, tip, None
 
     onto_branch(tree, branch, result)
+    gated = gate_on(repo) and not project.pull_request
+    if gated:
+        big, _allows, _problems = deny_rules(repo)
+        if big and big.search(message):
+            # The landing's own merge message (the brief's title) is the
+            # launcher's text, which no continuation can reword.
+            say("landing: the brief's title names what the push gate denies; "
+                "the merge says only the branch")
+            message = f"Land {branch}"
     if is_ancestor(tree, main_sha, tip):
         merged, which = tip, "branch"   # a fast-forward: the tree is the merge
     else:
@@ -2001,6 +2082,17 @@ def _prepare(project, repo, tree, branch, message, result, say, record,
                           main=main_sha)
             return None
         merged, which = rev(tree, "HEAD"), "merge"
+    if gated:
+        # What the push would refuse is refused here, before `main` has it
+        # Only what this landing adds is read: a commit
+        # already on `main` is the push's to report, not this job's.
+        held = push_gate(repo, main_sha, head=merged, objects=tree)
+        if held:
+            git(tree, "checkout", "--quiet", "-f", branch, check=False)
+            result.update(reason="gate", gate=held, main=main_sha, detail=(
+                "; ".join(held[:5])
+                + (f"; and {len(held) - 5} more" if len(held) > 5 else "")))
+            return None
     step = "branch_tests" if which == "branch" else "merge_tests"
     say(f"landing: testing the {which} ({merged[:7]})"
         + ("" if locked else ", outside the live lock"))
@@ -2207,6 +2299,9 @@ REASONS = {
     "diverged": "the canonical main and its remote have diverged",
     "rewritten": "main was rewritten since the job began, and its own commits "
                  "could not be replayed onto the new main",
+    "gate": "the push gate would refuse its commits (an identity that is not "
+            "the checkout's, or a name the deny list guards), and nothing "
+            "lands on main that cannot be pushed",
     "error": "a step of the landing failed",
     "cancelled": "the job was cancelled",
     "scope": "its commits change files outside the folder of the repository "
@@ -2252,6 +2347,28 @@ def continuation_brief(project: eng.Project, job_id: str, result: dict) -> str:
                   f"commit) and say in your receipt what they were for: a change "
                   f"there is the platform's, briefed to Loam. The launcher lands "
                   f"the branch when you finish."),
+        "gate": (f"Your branch `{branch}` did not land: the push gate would "
+                 f"refuse it, and it reads every commit, not only the last: "
+                 f"{result.get('detail') or '?'}. A later commit that removes "
+                 f"the name does not help. Rewrite the branch's own commits "
+                 f"(`git rebase -i` is unavailable: `git reset --soft main` "
+                 f"and recommit, or `git commit --amend` for the last one) so "
+                 f"none of them adds, touches or says it: a persona's or the "
+                 f"owner's name in a test becomes a placeholder, as the "
+                 f"release scrub does; a message is reworded. Do not push and "
+                 f"do not touch `main`; the launcher lands the branch when "
+                 f"you finish."),
+        "rewritten": (f"Your branch `{branch}` did not land: `main` was "
+                      f"rewritten after your branch took commits from it, and "
+                      f"replaying your own commits onto the new `main` "
+                      f"stopped: {result.get('detail') or '?'}. In your tree, "
+                      f"make a branch from `main` (the new one), cherry-pick "
+                      f"only the commits that are your job's own onto it, "
+                      f"resolve, run the tests, and move `{branch}` to the "
+                      f"result (on `{branch}`, `git reset --hard` to it). None of the old `main`'s "
+                      f"commits may come back. Do not push and do not touch "
+                      f"`main`; the launcher lands the branch when you "
+                      f"finish."),
         "branch_tests": (f"Your branch `{branch}` did not land: the tests fail "
                          f"on it. Make them pass on the branch and commit; the "
                          f"launcher lands it when you finish."),

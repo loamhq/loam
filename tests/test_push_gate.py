@@ -17,11 +17,20 @@ identities the landed commits carry.
     re-authored as the checkout's identity (same tree and dates), and a
     commit a landing already put on `main` that way is re-authored by the
     next push, but only when nothing but landings moved `main`;
-  - a deny-list match in an added line, a path or a message is held; an
-    `allow` line lets one file's match through; a missing list holds all;
+  - a deny-list match in an added line, a path or a message is refused at
+    the landing (reason `gate`), before `main` has it, until the branch's
+    own commits are rewritten; a commit already on `main` holds the push,
+    not the next landing; a brief's title that matches is left out of the
+    merge message; an `allow` line lets one file's match through; a missing
+    list holds all;
   - a job begun before `main` was rewritten lands only its own commits,
     replayed onto the new `main` as the checkout's identity, and none of
-    the old history comes back.
+    the old history comes back;
+  - a job branch that took `main`'s commits (by mid-job landings) before
+    `main` was rewritten lands only its own work, read from the reflog of
+    `main` and not the record's base: once when the rewrite came after the
+    base, once in the 2026-11-16 sequence (the base itself rewritten, a
+    replay, more mid-job landings, a second rewrite).
 
 Run: python3 tests/test_push_gate.py
 """
@@ -197,21 +206,60 @@ try:
     check("gate: its own identity, nothing denied: pushed",
           (result["pushed"], origin_main(origin)), (True, git(proj.root, "rev-parse", "main")))
 
-    # A denied word in an added line.
+    # A denied word in an added line: refused at the landing, before main
+    # has it, with a continuation that says what to rewrite.
     pushed = origin_main(origin)
+    here = git(proj.root, "rev-parse", "main")
     r = start(proj, "20261116-100000-00000004")
     commit(r, "d.txt", "hello Secretname\n")
     result, text = land(proj, r)
-    check("gate: a denied word in an added line is held",
-          (isinstance(result["pushed"], str), "d.txt adds 'Secretname'" in text,
-           origin_main(origin)), (True, True, pushed))
-    # ...and fixed in a later commit is still held: the history keeps it.
-    r = start(proj, "20261116-100000-00000005")
+    check("landing gate: a denied word in an added line is not landed",
+          (result["state"], result["reason"], "d.txt adds 'Secretname'" in text,
+           git(proj.root, "rev-parse", "main"), origin_main(origin)),
+          ("not_landed", "gate", True, here, pushed))
+    brief = wt.continuation_brief(proj, r["job"], result)
+    check("landing gate: the continuation says to rewrite the branch",
+          ("push gate" in brief and "d.txt adds 'Secretname'" in brief
+           and "placeholder" in brief), True)
+    # ...and fixed in a later commit on the branch is still refused: the
+    # history keeps it.
     commit(r, "d.txt", "hello\n")
     result, _ = land(proj, r)
-    check("gate: removing it later does not unpublish it; still held",
-          isinstance(result["pushed"], str), True)
+    check("landing gate: removing it in a later commit is still refused",
+          (result["state"], result["reason"]), ("not_landed", "gate"))
+    # The job rewrites its own commit: lands and is pushed.
+    git(Path(r["path"]), "reset", "-q", "--soft", "main")
+    git(Path(r["path"]), "commit", "-qm", "add d.txt")
+    result, _ = land(proj, r)
+    check("landing gate: the branch rewritten without it lands and is pushed",
+          (result["state"], result["pushed"]), ("landed", True))
+    # A commit already on main (put there before the landing asked) is the
+    # push's to hold, not a later job's: that job lands, its push is held.
+    pushed = origin_main(origin)
+    (proj.root / "f.txt").write_text("hello Secretname\n")
+    git(proj.root, "add", "-A")
+    git(proj.root, "commit", "-qm", "on main before the landing gate")
+    r = start(proj, "20261116-100000-00000005")
+    commit(r, "g.txt", "g\n")
+    result, text = land(proj, r)
+    check("gate: an older held commit holds the push, not the next landing",
+          (result["state"], isinstance(result["pushed"], str),
+           "f.txt adds 'Secretname'" in text, origin_main(origin)),
+          ("landed", True, True, pushed))
     git(proj.root, "reset", "-q", "--hard", pushed)   # the person's fix: drop it
+
+    # A brief's title that names a denied word: the merge says only the branch.
+    r = start(proj, "20261116-100000-00000009")
+    commit(r, "h.txt", "h\n")
+    (proj.root / "i.txt").write_text("i\n")          # main moves: a real merge
+    git(proj.root, "add", "-A")
+    git(proj.root, "commit", "-qm", "main moves")
+    git(proj.root, "push", "-q", "origin", "main")
+    result = wt.land(proj, r, f"Land {r['branch']}: the Secretname page")
+    check("landing gate: a denied title is left out of the merge message",
+          (result["state"], result["pushed"],
+           git(proj.root, "log", "-1", "--format=%s", "main")),
+          ("landed", True, f"Land {r['branch']}"))
 
     # An allowed file, a path, a message.
     r = start(proj, "20261116-100000-00000006")
@@ -219,18 +267,16 @@ try:
     result, _ = land(proj, r)
     check("gate: an `allow` line lets that file's match through",
           result["pushed"], True)
-    pushed = origin_main(origin)
     r = start(proj, "20261116-100000-00000007")
     commit(r, "box-only-host/x.txt", "x\n")
     result, text = land(proj, r)
-    check("gate: a denied path is held", "path box-only-host/x.txt" in text, True)
-    git(proj.root, "reset", "-q", "--hard", pushed)
+    check("landing gate: a denied path is not landed",
+          (result["reason"], "path box-only-host/x.txt" in text), ("gate", True))
     r = start(proj, "20261116-100000-00000008")
     commit(r, "e.txt", "e\n", msg="mention Secretname in the message")
     result, text = land(proj, r)
-    check("gate: a denied word in a message is held",
-          "its message names 'Secretname'" in text, True)
-    git(proj.root, "reset", "-q", "--hard", pushed)
+    check("landing gate: a denied word in a message is not landed",
+          (result["reason"], "its message names 'Secretname'" in text), ("gate", True))
     git(proj.root, "config", "loam.pushDeny", str(root / "gone"))
     check("gate: a deny list that is missing holds everything",
           any("is missing" in p for p in wt.push_gate(proj.root, None)), True)
@@ -268,6 +314,93 @@ try:
           (None, True, git(proj.root, "rev-parse", "main")))
     check("rewritten: main is one commit past the rewrite (a fast-forward)",
           git(proj.root, "rev-list", "--count", f"{rewritten}..main"), "1")
+
+    # -- A job branch that predates a rewrite of main (the 2026-11-16 case).
+    # The record is read from disk before each landing, as bin/engineer-job
+    # does (`--land` is a process of its own), never the dict a landing
+    # changed in memory.
+    def land_from_disk(project, record, keep_tree=False):
+        fresh = wt.read_record(project.jobs / record["job"])
+        return wt.land(project, fresh, f"Land {record['branch']}",
+                       keep_tree=keep_tree)
+
+    def rewrite_main(project, since: str, old: str, new: str) -> None:
+        """A filter-branch over `since..main` rewording one message, as a
+        scrub before a push does; origin is put at the result."""
+        subprocess.run(["git", "-C", str(project.root), "filter-branch", "-f",
+                        "--msg-filter", f"sed 's/{old}/{new}/'",
+                        f"{since}..main"], check=True, capture_output=True,
+                       env=dict(os.environ, FILTER_BRANCH_SQUELCH_WARNING="1"))
+        git(project.root, "update-ref", "-d", "refs/original/refs/heads/main")
+        git(project.root, "push", "-q", "-f", "origin", "main")
+
+    def in_main(project, sha: str) -> bool:
+        return subprocess.run(["git", "-C", str(project.root), "merge-base",
+                               "--is-ancestor", sha, "main"]).returncode == 0
+
+    # (a) The branch took a commit from main by a mid-job landing; main was
+    # rewritten after the job's base; the final landing merges.
+    proj, origin = make("predates")
+    git(proj.root, "config", "loam.pushGate", "true")
+    base = git(proj.root, "rev-parse", "main")
+    job = start(proj, "20261116-100000-0000000c")
+    other = start(proj, "20261116-100000-0000000d")
+    commit(other, "x.txt", "x\n", msg="unscrubbed x")
+    land(proj, other)
+    old_x = git(proj.root, "rev-parse", "main")
+    commit(job, "j1.txt", "one\n")
+    first = land_from_disk(proj, job, keep_tree=True)
+    rewrite_main(proj, base, "unscrubbed", "scrubbed")
+    commit(job, "j2.txt", "two\n")
+    result = land_from_disk(proj, job)
+    files = git(proj.root, "ls-tree", "--name-only", "main").split()
+    check("predates (a): the mid-job landing landed",
+          first["state"], "landed")
+    check("predates (a): the final landing lands and pushes",
+          (result["state"], result["pushed"],
+           origin_main(origin) == git(proj.root, "rev-parse", "main")),
+          ("landed", True, True))
+    check("predates (a): the rewritten commit does not come back",
+          (in_main(proj, old_x),
+           git(proj.root, "log", "--format=%s", "main").count("unscrubbed x"),
+           git(proj.root, "log", "--format=%s", "main").count("scrubbed x")),
+          (False, 0, 1))
+    check("predates (a): the job's own work is all there",
+          ("j1.txt" in files, "j2.txt" in files, "x.txt" in files), (True, True, True))
+
+    # (b) The exact sequence: the base itself is rewritten, a mid-job landing
+    # replays the branch (and the record keeps the old base), the job lands
+    # mid-job again, main is rewritten a second time, the job lands.
+    proj, origin = make("twice")
+    git(proj.root, "config", "loam.pushGate", "true")
+    (proj.root / "b.txt").write_text("b\n")
+    git(proj.root, "add", "-A")
+    git(proj.root, "commit", "-qm", "base one")
+    git(proj.root, "push", "-q", "origin", "main")
+    root_commit = git(proj.root, "rev-list", "--max-parents=0", "main")
+    job = start(proj, "20261116-100000-0000000e")
+    commit(job, "k1.txt", "one\n")
+    rewrite_main(proj, root_commit, "base one", "base 1")        # rewrite 1
+    first = land_from_disk(proj, job, keep_tree=True)
+    commit(job, "k2.txt", "two\n", msg="unscrubbed k2")
+    second = land_from_disk(proj, job, keep_tree=True)
+    old_k2 = git(proj.root, "rev-parse", "main")
+    rewrite_main(proj, root_commit, "unscrubbed", "scrubbed")     # rewrite 2
+    commit(job, "k3.txt", "three\n")
+    result = land_from_disk(proj, job)
+    subjects = git(proj.root, "log", "--format=%s", "main").splitlines()
+    check("predates (b): the record still names the first base",
+          (wt.read_record(proj.jobs / job["job"])["base"] == job["base"],
+           in_main(proj, job["base"])), (True, False))
+    check("predates (b): both mid-job landings landed",
+          (first["state"], second["state"]), ("landed", "landed"))
+    check("predates (b): the final landing lands and pushes",
+          (result["state"], result["pushed"]), ("landed", True))
+    check("predates (b): nothing from before either rewrite comes back",
+          (in_main(proj, old_k2), "unscrubbed k2" in subjects, "base one" in subjects),
+          (False, False, False))
+    check("predates (b): main is the rewritten main plus the job's last commit",
+          subjects, ["add k3.txt", "scrubbed k2", "add k1.txt", "base 1", "start"])
 finally:
     wt.WORKTREES, loam_lock.LOCK_DIR = saved
     shutil.rmtree(root, ignore_errors=True)

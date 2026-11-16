@@ -2743,7 +2743,10 @@ def run_recover() -> int:
 # that loop; every receipt in the chain still lands in the vault.
 # ---------------------------------------------------------------------------
 
-AUTO_REASONS = ("conflict", "merged_tests", "branch_tests", "interrupted")
+# `gate` and `rewritten` since 2026-11-16: the branch's own commits are
+# rewritten in the tree, which the job can do and nobody else needs to.
+AUTO_REASONS = ("conflict", "merged_tests", "branch_tests", "interrupted",
+                "gate", "rewritten")
 MAX_AUTO = 2
 
 
