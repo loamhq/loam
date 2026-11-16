@@ -119,3 +119,22 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   old commits. The landing notices (the job's recorded base is not in
   `main`) and replays only the job's own commits onto the new `main`
   (`replay_if_rewritten`), so a merge never brings the old history back.
+- **A gated landing re-authors the engineer's commits** (2026-11-16). A
+  tree cloned before the checkout's identity was set commits as the old
+  one; the landing sets the tree's identity and re-authors `main..branch`
+  before merging (`adopt_identity`). A commit already landed under another
+  identity is re-authored by the next push (`reauthor_landed`) only when
+  `main`'s reflog shows nothing but landings' fast-forwards since `origin`'s
+  head; a hand commit stays held. Re-authoring keeps trees, messages and
+  dates, so a commit already right keeps its hash; running jobs based on a
+  re-authored commit take the replay path above.
+
+## Antigravity's files
+
+- **`agy` asked to resume a conversation whose files are gone** prints
+  `conversation "<id>" not found` and starts an empty one (1.5.9). It does
+  not fail, so a caller that means to continue must check the `.db` itself;
+  the thread engine does (`agy_conversation_gone`).
+- **Implicit files are not read on resume**: a conversation with its turn's
+  implicit file moved away resumed with what it had been told, and each turn
+  writes a new one. Idle is the newest mtime of the `.db`/`brain/` files.
