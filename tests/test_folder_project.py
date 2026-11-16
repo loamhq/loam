@@ -140,6 +140,8 @@ check("the refusal has its own reason and its own brief",
 source = (ROOT / "bin" / "engineer-job").read_text(encoding="utf-8")
 check("the launcher asks no deploy key of a folder project",
       "not lands_by_pr(project) and not project.subdir and (" in source, True)
+check("...and reads its composition from the folder",
+      "assert_imports_resolve(project.root / project.subdir if project.subdir else project.root)" in source, True)
 
 loader = importlib.machinery.SourceFileLoader("provision_mod", str(ROOT / "bin" / "provision"))
 spec = importlib.util.spec_from_loader(loader.name, loader)

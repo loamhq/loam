@@ -667,7 +667,8 @@ def preflight(project: eng.Project, p: dict[str, Path], brief_meta: dict) -> str
             f"project was retired, the record should have gone with it."
         )
     try:
-        assert_imports_resolve(project.root)
+        # A folder project's harness is in its folder (2026-11-16).
+        assert_imports_resolve(project.root / project.subdir if project.subdir else project.root)
     except (IdentityError, OSError) as exc:
         fix = ("`agents/bin/provision --engineer`" if project.platform
                else "re-rendering it from `agents/engineer-template/`")
