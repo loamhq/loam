@@ -63,6 +63,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_broker as brk  # noqa: E402
+import loam_config as lc  # noqa: E402
 import loam_deploy as dep  # noqa: E402
 
 VERBS = ("build", "up", "status", "logs", "exec", "prune")
@@ -294,6 +295,22 @@ def origins_env() -> dict:
     return env
 
 
+def app_env() -> dict:
+    """The install's own values for the app (`[app]` in /etc/loam/loam.toml):
+    which voice each of its agents reads aloud in, and the avatar colours it
+    overrides. They name the install's agents, so they are config and never
+    the checkout's. Not secrets. Without the table the compose file's
+    defaults hold (Iris's voice; no colour overridden)."""
+    env = {}
+    voices = lc.get("app.speech_voices")
+    if isinstance(voices, str) and voices.strip():
+        env["LOAM_SPEECH_VOICES"] = voices.strip()
+    colours = lc.get("app.avatar_colours")
+    if isinstance(colours, dict):
+        env["LOAM_AVATAR_COLOURS"] = json.dumps(colours, separators=(",", ":"))
+    return env
+
+
 def read_secrets(path: Path, names: tuple[str, ...]) -> dict:
     """The named variables, and only those, out of a systemd EnvironmentFile.
 
@@ -358,7 +375,8 @@ def compose(app: dep.App, *args: str, env: dict | None = None, **kw) -> subproce
     # be there for `ps`, `logs` and `exec` too, or those stop working the
     # moment an app starts using one.
     full_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LOAM_COMMIT": commit,
-                **origins_env(), **broker_env(), **app_secrets(app), **(env or {})}
+                **origins_env(), **app_env(), **broker_env(), **app_secrets(app),
+                **(env or {})}
     return run(["docker", "compose", "-f", str(app.compose), *args], env=full_env, **kw)
 
 

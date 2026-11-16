@@ -100,7 +100,10 @@ services:
       # agent's soul, checked against Google's Gemini-TTS voice table. One
       # persona went from Achird (male) to Sulafat (female), another from
       # Pulcherrima (female) to Sadachbia (male).
-      SPEECH_VOICES: "iris=Aoede:warm, natural and unhurried"
+      # An install names its own agents' voices in /etc/loam/loam.toml
+      # (`app.speech_voices`, same format); bin/deploy passes it as
+      # LOAM_SPEECH_VOICES.
+      SPEECH_VOICES: "${LOAM_SPEECH_VOICES:-iris=Aoede:warm, natural and unhurried}"
       # Measured spoken words/minute per voice, which the app's per-chunk
       # duration check (e75c170, deployed 2026-10-13) expects each chunk to
       # land near: words x 60 / pace, accepted at 0.65-1.30 of that. A voice
@@ -120,7 +123,10 @@ services:
       # for the same reason as SPEECH_VOICES: the personas are this
       # installation's, and the app's repo names none. Not a secret, so a
       # literal; single-quoted so the JSON's double quotes survive YAML.
-      AVATAR_COLOURS: '{}'
+      # An install's own overrides are `[app.avatar_colours]` in
+      # /etc/loam/loam.toml (agent id = token); bin/deploy passes them as
+      # LOAM_AVATAR_COLOURS. Empty is no override.
+      AVATAR_COLOURS: '${LOAM_AVATAR_COLOURS:-}'
       # Files (0f67dc1/5148de9): the published vault's address, so a link to
       # it in a note or a message opens in Files instead of leaving the app.
       # The vault app (deploy/vault) is served at `vault.<domain>`; the domain

@@ -227,11 +227,25 @@ def memory_base(record: dict) -> Path:
     return Path(record["path"]).parent / f"{Path(record['path']).name}.memory-base"
 
 
+# Loam's own engineer is `engineer/` in the repository, and its harness is
+# there: provision renders the role, the project file, CLAUDE.md, agent.json
+# and .claude/ from the install's operator-authored sources, so a release
+# ships none of them and an install's checkout carries them untracked (in
+# `info/exclude`). A tree gets them the way a project's tree gets its own.
+# Its memory is the repository's, tracked, so it is never seeded.
+PLATFORM_HARNESS = tuple(f"engineer/{name}" for name in
+                         ("CLAUDE.md", "role.md", "project.md", "agent.json", ".claude"))
+
+
+def harness_names(project: eng.Project) -> tuple[str, ...]:
+    return PLATFORM_HARNESS if project.platform else HARNESS
+
+
 def seed_harness(project: eng.Project, record: dict) -> list[str]:
     """Copy the untracked harness into a fresh tree. Returns what was copied."""
     repo, tree = canonical(project), Path(record["path"])
     copied = []
-    for name in HARNESS:
+    for name in harness_names(project):
         src, dst = repo / name, tree / name
         if not src.exists() or dst.exists() or tracked(repo, name):
             continue

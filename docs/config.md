@@ -42,6 +42,9 @@ place on a particular machine. Added 2026-11-14 (first release, job L1).
 | `git.autocommit.name`, `.email` | the identity of the 15-minute vault, workspace and plugin commits | `loam`, `loam@<user>` |
 | `git.identity.name`, `.email` | the Loam HQ bot that makes releases and the `loam` repository's root commit. Never a person's address. | unset until that bot exists |
 | `engineer.briefers` | the personas who may brief the platform engineer, a list of names (`["ada"]`); a project engineer is open to every persona whatever this says (lib/loam_engineer.py, "Who may brief which project") | absent: every persona |
+| `owner.legacy_ids` | ids an install used for its owner before `owner.id` existed; records that carry one still read as the owner's | absent: none |
+| `deploy.config` | the deployment configuration (domain, `[moved]`, `[[forward]]`) of a box set up by hand, kept outside the checkout so an update never replaces it; same format as `deploy/loam.toml` | absent: `deploy/loam.toml` |
+| `app.speech_voices`, `app.avatar_colours` | the install's agents' read-aloud voices (`agent=Voice:character;...`) and avatar colour overrides (a table of agent id = palette token), passed by `bin/deploy` to the app's compose file | absent: Iris's voice; no override |
 | `edge.*` | an install's name on the web: its domain, address, the app at the domain itself, the records it serves, how DNS is asked, local certificates for a rehearsal, the DNS gate (first release L12; docs/install.md) | absent: the deploy layer reads `deploy/loam.toml` and serves every record, as the first install always has |
 
 `lib/loam_broker` and `lib/loam_engineer` re-export the paths under their

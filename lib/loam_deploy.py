@@ -111,7 +111,13 @@ import loam_broker
 AGENTS = lc.ROOT
 AI_LABS = lc.WORKSPACES
 DEPLOY = AGENTS / "deploy"
-CONFIG_PATH = DEPLOY / "loam.toml"
+# The deployment configuration (the domain, `[moved]`, `[[forward]]`): the
+# checkout's own `deploy/loam.toml` by default, or the file `deploy.config`
+# in /etc/loam/loam.toml names. A box set up by hand keeps its names in a file
+# of its own, outside the checkout, so an update never replaces them and the
+# checkout stays the release's (docs/config.md).
+CONFIG_PATH = (Path(lc.get("deploy.config")).expanduser() if lc.get("deploy.config")
+               else DEPLOY / "loam.toml")
 
 ETC = Path("/etc/loam")
 PUBLIC_FILE = ETC / "public"
