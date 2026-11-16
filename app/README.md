@@ -58,8 +58,9 @@ outcomes stay for ten minutes and open their receipt in Files. See
 
 ## Where the agent actually runs
 
-The question this app exists around is answered in `project.md`, and the
-answer is load-bearing enough to repeat here:
+The question this app exists around is answered in the broker's contract
+(`broker/README.md` at the repository's root; the app is Loam's `app/`
+folder), and the answer is load-bearing enough to repeat here:
 
 **The agent process does not run in this app's process.** It runs on the host, as
 an ordinary process of the host's own user, in the agent's own working
@@ -75,9 +76,10 @@ Two things follow, and they are the shape of the whole app:
 - **This app never decides what a session may write.** The host's write guard
   does, inside the session, exactly as it does today.
 
-The broker is not in this repository and this repository names nothing about
-any particular machine. Everything this app needs to know about it is two
-environment variables and the routes in `project.md`.
+The broker is in this repository (`broker/README.md` at the repository's
+root is its contract; the app is Loam's `app/` folder), and this repository
+names nothing about any particular machine. Everything this app needs to
+know about it is two environment variables and the routes in `broker/README.md`.
 
 ## The stack, and why
 
