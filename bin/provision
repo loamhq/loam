@@ -788,25 +788,15 @@ OnFailure=loam-wake-failed@%N.service
 
 [Service]
 Type=oneshot
-# The wake path carried no memory limit at all, which is what [[state]] open
-# item 2 names. A persona was OOM-killed mid-wake on 08-30 and 08-31 by the
-# GLOBAL out-of-memory killer, not by any cgroup limit -- above RAM+swap the
-# kernel picks a victim by badness score, and the victim need not be the
-# process that grew. These two settings do not stop the box filling up
-# (loam-rc-recycle.timer is what addresses that); they stop a wake being an
-# unattributed contributor to it.
-#
-# MemoryHigh is the one that matters: it throttles and reclaims rather than
-# killing, so a wake that grows gives its own pages back instead of pushing
-# the whole box over the edge. MemoryMax is the backstop for a genuine
-# runaway, and a kill there lands in this unit's cgroup -- attributed, and
-# reported by the OnFailure handler above, instead of the kernel choosing
-# someone else. Observed wake RSS at the two kills was 370 and 387 MB, so
-# 1 GiB of soft headroom is well clear of a healthy wake; the risk of
-# setting these too low is turning working nights into failures, which is
-# worse than the disease.
-MemoryHigh=1G
-MemoryMax=1536M
+# No memory ceiling (2026-11-16, the owner: "remove all of these limits on
+# the different agents, whether personas or engineers"). A wake is an agent
+# run and sits at the agents' place in the kernel's OOM order
+# (lib/loam_config.py), so if the box truly runs out it goes before the
+# broker, Caddy, the login and the app. Until then MemoryHigh=1G /
+# MemoryMax=1536M, added after two global OOM kills of a wake on the 8 GB
+# box (2026-08-30 and 08-31, at 370 and 387 MB) to make a wake an attributed
+# contributor rather than a bystander; the order does that now.
+OOMScoreAdjust={lc.AGENT_OOM_SCORE_ADJ}
 # Pinned, not drifting. The CLI auto-updated itself from 2.1.245 to 2.1.259 on
 # 2026-09-03 with nobody choosing it. Upgrades are an operator decision taken
 # with the changelog open, which is what this makes true.

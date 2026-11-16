@@ -38,6 +38,8 @@ def tokens() -> list[tuple[str, str]]:
         ("@HOME@", str(lc.HOME)),
         ("@TZ@", lc.TIMEZONE),
         ("@ZONE_WORD@", lc.ZONE_WORD),
+        ("@AGENT_OOM@", str(lc.AGENT_OOM_SCORE_ADJ)),
+        ("@CORE_OOM@", str(lc.CORE_OOM_SCORE_ADJ)),
     ]
 
 

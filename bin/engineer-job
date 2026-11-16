@@ -43,11 +43,13 @@ limitations at all." So:
                 and a brief that would cross 01:30 Pacific was refused.
     cap         none. Until then 300 API round trips (``--max-turns``, and
                 counted by lib/loam_codex_job.py for a Codex job).
+    memory      none. Until 2026-11-16 ``MemoryMax`` 20% of RAM and
+                ``MemorySwapMax`` 512M; a job now sits at the agents' place
+                in the kernel's OOM order instead.
 
-What stays: a job's memory cap (``JOB_MEMORY_MAX``, a share of RAM, 20%),
-the project's live lock around the steps that change live state, and the
-waiter's own ceiling under the tool call's four-hour transport timeout,
-which ends the call and never the job.
+What stays: the project's live lock around the steps that change live
+state, and the waiter's own ceiling under the tool call's four-hour
+transport timeout, which ends the call and never the job.
 
 **The receipt has two halves and they are not written by the same author.**
 The engineer writes the body: what changed, linked to evidence. This file
@@ -897,52 +899,23 @@ def read_brief_meta(p: dict[str, Path]) -> dict:
     }
 
 
-# A job's memory, RAM and swap together (2026-10-14). Until then a job had a
-# wake's MemoryHigh 1G / MemoryMax 1536M and no swap limit, and High is a
-# throttle, not a bound: one job (20261014-125454-3f0538c9) held 1023 MiB of
-# RAM and 851 MiB of swap. The box is 7750 MiB RAM + 2047 swap = 9797. The
-# rest at its realistic worst (the 10-14 table in engineer/memory) is the RC
-# servers 2600, system.slice 1165, the kernel and a floor of page cache 400,
-# the broker at its four-chat need 2000, and 350 for one more session-sized
-# thing -- a landing's tests run after its slot is freed -- = 6515. Three
-# jobs, which is GLOBAL_SLOTS, get 3282 between them: 1094 each, and
-# MemoryMax + MemorySwapMax is what a job can hold, so 960 + 128 = 1088.
-# Of the 65 jobs memsample saw 10-13..10-14 (RAM + swap, 5-minute samples),
-# 62 stayed under 960 and two went past 1088 (1157 and the 1874 above).
+# A job's memory: no ceiling (2026-11-16). The owner, on the loam-ui job
+# 20261114-185520-3e7737f6 OOM-killed at 20% of RAM (~6.3 GB) with its 512M
+# of swap full eleven times, on a box with over 20 GB free: "Part of why we
+# moved to this new infrastructure ... was so that we would remove all of
+# these limits on the different agents, whether personas or engineers." So
+# a job takes what it needs; admission by memory (lib/loam_lock.py) decides
+# only when it may start, and if the box truly runs out the kernel's OOM
+# order (lib/loam_config.py) takes a job's process before the broker, Caddy,
+# the login and the app.
 #
-# Raised the same day to 1536 + 512 = 2048, so the heavy jobs finish. Three
-# jobs at that ceiling no longer fit beside the rest at its worst (6144 +
-# 6515 > 9797), and that is accepted: the rare stacked hour is settled by
-# the OOM ordering, not the budget. The broker carries OOMScoreAdjust=500, a
-# job's processes inherit the user manager's 200, and the kernel ranks a
-# process by its share of RAM + swap in per mille plus that adjust. A job
-# process holds at most 2048 / 9797 = 209 + 200 = 409, below any broker
-# process's 500 + its share, so a global OOM kills in the broker and a job
-# runs on. Read 2026-10-14: wakes and RC servers are also at 200 and the
-# containers at 0, so all of them rank below the broker too.
-#
-# There is no MemoryHigh, on purpose. Caused 2026-10-14 in a scratch unit
-# (High 160M, Max 192M, SwapMax 32M, a child allocating without end): with
-# swap full, High does not kill, it throttles -- after 90 s the child sat at
-# 172 MiB, below Max, with 10292 `high` events and no OOM kill, and would
-# have sat there until its wall clock. The same unit without High was killed
-# at Max in half a second. So a job runs at full speed; at Max the kernel
-# drops its page cache and swaps its cold pages, up to SwapMax, and when
-# that is not enough it kills the largest process and the receipt says so.
-# That has never been the CLI: all 17 kills 10-14..10-20 took a Node tool
-# the agent started (ESLint in all 13 jobs of one adopted monorepo, which ran
-# their checks in parallel, then tsc; a test runner in loam-ui), and every job
-# finished.
-# The bound is what protects the box; a throttle would only turn a kill
-# into a job that hangs for the rest of its clock.
-# Since 2026-11-06 a share of the box: 20% of RAM is 1550 MB on the CX33
-# (1536 before) and grows when the box is resized. The 10-20 and 10-24
-# kills were at this cap, on a box with room to spare.
-# Kept when the slot count went (2026-11-10): a share of RAM, 20% of the
-# cpx62's 32 GB is ~6.3 GB per job, and it is what protects the box from one
-# job; admission by memory decides only whether a job may start.
-JOB_MEMORY_MAX = "20%"
-JOB_SWAP_MAX = "512M"
+# History, so nobody re-derives it: 2026-10-14 MemoryMax 960M + SwapMax 128M
+# on the 8 GB CX33, sized for three slots; raised that day to 1536M + 512M
+# so heavy jobs finish; 2026-11-06 a share, 20% of RAM; kept when the slots
+# went (11-10), and removed here. There was never a MemoryHigh, on purpose:
+# a throttle with swap full does not kill, it hangs (caused 2026-10-14 in a
+# scratch unit: 10292 `high` events in 90 s and no progress). That finding
+# stands -- do not add one back.
 
 
 def launch(project: eng.Project, job_id: str, p: dict[str, Path],
@@ -951,15 +924,16 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
 
     Every property here has a cause behind it:
 
-      MemoryMax        see JOB_MEMORY_MAX. A session is the CLI plus whatever
-      MemorySwapMax    it spawns; unbounded, it becomes an unattributed
-                       contributor to a global OOM, and the kernel picks its
-                       victim by badness score rather than by who grew.
-      OOMPolicy        continue. A kill at the job's own ceiling takes the
-                       largest process -- the CLI -- and leaves this launcher
-                       alive to say so in the receipt (`oom_kills`). The
-                       default, stop, would end the launcher with it and leave
-                       a job with no record but the failure log.
+      OOMScoreAdjust   the agents' place in the kernel's OOM order
+                       (lib/loam_config.py). No MemoryMax or MemorySwapMax
+                       since 2026-11-16: a job takes what it needs, and if
+                       the box truly runs out its process goes before Loam's
+                       core.
+      OOMPolicy        continue. A kill takes one process -- the CLI or a
+                       tool it ran -- and leaves this launcher alive to say
+                       so in the receipt (`oom_kills`). The default, stop,
+                       would end the launcher with it and leave a job with no
+                       record but the failure log.
       StandardOutput   null. Measured 2026-09-05: an RC server started without
                        it wrote roughly a line a second to the journal and the
                        user journal reached 2.4 GB. Nothing in this job's
@@ -1003,8 +977,7 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
         "systemd-run", "--user", "--collect",
         f"--unit={unit_name(job_id)}",
         f"--description=Loam engineer job {job_id} ({project.name})",
-        f"--property=MemoryMax={JOB_MEMORY_MAX}",
-        f"--property=MemorySwapMax={JOB_SWAP_MAX}",
+        f"--property=OOMScoreAdjust={lc.AGENT_OOM_SCORE_ADJ}",
         "--property=OOMPolicy=continue",
         "--property=StandardOutput=null",
         "--property=StandardError=journal",
@@ -1553,49 +1526,41 @@ def peak_memory() -> int | None:
 
 
 def oom_kills() -> dict:
-    """What this unit's memory ceiling did: `oom_kill`, processes the kernel
-    killed at MemoryMax; `swap_max`, times its swap was full at
-    MemorySwapMax. Empty outside a unit. Under OOMPolicy=continue a kill
-    takes the largest process -- the CLI, or a test it ran -- and this
-    launcher lives to read the count."""
-    group = own_cgroup()
-    out: dict = {}
-    for name, keys in (("memory.events", {"oom_kill": "oom_kill"}),
-                       ("memory.swap.events", {"max": "swap_max"})):
-        try:
-            for line in (group / name).read_text().splitlines():
-                key, _, value = line.partition(" ")
-                if key in keys:
-                    out[keys[key]] = int(value)
-        except (OSError, TypeError, ValueError):
-            pass
-    return out
+    """`oom_kill`: processes in this unit the kernel's OOM killer took
+    (`memory.events`). Empty outside a unit. A job has no memory ceiling
+    (2026-11-16), so a kill means the box itself ran out and the OOM order
+    (lib/loam_config.py) put this job's process first. Under
+    OOMPolicy=continue the kill takes one process -- the CLI, or a test it
+    ran -- and this launcher lives to read the count."""
+    try:
+        for line in (own_cgroup() / "memory.events").read_text().splitlines():
+            key, _, value = line.partition(" ")
+            if key == "oom_kill":
+                return {"oom_kill": int(value)}
+    except (OSError, TypeError, ValueError):
+        pass
+    return {}
 
 
 def memory_ceiling_text(events: dict) -> str:
-    """One plain sentence when the kernel killed something at the job's
-    ceiling, and nothing otherwise."""
+    """One plain sentence when the kernel killed something in the job, and
+    nothing otherwise."""
     if not events.get("oom_kill"):
         return ""
     return (f"The kernel killed {events['oom_kill']} process(es) in this job "
-            f"at its own memory ceiling (MemoryMax {JOB_MEMORY_MAX} with swap "
-            f"full at MemorySwapMax {JOB_SWAP_MAX}; `memory.events` "
-            f"oom_kill={events['oom_kill']}). The box did not run out; this "
-            f"job reached what one job may hold.")
+            f"(`memory.events` oom_kill={events['oom_kill']}). A job has no "
+            f"memory ceiling of its own, so the box ran out of memory and, "
+            f"in Loam's OOM order, an agent run's process goes before the "
+            f"broker, Caddy, the login and the app.")
 
 
 def memory_events_note(events: dict) -> str:
-    """The peak memory row's tail: the ceiling's events, when there were any,
-    so a job that filled its swap or lost a process says so beside its
-    peak. A quiet job's row is unchanged."""
-    parts = []
+    """The peak memory row's tail: the OOM kills, when there were any, so a
+    job that lost a process says so beside its peak. A quiet job's row is
+    unchanged."""
     if events.get("oom_kill"):
-        parts.append(f"**{events['oom_kill']} OOM kill(s) at MemoryMax "
-                     f"{JOB_MEMORY_MAX}**")
-    if events.get("swap_max"):
-        parts.append(f"swap full at MemorySwapMax {JOB_SWAP_MAX} "
-                     f"{events['swap_max']} time(s)")
-    return "; " + ", ".join(parts) if parts else ""
+        return f"; **{events['oom_kill']} OOM kill(s), the box out of memory**"
+    return ""
 
 
 def mib(value: int | None) -> str:

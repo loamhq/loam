@@ -7,10 +7,10 @@ OnFailure=loam-wake-failed@%N.service
 
 [Service]
 Type=oneshot
-# A wake's numbers, for a wake-shaped session: the CLI plus the history MCP
-# server it spawns. Attributed if it ever grows, throttled before killed.
-MemoryHigh=1G
-MemoryMax=1536M
+# No memory ceiling (2026-11-16; a wake's MemoryHigh 1G / MemoryMax 1536M
+# until then): an agent run, at the agents' place in the OOM order
+# (lib/loam_config.py).
+OOMScoreAdjust=@AGENT_OOM@
 Environment=DISABLE_AUTOUPDATER=1
 Environment=PATH=@UNIT_PATH@
 EnvironmentFile=-@WAKE_ENV@

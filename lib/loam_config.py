@@ -109,6 +109,27 @@ RUNTIME_DIR = Path(f"/run/user/{UID}")
 # The PATH a unit or a lane starts with: the user's tools first.
 UNIT_PATH = f"{LOCAL_BIN}:/usr/local/bin:/usr/bin:/bin"
 
+# -- memory: no ceilings, an order --------------------------------------------------
+# No agent run has a memory or swap ceiling (2026-11-16, the owner: "remove
+# all of these limits on the different agents, whether personas or
+# engineers"). Admission by memory decides when a run starts; what decides
+# who goes if the box truly runs out is the kernel's OOM order, and these two
+# numbers set it. The kernel kills the process with the highest share of
+# RAM + swap in per mille plus its oom_score_adj, so a 700-point gap means a
+# core process is taken before an agent only if it alone holds 70% of the
+# box more than the agent does -- that is, only if it is itself the runaway.
+#
+#   AGENT  every agent run: an engineer job, a wake, a cron, the reviewer, a
+#          Remote Control server, a chat the broker starts (`choom`), and the
+#          provider smoke runs. One number, so between agents the largest goes.
+#   CORE   the session broker's own process and the plugins gateway. 100 is
+#          the lowest a user unit can take: the user manager runs at 100
+#          (systemd 252) and an unprivileged process cannot go below the
+#          floor it inherited. Caddy, the claim service, Authelia and the app
+#          are the system's and Docker's, at 0, lower still.
+AGENT_OOM_SCORE_ADJ = 800
+CORE_OOM_SCORE_ADJ = 100
+
 # -- whose -----------------------------------------------------------------------
 
 OWNER_ID = get("owner.id", "owner")

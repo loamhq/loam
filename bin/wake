@@ -278,9 +278,9 @@ def cgroup_memory() -> dict:
     systemd 252 does not expose MemoryPeak as a unit property, but cgroup v2
     has carried memory.peak since kernel 5.19 and the wake runs inside its
     own unit's cgroup, so it can simply read its own. `high` is the count of
-    times MemoryHigh was breached: non-zero means this wake was throttled and
-    reclaimed rather than killed, which is the early warning that MemoryMax
-    is the next thing it meets. Both are advisory -- a missing value must
+    times MemoryHigh was breached: always zero since 2026-11-16, when the
+    wake unit's MemoryHigh and MemoryMax went (lib/loam_config.py), and
+    kept so an old log and a new one read alike. Both are advisory -- a missing value must
     never fail a wake, so every error here returns empty.
     """
     try:

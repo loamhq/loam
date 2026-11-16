@@ -520,9 +520,9 @@ across restarts (9100–9299, `state/plugins/ports.json`), and:
 
 **Limits**: `MemoryMax=512M`, no swap, `TasksMax=256`, `NoNewPrivileges`
 (this user has sudo; a plugin's server never does), `OOMScoreAdjust=700`
-(the broker is 500, a chat 800: under pressure a plugin goes before the
-broker). 512 MB on a 32 GB box is room for a small server and a ceiling on a
-runaway; raise `MEMORY_MAX` when a real plugin needs more. **Honest limit**:
+(every agent run is 800 and the broker 100: under pressure a plugin goes
+after the agents and before the broker). 512 MB on a 32 GB box is room for
+a small server and a ceiling on a runaway; raise `MEMORY_MAX` when a real plugin needs more. **Honest limit**:
 it runs as the same user as everything else, so the declaration is trust,
 not a wall, as for page code (spec v0).
 

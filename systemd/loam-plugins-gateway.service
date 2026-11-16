@@ -10,8 +10,11 @@ Description=Loam plugin gateway: /x/<id>/ to each server plugin's own port
 Type=simple
 Restart=always
 RestartSec=2s
+# Core, so the kernel reaches it after every agent run (lib/loam_config.py,
+# 2026-11-16; 300 until then). The 128M is its own, not an agent's: a gateway
+# that grows past it is itself the runaway, and Restart= brings it back in 2 s.
 MemoryMax=128M
-OOMScoreAdjust=300
+OOMScoreAdjust=@CORE_OOM@
 NoNewPrivileges=yes
 WorkingDirectory=@ROOT@
 ExecStart=/usr/bin/python3 @ROOT@/bin/plugin-gateway

@@ -77,7 +77,8 @@ LOCK_DIR = Path(os.environ.get("LOAM_LOCK_DIR") or lc.STATE / "locks")
 # 3,870 MB on the 32 GB cpx62 -- and what a session needs to start, the CLI
 # and its stdio MCP servers, ~394-450 MB measured 2026-09-16 and 2026-10-14.
 # A start is the one moment a size is assumed; after it, a run takes what it
-# takes, up to its unit's MemoryMax.
+# takes, with no ceiling (2026-11-16): the kernel's OOM order
+# (lib/loam_config.py) is what stands if the box truly runs out.
 def _box_mb() -> int:
     try:
         for line in Path("/proc/meminfo").read_text().splitlines():

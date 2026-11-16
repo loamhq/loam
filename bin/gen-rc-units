@@ -68,34 +68,14 @@ ConditionPathExists={credentials}
 Type=simple
 Restart=always
 RestartSec=10s
-# Contain a runaway instead of letting it choose a victim by cgroup accident.
-#
-# Sized for TWO sessions, not one. The old 900M was sized against one session
-# per agent and that assumption was never written down. A session is the CLI
-# plus its OWN two MCP servers -- ~440 MB measured, not the ~300 MB a session
-# process shows on its own -- so two sessions plus the ~80 MB supervisor
-# exceed 900M by construction. Both agents that ever carried a second session
-# hit the ceiling: one at 886 MB with 109 throttle events (2026-09-02) and
-# another pinned at exactly 900 MB with 1704 (2026-09-03). Opening a second chat
-# on an agent is ordinary use, so the cap was degrading the exact surface
-# being used, while it was being used.
-#
-# MemoryHigh=1G keeps reclaim starting early, where it costs page cache
-# rather than progress; MemoryMax=1400M is the wall behind it.
-#
-# The trade, the owner's call 2026-09-03: five agents x 1400M is more than the
-# box has, so per-agent caps stop being a collective guarantee. That guarantee
-# was always notional -- all four global OOM kills happened with 900M caps in
-# place, because a cgroup cap cannot see the box running out. What guards the
-# global picture instead is measurement and recovery: check-memory at 01:55,
-# the recycle at 01:30, and the OnFailure handlers.
-#
-# Since 2026-11-06 a share of the box (the box can be resized): 14% / 19% of
-# RAM is 1085 / 1472 MB on the CX33, today's 1G / 1400M rounded up, and grows
-# with a resize so one heavy session can use a bigger box. Measured first:
-# from 10-13 to 11-06 no RC unit passed 510 MB, so neither number has bound.
-MemoryHigh=14%
-MemoryMax=19%
+# No memory ceiling (2026-11-16, the owner: "remove all of these limits on
+# the different agents, whether personas or engineers"). A Remote Control
+# server is an agent run and sits at the agents' place in the kernel's OOM
+# order (lib/loam_config.py), so if the box truly runs out it goes before
+# the broker, Caddy, the login and the app. Until then MemoryHigh=14% /
+# MemoryMax=19% of RAM (1G / 1400M on the 8 GB box of 2026-09, sized for two
+# sessions an agent); from 10-13 to 11-06 no RC unit passed 510 MB.
+OOMScoreAdjust={agent_oom}
 # Pinned, not drifting. The CLI auto-updated itself from 2.1.245 to 2.1.259 on
 # 2026-09-03 with nobody choosing it. Upgrades are an operator decision taken
 # with the changelog open, which is what this makes true.
@@ -175,6 +155,7 @@ TEMPLATE = TEMPLATE.replace("{permission_mode}", PERMISSION_MODE)
 # The install's own paths (lib/loam_config.py, 2026-11-14), baked in the same
 # way and for the same reason.
 for _key, _value in (("{unit_path}", lc.UNIT_PATH), ("{root}", str(lc.ROOT)),
+                     ("{agent_oom}", str(lc.AGENT_OOM_SCORE_ADJ)),
                      ("{logs}", str(lc.LOGS)), ("{claude}", str(lc.CLAUDE_BIN)),
                      ("{wake_env}", str(lc.WAKE_ENV)),
                      ("{credentials}", str(lc.CLAUDE_HOME / ".credentials.json"))):

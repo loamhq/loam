@@ -164,9 +164,10 @@ try:
           "last message" in job.no_receipt_body(
               p, None, False, job.read_beat(p), None), False)
 
-    # A job killed at its own memory ceiling (2026-10-14): the no-receipt
-    # text says so first, and the record row names the kill beside the peak.
-    killed = {"oom_kill": 1, "swap_max": 3}
+    # A job that lost a process to the OOM killer (2026-10-14; no ceiling of
+    # its own since 2026-11-16, so a kill is the box out of memory): the
+    # no-receipt text says so first, and the record row names the kill.
+    killed = {"oom_kill": 1}
     text = job.no_receipt_body(p, None, False, job.read_beat(p), None, killed)
     print("\n--- the no-receipt text for a job killed for memory ---\n"
           + text + "\n---\n")
@@ -174,19 +175,17 @@ try:
           text.split("\n\n")[1].startswith("**Killed for memory.** The kernel "
                                            "killed 1 process(es) in this job"),
           True)
-    check("killed for memory: names the job's ceiling, not the box",
-          (f"MemoryMax {job.JOB_MEMORY_MAX}" in text,
-           f"MemorySwapMax {job.JOB_SWAP_MAX}" in text,
-           "The box did not run out" in text), (True, True, True))
+    check("killed for memory: names the box and the order, no ceiling",
+          ("no memory ceiling of its own" in text,
+           "OOM order" in text, "MemoryMax" in text), (True, True, False))
     check("no kill: no memory paragraph",
           "Killed for memory" in job.no_receipt_body(
-              p, None, False, job.read_beat(p), None, {"swap_max": 3}), False)
-    check("record row: the kill, then the full swap",
+              p, None, False, job.read_beat(p), None, {}), False)
+    check("record row: the kill",
           job.memory_events_note(killed),
-          f"; **1 OOM kill(s) at MemoryMax {job.JOB_MEMORY_MAX}**, swap full "
-          f"at MemorySwapMax {job.JOB_SWAP_MAX} 3 time(s)")
+          "; **1 OOM kill(s), the box out of memory**")
     check("record row: a quiet job's row is unchanged",
-          job.memory_events_note({"oom_kill": 0, "swap_max": 0}), "")
+          job.memory_events_note({"oom_kill": 0}), "")
 
     # -----------------------------------------------------------------------
     # 2. The stall label, on a fixture transcript and a fixture heartbeat.

@@ -35,7 +35,8 @@ in the plugin's folder; a loopback port of its own, kept across restarts
 **Limits**: ``MemoryMax=512M`` and no swap each (``MEMORY_MAX``; the box is
 32 GB and a plugin server is a small program; a wake is 1.5 GB), 256 tasks,
 ``NoNewPrivileges`` (this user has sudo; a plugin never does), and an OOM
-score above the broker's, so the kernel takes a plugin before the broker.
+score between the agents' and the core's, so the kernel takes a plugin
+after any agent run and before the broker.
 ``Restart=always`` after 2 s; five starts within 60 s and systemd gives up,
 which is ``failing`` with the last log lines on the plugin's row.
 
@@ -69,7 +70,7 @@ GATEWAY_PORT = 8933                 # bin/plugin-gateway, on 127.0.0.1
 PORTS = range(9100, 9300)           # one per plugin, kept across restarts
 MEMORY_MAX = "512M"
 TASKS_MAX = 256
-OOM_SCORE = 700                     # broker 500, chats 800 (session-broker unit)
+OOM_SCORE = 700                     # after agents (800), before core (100); lib/loam_config.py
 RESTART_SEC = 2
 BURST, BURST_WINDOW = 5, 60         # starts within seconds, then `failing`
 LOG_LINES = 20
