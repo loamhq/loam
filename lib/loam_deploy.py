@@ -972,9 +972,12 @@ Wants=network-online.target
 Type=simple
 # The environment, the broker's token and any vendor key among it, written
 # as root to {SERVICE_ENV_DIR}/%i.env (memory, root-only) before every start,
-# and read by systemd for the process below. Never on disk.
+# and read by systemd for the process below. Never on disk. Optional (`-`):
+# systemd reads it before ExecStartPre too, when a fresh boot has none yet,
+# and reads it again for ExecStart, after ExecStartPre has written it
+# (caused 2026-11-16: without the `-` the first start failed on it).
 ExecStartPre=+/usr/bin/env PYTHONPYCACHEPREFIX={ROOT_PYCACHE} /usr/bin/python3 {deploy} %i env
-EnvironmentFile={SERVICE_ENV_DIR}/%i.env
+EnvironmentFile=-{SERVICE_ENV_DIR}/%i.env
 WorkingDirectory={SERVICE_RELEASES}/%i/current
 ExecStart={SERVICE_NODE} src/server.js
 Restart=always

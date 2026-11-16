@@ -317,7 +317,7 @@ dep.SERVICE_RELEASES = Path("/var/lib/loam/app")
 unit = dep.service_unit()
 need = ["DynamicUser=yes", "CapabilityBoundingSet=\n", "NoNewPrivileges=yes", "ProtectHome=yes",
         "ProtectSystem=strict", f"OOMScoreAdjust={lc.CORE_OOM_SCORE_ADJ}",
-        "EnvironmentFile=/run/loam/app/%i.env", "WorkingDirectory=/var/lib/loam/app/%i/current",
+        "EnvironmentFile=-/run/loam/app/%i.env", "WorkingDirectory=/var/lib/loam/app/%i/current",
         f"ExecStartPre=+/usr/bin/env PYTHONPYCACHEPREFIX=/var/cache/loam/pycache /usr/bin/python3 {CHECKOUT}/bin/deploy %i env",
         "SyslogIdentifier=%i"]
 check("the unit template carries the wall, the core's OOM score and its env from /run",
