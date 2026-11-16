@@ -1,5 +1,6 @@
-"""Antigravity's per-conversation files for engineer jobs, cleared a week
-after the job (2026-11-15).
+"""Antigravity's per-conversation files, cleared after a week: an engineer
+job's a week after the job (2026-11-15), every other conversation once it has
+been idle a week (2026-11-16, ``clear_idle``).
 
 The owner, 2026-11-15 20:53 PT, on clearing Antigravity's per-conversation
 files a week after a job: "Sounds good." Every ``agy`` conversation leaves,
@@ -19,9 +20,11 @@ carries across conversations, so these are transcripts and an index, not a
 memory. An engineer job's are cleared ``KEEP_DAYS`` after the last job that
 names its conversation finished (a continuation appends to its parent's
 conversation, so a chain keeps it until a week after its last job), by the
-nightly ``provider-follow`` pass (``clear``). Only conversations a Loam job
-record names are touched: a persona's own conversation, or the owner's, is
-named by no job and is never cleared. The provider-memory check
+nightly ``provider-follow`` pass (``clear``). A conversation no job names
+(a persona's thread session, a probe, the owner's) was never cleared until
+2026-11-16; since then it is cleared once nothing has touched it for a week,
+and a thread that comes back to it starts a fresh session (see
+``clear_idle`` below). The provider-memory check
 (lib/loam_provider_memory.py) leaves the same files out of its counts, and
 since 2026-11-16 says no growth of these per-conversation stores at all, a
 persona's conversation's included: only a new kind of entry under the tree.
@@ -275,7 +278,9 @@ def clear(now: float | None = None, dry: bool = False) -> list[dict]:
     """Clear every due conversation's files and say what went, one row per
     conversation: ``{"conversation", "jobs", "removed": [...], "rows",
     "error"}``. Each job naming it records the clearing in its
-    ``antigravity.json``, which is what a continuation's refusal reads."""
+    ``antigravity.json``, which is what a continuation's refusal reads.
+    Then every conversation no job names that has been idle a week, and the
+    implicit files no job names that are a week old (``clear_idle``)."""
     now = time.time() if now is None else now
     rows = jobs()
     base = root()
@@ -311,6 +316,179 @@ def clear(now: float | None = None, dry: bool = False) -> list[dict]:
                 write_record(r["dir"], {"cleared": cleared})
             except OSError as exc:
                 row["error"] = f"cleared, but not recorded in {r['dir']}: {exc}"
+        done.append(row)
+    # Read again: a job conversation cleared above is gone from the disk,
+    # and the jobs still name it, so it is not counted idle twice.
+    return done + clear_idle(rows, now, dry)
+
+
+# -- every other conversation: cleared once idle a week (2026-11-16) ------------
+#
+# The owner's "Sounds good" (2026-11-15 20:53 PT) was to clearing
+# Antigravity's files after a week, read by the lead persona as all of them.
+# A conversation no job names -- a persona's thread session, a probe, the
+# owner's own -- is cleared once nothing has touched it for KEEP_DAYS: its
+# .db (and -wal), its brain folder and every file in it, and its summary
+# rows. Idle is the newest mtime among those files, which every turn writes.
+# One an ``agy`` process is running on is never touched, whatever its age.
+#
+# A thread session resumed after the clearing is not resumed: the thread
+# engine sees its conversation gone and starts a fresh session, which is
+# given the thread's recent exchange and the persona's summary, as a
+# rotation is (lib/loam_thread_engine.py ``agy_conversation_gone``). Asked
+# to resume a conversation it no longer has, ``agy`` 1.5.9 says
+# `conversation "<id>" not found` and starts a new one with no context, so
+# the engine must not leave it to that (read 2026-11-16).
+#
+# Implicit files name no conversation. Resuming does not read them: a
+# conversation whose turn's implicit file was moved away resumed with what
+# it had been told (2026-11-16), and each turn writes a new one. So one no
+# job names is cleared once it is KEEP_DAYS old; a job's are its job's.
+
+
+def last_active(conversation: str) -> float | None:
+    """The newest mtime among a conversation's files, or None when it has
+    none left (only summary rows)."""
+    base = root()
+    newest = None
+    paths = [base / "conversations" / f"{conversation}{ext}"
+             for ext in (".db", ".db-wal", ".db-shm")]
+    brain = base / "brain" / conversation
+    paths.append(brain)
+    if brain.is_dir():
+        for dirpath, dirnames, filenames in os.walk(brain):
+            paths += [Path(dirpath) / n for n in dirnames + filenames]
+    for path in paths:
+        try:
+            mtime = path.lstat().st_mtime
+        except OSError:
+            continue
+        newest = mtime if newest is None else max(newest, mtime)
+    return newest
+
+
+def known() -> set[str]:
+    """Every conversation with anything left: a .db, a brain folder, or a
+    summary row."""
+    base = root()
+    ids: set[str] = set()
+    try:
+        ids.update(p.name[:-3] for p in (base / "conversations").glob("*.db"))
+    except OSError:
+        pass
+    try:
+        ids.update(p.name for p in (base / "brain").iterdir() if p.is_dir())
+    except OSError:
+        pass
+    db = base / "conversation_summaries.db"
+    if db.exists():
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+        try:
+            ids.update(r[0] for r in con.execute(
+                "SELECT conversation_id FROM conversation_summaries") if r[0])
+        except sqlite3.Error:
+            pass
+        finally:
+            con.close()
+    return ids
+
+
+def running() -> set[str]:
+    """Conversations an ``agy`` process names (``--conversation <id>``)
+    right now."""
+    found: set[str] = set()
+    for proc in Path("/proc").glob("[0-9]*"):
+        try:
+            argv = (proc / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        for i, arg in enumerate(argv[:-1]):
+            if arg == b"--conversation":
+                found.add(argv[i + 1].decode(errors="replace"))
+            elif arg.startswith(b"--conversation="):
+                found.add(arg.split(b"=", 1)[1].decode(errors="replace"))
+    return found
+
+
+def idle(rows: list[dict], now: float | None = None) -> dict[str, float | None]:
+    """``{conversation id: last active}`` for each conversation no job names
+    that nothing has touched for KEEP_DAYS and no process is running on."""
+    now = time.time() if now is None else now
+    jobs_own, _ = owned(rows)
+    busy = running()
+    out = {}
+    for cid in known() - jobs_own - busy:
+        last = last_active(cid)
+        if last is None or last + KEEP_DAYS * 86400 <= now:
+            out[cid] = last
+    return out
+
+
+def stale_implicit(rows: list[dict], now: float | None = None) -> list[str]:
+    """Implicit files no job names that are KEEP_DAYS old."""
+    now = time.time() if now is None else now
+    _, jobs_own = owned(rows)
+    out = []
+    try:
+        for path in (root() / "implicit").iterdir():
+            if path.name in jobs_own:
+                continue
+            try:
+                if path.lstat().st_mtime + KEEP_DAYS * 86400 <= now:
+                    out.append(path.name)
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return sorted(out)
+
+
+def clear_idle(rows: list[dict], now: float | None = None,
+               dry: bool = False) -> list[dict]:
+    """Clear every idle conversation no job names, then the stale implicit
+    files: one row each, ``{"conversation", "jobs": [], "idle_since",
+    "removed", "rows", "error"}``; the implicit files are one row whose
+    ``conversation`` is None."""
+    now = time.time() if now is None else now
+    base = root()
+    done = []
+    for cid, last in sorted(idle(rows, now).items()):
+        files = [base / "conversations" / f"{cid}{ext}"
+                 for ext in (".db", ".db-wal", ".db-shm")] + [base / "brain" / cid]
+        row = {"conversation": cid, "jobs": [],
+               "idle_since": iso(last) if last else None,
+               "removed": [], "rows": 0, "error": None}
+        if dry:
+            row["removed"] = [str(f.relative_to(base)) for f in files if f.exists()]
+            done.append(row)
+            continue
+        # Asked again at the last moment: a turn may have begun since.
+        last_now = last_active(cid)
+        if (last_now is not None and last_now + KEEP_DAYS * 86400 > now) \
+                or cid in running():
+            continue
+        try:
+            for f in files:
+                if _remove(f):
+                    row["removed"].append(str(f.relative_to(base)))
+            row["rows"] = _summary_rows(cid)
+        except (OSError, sqlite3.Error) as exc:
+            row["error"] = str(exc)
+        done.append(row)
+    stale = stale_implicit(rows, now)
+    if stale:
+        row = {"conversation": None, "jobs": [], "idle_since": None,
+               "removed": [], "rows": 0, "error": None}
+        for name in stale:
+            path = base / "implicit" / name
+            if dry:
+                row["removed"].append(f"implicit/{name}")
+                continue
+            try:
+                if _remove(path):
+                    row["removed"].append(f"implicit/{name}")
+            except OSError as exc:
+                row["error"] = str(exc)
         done.append(row)
     return done
 

@@ -40,7 +40,8 @@ tested 11-15 that the CLI has no memory tools and nothing carries across
 conversations, so a job's `brain/<id>/`, its summary row and the implicit
 files that appeared while it ran are its transcript and a `/resume` index,
 cleared a week after the job. Everything else in those stores is counted,
-and its growth is said, as before.
+and its growth is said, as before. (Since 2026-11-16 every other
+conversation is cleared too, once idle a week.)
 
 Then not even that (2026-11-16): the owner read three such lines, posted in
 a fresh chat after his first message to a persona on Antigravity, as an
