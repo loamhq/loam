@@ -63,13 +63,14 @@ function settingsPlugins(options = {}) { return host.pluginSettingsUI.view(optio
 
 
 function settingsAppearance({ back = true } = {}) {
-  const { mode, size, theme: look } = host.theme.value, status = host.theme.status
+  const { mode, transition = 'normal', size, theme: look } = host.theme.value, status = host.theme.status
   const chosen = host.theme.installed.find(t => t.id === look)
   const latte = host.theme.value.options?.[look]?.['agent-shapes'] === 'latte-art'
   const signature = host.theme.value.options?.[look]?.['agent-shapes'] === 'signature'
   const themeOptions = chosen?.options?.filter(option =>
     option.id === 'agent-colours' ? !latte : option.id === 'face-content' ? signature : ['latte-mug', 'latte-inside'].includes(option.id) ? latte : true)
   const options = [{ id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }, { id: 'sun', label: 'Sun' }, { id: 'system', label: 'System' }]
+  const transitions = [{ id: 'fast', label: 'Fast · 3 s' }, { id: 'normal', label: 'Normal · 10 s' }, { id: 'long', label: 'Long · 20 s' }]
   const solar = mode === 'sun' ? host.theme.solar : null
   const feedback = h('div', { class: `appearance-status${status.error ? ' err' : ''}`, role: 'status' }, status.error || (status.saving ? 'Saving…' : status.localOnly ? 'Sun saved on this device until the host supports it.' : 'Changes saved'),
     status.error ? h('button', { class: 'quietlink', type: 'button', text: 'Try again', onclick: () => status.saving ? host.theme.save() : host.theme.refresh() }) : null)
@@ -118,7 +119,11 @@ function settingsAppearance({ back = true } = {}) {
         h('p', { class: 'note sun-place', text: solar.coordinates }),
         h('div', { class: 'sun-location note' },
           solar.place.source === 'timezone' ? h('span', { text: 'Using your time zone ·' }) : null,
-          h('button', { class: 'quietlink', type: 'button', disabled: status.locating, text: status.locating ? 'Finding your location…' : 'Use my location', onclick: () => host.theme.useLocation() }))) : null),
+          h('button', { class: 'quietlink', type: 'button', disabled: status.locating, text: status.locating ? 'Finding your location…' : 'Use my location', onclick: () => host.theme.useLocation() })),
+        h('div', { class: 'sun-transition' },
+          h('h4', { id: 'appearance-sun-transition', text: 'Transition' }),
+          h('p', { class: 'note sun-transition-hint', text: 'Gradual colour shift at sunrise and sunset.' }),
+          segmentedControl({ label: 'Transition', value: transition, options: transitions, choose: id => host.theme.set({ transition: id }), props: { class: 'appearance-modes sun-transition-modes', 'aria-labelledby': 'appearance-sun-transition' } }))) : null),
     h('section', { class: 'card appearance-card', 'aria-labelledby': 'appearance-size' },
       h('div', { class: 'appearance-label' }, h('h3', { class: 'kicker', id: 'appearance-size', text: 'Size' }), h('output', { for: 'appearance-zoom', 'aria-label': 'Current size', text: `${size}%` })),
       h('p', { class: 'note', text: 'Adjust text and controls together.' }),

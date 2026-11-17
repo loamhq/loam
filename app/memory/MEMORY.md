@@ -28,3 +28,12 @@ have never met.
 - **`public/claim.html`** is the claim page: one self-contained file under a
   strict CSP, served by the runtime's claim service before the server has
   an owner (`docs/install.md`).
+- **Sun mode gradual shift** lives in `public/sun-shift.js` and is driven by
+  `public/theme.js` only on live visible Sun boundaries when
+  `prefers-reduced-motion` is not `reduce`: it snapshots both modes' resolved
+  `:root` colour tokens via `getComputedStyle`, drifts surfaces in OKLCH across
+  the chosen `transition` duration (`fast` 3 s, `normal` 10 s, `long` 20 s),
+  flips inks (including paired inverted `-ink` tokens) near the midpoint,
+  switches `data-theme` and `theme-color` at `p = 0.5`, and removes all inline
+  overrides on completion or manual interruption. `public/themes/*` and non-`public/tokens.css` files in `public/` are tested against literal colour
+  patterns by `test/themes.test.js`.
