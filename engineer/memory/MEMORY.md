@@ -615,3 +615,29 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` and point `LOAM_CHROME` at
   `~/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`. A fixture
   script must `process.exit(0)`: its servers hold the event loop.
+## 2026-11-17 — Shared Docs on core's own row
+
+- **A plugin list that copies a core row drifts.** Shared Docs drew its own
+  row and lost the ⋯ menu and open-beside within a day. Core now exports
+  the row (`fileEntry` in app/public/files.js); a plugin root gets it as
+  `entry(row, extras)` and a menu item through `files.action`, slot `menu`
+  (app/docs/plugins/places.md).
+- **A plugin viewer is drawn once per Files, and there are two** (the
+  main panel's and the side panel's). One `cur` slot made each panel's draw
+  close the other's editor; key per-panel state by the `files` object.
+- **Opening a doc through the plugin marks it seen** (GET `doc` calls
+  `mark_seen`). Anything that only needs its text reads through Files
+  (`files.readText`).
+- **Core's reconciler keeps handlers only from `on*` props** (`node.__on`);
+  an `addEventListener` on a node built in a draw is lost when the node is
+  patched into an older one.
+- **Seeing the live page from the host, without the login or the personas'
+  browser:** Playwright with `context.route` sending the live domain to
+  127.0.0.1:8081 (the app) and `/x/*` to 127.0.0.1:8933 (the plugin
+  gateway), passing the original headers with `host` set to the domain (the
+  app's same-origin check refuses otherwise). Serving a tree's
+  `app/public` and `plugins/<id>` from the same route previews a change
+  against live data before it lands.
+- **`$TMPDIR` can be empty in a job's shell.** A `cp x $TMPDIR/y` that
+  fails leaves the next step (a `git show HEAD:x > x`) to overwrite work.
+  Write the job's scratch path out, and `git add` before experiments.

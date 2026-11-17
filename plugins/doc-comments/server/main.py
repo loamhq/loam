@@ -22,7 +22,15 @@ or a DELETE and in the JSON body otherwise)::
     GET    /doc/history                  saves newest first, and who wrote what
     GET    /doc/version?save=<id>        the text as it was after one save
     POST   /doc/restore                  write an earlier version back {save}
+    GET    /withme                       Shared with me: the docs others shared from their Loams
+    POST   /withme                       add one {link, password, name?}; checked at once
+    GET    /withme/<id>                  one of them
+    DELETE /withme/<id>                  forget it (nothing changes on the other side)
+    *      /withme/<id>/doc…             the doc routes above, sent to its own Loam's door
     GET    /health
+
+``/withme`` answers the owner and his personas alike: a persona's request
+reaches the other Loam with the door's agent key, under its own name.
 """
 
 from __future__ import annotations
@@ -43,11 +51,12 @@ from doccomments import store as stores  # noqa: E402
 from doccomments.door import Door  # noqa: E402
 from doccomments.service import Service  # noqa: E402
 from doccomments.sidecar import NoteError  # noqa: E402
+from doccomments.withme import WithMe  # noqa: E402
 
 BODY_MAX = 8 * 1024 * 1024
 
 
-def make_handler(service: Service, links=None, door=None, reach=lambda: "staging"):
+def make_handler(service: Service, links=None, door=None, reach=lambda: "staging", withme=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "doc-comments"
@@ -106,6 +115,8 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
                 on = sorted({l["did"] for l in docs if l["on"]})
                 seen = {d: links.seen(d) for d in on}
                 return 200, {"docs": service.shared(on, seen)}
+            if parts and parts[0] == "withme":
+                return self._withme(method, parts[1:], q)
             if not parts or parts[0] != "doc":
                 raise NoteError(404, "no such route")
             body = self._body() if method in ("POST", "PATCH", "PUT") else {}
@@ -165,6 +176,31 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
                     if action == "reattach":
                         return 200, service.reattach(who, root, path, tid, args)
             raise NoteError(405, f"no route for {method} {url.path}")
+
+        def _withme(self, method, rest, q):
+            """Shared with me (withme.py). The password, session and key
+            never appear in an answer; only ``withme.public`` rows do."""
+            if withme is None:
+                raise NoteError(503, "Shared with me is not set up here")
+            who = self._who()
+            body = self._body() if method in ("POST", "PATCH") else {}
+            if rest == [] and method == "GET":
+                return 200, {"docs": withme.list(refresh=q.get("refresh") != "0")}
+            if rest == [] and method == "POST":
+                return 201, {"doc": withme.add(body.get("link"), body.get("password"), body.get("name"), by=who)}
+            if not rest:
+                raise NoteError(405, "no such route")
+            wid = rest[0]
+            if rest[1:] == [] and method == "GET":
+                return 200, {"doc": withme.status(wid) if q.get("refresh") == "1" else withme.get(wid)}
+            if rest[1:] == [] and method == "DELETE":
+                return 200, withme.remove(wid)
+            if rest[1:2] == ["doc"]:
+                route = "/".join(rest[1:])
+                args = {**q, **body}
+                status, out = withme.request(wid, who, method, route, args)
+                return status, out
+            raise NoteError(405, "no such route")
 
         def _owner(self):
             if (self.headers.get("X-Loam-Agent") or "").strip():
@@ -237,6 +273,10 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
                 status, body = self._route(method)
             except NoteError as exc:
                 status, body = exc.status, {"error": exc.message}
+                if getattr(exc, "code", None):
+                    body["code"] = exc.code
+                    if exc.code == "need-name":
+                        body["suggest"] = service.store.owner().get("name") or ""
             except Exception as exc:  # noqa: BLE001 -- one request, never the server
                 traceback.print_exc()
                 status, body = 500, {"error": f"the doc-comments server failed: {exc}"}
@@ -258,8 +298,8 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
 
 
 def serve(service: Service, port: int, host: str = "127.0.0.1", links=None, door=None,
-          reach=lambda: "staging") -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((host, port), make_handler(service, links, door, reach))
+          reach=lambda: "staging", withme=None) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((host, port), make_handler(service, links, door, reach, withme))
     server.daemon_threads = True
     return server
 
@@ -294,7 +334,9 @@ def main() -> int:
 
     door = Door(service, links, Path(__file__).resolve().parent.parent, reach=reach,
                 owner_name=lambda: service.store.owner()["name"], home=home)
-    server = serve(service, port, links=links, door=door, reach=reach)
+    shared = WithMe(private, own_tokens=lambda: {l["token"] for l in links.all()}, door=door,
+                    owner=service.store.owner, agent=service.store.agent)
+    server = serve(service, port, links=links, door=door, reach=reach, withme=shared)
     print(f"doc-comments: listening on 127.0.0.1:{port}", file=sys.stderr, flush=True)
     try:
         server.serve_forever()
