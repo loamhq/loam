@@ -73,14 +73,15 @@ test("a plugin root's entry is a folder's own row: tile, label, open beside, the
   find(find(entry, 'row-side-action'), 'side-open').fire('click', {})
   assert.deepEqual(side.opened, ['Notes/plan.md', 'Notes/plan.md'])
 
-  // The ⋯ menu is the resource menu: Open to the side, Rename, Download, Copy link.
+  // The ⋯ menu is the resource menu: Open to the side, Rename, Open folder
+  // (a plugin's list is not the file's folder), Download, Copy link.
   find(entry, 'fs-rowmenu').fire('click', {})
   assert.equal(files.st.sheet.kind, 'resource')
   files.side = () => side
   const sheet = addSheet(files, { close: Object.assign(() => {}, { redraw() {} }) }).filter(Boolean)
   const labels = sheet.slice(1).map(n => n.textContent)
-  assert.deepEqual(labels.slice(0, 3), ['Open to the side', 'Rename', 'Download'])
-  assert.match(labels[3], /link/i)
+  assert.deepEqual(labels.slice(0, 4), ['Open to the side', 'Rename', 'Open folder', 'Download'])
+  assert.match(labels[4], /link/i)
 })
 
 test('a folder row and a plugin row are drawn by the same code', () => {

@@ -1,9 +1,12 @@
 // The owner's side of sharing, in Loam's editor: the Share button, the
 // invite card (who, what they can do, the ticket they get) and Shared with
-// (one row per link: its mode, Copy invite again, Turn off with Undo).
+// (one row per link: its mode, Copy invite again, Turn off with Undo), and
+// how the owner's agents appear to them on this doc (appear.js).
 // Talks to the plugin server's owner routes (`/x/doc-comments/doc/links`).
 
+import { bottomSheet, grab } from './sheet.js'
 import { tone, h, icon, put } from './editor/dom.js'
+import { appearSelect, wordSelect } from './appear.js'
 
 const MODES = [
   { id: 'view', label: 'can view', verb: 'view' },
@@ -11,9 +14,10 @@ const MODES = [
   { id: 'edit', label: 'can edit', verb: 'edit' },
 ]
 const DAYS = [1, 7, 30, 90, 365]
+const DAY_WORDS = DAYS.map(d => [String(d), d === 1 ? '1 day' : `${d} days`])
 
 export function createSharing({ base, root, path, title, owner, toast, onChange, notes = () => 0, resolved = () => 0 }) {
-  const st = { links: [], owner: owner || 'You', open: null, card: null, menu: null }
+  const st = { links: [], owner: owner || 'You', open: null, card: null, menu: null, appear: null }
   const req = async (method, route, body) => {
     const q = method === 'GET' ? `?${new URLSearchParams({ root, path })}` : ''
     const res = await fetch(`${base}${route}${q}`, {
@@ -61,11 +65,13 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
   // -- the dialog -------------------------------------------------------------------
 
   let scrim = null
+  let bs = null
   async function open(which = null) {
     try {
       const got = await req('GET', 'doc/links')
       st.links = got.links
       st.owner = got.owner || st.owner
+      st.appear = got.appear || null
     } catch (err) {
       toast?.(err.message)
       return
@@ -74,6 +80,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
     if (st.open === 'card') await freshCard()
     if (!scrim) {
       scrim = h('div', { class: 'dc-dlg-scrim dc-share-scrim', onclick: (e) => { if (e.target === scrim) close() } })
+      bs = bottomSheet(scrim, { close })
       document.body.append(scrim)
       requestAnimationFrame(() => scrim.classList.add('on'))
       document.addEventListener('keydown', onKey)
@@ -89,8 +96,10 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
     if (!scrim) return
     const s = scrim
     scrim = null
+    bs?.dispose()
+    bs = null
     s.classList.remove('on')
-    setTimeout(() => s.remove(), 220)
+    setTimeout(() => s.remove(), 320)
     document.removeEventListener('keydown', onKey)
     st.open = null
     onChange?.()
@@ -104,7 +113,9 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
 
   function draw() {
     if (!scrim) return
-    put(scrim, st.open === 'card' ? cardView() : listView())
+    // On a phone the dialog is a bottom sheet (sheet.js), with its handle.
+    bs.keep(() => put(scrim, st.open === 'card' ? cardView() : listView()))
+    scrim.firstChild?.prepend(grab(h))
   }
 
   function head(text, back = null) {
@@ -142,8 +153,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
     const pw = c.editing
       ? h('input', { class: 'dc-tk-pwin', type: 'text', value: c.password, maxlength: '100', 'aria-label': 'Password', oninput: (e) => { if (c.short && e.target.value.trim().length >= 6) { c.short = false; scrim?.querySelector('.dc-sh-warn')?.remove() } }, onkeydown: (e) => { if (e.key === 'Enter') { c.password = e.target.value.trim() || c.password; c.editing = false; c.short = c.password.length < 6 && c.short; draw() } }, onblur: (e) => { c.password = e.target.value.trim() || c.password; c.editing = false; c.short = c.password.length < 6 && c.short; draw() } })
       : h('button', { class: 'dc-tk-pw', type: 'button', title: 'Change the password', onclick: () => { c.editing = true; draw(); setTimeout(() => scrim?.querySelector('.dc-tk-pwin')?.select(), 0) } }, c.password)
-    const daysSel = h('select', { class: 'dc-tk-days', 'aria-label': 'Remembered for' }, DAYS.map(d => h('option', { value: String(d), selected: d === c.days ? true : null }, d === 1 ? '1 day' : `${d} days`)))
-    daysSel.addEventListener('change', () => { c.days = Number(daysSel.value) })
+    const daysSel = wordSelect({ options: DAY_WORDS, value: String(c.days), label: 'Remembered for', className: 'dc-tk-days', onChange: (v) => { c.days = Number(v) } })
     const go = h('button', { class: 'dc-gate-go dc-sh-go', type: 'button', disabled: c.busy ? true : null, onclick: create }, icon('file', 15), c.busy ? 'Making the link…' : 'Copy invite')
     setTimeout(() => { if (!c.name && document.activeElement === document.body) nameIn.focus() }, 30)
     return h('div', { class: 'dc-dlg dc-sharedlg', role: 'dialog', 'aria-label': 'Invite' },
@@ -194,7 +204,32 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
       head('Shared with'),
       h('div', { class: 'dc-sw-list' }, rows.length ? rows : h('p', { class: 'dc-quiet', text: 'No one has a link to this doc.' })),
       h('button', { class: 'dc-gate-go dc-sh-go', type: 'button', onclick: async () => { await freshCard(); st.open = 'card'; draw() } }, icon('plus', 15), 'New invite'),
-      h('p', { class: 'dc-sh-cap', text: 'Each link has its own password.' }))
+      h('p', { class: 'dc-sh-cap', text: 'Each link has its own password.' }),
+      appearLine())
+  }
+
+  // How the owner's agents appear to everyone with a link to this doc: one
+  // line, the default or this doc's own choice. Applied as notes are served,
+  // so it covers what is already on the doc too.
+  function appearLine() {
+    const a = st.appear
+    if (!a) return null
+    return h('div', { class: 'dc-tk-mem dc-ap-line' },
+      h('span', { text: 'Your agents appear here' }),
+      appearSelect({
+        value: a.choice, def: a.default, alias: a.alias, withDefault: true,
+        label: 'How your agents appear on this doc',
+        onChange: async (v) => {
+          try {
+            const out = await req('PATCH', 'doc/links/appear', { appear: v })
+            st.appear = out.appear
+            toast?.(st.appear.as === 'one'
+              ? `Your agents appear as ${st.appear.alias} here, on notes already here too`
+              : 'Your agents appear here by their own names')
+          } catch (err) { toast?.(err.message) }
+          draw()
+        },
+      }))
   }
 
   function rowMenu(l) {
@@ -211,7 +246,8 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
           else if (out?.password) toast?.(`New password ${out.password}`)
         } }, icon('file', 16), h('span', { class: 'dc-l' }, h('b', { text: 'Copy invite again' }), h('small', { text: 'With a new password; anyone already in stays in' }))),
         h('div', { class: 'dc-mi dc-mi-days' }, icon('history', 16), h('span', { class: 'dc-l' }, h('b', { text: 'Remembered for' })),
-          (() => { const s = h('select', {}, DAYS.map(d => h('option', { value: String(d), selected: d === l.days ? true : null }, d === 1 ? '1 day' : `${d} days`))); s.addEventListener('change', () => patch(l, { days: Number(s.value) })); return s })()),
+          // The words chosen, in a chip; the select under them covers the row.
+          wordSelect({ options: DAY_WORDS, value: String(l.days), label: 'Remembered for', onChange: (v) => patch(l, { days: Number(v) }) })),
         h('div', { class: 'dc-msep' }),
         h('button', { class: 'dc-mi bad', type: 'button', onclick: () => { st.menu = null; turnOff(l) } }, icon('x', 16), h('span', { class: 'dc-l' }, h('b', { text: 'Turn off' }), h('small', { text: 'The link stops working at once' })))) : null)
   }

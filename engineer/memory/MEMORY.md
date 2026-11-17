@@ -71,6 +71,10 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **`gen-rc-units` has no `--help`.** Any argument starting with `-` is
   ignored and the run is live: `gen-rc-units --help` writes every rc unit.
   Use `--dry-run`.
+- **Nor has `gen-deploy`** (caused 2026-11-17): `gen-deploy --help` is a
+  live render. It wrote the Caddyfile, reloaded Caddy and ran `compose up`
+  on the login and the browser. Read a generator's docstring, never its
+  `--help`.
 
 ## 2026-11-16 — a correct record can still draw in the wrong order
 
@@ -690,6 +694,69 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   fails leaves the next step (a `git show HEAD:x > x`) to overwrite work.
   Write the job's scratch path out, and `git add` before experiments.
 
+## 2026-11-17 — Shared with me: a server that fetches what a person pasted
+
+- **Staging and live are one Loam.** One broker, one vault, one plugin
+  server; only the app copies differ. A link shared "from staging" and added
+  "on live" is a doc shared with oneself, so a client of another Loam's door
+  needs an own-Loam path to be walkable at all: doc-comments recognises its
+  own tokens and calls its door in-process (`withme.Own`). The network path
+  is proved by `test/test_withme.py` against a second door over real https
+  on a local port with a throwaway certificate (`openssl req -x509 …
+  -addext subjectAltName=DNS:door.test`, a resolver that maps the name).
+- **Refuse by address, connect to the address you checked.** Resolve once,
+  refuse if any record is loopback, private, link-local, shared (100.64/10),
+  reserved, multicast or one of the box's own (`ip -j addr`), then dial that
+  IP with SNI and certificate checks for the name (`_Pinned`). A second
+  lookup at connect time is the rebinding hole.
+- **A Caddy site address without `bind` listens on every interface.** A
+  throwaway loopback Caddy for a headless browser (`https://host:9443 { tls
+  internal … }`) was up on `*:9443` for a minute, routing to staging without
+  the login; the host firewall's input policy (drop, with 80 and 443 open) is what
+  kept it off the internet. Put `bind 127.0.0.1` in every site block, and
+  check with `ss -ltnp` before pointing anything at it.
+- **The push gate again** (see "doc comments: a plugin with a real editor"):
+  a persona's name in a docstring example and a test fixture held the
+  branch. Grep the branch's added lines with the deny file before the first
+  `--land`, and squash with `git reset --soft <base>` once clean.
+- **app/test's fake DOM has no `classList` or `Event`**: a dialog built with
+  the editor's `h` cannot be driven there; prove it in a real browser.
+
+## 2026-11-17 — Opening from a plugin's list keeps the list
+
+- **Opening a file synced the list column to its folder in core** (`show()`
+  in app/public/files.js set `st.root`/`st.path` from the file), not in the
+  plugin. The fix is an explicit `list` option from `goFiles` through the
+  panels' `openMain` item and back into `show`, and `?list=@<id>` on the
+  file's address (`filesHref`'s third argument, `listFromURL`). Only a
+  plugin's root passes one (`fromList` wraps its `go`); shortcuts on the
+  Files home, Open daily note, New inbox note and chat links still go to
+  the file's folder.
+- **On the desktop a Files address is the main panel's item.** Browsing a
+  folder there does not push an address; only opening a file does. Anything
+  that must survive a reload rides on the file's address, and routePanels
+  (Back/Forward) and the cold load (`landedOn`) both read it.
+- **A side-panel item promoted to the main panel carries no list** (the
+  side's descriptor is root and path only), so promoting moves the list
+  to the folder, as before.
+- **A browser test against the fake host hangs on exit** (its event
+  streams stay open): race `closing()` against a timer and `process.exit`
+  in `test.after`, as app/test/files-plugin-list-browser.mjs does.
+- **`tests/test_wake_failed.py` collides across concurrent landings.** It
+  writes the box's real wake state and log (`lc.STATE`, `lc.LOGS`) under one
+  fixed agent name, so two `run-all`s reaching it together each see the
+  other's line. It failed my landing twice while four other jobs' landings
+  ran at once, and passed alone and on the next try. Fixing it means giving
+  it its own state folder; it is not a reason to doubt a branch.
+- **The live page, from the box, for frames:** the app on `127.0.0.1:8081`
+  plus a Playwright route sending `/x/*` to `127.0.0.1:8933` is exactly
+  Caddy's split for the browser's network (`@sight`). The plugin's page
+  files come from the app at `/api/plugins/doc-comments/files/…`, read from
+  the checkout. Playwright 1.65.1's video needs ffmpeg-1013 and the cache
+  has 1011, and a symlink under that name writes nothing, so use frames.
+  To photograph a CSS entrance, pause its animation the moment it starts
+  (`getAnimations()[0].pause()`) and step `currentTime`.
+
 ## 2026-11-17 — bringing context from another AI
 
 - **Opening a file synced the list column to its folder in core** (`show()`
@@ -762,3 +829,114 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   scratch folder whose `.claude/skills/` holds the skill, with `--add-dir`
   pointing at a synthetic vault. It shows what one model did once. It
   proves no behaviour.
+- **Coverage must count characters, not items** (corrected the same day,
+  on review). The first ledger counted a conversation as read when any of
+  it was printed, so one cut at `--max-chars` claimed full coverage. The
+  ledger now keeps per-conversation character spans, keyed by the source's
+  sha256 and member, not its file name. The text is redacted before it is
+  cut, so offsets are stable and a credential is never split across two
+  reads. A read that stops prints the exact `--from I --offset C` to carry
+  on. A tree-shaped conversation's other branches are counted as not read
+  unless `--all-branches` is used.
+- **The provenance convention (`created_by`/`last_modified_by`, quoted
+  wiki-links) is not shipped in core.** Files stamps Markdown it saves
+  (`with_provenance`). An agent's own writes rely on its instructions, so a
+  library skill that writes notes says so itself.
+
+## 2026-11-17 — a job that is stuck must read as stuck
+
+- **A ticking heartbeat proves the launcher is alive, not the engine.** The
+  launcher writes it. What says the engine is working is its own newest
+  event: the Claude transcript's last line (and its subagents' own
+  transcripts, `<id>/subagents/*.jsonl`, which the main one is silent
+  behind), or the Codex/Antigravity stream the launcher writes line by
+  line. `box_status()` carries it per running job (`last_activity`,
+  `quiet_since`), so `--status`, the MCP status and Activity all say it.
+- **Antigravity has no per-command timeout** (agy 1.5.9): a test that never
+  exits holds a job forever. It runs each command as `bash -c <cmd>`, a
+  direct child in a process group of its own, and writes a `step_update`
+  `ACTIVE` event as it starts it. Killing that group comes back to the model
+  as "Command was terminated by signal or canceled", and the run goes on.
+  `lib/loam_stuck.py` does exactly that after 30 silent minutes, only while
+  the engine's last event says a command runs, and only to processes that
+  started in the last step (the engine's own helpers started before it).
+- **Claude Code engines need none of it**: their Bash tool's own timeout
+  (2 min default, 10 max) ends a command, and a background command returns
+  at once.
+- **A watcher thread must be joined before the record is read.** The engine
+  can finish in the moment between a command's death and the watcher's
+  write; the first test run read an empty record for a stop that happened.
+- **Authelia answers its own API for a session when asked on the portal's
+  host** (`X-Forwarded-Host: auth.<domain>`, `X-Forwarded-Proto: https`)
+  with the `loam_auth` cookie alone; that is how `/_loam/passkeys` lists the
+  signed-in person's passkeys without Loam deciding whose they are.
+
+## 2026-11-17 — doc comments: hiding which agents the owner has
+
+- **Hide where an answer leaves, not in what is kept.** The door masks the
+  owner's agents in every answer to a visitor (`appear.mask`, by agent id,
+  over authors, closers, spans and `people`), so the sidecar stays true and
+  a change of choice covers past notes. Prove it by grepping everything the
+  door serves, by a browser and by an agent key, for every persona's name.
+- **The door's session cookie is `Secure`**: curl on loopback http never
+  sends it back from a cookie jar. Pass `Cookie:` by hand.
+- **An uncommitted file in the job's tree stops a mid-job landing** at its
+  checkout step ("would be overwritten"). Commit before `--land`, and edit
+  nothing tracked while it runs; a background landing needs a long timeout
+  (the default 10 min killed one mid-test, leaving the tree detached on the
+  merge commit; `git checkout <branch>` put it back, nothing reached main).
+- **A native `<select>` is as wide as its longest option.** In a sentence,
+  draw the chosen words and lay the select over them at opacity 0; it still
+  takes the keyboard and the phone's own picker.
+- **A plugin page change can be previewed against live before landing**:
+  route `/api/plugins/<id>/files/*` to the tree's `plugins/<id>/` in the
+  walk's Playwright context, beside the app (8081), gateway (8933) and door
+  (8936) routes.
+
+## 2026-11-17 — the share sheet as a bottom sheet on phones
+
+- **A dialog redrawn whole needs its gestures on the scrim.** The share
+  sheet's `draw()` replaces the dialog node on every change, so touch,
+  focus and the menu-flip observer live on the lasting scrim
+  (`page/sheet.js`) and find the dialog anew each time.
+- **A fixed scrim sized to `visualViewport` needs `box-sizing:
+  border-box`,** or its top padding pushes the sheet past the screen's foot
+  by exactly that much. The keyboard can't be shown in headless Chromium;
+  the browser test fakes `window.visualViewport` with an init script.
+- **Live shots past the login, through the app on loopback, also need
+  `Origin` and `Sec-Fetch-Site` dropped** from the proxied request, or the
+  app's same-origin guard 403s the plugins' page code. Abort
+  `text/event-stream` requests, or the proxy's read never ends. Theme
+  is the owner's server-side setting (`"mode":"sun"`), not
+  `prefers-color-scheme`: rewrite it in `/appearance-state.js` in the proxy
+  for dark shots. Serving `/api/plugins/<id>/files/*` from a job's tree
+  previews a plugin change live before it lands.
+- **Two jobs adding an import under the same line conflict.** Put a new
+  import on a different line from the parallel job's (above the shared
+  one), and check with `git merge-tree --write-tree HEAD <their branch>`.
+- **The Bash tool's own background limit kills `engineer-job --land` too**
+  (10 min foreground, then moved to background with the same cap). Start it
+  with `run_in_background` and a long timeout from the outset.
+
+## 2026-11-17 — the agents sheet on phones; "Remembered for" that fits
+
+- **Core's `select { min-height: 44px }` (app/public/style.css:40) reaches
+  every select a plugin draws.** A select laid over its words at opacity 0
+  with `inset: 0` still grew to 44px and overhung them; at the foot of a
+  bottom sheet that made the sheet scroll by 3px, which in turn stopped the
+  ⋯ menu from showing past the sheet's top. Set `min-height: 0` on any
+  select whose size you mean. The plugin's test harness does not load core,
+  so a test that cares adds the rule itself (`CORE_SELECT`).
+- **The harness has no global `box-sizing: border-box`; core does.** A
+  `width: 100%` row with padding overflowed its menu by 20px in the harness
+  only. Plugin rules that rely on border-box say it themselves.
+- **A menu hanging past a dialog's foot makes the dialog scroll** at the
+  moment the flip observer looks. "Does the sheet scroll of itself?" is
+  measured with the new menus set to `display: none`.
+- **When one dialog adopts a shared component, check its siblings.** The
+  share-sheet job moved the add sheet's phone CSS to `.dc-bs` and deleted
+  `.dc-wm-scrim`'s own; the agents sheet shared that class and silently
+  became a centred card on phones.
+- **Live dark shots:** the owner's theme mode in `/appearance-state.js` is
+  `sun` (follows the sun), `dark`, `light` or `system`; rewrite it to
+  `"mode":"dark"`, not `moon`.

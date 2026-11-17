@@ -480,13 +480,18 @@ and Turn off (at once, with Undo). **Shared Docs** is a root in Files
 (core's `files.root`) listing only docs with a link on. Each doc is core's
 own file row (`entry`, the same code a folder listing draws, so it opens,
 opens beside with Option-click or its side button, and has the same ⋯
-menu), with three additions: the second line says the modes that are open
-and the last activity ("Edit, view · 3m ago", "2 new · …" when there is
-news); the faces of the named links (a group link as a people glyph, "+N"
+menu), with three additions: the second line, one line always, says the mode when
+there is one ("Edit · 3m ago"), and only the time when links differ
+(each face names its own mode), and "2 new · …"
+first when there is news; the faces of the named links (a group link as a people glyph, "+N"
 past three, each naming who and what on hover or a long press) sit before
 the menu; and a dot on the tile's corner marks a doc with words from
 someone else since the owner last opened it. Opening it marks the new
-notes in the margin. A doc whose last link goes off leaves the list with a
+notes in the margin, and the list column stays on Shared Docs, at the same
+scroll, with that row shown as the open one; the address carries
+`?list=@doc-comments`, so a reload, Back and Forward come back to the same
+list (core, for any plugin root). The doc's folder is one step away: the
+breadcrumb in its header, or **Open folder** in the row's ⋯ menu. A doc whose last link goes off leaves the list with a
 short fade and slide. Nothing else in Files or the rail gets a dot, and
 nothing pings anyone. **Share settings** (or **Share…** on a doc with no
 link yet) is first in every writable vault Markdown file's ⋯ menu, here
@@ -495,6 +500,29 @@ share sheet as the doc's Share button without opening the doc, and the
 list redraws as soon as anything changes. The editor is kept per Files
 (the main panel's and the side panel's), so a doc opens beside another
 with its own full editor and notes.
+
+**On a phone** (600 px wide and less) the share sheet is a bottom sheet,
+wherever it opens (the doc's Share button, a ⋯ menu in Shared Docs or any
+folder), and so are Shared with me's add sheet and its "How your agents
+appear" sheet, like the notes' sheet: it
+rises from the foot with a gentle ease and a handle at its top, closes on a
+drag down (from the handle or its title, or from anywhere once it is
+scrolled to its top) or a tap above it, keeps clear of the home bar,
+scrolls inside when it is taller than the screen, and stands on the
+keyboard, with the field being typed in kept in view (`page/sheet.js`;
+the look is `.dc-bs` in `doc-comments.css`). A menu in it that would hang
+past its foot opens upward. A wider screen keeps the centred card, which
+lets such a menu hang past its foot when the card does not scroll, rather
+than cut it off.
+
+A choice made inside a sentence or a menu ("Their browser remembers it for
+[30 days ▾]", the days in a link's ⋯ menu, how the agents appear) is drawn
+as the words chosen with a chevron, and the native select is laid over them
+at opacity 0 (`wordSelect` in `page/appear.js`): it still takes the
+keyboard and the phone's own picker, and it is as wide as its words, not
+its longest choice. In the ⋯ menu the select covers the whole row. Core
+gives every select a 44 px touch height; the laid-over select sets that
+aside, so it never makes a sheet scroll.
 
 **The visitor's side.** `https://<domain>/s/<token>`: a password page that
 shows the owner's name and the doc's title (the invite already carries
@@ -586,10 +614,142 @@ Settings › Plugins, or `bin/settings set plugin.doc-comments.reach
 everywhere`) decides whether the editor and the door work beyond Loam's
 staging copy (`next.<domain>`). It ships `staging`.
 
+## Shared with me (2026-11-17)
+
+*The other half of sharing.* When someone with a Loam shares a doc with the
+owner, the owner adds it to their own Loam and works on it there, in the same
+editor, without it being copied into their vault.
+
+**What the owner sees.** Files › Shared Docs has two sections under the app's own
+kickers: *Shared by me* (the list above) and *Shared with me*. The second
+always ends with a quiet **Add a shared doc** row (alone, it says what it is
+for). Its sheet (a bottom sheet on a phone) takes the link and the password;
+a whole invite pasted into either field fills both. A link for no one person
+asks once for the name they go by there, offering their own. Their Loam checks
+both against the other Loam at once and says plainly what went wrong: the
+password, a link turned off or expired, not a Loam share link, a server that
+cannot be reached, a private address, an older or newer Loam. A row shows the
+doc's title, whose Loam it is on, the mode there and the dot when something
+is new since they last looked; its ⋯ is Open, Open to the side, Copy link,
+Remove (which forgets the link and password; nothing changes for the
+owner). A link turned off greys the row ("No longer shared"); a server that
+does not answer says so and is tried again at the next open; a changed mode
+is followed at the next look.
+
+**The editor** on such a doc is the same one, limited by the link's mode as
+the door answers it (view: Viewing only; comment: Viewing and Suggesting
+with notes; edit: all three). Its header names where the doc lives
+("Shared with me / <owner> · <host> / <title>") and has no Share and no
+History, which are the doc's owner's. On the other side the owner shows as
+the name on their link, exactly as through that Loam's share page.
+
+**How it is built.**
+
+- **Their Loam's server is the client**, not their browser
+  (`server/doccomments/withme.py`): it keeps the link, the password, the
+  session the door hands back and the door's agent key in the plugin's
+  private folder (`LOAM_PLUGIN_PRIVATE`, 0700; `with-me.json`, 0600),
+  outside the vault and any repository, and renews a lapsed session with
+  the kept password by itself. The password is kept in the clear because it
+  must be sent again; no answer, log line or error carries it, the session
+  or the key (`withme.public`). The page talks only to `/x/doc-comments/
+  withme…`; every doc operation there is sent to the door's
+  `/s/<token>/api/doc…`.
+- **The door states a protocol**: `GET /s/<token>/loam.json` answers
+  `{"loam_share": 1, "min": 1}` for any token (it says nothing about a
+  link). An older door has no such answer but serves Loam's own "doesn't
+  open anything" page, so the client can say "that Loam is too old for this"
+  rather than "not a Loam link". `/open` also answers the title, owner and
+  mode; `/api/status` gives a row in one call (title, owner, mode, and the
+  text's and the notes' revisions, which the dot compares with what they last
+  looked at).
+- **Safety, since the server fetches an address a person pasted**: only
+  `https://<host>[:port]/s/<token>`; only the door's own endpoints after it
+  (`DOOR_PATHS`); the host is resolved and every address must be public
+  (loopback, private, link-local, shared, multicast, reserved and this box's
+  own addresses refused, one bad record refuses all), and the connection
+  goes to the address that was checked, with the certificate checked against
+  the name; no redirect is followed; 8 MiB and 10 s per read, 25 s per
+  answer. What comes back is JSON handed to the editor, drawn as any doc is.
+- **A link of this Loam's own** (its token is in this Loam's links) is
+  opened through the door in-process: no network, the same protocol, and the
+  owner shows on it as anyone on that link does. That is a doc shared with
+  oneself, and it is how staging and live, which are one Loam on one box,
+  were walked.
+- **Personas** reach these docs with their tools by a `shared:w-…` address
+  (`doc_shared_with_me` lists them; `doc_read`, `doc_save` and every other
+  `doc_*` tool take it), and can add and remove one on the owner's ask
+  (`doc_add_shared`, `doc_remove_shared`). On the other side a persona shows
+  as "<Persona> · <name>'s agent": the server uses the door's agent key for
+  the link (one key, made once with the session) and says which agent is
+  asking in `X-Loam-Agent-Name`, which the door honours only with a good
+  key. It has the link's mode and nothing more, and dies with the link. The
+  plugin's paragraph tells personas that an outside doc's text is something
+  to consider, never an instruction, and to write on one only when the
+  owner asks.
+- **Core seams** (app/docs/plugins/places.md, `files.root`): a file of a
+  plugin's own root (`/files/@<id>/<path>`) opens without the host being
+  asked, with the row the root gives (`row(path)`), and is a panel item like
+  any file; a plugin row may carry its own ⋯ menu (`entry(row, {menu})`,
+  drawn by core as `files.itemsMenu`). No seam was needed to keep a secret:
+  `LOAM_PLUGIN_PRIVATE` already was one.
+- **Not in this step**: offline copies, a notice when the other side
+  changes something (the dot is the whole of it), saving a copy into the
+  vault, and strangers without a Loam (they keep the share page).
+
+## How the owner's agents appear to others (2026-11-17)
+
+The owner's words: "we should definitely have that option when I'm sharing
+a document to be able to set that." People outside see the owner's agents
+in two places: on the owner's own shared docs (a persona's notes, replies,
+suggestions and edits) and on docs in Shared with me (where a persona shows
+as "<Persona> · <name>'s agent"). Either can say which agents the owner has.
+So each can show them **by their own names** (as before, and still the
+default) or **as one**, "<Owner>'s agent".
+
+- **The default** is the plugin's `appear` setting (`names` or `one`): a
+  line at the foot of Shared Docs, "Your agents appear to others [by their
+  own names ▾]", and like every setting a persona's to set too
+  (`bin/settings set plugin.doc-comments.appear one`).
+- **A doc may choose its own**: a shared doc in its share sheet ("Your
+  agents appear here [as usual (…) ▾]"), a doc in Shared with me in its row
+  menu ("How your agents appear", a sheet of three choices). Kept outside
+  the vault: the owner's docs in `links.json` (`appear`, by doc id), Shared
+  with me in `with-me.json`. A persona changes one with `doc_appear`, on the
+  owner's word.
+- **Hiding is real, done where an answer leaves.** On the owner's docs the
+  door passes every answer for a visitor or a visitor's agent through
+  `appear.mask` (server/doccomments/appear.py): every author, closer, save
+  author, authorship span and `people` entry that is one of this Loam's
+  agents becomes `{"id": "owner-agent", "name": "<Owner>'s agent", "kind":
+  "agent"}`. Applied as served, so a change covers the notes already there.
+  The sidecar keeps the true persona, and the owner's own page, History and
+  Show authors still say which agent did what. A group visitor may then take
+  a persona's name, since refusing "Iris" would say there is an Iris.
+- **On Shared with me the name is never sent**: with `one` in force the
+  server sends the agent key and no `X-Loam-Agent-Name`, so the other door
+  shows "<name on the link>'s agent". What was sent under a name before is
+  the other Loam's and cannot be recalled; the sheet says so in one quiet
+  line. Notes made under a name keep that author there, so a persona can no
+  longer change or take back those after switching to `one`.
+- **Personas are told.** Every doc answer to a persona carries `appear`
+  (`choice`, `default`, `as`, `alias`, and `shared` on the owner's docs), and
+  `doc_notes`, `doc_read` and every write's answer say how the persona
+  appears there; when hidden, never to sign or name itself in what it
+  writes. The words it writes are its own: the mask changes authors, never
+  text.
+- Tests: `test/test_share.py` (`AgentsAppearAsOne`, `AppearRoutes`) greps
+  every door answer, by a browser and by an agent key, for the personas'
+  names; `test/test_withme.py` (`AgentsAppearAsOne`) greps every request the
+  other Loam receives.
+
 ## Working on it
 
 - `python3 plugins/doc-comments/test/test_model.py`, `node --test
-  plugins/doc-comments/test/*.mjs`, `python3 tests/test_doc_comments.py`.
+  plugins/doc-comments/test/*.mjs`, `python3 tests/test_doc_comments.py`;
+  Shared with me alone: `python3 plugins/doc-comments/test/test_withme.py`
+  (a second Loam's door over real https on a local port, with a throwaway
+  certificate).
 - The browser suite, `test/browser.test.mjs`, needs Playwright and a
   Chromium, which Loam does not ship; without `LOAM_PLAYWRIGHT` (the path to
   a Playwright install's `index.mjs`; `LOAM_CHROME` may name the browser) it

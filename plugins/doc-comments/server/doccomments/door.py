@@ -17,6 +17,10 @@ the link alone:
   the link is on. Wrong passwords are slowed, then blocked (links.py).
 - **An agent's key**, ``Authorization: Bearer lak_…``, acts as "<Name>'s
   agent" with the link's mode, and stops with the link.
+- **The owner's agents appear as the owner chose** (appear.py): by their
+  own names, or all as one, "<Owner>'s agent". Chosen per doc or by
+  default, and applied to every answer as it leaves (``_masked``), so the
+  sidecar keeps who really wrote what and a change applies to past notes.
 - **Writes** need the custom header ``X-Loam-Share: 1`` from a browser (so
   another site cannot post with the visitor's cookie), count against the
   link's limits, and are refused when the doc's sidecar is already large.
@@ -39,11 +43,20 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import parse_qs
 
+from . import appear as appear_mod
 from . import links as links_mod
 from . import frontmatter as fm
 from .sidecar import NoteError
 
 COOKIE = "loam_share"
+# The door's protocol, for another Loam's server opening a link on its owner's
+# behalf (Shared with me, 2026-11-17). ``GET /s/<token>/loam.json`` says it for
+# any token; a client that knows a different range says "that Loam is too old
+# (or new) for this" rather than half-work. Raise ``PROTOCOL`` when the shape
+# of an answer a client reads changes; raise ``PROTOCOL_MIN`` only when an
+# older client would go wrong.
+PROTOCOL = 1
+PROTOCOL_MIN = 1
 ROBOTS = "noindex, nofollow, noarchive, nosnippet"
 BODY_MAX = 1536 * 1024
 # The visitor's page is share/share.js and share/share.css. What it may load
@@ -109,7 +122,8 @@ def _json(status, obj, headers=None):
 
 class Door:
     def __init__(self, service, links, plugin_dir: Path, reach=lambda: "staging",
-                 owner_name=lambda: "Loam", sleep=time.sleep, home=lambda: ""):
+                 owner_name=lambda: "Loam", sleep=time.sleep, home=lambda: "",
+                 appear_default=lambda: appear_mod.DEFAULT):
         self.svc = service
         self.links = links
         self.page_dir = Path(plugin_dir) / "page"
@@ -118,6 +132,19 @@ class Door:
         self.owner_name = owner_name
         self.sleep = sleep
         self.home = home
+        self.appear_default = appear_default
+
+    def appear(self, did: str) -> str:
+        """How the owner's agents appear on this doc now: ``names`` or ``one``."""
+        return appear_mod.effective(self.links.appear(did), self.appear_default())
+
+    def _masked(self, link, out):
+        """An answer as it leaves: when this doc shows the owner's agents as
+        one, none of them is named in it."""
+        if self.appear(link["did"]) != "one":
+            return out
+        agents = [pid for pid, p in (self.svc.store.people() or {}).items() if p.get("kind") == "agent"]
+        return appear_mod.mask(out, agents, appear_mod.alias(self.owner_name()))
 
     # -- the request ------------------------------------------------------------------
 
@@ -154,6 +181,10 @@ class Door:
             return self._not_found(gone)
         if rest.startswith("/_/") and method == "GET":
             return self._static(rest[3:])
+        if rest == "/loam.json" and method == "GET":
+            # The same answer for every token: it says this is a Loam door
+            # and which protocol it speaks, nothing about any link.
+            return _json(200, {"loam_share": PROTOCOL, "min": PROTOCOL_MIN})
         link = self.links.by_token(token)
         if not link or not link["on"]:
             return self._not_found(gone)
@@ -180,7 +211,8 @@ class Door:
 
         # Who is asking: the agent by its key, or the browser by its session.
         if agent_visitor:
-            who = self._who(link, agent_visitor["name"], agent=True, key=agent_visitor["visitor"])
+            who = self._who(link, agent_visitor["name"], agent=True, key=agent_visitor["visitor"],
+                            label=_agent_label(headers))
         elif session:
             visitor = link["name"] or session.get("v")
             if rest == "/api/name" and method == "POST" and not link["name"]:
@@ -212,7 +244,16 @@ class Door:
                                "guide": _origin(headers) + prefix + "/agent.md",
                                "as": f"{who['name']}'s agent", "mode": link["mode"]})
         if api == ["me"] and method == "GET":
-            return _json(200, {"me": who, "mode": link["mode"], "link": link["id"]})
+            return _json(200, self._masked(link, {"me": who, "mode": link["mode"], "link": link["id"]}))
+        if api == ["status"] and method == "GET":
+            # What another Loam's list shows of this doc, in one call: its
+            # title, whose it is, the link's mode now, and the two revisions
+            # its dot compares (the text's and the notes').
+            doc = self.svc.store.read_doc(*doc_where)
+            rev = self.svc.revision(who, *doc_where)
+            return _json(200, self._masked(link, {"protocol": PROTOCOL, "title": _title(doc["text"], doc_where[1]),
+                                                  "owner": self.owner_name(), "mode": link["mode"], "me": who,
+                                                  "revision": rev["revision"], "notes": rev["notes"]}))
         if not api or api[0] != "doc":
             return _json(404, {"error": "no such route"})
         if writes:
@@ -225,7 +266,7 @@ class Door:
         cut = _front(stored)
         out = self._route(method, api[1:], _shift_in(args, stored[:cut]), who, root, dpath)
         created = method == "POST" and (api[1:] == ["notes"] or api[-1:] == ["replies"])
-        return _json(201 if created else 200, _for_visitor(out))
+        return _json(201 if created else 200, self._masked(link, _for_visitor(out)))
 
     def _route(self, method, api, args, who, root, path):
         svc = self.svc
@@ -281,12 +322,18 @@ class Door:
         got = self.svc.store.read_sidecar(link["did"])
         return bool(got) and len(json.dumps(got[0])) > links_mod.SIDECAR_MAX_BYTES
 
-    def _who(self, link, visitor, agent=False, key=None):
+    def _who(self, link, visitor, agent=False, key=None, label=None):
         """A visitor, or their agent. ``key`` is who they are on this link:
         the link's name for a named link, the browser's own id on a group
-        link (two browsers that type one name are two people)."""
+        link (two browsers that type one name are two people). ``label`` is
+        the agent's own name when the key is held by the visitor's Loam,
+        which says which of its agents is asking ("Iris · Sam's agent");
+        it is a name only, with the key's mode and nothing more."""
         base = {"mode": link["mode"], "link": link["id"]}
         k = key or links_mod.slug(visitor)
+        if agent and label:
+            return {"id": f"guest-agent:{link['id']}:{k}:{links_mod.slug(label)}",
+                    "name": f"{label} · {visitor}'s agent", "kind": "guest-agent", **base}
         if agent:
             return {"id": f"guest-agent:{link['id']}:{k}",
                     "name": f"{visitor}'s agent", "kind": "guest-agent", **base}
@@ -305,7 +352,11 @@ class Door:
         value, age = self.links.session_cookie(link, link["name"])
         if link["name"]:
             self.links.join(link["id"], link["name"])
-        return _json(200, {"ok": True, "need": None if link["name"] else "name"},
+        doc_where = self._doc(link)
+        title = _title(self.svc.store.read_doc(*doc_where)["text"], doc_where[1]) if doc_where else ""
+        return _json(200, {"ok": True, "need": None if link["name"] else "name", "protocol": PROTOCOL,
+                           "title": title, "owner": self.owner_name(), "mode": link["mode"],
+                           "name": link["name"], "days": link["days"]},
                      [("Set-Cookie", _cookie_header(value, age, prefix))])
 
     def _name(self, link, body, headers, prefix):
@@ -330,9 +381,13 @@ class Door:
             return True          # how agents and Loam itself are shown
         if "owner" in key.replace(" ", ""):
             return True
-        people = (self.svc.store.people() or {}).values()
+        people = list((self.svc.store.people() or {}).values())
         first = (key.split(" ") or [""])[0].strip(".,;:!?'’\"-")
         claimed = {_name_key(self.owner_name()).split(" ")[0]} if self.owner_name() else set()
+        # When the owner's agents appear as one, their names are not known
+        # here and are not claimed: refusing "Iris" would say there is one.
+        if self.appear(link["did"]) == "one":
+            people = [p for p in people if p.get("kind") != "agent"]
         claimed |= {_name_key(p.get("name", "")).split(" ")[0] for p in people if p.get("name")}
         claimed |= {_name_key(p.get("id", "")) for p in people if p.get("kind") == "agent" and p.get("id")}
         if first and first in (claimed - {""}):
@@ -395,6 +450,17 @@ def _cookie(headers):
 
 def _cookie_header(value, age, prefix):
     return (f"{COOKIE}={value}; Path={prefix}; Max-Age={age}; HttpOnly; Secure; SameSite=Lax")
+
+
+def _agent_label(headers):
+    """The name a visitor's Loam gives the agent holding its key
+    (``X-Loam-Agent-Name``): a short plain name, or None."""
+    raw = headers.get("x-loam-agent-name")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    name = " ".join("".join(ch for ch in raw if ch.isprintable()).split())[:40]
+    name = name.replace("·", "").replace("'s agent", "").replace("’s agent", "").strip()
+    return name or None
 
 
 def _bearer(headers):

@@ -426,7 +426,8 @@ def _job_row(label: dict, state: str, now: datetime, **extra) -> dict:
            "thread": label.get("thread"), "state": state, "phase": None,
            "since": None, "started": None, "finished": None,
            "elapsed_seconds": None, "outcome": None, "outcome_detail": None,
-           "ok": None, "receipt": None, "position": None, "held_by": None}
+           "ok": None, "receipt": None, "position": None, "held_by": None,
+           "last_activity": None, "quiet_since": None, "child_stops": 0}
     row.update(extra)
     began = _parse(row["started"])
     if began is not None:
@@ -472,7 +473,10 @@ def job_rows(recent: int = RECENT_SECONDS, now: datetime | None = None,
             continue
         seen.add(slot["job"])
         active.append(_job_row(slot, "running", now, since=slot.get("since"),
-                           started=slot.get("since")))
+                           started=slot.get("since"),
+                           last_activity=slot.get("last_activity"),
+                           quiet_since=slot.get("quiet_since"),
+                           child_stops=slot.get("child_stops") or 0))
     for land in live.get("landing") or []:
         if land.get("job") in seen:
             continue

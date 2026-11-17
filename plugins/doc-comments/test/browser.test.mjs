@@ -1957,6 +1957,248 @@ test('B5 (round 6): the Share button\'s faces sit apart, each ring in the button
   await page.done()
 })
 
+// -- the share sheet is a bottom sheet on a phone (2026-11-17) ---------------------
+
+// A finger's drag, by the browser's own touch events.
+async function drag(page, x, y0, y1, steps = 8) {
+  const cdp = await page.context().newCDPSession(page)
+  const at = (y) => [{ x, y, id: 1 }]
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(y0) })
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(y0 + ((y1 - y0) * i) / steps) })
+    await page.waitForTimeout(16)
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+}
+
+const sheetBox = (page) => page.evaluate(() => {
+  const d = document.querySelector('.dc-share-scrim .dc-dlg')
+  if (!d) return null
+  const r = d.getBoundingClientRect()
+  const g = d.querySelector('.dc-bs-grab')
+  return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: innerWidth, h: innerHeight, grab: g ? getComputedStyle(g).display : null, radius: getComputedStyle(d).borderTopLeftRadius, bl: getComputedStyle(d).borderBottomLeftRadius, overflow: getComputedStyle(d).overflowY }
+})
+
+for (const [w, dark] of [[430, true], [375, false]]) {
+  test(`the share sheet on a ${w}-wide phone (${dark ? 'dark' : 'light'}): it rises from the foot with a handle, and a drag down or a tap above closes it`, { skip }, async () => {
+    await start()
+    const p = await newDoc('# Shared\n\nA line.\n')
+    await devLink('comment', 'Robin', p)
+    const ctx = await browser.newContext({ viewport: { width: w, height: 800 }, hasTouch: true, isMobile: true, colorScheme: dark ? 'dark' : 'light' })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(`${base}/?phone${dark ? '&dark' : ''}&path=${encodeURIComponent(p)}`)
+    await page.waitForSelector('.dc-sharebtn.has')
+    await page.click('.dc-sharebtn')
+    await page.waitForSelector('.dc-share-scrim.on .dc-sw-row')
+    await page.waitForTimeout(450)
+    const b = await sheetBox(page)
+    console.log('# share sheet', w, JSON.stringify(b))
+    assert.ok(Math.abs(b.left) < 1 && Math.abs(b.right - b.w) < 1, 'edge to edge')
+    assert.ok(Math.abs(b.bottom - b.h) < 1, 'standing on the foot of the screen')
+    assert.equal(b.grab, 'block', 'the handle shows')
+    assert.equal(b.bl, '0px', 'square at the foot, round at the top')
+    assert.notEqual(b.radius, '0px')
+    assert.equal(b.overflow, 'auto', 'it scrolls inside when tall')
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `share-sheet-list-${w}-${dark ? 'dark' : 'light'}.png`) })
+    // A row's ⋯ menu on a short sheet opens upward, whole, over the page.
+    await page.click('.dc-sw-row .dc-ddw:last-child .dc-ib')
+    await page.waitForSelector('.dc-rowmenu')
+    await page.waitForTimeout(250)
+    const m = await page.evaluate(() => {
+      const r = document.querySelector('.dc-rowmenu').getBoundingClientRect()
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + 12)
+      return { top: r.top, bottom: r.bottom, h: innerHeight, up: document.querySelector('.dc-rowmenu').classList.contains('dc-up'), seen: Boolean(hit?.closest('.dc-rowmenu')) }
+    })
+    assert.ok(m.up && m.top >= 0 && m.bottom <= m.h && m.seen, `the menu is whole and in view (${JSON.stringify(m)})`)
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `share-sheet-menu-${w}-${dark ? 'dark' : 'light'}.png`) })
+    await page.keyboard.press('Escape')
+    await until(page, () => !document.querySelector('.dc-rowmenu'), null, 2000)
+    // The invite card, then a mode menu near its top: it opens down, inside.
+    await page.click('.dc-sh-go')
+    await page.waitForSelector('.dc-share-scrim .dc-ticket')
+    await page.waitForTimeout(300)
+    const c = await sheetBox(page)
+    assert.ok(Math.abs(c.bottom - c.h) < 1 && c.top >= 0, `the invite card fits as a sheet (${JSON.stringify(c)})`)
+    const fs = await page.evaluate(() => getComputedStyle(document.querySelector('.dc-iv-name')).fontSize)
+    assert.equal(fs, '16px', 'the name field never zooms the page')
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `share-sheet-invite-${w}-${dark ? 'dark' : 'light'}.png`) })
+    // A small drag settles back; a long one closes it.
+    await page.evaluate(() => document.activeElement?.blur())
+    await drag(page, w / 2, c.top + 10, c.top + 40)
+    await page.waitForTimeout(450)
+    assert.ok(Math.abs((await sheetBox(page)).top - c.top) < 1, 'a short drag settles back')
+    await drag(page, w / 2, c.top + 10, c.top + 260)
+    await until(page, () => !document.querySelector('.dc-share-scrim'), null, 2000)
+    // Opened again, a tap above it closes it.
+    await page.click('.dc-sharebtn')
+    await page.waitForSelector('.dc-share-scrim.on .dc-sw-row')
+    await page.waitForTimeout(400)
+    await page.touchscreen.tap(w / 2, 12)
+    await until(page, () => !document.querySelector('.dc-share-scrim'), null, 2000)
+    assert.deepEqual(errors, [])
+    await ctx.close()
+  })
+}
+
+test('the share sheet on a phone stands on the keyboard: the screen left above it is its whole height', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Shared\n\nA line.\n')
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  const page = await ctx.newPage()
+  // A keyboard, as the page sees one: the visual viewport shrinks from the foot.
+  await page.addInitScript(() => {
+    const vv = new EventTarget()
+    let height = innerHeight
+    Object.defineProperty(vv, 'height', { get: () => height })
+    Object.defineProperty(vv, 'offsetTop', { get: () => 0 })
+    Object.defineProperty(vv, 'width', { get: () => innerWidth })
+    window.__keyboard = (px) => { height = innerHeight - px; vv.dispatchEvent(new Event('resize')) }
+    Object.defineProperty(window, 'visualViewport', { get: () => vv })
+  })
+  await page.goto(`${base}/?phone&path=${encodeURIComponent(p)}`)
+  await page.waitForSelector('.dc-sharebtn')
+  await page.click('.dc-sharebtn')
+  await page.waitForSelector('.dc-share-scrim.on .dc-iv-name')
+  await page.waitForTimeout(400)
+  await page.evaluate(() => window.__keyboard(336))
+  await page.waitForTimeout(100)
+  const m = await page.evaluate(() => {
+    const d = document.querySelector('.dc-share-scrim .dc-dlg').getBoundingClientRect()
+    const f = document.querySelector('.dc-iv-name').getBoundingClientRect()
+    return { bottom: d.bottom, top: d.top, field: f.bottom, line: innerHeight - 336, scrolls: document.querySelector('.dc-share-scrim .dc-dlg').scrollHeight > document.querySelector('.dc-share-scrim .dc-dlg').clientHeight }
+  })
+  console.log('# keyboard', JSON.stringify(m))
+  assert.ok(Math.abs(m.bottom - m.line) < 1, `the sheet's foot is on the keyboard (${JSON.stringify(m)})`)
+  assert.ok(m.top >= 0 && m.field <= m.line, 'the field being typed in is above the keyboard')
+  assert.ok(m.scrolls, 'the rest scrolls inside')
+  await page.evaluate(() => window.__keyboard(0))
+  await page.waitForTimeout(100)
+  assert.ok(Math.abs((await page.evaluate(() => document.querySelector('.dc-share-scrim .dc-dlg').getBoundingClientRect().bottom)) - 844) < 1, 'and back on the foot when it goes')
+  await ctx.close()
+})
+
+test('the share sheet on a desktop stays the centred card, with no handle', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Shared\n\nA line.\n')
+  await devLink('comment', 'Robin', p)
+  const page = await open({ doc: p })
+  await page.click('.dc-sharebtn')
+  await page.waitForSelector('.dc-share-scrim.on .dc-sw-row')
+  await page.waitForTimeout(400)
+  const b = await sheetBox(page)
+  assert.equal(b.grab, 'none')
+  assert.ok(Math.abs((b.left + b.right) / 2 - b.w / 2) < 2 && b.right - b.left <= 460, `centred, at most 460 wide (${JSON.stringify(b)})`)
+  assert.ok(Math.abs((b.top + b.bottom) / 2 - b.h / 2) < 2, 'centred up and down')
+  assert.notEqual(b.bl, '0px')
+  await shot(page, 'share-sheet-desktop')
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+// -- the agents sheet on a phone, and "Remembered for" that fits (2026-11-17) ------
+
+// Core gives every select a 44px touch height (app/public/style.css); the
+// harness does not load core, so the rule is added where it matters.
+const CORE_SELECT = 'button, select, input:not([type="checkbox"]):not([type="radio"]):not([type="file"]) { min-height: 44px; }'
+
+async function openAppear(page) {
+  await page.addStyleTag({ url: '/plugin/assets/withme.css' })
+  await page.addStyleTag({ content: CORE_SELECT })
+  await page.evaluate(async () => {
+    const { openAppearSheet } = await import('/plugin/page/appear.js')
+    window.__chosen = []
+    openAppearSheet({ title: 'A weekend in the hills', there: 'Sam’s Loam', value: 'default', def: 'names', alias: "Robin's agent", agent: 'Iris', onChoose: async (v) => { window.__chosen.push(v); return true } })
+  })
+  await page.waitForSelector('.dc-ap-scrim.on .dc-ap-dlg')
+  await page.waitForTimeout(450)
+  return page.evaluate(() => {
+    const d = document.querySelector('.dc-ap-dlg')
+    const r = d.getBoundingClientRect()
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: innerWidth, h: innerHeight, bs: d.parentElement.classList.contains('dc-bs'), grab: getComputedStyle(d.querySelector('.dc-bs-grab')).display, bl: getComputedStyle(d).borderBottomLeftRadius }
+  })
+}
+
+test('the agents sheet on a phone is the share sheet\'s bottom sheet: edge to edge, on the foot, a handle; a drag down closes it', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Shared\n\nA line.\n')
+  const ctx = await browser.newContext({ viewport: { width: 430, height: 900 }, hasTouch: true, isMobile: true })
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto(`${base}/?phone&path=${encodeURIComponent(p)}`)
+  await page.waitForSelector('.cm-content')
+  const b = await openAppear(page)
+  assert.ok(b.bs, 'the scrim is a bottom sheet (sheet.js)')
+  assert.ok(Math.abs(b.left) < 1 && Math.abs(b.right - b.w) < 1, `edge to edge (${JSON.stringify(b)})`)
+  assert.ok(Math.abs(b.bottom - b.h) < 1, 'standing on the foot of the screen')
+  assert.equal(b.grab, 'block', 'the handle shows')
+  assert.equal(b.bl, '0px', 'square at the foot')
+  await shot(page, 'appear-sheet-430')
+  await drag(page, 215, b.top + 10, b.top + 260)
+  await until(page, () => !document.querySelector('.dc-ap-scrim'), null, 2000)
+  assert.deepEqual(errors, [])
+  await ctx.close()
+})
+
+test('the agents sheet on a desktop stays the centred card, with no handle; a choice is made and it closes', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Shared\n\nA line.\n')
+  const page = await open({ doc: p })
+  const b = await openAppear(page)
+  assert.equal(b.grab, 'none')
+  assert.ok(Math.abs((b.left + b.right) / 2 - b.w / 2) < 2 && Math.abs((b.top + b.bottom) / 2 - b.h / 2) < 2, `centred (${JSON.stringify(b)})`)
+  assert.notEqual(b.bl, '0px')
+  await page.click('.dc-ap-opt:nth-child(3)')
+  await until(page, () => !document.querySelector('.dc-ap-scrim'), null, 2000)
+  assert.deepEqual(await page.evaluate(() => window.__chosen), ['one'])
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+for (const [w, phone] of [[1440, false], [430, true]]) {
+  test(`"Remembered for" in a link's ⋯ menu fits inside the menu, and the menu is whole (${w})`, { skip }, async () => {
+    await start()
+    const p = await newDoc('# Shared\n\nA line.\n')
+    await devLink('comment', 'Robin', p)
+    const ctx = await browser.newContext({ viewport: { width: w, height: 900 }, hasTouch: phone, isMobile: phone })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(`${base}/?${phone ? 'phone&' : ''}path=${encodeURIComponent(p)}`)
+    await page.addStyleTag({ content: CORE_SELECT })
+    await page.waitForSelector('.dc-sharebtn.has')
+    await page.click('.dc-sharebtn')
+    await page.waitForSelector('.dc-share-scrim.on .dc-sw-row')
+    await page.waitForTimeout(450)
+    await page.click('.dc-sw-row .dc-ddw:last-child .dc-ib')
+    await page.waitForSelector('.dc-rowmenu')
+    await page.waitForTimeout(250)
+    const m = await page.evaluate(() => {
+      const menu = document.querySelector('.dc-rowmenu').getBoundingClientRect()
+      const row = document.querySelector('.dc-mi-days')
+      const chip = row.querySelector('.dc-ap-pick').getBoundingClientRect()
+      const sel = row.querySelector('select').getBoundingClientRect()
+      const r = row.getBoundingClientRect()
+      const at = (y) => document.elementFromPoint(menu.left + menu.width / 2, y)?.closest('.dc-rowmenu')
+      return { menu: menu.toJSON(), chip: chip.toJSON(), sel: sel.toJSON(), row: r.toJSON(), h: innerHeight, whole: Boolean(at(menu.top + 6) && at(menu.bottom - 6)), shown: row.querySelector('.dc-ap-shown').textContent }
+    })
+    console.log('# days', w, JSON.stringify(m))
+    assert.ok(m.chip.right <= m.menu.right - 8, `the days sit inside the menu, clear of its edge (${JSON.stringify(m)})`)
+    assert.ok(m.sel.left >= m.row.left - 0.5 && m.sel.right <= m.row.right + 0.5 && m.sel.bottom <= m.row.bottom + 0.5, 'the select under them stays within its row')
+    assert.ok(m.whole && m.menu.top >= 0 && m.menu.bottom <= m.h, 'the menu is whole, not cut off by the dialog')
+    assert.equal(m.shown, '30 days')
+    await page.selectOption('.dc-mi-days select', '7')
+    await until(page, () => !document.querySelector('.dc-rowmenu') || document.querySelector('.dc-mi-days .dc-ap-shown')?.textContent === '7 days', null, 3000)
+    if (!await page.$('.dc-rowmenu')) await page.click('.dc-sw-row .dc-ddw:last-child .dc-ib')
+    await until(page, () => document.querySelector('.dc-mi-days .dc-ap-shown')?.textContent === '7 days', null, 3000)
+    await shot(page, `row-menu-days-${w}`)
+    assert.deepEqual(errors, [])
+    await ctx.close()
+  })
+}
+
 // -- the selection popup waits until the selecting stops -------------------------
 
 // Every change of the popup's classes, timed, from the page itself: what the

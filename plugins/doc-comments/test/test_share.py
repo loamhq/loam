@@ -547,5 +547,155 @@ class VisitorsRoundFive(unittest.TestCase):
         _, me = w.req("GET", tok, "/api/me", cookie=c)
         self.assertEqual(me["me"]["name"], "Robin")
 
+
+IRIS = {"id": "iris", "name": "Iris", "kind": "agent"}
+ADA = {"id": "ada", "name": "Ada", "kind": "agent"}
+PERSONAS = re.compile(rb"\b(iris|ada)\b", re.I)
+
+
+class AgentsAppearAsOne(unittest.TestCase):
+    """The owner's agents shown to outsiders by their own names, or all as
+    one, "Sam's agent" (2026-11-17): per doc or by default, applied to every
+    answer the door gives, past notes included, while the sidecar and the
+    owner's own view keep who really wrote what."""
+
+    def busy(self, w):
+        """Notes, a reply, a closed suggestion and a save, each by a persona."""
+        w.svc.add(IRIS, "vault", "Plans/plan.md", {"kind": "comment", "quote": "first line", "text": "Tighten?"})
+        tid = w.svc.get(OWNER, "vault", "Plans/plan.md")["notes"][0]["id"]
+        w.svc.reply(ADA, "vault", "Plans/plan.md", tid, "Agreed.")
+        out = w.svc.add(ADA, "vault", "Plans/plan.md", {"kind": "suggestion", "quote": "second line", "replacement": "next line"})
+        w.svc.accept(IRIS, "vault", "Plans/plan.md", out["note"])
+        doc = w.svc.get(OWNER, "vault", "Plans/plan.md")
+        w.svc.save(IRIS, "vault", "Plans/plan.md", {"base_revision": doc["revision"], "base_text": doc["text"],
+                                                    "text": doc["text"].replace("The first", "This first")})
+
+    def answers(self, w, tok, c, key):
+        """Everything a visitor and their agent are served of the doc."""
+        raw = []
+        for rest in ("/", "/api/doc", "/api/me", "/api/status", "/api/doc/revision", "/agent.md"):
+            ans, _ = w.req("GET", tok, rest, cookie=c)
+            raw.append(ans.body)
+        for rest in ("/api/doc", "/api/me", "/api/status"):
+            ans, _ = w.req("GET", tok, rest, key=key, share=False)
+            self.assertEqual(ans.status, 200)
+            raw.append(ans.body)
+        ans, got = w.req("POST", tok, "/api/doc/notes", quote_body(quote="A plan"), cookie=c)
+        self.assertEqual(ans.status, 201, got)
+        raw.append(ans.body)
+        return raw, got
+
+    def test_one_name_hides_every_persona_in_every_answer(self):
+        w = World()
+        self.busy(w)
+        _, tok = w.link("edit")
+        c = w.login(tok)
+        key = w.req("POST", tok, "/api/agent-key", {}, cookie=c)[1]["key"]
+        raw, _ = self.answers(w, tok, c, key)
+        self.assertTrue(any(PERSONAS.search(b) for b in raw))        # names, today's default
+        w.links.set_appear(w.did, "one")
+        raw, got = self.answers(w, tok, c, key)
+        for b in raw:
+            self.assertIsNone(PERSONAS.search(b), b[:300])
+        authors = {n["author"]["name"] for n in got["notes"]}
+        self.assertIn("Sam's agent", authors)
+        closer = [n for n in got["notes"] if n["kind"] == "suggestion"][0]["closed"]["by"]
+        self.assertEqual(closer, {"id": "owner-agent", "name": "Sam's agent", "kind": "agent"})
+        # The sidecar and the owner keep the truth.
+        mine = w.svc.get(OWNER, "vault", "Plans/plan.md")
+        self.assertEqual({n["author"]["name"] for n in mine["notes"]} - {"Robin"}, {"Iris", "Ada"})
+        hist = w.svc.history(OWNER, "vault", "Plans/plan.md")
+        self.assertIn("iris", {s["author"]["id"] for s in hist["saves"]})
+
+    def test_the_default_decides_until_a_doc_chooses(self):
+        w = World()
+        self.busy(w)
+        _, tok = w.link("comment")
+        c = w.login(tok)
+        w.door.appear_default = lambda: "one"
+        self.assertEqual(w.links.appear(w.did), "default")
+        _, doc = w.req("GET", tok, "/api/doc", cookie=c)
+        self.assertEqual({n["author"]["name"] for n in doc["notes"]}, {"Sam's agent"})
+        w.links.set_appear(w.did, "names")
+        _, doc = w.req("GET", tok, "/api/doc", cookie=c)
+        self.assertEqual({n["author"]["name"] for n in doc["notes"]}, {"Iris", "Ada"})
+        w.links.set_appear(w.did, "default")
+        _, doc = w.req("GET", tok, "/api/doc", cookie=c)
+        self.assertEqual({n["author"]["name"] for n in doc["notes"]}, {"Sam's agent"})
+        with self.assertRaises(Exception):
+            w.links.set_appear(w.did, "nobody")
+
+    def test_a_group_visitor_may_take_a_hidden_personas_name(self):
+        # Refusing "Iris" would tell a stranger there is an Iris.
+        w = World()
+        _, tok = w.link("comment", name=None)
+        c = w.login(tok)
+        ans, _ = w.req("POST", tok, "/api/name", {"name": "Iris"}, cookie=c)
+        self.assertEqual(ans.status, 409)
+        w.links.set_appear(w.did, "one")
+        c = w.login(tok)
+        ans, got = w.req("POST", tok, "/api/name", {"name": "Iris"}, cookie=c)
+        self.assertEqual(ans.status, 200, got)
+        c = w.login(tok)
+        ans, _ = w.req("POST", tok, "/api/name", {"name": "Sam's agent"}, cookie=c)
+        self.assertEqual(ans.status, 409)
+
+
+class AppearRoutes(unittest.TestCase):
+    """The owner's routes and a persona's tools for the choice, over HTTP."""
+
+    def test_routes_and_tools(self):
+        import threading
+        import urllib.request
+        sys.path.insert(0, str(HERE.parent))
+        sys.path.insert(0, str(HERE.parent / "server"))
+        sys.path.insert(0, str(HERE.parent / "tools"))
+        import main as server_main
+        import notes_mcp as T
+        w = World()
+        default = {"v": "names"}
+        srv = server_main.serve(w.svc, 0, links=w.links, door=w.door, appear_default=lambda: default["v"])
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.shutdown)
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+        def call(method, route, body=None, agent=None, query=""):
+            req = urllib.request.Request(base + route + query, method=method,
+                                         data=json.dumps(body).encode() if body is not None else None,
+                                         headers={"Content-Type": "application/json", **({"X-Loam-Agent": agent} if agent else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=20) as res:
+                    return res.status, json.loads(res.read())
+            except urllib.error.HTTPError as exc:
+                return exc.code, json.loads(exc.read())
+        import urllib.error
+        q = "?root=vault&path=Plans/plan.md"
+        st, got = call("GET", "/doc/links", query=q)
+        self.assertEqual(got["appear"], {"choice": "default", "default": "names", "as": "names", "alias": "Sam's agent"})
+        st, got = call("GET", "/shared")
+        self.assertEqual((got["appear"], got["alias"]), ("names", "Sam's agent"))
+        default["v"] = "one"
+        st, got = call("GET", "/shared")
+        self.assertEqual(got["appear"], "one")
+        st, got = call("PATCH", "/doc/links/appear", {"root": "vault", "path": "Plans/plan.md", "appear": "names"})
+        self.assertEqual((st, got["appear"]["choice"], got["appear"]["as"]), (200, "names", "names"))
+        st, got = call("PATCH", "/doc/links/appear", {"root": "vault", "path": "Plans/plan.md", "appear": "x"})
+        self.assertEqual(st, 400)
+        # A persona's tools: what the doc says, and the choice changed on the owner's word.
+        T.URL, T.AGENT = base, "iris"
+        w.link("comment")
+        notes = T.run_tool("doc_notes", {"path": "Plans/plan.md"})
+        self.assertIn("see you as Iris", notes)
+        out = T.run_tool("doc_appear", {"path": "Plans/plan.md", "appear": "one"})
+        self.assertIn("“Sam's agent”", out)
+        self.assertEqual(w.links.appear(w.did), "one")
+        notes = T.run_tool("doc_comment", {"path": "Plans/plan.md", "quote": "A plan", "text": "Good title."})
+        self.assertIn("see you, and every other agent of the owner's, as “Sam's agent”", notes)
+        self.assertIn("never sign or name yourself", T.run_tool("doc_read", {"path": "Plans/plan.md"}).lower())
+        # Share links themselves stay the owner's.
+        st, _ = call("GET", "/doc/links", agent="iris", query=q)
+        self.assertEqual(st, 403)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

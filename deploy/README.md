@@ -1107,6 +1107,16 @@ and three rules this file's renders follow only when the table is there:
 - **The relay.** `/_loam/login-code` on the app's host goes through the gate
   to the same service, ahead of the browser's subnet, and hands the
   signed-in owner the one-time code Authelia's file notifier wrote.
+- **The passkeys** (2026-11-17). `/_loam/passkeys` on every app-shell host
+  (the app and its staging copy) goes through the gate to the same service,
+  ahead of the browser's subnet. It asks Authelia's own
+  `GET /api/secondfactor/webauthn/credentials` with the person's own
+  `loam_auth` cookie and nothing else, on the portal of the cookie domain
+  the request came in on, so Authelia decides whose list it is, and answers
+  the app `{"passkeys": [{id, description, created_at, last_used_at}]}`.
+  `DELETE /_loam/passkeys/<id>` passes Authelia's own removal through, with
+  the elevated session Authelia always asks for; the app does not call it
+  (its Remove opens the portal). Contract: `docs/install.md`.
 
 `gen-deploy --init-secrets` makes the login's secrets and volume with no
 user; the claim writes the user. A box without `[edge]` renders exactly as

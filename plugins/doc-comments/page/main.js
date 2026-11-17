@@ -10,9 +10,12 @@ import { createDocEditor } from './editor/editor.js'
 import { tone, icon as glyph } from './editor/dom.js'
 import { docApi } from './api.js'
 import { createSharing } from './sharing.js'
+import { createWithMe, withmeId, WITHME_PREFIX } from './withme.js'
+import { how } from './appear.js'
 
 const BASE = '/x/doc-comments/'
 const ROOTS = { vault: 'Vault', spaces: 'AI Spaces', system: 'System' }
+const ROOT_ID = '@doc-comments'
 const COMPACT_PX = 760
 const LEAVE_MS = 340
 const MODE_ORDER = ['edit', 'comment', 'view']
@@ -81,6 +84,7 @@ export function activate(loam) {
   }
 
   function open(ctx) {
+    if (ctx.file.root === ROOT_ID) return openWithMe(ctx)
     const { files, file, options } = ctx
     const key = `${file.root}:${file.path}`
     const entry = { key, status: 'loading', editor: null, own: null, options, files, file }
@@ -149,6 +153,100 @@ export function activate(loam) {
     return entry
   }
 
+  // A doc shared with the owner from another Loam (Shared with me): the
+  // same editor, its operations sent through this Loam's server to that
+  // Loam's door (`withme/<id>/doc…`). What it may do is the link's mode, as
+  // the door answers it (`can`); no Share and no History (both are its
+  // owner's); the header says where it lives in place of the vault's
+  // breadcrumb. Nothing is written into this vault.
+  function openWithMe(ctx) {
+    const { files, file, options } = ctx
+    const key = `${file.root}:${file.path}`
+    const wid = withmeId(file.path)
+    const entry = { key, status: 'loading', editor: null, own: null, options, files, file, withme: wid }
+    editors.set(files, entry)
+    const cur = () => editors.get(files)
+    if (!wid) { entry.status = 'missing'; return entry }
+    const api = docApi({ base: `${BASE}withme/${wid}/`, root: '', path: '' })
+    const go = () => entry.options.go || host.goFiles
+    const known = () => withme.byId(wid) || file.row?.withme || null
+    const begin = () => api.get().then((doc) => {
+      if (disposed || cur() !== entry) return
+      const d = known()
+      if (d) { d.new = false; d.state = 'ok'; d.mode = doc.me?.mode || d.mode }
+      const titleOf = () => (/^#\s+(.+?)\s*#*\s*$/m.exec(ed?.text?.() || doc.text)?.[1]) || d?.title || 'Shared doc'
+      let ed = null
+      ed = createDocEditor({
+        api, doc, face,
+        history: false,
+        phone: !options.wide,
+        settings: loam.settings,
+        openLink: (ref) => { if (/^(https?:|mailto:)/i.test(ref)) window.open(ref, '_blank', 'noopener,noreferrer') },
+        crumbs: [
+          { label: 'Shared with me', go: () => go()?.(ROOT_ID, '') },
+          { label: (known()?.owner ? `${known().owner} · ` : '') + (known()?.host || '') },
+          { label: titleOf() },
+        ],
+        back: entry.options.close ? { label: entry.options.closeLabel || 'Back', go: entry.options.close } : null,
+        menuExtras: () => [{ label: 'Copy link', icon: 'link', run: () => copyText(known()?.url, 'Link copied. Its password stays with your Loam.') }],
+        headExtras: () => [entry.options.readAloud?.glyph || null].filter(Boolean),
+        // Dictation's mic only while the doc takes the owner's typed text (the
+        // editor decides: never in Viewing, never on a view link).
+        mic: () => entry.options.mic || null,
+        micInHead: () => Boolean(entry.options.wide),
+        onCanType: (yes) => { if (!yes) stopDictation(entry) },
+        // The link turned off while it was open: say so in its place.
+        onGone: () => { entry.status = 'gone'; const k = known(); if (k) k.state = 'gone'; host.schedule?.() },
+      })
+      entry.editor = ed
+      entry.status = 'ready'
+      if (files.own) {
+        entry.own = files.own(file, {
+          dirty: () => ed.dirty(),
+          save: () => ed.flush(),
+          edit: (text) => { if (text !== ed.text()) ed.replaceText(text) },
+          field: fieldFor(ed),
+        })
+      }
+      watchWidth(entry)
+      host.schedule?.()
+    }).catch((err) => {
+      if (disposed || cur() !== entry) return
+      entry.status = err?.status === 410 ? 'gone' : err?.status === 404 ? 'missing' : 'down'
+      entry.error = err
+      const k = known()
+      if (k && entry.status === 'gone') k.state = 'gone'
+      host.schedule?.()
+    })
+    entry.retry = () => { entry.status = 'loading'; host.schedule?.(); begin() }
+    if (!withme.st.loaded) withme.load(false)
+    begin()
+    return entry
+  }
+
+  function withMeState(entry, c) {
+    const H = loam.ui.h
+    const d = withme.byId(entry.withme)
+    const title = d?.title || 'This doc'
+    const remove = d ? H('button', { type: 'button', onclick: async () => { await withme.remove(d); (c.options.go || host.goFiles)?.(ROOT_ID, '') } }, 'Remove it') : null
+    const back = H('button', { type: 'button', class: remove ? '' : 'go', onclick: () => (c.options.go || host.goFiles)?.(ROOT_ID, '') }, 'Back to Shared Docs')
+    const say = {
+      gone: ['No longer shared', `${d?.owner || 'Its owner'} turned off the link to “${title}”, or it expired. Nothing of it is kept here.`, [remove, back]],
+      missing: ['Not in Shared with me', 'This doc was removed from Shared with me on this Loam.', [back]],
+      down: ['Couldn’t open it just now', entry.error?.message || 'Its Loam didn’t answer.', [H('button', { type: 'button', class: 'go', onclick: () => entry.retry?.() }, 'Try again'), back]],
+    }[entry.status] || ['', '', []]
+    return H('div', { key: `doc-comments:state:${entry.key}:${entry.status}`, class: 'dc-host dc-wm-host' },
+      H('div', { class: 'dc-wm-state', role: 'status' },
+        H('span', { class: 'dc-wm-glyph' }, glyph(entry.status === 'down' ? 'changed' : 'people', 22)),
+        H('h2', { text: say[0] }), H('p', { text: say[1] }),
+        H('div', { class: 'dc-wm-acts' }, ...say[2].filter(Boolean))))
+  }
+
+  async function copyText(text, done) {
+    if (!text) return
+    try { await navigator.clipboard.writeText(text); listToast(done) } catch { listToast(text) }
+  }
+
   // Dictation's take into this doc, if one runs, is ended the way closing the
   // field ends it (dictation's own `field.closed`), in the page or panel that
   // holds the doc.
@@ -202,6 +300,7 @@ export function activate(loam) {
       }
       cur.options = c.options
       cur.file = c.file
+      if (cur.withme !== undefined && ['gone', 'down', 'missing'].includes(cur.status)) return withMeState(cur, c)
       if (cur.status === 'down') return c.defaultView()
       // Keyed, so Loam's reconciler matches what is drawn here by identity
       // and never by position: matched by position, the "Opening…" line was
@@ -225,13 +324,15 @@ export function activate(loam) {
   // and what they can do on hover or a long press), what is open (the
   // modes) and when it last moved, and a dot on the tile where something is
   // new since the owner last looked. A quiet row says nothing about news.
-  const shared = { docs: [], loaded: false, rows: new Map(), leaving: new Map(), seen: new Set() }
+  const shared = { docs: [], loaded: false, rows: new Map(), leaving: new Map(), seen: new Set(), appear: null }
   const filesOf = () => host.files
   const docKey = (root, path) => `${root}:${path}`
   async function loadShared() {
     const res = await fetch(`${BASE}shared`, { credentials: 'same-origin' })
     if (!res.ok) throw new Error('Shared Docs could not be read just now.')
-    const docs = (await res.json()).docs || []
+    const got = await res.json()
+    const docs = got.docs || []
+    if (got.appear) shared.appear = { appear: got.appear, owner: got.owner, alias: got.alias }
     // The row as a folder would list it (size, age, what it may do), asked
     // of Files once per doc; a doc it cannot answer for is still listed.
     const files = filesOf()
@@ -265,7 +366,9 @@ export function activate(loam) {
     const H = loam.ui.h
     const on = (d.links || []).filter(l => l.on)
     const modes = MODE_ORDER.filter(m => on.some(l => l.mode === m)).map(m => MODE_WORD[m])
-    const modeText = modes.length ? modes[0] + (modes.length > 1 ? `, ${modes.slice(1).join(', ').toLowerCase()}` : '') : ''
+    // One mode is said by name; several are the faces' to tell (each says
+    // its own on hover or a long press), so the line stays short.
+    const modeText = modes.length === 1 ? modes[0] : ''
     const ago = typeof files?.ago === 'function' ? files.ago(d.last) : when(d.last)
     const fresh = d.new > 0 && !shared.seen.has(d.id)
     const meta = [
@@ -303,14 +406,81 @@ export function activate(loam) {
     return H('span', { class: 'dc-sd-people', key: `people:${id}`, onclick: tip.swallow, oncontextmenu: tip.swallow, 'aria-label': `Shared with ${who.map(p => p.name ? `${p.name} (can ${p.mode})` : `a group link (can ${p.mode})`).join(', ')}` }, ...nodes)
   }
 
+  // Shared with me (2026-11-17): docs others shared from their own Loams,
+  // under "Shared by me" in the same list. It needs core's files of a
+  // plugin's own root (`openPluginFile`, a row's own menu: `itemsMenu`), so
+  // an older copy of the app shows Shared by me alone.
+  const withMeOn = () => typeof filesOf()?.itemsMenu === 'function'
+  const withme = createWithMe({
+    base: BASE, root: ROOT_ID, schedule: () => host.schedule?.(),
+    toast: (text) => listToast(text), files: filesOf, side: () => filesOf()?.side?.() || null,
+    agentName: () => host.state?.agents?.list?.find(a => !a.archived)?.name || '',
+  })
+  if (withMeOn()) loam.ui.styles?.add?.('assets/withme.css')
+
   const sharedRoot = loam.places?.files?.root?.add?.({
     id: 'doc-comments',
     name: 'Shared Docs',
-    desc: 'Docs open to people outside',
+    desc: withMeOn() ? 'Docs you share, and docs shared with you' : 'Docs open to people outside',
     icon: (size) => peopleIcon(size),
     when: () => allowed(),
-    load: () => loadShared(),
+    load: () => Promise.all([loadShared(), withMeOn() ? withme.load() : null]),
+    // A file of this root is a doc in Shared with me: `with-me/<id>.md`.
+    // Its ⋯ in a panel's header is the row's own menu.
+    menu: (path) => {
+      const d = withme.byId(withmeId(path))
+      return d ? withme.menuItems(d, (r, p, o) => (host.goFiles || (() => {}))(r, p, o)) : []
+    },
+    row: (path) => {
+      const d = withme.byId(withmeId(path))
+      return d ? withme.rowOf(d) : { kind: 'file', name: 'Shared doc', capabilities: {} }
+    },
     render({ go, files, entry }) {
+      const H = loam.ui.h
+      // Opened cold (before this plugin registered, so `load` never ran):
+      // Shared with me asks for itself, as Shared by me does.
+      if (withMeOn() && !withme.st.loaded && !withme.st.loading) withme.load()
+      if (withMeOn()) return H('div', { class: 'dc-sd-sections', key: 'sd:sections' },
+        H('div', { class: 'kicker fs-kicker dc-sd-kicker', text: 'Shared by me' }),
+        sharedByMe({ go, files, entry }),
+        H('div', { class: 'kicker fs-kicker dc-sd-kicker', text: 'Shared with me' }),
+        withme.st.loaded ? withme.section({ entry, go, H }) : H('div', { class: 'fs-quiet', text: 'Loading…' }),
+        appearFoot(H))
+      return H('div', { class: 'dc-sd-sections', key: 'sd:sections' }, sharedByMe({ go, files, entry }), appearFoot(H))
+    },
+  })
+
+  // How the owner's agents appear to people outside, unless a doc says
+  // otherwise (its share sheet; a doc in Shared with me, its menu): one
+  // quiet line at the foot of Shared Docs. The plugin's `appear` setting,
+  // so a persona can set it too (`bin/settings set plugin.doc-comments.appear one`).
+  function appearFoot(H) {
+    const a = shared.appear || withme.st.appear
+    if (!a) return null
+    const choose = async (v) => {
+      if (v === a.appear) return
+      try {
+        const res = await fetch('/api/plugins/doc-comments/settings', {
+          method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: { appear: v } }),
+        })
+        if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'That wasn’t saved. Try again in a moment.')
+        a.appear = v
+        shared.appear = { ...a }
+        if (withme.st.appear) withme.st.appear = { ...withme.st.appear, appear: v }
+        listToast(`Your agents appear to others ${how(v, a.alias)}, unless a doc says otherwise`)
+      } catch (err) { listToast(err.message) }
+      host.schedule?.()
+    }
+    return H('label', { class: 'dc-tk-mem dc-ap-foot', key: 'sd:appear' },
+      H('span', { text: 'Your agents appear to others' }),
+      H('span', { class: 'dc-ap-pick' },
+        H('span', { class: 'dc-ap-shown', text: how(a.appear, a.alias) }), glyph('chevronDown', 12),
+        H('select', { class: 'dc-ap-sel', 'aria-label': 'How your agents appear to others', onchange: (e) => choose(e.target.value) },
+          ['names', 'one'].map(v => H('option', { value: v, selected: v === a.appear, text: how(v, a.alias) })))))
+  }
+
+  function sharedByMe({ go, files, entry }) {
       const H = loam.ui.h
       if (!shared.loaded) {
         // Opened before this plugin had registered (a cold load of the
@@ -321,14 +491,13 @@ export function activate(loam) {
         }
         return H('div', { class: 'fs-quiet', text: 'Loading…' })
       }
-      if (!shared.docs.length && !shared.leaving.size) return H('div', { class: 'fs-quiet dc-sd-empty', text: 'No doc is shared with anyone outside Loam yet. Share one from its ⋯ menu, or with the Share button at the top of the doc.' })
+      if (!shared.docs.length && !shared.leaving.size) return H('div', { class: 'fs-quiet dc-sd-empty', text: 'No doc is shared with anyone outside Loam yet. Share one from its ⋯ menu, or with the Share button at the top of the doc.', key: 'sd:empty' })
       // An older core with no shared row: open by address, as before.
       const draw = typeof entry === 'function' ? entry : (row, x) => H('button', { class: 'setrow', key: `sd:${row.path}`, onclick: () => { x.onopen?.(); go(row.root, row.path, { isFile: true }) } }, H('div', { class: 'fs-words' }, H('div', { class: 'fs-name', text: row.name }), H('div', { class: 'fs-meta' }, x.meta)))
       const list = shared.docs.map(d => ({ d, leaving: false }))
       for (const { doc, at } of shared.leaving.values()) list.splice(Math.min(at, list.length), 0, { d: doc, leaving: true })
       return H('div', { class: 'card card-group dc-sd' }, list.map(({ d, leaving }) => sharedRow(d, draw, files, leaving)))
-    },
-  })
+  }
 
   // "Share settings" (or "Share…" on a doc not yet shared), first in a
   // Markdown file's ⋯ menu anywhere in Files (core's `files.action`, slot

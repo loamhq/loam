@@ -47,6 +47,15 @@ limitations at all." So:
                 ``MemorySwapMax`` 512M; a job now sits at the agents' place
                 in the kernel's OOM order instead.
 
+**A command that never returns is stopped, not the job (since 2026-11-17).**
+An Antigravity job sat 13 hours on a test that never exited, its heartbeat
+ticking. Now a Codex or Antigravity engine silent for 30 minutes while its
+own last event says a command runs has that command stopped, gets the error
+back and carries on; the receipt says so, and a second stop on one job posts
+one line to its thread (lib/loam_stuck.py). A Claude engine needs nothing:
+its Bash tool has its own timeout. And ``--status`` says each running job's
+last engine event, not only its start, so a stuck job reads as stuck.
+
 What stays: the project's live lock around the steps that change live
 state, and the waiter's own ceiling under the tool call's four-hour
 transport timeout, which ends the call and never the job.
@@ -173,6 +182,7 @@ import loam_ci  # noqa: E402
 import loam_github  # noqa: E402
 import loam_lock  # noqa: E402
 import loam_session  # noqa: E402
+import loam_stuck  # noqa: E402
 import loam_waiters  # noqa: E402
 import loam_worktree as wt  # noqa: E402
 from loam_memory import front_matter  # noqa: E402
@@ -1237,10 +1247,21 @@ def transcript_last(session_id: str | None,
     job's transcript is `stream`, its event stream in the job directory."""
     path = stream or (loam_session.session_file(session_id) if session_id else None)
     try:
-        return (datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-                if path else None)
+        newest = path.stat().st_mtime if path else None
     except OSError:
         return None
+    if newest is not None and stream is None:
+        # A Claude session's subagents write transcripts of their own beside
+        # it (`<id>/subagents/*.jsonl`), and the main one is silent while it
+        # waits on them: their lines are the session's activity too
+        # (2026-11-17).
+        try:
+            for sub in path.with_suffix("").joinpath("subagents").glob("*.jsonl"):
+                newest = max(newest, sub.stat().st_mtime)
+        except OSError:
+            pass
+    return (datetime.fromtimestamp(newest, tz=timezone.utc)
+            if newest is not None else None)
 
 
 def beat_once(p: dict[str, Path], session_id: str | None,
@@ -1448,7 +1469,7 @@ are two readings; here are both.
 | tree | before | after |
 |---|---|---|
 {git_rows}
-{ended_chats}
+{ended_chats}{child_stops}
 {landing}
 """
 
@@ -1842,6 +1863,33 @@ def quota_fallback(project: eng.Project, runtime: str, choice: dict) -> tuple[di
     return down, ""
 
 
+def stuck_stopped(p: dict[str, Path], meta: dict, job_id: str):
+    """The callback lib/loam_stuck.py calls after it stops a command that
+    did not return (since 2026-11-17). The stop is already in the job
+    directory's record, which the receipt reads; the second stop on one job
+    also posts one line to the thread that briefed it, because a job that
+    hangs twice is likely to hang again and someone should look."""
+    def on_stop(record: dict, count: int) -> None:
+        print(f"engineer-job: stopped a command that did not return "
+              f"(pid {record['pid']}, {record['quiet_minutes']} min quiet): "
+              f"{record['argv']}", file=sys.stderr, flush=True)
+        if count != 2 or not meta.get("thread"):
+            return
+        title = meta.get("title") or job_id
+        text = (f"The engineer job “{title}” has hung on a command a second "
+                f"time: `{record['command'][:160]}` gave no answer for "
+                f"{record['quiet_minutes']} minutes, and Loam stopped it again "
+                f"so the job could carry on. The job is still running; if it "
+                f"keeps hanging, cancel it from Activity.")
+        try:
+            import loam_threads  # noqa: PLC0415
+            loam_threads.append(meta["thread"], "system", text, kind="system")
+        except Exception as exc:  # noqa: BLE001 - a post never ends a job
+            print(f"engineer-job: the second-stop line was not posted: {exc}",
+                  file=sys.stderr)
+    return on_stop
+
+
 def run_antigravity(project: eng.Project, runtime: str, choice: dict, argv_for,
                     argv: list[str], workdir: str, meta: dict, p: dict[str, Path],
                     resume_from: str | None, prompt: str):
@@ -1861,9 +1909,10 @@ def run_antigravity(project: eng.Project, runtime: str, choice: dict, argv_for,
 
     before = agy_files.snapshot()
     convs: list[str] = []
+    on_stop = stuck_stopped(p, meta, p["dir"].name)
     returncode, agy_run, timed_out = agy_job.run(
         argv, workdir, ceiling_seconds(meta), p["dir"], p["stderr"],
-        on_thread=on_thread, resumed=resume_from)
+        on_thread=on_thread, resumed=resume_from, on_stop=on_stop)
     convs.append(agy_run.conversation_id)
     if agy_run.quota and not timed_out and not p["cancelled"].is_file():
         down, why = quota_fallback(project, runtime, choice)
@@ -1880,7 +1929,7 @@ def run_antigravity(project: eng.Project, runtime: str, choice: dict, argv_for,
             write_engine(p, runtime, argv, down["tier"])
             returncode, agy_run, timed_out = agy_job.run(
                 argv, workdir, ceiling_seconds(meta), p["dir"], p["stderr"],
-                on_thread=on_thread, resumed=resume_from)
+                on_thread=on_thread, resumed=resume_from, on_stop=on_stop)
             convs.append(agy_run.conversation_id)
     try:
         agy_files.write_record(p["dir"], agy_files.attribute(
@@ -2030,8 +2079,9 @@ def box_status() -> dict:
         slot.update(since=holder.get("since"), pid=holder.get("pid"))
         if lane.startswith("job:"):
             job_id = lane[len("job:"):]
-            slot.update(kind="engineer job",
-                        **job_label(eng.locate_job(job_id), job_id))
+            located = eng.locate_job(job_id)
+            slot.update(kind="engineer job", **job_label(located, job_id),
+                        **activity_of(located, job_id))
         else:
             # A wake or a cron runs with no project and no briefer: it says
             # so (null), and says whose lane it is.
@@ -2082,6 +2132,52 @@ def box_status() -> dict:
             "queue": queue, "memory": lock.room()}
 
 
+def activity_of(project: eng.Project | None, job_id: str) -> dict:
+    """A running job's last real activity (since 2026-11-17): the engine's
+    newest event as the heartbeat last read it -- the Claude transcript's
+    last line (its subagents' included), or the Codex or Antigravity
+    stream's -- and, once there has been none for STALL_MINUTES, when the
+    silence began; with the commands the launcher stopped for never
+    returning. The job's start alone made a job frozen for 13 hours read
+    like one at work (11-16). All null for a job with no heartbeat yet."""
+    out = {"last_activity": None, "quiet_since": None, "child_stops": 0}
+    if project is None:
+        return out
+    p = paths(project, job_id)
+    beat = read_beat(p)
+    out["last_activity"] = beat.get("transcript_last")
+    out["quiet_since"] = beat.get("stalled_since")
+    out["child_stops"] = len(loam_stuck.read_stops(p["dir"]))
+    return out
+
+
+def quiet_words(slot: dict, now: datetime | None = None) -> str:
+    """The status line's account of a running job's activity."""
+    now = now or eng.now_utc()
+
+    def ago(value: str | None) -> str | None:
+        try:
+            then = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        minutes = max(0, int((now - then).total_seconds() // 60))
+        return (f"{minutes} min" if minutes < 60
+                else f"{minutes // 60} h {minutes % 60} min")
+
+    last = slot.get("last_activity")
+    stops = slot.get("child_stops") or 0
+    stopped = (f"; the launcher stopped {stops} command"
+               f"{'' if stops == 1 else 's'} that never returned" if stops else "")
+    if slot.get("quiet_since"):
+        quiet = ago(slot["quiet_since"]) or "?"
+        return (f"NO ACTIVITY FOR {quiet} (last engine event "
+                f"{last or 'none — it never wrote one'}); it may be stuck"
+                + stopped)
+    if last:
+        return f"last activity {last} ({ago(last) or '?'} ago){stopped}"
+    return "no engine event yet" + stopped
+
+
 def status_text(status: dict | None = None) -> str:
     """`box_status`, as a person reads it."""
     status = status or box_status()
@@ -2099,7 +2195,8 @@ def status_text(status: dict | None = None) -> str:
              f"Running ({len(status['slots'])}):"]
     for slot in status["slots"]:
         if slot.get("kind") == "engineer job":
-            text = f"job {job(slot)} — since {slot.get('since') or '?'}"
+            text = (f"job {job(slot)} — since {slot.get('since') or '?'}; "
+                    f"{quiet_words(slot)}")
         else:
             text = (f"{slot.get('agent') or '?'}'s {slot.get('lane') or '?'} "
                     f"lane (pid {slot.get('pid') or '?'}) — since "
@@ -3134,7 +3231,8 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                 returncode, codex_run, timed_out = codex_job.run(
                     argv, str(workdir), ceiling_seconds(meta), p["dir"],
                     p["stderr"], on_thread=lambda tid: p["session"].write_text(
-                        tid + "\n", encoding="utf-8"))
+                        tid + "\n", encoding="utf-8"),
+                    on_stop=stuck_stopped(p, meta, job_id))
                 envelope = {"session_id": codex_run.thread_id,
                             "result": codex_run.failed}
             elif antigravity:
@@ -3405,6 +3503,10 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         "deploy_brief": deploy_row(project, meta),
         "git_rows": git_rows(before, after),
         "ended_chats": ended_chats(project, started_at, finished_at),
+        # The commands the launcher stopped because they never returned
+        # (lib/loam_stuck.py, since 2026-11-17): a paragraph, and how many.
+        "child_stops": loam_stuck.receipt_text(p["dir"]),
+        "child_stops_count": len(loam_stuck.read_stops(p["dir"])),
         "git_before": before, "git_after": after,
     }
     receipt = assemble(job_id, meta, body, facts)
@@ -3455,6 +3557,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             "returncode": returncode,
             "session_id": ran_as, "continue_job": continue_job or None,
             "stalled_since": facts["stalled_since"],
+            "child_stops": facts["child_stops_count"],
             "landing": landing.get("state"), "landed_sha": facts["landed_sha"],
             "release_tag": facts["release_tag"],
             "peak_rss_bytes": peak, "landing_timing": landing.get("timing"),

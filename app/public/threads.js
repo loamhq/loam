@@ -5,7 +5,7 @@ import { formatDateTime, formatCalendarDate } from './time.js'
 import { menuSurface } from './menu-surface.js'
 import { threadSelection } from './thread-selection.js'
 import { threadIcons, threadGlyph, threadPersona, threadSubtitle, threadActivity, threadIconState, listeningPulse, listeningRecipients, paintMention, LISTENING_INSET, listeningInset } from './thread-identity.js'
-import { threadWaiting, replyChip, replyTimestamp, composerModel, mentionChoices as choicesForMention, backgroundCount, threadBackground, memberGenerating, replyHasContent, showReply, taskTitle, taskElapsed, jobStatus, jobElapsed, failedTurnInfo, formatSystemLine } from './thread-experience.js'
+import { threadWaiting, replyChip, replyTimestamp, composerModel, mentionChoices as choicesForMention, backgroundCount, threadBackground, memberGenerating, replyHasContent, showReply, taskTitle, taskElapsed, jobStatus, jobActivity, jobElapsed, failedTurnInfo, formatSystemLine } from './thread-experience.js'
 import { createReplySteps, memberTakingTurn } from './thread-steps.js'
 import { boardDrag } from './board-drag.js'
 import { authorMarkers } from './thread-authors.js'
@@ -1106,7 +1106,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       h('span', { class: 'tt-job-face', role: 'img', 'aria-label': name(job.persona) }, avatar(job.persona, 28)),
       h('span', { class: 'tt-task-copy' }, h('span', { class: 'tt-task-title', text: job.title }),
         h('span', { class: 'tt-task-name', text: job.project }),
-        h('span', { class: 'tt-job-status', title: job.outcome_detail, text: jobStatus(job) })),
+        h('span', { class: `tt-job-status${jobActivity(job)?.stuck ? ' tt-job-quiet' : ''}`, title: job.outcome_detail ?? (job.last_activity ? `Last engine event ${formatDateTime(job.last_activity)}` : undefined), text: jobStatus(job) })),
       elapsed !== null ? h('span', { class: 'tt-job-elapsed', 'aria-label': `Elapsed ${elapsed}`, text: elapsed }) : null,
       link ? icon.chevronRight(14) : null)
   }
