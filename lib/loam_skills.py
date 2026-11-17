@@ -64,6 +64,12 @@ SKILL_FILE = "SKILL.md"
 LOAM_DIR = "Loam"
 # The person's own shared shelf, beside it.
 OWN_DIR = "skills"
+# The one folder inside Loam's that an update keeps (2026-11-16): plugins'
+# data that belongs in the vault, `<system>/Loam/data/<plugin id>/` (the
+# doc-comments sidecars first). It is never in the library, never counted as
+# an edit to it, carried across when the library is replaced, and kept as it
+# is now when an update is undone.
+KEPT_DIR = "data"
 # This repository's library: what becomes <system>/Loam/. Under docs/ and not
 # at the top level because a landing's tests see only top-level entries the
 # canonical checkout already has (lib/loam_worktree.platform_argv); the
@@ -310,6 +316,9 @@ def library_diff(source: Path | None = None, vault: Path | None = None,
                                            p.relative_to(root).parts)}
 
     a, b = files(src), files(dst)
+    kept = KEPT_DIR + os.sep
+    a = {f for f in a if not f.startswith(kept)}
+    b = {f for f in b if not f.startswith(kept)}
     return {"added": sorted(a - b), "removed": sorted(b - a),
             "changed": sorted(f for f in a & b
                               if not filecmp.cmp(src / f, dst / f, shallow=False))}
@@ -332,11 +341,23 @@ def install_library(source: Path | None = None, vault: Path | None = None,
     shutil.rmtree(new, ignore_errors=True)
     shutil.copytree(src, new, symlinks=False,
                     ignore=shutil.ignore_patterns(".*", "__pycache__"))
+    shutil.rmtree(new / KEPT_DIR, ignore_errors=True)
     if dst.exists():
         os.replace(dst, old)
+    carry_kept(old, new)
     os.replace(new, dst)
     shutil.rmtree(old, ignore_errors=True)
     return diff
+
+
+def carry_kept(src: Path, dst: Path) -> None:
+    """Move ``src``'s kept folder into ``dst`` (replacing any there): the data
+    plugins keep in the vault survives Loam's folder being swapped whole."""
+    kept = src / KEPT_DIR
+    if kept.is_dir() and not kept.is_symlink():
+        shutil.rmtree(dst / KEPT_DIR, ignore_errors=True)
+        dst.mkdir(parents=True, exist_ok=True)
+        os.replace(kept, dst / KEPT_DIR)
 
 
 # -- the starter vault ------------------------------------------------------------
