@@ -46,7 +46,7 @@ export function createPasskey({ changed, request = authenticatedFetch, later = s
       h('p', { text: 'Add a passkey to sign in with your face, fingerprint or device screen lock.' }),
       h('a', { class: 'pillbtn primary', href: authSettingsURL(), target: '_blank', rel: 'noopener noreferrer', text: st.active ? 'Open sign-in settings again' : 'Add a passkey', onclick: start }),
       st.active ? h('div', { class: 'passkey-flow' },
-        h('p', { text: 'In the page that opens, choose Two-Factor Authentication, then WebAuthn Credentials, then Add.' }),
+        h('p', { text: 'In the page that opens, choose Add a passkey.' }),
         h('p', { class: 'note', text: 'When it asks for a one-time code, come back here. Keep this page open until you’ve added your passkey.' }),
         h('div', { class: 'passkey-code-area', role: 'status', 'aria-live': 'polite' },
           h('p', { text: valid ? 'Loam’s sign-in sent you this code' : 'Waiting for your sign-in code…' }),
