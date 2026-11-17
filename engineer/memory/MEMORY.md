@@ -669,3 +669,22 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `--land`, and squash with `git reset --soft <base>` once clean.
 - **app/test's fake DOM has no `classList` or `Event`**: a dialog built with
   the editor's `h` cannot be driven there; prove it in a real browser.
+## 2026-11-17 — doc comments: no dictation in Viewing
+
+- **What a host hands an editor is drawn by the editor's rule, not the
+  host's.** Dictation's mic was one of the header's `headExtras`, drawn in
+  every mode. A control with a rule of its own (here: only while the doc
+  takes typed text) is passed apart (`mic`) so the component that knows the
+  mode decides, and it says when the rule flips (`onCanType`) so the host
+  can end what was running (dictation's `field.closed`).
+- **A bar hidden by CSS still holds its last buttons.** The phone's
+  keyboard bar kept the mic inside it while off; a test counting the mic in
+  the page saw it. Empty what is off, and only when it holds something.
+- **`classList.remove(x)` rewrites `class` even when `x` is absent**, which
+  is a mutation: the idle-page test caught `fitHead` doing it on every
+  render (20 in 6 s, from `f2c2357`). Check `contains` first.
+- **The live app answers on loopback without the login** (`127.0.0.1:8081`,
+  `loam-app@loam-ui`; `next.` on its own port): Caddy holds the login, so a
+  host-side Playwright there drives the real live page for screenshots with
+  no proof user. Use a scratch doc of invented text, so nothing real is
+  open in Editing, and delete it and its sidecar after.
