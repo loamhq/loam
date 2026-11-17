@@ -4,6 +4,7 @@ import { h, kept, morph, icon } from './ui.js'
 import { segmentedControl } from './chat-ui.js'
 import { foldJobChains, engineLabel, jobThread, jobContext } from './activity-record.js'
 import { modelLabel } from './providers.js'
+import { jobActivity } from './thread-experience.js'
 import { strip } from './markdown.js'
 import { scheduleChange, actorName } from './schedule-change.js'
 
@@ -177,6 +178,12 @@ export function createActivity({ registry = createCoreRegistry(), api, redraw, a
   function engineerMeta(job, timing) {
     return [job.project, engineLabel(job.engine), modelLabel(providers().find(p => p.id === job.engine), job.model).name, timing && !/unknown/i.test(timing) ? timing : null].filter(Boolean).join(' · ')
   }
+  function activityLine(job) {
+    const activity = job.kind === 'engineer job' ? jobActivity({ ...job, state: 'running' }) : null
+    if (!activity) return null
+    const stops = job.child_stops ? ` · ${job.child_stops} stuck ${job.child_stops === 1 ? 'command' : 'commands'} stopped` : ''
+    return h('div', { class: `activity-meta activity-job-activity${activity.stuck ? ' activity-job-quiet' : ''}`, text: activity.text[0].toUpperCase() + activity.text.slice(1) + stops })
+  }
   function jobRow(job, queued = false, position = 0) {
     const own = ['wake', 'cron', 'reviewer'].includes(job.run_kind) || job.kind === 'wake'
     return h('li', { class: `activity-job${jobThread(job) ? ' activity-paired' : ''}`, key: job.job ?? `slot:${job.slot}` },
@@ -184,7 +191,9 @@ export function createActivity({ registry = createCoreRegistry(), api, redraw, a
       h('div', { class: 'activity-job-words' },
         h('div', { class: 'activity-job-title', text: job.title || (own ? ({ cron: 'Scheduled work', reviewer: 'Review', wake: 'Wake' }[job.run_kind] || 'Independent work') : 'Engineering work') }),
         engineerContext(job),
-        h('div', { class: 'activity-meta', text: engineerMeta(job, queued ? `Queued ${job.position ?? position + 1}` : validTime(job.since || job.started) ? elapsed(job.since || job.started) : null) })),
+        h('div', { class: 'activity-meta', text: engineerMeta(job, queued ? `Queued ${job.position ?? position + 1}` : validTime(job.since || job.started) ? elapsed(job.since || job.started) : null) }),
+        // The engine's last event, not only the start: a stuck job reads as stuck (2026-11-17).
+        activityLine(job)),
       job.job ? h('button', { class: 'pillbtn content-mark activity-cancel', text: 'Cancel', 'aria-label': `Cancel ${job.title}`, onclick: (event) => {
         st.confirm = { job, queued, busy: false, error: '', returnFocus: event.currentTarget }; redraw()
       } }) : null)

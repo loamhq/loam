@@ -96,6 +96,7 @@
 .tt-job-row:not(button) { cursor:default; }
 .tt-job-face { flex:none; display:flex; }
 .tt-job-status { color:var(--paper-ink-3); font-size:12px; overflow-wrap:anywhere; }
+.tt-job-status.tt-job-quiet { color:var(--paper-ink-2); font-weight:600; }
 .tt-job-elapsed { flex:none; color:var(--paper-ink-3); font-size:11px; white-space:nowrap; }
 .tt-job-row > svg { flex:none; color:var(--paper-ink-3); }
 .tt-task-who { display:flex; align-items:center; gap:10px; font-size:13px; }

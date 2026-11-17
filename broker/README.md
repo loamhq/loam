@@ -5600,9 +5600,21 @@ line), then the finished, newest first. Every row has every key:
   "ok": "bool once finished; else null",
   "receipt": "vault-relative path of the receipt once finished (e.g. 40_PROJECTS/Loam/receipts/….md); null before, or when none was published",
   "position": "int while queued (1 is next); else null",
-  "held_by": "what a queued job waits on, in words; else null"
+  "held_by": "what a queued job waits on, in words; else null",
+  "last_activity": "ISO UTC while running: the engine's newest event (the Claude transcript's last line, its subagents' included, or the Codex/Antigravity stream's), as the heartbeat last read it; else null",
+  "quiet_since": "ISO UTC while running and the engine has written nothing for 15 minutes: when the silence began; else null",
+  "child_stops": "int: commands the launcher stopped because they never returned (lib/loam_stuck.py); 0 on nearly every job"
 }
 ```
+
+**The last three (2026-11-17)** are there because a job's start alone said
+nothing about whether it was working: an Antigravity job frozen on a test that
+never exited read as "running for 13 h" with its heartbeat ticking (the
+launcher writes the heartbeat, not the engine). They come from the launcher's
+`box_status()` slot for the job (`activity_of`), so `engineer-job --status`,
+`mcp__engineer__status` and Activity say the same: Activity and the thread's
+Tasks panel show "active 3 min ago", or "No activity for 13 hr" once
+`quiet_since` is set.
 
 Finished rows stay for 10 minutes after `finished` (`RECENT_SECONDS`), so a
 finish is seen. The outcome words: `cancelled` and `interrupted` from the

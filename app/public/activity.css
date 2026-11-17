@@ -13,6 +13,7 @@
 .activity-job > .blob { flex:none; }
 .activity-job-title { font-weight: 700; font-size: 16px; overflow-wrap: anywhere; margin-bottom: 4px; }
 .activity-meta { color: var(--paper-ink-3); font-size: 13px; line-height: 1.5; }
+.activity-job-quiet { color: var(--paper-ink-2); font-weight: 600; }
 .activity-slot-empty { color: var(--paper-ink-3); font-size: 13px; padding: 10px 0; border-bottom: 1px solid var(--paper-rule); }
 .activity-cancel { flex: none; }
 .activity-empty { color: var(--paper-ink-3); font-size: 14px; margin: 16px 0; }

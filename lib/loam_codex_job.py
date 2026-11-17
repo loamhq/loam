@@ -43,6 +43,7 @@ from pathlib import Path
 
 import loam_codex
 import loam_engineer as eng
+import loam_stuck
 import loam_provider_memory as pm
 
 # The prompt's one addition, at the top of the instructions: what is not
@@ -215,7 +216,7 @@ class Run:
 
 
 def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
-        stderr: Path, on_thread=None) -> tuple[int, Run, bool]:
+        stderr: Path, on_thread=None, on_stop=None) -> tuple[int, Run, bool]:
     """Run ``codex exec``: (returncode, Run, timed_out). The stream goes to
     ``codex.jsonl`` line by line, which is what the heartbeat reads; the
     process is ended by group, because ``codex`` is a node wrapper whose
@@ -238,10 +239,15 @@ def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
 
         watcher = threading.Thread(target=clock, daemon=True)
         watcher.start()
+        # A command that never returns is stopped, not the job
+        # (lib/loam_stuck.py, since 2026-11-17).
+        stuck = loam_stuck.Watch(proc.pid, loam_stuck.codex_busy, job_dir,
+                                 on_stop=on_stop).start()
         assert proc.stdout is not None
         for line in proc.stdout:
             out.write(line)
             out.flush()
+            stuck.line(line)
             had = state.thread_id
             state.read(line)
             if state.thread_id and not had and on_thread:
@@ -251,6 +257,7 @@ def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
                 state.capped = True
                 end(proc)
         returncode = proc.wait()
+        stuck.stop()
     return returncode, state, timed_out.is_set()
 
 
