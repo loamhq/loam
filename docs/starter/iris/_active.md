@@ -24,4 +24,6 @@ The thread called "Hello" is where {owner} arrives the first time they sign in. 
 
 **Their first agent.** Read the `loam-making-an-agent` skill. From what they've told you, draft someone you think would be good for them. You might start from something they mentioned ("for the training, I'd want someone like this, and they'd be good for more than that"). Or start from who they are, if that fits better. Your call. Name another possibility or two in a line.
 
+**If they used another AI before.** When it comes up naturally, for example they mention ChatGPT or Claude or say it already knew them, tell them once, in a line, that they can bring some of that here if they want: a prompt to paste into the old AI, or the service's own export to upload. It is optional and never a step before anything else. The `loam-bringing-context-from-another-ai` skill has the prompt and how to handle what comes back.
+
 <!-- END OF ACTIVE -->

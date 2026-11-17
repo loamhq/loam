@@ -31,9 +31,9 @@ carries them (``public``).
   draws any doc. Nothing from the other side is ever page code.
 
 A link whose token is one of this Loam's own (a doc the owner shared with
-himself, or a link of this Loam pasted under another of its names) is opened
+themselves, or a link of this Loam pasted under another of its names) is opened
 through this server's own door in-process: no network, the same protocol,
-and he shows on it exactly as anyone else on that link does.
+and the owner shows on it exactly as anyone else on that link does.
 """
 
 from __future__ import annotations
@@ -101,12 +101,12 @@ def parse_link(raw) -> dict:
         u = urlsplit(raw)
         port = u.port
     except ValueError:
-        raise Refused(400, "That isn’t a Loam share link. It looks like https://…/s/… .", "not-link") from None
+        raise Refused(400, "That isn’t a Loam share link. It looks like https://…/s/…", "not-link") from None
     if u.scheme == "http":
         raise Refused(400, "That link isn’t https. Loam only opens share links over https.", "not-link")
     m = TOKEN_RE.match(u.path or "")
     if u.scheme != "https" or not u.hostname or u.username or u.password or not m:
-        raise Refused(400, "That isn’t a Loam share link. It looks like https://…/s/… .", "not-link")
+        raise Refused(400, "That isn’t a Loam share link. It looks like https://…/s/…", "not-link")
     host = u.hostname.rstrip(".").lower()
     try:
         host.encode("idna")
@@ -468,7 +468,7 @@ class WithMe:
 
     def _auth(self, e: dict, who: dict, fresh: bool = False) -> dict:
         """The headers that make this request the owner (the session) or one
-        of his agents (the door's agent key, with the agent's own name)."""
+        of their agents (the door's agent key, with the agent's own name)."""
         if who.get("kind") == "agent":
             key = e.get("agent_key")
             if not key or fresh:
@@ -566,13 +566,13 @@ class WithMe:
         if me.get("mode") in ("view", "comment", "edit"):
             changes["mode"] = me["mode"]
         if who.get("kind") != "agent" and method == "GET" and route.strip("/") in ("doc", "doc/revision"):
-            # He is looking: what he sees now is what "new" compares against.
+            # The owner is looking: what they see now is what "new" compares against.
             rev = {"revision": got.get("revision"),
                    "notes": got.get("notes") if route.strip("/") == "doc/revision" else got.get("notes_revision")}
             if rev["revision"]:
                 changes.update(seen=rev, latest=rev, seen_at=now_iso())
         if who.get("kind") != "agent" and method == "GET" and route.strip("/") == "doc":
-            # When he last looked, so the editor marks what is new since.
+            # When the owner last looked, so the editor marks what is new since.
             got["seen"] = e.get("seen_at")
         if route.strip("/") == "doc" and method == "GET" and isinstance(got.get("text"), str):
             m = re.search(r"(?m)^#\s+(.+?)\s*#*\s*$", got["text"])

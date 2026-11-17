@@ -8,7 +8,7 @@ import { createMessageState } from '../chat-ui.js'
 export function mount(host, options = {}) {
   return createThreads({ registry: host.registry, api: host.api, redraw: host.schedule,
     changedAgent: agent => host.changedAgent?.(agent), agents: () => host.state.agents.list, agentsReady: () => host.state.agentsReady, providers: () => host.state.providers,
-    running: host.running, rail: host.rail, nav: host.nav, openProfile: host.goProfile,
+    running: host.running, rail: host.rail, nav: host.nav, openProfile: host.goProfile, openSettings: (page, provider) => host.goSettings?.(page, provider),
     listIsMain: () => ['home', 'threads'].includes(host.state.screen),
     messageState: options.messageState ?? createMessageState(),
     renderText: text => markdown(text, { copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event) }),

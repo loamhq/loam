@@ -8,7 +8,7 @@
 import { h, icon, put, tone } from './editor/dom.js'
 
 export const WITHME_PREFIX = 'with-me/'
-const MODE = { view: 'Can view', comment: 'Can comment', edit: 'Can edit' }
+const MODE = { view: 'View', comment: 'Comment', edit: 'Edit' }
 
 export function withmePath(id) { return `${WITHME_PREFIX}${id}.md` }
 export function withmeId(path) { return /^with-me\/(w-[a-z0-9]{10})\.md$/.exec(path || '')?.[1] || null }
@@ -44,7 +44,7 @@ export function createWithMe({ base, root, schedule, toast, files, side }) {
   }
 
   const byId = (id) => st.docs.find(d => d.id === id) || null
-  const rowOf = (d) => ({ kind: 'file', root, path: withmePath(d.id), name: d.title, capabilities: {}, withme: d })
+  const rowOf = (d) => ({ kind: 'file', root, path: withmePath(d.id), name: d.title, place: `Shared with me · ${d.owner ? `${d.owner}’s Loam` : d.host}`, capabilities: {}, withme: d })
 
   // -- the section ----------------------------------------------------------------------
 
@@ -68,7 +68,7 @@ export function createWithMe({ base, root, schedule, toast, files, side }) {
     if (d.state === 'password') return 'Its password no longer opens it'
     if (d.state === 'version') return 'That Loam is a version this one can’t open'
     const whose = d.owner ? `${d.owner}’s Loam` : d.host
-    return [whose, MODE[d.mode] || 'Can view'].join(' · ')
+    return [whose, MODE[d.mode] || 'View'].join(' · ')
   }
 
   function row(d, { entry, go, leaving, H = h }) {
@@ -77,8 +77,6 @@ export function createWithMe({ base, root, schedule, toast, files, side }) {
     const extras = {
       meta: metaFor(d),
       badge: d.new && !dead ? H('span', { class: 'dc-sd-dot', key: `wmdot:${d.id}`, role: 'img', 'aria-label': 'Something new' }) : null,
-      trail: d.owner ? H('span', { class: 'dc-sd-people dc-wm-from', key: `wmf:${d.id}`, title: `From ${d.owner} at ${d.host}` },
-        H('span', { class: 'dc-sd-face', style: { background: tone(d.owner) }, text: d.owner.charAt(0).toUpperCase() })) : null,
       onopen: () => { d.new = false },
       menu: () => menuItems(d, go),
       className: `dc-wm-entry${dead ? ' dc-wm-dead' : ''}${st.fresh.has(d.id) ? ' dc-wm-arrive' : ''}${leaving ? ' dc-sd-leaving' : ''}`,
@@ -142,7 +140,7 @@ export function createWithMe({ base, root, schedule, toast, files, side }) {
 
   function draw(s, focus = false) {
     if (!scrim) return
-    const linkIn = h('input', { class: 'dc-wm-in', type: 'url', inputmode: 'url', placeholder: 'https://…/s/…', value: s.link, autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Link' })
+    const linkIn = h('input', { class: 'dc-wm-in', type: 'text', inputmode: 'url', autocapitalize: 'off', placeholder: 'https://…/s/…', value: s.link, autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Link' })
     const pwIn = h('input', { class: 'dc-wm-in mono', type: 'text', placeholder: 'Password', value: s.password, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': 'Password' })
     const nameIn = s.needName ? h('input', { class: 'dc-wm-in', type: 'text', placeholder: 'Your name there', value: s.name, maxlength: '60', autocomplete: 'name', 'aria-label': 'Your name there' }) : null
     // A whole invite pasted anywhere fills both: the link, and the password

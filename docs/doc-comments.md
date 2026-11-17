@@ -52,8 +52,18 @@ adds and does not rewrite (below, "What step 2 adds").
 - **A note whose words changed since** shows a small glyph at rest and, when
   focused, says so in a quiet line with the words it was about. On the
   phone, the thread's sheet scrolls its passage into view above it.
-- **A doc with no notes** keeps its text column centred; it moves aside when
-  the first note appears.
+- **The text's measure** grows with the pane up to 720 px (about 87
+  characters of 17 px Figtree on real prose) and stops there, in every mode,
+  in the main and side panels and on the share page; past it the room
+  becomes air either side, and the type never grows with the screen. Tables,
+  code and images use the column's width; a wider table scrolls inside it.
+  The text and the margin (300 px) are one block centred in the pane; when
+  the pane is tight the margin gives way first, to 256 px, then the text.
+- **A doc with no notes** pays for no margin: the text takes its whole
+  measure in the middle of the pane, and eases aside (about 200 ms) when the
+  first note appears or one is started. While keys are going down in the
+  text it waits for the pause (under a second), so a note arriving from
+  someone else never moves the line being typed.
 - **Formatting, desktop**: no toolbar. Selecting text in Editing shows one
   popup: Aa (block type), bold, italic, strikethrough, link, code, then
   Comment and Suggest; each button's tooltip names the Markdown and the
@@ -583,20 +593,20 @@ staging copy (`next.<domain>`). It ships `staging`.
 ## Shared with me (2026-11-17)
 
 *The other half of sharing.* When someone with a Loam shares a doc with the
-owner, the owner adds it to his own Loam and works on it there, in the same
-editor, without it being copied into his vault.
+owner, the owner adds it to their own Loam and works on it there, in the same
+editor, without it being copied into their vault.
 
-**What he sees.** Files › Shared Docs has two sections under the app's own
+**What the owner sees.** Files › Shared Docs has two sections under the app's own
 kickers: *Shared by me* (the list above) and *Shared with me*. The second
 always ends with a quiet **Add a shared doc** row (alone, it says what it is
 for). Its sheet (a bottom sheet on a phone) takes the link and the password;
 a whole invite pasted into either field fills both. A link for no one person
-asks once for the name he goes by there, offering his own. His Loam checks
+asks once for the name they go by there, offering their own. Their Loam checks
 both against the other Loam at once and says plainly what went wrong: the
 password, a link turned off or expired, not a Loam share link, a server that
 cannot be reached, a private address, an older or newer Loam. A row shows the
-doc's title, whose Loam it is on, his mode there and the dot when something
-is new since he last looked; its ⋯ is Open, Open to the side, Copy link,
+doc's title, whose Loam it is on, the mode there and the dot when something
+is new since they last looked; its ⋯ is Open, Open to the side, Copy link,
 Remove (which forgets the link and password; nothing changes for the
 owner). A link turned off greys the row ("No longer shared"); a server that
 does not answer says so and is tried again at the next open; a changed mode
@@ -606,12 +616,12 @@ is followed at the next look.
 the door answers it (view: Viewing only; comment: Viewing and Suggesting
 with notes; edit: all three). Its header names where the doc lives
 ("Shared with me / <owner> · <host> / <title>") and has no Share and no
-History, which are the doc's owner's. On the other side he shows as the
-name on his link, exactly as if he used their share page in a browser.
+History, which are the doc's owner's. On the other side the owner shows as
+the name on their link, exactly as through that Loam's share page.
 
 **How it is built.**
 
-- **His Loam's server is the client**, not his browser
+- **Their Loam's server is the client**, not their browser
   (`server/doccomments/withme.py`): it keeps the link, the password, the
   session the door hands back and the door's agent key in the plugin's
   private folder (`LOAM_PLUGIN_PRIVATE`, 0700; `with-me.json`, 0600),
@@ -627,7 +637,7 @@ name on his link, exactly as if he used their share page in a browser.
   open anything" page, so the client can say "that Loam is too old for this"
   rather than "not a Loam link". `/open` also answers the title, owner and
   mode; `/api/status` gives a row in one call (title, owner, mode, and the
-  text's and the notes' revisions, which the dot compares with what he last
+  text's and the notes' revisions, which the dot compares with what they last
   looked at).
 - **Safety, since the server fetches an address a person pasted**: only
   `https://<host>[:port]/s/<token>`; only the door's own endpoints after it
@@ -638,13 +648,13 @@ name on his link, exactly as if he used their share page in a browser.
   the name; no redirect is followed; 8 MiB and 10 s per read, 25 s per
   answer. What comes back is JSON handed to the editor, drawn as any doc is.
 - **A link of this Loam's own** (its token is in this Loam's links) is
-  opened through the door in-process: no network, the same protocol, and he
-  shows on it as anyone on that link does. That is a doc he shared with
-  himself, and it is how staging and live, which are one Loam on one box,
+  opened through the door in-process: no network, the same protocol, and the
+  owner shows on it as anyone on that link does. That is a doc shared with
+  oneself, and it is how staging and live, which are one Loam on one box,
   were walked.
 - **Personas** reach these docs with their tools by a `shared:w-…` address
   (`doc_shared_with_me` lists them; `doc_read`, `doc_save` and every other
-  `doc_*` tool take it), and can add and remove one on his ask
+  `doc_*` tool take it), and can add and remove one on the owner's ask
   (`doc_add_shared`, `doc_remove_shared`). On the other side a persona shows
   as "<Persona> · <name>'s agent": the server uses the door's agent key for
   the link (one key, made once with the session) and says which agent is

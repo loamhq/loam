@@ -11,7 +11,16 @@
 .welcome-continue .primary { min-height: 48px; }
 .welcome-continue .note { margin: 10px 0 0; }
 .welcome .loginflow .note { line-height: 1.5; }
-.update-control, .passkey-flow { display: grid; gap: 16px; }
+.update-control, .passkey-flow, .passkey-sections { display: grid; gap: 16px; }
+.passkey-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
+.passkey-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--paper-raised); border: 1px solid var(--paper-rule); min-width: 0; }
+.passkey-item-who { min-width: 0; }
+.passkey-item-name { font-weight: 600; overflow-wrap: anywhere; }
+.passkey-item .note { margin: 2px 0 0; }
+.passkey-item .pillbtn, .passkey-actions .pillbtn, .signout-card .pillbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; text-decoration: none; flex: none; }
+.passkey-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.passkey-manage { min-height: 44px; display: inline-flex; align-items: center; }
+.signout-card .pillbtn { align-self: flex-start; }
 .update-control .card, .passkey-card { padding: 22px; margin: 0; min-width: 0; gap: 12px; }
 .update-control h3, .passkey-card h3 { font-size: 19px; margin: 0 0 10px; }
 .update-control p, .passkey-card p { margin: 10px 0 16px; }
@@ -19,6 +28,9 @@
 .update-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 .update-library { margin: 18px 0; }
 .update-library summary { cursor: pointer; font-weight: 650; padding: 10px 0; }
+.update-details { margin-top: 6px; }
+.update-details summary { cursor: pointer; font-size: 13px; color: var(--paper-ink-2); font-weight: 600; padding: 6px 0; min-height: 44px; display: inline-flex; align-items: center; }
+.update-details .update-steps { margin-top: 10px; }
 .update-library pre { max-height: 280px; overflow: auto; padding: 16px; background: var(--paper-raised); border: 1px solid var(--paper-rule); border-radius: 14px; font-size: 12px; white-space: pre; }
 .update-control li, .update-control .note { overflow-wrap: anywhere; }
 .update-steps { margin: 20px 0 0; padding: 0; list-style: none; display: grid; gap: 18px; }

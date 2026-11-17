@@ -189,7 +189,7 @@ export function activate(loam) {
         back: entry.options.close ? { label: entry.options.closeLabel || 'Back', go: entry.options.close } : null,
         menuExtras: () => [{ label: 'Copy link', icon: 'link', run: () => copyText(known()?.url, 'Link copied. Its password stays with your Loam.') }],
         headExtras: () => [entry.options.readAloud?.glyph || null].filter(Boolean),
-        // Dictation's mic only while the doc takes his typed text (the
+        // Dictation's mic only while the doc takes the owner's typed text (the
         // editor decides: never in Viewing, never on a view link).
         mic: () => entry.options.mic || null,
         micInHead: () => Boolean(entry.options.wide),
@@ -420,12 +420,20 @@ export function activate(loam) {
     when: () => allowed(),
     load: () => Promise.all([loadShared(), withMeOn() ? withme.load() : null]),
     // A file of this root is a doc in Shared with me: `with-me/<id>.md`.
+    // Its ⋯ in a panel's header is the row's own menu.
+    menu: (path) => {
+      const d = withme.byId(withmeId(path))
+      return d ? withme.menuItems(d, (r, p, o) => (host.goFiles || (() => {}))(r, p, o)) : []
+    },
     row: (path) => {
       const d = withme.byId(withmeId(path))
       return d ? withme.rowOf(d) : { kind: 'file', name: 'Shared doc', capabilities: {} }
     },
     render({ go, files, entry }) {
       const H = loam.ui.h
+      // Opened cold (before this plugin registered, so `load` never ran):
+      // Shared with me asks for itself, as Shared by me does.
+      if (withMeOn() && !withme.st.loaded && !withme.st.loading) withme.load()
       if (withMeOn()) return H('div', { class: 'dc-sd-sections', key: 'sd:sections' },
         H('div', { class: 'kicker fs-kicker dc-sd-kicker', text: 'Shared by me' }),
         sharedByMe({ go, files, entry }),

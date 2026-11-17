@@ -3,7 +3,7 @@ import { mount as mountComposer } from './composer.js'
 import { mount as mountTranscript } from './transcript.js'
 import { mount as mountSheets } from './sheets.js'
 import { mount as mountConversation } from './conversation.js'
-import { createApps, appAddress, canFrame, appUnavailable } from '../apps.js'
+import { createApps, appAddress, canFrame, appUnavailable, buildAppThread } from '../apps.js'
 import { createAttachments, addFile, tooBig, markProgress, markStored, markFailed, carriesFiles, filesFrom } from '../attach.js'
 import { createMessageState } from '../chat-ui.js'
 import { fileView, folderView, nameOf, parentOf, splitPath, ROOT_LOOK } from '../files.js'
@@ -94,7 +94,7 @@ export function mountSidePanel(base) {
   })
   own.apps = createApps({ registry: own.registry, api: base.api, redraw: base.schedule, wide: () => true,
     avatar: id => blob(agentLook(id, state.agents), { size: 40, font: 18 }), agentName: id => state.agents.list.find(a => a.id === id)?.name ?? id,
-    newThread: () => base.threads.create(), copy: copyText, leave: () => base.panels.close(), navigate: item => base.panels.openSide(item), side: () => base.panels,
+    newThread: () => buildAppThread(base.threads, base.state.agents.list), copy: copyText, leave: () => base.panels.close(), navigate: item => base.panels.openSide(item), side: () => base.panels,
   })
   let request = 0
   function item() {
@@ -142,14 +142,18 @@ export function mountSidePanel(base) {
   }
   function header() {
     const at = item(), f = host.files.st.file
-    const label = at?.kind === 'app' ? at.app?.name ?? (own.apps.st.error ? 'App unavailable' : 'Opening app…') : f ? nameOf(f.path) : at?.id ?? 'Files'
-    const location = at?.kind === 'app' ? at.app ? appAddress(at.app.url) : at.url : f ? [ROOT_LOOK[f.root]?.name ?? f.root, ...splitPath(parentOf(f.path))].join(' / ') : ''
+    // A plugin root's file is named by its row and placed by its `place`
+    // (a doc on another Loam has no folder here, 2026-11-17).
+    const ownRoot = f?.plugin ? host.files.pluginRoot?.(f.root) : null
+    const label = at?.kind === 'app' ? at.app?.name ?? (own.apps.st.error ? 'App unavailable' : 'Opening app…') : f ? (f.plugin ? f.row?.name ?? nameOf(f.path) : nameOf(f.path)) : at?.id ?? 'Files'
+    const location = at?.kind === 'app' ? at.app ? appAddress(at.app.url) : at.url : f ? (f.plugin ? f.row?.place ?? ownRoot?.name ?? f.root : [ROOT_LOOK[f.root]?.name ?? f.root, ...splitPath(parentOf(f.path))].join(' / ')) : ''
     const controls = base.panels.controls()
     return h('header', { class: 'side-head' },
       h('span', { class: 'side-face', 'aria-hidden': 'true' }, at?.kind === 'app' ? icon.apps(20) : icon.file(20)),
       h('div', { class: 'side-heading' }, h('strong', { text: label }), h('span', { text: location, title: location })),
       controls[0], controls[1], h('button', { class: 'iconbtn ghost', title: 'Item actions', 'aria-label': 'Item actions', onclick: () => {
-        if (f) host.files.resourceMenu(f.row, host.filesHome())
+        if (f && ownRoot?.menu) host.files.itemsMenu(f.row, ownRoot.menu(f.path))
+        else if (f) host.files.resourceMenu(f.row, host.filesHome())
         else { state.appMenu = !state.appMenu; base.schedule() }
       } }, icon.dots(18)), controls[2])
   }

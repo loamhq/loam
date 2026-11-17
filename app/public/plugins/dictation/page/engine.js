@@ -420,6 +420,7 @@ async function transcribeTake() {
   if (host.state.rec !== take) return
   let words = null
   let failed = null
+  let needsKey = false
   let polish = null
   try {
     const form = new FormData()
@@ -434,14 +435,23 @@ async function transcribeTake() {
     }
     // The server's own answer for a take with nothing said in it.
     else if (res.status === 422) words = ''
-    else failed = body?.error ?? `The recording could not be transcribed (${res.status}).`
+    else {
+      failed = body?.error ?? `The recording could not be transcribed (${res.status}).`
+      needsKey = res.status === 503 && /gemini api key/i.test(failed)
+    }
   } catch (err) {
     failed = err?.message || 'The recording did not reach this app.'
   }
   if (host.state.rec !== take) return
   host.state.rec = null
   if (failed !== null) {
-    say(TAKE_FAILED, take.retried ? null : { act: 'retry', label: 'Retry', take, detail: failed })
+    if (needsKey) {
+      // No key is not a take that failed: say what is missing and where it goes.
+      const reach = typeof host.goSettings === 'function'
+      say(reach ? NEEDS_KEY : `${NEEDS_KEY} Add one in Settings › Plugins › Dictation.`, reach ? { act: 'settings', label: 'Add a key', detail: failed } : null)
+    } else {
+      say(TAKE_FAILED, take.retried ? null : { act: 'retry', label: 'Retry', take, detail: failed })
+    }
     restoreField(take)
   } else if (words === '') {
     say(TAKE_EMPTY, { act: 'again', label: 'Try again', target: take.target })
@@ -548,7 +558,12 @@ function actOnNotice() {
   const offer = host.state.takeNotice?.offer
   host.state.takeNotice = null
   host.schedule()
-  if (!offer || host.state.rec) return
+  if (!offer) return
+  if (offer.act === 'settings') {
+    host.goSettings?.('plugins', 'dictation')
+    return
+  }
+  if (host.state.rec) return
   if (offer.act === 'again') {
     pressMic(offer.target ?? 'draft')
     return
@@ -972,7 +987,9 @@ function termsCard() {
   )
 }
 
-const TERMS_NOT_CONNECTED = 'The vault’s terms are not connected on this app yet.'
+const NEEDS_KEY = 'Dictation needs a Gemini API key.'
+
+const TERMS_NOT_CONNECTED = 'No names and terms note yet. Add one to your vault to help dictation spell your names.'
 
 function settingsDictation({ back = true } = {}) {
   const d = host.state.dictation

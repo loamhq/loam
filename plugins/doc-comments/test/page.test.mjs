@@ -291,7 +291,7 @@ test('Shared Docs has two sections once core can open a plugin root\'s files: Sh
   assert.deepEqual(byClass(out, 'dc-sd-kicker').map(textOf), ['Shared by me', 'Shared with me'])
   const mine = drawn.filter(d => d.row.root === '@doc-comments')
   assert.deepEqual(mine.map(d => [d.row.name, d.row.path]), [['Garden plan', 'with-me/w-aaaaaaaaaa.md'], ['Old notes', 'with-me/w-bbbbbbbbbb.md']])
-  assert.equal(mine[0].extras.meta, 'Ada’s Loam · Can edit')
+  assert.equal(mine[0].extras.meta, 'Ada’s Loam · Edit')
   assert.match(mine[0].extras.badge.props.class, /dc-sd-dot/)
   assert.equal(mine[1].extras.meta, 'No longer shared')
   assert.match(mine[1].extras.className, /dc-wm-dead/)
