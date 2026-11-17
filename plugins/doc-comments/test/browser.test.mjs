@@ -285,97 +285,206 @@ async function caretAfter(page, words) {
 
 const openSuggestions = (page) => page.evaluate(() => window.__ed.state.notes.filter(n => n.kind === 'suggestion' && n.state === 'open').map(n => ({ id: n.id, quote: n.anchor.quote, replacement: n.replacement })))
 
-test('Suggesting: type, accept, type again; the accepted text is the base everywhere', { skip }, async () => {
-  await start()
-  const text = '# Roots\n\nThe first winter I stayed, nothing happened, and that was the point. The baker learned my order.\n\nI think this is what roots are: not comfort, but accountability.\n'
+// -- Suggesting --------------------------------------------------------------
+//
+// What must hold (the staging walk, 2026-11-16): while I am Suggesting, my own
+// run of typing and deleting in one place stays one suggestion that keeps
+// growing, the caret moves only by my keys, accepting writes exactly what I
+// saw, and rejecting puts back the original byte for byte.
+
+const body = (t) => t.replace(/^---\n[\s\S]*?\n---\n/, (fm) => {
+  const keep = fm.split('\n').filter(l => !/^(loam_doc_id|last_modified_by):/.test(l))
+  return keep.length <= 3 ? '' : keep.join('\n')
+})
+const api = (p, route, method = 'POST', extra = {}, agent = null) => fetch(`${base}/x/doc-comments/${route}${method === 'GET' ? `?${new URLSearchParams({ root: 'vault', path: p })}` : ''}`, {
+  method, headers: { 'Content-Type': 'application/json', ...(agent ? { 'X-Loam-Agent': agent } : {}) },
+  body: method === 'GET' ? undefined : JSON.stringify({ root: 'vault', path: p, ...extra }),
+}).then(r => r.json())
+const mineOpen = async (p) => (await api(p, 'doc', 'GET')).notes.filter(n => n.kind === 'suggestion' && n.state === 'open' && n.author.id === 'sam')
+const shown = (page) => page.evaluate(() => window.__ed.text())
+// Where the caret is, as the text on either side of it: a line added above
+// (a doc's first note adds one to its frontmatter) moves its number, not it.
+const caretPos = (page) => page.evaluate(() => { const v = window.__ed.view, h = v.state.selection.main.head; return v.state.sliceDoc(Math.max(0, h - 12), h) + '|' + v.state.sliceDoc(h, h + 12) })
+// The same caret: the same text after it, and the shorter text before it
+// ending the longer (near the top, a line added above shows in the window).
+const sameCaret = (a, b) => {
+  const [ab, aa] = a.split('|'), [bb, ba] = b.split('|')
+  return aa === ba && (ab.endsWith(bb) || bb.endsWith(ab))
+}
+const PAUSE = 2300            // longer than the pause after which typing is sent
+
+async function settle(page) {
+  await page.evaluate(() => window.__ed.flush())
+  await page.waitForTimeout(100)
+}
+
+// Accept (or reject) every suggestion of mine, as the server's own caller.
+async function closeMine(p, how) {
+  for (const n of await mineOpen(p)) await api(p, `doc/notes/${n.id}/${how}`)
+}
+
+async function suggestDoc(text) {
   const p = await newDoc(text)
   const page = await open({ doc: p })
-  const toasts = []
-  await page.exposeFunction('__toast', (t) => toasts.push(t))
-  await page.evaluate(() => new MutationObserver(() => { const t = document.querySelector('.dc-toast.on'); if (t) window.__toast(t.textContent) }).observe(document.querySelector('.dc-toast'), { childList: true, subtree: true, attributes: true }))
   await mode(page, 'Suggesting')
-  await caretAfter(page, 'that was the point.')
-  await page.keyboard.type(' Zed.')
-  await until(page, () => window.__ed.state.notes.some(n => n.kind === 'suggestion' && n.state === 'open'))
-  let open1 = await openSuggestions(page)
-  assert.equal(open1.length, 1)
-  await page.click(`.dc-card[data-id="${open1[0].id}"]`)
-  await page.click('.dc-card.on .dc-sm.ok')
-  await until(page, () => !window.__ed.state.notes.some(n => n.kind === 'suggestion' && n.state === 'open'))
-  let d = await disk(p)
-  assert.ok(d.text.includes('that was the point. Zed. The baker'), d.text)
-  // Type again, elsewhere.
-  await caretAfter(page, 'roots are:')
-  await page.keyboard.type(' Yak.')
-  await until(page, () => window.__ed.state.notes.some(n => n.kind === 'suggestion' && n.state === 'open'))
-  await page.waitForTimeout(400)
-  const editorText = await page.evaluate(() => window.__ed.text())
-  d = await disk(p)
-  assert.equal(editorText, d.text, 'the editor holds the stored text (the accept stands)')
-  const open2 = await openSuggestions(page)
-  assert.equal(open2.length, 1, `one open suggestion, not a copy of the accepted one: ${JSON.stringify(open2)}`)
-  // Anchored on the word before it (a passage is never empty), where it was typed.
-  assert.equal(open2[0].quote.trim(), 'are:')
-  assert.equal(open2[0].replacement.replace(/\s+/g, ' ').trim(), 'are: Yak.')
-  const side = d.sidecar.threads.filter(t => t.state === 'open')
-  assert.equal(side.length, 1)
-  assert.equal(side[0].anchor.quote.trim(), 'are:')
-  assert.equal(d.text.slice(side[0].where.start, side[0].where.end).trim(), 'are:')
-  // Drawn as an insertion: nothing struck, only the new words.
-  const drawn = await page.evaluate((id) => ({ del: document.querySelectorAll(`.dc-sg-del[data-note="${id}"]`).length, ins: document.querySelector(`.dc-sg-ins[data-note="${id}"]`)?.textContent }), open2[0].id)
-  assert.deepEqual({ ...drawn, ins: drawn.ins?.trim() }, { del: 0, ins: 'Yak.' })
-  await page.click(`.dc-card[data-id="${open2[0].id}"]`)
-  assert.match(await page.textContent('.dc-card.on .dc-stl'), /^Add “Yak\.”/)
-  await page.click('.dc-card.on .dc-sm.ok')
-  await until(page, () => !window.__ed.state.notes.some(n => n.kind === 'suggestion' && n.state === 'open'))
-  d = await disk(p)
-  assert.ok(d.text.includes('what roots are: Yak. not comfort'), d.text)
-  assert.equal(d.text.split('Zed.').length, 2, 'Zed. once')
-  assert.equal(await page.evaluate(() => window.__ed.text()), d.text)
-  // Accept's Undo puts the words back and the suggestion with them.
-  assert.ok(toasts.some(t => /Accepted/.test(t) && /Undo/.test(t)), `Accept's toast has Undo: ${toasts}`)
-  await page.click('.dc-toast.on button')
-  await until(page, () => window.__ed.state.notes.some(n => n.kind === 'suggestion' && n.state === 'open'))
-  d = await disk(p)
-  assert.ok(d.text.includes('what roots are: not comfort'), d.text)
-  assert.ok(!toasts.some(t => /Mismatched|change set|TypeError|RangeError/i.test(t)), `no library error in a toast: ${toasts}`)
+  return { p, page }
+}
+
+const TEXT = '# Roots\n\nThe first winter I stayed, nothing happened, and that was the point. The baker learned my order. The man with the grey dog started nodding.\n\nI think this is what roots are: not comfort, but accountability.\n'
+
+test('Suggesting: the walk\'s two repros, with real pauses', { skip }, async () => {
+  await start()
+  // Repro 1: type, pause, type, accept.
+  let { p, page } = await suggestDoc(TEXT)
+  await caretAfter(page, 'learned my order.')
+  await page.keyboard.type(' Aaa.')
+  await page.waitForTimeout(PAUSE)
+  let c = await caretPos(page)
+  assert.ok(c.split('|')[0].endsWith('order. Aaa.') && c.split('|')[1].startsWith(' The man'), `the pause left the caret where it was: ${c}`)
+  await page.keyboard.type(' Bbb.')
+  c = await caretPos(page)
+  assert.ok(c.split('|')[0].endsWith('Aaa. Bbb.') && c.split('|')[1].startsWith(' The man'), `the caret moved only by the keys: ${c}`)
+  await page.waitForTimeout(PAUSE)
+  assert.equal((await mineOpen(p)).length, 1, 'one suggestion, grown')
+  const seen = await shown(page)
+  assert.ok(seen.includes('my order. Aaa. Bbb. The man'), seen)
+  await shot(page, 'suggest-bursts')
+  await closeMine(p, 'accept')
+  assert.equal(body((await disk(p)).text), body(seen))
+  await page.done()
+  // Repro 2: type, pause, type, pause, Backspace.
+  ;({ p, page } = await suggestDoc(TEXT))
+  await caretAfter(page, 'nothing happened,')
+  await page.keyboard.type(' aa')
+  await page.waitForTimeout(PAUSE)
+  await page.keyboard.type(' bb')
+  await page.waitForTimeout(PAUSE)
+  await page.keyboard.press('Backspace')
+  await page.waitForTimeout(PAUSE)
+  const two = await shown(page)
+  assert.ok(two.includes('nothing happened, aa b and that'), two)
+  const open2 = await mineOpen(p)
+  assert.equal(open2.length, 1, JSON.stringify(open2.map(n => [n.anchor.quote, n.replacement])))
+  await closeMine(p, 'reject')
+  assert.equal(body((await disk(p)).text), body(TEXT), 'reject restores the original')
+  await page.waitForTimeout(2200)
+  assert.equal(body(await shown(page)), body(TEXT), 'and the editor shows it')
   assert.deepEqual(page.errors, [])
   await page.done()
 })
 
-test('Suggesting: type, delete a word, accept one, reject the other: no phantom copy, even after a reload', { skip }, async () => {
+// Each case: where the caret goes, then bursts (typed text, or {bs: n}),
+// each followed by a pause longer than the autosave.
+const CASES = [
+  ['at the start of a word', 'The baker', -5, ['Old ', 'er ']],
+  ['in the middle of a word', 'The ba', 0, ['xx', 'yy']],
+  ['at the end of a word', 'The baker', 0, ['s', ' too']],
+  ['before punctuation', 'my order', 0, [' please', ' now']],
+  ["at a paragraph's end", 'started nodding.', 0, [' Then', ' he left.']],
+  ['with Backspace across what was typed', 'the grey', 0, [' old', { bs: 8 }, ' white']],
+  ['at the very start of the text', '', 0, ['Note: ', 'read me. ']],
+]
+
+for (const [name, after, shift, bursts] of CASES) {
+  for (const how of ['accept', 'reject']) {
+    test(`Suggesting in bursts ${name}, then ${how}`, { skip }, async () => {
+      await start()
+      const { p, page } = await suggestDoc(TEXT)
+      if (after) await caretAfter(page, after)
+      else await page.evaluate(() => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: 0 } }) })
+      if (shift) for (let i = 0; i < -shift; i++) await page.keyboard.press('ArrowLeft')
+      for (const b of bursts) {
+        if (typeof b === 'string') await page.keyboard.type(b)
+        else for (let i = 0; i < b.bs; i++) await page.keyboard.press('Backspace')
+        const typed = await caretPos(page)
+        if (typeof b === 'string') assert.ok(typed.split('|')[0].endsWith(b.slice(-12)), `the caret is after what was typed: ${typed}`)
+        await page.waitForTimeout(PAUSE)
+        assert.ok(sameCaret(await caretPos(page), typed), `the pause did not move the caret: ${typed} then ${await caretPos(page)}`)
+      }
+      const seen = await shown(page)
+      assert.ok((await mineOpen(p)).length <= 1, 'one run in one place is one suggestion')
+      await closeMine(p, how)
+      const d = body((await disk(p)).text)
+      assert.equal(d, how === 'accept' ? body(seen) : body(TEXT))
+      await page.waitForTimeout(2000)
+      assert.equal(body(await shown(page)), d, 'the editor shows what is stored')
+      assert.deepEqual(page.errors, [])
+      await page.done()
+    })
+  }
+}
+
+test('Suggesting next to and inside someone else\'s suggestion, and with a change on disk mid-pause', { skip }, async () => {
   await start()
-  const p = await newDoc('# Two\n\nThe baker learned my order. The man with the grey dog started nodding.\n')
-  let page = await open({ doc: p })
+  const p = await newDoc(TEXT)
+  await api(p, 'doc/notes', 'POST', { kind: 'suggestion', quote: 'the grey dog', replacement: 'the black dog', text: '' }, 'ada')
+  const page = await open({ doc: p })
   await mode(page, 'Suggesting')
-  await caretAfter(page, 'learned my order.')
-  await page.keyboard.type(' She smiled.')
-  await page.waitForTimeout(2300)
-  await caretAfter(page, 'the grey')
-  for (let i = 0; i < 5; i++) await page.keyboard.press('Backspace')
-  await until(page, () => window.__ed.state.notes.filter(n => n.kind === 'suggestion' && n.state === 'open').length === 2)
-  const both = await openSuggestions(page)
-  const ins = both.find(s => s.replacement.includes('smiled'))
-  const del = both.find(s => s !== ins)
-  // The insertion is drawn and described as one.
-  const drawn = await page.evaluate((id) => ({ del: document.querySelectorAll(`.dc-sg-del[data-note="${id}"]`).length, ins: document.querySelector(`.dc-sg-ins[data-note="${id}"]`)?.textContent }), ins.id)
-  assert.deepEqual({ ...drawn, ins: drawn.ins?.trim() }, { del: 0, ins: 'She smiled.' })
-  await shot(page, 'pure-insertion')
-  await page.click(`.dc-card[data-id="${ins.id}"]`)
-  await page.click('.dc-card.on .dc-sm.ok')
-  await until(page, (id) => window.__ed.state.notes.find(n => n.id === id)?.state === 'accepted', ins.id)
-  await page.click(`.dc-card[data-id="${del.id}"]`)
-  await page.click('.dc-card.on .dc-sm:has-text("Reject")')
-  await until(page, () => !window.__ed.state.notes.some(n => n.kind === 'suggestion' && n.state === 'open'))
-  await page.waitForTimeout(2500)
-  assert.deepEqual(await openSuggestions(page), [])
+  await caretAfter(page, 'the grey dog')
+  await page.keyboard.type(' too')
+  await page.waitForTimeout(PAUSE)
+  await caretAfter(page, 'the gr')
+  await page.keyboard.type('ee')
+  await page.waitForTimeout(PAUSE)
+  // someone saves elsewhere in the doc while I pause
+  const d0 = (await disk(p)).text
+  await outside(p, d0.replace('accountability', 'accountability, slowly'))
+  await page.waitForTimeout(PAUSE)
+  await caretAfter(page, 'not comfort')
+  await page.keyboard.type(' at all')
+  await page.waitForTimeout(PAUSE)
+  const seen = await shown(page)
+  assert.ok(seen.includes('slowly') && seen.includes('greeey dog too') && seen.includes('comfort at all'), seen)
+  await closeMine(p, 'accept')
+  assert.equal(body((await disk(p)).text), body(seen))
+  // Ada's is still there, open, on what is left of its words or changed
+  const ada = (await api(p, 'doc', 'GET')).notes.filter(n => n.author.id === 'ada' && n.state === 'open')
+  assert.equal(ada.length, 1)
+  assert.deepEqual(page.errors, [])
   await page.done()
-  page = await open({ doc: p })
-  assert.deepEqual(await openSuggestions(page), [], 'none after a reload either')
-  const d = await disk(p)
-  assert.ok(d.text.includes('my order. She smiled. The man with the grey dog'), d.text)
-  assert.equal(await page.evaluate(() => window.__ed.text()), d.text)
-  await page.done()
+})
+
+// Seeded runs: type, pause (sent at once), delete, move, then accept or
+// reject everything. After each, what is stored is what was on the screen.
+const FUZZ = Number(process.env.DC_FUZZ || 200)
+test(`Suggesting, ${FUZZ} seeded runs of typing, pausing, deleting, accepting and rejecting`, { skip, timeout: 1800000 }, async () => {
+  await start()
+  const WORDS = [' Aaa.', ' bb', 'x', ',', ' cc dd', '.', ' ']
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 850 } })
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  let failures = []
+  const only = process.env.DC_SEED ? Number(process.env.DC_SEED) : null
+  for (let seed = only || 1; seed <= (only || FUZZ); seed++) {
+    let s = seed * 2654435761 >>> 0
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const p = await newDoc(TEXT)
+    await page.goto(`${base}/?path=${encodeURIComponent(p)}`)
+    await page.waitForSelector('.cm-content')
+    await mode(page, 'Suggesting')
+    const len = await page.evaluate(() => window.__ed.view.state.doc.length)
+    await page.evaluate((at) => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: at } }) }, 9 + Math.floor(r() * (len - 9)))
+    const log = []
+    for (let step = 0; step < 10; step++) {
+      const k = r()
+      if (k < 0.45) { const w = WORDS[Math.floor(r() * WORDS.length)]; log.push(`type ${JSON.stringify(w)}`); await page.keyboard.type(w) }
+      else if (k < 0.6) { const n = 1 + Math.floor(r() * 4); log.push(`bs ${n}`); for (let i = 0; i < n; i++) await page.keyboard.press('Backspace') }
+      else if (k < 0.72) { const n = 1 + Math.floor(r() * 6); const key = r() < 0.5 ? 'ArrowLeft' : 'ArrowRight'; log.push(`${key} ${n}`); for (let i = 0; i < n; i++) await page.keyboard.press(key) }
+      else { log.push('pause'); const c = await caretPos(page); await settle(page); const c2 = await caretPos(page); if (!sameCaret(c2, c)) failures.push(`seed ${seed}: the pause moved the caret ${JSON.stringify(c)} -> ${JSON.stringify(c2)} (${log.join(', ')})`) }
+    }
+    await settle(page)
+    const seen = await shown(page)
+    const how = r() < 0.5 ? 'accept' : 'reject'
+    await closeMine(p, how)
+    const d = body((await disk(p)).text)
+    const want = how === 'accept' ? body(seen) : body(TEXT)
+    if (d !== want) failures.push(`seed ${seed} (${how}): stored ${JSON.stringify(d.slice(9, 200))} but showed ${JSON.stringify(want.slice(9, 200))} after ${log.join(', ')}`)
+    if (failures.length > 5) break
+  }
+  await ctx.close()
+  assert.deepEqual(failures, [])
+  assert.deepEqual(errors, [])
 })
 
 test('an open doc takes in a change on disk within two seconds, keeping the caret and the scroll', { skip }, async () => {

@@ -333,7 +333,16 @@ class Service_(unittest.TestCase):
     def test_revision_alone(self):
         store, svc = make()
         got = svc.revision(OWNER, *self.P)
-        self.assertEqual(got, {"revision": svc.get(OWNER, *self.P)["revision"]})
+        self.assertEqual(got, {"revision": svc.get(OWNER, *self.P)["revision"], "notes": None})
+        # a note from anyone moves the notes' revision, not the doc's
+        self.comment(svc, "eighteen months")
+        first = svc.revision(OWNER, *self.P)
+        self.assertIsNotNone(first["notes"])
+        nid = svc.get(OWNER, *self.P)["notes"][0]["id"]
+        svc.reply(store.agent("ada"), *self.P, nid, "A reply")
+        second = svc.revision(OWNER, *self.P)
+        self.assertEqual(second["revision"], first["revision"])
+        self.assertNotEqual(second["notes"], first["notes"])
 
     def test_reject_leaves_text(self):
         store, svc = make()

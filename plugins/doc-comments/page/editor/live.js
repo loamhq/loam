@@ -474,6 +474,7 @@ function notesDecos(state, notes) {
   for (const n of notes) {
     if (n.from == null || n.to == null || n.to < n.from || n.to > state.doc.length) continue
     const on = n.focus ? ' on' : n.peek ? ' peek' : ''
+    if (n.kind === 'draft') continue    // one's own, drawn live over real text (liveSuggest)
     if (n.kind === 'suggestion') {
       // Only what changes is drawn: a typed insertion is its new words alone,
       // with nothing struck (textdiff.js, suggestionShape).
@@ -528,16 +529,20 @@ export const suggestBase = StateField.define({
 })
 
 class DelWidget extends WidgetType {
-  constructor(text) { super(); this.text = text }
-  eq(o) { return o.text === this.text }
-  toDOM() { return h('del', { class: 'dc-sg-live-del', text: this.text }) }
+  constructor(text, id = null, extra = '') { super(); this.text = text; this.id = id; this.extra = extra }
+  eq(o) { return o.text === this.text && o.id === this.id && o.extra === this.extra }
+  toDOM() { return h('del', { class: `dc-sg-live-del${this.extra}`, 'data-note': this.id || null, text: this.text }) }
+  ignoreEvent() { return false }
 }
 
-export function liveSuggest(hunksOf) {
+// `noteFor(from, to)`, given a changed run in the stored text, names the
+// draft it belongs to and how it is drawn ({id, on}), so the live marks of
+// one's own suggestions focus their card like any other passage.
+export function liveSuggest(hunksOf, noteFor = () => null) {
   return ViewPlugin.fromClass(class {
     constructor(view) { this.decorations = this.build(view) }
     update(u) {
-      if (u.docChanged || u.transactions.some(t => t.effects.some(e => e.is(setSuggestBase)))) this.decorations = this.build(u.view)
+      if (u.docChanged || u.transactions.some(t => t.effects.some(e => e.is(setSuggestBase) || e.is(setNotes)))) this.decorations = this.build(u.view)
     }
     build(view) {
       const base = view.state.field(suggestBase, false)
@@ -548,8 +553,10 @@ export function liveSuggest(hunksOf) {
       let delta = 0
       for (const c of hunksOf(base, now)) {
         const at = c.from + delta
-        if (c.to > c.from) out.push(Decoration.widget({ widget: new DelWidget(base.slice(c.from, c.to)), side: -1 }).range(at))
-        if (c.insert) out.push(Decoration.mark({ class: 'dc-sg-live-ins' }).range(at, at + c.insert.length))
+        const n = noteFor(c.from, c.to)
+        const extra = n ? `${n.on ? ' on' : ''}${n.peek ? ' peek' : ''}` : ''
+        if (c.to > c.from) out.push(Decoration.widget({ widget: new DelWidget(base.slice(c.from, c.to), n?.id, extra), side: -1 }).range(at))
+        if (c.insert) out.push(Decoration.mark({ class: `dc-sg-live-ins${extra}`, attributes: n ? { 'data-note': n.id } : {} }).range(at, at + c.insert.length))
         delta += c.insert.length - (c.to - c.from)
       }
       return Decoration.set(out, true)

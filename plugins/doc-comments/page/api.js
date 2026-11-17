@@ -42,6 +42,7 @@ export function docApi({ base, root, path, headers = {}, fetchImpl = (...a) => f
     accept: (id) => note(id, 'accept'),
     reject: (id) => note(id, 'reject'),
     reattach: (id, body) => note(id, 'reattach', body),
+    withdraw: (id) => note(id, 'withdraw'),
     edit: (id, reply, text) => req('PATCH', `doc/notes/${encodeURIComponent(id)}`, { reply, text }),
     history: () => req('GET', 'doc/history'),
     version: (save) => req('GET', 'doc/version', { save }),

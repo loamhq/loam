@@ -187,7 +187,10 @@
 .dc .dc-sg.on { background: var(--dc-fillon); }
 .dc.mode-view .dc-sg-del:not(.on):not(.peek) { opacity: .9; }
 .dc .dc-sg-live-del { color: var(--dc-ink3); text-decoration: line-through 1px var(--dc-ink3); margin-right: 3px; }
-.dc .dc-sg-live-ins { color: var(--dc-accent); text-decoration: underline 1px var(--dc-ul); text-underline-offset: 5px; }
+.dc .dc-sg-live-ins { color: var(--dc-accent); text-decoration: underline 1px var(--dc-ul); text-underline-offset: 5px; border-radius: 4px; transition: background .18s; }
+.dc .dc-sg-live-ins[data-note], .dc .dc-sg-live-del[data-note] { cursor: text; }
+.dc .dc-sg-live-ins.peek, .dc .dc-sg-live-del.peek { background: var(--dc-fill); }
+.dc .dc-sg-live-ins.on, .dc .dc-sg-live-del.on { background: var(--dc-fillon); }
 /* Show authors */
 .dc-legend { position: absolute; top: 14px; left: 76px; display: flex; gap: 14px; font-size: 12px; color: var(--dc-ink3); opacity: 0; transform: translateY(-3px); transition: opacity .2s, transform .2s var(--dc-ease); pointer-events: none; }
 .dc-legend.on { opacity: 1; transform: none; }

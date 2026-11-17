@@ -137,10 +137,20 @@ class Service:
             return self._answer(who, doc, sc)
 
     def revision(self, who: dict, root: str, path: str) -> dict:
-        """Only the doc's revision: what an open editor asks every second or
-        two, to take in a change made on disk without reading it all."""
+        """Only the doc's revision and its notes' (the sidecar's): what an
+        open editor asks every second or two, to take in a change made on
+        disk, or a note, reply or close from anyone, without reading it all."""
         self._need(who, "view")
-        return {"revision": self.store.read_doc(root, path)["revision"]}
+        doc = self.store.read_doc(root, path)
+        notes = None
+        did = fm.doc_id(doc["text"])
+        if did:
+            try:
+                notes = self.store.read_doc(self.store.root, self.store.sidecar_path(did))["revision"]
+            except NoteError as exc:
+                if exc.status != 404:
+                    raise
+        return {"revision": doc["revision"], "notes": notes}
 
     # -- writing ----------------------------------------------------------------------
 
@@ -314,6 +324,12 @@ class Service:
         sc_mod.relocate(sc, stored["text"], ops)
         self._write_sidecar(sc, sc_rev)
         return self._answer(who, {**doc, **stored}, sc)
+
+    def withdraw(self, who, root, path, tid) -> dict:
+        """Take back one's own open suggestion entirely (Suggesting, when the
+        words typed are deleted again): it leaves no trace in Resolved."""
+        self._need(who, "suggest")
+        return self._note_op(who, root, path, lambda d, sc: sc_mod.withdraw(sc, tid, who))
 
     def reject(self, who, root, path, tid) -> dict:
         self._need(who, "accept")

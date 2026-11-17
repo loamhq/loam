@@ -261,6 +261,20 @@ def supersede(sc: dict, old_id: str, new: dict, author: dict) -> None:
     sc["threads"].remove(old)
 
 
+def withdraw(sc: dict, tid: str, author: dict) -> None:
+    note = find(sc, tid)
+    if note["kind"] != "suggestion" or note["author"]["id"] != author["id"]:
+        raise NoteError(403, "only its author takes back a suggestion")
+    if note["state"] != OPEN:
+        raise NoteError(409, f"that suggestion is already {note['state']}")
+    if note.get("replies"):
+        # Someone answered it: it closes (kept with its replies) rather than vanish.
+        note["state"] = "rejected"
+        note["closed"] = {"by": author, "at": now_iso()}
+        return
+    sc["threads"].remove(note)
+
+
 def delete_reply(sc: dict, tid: str, rid: str, author: dict) -> None:
     note = find(sc, tid)
     for i, r in enumerate(note["replies"]):

@@ -20,6 +20,12 @@ export function changes(a, b) {
   while (head < n && a.charCodeAt(head) === b.charCodeAt(head)) head++
   let tail = 0
   while (tail < n - head && a.charCodeAt(a.length - 1 - tail) === b.charCodeAt(b.length - 1 - tail)) tail++
+  // Never inside a word: "and" becoming "aa and" is "aa " put before "and",
+  // not "a" kept and "a an" put inside it (which drew a suggestion of half
+  // a word).
+  const w = (c) => c !== undefined && /\w/u.test(c)
+  while (head > 0 && w(a[head - 1]) && (w(a[head]) || w(b[head]))) head--
+  while (tail > 0 && w(a[a.length - tail]) && (w(a[a.length - tail - 1]) || w(b[b.length - tail - 1]))) tail--
   const ma = a.slice(head, a.length - tail)
   const mb = b.slice(head, b.length - tail)
   if (!ma || !mb) return [{ from: head, to: head + ma.length, insert: mb }]
