@@ -39,17 +39,29 @@ adds and does not rewrite (below, "What step 2 adds").
   in the theme's accent: no red, no green.
 - **A comment is resolved** (✓ in the focused note's corner, with Undo); **a
   suggestion is accepted or rejected**. Closed notes sit behind a count in
-  the ⋯ menu (Resolved), each reopenable (an accepted suggestion is part of
-  the text: History restores the text from before it).
+  the ⋯ menu (Resolved), each reopenable, its replies opened in place (an
+  accepted suggestion is part of the text: Accept's toast has Undo, and later
+  History restores the text from before it). A person changes their own
+  note's words and their own replies, and removes their own replies, from
+  the focused note.
 - **⋯** holds Show authors (tints the text by who wrote it, off by default),
-  History (every save, newest first, each restorable, and the Detached
-  notes, each re-attachable), Resolved, and This file… (Files' own menu:
-  rename, move, copy link, download).
+  History (every save, newest first; a click opens that version, marked where
+  it differs from now, with Restore there; and the Detached notes, each
+  re-attachable), Resolved, and This file… (Files' own menu: rename, move,
+  copy link, download).
+- **A note whose words changed since** shows a small glyph at rest and, when
+  focused, says so in a quiet line with the words it was about. On the
+  phone, the thread's sheet scrolls its passage into view above it.
+- **A doc with no notes** keeps its text column centred; it moves aside when
+  the first note appears.
 - **Formatting, desktop**: no toolbar. Selecting text in Editing shows one
   popup: Aa (block type), bold, italic, strikethrough, link, code, then
   Comment and Suggest; each button's tooltip names the Markdown and the
-  shortcut. On an empty line a faint "+" sits in the gutter, and "/" opens
-  the same block menu, each row showing its Markdown. Typed Markdown keeps
+  shortcut. Aa turns the selection into another kind of block (a code
+  block, a divider and a table are added, not turned into, so they are
+  offered only where a block is added). On an empty line a faint "+" sits in
+  the gutter, and "/" opens the block menu, each row showing its Markdown,
+  below the caret when it fits there. Typed Markdown keeps
   working: the marks show around the caret and hide elsewhere.
 - **Phone**: dots in the gutter, a thread in a bottom sheet, no popup over a
   selection (the phone's own menu lives there). The bar above the keyboard
@@ -90,6 +102,7 @@ core gained a general hook any plugin can use:
 | an agent tool's environment | lib/loam_contributions.py | `LOAM_AGENT`, `LOAM_LANE`, `LOAM_VAULT`, `LOAM_WORKSPACES`, `LOAM_PLUGIN_URL` (docs/plugins.md) |
 | a plugin's kept vault folder | lib/loam_skills.py, lib/loam_update.py, lib/loam_plugin_servers.py | `<system>/Loam/data/<id>/`, kept by updates, told as `LOAM_VAULT_DATA` (docs/update.md) |
 | a save made for a persona | lib/loam_files.py | `PUT /v1/files/text` takes `by`, and the provenance stamp names that persona (broker/README.md) |
+| a place a starting plugin names | app `public/plugin-loader.js` (`pending`), `public/files.js` | while a plugin whose manifest names `files.viewer` is starting (and before the catalog is read), Files holds an empty place for a Markdown file rather than flash its own preview first |
 
 ### The server holds the model
 
@@ -178,7 +191,62 @@ files while the plugin is on.
 Suggesting works the same way from the other side: what is typed while
 Suggesting is shown live (struck old words, new words in the accent), and on
 a pause each changed run of words becomes a suggestion; a run that touches
-one of your own open suggestions grows it rather than starting another.
+one of your own open suggestions grows it rather than starting another (the
+new one is sent with `supersedes`, and the server puts it in the old one's
+place, replies and all; anyone else's suggestion is never replaced).
+
+The live marks are drawn over **the text as stored**: whenever the stored
+text moves (an accept, someone's save, an edit on disk), that is the base
+Suggesting draws from. Until 2026-11-17 it kept the text from when
+Suggesting began, so after an accept the next keystroke suggested the
+accepted words again, put the editor back to the old text and anchored the
+new suggestion as far off as the accepted words were long.
+
+A typed insertion has to be anchored on a word beside it (a passage is never
+empty), so "order." becomes "order. She smiled.". It is drawn and described
+by what changes (`textdiff.js`, `suggestionShape`): only the new words, in
+the accent, and "Add “She smiled.”"; a deletion likewise. Accepting one
+replaces the passage as it always did.
+
+**Accept's Undo** reopens the suggestion: while its accept is still the
+doc's last change, the server writes the text from just before it back (a
+save of its own) and the suggestion is open again; later than that, History
+restores.
+
+### Changes on disk
+
+An open doc asks the plugin's server for its revision alone
+(`GET doc/revision`) every 1.5 s while the page is visible. A new one is
+read in quietly: with nothing unsaved the editor takes the new text (the
+caret and the passages map through it, and the first line in view stays
+where it was on the screen); with unsaved edits they are saved at once, and
+the save merges. The window regaining focus does the same.
+
+### Typing
+
+Enter in a paragraph or a heading starts a new paragraph (a blank line on
+disk); Shift-Enter is one line break. In a list or a quote Enter continues
+it, and Enter on an empty item ends it with a blank line, so on disk what
+follows is not still inside the last item. Code blocks, tables and the
+frontmatter keep CodeMirror's own Enter. Typed `[] ` at the start of a line
+is a checklist item, and a third backtick on an empty line closes the code
+block it opens. Every doc opens in Editing; a mode lasts while that doc is
+open.
+
+### Placing things beside the text
+
+Loam zooms its page (Settings, Size: `body { zoom }`; the owner's desktop
+was at 90% on 2026-11-16). A rectangle read from the DOM, and CodeMirror's
+line heights, are then in screen pixels, while a `top` set on an element
+inside the page is in the page's own, so everything placed from a line
+drifted by a tenth of its distance: 29 px by the first paragraph, 200 px by
+the end of a long doc. Margin notes, gutter marks, the phone's dots, the
+"+", the selection popup, the link field and the block menu all convert
+through one factor (`zoom()` in `editor.js`). A picture tells CodeMirror
+when it arrives, so its height map (which places what is below it) is
+right. `test/browser.test.mjs` holds each note within 4 px of its passage's
+first line at 1280×850 and 430×900, at 100% and 90%, after load, scrolling,
+a resize and an edit above.
 
 ### The sidecar
 
@@ -330,8 +398,15 @@ staging copy (`next.<domain>`). It ships `staging`.
 
 - `python3 plugins/doc-comments/test/test_model.py`, `node --test
   plugins/doc-comments/test/*.mjs`, `python3 tests/test_doc_comments.py`.
+- The browser suite, `test/browser.test.mjs`, needs Playwright and a
+  Chromium, which Loam does not ship; without `LOAM_PLAYWRIGHT` (the path to
+  a Playwright install's `index.mjs`; `LOAM_CHROME` may name the browser) it
+  is skipped. `DC_SHOTS=<dir>` keeps its screenshots.
 - `python3 plugins/doc-comments/test/dev_server.py` serves the editor alone
-  on a seeded in-memory doc at `http://127.0.0.1:8790/` (`?phone`, `?dark`),
-  with the real server code behind it.
+  on seeded in-memory docs at `http://127.0.0.1:8790/` (`?phone`, `?dark`,
+  `?zoom=0.9` as Loam's Size setting zooms, `?path=Essays/drafts/Long.md`
+  for a long doc with every kind of block), with the real server code behind
+  it; `POST /dev/outside` stands in for an edit on disk and `GET /dev/file`
+  shows what is stored.
 - `plugins/doc-comments/tools/vendor/build.sh` rebuilds the CodeMirror
   module from the pinned versions.

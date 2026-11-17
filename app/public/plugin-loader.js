@@ -34,7 +34,12 @@ export function pluginData(request) {
   }
 }
 export function createPluginLoader({ registry, request, ui, changed = () => {}, importer = url => import(url), themes = async () => {}, fallback = [], activationMs = 15000 }) {
-  const st = { rows: [], loading: false, loaded: false, error: '', failures: new Map(), writing: new Set() }
+  const st = { rows: [], loading: false, loaded: false, known: false, error: '', failures: new Map(), writing: new Set() }
+  // Plugins whose page module is still starting, by id. A place a starting
+  // plugin names in its manifest (`places`) is "pending": the page may hold
+  // its own drawing there for that moment, so a plugin's view is not preceded
+  // by a flash of core's (Files' Markdown preview before an editor plugin).
+  const settling = new Set()
   const active = new Map(), settings = new Map(), css = new Map()
   const styles = globalThis.document?.head ? createPluginStyles() : null
   let flight = null, reread = false, serial = 0, disposed = false
@@ -68,7 +73,11 @@ export function createPluginLoader({ registry, request, ui, changed = () => {}, 
       const key = JSON.stringify(row)
       if (!css.has(key) && styles) css.set(key, styles.add(row, 'theme.css', local))
     }
+    for (const row of eligible) if (!active.has(row.id)) settling.add(row.id)
     const activate = async row => {
+      try { await activateRow(row) } finally { if (settling.delete(row.id)) changed() }
+    }
+    const activateRow = async row => {
       if (disposed || active.has(row.id)) return
       if (!Number.isInteger(row.api) || row.api > 0) { st.failures.set(row.id, `This plugin needs page API ${row.api}; this page supports API 0.`); return }
       const api = scope(row, local), entry = { signature: JSON.stringify(row), scope: api, cleanup: null, cancelled: false }
@@ -122,6 +131,7 @@ export function createPluginLoader({ registry, request, ui, changed = () => {}, 
       }
       if (disposed) break
       st.rows = rows.map((row, index) => ({ ...row, key: rowKey(row, index) }))
+      st.known = true
       await apply(rows, local)
       st.loaded = true
     } while (reread && !disposed)
@@ -147,7 +157,18 @@ export function createPluginLoader({ registry, request, ui, changed = () => {}, 
     }
     finally { await refresh(); st.writing.delete(path); changed() }
   }
-  return { st, refresh, failed, scope,
+  // Whether a place may still get a plugin's view: before the catalog is read
+  // at all, or while a plugin that names the place is starting.
+  function pending(place) {
+    if (disposed) return false
+    if (!st.known) return true
+    for (const id of settling) {
+      const row = st.rows.find(r => r.id === id && r.effective !== false)
+      if (row && Array.isArray(row.places) && row.places.includes(place)) return true
+    }
+    return false
+  }
+  return { st, refresh, failed, scope, pending,
     toggle: (id, on) => write('PATCH', `/plugins/${segment(id)}`, { on }),
     install: body => write('POST', '/plugins', body),
     remove: id => write('DELETE', `/plugins/${segment(id)}`),

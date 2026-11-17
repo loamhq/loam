@@ -115,3 +115,20 @@ test('an initially unreachable catalog cannot re-enable a plugin whose host stat
   assert.match(loader.st.rows[0].warnings[0], /unknown/)
   await loader.dispose()
 })
+
+test('a place a starting plugin names is pending until it has started (no flash of core’s view first)', async () => {
+  let finish, began
+  const started = new Promise(resolve => { began = resolve })
+  const rows = [row('viewer', { places: ['files.viewer'] }), row('other', { places: ['app.overlay'] })]
+  const loader = createPluginLoader({ registry: createCoreRegistry(), ui: {}, request: async () => ({ plugins: rows }),
+    importer: async url => ({ async activate() { if (url.includes('/viewer/')) { began(); await new Promise(resolve => { finish = resolve }) } } }) })
+  assert.equal(loader.pending('files.viewer'), true, 'before the catalog is read, anything may come')
+  const reading = loader.refresh()
+  await started
+  assert.equal(loader.pending('files.viewer'), true, 'its plugin is starting')
+  assert.equal(loader.pending('core.composer'), false, 'no starting plugin names it')
+  finish()
+  await reading
+  assert.equal(loader.pending('files.viewer'), false)
+  await loader.dispose()
+})

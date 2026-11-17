@@ -90,6 +90,13 @@ def test_suites():
     check("the page module registers nothing without files.own, and cleans up", r.returncode, 0)
     if r.returncode:
         print(r.stdout[-3000:], r.stderr[-3000:])
+    # The editor in a real browser (positions, typing, Suggesting): skipped
+    # unless LOAM_PLAYWRIGHT names a Playwright install (the plugin's README).
+    r = subprocess.run([node, "--test", "--test-timeout=120000", str(PLUGIN / "test" / "browser.test.mjs")],
+                       capture_output=True, text=True, timeout=900)
+    check("the editor in a browser (or skipped without Playwright)", r.returncode, 0)
+    if r.returncode:
+        print(r.stdout[-3000:], r.stderr[-3000:])
 
 
 # -- a real broker on a scratch vault ------------------------------------------------

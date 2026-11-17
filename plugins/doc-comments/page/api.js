@@ -10,14 +10,15 @@ export class ApiError extends Error {
 export function docApi({ base, root, path, headers = {}, fetchImpl = (...a) => fetch(...a) }) {
   const b = base.endsWith('/') ? base : `${base}/`
   async function req(method, route, body = null) {
-    const q = method === 'GET' ? `?${new URLSearchParams({ root, path, ...(body || {}) })}` : ''
+    const inQuery = method === 'GET' || method === 'DELETE'
+    const q = inQuery ? `?${new URLSearchParams({ root, path, ...(body || {}) })}` : ''
     let res
     try {
       res = await fetchImpl(`${b}${route}${q}`, {
         method,
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers },
-        body: method === 'GET' ? undefined : JSON.stringify({ root, path, ...(body || {}) }),
+        body: inQuery ? undefined : JSON.stringify({ root, path, ...(body || {}) }),
       })
     } catch (err) {
       throw new ApiError(0, 'Comments could not reach their server.')
@@ -31,6 +32,8 @@ export function docApi({ base, root, path, headers = {}, fetchImpl = (...a) => f
   return {
     req,
     get: () => req('GET', 'doc'),
+    revision: () => req('GET', 'doc/revision'),
+    deleteReply: (id, reply) => req('DELETE', `doc/notes/${encodeURIComponent(id)}/replies/${encodeURIComponent(reply)}`),
     save: (body) => req('POST', 'doc/save', body),
     add: (body) => req('POST', 'doc/notes', body),
     reply: (id, text) => note(id, 'replies', { text }),

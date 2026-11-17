@@ -9,9 +9,10 @@ note is that persona's. Step 2's share links will add a third caller, a
 link's visitor, through core's share door; the routes stay the same.
 
 Routes (every doc is named by ``root`` and ``path``, in the query for a GET
-and in the JSON body otherwise)::
+or a DELETE and in the JSON body otherwise)::
 
     GET    /doc                          the doc's text, revision and notes
+    GET    /doc/revision                 only its revision (an open editor's poll)
     POST   /doc/notes                    a comment or a suggestion
     POST   /doc/notes/<id>/replies       a reply
     PATCH  /doc/notes/<id>               change your own words {text, reply?}
@@ -126,6 +127,8 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
                         out["seen"] = links.seen(out["id"])
                         links.mark_seen(out["id"])
                 return 200, out
+            if method == "GET" and rest == ["revision"]:
+                return 200, service.revision(who, root, path)
             if method == "GET" and rest == ["history"]:
                 return 200, service.history(who, root, path)
             if method == "GET" and rest == ["version"]:

@@ -171,6 +171,8 @@ class Door:
         svc = self.svc
         if method == "GET" and api == []:
             return svc.get(who, root, path)
+        if method == "GET" and api == ["revision"]:
+            return svc.revision(who, root, path)
         if method == "GET" and api == ["history"]:
             return svc.history(who, root, path)
         if method == "GET" and api == ["version"]:

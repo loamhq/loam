@@ -247,6 +247,20 @@ def edit_reply(sc: dict, tid: str, rid: str | None, body: str, author: dict) -> 
     return item
 
 
+def supersede(sc: dict, old_id: str, new: dict, author: dict) -> None:
+    """Typing next to one's own open suggestion grows it: the new one (which
+    covers it) takes its place, with its replies and its words if it has
+    none of its own. Anyone else's suggestion, or a closed one, stays."""
+    old = next((t for t in sc["threads"] if t["id"] == old_id), None)
+    if not old or old is new or old["kind"] != "suggestion" or old["state"] != OPEN \
+            or old["author"]["id"] != author["id"]:
+        return
+    new["replies"] = old.get("replies", []) + new.get("replies", [])
+    if not new.get("text") and old.get("text"):
+        new["text"] = old["text"]
+    sc["threads"].remove(old)
+
+
 def delete_reply(sc: dict, tid: str, rid: str, author: dict) -> None:
     note = find(sc, tid)
     for i, r in enumerate(note["replies"]):
