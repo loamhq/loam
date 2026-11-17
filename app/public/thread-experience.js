@@ -152,3 +152,88 @@ export function liveThreadMembers(open) {
     ...open.thread.members.filter((m) => m.working || backgroundCount(m)).map((m) => m.persona)])]
     .filter((id) => threadWaiting(open, id, id, 0))
 }
+
+// "2nd draft", "3rd draft": a draft's revision as a person counts it. The
+// first draft is just the draft, so it has no label.
+export function ordinalDraft(rev) {
+  const n = Number(rev)
+  if (!Number.isInteger(n) || n <= 1) return ''
+  const mod100 = n % 100
+  const suffix = mod100 >= 11 && mod100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th')
+  return `${n}${suffix} draft`
+}
+
+// A turn that failed before the agent said anything is the provider's error,
+// not the agent's words. The broker records it two ways: Claude Code's own
+// stand-in reply (`model: "<synthetic>"`, its text the raw error), and a Loam
+// line ("Iris's turn failed: …") when the engine itself gave up. Either is
+// drawn as a system line that says what happened and what to do; the raw
+// error stays behind Details.
+const PROVIDER_ERROR_RE = /^(?:Failed to authenticate|OAuth\b|API Error|Invalid API key|Authentication\b|Not logged in|Unauthorized\b|Credit balance|Rate limit|Could not reach)/i
+const AUTH_ERROR_RE = /authenticat|oauth|expired|unauthori[sz]ed|\b401\b|\b403\b|api[_ ]?key|not logged in|log ?in again|sign ?in again|credential/i
+const QUOTA_ERROR_RE = /rate[_ ]?limit|quota|\b429\b|credit balance|usage limit|billing/i
+// Claude Code's sign-in is the person's Claude account, so the line names Claude;
+// the others by the name Settings › Providers shows.
+const PROVIDER_WORDS = { 'claude-code': 'Claude' }
+
+export function failedTurnInfo(message, { agentName = (id) => id, engineOf = () => null, providers = [] } = {}) {
+  if (!message || message.streaming) return null
+  let agent, raw, engine = message.engine ?? null
+  if (message.kind === 'system') {
+    const m = /^(.+?)['’]s turn failed:\s*([\s\S]+)$/.exec(String(message.text ?? '').trim())
+    if (!m) return null
+    agent = m[1].trim(); raw = m[2].trim(); engine ??= engineOf(agent)
+  } else {
+    const text = String(message.text ?? '').trim()
+    if (message.model !== '<synthetic>') {
+      // A real reply that happens to start like an error is the agent's own,
+      // unless the record says the turn ended in an error with nothing done.
+      if (!PROVIDER_ERROR_RE.test(text) || message.attachments?.length) return null
+      const segments = messageSegments(message)
+      const did = segments.some((p) => p.steps?.length || p.did?.length || p.plan || (p.item && p.item.kind !== 'result'))
+      if (did || !segments.some((p) => p.item?.kind === 'result' && p.item.isError)) return null
+    }
+    agent = agentName(message.author)
+    raw = text || 'The turn ended without a reply.'
+  }
+  const provider = PROVIDER_WORDS[engine] ?? providers.find((p) => p.id === engine)?.name ?? null
+  const reach = provider ? `${agent} couldn’t reach ${provider}.` : `${agent} couldn’t reach their AI provider.`
+  if (AUTH_ERROR_RE.test(raw)) return { kind: 'signin', agent, engine, provider, raw, summary: `${reach} Sign in again in Settings › Providers.`, action: 'providers' }
+  if (QUOTA_ERROR_RE.test(raw)) return { kind: 'limit', agent, engine, provider, raw, summary: `${provider ?? 'The provider'} has paused replies for now. Try again later, or see Settings › Providers.`, action: 'providers' }
+  return { kind: 'failed', agent, engine, provider, raw, summary: `${agent}’s turn didn’t finish. Send your message again, or ask another agent.`, action: null }
+}
+
+// Loam's own lines name things by id for the agents that read them: a draft
+// ("draft d-5f7081e2, revision 1"), a thread ("their first thread is
+// t-c4a782f2", "this thread is `t-…`"), a message ("m12 in t-…"). A person
+// reads words: the ids go, a revision is "2nd draft" once there is more than
+// one, and a thread is a link by its name. Returns parts: `{ text }` or
+// `{ link: { thread, title } }`.
+export function formatSystemLine(text, { threads = [] } = {}) {
+  const clean = String(text ?? '')
+    .replace(/\s*\([^()]*settings describe agent\.draft[^()]*\)/gi, '')
+    .replace(/\s*\(m[\w-]+ in t-[0-9a-f]+\)/gi, '')
+    .replace(/[;,]?\s*this thread is `?t-[0-9a-f]+`?\.?/gi, '')
+    .trim()
+
+  const made = /^Made (.+?)(?: \([\w.-]+\))?: their first thread is (t-[0-9a-f]+)\.?$/i.exec(clean)
+  if (made) {
+    const [, who, thread] = made
+    const title = threads.find((t) => t.id === thread)?.title
+    return [{ text: `Made ${who}. ` }, { link: { thread, title: title && !/^new thread$/i.test(title) ? `Their first thread: ${title}` : 'Say hello in their first thread' } }]
+  }
+  const drafted = /^(.+?) drafted a new agent: (.+?) \(draft d-[0-9a-f]+, revision (\d+)\)\.?$/i.exec(clean)
+  if (drafted) {
+    const [, by, who, rev] = drafted
+    const ord = ordinalDraft(rev)
+    return [{ text: `${by} drafted a new agent: ${who}${ord ? ` (${ord})` : ''}` }]
+  }
+  const revised = /^(.+?) revised draft d-[0-9a-f]+: (.*?), revision (\d+)(?: \([^)]*\))?\.?$/i.exec(clean)
+  if (revised) {
+    const [, by, who, rev] = revised
+    return [{ text: `${by} made a ${ordinalDraft(rev) || 'new draft'} of ${who || 'the new agent'}` }]
+  }
+  const aside = /^(.+?) set draft d-[0-9a-f]+ aside\.?$/i.exec(clean)
+  if (aside) return [{ text: `${aside[1]} set the new agent’s draft aside` }]
+  return [{ text: clean.replace(/\s*\(draft d-[0-9a-f]+(?:, revision \d+)?\)/gi, '') }]
+}

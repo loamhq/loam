@@ -128,6 +128,13 @@
 .tt-system-text { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; }
 .tt-system.expanded .tt-system-text { display:block; -webkit-line-clamp:unset; }
 .tt-system-toggle { font:inherit; color:inherit; min-height:44px; padding:4px 12px; }
+.tt-system-failed { display:flex; flex-direction:column; align-items:center; gap:8px; margin:14px auto; max-width:520px; padding:12px 16px; border-radius:16px; background:var(--paper-raised); border:1px solid var(--paper-rule); color:var(--paper-ink-2); font-size:13.5px; }
+.tt-failed-summary { margin:0; color:var(--paper-ink); }
+.tt-failed-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:10px; }
+.tt-failed-go { min-height:36px; padding:6px 14px; font-size:13px; }
+.tt-failed-details { width:100%; text-align:left; font-size:12.5px; color:var(--paper-ink-3); }
+.tt-failed-details summary { cursor:pointer; text-align:center; padding:4px 0; list-style-position:inside; }
+.tt-failed-raw { margin:8px 0 0; padding:10px 12px; border-radius:10px; background:var(--paper-page); border:1px solid var(--paper-rule); font-family:var(--font-mono); font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--paper-ink-2); }
 .tt-branch-link { color:inherit; text-decoration:underline; text-decoration-color:var(--signal-crema); text-underline-offset:3px; }
 .tt-branch-link:focus-visible { color:var(--paper-ink); text-decoration-color:var(--signal-crema); }
 @media (hover:hover) { .tt-branch-link:hover { color:var(--paper-ink); text-decoration-color:var(--signal-crema); } }

@@ -344,6 +344,8 @@ cover all eleven Palette hues, Latte tones and every shape in light/dark.
 
 Claim, first-provider setup, the hello thread, passkeys and the manual Update
 control are described in [the U4 guide](docs/first-release-u4.md).
+What a new person meets on day one (the new agent's card, Loam's lines without
+ids, failed turns, sign out, Files shortcuts, Build an app) is [the first day](docs/first-day.md).
 The standalone claim page embeds the bundled Latin Caprasimo and Figtree faces.
 After refreshing `public/fonts/`, run `node tools/embed-claim-fonts.js` to refresh
 its generated font block; `npm test` checks for drift. The claim CSP permits

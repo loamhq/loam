@@ -5,7 +5,7 @@ import { formatDateTime, formatCalendarDate } from './time.js'
 import { menuSurface } from './menu-surface.js'
 import { threadSelection } from './thread-selection.js'
 import { threadIcons, threadGlyph, threadPersona, threadSubtitle, threadActivity, threadIconState, listeningPulse, listeningRecipients, paintMention, LISTENING_INSET, listeningInset } from './thread-identity.js'
-import { threadWaiting, replyChip, replyTimestamp, composerModel, mentionChoices as choicesForMention, backgroundCount, threadBackground, memberGenerating, replyHasContent, showReply, taskTitle, taskElapsed, jobStatus, jobElapsed } from './thread-experience.js'
+import { threadWaiting, replyChip, replyTimestamp, composerModel, mentionChoices as choicesForMention, backgroundCount, threadBackground, memberGenerating, replyHasContent, showReply, taskTitle, taskElapsed, jobStatus, jobElapsed, failedTurnInfo, formatSystemLine } from './thread-experience.js'
 import { createReplySteps, memberTakingTurn } from './thread-steps.js'
 import { boardDrag } from './board-drag.js'
 import { authorMarkers } from './thread-authors.js'
@@ -30,7 +30,7 @@ import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuot
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
-export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openRef, address = () => {}, messageState = createMessageState(), sidebar = null, renderText = markdown, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
+export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, messageState = createMessageState(), sidebar = null, renderText = markdown, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -42,7 +42,14 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   const st = { available: false, checked: false, threads: [], open: null, error: '', loading: false, creating: false, query: '', fixture, manage: false,
     drafts: new Map(), boardDrafts: new Map(), quickDrafts: new Map(), refreshed: 0 }
   let transport = api, fixtureStream = null, fixtureAgents = null, fixtureProviders = null, runtimeAgents = null
-  const agentDraftController = createAgentDrafts({ api: (...args) => transport(...args), redraw, made: agent => { changedAgent(agent); load({ quiet: true }) } })
+  const agentDraftController = createAgentDrafts({
+    api: (...args) => transport(...args),
+    redraw,
+    made: agent => { changedAgent(agent); load({ quiet: true }) },
+    askChanges: () => { draft.focus(); redraw() },
+    openThread: id => open(id),
+    renderText,
+  })
   const agentDrafts = agentDraftController.st
   const loadAgentDrafts = () => agentDraftController.load(st.open?.thread.id)
   let controller = null, generation = 0, retry = null, listingRequest = 0
@@ -505,6 +512,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (e.type === 'turn.finished' && o.deleteBlocked === o.error) { o.error = ''; o.deleteBlocked = null }
     if (e.type === 'message.done') {
       refreshList(); if (o.atEnd !== false) markRead(o)
+      if (!st.fixture && e.message?.kind === 'system') agentDraftController.load(o.thread.id)
       if (!st.listLive && e.message?.kind === 'system' && o.typing.size) refreshTurn(o, e.message.id, o.eventVersion)
     }
     redraw()
@@ -622,13 +630,14 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     await open(link.thread)
     if (st.open?.thread.id === link.thread && link.message) { st.open.replyJump = link.message; st.open.jumpKind = 'quote'; redraw() }
   }
-  function create(persona = null) {
+  function create(persona = null, options = {}) {
     if (st.creating) return
     close(); enter({ kind: 'thread', id: 'new-thread' }); st.creating = true; st.error = ''
     const ticket = generation
     const o = st.open = { thread: { id: 'new-thread', title: 'New thread', default: persona, members: persona ? [{ persona, engine: 'claude-code' }] : [] },
       messages: [], loading: false, creating: true, typing: new Set(), permissions: new Map(), steps: new Map(),
-      board: { markdown: '', path: '' }, boardBusy: false, boardOpen: false }
+      board: { markdown: '', path: '' }, boardBusy: false, boardOpen: false,
+      promptTitle: options.promptTitle ?? null, promptBody: options.promptBody ?? null, promptPlaceholder: options.placeholder ?? null }
     redraw(); setTimeout(() => draft.focus(), 0)
     return transport('POST', '/threads', persona ? { persona } : {}).then((body) => {
       const thread = readThreadSummary(body)
@@ -1157,9 +1166,14 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       const names = m.joins?.names.map(name), joined = names?.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : null
       const key = `system:${st.open.thread.id}:${m.id}`, shown = openMessages.has(key)
       const id = `system-${encodeURIComponent(st.open.thread.id)}-${encodeURIComponent(m.id)}`
+      // Loam's lines name drafts, threads and messages by id for the agents;
+      // the person reads words and a thread's name (formatSystemLine).
+      const parts = (raw) => formatSystemLine(systemText(raw), { threads: st.threads })
       const content = typeof m.link?.thread === 'string'
-        ? h('a', { class: 'tt-branch-link', href: `${path(m.link.thread)}${m.link.message ? `#${encodeURIComponent(m.link.message)}` : ''}`, onclick: (e) => followThreadLink(e, m.link), text: systemText(m.text) })
-        : joined ? `${name(m.joins.actor)} brought in ${joined}.` : systemText(m.text ?? `${m.actor ? name(m.actor) : 'You'} brought in ${name(m.member_joined)}`)
+        ? h('a', { class: 'tt-branch-link', href: `${path(m.link.thread)}${m.link.message ? `#${encodeURIComponent(m.link.message)}` : ''}`, onclick: (e) => followThreadLink(e, m.link), text: parts(m.text).map((part) => part.text ?? part.link.title).join('') })
+        : joined ? `${name(m.joins.actor)} brought in ${joined}.` : parts(m.text ?? `${m.actor ? name(m.actor) : 'You'} brought in ${name(m.member_joined)}`).map((part) => part.link
+          ? h('a', { class: 'tt-branch-link', href: path(part.link.thread), onclick: (e) => followThreadLink(e, part.link), text: part.link.title })
+          : part.text)
       return h('div', { class: `exitline tt-system${shown ? ' expanded' : ''}`, key: m.id, 'data-message-id': m.id, 'data-join-count': names?.length },
         h('div', { class: 'tt-system-text', id, 'data-system-key': key }, content),
         longSystemLines.has(key) ? button(shown ? 'Show less' : 'Show more', () => { if (shown) openMessages.delete(key); else openMessages.add(key); redraw() },
@@ -1207,6 +1221,22 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       load?.status === 'error' ? h('div', { class: 'tt-steps-retry muted', role: 'status' }, 'Steps couldn’t be loaded. ', button('Try again', () => st.open.replySteps.ensure(m.id, true), { class: 'quietlink' })) : null,
       ...permissions.map(permission))
   }
+  // A turn that failed with the provider's error is a system line, not the
+  // agent speaking it: what happened, where to fix it, the raw words behind
+  // Details (failedTurnInfo).
+  function failedTurnLine(m, info) {
+    return h('div', { class: 'exitline tt-system tt-system-failed', key: m.id, 'data-message-id': m.id, 'data-failure': info.kind },
+      h('p', { class: 'tt-failed-summary', text: info.summary }),
+      h('div', { class: 'tt-failed-actions' },
+        info.action === 'providers' && openSettings ? button('Go to Providers', () => openSettings('providers'), { class: 'pillbtn tt-failed-go' }) : null,
+        h('details', { class: 'tt-failed-details', open: openMessages.has(`failed:${st.open.thread.id}:${m.id}`), ontoggle: (event) => { if (event.currentTarget.isConnected) { if (event.currentTarget.open) openMessages.add(`failed:${st.open.thread.id}:${m.id}`); else openMessages.delete(`failed:${st.open.thread.id}:${m.id}`) } } },
+          h('summary', { text: 'Details' }),
+          h('pre', { class: 'tt-failed-raw', text: info.raw }))))
+  }
+  const engineOf = (display) => {
+    const id = catalog().find((a) => a.name === display)?.id ?? String(display).toLowerCase()
+    return st.open?.thread.members.find((member) => member.persona === id)?.engine ?? null
+  }
   function messageRuns(messages) {
     const out = []
     let run = null
@@ -1216,6 +1246,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
         out.push(h('div', { class: 'tt-seen-strip tt-unread-strip', key: 'unread-boundary', 'data-unread-boundary': m.id },
           h('span', { class: 'tt-seen-count', text: `${st.open.openingUnread} new from the agents` })))
       }
+      const failed = failedTurnInfo(m, { agentName: name, engineOf, providers: providerCatalog() })
+      if (failed) { run = null; out.push(failedTurnLine(m, failed)); continue }
       const agent = m.kind !== 'system' && (st.open.thread.members.some((a) => a.persona === m.author) || catalog().some((a) => a.id === m.author))
       if (agent && !showReply(st.open, m)) continue
       if (!agent) { run = null; out.push(message(m)); continue }
@@ -1528,7 +1560,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     const renderedComposer = compose.render({ sharedThread: true, record: { session_id: `thread:${o.thread.id}` }, agentId: o.thread.default,
       disabled: o.sending || o.loading || o.refreshing || o.readFailed || o.creating || o.createFailed,
       readOnly: o.readFailed || o.sending || o.createFailed,
-      placeholder: o.thread.default ? `Message ${name(o.thread.default)}` : o.creating ? 'A little room for your thought…' : 'Write a thought, or @mention someone',
+      placeholder: (!o.messages.length && o.promptPlaceholder) || (o.thread.default ? `Message ${name(o.thread.default)}` : o.creating ? 'A little room for your thought…' : 'Write a thought, or @mention someone'),
       mentionPicker: st.mention ? h('div', { key: 'mentions', class: 'popover tt-mentions', role: 'listbox', 'aria-label': 'Mention an agent' }, ...mentionChoices().map((a, i) => settingsRow({ title: a.name, sub: a.sub, lead: a.everyone ? icon.users(24) : avatar(a.id, 24), onclick: () => insertMention(a), props: { type: 'button', role: 'option', 'aria-selected': String(i === (st.mention.index ?? 0)), class: `setrow${i === (st.mention.index ?? 0) ? ' on' : ''}` } }))) : null,
       modelControl: modelPill({ label: chosenModel?.name ?? 'Providers & models', lead: defaultMember ? providerMark(defaultMember.engine, 14) : icon.users(14),
         title: defaultMember ? chosenModel.title ?? `${name(defaultMember.persona)} · ${providerName(defaultMember)} · ${modelTitle(defaultMember)} · Settings for this thread` : 'Providers & models',
@@ -1544,7 +1576,6 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     return chatFrame({ wide: st.wide, props: { class: 'tt-thread', key: `thread:${o.thread.id}`, ...compose.dragProps() }, children: [
       st.fixture ? h('div', { class: 'tt-fixture' }, 'Design preview · sample conversation') : null,
       header,
-      agentDraftController.view(o.thread.id),
       registry.draw('thread.header.action', { thread: o.thread, state: o, open, patch }),
       registry.draw('app.overlay', { slot: 'player' }),
       o.headerMenu ? menuSurface(h('div', { key: 'header-menu', class: 'popover tt-header-menu', role: 'menu' },
@@ -1573,11 +1604,16 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
             o.has_more || o.moreBusy ? h('div', { class: 'tt-history', key: 'history' },
               o.moreBusy ? h('div', { class: 'earlier tt-history-loading', role: 'status', text: 'Loading earlier…' }) : button('Earlier messages', () => earlier(), { class: 'earlier' }),
               o.historyError ? h('div', { class: 'muted', role: 'status', text: o.historyError }) : null) : null,
-            !o.loading && !o.messages.length ? emptyConversation({ title: o.thread.default ? `A new thread with ${name(o.thread.default)}` : 'A little room to think', body: o.thread.default ? 'Start with a thought. Bring others in with @.' : 'Collect your thoughts here. Mention someone when you want a reply.', face: h('div', { class: 'tt-empty-icon' }, threadFace(o.thread, 68)) }) : null,
-            ...messageRows)),
+            !o.loading && !o.messages.length ? emptyConversation({
+              title: o.promptTitle || (o.thread.default ? `A new thread with ${name(o.thread.default)}` : 'A little room to think'),
+              body: o.promptBody || (o.thread.default ? 'Start with a thought. Bring others in with @.' : 'Collect your thoughts here. Mention someone when you want a reply.'),
+              face: h('div', { class: 'tt-empty-icon' }, threadFace(o.thread, 68)),
+            }) : null,
+            ...messageRows,
+            agentDraftController.view(o.thread.id))),
         chatDock(h('div', { class: 'tt-composer' },
           listeners,
-          o.error ? h('div', { class: 'banner', role: 'alert' }, o.error, o.createFailed ? button('Try creating again', () => create(o.thread.default)) : button('Refresh thread', () => open(o.thread.id))) : null,
+          o.error ? h('div', { class: 'banner', role: 'alert' }, o.error, o.createFailed ? button('Try creating again', () => create(o.thread.default, { promptTitle: o.promptTitle, promptBody: o.promptBody, placeholder: o.promptPlaceholder })) : button('Refresh thread', () => open(o.thread.id))) : null,
           o.connection ? h('div', { class: 'noticerow', role: 'status', text: o.connection }) : null,
           composingReply(), renderedComposer), composerHint({ wide: st.wide, chord: sendHint(isMac(globalThis.navigator)), thread: true }))),
       o.boardOpen ? h('button', { class: 'tt-board-scrim', title: 'Dismiss board panel', tabindex: '-1', onclick: () => { o.boardOpen = false; o.focusChat = true; redraw() } }) : null,

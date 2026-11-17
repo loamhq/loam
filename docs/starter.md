@@ -65,6 +65,10 @@ age, and whatever they choose to tell her, kept in `About me.md`); they know
 they can come to her or any agent about Loam; they have a rough sense of
 what Loam is; and they have their first agent, drafted as a character
 through the library skill `loam-making-an-agent` and made on their yes.
+If they mention an AI they used before, she tells them once that they can
+bring its context over (a prompt to paste, or the service's export), an
+offer and never a step: the library skill `loam-bringing-context-from-another-ai`
+(2026-11-17).
 
 ## The page's contract (for U4)
 

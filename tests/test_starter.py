@@ -132,6 +132,14 @@ def main() -> int:
     check("the soul is the starter's, word for word but the names",
           (ws / "soul.md").read_text(), st.fill((st.STARTER_DIR / "iris" / "soul.md").read_text()))
 
+    skill = "loam-bringing-context-from-another-ai"
+    check("her _active.md offers bringing context from another AI, by the "
+          "library skill, and the seeded vault's library has that skill",
+          (f"`{skill}`" in (ws / "_active.md").read_text(),
+           (lc.VAULT / "System" / "Loam" / "skills" / skill / "SKILL.md").is_file(),
+           (lc.VAULT / "System" / "Loam" / "skills" / skill / "inspect_export.py").is_file()),
+          (True, True, True))
+
     meta, msgs, path = threads.read(out["thread"])
     check("the hello thread: titled, pinned, hello, Iris its default and member",
           (meta["title"], meta.get("pinned"), meta.get("hello"), meta["default"], meta["members"]),
