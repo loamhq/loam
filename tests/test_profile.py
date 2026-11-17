@@ -258,10 +258,12 @@ async def main():
         # -- the profile ------------------------------------------------------
         status, body = await http(port, "GET", "/v1/agents/ada")
         check("GET /v1/agents/ada answers 200", status == 200, body)
-        check("identity: display, face, the id's own as defaults",
-              body["identity"]["display"] == "Ada" and body["identity"]["emoji"] == "🧱"
+        check("identity: display, face, the id's own as defaults, no emoji",
+              body["identity"]["display"] == "Ada" and body["identity"]["face"] is None
               and body["identity"]["default_display"] == "Ada"
-              and body["identity"]["default_emoji"] == "🧱", body["identity"])
+              and "emoji" not in body["identity"]
+              and "default_emoji" not in body["identity"]
+              and "emoji" not in body["agent"], body["identity"])
         d = body["defaults"]
         check("defaults: nothing set, Claude Code effective, wakes on fable",
               d["provider"] is None and d["model"] is None
@@ -300,27 +302,28 @@ async def main():
 
         # -- identity ---------------------------------------------------------
         status, body = await http(port, "PATCH", "/v1/agents/ada",
-                                  {"display": "  Clayton  ", "emoji": "🦊"})
-        check("PATCH display and emoji: 200, the profile back",
-              status == 200 and body["identity"]["display"] == "Clayton"
-              and body["identity"]["emoji"] == "🦊", body.get("identity", body))
+                                  {"display": "  Clayton  "})
+        check("PATCH display: 200, the profile back",
+              status == 200 and body["identity"]["display"] == "Clayton",
+              body.get("identity", body))
         text = (LABS / "ada" / "agent.json").read_text()
-        check("agent.json in its one order, the id unchanged",
+        check("agent.json in its one order, the id unchanged, an older emoji kept",
               text == profile.render_agent(card("ada")) and card("ada")["name"] == "ada"
-              and list(card("ada"))[:3] == ["name", "display", "emoji"], text)
+              and list(card("ada"))[:3] == ["name", "display", "emoji"]
+              and card("ada")["emoji"] == "🧱", text)
         check("an @ matches the new name and the id",
               threads.mentions("@Clayton hi") == ["ada"]
               and threads.mentions("@ada hi") == ["ada"])
         status, body = await http(port, "GET", "/v1/agents")
         check("the cards say the new name",
-              {"id": "ada", "name": "Clayton", "emoji": "🦊", "face": None} in body["agents"], body)
+              {"id": "ada", "name": "Clayton", "face": None} in body["agents"], body)
         before = text
         for patch, code, label in (
                 ({"display": "Iris"}, 409, "another agent's name"),
                 ({"display": "iris"}, 409, "another agent's id"),
                 ({"display": "all"}, 400, "a word the threads keep"),
                 ({"display": ""}, 400, "an empty name"),
-                ({"emoji": "a b"}, 400, "a face with a space"),
+                ({"emoji": "🦊"}, 400, "the emoji face, retired 2026-11-16"),
                 ({"colour": "red"}, 400, "a field there is none of"),
                 ({}, 400, "nothing named")):
             status, body = await http(port, "PATCH", "/v1/agents/ada", patch)
@@ -328,10 +331,9 @@ async def main():
                   status == code and (LABS / "ada" / "agent.json").read_text() == before,
                   body)
         status, body = await http(port, "PATCH", "/v1/agents/ada",
-                                  {"display": None, "emoji": None})
-        check("null puts the id's name and the atlas face back",
-              status == 200 and card("ada")["display"] == "Ada"
-              and card("ada")["emoji"] == "🧱", body.get("identity", body))
+                                  {"display": None})
+        check("null puts the id's name back",
+              status == 200 and card("ada")["display"] == "Ada", body.get("identity", body))
 
         # -- defaults ---------------------------------------------------------
         status, body = await http(port, "PATCH", "/v1/agents/ada",
@@ -387,7 +389,7 @@ async def main():
 
         # provision keeps what was set
         kept = profile.kept({**card("ada"), "display": "Clayton", "model": "opus"})
-        check("provision keeps display, emoji and the defaults (kept)",
+        check("provision keeps display, an older emoji and the defaults (kept)",
               kept == {"display": "Clayton", "emoji": "🧱", "model": "opus"}, kept)
 
         # -- a persona, through bin/settings ----------------------------------

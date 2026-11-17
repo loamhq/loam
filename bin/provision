@@ -76,25 +76,6 @@ def die(msg: str) -> None:
     sys.exit(1)
 
 
-def emoji_for(display: str, own: str | None = None) -> str:
-    """The agent's identity emoji, from its own atlas note; else ``own``, the
-    face its agent.json already has (2026-11-14: an agent made by
-    conversation, lib/loam_agents.py, has a face and no atlas note)."""
-    note = VAULT / "20_ATLAS" / f"{display}.md"
-    try:
-        text = note.read_text(encoding="utf-8")
-    except OSError:
-        if own:
-            return own
-        die(f"atlas note missing at {note}; cannot derive emoji")
-    m = re.search(r"^emoji:\s*(\S+)", text, re.MULTILINE)
-    if not m:
-        if own:
-            return own
-        die(f"no emoji: field in {note}")
-    return m.group(1)
-
-
 def skills_shape(workspace: Path) -> str:
     """folder-form (<skill>/SKILL.md), single-file (<skill>.md), or absent."""
     skills = workspace / "skills"
@@ -2677,15 +2658,13 @@ def main() -> None:
         _card = _card if isinstance(_card, dict) else {}
     except (OSError, ValueError):
         _card = {}
-    _own = _card.get("emoji")
-    emoji = emoji_for(display, _own if isinstance(_own, str) else None)
     # The agent's own files say the name it was made with (2026-11-14, L9:
     # "Old Sam", not "Old-sam"); an agent made before then has its id's.
     import loam_profile  # noqa: PLC0415
     own_name = loam_profile.self_name(name, _card)
     shape = skills_shape(workspace)
 
-    print(f"agent={name} display={display} emoji={emoji} wake={wake} skills={shape}")
+    print(f"agent={name} display={display} wake={wake} skills={shape}")
     print(f"  soul={workspace/'soul.md'} ({(workspace/'soul.md').stat().st_size}B)")
     print(f"  config={workspace/'config.md'} ({(workspace/'config.md').stat().st_size}B)")
     if dry:
@@ -2697,7 +2676,9 @@ def main() -> None:
 
     # What the owner set on the agent's profile (2026-11-13: its display name,
     # its face and its default provider, model and thinking level) is kept
-    # over what this derives; a new agent starts on the derived ones. The
+    # over what this derives; a new agent starts on the derived ones. An
+    # agent has no emoji face (retired 2026-11-16); an older file's `emoji` is
+    # kept with the rest (loam_profile.KEPT), so its bytes do not change. The
     # persona's own words (CLAUDE.md's "You are ...") stay on the id's name.
     import loam_profile  # noqa: PLC0415
     try:
@@ -2707,7 +2688,6 @@ def main() -> None:
     (workspace / "agent.json").write_text(loam_profile.render_agent({
         "name": name,
         "display": display,
-        "emoji": emoji,
         "workspace": str(workspace),
         "vault": str(VAULT),
         "wake_schedule": wake,

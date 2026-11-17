@@ -170,7 +170,7 @@ idle process is live, a ``waiting`` one is live by definition, and an
 count moves.
 
 **The agents have names.** ``GET /v1/agents`` answers objects -- ``id``,
-``name``, ``emoji``, read from each persona's ``agent.json`` -- and not the
+``name``, ``face``, read from each persona's ``agent.json`` -- and not the
 bare strings it answered until 2026-09-18. A page draws an agent's name and
 mark, and both are facts about the agent that only the box can state.
 
@@ -7012,8 +7012,8 @@ class Server:
                 status = 201
                 self.agents_line(body.get("thread"), (
                     f"{say(by) if by else lc.OWNER_NAME} drafted a new agent: "
-                    f"{body.get('emoji') or ''} {body.get('name') or '(no name yet)'} "
-                    f"(draft {body['draft']}, revision {body['rev']})").replace("  ", " "))
+                    f"{body.get('name') or '(no name yet)'} "
+                    f"(draft {body['draft']}, revision {body['rev']})"))
             elif len(tail) == 2 and tail[0] == "drafts":
                 if method == "GET":
                     body = await asyncio.to_thread(
@@ -7022,7 +7022,7 @@ class Server:
                     body = await asyncio.to_thread(loam_agents.revise, tail[1], payload, by)
                     self.agents_line(body.get("thread"), (
                         f"{say(by) if by else lc.OWNER_NAME} revised draft "
-                        f"{body['draft']}: {body.get('emoji') or ''} "
+                        f"{body['draft']}: "
                         f"{body.get('name') or ''}, revision {body['rev']} "
                         f"({', '.join(body['revisions'][-1]['fields'])})"))
                 elif method == "DELETE":

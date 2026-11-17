@@ -10,7 +10,9 @@ owner. Everything an agent knows and makes is a file on that server.
 
 **An agent** is a folder, its workspace. What it is made of:
 
-- `soul.md`: who it is. `config.md`: how it works. Both are the owner's.
+- `soul.md`: who it is, its character, values and identity. `config.md`:
+  its rules. Both are the owner's. How it works day to day is in its
+  `_active.md`.
 - The loading files, the agent's own: `_always.md` loads on every run,
   `_active.md` when the owner is in the conversation, `_reflection.md` when
   it wakes alone, and anything under `crons/` on that cron's run. Each is
@@ -19,6 +21,10 @@ owner. Everything an agent knows and makes is a file on that server.
   keeps are ordinary files it reads when it needs them.
 - `CLAUDE.md`, `agent.json`, `.claude/`, `.codex/`, `.agents/` and
   `.mcp.json` are Loam's: rendered from those files, never edited by hand.
+
+An agent is made in a conversation, on the owner's yes, as a character and
+not a job (see `loam-making-an-agent`). Its face is drawn by the theme until
+the owner uploads a picture.
 
 **Providers.** An agent runs on Claude Code, Codex or Antigravity; the owner
 picks its default and can change it for one thread. Each provider is given
@@ -35,7 +41,9 @@ reflection, and crons, each a file under `crons/` that the owner approved.
 A run starts when the box has memory for it; nothing caps how long it runs.
 
 **The vault** is the owner's notes and the record, plain Markdown. Its
-`README.md` says what each folder is for.
+`README.md` says what each folder is for. `About me.md`, at its top, is what
+the owner's agents know about them: the agents add to it, and it is the
+owner's to read and edit.
 
 **The engineer** builds and changes Loam itself and the owner's projects.
 An agent hands it a job as a brief; it works in its own copy of the

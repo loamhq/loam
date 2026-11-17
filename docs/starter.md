@@ -2,15 +2,26 @@
 
 *Since 2026-11-14 (first release, L11; the owner's decision 4). The code is
 `lib/loam_starter.py`; the command is `bin/library seed-starter`; the tests
-are `tests/test_starter.py`; the words are in `docs/starter/`, all of them
-placeholders until they are designed with the owner (`docs/starter/README.md`
-says which file holds which).*
+are `tests/test_starter.py`; the words are in `docs/starter/`
+(`docs/starter/README.md` says which file holds which). The words are the
+owner's approved starter of 2026-11-16, which replaced L11's placeholders.*
 
 ## What a blank install gets
 
 One agent, Iris, and one thread with her, the hello thread. The installer
 runs, in order, `bin/library seed-vault` (docs/skills.md) and
 `bin/library seed-starter`.
+
+**About me.** `seed-vault` also writes `About me.md` at the top of the
+vault: a heading and one line saying it is what the person's agents know
+about them, theirs to read and edit (the owner, 2026-11-16). Every agent made
+on an install whose vault has it (Iris, and any made by `agent.draft` and
+`agent.confirm`) is given an `_always.md` with one line pointing there: read
+it, add what lasts about the owner, tell them when you do
+(`loam_agents.ABOUT_LINE`). A vault without the file, like the first
+install's, gets no line, so its agents are untouched. After that the note is
+the person's and the agents': Iris fills it in during the hello conversation
+and keeps it accurate on her nightly wake.
 
 `seed-starter` makes Iris from `docs/starter/iris/` through
 `loam_agents.make`, the same step L10's create route ends in: her workspace,
@@ -48,10 +59,12 @@ first turn does, and the recent exchange it is handed shows her opening
 with `(preset: Loam posted this opening in your name before your first
 turn; carry on from it as yours)` after her name (`loam_threads.transcript`).
 From that reply on, the conversation is the model's. What she does in it is
-in her `_active.md`, "The hello conversation": the person's name, age and
-where they live, then an open "tell me about yourself"; that she, or any
-agent, is who to ask about Loam; a very short overview; and their first
-agent, made through L10's draft, revise and confirm.
+in her `_active.md`, "The hello conversation": aims and leans, not a script.
+By the end she knows who the person is (their name, where they live, their
+age, and whatever they choose to tell her, kept in `About me.md`); they know
+they can come to her or any agent about Loam; they have a rough sense of
+what Loam is; and they have their first agent, drafted as a character
+through the library skill `loam-making-an-agent` and made on their yes.
 
 ## The page's contract (for U4)
 

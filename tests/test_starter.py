@@ -70,7 +70,15 @@ def fake_provision(agent, wake):
 
 def main() -> int:
     lc.WORKSPACES.mkdir(parents=True)
+    made = loam_skills.seed_vault(lc.VAULT)
+    about = lc.VAULT / "About me.md"
+    check("seed-vault writes About me.md at the top of the vault",
+          ("About me.md" in made, about.read_text().splitlines()[0]), (True, "# About me"))
+    check("...and the vault's README names it",
+          "`About me.md`" in (lc.VAULT / "README.md").read_text(), True)
+    about.write_text("# About me\n\nSam's own words.\n")
     loam_skills.seed_vault(lc.VAULT)
+    check("...and never writes it again", about.read_text(), "# About me\n\nSam's own words.\n")
 
     # The page draws a single newline as a line break, so the hello message
     # is one line per paragraph: hard-wrapped, it broke mid-sentence on a
@@ -107,11 +115,15 @@ def main() -> int:
     check("the starter agent is made and provisioned once", provisioned, [("iris", out["wake"])])
     check("...from docs/starter, in L10's shape",
           sorted(p.name for p in ws.iterdir()),
-          ["_active.md", "_reflection.md", "agent.json", "config.md", "crons",
+          ["_active.md", "_always.md", "_reflection.md", "agent.json", "config.md", "crons",
            "memory", "skills", "soul.md", "threads"])
+    always = (ws / "_always.md").read_text()
+    check("her _always.md points at About me.md: read it, add, tell",
+          (str(about) in always, "Read it; add what lasts about Sam; tell them when you do."
+           in always), (True, True))
     card = json.loads((ws / "agent.json").read_text())
-    check("agent.json: its id, name and face", (card["name"], card["display"], card["emoji"]),
-          ("iris", "Iris", "🌱"))
+    check("agent.json: its id and name, and no emoji face (retired 2026-11-16)",
+          (card["name"], card["display"], "emoji" in card), ("iris", "Iris", False))
     texts = "".join((ws / n).read_text() for n in ("soul.md", "config.md", "_active.md", "_reflection.md"))
     check("no placeholder token is left", [t for t in ("{owner}", "@VAULT@", "@WORKSPACES@", "@SYSTEM@") if t in texts], [])
     check("...the install's names are filled in",

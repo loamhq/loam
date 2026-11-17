@@ -1239,19 +1239,18 @@ def roster(archived: bool = False) -> list[str]:
 
 
 def agent_card(name: str) -> dict:
-    """One agent as the interface answers it: ``{"id", "name", "emoji"}``.
+    """One agent as the interface answers it: ``{"id", "name", "face"}``.
 
-    The name and the emoji are READ from the persona's own ``agent.json``,
-    which the runtime renders and which is the one place either is stated --
-    ``display`` and ``emoji``, the same two fields the transcript writer
-    puts at the head of a conversation file. Capitalising the id would
+    The name is READ from the persona's own ``agent.json``, which the
+    runtime renders and which is the one place it is stated -- ``display``. Capitalising the id would
     produce "Ai" for an agent named ``ai`` and would silently disagree with
     the record the moment the owner renames one, so it is the fallback and
     never the answer when the file has one.
 
-    ``emoji`` is ``null`` when the file states none, which is the honest
-    answer: a client draws its own mark and is not handed a guess. Nothing
-    else from ``agent.json`` leaves this box -- the file also holds the
+    ``face`` is an uploaded image, or ``null``: then the client draws the
+    theme's face. The emoji face is retired (the owner, 2026-11-16): an
+    older file's ``emoji`` is not served. Nothing else from ``agent.json``
+    leaves this box -- the file also holds the
     workspace, the vault path and the wake schedule, and none of that is an
     app's business.
     """
@@ -1261,14 +1260,12 @@ def agent_card(name: str) -> dict:
     except (OSError, json.JSONDecodeError):
         config = {}
     display = config.get("display")
-    emoji = config.get("emoji")
     import loam_agents  # noqa: PLC0415
     return {
         "id": name,
         "name": display if isinstance(display, str) and display.strip()
         else name.capitalize(),
-        "emoji": emoji if isinstance(emoji, str) and emoji.strip() else None,
-        # An uploaded face (2026-11-14): over the emoji and over any theme's.
+        # An uploaded face (2026-11-14): over any theme's.
         "face": loam_agents.face_of(name, config) if isinstance(config, dict) else None,
     }
 
