@@ -14,6 +14,8 @@ through Loam's real interfaces, and the core hooks it added.
   - Shared with me (test/test_withme.py): another Loam's door over real
     https, the addresses refused, each failure named, the password never in
     an answer, a log or the vault
+  - its look (test/test_look.py): every colour in its CSS a core token, every
+    pill corner core's, the share page's copy of Latte's tokens exact
   - the plugin's HTTP server and its agent tool (stdio MCP) end to end: a
     persona comments by quote and lists the doc's notes, under its own name
   - the kept folder: `<system>/Loam/data/` survives the library being

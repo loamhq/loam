@@ -121,7 +121,7 @@ async function page({ width, look, mode }) {
     const wm = /^\/x\/doc-comments\/withme(\/.*)?$/.exec(u.pathname)
     if (wm) {
       const rest = wm[1] || ''
-      if (req.method() === 'GET' && (rest === '' || rest === '/')) return route.fulfill({ json: { docs: WITHME, appear: 'names', alias: "Sam's agent" } })
+      if (req.method() === 'GET' && (rest === '' || rest === '/')) return route.fulfill({ json: { docs: WITHME, appear: 'names', owner: 'Sam', alias: "Sam's agent" } })
       if (req.method() === 'POST' && (rest === '' || rest === '/')) return route.fulfill({ status: 400, json: { error: 'That isn’t a share link. A share link ends in /s/ and a long code.', code: 'link' } })
       const id = rest.split('/')[1]
       if (/\/doc/.test(rest)) return route.fulfill({ status: 410, json: { error: 'The link was turned off.', code: 'gone' } })
@@ -202,6 +202,11 @@ const SURFACES = {
   async 'withme-gone'(p) {
     await p.goto(`${app.url}/files/@doc-comments`); await p.waitForSelector('.dc-wm-entry'); await settle(p, 400)
     await p.locator('.dc-wm-entry .setrow', { hasText: 'Trip budget' }).first().click(); await settle(p, 1000)
+  },
+  async 'appear-sheet'(p) {
+    await p.goto(`${app.url}/files/@doc-comments`); await p.waitForSelector('.dc-wm-entry'); await settle(p, 400)
+    await p.locator('.dc-wm-entry', { hasText: 'The garden plan' }).locator('.iconbtn').last().click(); await settle(p, 400)
+    await p.locator('[data-menu-surface] :is(button, .setrow)', { hasText: 'How your agents appear' }).first().click(); await settle(p, 700)
   },
   async 'share-gate'(p) { await p.goto(`${gbase}${shareLinks.comment.path}`); await settle(p, 700) },
   async 'share-page'(p) {
