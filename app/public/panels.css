@@ -53,10 +53,13 @@
 .tt-row:hover > .row-side-mark,.tt-row:focus-within > .row-side-mark { opacity:0; }
 .row-side-mark { color:var(--paper-ink-3); flex:none; display:inline-flex; align-items:center; justify-content:center; }
 .tt-row > .row-side-mark { position:absolute; right:14px; bottom:6px; }
-.fs-entry > .row-side-action > .iconbtn { width:32px; height:38px; }
+.fs-entry > .row-side-action { display:flex; align-items:center; justify-content:center; }
+.fs-entry > .row-side-action > .iconbtn { width:40px; height:40px; }
+.fs-entry > .row-side-mark { position:absolute; right:48px; top:50%; transform:translateY(-50%); width:44px; height:44px; pointer-events:none; transition:opacity 160ms; }
+.fs-entry:hover > .row-side-mark,.fs-entry:focus-within > .row-side-mark { opacity:0; }
 .row-side-action .iconbtn { background:transparent; color:var(--paper-ink-3); }
-.row-side-action .iconbtn:active { background:var(--latte-foam); color:var(--latte-foam-ink); }
-.row-side-action:hover { color:var(--paper-ink); background:var(--paper-hover-alpha); }
+.row-side-action .iconbtn:active { background:var(--paper-pressed); color:var(--paper-ink); }
+@media (hover:hover) { :is(.tt-row > .row-side-action,button.row-side-action):hover { color:var(--paper-ink); background:var(--paper-hover-alpha); } }
 .tt-row:hover .row-side-action,.apps-row:hover .row-side-action,.fs-entry:hover .row-side-action,
 .tt-row:focus-within .row-side-action,.apps-row:focus-within .row-side-action,.fs-entry:focus-within .row-side-action { opacity:1; }
 .filelink-side { display:inline-flex; align-items:center; vertical-align:middle; justify-content:center; width:18px; height:22px; padding:0; border:0; border-radius:6px; background:none; color:var(--paper-ink-3); opacity:0; cursor:pointer; }
@@ -99,6 +102,7 @@
   .tt-row:has(.row-side-action) .srow-meta { padding-right:52px; }
   .tt-row:has(.row-side-action) .srow-time { opacity:1; }
   .tt-row > .row-side-mark { right:58px; opacity:1; }
+  .fs-entry > .row-side-mark { position:static; transform:none; width:auto; height:auto; margin-right:4px; opacity:1; }
   .row-side-action .iconbtn,.side-head .iconbtn,.side-pane .tt-head .iconbtn { width:40px; height:44px; }
 }
 @media (prefers-reduced-motion:reduce) {

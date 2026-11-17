@@ -47,3 +47,13 @@ have never met.
   preview, `Upload a picture`, and (when a picture is set) `Use the theme’s
   face`. Thread icons (`thread.icon` in `thread-identity.js`) remain a
   separate concept.
+- **Files row selection and action hovers** live on `.fs-entry` (`.on` for main,
+  `.in-side` for side, with `:has(> .setrow.on)` / `:has(> .row-side-mark)`
+  fallbacks so `files.root` plugins reusing `.fs-entry` inherit them): the row
+  wrapper paints the surface fill and `.fs-words::after` rule while
+  `.fs-entry > .setrow` stays transparent, and `button-tiers.css` excludes
+  `.fs-entry *` from its general opaque `--paper-hover` rule (which has
+  specificity `(0,6,0)` from `.approve .allow`) so `.fs-rowmenu` and
+  `.row-side-action > .iconbtn` share a rounded translucent tint.
+  `files.revealOpen(root)` scrolls an off-screen `.fs-entry.on` into view once
+  per `(folder, file)` visit.

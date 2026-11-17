@@ -816,7 +816,7 @@ function render() {
   page.fitToolOutputs(); if (modern || state.wide && state.navigator === 'chats') threads.afterRender()
   if (panels.visible()) sidePanel.afterRender()
   activity.syncDialog(); profileActivity.syncDialog(); engineerActivity.syncDialog(); profileUI.syncFocus(); settingsProfileUI.syncFocus()
-  running.syncDialog(); fitPreviewTables(root); page.fitMine(); landOnFragment(); menuSurfaces.sync(); files.focusRename(); revealThemeChoice(); registry.emit('rendered', { root, screen: state.screen })
+  running.syncDialog(); fitPreviewTables(root); page.fitMine(); landOnFragment(); menuSurfaces.sync(); files.focusRename(); files.revealOpen(root); revealThemeChoice(); registry.emit('rendered', { root, screen: state.screen })
 }
 
 
