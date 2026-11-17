@@ -1596,9 +1596,9 @@ export function createDocEditor(opts) {
       body.push(pre)
     }
     return h('div', { class: 'dc-preview' },
-      h('div', { class: 'dc-preview-h' }, h('span', { text: 'As it was then; marked where it differs from now' }), h('span', { class: 'dc-grow' }),
-        st.can.edit && p.text != null ? h('button', { class: 'dc-sm ok', type: 'button', onclick: () => restore(s, head_) }, 'Restore this version') : null),
-      ...body)
+      h('div', { class: 'dc-preview-h', text: 'As it was then, marked where it differs from now' }),
+      ...body,
+      st.can.edit && p.text != null ? h('div', { class: 'dc-dbtns' }, h('button', { class: 'dc-sm ok', type: 'button', onclick: () => restore(s, head_) }, 'Restore this version')) : null)
   }
 
   async function restore(s, head_) {
