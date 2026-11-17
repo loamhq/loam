@@ -518,5 +518,34 @@ class Limits(unittest.TestCase):
         self.assertEqual(w.req("GET", tok, "/api/doc", cookie=c)[0].status, 401)
 
 
+
+class VisitorsRoundFive(unittest.TestCase):
+    """Round 5 (2026-11-17): a group visitor's name does not start with the
+    owner's first name or a persona's, nor say "owner"; and once named, a
+    browser stays that name."""
+
+    browser = VisitorsRoundFour.browser
+
+    def test_names_that_borrow_someone_here_are_refused(self):
+        w = World()
+        _, tok = w.link("comment", name=None)
+        for bad in ("Sam Visitor", "sam   jones", "Ada Lovelace", "ADA, guest", "The owner", "Owner", "Doc Owner's friend", "co-owner"):
+            _, st = self.browser(w, tok, bad)
+            self.assertEqual(st, 409, bad)
+        for good in ("Samira", "Adam", "Robin Sam"):
+            _, st = self.browser(w, tok, good)
+            self.assertEqual(st, 200, good)
+
+    def test_a_browser_cannot_rename_itself(self):
+        w = World()
+        _, tok = w.link("comment", name=None)
+        c, st = self.browser(w, tok, "Robin")
+        self.assertEqual(st, 200)
+        ans, got = w.req("POST", tok, "/api/name", {"name": "Robin Two"}, cookie=c)
+        self.assertEqual(ans.status, 409, got)
+        self.assertFalse([v for k, v in ans.headers if k == "Set-Cookie"], "no new session")
+        _, me = w.req("GET", tok, "/api/me", cookie=c)
+        self.assertEqual(me["me"]["name"], "Robin")
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

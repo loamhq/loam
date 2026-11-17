@@ -258,19 +258,37 @@ the places carried through that; a restore likewise. Then:
 
 - the quote still at the carried place: attached, there;
 - other words there, most of its own letters kept: "changed since", there;
-- most of its letters gone: detached, remembering the carried point, and
-  back when those exact words return there.
+- most of its letters gone: detached, remembering the carried point and
+  the words removed around it, and back when those exact words return at
+  that point (a section deleted on disk and put back, a cut undone, an
+  earlier version restored).
 
-A like passage elsewhere is never the note's. Only for a worked-out change
-(where a diff cannot tell two equal runs of words apart) may a note whose
-words changed take its exact quote within the size of that change around its
-carried place. `textdiff.delta` is exact to the letter inside a replaced run
-of words. Searching is left only for a note that was never placed.
+Nothing is looked for anywhere else, at any distance (2026-11-17, round 5:
+the earlier allowance, a quote looked for within the size of a worked-out
+change, let a note in two deleted sections land in section 1, and Accept
+wrote there). A detached note comes back only two ways: its exact words
+return at its carried point, or a person re-attaches it. A note from before
+places were kept attaches only where its anchor says it was. Where a
+comparison cannot tell which of two equal neighbouring runs was removed, the
+note stays on the one the comparison kept (the words are the same either
+way); for a worked-out change both readings are carried and the one that
+keeps the note's words wins. A passage holding the whole of a replaced run
+at its start or end holds what that run became (a comment whose last word an
+accept rewrote covers the new words). `textdiff.delta` is exact to the
+letter inside a replaced run of words, and slides each change to its
+rightmost equal place.
+
+A draft of mine open in Suggesting whose original words are removed on disk
+is set aside: its typed words leave with the passage, it is never sent again
+on other words, and the editor says so in one line. Its note, if it was
+sent, waits detached.
+
 `test/test_places.py` runs 300 seeded sequences on a doc that repeats itself
 (saves, edits on disk, restores, accepts and rejects near, inside and far
 from notes on repeated phrases) and checks after every step that each note
-outside a change is on the occurrence it was put on; `test/browser.test.mjs`
-does the same through the editor.
+outside a change is on the occurrence it was put on, and 250 more that
+remove whole blocks and put them back (on disk and by restore);
+`test/browser.test.mjs` does both through the editor, with drafts open.
 
 ### Changes on disk
 
@@ -452,9 +470,14 @@ the visitor's session is already a cookie of its own scoped to
   visitor's save keeps the frontmatter as it is stored (an id line rewritten
   through a link had made the doc's links and notes vanish). Notes already
   on a doc are shown to visitors (one set of notes), so the invite card
-  says so in one quiet line. A group visitor cannot take the owner's name, a
+  says so in one quiet line, counting the open notes and, apart, the
+  resolved ones. A group visitor cannot take the owner's name, a
   persona's, or the name on one of this doc's named links (compared
-  case-folded and NFKC-normalised).
+  case-folded and NFKC-normalised); nor a name whose first word is the
+  owner's first name or a persona's name, nor one with "owner" in it. A
+  browser names itself once; a second name is refused.
+- **Making a new agent key asks once**: it stops the agent using the old
+  key at once.
 - **What the visitor's page loads** is derived: the door serves `share.js`,
   `share.css` and every module they import, followed through the graph
   (`page_files`). A hand-kept list missed a new module once and every

@@ -414,7 +414,7 @@
 
 /* A note whose words changed since: said in words on the focused note. */
 .dc-chgl { margin: 6px 0 0; font-size: 12px; line-height: 1.45; color: var(--dc-ink3); }
-.dc-chgl q { font-style: italic; quotes: "“" "”"; }
+.dc-chgl .dc-chgq { color: var(--dc-ink2); }
 
 /* Resolved: the replies line sits with the note's words and opens them. */
 .dc-ri .dc-more, .dc-ri .dc-rps { margin-left: 28px; }

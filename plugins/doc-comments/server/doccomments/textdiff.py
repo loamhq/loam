@@ -220,9 +220,9 @@ def summary(old: str, new: str, ops: list[list] | None = None) -> dict:
     removed = sum(v for o, v in ops if o == "-")
     fm_old = _FM.match(old)
     body_from = fm_old.end() if fm_old else 0
-    first, at_new, at = "", None, 0
+    first, at_new, at, cut_at = "", None, 0, None
     pos_new = 0
-    for op, val in ops:
+    for k, (op, val) in enumerate(ops):
         if op == "=":
             at += val
             pos_new += val
@@ -234,6 +234,9 @@ def summary(old: str, new: str, ops: list[list] | None = None) -> dict:
         elif op == "-":
             if at + val > body_from:
                 first, at_new = old[max(at, body_from):at + val], pos_new
+                # words taken out, not replaced: read where they were
+                if not (k + 1 < len(ops) and ops[k + 1][0] == "+") and not (k and ops[k - 1][0] == "+"):
+                    cut_at = max(at, body_from)
                 break
             at += val
     if at_new is None:
@@ -242,7 +245,21 @@ def summary(old: str, new: str, ops: list[list] | None = None) -> dict:
                 "frontmatter": bool(ops) and not (added == removed == 0) and bool(fm_new or fm_old)}
     first = " ".join(first.split())[:60]
     section = ""
-    lines = new[:at_new].splitlines()
+    # The section is read where the change is: for words taken out, in the
+    # text they were taken from, their own line included (a comparison can
+    # start a removed section after its heading's shared "## Section ", and
+    # the heading is the whole line, number and all); for words put in, the
+    # line they were put in, whole, when they start partway along it.
+    if cut_at is not None:
+        src, pos = old, cut_at
+        end = src.find("\n", pos)
+        pos = len(src) if end < 0 else end
+    else:
+        src, pos = new, at_new
+        if pos > 0 and src[pos - 1] != "\n":
+            end = src.find("\n", pos)
+            pos = len(src) if end < 0 else end
+    lines = src[:pos].splitlines()
     # A `#` inside a fenced code block is a comment, not a heading.
     fenced, in_code = [], False
     for line in lines:

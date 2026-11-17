@@ -564,3 +564,21 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   revision.
 - **`pkill -f <pattern>` in the same command line kills its own shell**
   (again). Kill by the pid from `ss -ltnp`, or keep a pid file.
+- **No allowance either (round 5).** Round 4 still let a note whose words
+  changed take its quote "within the size of the change"; a two-section
+  deletion is a big change, so a note hopped to section 1. Now nothing is
+  looked for at any distance: a detached note remembers the removed run
+  (`gone`) and comes back only when that run is re-inserted at its point.
+  For a diffed change both equal readings (`textdiff.lean_left`) are
+  carried, and the one keeping the note's words wins.
+- **`map_pos` puts any position inside a deleted run at the run's start**,
+  so an `after` flag there does nothing; an edge inside a replaced run is
+  mapped from the run's own edge instead (B8: a comment lost the word an
+  accept had just rewritten).
+- **Two `.dc-…` rules in two files at equal intent lose on specificity.** The
+  share page's phone bar fix of round 4 never applied: `.dc.phone .dc-head`
+  (3 classes) beat `.dc-sharepage .dc-head` (2). Measure the computed style
+  in a browser test, never read the CSS and assume.
+- **Places worked out over a drawn text go stale when drafts enter or
+  leave it.** After a mode change, `applyAnswer` runs again on the last
+  answer (`redrawPlaces`), or marks land on the wrong letters.

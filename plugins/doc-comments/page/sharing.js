@@ -12,7 +12,7 @@ const MODES = [
 ]
 const DAYS = [1, 7, 30, 90, 365]
 
-export function createSharing({ base, root, path, title, owner, toast, onChange, notes = () => 0 }) {
+export function createSharing({ base, root, path, title, owner, toast, onChange, notes = () => 0, resolved = () => 0 }) {
   const st = { links: [], owner: owner || 'You', open: null, card: null, menu: null }
   const req = async (method, route, body) => {
     const q = method === 'GET' ? `?${new URLSearchParams({ root, path })}` : ''
@@ -128,14 +128,17 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
   function cardView() {
     const c = st.card
     const nameIn = h('input', { class: 'dc-iv-name', type: 'text', placeholder: 'Who is it for? (optional)', value: c.name, maxlength: '60', 'aria-label': 'Who is it for' })
-    nameIn.addEventListener('input', () => { c.name = nameIn.value; if (seen) seen.textContent = `${c.name || 'They'} will also see the ${n === 1 ? 'note' : `${n} notes`} already on this doc.`; forName.textContent = c.name ? `For ${c.name}` : 'For anyone with the link'; av.textContent = (c.name || '').charAt(0).toUpperCase(); av.classList.toggle('grp', !c.name); av.style.background = c.name ? tone(c.name) : ''; cap.textContent = c.name ? `The card is what ${c.name} gets.` : 'A group link: each visitor gives a name once.' })
+    nameIn.addEventListener('input', () => { c.name = nameIn.value; if (seen) seen.textContent = seenLine(); forName.textContent = c.name ? `For ${c.name}` : 'For anyone with the link'; av.textContent = (c.name || '').charAt(0).toUpperCase(); av.classList.toggle('grp', !c.name); av.style.background = c.name ? tone(c.name) : ''; cap.textContent = c.name ? `The card is what ${c.name} gets.` : 'A group link: each visitor gives a name once.' })
     const av = h('span', { class: `dc-iv-av${c.name ? '' : ' grp'}`, style: c.name ? { background: tone(c.name) } : {}, text: c.name.charAt(0).toUpperCase() })
     const forName = h('div', { class: 'dc-tk-for', text: c.name ? `For ${c.name}` : 'For anyone with the link' })
     const cap = h('p', { class: 'dc-sh-cap', text: c.name ? `The card is what ${c.name} gets.` : 'A group link: each visitor gives a name once.' })
     // The notes already on the doc are seen by whoever the link is for: said
     // once, quietly, so it is never a surprise.
-    const n = notes()
-    const seen = n ? h('p', { class: 'dc-sh-cap dc-sh-notes', text: `${c.name || 'They'} will also see the ${n === 1 ? 'note' : `${n} notes`} already on this doc.` }) : null
+    const n = notes(), r = resolved()
+    const seenLine = () => n
+      ? `${c.name || 'They'} will also see the ${n === 1 ? 'open note' : `${n} open notes`} already on this doc${r ? `, and ${r} resolved` : ''}.`
+      : `${c.name || 'They'} will also see the ${r === 1 ? 'resolved note' : `${r} resolved notes`} on this doc.`
+    const seen = n || r ? h('p', { class: 'dc-sh-cap dc-sh-notes', text: seenLine() }) : null
     const pw = c.editing
       ? h('input', { class: 'dc-tk-pwin', type: 'text', value: c.password, maxlength: '100', 'aria-label': 'Password', oninput: (e) => { if (c.short && e.target.value.trim().length >= 6) { c.short = false; scrim?.querySelector('.dc-sh-warn')?.remove() } }, onkeydown: (e) => { if (e.key === 'Enter') { c.password = e.target.value.trim() || c.password; c.editing = false; c.short = c.password.length < 6 && c.short; draw() } }, onblur: (e) => { c.password = e.target.value.trim() || c.password; c.editing = false; c.short = c.password.length < 6 && c.short; draw() } })
       : h('button', { class: 'dc-tk-pw', type: 'button', title: 'Change the password', onclick: () => { c.editing = true; draw(); setTimeout(() => scrim?.querySelector('.dc-tk-pwin')?.select(), 0) } }, c.password)

@@ -302,8 +302,8 @@ export function createDocEditor(opts) {
         EditorView.scrollMargins.of(() => ({ top: 24, bottom: st.phone ? 132 : 96 })),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         inline,
+        notesField,             // before the blocks: a table marks the cells notes sit in
         blocks(embed),
-        notesField,
         authorsField,
         suggestBase,
         draftsField,
@@ -687,6 +687,16 @@ export function createDocEditor(opts) {
   // stored text, so the editor does not change (and its caret does not move);
   // a rejected one's words go back to the original. Then the stored text's own
   // changes are mapped around the open drafts, which keep their words and place.
+  // Whether a change removed the whole of [a, b] with text on both sides of
+  // it gone too (a point strictly inside a removed run, or a range wholly in
+  // one): a draft there has lost its passage.
+  function removedAround(cs, a, b) {
+    if (!cs) return false
+    let gone = false
+    cs.iterChanges((fA, tA) => { if (tA > fA && fA < a && b < tA) gone = true })
+    return gone
+  }
+
   function rebaseDrafts(ans, ET) {
     const open = new Set((ans.notes || []).filter(n => n.state === 'open').map(n => n.id))
     const states = new Map((ans.notes || []).map(n => [n.id, n.state]))
@@ -694,8 +704,18 @@ export function createDocEditor(opts) {
     const rs = inBase(drafts(), view.state.doc)
     const keep = [], back = []
     let acc = '', at = 0
+    // A draft whose original words were removed from the file (on disk,
+    // by someone else) has nowhere to stand: it is set aside (its typed
+    // words leave the editor with the removed text) and never sent again as
+    // a suggestion on other words. Its note, if sent, waits detached.
+    const whereOf = new Map((ans.notes || []).map(n => [n.id, n.where?.state]))
+    let pre = null
+    try { pre = ChangeSet.of(diffChanges(base, ET), base.length, '\n') } catch { pre = null }
+    let lost = 0
     for (const r of rs) {
       const id = r.d.ids[0]
+      const gone = id ? whereOf.get(id) === 'detached' : removedAround(pre, r.start, r.end)
+      if (gone) { lost++; back.push({ from: r.d.from, to: r.d.to, insert: r.d.orig }); continue }
       if (!id || open.has(id)) { keep.push(r.d); continue }
       if (states.get(id) === 'accepted' && r.d.sent != null) {
         // Its words as last sent are in the stored text now.
@@ -707,6 +727,7 @@ export function createDocEditor(opts) {
       }
     }
     base = acc + base.slice(at)
+    if (lost) showToast(lost === 1 ? 'A suggestion of yours was on words just removed from the file. It waits in ⋯ History, detached.' : `${lost} suggestions of yours were on words just removed from the file. They wait in ⋯ History, detached.`)
     if (back.length) {
       view.dispatch({ changes: back, effects: setDrafts.of({ list: keep }), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
     } else if (keep.length !== rs.length) {
@@ -843,6 +864,12 @@ export function createDocEditor(opts) {
     st.sinceBase = draftsCS()
   }
 
+  function redrawPlaces() {
+    st.lastSig = null
+    if (st.lastAns) applyAnswer(st.lastAns)
+    else pushNotes()
+  }
+
   function leaveDrafts() {
     st.pending = false
     const back = drafts().map(d => ({ from: d.from, to: d.to, insert: d.orig }))
@@ -861,7 +888,9 @@ export function createDocEditor(opts) {
     if (was === 'suggest') leaveDrafts()
     view.dispatch({ effects: [setMode.of(mode), editableC.reconfigure(editableExt()), setSuggestBase.of(mode === 'suggest' ? st.mapBase : null), historyC.reconfigure(history())], annotations: remote.of(true) })
     if (mode === 'suggest') enterDrafts()
-    pushNotes()
+    // The notes' places were worked out over the text as it was drawn: the
+    // drafts' words just came in (or went out), so they are worked out again.
+    redrawPlaces()
     st.menu = null
     hideSelbar()
     render()
@@ -1461,6 +1490,13 @@ export function createDocEditor(opts) {
     if (shape.kind === 'delete' && !gone.trim() && /\n/.test(gone)) return h('div', { class: 'dc-stl' }, h('span', { text: 'Join two paragraphs' }))
     if (shape.kind === 'insert' && para.test(came)) return h('div', { class: 'dc-stl' }, h('span', { text: 'Add a paragraph ' }), h('ins', { text: `“${clip(came)}”` }))
     if (shape.kind === 'delete' && para.test(gone)) return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete a paragraph ' }), h('del', { text: `“${clip(gone)}”` }))
+    // A space turned into a line break, or a line break into a space: the
+    // paragraph is split or joined, and no space is struck.
+    if (!from.trim() && !(n.replacement ?? '').trim() && from !== (n.replacement ?? '')) {
+      const nlA = /\n/.test(from), nlB = /\n/.test(n.replacement ?? '')
+      if (nlB && !nlA) return h('div', { class: 'dc-stl' }, h('span', { text: 'Split the paragraph' }))
+      if (nlA && !nlB) return h('div', { class: 'dc-stl' }, h('span', { text: 'Join two paragraphs' }))
+    }
     if (shape.kind === 'replace' && !n.replacement?.trim()) return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete ' }), h('del', { text: `“${clip(from)}”` }))
     if (shape.kind === 'insert') return h('div', { class: 'dc-stl' }, h('span', { text: 'Add ' }), h('ins', { text: `“${clip(shape.insert)}”` }))
     if (shape.kind === 'delete') return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete ' }), h('del', { text: `“${clip(from.slice(shape.from, shape.to))}”` }))
@@ -1499,7 +1535,12 @@ export function createDocEditor(opts) {
     else if (text) out.push(h('p', { class: `dc-tx${full ? '' : ' clamp'}`, text }))
     // The glyph in the head says it at rest; the focused note says it in
     // words, where a phone can read it too.
-    if (full && n.where?.state === 'changed') out.push(h('div', { class: 'dc-chgl' }, 'The words changed since. They read ', h('q', { text: clip(n.anchor?.quote || '', 120) })))
+    if (full && n.where?.state === 'changed') {
+      // What the passage says now, in quotation marks of its own (not a
+      // style's): "It now reads “lixght”".
+      const now = n.now ?? (n.from != null ? view.state.sliceDoc(n.from, n.to) : '')
+      out.push(h('div', { class: 'dc-chgl' }, 'The words changed since. It now reads ', h('span', { class: 'dc-chgq', text: `“${clip(now, 120)}”` })))
+    }
     if (!full) {
       if (n.replies?.length) out.push(h('div', { class: 'dc-more', text: n.replies.length === 1 ? '1 reply' : `${n.replies.length} replies` }))
       return out
@@ -2266,7 +2307,7 @@ export function createDocEditor(opts) {
 
   applyAnswer(opts.doc)
   watch()
-  if (st.mode === 'suggest') { view.dispatch({ effects: setSuggestBase.of(st.mapBase), annotations: remote.of(true) }); enterDrafts() }
+  if (st.mode === 'suggest') { view.dispatch({ effects: setSuggestBase.of(st.mapBase), annotations: remote.of(true) }); enterDrafts(); redrawPlaces() }
   if (st.authors) loadAuthors()
 
   return {

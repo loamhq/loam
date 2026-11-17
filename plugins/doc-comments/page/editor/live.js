@@ -122,20 +122,81 @@ function plainInline(s) {
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/~~([^~]+)~~/g, '$1')
 }
 
+// Where each cell's words sit in a table's source: [[{from, to}]] by line
+// (the separator line included), offsets from the table's start.
+function cellRanges(source) {
+  const out = []
+  let at = 0
+  for (const line of source.split('\n')) {
+    const row = []
+    if (line.trim()) {
+      const bars = []
+      for (let i = 0; i < line.length; i++) if (line[i] === '|' && line[i - 1] !== '\\') bars.push(i)
+      const lead = /^\s*\|/.test(line), trail = /\|\s*$/.test(line) && !/\\\|\s*$/.test(line)
+      const cuts = [lead ? bars[0] : -1, ...bars.slice(lead ? 1 : 0, trail ? -1 : undefined), trail ? bars[bars.length - 1] : line.length]
+      for (let k = 0; k + 1 < cuts.length; k++) {
+        let f = cuts[k] + 1, t = cuts[k + 1]
+        while (f < t && /\s/.test(line[f])) f++
+        while (t > f && /\s/.test(line[t - 1])) t--
+        row.push({ from: at + f, to: at + t })
+      }
+      out.push(row)
+    }
+    at += line.length + 1
+  }
+  return out
+}
+
+// The cells a note sits in: {row, col} → {id, cls} (row 0 the head, 1 on the
+// body's first row; the separator line is not a row).
+function cellMarks(source, from, notes) {
+  const marks = {}
+  if (!notes?.length) return marks
+  const rows = cellRanges(source)
+  rows.forEach((cells, r) => {
+    if (r === 1) return
+    cells.forEach((c, k) => {
+      for (const n of notes) {
+        if (n.from == null || n.to == null) continue
+        const a = n.from - from, b = n.to - from
+        if (a < c.to && b > c.from || (a === b && a >= c.from && a <= c.to && n.kind !== 'comment')) {
+          const on = n.focus ? ' on' : n.peek ? ' peek' : ''
+          marks[`${r ? r - 1 : 0}:${r ? 'b' : 'h'}:${k}`] = { id: n.id, cls: `dc-pass${n.changed ? ' changed' : ''}${on}` }
+          break
+        }
+      }
+    })
+  })
+  return marks
+}
+
 class TableWidget extends WidgetType {
-  constructor(source, from) { super(); this.source = source; this.from = from }
-  eq(o) { return o.source === this.source }
+  constructor(source, from, marks = {}) { super(); this.source = source; this.from = from; this.marks = marks; this.sig = JSON.stringify(marks) }
+  eq(o) { return o.source === this.source && o.sig === this.sig }
   get estimatedHeight() { return 22 + 34 * Math.max(1, this.source.split(/\r?\n/).filter(l => l.trim()).length - 1) }
   toDOM(view) {
     const lines = this.source.split(/\r?\n/).filter(l => l.trim())
     const head = cellsOf(lines[0] || '')
     const align = cellsOf(lines[1] || '').map(c => (c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : ''))
     const body = lines.slice(2).map(cellsOf)
+    // A cell a note sits in carries the note's mark, as its words would in a
+    // paragraph (and opens it when clicked, like any mark).
+    const words = (key, text) => {
+      const m = this.marks[key]
+      return m ? [h('span', { class: m.cls, 'data-note': m.id, text })] : text
+    }
+    const cell = (tag, key, text, i) => {
+      const w = words(key, text)
+      return typeof w === 'string' ? h(tag, { class: align[i] ? `al-${align[i]}` : null, text: w }) : h(tag, { class: align[i] ? `al-${align[i]}` : null }, ...w)
+    }
     const table = h('table', { class: 'dc-table' },
-      h('thead', {}, h('tr', {}, head.map((c, i) => h('th', { class: align[i] ? `al-${align[i]}` : null, text: plainInline(c) })))),
-      h('tbody', {}, body.map(r => h('tr', {}, head.map((_, i) => h('td', { class: align[i] ? `al-${align[i]}` : null, text: plainInline(r[i] ?? '') }))))))
+      h('thead', {}, h('tr', {}, head.map((c, i) => cell('th', `0:h:${i}`, plainInline(c), i)))),
+      h('tbody', {}, body.map((r, ri) => h('tr', {}, head.map((_, i) => cell('td', `${ri + 1}:b:${i}`, plainInline(r[i] ?? ''), i))))))
     const wrap = h('div', { class: 'dc-tablewrap' }, table)
     wrap.addEventListener('mousedown', (e) => {
+      // A note's mark in a cell opens the note (the editor's click), and
+      // does not open the table's source.
+      if (e.target?.closest?.('[data-note]')) { e.preventDefault(); return }
       if (view.state.field(modeField, false) === 'view') return
       e.preventDefault()
       view.dispatch({ selection: { anchor: this.from + 1 } })
@@ -143,7 +204,7 @@ class TableWidget extends WidgetType {
     })
     return wrap
   }
-  ignoreEvent() { return true }
+  ignoreEvent(e) { return !e.target?.closest?.('[data-note]') }
 }
 
 class RuleWidget extends WidgetType {
@@ -219,7 +280,7 @@ function blockDecos(state, embed) {
       if (fm && node.from < fm.to) return node.name === 'Document'
       if (node.name === 'Table') {
         const from = state.doc.lineAt(node.from).from, to = state.doc.lineAt(node.to).to
-        if (!lineTouched(state, from, to)) items.push([from, to, Decoration.replace({ widget: new TableWidget(state.sliceDoc(from, to), from), block: true })])
+        if (!lineTouched(state, from, to)) items.push([from, to, Decoration.replace({ widget: new TableWidget(state.sliceDoc(from, to), from, cellMarks(state.sliceDoc(from, to), from, state.field(notesField, false)?.notes)), block: true })])
         return false
       }
       if (node.name === 'HorizontalRule') {
@@ -251,7 +312,7 @@ export function blocks(embed) {
   return StateField.define({
     create: (state) => blockDecos(state, embed),
     update(v, tr) {
-      if (tr.docChanged || tr.selection || tr.effects.some(e => e.is(setMode) || e.is(setFocused)) || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return blockDecos(tr.state, embed)
+      if (tr.docChanged || tr.selection || tr.effects.some(e => e.is(setMode) || e.is(setFocused) || e.is(setNotes)) || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return blockDecos(tr.state, embed)
       return v
     },
     provide: (f) => EditorView.decorations.from(f),

@@ -452,5 +452,44 @@ class WholeBlocks(unittest.TestCase):
               f"{ambiguous_total} notes kept on an equal run the comparison kept")
 
 
+
+class WhatItsWordsBecame(unittest.TestCase):
+    """Round 5, B8: a comment whose last (or first) words were rewritten by
+    an accepted suggestion beside it covers what those words became."""
+
+    def add(self, w, kind, words, **kw):
+        t = w.text()
+        s = t.index(words, t.index("Paragraph 2a."))
+        return w.svc.add(OWNER, *P, {"kind": kind, "start": s, "end": s + len(words), "quote": words,
+                                     "revision": w.get()["revision"], "text": "x", **kw})["note"]
+
+    def test_a_comment_covers_what_its_words_became(self):
+        for cq, sq, rep, want in (
+                ("river kept its own", "own time", "proper time", "river kept its proper time"),
+                ("river kept its own", "its own", "its", "river kept its"),
+                ("river kept its own", "The river", "A river", "A river kept its own"),
+                ("kept its own time", "own", "own good", "kept its own good time"),
+                ("river kept its own", "kept its", "kept all its", "river kept all its own")):
+            w = World()
+            c = self.add(w, "comment", cq)
+            s = self.add(w, "suggestion", sq, replacement=rep)
+            w.svc.accept(OWNER, *P, s)
+            wh = w.note(c)["where"]
+            self.assertEqual(w.text()[wh["start"]:wh["end"]], want, (cq, sq, rep))
+
+
+class HistoryRows(unittest.TestCase):
+    """Round 5, B9: a History row names the whole heading, number and all."""
+
+    def test_a_cut_section_is_named_with_its_number(self):
+        from doccomments import textdiff
+        t = DOC
+        a, b = t.index("## Section 3"), t.index("## Section 4")
+        self.assertEqual(textdiff.summary(t, t[:a] + t[b:])["section"], "Section 3")
+        c = t.index("Paragraph 2a")
+        self.assertEqual(textdiff.summary(t, t[:c] + "New words. " + t[c:])["section"], "Section 2")
+        d = t.index("## Section 5") + len("## Section ")
+        self.assertEqual(textdiff.summary(t, t[:d] + "Five" + t[d + 1:])["section"], "Section Five")
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

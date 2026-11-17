@@ -7,6 +7,7 @@
 // registration goes and Files draws Markdown in its own editor again.
 
 import { createDocEditor } from './editor/editor.js'
+import { tone } from './editor/dom.js'
 import { docApi } from './api.js'
 import { createSharing } from './sharing.js'
 
@@ -53,7 +54,11 @@ export function activate(loam) {
         return loam.ui.blob(host.agentLook(author.id, host.state?.agents), { size, font })
       }
       if (loam.ui.blob) {
-        return loam.ui.blob({ initial: (author?.name || '?').charAt(0).toUpperCase(), color: 'var(--latte-espresso)', ink: 'var(--latte-espresso-ink)', shape: '50%' }, { size, font })
+        // The owner is drawn as Loam draws them everywhere; anyone else in
+        // their own tone from their name, the one the share page gives them,
+        // so two visitors are told apart at a glance.
+        const own = author?.kind === 'owner'
+        return loam.ui.blob({ initial: (author?.name || '?').charAt(0).toUpperCase(), color: own ? 'var(--latte-espresso)' : tone(author?.name || '?'), ink: own ? 'var(--latte-espresso-ink)' : '#fff', shape: '50%' }, { size, font })
       }
     } catch { /* fall through to the editor's own initial */ }
     return null
@@ -83,7 +88,9 @@ export function activate(loam) {
       const sharing = file.root === 'vault' && writable ? createSharing({
         base: BASE, root: file.root, path: file.path, title: titleOf,
         toast: (text, undo) => ed?.toast(text, undo), onChange: () => ed?.refreshHead(),
-        notes: () => (ed?.notes?.() || doc.notes || []).length,
+        // What a visitor will see: the open notes, and the resolved ones apart.
+        notes: () => (ed?.notes?.() || doc.notes || []).filter(n => n.state === 'open').length,
+        resolved: () => ed?.state?.resolved ?? doc.resolved ?? 0,
       }) : null
       if (sharing) sharing.links = doc.links
       ed = createDocEditor({

@@ -184,6 +184,9 @@ class Door:
         elif session:
             visitor = link["name"] or session.get("v")
             if rest == "/api/name" and method == "POST" and not link["name"]:
+                if session.get("v"):
+                    # A browser names itself once: what it wrote stays.
+                    return _json(409, {"error": f"You are {session['v']} on this link; a name, once given, stays."})
                 return self._name(link, body, headers, prefix)
             if not visitor:
                 return _json(409, {"error": "say your name first", "need": "name"})
@@ -320,11 +323,20 @@ class Door:
     def _taken(self, link, name) -> bool:
         """A group visitor's name may not be the owner's, a persona's, or the
         name on one of this doc's named links, compared case-folded and
-        Unicode-normalised."""
+        Unicode-normalised; nor start with the owner's first name or a
+        persona's name as its first word ("Sam Visitor"), nor say "owner"."""
         key = _name_key(name)
         if key.endswith("'s agent") or key.endswith("’s agent") or key == "loam":
             return True          # how agents and Loam itself are shown
+        if "owner" in key.replace(" ", ""):
+            return True
         people = (self.svc.store.people() or {}).values()
+        first = (key.split(" ") or [""])[0].strip(".,;:!?'’\"-")
+        claimed = {_name_key(self.owner_name()).split(" ")[0]} if self.owner_name() else set()
+        claimed |= {_name_key(p.get("name", "")).split(" ")[0] for p in people if p.get("name")}
+        claimed |= {_name_key(p.get("id", "")) for p in people if p.get("kind") == "agent" and p.get("id")}
+        if first and first in (claimed - {""}):
+            return True
         others = [self.owner_name()]
         others += [p.get("name", "") for p in people]
         others += [l.get("name") or "" for l in self.links.for_doc(link["did"]) if l.get("name")]

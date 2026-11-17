@@ -168,7 +168,10 @@ export function draftDecos(list, look = () => null, doc = null) {
   for (const d of list) {
     const n = look(d)
     const extra = n ? `${n.on ? ' on' : ''}${n.peek ? ' peek' : ''}` : ''
-    if (d.orig) {
+    // A space turned into a line break (Enter at a space) is a split, not a
+    // deletion: nothing is struck.
+    const split = d.orig && !d.orig.trim() && !/\n/.test(d.orig) && doc && d.to > d.from && /\n/.test(doc.sliceString(d.from, d.to)) && !doc.sliceString(d.from, d.to).trim()
+    if (d.orig && !split) {
       // A deleted paragraph is drawn at the end of the line before it, not
       // at the start of the next one (where a heading would give it its type).
       let at = d.from

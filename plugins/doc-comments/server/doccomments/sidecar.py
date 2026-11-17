@@ -447,6 +447,44 @@ def _inside_deleted(ops: list, pos: int) -> bool:
     return bool(run) and run[0] < pos < run[1]
 
 
+def _replaced_runs(ops: list) -> list[tuple[int, int]]:
+    """The old ranges a change replaced (deleted with words put in their
+    place, no equal text between)."""
+    out, old, i = [], 0, 0
+    while i < len(ops):
+        op, val = ops[i]
+        if op == "=":
+            old += val
+            i += 1
+            continue
+        a, ins, j = old, False, i
+        while j < len(ops) and ops[j][0] != "=":
+            if ops[j][0] == "-":
+                old += ops[j][1]
+            else:
+                ins = True
+            j += 1
+        if ins and old > a:
+            out.append((a, old))
+        i = j
+    return out
+
+
+def _ends(ops: list, s: int, e: int) -> tuple[bool, bool]:
+    """How a passage's ends map through a change: a passage that holds the
+    whole of a run that was replaced, starting or ending with it, holds what
+    the run became (its start before the new words, its end after them);
+    otherwise an end inside removed words keeps to the passage's side, and
+    words put in right beside it stay outside it."""
+    s_after, e_after = not _inside_deleted(ops, s), _inside_deleted(ops, e)
+    for a, b in _replaced_runs(ops):
+        if a == s and b <= e:
+            s_after = False
+        if b == e and a >= s:
+            e_after = True
+    return s_after, e_after
+
+
 def locate(note: dict, text: str, ops: list | None = None, guessed: bool = False,
            old: str | None = None) -> dict:
     """``_carry``; for a worked-out change, when the note does not survive it
@@ -539,8 +577,15 @@ def _carry(note: dict, text: str, ops: list | None = None, old: str | None = Non
         # A passage's edges move with what its words became: an edge inside
         # a replaced run takes the whole replacement (a comment whose last
         # word was rewritten by an accept covers the new words, not fewer).
-        s2 = textdiff.map_pos(ops, s, after=not _inside_deleted(ops, s))
-        e2 = max(s2, textdiff.map_pos(ops, e, after=_inside_deleted(ops, e)))
+        s_after, e_after = _ends(ops, s, e)
+        # (an edge inside removed words maps from the removed run's own edge
+        # on the passage's side: before the new words at the start, after
+        # them at the end)
+        rs, re_ = _deleted_run(ops, s), _deleted_run(ops, e)
+        s_at = rs[0] if rs and rs[0] < s < rs[1] else s
+        e_at = re_[1] if re_ and re_[0] < e < re_[1] else e
+        s2 = textdiff.map_pos(ops, s_at, after=s_after if s_at == s else False)
+        e2 = max(s2, textdiff.map_pos(ops, e_at, after=e_after or e_at != e))
     else:
         s2, e2 = s, e
     s2, e2 = max(0, min(len(text), s2)), max(0, min(len(text), e2))

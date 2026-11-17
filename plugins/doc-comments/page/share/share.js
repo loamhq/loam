@@ -197,10 +197,19 @@ async function docPage() {
     const st0 = await fetch(`${P}/api/agent-key`, { credentials: 'same-origin', headers: SHARE }).then(x => x.json()).catch(() => ({}))
     if (st0?.made) {
       const when = new Date(st0.made).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      await new Promise((resolve) => put(body,
-        h('p', { class: 'dc-agentfoot', text: `Your agent has a key, made ${when}. It works until the link is turned off.` }),
-        h('button', { class: 'dc-gate-go dc-copy', type: 'button', onclick: resolve }, 'Make a new key'),
-        h('p', { class: 'dc-agentfoot', text: 'A new key stops the old one working at once.' })))
+      // A new key stops a working agent: asked once before it is made.
+      await new Promise((resolve) => {
+        const ask = () => put(body,
+          h('p', { class: 'dc-agentask', text: 'Make a new key? Your agent stops working here until you give it the new one.' }),
+          h('div', { class: 'dc-agentrow2' },
+            h('button', { class: 'dc-gate-go dc-copy dc-agentno', type: 'button', onclick: first }, 'Keep the old key'),
+            h('button', { class: 'dc-gate-go dc-copy', type: 'button', onclick: resolve }, 'Make a new key')))
+        const first = () => put(body,
+          h('p', { class: 'dc-agentfoot', text: `Your agent has a key, made ${when}. It works until the link is turned off.` }),
+          h('button', { class: 'dc-gate-go dc-copy', type: 'button', onclick: ask }, 'Make a new key'),
+          h('p', { class: 'dc-agentfoot', text: 'A new key stops the old one working at once.' }))
+        first()
+      })
     } else {
       await new Promise((resolve) => put(body,
         h('button', { class: 'dc-gate-go dc-copy', type: 'button', onclick: resolve }, robot(), 'Make a key for my agent'),
