@@ -2042,6 +2042,43 @@ for (const [w, dark] of [[430, true], [375, false]]) {
   })
 }
 
+test('the share sheet on a phone stands on the keyboard: the screen left above it is its whole height', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Shared\n\nA line.\n')
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  const page = await ctx.newPage()
+  // A keyboard, as the page sees one: the visual viewport shrinks from the foot.
+  await page.addInitScript(() => {
+    const vv = new EventTarget()
+    let height = innerHeight
+    Object.defineProperty(vv, 'height', { get: () => height })
+    Object.defineProperty(vv, 'offsetTop', { get: () => 0 })
+    Object.defineProperty(vv, 'width', { get: () => innerWidth })
+    window.__keyboard = (px) => { height = innerHeight - px; vv.dispatchEvent(new Event('resize')) }
+    Object.defineProperty(window, 'visualViewport', { get: () => vv })
+  })
+  await page.goto(`${base}/?phone&path=${encodeURIComponent(p)}`)
+  await page.waitForSelector('.dc-sharebtn')
+  await page.click('.dc-sharebtn')
+  await page.waitForSelector('.dc-share-scrim.on .dc-iv-name')
+  await page.waitForTimeout(400)
+  await page.evaluate(() => window.__keyboard(336))
+  await page.waitForTimeout(100)
+  const m = await page.evaluate(() => {
+    const d = document.querySelector('.dc-share-scrim .dc-dlg').getBoundingClientRect()
+    const f = document.querySelector('.dc-iv-name').getBoundingClientRect()
+    return { bottom: d.bottom, top: d.top, field: f.bottom, line: innerHeight - 336, scrolls: document.querySelector('.dc-share-scrim .dc-dlg').scrollHeight > document.querySelector('.dc-share-scrim .dc-dlg').clientHeight }
+  })
+  console.log('# keyboard', JSON.stringify(m))
+  assert.ok(Math.abs(m.bottom - m.line) < 1, `the sheet's foot is on the keyboard (${JSON.stringify(m)})`)
+  assert.ok(m.top >= 0 && m.field <= m.line, 'the field being typed in is above the keyboard')
+  assert.ok(m.scrolls, 'the rest scrolls inside')
+  await page.evaluate(() => window.__keyboard(0))
+  await page.waitForTimeout(100)
+  assert.ok(Math.abs((await page.evaluate(() => document.querySelector('.dc-share-scrim .dc-dlg').getBoundingClientRect().bottom)) - 844) < 1, 'and back on the foot when it goes')
+  await ctx.close()
+})
+
 test('the share sheet on a desktop stays the centred card, with no handle', { skip }, async () => {
   await start()
   const p = await newDoc('# Shared\n\nA line.\n')

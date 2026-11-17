@@ -844,3 +844,28 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   route `/api/plugins/<id>/files/*` to the tree's `plugins/<id>/` in the
   walk's Playwright context, beside the app (8081), gateway (8933) and door
   (8936) routes.
+
+## 2026-11-17 — the share sheet as a bottom sheet on phones
+
+- **A dialog redrawn whole needs its gestures on the scrim.** The share
+  sheet's `draw()` replaces the dialog node on every change, so touch,
+  focus and the menu-flip observer live on the lasting scrim
+  (`page/sheet.js`) and find the dialog anew each time.
+- **A fixed scrim sized to `visualViewport` needs `box-sizing:
+  border-box`,** or its top padding pushes the sheet past the screen's foot
+  by exactly that much. The keyboard can't be shown in headless Chromium;
+  the browser test fakes `window.visualViewport` with an init script.
+- **Live shots past the login, through the app on loopback, also need
+  `Origin` and `Sec-Fetch-Site` dropped** from the proxied request, or the
+  app's same-origin guard 403s the plugins' page code. Abort
+  `text/event-stream` requests, or the proxy's read never ends. Theme
+  is the owner's server-side setting (`"mode":"sun"`), not
+  `prefers-color-scheme`: rewrite it in `/appearance-state.js` in the proxy
+  for dark shots. Serving `/api/plugins/<id>/files/*` from a job's tree
+  previews a plugin change live before it lands.
+- **Two jobs adding an import under the same line conflict.** Put a new
+  import on a different line from the parallel job's (above the shared
+  one), and check with `git merge-tree --write-tree HEAD <their branch>`.
+- **The Bash tool's own background limit kills `engineer-job --land` too**
+  (10 min foreground, then moved to background with the same cap). Start it
+  with `run_in_background` and a long timeout from the outset.

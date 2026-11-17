@@ -566,7 +566,10 @@
   .dc-bs .dc-sh-head h2 { font-size: 24px; }
   /* A phone zooms the page into a field under 16px: never here. */
   .dc-bs input[type="text"] { font-size: 16px; }
+  .dc-bs .dc-iv-name { text-overflow: ellipsis; }
   .dc-bs .dc-menu.dc-up { top: auto; bottom: calc(100% + 6px); }
+  /* The ticket's link, when it wraps under a long password, keeps to the right. */
+  .dc-bs .dc-tk-link { margin-left: auto; }
   .dc-bs > .dc-dlg.dc-bs-spill { overflow: visible; }
 }
 @media (max-width: 600px) and (prefers-reduced-motion: reduce) {
