@@ -634,3 +634,30 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   host-side Playwright there drives the real live page for screenshots with
   no proof user. Use a scratch doc of invented text, so nothing real is
   open in Editing, and delete it and its sidecar after.
+
+## 2026-11-17 — doc comments: the selection popup waits
+
+- **Never wrap `engineer-job --land` in `timeout`.** A landing tests the
+  branch, then tests the merge again whenever `main` moved meanwhile (it did
+  twice in one hour); each `run-all` took ~10 min with a browser suite
+  beside it. `timeout 900` killed it mid-merge-test. It left nothing behind
+  (the canonical checkout was clean), but run it in the background with no
+  limit of its own.
+- **Several jobs on one plugin all append tests at the end of
+  `browser.test.mjs`**, so their landings conflict there. Both sides are
+  whole tests: keep both blocks and run both sets on the merged tree.
+- **"Is the user still selecting?" is a gesture, not a timer.** CodeMirror
+  marks its transactions (`select.pointer`, `select`, `input.format`, the
+  plugin's `remote` annotation), so the popup's own commands and the
+  server's answers can redraw in place while anything the person does sends
+  it away. Track the mouse button on `window` in the capture phase (the
+  release can land outside the editor), and expect one last
+  `select.pointer` transaction just after the button is up.
+- **`coordsAtPos` is null outside the drawn viewport.** A popup placed from
+  a selection's ends never appears for Select All on a long doc. Clamp the
+  range to the part on screen (`posAtCoords` at the scroller's top and
+  bottom) before measuring.
+- **Playwright's synthetic `new Event('touchstart')` throws inside
+  CodeMirror** (it reads `e.touches[0]`). Drive real touches with a
+  `hasTouch` context and CDP `Input.dispatchTouchEvent`; a held touch
+  doesn't turn into a click.
