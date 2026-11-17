@@ -219,7 +219,7 @@ mcp = MCPServer("loam-engineer")
         "is there to catch.\n"
         "\n"
         "The result carries `receipt_path` — the vault file at "
-        f"`40_PROJECTS/<project>/receipts/`, which is where {lc.OWNER_NAME} reads it. "
+        f"`{lc.vault_folder('projects')}/<project>/receipts/`, which is where {lc.OWNER_NAME} reads it. "
         "Pass that path on when you tell him.\n"
         "\n"
         f"**What the engineer will not do.** It never talks to {lc.OWNER_NAME} — you "

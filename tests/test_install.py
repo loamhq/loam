@@ -441,6 +441,20 @@ def cases() -> int:
     res = subprocess.run([str(ROOT / "bin" / "loam"), "claim"], capture_output=True, text=True, check=False)
     check("`loam claim` is not a verb", res.returncode, 2)
 
+    # -- how long it says it takes (2026-11-16: it said "about fifteen
+    # minutes"; both rehearsals took about two) ------------------------------
+    for f in ("install.sh", "README.md", "docs/install.md"):
+        check(f"{f} no longer promises fifteen minutes",
+              "fifteen minutes" in (ROOT / f).read_text(encoding="utf-8"), False)
+    check("install.sh says a few minutes",
+          "This takes a few minutes" in (ROOT / "install.sh").read_text(encoding="utf-8"))
+    check("the finale says what it took",
+          [li.took(s) for s in (40, 70, 130, 900)],
+          ["under a minute", "about a minute", "about 2 minutes", "about 15 minutes"])
+    inst = (ROOT / "bin" / "loam-install").read_text(encoding="utf-8")
+    check("...and only a run that did every step says it",
+          "finale(time.time() - began if start == 1 else None)" in inst)
+
     print(f"\n{'OK' if not FAILURES else f'{FAILURES} FAILED'}")
     return 1 if FAILURES else 0
 

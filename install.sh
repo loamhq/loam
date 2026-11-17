@@ -65,7 +65,7 @@ if [ -z "$VERSION" ] && [ -f "$STATE/answers.json" ]; then
 fi
 
 echo
-say "Installing Loam. This takes about fifteen minutes; you can watch it go."
+say "Installing Loam. This takes a few minutes; you can watch it go."
 
 # What the fetch itself needs. A fresh server usually has curl and Python;
 # git and the certificates are made sure of here (step 3 installs the rest).

@@ -42,13 +42,15 @@ from pathlib import Path
 import loam_config as lc
 import loam_cron
 import loam_engineer as eng
+import loam_inbox
 import loam_schedule as ls
 from loam_memory import CRON_LANE_DIR, strip_frontmatter
 
 ROOT = Path(__file__).resolve().parent.parent
 LAUNCHER = ROOT / "bin" / "engineer-job"
 WAKE_LOGS = eng.LOG_DIR
-FAILURE_LOG = eng.VAULT / "00_INBOX" / "from-agents" / "loam-wake-failures.md"
+# The install's folder, from the one place that writes it (lib/loam_inbox.py).
+FAILURE_LOG = eng.VAULT / loam_inbox.FAILURE_LOG
 
 ACTOR, LANE = lc.OWNER_ID, "app"
 KINDS = ("change", "refused", "fire", "run", "job")

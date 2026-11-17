@@ -1728,7 +1728,7 @@ def queued_text(p: dict[str, Path], job_id: str) -> str:
     # "40_PROJECTS/<project>/receipts/" with the placeholder left in.
     project = eng.projects().get(state.get("project", ""))
     where = (str(project.receipts_dir(eng.VAULT)) if project
-             else "the project's 40_PROJECTS/…/receipts/ folder")
+             else f"the project's {lc.vault_folder('projects')}/…/receipts/ folder")
     return (
         f"Queued, not refused: job {job_id} is waiting for memory on the box "
         f"— position {position or '?'} of {total or '?'}, queued since "
