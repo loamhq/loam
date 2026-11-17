@@ -477,7 +477,11 @@ first when there is news; the faces of the named links (a group link as a people
 past three, each naming who and what on hover or a long press) sit before
 the menu; and a dot on the tile's corner marks a doc with words from
 someone else since the owner last opened it. Opening it marks the new
-notes in the margin. A doc whose last link goes off leaves the list with a
+notes in the margin, and the list column stays on Shared Docs, at the same
+scroll, with that row shown as the open one; the address carries
+`?list=@doc-comments`, so a reload, Back and Forward come back to the same
+list (core, for any plugin root). The doc's folder is one step away: the
+breadcrumb in its header, or **Open folder** in the row's ⋯ menu. A doc whose last link goes off leaves the list with a
 short fade and slide. Nothing else in Files or the rail gets a dot, and
 nothing pings anyone. **Share settings** (or **Share…** on a doc with no
 link yet) is first in every writable vault Markdown file's ⋯ menu, here

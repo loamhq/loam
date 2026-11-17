@@ -687,3 +687,24 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **`$TMPDIR` can be empty in a job's shell.** A `cp x $TMPDIR/y` that
   fails leaves the next step (a `git show HEAD:x > x`) to overwrite work.
   Write the job's scratch path out, and `git add` before experiments.
+
+## 2026-11-17 — Opening from a plugin's list keeps the list
+
+- **Opening a file synced the list column to its folder in core** (`show()`
+  in app/public/files.js set `st.root`/`st.path` from the file), not in the
+  plugin. The fix is an explicit `list` option from `goFiles` through the
+  panels' `openMain` item and back into `show`, and `?list=@<id>` on the
+  file's address (`filesHref`'s third argument, `listFromURL`). Only a
+  plugin's root passes one (`fromList` wraps its `go`); shortcuts on the
+  Files home, Open daily note, New inbox note and chat links still go to
+  the file's folder.
+- **On the desktop a Files address is the main panel's item.** Browsing a
+  folder there does not push an address; only opening a file does. Anything
+  that must survive a reload rides on the file's address, and routePanels
+  (Back/Forward) and the cold load (`landedOn`) both read it.
+- **A side-panel item promoted to the main panel carries no list** (the
+  side's descriptor is root and path only), so promoting moves the list
+  to the folder, as before.
+- **A browser test against the fake host hangs on exit** (its event
+  streams stay open): race `closing()` against a timer and `process.exit`
+  in `test.after`, as app/test/files-plugin-list-browser.mjs does.
