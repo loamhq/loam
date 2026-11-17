@@ -246,3 +246,26 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   stops it. **It moves every process of the cgroup it starts in into its
   `init.scope`**: start it in a child cgroup of its own
   (tests/private_systemd.py does), or it reorganises the calling unit.
+
+## 2026-11-16 — restarts that end, probes that leave nothing
+
+- **`restart-broker --when-idle` has a ceiling** (`loam_live.RESTART_CEILING_S`,
+  30 min). Before it, a `working` or `asking` session holds the restart
+  (three clear reads); past it only a `working` row whose `last_event_at`
+  (or turn start) is under `RESTART_OUTPUT_S` (60 s) old does, and one
+  clear read is enough. A landing holds it through the live lock either way;
+  engineer jobs are units of their own and outlive it. `background` has
+  never held it since 11-12; what could wait forever was a silent turn or
+  an unanswered question.
+- **A live probe cleans up after itself.** `bin/broker-probe` deletes the
+  thread it created (its member's process first), in a `finally`, so a run
+  that stops early does too; archiving left them in the owner's Archived
+  list. Deleting a thread removes its record from the vault's conversations
+  folder, so only the broker does it, on the owner's click or a probe's own
+  thread; an engineer never deletes the owner's threads by hand.
+- **`tests/run-all` names a scratch `LOAM_THREADS_STATE` and `LOAM_VAULT`**
+  for every test unless the caller did, the floor under a thread test that
+  forgets its own.
+- **check-drift's model check reads Claude sessions only.** A lane on another
+  provider (a persona's, or the reviewer's) is a note, never a family
+  comparison: its newest Claude session predates the switch.
