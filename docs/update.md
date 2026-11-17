@@ -122,9 +122,10 @@ commits), plus the folders listed:
 | `gateway` | `bin/plugin-gateway` | |
 
 - **The broker** is restarted by `restart-broker --when-idle`. That waits
-  until no session is working or asking; after half an hour (its ceiling)
-  it goes at the first moment no session has produced output for a
-  minute. The
+  until every session is idle and no thread turn is in flight; after half
+  an hour (its ceiling) it defers instead of restarting, and the step fails
+  as `deferred`: the apply is undone, and since the broker never restarted
+  the undo does not restart it either (`undo-broker` is skipped). The
   wait's lines ("held by iris (working)") become the step's `detail` as
   they come. The step then requires a new main process that answers `/up`
   within 90 s.

@@ -5972,8 +5972,8 @@ class Server:
                "model": running_model(session) or asked,
                "model_asked": asked,
                "state": state, "last_active": stamp(last),
-               # The newest event the session wrote: output, for a restart
-               # past its ceiling (loam_live.restart_blockers, 2026-11-16).
+               # The newest event the session wrote (2026-11-16; since
+               # 11-17 it no longer lets a restart go: loam_live).
                "last_event_at": getattr(session, "last_event_at", None),
                "idle_since": stamp(last) if state == "idle" else None,
                "started_at": stamp(started),
@@ -6070,7 +6070,18 @@ class Server:
                             "mb": sum(r["rss_mb"] or 0 for r in rows),
                             "idle": sum(1 for r in rows if r["state"] == "idle")},
                "units": loam_live.units()}
-        return {"sessions": rows, "box": box,
+        # Thread turns in flight (2026-11-17), with or without a session
+        # yet: a planned restart goes only when this is empty and every row
+        # is idle (loam_live.restart_blockers), so a turn that has been
+        # taken but whose session is still starting is not cut.
+        engine = self.threads
+        turns = [{"thread_id": tid, "persona": persona,
+                  "queued": key not in engine.turns}
+                 for key in dict.fromkeys(
+                     [*engine.turns,
+                      *(k for k, q in list(engine.queues.items()) if not q.empty())])
+                 for (tid, persona) in [key]]
+        return {"sessions": rows, "box": box, "turns": turns,
                 "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
     async def end_idle(self) -> dict:

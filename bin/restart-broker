@@ -7,23 +7,30 @@ of Loam is halfway through moving `main` under it. Since 2026-10-02 every job
 edits its own worktree and lands by a tested merge (lib/loam_worktree.py); a
 restart waits for any landing in progress, says so, and then restarts.
 
-`--when-idle` (2026-11-12) first waits until no session is producing a turn:
-`lib/loam_live.restart_blockers`, the one rule (`working` or `asking` holds
-it; a session waiting on background work does not, and an engineer job's
-receipt reaches its thread anyway, lib/loam_waiters.py). Three clear reads
-`--poll` seconds apart, so a thread turn on its way to sending is not cut;
-a failed read is busy. `--max-wait` seconds (default: no limit) ends the
-wait with exit 75 and no restart. Each change in what holds it is printed.
+**An explicit restart** (no `--when-idle`) is the operator's emergency
+restart: it waits only for the live lock and restarts, whatever is running.
 
-`--ceiling` seconds (default `loam_live.RESTART_CEILING_S`, 30 min;
-2026-11-16, after a wait looped for over an hour on 11-12): past it, the
-restart stops waiting for turns to end and goes at the next quiet moment,
-one read on which no session has produced output in the last
-`loam_live.RESTART_OUTPUT_S`. A silent `working` turn and an unanswered
-question are ended by it; a landing still holds it (the live lock), and
-engineer jobs, units of their own, run on. `--ceiling 0` turns it off.
+**A planned restart** (`--when-idle`, 2026-11-12; its rule replaced
+2026-11-17) restarts only on positive evidence that nothing would be cut:
+`lib/loam_live.restart_blockers`, every live session `idle` and no thread
+turn in flight or queued. `working` -- a silent turn in a long tool call or
+one waiting on an engineer job included -- `asking`, `background`, a state
+it does not know and a failed read all hold it. It takes three clear reads
+`--poll` seconds apart, so a thread turn on its way to sending is not cut;
+once the live lock is its own it reads again, three more clear reads, the
+last of them just before the restart; busy again by then, it defers rather
+than hold the lock landings wait on.
+
+**At the ceiling it defers, never forces** (2026-11-17). On 11-16 a planned
+restart went at its 1800 s ceiling past four silent turns and cut them, three
+of them waiting on engineer jobs. Now, when `--ceiling` (default
+`loam_live.RESTART_CEILING_S`, 30 min; `0` turns it off) or `--max-wait`
+(default none) runs out, it prints what still holds it and exits 75 with
+nothing restarted; the caller tries again later (lib/loam_follow.py's next
+run does; by hand, run it again). Each change in what holds it is printed.
 
 Usage: restart-broker [--when-idle [--poll S] [--max-wait S] [--ceiling S]]
+Exit: the restart's own code; 75 when a planned restart deferred.
 """
 
 import argparse
@@ -37,60 +44,79 @@ import loam_lock  # noqa: E402
 
 UNIT = "loam-session-broker.service"
 CLEAR_READS = 3
+# How many reads the wait under the live lock is given to see idle again.
+UNDER_LOCK_READS = CLEAR_READS + 1
+DEFERRED = 75
 
 
 def wait_idle(poll: float, max_wait: float | None, ceiling: float | None = None,
               started: float | None = None, read=None, clock=time.monotonic,
               sleep=time.sleep) -> bool:
-    """True once the broker may restart, False when `max_wait` ran out.
-    ``started`` is when the whole wait began, so the second wait, under the
-    lock, counts the ceiling from the first."""
-    import loam_live  # noqa: PLC0415
+    """True once every one of `CLEAR_READS` reads in a row said idle, the
+    last of them the read this returns on; False when the ceiling or
+    `max_wait` ran out first (nothing is restarted then). ``read`` answers
+    `restart_blockers`'s lines (empty: idle); one that raises is busy.
+    ``started`` is when the wait began (the ceiling counts from it)."""
     if read is None:
         import loam_follow  # noqa: PLC0415 -- the live list's reader
-        read = loam_follow.broker_rows
+        read = loam_follow.restart_read
     started = clock() if started is None else started
+    limits = [s for s in (max_wait, ceiling or None) if s is not None]
+    limit = min(limits) if limits else None
     clear, last = 0, None
     while True:
-        past = bool(ceiling) and clock() - started >= ceiling
-        why = loam_live.restart_blockers(read(), past_ceiling=past)
-        if (past, why) != last:
-            print(f"restart-broker: {'held by ' + ', '.join(why) if why else 'quiet'}"
-                  + (f" (past the {ceiling:.0f} s ceiling: only output holds it)"
-                     if past else ""), flush=True)
-            last = (past, why)
+        try:
+            why = list(read())
+        except Exception as exc:  # noqa: BLE001 -- a read that fails is busy
+            why = [f"the broker's live list could not be read ({exc}; counted as busy)"]
+        if why != last:
+            print(f"restart-broker: {'held by ' + ', '.join(why) if why else 'quiet'}",
+                  flush=True)
+            last = why
         clear = 0 if why else clear + 1
-        if clear >= (1 if past else CLEAR_READS):
+        if clear >= CLEAR_READS:
             return True
-        if max_wait is not None and clock() - started >= max_wait:
+        if limit is not None and clock() - started >= limit:
+            print(f"restart-broker: deferred: still held after "
+                  f"{clock() - started:.0f} s"
+                  + (f" (the {ceiling:.0f} s ceiling)" if ceiling and limit == ceiling
+                     else "")
+                  + (f" by {', '.join(why)}" if why else " (not yet three clear reads)")
+                  + "; not restarted, try again later", flush=True)
             return False
         sleep(poll)
 
 
-if __name__ == "__main__":
+def main(argv=None, *, wait=wait_idle, lock=None, restart=None,
+         clock=time.monotonic) -> int:
+    """``wait``, ``lock``, ``restart`` and ``clock`` are seams for the tests
+    (tests/test_restart_ceiling.py); the box's are the broker's live list,
+    the live lock, systemctl and the monotonic clock."""
     ap = argparse.ArgumentParser(prog="restart-broker")
     ap.add_argument("--when-idle", action="store_true")
     ap.add_argument("--poll", type=float, default=20.0)
     ap.add_argument("--max-wait", type=float, default=None)
     ap.add_argument("--ceiling", type=float, default=None)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if args.ceiling is None:
-        import loam_live
+        import loam_live  # noqa: PLC0415
         args.ceiling = loam_live.RESTART_CEILING_S
-    began = time.monotonic()
-    if args.when_idle and not wait_idle(args.poll, args.max_wait, args.ceiling, began):
-        print(f"restart-broker: still held after {args.max_wait:.0f} s; "
-              f"not restarted", flush=True)
-        sys.exit(75)
-    with loam_lock.live("Loam", "restart-broker"):
+    lock = lock or (lambda: loam_lock.live("Loam", "restart-broker"))
+    restart = restart or (lambda: subprocess.run(
+        ["systemctl", "--user", "restart", UNIT], check=False).returncode)
+    began = clock()
+    if args.when_idle and not wait(args.poll, args.max_wait, args.ceiling, began):
+        return DEFERRED
+    with lock():
         # The live lock can be held for minutes by a landing, and a session
-        # can begin a turn in that time; quiet is read again once it is ours
-        # (2026-11-14: a restart waited five minutes here and went without
-        # looking).
-        if args.when_idle and not wait_idle(args.poll, args.max_wait, args.ceiling,
-                                            began):
-            print(f"restart-broker: still held after {args.max_wait:.0f} s; "
-                  f"not restarted", flush=True)
-            sys.exit(75)
-        sys.exit(subprocess.run(["systemctl", "--user", "restart", UNIT],
-                                check=False).returncode)
+        # can begin a turn in that time; idle is read again, fresh, once the
+        # lock is ours (2026-11-14), and the restart follows the last read.
+        # Briefly (2026-11-17): landings wait on this lock, so a box busy
+        # again by now defers rather than waiting here.
+        if args.when_idle and not wait(args.poll, UNDER_LOCK_READS * args.poll, 0):
+            return DEFERRED
+        return restart()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

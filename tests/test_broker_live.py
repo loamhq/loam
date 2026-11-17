@@ -284,6 +284,7 @@ async def main():
     check("...RAM used/total, the sessions' count, and the units by kind",
           (isinstance(box["ram_total_mb"], int), box["sessions"]["live"], sorted(box["units"])),
           (True, 5, ["crons", "engineer_jobs", "rc_servers", "wakes"]))
+    check("no thread turn in flight: `turns` is empty (2026-11-17)", view["turns"], [])
 
     # -- 2. end-idle ---------------------------------------------------------
     iris.last_activity = time.time() - 600     # its answer was ten minutes ago
@@ -315,6 +316,11 @@ async def main():
     check("...and the view shows it working, ending a turn in progress",
           [(r["state"], r["ending"]["text"]) for r in view["sessions"] if r["id"] == iris.id],
           [("working", "ends a turn in progress")])
+    check("...and names the turn in flight, for a planned restart",
+          view["turns"], [{"thread_id": tid, "persona": "iris", "queued": False}])
+    check("...which that turn holds back (loam_live.restart_blockers)",
+          loam_live.restart_blockers(view["sessions"], view["turns"])[-1:],
+          [f"iris's turn in {tid} in flight"])
     status, out = await call(server, "POST", "/v1/sessions/end-idle")
     check("end-idle leaves the turn alone", iris.id in [k["id"] for k in out["kept"]], True)
     status, rec = await call(server, "DELETE", f"/v1/sessions/{iris.id}")

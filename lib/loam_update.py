@@ -165,6 +165,12 @@ class Refusal(Exception):
         return {"code": self.code, "message": self.message, **self.detail}
 
 
+class BrokerDeferred(RuntimeError):
+    """``restart-broker --when-idle`` deferred (exit 75, 2026-11-17): the box
+    did not go idle within its ceiling, so the broker was not restarted and
+    still runs the code it started with."""
+
+
 class StepFailed(Exception):
     def __init__(self, step: str, message: str) -> None:
         super().__init__(message)
@@ -850,7 +856,9 @@ class Box:
             if line:
                 said.append(line)
                 self.on_line(line)
-        if proc.wait() != 0:
+        if proc.wait() == 75:
+            raise BrokerDeferred("; ".join(said[-3:]) or "deferred: not restarted")
+        if proc.returncode != 0:
             raise RuntimeError("; ".join(said[-3:]) or f"exit {proc.returncode}")
         deadline = time.monotonic() + BROKER_UP_S
         while time.monotonic() < deadline:
@@ -955,7 +963,8 @@ class Run:
             self.save()
             raise
         except Exception as exc:  # noqa: BLE001 -- every failure is the record's
-            entry.update(status="failed", ended_at=now_iso(), detail=str(exc)[-1500:])
+            entry.update(status="failed", ended_at=now_iso(), detail=str(exc)[-1500:],
+                         **({"deferred": True} if isinstance(exc, BrokerDeferred) else {}))
             self.save()
             raise StepFailed(name, str(exc)) from exc
         entry.update(status="done", ended_at=now_iso(),
@@ -1182,7 +1191,16 @@ def _undo(run: Run, box: Box, old_commit: str, backup: str | None,
             run.step(name, fn, *args)
         except StepFailed:
             ok = False
+    deferred = any(e.get("name") == "broker" and e.get("deferred")
+                   for e in run.rec.get("steps") or [])
     for name in REGEN:
+        if name == "broker" and deferred:
+            # Never restarted, so it runs the release it started on: nothing
+            # to undo, and a second idle wait would only defer again.
+            run.skip("undo-broker", "the broker was not restarted (its restart "
+                     "deferred: the box was not idle), so it runs the previous "
+                     "release already")
+            continue
         if name in done or (name == "broker" and run.rec.get("failed_step") == "broker"):
             try:
                 run.step(f"undo-{name}", getattr(box, name.replace("-", "_")))

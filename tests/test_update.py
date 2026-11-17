@@ -340,6 +340,28 @@ check("...a notice: failed and undone", [n["kind"] for n in notices()], ["failed
 clear_notices()
 check("...and no rollback offered for an apply that did not land", up.status()["rollback"], None)
 
+
+class DeferringBox(FakeBox):
+    """restart-broker --when-idle deferred (2026-11-17): never restarted."""
+
+    def broker(self):
+        self.calls.append("broker")
+        raise up.BrokerDeferred("restart-broker: deferred: still held after 1800 s")
+
+
+box = DeferringBox()
+rec = up.apply(box=box)
+check("a deferred broker restart: failed at the broker, and rolled back",
+      (rec["outcome"], rec["failed_step"], rec["rolled_back"]), ("failed", "broker", True))
+check("...the broker step is marked deferred and says why",
+      [(s.get("deferred"), "deferred" in (s.get("detail") or ""))
+       for s in rec["steps"] if s["name"] == "broker"], [(True, True)])
+check("...and the undo does not wait to restart a broker that never restarted",
+      (box.calls.count("broker"),
+       [(s["name"], s["status"]) for s in rec["steps"] if s["name"] == "undo-broker"]),
+      (1, [("undo-broker", "skipped")]))
+clear_notices()
+
 # -- an apply killed mid-way -----------------------------------------------------------------
 
 
@@ -505,8 +527,16 @@ try:
     got = None
 except RuntimeError as exc:
     got = str(exc)
-check("...and a restart-broker that gave up is a failure, saying why", got,
+check("...and a restart-broker that deferred is a failure, saying why", got,
       "restart-broker: still held")
+try:
+    b2.broker()
+    got = None
+except up.BrokerDeferred:
+    got = "deferred"
+except RuntimeError:
+    got = "other"
+check("...told apart as a deferral (exit 75: nothing was restarted)", got, "deferred")
 up._main_pid, up._broker_up = real_pid, real_up
 lc.ROOT = up_root
 
