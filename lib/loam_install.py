@@ -71,6 +71,19 @@ STEPS = (
 # The steps' record
 # ---------------------------------------------------------------------------
 
+def took(seconds: float) -> str:
+    """How long the install took, in the words the last line says it in.
+    The installer used to promise "about fifteen minutes"; both rehearsals
+    of 2026-11-16 took about two (the first-day walk), so it now promises
+    "a few minutes" and says what it actually took."""
+    minutes = round(seconds / 60)
+    if seconds < 60:
+        return "under a minute"
+    if minutes <= 1:
+        return "about a minute"
+    return f"about {minutes} minutes"
+
+
 def step_file(n: int) -> Path:
     name = dict((k, v) for k, v, _ in STEPS)[n]
     return STEPS_DIR / f"{n:02d}-{name}.done"

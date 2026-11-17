@@ -16,7 +16,7 @@ least 4 GB of memory and 15 GB of free disk, as root:
 curl -fsSL https://raw.githubusercontent.com/loamhq/loam/main/install.sh | sudo bash -s -- --name <name>
 ```
 
-It takes about fifteen minutes, can be run again at any time, and ends with
+It takes a few minutes, can be run again at any time, and ends with
 a one-time link that claims the server. While this repository is private,
 the fetch needs an install token: `docs/install.md` says how.
 
