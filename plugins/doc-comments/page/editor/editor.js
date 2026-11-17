@@ -84,6 +84,9 @@ export function createDocEditor(opts) {
     menu: null, saving: false, dirty: false, again: false, word: '', error: '',
     phone: Boolean(opts.phone), reattach: null, toast: null, sheet: null, bmenu: null, link: null,
     destroyed: false, editing: null, openReplies: new Set(), preview: null, sheetFor: null,
+    // The selection's tools are wanted (desktop: the popup) or offered (a
+    // phone's bars) only once the selecting has stopped.
+    selWant: false, barSel: false,
     // Suggesting: my own open suggestions, kept as real text in the editor
     // (record.js); `pending` while typing waits for its pause.
     pending: false,
@@ -318,8 +321,6 @@ export function createDocEditor(opts) {
           click: onEditorClick,
           mouseover: onEditorOver,
           mouseout: onEditorOut,
-          keyup: () => { if (!st.phone) queueSelbar() },
-          mouseup: () => { if (!st.phone) setTimeout(queueSelbar, 0) },
           focus: () => { view.dispatch({ effects: setFocused.of(true), annotations: remote.of(true) }); renderBars() },
           blur: () => setTimeout(() => {
             if (st.destroyed) return
@@ -583,7 +584,7 @@ export function createDocEditor(opts) {
       closeBmenuIfStale()
     }
     if (u.docChanged || u.geometryChanged || u.viewportChanged || u.transactions.some(t => t.effects.length)) queueLayout()
-    if (u.selectionSet && !st.phone) queueSelbar()
+    if (u.selectionSet) selectionMoved(u)
     if (u.selectionSet || u.focusChanged) { renderPlus(); if (st.phone) renderBars() }
   }
 
@@ -1152,6 +1153,90 @@ export function createDocEditor(opts) {
 
   // -- the selection popup (desktop) -----------------------------------------------------------
 
+  // It waits until the selecting stops: never there while a selection is
+  // being made, so it cannot flicker over the pointer or the words being
+  // chosen. After a mouse or trackpad drag it comes a beat after the button
+  // is up (longer after a double-click, which may yet become a triple); after
+  // Shift+arrows, Select All or anything else, once the selection has been
+  // still for a moment. On a phone the same wait holds the keyboard bar's
+  // Comment and Suggest, and the slim bar, until the fingers are up and the
+  // handles still. Any new selecting sends it away at once.
+  const SETTLE = { release: 120, double: 300, still: 350 }
+  const gest = { mouse: false, touch: false, touchedAt: 0, timer: 0, at: null, release: SETTLE.release }
+
+  function settleLater(ms) {
+    clearTimeout(gest.timer)
+    gest.timer = setTimeout(settled, ms)
+  }
+
+  function settled() {
+    if (st.destroyed || gest.mouse || gest.touch) return
+    if (st.phone) { if (!st.barSel) { st.barSel = true; renderBars() } return }
+    st.selWant = true
+    renderSelbar()
+  }
+
+  // A selection changed. The popup's own commands (formatting, a link) and
+  // the server's answers keep it where it is, redrawn; anything the person
+  // does sends it away until the selection settles again.
+  function selectionMoved(u) {
+    const own = u.transactions.every(t => !t.selection || t.annotation(remote) || t.isUserEvent('input.format'))
+    if (own) {
+      if (!st.phone && (st.selWant || st.link)) queueSelbar()
+      return
+    }
+    if (st.phone) {
+      // Handles dragged on a selection already offered: the bar stays as it
+      // is. A caret, or a new selection, waits.
+      if (!selectionRange()) { clearTimeout(gest.timer); st.barSel = false; return }
+      if (!st.barSel && !gest.touch && !gest.mouse) settleLater(SETTLE.still)
+      return
+    }
+    if (st.link) return
+    dropSelbar()
+    // The pointer's last word on a gesture can come just after the button is
+    // up; it keeps the gesture's own wait.
+    const pointer = u.transactions.some(t => t.isUserEvent('select.pointer'))
+    if (!gest.mouse && selectionRange()) settleLater(pointer ? gest.release : SETTLE.still)
+  }
+
+  // The pointer goes down in the text: whatever was offered leaves now, and
+  // nothing comes until the button is up (a narrow window with a mouse has
+  // the phone's bars, and they wait for the button too).
+  function onSelectStart(e) {
+    // The mouse events a browser makes up after a touch are the touch's.
+    if (e.button !== 0 || gest.touch || Date.now() - gest.touchedAt < 800) return
+    gest.mouse = true
+    clearTimeout(gest.timer)
+    if (!e.target.closest?.('.dc-selbar')) dropSelbar()
+  }
+  function onSelectEnd(e) {
+    if (!gest.mouse) return
+    gest.mouse = false
+    gest.at = { x: e.clientX, y: e.clientY }
+    gest.release = e.detail === 2 ? SETTLE.double : SETTLE.release
+    if (st.link || !selectionRange() || (st.phone && st.barSel)) return
+    settleLater(gest.release)
+  }
+  function onTouchStart() {
+    gest.touch = true
+    gest.touchedAt = Date.now()
+    clearTimeout(gest.timer)
+  }
+  function onTouchEnd(e) {
+    if (!gest.touch || e.touches?.length) return
+    gest.touch = false
+    gest.touchedAt = Date.now()
+    if (!selectionRange() || st.link) return
+    // A phone's bar, or a touch screen's popup: once the handles are still.
+    if (st.phone ? !st.barSel : !st.selWant) settleLater(SETTLE.still)
+  }
+  view.dom.addEventListener('mousedown', onSelectStart, true)
+  view.dom.addEventListener('touchstart', onTouchStart, { capture: true, passive: true })
+  globalThis.addEventListener?.('mouseup', onSelectEnd, true)
+  globalThis.addEventListener?.('touchend', onTouchEnd, true)
+  globalThis.addEventListener?.('touchcancel', onTouchEnd, true)
+
   let selbarQueued = false
   function queueSelbar() {
     if (selbarQueued) return
@@ -1159,9 +1244,55 @@ export function createDocEditor(opts) {
     requestAnimationFrame(() => { selbarQueued = false; renderSelbar() })
   }
 
-  function hideSelbar() {
-    selbar.classList.remove('on')
+  // Sent away by the person: gone until the selection settles again.
+  function dropSelbar() {
+    clearTimeout(gest.timer)
+    st.selWant = false
+    hideSelbar()
+  }
+
+  let selbarOut = 0
+  function hideSelbar({ keep = false } = {}) {
+    if (!keep) st.selWant = false
     st.link = null
+    if (!selbar.classList.contains('on')) return
+    // A very quick fade, already out of the pointer's way.
+    selbar.classList.remove('on', 'in')
+    selbar.classList.add('out')
+    clearTimeout(selbarOut)
+    selbarOut = setTimeout(() => selbar.classList.remove('out'), 90)
+  }
+
+  function showSelbar(below) {
+    clearTimeout(selbarOut)
+    const entering = !selbar.classList.contains('on')
+    selbar.classList.remove('out')
+    selbar.classList.toggle('blw', below)
+    selbar.classList.add('on')
+    if (entering) {
+      // Restart the entrance even when a fade out was still running.
+      selbar.classList.remove('in')
+      void selbar.offsetWidth
+      selbar.classList.add('in')
+    }
+  }
+  selbar.addEventListener('animationend', (e) => { if (e.target === selbar) selbar.classList.remove('in') })
+
+  // The part of the selection on the screen, between the header and the
+  // bottom of the scroller, or null when none of it shows. A long selection
+  // (Select All) is placed by the part in sight: its far ends are not drawn.
+  function selectionInView(from, to) {
+    const sr = scroll.getBoundingClientRect(), cr = view.contentDOM.getBoundingClientRect()
+    const top = Math.max(sr.top, head.getBoundingClientRect().bottom), bottom = sr.bottom
+    if (bottom - top < 8) return null
+    const x = Math.max(cr.left + 1, Math.min(cr.left + 40, cr.right - 1))
+    const p0 = view.posAtCoords({ x, y: top + 2 }, false), p1 = view.posAtCoords({ x, y: bottom - 2 }, false)
+    const lo = view.lineBlockAt(p0).from, hi = view.lineBlockAt(p1).to
+    if (to <= lo || from >= hi) return null
+    const f = Math.max(from, lo), t = Math.min(to, hi)
+    const ca = view.coordsAtPos(f, 1), cb = view.coordsAtPos(t, -1)
+    if (!ca || !cb || cb.bottom <= top || ca.top >= bottom) return null
+    return { from: f, to: t }
   }
 
   function tip(label, md, key) {
@@ -1173,7 +1304,11 @@ export function createDocEditor(opts) {
     const r = selectionRange()
     const focused = view.hasFocus
     if (st.link) return renderLinkBar()
+    if (!st.selWant || gest.mouse) return hideSelbar({ keep: true })
     if (!r || !focused || st.compose) return hideSelbar()
+    // Scrolled out of sight: it goes, and comes back with the words.
+    const seen = selectionInView(r.from, r.to)
+    if (!seen) return hideSelbar({ keep: true })
     const a = active(view.state)
     const items = []
     if (st.reattach) {
@@ -1193,20 +1328,23 @@ export function createDocEditor(opts) {
       if (st.can.suggest && st.mode !== 'view') items.push(h('button', { class: 'dc-sx', type: 'button', onclick: () => startNote('suggestion') }, icon('suggest', 14), h('span', { text: 'Suggest' }), tip('Suggest a change', null, null)))
     }
     if (!items.length) return hideSelbar()
-    selbar.className = `dc-selbar${st.mode === 'edit' && st.can.edit && !st.reattach ? ' fmt' : ''}`
+    selbar.classList.toggle('fmt', st.mode === 'edit' && st.can.edit && !st.reattach)
+    selbar.classList.remove('lnk')
     put(selbar, ...items)
-    placeAbove(selbar, r.from, r.to)
-    selbar.classList.add('on')
+    showSelbar(placeAbove(selbar, seen.from, seen.to))
   }
 
+  // Returns whether it went below the selection.
   function placeAbove(el, from, to) {
     const ca = view.coordsAtPos(from), cb = view.coordsAtPos(to, -1)
-    if (!ca || !cb) return
+    if (!ca || !cb) return false
     const a = local(ca), b = local(cb), c = local(col.getBoundingClientRect())
     const box = rootSize()
+    const was = el.classList.contains('on')
     el.style.visibility = 'hidden'
     el.classList.add('on')
     const w = el.offsetWidth, hgt = el.offsetHeight
+    if (!was) el.classList.remove('on')
     el.style.visibility = ''
     const sameLine = Math.abs(a.top - b.top) < 4
     const mid = sameLine ? (a.left + b.right) / 2 : (a.left + Math.min(b.right, c.right)) / 2
@@ -1215,9 +1353,21 @@ export function createDocEditor(opts) {
     // Just above the first line of the selection, clear of the header;
     // below its last line when there is no room above.
     let top = a.top - hgt - 8
-    if (top < head.offsetHeight + 4) top = b.bottom + 8
+    let below = top < head.offsetHeight + 4
+    if (below) top = b.bottom + 8
+    // A selection taller than the screen: at the top of the view.
+    const vb = local(scroll.getBoundingClientRect()).bottom
+    if (below && top + hgt > vb - 8) { top = head.offsetHeight + 8; below = false }
+    // Never under the pointer where the button came up: the other side of
+    // the selection when that side has room.
+    const p = gest.at && local({ left: gest.at.x, right: gest.at.x, top: gest.at.y, bottom: gest.at.y })
+    if (p && p.left > left - 6 && p.left < left + w + 6 && p.top > top - 6 && p.top < top + hgt + 6) {
+      const alt = below ? a.top - hgt - 8 : b.bottom + 8
+      if (below ? alt >= head.offsetHeight + 4 : alt + hgt <= box.height - 8) { top = alt; below = !below }
+    }
     el.style.left = `${left}px`
     el.style.top = `${top}px`
+    return below
   }
 
   function openLink_() {
@@ -1239,10 +1389,10 @@ export function createDocEditor(opts) {
       if (e.key === 'Enter') { e.preventDefault(); done() }
       if (e.key === 'Escape') { e.preventDefault(); st.link = null; hideSelbar(); view.focus() }
     })
-    selbar.className = 'dc-selbar lnk'
+    selbar.classList.remove('fmt')
+    selbar.classList.add('lnk')
     put(selbar, h('span', { class: 'dc-lk' }, icon('link', 15)), input, h('button', { class: 'dc-fb ok', type: 'button', 'aria-label': 'Apply link', onclick: done }, icon('check', 14)))
-    placeAbove(selbar, l.from, l.to)
-    selbar.classList.add('on')
+    showSelbar(placeAbove(selbar, l.from, l.to))
     setTimeout(() => input.focus(), 0)
   }
 
@@ -1773,7 +1923,7 @@ export function createDocEditor(opts) {
     } else margin.style.minHeight = ''
     renderGutter(ranges)
     renderPlus()
-    if (selbar.classList.contains('on') && !st.link) renderSelbar()
+    if ((selbar.classList.contains('on') || st.selWant) && !st.link) renderSelbar()
     if (st.mode === 'view' && st.focus && !st.phone) placeQpop()
   }
 
@@ -1961,7 +2111,7 @@ export function createDocEditor(opts) {
 
   scroll.addEventListener('scroll', () => {
     head.classList.toggle('scd', scroll.scrollTop > 4)
-    if (!st.phone && selbar.classList.contains('on')) {
+    if (!st.phone && (selbar.classList.contains('on') || st.selWant)) {
       if (st.link) renderLinkBar(); else renderSelbar()
     }
     if (st.bmenu) renderBmenu()
@@ -2216,7 +2366,8 @@ export function createDocEditor(opts) {
   function renderBars() {
     if (!st.phone) { kbar.classList.remove('on'); vbar.classList.remove('on'); if (kbar.firstChild) put(kbar); return }
     const focused = view.hasFocus
-    const r = selectionRange()
+    // A selection is offered once it has settled (see `settled`).
+    const r = st.barSel ? selectionRange() : null
     const writing = focused && canFormat()
     // Forced booleans: `toggle(name, undefined)` flips the class instead,
     // which left an empty bar at load and two bars after a blur.
@@ -2443,6 +2594,10 @@ export function createDocEditor(opts) {
       clearTimeout(suggestTimer)
       clearTimeout(watchTimer)
       globalThis.document?.removeEventListener('keydown', onEscape)
+      clearTimeout(gest.timer)
+      globalThis.removeEventListener?.('mouseup', onSelectEnd, true)
+      globalThis.removeEventListener?.('touchend', onTouchEnd, true)
+      globalThis.removeEventListener?.('touchcancel', onTouchEnd, true)
       ro?.disconnect()
       view.destroy()
     },

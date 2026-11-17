@@ -68,6 +68,29 @@ adds and does not rewrite (below, "What step 2 adds").
   is the one home for formatting (Aa, bold, italic, link, list, checklist,
   Comment, and dictation's mic); with a selection its end becomes Comment ·
   Suggest. In Viewing a selection brings up a slim bar with Comment.
+- **The selection's tools wait until the selecting stops** (2026-11-17; the
+  popup used to follow every letter of a drag and flicker over the pointer).
+  While a selection is being made the popup is not there at all. After a
+  mouse or trackpad drag it comes 120 ms after the button is up, not on a
+  timer while it is held; after a double-click it waits 300 ms, in case a
+  third click makes it the paragraph. After Shift+arrows, Select All or a
+  selection made by code, it comes once the selection has been still for
+  350 ms. It comes in one motion (180 ms, fading in while it rises 5 px away
+  from the words; a plain 140 ms fade with reduced motion), above the
+  selection, below it when there is no room, and on the other side when it
+  would sit under the pointer where the button came up; a selection taller
+  than the screen is placed by the part in sight. It leaves in an 80 ms fade
+  that already ignores the pointer, the moment a new selection starts, on
+  Shift+click, typing, or a click elsewhere; it goes when its words scroll
+  out of sight and comes back with them. Its own buttons (bold, a link…)
+  redraw it in place, with no blink. On a phone the same wait holds the
+  keyboard bar's Comment · Suggest and the slim bar: offered once the
+  fingers are up and the handles have been still 350 ms; dragging a handle
+  of a selection already offered leaves the bar as it is, and a caret takes
+  it back at once. A narrow window with a mouse has the phone's bars, and
+  they wait for the button to come up; the mouse events a browser makes up
+  after a touch are ignored (800 ms). (`editor.js`, `selectionMoved` and `settled`; the numbers
+  are `SETTLE`.)
 - **What the old editor drew keeps a home**: the frontmatter is a quiet
   Properties line above the title (click to open the rows; click a row to
   edit the YAML); task boxes are real checkboxes; callouts (`> [!note]`) are
