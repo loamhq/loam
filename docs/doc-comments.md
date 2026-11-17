@@ -75,6 +75,21 @@ adds and does not rewrite (below, "What step 2 adds").
   as tables until the caret enters them; wiki-links are links (⌘/Ctrl-click,
   or a click in Viewing); dictation's mic is in the header (desktop) and the
   keyboard bar (phone); read aloud's button is in the header.
+- **Dictation only where words can go** (2026-11-17, the owner: "when I'm
+  in Viewing mode, dictation should not be an option because I can't insert
+  anything. Read aloud is fine in all modes"). The mic is drawn only while
+  the doc takes typed text from this person: Editing, or Suggesting (the
+  dictated words become a suggestion, as typed ones do), with the right to.
+  In Viewing, on a file that opens read-only, and on a share page (whose
+  visitors are never given a mic) it is not there at all, and the header
+  closes up. A mode change adds or removes it at once. The editor takes the
+  mic apart from the header's other extras (`mic`, `micInHead`) and says
+  when the rule changes (`onCanType`); the adapter (`page/main.js`) then
+  ends a take running into the doc as closing the field does (dictation's
+  `field.closed`), and its field refuses writes while the doc cannot be
+  typed into, so a late take lands nothing. Read aloud stays in every mode.
+  Comment and reply boxes have no dictation of their own. Dictation has no
+  keyboard shortcut.
 - **Share** is in the header (step 2, below).
 
 ## How it is built
