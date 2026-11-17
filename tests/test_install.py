@@ -164,6 +164,16 @@ def cases() -> int:
     rules = __import__("yaml").safe_load(dep.authelia_config())["access_control"]["rules"]
     check("Authelia covers the domain itself and every name under it",
           {"domain": ["sam.loam-proof.test", "*.sam.loam-proof.test"], "policy": "one_factor"} in rules)
+    # No one reads an install's file notifier, so its sign-in page offers no
+    # password reset that would wait for an email (the first-day walk).
+    reset = lambda: __import__("yaml").safe_load(dep.authelia_config())[  # noqa: E731
+        "authentication_backend"]["password_reset"]["disable"]
+    check("an install's sign-in page offers no password reset", reset(), True)
+    edge_was, dep.EDGE = dep.EDGE, {}
+    try:
+        check("...the first install's still does (its engineer reads the notifier)", reset(), False)
+    finally:
+        dep.EDGE = edge_was
 
     # -- claimed ---------------------------------------------------------------
     dep.CLAIMED_FILE.write_text("{}")
