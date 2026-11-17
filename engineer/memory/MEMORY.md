@@ -869,3 +869,26 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **The Bash tool's own background limit kills `engineer-job --land` too**
   (10 min foreground, then moved to background with the same cap). Start it
   with `run_in_background` and a long timeout from the outset.
+
+## 2026-11-17 — the agents sheet on phones; "Remembered for" that fits
+
+- **Core's `select { min-height: 44px }` (app/public/style.css:40) reaches
+  every select a plugin draws.** A select laid over its words at opacity 0
+  with `inset: 0` still grew to 44px and overhung them; at the foot of a
+  bottom sheet that made the sheet scroll by 3px, which in turn stopped the
+  ⋯ menu from showing past the sheet's top. Set `min-height: 0` on any
+  select whose size you mean. The plugin's test harness does not load core,
+  so a test that cares adds the rule itself (`CORE_SELECT`).
+- **The harness has no global `box-sizing: border-box`; core does.** A
+  `width: 100%` row with padding overflowed its menu by 20px in the harness
+  only. Plugin rules that rely on border-box say it themselves.
+- **A menu hanging past a dialog's foot makes the dialog scroll** at the
+  moment the flip observer looks. "Does the sheet scroll of itself?" is
+  measured with the new menus set to `display: none`.
+- **When one dialog adopts a shared component, check its siblings.** The
+  share-sheet job moved the add sheet's phone CSS to `.dc-bs` and deleted
+  `.dc-wm-scrim`'s own; the agents sheet shared that class and silently
+  became a centred card on phones.
+- **Live dark shots:** the owner's theme mode in `/appearance-state.js` is
+  `sun` (follows the sun), `dark`, `light` or `system`; rewrite it to
+  `"mode":"dark"`, not `moon`.
