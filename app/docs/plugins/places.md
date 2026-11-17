@@ -88,7 +88,14 @@ relay. It holds no broker credential. `loam.events.emit(name,detail)` broadcasts
 a removable handle. Events include `thread.event`, `message.arrived`,
 `turn.started`, `turn.ended`, `file.changed`, `section.changed` and `rendered`; thread
 notifications include the thread and original event. `file.changed` follows a
-successful save. `file.renamed` follows an accepted rename in the originating
+successful save. A plugin's editor can **hold the open file** (since
+2026-11-16, for doc-comments): `files.own(file, {dirty, save, edit, field})`
+(each optional; `save` returns a promise) returns a removable handle; while
+held, Files' `edit(text)`, `save()` and `dirty()` go to the plugin, the way
+out of an unsaved edit waits on its save, and `host.fileField` is the
+plugin's `field` (a textarea-like object: `value`, `selectionStart`,
+`selectionEnd`, `setSelectionRange`, `focus`, `isConnected`), so dictation
+lands in the plugin's editor. Opening another file releases it. `file.renamed` follows an accepted rename in the originating
 page, with the host's new row and `from` address; see [Files renaming](../files-renaming.md).
 External file change streaming is not available on the host.
 

@@ -188,9 +188,22 @@ def environment(pid: str, want: dict, port: int) -> dict[str, str]:
         "LOAM_BROKER_URL": f"http://{cfg.BIND_ADDR}:{cfg.PORT}",
         "LOAM_BROKER_TOKEN_FILE": str(cfg.TOKEN_PATH),
         "LOAM_API": str(plugins.API),
+        # Since 2026-11-16 (doc-comments): the plugin's own folder in the
+        # vault, `<system>/Loam/data/<id>`, which an update keeps
+        # (lib/loam_skills.py, KEPT_DIR). Vault-relative, for the broker's
+        # Files routes, and as a host path. Not made until the plugin writes.
+        "LOAM_VAULT_DATA": vault_data(pid),
+        "LOAM_VAULT_DATA_DIR": str(lc.VAULT / vault_data(pid)),
         "PATH": lc.UNIT_PATH,
         "PYTHONUNBUFFERED": "1",
     }
+
+
+def vault_data(pid: str) -> str:
+    """A plugin's folder in the vault, relative to it: under Loam's own
+    folder, in the one place there an update does not replace."""
+    import loam_skills  # noqa: PLC0415
+    return f"{lc.vault_folder('system')}/{loam_skills.LOAM_DIR}/{loam_skills.KEPT_DIR}/{pid}"
 
 
 def argv(pid: str, want: dict, port: int) -> list[str]:

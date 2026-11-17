@@ -5972,6 +5972,9 @@ class Server:
                "model": running_model(session) or asked,
                "model_asked": asked,
                "state": state, "last_active": stamp(last),
+               # The newest event the session wrote: output, for a restart
+               # past its ceiling (loam_live.restart_blockers, 2026-11-16).
+               "last_event_at": getattr(session, "last_event_at", None),
                "idle_since": stamp(last) if state == "idle" else None,
                "started_at": stamp(started),
                "rss_mb": loam_live.tree_rss_mb(pid, kids),

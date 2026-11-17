@@ -104,13 +104,18 @@
     }
     return { ...today, mode: light ? 'light' : 'dark', next: Number.isFinite(next) ? next : now + 6 * 3600000, start: today.sunrise === null ? null : today.sunrise - halfHour, end: today.sunset === null ? null : today.sunset + halfHour }
   }
-  // Only unacknowledged Sun/location edits are cached, never other preferences.
+  // Only unacknowledged Sun/location/transition edits are cached, never other preferences.
   function local(kind, value) {
     const key = 'loam.appearance.sun'
     try {
       const stored = JSON.parse(localStorage.getItem(key) || '{}')
       if (arguments.length > 1) {
-        if (value?.mode) stored[kind] = { mode: value.mode }
+        if (value?.mode || value?.transition) {
+          stored[kind] = {
+            ...(value.mode ? { mode: value.mode } : {}),
+            ...(value.transition ? { transition: value.transition } : {}),
+          }
+        }
         else delete stored[kind]
         if (value?.location) stored.location = value.location
         else delete stored.location
@@ -119,6 +124,7 @@
       }
       const clean = {}
       if (['sun', 'light', 'dark', 'system'].includes(stored[kind]?.mode)) clean.mode = stored[kind].mode
+      if (['fast', 'normal', 'long'].includes(stored[kind]?.transition)) clean.transition = stored[kind].transition
       if (location(stored.location)) clean.location = location(stored.location)
       return clean
     } catch { return {} }

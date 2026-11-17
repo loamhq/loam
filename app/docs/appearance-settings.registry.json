@@ -54,6 +54,16 @@
       "default": "system"
     },
     {
+      "key": "appearance.phone.transition",
+      "type": "string",
+      "enum": [
+        "fast",
+        "normal",
+        "long"
+      ],
+      "default": "normal"
+    },
+    {
       "key": "appearance.phone.size",
       "type": "integer",
       "minimum": 75,
@@ -223,6 +233,16 @@
         "system"
       ],
       "default": "system"
+    },
+    {
+      "key": "appearance.desktop.transition",
+      "type": "string",
+      "enum": [
+        "fast",
+        "normal",
+        "long"
+      ],
+      "default": "normal"
     },
     {
       "key": "appearance.desktop.size",

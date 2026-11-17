@@ -123,8 +123,10 @@ own `thread.*` rows cover the same things.
 | `reviewer.effort` | The reviewer's thinking level | PATCH /api/system/reviewer | persona, conversation only | no |
 | `plugin.agent` | A plugin's settings for one agent (Read aloud's voice, once loam-ui reads it) | PATCH /api/plugins/{plugin}/agents/{agent} | persona, conversation only | no |
 | `appearance.phone.mode` | The phone's mode: light, dark, sun or system (the modes loam-ui's handoff declares) | PATCH /api/settings/appearance | persona | no (was `device.theme`, in the browser) |
+| `appearance.phone.transition` | The phone's Sun mode transition: fast (3 s), normal (10 s) or long (20 s) | PATCH /api/settings/appearance | persona | no |
 | `appearance.phone.size` | The phone's page size, 75–150 % in 5s | PATCH /api/settings/appearance | persona | no |
 | `appearance.desktop.mode` | The desktop's mode: light, dark, sun or system (the modes loam-ui's handoff declares) | PATCH /api/settings/appearance | persona | no (was `device.theme`) |
+| `appearance.desktop.transition` | The desktop's Sun mode transition: fast (3 s), normal (10 s) or long (20 s) | PATCH /api/settings/appearance | persona | no |
 | `appearance.desktop.size` | The desktop's page size, 75–150 % in 5s | PATCH /api/settings/appearance | persona | no |
 | `appearance.phone.theme` | The phone's theme (Latte, Plain, any installed) | PATCH /api/settings/appearance | persona | no |
 | `appearance.desktop.theme` | The desktop's theme (Latte, Plain, any installed) | PATCH /api/settings/appearance | persona | no |
@@ -249,6 +251,20 @@ is refused; a stored `sun` is kept on read regardless (any id-shaped mode
 is), so an unreadable handoff cannot turn Sun into System on the next write
 of another field. When loam-ui adds a fifth mode to its handoff, it is
 settable here with no change.
+
+**The Sun transition** (2026-11-16; loam-ui's `sun-shift.js`, its contract
+in the app's `docs/appearance.md`; the owner asked that evening for a
+Transition setting). Each kind also keeps `transition`, how long the page
+takes to shift between light and dark at a Sun boundary: `fast` (3 s),
+`normal` (10 s, the default) or `long` (20 s). The host keeps the id and
+the page owns the durations. The three ids are fixed in
+`lib/loam_appearance.py` (`TRANSITIONS`), like the size's range, and the
+parity test holds them to the enum of `appearance.<kind>.transition` in the
+handoff; anything else is a 400, and a stored id outside them reads as
+`normal`. The page's body is `{"desktop": {"transition": "long"}}`; a
+persona's keys are `appearance.<kind>.transition`. Until this landed the
+host refused the field and the page kept it only in that browser's
+`loam.appearance.sun`; the page clears that once a reading carries it.
 
 Seeded 2026-11-11: desktop size 90 (the owner: "I really enjoy it at a 90%
 zoom"), both modes `system`, phone size 100. The browser theme they used before

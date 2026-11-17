@@ -15,6 +15,7 @@ export function appearanceRegistry(themes) {
     const key = field => `appearance.${kind}.${field}`
     settings.push(
       { key: key('mode'), type: 'string', enum: ['light', 'dark', 'sun', 'system'], default: 'system' },
+      { key: key('transition'), type: 'string', enum: ['fast', 'normal', 'long'], default: 'normal' },
       { key: key('size'), type: 'integer', minimum: 75, maximum: 150, multipleOf: 5, default: 100 },
       { key: key('theme'), type: 'string', enum: themes.map(t => t.id), default: 'latte' },
     )

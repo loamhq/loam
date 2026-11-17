@@ -21,11 +21,13 @@ not, `_active.md`'s content must be, and `_reflection.md`'s must not. That
 last pair is what proves the conversation output style loaded and the
 reflection lane did not -- the difference between this and a wake.
 
-The thread is left archived at the end (nothing is deleted), and the
-member's process is ended unless --keep.
+At the end the member's process is ended and the probe's own thread is
+deleted (2026-11-16; until then it was left archived, and the probe threads
+piled up in the owner's Archived list), unless --keep. A run that stops
+early cleans up the same way.
 
 Usage:  broker-probe [--agent AGENT (default: the lead agent)] [--engine claude-code] [--keep]
-        --keep leaves the member's process running and the thread unarchived.
+        --keep leaves the member's process running and the thread in place.
 """
 
 from __future__ import annotations
@@ -204,6 +206,38 @@ def main() -> int:
     say(f"HTTP 201  thread={thread_id}  title={row.get('title')!r}  "
         f"members={[(m['persona'], m['engine']) for m in row.get('members') or []]}")
 
+    try:
+        return probe(args, agent, workspace, thread_id)
+    finally:
+        if not args.keep:
+            clean_up(thread_id, agent)
+
+
+def clean_up(thread_id: str, agent: str, tries: int = 12, wait_s: float = 5) -> str:
+    """The probe's own thread out of the owner's data, its member's process
+    ended first (2026-11-16): until then each run left a `broker-probe <hex>`
+    thread in the owner's Archived list, four of them by 11-12. It is the
+    thread this run created and nothing else; a turn still finishing (409)
+    is waited for, and a thread that cannot be deleted is archived, as
+    before, and said."""
+    member = member_session(thread_id, agent)
+    if member:
+        call("DELETE", f"/v1/sessions/{member['id']}")
+    for _ in range(tries):
+        status, row = call("DELETE", f"/v1/threads/{thread_id}")
+        if status == 200:
+            say(f"\nsession ended; probe thread {thread_id} deleted")
+            return "deleted"
+        if status != 409:
+            break
+        time.sleep(wait_s)
+    status, row = call("PATCH", f"/v1/threads/{thread_id}", {"archived": True})
+    say(f"\nsession ended; probe thread {thread_id} NOT deleted "
+        f"(HTTP {status}); archived: {row.get('archived')}")
+    return "archived"
+
+
+def probe(args, agent: str, workspace, thread_id: str) -> int:
     stream = Stream(thread_id)
 
     # -- message 1: identity, and the first line of _active.md ------------
@@ -371,10 +405,6 @@ def main() -> int:
         say(f"  {record['session_id']}  {record['agent']}  {record['state']}  "
             f"last_activity={record['last_activity']}")
 
-    if not args.keep:
-        call("DELETE", f"/v1/sessions/{session_id}")
-        status, row = call("PATCH", f"/v1/threads/{thread_id}", {"archived": True})
-        say(f"\nsession ended; thread archived: {row.get('archived')}")
     say(f"\nprobe thread: {thread_id}  member session: {session_id}")
     return 0
 

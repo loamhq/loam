@@ -540,7 +540,20 @@ export function createFiles({
 
   // Whether leaving the open file would lose something.
   function dirty() {
+    if (st.file?.owner?.dirty) return Boolean(st.file.owner.dirty())
     return Boolean(st.file && st.file.draft !== null && st.file.draft !== st.file.saved)
+  }
+
+  // A plugin's editor holding the open file (2026-11-16, for doc-comments;
+  // any plugin may). While it does, Files' own edits, saves and the field
+  // dictation writes into are its: `handlers` is `{dirty(), save(), edit(text),
+  // field}`, each optional, `save` returning a promise. The way out of an
+  // unsaved edit (`guard`) then waits on its save. Released by `remove()`, or
+  // when another file opens.
+  function own(file, handlers) {
+    if (!file || st.file !== file || !handlers) return { remove() {} }
+    file.owner = handlers
+    return { remove() { if (file.owner === handlers) file.owner = null } }
   }
 
   // Every way out of an unsaved edit comes through here. Clean, `proceed` runs
@@ -968,6 +981,7 @@ export function createFiles({
   // the person's answer to a conflict saves nothing until they give it.
   function edit(text) {
     const file = st.file
+    if (file?.owner?.edit) return file.owner.edit(text)
     if (!file || (file.view === 'html' && !file.textLoaded)) return
     file.draft = text
     file.flash = ''
@@ -1016,6 +1030,7 @@ export function createFiles({
   // confirmed it. If the file moves again, that save is refused too.
   async function save({ over = null } = {}) {
     const file = st.file
+    if (file?.owner?.save) return file.owner.save()
     if (!file || !file.caps.write || (file.view === 'html' && !file.textLoaded)) return
     if (file.renaming) return file.renameFlight.then(() => st.file === file ? save({ over }) : undefined)
     if (file.timer) timers.clear(file.timer)
@@ -1242,7 +1257,7 @@ export function createFiles({
     schedule()
   }
 
-  return { registry, st, beginRename, cancelRename, editRename, rename, applyRename, focusRename, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, beginRename, cancelRename, editRename, rename, applyRename, focusRename, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function extWord(e) {

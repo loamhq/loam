@@ -279,3 +279,73 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `40_PROJECTS` (engineer receipts, RENAME_PINNED, SYSTEM_VAULT_SOURCES).
   The app, the Files shortcuts and the schedule page now read `vault.*`;
   those others still do not.
+## 2026-11-16 — restarts that end, probes that leave nothing
+
+- **`restart-broker --when-idle` has a ceiling** (`loam_live.RESTART_CEILING_S`,
+  30 min). Before it, a `working` or `asking` session holds the restart
+  (three clear reads); past it only a `working` row whose `last_event_at`
+  (or turn start) is under `RESTART_OUTPUT_S` (60 s) old does, and one
+  clear read is enough. A landing holds it through the live lock either way;
+  engineer jobs are units of their own and outlive it. `background` has
+  never held it since 11-12; what could wait forever was a silent turn or
+  an unanswered question.
+- **A live probe cleans up after itself.** `bin/broker-probe` deletes the
+  thread it created (its member's process first), in a `finally`, so a run
+  that stops early does too; archiving left them in the owner's Archived
+  list. Deleting a thread removes its record from the vault's conversations
+  folder, so only the broker does it, on the owner's click or a probe's own
+  thread; an engineer never deletes the owner's threads by hand.
+- **`tests/run-all` names a scratch `LOAM_THREADS_STATE` and `LOAM_VAULT`**
+  for every test unless the caller did, the floor under a thread test that
+  forgets its own.
+- **check-drift's model check reads Claude sessions only.** A lane on another
+  provider (a persona's, or the reviewer's) is a note, never a family
+  comparison: its newest Claude session predates the switch.
+
+## 2026-11-16 — a project's test command outlives the files it names
+
+- **`test_command` in `projects/<name>.json` is hand-written and nothing
+  checks it** — not provision (which only carries it over a re-provision),
+  not check-drift. When a project removes the file it names, every landing
+  of that project fails as "tests fail", and the automatic continuation is
+  told to make them pass from inside the repo, which it cannot honestly do
+  (one began rebuilding the deleted check script; it was cancelled). Read a
+  "tests fail" landing's command before reading the branch.
+- **A project with no tests left** gets the lightest honest check, not
+  none: for a static site served by Caddy, `caddy validate` of its
+  Caddyfile, its pages present, `node --check` on its scripts.
+- **The records sit behind a job's wall.** `projects/` is untracked runtime
+  state inside the canonical checkout, which the wall mounts read-only, so
+  an engineer job cannot edit a record in place. It was written with
+  `sudo nsenter --mount=/proc/1/ns/mnt -- sudo -u <the box user> …` (the
+  host's mount namespace, as the owning user). That is the "deliberate
+  remount" the wall's comment allows, and it touched that one file.
+- **A finished job's unlanded branch lands through a continuation**:
+  `engineer-job --brief` with `continue_job` set to the original job, told
+  to change nothing. The session ends, and the launcher tests, merges and
+  pushes the reopened branch.
+## 2026-11-16 — doc comments: a plugin with a real editor
+
+- **A plugin's page code is served from the checkout, not from the app's
+  deployed release.** The broker's files route reads the shipped plugin
+  folders from Loam's checkout, so a landed plugin reaches live and staging
+  alike the moment it is on, whatever commit each app copy runs. To put a
+  page change on staging first, gate it on a capability only the new app has
+  (doc-comments waits for `files.own`); it turns on for live when live is
+  deployed from that release.
+- **CodeMirror 6 measures block widgets without their CSS margins.** A
+  margin on a block widget (the Properties line, a table) leaves the height
+  map short by that much, and everything placed from `lineBlockAt` (gutter
+  marks, margin notes) sits that far too high. Use padding inside widgets.
+- **`ChangeSet.of(changes, length)` splits inserted text on any line ending**
+  unless given the separator as its third argument; without it a merged
+  CRLF quietly became LF. And CodeMirror counts a CRLF as one position, in
+  UTF-16, while Python counts code points of the raw text: convert at every
+  boundary (`plugins/doc-comments/page/editor/textdiff.js`, `posMap`).
+- **`node.replaceChildren(null)` draws the text "null".** Filter first.
+- **The push gate's deny list covers fixtures and comments too.** Names of
+  the install's people and agents in a test fixture hold the whole branch,
+  and the history keeps them after a fix. Before landing, grep the branch's
+  added lines with the deny file's patterns (`git diff main | grep '^+' |
+  grep -oE -f <patterns>`), use synthetic names (the starter's Iris, or
+  Ada, Sam), and squash your own unpushed commits once they are clean.

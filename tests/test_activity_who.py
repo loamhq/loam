@@ -408,5 +408,28 @@ check("working and asking do",
       ["ada/cccccccc working", "pax/dddddddd asking"])
 check("a failed read holds it", bool(loam_live.restart_blockers(None)), True)
 
+# Past the ceiling (2026-11-16) only output holds it: a working row whose
+# newest event is under RESTART_OUTPUT_S old. A silent turn and a question
+# nobody answered do not; a failed read still does.
+T = 1_800_000_000.0
+def iso(ts):
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+late = [{"agent": "ada", "id": "c" * 10, "state": "working",
+         "last_active": iso(T - 3600), "last_event_at": iso(T - 10)},
+        {"agent": "iris", "id": "e" * 10, "state": "working",
+         "last_active": iso(T - 3600), "last_event_at": iso(T - 900)},
+        {"agent": "pax", "id": "d" * 10, "state": "asking",
+         "last_active": iso(T - 5), "last_event_at": iso(T - 5)},
+        {"agent": "juno", "id": "f" * 10, "state": "working",
+         "last_active": iso(T - 20), "last_event_at": None}]
+check("past the ceiling, only a session producing output holds it",
+      loam_live.restart_blockers(late, past_ceiling=True, now=T),
+      ["ada/cccccccc working, output 10 s ago", "juno/ffffffff working, output 20 s ago"])
+check("...before it, every working and asking row still does",
+      len(loam_live.restart_blockers(late, now=T)), 4)
+check("...and a failed read holds it past the ceiling too",
+      bool(loam_live.restart_blockers(None, past_ceiling=True)), True)
+
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

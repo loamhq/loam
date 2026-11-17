@@ -11,7 +11,7 @@ job L13). The rules are all in `lib/loam_update.py`; the command is
 | Replaced (ships) | Never touched (the person's) |
 |---|---|
 | the checkout (`paths.root`'s repository), moved to a release tag | every agent workspace (`paths.workspaces`), the starter agent's included |
-| `<vault>/<system>/Loam/`, replaced whole from the library (`docs/library/`) | the rest of the vault, `System/skills/` included |
+| `<vault>/<system>/Loam/`, replaced whole from the library (`docs/library/`), except its `data/` | the rest of the vault, `System/skills/` included, and `<system>/Loam/data/` |
 | | Yours (`paths.plugins`) |
 | | `/etc/loam/` |
 | | `paths.state` (except `<state>/update/`, the updater's own), `paths.logs`, jobs, provider homes |
@@ -95,6 +95,16 @@ there are edits, the whole folder is copied to
 `<state>/update/backups/<run>/Loam/` before it is replaced. The last five
 copies are kept.
 
+**`<system>/Loam/data/` is kept** (since 2026-11-16): the one folder inside
+Loam's that is the person's, where plugins keep data that belongs in the
+vault (`data/<plugin id>/`; the doc-comments sidecars first,
+`plugins/doc-comments`). It is never in the library, so it is never counted
+as an edit; replacing the folder carries it across (`carry_kept` in
+lib/loam_skills.py); an update's backup leaves it out; and undoing an update
+keeps it as it is now, never as the backup had it, so a note made after the
+update is not lost by the undo. `tests/test_doc_comments.py` proves the
+four.
+
 ## After the move
 
 Each step runs from the new code, and only when something it reads has
@@ -112,7 +122,9 @@ commits), plus the folders listed:
 | `gateway` | `bin/plugin-gateway` | |
 
 - **The broker** is restarted by `restart-broker --when-idle`. That waits
-  until no session is working or asking, and it has no time limit. The
+  until no session is working or asking; after half an hour (its ceiling)
+  it goes at the first moment no session has produced output for a
+  minute. The
   wait's lines ("held by iris (working)") become the step's `detail` as
   they come. The step then requires a new main process that answers `/up`
   within 90 s.

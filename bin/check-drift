@@ -1008,8 +1008,18 @@ def check_lane_models(findings: list, names: list[str], prov) -> list[str]:
             card, prov.settings(AI_LABS / n)["model"])[0]))
     lanes.append(("engineer", AGENTS / "engineer",
                   eng.engineer_choice(eng.platform_project())["model"]))
-    lanes.append(("reviewer", AGENTS / "reviewer",
-                  loam_profile.reviewer_choice(prov.REVIEWER_MODEL)[0]))
+    # The reviewer on another provider (Antigravity, the owner's setting) has
+    # no Claude session of its own to read: the newest one on disk is from
+    # before the switch, so comparing it with a Gemini id was a "family
+    # mismatch" that no run had (2026-11-16, the 04:25 run on Claude Code).
+    reviewer_on = loam_profile.reviewer_provider()
+    if reviewer_on != "claude-code":
+        notes.append(f"  reviewer: on {loam_profile.PROVIDER_NAMES[reviewer_on]} "
+                     f"({loam_profile.reviewer_choice(prov.REVIEWER_MODEL)[0]})"
+                     f" -- no Claude family to check")
+    else:
+        lanes.append(("reviewer", AGENTS / "reviewer",
+                      loam_profile.reviewer_choice(prov.REVIEWER_MODEL)[0]))
 
     for label, ws, configured in lanes:
         # `best` and `opusplan` name a policy, not a family; there is no

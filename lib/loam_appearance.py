@@ -6,19 +6,22 @@ browser he opens agrees and a persona can change it on his ask (his 11-10
 rule: every setting the page can change, a persona can too). The page half is
 loam-ui's (`docs/appearance.md`); this is the host half it asked for.
 
-The value is two device kinds, each a mode, a size, a theme and the
-options of every theme that has any (2026-11-12)::
+The value is two device kinds, each a mode, a Sun transition (2026-11-16),
+a size, a theme and the options of every theme that has any (2026-11-12)::
 
-    {"phone":   {"mode": "system", "size": 100, "theme": "latte",
+    {"phone":   {"mode": "system", "transition": "normal", "size": 100,
+                 "theme": "latte",
                  "options": {"latte": {"agent-colours": "palette",
                                        "agent-shapes": "distinct"}}},
-     "desktop": {"mode": "system", "size": 90,  "theme": "latte",
+     "desktop": {"mode": "system", "transition": "normal", "size": 90,
+                 "theme": "latte",
                  "options": {"latte": {...}}}}
 
 ``mode`` is one of the modes loam-ui declares (``light``, ``dark``, ``sun``
 and ``system`` on 2026-11-13; see *Modes are loam-ui's* below); ``size`` an
 integer percent from 75 to 150 in steps of 5; ``theme`` the id of an
-installed theme. A missing field reads as its default (``system``, 100,
+installed theme; ``transition`` one of ``fast``, ``normal`` and ``long``.
+A missing field reads as its default (``system``, ``normal``, 100,
 ``latte``). A patch names any of the kinds' fields, and ``location``, and
 merges them in one write; anything else -- an unknown kind or field, an empty
 patch, a value out of range, a boolean for a size, a theme that is not
@@ -44,6 +47,17 @@ required and nothing else is taken; ``"location": null`` clears it. A reading
 always carries ``location``, ``null`` when none is saved; with Sun chosen and
 no place saved, the page uses its time-zone fallback without asking the
 browser for one.
+
+**The Sun transition** (2026-11-16; the owner asked a persona that evening
+for a Sun-mode Transition setting, loam-ui's ``sun-shift.js``). Each kind
+also keeps ``transition``, how long the page takes to shift between light
+and dark at a Sun boundary: ``fast`` (3 s), ``normal`` (10 s, the default)
+or ``long`` (20 s). The durations are the page's; the host keeps the id. It
+sits beside ``mode`` in each kind, so a phone and a desktop may differ, and
+a write of anything else is refused like any bad field. The three ids are
+fixed here like the size's range, and the tests hold them to loam-ui's
+handoff (the enum of ``appearance.<kind>.transition``); a stored id outside
+them reads as ``normal``.
 
 **Modes are loam-ui's** (2026-11-13). The modes a write may choose, and the
 location sources, are read from loam-ui's machine-readable handoff
@@ -128,7 +142,9 @@ LAT_MAX, LON_MAX, ZONE_MAX = 90, 180, 100
 # copies, which a browser's Intl does not take.
 ZONE = re.compile(r"^(?!posix/|right/)[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+)*$")
 SIZE_MIN, SIZE_MAX, SIZE_STEP = 75, 150, 5
-DEFAULT = {"mode": "system", "size": 100, "theme": "latte"}
+# The Sun transition's ids, the page's (app/public/sun-shift.js).
+TRANSITIONS = ("fast", "normal", "long")
+DEFAULT = {"mode": "system", "transition": "normal", "size": 100, "theme": "latte"}
 # A theme id as loam-ui's loader accepts one (src/themes.js, `slug`).
 THEME_ID = re.compile(r"^[a-z][a-z0-9-]*$")
 
@@ -334,7 +350,7 @@ def _stored_options(row: dict) -> dict[str, dict[str, str]]:
 
 
 def _fill(stored) -> dict:
-    """Mode, size and theme of each kind, defaults where the file has nothing
+    """Mode, transition, size and theme of each kind, defaults where the file has nothing
     (or nonsense), and the kind's stored option choices as stored."""
     stored = stored if isinstance(stored, dict) else {}
     out = {}
@@ -343,6 +359,8 @@ def _fill(stored) -> dict:
         out[kind] = {
             # Kept if id-shaped, declared or not: only a write is held to modes().
             "mode": row["mode"] if _theme_shaped(row.get("mode")) else DEFAULT["mode"],
+            "transition": (row["transition"] if row.get("transition") in TRANSITIONS
+                           else DEFAULT["transition"]),
             "size": row["size"] if _valid_size(row.get("size")) else DEFAULT["size"],
             "theme": (row["theme"] if _theme_shaped(row.get("theme"))
                       else DEFAULT["theme"]),
@@ -371,7 +389,7 @@ def _public(value: dict, cat: dict) -> dict:
 
 
 def read_base() -> dict:
-    """Mode, size and theme of each kind, without reading the theme catalog
+    """Mode, transition, size and theme of each kind, without reading the theme catalog
     (the plugin list's in-use themes)."""
     value = _fill(_load_all().get("appearance"))
     return {kind: {k: v for k, v in value[kind].items() if k != "options"}
@@ -398,8 +416,8 @@ def validate(patch) -> dict:
             raise AppearanceError(f"{kind!r} is not a device kind or the "
                                   f"location; they are phone, desktop and location")
         if not isinstance(fields, dict) or not fields:
-            raise AppearanceError(f"{kind}: name a mode, a size, a theme or a "
-                                  f"theme's options to change")
+            raise AppearanceError(f"{kind}: name a mode, a transition, a size, "
+                                  f"a theme or a theme's options to change")
         for name, value in fields.items():
             if name == "mode":
                 if not _valid_mode(value):
@@ -407,6 +425,10 @@ def validate(patch) -> dict:
                     raise AppearanceError(
                         f"{kind} mode is {', '.join(allowed[:-1])} or "
                         f"{allowed[-1]}, not {value!r}")
+            elif name == "transition":
+                if not isinstance(value, str) or value not in TRANSITIONS:
+                    raise AppearanceError(
+                        f"{kind} transition is fast, normal or long, not {value!r}")
             elif name == "size":
                 if not _valid_size(value):
                     raise AppearanceError(
@@ -423,8 +445,8 @@ def validate(patch) -> dict:
                 _check_options(kind, value, cat)
             else:
                 raise AppearanceError(f"{kind}: {name!r} is not an appearance "
-                                      f"field; they are mode, size, theme and "
-                                      f"options")
+                                      f"field; they are mode, transition, size, "
+                                      f"theme and options")
         clean[kind] = dict(fields)
     return clean
 
