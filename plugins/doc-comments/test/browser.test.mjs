@@ -55,12 +55,12 @@ async function newDoc(text) {
 const disk = async (p) => (await (await fetch(`${base}/dev/file?path=${encodeURIComponent(p)}`)).json())
 const outside = (p, text) => fetch(`${base}/dev/outside`, { method: 'POST', body: JSON.stringify({ path: p, text }) })
 
-async function open({ doc = 'Essays/drafts/Long.md', w = 1280, h = 850, zoom = 1, phone = false } = {}) {
+async function open({ doc = 'Essays/drafts/Long.md', w = 1280, h = 850, zoom = 1, phone = false, extra = '' } = {}) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h } })
   const page = await ctx.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
-  await page.goto(`${base}/?dark&zoom=${zoom}${phone ? '&phone' : ''}&path=${encodeURIComponent(doc)}`)
+  await page.goto(`${base}/?dark&zoom=${zoom}${phone ? '&phone' : ''}${extra}&path=${encodeURIComponent(doc)}`)
   await page.waitForSelector('.cm-content')
   await page.waitForTimeout(500)
   page.errors = errors
@@ -1951,5 +1951,115 @@ test('B5 (round 6): the Share button\'s faces sit apart, each ring in the button
   assert.ok(m.overlap <= 3, `faces overlap ${m.overlap}px`)
   assert.ok(m.ring.includes(m.btn), 'the ring is the button\'s colour')
   await page.screenshot({ path: `${SHOTS || '/tmp'}/share-faces.png`, clip: await page.evaluate(() => { const r = document.querySelector('.dc-sharebtn').getBoundingClientRect(); return { x: r.x - 20, y: r.y - 10, width: r.width + 40, height: r.height + 20 } }) }).catch(() => {})
+  await page.done()
+})
+
+
+// Dictation into the doc only while the doc takes typed text from this
+// person (2026-11-17): the mic is in the header (and the phone's keyboard
+// bar) in Editing and Suggesting, and gone in Viewing, on a doc that cannot
+// be written, and on a view link's page; read aloud stays in every mode.
+// Switching mode adds or removes it at once, and a take running when the
+// doc goes to Viewing stops with nothing more written.
+const headHas = (page) => page.evaluate(() => {
+  const head = document.querySelector('.dc-head')
+  const mic = head.querySelector('.mic'), ra = head.querySelector('.read-aloud')
+  return {
+    mic: Boolean(mic), read: Boolean(ra),
+    // The header closes up: what follows read aloud is the mic, or the mode
+    // control itself, never an empty slot.
+    next: ra?.nextElementSibling?.classList.contains('mic') ? 'mic' : ra?.nextElementSibling?.querySelector('.dc-mpill') || ra?.nextElementSibling?.classList.contains('dc-mpill') ? 'mode' : String(ra?.nextElementSibling?.className),
+    anyMic: document.querySelectorAll('.dc .mic').length,
+  }
+})
+async function pickMode(page, label) {
+  await page.click('.dc-mpill')
+  await page.click(`.dc-mi[role=menuitemradio]:has-text("${label}")`)
+  await page.waitForTimeout(250)
+}
+
+test('dictation: the mic in Editing and Suggesting, gone in Viewing; read aloud in all three; a take stops on the way to Viewing', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Dictated\n\nA first line.\n')
+  const page = await open({ doc: p, extra: '&mic' })
+  await page.waitForSelector('.dc-head .read-aloud')
+  assert.deepEqual(await headHas(page), { mic: true, read: true, next: 'mic', anyMic: 1 }, 'Editing')
+  await shot(page, 'mic-editing')
+
+  await pickMode(page, 'Suggesting')
+  assert.deepEqual(await headHas(page), { mic: true, read: true, next: 'mic', anyMic: 1 }, 'Suggesting')
+  // A take in Suggesting lands as a suggestion, as typed words do.
+  await page.click('.dc-head .mic')
+  await page.evaluate(() => window.__dictate(' Said aloud.'))
+  await page.waitForTimeout(200)
+  assert.ok((await page.evaluate(() => window.__ed.text())).includes('Said aloud.'))
+  assert.ok((await page.evaluate(() => window.__ed.drafts().length)) > 0, 'the words are a suggestion')
+  await page.evaluate(() => { window.__take.on = false })
+
+  await pickMode(page, 'Viewing')
+  assert.deepEqual(await headHas(page), { mic: false, read: true, next: 'mode', anyMic: 0 }, 'Viewing')
+  await shot(page, 'mic-viewing')
+
+  await pickMode(page, 'Editing')
+  assert.deepEqual(await headHas(page), { mic: true, read: true, next: 'mic', anyMic: 1 }, 'back to Editing')
+  // A take running when the doc goes to Viewing is stopped, and nothing it
+  // would still write lands.
+  await page.click('.dc-head .mic')
+  await page.evaluate(() => window.__dictate(' Before.'))
+  await pickMode(page, 'Viewing')
+  const t = await page.evaluate(() => ({ on: window.__take.on, stopped: window.__take.stopped, can: window.__ed.canType() }))
+  assert.deepEqual(t, { on: false, stopped: 1, can: false })
+  const before = await page.evaluate(() => window.__ed.text())
+  assert.ok(before.includes('Before.'))
+  await page.evaluate(() => { window.__take.on = true; window.__dictate(' After.') })
+  assert.equal(await page.evaluate(() => window.__ed.text()), before, 'nothing is written in Viewing')
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('dictation: a doc that opens with no right to write has read aloud and no mic', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Read only\n\nA line.\n')
+  const page = await open({ doc: p, extra: '&mic&can=view' })
+  await page.waitForSelector('.dc-head .read-aloud')
+  const got = await headHas(page)
+  assert.deepEqual([got.mic, got.read, got.anyMic], [false, true, 0])
+  assert.equal(await page.evaluate(() => Boolean(document.querySelector('.dc-mpill-only'))), true, 'only Viewing')
+  await page.done()
+})
+
+test('dictation, phone: the keyboard bar carries the mic in Editing and Suggesting, and no mic anywhere in Viewing', { skip }, async () => {
+  await start()
+  const p = await newDoc('# On a phone\n\nA first line of words.\n')
+  const page = await open({ doc: p, w: 430, h: 900, phone: true, extra: '&mic' })
+  const micIn = () => page.evaluate(() => ({
+    bar: Boolean(document.querySelector('.dc-kbar.on .mic')),
+    head: Boolean(document.querySelector('.dc-head .mic')),
+    any: document.querySelectorAll('.dc .mic').length,
+    read: Boolean(document.querySelector('.dc-head .read-aloud')),
+  }))
+  const focusIn = () => page.evaluate(() => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: v.state.doc.length - 2 } }) })
+  for (const [i, [mode, want]] of [['Editing', true], ['Suggesting', true], ['Viewing', false], ['Editing', true]].entries()) {
+    if (i) await pickMode(page, mode)
+    await focusIn()
+    await page.waitForTimeout(250)
+    const m = await micIn()
+    assert.deepEqual(m, { bar: want, head: false, any: want ? 1 : 0, read: true }, mode)
+    await shot(page, `mic-phone-${mode.toLowerCase()}`)
+  }
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('dictation: a view link\'s visitor has no mic and cannot type', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Shared to view\n\nA line.\n')
+  const link = await devLink('view', 'Sam', p)
+  const page = await visitor(link)
+  const got = await page.evaluate(() => ({
+    mic: document.querySelectorAll('.mic, [aria-label="Dictate"], [aria-label*="ictat"]').length,
+    editable: document.querySelector('.cm-content').getAttribute('contenteditable'),
+  }))
+  assert.deepEqual(got, { mic: 0, editable: 'false' })
   await page.done()
 })
