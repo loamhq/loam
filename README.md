@@ -46,3 +46,8 @@ Read `docs/config.md` first: one file, `/etc/loam/loam.toml`, says where
 everything of an install is, and nothing in the code names a place on a
 particular machine. Run the tests before and after a change. Plugins are
 the way to add something without changing Loam itself (`docs/plugins.md`).
+
+## License
+
+Loam is free software under the GNU Affero General Public License,
+version 3 (AGPL-3.0-only); the full text is in `LICENSE`.
