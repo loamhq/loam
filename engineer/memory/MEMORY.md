@@ -317,3 +317,19 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   added lines with the deny file's patterns (`git diff main | grep '^+' |
   grep -oE -f <patterns>`), use synthetic names (the starter's Iris, or
   Ada, Sam), and squash your own unpushed commits once they are clean.
+
+## 2026-11-16 — an app handoff can land with the host's parity test red
+
+- **The app folder's landing runs only its own tests** (`projects/loam-ui.json`,
+  `test_command: cd app && npm test`), not `tests/run-all`. So an app change
+  to `app/docs/appearance-settings.registry.json` lands even when
+  `tests/test_settings.py`'s parity check (host registry keys == handoff
+  keys) then fails on `main`: the Sun `transition` key (bb293fb) did this
+  until the host half landed (2d52cb0). After an app job adds a setting,
+  expect the next Loam landing to be red until the host side lands.
+- **"Deploy the host" is land plus `restart-broker --when-idle`.** The host
+  (the broker) runs from the canonical checkout; `bin/deploy <app>` is
+  for the deployed apps (`deploy/loam-ui`, `files`, `vault`) only.
+- **Sun transition ids are fixed host-side** (`loam_appearance.TRANSITIONS`,
+  like the size's range), not read from the handoff like the modes are; the
+  parity test holds them equal to the handoff's enum.
