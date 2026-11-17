@@ -63,6 +63,17 @@ def main() -> int:
     if not os.environ.get("LOAM_HOST_SETTINGS"):
         settings = tempfile.mkdtemp(prefix="loam-test-settings-")
         os.environ["LOAM_HOST_SETTINGS"] = os.path.join(settings, "settings.json")
+    # And a thread store and vault of its own (2026-11-16): a test that
+    # writes threads without naming its own would write the owner's, as the
+    # live probe's `broker-probe` threads did. Every thread test names its
+    # own today; this is the floor under one that forgets.
+    stores = None
+    if not os.environ.get("LOAM_THREADS_STATE") or not os.environ.get("LOAM_VAULT"):
+        stores = tempfile.mkdtemp(prefix="loam-test-threads-")
+        if not os.environ.get("LOAM_THREADS_STATE"):
+            os.environ["LOAM_THREADS_STATE"] = os.path.join(stores, "threads")
+        if not os.environ.get("LOAM_VAULT"):
+            os.environ["LOAM_VAULT"] = os.path.join(stores, "vault")
     # No test's broker object reads the box's real usage through a real CLI
     # (lib/loam_provider_usage.py); the ones that build a Server say so too.
     os.environ["LOAM_USAGE_READS"] = "off"
@@ -84,6 +95,8 @@ def main() -> int:
             shutil.rmtree(schedules, ignore_errors=True)
         if settings:
             shutil.rmtree(settings, ignore_errors=True)
+        if stores:
+            shutil.rmtree(stores, ignore_errors=True)
 
 
 def run_all() -> int:
