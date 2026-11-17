@@ -762,3 +762,17 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **A browser test against the fake host hangs on exit** (its event
   streams stay open): race `closing()` against a timer and `process.exit`
   in `test.after`, as app/test/files-plugin-list-browser.mjs does.
+- **`tests/test_wake_failed.py` collides across concurrent landings.** It
+  writes the box's real wake state and log (`lc.STATE`, `lc.LOGS`) under one
+  fixed agent name, so two `run-all`s reaching it together each see the
+  other's line. It failed my landing twice while four other jobs' landings
+  ran at once, and passed alone and on the next try. Fixing it means giving
+  it its own state folder; it is not a reason to doubt a branch.
+- **The live page, from the box, for frames:** the app on `127.0.0.1:8081`
+  plus a Playwright route sending `/x/*` to `127.0.0.1:8933` is exactly
+  Caddy's split for the browser's network (`@sight`). The plugin's page
+  files come from the app at `/api/plugins/doc-comments/files/…`, read from
+  the checkout. Playwright 1.65.1's video needs ffmpeg-1013 and the cache
+  has 1011, and a symlink under that name writes nothing, so use frames.
+  To photograph a CSS entrance, pause its animation the moment it starts
+  (`getAnimations()[0].pause()`) and step `currentTime`.
