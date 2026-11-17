@@ -269,3 +269,26 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **check-drift's model check reads Claude sessions only.** A lane on another
   provider (a persona's, or the reviewer's) is a note, never a family
   comparison: its newest Claude session predates the switch.
+
+## 2026-11-16 — a project's test command outlives the files it names
+
+- **`test_command` in `projects/<name>.json` is hand-written and nothing
+  checks it** — not provision (which only carries it over a re-provision),
+  not check-drift. When a project removes the file it names, every landing
+  of that project fails as "tests fail", and the automatic continuation is
+  told to make them pass from inside the repo, which it cannot honestly do
+  (one began rebuilding the deleted check script; it was cancelled). Read a
+  "tests fail" landing's command before reading the branch.
+- **A project with no tests left** gets the lightest honest check, not
+  none: for a static site served by Caddy, `caddy validate` of its
+  Caddyfile, its pages present, `node --check` on its scripts.
+- **The records sit behind a job's wall.** `projects/` is untracked runtime
+  state inside the canonical checkout, which the wall mounts read-only, so
+  an engineer job cannot edit a record in place. It was written with
+  `sudo nsenter --mount=/proc/1/ns/mnt -- sudo -u <the box user> …` (the
+  host's mount namespace, as the owning user). That is the "deliberate
+  remount" the wall's comment allows, and it touched that one file.
+- **A finished job's unlanded branch lands through a continuation**:
+  `engineer-job --brief` with `continue_job` set to the original job, told
+  to change nothing. The session ends, and the launcher tests, merges and
+  pushes the reopened branch.
