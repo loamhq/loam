@@ -281,7 +281,8 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   those others still do not.
 ## 2026-11-16 — restarts that end, probes that leave nothing
 
-- **`restart-broker --when-idle` has a ceiling** (`loam_live.RESTART_CEILING_S`,
+- *(Superseded 2026-11-17, below: the ceiling now defers, it never
+  forces.)* **`restart-broker --when-idle` has a ceiling** (`loam_live.RESTART_CEILING_S`,
   30 min). Before it, a `working` or `asking` session holds the restart
   (three clear reads); past it only a `working` row whose `last_event_at`
   (or turn start) is under `RESTART_OUTPUT_S` (60 s) old does, and one
@@ -512,7 +513,8 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **A yes must come after the draft's revision** (`check_yes(after=…)`), so
   an agent that shows a short version, hears yes, and only then calls
   `agent.draft` has to ask again. Iris did, gracefully; it is a second yes
-  the owner gives.
+  the owner gives. *(Fixed 2026-11-17: the skill now says draft first, then
+  show; see below.)*
 - **One config proves nothing shared.** `fleet_clauses` keeps lines most
   configs carry unmasked; with a single agent that was every line, so the
   next agent's config said it was Iris. It now masks everything when there
@@ -708,3 +710,31 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **A browser test against the fake host hangs on exit** (its event
   streams stay open): race `closing()` against a timer and `process.exit`
   in `test.after`, as app/test/files-plugin-list-browser.mjs does.
+
+## 2026-11-17 — one yes, plain headers, restarts that never cut
+
+- **A planned restart needs positive evidence of idle.** On 11-16
+  `restart-broker --when-idle` reached its 1800 s ceiling, stopped waiting
+  for silent turns and restarted, cutting four, three of them blocked on
+  engineer calls. A turn waiting on an engineer job is `working` and
+  silent, which is exactly what the ceiling stopped counting. Now only a
+  live list whose every row is `idle`, with an empty `turns` (thread turns
+  in flight or queued, a field the live view gained), lets it go; at the
+  ceiling or `--max-wait` it exits 75 with nothing restarted. A restart
+  that must happen now is the plain `restart-broker`, the operator's.
+- **A deferral is the caller's to retry.** `loam_follow` leaves the final
+  decision to `restart-broker --when-idle` (it used to read once, then
+  restart plainly after however long the live lock took). `loam update`
+  marks the broker step `deferred` and skips `undo-broker`, since a broker
+  that never restarted already runs the old release.
+- **The re-check under the live lock is short** (`UNDER_LOCK_READS`):
+  landings wait on that lock, so a box busy again by then defers.
+- **A yes's place in the thread decides, not its stamp.** Stamps are to the
+  second; a yes posted in the same second as a revision made the revised
+  draft (shown by running the new test against the old guard). Each
+  revision records the thread's newest message (`after_message`) and a yes
+  must come after it.
+- **Transcript headers are the plain name.** `hooks/transcript_capture.py`
+  read the retired `emoji` from every older `agent.json` and prefixed new
+  headers with it. It no longer does; `plan_update` keeps the turns already
+  in a file byte for byte, so old headers stay as written.
