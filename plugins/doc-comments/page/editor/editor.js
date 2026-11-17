@@ -1162,7 +1162,7 @@ export function createDocEditor(opts) {
   // Comment and Suggest, and the slim bar, until the fingers are up and the
   // handles still. Any new selecting sends it away at once.
   const SETTLE = { release: 120, double: 300, still: 350 }
-  const gest = { mouse: false, touch: false, timer: 0, at: null, release: SETTLE.release }
+  const gest = { mouse: false, touch: false, touchedAt: 0, timer: 0, at: null, release: SETTLE.release }
 
   function settleLater(ms) {
     clearTimeout(gest.timer)
@@ -1189,7 +1189,7 @@ export function createDocEditor(opts) {
       // Handles dragged on a selection already offered: the bar stays as it
       // is. A caret, or a new selection, waits.
       if (!selectionRange()) { clearTimeout(gest.timer); st.barSel = false; return }
-      if (!st.barSel && !gest.touch) settleLater(SETTLE.still)
+      if (!st.barSel && !gest.touch && !gest.mouse) settleLater(SETTLE.still)
       return
     }
     if (st.link) return
@@ -1201,9 +1201,11 @@ export function createDocEditor(opts) {
   }
 
   // The pointer goes down in the text: whatever was offered leaves now, and
-  // nothing comes until the button is up.
+  // nothing comes until the button is up (a narrow window with a mouse has
+  // the phone's bars, and they wait for the button too).
   function onSelectStart(e) {
-    if (e.button !== 0 || st.phone) return
+    // The mouse events a browser makes up after a touch are the touch's.
+    if (e.button !== 0 || gest.touch || Date.now() - gest.touchedAt < 800) return
     gest.mouse = true
     clearTimeout(gest.timer)
     if (!e.target.closest?.('.dc-selbar')) dropSelbar()
@@ -1213,16 +1215,18 @@ export function createDocEditor(opts) {
     gest.mouse = false
     gest.at = { x: e.clientX, y: e.clientY }
     gest.release = e.detail === 2 ? SETTLE.double : SETTLE.release
-    if (st.link || !selectionRange()) return
+    if (st.link || !selectionRange() || (st.phone && st.barSel)) return
     settleLater(gest.release)
   }
   function onTouchStart() {
     gest.touch = true
+    gest.touchedAt = Date.now()
     clearTimeout(gest.timer)
   }
   function onTouchEnd(e) {
     if (!gest.touch || e.touches?.length) return
     gest.touch = false
+    gest.touchedAt = Date.now()
     if (!selectionRange() || st.link) return
     // A phone's bar, or a touch screen's popup: once the handles are still.
     if (st.phone ? !st.barSel : !st.selWant) settleLater(SETTLE.still)

@@ -2375,3 +2375,25 @@ test('dictation: a view link\'s visitor has no mic and cannot type', { skip }, a
   assert.deepEqual(got, { mic: 0, editable: 'false' })
   await page.done()
 })
+
+test('a narrow window with a mouse (the phone\'s bars): Comment is offered after the button is up, not while it is held', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const page = await open({ doc: p, w: 430, h: 900, phone: true })
+  const t = await page.evaluate(() => window.__ed.text())
+  const s = t.indexOf('The river kept')
+  const a = await pointAt(page, s), b = await pointAt(page, s + 'The river kept its own'.length, -1)
+  const offered = () => page.evaluate(() => [...document.querySelectorAll('.dc-kbar.on .dc-kc')].some(x => /Comment/.test(x.textContent) && !x.disabled))
+  await page.mouse.move(a.x, a.y)
+  await page.mouse.down()
+  for (let i = 1; i <= 10; i++) {
+    await page.mouse.move(a.x + (b.x - a.x) * i / 10, a.y + (b.y - a.y) * i / 10)
+    await page.waitForTimeout(i === 5 ? 700 : 40)
+    assert.equal(await offered(), false, `not offered while the button is held (${i})`)
+  }
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+  assert.equal(await offered(), true, 'offered after the release')
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})

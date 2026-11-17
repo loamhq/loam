@@ -87,7 +87,9 @@ adds and does not rewrite (below, "What step 2 adds").
   keyboard bar's Comment · Suggest and the slim bar: offered once the
   fingers are up and the handles have been still 350 ms; dragging a handle
   of a selection already offered leaves the bar as it is, and a caret takes
-  it back at once. (`editor.js`, `selectionMoved` and `settled`; the numbers
+  it back at once. A narrow window with a mouse has the phone's bars, and
+  they wait for the button to come up; the mouse events a browser makes up
+  after a touch are ignored (800 ms). (`editor.js`, `selectionMoved` and `settled`; the numbers
   are `SETTLE`.)
 - **What the old editor drew keeps a home**: the frontmatter is a quiet
   Properties line above the title (click to open the rows; click a row to
