@@ -237,6 +237,36 @@ test('the block menu opens below the caret with every row showing (850 px)', { s
   await page.done()
 })
 
+test('the block menu, opened halfway down at 90%, makes room below the caret rather than scroll inside', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Middle\n\n' + Array.from({ length: 30 }, (_, i) => `Paragraph ${i} of a doc long enough to scroll.`).join('\n\n') + '\n')
+  const page = await open({ doc: p, zoom: 0.9 })
+  await page.evaluate(() => {
+    const v = window.__ed.view
+    const at = v.state.doc.toString().indexOf('Paragraph 12') - 1
+    v.focus()
+    v.dispatch({ selection: { anchor: at } })
+    const y = v.coordsAtPos(at).top - document.querySelector('.dc-scroll').getBoundingClientRect().top
+    document.querySelector('.dc-scroll').scrollTop += y - 380
+  })
+  await page.waitForTimeout(200)
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('/')
+  await page.waitForSelector('.dc-bmenu.on')
+  await page.waitForTimeout(300)
+  const m = await page.evaluate(() => {
+    const menu = document.querySelector('.dc-bmenu.on')
+    const r = menu.getBoundingClientRect()
+    const c = window.__ed.view.coordsAtPos(window.__ed.view.state.selection.main.head)
+    const head = document.querySelector('.dc-head').getBoundingClientRect()
+    return { below: r.top >= c.bottom - 1, scrolls: menu.scrollHeight > menu.clientHeight + 1, bottom: r.bottom, h: innerHeight, caretVisible: c.top >= head.bottom }
+  })
+  assert.deepEqual({ below: m.below, scrolls: m.scrolls, caretVisible: m.caretVisible }, { below: true, scrolls: false, caretVisible: true })
+  assert.ok(m.bottom <= m.h)
+  await shot(page, 'block-menu-middle-90')
+  await page.done()
+})
+
 async function mode(page, label) {
   await page.click('.dc-mpill')
   await page.click(`.dc-menu .dc-mi:has-text("${label}")`)
