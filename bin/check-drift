@@ -794,9 +794,12 @@ def check_deploy(findings: list) -> list[str]:
         moved = {old for old, _ in dep.moved_targets(apps)}
         overdue = dep.moved_overdue()
         kept = dep.forward_hosts()
+        # A `[[landing]]` host (2026-11-16) is ungated on the owner's yes,
+        # quoted in its entry, which is that host's public file.
+        landed = {e["host"] for e in dep.landings()}
     except dep.DeployError as exc:
         findings.append(("deploy moved", str(dep.CONFIG_PATH), str(exc)))
-        moved, overdue, kept = set(), None, set()
+        moved, overdue, kept, landed = set(), None, set(), set()
     if overdue:
         stays = sorted(moved & kept)
         findings.append((
@@ -809,7 +812,7 @@ def check_deploy(findings: list) -> list[str]:
                f"needs it." if stays else "")))
     for host, gated in dep.live_host_blocks(live_caddy):
         app = by_host.get(host)
-        if not gated and (host in moved or host in kept):
+        if not gated and (host in moved or host in kept or host in landed):
             continue
         if not gated and app not in public and app not in site_public:
             findings.append((

@@ -22,4 +22,6 @@ auth_host = "auth"
 # When the domain changes, the old names can keep answering with a 308 for a
 # while (`[moved]`), and an old host's paths can outlive that (`[[forward]]`,
 # for a callback URL registered somewhere that cannot be changed by API).
-# Both are described in lib/loam_deploy.py, "Old names".
+# Both are described in lib/loam_deploy.py, "Old names". A static folder
+# can be public on a name outside the domain with `[[landing]]`, which carries
+# the owner's quoted yes (lib/loam_deploy.py, before `landings`).
