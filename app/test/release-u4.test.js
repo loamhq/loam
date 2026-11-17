@@ -13,6 +13,8 @@ test('only an untouched runtime hello enters onboarding; presets have prose and 
   assert.equal(untouchedHello({ thread: { hello: true }, messages: [preset], has_more: false }), true)
   for (const record of [{ thread: { hello: false }, messages: [preset], has_more: false }, { thread: { hello: true }, messages: [preset, { author: 'you' }], has_more: false }, { thread: { hello: true }, messages: [preset], has_more: true }]) assert.equal(untouchedHello(record), false)
   assert.deepEqual(replyChip(preset), { provider: null, model: null, fullModel: null })
+  const synthetic = replyChip({ engine: 'claude-code', model: '<synthetic>', text: 'Failed to authenticate' })
+  assert.equal(synthetic.model, null); assert.equal(synthetic.fullModel, null)
   assert.deepEqual(messageSegments(preset), [{ text: 'Hello!' }])
 })
 test('update routes preserve status, refusal, JSON body, bearer and no-store; other verbs stay unavailable', async t => {
