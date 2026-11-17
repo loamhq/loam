@@ -3,8 +3,8 @@
 // (one row per link: its mode, Copy invite again, Turn off with Undo).
 // Talks to the plugin server's owner routes (`/x/doc-comments/doc/links`).
 
-import { tone, h, icon, put } from './editor/dom.js'
 import { bottomSheet, grab } from './sheet.js'
+import { tone, h, icon, put } from './editor/dom.js'
 
 const MODES = [
   { id: 'view', label: 'can view', verb: 'view' },

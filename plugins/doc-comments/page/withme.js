@@ -5,8 +5,8 @@
 // withme.py). This module draws the section under "Shared by me", its rows
 // and their menu, and the sheet that adds one.
 
-import { h, icon, put, tone } from './editor/dom.js'
 import { bottomSheet, grab } from './sheet.js'
+import { h, icon, put, tone } from './editor/dom.js'
 
 export const WITHME_PREFIX = 'with-me/'
 const MODE = { view: 'View', comment: 'Comment', edit: 'Edit' }
