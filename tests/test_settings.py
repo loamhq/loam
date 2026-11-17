@@ -108,6 +108,10 @@ HANDOFF_ROWS = [
                     "timeZone": {"type": "string"}}},
     *[{"key": f"appearance.{k}.mode", "type": "string",
        "enum": ["light", "dark", "sun", "system"], "default": "system"}
+      for k in ("phone", "desktop")],
+    # The Sun transition (loam-ui's handoff of 2026-11-16).
+    *[{"key": f"appearance.{k}.transition", "type": "string",
+       "enum": ["fast", "normal", "long"], "default": "normal"}
       for k in ("phone", "desktop")]]
 HANDOFF.write_text(json.dumps({"route": "/v1/settings/appearance",
                                "settings": HANDOFF_ROWS}))
@@ -257,6 +261,10 @@ else:
             field = key.rsplit(".", 1)[1]
             if field == "mode" and (tuple(r["enum"]) != real_declared["modes"]
                                     or r["default"] != appearance.DEFAULT["mode"]):
+                bad.append(key)
+            if field == "transition" and (
+                    tuple(r["enum"]) != appearance.TRANSITIONS
+                    or r["default"] != appearance.DEFAULT["transition"]):
                 bad.append(key)
             if key == "appearance.location" and (
                     tuple(r["properties"]["source"]["enum"])
@@ -462,14 +470,18 @@ async def main():
 
         # -- Appearance -------------------------------------------------------
         def full(phone, desktop, popts=None, dopts=None, location=None):
-            return {"phone": {**dict(zip(("mode", "size", "theme"), phone)),
+            return {"phone": {"transition": "normal",
+                              **dict(zip(("mode", "size", "theme"), phone)),
                               "options": popts or LATTE_DEFAULTS},
-                    "desktop": {**dict(zip(("mode", "size", "theme"), desktop)),
+                    "desktop": {"transition": "normal",
+                                **dict(zip(("mode", "size", "theme"), desktop)),
                                 "options": dopts or LATTE_DEFAULTS},
                     "location": location}
 
         def base(value):
-            return {k: {f: v for f, v in value[k].items() if f != "options"}
+            # Mode, size and theme: the transition has checks of its own.
+            return {k: {f: v for f, v in value[k].items()
+                        if f not in ("options", "transition")}
                     for k in ("phone", "desktop")}
 
         status, body = await http(port, "GET", "/v1/settings/appearance")
@@ -536,7 +548,8 @@ async def main():
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
                                   {"phone": {"theme": "sepia-night", "mode": "light"}})
         check("a theme added to the folder is settable with no code change",
-              status == 200 and body["phone"] == {"mode": "light", "size": 125,
+              status == 200 and body["phone"] == {"mode": "light",
+                                                   "transition": "normal", "size": 125,
                                                    "theme": "sepia-night",
                                                    "options": LATTE_DEFAULTS}, body)
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
@@ -921,6 +934,76 @@ async def main():
         out2 = await cli(port, "set", "appearance.desktop.mode", "light")
         check("...and the modes go back", out.get("value") == "system"
               and out2.get("value") == "light", (out, out2))
+        # -- The Sun transition (2026-11-16; loam-ui's sun-shift.js) ----------
+        status, body = await http(port, "GET", "/v1/settings/appearance")
+        check("a reading carries each kind's transition, normal by default",
+              body["phone"]["transition"] == "normal"
+              and body["desktop"]["transition"] == "normal", body)
+        before = body
+        for kind in ("phone", "desktop"):
+            for value in ("fast", "long", "normal"):
+                status, body = await http(port, "PATCH", "/v1/settings/appearance",
+                                          {kind: {"transition": value}})
+                status2, again = await http(port, "GET", "/v1/settings/appearance")
+                other = "desktop" if kind == "phone" else "phone"
+                check(f"PATCH {kind} transition {value}, then GET: round-trips, "
+                      f"the other kind and every other field untouched",
+                      status == 200 and status2 == 200
+                      and again[kind]["transition"] == value and again == body
+                      and again[other] == before[other]
+                      and {f: v for f, v in again[kind].items() if f != "transition"}
+                      == {f: v for f, v in before[kind].items() if f != "transition"}
+                      and again["location"] == before["location"], (status, again))
+        status, body = await http(port, "PATCH", "/v1/settings/appearance",
+                                  {"desktop": {"transition": "long", "mode": "sun"}})
+        check("the page's Sun body with a transition: both in one PATCH",
+              status == 200 and body["desktop"]["transition"] == "long"
+              and body["desktop"]["mode"] == "sun", body)
+        stored = json.loads(Path(os.environ["LOAM_HOST_SETTINGS"]).read_text())
+        check("...persisted in the host settings file",
+              stored["appearance"]["desktop"]["transition"] == "long", stored)
+        for patch in ({"desktop": {"transition": "slow"}},
+                      {"phone": {"transition": 10}},
+                      {"phone": {"transition": None}},
+                      {"phone": {"transition": "Fast"}},
+                      {"phone": {"size": 90, "transition": "medium"}}):
+            status, body = await http(port, "PATCH", "/v1/settings/appearance", patch)
+            check(f"PATCH refused with a sentence: {json.dumps(patch)}",
+                  status == 400 and "transition is fast, normal or long"
+                  in body.get("error", ""), (status, body))
+        status, body = await http(port, "GET", "/v1/settings/appearance")
+        check("...and none of them wrote anything",
+              body["desktop"]["transition"] == "long"
+              and body["phone"]["transition"] == "normal"
+              and body["phone"]["size"] == before["phone"]["size"], body)
+        out = await cli(port, "describe", "appearance.phone.transition")
+        row = out.get("setting") or {}
+        check("describe appearance.phone.transition: the three ids",
+              row.get("allowed") == ["fast", "normal", "long"]
+              and "default normal" in row.get("values", ""), out)
+        out = await cli(port, "get", "appearance.desktop.transition")
+        check("get appearance.desktop.transition as a persona: the page's long",
+              out.get("ok") and out.get("value") == "long", out)
+        print("QUOTE get appearance.desktop.transition ->", json.dumps(out))
+        out = await cli(port, "set", "appearance.phone.transition", "fast")
+        check("set appearance.phone.transition fast as a persona: read back",
+              out.get("ok") and out.get("value") == "fast", out)
+        print("QUOTE set appearance.phone.transition fast ->", json.dumps(out))
+        status, body = await http(port, "GET", "/v1/settings/appearance")
+        check("...the same value the page's GET reads",
+              body["phone"]["transition"] == "fast", body)
+        out = await cli(port, "set", "appearance.phone.transition", "glacial")
+        check("set appearance.phone.transition glacial: the broker's refusal",
+              out.get("ok") is False
+              and "transition is fast, normal or long" in out.get("error", ""), out)
+        print("QUOTE set appearance.phone.transition glacial ->", json.dumps(out))
+        out = await cli(port, "set", "appearance.phone.transition", "normal")
+        out2 = await cli(port, "set", "appearance.desktop.transition", "normal")
+        out3 = await cli(port, "set", "appearance.desktop.mode", "light")
+        check("...and the transitions and the desktop mode go back",
+              out.get("value") == "normal" and out2.get("value") == "normal"
+              and out3.get("value") == "light", (out, out2, out3))
+
         out = await cli(port, "describe", "appearance.desktop.theme")
         row = out.get("setting") or {}
         check("describe appearance.desktop.theme: the installed ids, live",

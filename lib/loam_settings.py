@@ -476,6 +476,8 @@ ENTRIES: list[Entry] = [
     *[Entry(f"appearance.{kind}.{field}", "setting",
             f"{'The phone' if kind == 'phone' else 'The desktop'}'s "
             + {"mode": "mode: light, dark, by the sun, or the system's",
+               "transition": "Sun mode transition: how long the shift "
+                             "between light and dark takes",
                "size": "page size (zoom)",
                "theme": "theme (its look: Latte, Plain, ...)"}[field],
             "PATCH /api/settings/appearance",
@@ -485,14 +487,18 @@ ENTRIES: list[Entry] = [
                              "sunrise to 30 min after sunset at "
                              "appearance.location -- or system, the device's "
                              "own); default system",
+                    "transition": "fast (3 s), normal (10 s) or long (20 s); "
+                                  "default normal",
                     "size": "a whole percent, 75 to 150 in steps of 5; default 100",
                     "theme": "an installed theme's id (describe lists them); "
                              "default latte"}[field],
-            options={"theme": "themes", "mode": "modes"}.get(field),
+            options={"theme": "themes", "mode": "modes",
+                     "transition": "transitions"}.get(field),
             body=(lambda v, m, kind=kind, field=field: {kind: {field: v}}),
             read="GET /v1/settings/appearance",
             pick=(lambda a, m, kind=kind, field=field: a[kind][field]))
-      for kind in ("phone", "desktop") for field in ("mode", "size", "theme")],
+      for kind in ("phone", "desktop")
+      for field in ("mode", "transition", "size", "theme")],
     # The saved place Sun mode reads (2026-11-13; loam-ui 29a1506), one for
     # both device kinds so the phone and the desktop agree.
     Entry("appearance.location", "setting",
@@ -688,9 +694,11 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "/^\\/integrations\\/github\\/(manifest|register|install|callback|refresh)$/":
         ["integration.github"],
     "rest === '/settings/appearance'": [
-        "appearance.phone.mode", "appearance.phone.size", "appearance.phone.theme",
-        "appearance.desktop.mode", "appearance.desktop.size",
-        "appearance.desktop.theme", "appearance.location"],
+        "appearance.phone.mode", "appearance.phone.transition",
+        "appearance.phone.size", "appearance.phone.theme",
+        "appearance.desktop.mode", "appearance.desktop.transition",
+        "appearance.desktop.size", "appearance.desktop.theme",
+        "appearance.location"],
     # Plugins (2026-11-12; docs/plugins.md), passed by loam-ui's relay
     # since its plugin host (moved up from PAGE_RELAY_AHEAD).
     "rest === '/plugins'": ["plugin.install"],
@@ -1026,6 +1034,9 @@ def options(name: str, member_engine: str | None = None) -> list:
     if name == "modes":
         import loam_appearance  # noqa: PLC0415
         return list(loam_appearance.modes())
+    if name == "transitions":
+        import loam_appearance  # noqa: PLC0415
+        return list(loam_appearance.TRANSITIONS)
     if name.startswith("theme-option:"):
         import loam_appearance  # noqa: PLC0415
         _, theme, opt = name.split(":", 2)
