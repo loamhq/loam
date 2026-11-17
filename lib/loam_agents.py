@@ -34,7 +34,8 @@ person's yes. An agent's call (``by``) must name the thread it is talking to
 the person in and the id of the person's message that said yes; the route
 checks, in the thread's record, that the agent is a member there, that the
 message is the owner's, and that it was written after the version it
-approves (for a draft) or within ``YES_WINDOW`` (for an archive or a
+approves (for a draft: after it in the thread too, 2026-11-17, since a
+stamp is to the second) or within ``YES_WINDOW`` (for an archive or a
 restore), and it takes each yes once. The record is written by the runtime
 alone, and every agent's post is recorded under its own name, so an agent
 cannot write a message as the person through any route. That is a guard
@@ -273,11 +274,15 @@ def _write_agent(agent: str, config: dict) -> None:
 
 def check_yes(by: str | None, thread: str | None, yes: str | None, *,
               after: str | None = None, window: timedelta | None = None,
-              used: set[tuple[str, str]] | None = None) -> dict | None:
+              used: set[tuple[str, str]] | None = None,
+              after_message: tuple[str, str | None] | None = None) -> dict | None:
     """None when the call is the person's own (no ``by``). For an agent's
     call: the person's message ``yes`` in ``thread``, which the agent is a
     member of, written at or after ``after`` or within ``window`` of now,
-    and not taken before. Answers ``{"thread", "message", "at"}``."""
+    and not taken before. ``after_message`` (2026-11-17) is ``(thread, the
+    id of its newest message when the draft's revision was written)``: a yes
+    in that thread must come after it, which decides what a one-second
+    stamp cannot. Answers ``{"thread", "message", "at"}``."""
     if not by:
         return None
     if not thread or not yes:
@@ -302,6 +307,14 @@ def check_yes(by: str | None, thread: str | None, yes: str | None, *,
         raise AgentsError(f"`yes`: {yes} in {thread} is not {lc.OWNER_NAME}'s "
                           f"message", 403)
     at = _utc(msg.get("at"))
+    if after_message and after_message[0] == thread:
+        ids = [m.get("id") for m in msgs]
+        mark = after_message[1]
+        if mark is not None and mark in ids and ids.index(yes) <= ids.index(mark):
+            raise AgentsError(
+                f"`yes`: {yes} was written before this version of the draft "
+                f"(revision written after {mark}); show {lc.OWNER_NAME} the "
+                f"version you are confirming and take the yes they give to it", 409)
     if after and (at is None or at < _utc(after)):
         raise AgentsError(
             f"`yes`: {yes} was written before this version of the draft "
@@ -498,6 +511,19 @@ def drafts(thread: str | None = None) -> list[dict]:
     return [shown(d) for d in rows]
 
 
+def _newest_message(thread: str | None) -> str | None:
+    """The id of ``thread``'s newest message, or None (no thread, or none
+    yet): where a revision stands in the conversation its yes comes in."""
+    if not thread:
+        return None
+    import loam_threads as threads  # noqa: PLC0415
+    try:
+        msgs = threads.read(thread)[1]
+    except (threads.ThreadError, OSError):
+        return None
+    return msgs[-1].get("id") if msgs else None
+
+
 def _refuse_retired(fields) -> None:
     if "emoji" in fields:
         raise AgentsError("`emoji` is retired: an agent's face is the one the theme "
@@ -532,6 +558,7 @@ def new_draft(payload: dict, by: str | None) -> dict:
     draft["revisions"] = [{"rev": 1, "at": at, "by": by or lc.OWNER_ID,
                            "fields": sorted(k for k in payload)}]
     with locked():
+        draft["after_message"] = _newest_message(thread)
         _write_json(draft_path(draft["draft"]), draft)
     return shown(draft)
 
@@ -552,6 +579,7 @@ def revise(draft_id: str, patch: dict, by: str | None) -> dict:
         draft = _clean_fields(patch, draft, by)
         draft["rev"] += 1
         draft["updated"] = now_iso()
+        draft["after_message"] = _newest_message(draft.get("thread"))
         draft["revisions"].append({"rev": draft["rev"], "at": draft["updated"],
                                    "by": by or lc.OWNER_ID, "fields": sorted(patch)})
         _write_json(draft_path(draft_id), draft)
@@ -737,7 +765,9 @@ def confirm(draft_id: str, payload: dict, by: str | None, *,
                               409, {"draft": shown(draft)})
         yes = check_yes(by, payload.get("thread") or draft.get("thread"),
                         payload.get("yes"), after=draft["updated"],
-                        used=_used_yeses())
+                        used=_used_yeses(),
+                        after_message=((draft.get("thread"), draft.get("after_message"))
+                                       if "after_message" in draft else None))
         agent = draft["id"]
         wake = draft.get("wake") or free_wake()
         made = make(agent, draft, wake, provision=provision, units=units)

@@ -1,6 +1,6 @@
 ---
 name: loam-making-an-agent
-description: How to make a new agent with the owner: build it from a character (personality, values, a way of seeing the world), never from a task; draft, show, revise and make it on their yes. Use when the owner asks for a new agent, or when one would clearly serve them.
+description: How to make a new agent with the owner: build it from a character (personality, values, a way of seeing the world), never from a task; write the draft, show it, revise it on their word, and make it on their yes to the version shown. Use when the owner asks for a new agent, or when one would clearly serve them.
 ---
 
 # Making an agent
@@ -9,8 +9,10 @@ description: How to make a new agent with the owner: build it from a character (
 
 **Draft from the owner, not from a template.** Use what you know of them (`About me.md` at the top of the vault, and the conversation) to imagine who would be good for them. Give it a name that suits it. Its face is drawn by the theme until the owner uploads a picture.
 
-**Show a short version first.** A few sentences in conversation: who they are, what they care about, how they would be with the owner, and a thing or two they would be good for. Not the whole soul. Change it on the owner's word, as many times as it takes.
+**Write the draft first, then show it.** Once you have someone in mind, write them as a draft through the settings route before you say anything about them: `agent.draft`, with the name, the soul and the config (`mcp__engineer__settings` `describe` lists it). Then show the owner a short version of that draft in conversation: a few sentences on who they are, what they care about, how they would be with the owner, and a thing or two they would be good for. Not the whole soul, unless they ask. Writing first means the yes they give is to a draft that exists, so one yes is enough.
 
-**Make it only on their yes**, in a conversation and never from a wake or a cron, through the settings route: `agent.draft`, then `agent.revise`, then `agent.confirm` (`mcp__engineer__settings` `describe` lists them). The new agent appears in Chats with a first thread.
+**Change it on their word, as many times as it takes.** Each change is `agent.revise`, which makes a new revision; show them the new version. A yes they gave before the change was to the old one, and does not make the new one: ask again.
+
+**Make it only on their yes to the version you showed**, in a conversation and never from a wake or a cron: `agent.confirm`, with that revision and the id of their message that said yes. The new agent appears in Chats with a first thread.
 
 **Write the soul to stand alone.** It must make sense if no other agent existed: no comparisons to other agents, and no "unlike Iris". It holds only who the agent is: its character, values and identity. Never instructions on how to behave or what tasks it does; how it works goes in its `_active.md`.

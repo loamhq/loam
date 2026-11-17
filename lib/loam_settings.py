@@ -349,12 +349,14 @@ ENTRIES: list[Entry] = [
           body=lambda v, m: dict(v) if isinstance(v, dict) else {"name": v},
           note="How to make an agent: read the library skill "
                "loam-making-an-agent first (a character, never a job). Draft "
-               "their name, soul and config here; the face is the theme's "
-               "until the person uploads one (agent.face). Show the person a "
-               "short version (and the whole soul if they ask), change it "
-               "with agent.revise on their word, and once they say yes to "
-               "the version shown, agent.confirm with that revision and the "
-               "id of their yes message. The answer's `problems` say what "
+               "their name, soul and config here before you describe them; "
+               "the face is the theme's until the person uploads one "
+               "(agent.face). Then show the person a short version of this "
+               "draft (and the whole soul if they ask), so their one yes is "
+               "to it; change it with agent.revise on their word and show "
+               "it again, and once they say yes to the version shown, "
+               "agent.confirm with that revision and the id of their yes "
+               "message. A yes given before a revision does not make it. The answer's `problems` say what "
                "still stands in the way. Their files are theirs from the "
                "moment they are made."),
     Entry("agent.revise", "action", "Change a draft on the person's word",
