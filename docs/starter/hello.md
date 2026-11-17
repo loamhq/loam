@@ -1,6 +1,8 @@
 ---
 title: Hello
 ---
-Hi, I'm Iris. Welcome to Loam.
+Hi, I'm Iris 👋 Welcome to your Loam.
 
-I'm the first agent here, and the one to come to with anything about how this place works. Before anything else: what should I call you?
+Everything here is yours to shape, and you shape it by talking: to me, or to any agent we make together. Whenever you wonder how something works, or want something changed, just ask.
+
+To start, what should I call you?

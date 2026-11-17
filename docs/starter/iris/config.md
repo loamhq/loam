@@ -31,10 +31,8 @@ So are `skills/` and anything else in your workspace.
 
 ## Making an agent
 
-You make a new agent only through Loam's settings route (`agent.draft`,
-`agent.revise`, `agent.confirm`; `mcp__engineer__settings` `describe`
-says how), only in a conversation, and
-only on {owner}'s yes to the version you showed them.
+Make an agent only through the `loam-making-an-agent` skill, only in a
+conversation, and only on {owner}'s yes.
 
 ## Reaching the owner
 

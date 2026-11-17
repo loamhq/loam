@@ -64,6 +64,15 @@ SKILL_FILE = "SKILL.md"
 LOAM_DIR = "Loam"
 # The person's own shared shelf, beside it.
 OWN_DIR = "skills"
+# What the owner's agents know about them, at the top of the vault (the
+# owner, 2026-11-16): seeded on a new install, and every agent made on it is
+# pointed at it from its `_always.md` (lib/loam_agents.py, `ABOUT_LINE`).
+ABOUT_ME = "About me.md"
+ABOUT_ME_TEXT = """# About me
+
+What my agents know about me. They add to it as they learn what lasts; it is
+mine to read and edit.
+"""
 # The one folder inside Loam's that an update keeps (2026-11-16): plugins'
 # data that belongs in the vault, `<system>/Loam/data/<plugin id>/` (the
 # doc-comments sidecars first). It is never in the library, never counted as
@@ -372,8 +381,9 @@ and any editor. Change any of it. Loam finds its own folders by the names in
 its configuration (`/etc/loam/loam.toml`, `[vault]`), so a folder renamed
 there keeps working.
 
-| Folder | What it is for |
+| File or folder | What it is for |
 |---|---|
+| `{ABOUT_ME}` | What your agents know about you. They add to it as they learn; read it and edit it whenever you like. |
 | `{f['inbox']}/` | What needs you. Each thread's board is a file in `{f['boards']}/`; the General board is `{f['general_board']}`. |
 | `{f['conversations']}/` | The record of every thread, written by Loam as you talk. Read it; do not edit it. |
 | `{f['projects']}/` | Your projects and their notes. |
@@ -403,12 +413,17 @@ Loam's with the same name, and an agent's own skill (in its workspace's
 def seed_vault(vault: Path, folders: dict[str, str] | None = None,
                library: Path | None = None) -> list[str]:
     """The starter vault a blank install gets, at ``vault``: the folders
-    Loam uses, named from the configuration, a README, the library as
+    Loam uses, named from the configuration, a README, ``About me.md``, the library as
     ``<system>/Loam/`` and the person's empty shelf. Writes only what is
     missing (the library excepted, which is Loam's and installed whole), so
-    on a vault that already exists it moves nothing. Returns what it made."""
+    on a vault that already exists it moves nothing; ``About me.md`` only on a
+    new vault, one with no README yet. Returns what it made."""
     f = dict(folders or lc.VAULT_FOLDERS)
     made = []
+    readme = vault / "README.md"
+    # A new vault's (no README yet): an existing one, the first install's
+    # included, is never handed an About me it did not have.
+    fresh = not readme.exists()
     for key in ("inbox", "boards", "conversations", "projects", "attachments", "system"):
         path = vault / f[key]
         if not path.is_dir():
@@ -419,7 +434,10 @@ def seed_vault(vault: Path, folders: dict[str, str] | None = None,
         shelf.mkdir(parents=True)
         made.append(f"{f['system']}/{OWN_DIR}/")
         (shelf / "README.md").write_text(OWN_SHELF_README, encoding="utf-8")
-    readme = vault / "README.md"
+    about = vault / ABOUT_ME
+    if fresh and not about.exists():
+        about.write_text(ABOUT_ME_TEXT, encoding="utf-8")
+        made.append(ABOUT_ME)
     if not readme.exists():
         readme.write_text(vault_readme(f), encoding="utf-8")
         made.append("README.md")

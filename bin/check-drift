@@ -1146,15 +1146,14 @@ def main() -> int:
                 "persona's skills. Run bin/provision --codex " + name + ".",
             ))
 
-        # agent.json against what provision renders. The display name, the
-        # emoji and the default provider, model and thinking level are the
-        # profile's (2026-11-13: the owner sets them on the page), so the file's
-        # own values are expected; until then the emoji was held to the atlas
-        # note, which is now only a new agent's first face.
+        # agent.json against what provision renders. The display name and
+        # the default provider, model and thinking level are the profile's
+        # (2026-11-13: the owner sets them on the page), so the file's own
+        # values are expected; so is a retired emoji an older file still holds
+        # (2026-11-16), which provision keeps as it is.
         expected_agent = loam_profile.render_agent({
             "name": name,
             "display": name.capitalize(),
-            "emoji": prov.emoji_for(name.capitalize(), cfg.get("emoji")),
             "workspace": str(ws),
             "vault": str(prov.VAULT),
             "wake_schedule": wake,

@@ -13,8 +13,9 @@ Two things, both found in a real browser at the deployed app on 2026-09-18:
 
   2. **`GET /v1/agents` answered bare strings**, so a page drawing an
      agent's name and mark had to invent both. It answers objects now:
-     `{"id", "name", "emoji"}`, read from the persona's own `agent.json`,
-     which is where the runtime states them. A breaking change to that
+     `{"id", "name", "face"}`, the name read from the persona's own
+     `agent.json`, which is where the runtime states it. (`emoji` left the
+     rows 2026-11-16, when the emoji face was retired.) A breaking change to that
      route's shape, and the one route on this interface that has had one.
 
 No model call is spent: the titler does not run here. A backfilled title is
@@ -265,20 +266,20 @@ async def main() -> None:
           (status, list(answer)), (200, ["agents"]))
     check("...holding objects, not the bare strings it answered before",
           answer["agents"][0],
-          {"id": "ada", "name": "Ada", "emoji": "🧱", "face": None})
+          {"id": "ada", "name": "Ada", "face": None})
     check("...sorted by id, as the roster always was",
           [a["id"] for a in answer["agents"]],
           ["ada", "nameless", "plain"])
     check("an agent.json with no display falls back to the capitalised id",
           [a for a in answer["agents"] if a["id"] == "nameless"][0],
-          {"id": "nameless", "name": "Nameless", "emoji": "🌳", "face": None})
-    check("an agent.json with no emoji says null, rather than a guess",
+          {"id": "nameless", "name": "Nameless", "face": None})
+    check("an agent.json's retired emoji is not served",
           [a for a in answer["agents"] if a["id"] == "plain"][0],
-          {"id": "plain", "name": "Plain", "emoji": None, "face": None})
+          {"id": "plain", "name": "Plain", "face": None})
     # `face` (2026-11-14) is an uploaded image's route and digest, null
     # without one: never the workspace's path.
     check("nothing else from agent.json leaves the box",
-          sorted(answer["agents"][0]), ["emoji", "face", "id", "name"])
+          sorted(answer["agents"][0]), ["face", "id", "name"])
     check("the roster of ids is unchanged, and is what a session starts by",
           cfg.roster(), ["ada", "nameless", "plain"])
 
