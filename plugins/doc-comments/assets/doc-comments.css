@@ -371,7 +371,8 @@
 .dc.phone .dc-head.tight .dc-mpill { gap: 2px; padding: 0 7px 0 9px !important; }
 .dc.phone .dc-mpill { height: 34px; }
 .dc.phone .dc-page { padding: 0; }
-.dc.phone .dc-col { width: 100%; flex-basis: 100%; padding: 22px 24px 160px 38px; }
+/* The phone layout is also the side panel's: the same measure holds when it is widened. */
+.dc.phone .dc-col { width: 100%; flex-basis: 100%; max-width: calc(var(--dc-measure) + 62px); padding: 22px 24px 160px 38px; }
 .dc.phone .cm-editor { font-size: 17px; line-height: 1.7; }
 .dc.phone .dc-h1 { font-size: 28px; }
 .dc.phone .dc-h2 { font-size: 19px; }

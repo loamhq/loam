@@ -1999,6 +1999,21 @@ for (const zoom of [1, 0.9]) {
   })
 }
 
+test(`the phone layout (the side panel's) holds the same ${MEASURE} px when wide, and is unchanged at 430`, { skip }, async () => {
+  await start()
+  for (const [w, want] of [[1100, MEASURE], [430, null]]) {
+    const page = await open({ w, phone: true })
+    const g = await geometry(page)
+    if (want) {
+      assert.ok(Math.abs(g.text - want) <= 0.5, `${w}: the text is ${g.text.toFixed(1)} px`)
+      assert.ok(Math.abs((g.left - 38) - (g.right - 24)) <= 2, `${w}: centred (${g.left.toFixed(1)} | ${g.right.toFixed(1)})`)
+    } else assert.ok(Math.abs(g.left - 38) <= 0.5 && Math.abs(g.right - 24) <= 0.5, `430: the phone's edges as before (${g.left} | ${g.right})`)
+    const dots = await offsets(page, true)
+    if (dots.length) near(dots, `${w}: dots level`)
+    await page.done()
+  }
+})
+
 for (const w of [1280, 1920]) {
   test(`a note's card stays level with its passage at ${w}, on load, scrolled and in Suggesting`, { skip }, async () => {
     await start()
