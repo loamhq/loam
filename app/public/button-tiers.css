@@ -68,6 +68,13 @@
 }
 :root :is(.secondary,.roundmic,.player-play):active { background:var(--latte-hover); color:var(--latte-hover-ink); }
 
+/* A new agent's Create is the thread's main action only while nothing is
+ * being written and only on the latest draft; otherwise it steps down to the
+ * secondary tier beside Ask for changes, and Send leads. */
+:root .tt-thread:has(.roundsend:not(:disabled)) .agent-draft-card .primary,
+:root .agent-draft-card:has(~ .agent-draft-card) .primary {
+  background:var(--latte-foam); color:var(--latte-foam-ink); border-color:transparent; box-shadow:none;
+}
 /* Disabled actions do not advertise a next step. */
 :root :is(.primary,.roundsend,.secondary,.roundmic):is(:disabled,[aria-disabled="true"]) {
   background:var(--paper-hover); color:var(--paper-ink-3);
@@ -78,7 +85,6 @@
 /* Repeated preference forms have no single main action at rest. Only the form
  * being completed promotes its save action. Other saves remain Newspaper. */
 :root .plugin-secret-settings .primary,
-:root .agent-drafts .primary,
 :root .welcome-providers .provider-sign-in:not(:has(.loginflow)) .primary,
 :root .welcome:has(.loginflow) .welcome-continue .primary,
 :root .update-control:has(.update-rollback .primary) .update-release .primary {
