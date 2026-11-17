@@ -37,10 +37,10 @@ test('fresh browsers use host values, writes merge one device kind and leave oth
   assert.equal(held.desktop.size, 95)
   page()
   const fresh = createTheme(null, { kind: 'desktop', boot: { values: structuredClone(held), available: true }, request })
-  assert.deepEqual(fresh.value, { mode: 'system', size: 95, theme: 'latte' })
+  assert.deepEqual(fresh.value, { mode: 'system', transition: 'normal', size: 95, theme: 'latte' })
   held.desktop = { mode: 'dark', size: 85 }
   await fresh.refresh()
-  assert.deepEqual(fresh.value, { ...held.desktop, theme: 'latte' }, 'a persona change arrives on refresh')
+  assert.deepEqual(fresh.value, { ...held.desktop, transition: 'normal', theme: 'latte' }, 'a persona change arrives on refresh')
 })
 
 test('system mode follows media; the quick toggle writes an explicit host mode', async () => {
@@ -117,7 +117,7 @@ test('host boot runs before styles/app, ignores browser theme storage, and selec
 })
 
 test('public boot filters unrelated host data; failures fall back without leaking a token', async () => {
-  assert.deepEqual(appearanceValues({ phone: { mode: 'invalid', size: 94 } }), { phone: { mode: 'system', size: 100, theme: 'latte' }, desktop: { mode: 'system', size: 100, theme: 'latte' } })
+  assert.deepEqual(appearanceValues({ phone: { mode: 'invalid', transition: 'invalid', size: 94 } }), { phone: { mode: 'system', transition: 'normal', size: 100, theme: 'latte' }, desktop: { mode: 'system', transition: 'normal', size: 100, theme: 'latte' } })
   const source = await appearanceBoot({ json: async () => ({ status: 200, body: JSON.stringify({ ...values(), secret: 'must-not-appear' }) }) })
   assert.doesNotMatch(source, /must-not-appear/)
   const failed = await appearanceBoot({ json: async () => { throw new Error('secret-in-error') } })
@@ -154,12 +154,15 @@ test('the registry handoff covers every manifest option and the UI limits', asyn
   const registry = JSON.parse(await readFile(new URL('../docs/appearance-settings.registry.json', import.meta.url)))
   assert.equal(registry.route, '/v1/settings/appearance')
   assert.deepEqual(registry, appearanceRegistry((await loadThemes()).themes))
-  assert.equal(registry.settings.length, 35)
+  assert.equal(registry.settings.length, 37)
   for (const kind of ['phone', 'desktop']) {
     const mode = registry.settings.find((s) => s.key === `appearance.${kind}.mode`)
+    const transition = registry.settings.find((s) => s.key === `appearance.${kind}.transition`)
     const size = registry.settings.find((s) => s.key === `appearance.${kind}.size`)
     assert.deepEqual(mode.enum, ['light', 'dark', 'sun', 'system'])
     assert.equal(mode.default, 'system')
+    assert.deepEqual(transition.enum, ['fast', 'normal', 'long'])
+    assert.equal(transition.default, 'normal')
     assert.deepEqual([size.minimum, size.maximum, size.multipleOf, size.default], [75, 150, 5, 100])
   }
   const source = await readFile(new URL('../public/page/settings.js', import.meta.url), 'utf8')
@@ -176,5 +179,5 @@ test('a delayed host refresh cannot roll back a newer saved edit', async () => {
   const refreshing = theme.refresh()
   theme.set({ mode: 'dark', size: 125 }); await theme.save()
   finish(values()); await refreshing
-  assert.deepEqual(theme.value, { mode: 'dark', size: 125, theme: 'latte' })
+  assert.deepEqual(theme.value, { mode: 'dark', transition: 'normal', size: 125, theme: 'latte' })
 })

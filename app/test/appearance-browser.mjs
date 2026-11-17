@@ -137,15 +137,15 @@ try {
       await page.waitForFunction((expected) => document.documentElement.dataset.theme === expected, mode === 'light' ? 'dark' : 'light')
       values[kind] = { mode, size, theme: 'latte' }
       await page.reload(); await page.waitForFunction(() => globalThis.__appearanceTest)
-      assert.deepEqual(await page.evaluate(() => { const { options, ...value } = __appearanceTest.theme.value; return value }), { mode, size, theme: 'latte' })
+      assert.deepEqual(await page.evaluate(() => { const { options, ...value } = __appearanceTest.theme.value; return value }), { mode, transition: 'normal', size, theme: 'latte' })
       // Fresh storage context reads the same host setting.
       const other = await contextFor(width, mode), fresh = await other.newPage()
       await fresh.goto(app.url); await fresh.locator('.tt-row').first().waitFor(); await fresh.waitForFunction(() => globalThis.__appearanceTest)
-      assert.deepEqual(await fresh.evaluate(() => { const { options, ...value } = __appearanceTest.theme.value; return value }), { mode, size, theme: 'latte' })
+      assert.deepEqual(await fresh.evaluate(() => { const { options, ...value } = __appearanceTest.theme.value; return value }), { mode, transition: 'normal', size, theme: 'latte' })
       await other.close()
       values[kind] = { mode: mode === 'light' ? 'dark' : 'light', size: 110, theme: 'latte' }
       await page.evaluate(() => __appearanceTest.theme.refresh())
-      assert.deepEqual(await page.evaluate(() => { const { options, ...value } = __appearanceTest.theme.value; return value }), values[kind])
+      assert.deepEqual(await page.evaluate(() => { const { options, ...value } = __appearanceTest.theme.value; return value }), { ...values[kind], transition: 'normal' })
       if (width === 1440) {
         await page.evaluate(() => __appearanceTest.closeSheet())
         assert.equal(await page.getByTitle('Appearance', { exact: true }).count(), 0, 'the duplicate rail toggle was removed')

@@ -9,6 +9,7 @@
       "fields": [
         "location",
         "phone.mode",
+        "phone.transition",
         "phone.size",
         "phone.theme",
         "phone.options.latte.agent-colours",
@@ -26,6 +27,7 @@
         "phone.options.yosemite.agent-shapes",
         "phone.options.yosemite.face-content",
         "desktop.mode",
+        "desktop.transition",
         "desktop.size",
         "desktop.theme",
         "desktop.options.latte.agent-colours",
