@@ -7,6 +7,10 @@ A fleet-wide sentence that names one agent (the per-cron grant, 2026-10-06:
 and must not read as drift in the named agent's copy; a real divergence
 still must.
 
+The reviewer on another provider (Antigravity) is not compared with the
+newest Claude Code session on disk, which is from before the switch
+(2026-11-16: a "family mismatch" no run had); on Claude Code it still is.
+
 Run: python3 tests/test_check_drift.py
 """
 
@@ -58,6 +62,36 @@ def run(cd, configs: dict[str, str]) -> list:
         return findings
 
 
+def lane_checks(cd) -> None:
+    import loam_engineer as eng
+    asked = []
+    eng.engineer_choice = lambda project, settings=None: {"model": "fable"}
+    eng.platform_project = lambda: None
+    cd.sess.effective_model = lambda ws: (asked.append(ws.name) or
+                                          ("claude-fable-5-2", "s.jsonl", None))
+    cd.sess.model_verdict = lambda configured, seen, chosen: (
+        ("ok", "") if configured in seen[0] else ("drift", ""))
+    cd.brk.chosen_model = lambda stem: None
+    prov = type("P", (), {"REVIEWER_MODEL": "fable"})
+
+    cd.loam_profile.reviewer_provider = lambda: "antigravity"
+    cd.loam_profile.reviewer_choice = lambda model, *a, **k: ("gemini-4-hydrogen-high", None)
+    findings: list = []
+    notes = cd.check_lane_models(findings, [], prov)
+    check("the reviewer on Antigravity is not compared with a Claude session",
+          "reviewer" not in asked and not findings, repr((asked, findings)))
+    check("...and the note says where it runs",
+          any("reviewer: on Antigravity (gemini-4-hydrogen-high)" in n for n in notes),
+          repr(notes))
+
+    cd.loam_profile.reviewer_provider = lambda: "claude-code"
+    cd.loam_profile.reviewer_choice = lambda model, *a, **k: ("opus", None)
+    findings = []
+    cd.check_lane_models(findings, [], prov)
+    check("the reviewer on Claude Code still is",
+          [f[0] for f in findings] == ["reviewer effective model"], repr(findings))
+
+
 def main() -> int:
     cd = load()
     names = ("ada", "cleo", "juno")
@@ -76,6 +110,8 @@ def main() -> int:
     found = run(cd, {n: config(n, "Your workspace is "
                                   f"`ai-labs/{n}/`.") for n in names})
     check("an agent's own name still masks", not found, repr(found))
+
+    lane_checks(cd)
 
     print(f"\n{'OK' if not fails else f'{fails} FAILED'}")
     return 1 if fails else 0
