@@ -1171,7 +1171,11 @@ export function createDocEditor(opts) {
 
   function renderHead() {
     const m = MODES.find(x => x.id === st.mode)
-    const crumbs = (opts.crumbs || []).flatMap((c, i) => [
+    // The phone shows the two folders the doc is in, as the mockup does; the
+    // desktop the whole path (shortened by the host).
+    const all = opts.crumbs || []
+    const shown = st.phone && all.length > 2 ? all.slice(0, -1).filter(c => c.label !== '…').slice(-2) : all
+    const crumbs = shown.flatMap((c, i) => [
       i ? h('span', { class: 'dc-sl', text: '/' }) : null,
       c.go ? h('button', { class: 'dc-crumb-b', type: 'button', onclick: c.go, text: c.label }) : h('span', { text: c.label }),
     ])
