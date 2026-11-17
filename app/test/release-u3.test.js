@@ -195,3 +195,28 @@ test('profile status refresh preserves the selected tab and cannot overwrite a l
   finish({ ...fresh, identity: { display: 'Stale' } }); await refreshing
   assert.equal(c.st.data.identity.display, 'Renamed'); assert.equal(c.st.tab, 'Files')
 })
+
+test('archive and restore tell Chats by id when the host answers the agent as a string', async () => {
+  // The host's real answers (lib/loam_agents): {"agent": "juniper", "archived": {...}} and
+  // {"agent": "juniper", "event": {...}}. Found by the 2026-11-16 first-day walk: spread as
+  // an object, the id was lost and Chats kept the archived agent until a reload.
+  const changed = [], calls = []
+  const api = async (method, path) => {
+    calls.push([method, path])
+    if (method === 'GET' && path === '/agents/juniper') return { identity: {}, agent: { id: 'juniper', name: 'Juniper', emoji: '🌿' } }
+    if (path.endsWith('/archive')) return { agent: 'juniper', archived: { at: 'now', by: 'owner' } }
+    if (path.endsWith('/restore')) return { agent: 'juniper', event: { kind: 'restored' } }
+    if (path === '/agents?archived=1') return { agents: [] }
+    return {}
+  }
+  const c = createProfiles({ redraw() {}, api, changedAgent: agent => changed.push(agent) })
+  await c.load('agent', 'juniper'); c.st.confirmArchive = true
+  assert.equal(await c.archive(), true)
+  assert.deepEqual(changed.at(-1), { id: 'juniper', archived: { at: 'now', by: 'owner' } })
+  let agents = createAgents([{ id: 'iris', name: 'Iris' }, { id: 'juniper', name: 'Juniper' }])
+  const apply = agent => { const rows = agents.list; agents = createAgents(agent.archived ? rows.filter(r => r.id !== agent.id) : agents.byId.has(agent.id) ? rows.map(r => r.id === agent.id ? agent : r) : [...rows, agent]) }
+  apply(changed.at(-1)); assert.deepEqual(agents.list.map(a => a.id), ['iris'])
+  await c.restore('juniper')
+  assert.deepEqual(changed.at(-1), { id: 'juniper', name: 'Juniper', emoji: '🌿', archived: null })
+  apply(changed.at(-1)); assert.deepEqual(agents.list.map(a => [a.id, a.name]), [['iris', 'Iris'], ['juniper', 'Juniper']])
+})

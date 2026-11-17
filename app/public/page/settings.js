@@ -5,7 +5,7 @@ import { h, icon, kept, blob } from "../ui.js"
 import { settingsNav, segmentedControl, settingsRow } from "../chat-ui.js"
 import { connectedCount, providerRows, providerDetail, loginView } from "../providers.js"
 import { nameOf as fileNameOf, ROOT_LOOK } from "../files.js"
-import { agentLook, providerGlyph } from "../sessions.js"
+import { agentLook, createAgents, providerGlyph } from "../sessions.js"
 import { providerMark } from "../marks.js"
 import { githubNotice, orgApps, offersOrgs, orgView, githubView } from "../integrations.js"
 import { integrationCatalog } from '../integration-catalog.js'
@@ -258,7 +258,7 @@ function settingsAgents({ back = true } = {}) {
   if (host.state.sheet?.archivedAgents) return [settingsBack('Agents', 'agents'), settingsHead('Archived'),
     st.directoryError ? h('p', { role: 'alert', class: 'schedule-error', text: st.directoryError }) : null,
     st.archived === null ? h('p', { role: 'status', text: 'Loading archived agents…' }) : st.archived.length ? group('Archived agents', st.archived.map(agent => h('div', { class: 'setrow', key: agent.id },
-      blob(agentLook(agent.id, { list: st.archived, byId: new Map(st.archived.map(a => [a.id, a])) }), { size: 40, font: 18 }), h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: agent.name })),
+      blob(agentLook(agent.id, createAgents(st.archived)), { size: 40, font: 18 }), h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: agent.name })),
       h('button', { class: 'pillbtn', disabled: st.directoryBusy, text: 'Restore', 'aria-label': `Restore ${agent.name}`, onclick: () => host.settingsProfiles.restore(agent.id) })))) : h('p', { class: 'note profile-empty', text: 'No archived agents.' })]
   return [back ? settingsBack('Settings', 'root') : null, settingsHead('Agents'),
     h('div', { class: 'agent-directory-actions' }, h('button', { class: 'pillbtn primary', disabled: st.directoryBusy, 'aria-label': 'New agent', onclick: async () => {
