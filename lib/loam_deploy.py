@@ -139,10 +139,10 @@ SIGHT_FIREWALL_SCRIPT = BROWSER_DIR / "firewall.sh"
 SIGHT_FIREWALL_UNIT = Path("/etc/systemd/system/loam-sight-firewall.service")
 SUDOERS = Path("/etc/sudoers.d/loam-deploy")
 DEPLOY_BIN = AGENTS / "bin" / "deploy"
-# Loam's own sign-in page (2026-11-16; login/README.md): its source in the
+# Loam's own sign-in page (2026-11-16; deploy/login/README.md): its source in the
 # checkout, its render beside the login's other files, and the path on the
 # portal its assets answer on (Authelia uses nothing under /_loam/).
-LOGIN_SRC = Path(__file__).resolve().parent.parent / "login"
+LOGIN_SRC = Path(__file__).resolve().parent.parent / "deploy" / "login"
 LOGIN_DIR = ETC / "login"
 LOGIN_ASSETS = "/_loam/login"
 
@@ -1807,7 +1807,7 @@ def caddy_claim_block(fq: str) -> str:
 # The sign-in page (2026-11-16)
 # ---------------------------------------------------------------------------
 #
-# The portal's own pages are Loam's, not Authelia's: login/ in the checkout,
+# The portal's own pages are Loam's, not Authelia's: deploy/login/ in the checkout,
 # rendered into LOGIN_DIR and served by Caddy on the portal host, in front of
 # Authelia's API, which is unchanged and still answers every /api/ request.
 # Authelia's theming reaches a logo, a favicon and its words (asset_path), not
@@ -1836,7 +1836,7 @@ LOGIN_ROUTES = ("/", "/2fa", "/2fa/*", "/authenticated", "/logout",
 LOGIN_FILES = ("index.html", "login.css", "login.js", "icon.svg")
 # The app's own copies of Loam's two faces (app/public/fonts), the same files
 # the claim page embeds: one copy of each in the repository.
-LOGIN_FONT_DIR = LOGIN_SRC.parent / "app" / "public" / "fonts"
+LOGIN_FONT_DIR = LOGIN_SRC.parent.parent / "app" / "public" / "fonts"
 LOGIN_FONTS = (("Caprasimo", "400", "caprasimo-400-latin.woff2"),
                ("Figtree", "300 900", "figtree-400-latin.woff2"))
 LATIN = ("U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, "
@@ -1911,7 +1911,7 @@ def caddy_portal_block(fq: str) -> str:
             when = (f'\t\texpression `{{query.rd}}.startsWith("{target}") '
                     f'|| {{query.page}} == "loam"`\n')
         out += [
-            "\t# Loam's sign-in page (login/, rendered into "
+            "\t# Loam's sign-in page (deploy/login/, rendered into "
             f"{LOGIN_DIR}). login.page = {mode!r}.",
             f"\thandle_path {LOGIN_ASSETS}/* {{",
             f"\t\troot * {LOGIN_DIR}",
