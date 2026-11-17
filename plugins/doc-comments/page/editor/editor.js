@@ -1072,7 +1072,18 @@ export function createDocEditor(opts) {
     bmenu.classList.add('on')
     const hgt = bmenu.scrollHeight
     const floor = head.offsetHeight + 6
-    const roomBelow = box.height - 12 - below, roomAbove = above - floor
+    let roomBelow = box.height - 12 - below
+    // Not enough room below the caret: the doc scrolls up to make it, as
+    // long as the caret line stays in view under the header.
+    if (hgt > roomBelow && b.at !== 'selbar') {
+      const need = Math.ceil(hgt - roomBelow)
+      const canScroll = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop
+      if (above - need > floor + 8 && canScroll >= need) {
+        scroll.scrollTop += need
+        below -= need; above -= need; roomBelow += need
+      }
+    }
+    const roomAbove = above - floor
     let top
     if (hgt <= roomBelow) top = below
     else if (hgt <= roomAbove) top = above - hgt

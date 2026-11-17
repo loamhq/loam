@@ -300,9 +300,9 @@
 .dc-bmenu { position: absolute; display: none; width: 252px; background: var(--dc-pane); border-radius: 16px; box-shadow: var(--dc-float); padding: 5px; z-index: 35; transform-origin: top left; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; }
 .dc-bmenu.up { transform-origin: bottom left; }
 .dc-bmenu.on { display: block; animation: dc-pop .14s var(--dc-ease); }
-.dc-bi { display: flex !important; align-items: center; gap: 11px; width: 100%; padding: 5px 10px 5px 5px !important; border-radius: 11px; text-align: left; }
+.dc-bi { display: flex !important; align-items: center; gap: 11px; width: 100%; padding: 4px 10px 4px 5px !important; border-radius: 11px; text-align: left; }
 .dc-bi.on { background: var(--dc-hover); }
-.dc-bt { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--dc-paper); box-shadow: 0 0 0 1px var(--dc-rule); font-size: 12px; font-weight: 700; color: var(--dc-ink2); flex: none; }
+.dc-bt { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--dc-paper); box-shadow: 0 0 0 1px var(--dc-rule); font-size: 12px; font-weight: 700; color: var(--dc-ink2); flex: none; }
 .dc-bl { flex: 1; font-size: 13.5px; font-weight: 550; color: var(--dc-ink); }
 .dc-bk { font: 12px/1 var(--dc-mono); color: var(--dc-ink3); opacity: .85; white-space: pre; }
 .dc-bck { color: var(--dc-accent); }
