@@ -652,6 +652,9 @@ export function createFiles({
     if (!st.roots.loaded) loadRoots()
     let kindIsFile = isFile
     let known = row
+    // A plugin's root has no folders: a path in it is one of its files, and
+    // the host has nothing to say about it (2026-11-17).
+    if (kindIsFile === null && path !== '' && typeof root === 'string' && root.startsWith('@')) kindIsFile = true
     if (kindIsFile === null && path !== '') {
       try {
         known = await api('GET', `/files/stat?${q({ root, path })}`)
@@ -691,6 +694,7 @@ export function createFiles({
   }
 
   async function openFile(root, path, row = null, { fragment = null, mode = null } = {}) {
+    if (typeof root === 'string' && root.startsWith('@')) return openPluginFile(root, path, row, { fragment })
     const known = isRow(row) ? row : st.listing.rows.find((x) => x.path === path)
     const r = known ?? { root, path, name: nameOf(path), kind: 'file' }
     const view = viewOf(r)
@@ -757,6 +761,25 @@ export function createFiles({
       return
     }
     await loadText(file)
+  }
+
+  // A file of a plugin's own root (`files.root`, 2026-11-17; doc-comments'
+  // Shared with me first): the host is never asked about it. Its row is the
+  // one the list gave, else the root's `row(path)`; its viewer (the plugin's
+  // `files.viewer`) reads and writes it through the plugin. It opens in
+  // either panel and has an address like any file: `/files/@<id>/<path>`.
+  function openPluginFile(root, path, row = null, { fragment = null } = {}) {
+    const own = pluginRoot(root)
+    const given = row && typeof row === 'object' ? row : own?.row?.(path) ?? null
+    const r = { kind: 'file', name: nameOf(path), ...(given || {}), root, path }
+    closeFile()
+    st.file = {
+      root, path, row: r, view: viewOf({ ...r, name: nameOf(path) }), caps: capsOf(r), plugin: root.slice(1),
+      text: '', saved: '', draft: null, revision: null, textLoaded: true,
+      mode: 'preview', loading: false, error: '', status: null, saving: false, conflict: null,
+      flash: '', fragment, blobUrl: null, blobError: '',
+    }
+    schedule()
   }
 
   async function loadText(file) {
@@ -851,6 +874,16 @@ export function createFiles({
       const notice = st.notice
       copyNoticeTimer = timers.set(() => { if (st.notice === notice) { st.notice = ''; schedule() } }, 3000)
     }
+    schedule()
+  }
+
+  // A row's own ⋯ menu, in place of a file's (`entry(row, {menu})`,
+  // 2026-11-17): a plugin's row that is not a host file (a doc on another
+  // Loam) has its own actions. `items` are `{id?, label, icon?, sub?,
+  // danger?, run(row)}`; core draws them in the same sheet.
+  function itemsMenu(resource, items) {
+    st.notice = ''
+    st.sheet = { kind: 'items', resource, name: resource.name ?? nameOf(resource.path), items: (items || []).filter(Boolean) }
     schedule()
   }
 
@@ -1300,7 +1333,7 @@ export function createFiles({
     row.scrollIntoView?.({ block: 'nearest' })
   }
 
-  return { registry, st, pluginRoot, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function extWord(e) {
@@ -1370,7 +1403,8 @@ function renameTitle(files, resource, label, className, slot = 'title') {
 
 function rowButton(row, { on, onclick, key, meta = null, badge = null, trail = null }) {
   const folder = isFolder(row)
-  const tile = tileOf(row.name)
+  // A plugin root's row may be named by a title; its type is its path's.
+  const tile = tileOf(typeof row.root === 'string' && row.root.startsWith('@') ? row.path : row.name)
   return h(
     'button',
     { class: `setrow${on ? ' on' : ''}`, key, 'aria-current': on ? 'page' : null, onclick },
@@ -1403,7 +1437,7 @@ function openFileMarks(files, go) {
 // line, text or nodes; default size and age), `badge` (a node on the tile's
 // corner), `trail` (nodes after the words), `onopen(row)` (before it opens),
 // `className` (on the entry).
-export function fileEntry(files, row, { go, home = null, meta = null, badge = null, trail = null, onopen = null, className = '', marksFor = null } = {}) {
+export function fileEntry(files, row, { go, home = null, meta = null, badge = null, trail = null, onopen = null, className = '', marksFor = null, menu = null } = {}) {
   const side = go.side?.()
   const file = !isFolder(row)
   const item = { kind: 'file', root: row.root, path: row.path, row }
@@ -1419,7 +1453,7 @@ export function fileEntry(files, row, { go, home = null, meta = null, badge = nu
     },
   }), file && side?.available() ? h('span', { class: 'row-side-action' }, side.affordance(item)) : null,
   isSide ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
-  renamingHere(files, row, 'row') ? null : h('button', { class: 'iconbtn content-mark fs-rowmenu', title: `Actions for ${row.name}`, 'aria-label': `Actions for ${row.name}`, onclick: () => files.resourceMenu(row, home) }, icon.dots(18)))
+  renamingHere(files, row, 'row') ? null : h('button', { class: 'iconbtn content-mark fs-rowmenu', title: `Actions for ${row.name}`, 'aria-label': `Actions for ${row.name}`, onclick: () => (menu ? files.itemsMenu(row, menu()) : files.resourceMenu(row, home)) }, icon.dots(18)))
 }
 
 // Chosen files and folders, in their chosen order, as one card of rows, or the
@@ -1905,6 +1939,16 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
         h('button', { class: 'primary fs-keepediting', text: 'Keep editing', onclick: close }),
         h('button', { class: 'pillbtn dangertext fs-leave', text: 'Leave without saving', onclick: () => s.proceed() }),
       ),
+    ]
+  }
+  if (s.kind === 'items') {
+    return [
+      h('div', { class: 'display sheettitle', text: s.name }),
+      ...s.items.map((item, i) => {
+        const glyph = typeof item.icon === 'function' ? item.icon(18) : icon[item.icon]?.(18) ?? null
+        return h('button', { class: `sheetrow fs-menu-item${item.danger ? ' danger' : ''}`, key: `item:${item.id ?? i}`, onclick: () => { files.st.sheet = null; close?.redraw?.(); item.run(s.resource) } },
+          glyph, item.sub ? h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: item.label }), h('div', { class: 'fs-meta', text: item.sub })) : h('span', { text: item.label }))
+      }),
     ]
   }
   if (s.kind === 'folder' || s.kind === 'resource') {

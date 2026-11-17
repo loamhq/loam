@@ -7,7 +7,8 @@ import { threadHref, threadFromPath } from './thread-opening.js'
 // stay with their mount; neither the navigator nor history owns those objects.
 export function itemDescriptor(item) {
   if (item?.kind === 'thread' && typeof item.id === 'string' && item.id) return { kind: 'thread', id: item.id }
-  if (item?.kind === 'file' && ['vault', 'spaces'].includes(item.root) && typeof item.path === 'string' && item.path) return { kind: 'file', root: item.root, path: item.path }
+  // A file of a plugin's own root (`@<id>`, files.root) opens in a panel too.
+  if (item?.kind === 'file' && (['vault', 'spaces'].includes(item.root) || /^@[a-z0-9][a-z0-9._-]*$/.test(item.root ?? '')) && typeof item.path === 'string' && item.path && !item.path.split('/').some(s => s === '..' || s === '.')) return { kind: 'file', root: item.root, path: item.path }
   if (item?.kind === 'app' && appURL(item.app?.url ?? item.url)) return { kind: 'app', url: item.app?.url ?? item.url }
   if (typeof item?.kind === 'string' && !['thread', 'file', 'app'].includes(item.kind) && /^[a-z][a-z0-9:._-]*$/i.test(item.kind) && typeof item.id === 'string' && item.id) return { kind: item.kind, id: item.id }
   return null

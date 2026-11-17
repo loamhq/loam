@@ -250,3 +250,82 @@ test('a doc open beside another keeps its own editor: one per Files', async () =
   await tick()
   assert.equal(opens(), 2, 'each panel opened its doc once; neither closed the other')
 })
+
+// -- Shared with me (2026-11-17) ------------------------------------------------------
+
+const WITHME = { docs: [
+  { id: 'w-aaaaaaaaaa', address: 'shared:w-aaaaaaaaaa', url: 'https://ada.example/s/x', host: 'ada.example', title: 'Garden plan', owner: 'Ada', mode: 'edit', state: 'ok', new: true },
+  { id: 'w-bbbbbbbbbb', address: 'shared:w-bbbbbbbbbb', url: 'https://lee.example/s/y', host: 'lee.example', title: 'Old notes', owner: 'Lee', mode: 'view', state: 'gone', new: false },
+] }
+
+function withmeFetch(calls, answer = WITHME) {
+  const shared = sharedFetch(calls)
+  return async (url, opts = {}) => {
+    if (String(url).includes('/withme')) {
+      calls.push(`${opts.method || 'GET'} ${url} ${opts.body || ''}`)
+      if ((opts.method || 'GET') === 'GET') return { ok: true, json: async () => structuredClone(answer) }
+      if (opts.method === 'POST') {
+        const body = JSON.parse(opts.body)
+        if (body.password === 'wrong') return { ok: false, status: 403, json: async () => ({ error: 'That password doesn’t open this link.', code: 'password' }) }
+        if (!body.name && body.link.includes('group')) return { ok: false, status: 409, json: async () => ({ error: 'name?', code: 'need-name', suggest: 'Sam' }) }
+        return { ok: true, status: 201, json: async () => ({ doc: { ...answer.docs[0], id: 'w-cccccccccc', title: 'New one', name: body.name || 'Sam' } }) }
+      }
+    }
+    return shared(url, opts)
+  }
+}
+
+test('Shared Docs has two sections once core can open a plugin root\'s files: Shared by me, then Shared with me with its rows and the Add row', async () => {
+  globalThis.location = { hostname: 'next.example.test' }
+  const calls = []
+  globalThis.fetch = withmeFetch(calls)
+  const files = { ...statFiles(), itemsMenu() {}, side: () => ({ available: () => true }) }
+  const { loam, roots, styles } = fakeLoam({ files })
+  activate(loam)
+  await tick()
+  assert.ok(styles.includes('assets/withme.css'))
+  await roots[0].load()
+  const drawn = []
+  const entry = (row, extras) => { drawn.push({ row, extras }); return el('div', { class: 'fs-entry' }) }
+  const out = roots[0].render({ go() {}, files, entry, wide: true })
+  assert.deepEqual(byClass(out, 'dc-sd-kicker').map(textOf), ['Shared by me', 'Shared with me'])
+  const mine = drawn.filter(d => d.row.root === '@doc-comments')
+  assert.deepEqual(mine.map(d => [d.row.name, d.row.path]), [['Garden plan', 'with-me/w-aaaaaaaaaa.md'], ['Old notes', 'with-me/w-bbbbbbbbbb.md']])
+  assert.equal(mine[0].extras.meta, 'Ada’s Loam · Can edit')
+  assert.match(mine[0].extras.badge.props.class, /dc-sd-dot/)
+  assert.equal(mine[1].extras.meta, 'No longer shared')
+  assert.match(mine[1].extras.className, /dc-wm-dead/)
+  assert.equal(mine[1].extras.badge, null, 'no dot on a row that is no longer shared')
+  assert.deepEqual(mine[0].extras.menu().map(i => i.label), ['Open', 'Open to the side', 'Copy link', 'Remove'])
+  assert.equal(byClass(out, 'dc-wm-add').length, 1)
+  // a cold address: the root's row names the doc by its title
+  assert.equal(roots[0].row('with-me/w-aaaaaaaaaa.md').name, 'Garden plan')
+  // the password is never in what the page was given
+  assert.equal(JSON.stringify(WITHME).includes('password'), false)
+})
+
+test('Shared with me, empty: the Add row says what it is for', async () => {
+  globalThis.location = { hostname: 'next.example.test' }
+  globalThis.fetch = withmeFetch([], { docs: [] })
+  const files = { ...statFiles(), itemsMenu() {}, side: () => null }
+  const { loam, roots } = fakeLoam({ files })
+  activate(loam)
+  await tick()
+  await roots[0].load()
+  const out = roots[0].render({ go() {}, files, entry: () => el('div'), wide: true })
+  const add = byClass(out, 'dc-wm-add')[0]
+  assert.match(textOf(add), /^Add a shared doc.*Paste its link and password/)
+})
+
+test('an older core (no itemsMenu): Shared Docs is Shared by me alone', async () => {
+  globalThis.location = { hostname: 'next.example.test' }
+  globalThis.fetch = withmeFetch([])
+  const files = statFiles()
+  const { loam, roots, styles } = fakeLoam({ files })
+  activate(loam)
+  await tick()
+  await roots[0].load()
+  const out = roots[0].render({ go() {}, files, entry: () => el('div'), wide: true })
+  assert.equal(byClass(out, 'dc-sd-kicker').length, 0)
+  assert.equal(styles.includes('assets/withme.css'), false)
+})

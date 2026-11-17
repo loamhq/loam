@@ -11,6 +11,9 @@ through Loam's real interfaces, and the core hooks it added.
     names that persona (`by`, a core hook), the sidecar is made under
     `<system>/Loam/data/doc-comments/`, a save made for an unknown persona is
     refused, and the notes follow a rename done through Files
+  - Shared with me (test/test_withme.py): another Loam's door over real
+    https, the addresses refused, each failure named, the password never in
+    an answer, a log or the vault
   - the plugin's HTTP server and its agent tool (stdio MCP) end to end: a
     persona comments by quote and lists the doc's notes, under its own name
   - the kept folder: `<system>/Loam/data/` survives the library being
@@ -95,6 +98,13 @@ def test_suites():
     r = subprocess.run([node, "--test", "--test-timeout=120000", str(PLUGIN / "test" / "browser.test.mjs")],
                        capture_output=True, text=True, timeout=900)
     check("the editor in a browser (or skipped without Playwright)", r.returncode, 0)
+    if r.returncode:
+        print(r.stdout[-3000:], r.stderr[-3000:])
+    r = subprocess.run([sys.executable, str(PLUGIN / "test" / "test_withme.py")],
+                       capture_output=True, text=True, env=env, timeout=600)
+    tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
+    check("Shared with me's suite passes (addresses refused, failures named, the password kept in)",
+          (r.returncode, tail[0]), (0, "OK"))
     if r.returncode:
         print(r.stdout[-3000:], r.stderr[-3000:])
     r = subprocess.run([sys.executable, str(PLUGIN / "test" / "test_places.py")],
@@ -231,9 +241,10 @@ def test_with_broker(tmp: Path):
                                capture_output=True, text=True, env=env, timeout=60)
             answers = {a["id"]: a for a in map(json.loads, r.stdout.splitlines())}
             names = sorted(t["name"] for t in answers[2]["result"]["tools"])
-            check("the tool lists its eight operations", names,
+            check("the tool lists its operations, Shared with me's included", names,
                   sorted(["doc_notes", "doc_comment", "doc_suggest", "doc_reply", "doc_resolve",
-                          "doc_reopen", "doc_accept", "doc_reject"]))
+                          "doc_reopen", "doc_accept", "doc_reject", "doc_shared_with_me", "doc_read",
+                          "doc_save", "doc_add_shared", "doc_remove_shared"]))
             check("a persona suggests by quote through the tool (absolute path)",
                   answers[3]["result"].get("isError"), None)
             listing = answers[4]["result"]["content"][0]["text"]

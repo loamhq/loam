@@ -2227,6 +2227,8 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-shortcuts .fs-meta { overflow-wrap: anywhere; }
 .fs-note { font-size: 12px; color: var(--paper-ink-3); padding: 8px 14px; }
 .fs-sheet .sheetrow { display: flex; align-items: center; gap: 12px; padding: 10px; border: 0; background: transparent; border-radius: 20px; text-align: left; color: inherit; width: 100%; }
+.fs-sheet .sheetrow.danger, .fs-sheet .sheetrow.danger .fs-name { color: var(--danger); }
+.fs-sheet .sheetrow.danger .fs-meta { color: var(--paper-ink-3); }
 .fs-sheet .sheettitle { font-size: 24px; padding: 0 10px 8px; overflow-wrap: anywhere; }
 .fs-sheetfield { padding: 4px 6px 10px; }
 a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: pointer; }
