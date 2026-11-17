@@ -330,6 +330,43 @@ class Service_(unittest.TestCase):
         ids = {n["id"] for n in mine["notes"] if n["state"] == "open"}
         self.assertIn(theirs["note"], ids)
 
+    def test_first_note_at_the_very_top_does_not_take_in_the_id_line(self):
+        store = MemoryStore({"vault:Top.md": "# Walk\n\nWords.\n"})
+        svc = Service(store)
+        got = svc.add(OWNER, "vault", "Top.md", {"kind": "suggestion", "start": 0, "end": 1, "quote": "#",
+                                                 "revision": svc.get(OWNER, "vault", "Top.md")["revision"],
+                                                 "replacement": "Hello #", "text": ""})
+        n = got["notes"][0]
+        self.assertEqual(got["text"][n["where"]["start"]:n["where"]["end"]], "#")
+        self.assertTrue(got["text"].startswith("---\nloam_doc_id: "))
+
+    def test_a_deleted_passage_detaches_instead_of_moving_onto_a_like_one(self):
+        sections = "\n\n".join(
+            f"## Section {i}\n\nParagraph {i}a. The river kept its own time.\n\n"
+            f"Paragraph {i}b, after the blocks. Nothing here is remarkable except where it sits.\n\n"
+            f"Paragraph {i}c closes the section with words of its own." for i in range(1, 7))
+        text = "# Long\n\n" + sections + "\n\nEnd words here.\n"
+        store = MemoryStore({"vault:Long.md": text})
+        svc = Service(store)
+        p = ("vault", "Long.md")
+        a = svc.add(OWNER, *p, {"kind": "comment", "quote": "Paragraph 6b, after the blocks", "text": "On 6b"})
+        b = svc.add(OWNER, *p, {"kind": "comment", "quote": "End words here.", "text": "On the end"})
+        doc = store.files["vault:Long.md"]
+        start = doc.index("Paragraph 6b")
+        end = doc.index("Paragraph 6c")
+        doc = doc[:start] + doc[end:]
+        doc = doc.replace("\n\nEnd words here.\n", "\n")
+        store.outside_edit(*p, doc)
+        notes = {n["text"]: n for n in svc.get(OWNER, *p)["notes"]}
+        self.assertEqual(notes["On 6b"]["where"]["state"], "detached")
+        self.assertEqual(notes["On the end"]["where"]["state"], "detached")
+        # and a passage merely edited where it was is still found, changed
+        a2 = svc.add(OWNER, *p, {"kind": "comment", "quote": "Paragraph 3b, after the blocks", "text": "On 3b"})
+        doc = store.files["vault:Long.md"].replace("Paragraph 3b, after the blocks", "Paragraph 3b, after all the blocks")
+        store.outside_edit(*p, doc)
+        notes = {n["text"]: n for n in svc.get(OWNER, *p)["notes"]}
+        self.assertEqual(notes["On 3b"]["where"]["state"], "changed")
+
     def test_revision_alone(self):
         store, svc = make()
         got = svc.revision(OWNER, *self.P)

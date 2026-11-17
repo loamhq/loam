@@ -240,8 +240,10 @@ class Service:
                 start, end = self._place(doc["text"], doc["revision"], args)
                 doc2, sc, sc_rev, ops = self._ensure_sidecar(who, root, path, doc, sc, sc_rev)
                 if ops:
-                    start = textdiff.map_pos(ops, start)
-                    end = textdiff.map_pos(ops, end, after=False)
+                    # A passage at the very top stays after the id line a
+                    # doc's first note puts there, never takes it in.
+                    start = textdiff.map_pos(ops, start, after=True)
+                    end = max(start, textdiff.map_pos(ops, end, after=False))
                     sc_mod.relocate(sc, doc2["text"])
                 note = sc_mod.add(sc, doc2["text"], kind, start, end, args.get("text", ""),
                                   who, replacement=args.get("replacement"))
@@ -330,6 +332,11 @@ class Service:
         words typed are deleted again): it leaves no trace in Resolved."""
         self._need(who, "suggest")
         return self._note_op(who, root, path, lambda d, sc: sc_mod.withdraw(sc, tid, who))
+
+    def remove(self, who, root, path, tid) -> dict:
+        """Delete one's own comment, while nobody else has replied to it."""
+        self._need(who, "comment")
+        return self._note_op(who, root, path, lambda d, sc: sc_mod.remove(sc, tid, who))
 
     def reject(self, who, root, path, tid) -> dict:
         self._need(who, "accept")

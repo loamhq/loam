@@ -83,6 +83,7 @@ export function activate(loam) {
       const sharing = file.root === 'vault' && writable ? createSharing({
         base: BASE, root: file.root, path: file.path, title: titleOf,
         toast: (text, undo) => ed?.toast(text, undo), onChange: () => ed?.refreshHead(),
+        notes: () => (ed?.notes?.() || doc.notes || []).length,
       }) : null
       if (sharing) sharing.links = doc.links
       ed = createDocEditor({

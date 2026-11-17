@@ -275,6 +275,15 @@ def withdraw(sc: dict, tid: str, author: dict) -> None:
     sc["threads"].remove(note)
 
 
+def remove(sc: dict, tid: str, author: dict) -> None:
+    note = find(sc, tid)
+    if not own(note["author"]["id"], author["id"]):
+        raise NoteError(403, "only its author deletes a note")
+    if any(r["author"]["id"] != author["id"] for r in note.get("replies", [])):
+        raise NoteError(409, "Others have replied to it; resolve it instead")
+    sc["threads"].remove(note)
+
+
 def delete_reply(sc: dict, tid: str, rid: str, author: dict) -> None:
     note = find(sc, tid)
     for i, r in enumerate(note["replies"]):
@@ -286,13 +295,21 @@ def delete_reply(sc: dict, tid: str, rid: str, author: dict) -> None:
     raise NoteError(404, f"no reply {rid!r} on that note")
 
 
+def own(author_id: str, who_id: str) -> bool:
+    """Whether a note is one's own: written by oneself, or, for a visitor,
+    by their own agent (``guest-agent:<link>:<name>`` beside ``guest:<link>:<name>``)."""
+    if author_id == who_id:
+        return True
+    return who_id.startswith("guest:") and author_id == "guest-agent:" + who_id[len("guest:"):]
+
+
 def resolve(sc: dict, tid: str, author: dict, may_any: bool, now: str | None = None) -> dict:
     note = find(sc, tid)
     if note["kind"] != "comment":
         raise NoteError(409, "a suggestion is accepted or rejected, not resolved")
     if note["state"] != OPEN:
         raise NoteError(409, f"that note is already {note['state']}")
-    if not may_any and note["author"]["id"] != author["id"]:
+    if not may_any and not own(note["author"]["id"], author["id"]):
         raise NoteError(403, "you may resolve your own notes; the owner resolves any")
     note["state"] = "resolved"
     note["closed"] = {"by": author, "at": now or now_iso()}
@@ -404,7 +421,12 @@ def view(sc: dict, text: str) -> dict:
     ``text`` now. Assumes ``relocate`` has run against ``text``."""
     notes = []
     for t in sc["threads"]:
-        w = t.get("where") or {"state": "detached", "start": None, "end": None}
+        w = dict(t.get("where") or {"state": "detached", "start": None, "end": None})
+        # A closed note's place is where it was when it closed; the text may
+        # have grown shorter since. Never past the end.
+        for k in ("start", "end"):
+            if isinstance(w.get(k), int):
+                w[k] = max(0, min(len(text), w[k]))
         n = {k: v for k, v in t.items() if k not in ("where", "found")}
         n["where"] = w
         if w["state"] == "changed" and t.get("found"):

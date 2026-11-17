@@ -10,21 +10,20 @@
 // (Loam's dictation mic, read aloud).
 
 import {
-  EditorState, EditorView, EditorSelection, ChangeSet, Compartment, Transaction, Annotation, Prec,
+  EditorState, EditorView, EditorSelection, ChangeSet, Compartment, Transaction, Annotation, Prec, ViewPlugin,
   keymap, history, historyKeymap, defaultKeymap, drawSelection, indentMore, indentLess, syntaxTree,
 } from '../vendor/codemirror.js'
 import { h, icon, rel, stamp, put } from './dom.js'
 import { changes as diffChanges, posMap, editorText, suggestionShape } from './textdiff.js'
 import {
   markdownLanguage, inline, blocks, notesField, setNotes, authorsField, setAuthors,
-  modeField, setMode, suggestBase, setSuggestBase, liveSuggest, focusField, setFocused,
+  modeField, setMode, suggestBase, setSuggestBase, focusField, setFocused,
 } from './live.js'
-import { applyDrafts, plan as planDrafts } from './drafts.js'
+import { remote, draftsField, setDrafts, setRecording, inBase, applied, passages, draftDecos } from './record.js'
 import { INLINE, BLOCKS, active, toggleInline, setLink, linkAt, setBlock, blockOf } from './format.js'
 
 export const AUTOSAVE_MS = 1200
 export const WATCH_MS = 1500
-const remote = Annotation.define()
 const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')
 const MOD = MAC ? '⌘' : 'Ctrl'
 
@@ -83,8 +82,8 @@ export function createDocEditor(opts) {
     phone: Boolean(opts.phone), reattach: null, toast: null, sheet: null, bmenu: null, link: null,
     destroyed: false, editing: null, openReplies: new Set(), preview: null, sheetFor: null,
     // Suggesting: my own open suggestions, kept as real text in the editor
-    // (drafts.js); `pending` while typing waits for its pause.
-    drafts: new Set(), pending: false,
+    // (record.js); `pending` while typing waits for its pause.
+    pending: false,
   }
   if (!opts.doc.can?.edit && st.mode !== 'view') st.mode = opts.doc.can?.suggest ? 'suggest' : 'view'
   let saveTimer = null, suggestTimer = null, layoutQueued = false
@@ -270,6 +269,19 @@ export function createDocEditor(opts) {
     return false
   }
 
+  // My drafts drawn over the editor's text: the original words struck, mine
+  // in the accent, highlighted with their card.
+  const draftsDrawn = ViewPlugin.fromClass(class {
+    constructor(v) { this.decorations = this.build(v.state) }
+    update(u) {
+      if (u.docChanged || u.startState.field(draftsField) !== u.state.field(draftsField) || u.transactions.some(t => t.effects.length)) this.decorations = this.build(u.state)
+    }
+    build(state) {
+      const rec = state.field(draftsField)
+      return draftDecos(rec.list, (d) => d.ids[0] ? { id: d.ids[0], on: st.focus === d.ids[0], peek: st.peek === d.ids[0] } : null)
+    }
+  }, { decorations: (v) => v.decorations })
+
   const view = new EditorView({
     parent: col,
     state: EditorState.create({
@@ -294,7 +306,8 @@ export function createDocEditor(opts) {
         notesField,
         authorsField,
         suggestBase,
-        liveSuggest((a, b) => diffChanges(a, b), (from, to) => draftAtBase(from, to)),
+        draftsField,
+        draftsDrawn,
         EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'on', autocapitalize: 'sentences', 'aria-label': 'Document' }),
         EditorView.updateListener.of(onUpdate),
         EditorView.domEventHandlers({
@@ -344,37 +357,10 @@ export function createDocEditor(opts) {
     st.lastAns = ans
     const T = ans.text
     const ET = ed(T)
-    // A draft closed by anyone (accepted, rejected) leaves the editor's text
-    // first: its words go back to the stored ones, so an accept is not
-    // counted twice (once in the stored text, once in what I typed) and a
-    // reject restores the words exactly.
-    if (st.drafts.size) {
-      const stillOpen = new Set((ans.notes || []).filter(n => n.state === 'open' && n.where?.state !== 'detached').map(n => n.id))
-      const closed = [...st.drafts].filter(id => !stillOpen.has(id))
-      if (closed.length) {
-        const ranges = currentNoteRanges()
-        const back = []
-        for (const id of closed) {
-          st.drafts.delete(id)
-          const r = ranges.find(x => x.id === id)
-          const n = st.notes.find(x => x.id === id)
-          if (!r || !n || r.from == null || n.where?.start == null) continue
-          const quote = st.mapBase.slice(st.pm.toEditor(n.where.start), st.pm.toEditor(n.where.end))
-          if (view.state.sliceDoc(r.from, r.to) !== quote) back.push({ from: r.from, to: r.to, insert: quote })
-        }
-        if (back.length) {
-          const cs = view.state.changes(back.sort((a, b) => a.from - b.from).filter((c, i, a) => !i || c.from >= a[i - 1].to))
-          view.dispatch({ changes: cs, annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
-          // Counted afresh: composing a change with its own undoing leaves a
-          // replacement of the words by themselves, over which the stored
-          // text's change would land beside the words instead of on them.
-          const now = view.state.doc.toString()
-          st.sinceBase = ChangeSet.of(diffChanges(st.mapBase, now), st.mapBase.length, '\n')
-        }
-      }
-    }
     let userOver, editorUnchanged = false
-    try {
+    if (view.state.field(draftsField).on) {
+      ;({ userOver, editorUnchanged } = rebaseDrafts(ans, ET))
+    } else try {
       const serverCS = ChangeSet.of(diffChanges(st.mapBase, ET), st.mapBase.length, '\n')
       // Where both put words at one place, the stored text's come first (a
       // first note's id line at the top goes above what was typed there).
@@ -409,14 +395,21 @@ export function createDocEditor(opts) {
     st.me = ans.me || st.me
     st.can = ans.can || st.can
     st.resolved = ans.resolved || 0
-    const map = (p) => (p == null ? p : userOver.mapPos(p, 1))
+    // Positions from the server are clamped to the text: a closed note's
+    // stored place can lie past a text that has since grown shorter, and it
+    // must never stop a doc from opening.
+    const len = ET.length
+    const clamp = (p) => Math.max(0, Math.min(len, p))
+    const map = (p, assoc) => (p == null ? p : userOver.mapPos(clamp(st.pm.toEditor(p)), assoc))
+    const mine = draftById()
     st.notes = (ans.notes || []).map(n => {
       const w = n.where || {}
-      // A draft's passage is its own text in the editor: from before it to
-      // after it.
-      const draft = st.drafts.has(n.id)
-      const from = w.start == null ? null : draft ? userOver.mapPos(st.pm.toEditor(w.start), -1) : map(st.pm.toEditor(w.start))
-      const to = w.end == null ? null : userOver.mapPos(st.pm.toEditor(w.end), draft ? 1 : -1)
+      // A draft's passage is its own words in the editor.
+      const d = mine.get(n.id)
+      if (d) return { ...n, from: d.from, to: Math.max(d.from, d.to) }
+      if (n.state !== 'open') return { ...n, from: null, to: null }
+      const from = w.start == null ? null : map(w.start, 1)
+      const to = w.end == null ? null : Math.max(from ?? 0, map(w.end, -1))
       return { ...n, from, to }
     })
     for (const n of st.notes) for (const a of [n.author, ...(n.replies || []).map(r => r.author)]) if (a?.id && !people[a.id]) people[a.id] = a
@@ -424,7 +417,7 @@ export function createDocEditor(opts) {
     st.dirty = !st.sinceBase.empty && st.mode === 'edit'
     // An answer that changes nothing (the watch reading a doc whose notes'
     // file was only rewritten) draws nothing.
-    const sig = JSON.stringify([ans.revision, ans.notes, ans.resolved, ans.can, [...st.drafts]])
+    const sig = JSON.stringify([ans.revision, ans.notes, ans.resolved, ans.can, [...mine.keys()]])
     if (sig === st.lastSig && editorUnchanged) return
     st.lastSig = sig
     pushNotes()
@@ -486,10 +479,11 @@ export function createDocEditor(opts) {
   }
 
   function pushNotes() {
+    const draftIds = new Set(draftById().keys())
     const list = []
     for (const n of st.notes) {
       if (n.state !== 'open' || n.from == null) continue
-      list.push({ id: n.id, kind: st.drafts.has(n.id) ? 'draft' : n.kind, from: n.from, to: n.to, replacement: n.replacement, focus: st.focus === n.id, peek: st.peek === n.id, changed: n.where?.state === 'changed' })
+      list.push({ id: n.id, kind: draftIds.has(n.id) ? 'draft' : n.kind, from: n.from, to: n.to, replacement: n.replacement, focus: st.focus === n.id, peek: st.peek === n.id, changed: n.where?.state === 'changed' })
     }
     if (st.compose) list.push({ id: '__new', kind: 'comment', from: st.compose.from, to: st.compose.to, focus: true })
     view.dispatch({ effects: setNotes.of(list), annotations: remote.of(true) })
@@ -512,14 +506,34 @@ export function createDocEditor(opts) {
   // fault of the page's: it is logged, and the doc is read again.
   function fail(err) {
     const ours = typeof err?.status === 'number'
-    const msg = ours ? (err.message || 'That did not work.') : 'Something went wrong here, so the doc has been read again.'
+    const msg = ours ? plainError(err) : 'Something went wrong here, so the doc has been read again.'
     if (!ours) {
       console.error('doc-comments:', err)
-      setTimeout(() => { if (!st.destroyed) reloadQuietly() }, 0)
+      // read again, at most every ten seconds: nothing may loop
+      const now = Date.now()
+      if (!st.lastRescue || now - st.lastRescue > 10000) {
+        st.lastRescue = now
+        setTimeout(() => { if (!st.destroyed) reloadQuietly() }, 0)
+      }
     }
     st.error = msg
     showToast(msg, null, true)
     render()
+  }
+
+  // The server's sentences, said for a person (and the doc read again when
+  // what was asked about is no longer there).
+  function plainError(err) {
+    const m = String(err?.message || '')
+    if (/^no (note|reply) '/i.test(m) || err.status === 404 && /note|reply/i.test(m)) {
+      setTimeout(() => { if (!st.destroyed) reloadQuietly() }, 0)
+      return 'That note is no longer on this doc.'
+    }
+    if (/is empty$/i.test(m)) return 'Write something first.'
+    if (/already (resolved|accepted|rejected)/i.test(m)) return `That was ${m.split('already ')[1]} already.`
+    if (err.status === 0) return 'Comments could not reach their server. Your words are kept here.'
+    if (err.status >= 500) return 'The comments server did not answer. Try again in a moment.'
+    return m ? m.charAt(0).toUpperCase() + m.slice(1) + (/[.!?]$/.test(m) ? '' : '.') : 'That did not work.'
   }
 
   async function call(fn) {
@@ -540,7 +554,8 @@ export function createDocEditor(opts) {
 
   function onUpdate(u) {
     if (u.docChanged && !u.transactions.some(t => t.annotation(remote))) {
-      for (const t of u.transactions) if (t.docChanged) st.sinceBase = st.sinceBase.compose(t.changes)
+      if (view.state.field(draftsField).on) st.sinceBase = draftsCS()
+      else for (const t of u.transactions) if (t.docChanged) st.sinceBase = st.sinceBase.compose(t.changes)
       if (st.mode === 'edit') {
         st.dirty = true
         st.word = ''
@@ -606,10 +621,14 @@ export function createDocEditor(opts) {
 
   // A file that ended with a line break keeps it, and a new (empty) one gets
   // one, even when the last words were typed on its last, empty line.
-  function keepFinalNewline() {
+  function keepFinalNewline(force = false) {
     const was = st.server.text
     if (was !== '' && !/\n$/.test(was)) return
     const doc = view.state.doc
+    // Not while the caret is on the last line being typed: added under it
+    // there, a "/" typed and deleted again left one line break more. It is
+    // added when the doc is let go (flush), or once the caret moves off.
+    if (!force && view.hasFocus && doc.lineAt(view.state.selection.main.head).number === doc.lines) return
     if (!doc.length || /\n$/.test(doc.sliceString(Math.max(0, doc.length - 1)))) return
     const sel = view.state.selection
     view.dispatch({ changes: { from: doc.length, insert: view.state.lineBreak }, selection: sel, annotations: Transaction.addToHistory.of(false) })
@@ -617,6 +636,7 @@ export function createDocEditor(opts) {
 
   async function flushNow() {
     clearTimeout(saveTimer)
+    if (st.mode === 'edit') keepFinalNewline(true)
     if (st.mode === 'edit' && !st.sinceBase.empty) await saveNow()
     if (st.mode === 'suggest') await suggestNow()
   }
@@ -633,99 +653,179 @@ export function createDocEditor(opts) {
     suggestTimer = setTimeout(() => run(suggestNow).catch(fail), AUTOSAVE_MS * 1.5)
   }
 
-  // My drafts, in the stored text's positions (editor space).
-  function draftsInBase() {
-    const out = []
-    for (const n of st.notes) {
-      if (!st.drafts.has(n.id) || n.state !== 'open' || n.where?.start == null) continue
-      out.push({ id: n.id, from: st.pm.toEditor(n.where.start), to: st.pm.toEditor(n.where.end), replacement: ed(n.replacement || '') })
-    }
-    return out
+  function drafts() { return view.state.field(draftsField).list }
+
+  // My drafts by the server note each grows.
+  function draftById() {
+    const m = new Map()
+    for (const d of drafts()) if (d.ids[0]) m.set(d.ids[0], d)
+    return m
   }
 
-  // Which draft a changed run of the stored text belongs to (live marks).
-  function draftAtBase(from, to) {
-    if (!st.drafts.size) return null
-    for (const d of draftsInBase()) {
-      if (d.from <= to && from <= d.to) return { id: d.id, on: st.focus === d.id, peek: st.peek === d.id }
-    }
-    return null
+  // The drafts as a change of the stored text into the editor's.
+  function draftsCS(base = st.mapBase) {
+    return ChangeSet.of(inBase(drafts(), view.state.doc).map(r => ({ from: r.start, to: r.end, insert: r.text })), base.length, '\n')
   }
 
-  // Suggesting keeps my own suggestions as real text in the editor: what is
-  // typed, deleted and typed again in one place stays there, the caret moves
-  // only by the person's keys, and a pause sends each changed run as the
-  // suggestion it now is (growing the draft it touches, `supersedes`), or
-  // withdraws a draft whose words are back as they were. Nothing in the
-  // editor changes at a pause (until 2026-11-17 the typed words were taken
-  // out and drawn as a widget, which put the caret beside or inside the next
-  // word and wrote what came after onto the wrong side of it).
+  // An answer while Suggesting (drafts.js gave way to record.js, 2026-11-17).
+  // First the drafts closed by anyone: an accepted one's words are now in the
+  // stored text, so the editor does not change (and its caret does not move);
+  // a rejected one's words go back to the original. Then the stored text's own
+  // changes are mapped around the open drafts, which keep their words and place.
+  function rebaseDrafts(ans, ET) {
+    const open = new Set((ans.notes || []).filter(n => n.state === 'open').map(n => n.id))
+    const states = new Map((ans.notes || []).map(n => [n.id, n.state]))
+    let base = st.mapBase
+    const rs = inBase(drafts(), view.state.doc)
+    const keep = [], back = []
+    let acc = '', at = 0
+    for (const r of rs) {
+      const id = r.d.ids[0]
+      if (!id || open.has(id)) { keep.push(r.d); continue }
+      if (states.get(id) === 'accepted' && r.d.sent != null) {
+        // Its words as last sent are in the stored text now.
+        acc += base.slice(at, r.start) + r.d.sent
+        at = r.end
+        if (r.text !== r.d.sent) keep.push({ ...r.d, orig: r.d.sent, ids: [], sent: null })
+      } else {
+        back.push({ from: r.d.from, to: r.d.to, insert: r.d.orig })
+      }
+    }
+    base = acc + base.slice(at)
+    if (back.length) {
+      view.dispatch({ changes: back, effects: setDrafts.of({ list: keep }), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
+    } else if (keep.length !== rs.length) {
+      view.dispatch({ effects: setDrafts.of({ list: keep }), annotations: remote.of(true) })
+    }
+    // The open drafts' places in the stored text as it was (with accepts).
+    const before = inBase(drafts(), view.state.doc)
+    let editorUnchanged = true
+    if (base !== ET) {
+      const serverCS = ChangeSet.of(diffChanges(base, ET), base.length, '\n')
+      const ownCS = ChangeSet.of(before.map(r => ({ from: r.start, to: r.end, insert: r.text })), base.length, '\n')
+      const forEditor = serverCS.map(ownCS, true)
+      // Words the stored text changed inside a draft's original words become
+      // its original words (the draft's own words stay as typed).
+      const origs = new Map(before.map(r => {
+        const a = serverCS.mapPos(r.start, 1), b = Math.max(a, serverCS.mapPos(r.end, -1))
+        return [r.d.key, ET.slice(a, b)]
+      }))
+      if (!forEditor.empty) {
+        editorUnchanged = false
+        const keepScroll = scrollAnchor()
+        view.dispatch({ changes: forEditor, selection: view.state.selection.map(forEditor, 1), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
+        if (keepScroll) holdScroll(keepScroll, forEditor)
+      }
+      view.dispatch({ effects: setDrafts.of({ list: drafts().map(d => ({ ...d, orig: origs.has(d.key) ? origs.get(d.key) : d.orig })) }), annotations: remote.of(true) })
+    }
+    // The invariant, checked: the stored text with my drafts applied is the
+    // editor's text. If ever not, the drafts are dropped and made again from
+    // the server's notes, rather than shown wrong.
+    if (applied(ET, drafts(), view.state.doc) !== view.state.doc.toString()) {
+      console.error('doc-comments: drafts out of step with the stored text; reading them again')
+      const now = view.state.doc.toString()
+      view.dispatch({ changes: ChangeSet.of(diffChanges(now, ET), now.length, '\n'), effects: setDrafts.of({ list: [], gone: [] }), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
+      st.mapBase = ET
+      adoptDrafts(ans.notes || [], ET)
+      editorUnchanged = false
+    }
+    return { userOver: draftsCS(ET), editorUnchanged: editorUnchanged && !back.length }
+  }
+
+  // A pause sends my drafts as they are: each one changed since it was last
+  // sent goes as the suggestion it now is (growing its note: `supersedes`),
+  // drafts the person joined take one note (the others withdrawn), and a
+  // draft typed and deleted again is withdrawn. Nothing in the editor changes.
   async function suggestNow() {
     clearTimeout(suggestTimer)
     st.pending = false
-    const base = view.state.field(suggestBase, false)
-    if (base == null || st.destroyed) return
-    const now = view.state.doc.toString()
-    const ops = planDrafts(base, now, draftsInBase())
-    for (const o of ops) {
-      // The first note on a doc adds its id line, so the stored text can
-      // move between two of these: positions are mapped through that move.
-      const cur = view.state.field(suggestBase, false) ?? base
-      const moved = cur === base ? null : ChangeSet.of(diffChanges(base, cur), base.length, '\n')
+    if (st.destroyed || !view.state.field(draftsField).on) return
+    const gone = view.state.field(draftsField).gone
+    if (gone.length) view.dispatch({ effects: setDrafts.of({ gone: [] }), annotations: remote.of(true) })
+    for (const id of gone) {
+      try { applyAnswer(await api.withdraw(id)) } catch (err) { if (err?.status !== 404) fail(err) }
+    }
+    const done = new Set()                       // each draft at most once a pause
+    for (let guard = 0; guard < 200; guard++) {
+      // Each draft as its passage now; one whose passage the server does not
+      // hold as such (new, grown, or moved by a neighbour) is sent.
+      const notes = new Map(st.notes.map(n => [n.id, n]))
+      const all = passages(st.mapBase, drafts(), view.state.doc)
+      const next = all.find(({ r, p }) => {
+        if (done.has(r.d.key)) return false
+        if (!p) return r.d.sent !== r.text
+        const n = notes.get(r.d.ids[0])
+        return !n || n.state !== 'open' || r.d.sent !== r.text || n.where?.start !== st.pm.toServer(p.start) || n.where?.end !== st.pm.toServer(p.end) || ed(n.replacement || '') !== p.replacement
+      })
+      if (!next) break
+      const { r, p } = next
+      const key = r.d.key, text = r.text
+      done.add(key)
+      const mark = (patch) => view.dispatch({ effects: setDrafts.of({ list: drafts().map(d => (d.key === key ? { ...d, ...patch } : d)) }), annotations: remote.of(true) })
+      if (!p) { mark({ sent: text }); continue }          // nothing to anchor on yet
+      const body = {
+        kind: 'suggestion', text: '', revision: st.server.revision,
+        quote: st.pm.slice(p.start, p.end), replacement: raw(p.replacement),
+        start: st.pm.toServer(p.start), end: st.pm.toServer(p.end),
+      }
+      if (r.d.ids[0]) body.supersedes = r.d.ids[0]
       try {
-        let ans
-        if (o.op === 'withdraw') {
-          st.drafts.delete(o.id)
-          ans = await api.withdraw(o.id)
-        } else {
-          const start = moved ? moved.mapPos(o.from, 1) : o.from
-          const end = moved ? moved.mapPos(o.to, -1) : o.to
-          const body = {
-            kind: 'suggestion', text: '', revision: st.server.revision,
-            quote: st.pm.slice(start, end), replacement: raw(o.replacement),
-            start: st.pm.toServer(start), end: st.pm.toServer(end),
-          }
-          if (o.supersedes) body.supersedes = o.supersedes
-          ans = await api.add(body)
-          if (o.supersedes) st.drafts.delete(o.supersedes)
-          if (ans.note) st.drafts.add(ans.note)
-          for (const id of o.withdraws || []) {
-            st.drafts.delete(id)
-            applyAnswer(ans)
-            ans = await api.withdraw(id)
-          }
-        }
+        const ans = await api.add(body)
+        const extra = r.d.ids.slice(1)
+        mark({ ids: [ans.note], sent: text })
         applyAnswer(ans)
+        for (const id of extra) {
+          try { applyAnswer(await api.withdraw(id)) } catch (err) { if (err?.status !== 404) fail(err) }
+        }
       } catch (err) {
         // The words stay in the editor; the next pause tries again.
         fail(err)
+        break
       }
     }
   }
 
-  // Into Suggesting: my own open suggestions become drafts, their words put
-  // into the editor's text. Out of it: they go back to being drawn over the
-  // stored text.
+  // My open suggestions as drafts: their words put into the editor's text,
+  // only the part that differs (the passage's anchoring words are not).
+  function adoptDrafts(notes, base) {
+    const mineOpen = notes.filter(n => n.kind === 'suggestion' && n.state === 'open' && n.author?.id === st.me?.id && n.where?.state === 'attached' && n.where.start != null)
+      .map(n => {
+        const s = Math.max(0, Math.min(base.length, st.pm.toEditor(n.where.start))), e = Math.max(s, Math.min(base.length, st.pm.toEditor(n.where.end)))
+        const quote = base.slice(s, e), rep = ed(n.replacement || '')
+        let p = 0
+        while (p < quote.length && p < rep.length && quote[p] === rep[p]) p++
+        let q = 0
+        while (q < quote.length - p && q < rep.length - p && quote[quote.length - 1 - q] === rep[rep.length - 1 - q]) q++
+        return { id: n.id, start: s + p, end: e - q, orig: quote.slice(p, quote.length - q), text: rep.slice(p, rep.length - q) }
+      })
+      .sort((a, b) => a.start - b.start)
+    const take = []
+    for (const m of mineOpen) if (!take.length || m.start >= take[take.length - 1].end) take.push(m)
+    const changes = take.map(m => ({ from: m.start, to: m.end, insert: m.text }))
+    let shift = 0
+    const list = take.map(m => {
+      const from = m.start + shift
+      shift += m.text.length - m.orig.length
+      return { key: `n:${m.id}`, from, to: from + m.text.length, orig: m.orig, ids: [m.id], sent: m.text }
+    })
+    // Built against the text after the change: set the list after it.
+    const cs = ChangeSet.of(changes, view.state.doc.length, '\n')
+    view.dispatch({ changes: cs, selection: view.state.selection.map(cs, -1), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
+    view.dispatch({ effects: setDrafts.of({ list, gone: [] }), annotations: remote.of(true) })
+  }
+
+  // Into Suggesting: recording on, my open suggestions become drafts. Out of
+  // it: their words go back, and they are drawn over the stored text again.
   function enterDrafts() {
-    const base = st.mapBase
-    const mine = st.notes.filter(n => n.kind === 'suggestion' && n.state === 'open' && n.author?.id === st.me?.id && n.where?.state === 'attached')
-    const list = mine.map(n => ({ id: n.id, from: st.pm.toEditor(n.where.start), to: st.pm.toEditor(n.where.end), replacement: ed(n.replacement || '') }))
-    const { placed } = applyDrafts(base, list)
-    st.drafts = new Set(placed.map(p => p.id))
-    if (!placed.length) return
-    const cs = ChangeSet.of(placed.map(p => ({ from: p.from, to: p.to, insert: p.replacement })), base.length, '\n').map(st.sinceBase)
-    view.dispatch({ changes: cs, annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
-    st.sinceBase = st.sinceBase.compose(cs)
+    view.dispatch({ effects: setRecording.of(true), annotations: remote.of(true) })
+    adoptDrafts(st.notes, st.mapBase)
+    st.sinceBase = draftsCS()
   }
 
   function leaveDrafts() {
-    st.drafts = new Set()
     st.pending = false
-    const now = view.state.doc.toString()
-    if (now !== st.mapBase) {
-      const cs = ChangeSet.of(diffChanges(now, st.mapBase), now.length, '\n')
-      view.dispatch({ changes: cs, annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
-    }
+    const back = drafts().map(d => ({ from: d.from, to: d.to, insert: d.orig }))
+    view.dispatch({ changes: back, effects: setRecording.of(false), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
     st.sinceBase = ChangeSet.empty(st.mapBase.length)
   }
 
@@ -1260,8 +1360,9 @@ export function createDocEditor(opts) {
 
   function ownTools(n, r = null) {
     return h('span', { class: 'dc-own' },
-      h('button', { class: 'dc-ib', type: 'button', title: 'Change your words', 'aria-label': 'Change your words', onclick: (e) => { e.stopPropagation(); st.editing = { id: n.id, rid: r ? r.id : null }; render(); setTimeout(() => root.querySelector('.dc-edit-fld textarea')?.focus(), 30) } }, icon('pencil', 13)),
-      r ? h('button', { class: 'dc-ib', type: 'button', title: 'Remove your reply', 'aria-label': 'Remove your reply', onclick: (e) => { e.stopPropagation(); removeReply(n, r) } }, icon('trash', 13)) : null)
+      h('button', { class: 'dc-ib', type: 'button', title: 'Change your words', 'aria-label': 'Change your words', onclick: (e) => { e.stopPropagation(); st.editing = { id: n.id, rid: r ? r.id : null }; render(); setTimeout(() => (st.phone ? sheet : root).querySelector('.dc-edit-fld textarea')?.focus({ preventScroll: true }), 30) } }, icon('pencil', 13)),
+      r ? h('button', { class: 'dc-ib', type: 'button', title: 'Remove your reply', 'aria-label': 'Remove your reply', onclick: (e) => { e.stopPropagation(); removeReply(n, r) } }, icon('trash', 13))
+        : h('button', { class: 'dc-ib', type: 'button', title: 'Delete your note', 'aria-label': 'Delete your note', onclick: (e) => { e.stopPropagation(); removeNote(n) } }, icon('trash', 13)))
   }
 
   function editField(n, rid, text) {
@@ -1286,9 +1387,22 @@ export function createDocEditor(opts) {
         h('button', { class: 'dc-sm ok', type: 'button', onclick: (e) => { e.stopPropagation(); done(true) } }, 'Save')))
   }
 
+  // Removing one's own words keeps an Undo: the reply is posted again.
   async function removeReply(n, r) {
     const ans = await call(() => api.deleteReply(n.id, r.id))
-    if (ans) showToast('Reply removed')
+    if (ans) showToast('Reply removed', () => call(() => api.reply(n.id, r.text)))
+  }
+
+  // One's own note goes with its replies only when nobody else has replied
+  // (the server checks); a suggestion of one's own is withdrawn.
+  async function removeNote(n) {
+    const ans = await call(() => (n.kind === 'suggestion' ? api.withdraw(n.id) : api.removeNote(n.id)))
+    if (ans) {
+      if (st.sheet === 'thread') closeSheet()
+      st.focus = null
+      showToast('Note deleted')
+      render()
+    }
   }
 
   function mayResolve(n) {
@@ -1538,6 +1652,12 @@ export function createDocEditor(opts) {
       marks.push(m)
     }
     put(gutter, ...marks)
+    // Centred by the mark's own height: Loam's page gives buttons a larger
+    // touch target on a phone than the 24 px the mark is drawn for.
+    for (const m of marks) {
+      const hgt = m.offsetHeight
+      if (hgt && hgt !== 24) m.style.top = `${parseFloat(m.style.top) - (hgt - 24) / 2}px`
+    }
   }
 
   function placeQpop() {
@@ -1593,12 +1713,14 @@ export function createDocEditor(opts) {
   function moreMenu() {
     const det = detached().length
     return h('div', { class: 'dc-menu', role: 'menu' },
-      det ? h('button', { class: 'dc-mi dc-mi-lost', type: 'button', role: 'menuitem', onclick: () => openDrawer('history', { detached: true }) },
+      det && opts.history !== false ? h('button', { class: 'dc-mi dc-mi-lost', type: 'button', role: 'menuitem', onclick: () => openDrawer('history', { detached: true }) },
         icon('reattach', 17), h('span', { class: 'dc-l' }, h('b', { text: det === 1 ? '1 note lost its passage' : `${det} notes lost their passages` }), h('small', { text: 'Attach again, or read what it was about' })), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
-      det ? h('div', { class: 'dc-msep' }) : null,
-      h('button', { class: `dc-mi${st.authors ? ' on' : ''}`, type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(st.authors), onclick: toggleAuthors },
+      det && opts.history !== false ? h('div', { class: 'dc-msep' }) : null,
+      // History and Show authors read the doc's history, which is the
+      // owner's: a share page has neither (opts.history === false).
+      opts.history === false ? null : h('button', { class: `dc-mi${st.authors ? ' on' : ''}`, type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(st.authors), onclick: toggleAuthors },
         icon('people', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Show authors' })), h('span', { class: `dc-sw${st.authors ? ' on' : ''}` })),
-      h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('history') },
+      opts.history === false ? null : h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('history') },
         icon('history', 17), h('span', { class: 'dc-l' }, h('b', { text: 'History' })), det ? h('span', { class: 'dc-ct', text: `${det} detached` }) : null, h('span', { class: 'dc-chv' }, icon('chevronRight', 14))),
       h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('resolved') },
         icon('resolved', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Resolved' })), h('span', { class: 'dc-ct', text: String(st.resolved || 0) }), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))),
@@ -1706,7 +1828,7 @@ export function createDocEditor(opts) {
 
   function saveTitle(s) {
     const sum = s.summary || {}
-    const where = sum.section ? `“${clip(sum.section, 44)}”` : sum.first ? `“${clip(sum.first, 40)}”` : ''
+    const where = sum.section ? `“${clip(plain(sum.section), 44)}”` : sum.first ? `“${clip(plain(sum.first), 40)}”` : ''
     if (s.kind === 'base') return s.folded ? 'Earlier versions, folded' : 'Where the record begins'
     if (s.kind === 'restore' && s.undid) return 'Undid accepting a suggestion'
     if (s.kind === 'restore') return 'Restored an earlier version'
@@ -1752,7 +1874,7 @@ export function createDocEditor(opts) {
 
   // A version is read as words, not Markdown: no heading marks or emphasis.
   function plain(t) {
-    return t.replace(/(^|\n)#{1,6} /g, '$1').replace(/\*\*([^*\n]+)\*\*/g, '$1').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2').replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/\[\[([^\]]+)\]\]/g, '$1')
+    return String(t || '').replace(/^\s*(```|~~~)[^\n]*$/gm, '').replace(/!\[\[([^\]|]+)(\|[^\]]*)?\]\]/g, '[picture: $1]').replace(/`([^`\n]*)`/g, '$1').replace(/^#{1,6}\s*/, '').replace(/(^|\n)#{1,6} /g, '$1').replace(/\*\*([^*\n]+)\*\*/g, '$1').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2').replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/\[\[([^\]]+)\]\]/g, '$1')
   }
 
   async function togglePreview(s) {
@@ -1761,7 +1883,12 @@ export function createDocEditor(opts) {
     render()
     try {
       const ans = await api.version(s.id)
-      if (st.preview?.id === s.id) { st.preview = { id: s.id, text: ans.text }; render() }
+      if (st.preview?.id === s.id) {
+        st.preview = { id: s.id, text: ans.text }
+        render()
+        // brought into view: an entry low in the list opened below the fold
+        requestAnimationFrame(() => root.querySelector('.dc-preview')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+      }
     } catch (err) {
       st.preview = null
       fail(err)
@@ -2014,7 +2141,7 @@ export function createDocEditor(opts) {
   function render() {
     if (st.destroyed) return
     const bare = !st.phone && !st.compose && openNotes().length === 0
-    root.className = `dc mode-${st.mode}${st.phone ? ' phone' : ' desk'}${bare ? ' bare' : ''}${st.authors ? ' authors' : ''}${st.reattach ? ' reattaching' : ''}${st.drawer && !st.phone ? ' drawer-open' : ''}`
+    root.className = `dc mode-${st.mode}${st.phone ? ' phone' : ' desk'}${st.phone && st.sheet ? ' sheet-open' : ''}${bare ? ' bare' : ''}${st.authors ? ' authors' : ''}${st.reattach ? ' reattaching' : ''}${st.drawer && !st.phone ? ' drawer-open' : ''}`
     renderHead()
     banner.classList.toggle('on', Boolean(st.reattach))
     if (st.reattach) {
@@ -2077,6 +2204,8 @@ export function createDocEditor(opts) {
     me: () => st.me,
     // A fresh read of the doc (focus came back, the file changed on disk).
     reload: () => reloadQuietly(),
+    // My drafts while Suggesting (record.js), for tests and tools.
+    drafts: () => view.state.field(draftsField).list.map(d => ({ ...d })),
     // The text as the editor holds it; replacing it is an edit like typing.
     // In editor space, with editor positions (what dictation's field reads).
     text: () => view.state.doc.toString(),

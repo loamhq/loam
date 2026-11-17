@@ -520,3 +520,29 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **`tests/test_engineer.py` fails inside a job's wall** (the jobs folder is
   read-only there): same on unchanged `main`. The landing's run is the one
   that counts.
+
+## 2026-11-17 — doc comments round 3: record, do not compare; bound the browser
+
+- **Tracked changes are recorded, never derived by diffing.** Three rounds
+  of Suggesting bugs came from working out "what the person typed" by
+  comparing the editor's text with the stored text. A StateField that grows
+  ranges from the person's own transactions and maps them through every
+  other change (`plugins/doc-comments/page/editor/record.js`) fixed the
+  class, not the cases. Fuzz with several open at once: a fuzz that kept one
+  draft open passed 600 runs while all of it was broken.
+- **Trimming shared letters off a range's edge puts the edge inside a
+  word**, and the next keystroke there starts a second range. Keep ranges
+  as the edits made them.
+- **A browser suite on a shared box runs under a cap**:
+  `systemd-run --user --scope -p MemoryMax=6G -p MemorySwapMax=0` around
+  node, `--test-concurrency=1`, a few seeded runs per browser context,
+  every context closed. The previous job's unit peaked at 24.5 GB and the
+  box ran out of memory five times, ending the owner's conversations; a
+  failing `assert.equal(playwrightHandle, …)` serialising the handle was
+  one way there.
+- **A served-file allowlist goes stale.** The share door's hand-kept list
+  of page modules missed one, and every visitor saw a blank page with no
+  test failing. Derive it (follow the imports) and test the page through
+  the door in a real browser, failing on any 404.
+- **Loam's page enlarges buttons on a phone** (touch targets), so anything
+  absolutely placed by a fixed height must measure its real height.

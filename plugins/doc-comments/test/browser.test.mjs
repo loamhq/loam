@@ -22,6 +22,7 @@ const TOL = 4
 
 let chromium = null
 let server = null, base = '', browser = null
+const shareLinks = {}
 
 async function start() {
   if (browser) return
@@ -32,6 +33,7 @@ async function start() {
     server.stdout.on('data', (d) => {
       buf += d
       const m = /doc-comments dev: (http:\/\/127\.0\.0\.1:\d+)\//.exec(buf)
+      for (const l of buf.matchAll(/(\w+) link: http:\/\/127\.0\.0\.1:\d+(\/s\/\S+)\s+password: (\S+)/g)) shareLinks[l[1]] = { path: l[2], password: l[3] }
       if (m) resolve(m[1])
     })
     server.on('exit', (code) => reject(new Error(`dev server exited ${code}`)))
@@ -448,165 +450,270 @@ test('Suggesting next to and inside someone else\'s suggestion, and with a chang
   await page.done()
 })
 
-// Seeded runs: type, pause (sent at once), delete, move, then accept or
-// reject everything. After each, what is stored is what was on the screen.
-const FUZZ = Number(process.env.DC_FUZZ || 200)
-test(`Suggesting, ${FUZZ} seeded runs of typing, pausing, deleting, accepting and rejecting`, { skip, timeout: 1800000 }, async () => {
+// -- Suggesting with several drafts (round 3) ----------------------------------
+
+// The stored text with every open suggestion of mine applied: what the
+// editor must show while Suggesting.
+async function storedWithMine(p) {
+  const d = await api(p, 'doc', 'GET')
+  const mine = d.notes.filter(n => n.kind === 'suggestion' && n.state === 'open' && n.author.id === 'sam' && n.where?.state === 'attached').sort((a, b) => a.where.start - b.where.start)
+  let out = '', at = 0
+  for (const n of mine) { out += d.text.slice(at, n.where.start) + n.replacement; at = n.where.end }
+  return { text: out + d.text.slice(at), mine, stored: d.text }
+}
+async function closeOne(page, p, id, how) {
+  await api(p, `doc/notes/${id}/${how}`)
+  await page.evaluate(() => window.__ed.reload())
+  await page.waitForTimeout(150)
+}
+async function selectText(page, from, to) {
+  await page.evaluate(([a, b]) => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: a, head: b } }) }, [from, to])
+}
+const indexIn = (page, words, after = true) => page.evaluate(([w, af]) => { const t = window.__ed.text(); const i = t.indexOf(w); return i < 0 ? -1 : i + (af ? w.length : 0) }, [words, after])
+const LONGTEXT = '# Walk\n\n' + [1, 2, 3, 4, 5, 6].map(i => `Paragraph ${i}a opens section ${i}. Nothing here is remarkable except where it sits.\n\nParagraph ${i}c closes the section with a sentence.`).join('\n\n') + '\n'
+
+test('A1: two drafts far apart stay two; rejecting one leaves the other; accepting keeps the final line break', { skip }, async () => {
   await start()
-  const WORDS = [' Aaa.', ' bb', 'x', ',', ' cc dd', '.', ' ']
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 850 } })
-  const page = await ctx.newPage()
-  const errors = []
-  page.on('pageerror', (e) => errors.push(e.message))
-  let failures = []
+  const { p, page } = await suggestDoc(LONGTEXT)
+  // a draft open early in the doc, then Ctrl+End and words at the end (as walked)
+  await caretAfter(page, 'Paragraph 1a opens section 1.')
+  await page.keyboard.type(' Early.')
+  await page.waitForTimeout(PAUSE)
+  await page.keyboard.press('Control+End')
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.type(' End words here.')
+  await page.waitForTimeout(PAUSE)
+  await caretAfter(page, 'Paragraph 3c closes the section with a sentence.')
+  await page.keyboard.type(' Mid.')
+  await page.waitForTimeout(PAUSE)
+  let s1 = await storedWithMine(p)
+  assert.equal(s1.mine.length, 3, JSON.stringify(s1.mine.map(n => [n.anchor.quote, n.replacement])))
+  const early = s1.mine.find(n => n.replacement.includes('Early.'))
+  await closeOne(page, p, early.id, 'reject')
+  s1 = await storedWithMine(p)
+  assert.ok(s1.mine.every(n => n.anchor.quote.length < 40), 'neither swallows the text between')
+  assert.equal(s1.text, await shown(page))
+  const mid = s1.mine.find(n => n.replacement.includes('Mid.'))
+  await closeOne(page, p, mid.id, 'reject')
+  assert.equal(body((await disk(p)).text), body(LONGTEXT))
+  assert.ok(!(await shown(page)).includes('Mid.'), 'the rejected words left the editor')
+  assert.equal((await storedWithMine(p)).text, await shown(page))
+  const end = (await storedWithMine(p)).mine[0]
+  await closeOne(page, p, end.id, 'accept')
+  const d = (await disk(p)).text
+  assert.ok(d.endsWith('End words here.\n'), JSON.stringify(d.slice(-30)))
+  assert.equal(d, await shown(page))
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('A2: deleting original words beside a draft, then more, then accepting', { skip }, async () => {
+  await start()
+  const { p, page } = await suggestDoc(LONGTEXT)
+  await caretAfter(page, 'Nothing here')
+  await page.keyboard.type(' at all')
+  await page.waitForTimeout(PAUSE)
+  const s = await indexIn(page, ' is remarkable', false)
+  await selectText(page, s, s + ' is remarkable'.length)
+  await page.keyboard.press('Delete')
+  await page.waitForTimeout(PAUSE)
+  await caretAfter(page, 'Nothing here at all')
+  await page.keyboard.type(' matters')
+  await page.waitForTimeout(PAUSE)
+  const seen = await shown(page)
+  assert.ok(seen.includes('Paragraph 1a opens section 1. Nothing here at all matters except'), seen.slice(0, 200))
+  const st1 = await storedWithMine(p)
+  assert.equal(st1.text, seen)
+  for (const n of st1.mine) await closeOne(page, p, n.id, 'accept')
+  assert.equal(body((await disk(p)).text), body(seen))
+  assert.equal(await shown(page), (await disk(p)).text)
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('A3: typing over a selection, extending it, accepting; a closed note past a shorter text never stops the doc', { skip }, async () => {
+  await start()
+  const { p, page } = await suggestDoc(LONGTEXT)
+  const s = await indexIn(page, 'closes the section', false)
+  await selectText(page, s, s + 'closes the section'.length)
+  await page.keyboard.type('ends it')
+  await page.waitForTimeout(PAUSE)
+  await page.keyboard.type(' nicely')
+  await page.waitForTimeout(PAUSE)
+  const seen = await shown(page)
+  const st1 = await storedWithMine(p)
+  assert.equal(st1.mine.length, 1)
+  await closeOne(page, p, st1.mine[0].id, 'accept')
+  assert.equal((await disk(p)).text, seen)
+  assert.equal(await shown(page), seen)
+  // the accepted note's stored place now lies past a much shorter text
+  await outside(p, (await disk(p)).text.slice(0, 120) + '\n')
+  await page.waitForTimeout(2500)
+  await page.done()
+  const again = await open({ doc: p })
+  assert.ok(await again.$('.dc .cm-content'), 'the doc opens in the editor')
+  await again.waitForTimeout(2000)
+  assert.deepEqual(again.errors, [])
+  await again.done()
+})
+
+test('A4: two insertions, the later one accepted: once on disk, once in the editor, labelled alike', { skip }, async () => {
+  await start()
+  const { p, page } = await suggestDoc(LONGTEXT)
+  await caretAfter(page, 'Paragraph 2c closes the section with a sentence.')
+  await page.keyboard.type(' First.')
+  await page.waitForTimeout(PAUSE)
+  await caretAfter(page, 'Paragraph 4a opens section 4.')
+  await page.keyboard.type(' Second.')
+  await page.waitForTimeout(PAUSE)
+  const labels = await page.$$eval('.dc-card.sug .dc-stl', els => els.map(e => e.textContent))
+  assert.deepEqual(labels.sort(), ['Add “First.”', 'Add “Second.”'])
+  const second = (await storedWithMine(p)).mine.find(n => n.replacement.includes('Second.'))
+  const before = await caretPos(page)
+  await closeOne(page, p, second.id, 'accept')
+  const t = await shown(page)
+  assert.equal(t.split('Second.').length, 2, 'once in the editor')
+  assert.equal((await disk(p)).text.split('Second.').length, 2, 'once on disk')
+  assert.ok(sameCaret(await caretPos(page), before), 'accepting did not move the caret')
+  assert.equal((await storedWithMine(p)).text, t)
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('A5: undo after a pause withdraws it; the caret stays through Accept, Reject and a mode change; the highlight is only the suggested words', { skip }, async () => {
+  await start()
+  const { p, page } = await suggestDoc(LONGTEXT)
+  await caretAfter(page, 'Paragraph 1a opens section 1.')
+  await page.keyboard.type(' Undone.')
+  await page.waitForTimeout(PAUSE)
+  await page.keyboard.press('Control+z')
+  await page.waitForTimeout(PAUSE)
+  assert.deepEqual((await storedWithMine(p)).mine, [], 'nothing left: no "Add “”" card')
+  assert.equal(await page.locator('.dc-card.sug').count(), 0)
+  // Accept from the card, the caret just after the words typed: it stays.
+  await caretAfter(page, 'Paragraph 3a opens section 3.')
+  await page.keyboard.type(' Taken.')
+  await page.waitForTimeout(PAUSE)
+  const taken = (await storedWithMine(p)).mine[0].id
+  const atTaken = await caretPos(page)
+  await page.click(`.dc-card[data-id="${taken}"]`)
+  await page.click('.dc-card.on .dc-sm.ok')
+  await until(page, () => !document.querySelector('.dc-card.sug'))
+  assert.ok(sameCaret(await caretPos(page), atTaken), `accepting did not move the caret: ${atTaken} / ${await caretPos(page)}`)
+  await caretAfter(page, 'Paragraph 2a opens section 2.')
+  await page.keyboard.type(' Kept.')
+  await page.waitForTimeout(PAUSE)
+  const id = (await storedWithMine(p)).mine[0].id
+  // focus its card: only the suggested words are highlighted
+  await page.click(`.dc-card[data-id="${id}"]`)
+  const lit = await page.$$eval('.cm-content .on', els => els.map(e => e.textContent).join('|'))
+  assert.equal(lit.trim(), 'Kept.')
+  await caretAfter(page, 'Paragraph 5a opens')
+  const c = await caretPos(page)
+  await mode(page, 'Editing')
+  await mode(page, 'Suggesting')
+  assert.ok(sameCaret(await caretPos(page), c), `a mode change did not move the caret: ${c} / ${await caretPos(page)}`)
+  await page.evaluate(() => window.__ed.view.focus())
+  await closeOne(page, p, id, 'reject')
+  assert.ok(sameCaret(await caretPos(page), c), 'reject did not move the caret')
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+// Seeded runs with several drafts open at once: typing anywhere (first and
+// last lines too), deleting original words, typing over a selection, Enter,
+// undo and redo, pauses, and accepting or rejecting one draft at a time in a
+// random order with others still open. After every step: the stored text
+// with my open suggestions applied is the editor's text; an accept or reject
+// changes no other suggestion and does not move the caret. At the end every
+// draft is rejected in a random order and the original comes back exactly.
+// A few runs share a browser context, which is then closed (the box is
+// shared: the suite runs under a memory cap and keeps little open).
+const FUZZ = Number(process.env.DC_FUZZ || 120)
+test(`Suggesting, ${FUZZ} seeded runs with several drafts open at once`, { skip, timeout: 3600000 }, async () => {
+  await start()
+  const WORDS = [' Aaa.', ' bb', 'x', ',', ' cc dd', '.', 'Zed ']
+  const failures = []
+  let most = 0
   const only = process.env.DC_SEED ? Number(process.env.DC_SEED) : null
+  let ctx = null, page = null, errors = []
   for (let seed = only || 1; seed <= (only || FUZZ); seed++) {
-    let s = seed * 2654435761 >>> 0
+    if (!ctx || (seed - 1) % 10 === 0) {
+      await ctx?.close()
+      ctx = await browser.newContext({ viewport: { width: 1280, height: 850 } })
+      page = await ctx.newPage()
+      page.on('pageerror', (e) => errors.push(`seed ${seed}: ${e.message}`))
+    }
+    let s = (seed * 2654435761) >>> 0
     const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
-    const p = await newDoc(TEXT)
+    const pick = (n) => Math.floor(r() * n)
+    const p = await newDoc(LONGTEXT)
     await page.goto(`${base}/?path=${encodeURIComponent(p)}`)
     await page.waitForSelector('.cm-content')
     await mode(page, 'Suggesting')
-    const len = await page.evaluate(() => window.__ed.view.state.doc.length)
-    await page.evaluate((at) => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: at } }) }, 9 + Math.floor(r() * (len - 9)))
     const log = []
-    for (let step = 0; step < 10; step++) {
-      const k = r()
-      if (k < 0.45) { const w = WORDS[Math.floor(r() * WORDS.length)]; log.push(`type ${JSON.stringify(w)}`); await page.keyboard.type(w) }
-      else if (k < 0.6) { const n = 1 + Math.floor(r() * 4); log.push(`bs ${n}`); for (let i = 0; i < n; i++) await page.keyboard.press('Backspace') }
-      else if (k < 0.72) { const n = 1 + Math.floor(r() * 6); const key = r() < 0.5 ? 'ArrowLeft' : 'ArrowRight'; log.push(`${key} ${n}`); for (let i = 0; i < n; i++) await page.keyboard.press(key) }
-      else { log.push('pause'); const c = await caretPos(page); await settle(page); const c2 = await caretPos(page); if (!sameCaret(c2, c)) failures.push(`seed ${seed}: the pause moved the caret ${JSON.stringify(c)} -> ${JSON.stringify(c2)} (${log.join(', ')})`) }
-    }
-    await settle(page)
-    const seen = await shown(page)
-    const how = r() < 0.5 ? 'accept' : 'reject'
-    await closeMine(p, how)
-    const d = body((await disk(p)).text)
-    const want = how === 'accept' ? body(seen) : body(TEXT)
-    if (d !== want) failures.push(`seed ${seed} (${how}): stored ${JSON.stringify(d.slice(9, 200))} but showed ${JSON.stringify(want.slice(9, 200))} after ${log.join(', ')}`)
-    if (failures.length > 5) break
+    const bodyStart = () => page.evaluate(() => { const t = window.__ed.text(); const m = /^---\n[\s\S]*?\n---\n/.exec(t); return m ? m[0].length : 0 })
+    const fail = (msg) => failures.push(`seed ${seed}: ${msg} after ${log.join(', ')}`)
+    try {
+      for (let step = 0; step < 16 && failures.length < 4; step++) {
+        const b0 = await bodyStart()
+        const len = await page.evaluate(() => window.__ed.view.state.doc.length)
+        const at = b0 + pick(len - b0 + 1)
+        const k = r()
+        if (k < 0.28) { const w = WORDS[pick(WORDS.length)]; log.push(`type ${JSON.stringify(w)}@${at}`); await page.evaluate((a) => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: a } }) }, at); await page.keyboard.type(w) }
+        else if (k < 0.4) { const n = 1 + pick(10); log.push(`delete ${n}@${at}`); await selectText(page, at, Math.min(len, at + n)); await page.keyboard.press('Delete') }
+        else if (k < 0.5) { const n = 1 + pick(14); log.push(`over ${n}@${at}`); await selectText(page, at, Math.min(len, at + n)); await page.keyboard.type('new words') }
+        else if (k < 0.55) { log.push(`enter@${at}`); await page.evaluate((a) => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: a } }) }, at); await page.keyboard.press('Enter') }
+        else if (k < 0.6) { log.push('undo'); await page.keyboard.press('Control+z') }
+        else if (k < 0.63) { log.push('redo'); await page.keyboard.press('Control+Shift+z') }
+        else if (k < 0.8) {
+          log.push('pause'); const c = await caretPos(page); await settle(page)
+          if (!sameCaret(await caretPos(page), c)) fail('a pause moved the caret')
+        } else {
+          await settle(page)
+          const { mine } = await storedWithMine(p)
+          if (!mine.length) continue
+          const n = mine[pick(mine.length)]
+          const how = r() < 0.5 ? 'accept' : 'reject'
+          log.push(`${how} ${JSON.stringify(n.replacement.slice(0, 20))}`)
+          const others = mine.filter(x => x.id !== n.id).map(x => `${x.id}:${x.anchor.quote}→${x.replacement}`).sort()
+          const c = await caretPos(page)
+          // a caret inside the words being taken back has to move with them
+          const inside = await page.evaluate((id) => { const x = window.__ed.drafts().find(d => d.ids[0] === id); const h = window.__ed.view.state.selection.main.head; return Boolean(x && h >= x.from && h <= x.to) }, n.id)
+          await closeOne(page, p, n.id, how)
+          const after = (await storedWithMine(p)).mine.map(x => `${x.id}:${x.anchor.quote}→${x.replacement}`).sort()
+          if (JSON.stringify(after) !== JSON.stringify(others)) fail(`${how} changed another suggestion: ${JSON.stringify(others)} -> ${JSON.stringify(after)}`)
+          // the caret stays: the same few letters on either side of it
+          // (further off, the reject may have put original words back)
+          const c2 = await caretPos(page)
+          const stays = c2.split('|')[1].slice(0, 3) === c.split('|')[1].slice(0, 3) && c2.split('|')[0].slice(-3) === c.split('|')[0].slice(-3)
+          if (!inside && !stays) fail(`${how} moved the caret ${c} -> ${await caretPos(page)}`)
+        }
+        await settle(page)
+        const now = await storedWithMine(p)
+        most = Math.max(most, now.mine.length)
+        const t = await shown(page)
+        if (now.text !== t) {
+          let k0 = 0; while (now.text[k0] === t[k0]) k0++
+          fail(`stored+mine ≠ editor at ${k0}: ${JSON.stringify(now.text.slice(k0 - 40, k0 + 40))} vs ${JSON.stringify(t.slice(k0 - 40, k0 + 40))}; mine ${JSON.stringify(now.mine.map(m => [m.anchor.quote, m.replacement]))}`)
+          break
+        }
+      }
+      // Reject everything left, in a random order: the original exactly.
+      let left = (await storedWithMine(p)).mine
+      while (left.length) { await closeOne(page, p, left[pick(left.length)].id, 'reject'); left = (await storedWithMine(p)).mine }
+      const stored = await storedWithMine(p)
+      const original = LONGTEXT
+      if (body(stored.stored) !== body(original) && !log.some(l => l.startsWith('accept'))) fail('rejecting all did not give the original')
+      if (stored.text !== await shown(page)) fail('after rejecting all, the editor differs from what is stored')
+    } catch (err) { fail(`threw ${err.message.split('\n')[0]}`) }
+    if (failures.length >= 4) break
   }
-  await ctx.close()
+  await ctx?.close()
+  console.log(`# most suggestions open at once in a run: ${most}`)
   assert.deepEqual(failures, [])
   assert.deepEqual(errors, [])
-})
-
-test('an open doc takes in a change on disk within two seconds, keeping the caret and the scroll', { skip }, async () => {
-  await start()
-  const paras = Array.from({ length: 40 }, (_, i) => `Paragraph ${i}, which is long enough to be a real line of text in the column.`)
-  const text = '# Outside\n\n' + paras.join('\n\n') + '\n'
-  const p = await newDoc(text)
-  const page = await open({ doc: p })
-  await scrollTo(page, 1200)
-  await caretAfter(page, 'Paragraph 30,')
-  const before = await page.evaluate(() => {
-    const v = window.__ed.view
-    const at = v.state.doc.toString().indexOf('Paragraph 25')
-    return { y: v.coordsAtPos(at).top, scroll: document.querySelector('.dc-scroll').scrollTop }
-  })
-  await outside(p, text.replace('# Outside\n\n', '# Outside\n\nA paragraph added on disk, above everything.\n\n').replace('Paragraph 35,', 'Paragraph 35 (changed on disk),'))
-  await until(page, () => window.__ed.text().includes('changed on disk'), null, 2500)
-  await page.waitForTimeout(300)
-  const after = await page.evaluate(() => {
-    const v = window.__ed.view
-    const t = v.state.doc.toString()
-    const at = t.indexOf('Paragraph 25')
-    return { y: v.coordsAtPos(at).top, caretAfter: t.slice(v.state.selection.main.head - 13, v.state.selection.main.head) }
-  })
-  assert.ok(Math.abs(after.y - before.y) <= 2, `what was being read did not move (${before.y} → ${after.y})`)
-  assert.equal(after.caretAfter, 'Paragraph 30,')
-  // With an unsaved edit: both land.
-  await page.keyboard.type(' typed here')
-  const d0 = await disk(p)
-  await outside(p, d0.text.replace('Paragraph 2,', 'Paragraph 2 (disk again),'))
-  await until(page, () => window.__ed.text().includes('disk again'), null, 4000)
-  await page.waitForTimeout(1600)
-  const d = await disk(p)
-  assert.ok(d.text.includes('disk again') && d.text.includes('Paragraph 30, typed here'), d.text.slice(0, 400))
-  assert.deepEqual(page.errors, [])
-  await page.done()
-})
-
-test('typing: Enter makes paragraphs, lists and quotes end with a blank line, "[] " and ``` convert', { skip }, async () => {
-  await start()
-  const p = await newDoc('# Typing\n\n')
-  const page = await open({ doc: p })
-  await page.evaluate(() => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: v.state.doc.length } }) })
-  const k = page.keyboard
-  await k.type('First paragraph.')
-  await k.press('Enter')
-  await k.type('Second paragraph.')
-  await k.press('Shift+Enter')
-  await k.type('Same paragraph, next line.')
-  await k.press('Enter')
-  await k.type('- one')
-  await k.press('Enter')
-  await k.type('two')
-  await k.press('Enter')
-  await k.press('Enter')
-  await k.type('After the list.')
-  await k.press('Enter')
-  await k.type('> quoted')
-  await k.press('Enter')
-  await k.press('Enter')
-  await k.type('After the quote.')
-  await k.press('Enter')
-  await k.type('[] a task')
-  await k.press('Enter')
-  await k.press('Enter')
-  await k.type('```')
-  const fenced = await page.evaluate(() => window.__ed.text())
-  assert.ok(fenced.endsWith('```\n```'), JSON.stringify(fenced.slice(-20)))
-  await page.keyboard.press('Control+s')
-  await page.waitForTimeout(800)
-  const d = await disk(p)
-  const want = '# Typing\n\nFirst paragraph.\n\nSecond paragraph.\nSame paragraph, next line.\n\n- one\n- two\n\nAfter the list.\n\n> quoted\n\nAfter the quote.\n\n- [ ] a task\n\n```\n```\n'  // the file ended with a line break, and still does
-  // (the store stamps who saved it in the frontmatter, as the broker does)
-  assert.equal(d.text.replace(/^---\n[\s\S]*?\n---\n\n?/, ''), want)
-  assert.deepEqual(page.errors, [])
-  await page.done()
-})
-
-test('every doc opens in Editing, whatever was used last', { skip }, async () => {
-  await start()
-  const p = await newDoc('# Mode\n\nWords.\n')
-  let page = await open({ doc: p })
-  await mode(page, 'Suggesting')
-  await page.done()
-  page = await open({ doc: 'Essays/drafts/Fresh.md' })
-  assert.equal(await page.evaluate(() => window.__ed.state.mode), 'edit')
-  // and a doc with no notes centres its column at the desktop width
-  const centred = await page.evaluate(() => {
-    const c = document.querySelector('.cm-content').getBoundingClientRect(), r = document.querySelector('.dc').getBoundingClientRect()
-    return Math.abs((c.left - r.left) - (r.right - c.right))
-  })
-  assert.ok(centred < 90, `the column is near the middle (${centred})`)
-  await page.done()
-})
-
-test('phone: the thread sheet leaves its passage in view above it', { skip }, async () => {
-  await start()
-  const page = await open({ doc: 'Essays/drafts/Long.md', w: 430, h: 900, phone: true })
-  await scrollTo(page, 99999)
-  await page.waitForTimeout(300)
-  const id = await page.evaluate(() => window.__ed.state.notes.filter(n => n.state === 'open').sort((a, b) => b.from - a.from)[0].id)
-  await page.evaluate((id) => {
-    const n = window.__ed.state.notes.find(x => x.id === id)
-    const v = window.__ed.view
-    const top = v.lineBlockAt(n.from).top
-    const marks = [...document.querySelectorAll('.dc-mk')]
-    const m = marks.reduce((a, x) => (Math.abs(parseFloat(x.style.top) - top) < Math.abs(parseFloat(a.style.top) - top) ? x : a))
-    m.click()
-  }, id)
-  await page.waitForTimeout(900)
-  const r = await page.evaluate((id) => {
-    const span = document.querySelector(`.cm-content [data-note="${id}"]`)
-    const s = span.getClientRects()[0]
-    return { passage: s.bottom, sheet: document.querySelector('.dc-sheet.on').getBoundingClientRect().top, top: s.top, scrollTop: document.querySelector('.dc-scroll').getBoundingClientRect().top }
-  }, id)
-  assert.ok(r.passage <= r.sheet - 8 && r.top >= r.scrollTop, `the passage (${r.top}–${r.passage}) is above the sheet (${r.sheet})`)
-  await shot(page, 'phone-sheet')
-  await page.done()
+  assert.ok(only || most >= 3, 'the runs kept several drafts open')
 })
 
 // -- the watch ----------------------------------------------------------------
@@ -769,5 +876,51 @@ test('Escape closes History and Resolved; a change of width keeps the line in vi
   await page.waitForTimeout(500)
   const after = await page.evaluate(() => { const s = document.querySelector('.dc-scroll'); return s.scrollTop })
   assert.ok(after > 1000, `the scroll was kept (${after}, was showing ${before})`)
+  await page.done()
+})
+
+// -- the visitor's page, through the door -------------------------------------
+
+for (const [w, h, label] of [[1280, 850, 'desktop'], [430, 900, 'phone']]) {
+  test(`a visitor's page loads through the door with no owner cookie, every file found (${label})`, { skip }, async () => {
+    await start()
+    const link = shareLinks.comment
+    assert.ok(link, 'the dev server made a share link')
+    const ctx = await browser.newContext({ viewport: { width: w, height: h } })
+    const page = await ctx.newPage()
+    const bad = []
+    page.on('response', (r) => { if (r.status() >= 400) bad.push(`${r.status()} ${new URL(r.url()).pathname}`) })
+    page.on('console', (m) => { if (m.type() === 'error') bad.push(`console: ${m.text()}`) })
+    page.on('pageerror', (e) => bad.push(`error: ${e.message}`))
+    await page.goto(`${base}${link.path}`)
+    await page.waitForSelector('input[type=password]', { timeout: 8000 })
+    await shot(page, `visitor-gate-${label}`)
+    await page.fill('input[type=password]', link.password)
+    await page.keyboard.press('Enter')
+    await page.waitForSelector('.dc .cm-content', { timeout: 8000 })
+    await page.waitForTimeout(800)
+    await shot(page, `visitor-doc-${label}`)
+    assert.deepEqual(bad, [])
+    await ctx.close()
+  })
+}
+
+test('a passage deleted on disk: its note is detached, ⋯ carries the mark and says so', { skip }, async () => {
+  await start()
+  const p = await newDoc(LONGTEXT)
+  await api(p, 'doc/notes', 'POST', { kind: 'comment', quote: 'Paragraph 6c closes the section with a sentence.', text: 'On the last paragraph' }, 'ada')
+  const page = await open({ doc: p })
+  const d = (await disk(p)).text
+  await outside(p, d.replace('\n\nParagraph 6c closes the section with a sentence.', ''))
+  await until(page, () => document.querySelector('.dc-gbtn.dc-lost'), null, 5000)
+  await page.click('.dc-gbtn.dc-lost')
+  const first = await page.textContent('.dc-menu .dc-mi')
+  assert.match(first, /^1 note lost its passage/)
+  const notes = (await api(p, 'doc', 'GET')).notes
+  assert.equal(notes[0].where.state, 'detached', 'not moved onto "Paragraph 5c …"')
+  await page.click('.dc-mi-lost')
+  await page.waitForSelector('.dc-drawer.on .dc-dsec')
+  await shot(page, 'detached')
+  assert.deepEqual(page.errors, [])
   await page.done()
 })

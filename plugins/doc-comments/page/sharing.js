@@ -12,7 +12,7 @@ const MODES = [
 ]
 const DAYS = [1, 7, 30, 90, 365]
 
-export function createSharing({ base, root, path, title, owner, toast, onChange }) {
+export function createSharing({ base, root, path, title, owner, toast, onChange, notes = () => 0 }) {
   const st = { links: [], owner: owner || 'You', open: null, card: null, menu: null }
   const req = async (method, route, body) => {
     const q = method === 'GET' ? `?${new URLSearchParams({ root, path })}` : ''
@@ -21,7 +21,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange 
       body: method === 'GET' ? undefined : JSON.stringify({ root, path, ...(body || {}) }),
     })
     const data = await res.json().catch(() => null)
-    if (!res.ok) throw new Error(data?.error || `The share server answered ${res.status}`)
+    if (!res.ok) throw new Error(plainError(data?.error, res.status))
     return data
   }
 
@@ -48,7 +48,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange 
   function faces(list) {
     const shown = list.slice(0, 2)
     return h('span', { class: 'dc-sharefaces' }, shown.map(l => l.name
-      ? h('span', { class: 'dc-sf', text: l.name.charAt(0).toUpperCase() })
+      ? h('span', { class: 'dc-sf', style: { background: tone(l.name) }, text: l.name.charAt(0).toUpperCase() })
       : h('span', { class: 'dc-sf grp' }, icon('people', 11))))
   }
 
@@ -128,10 +128,14 @@ export function createSharing({ base, root, path, title, owner, toast, onChange 
   function cardView() {
     const c = st.card
     const nameIn = h('input', { class: 'dc-iv-name', type: 'text', placeholder: 'Who is it for? (optional)', value: c.name, maxlength: '60', 'aria-label': 'Who is it for' })
-    nameIn.addEventListener('input', () => { c.name = nameIn.value; forName.textContent = c.name ? `For ${c.name}` : 'For anyone with the link'; av.textContent = (c.name || '').charAt(0).toUpperCase(); av.classList.toggle('grp', !c.name); cap.textContent = c.name ? `The card is what ${c.name} gets.` : 'A group link: each visitor gives a name once.' })
+    nameIn.addEventListener('input', () => { c.name = nameIn.value; if (seen) seen.textContent = `${c.name || 'They'} will also see the ${n === 1 ? 'note' : `${n} notes`} already on this doc.`; forName.textContent = c.name ? `For ${c.name}` : 'For anyone with the link'; av.textContent = (c.name || '').charAt(0).toUpperCase(); av.classList.toggle('grp', !c.name); cap.textContent = c.name ? `The card is what ${c.name} gets.` : 'A group link: each visitor gives a name once.' })
     const av = h('span', { class: `dc-iv-av${c.name ? '' : ' grp'}`, text: c.name.charAt(0).toUpperCase() })
     const forName = h('div', { class: 'dc-tk-for', text: c.name ? `For ${c.name}` : 'For anyone with the link' })
     const cap = h('p', { class: 'dc-sh-cap', text: c.name ? `The card is what ${c.name} gets.` : 'A group link: each visitor gives a name once.' })
+    // The notes already on the doc are seen by whoever the link is for: said
+    // once, quietly, so it is never a surprise.
+    const n = notes()
+    const seen = n ? h('p', { class: 'dc-sh-cap dc-sh-notes', text: `${c.name || 'They'} will also see the ${n === 1 ? 'note' : `${n} notes`} already on this doc.` }) : null
     const pw = c.editing
       ? h('input', { class: 'dc-tk-pwin', type: 'text', value: c.password, maxlength: '100', 'aria-label': 'Password', onkeydown: (e) => { if (e.key === 'Enter') { c.password = e.target.value.trim() || c.password; c.editing = false; draw() } }, onblur: (e) => { c.password = e.target.value.trim() || c.password; c.editing = false; draw() } })
       : h('button', { class: 'dc-tk-pw', type: 'button', title: 'Change the password', onclick: () => { c.editing = true; draw(); setTimeout(() => scrim?.querySelector('.dc-tk-pwin')?.select(), 0) } }, c.password)
@@ -151,9 +155,12 @@ export function createSharing({ base, root, path, title, owner, toast, onChange 
           h('div', {}, h('div', { class: 'dc-tk-lbl', text: 'Password' }), pw),
           h('div', { class: 'dc-tk-link' }, h('span', { text: location.host }), h('span', { text: '/s/…' })))),
       h('div', { class: 'dc-tk-mem' }, h('span', { text: 'Their browser remembers it for' }), daysSel),
-      go, cap)
+      c.short ? h('p', { class: 'dc-sh-cap dc-sh-warn', role: 'alert', text: 'A password needs at least 6 characters.' }) : null,
+      go, cap, seen)
 
     async function create() {
+      if ((c.password || '').length < 6) { c.short = true; c.editing = true; draw(); return }
+      c.short = false
       c.busy = true
       draw()
       try {
@@ -174,9 +181,9 @@ export function createSharing({ base, root, path, title, owner, toast, onChange 
 
   function listView() {
     const rows = live().map(l => h('div', { class: 'dc-sw-row' },
-      l.name ? h('span', { class: 'dc-iv-av', text: l.name.charAt(0).toUpperCase() }) : h('span', { class: 'dc-iv-av grp' }, icon('people', 15)),
+      l.name ? h('span', { class: 'dc-iv-av', style: { background: tone(l.name) }, text: l.name.charAt(0).toUpperCase() }) : h('span', { class: 'dc-iv-av grp' }, icon('people', 15)),
       h('div', { class: 'dc-sw-who' }, h('b', { text: l.name || 'Group link' }),
-        !l.name && l.people.length ? h('span', { class: 'dc-sharefaces' }, l.people.slice(0, 4).map(p => h('span', { class: 'dc-sf', title: p, text: p.charAt(0).toUpperCase() }))) : null,
+        !l.name && l.people.length ? h('span', { class: 'dc-sharefaces' }, l.people.slice(0, 4).map(p => h('span', { class: 'dc-sf', title: p, style: { background: tone(p) }, text: p.charAt(0).toUpperCase() }))) : null,
         l.locked ? h('small', { class: 'bad', text: 'Locked after wrong passwords' }) : null),
       modeMenu(l.mode, (m) => patch(l, { mode: m }), `mode:${l.id}`),
       rowMenu(l)))
@@ -195,6 +202,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange 
       openNow ? h('div', { class: 'dc-menu dc-rowmenu', role: 'menu' },
         h('button', { class: 'dc-mi', type: 'button', onclick: async () => {
           st.menu = null
+          draw()
           const out = await patch(l, { password: true }, false)
           if (out?.password && await copy(invite(out.link, out.password))) toast?.('Invite copied, with a new password. Browsers already in stay in.')
           else if (out?.password) toast?.(`New password ${out.password}`)
@@ -231,4 +239,24 @@ export function createSharing({ base, root, path, title, owner, toast, onChange 
   }
 
   return { button, open, refresh, set links(v) { st.links = v || [] } }
+}
+
+// What a person is told when the share server refuses: its sentences are
+// for programs; these are for people.
+function plainError(msg, status) {
+  const m = String(msg || '')
+  if (/password is 6 to 100/i.test(m)) return 'A password needs 6 to 100 characters.'
+  if (/no (note|link) '/i.test(m)) return 'That is no longer here. The list has been read again.'
+  if (status === 429) return 'Too many tries just now. Wait a moment and try again.'
+  if (status >= 500) return 'The share server did not answer. Try again in a moment.'
+  return m ? m.charAt(0).toUpperCase() + m.slice(1) + (/[.!?]$/.test(m) ? '' : '.') : `The share server answered ${status}.`
+}
+
+// A person's face has a tone of its own, from their name: calm colours that
+// read with white initials in light and dark.
+const TONES = ['#59749A', '#7A6A9E', '#5E8A6E', '#A0704E', '#8A5A6E', '#4F7F86', '#86753F']
+export function tone(name) {
+  let h = 0
+  for (const ch of String(name || '').toLowerCase()) h = (h * 31 + ch.codePointAt(0)) >>> 0
+  return TONES[h % TONES.length]
 }

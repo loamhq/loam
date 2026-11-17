@@ -567,3 +567,22 @@
 .dc-mk, .dc.phone .dc-mk { margin-top: 0; }
 
 .dc-dlg :is(.dc-iv-name, .dc-tk-pwin):is(:focus, :focus-visible) { outline: none; }
+
+/* The invite card's quiet line about notes already on the doc, and a
+   password too short to use. */
+.dc-sh-notes { margin-top: 4px; }
+.dc-sh-warn { color: var(--warning, #9A6A1E); margin-top: 8px; }
+
+/* Phone: with a thread open, a toast sits at the top, clear of the Reply field. */
+.dc.phone.sheet-open .dc-toast { top: 64px; bottom: auto; transform: translate(-50%, -12px); }
+.dc.phone.sheet-open .dc-toast.on { transform: translate(-50%, 0); }
+
+/* Shared with: each person's own tone; a group's joined faces read clearly. */
+.dc-sf { color: #fff; }
+.dc-sf.grp { color: var(--paper-ink-3, #645F59); background: var(--paper-card, #E9E4DC); }
+.dc-sw-who .dc-sharefaces .dc-sf { width: 24px; height: 24px; font-size: 11px; margin-right: -4px; }
+.dc-rowmenu .dc-mi-days b { white-space: nowrap; }
+.dc-rowmenu .dc-mi-days select { flex: none; }
+/* A long password stays on one line in the ticket, scrolled if it must. */
+.dc-tk-pw { white-space: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+@media (max-width: 480px) { .dc-tk-pw { font-size: 16px !important; } }

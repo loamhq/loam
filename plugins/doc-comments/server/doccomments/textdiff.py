@@ -163,8 +163,16 @@ def summary(old: str, new: str, ops: list[list] | None = None) -> dict:
     first = " ".join(first.split())[:60]
     section = ""
     lines = new[:at_new].splitlines()
-    for line in reversed(lines):
-        m = _HEADING.match(line.strip())
+    # A `#` inside a fenced code block is a comment, not a heading.
+    fenced, in_code = [], False
+    for line in lines:
+        if line.lstrip().startswith(("```", "~~~")):
+            in_code = not in_code
+            fenced.append(True)
+        else:
+            fenced.append(in_code)
+    for line, code in zip(reversed(lines), reversed(fenced)):
+        m = None if code else _HEADING.match(line.strip())
         if m:
             section = m.group(1).strip()
             break

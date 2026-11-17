@@ -17,7 +17,7 @@ or a DELETE and in the JSON body otherwise)::
     POST   /doc/notes/<id>/replies       a reply
     PATCH  /doc/notes/<id>               change your own words {text, reply?}
     DELETE /doc/notes/<id>/replies/<r>   remove your own reply
-    POST   /doc/notes/<id>/<action>      resolve, reopen, accept, reject, reattach, withdraw
+    POST   /doc/notes/<id>/<action>      resolve, reopen, accept, reject, reattach, withdraw, remove
     POST   /doc/save                     a save, merged three ways
     GET    /doc/history                  saves newest first, and who wrote what
     GET    /doc/version?save=<id>        the text as it was after one save
@@ -50,7 +50,8 @@ BODY_MAX = 8 * 1024 * 1024
 def make_handler(service: Service, links=None, door=None, reach=lambda: "staging"):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-        server_version = "doc-comments/1"
+        server_version = "doc-comments"
+        sys_version = ""
 
         def log_message(self, fmt, *args):  # one line per request, to the journal
             sys.stderr.write("%s %s\n" % (self.command, fmt % args))
@@ -159,6 +160,8 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
                         return 200, service.reject(who, root, path, tid)
                     if action == "withdraw":
                         return 200, service.withdraw(who, root, path, tid)
+                    if action == "remove":
+                        return 200, service.remove(who, root, path, tid)
                     if action == "reattach":
                         return 200, service.reattach(who, root, path, tid, args)
             raise NoteError(405, f"no route for {method} {url.path}")

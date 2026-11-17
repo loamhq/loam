@@ -121,6 +121,7 @@ async function docPage() {
     phone: phone.matches,
     settings: store,
     titleBar: { title: boot.title, sub: `${boot.owner}’s doc` },
+    history: false,
     headEnd: () => [agentBtn, meWrap],
     openLink: (ref) => { if (/^https?:/i.test(ref)) window.open(ref, '_blank', 'noopener,noreferrer') },
   })

@@ -1423,9 +1423,12 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
   const folderRow = st.listing.folder ?? (st.path === '' && rootRow ? { capabilities: rootRow.capabilities } : null)
   const folderCaps = capsOf(folderRow)
   const canAdd = !atRoot && folderCaps.create
-  const title = atRoot ? 'Files' : own ? own.name : st.path === '' ? rootName : nameOf(st.path)
+  // A plugin's root opened cold, before its plugin has registered: no
+  // heading yet (its address, "@<id>", is not a name).
+  const coldPlugin = !own && typeof st.root === 'string' && st.root.startsWith('@')
+  const title = atRoot ? 'Files' : own ? own.name : coldPlugin ? '' : st.path === '' ? rootName : nameOf(st.path)
   const parent = atRoot ? null : st.path === '' ? 'Files' : parentOf(st.path) === '' ? rootName : nameOf(parentOf(st.path))
-  const sub = atRoot ? '' : own ? (own.desc || '') : st.path === '' ? (rootRow?.desc ?? ROOT_LOOK[st.root]?.desc ?? '') : [rootName, ...splitPath(st.path)].join(' / ')
+  const sub = atRoot || coldPlugin ? '' : own ? (own.desc || '') : st.path === '' ? (rootRow?.desc ?? ROOT_LOOK[st.root]?.desc ?? '') : [rootName, ...splitPath(st.path)].join(' / ')
   const pinned = !atRoot && !own && home?.isShortcut ? home.isShortcut(st.root, st.path) : false
 
   // The home's header is the Chats header, class for class, so the two tabs
@@ -1486,7 +1489,7 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
     }
     if (st.roots.loaded && !st.roots.error) body.push(homeShortcuts(files, home, go))
   } else if (!own && st.root?.startsWith?.('@')) {
-    body.push(h('div', { class: 'fs-quiet', text: 'Loading…' }))
+    body.push(h('div', { class: 'fs-quiet', 'aria-busy': 'true' }))
   } else if (own) {
     if (st.listing.error) body.push(errorBox(st.listing.error, st.listing.status, () => files.loadFolder()))
     else body.push(files.registry.invoke(own, 'render', { files, go, wide }))

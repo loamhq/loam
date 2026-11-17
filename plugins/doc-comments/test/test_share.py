@@ -103,6 +103,80 @@ def quote_body(kind="comment", quote="The first line", **kw):
     return {"kind": kind, "quote": quote, "text": "a note", **kw}
 
 
+class WhatALinkReads(unittest.TestCase):
+    """Round 3 of the walk (2026-11-17), the owner's decisions: history is the
+    owner's; a visitor never sees or changes the frontmatter; a group
+    visitor cannot take a name in use here; one's own agent's note is one's
+    own; a suggestion can be withdrawn."""
+
+    def test_history_and_versions_are_not_found_for_every_mode(self):
+        w = World()
+        for mode in ("view", "comment", "edit"):
+            _, tok = w.link(mode)
+            c = w.login(tok)
+            for rest, q in (("/api/doc/history", ""), ("/api/doc/version", "save=base")):
+                ans, _ = w.req("GET", tok, rest, cookie=c, query=q)
+                self.assertEqual(ans.status, 404, (mode, rest))
+
+    def test_body_only_and_the_frontmatter_kept_on_a_save(self):
+        w = World()
+        _, tok = w.link("edit")
+        c = w.login(tok)
+        _, doc = w.req("GET", tok, "/api/doc", cookie=c)
+        self.assertFalse(doc["text"].startswith("---"), doc["text"][:40])
+        self.assertNotIn("loam_doc_id", doc["text"])
+        stored = w.store.files["vault:Plans/plan.md"]
+        front = stored[:stored.index("\n---\n") + 5]
+        # a note by position in the body lands on the same words in the file
+        s = doc["text"].index("first line")
+        ans, got = w.req("POST", tok, "/api/doc/notes", {"kind": "comment", "start": s, "end": s + 10,
+                                                         "quote": "first line", "revision": doc["revision"], "text": "x"}, cookie=c)
+        self.assertEqual(ans.status, 201, got)
+        n = [x for x in got["notes"] if x["id"] == got["note"]][0]
+        self.assertEqual(got["text"][n["where"]["start"]:n["where"]["end"]], "first line")
+        self.assertEqual(set(n["anchor"]), {"quote"})
+        # a save that tries to rewrite the id line changes the body only
+        evil = "---\nloam_doc_id: d-zzzzzzzzzz\ncreated_by: Mallory\n---\n" + got["text"].replace("first line", "first row")
+        ans, saved = w.req("POST", tok, "/api/doc/save", {"base_revision": got["revision"], "base_text": got["text"], "text": evil}, cookie=c)
+        self.assertEqual(ans.status, 200, saved)
+        now = w.store.files["vault:Plans/plan.md"]
+        self.assertTrue(now.startswith(front.split("last_modified_by")[0][:30]), now[:120])
+        self.assertIn("loam_doc_id: " + w.did, now.split("\n---\n")[0])
+        self.assertNotIn("Mallory", now.split("\n---\n")[0])
+        self.assertIn("first row", now)
+        # and the doc's notes and links still work
+        ans, _ = w.req("GET", tok, "/api/doc", cookie=c)
+        self.assertEqual(ans.status, 200)
+
+    def test_a_group_visitor_cannot_take_a_name_in_use_here(self):
+        w = World()
+        w.link("comment", name="Morgan")
+        _, tok = w.link("comment", name=None)
+        for taken in ("Sam", "sam ", "ＳＡＭ", "Ada", "morgan", "MORGAN"):
+            ans, _ = w.req("POST", tok, "/open", {"password": "right-password"})
+            c = [v for k, v in ans.headers if k == "Set-Cookie"][0].split(";")[0].split("=", 1)[1]
+            ans, got = w.req("POST", tok, "/api/name", {"name": taken}, cookie=c)
+            self.assertEqual(ans.status, 409, taken)
+            self.assertEqual(got["error"].split(".")[0], "That name is taken here")
+        self.assertTrue(w.login(tok, name="Robin"))
+
+    def test_own_agents_note_resolved_and_own_suggestion_withdrawn(self):
+        w = World()
+        _, tok = w.link("comment", name="Robin")
+        c = w.login(tok)
+        ans, got = w.req("POST", tok, "/api/agent-key", {}, cookie=c)
+        key = got["key"]
+        ans, got = w.req("POST", tok, "/api/doc/notes", quote_body(), key=key, share=False)
+        self.assertEqual(ans.status, 201, got)
+        ans, got = w.req("POST", tok, f"/api/doc/notes/{got['note']}/resolve", {}, cookie=c)
+        self.assertEqual(ans.status, 200, got)
+        ans, got = w.req("POST", tok, "/api/doc/notes", quote_body("suggestion", replacement="The first row"), cookie=c)
+        nid = got["note"]
+        ans, got = w.req("POST", tok, f"/api/doc/notes/{nid}/withdraw", {}, cookie=c)
+        self.assertEqual(ans.status, 200, got)
+        self.assertNotIn(nid, [n["id"] for n in got["notes"]])
+
+
 class Modes(unittest.TestCase):
     def test_view(self):
         w = World()

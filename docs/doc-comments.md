@@ -188,34 +188,46 @@ notes that meets such a conflict gets its sidecar then, to hold the
 suggestion. This replaces Files' "Keep mine / Take theirs" box for Markdown
 files while the plugin is on.
 
-**Suggesting keeps my own suggestions as real text** (`page/editor/drafts.js`,
-2026-11-17). While a person is Suggesting, their own open suggestions
-("drafts") are applied to the editor's text and drawn over it as suggestions
-(old words struck, new words in the accent), so the caret always sits in
-real text: typing, deleting, pausing and typing again in one place is one run
-of edits. A pause sends what changed: each changed run of whole words, as the
-stored text has it and what it would become; a run that touches a draft
-grows it (`supersedes`: the server puts the new one in the old one's place,
-replies and all, and never replaces anyone else's), and a draft whose words
-are back as they were is withdrawn (`withdraw`; kept as rejected if someone
-replied). Nothing in the editor changes at a pause. When a draft is closed by
-anyone (accepted, rejected) its words in the editor go back to the stored
-ones before the stored text is mapped in, so an accept is not counted twice
-and a reject restores the words exactly. Leaving Suggesting draws the drafts
-over the stored text again; entering it makes my open suggestions drafts.
+**Suggesting is recorded, not compared** (`page/editor/record.js`,
+2026-11-17). While a person is Suggesting, each of their own pending
+suggestions ("drafts") is a range of the editor's text carrying the
+original words it replaces. A draft is made and grown only by the edits the
+person makes: an edit inside or touching a draft (or in the same word) grows
+it, an edit anywhere else starts a new one, and every other change moves
+drafts by CodeMirror's own position mapping. Nothing joins two drafts the
+person did not join by editing across the gap. The invariant: the stored
+text with every draft applied is the editor's text; `rebaseDrafts` in
+`editor.js` checks it on every answer, and rebuilds the drafts from the
+server's notes rather than show anything wrong.
 
-*Why:* until then a pause took the typed words out of the editor and drew
-them as a widget. The caret was left beside the widget or inside the next
-word, so typing on after a pause wrote onto the wrong side of it ("order.
-Aaa.  Bbb.The man") or made three overlapping suggestions out of one word.
-The page's diff also never splits a word now (`textdiff.js`, `changes`).
-`test/drafts.test.mjs` runs 400 seeded sequences of typing, pausing and
-deleting through the planner; `test/browser.test.mjs` types in bursts with
-real pauses (start, middle and end of a word, before punctuation, a
-paragraph's end, the top of the doc, Backspace across what was typed, beside
-and inside someone else's suggestion, a disk change mid-pause) and 200 seeded
-runs in the browser, and holds after each that accepting writes exactly what
-was on the screen and rejecting restores the original.
+A pause sends the drafts as they are: each as a passage of the stored text,
+widened to whole words and anchored on a word for an insertion, computed
+left to right so no two passages share a letter (`passages`), and sent when
+the server does not hold it as such (`supersedes` grows the draft's note;
+drafts joined by an edit keep one note and withdraw the others; a draft
+typed and deleted again is withdrawn). The editor never changes at a pause.
+An accepted draft's words become the stored ones without the editor
+changing (its caret does not move); a rejected one's original words come
+back; every other draft keeps its words and place. Entering Suggesting
+makes my open suggestions drafts; leaving it draws them over the stored
+text again.
+
+*Why, after three rounds:* the first design took the typed words out of the
+editor at each pause (the caret then sat beside a widget); the second kept
+them but worked out the drafts at each pause by comparing the editor's text
+with the stored text. A comparison cannot know that two changes 4,000
+characters apart are two things, or which of two equal words a change
+belongs to: two drafts merged into one that swallowed the text between,
+an accept was counted twice, and a deletion beside a draft wrote words
+never typed. Editors that track changes record them; this one now does.
+`test/record.test.mjs` runs 500 seeded sequences keeping several drafts
+open at once (two or more in every run, four or more in nearly all),
+mixing typing, deleting original words, typing over a selection, undo and
+redo, and accepting or rejecting in any order, checking after every step
+the invariant, that no two passages overlap, that accepting or rejecting one
+changes no other, and that rejecting all gives the original exactly.
+`test/browser.test.mjs` does the same against the real server in a browser
+(120 seeded runs, and a named test for each case the walk found).
 
 The live marks are drawn over **the text as stored**: whenever the stored
 text moves (an accept, someone's save, an edit on disk), that is the base
@@ -231,6 +243,17 @@ replaces the passage as it always did.
 doc's last change, the server writes the text from just before it back (a
 save of its own) and the suggestion is open again; later than that, History
 restores.
+
+### What a note points at, strictly
+
+A note whose passage was edited is found again near where it was ("text
+changed since"). A passage *elsewhere* that merely looks like it is not
+the note's: a changed match must lie within the quote's own length of the
+note's old place mapped through the edit, and share at least half the quote
+in one run. Otherwise the note is detached, ⋯ carries a quiet mark, and its
+menu's first row reads "1 note lost its passage" (2026-11-17: a note on
+"Paragraph 6b, after the blocks", deleted, had moved to "Paragraph 5b, after
+the blocks").
 
 ### Changes on disk
 
@@ -400,7 +423,26 @@ the visitor's session is already a cookie of its own scoped to
     own threads;
   - edit also saves (through the same merge), accepts and rejects, and
     resolves any thread;
-  - no link restores a version or touches links.
+  - no link restores a version or touches links;
+  - a visitor resolves a thread their own agent opened, and withdraws or
+    deletes their own suggestion or comment.
+- **What a link reads** (the owner's decisions, 2026-11-17). History and
+  earlier versions are the owner's: `doc/history` and `doc/version` are not
+  found through the door, for every mode, so words removed before a doc was
+  shared stay unread. A visitor sees and writes the doc's **body** only:
+  the door serves the text without its frontmatter (and notes' anchors
+  without the words around them), shifts positions both ways, and a
+  visitor's save keeps the frontmatter as it is stored (an id line rewritten
+  through a link had made the doc's links and notes vanish). Notes already
+  on a doc are shown to visitors (one set of notes), so the invite card
+  says so in one quiet line. A group visitor cannot take the owner's name, a
+  persona's, or the name on one of this doc's named links (compared
+  case-folded and NFKC-normalised).
+- **What the visitor's page loads** is derived: the door serves `share.js`,
+  `share.css` and every module they import, followed through the graph
+  (`page_files`). A hand-kept list missed a new module once and every
+  visitor saw an empty page; `test/browser.test.mjs` loads the visitor's
+  page through the door with no owner cookie and fails on any 404.
 - **Writes** from the page carry `X-Loam-Share: 1`, so another site cannot
   post with the visitor's cookie. Each link may write 120 times an hour and
   600 a day. Notes stop at a 4 MiB sidecar, and a body is at most 1.5 MiB.

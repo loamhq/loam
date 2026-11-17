@@ -94,3 +94,7 @@ test('server positions (code points, raw CRLF) and editor positions agree', () =
     assert.ok(e > s)
   }
 })
+
+test('the diff never splits a word', () => {
+  assert.deepEqual(changes('happened, and that', 'happened, aa and that'), [{ from: 10, to: 10, insert: 'aa ' }])
+})

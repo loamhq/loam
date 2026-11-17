@@ -22,6 +22,16 @@ import difflib
 CONTEXT = 32          # characters of context kept on each side
 MIN_RATIO = 0.6       # how like the quote a changed passage must be
 BRACKET_RATIO = 0.45  # ... when its context on both sides still matches
+MIN_SHARED = 0.5      # the share of the quote a changed passage must keep in one run
+
+
+def _near(start: int, hint: int, quote: str) -> bool:
+    """A changed passage is where the note was (its old place mapped through
+    the edit): a like passage elsewhere is a different passage, and the note
+    is detached rather than moved onto it (2026-11-17: a note on "Paragraph
+    6b, after the blocks" whose paragraph was deleted had moved to
+    "Paragraph 5b, after the blocks")."""
+    return abs(start - hint) <= max(48, len(quote))
 
 
 def make(text: str, start: int, end: int) -> dict:
@@ -86,7 +96,7 @@ def _bracketed(text: str, anchor: dict, hint: int):
             continue
         between = text[start:s]
         r = _ratio(quote, between)
-        if r >= BRACKET_RATIO:
+        if r >= BRACKET_RATIO and _near(start, hint, quote):
             key = (r, -abs(start - hint))
             if best is None or key > best[0]:
                 best = (key, start, s)
@@ -100,7 +110,7 @@ def _window(text: str, quote: str, hint: int):
         return None
     sm = difflib.SequenceMatcher(None, text, quote, autojunk=False)
     m = sm.find_longest_match(0, len(text), 0, len(quote))
-    if m.size < max(6, min(12, len(quote) // 3)):
+    if m.size < max(6, min(12, len(quote) // 3), int(len(quote) * MIN_SHARED)):
         return None
     base = m.a - m.b
     best = None
@@ -115,7 +125,7 @@ def _window(text: str, quote: str, hint: int):
             key = (r, -abs(s - hint))
             if best is None or key > best[0]:
                 best = (key, s, e)
-    if best is None or best[0][0] < MIN_RATIO:
+    if best is None or best[0][0] < MIN_RATIO or not _near(best[1], hint, quote):
         return None
     s, e = _snap(text, best[1], best[2])
     return s, e
