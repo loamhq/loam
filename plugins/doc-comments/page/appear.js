@@ -30,8 +30,12 @@ export function appearSelect({ value, def, alias, onChange, withDefault = false,
   opts.push(['names', how('names', alias)], ['one', how('one', alias)])
   const s = h('select', { class: 'dc-ap-sel', 'aria-label': label || 'How your agents appear' },
     opts.map(([v, t]) => h('option', { value: v, selected: v === value ? true : null }, t)))
-  s.addEventListener('change', () => onChange(s.value))
-  return s
+  const shown = h('span', { class: 'dc-ap-shown', text: (opts.find(o => o[0] === value) || opts[0])[1] })
+  s.addEventListener('change', () => { shown.textContent = (opts.find(o => o[0] === s.value) || opts[0])[1]; onChange(s.value) })
+  // The words chosen, drawn as words, with the select laid over them: a
+  // select is as wide as its longest choice, which left a gap before the
+  // chevron. The select still takes the keyboard and the phone's picker.
+  return h('span', { class: 'dc-ap-pick' }, shown, icon('chevronDown', 12), s)
 }
 
 // The sheet for one doc in Shared with me: three plain choices, and the one

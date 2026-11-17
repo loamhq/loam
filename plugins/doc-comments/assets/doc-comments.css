@@ -651,8 +651,12 @@
 /* How the owner's agents appear to others (2026-11-17): a select that reads
    as part of its sentence, at the foot of Shared Docs and of a doc's share
    sheet, and a small sheet of three choices for a doc in Shared with me. */
-.dc-ap-sel { max-width: 100%; text-overflow: ellipsis; }
-.dc-tk-mem .dc-ap-sel:focus-visible { outline: 2px solid var(--signal-crema, #B4733A); outline-offset: 1px; }
+.dc-ap-pick { position: relative; display: inline-flex; align-items: center; gap: 3px; max-width: 100%; padding: 2px 5px; border-radius: 6px; font-weight: 600; color: var(--paper-ink-2, #4B4741); }
+.dc-ap-pick:hover { background: var(--paper-hover-alpha, rgba(0,0,0,.05)); }
+.dc-ap-pick:focus-within { outline: 2px solid var(--signal-crema, #B4733A); outline-offset: 1px; }
+.dc-ap-shown { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-ap-pick svg { flex: none; }
+.dc-tk-mem .dc-ap-pick .dc-ap-sel { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; padding: 0; }
 .dc-ap-line { flex-wrap: wrap; margin: 12px 0 0; text-align: center; }
 .dc-ap-foot { flex-wrap: wrap; margin: 26px 8px 10px; text-align: center; cursor: default; }
 .dc-ap-list { display: grid; gap: 2px; }

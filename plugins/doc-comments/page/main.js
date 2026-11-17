@@ -474,8 +474,10 @@ export function activate(loam) {
     }
     return H('label', { class: 'dc-tk-mem dc-ap-foot', key: 'sd:appear' },
       H('span', { text: 'Your agents appear to others' }),
-      H('select', { class: 'dc-ap-sel', 'aria-label': 'How your agents appear to others', onchange: (e) => choose(e.target.value) },
-        ['names', 'one'].map(v => H('option', { value: v, selected: v === a.appear, text: how(v, a.alias) }))))
+      H('span', { class: 'dc-ap-pick' },
+        H('span', { class: 'dc-ap-shown', text: how(a.appear, a.alias) }), glyph('chevronDown', 12),
+        H('select', { class: 'dc-ap-sel', 'aria-label': 'How your agents appear to others', onchange: (e) => choose(e.target.value) },
+          ['names', 'one'].map(v => H('option', { value: v, selected: v === a.appear, text: how(v, a.alias) })))))
   }
 
   function sharedByMe({ go, files, entry }) {

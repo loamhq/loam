@@ -822,3 +822,25 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   host** (`X-Forwarded-Host: auth.<domain>`, `X-Forwarded-Proto: https`)
   with the `loam_auth` cookie alone; that is how `/_loam/passkeys` lists the
   signed-in person's passkeys without Loam deciding whose they are.
+
+## 2026-11-17 — doc comments: hiding which agents the owner has
+
+- **Hide where an answer leaves, not in what is kept.** The door masks the
+  owner's agents in every answer to a visitor (`appear.mask`, by agent id,
+  over authors, closers, spans and `people`), so the sidecar stays true and
+  a change of choice covers past notes. Prove it by grepping everything the
+  door serves, by a browser and by an agent key, for every persona's name.
+- **The door's session cookie is `Secure`**: curl on loopback http never
+  sends it back from a cookie jar. Pass `Cookie:` by hand.
+- **An uncommitted file in the job's tree stops a mid-job landing** at its
+  checkout step ("would be overwritten"). Commit before `--land`, and edit
+  nothing tracked while it runs; a background landing needs a long timeout
+  (the default 10 min killed one mid-test, leaving the tree detached on the
+  merge commit; `git checkout <branch>` put it back, nothing reached main).
+- **A native `<select>` is as wide as its longest option.** In a sentence,
+  draw the chosen words and lay the select over them at opacity 0; it still
+  takes the keyboard and the phone's own picker.
+- **A plugin page change can be previewed against live before landing**:
+  route `/api/plugins/<id>/files/*` to the tree's `plugins/<id>/` in the
+  walk's Playwright context, beside the app (8081), gateway (8933) and door
+  (8936) routes.
