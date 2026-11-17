@@ -407,9 +407,14 @@ function faceTip() {
     // pixels, a fixed position in the page's own.
     const r = face.getBoundingClientRect()
     const scale = (document.body.getBoundingClientRect().width / (document.body.offsetWidth || 1)) || 1
-    node.style.left = `${(r.left + r.width / 2) / scale}px`
+    // Centred over the face, kept inside the window.
+    const vw = document.documentElement.clientWidth / scale
+    const half = Math.min(node.offsetWidth, vw - 16) / 2
+    node.style.left = `${Math.min(Math.max((r.left + r.width / 2) / scale, half + 8), vw - half - 8)}px`
     node.style.top = `${r.top / scale}px`
     requestAnimationFrame(() => node?.classList.add('on'))
+    // Any next touch or click elsewhere puts it away.
+    setTimeout(() => document.addEventListener('pointerdown', hide, { once: true, capture: true }), 0)
   }
   function hide() {
     clearTimeout(timer)
