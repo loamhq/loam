@@ -36,7 +36,7 @@ export function createAgentDrafts({ api, redraw, made = () => {} }) {
         st.error ? h('p', { role: 'alert', class: 'schedule-error', text: st.error }) : null,
         st.result ? h('p', { role: 'status', text: `${st.result.agent.name || st.result.agent.id} is ready.` }) : null,
         !st.rows.length && !st.loading && !st.result ? h('p', { class: 'note', text: 'Start by telling the agent what you have in mind. Its draft will appear here for your review.' }) : null,
-        st.rows.map(d => h('article', { key: d.draft }, h('h3', { text: `${d.emoji || ''} ${d.name}`.trim() }), h('p', { class: 'note', text: `Revision ${d.rev}` }),
+        st.rows.map(d => h('article', { key: d.draft }, h('h3', { text: d.name || '' }), h('p', { class: 'note', text: `Revision ${d.rev}` }),
           ...['soul', 'config'].map(key => h('details', {}, h('summary', { text: key === 'soul' ? 'Soul' : 'Config' }), h('pre', { text: d[key] }))),
           (d.problems || []).map(problem => h('p', { class: 'note warn', text: typeof problem === 'string' ? problem : JSON.stringify(problem) })),
           h('button', { class: 'pillbtn primary', disabled: st.busy || st.loading || !d.ready, text: st.busy ? 'Creating…' : 'Create agent', onclick: () => confirm(d) })))) : null)

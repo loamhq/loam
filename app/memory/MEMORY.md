@@ -37,3 +37,9 @@ have never met.
   switches `data-theme` and `theme-color` at `p = 0.5`, and removes all inline
   overrides on completion or manual interruption. `public/themes/*` and non-`public/tokens.css` files in `public/` are tested against literal colour
   patterns by `test/themes.test.js`.
+- **Agent faces have no emoji** (retired 2026-11-16): an agent's face is
+  always the theme's drawn face (`blob()` / `agentFace()`) or its uploaded
+  image (`face`). `sessions.js`, `agent-profile.js` and `agent-drafts.js`
+  ignore any `emoji` field on agent/draft records, and the profile face
+  control offers only upload and removal. Thread icons (`thread.icon` in
+  `thread-identity.js`) remain a separate concept.

@@ -31,7 +31,6 @@ export function createAgents(entries = []) {
       ...(typeof entry.description === 'string' && entry.description.trim() ? { description: entry.description.trim() } : {}),
       face: entry.face ?? null,
       archived: entry.archived ?? null,
-      emoji: typeof entry.emoji === 'string' && entry.emoji !== '' ? entry.emoji : null,
     }))
 
   const shared = new Map()
@@ -55,7 +54,7 @@ export function agentOf(agents, id) {
   const key = String(id ?? '')
   const known = agents?.byId?.get(key)
   if (known) return known
-  return { id: key, name: capitalise(key), emoji: null, initial: letters(key)[0] ?? '?' }
+  return { id: key, name: capitalise(key), initial: letters(key)[0] ?? '?' }
 }
 
 export function agentName(agents, id) {
@@ -93,7 +92,6 @@ export function agentLook(id, agents = null) {
     shape: AGENT_SHAPES[hash % AGENT_SHAPES.length],
     initial: agent.initial || '?',
     name: agent.name,
-    emoji: agent.emoji,
     imageSrc: agent.face?.url?.replace(/^\/v1\//, '/api/') || null,
   }
 }

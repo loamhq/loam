@@ -4,7 +4,7 @@ import { owner, setOwner } from './owner.js'
 // discarded on reload and never sent to the runtime or stored in the browser.
 export function createThreadFixture({ modern = true } = {}) {
   if (!owner().id) setOwner({ id: 'preview-owner', name: 'You', accepts: ['preview-owner'] })
-  const agents = [ { id: 'sprout', name: 'Sprout', emoji: null }, { id: 'quill', name: 'Quill', emoji: null }, { id: 'scout', name: 'Scout', emoji: null }, { id: 'ledger', name: 'Ledger', emoji: null }, { id: 'pip', name: 'Pip', emoji: null } ]
+  const agents = [ { id: 'sprout', name: 'Sprout' }, { id: 'quill', name: 'Quill' }, { id: 'scout', name: 'Scout' }, { id: 'ledger', name: 'Ledger' }, { id: 'pip', name: 'Pip' } ]
   const providers = [ { id: 'claude-code', name: 'Claude Code', connected: true, models: [{ id: 'swift', name: 'Swift' }, { id: 'deep', name: 'Deep' }] }, { id: 'codex', name: 'Codex', connected: true }, { id: 'antigravity', name: 'Antigravity', connected: true, usage: null } ]
   const now = () => new Date().toISOString()
   let counter = 10

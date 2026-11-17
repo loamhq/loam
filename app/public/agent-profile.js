@@ -200,7 +200,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     const e = st.edit
     return h('form', { class: 'profile-editor', key: `edit:${field}`, onsubmit: event => { event.preventDefault(); save(e.value) } },
       h('label', { for: `profile-${field}`, text: label }),
-      h('input', { id: `profile-${field}`, class: 'field-input', type: time ? 'time' : 'text', value: e.value, disabled: st.busy, required: time, onkeydown: event => { if (event.key === 'Escape' && !st.busy) { event.preventDefault(); event.stopPropagation(); st.edit = null; st.error = ''; host.schedule() } }, maxlength: field === 'display' ? 40 : field === 'emoji' ? 16 : undefined, oninput: event => { e.value = event.target.value } }),
+      h('input', { id: `profile-${field}`, class: 'field-input', type: time ? 'time' : 'text', value: e.value, disabled: st.busy, required: time, onkeydown: event => { if (event.key === 'Escape' && !st.busy) { event.preventDefault(); event.stopPropagation(); st.edit = null; st.error = ''; host.schedule() } }, maxlength: field === 'display' ? 40 : undefined, oninput: event => { e.value = event.target.value } }),
       help ? h('p', { class: 'note', text: help }) : null,
       h('div', { class: 'profile-actions' }, h('button', { class: 'pillbtn primary', type: 'submit', disabled: st.busy, text: st.busy ? 'Saving…' : 'Save' }), h('button', { class: 'pillbtn', type: 'button', disabled: st.busy, text: 'Cancel', onclick: () => { st.edit = null; st.error = ''; host.schedule() } })))
   }
@@ -242,7 +242,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     return [h('div', { class: 'agent-profile', key: `agent-profile:${agent}` },
       h('header', { class: 'profile-hero' },
         h('div', { class: 'profile-identity' },
-          h('button', { class: 'profile-face', disabled: st.busy, 'aria-label': `Change ${name}’s face`, onclick: () => { st.edit = st.edit?.field === 'face' ? null : { field: 'face' }; host.schedule() } }, blob({ ...look, imageSrc: data.identity.face?.url?.replace(/^\/v1\//, '/api/') || look.imageSrc }, { size: 64, font: 28 })),
+          h('button', { class: 'profile-face', disabled: st.busy, 'aria-label': `Change ${name}’s face`, onclick: () => { st.edit = st.edit?.field === 'face' ? null : { field: 'face' }; host.schedule() } }, blob({ ...look, imageSrc: data.identity.face === null ? null : data.identity.face?.url?.replace(/^\/v1\//, '/api/') || look.imageSrc }, { size: 64, font: 28 })),
           h('div', {}, st.edit?.field === 'display' ? editor('display', name, value => c.patch({ display: value }), { label: 'Display name' }) : h('button', { class: 'profile-name display', disabled: st.busy, 'aria-label': `Rename ${name}`, text: name, onclick: () => edit('display', name) }),
             h('p', { class: 'profile-status note', text: isArchived ? 'Archived' : profileStatus(data.status) })),
           h('button', { class: 'iconbtn profile-menu-button', 'data-profile-actions': c === host.profiles ? 'page' : 'settings', 'aria-label': 'Agent actions', 'aria-haspopup': 'menu', 'aria-expanded': String(Boolean(st.menu)), onclick: () => { st.menu = !st.menu; host.schedule() } }, icon.dots(20))),
@@ -251,9 +251,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
           { title: 'Agent actions', heading: false, anchored: true, width: 220, anchor: `[data-profile-actions="${c === host.profiles ? 'page' : 'settings'}"]`, close: () => { st.menu = false; host.schedule() } }) : null,
         st.edit?.field === 'face' ? h('div', { class: 'profile-face-options' }, upload,
           h('button', { class: 'pillbtn', text: 'Upload a face', disabled: st.busy, onclick: () => upload.click() }),
-          data.identity.face ? h('button', { class: 'pillbtn', text: 'Remove uploaded face', disabled: st.busy, onclick: () => c.face() }) : null,
-          h('button', { class: 'pillbtn', text: 'Change emoji', disabled: st.busy, onclick: () => edit('emoji', data.identity.emoji) })) : null,
-        editor('emoji', data.identity.emoji, value => c.patch({ emoji: value || null }), { label: 'Emoji', help: 'One emoji. Clear to restore the original.' }),
+          data.identity.face ? h('button', { class: 'pillbtn', text: 'Remove uploaded face', disabled: st.busy, onclick: () => c.face() }) : null) : null,
         st.soul ? h('blockquote', { class: 'profile-soul', cite: data.files.soul?.path }, h('p', { text: st.soul }), h('cite', { text: 'From the soul' })) : null,
         st.soulError ? h('p', { class: 'note', role: 'status', text: st.soulError }) : null,
         h('div', { class: 'profile-actions' },
