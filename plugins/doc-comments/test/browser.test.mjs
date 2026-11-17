@@ -2097,6 +2097,108 @@ test('the share sheet on a desktop stays the centred card, with no handle', { sk
   await page.done()
 })
 
+// -- the agents sheet on a phone, and "Remembered for" that fits (2026-11-17) ------
+
+// Core gives every select a 44px touch height (app/public/style.css); the
+// harness does not load core, so the rule is added where it matters.
+const CORE_SELECT = 'button, select, input:not([type="checkbox"]):not([type="radio"]):not([type="file"]) { min-height: 44px; }'
+
+async function openAppear(page) {
+  await page.addStyleTag({ url: '/plugin/assets/withme.css' })
+  await page.addStyleTag({ content: CORE_SELECT })
+  await page.evaluate(async () => {
+    const { openAppearSheet } = await import('/plugin/page/appear.js')
+    window.__chosen = []
+    openAppearSheet({ title: 'A weekend in the hills', there: 'Sam’s Loam', value: 'default', def: 'names', alias: "Robin's agent", agent: 'Iris', onChoose: async (v) => { window.__chosen.push(v); return true } })
+  })
+  await page.waitForSelector('.dc-ap-scrim.on .dc-ap-dlg')
+  await page.waitForTimeout(450)
+  return page.evaluate(() => {
+    const d = document.querySelector('.dc-ap-dlg')
+    const r = d.getBoundingClientRect()
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: innerWidth, h: innerHeight, bs: d.parentElement.classList.contains('dc-bs'), grab: getComputedStyle(d.querySelector('.dc-bs-grab')).display, bl: getComputedStyle(d).borderBottomLeftRadius }
+  })
+}
+
+test('the agents sheet on a phone is the share sheet\'s bottom sheet: edge to edge, on the foot, a handle; a drag down closes it', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Shared\n\nA line.\n')
+  const ctx = await browser.newContext({ viewport: { width: 430, height: 900 }, hasTouch: true, isMobile: true })
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto(`${base}/?phone&path=${encodeURIComponent(p)}`)
+  await page.waitForSelector('.cm-content')
+  const b = await openAppear(page)
+  assert.ok(b.bs, 'the scrim is a bottom sheet (sheet.js)')
+  assert.ok(Math.abs(b.left) < 1 && Math.abs(b.right - b.w) < 1, `edge to edge (${JSON.stringify(b)})`)
+  assert.ok(Math.abs(b.bottom - b.h) < 1, 'standing on the foot of the screen')
+  assert.equal(b.grab, 'block', 'the handle shows')
+  assert.equal(b.bl, '0px', 'square at the foot')
+  await shot(page, 'appear-sheet-430')
+  await drag(page, 215, b.top + 10, b.top + 260)
+  await until(page, () => !document.querySelector('.dc-ap-scrim'), null, 2000)
+  assert.deepEqual(errors, [])
+  await ctx.close()
+})
+
+test('the agents sheet on a desktop stays the centred card, with no handle; a choice is made and it closes', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Shared\n\nA line.\n')
+  const page = await open({ doc: p })
+  const b = await openAppear(page)
+  assert.equal(b.grab, 'none')
+  assert.ok(Math.abs((b.left + b.right) / 2 - b.w / 2) < 2 && Math.abs((b.top + b.bottom) / 2 - b.h / 2) < 2, `centred (${JSON.stringify(b)})`)
+  assert.notEqual(b.bl, '0px')
+  await page.click('.dc-ap-opt:nth-child(3)')
+  await until(page, () => !document.querySelector('.dc-ap-scrim'), null, 2000)
+  assert.deepEqual(await page.evaluate(() => window.__chosen), ['one'])
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+for (const [w, phone] of [[1440, false], [430, true]]) {
+  test(`"Remembered for" in a link's ⋯ menu fits inside the menu, and the menu is whole (${w})`, { skip }, async () => {
+    await start()
+    const p = await newDoc('# Shared\n\nA line.\n')
+    await devLink('comment', 'Robin', p)
+    const ctx = await browser.newContext({ viewport: { width: w, height: 900 }, hasTouch: phone, isMobile: phone })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(`${base}/?${phone ? 'phone&' : ''}path=${encodeURIComponent(p)}`)
+    await page.addStyleTag({ content: CORE_SELECT })
+    await page.waitForSelector('.dc-sharebtn.has')
+    await page.click('.dc-sharebtn')
+    await page.waitForSelector('.dc-share-scrim.on .dc-sw-row')
+    await page.waitForTimeout(450)
+    await page.click('.dc-sw-row .dc-ddw:last-child .dc-ib')
+    await page.waitForSelector('.dc-rowmenu')
+    await page.waitForTimeout(250)
+    const m = await page.evaluate(() => {
+      const menu = document.querySelector('.dc-rowmenu').getBoundingClientRect()
+      const row = document.querySelector('.dc-mi-days')
+      const chip = row.querySelector('.dc-ap-pick').getBoundingClientRect()
+      const sel = row.querySelector('select').getBoundingClientRect()
+      const r = row.getBoundingClientRect()
+      const at = (y) => document.elementFromPoint(menu.left + menu.width / 2, y)?.closest('.dc-rowmenu')
+      return { menu: menu.toJSON(), chip: chip.toJSON(), sel: sel.toJSON(), row: r.toJSON(), h: innerHeight, whole: Boolean(at(menu.top + 6) && at(menu.bottom - 6)), shown: row.querySelector('.dc-ap-shown').textContent }
+    })
+    console.log('# days', w, JSON.stringify(m))
+    assert.ok(m.chip.right <= m.menu.right - 8, `the days sit inside the menu, clear of its edge (${JSON.stringify(m)})`)
+    assert.ok(m.sel.left >= m.row.left - 0.5 && m.sel.right <= m.row.right + 0.5 && m.sel.bottom <= m.row.bottom + 0.5, 'the select under them stays within its row')
+    assert.ok(m.whole && m.menu.top >= 0 && m.menu.bottom <= m.h, 'the menu is whole, not cut off by the dialog')
+    assert.equal(m.shown, '30 days')
+    await page.selectOption('.dc-mi-days select', '7')
+    await until(page, () => !document.querySelector('.dc-rowmenu') || document.querySelector('.dc-mi-days .dc-ap-shown')?.textContent === '7 days', null, 3000)
+    if (!await page.$('.dc-rowmenu')) await page.click('.dc-sw-row .dc-ddw:last-child .dc-ib')
+    await until(page, () => document.querySelector('.dc-mi-days .dc-ap-shown')?.textContent === '7 days', null, 3000)
+    await shot(page, `row-menu-days-${w}`)
+    assert.deepEqual(errors, [])
+    await ctx.close()
+  })
+}
+
 // -- the selection popup waits until the selecting stops -------------------------
 
 // Every change of the popup's classes, timed, from the page itself: what the

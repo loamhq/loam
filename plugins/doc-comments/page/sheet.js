@@ -3,7 +3,8 @@
 // phone. The look is CSS (`.dc-bs` in doc-comments.css, at 600px and less);
 // this adds what CSS cannot: a drag down closes it, the sheet stands on the
 // keyboard rather than under it, and the field being typed in stays in view.
-// On a wider screen it does nothing, and the dialog stays the centred card.
+// On a wider screen the dialog stays the centred card, and only the menus
+// inside it are looked after (below).
 //
 // The scrim is the one lasting node: its dialog is drawn again on every
 // change, so everything here listens on the scrim and finds the dialog anew.
@@ -76,17 +77,29 @@ export function bottomSheet(scrim, { close }) {
 
   // A menu inside the sheet that would hang past its foot opens upward; on
   // a short sheet it may rise past the sheet's top, over the page, and the
-  // sheet lets it show while it is open (the next drawing closes it).
+  // sheet lets it show while it is open (the next drawing closes it). On a
+  // wider screen the centred card, when it does not scroll, lets the menu
+  // hang past its foot instead, where the screen has room (2026-11-17: the
+  // card cut a link's ⋯ menu off at its foot).
   const flip = globalThis.MutationObserver && new MutationObserver(() => {
     const s = sheet()
-    if (!phone() || !s) return
+    if (!s) return
+    const menus = [...s.querySelectorAll('.dc-menu:not(.dc-up)')]
+    if (!menus.length) return
     const box = s.getBoundingClientRect()
-    for (const m of s.querySelectorAll('.dc-menu:not(.dc-up)')) {
+    // Whether the sheet scrolls of itself: a menu hanging past its foot
+    // makes it scroll, so it is set aside while that is measured.
+    for (const m of menus) m.style.display = 'none'
+    const still = s.scrollHeight <= s.clientHeight + 1
+    for (const m of menus) m.style.display = ''
+    for (const m of menus) {
       const r = m.getBoundingClientRect()
+      if (r.bottom <= box.bottom - 8) continue
+      if (!phone() && still && r.bottom <= innerHeight - 8) { s.classList.add('dc-bs-spill'); continue }
       const ddw = m.parentElement?.getBoundingClientRect()
-      if (r.bottom <= box.bottom - 8 || !ddw || ddw.top - r.height - 6 < 8) continue
+      if (!ddw || ddw.top - r.height - 6 < 8) continue
       m.classList.add('dc-up')
-      if (ddw.top - r.height - 6 < box.top && s.scrollHeight <= s.clientHeight) s.classList.add('dc-bs-spill')
+      if (ddw.top - r.height - 6 < box.top && still) s.classList.add('dc-bs-spill')
     }
   })
   flip?.observe(scrim, { childList: true, subtree: true })

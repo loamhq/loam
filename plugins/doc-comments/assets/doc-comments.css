@@ -512,8 +512,8 @@
 .dc-sw-row .dc-modepill { height: 30px; background: none !important; font-size: 13px !important; padding: 0 8px 0 10px !important; }
 .dc-sw-row .dc-modepill:hover, .dc-sw-row .open .dc-modepill { background: var(--paper-hover-alpha, rgba(0,0,0,.05)) !important; }
 .dc-dlg .dc-ddw { position: relative; }
-.dc-dlg .dc-menu { position: absolute; top: calc(100% + 6px); right: 0; width: 250px; background: var(--paper-pane, #F6F3EE); border-radius: 16px; padding: 5px; z-index: 5; box-shadow: 0 16px 44px color-mix(in srgb, #000 16%, transparent), 0 0 0 1px var(--paper-rule, rgba(0,0,0,.1)); animation: dc-pop .15s cubic-bezier(.2,.8,.2,1); }
-.dc-dlg .dc-mi { display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px 10px; border-radius: 11px; text-align: left; }
+.dc-dlg .dc-menu { position: absolute; top: calc(100% + 6px); right: 0; width: 250px; box-sizing: border-box; background: var(--paper-pane, #F6F3EE); border-radius: 16px; padding: 5px; z-index: 5; box-shadow: 0 16px 44px color-mix(in srgb, #000 16%, transparent), 0 0 0 1px var(--paper-rule, rgba(0,0,0,.1)); animation: dc-pop .15s cubic-bezier(.2,.8,.2,1); }
+.dc-dlg .dc-mi { display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px 10px; border-radius: 11px; text-align: left; box-sizing: border-box; }
 .dc-dlg .dc-mi:hover { background: var(--paper-hover-alpha, rgba(0,0,0,.05)); }
 .dc-dlg .dc-mi > svg { color: var(--paper-ink-3, #645F59); flex: none; }
 .dc-dlg .dc-mi .dc-l { flex: 1; min-width: 0; }
@@ -557,6 +557,11 @@
    the home bar, and stand on the keyboard (sheet.js, which also closes one
    on a drag down). A wider screen keeps the centred card. */
 .dc-bs-grab { display: none; }
+/* A menu that would hang past the sheet's foot opens upward, and a sheet
+   that does not scroll lets a menu show past its edge (sheet.js), at any
+   width: the centred card cut a link's ⋯ menu off at its foot. */
+.dc-bs .dc-menu.dc-up { top: auto; bottom: calc(100% + 6px); transform-origin: bottom right; }
+.dc-bs > .dc-dlg.dc-bs-spill { overflow: visible; }
 @media (max-width: 600px) {
   .dc-dlg-scrim.dc-bs { box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; padding: max(28px, env(safe-area-inset-top)) 0 0; }
   .dc-bs > .dc-dlg { width: 100%; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; border-radius: 26px 26px 0 0; padding: 6px 20px calc(18px + env(safe-area-inset-bottom)); box-shadow: 0 -10px 40px color-mix(in srgb, #000 14%, transparent); transform: translateY(100%); transition: transform .34s cubic-bezier(.2,.8,.2,1); will-change: transform; }
@@ -567,10 +572,8 @@
   /* A phone zooms the page into a field under 16px: never here. */
   .dc-bs input[type="text"] { font-size: 16px; }
   .dc-bs .dc-iv-name { text-overflow: ellipsis; }
-  .dc-bs .dc-menu.dc-up { top: auto; bottom: calc(100% + 6px); }
   /* The ticket's link, when it wraps under a long password, keeps to the right. */
   .dc-bs .dc-tk-link { margin-left: auto; }
-  .dc-bs > .dc-dlg.dc-bs-spill { overflow: visible; }
 }
 @media (max-width: 600px) and (prefers-reduced-motion: reduce) {
   .dc-bs > .dc-dlg { transform: none; transition: none; }
@@ -646,8 +649,7 @@
 .dc-sf { color: #fff; }
 .dc-sf.grp { color: var(--paper-ink-3, #645F59); background: var(--paper-card, #E9E4DC); }
 .dc-sw-who .dc-sharefaces .dc-sf { width: 24px; height: 24px; font-size: 11px; margin-right: -4px; }
-.dc-rowmenu .dc-mi-days b { white-space: nowrap; }
-.dc-rowmenu .dc-mi-days select { flex: none; }
+.dc-rowmenu .dc-mi-days b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A long password stays on one line in the ticket, scrolled if it must. */
 .dc-tk-pw { white-space: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 @media (max-width: 480px) { .dc-tk-pw { font-size: 16px !important; } }
@@ -681,7 +683,19 @@
 .dc-ap-pick:focus-within { outline: 2px solid var(--signal-crema, #B4733A); outline-offset: 1px; }
 .dc-ap-shown { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dc-ap-pick svg { flex: none; }
-.dc-tk-mem .dc-ap-pick .dc-ap-sel { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; padding: 0; }
+/* The select laid over its words (appear.js, wordSelect). Core gives every
+   select a 44px touch height; here it reaches a little past the words for
+   the finger and no further, so a sheet it sits at the foot of never scrolls
+   for it. */
+.dc-ap-pick select.dc-ap-sel { position: absolute; inset: -6px 0; width: 100%; height: auto; min-height: 0; margin: 0; border: 0; opacity: 0; cursor: pointer; font-size: 16px; padding: 0; }
+/* "Remembered for" in a link's ⋯ menu: the days in a chip that fits the
+   menu, and the select under them covering the whole row, so the row is
+   what a finger or a click opens. */
+.dc-dlg .dc-mi-days { position: relative; cursor: pointer; }
+.dc-dlg .dc-mi-days .dc-ap-pick { position: static; flex: none; gap: 4px; padding: 3px 7px 3px 9px; border-radius: 8px; background: var(--paper-card, #E9E4DC); font-size: 12.5px; color: var(--paper-ink-2, #4B4741); }
+.dc-dlg .dc-mi-days .dc-ap-pick select.dc-ap-sel { inset: 0; border-radius: 11px; }
+.dc-dlg .dc-mi-days .dc-ap-pick:focus-within { outline: none; }
+.dc-dlg .dc-mi-days:focus-within { outline: 2px solid var(--signal-crema, #B4733A); outline-offset: -2px; }
 .dc-ap-line { flex-wrap: wrap; margin: 12px 0 0; text-align: center; }
 .dc-ap-foot { flex-wrap: wrap; margin: 26px 8px 10px; text-align: center; cursor: default; }
 .dc-ap-list { display: grid; gap: 2px; }
