@@ -1,4 +1,4 @@
-import { createFiles, listFromURL, renamedResource, uploadAccept, FILES_LOCATION_HIDDEN, filesHref, vaultUrlRef, missingSentence, resolveOf, isFolder, externalHref, parseFilesPath, downloadHref, nameOf as fileNameOf, formatText, drawnTypeOf, bytesAre, folderView, fileView, ROOT_LOOK } from "../files.js"
+import { createFiles, renamedResource, uploadAccept, FILES_LOCATION_HIDDEN, filesHref, vaultUrlRef, missingSentence, resolveOf, isFolder, externalHref, parseFilesPath, downloadHref, nameOf as fileNameOf, formatText, drawnTypeOf, bytesAre, folderView, fileView, ROOT_LOOK } from "../files.js"
 import { h, kept, icon } from "../ui.js"
 import { setFileLinks, setVaultUrls } from "../markdown.js"
 import { createPicker } from "../filepicker.js"
@@ -21,13 +21,6 @@ export function mount(host, { navigation = true } = {}) {
 
 function herePath() {
   return globalThis.location?.pathname ?? '/'
-}
-
-// The path and the list it was opened from (`?list=`), what a Files address
-// is made of; the side panel's `?side=` is not part of it.
-function hereAddress() {
-  const list = listFromURL(globalThis.location?.search ?? '')
-  return herePath() + (list ? `?list=${encodeURIComponent(list)}` : '')
 }
 
 function pushAddress(data, title, href) {
@@ -153,12 +146,12 @@ function builtinFileFieldFor(f, { readOnly, mono }) {
 // Go to a folder or a file. `push: false` is for an address the browser has
 // already moved to — a load, or Back.
 let fileDestination = 0
-function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null, list = null } = {}) {
+function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null } = {}) {
   const destination = ++fileDestination
   if (navigation && host.state.wide && !routed && isFile === null && root && path) {
     const request = ++host.importRequest
     host.api('GET', `/files/stat?${new URLSearchParams({ root, path })}`).then(resource => {
-      if (destination === fileDestination && request === host.importRequest) goFiles(root, path, { isFile: !isFolder(resource), row: resource, push, fragment, mode, list })
+      if (destination === fileDestination && request === host.importRequest) goFiles(root, path, { isFile: !isFolder(resource), row: resource, push, fragment, mode })
     }).catch(() => { if (destination === fileDestination && request === host.importRequest) files.show(root, path, { keepFile: true }) })
     return true
   }
@@ -166,14 +159,7 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
   if (host.state.wide && ['settings', 'activity'].includes(host.state.sheet?.kind)) host.closeSheet()
   const beside = host.panels?.st.side
   const heldFile = beside?.kind === 'file' && beside.root === root && beside.path === path
-  // The file already open in the main panel, opened again from a plugin's
-  // list: nothing reopens, but its address now names the list it is in.
-  const mainHere = host.state.mainItem?.kind === 'file' && host.state.mainItem.root === root && host.state.mainItem.path === path && files.st.file?.root === root && files.st.file?.path === path
-  if (navigation && !routed && isFile === true && list && mainHere && host.panelId !== 'side' && !heldFile) {
-    if (files.st.root === list && hereAddress() !== filesHref(root, path, list)) globalThis.history?.replaceState?.({ files: true }, '', withSide(filesHref(root, path, list), host.panels?.st.side))
-    host.schedule(); return true
-  }
-  if (!routed && (isFile === true || (isFile === null && heldFile)) && host.panels) return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain']({ kind: 'file', root, path, row, fragment, push, list })
+  if (!routed && (isFile === true || (isFile === null && heldFile)) && host.panels) return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain']({ kind: 'file', root, path, row, fragment, push })
   if (!routed && host.panelId !== 'side') host.state.navigator = 'files'
   const hidden = root === 'system'
   if (hidden) { root = null; path = ''; isFile = false; row = null; fragment = null }
@@ -184,7 +170,7 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
   const leavingFile = files.st.file && !(isFile && files.st.file.root === root && files.st.file.path === path)
   if (leavingFile && !files.guard(null)) {
     // The page's own sheet asks; going on from it comes back here, clean.
-    files.st.sheet.proceed = proceedThen(() => goFiles(hidden ? 'system' : root, path, { isFile, row, fragment, list }))
+    files.st.sheet.proceed = proceedThen(() => goFiles(hidden ? 'system' : root, path, { isFile, row, fragment }))
     return false
   }
   host.state.mainItem = root && path ? { kind: 'file', root, path } : null
@@ -199,12 +185,11 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
     host.state.screen = 'files'
   }
   if (leavingFile && !isFile) files.closeFile()
-  // `show` keeps the list only for what turns out to be a file.
-  files.show(root, path, { isFile, row, fragment, mode, list })
+  files.show(root, path, { isFile, row, fragment, mode })
   if (hidden) files.st.notice = FILES_LOCATION_HIDDEN
-  const href = filesHref(root, path, isFile === false ? null : list)
+  const href = filesHref(root, path)
   if (navigation && hidden && herePath() !== href) globalThis.history?.replaceState?.({ files: true }, '', href)
-  else if (navigation && push && hereAddress() !== href) pushAddress({ files: true }, '', href)
+  else if (navigation && push && herePath() !== href) pushAddress({ files: true }, '', href)
   host.schedule()
   return true
 }
@@ -319,7 +304,7 @@ if (navigation) globalThis.addEventListener?.('popstate', () => {
     if (host.state.screen === 'files') {
       if (!files.guard(null)) {
         const f = files.st.file
-        if (f) pushAddress({ files: true }, '', filesHref(f.root, f.path, files.st.root))
+        if (f) pushAddress({ files: true }, '', filesHref(f.root, f.path))
         files.st.sheet.proceed = proceedThen(() => host.threads.open(thread))
         host.schedule(); return
       }
@@ -330,18 +315,18 @@ if (navigation) globalThis.addEventListener?.('popstate', () => {
   if (host.threads.st.open) { host.threads.close({ navigate: false }); host.schedule() }
   const at = parseFilesPath(herePath())
   if (at) {
-    if (!goFiles(at.root, at.path, { push: false, list: listFromURL(globalThis.location?.search ?? '') })) {
+    if (!goFiles(at.root, at.path, { push: false })) {
       // The sheet is asking: until it is answered the address stays on the file
       // the person is still on, and leaving from it goes where Back was going.
       const f = files.st.file
-      if (f) pushAddress({ files: true }, '', filesHref(f.root, f.path, files.st.root))
+      if (f) pushAddress({ files: true }, '', filesHref(f.root, f.path))
       files.st.sheet.proceed = proceedThen(() => goFiles(at.root, at.path))
     }
     return
   }
   if (host.state.screen === 'files' && !leaveFiles({ toChat: true, push: false })) {
     const f = files.st.file
-    if (f) pushAddress({ files: true }, '', filesHref(f.root, f.path, files.st.root))
+    if (f) pushAddress({ files: true }, '', filesHref(f.root, f.path))
   }
 })
 
@@ -476,8 +461,8 @@ function filesScreen() {
       'section',
       { class: 'screen files', key: 'screen:files:file' },
       fileView(files, {
-        close: () => goFiles(files.st.root, files.st.path),
-        closeLabel: files.pluginRoot() ? files.pluginRoot().name : files.st.path === '' ? (ROOT_LOOK[f.root]?.name ?? f.root) : fileNameOf(files.st.path),
+        close: () => goFiles(f.root, files.st.path),
+        closeLabel: files.st.path === '' ? (ROOT_LOOK[f.root]?.name ?? f.root) : fileNameOf(files.st.path),
         wide: false,
         field: fileFieldFor,
         home: filesHome(),

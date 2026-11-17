@@ -5,7 +5,7 @@ const outcomes = { starting: 'Getting ready…', running: 'Updating Loam…', ap
 const changeKeys = check => ['added', 'changed', 'removed'].filter(key => check?.changes?.[key]?.length)
 
 export function createUpdate({ api, changed, reload = () => location.reload(), later = setTimeout, cancel = clearTimeout }) {
-  const st = { data: null, busy: false, operation: null, error: '', refusal: null, review: null, reconnecting: false, confirmRollback: false }
+  const st = { data: null, busy: false, operation: null, error: '', refusal: null, review: null, reconnecting: false, confirmRollback: false, detailsOpen: false }
   let timer = null, disposed = false, reloaded = false
   function stop() { disposed = true; cancel(timer); timer = null }
   function follow() {
@@ -99,12 +99,18 @@ export function createUpdate({ api, changed, reload = () => location.reload(), l
       run ? h('section', { class: 'card update-progress', 'aria-label': 'Update progress' },
         h('h3', { role: 'status', text: outcomes[run.outcome] ?? run.outcome }),
         run.to_version ? h('p', { class: 'note', text: `${run.from_version || 'Earlier version'} → ${run.to_version}` }) : null,
-        h('ol', { class: 'update-steps' }, (run.steps ?? []).map(step => h('li', { class: `update-step ${step.status}` }, h('span', { class: 'update-step-state', text: step.status === 'done' ? '✓' : step.status === 'running' ? '…' : '·', 'aria-hidden': 'true' }),
-          h('div', {}, h('div', { text: step.words }), h('span', { class: 'note', text: step.status }), step.detail ? h('p', { class: 'note', text: step.detail }) : null)))),
         st.reconnecting ? h('p', { class: 'note', role: 'status', text: 'Loam is restarting. We’ll pick up progress as soon as it returns.' }) : null,
         run.message ? h('p', { text: run.message }) : null,
         run.outcome === 'failed' ? h('p', { class: 'note', text: run.rolled_back ? 'Your previous version was restored. Your agent can help with the failed step.' : 'Your agent can help you finish or restore the previous version.' }) : null,
-        run.outcome === 'interrupted' ? h('p', { class: 'note', text: 'You can restore the previous version below.' }) : null) : null,
+        run.outcome === 'interrupted' ? h('p', { class: 'note', text: 'You can restore the previous version below.' }) : null,
+        active && run.steps?.length ? h('ol', { class: 'update-steps' }, run.steps.map(step => h('li', { class: `update-step ${step.status}` },
+          h('span', { class: 'update-step-state', text: step.status === 'done' ? '✓' : step.status === 'running' ? '…' : '·', 'aria-hidden': 'true' }),
+          h('div', {}, h('div', { text: step.words }), h('span', { class: 'note', text: step.status }))))) : null,
+        (active ? run.steps?.some(step => step.detail) : run.steps?.length) ? h('details', { class: 'update-details', open: st.detailsOpen, ontoggle: e => { if (e.currentTarget.isConnected) st.detailsOpen = e.currentTarget.open } },
+          h('summary', { text: 'Details' }),
+          h('ol', { class: 'update-steps' }, (run.steps ?? []).filter(step => !active || step.detail).map(step => h('li', { class: `update-step ${step.status}` },
+            h('span', { class: 'update-step-state', text: step.status === 'done' ? '✓' : step.status === 'running' ? '…' : '·', 'aria-hidden': 'true' }),
+            h('div', {}, h('div', { text: step.words }), h('span', { class: 'note', text: step.status }), step.detail ? h('p', { class: 'note', text: step.detail }) : null))))) : null) : null,
       data?.rollback && !active ? h('section', { class: 'card update-rollback' }, h('h3', { text: 'Go back a version' }),
         h('p', { class: 'note', text: `Restore Loam ${data.rollback.to_version || 'to its previous version'}.` }),
         st.confirmRollback ? h('div', {}, h('p', { text: 'Restore the previous release now?' }), h('div', { class: 'update-actions' }, button('Cancel', () => { st.confirmRollback = false; changed() }, false, locked), button('Restore previous version', () => runAction('rollback'), true, locked)))

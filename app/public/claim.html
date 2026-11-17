@@ -35,8 +35,8 @@
 <div id="opening"><div class="mark" aria-hidden="true">✳</div><div class="kicker">Your own little corner</div><h1>Welcome to Loam</h1><p class="intro">A place for you and your agents. Create your sign-in to make it yours.</p></div>
 <form id="claim-form">
 <label for="username">Choose a username</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
-<label for="password">Choose a password</label><div class="password"><input id="password" name="password" type="password" autocomplete="new-password" required><button class="show" type="button" id="show" aria-label="Show password" aria-pressed="false">Show</button></div>
-<p class="hint">Save these somewhere safe. You’ll use them to sign in on your other devices.</p>
+<label for="password">Choose a password</label><div class="password"><input id="password" name="password" type="password" autocomplete="new-password" aria-describedby="password-hint" required><button class="show" type="button" id="show" aria-label="Show password" aria-pressed="false">Show</button></div>
+<p class="hint" id="password-hint">At least 10 characters. Keep both somewhere safe: you’ll use them to sign in on your other devices.</p>
 <button class="primary" id="submit" type="submit">Make this my Loam</button><p class="privacy">This sign-in belongs to your Loam.</p>
 </form>
 <p id="error" class="error" role="alert" hidden></p>

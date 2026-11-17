@@ -3,7 +3,7 @@ import { mount as mountComposer } from './composer.js'
 import { mount as mountTranscript } from './transcript.js'
 import { mount as mountSheets } from './sheets.js'
 import { mount as mountConversation } from './conversation.js'
-import { createApps, appAddress, canFrame, appUnavailable } from '../apps.js'
+import { createApps, appAddress, canFrame, appUnavailable, buildAppThread } from '../apps.js'
 import { createAttachments, addFile, tooBig, markProgress, markStored, markFailed, carriesFiles, filesFrom } from '../attach.js'
 import { createMessageState } from '../chat-ui.js'
 import { fileView, folderView, nameOf, parentOf, splitPath, ROOT_LOOK } from '../files.js'
@@ -94,7 +94,7 @@ export function mountSidePanel(base) {
   })
   own.apps = createApps({ registry: own.registry, api: base.api, redraw: base.schedule, wide: () => true,
     avatar: id => blob(agentLook(id, state.agents), { size: 40, font: 18 }), agentName: id => state.agents.list.find(a => a.id === id)?.name ?? id,
-    newThread: () => base.threads.create(), copy: copyText, leave: () => base.panels.close(), navigate: item => base.panels.openSide(item), side: () => base.panels,
+    newThread: () => buildAppThread(base.threads, base.state.agents.list), copy: copyText, leave: () => base.panels.close(), navigate: item => base.panels.openSide(item), side: () => base.panels,
   })
   let request = 0
   function item() {

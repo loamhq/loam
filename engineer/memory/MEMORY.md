@@ -690,7 +690,7 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   fails leaves the next step (a `git show HEAD:x > x`) to overwrite work.
   Write the job's scratch path out, and `git add` before experiments.
 
-## 2026-11-17 — Opening from a plugin's list keeps the list
+## 2026-11-17 — bringing context from another AI
 
 - **Opening a file synced the list column to its folder in core** (`show()`
   in app/public/files.js set `st.root`/`st.path` from the file), not in the
@@ -738,3 +738,27 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   read the retired `emoji` from every older `agent.json` and prefixed new
   headers with it. It no longer does; `plan_update` keeps the turns already
   in a file byte for byte, so old headers stay as written.
+- **The library can ship a helper beside a skill.** `install_library`
+  copies the whole folder (only dotfiles and `__pycache__` are skipped), so
+  `docs/library/skills/<name>/inspect_export.py` reaches every install's
+  `<vault>/<system>/Loam/skills/<name>/`, and an agent runs it with
+  `python3 -I <path>`. Keep such a helper stdlib-only: it runs under
+  whatever Python the box has.
+- **Python 3.11's `zipfile` does not notice overlapping entries** (3.12
+  added a check). `inspect_export.py` compares each entry's local header
+  offset plus packed size with the next one itself; the test makes an
+  overlap by rewriting a central-directory offset (byte 42 of a
+  `PK\x01\x02` record).
+- **Both upload routes cap a file at 10 MiB, held in memory**
+  (`ATTACHMENT_MAX_BYTES`; Files uses the same cap). `.zip` is accepted on
+  both since this date, so a small export arrives whole. A typical ChatGPT
+  export with images is bigger than that, and taking it needs a streaming
+  upload, not a raised number.
+- **OpenAI's help centre answers automated fetches with 403** (a
+  JavaScript challenge). The Wayback Machine's snapshot of the article
+  (`/web/<ts>id_/<url>`, fetched with `--compressed`) is the page's own text.
+  Claude's help centre serves `<article>.md`.
+- **A model walk of a skill can run without the broker**: `claude -p` in a
+  scratch folder whose `.claude/skills/` holds the skill, with `--add-dir`
+  pointing at a synthetic vault. It shows what one model did once. It
+  proves no behaviour.

@@ -85,13 +85,21 @@
 .dc-sw.on { background: var(--dc-pri); }
 .dc-sw.on::after { left: 15px; }
 
-/* the page: a narrower measure, more air, the margin beside it */
+/* The page. The text's measure grows with the pane up to --dc-measure (720 px,
+   about 95 characters of 17 px Figtree) and stops there: past it, the room
+   becomes air either side, never a longer line or a bigger type. The text
+   and the margin beside it are one block, centred in the pane. When the pane
+   is tight the margin gives way first (to 256 px), then the text. The left
+   padding is the gutter (Viewing's marks, the "+"); with no margin showing
+   the right padding matches it, so the text itself sits in the middle. */
+.dc { --dc-measure: 720px; --dc-padl: 76px; --dc-padr: 48px; --dc-shift: .22s; }
 .dc-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .dc-page { position: relative; display: flex; justify-content: center; gap: 0; padding: 0 16px; min-height: 100%; box-sizing: border-box; }
-.dc-col { position: relative; width: 664px; max-width: 100%; flex: 0 1 664px; min-width: 0; padding: 40px 48px 160px 76px; box-sizing: border-box; }
-.dc-margin { position: relative; width: 300px; flex: none; margin-left: 8px; transition: width .3s var(--dc-ease), margin .3s var(--dc-ease), opacity .2s; }
-.dc.mode-view .dc-margin, .dc.phone .dc-margin { width: 0; margin-left: 0; opacity: 0; pointer-events: none; overflow: hidden; }
-@media (max-width: 1100px) { .dc.desk .dc-col { padding-left: 52px; padding-right: 28px; } }
+.dc-col { position: relative; width: calc(var(--dc-measure) + var(--dc-padl) + var(--dc-padr)); max-width: 100%; flex: 0 1 auto; min-width: 0; padding: 40px var(--dc-padr) 160px var(--dc-padl); box-sizing: border-box; }
+.dc-margin { position: relative; width: 300px; min-width: 256px; flex: 0 4 auto; margin-left: 8px; transition: width var(--dc-shift) var(--dc-ease), min-width var(--dc-shift) var(--dc-ease), margin var(--dc-shift) var(--dc-ease), opacity .2s; }
+.dc.mode-view .dc-margin, .dc.phone .dc-margin { width: 0; min-width: 0; margin-left: 0; opacity: 0; pointer-events: none; overflow: hidden; }
+.dc.desk.mode-view, .dc.desk.bare { --dc-padr: var(--dc-padl); }
+@media (max-width: 1100px) { .dc.desk { --dc-padl: 52px; --dc-padr: 28px; } }
 
 /* CodeMirror, dressed as the doc */
 .dc .cm-editor { outline: none !important; background: transparent; color: var(--dc-ink); font-size: 17px; line-height: 1.76; font-family: inherit; }
@@ -193,7 +201,7 @@
 .dc .dc-sg-live-ins.peek, .dc .dc-sg-live-del.peek { background: var(--dc-fill); }
 .dc .dc-sg-live-ins.on, .dc .dc-sg-live-del.on { background: var(--dc-fillon); }
 /* Show authors */
-.dc-legend { position: absolute; top: 14px; left: 76px; display: flex; gap: 14px; font-size: 12px; color: var(--dc-ink3); opacity: 0; transform: translateY(-3px); transition: opacity .2s, transform .2s var(--dc-ease); pointer-events: none; }
+.dc-legend { position: absolute; top: 14px; left: var(--dc-padl); display: flex; gap: 14px; font-size: 12px; color: var(--dc-ink3); opacity: 0; transform: translateY(-3px); transition: opacity .2s, transform .2s var(--dc-ease); pointer-events: none; }
 .dc-legend.on { opacity: 1; transform: none; }
 .dc-legend .dc-lg { display: inline-flex; align-items: center; gap: 6px; }
 .dc-au-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
@@ -213,7 +221,7 @@
 .dc.authors .dc-col { padding-top: 64px; }
 
 /* margin notes: name and two lines at rest; the thread you are in lifts */
-.dc-card { position: absolute; left: 0; width: 286px; box-sizing: border-box; border-radius: 16px; padding: 10px 14px 11px; transition: top .34s var(--dc-ease), transform .2s var(--dc-ease), box-shadow .2s, background .2s, opacity .2s, padding .2s; cursor: pointer; animation: dc-fade .25s ease; }
+.dc-card { position: absolute; left: 0; width: max(242px, calc(100% - 14px)); box-sizing: border-box; border-radius: 16px; padding: 10px 14px 11px; transition: top .34s var(--dc-ease), transform .2s var(--dc-ease), box-shadow .2s, background .2s, opacity .2s, padding .2s; cursor: pointer; animation: dc-fade .25s ease; }
 .dc-card.hov { background: color-mix(in srgb, var(--dc-surface) 35%, transparent); }
 .dc-card.on { background: var(--dc-pane); box-shadow: var(--dc-lift); transform: translateX(-6px); padding: 12px 16px 14px; cursor: default; z-index: 2; }
 .dc-margin.hasf .dc-card:not(.on):not(.hov) { opacity: .5; }
@@ -277,11 +285,11 @@
    rises a few pixels away from the words (down, when it sits below them).
    It leaves in a blink, already out of the pointer's way. */
 .dc-selbar.on { display: flex; }
-.dc-selbar.in { animation: dc-selin .18s var(--dc-ease) both; }
+.dc-selbar.in { animation: dc-selin .2s cubic-bezier(.33, 1, .68, 1) both; }
 .dc-selbar.in.blw { animation-name: dc-selin-b; }
 .dc-selbar.out { display: flex; pointer-events: none; animation: dc-selout .08s ease-in both; }
-@keyframes dc-selin { from { opacity: 0; transform: translateY(5px) scale(.985); } to { opacity: 1; transform: none; } }
-@keyframes dc-selin-b { from { opacity: 0; transform: translateY(-5px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes dc-selin { from { opacity: 0; transform: translateY(6px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes dc-selin-b { from { opacity: 0; transform: translateY(-6px) scale(.985); } to { opacity: 1; transform: none; } }
 @keyframes dc-selout { from { opacity: 1; } to { opacity: 0; } }
 .dc-selbar button { height: 30px; padding: 0 11px 0 9px !important; font-size: 12.5px !important; display: inline-flex !important; align-items: center; gap: 6px; border-radius: 999px; position: relative; transition: background .12s; white-space: nowrap; }
 .dc-selbar button svg { color: var(--dc-ink3); }
@@ -372,7 +380,8 @@
 .dc.phone .dc-head.tight .dc-mpill { gap: 2px; padding: 0 7px 0 9px !important; }
 .dc.phone .dc-mpill { height: 34px; }
 .dc.phone .dc-page { padding: 0; }
-.dc.phone .dc-col { width: 100%; flex-basis: 100%; padding: 22px 24px 160px 38px; }
+/* The phone layout is also the side panel's: the same measure holds when it is widened. */
+.dc.phone .dc-col { width: 100%; flex-basis: 100%; max-width: calc(var(--dc-measure) + 62px); padding: 22px 24px 160px 38px; }
 .dc.phone .cm-editor { font-size: 17px; line-height: 1.7; }
 .dc.phone .dc-h1 { font-size: 28px; }
 .dc.phone .dc-h2 { font-size: 19px; }
@@ -442,8 +451,8 @@
 
 /* No notes to show: the text column is centred, and moves aside gently when
    the first note appears. */
-.dc.desk.bare .dc-margin { width: 0; margin-left: 0; opacity: 0; }
-.dc.desk .dc-col { transition: padding .3s var(--dc-ease); }
+.dc.desk.bare .dc-margin { width: 0; min-width: 0; margin-left: 0; opacity: 0; }
+.dc.desk .dc-col { transition: padding var(--dc-shift) var(--dc-ease); }
 
 /* The phone's sheet: room below the text so the passage it is about can be
    scrolled above it. */

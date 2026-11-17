@@ -3004,7 +3004,8 @@ folder nobody can read; the app is in it so two front ends never collide.
   documents (pdf, docx, xlsx, pptx, odt, epub, rtf) and the text and code a
   persona is asked to read (txt, md, csv, tsv, json, yaml, toml, html, xml,
   css, sql, diff, py, js, ts, sh, c, cpp, rs, go, rb, java, kt, swift, php
-  and their kin).
+  and their kin), and zip, for an export from another AI service, stored as
+  sent and never unpacked by the interface (2026-11-17).
 - **Two caps, because they are two limits.** `attachment_max_bytes` is
   10 MB — this box's, a body held in memory and then written down — and a
   request over it is **`413`** in a sentence with the number in it, refused
@@ -3356,7 +3357,7 @@ decides. `201` answers the stored file's row plus:
   text types Files edits, and `.heic`/`.heif`; the list is
   `GET /v1/limits` `files_upload_extensions`. Anything else, or no
   extension, is `415 {"error", "types"}`. For `png jpg jpeg gif webp heic
-  heif pdf docx xlsx pptx odt epub` the first bytes must be that format's
+  heif pdf docx xlsx pptx odt epub zip` the first bytes must be that format's
   (`415` otherwise), so a name never lies about what a preview will get.
 - **Size**: up to `files_upload_max_bytes` (10 MiB, the attachment cap). Over
   it by up to 8 KiB, `413 {"error", "size", "max"}`; further over, the body

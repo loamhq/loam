@@ -54,6 +54,20 @@ export function appLetter(app, catalog = []) {
   return (part[position] || part[0]).toLocaleUpperCase()
 }
 
+// "Build an app" opens a thread with an agent already in it and a word on
+// what to say, never an empty room: Iris, the agent every install starts with,
+// else the first agent awake. The words are the empty thread's own, so
+// nothing is sent until the person writes.
+export function buildAppThread(threads, agents = []) {
+  const awake = agents.filter((agent) => !agent.archived)
+  const agent = awake.find((a) => a.id === 'iris') ?? awake[0] ?? null
+  return threads.create(agent?.id ?? null, {
+    promptTitle: agent ? `Build an app with ${agent.name}` : 'Build an app',
+    promptBody: `Describe what you’d like in a sentence or two. ${agent ? agent.name : 'Your agent'} will ask what’s needed, then build it.`,
+    placeholder: 'What would you like to build?',
+  })
+}
+
 export function createApps({ registry = createCoreRegistry(), api, redraw, wide, avatar, agentName, newThread,
   openBrowser = url => globalThis.open(url, '_blank', 'noopener,noreferrer'), copy, side = () => null, navigate = null, isCurrent = () => true, leave = null }) {
   const st = { details: null, media: new Map(), readyImages: new Set(), failedImages: new Set(), apps: [], loaded: false, loading: false, error: '', selected: null, copied: false, copyError: '' }

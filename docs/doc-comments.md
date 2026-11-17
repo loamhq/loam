@@ -52,8 +52,18 @@ adds and does not rewrite (below, "What step 2 adds").
 - **A note whose words changed since** shows a small glyph at rest and, when
   focused, says so in a quiet line with the words it was about. On the
   phone, the thread's sheet scrolls its passage into view above it.
-- **A doc with no notes** keeps its text column centred; it moves aside when
-  the first note appears.
+- **The text's measure** grows with the pane up to 720 px (about 87
+  characters of 17 px Figtree on real prose) and stops there, in every mode,
+  in the main and side panels and on the share page; past it the room
+  becomes air either side, and the type never grows with the screen. Tables,
+  code and images use the column's width; a wider table scrolls inside it.
+  The text and the margin (300 px) are one block centred in the pane; when
+  the pane is tight the margin gives way first, to 256 px, then the text.
+- **A doc with no notes** pays for no margin: the text takes its whole
+  measure in the middle of the pane, and eases aside (about 200 ms) when the
+  first note appears or one is started. While keys are going down in the
+  text it waits for the pause (under a second), so a note arriving from
+  someone else never moves the line being typed.
 - **Formatting, desktop**: no toolbar. Selecting text in Editing shows one
   popup: Aa (block type), bold, italic, strikethrough, link, code, then
   Comment and Suggest; each button's tooltip names the Markdown and the
@@ -75,8 +85,8 @@ adds and does not rewrite (below, "What step 2 adds").
   timer while it is held; after a double-click it waits 300 ms, in case a
   third click makes it the paragraph. After Shift+arrows, Select All or a
   selection made by code, it comes once the selection has been still for
-  350 ms. It comes in one motion (180 ms, fading in while it rises 5 px away
-  from the words; a plain 140 ms fade with reduced motion), above the
+  350 ms. It comes in one motion (200 ms, ease-out, fading in while it rises
+  6 px away from the words; a plain 140 ms fade with reduced motion), above the
   selection, below it when there is no room, and on the other side when it
   would sit under the pointer where the button came up; a selection taller
   than the screen is placed by the part in sight. It leaves in an 80 ms fade
@@ -476,11 +486,7 @@ news); the faces of the named links (a group link as a people glyph, "+N"
 past three, each naming who and what on hover or a long press) sit before
 the menu; and a dot on the tile's corner marks a doc with words from
 someone else since the owner last opened it. Opening it marks the new
-notes in the margin, and the list column stays on Shared Docs, at the same
-scroll, with that row shown as the open one; the address carries
-`?list=@doc-comments`, so a reload, Back and Forward come back to the same
-list (core, for any plugin root). The doc's folder is one step away: the
-breadcrumb in its header, or **Open folder** in the row's ⋯ menu. A doc whose last link goes off leaves the list with a
+notes in the margin. A doc whose last link goes off leaves the list with a
 short fade and slide. Nothing else in Files or the rail gets a dot, and
 nothing pings anyone. **Share settings** (or **Share…** on a doc with no
 link yet) is first in every writable vault Markdown file's ⋯ menu, here

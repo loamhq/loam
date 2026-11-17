@@ -1137,6 +1137,8 @@ UPLOAD_MAGIC = {
     "jpeg": (b"\xff\xd8\xff",), "gif": (b"GIF87a", b"GIF89a"),
     "pdf": (b"%PDF-",), "docx": _ZIP, "xlsx": _ZIP, "pptx": _ZIP,
     "odt": _ZIP, "epub": _ZIP,
+    # A ZIP with no entries begins at its end record.
+    "zip": _ZIP + (b"PK\x05\x06",),
 }
 
 
