@@ -187,21 +187,30 @@ export function activate(loam) {
   // only docs with a link on. A dot marks one with something new since the
   // owner last opened it; nothing else anywhere gets a dot.
   const shared = { docs: [], loaded: false }
+  async function loadShared() {
+    const res = await fetch(`${BASE}shared`, { credentials: 'same-origin' })
+    if (!res.ok) throw new Error('Shared Docs could not be read just now.')
+    shared.docs = (await res.json()).docs || []
+    shared.loaded = true
+  }
   const sharedRoot = loam.places?.files?.root?.add?.({
     id: 'doc-comments',
     name: 'Shared Docs',
     desc: 'Docs open to people outside',
     icon: (size) => peopleIcon(size),
     when: () => allowed(),
-    async load() {
-      const res = await fetch(`${BASE}shared`, { credentials: 'same-origin' })
-      if (!res.ok) throw new Error('Shared Docs could not be read just now.')
-      shared.docs = (await res.json()).docs || []
-      shared.loaded = true
-    },
+    load: () => loadShared(),
     render({ go }) {
       const H = loam.ui.h
-      if (!shared.loaded) return H('div', { class: 'fs-quiet', text: 'Loading…' })
+      if (!shared.loaded) {
+        // Opened before this plugin had registered (a cold load of the
+        // address): load now, and draw again when it answers.
+        if (!shared.loading) {
+          shared.loading = true
+          loadShared().catch(() => {}).finally(() => { shared.loading = false; host.schedule?.() })
+        }
+        return H('div', { class: 'fs-quiet', text: 'Loading…' })
+      }
       if (!shared.docs.length) return H('div', { class: 'fs-quiet dc-sd-empty', text: 'No doc is shared with anyone outside Loam yet. Share one with the Share button at the top of the doc.' })
       return H('div', { class: 'card card-group dc-sd' }, shared.docs.map(d => {
         const name = (d.path || '').split('/').pop().replace(/\.(md|markdown)$/i, '')
