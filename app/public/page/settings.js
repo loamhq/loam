@@ -30,7 +30,10 @@ function settingsBody(sheet, back) {
   if (page === 'agents' && sheet.detail) return sheet.detail.kind === 'agent'
     ? [settingsBack('Agents', 'agents'), ...host.settingsProfileUI.body(sheet.detail.id)] : host.settingsProfileUI.settingsDetail()
   if (page === 'update') return [back ? settingsBack('Settings', 'root') : null, settingsHead('Update', 'A little care for your Loam.'), updates.view()]
-  if (page === 'signin') return [back ? settingsBack('Settings', 'root') : null, settingsHead('Sign-in', 'Your way into Loam.'), passkey.view()]
+  if (page === 'signin') {
+    if (!passkey.st.listed && !passkey.st.listing) passkey.loadPasskeys()
+    return [back ? settingsBack('Settings', 'root') : null, settingsHead('Sign-in', 'Your way into Loam.'), passkey.view()]
+  }
   if (page === 'provider') return settingsProvider(sheet.provider)
   if (page === 'integration') return settingsIntegration(sheet.provider, sheet.account)
   const section = host.registry.entries('settings.section').find(entry => !entry.component && entry.id === page && (!entry.children || host.registry.entries('settings.section').some(child => child.group === entry.children)))
@@ -146,7 +149,18 @@ function goSettings(page, provider = null) {
   const sheet = { kind: 'settings', page, provider }
   host.registry.emit('sheet.changing', { previous: host.state.sheet, sheet })
   host.state.sheet = sheet
-  if (page === 'plugins') host.pluginLoader?.refresh()
+  if (page === 'plugins') {
+    if (provider) {
+      const openPlugin = () => {
+        if (host.state.sheet?.kind !== 'settings' || settingsHome(host.state.sheet.page) !== 'plugins') return
+        const row = host.pluginLoader?.st.rows?.find(r => r.id === provider)
+        if (row) host.pluginSettingsUI?.open(row)
+      }
+      if (host.pluginLoader?.st.rows?.some(r => r.id === provider)) openPlugin()
+      else host.pluginLoader?.refresh()?.then(openPlugin).catch(() => {})
+    } else host.pluginLoader?.refresh()
+  }
+  if (page === 'signin') passkey.loadPasskeys()
   host.registry.emit('settings.opened', { page })
   if (page === 'agents') host.settingsProfiles.directory()
   host.schedule()
@@ -265,22 +279,29 @@ function settingsAgents({ back = true } = {}) {
     st.archived === null ? h('p', { role: 'status', text: 'Loading archived agents…' }) : st.archived.length ? group('Archived agents', st.archived.map(agent => h('div', { class: 'setrow', key: agent.id },
       blob(agentLook(agent.id, createAgents(st.archived)), { size: 40, font: 18 }), h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: agent.name })),
       h('button', { class: 'pillbtn', disabled: st.directoryBusy, text: 'Restore', 'aria-label': `Restore ${agent.name}`, onclick: () => host.settingsProfiles.restore(agent.id) })))) : h('p', { class: 'note profile-empty', text: 'No archived agents.' })]
+  const systemRows = [
+    ...(st.engineers ? [
+      ...[...st.engineers.engineers].sort((a, b) => Number(b.platform) - Number(a.platform) || a.project.localeCompare(b.project)).map(row => settingsRow({ title: row.project, sub: 'Engineer', lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(row) }), onclick: () => detail('engineer', row.project) })),
+      settingsRow({ title: 'Every other project', sub: 'Default engineer', lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(st.engineers.default) }), onclick: () => detail('engineer', 'default') }),
+    ] : []),
+    ...(st.reviewer ? [settingsRow({ title: st.reviewer.name, sub: st.reviewer.plain, lead: tile(icon.clock(18)), onclick: () => detail('reviewer', 'reviewer') })] : []),
+  ]
   return [back ? settingsBack('Settings', 'root') : null, settingsHead('Agents'),
     h('div', { class: 'agent-directory-actions' }, h('button', { class: 'pillbtn primary', disabled: st.directoryBusy, 'aria-label': 'New agent', onclick: async () => {
       st.directoryBusy = true; st.directoryError = ''; host.schedule()
-      try { const thread = await host.api('POST', '/agents/new', {}); host.closeSheet(); await host.threads.open(thread.id || thread.thread?.id); host.threads.agentDrafts.open = true; host.threads.agentDrafts.thread = thread.id || thread.thread?.id; await host.threads.loadAgentDrafts() }
+      try { const thread = await host.api('POST', '/agents/new', {}); host.closeSheet(); await host.threads.open(thread.id || thread.thread?.id); host.threads.agentDrafts.thread = thread.id || thread.thread?.id; await host.threads.loadAgentDrafts() }
       catch (e) { st.directoryError = e.message }
       finally { st.directoryBusy = false; host.schedule() }
     } }, icon.plus(16), st.directoryBusy ? 'Opening…' : 'New agent'), h('button', { class: 'pillbtn', text: 'Archived', onclick: () => { host.state.sheet.archivedAgents = true; host.settingsProfiles.archived(); host.schedule() } })),
     group('Agents', host.state.agents.list.length ? host.state.agents.list.map(agent => settingsRow({ key: agent.id,
       lead: blob(agentLook(agent.id, host.state.agents), { size: 40, font: 18 }), title: agent.name,
       onclick: () => { if (host.state.wide) detail('agent', agent.id); else { host.closeSheet(); host.goProfile(agent.id) } } })) : h('p', { class: 'note profile-empty', text: host.state.agentsReady ? 'No agents are available yet.' : 'Agents could not be loaded.' })),
-    st.directoryLoading ? h('p', { class: 'note', role: 'status', text: 'Loading engineers and system…' }) : null,
+    st.directoryLoading ? h('p', { class: 'note', role: 'status', text: 'Loading system…' }) : null,
     st.directoryError ? h('div', {}, h('p', { class: 'schedule-error', role: 'alert', text: st.directoryError }), h('button', { class: 'pillbtn', text: 'Try again', onclick: () => host.settingsProfiles.directory() })) : null,
-    st.engineers ? group('Engineers', [
-      ...[...st.engineers.engineers].sort((a, b) => Number(b.platform) - Number(a.platform) || a.project.localeCompare(b.project)).map(row => settingsRow({ title: row.project, lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(row) }), onclick: () => detail('engineer', row.project) })),
-      settingsRow({ title: 'Every other project', lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(st.engineers.default) }), onclick: () => detail('engineer', 'default') })]) : null,
-    st.reviewer ? group('System', settingsRow({ title: st.reviewer.name, sub: st.reviewer.plain, lead: tile(icon.clock(18)), onclick: () => detail('reviewer', 'reviewer') })) : null]
+    systemRows.length ? h('section', { class: 'profile-group profile-group-system', 'aria-label': 'System' },
+      h('h3', { class: 'kicker', text: 'System' }),
+      h('p', { class: 'note profile-system-note', text: 'The engineers who build and the nightly reviewer. Their settings are yours to change too.' }),
+      h('div', { class: 'rows' }, systemRows)) : null]
 }
 
 

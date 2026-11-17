@@ -325,6 +325,20 @@ export function shortcutsOf(body) {
   return list.filter((s) => s?.resource?.root !== 'system' && s && typeof s.label === 'string' && isRow(s.resource))
 }
 
+// The host offers its developer shortcuts wherever those folders exist, and
+// every install has them: a fresh vault's System holds only Loam's library
+// and the empty skills shelf (`bin/library seed-vault`), and its Projects/Loam
+// only the schedule page the timers write. So a new person would meet
+// "Vault system", "Loam project" and "Loam infrastructure" for folders they
+// never made. Each is shown only once its folder holds something beyond what
+// the install put there (first-day walk, 2026-11-16); an install that uses
+// them keeps them, and a shortcut the person pinned themselves always shows.
+const INSTALLED_ONLY = new Map([
+  ['Vault system', new Set(['loam', 'skills'])],
+  ['Loam project', new Set(['infrastructure'])],
+  ['Loam infrastructure', new Set(['schedule.md'])],
+])
+
 export function rowsOf(body) {
   return Array.isArray(body?.entries) ? body.entries.filter(isRow) : []
 }
@@ -505,11 +519,27 @@ export function createFiles({
       .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
       .join('&')
 
+  let rootsRequest = 0
+  async function usedShortcuts(offered) {
+    const kept = await Promise.all(offered.map(async (s) => {
+      const installed = INSTALLED_ONLY.get(s.label)
+      if (!installed) return true
+      try {
+        const listing = await api('GET', `/files/list?${q({ root: s.resource.root, path: s.resource.path, limit: 50 })}`)
+        return rowsOf(listing).some((entry) => !installed.has((entry.name ?? nameOf(entry.path)).toLowerCase()))
+      } catch { return false }
+    }))
+    return offered.filter((_, i) => kept[i])
+  }
   async function loadRoots() {
+    const ticket = ++rootsRequest
     try {
       const body = await api('GET', '/files/roots')
-      st.roots = { loaded: true, items: rootsOf(body), shortcuts: shortcutsOf(body), error: '' }
+      const shortcuts = await usedShortcuts(shortcutsOf(body))
+      if (ticket !== rootsRequest) return
+      st.roots = { loaded: true, items: rootsOf(body), shortcuts, error: '' }
     } catch (err) {
+      if (ticket !== rootsRequest) return
       st.roots = { loaded: true, items: [], shortcuts: [], error: err.message, status: err.status }
     }
     schedule()

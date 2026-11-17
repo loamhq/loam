@@ -42,7 +42,7 @@ import { blockView, toolSummary, foldFacts, foldsAsStep, contextWords, compactio
 import { richField, readField, caretPoint, setMarkdown } from './compose.js'
 import { createFiles, folderView, fileView, fitPreviewTables, addSheet, parseFilesPath, filesHref, FILES_LOCATION_HIDDEN, isFolder, nameOf as fileNameOf, resolveOf, missingSentence, externalHref, vaultUrlRef, formatText, uploadAccept, ROOT_LOOK, drawnTypeOf, bytesAre, downloadHref } from './files.js'
 import { createActivity } from './activity.js'
-import { createApps, canFrame } from './apps.js'
+import { createApps, canFrame, buildAppThread } from './apps.js'
 import { SETTINGS_SECTIONS, settingsHome } from './app-shape.js'
 
 import { createThreads } from './threads.js'
@@ -394,7 +394,7 @@ const apps = createApps({ registry, api, redraw: schedule, wide: () => state.wid
   side: () => panels, navigate: item => panels.openMain(item),
   avatar: (id, { size = 40, font = 18 } = {}) => isOwner(id) ? blob({ initial: ownerInitial(), color: 'var(--latte-espresso)', ink: 'var(--latte-espresso-ink)', shape: '50%' }, { size, font }) : blob(agentLook(id, state.agents), { size, font }),
   agentName: id => isOwner(id) ? 'you' : state.agents.list.find(agent => agent.id === id)?.name ?? id ?? 'Unknown',
-  newThread: () => threads.create(), copy: copyText, leave: () => goApps(),
+  newThread: () => buildAppThread(threads, state.agents.list), copy: copyText, leave: () => goApps(),
 })
 function goApps() {
   if (state.screen === 'files') {

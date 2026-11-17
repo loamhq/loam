@@ -1599,8 +1599,8 @@ test('the Names and terms card: the note’s path, how many terms, when they wer
   for (const answer of ['no such route', null]) {
     termsNote = answer
     await openDictation()
-    await until(() => /not connected/.test(text(card('Names and terms'))))
-    assert.equal(text(card('Names and terms')), 'Names and termsThe vault’s terms are not connected on this app yet.')
+    await until(() => /No names and terms note yet/.test(text(card('Names and terms'))))
+    assert.equal(text(card('Names and terms')), 'Names and termsNo names and terms note yet. Add one to your vault to help dictation spell your names.')
     assert.equal(find(card('Names and terms'), 'warn'), null, `a missing route (${answer ?? 405}) was drawn as a fault`)
     await closeSettings()
   }

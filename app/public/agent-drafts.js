@@ -1,13 +1,19 @@
-import { h } from './ui.js'
+import { h, blob } from './ui.js'
+import { soulExcerpt } from './agent-profile.js'
+import { createAgents, agentLook } from './sessions.js'
+import { markdown } from './markdown.js'
+import { ordinalDraft } from './thread-experience.js'
+
+const stripFrontmatter = (text = '') => String(text ?? '').replace(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/, '').trim()
 
 // Drafts belong to the host and the conversation. Only an explicit confirmation
 // publishes the revision currently on screen; the host rejects a stale revision.
-export function createAgentDrafts({ api, redraw, made = () => {} }) {
-  const st = { thread: null, rows: [], open: false, busy: false, loading: false, error: '', result: null }
+export function createAgentDrafts({ api, redraw, made = () => {}, askChanges = () => {}, openThread = null, renderText = markdown }) {
+  const st = { thread: null, rows: [], expanded: new Set(), busy: false, loading: false, error: '', result: null }
   let generation = 0
   async function load(thread = st.thread) {
     const ticket = ++generation
-    if (st.thread !== thread) { st.rows = []; st.open = false; st.result = null; st.error = '' }
+    if (st.thread !== thread) { st.rows = []; st.expanded.clear(); st.result = null; st.error = '' }
     st.thread = thread; st.loading = true
     try {
       const body = await api('GET', `/agents/drafts?${new URLSearchParams({ thread })}`)
@@ -26,20 +32,53 @@ export function createAgentDrafts({ api, redraw, made = () => {} }) {
     } catch (e) { if (st.thread === thread) { st.error = e.message; await load(thread) } }
     finally { st.busy = false; redraw() }
   }
+  // The review is a card in the thread's flow, after the line that says the
+  // draft was made, where the agent says it is ("below"): the face and name,
+  // two sentences of who they are, the whole soul and config rendered behind
+  // one fold, then Create and Ask for changes. A revision number is shown only
+  // once there is more than one ("2nd draft"); the draft's id never is.
+  function card(d) {
+    const id = d.id || d.draft || 'new-agent'
+    const name = d.name || 'Your new agent'
+    const look = agentLook(id, createAgents([{ id, name }]))
+    const who = soulExcerpt(d.soul || '')
+    const draftLabel = ordinalDraft(d.rev)
+    const expanded = st.expanded.has(d.draft)
+    const soulText = stripFrontmatter(d.soul)
+    const configText = stripFrontmatter(d.config)
+    const toggle = () => { if (expanded) st.expanded.delete(d.draft); else st.expanded.add(d.draft); redraw() }
+    return h('article', { class: 'card agent-draft-card', key: d.draft, 'aria-label': `${name}, a new agent to review` },
+      h('div', { class: 'agent-draft-head' },
+        blob(look, { size: 48, font: 22 }),
+        h('div', { class: 'agent-draft-who' },
+          h('div', { class: 'agent-draft-title-row' },
+            h('h3', { text: name }),
+            draftLabel ? h('span', { class: 'agent-draft-rev', text: draftLabel }) : null),
+          who ? h('p', { class: 'agent-draft-summary', text: who }) : null)),
+      soulText || configText ? h('button', { type: 'button', class: 'quietlink agent-draft-more', 'aria-expanded': String(expanded), text: expanded ? 'Show less' : 'Read the whole thing', onclick: toggle }) : null,
+      expanded ? h('div', { class: 'agent-draft-full' },
+        soulText ? h('section', { class: 'agent-draft-doc', 'aria-label': 'Soul' },
+          h('h4', { class: 'kicker', text: 'Who they are' }),
+          h('div', { class: 'md' }, renderText(soulText))) : null,
+        configText ? h('section', { class: 'agent-draft-doc', 'aria-label': 'Config' },
+          h('h4', { class: 'kicker', text: 'How they work' }),
+          h('div', { class: 'md' }, renderText(configText))) : null) : null,
+      ...(d.problems || []).map(problem => h('p', { class: 'note warn', text: typeof problem === 'string' ? problem : problem?.message ?? JSON.stringify(problem) })),
+      st.busy ? h('p', { class: 'note', role: 'status', text: `Making ${name}… This can take up to 20 minutes. Keep this page open.` }) : null,
+      h('div', { class: 'agent-draft-actions' },
+        h('button', { type: 'button', class: 'pillbtn primary', disabled: st.busy || st.loading || !d.ready, text: st.busy ? 'Creating…' : 'Create', onclick: () => confirm(d) }),
+        h('button', { type: 'button', class: 'pillbtn secondary', disabled: st.busy, text: 'Ask for changes', onclick: () => askChanges(d) })))
+  }
   function view(thread) {
-    if (st.thread !== thread || (!st.open && !st.rows.length)) return null
+    if (st.thread !== thread || (!st.rows.length && !st.result && !st.error)) return null
+    const made = st.result?.agent
     return h('section', { class: 'agent-drafts', 'aria-label': 'New agent review' },
-      h('button', { class: 'pillbtn', 'aria-expanded': String(st.open), text: st.open ? 'Hide agent review' : 'Review agent', onclick: () => { st.open = !st.open; if (st.open) load(thread); redraw() } }),
-      st.open ? h('div', { class: 'agent-drafts-body' },
-        st.loading ? h('p', { role: 'status', text: 'Reading the latest draft…' }) : null,
-        st.busy ? h('p', { role: 'status', text: 'Creating the agent… This can take up to 20 minutes. Keep this page open.' }) : null,
-        st.error ? h('p', { role: 'alert', class: 'schedule-error', text: st.error }) : null,
-        st.result ? h('p', { role: 'status', text: `${st.result.agent.name || st.result.agent.id} is ready.` }) : null,
-        !st.rows.length && !st.loading && !st.result ? h('p', { class: 'note', text: 'Start by telling the agent what you have in mind. Its draft will appear here for your review.' }) : null,
-        st.rows.map(d => h('article', { key: d.draft }, h('h3', { text: d.name || '' }), h('p', { class: 'note', text: `Revision ${d.rev}` }),
-          ...['soul', 'config'].map(key => h('details', {}, h('summary', { text: key === 'soul' ? 'Soul' : 'Config' }), h('pre', { text: d[key] }))),
-          (d.problems || []).map(problem => h('p', { class: 'note warn', text: typeof problem === 'string' ? problem : JSON.stringify(problem) })),
-          h('button', { class: 'pillbtn primary', disabled: st.busy || st.loading || !d.ready, text: st.busy ? 'Creating…' : 'Create agent', onclick: () => confirm(d) })))) : null)
+      st.error ? h('p', { role: 'alert', class: 'schedule-error', text: st.error }) : null,
+      made ? h('div', { class: 'card agent-draft-result', role: 'status' },
+        blob(agentLook(made.id, createAgents([made])), { size: 36, font: 16 }),
+        h('p', { text: `${made.name || 'Your new agent'} is ready.` }),
+        st.result.first_thread && openThread ? h('button', { type: 'button', class: 'pillbtn secondary', text: `Say hello to ${made.name || 'them'}`, onclick: () => openThread(st.result.first_thread) }) : null) : null,
+      ...st.rows.map(card))
   }
   return { st, load, confirm, view }
 }
