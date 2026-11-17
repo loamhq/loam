@@ -2119,6 +2119,7 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .setrow > svg:last-child { flex: none; color: var(--paper-ink-3); }
 .icon-tile { background: var(--paper-card); color: var(--paper-ink-2); width: 42px; height: 42px; border-radius: var(--radius-md); flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
 .fs-folder.wide .icon-tile { width: 40px; height: 40px; }
+.fs-entry .icon-tile { position: relative; }
 .icon-tile span { font-size: 8.5px; font-weight: 700; letter-spacing: .06em; }
 .fs-foldertile { background: var(--paper-card); color: var(--paper-ink-2); border-radius: 58% 42% 55% 45% / 48% 56% 44% 52%; }
 .fs-words { flex: 1; min-width: 0; }

@@ -535,20 +535,27 @@
 .dc-new { width: 6px; height: 6px; border-radius: 50%; background: var(--dc-accent); flex: none; }
 .dc.phone .dc-titlebar span { display: none; }
 
-/* Shared Docs, in Files */
-.dc-sd { padding: 4px; }
-.dc-sd-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 10px 10px 8px; border-radius: 14px; text-align: left; background: none; border: 0; font: inherit; color: inherit; cursor: pointer; transition: background .12s; }
-.dc-sd-row:hover { background: var(--paper-hover-alpha, rgba(0,0,0,.045)); }
-.dc-sd-row + .dc-sd-row { box-shadow: 0 -1px 0 var(--paper-rule, rgba(0,0,0,.08)); }
-.dc-sd-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-.dc-sd-row.fresh .dc-sd-dot { background: var(--signal-crema, #B4733A); }
-.dc-sd-tile { width: 32px; height: 38px; border-radius: 7px; display: grid; place-items: center; background: var(--paper-raised, #FAF8F4); box-shadow: inset 0 0 0 1px var(--paper-rule, rgba(0,0,0,.1)); color: var(--paper-ink-3, #645F59); flex: none; }
-.dc-sd-words { flex: 1; min-width: 0; display: grid; }
-.dc-sd-words b { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dc-sd-words small { font-size: 12px; color: var(--paper-ink-3, #645F59); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dc-sd-modes { display: flex; gap: 4px; }
-.dc-sd-mode { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--paper-card, #E9E4DC); color: var(--paper-ink-2, #4B4741); }
-.dc-sd-time { font-size: 12px; color: var(--paper-ink-3, #645F59); min-width: 54px; text-align: right; }
+/* Shared Docs, in Files: core's own file row (2026-11-17), plus who has a
+   link, what is new on the tile's corner, and a gentle exit. */
+.dc-sd-people { display: inline-flex; align-items: center; flex: none; padding-left: 4px; cursor: default; -webkit-touch-callout: none; user-select: none; }
+.dc-sd-face { width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; box-sizing: border-box; font-size: 10.5px; font-weight: 700; line-height: 1; color: #fff; background: var(--paper-raised, #FAF8F4); box-shadow: 0 0 0 2px var(--paper-card, #E9E4DC); transition: transform .16s cubic-bezier(.2,.8,.2,1); }
+.dc-sd-face + .dc-sd-face { margin-left: -6px; }
+.dc-sd-face.grp { color: var(--paper-ink-2, #4B4741); }
+.dc-sd-face.more { color: var(--paper-ink-2, #4B4741); font-size: 10px; letter-spacing: -.02em; }
+@media (hover: hover) { .dc-sd-face:hover { transform: translateY(-2px); z-index: 1; } }
+.setrow.on .dc-sd-face { box-shadow: 0 0 0 2px var(--latte-control-selected, #E3D6C6); }
+.dc-sd-new { color: var(--signal-crema, #B4733A); font-weight: 650; }
+.setrow.on .dc-sd-new { color: inherit; }
+.dc-sd-dot { position: absolute; top: -2px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--signal-crema, #B4733A); box-shadow: 0 0 0 2px var(--paper-card, #E9E4DC); transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s; animation: dc-sd-dot-in .4s cubic-bezier(.2,.8,.2,1.4); }
+.dc-sd-dot.seen { transform: scale(0); opacity: 0; }
+@keyframes dc-sd-dot-in { from { transform: scale(0); } to { transform: scale(1); } }
+.fs-entry.dc-sd-leaving { overflow: hidden; pointer-events: none; animation: dc-sd-leave .34s cubic-bezier(.4,0,.2,1) forwards; }
+@keyframes dc-sd-leave { 0% { max-height: 90px; opacity: 1; } 45% { opacity: 0; transform: translateX(10px); } 100% { max-height: 0; opacity: 0; transform: translateX(10px); } }
+.dc-sd-tip { position: fixed; z-index: 2000; transform: translate(-50%, calc(-100% - 6px)) scale(.96); transform-origin: 50% 100%; opacity: 0; pointer-events: none; white-space: pre-line; max-width: 260px; padding: 6px 10px; border-radius: 10px; font: 600 12.5px/1.35 var(--font-body, system-ui, sans-serif); background: var(--latte-espresso, #2F2017); color: var(--latte-espresso-ink, #FFF8EE); box-shadow: 0 8px 24px color-mix(in srgb, #000 18%, transparent); transition: opacity .14s, transform .18s cubic-bezier(.2,.8,.2,1); }
+.dc-sd-tip.on { opacity: 1; transform: translate(-50%, calc(-100% - 8px)); }
+.dc-list-toast { position: fixed; bottom: calc(26px + env(safe-area-inset-bottom)); z-index: 1100; --dc-pri: var(--latte-espresso, #2F2017); --dc-onpri: var(--latte-espresso-ink, #FFF8EE); --dc-float: 0 10px 30px color-mix(in srgb, #000 18%, transparent); --dc-ease: cubic-bezier(.2,.8,.2,1); font-family: var(--font-body, system-ui, sans-serif); }
+.dc-list-toast button { font: inherit; border: 0; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .dc-sd-dot, .dc-sd-face, .dc-sd-tip { transition: none; animation: none; } .fs-entry.dc-sd-leaving { animation-duration: .01s; } }
 .dc-sd-empty { padding: 18px 12px; }
 
 /* the phone's link, typed in the keyboard bar */

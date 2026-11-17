@@ -823,6 +823,15 @@ export function createFiles({
     schedule()
   }
 
+  // A row as a listing would have it (name, size, age, capabilities), for a
+  // plugin's root that knows a file only by its address (2026-11-17).
+  function stat(root, path) {
+    return api('GET', `/files/stat?${q({ root, path })}`)
+  }
+  async function readText(root, path) {
+    return readOf(await api('GET', `/files/read?${q({ root, path })}`)).text
+  }
+
   async function prepareLink(resource) {
     if (resource.linkPromise) return resource.linkPromise
     const path = resource.path
@@ -1279,7 +1288,7 @@ export function createFiles({
     schedule()
   }
 
-  return { registry, st, pluginRoot, beginRename, cancelRename, editRename, rename, applyRename, focusRename, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, pluginRoot, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function extWord(e) {
@@ -1347,22 +1356,49 @@ function renameTitle(files, resource, label, className, slot = 'title') {
     : h('div', { class: className, text: label }))
 }
 
-function rowButton(row, { on, onclick, key }) {
+function rowButton(row, { on, onclick, key, meta = null, badge = null, trail = null }) {
   const folder = isFolder(row)
   const tile = tileOf(row.name)
   return h(
     'button',
     { class: `setrow${on ? ' on' : ''}`, key, onclick },
     folder
-      ? h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18))
-      : h('div', { class: 'icon-tile', style: { background: tile.bg, color: tile.fg } }, icon.file(14), h('span', { text: tile.label })),
-    h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: row.name }), h('div', { class: 'fs-meta', text: metaOf(row) })),
+      ? h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18), badge)
+      : h('div', { class: 'icon-tile', style: { background: tile.bg, color: tile.fg } }, icon.file(14), h('span', { text: tile.label }), badge),
+    h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: row.name }), typeof meta === 'string' || meta === null ? h('div', { class: 'fs-meta', text: meta ?? metaOf(row) }) : h('div', { class: 'fs-meta' }, meta)),
+    trail,
     folder ? icon.chevronRight(10) : null,
   )
 }
 
-// Chosen files and folders, in their chosen order, as one card of rows, or the
-// empty state that says how to make one.
+// One entry of a listing: the row, its open-beside affordance, the mark when
+// it is open beside, and its ⋯ menu. A folder's listing and a plugin's root
+// (`files.root`'s `entry(row, extras)`) both draw it, so a plugin's list is
+// the same row as everywhere else in Files and cannot drift from it
+// (2026-11-17). A plugin adds only what `extras` carries: `meta` (the second
+// line, text or nodes; default size and age), `badge` (a node on the tile's
+// corner), `trail` (nodes after the words), `onopen(row)` (before it opens),
+// `className` (on the entry).
+export function fileEntry(files, row, { go, home = null, meta = null, badge = null, trail = null, onopen = null, className = '' } = {}) {
+  const st = files.st
+  const open = st.file ? `${st.file.root}:${st.file.path}` : null
+  const side = go.side?.()
+  const file = !isFolder(row)
+  const item = { kind: 'file', root: row.root, path: row.path, row }
+  return h('div', { class: `fs-entry${className ? ` ${className}` : ''}`, key: `entry:${row.root}:${row.path}` }, renameField(files, row, 'row') ?? rowButton(row, {
+    on: open === `${row.root}:${row.path}`,
+    key: `row:${row.root}:${row.path}`,
+    meta, badge, trail,
+    onclick: (event) => {
+      onopen?.(row)
+      if (event?.altKey && side?.available() && file) side.openSide(item)
+      else go(row.root, row.path, { isFile: file, row })
+    },
+  }), file && side?.available() ? h('span', { class: 'row-side-action' }, side.affordance(item)) : null,
+  side?.visible() && side.st.side?.kind === 'file' && side.st.side.root === row.root && side.st.side.path === row.path ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
+  renamingHere(files, row, 'row') ? null : h('button', { class: 'iconbtn content-mark fs-rowmenu', title: `Actions for ${row.name}`, 'aria-label': `Actions for ${row.name}`, onclick: () => files.resourceMenu(row, home) }, icon.dots(18)))
+}
+
 function homeShortcuts(files, home, go) {
   const list = home?.shortcuts ?? fileShortcuts(null, files.st.roots.shortcuts)
   return h(
@@ -1492,7 +1528,7 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
     body.push(h('div', { class: 'fs-quiet', 'aria-busy': 'true' }))
   } else if (own) {
     if (st.listing.error) body.push(errorBox(st.listing.error, st.listing.status, () => files.loadFolder()))
-    else body.push(files.registry.invoke(own, 'render', { files, go, wide }))
+    else body.push(files.registry.invoke(own, 'render', { files, go, wide, home, entry: (row, extras = {}) => fileEntry(files, row, { ...extras, go, home }) }))
   } else if (st.listing.error) {
     body.push(errorBox(st.listing.error, st.listing.status, () => files.loadFolder()))
   } else if (st.listing.loading && st.listing.rows.length === 0) {
@@ -1500,20 +1536,11 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
   } else {
     if (st.listing.rows.length === 0) body.push(h('div', { class: 'fs-quiet', text: 'Nothing here yet.' }))
     else if (st.listing.rows.length > 0) {
-      const open = st.file ? `${st.file.root}:${st.file.path}` : null
       body.push(
         h(
           'div',
           { class: 'card card-group' },
-          ...st.listing.rows.map((row) =>
-            h('div', { class: 'fs-entry', key: `entry:${row.root}:${row.path}` }, renameField(files, row, 'row') ?? rowButton(row, {
-              on: open === `${row.root}:${row.path}`,
-              key: `row:${row.root}:${row.path}`,
-              onclick: event => event.altKey && go.side?.()?.available() && !isFolder(row) ? go.side().openSide({ kind: 'file', root: row.root, path: row.path, row }) : go(row.root, row.path, { isFile: !isFolder(row), row }),
-            }), !isFolder(row) && go.side?.()?.available() ? h('span', { class: 'row-side-action' }, go.side().affordance({ kind: 'file', root: row.root, path: row.path, row })) : null,
-            go.side?.()?.visible() && go.side().st.side?.kind === 'file' && go.side().st.side.root === row.root && go.side().st.side.path === row.path ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
-            renamingHere(files, row, 'row') ? null : h('button', { class: 'iconbtn content-mark fs-rowmenu', title: `Actions for ${row.name}`, 'aria-label': `Actions for ${row.name}`, onclick: () => files.resourceMenu(row, home) }, icon.dots(18))),
-          ),
+          ...st.listing.rows.map((row) => fileEntry(files, row, { go, home })),
         ),
       )
     }
@@ -1822,6 +1849,19 @@ function uploadRow(files, item, close) {
   )
 }
 
+// A plugin's items in a file's or folder's ⋯ menu, first in it
+// (`files.action`, `slot: 'menu'`, 2026-11-17): `render({files, resource})`
+// answers `{label, icon, run}` (icon: a function of size, or a core icon's
+// name) and core draws the row; choosing it closes the menu, then runs.
+function menuItems(files, resource, close) {
+  return files.registry.draw('files.action', { slot: 'menu', files, resource }).map((item, i) => {
+    if (item?.nodeType) return item
+    if (!item?.label || typeof item.run !== 'function') return null
+    const glyph = typeof item.icon === 'function' ? item.icon(18) : icon[item.icon]?.(18) ?? null
+    return h('button', { class: `sheetrow fs-menu-plugin${item.className ? ` ${item.className}` : ''}`, key: `plugin:${item.id ?? i}`, onclick: () => { files.st.sheet = null; close?.redraw?.(); item.run(resource) } }, glyph, h('span', { text: item.label }))
+  }).filter(Boolean)
+}
+
 export function addSheet(files, { close, nameField, nameValue = () => nameField.value, chooseUpload = null, uploadChooser = null }) {
   const s = files.st.sheet
   // A save on the way out is quiet: the header already says "Saving…".
@@ -1841,6 +1881,7 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
   if (s.kind === 'folder' || s.kind === 'resource') {
     return [
       h('div', { class: 'display sheettitle', text: s.name }),
+      ...(s.resource ? menuItems(files, s.resource, close) : []),
       s.resource && !isFolder(s.resource) && files.side?.()?.available() ? h('button', { class: 'sheetrow', onclick: () => { const row = s.resource; files.st.sheet = null; files.side().openSide({ kind: 'file', root: row.root, path: row.path, row }) } }, icon.panelRight(18), 'Open to the side') : null,
       capsOf(s.resource).rename ? h('button', { class: 'sheetrow fs-menu-rename', onclick: () => files.beginRename(s.resource, s.renameSlot ?? 'row') }, icon.pencil(18), h('span', { text: 'Rename' })) : null,
       s.openFolder ? h('button', { class: 'sheetrow fs-menu-folder', onclick: () => { files.st.sheet = null; s.openFolder() } }, icon.folder(18), h('span', { text: 'Open folder' })) : null,
