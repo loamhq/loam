@@ -777,3 +777,16 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   scratch folder whose `.claude/skills/` holds the skill, with `--add-dir`
   pointing at a synthetic vault. It shows what one model did once. It
   proves no behaviour.
+- **Coverage must count characters, not items** (corrected the same day,
+  on review). The first ledger counted a conversation as read when any of
+  it was printed, so one cut at `--max-chars` claimed full coverage. The
+  ledger now keeps per-conversation character spans, keyed by the source's
+  sha256 and member, not its file name. The text is redacted before it is
+  cut, so offsets are stable and a credential is never split across two
+  reads. A read that stops prints the exact `--from I --offset C` to carry
+  on. A tree-shaped conversation's other branches are counted as not read
+  unless `--all-branches` is used.
+- **The provenance convention (`created_by`/`last_modified_by`, quoted
+  wiki-links) is not shipped in core.** Files stamps Markdown it saves
+  (`with_provenance`). An agent's own writes rely on its instructions, so a
+  library skill that writes notes says so itself.
