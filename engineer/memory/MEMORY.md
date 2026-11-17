@@ -715,3 +715,50 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   CodeMirror** (it reads `e.touches[0]`). Drive real touches with a
   `hasTouch` context and CDP `Input.dispatchTouchEvent`; a held touch
   doesn't turn into a click.
+## 2026-11-17 — Shared Docs on core's own row
+
+- **A plugin list that copies a core row drifts.** Shared Docs drew its own
+  row and lost the ⋯ menu and open-beside within a day. Core now exports
+  the row (`fileEntry` in app/public/files.js); a plugin root gets it as
+  `entry(row, extras)` and a menu item through `files.action`, slot `menu`
+  (app/docs/plugins/places.md).
+- **A plugin viewer is drawn once per Files, and there are two** (the
+  main panel's and the side panel's). One `cur` slot made each panel's draw
+  close the other's editor; key per-panel state by the `files` object.
+- **Opening a doc through the plugin marks it seen** (GET `doc` calls
+  `mark_seen`). Anything that only needs its text reads through Files
+  (`files.readText`).
+- **Core's reconciler keeps handlers only from `on*` props** (`node.__on`);
+  an `addEventListener` on a node built in a draw is lost when the node is
+  patched into an older one.
+- **Seeing the live page from the host, without the login or the personas'
+  browser:** Playwright with `context.route` sending the live domain to
+  127.0.0.1:8081 (the app) and `/x/*` to 127.0.0.1:8933 (the plugin
+  gateway), passing the original headers with `host` set to the domain (the
+  app's same-origin check refuses otherwise). Serving a tree's
+  `app/public` and `plugins/<id>` from the same route previews a change
+  against live data before it lands.
+- **`$TMPDIR` can be empty in a job's shell.** A `cp x $TMPDIR/y` that
+  fails leaves the next step (a `git show HEAD:x > x`) to overwrite work.
+  Write the job's scratch path out, and `git add` before experiments.
+
+## 2026-11-17 — Opening from a plugin's list keeps the list
+
+- **Opening a file synced the list column to its folder in core** (`show()`
+  in app/public/files.js set `st.root`/`st.path` from the file), not in the
+  plugin. The fix is an explicit `list` option from `goFiles` through the
+  panels' `openMain` item and back into `show`, and `?list=@<id>` on the
+  file's address (`filesHref`'s third argument, `listFromURL`). Only a
+  plugin's root passes one (`fromList` wraps its `go`); shortcuts on the
+  Files home, Open daily note, New inbox note and chat links still go to
+  the file's folder.
+- **On the desktop a Files address is the main panel's item.** Browsing a
+  folder there does not push an address; only opening a file does. Anything
+  that must survive a reload rides on the file's address, and routePanels
+  (Back/Forward) and the cold load (`landedOn`) both read it.
+- **A side-panel item promoted to the main panel carries no list** (the
+  side's descriptor is root and path only), so promoting moves the list
+  to the folder, as before.
+- **A browser test against the fake host hangs on exit** (its event
+  streams stay open): race `closing()` against a timer and `process.exit`
+  in `test.after`, as app/test/files-plugin-list-browser.mjs does.

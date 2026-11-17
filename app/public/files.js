@@ -85,10 +85,25 @@ function ymd(d) {
 
 // `/files/<root>/<a>/<b c>` from a root and a path, each segment encoded on its
 // own so a `/` inside a name can never become a second segment.
-export function filesHref(root, path = '') {
+export function filesHref(root, path = '', list = null) {
   if (!root) return '/files'
   const segments = splitPath(path).map(encodeURIComponent)
-  return ['/files', encodeURIComponent(root), ...segments].join('/')
+  const href = ['/files', encodeURIComponent(root), ...segments].join('/')
+  return listOf(list) && path !== '' ? `${href}?list=${encodeURIComponent(list)}` : href
+}
+
+// The list a file was opened from, when that list is not its folder: a
+// plugin's own root (`@<id>`, `files.root`; doc-comments' Shared Docs first).
+// Opening a file from one leaves the list column on it, and the file's
+// address carries it as `?list=@<id>`, so a reload, Back and Forward come
+// back to the same list (2026-11-17). Anything else is no list.
+export function listOf(value) {
+  return typeof value === 'string' && /^@[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(value) ? value : null
+}
+
+// `?list=` of an address (a full URL, or a path with its search), or null.
+export function listFromURL(value) {
+  try { return listOf(new URL(value ?? '', 'http://placeholder').searchParams.get('list')) } catch { return null }
 }
 
 // The reverse, or `null` for an address that is not a Files one or that names
@@ -632,7 +647,7 @@ export function createFiles({
 
   // Go to an address — a folder, or a file in its folder. `isFile` is known
   // when a row was clicked; an address loaded cold is asked about.
-  async function show(root, path = '', { isFile = null, row = null, fragment = null, mode = null, keepFile = false } = {}) {
+  async function show(root, path = '', { isFile = null, row = null, fragment = null, mode = null, keepFile = false, list = null } = {}) {
     if (!st.renaming?.busy) st.renaming = null
     // The latest place asked for wins: a slow answer about an earlier one must
     // not close a file opened after it.
@@ -672,10 +687,15 @@ export function createFiles({
         return
       }
     }
-    const folder = kindIsFile ? parentOf(path) : path
-    if (st.root !== root || st.path !== folder || st.listing.error) {
-      st.root = root
-      st.path = folder
+    // A file opened from a list that is not its folder (`list`, a plugin's
+    // root) leaves the list column on that list; otherwise it shows the
+    // file's folder.
+    const from = kindIsFile ? listOf(list) : null
+    const listRoot = from ?? root
+    const listPath = from ? '' : kindIsFile ? parentOf(path) : path
+    if (st.root !== listRoot || st.path !== listPath || st.listing.error) {
+      st.root = listRoot
+      st.path = listPath
       loadFolder()
     }
     if (kindIsFile) {
@@ -1441,6 +1461,9 @@ export function fileEntry(files, row, { go, home = null, meta = null, badge = nu
   const side = go.side?.()
   const file = !isFolder(row)
   const item = { kind: 'file', root: row.root, path: row.path, row }
+  // In a plugin's list (not the row's own folder), its ⋯ menu also goes to
+  // the folder the file is in, one step away (2026-11-17).
+  const inList = Boolean(listOf(files.st.root))
   const { isMain, isSide } = (marksFor ?? openFileMarks(files, go))(row.root, row.path, file)
   return h('div', { class: `fs-entry${isMain ? ' on' : ''}${isSide ? ' in-side' : ''}${className ? ` ${className}` : ''}`, key: `entry:${row.root}:${row.path}` }, renameField(files, row, 'row') ?? rowButton(row, {
     on: isMain,
@@ -1453,7 +1476,15 @@ export function fileEntry(files, row, { go, home = null, meta = null, badge = nu
     },
   }), file && side?.available() ? h('span', { class: 'row-side-action' }, side.affordance(item)) : null,
   isSide ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
-  renamingHere(files, row, 'row') ? null : h('button', { class: 'iconbtn content-mark fs-rowmenu', title: `Actions for ${row.name}`, 'aria-label': `Actions for ${row.name}`, onclick: () => (menu ? files.itemsMenu(row, menu()) : files.resourceMenu(row, home)) }, icon.dots(18)))
+  renamingHere(files, row, 'row') ? null : h('button', { class: 'iconbtn content-mark fs-rowmenu', title: `Actions for ${row.name}`, 'aria-label': `Actions for ${row.name}`, onclick: () => (menu ? files.itemsMenu(row, menu()) : files.resourceMenu(row, home, { openFolder: inList ? () => go(row.root, parentOf(row.path)) : null })) }, icon.dots(18)))
+}
+
+// A plugin's root hands its rows a `go` that opens a file as from that list
+// (`list`), so the list column stays on it; folders and the rest go as
+// asked. The wrapper keeps `go`'s own properties (`side`, `redraw`).
+function fromList(go, list) {
+  const from = (root, path, opts = {}) => go(root, path, opts?.isFile ? { list, ...opts } : opts)
+  return Object.assign(from, go)
 }
 
 // Chosen files and folders, in their chosen order, as one card of rows, or the
@@ -1590,7 +1621,7 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
     body.push(h('div', { class: 'fs-quiet', 'aria-busy': 'true' }))
   } else if (own) {
     if (st.listing.error) body.push(errorBox(st.listing.error, st.listing.status, () => files.loadFolder()))
-    else body.push(files.registry.invoke(own, 'render', { files, go, wide, home, entry: (row, extras = {}) => fileEntry(files, row, { ...extras, go, home }) }))
+    else body.push(files.registry.invoke(own, 'render', { files, go: fromList(go, st.root), wide, home, entry: (row, extras = {}) => fileEntry(files, row, { ...extras, go: fromList(go, st.root), home }) }))
   } else if (st.listing.error) {
     body.push(errorBox(st.listing.error, st.listing.status, () => files.loadFolder()))
   } else if (st.listing.loading && st.listing.rows.length === 0) {
