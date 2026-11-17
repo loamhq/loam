@@ -13,6 +13,8 @@ test('only an untouched runtime hello enters onboarding; presets have prose and 
   assert.equal(untouchedHello({ thread: { hello: true }, messages: [preset], has_more: false }), true)
   for (const record of [{ thread: { hello: false }, messages: [preset], has_more: false }, { thread: { hello: true }, messages: [preset, { author: 'you' }], has_more: false }, { thread: { hello: true }, messages: [preset], has_more: true }]) assert.equal(untouchedHello(record), false)
   assert.deepEqual(replyChip(preset), { provider: null, model: null, fullModel: null })
+  const synthetic = replyChip({ engine: 'claude-code', model: '<synthetic>', text: 'Failed to authenticate' })
+  assert.equal(synthetic.model, null); assert.equal(synthetic.fullModel, null)
   assert.deepEqual(messageSegments(preset), [{ text: 'Hello!' }])
 })
 test('update routes preserve status, refusal, JSON body, bearer and no-store; other verbs stay unavailable', async t => {
@@ -62,13 +64,13 @@ test('claim is self-contained; token leaves the address; exact refusals and alre
   assert.match(source, /font-src data:;/, 'font policy permits data only')
   assert.match(source, /default-src 'none'/)
   function fixture(status, hash = '#fixture-token') {
-    const nodes = new Map(), calls = [], redirects = [], waits = [], next = []
+    const nodes = new Map(), calls = [], redirects = [], waits = [], next = [], windowEvents = {}, reloads = []
     const node = () => ({ hidden: false, value: '', disabled: false, events: {}, addEventListener(name, fn) { this.events[name] = fn }, setAttribute() {}, appendChild(child) { next.push(child) } })
     const get = id => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id) }
-    const location = { hash, host: 'example.test', pathname: '/claim', search: '', href: 'https://example.test/claim' + hash, assign(value) { redirects.push(value) } }
-    runInNewContext(script, { document: { getElementById: get, createElement: node }, location, history: { replaceState(...args) { calls.push(args) } }, URL, URLSearchParams, setTimeout(fn, delay) { waits.push({ fn, delay }) }, fetch: async (path, options) => { calls.push({ path, body: JSON.parse(options.body), type: options.headers['content-type'] }); return { status, ok: status === 200, json: async () => status === 200 ? { ok: true, username: 'person', next: 'https://auth.example.test/', wait_seconds: 3 } : { error: `The exact refusal for ${status}.` } } } })
+    const location = { hash, host: 'example.test', pathname: '/claim', search: '', href: 'https://example.test/claim' + hash, assign(value) { redirects.push(value) }, reload() { reloads.push(location.hash) } }
+    runInNewContext(script, { addEventListener(name, fn) { windowEvents[name] = fn }, document: { getElementById: get, createElement: node }, location, history: { replaceState(...args) { calls.push(args) } }, URL, URLSearchParams, setTimeout(fn, delay) { waits.push({ fn, delay }) }, fetch: async (path, options) => { calls.push({ path, body: JSON.parse(options.body), type: options.headers['content-type'] }); return { status, ok: status === 200, json: async () => status === 200 ? { ok: true, username: 'person', next: 'https://auth.example.test/', wait_seconds: 3 } : { error: `The exact refusal for ${status}.` } } } })
     get('username').value = 'person'; get('password').value = 'synthetic-password'
-    return { get, calls, waits, redirects, submit: () => get('claim-form').events.submit({ preventDefault() {} }) }
+    return { get, calls, waits, redirects, location, windowEvents, reloads, submit: () => get('claim-form').events.submit({ preventDefault() {} }) }
   }
   for (const status of [400, 403, 429, 500, 410]) {
     const f = fixture(status); assert.equal(f.calls[0][2], '/claim'); await f.submit()
@@ -80,4 +82,29 @@ test('claim is self-contained; token leaves the address; exact refusals and alre
   assert.equal(success.get('password').value, ''); assert.equal(success.waits[0].delay, 3000); assert.equal(success.redirects.length, 0)
   success.waits[0].fn(); assert.equal(success.redirects[0], 'https://auth.example.test/')
   const missing = fixture(403, ''); assert.equal(missing.get('claim-form').hidden, true); await missing.submit(); assert.equal(missing.calls.length, 1)
+  // The full link pasted into a tab already on /claim changes only the fragment: the page reads it again.
+  missing.location.hash = '#fixture-token'; missing.windowEvents.hashchange(); assert.deepEqual(missing.reloads, ['#fixture-token'])
+  missing.location.hash = ''; missing.windowEvents.hashchange(); assert.equal(missing.reloads.length, 1, 'an emptied fragment reloads nothing')
+})
+
+test('an available release with no System/Loam changes draws no empty file list', async () => {
+  // Found by the 2026-11-16 first-day walk: "What's new" and "Files included in this release:"
+  // over nothing. The release notes reach the person through their agent.
+  const { installDom } = await import('./fakedom.js'), { text } = await import('./browser.js')
+  installDom()
+  const data = changes => ({ current: { version: '0.1.0', kind: 'stock' }, check: { latest: { version: '0.1.1' }, available: true, changes } })
+  for (const [changes, listed] of [[{ added: [], changed: [], removed: [] }, false], [{ added: [], changed: ['System/Loam/skills/x/SKILL.md'], removed: [] }, true]]) {
+    const c = createUpdate({ changed() {}, reload() {}, later() {}, cancel() {}, api: async () => data(changes) })
+    await c.check()
+    const words = text(c.view())
+    assert.match(words, /Loam 0\.1\.1 is ready/)
+    assert.match(words, /your agent will tell you what’s new/)
+    assert.doesNotMatch(words, /Files included in this release/)
+    assert.equal(/System\/Loam this release replaces/.test(words), listed)
+    assert.equal(words.includes('SKILL.md'), listed)
+  }
+  // The last run's card said "Loam is up to date" under "Loam 0.1.2 is ready".
+  const c = createUpdate({ changed() {}, reload() {}, later() {}, cancel() {}, api: async () => ({ ...data({}), run: { outcome: 'applied', from_version: '0.1.0', to_version: '0.1.1', steps: [] } }) })
+  await c.check()
+  assert.doesNotMatch(text(c.view()), /Loam is up to date/)
 })

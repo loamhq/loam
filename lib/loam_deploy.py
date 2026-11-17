@@ -1995,7 +1995,11 @@ def authelia_config() -> str:
             "elevated_session": {"skip_second_factor": True},
         },
         "authentication_backend": {
-            "password_reset": {"disable": False},
+            # An install (an `[edge]`) has no one to read the file notifier's
+            # reset mail, so "Reset password?" on its sign-in page promised
+            # an email that never came (the first-day walk, 2026-11-16). Off
+            # there; the first install keeps it (its engineer reads the file).
+            "password_reset": {"disable": bool(EDGE)},
             "password_change": {"disable": False},
             "file": {"path": "/data/users_database.yml", "watch": True},
         },

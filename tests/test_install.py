@@ -164,6 +164,16 @@ def cases() -> int:
     rules = __import__("yaml").safe_load(dep.authelia_config())["access_control"]["rules"]
     check("Authelia covers the domain itself and every name under it",
           {"domain": ["sam.loam-proof.test", "*.sam.loam-proof.test"], "policy": "one_factor"} in rules)
+    # No one reads an install's file notifier, so its sign-in page offers no
+    # password reset that would wait for an email (the first-day walk).
+    reset = lambda: __import__("yaml").safe_load(dep.authelia_config())[  # noqa: E731
+        "authentication_backend"]["password_reset"]["disable"]
+    check("an install's sign-in page offers no password reset", reset(), True)
+    edge_was, dep.EDGE = dep.EDGE, {}
+    try:
+        check("...the first install's still does (its engineer reads the notifier)", reset(), False)
+    finally:
+        dep.EDGE = edge_was
 
     # -- claimed ---------------------------------------------------------------
     dep.CLAIMED_FILE.write_text("{}")
@@ -332,6 +342,96 @@ def cases() -> int:
     fake = _Fake()
     claim.Handler.send(fake, 200, b"{}")
     check("...and JSON answers carry no CSP", "Content-Security-Policy" in fake.headers, False)
+
+    # -- step 3: the previews' browser on each distribution ---------------------
+    # Ubuntu 24.04 has no chromium-headless-shell package (found by the
+    # 2026-11-16 fresh install: step 3 stopped on it); there Playwright's
+    # pinned headless shell is linked under the Debian package's name.
+    inst = load_cmd("loam-install")
+    check("Debian takes the headless shell from its archive, Ubuntu does not ask for it",
+          (inst.PREVIEW_BROWSER in inst.apt_packages("debian"),
+           inst.PREVIEW_BROWSER in inst.apt_packages("ubuntu")), (True, False))
+    with tempfile.TemporaryDirectory() as td:
+        saved_pw = inst.PLAYWRIGHT_BROWSERS
+        inst.PLAYWRIGHT_BROWSERS = Path(td)
+        try:
+            check("no Playwright shell yet: none found", inst.playwright_shell(), None)
+            for build in ("1200", "1255", "999"):
+                f = (Path(td) / f"chromium_headless_shell-{build}" / "chrome-headless-shell-linux64"
+                     / "chrome-headless-shell")
+                f.parent.mkdir(parents=True)
+                f.write_text("")
+            check("...the newest build is the one linked",
+                  inst.playwright_shell().parts[-3], "chromium_headless_shell-1255")
+            ran = []
+            saved_run = inst.run
+            inst.run = lambda *a, **k: ran.append(a)
+            try:
+                inst.ensure_preview_browser("debian")
+            finally:
+                inst.run = saved_run
+            check("...and on Debian nothing is fetched or linked", ran, [])
+        finally:
+            inst.PLAYWRIGHT_BROWSERS = saved_pw
+    check("the app is told to run the same command name on both",
+          inst.PREVIEW_BROWSER, "chromium-headless-shell")
+
+    # -- the boot unit for Loam's user manager ---------------------------------
+    # After a reboot of the walk's VM, lingering did not start Loam's user
+    # manager: the system came back, the agents' engine and timers did not.
+    unit = inst.system_unit_text("loam-user-manager.service", {"root": str(ROOT), "user": "sam"})
+    check("step 9 installs the boot unit for Loam's user manager",
+          "loam-user-manager.service" in inst.SYSTEM_UNITS, True)
+    check("...which starts the install user's manager, after logind, at boot",
+          ('id -u sam' in unit, "@USER@" in unit, "After=systemd-logind.service" in unit,
+           "WantedBy=multi-user.target" in unit), (True, False, True, True))
+
+    # -- `loam status` reads the app as a unit, not a container ---------------
+    # A fresh install's status read "App: absent" with the app up (found by
+    # the 2026-11-16 first-day walk): it asked Docker, and the app has run as
+    # loam-app@<name>.service since that day.
+    import http.server  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+
+    class Up(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            self.send_response(200 if self.path == "/up" else 404)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Up)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    st = load_cmd("loam-status")
+    bare = dict(exposure="private", host="", policy="one_factor", static_root=None,
+                share_expires=None, compose=None, checkout=None)
+    svc = dep.App(name="loam-ui", port=srv.server_port, service=True, **bare)
+    ctr = dep.App(name="other", port=None, service=False, **bare)
+    asked: list = []
+    unit_state = {"v": "active"}
+
+    def fake_run(argv, **kw):
+        asked.append(argv[:2])
+        out = unit_state["v"] if argv[0] == "systemctl" else "running healthy"
+        return subprocess.CompletedProcess(argv, 0, out + "\n", "")
+
+    saved_records, saved_run = st.dep.records, st.run
+    st.dep.records, st.run = (lambda: [svc, ctr]), fake_run
+    try:
+        check("a service app, active and answering /up, is running healthy",
+              st.app_health("loam-ui"), "running healthy")
+        check("...asked of systemd, not Docker", ["docker", "inspect"] in asked, False)
+        unit_state["v"] = "inactive"
+        check("...a stopped unit is absent", st.app_health("loam-ui"), "absent")
+        unit_state["v"] = "failed"
+        check("...a failed one says so", st.app_health("loam-ui"), "failed")
+        asked.clear()
+        check("a container app is still asked of Docker",
+              (st.app_health("other"), ["docker", "inspect"] in asked), ("running healthy", True))
+    finally:
+        st.dep.records, st.run = saved_records, saved_run
+        srv.shutdown()
 
     # -- the command ----------------------------------------------------------
     res = subprocess.run([str(ROOT / "bin" / "loam"), "help"], capture_output=True, text=True, check=False)

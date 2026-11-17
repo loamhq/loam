@@ -14,7 +14,11 @@ export function replyLabels(message, providers = []) {
 export function replyChip(message, providers = []) {
   if (message.preset === true) return { provider: null, model: null, fullModel: null }
   const labels = replyLabels(message, providers)
-  const model = modelLabel(providers.find((p) => p.id === message.engine), message.model)
+  // Claude Code names its own error replies' model "<synthetic>" (a login that
+  // could not be refreshed, a refused request); it is not a model a person
+  // chose, and the chip drew it raw (the first-day walk, 2026-11-16).
+  const named = /^<.*>$/.test(message.model ?? '') ? null : message.model
+  const model = modelLabel(providers.find((p) => p.id === message.engine), named)
   return { ...labels, model: model.name, fullModel: model.fullName }
 }
 

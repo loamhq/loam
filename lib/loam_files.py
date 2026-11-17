@@ -139,13 +139,17 @@ SYSTEM_VAULT_SOURCES = {
 
 # Where the vault keeps the system's own documents: its conventions and
 # schemas, and the platform's design, architecture and decisions.
+# The folder names are the install's (`vault.system`, `vault.projects`); on
+# the first install they are 99_SYSTEM and 40_PROJECTS, as before. Only the
+# ones that exist are offered (``shortcuts``).
+_SYS, _PROJ = lc.vault_folder("system"), lc.vault_folder("projects")
 VAULT_SHORTCUTS = (
-    ("Vault system", "99_SYSTEM"),
-    ("Conventions", "99_SYSTEM/conventions"),
-    ("Loam project", "40_PROJECTS/Loam"),
-    ("Loam architecture", "40_PROJECTS/Loam/architecture"),
-    ("Loam infrastructure", "40_PROJECTS/Loam/infrastructure"),
-    ("Loam decisions", "40_PROJECTS/Loam/decisions"),
+    ("Vault system", _SYS),
+    ("Conventions", f"{_SYS}/conventions"),
+    ("Loam project", f"{_PROJ}/Loam"),
+    ("Loam architecture", f"{_PROJ}/Loam/architecture"),
+    ("Loam infrastructure", f"{_PROJ}/Loam/infrastructure"),
+    ("Loam decisions", f"{_PROJ}/Loam/decisions"),
 )
 
 ROOTS = {

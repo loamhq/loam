@@ -1,0 +1,17 @@
+[Unit]
+Description=Loam's user manager at boot (the agents' engine, plugins and timers)
+# Lingering (`loginctl enable-linger`, step 4) is what starts Loam's user
+# manager at boot, and with it the broker, the plugin host and every timer.
+# On the first-day walk's VM (2026-11-16) logind came up after a reboot and
+# never started it: the system services were back, the agents were not. This
+# asks for it once more at boot. Where linger already did, it is a no-op.
+After=systemd-logind.service systemd-user-sessions.service dbus.service
+Wants=systemd-logind.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'exec systemctl start "user@$(id -u @USER@).service"'
+
+[Install]
+WantedBy=multi-user.target

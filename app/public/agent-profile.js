@@ -25,6 +25,11 @@ export function profileStatus(status = {}) {
 
 // One controller for host-owned settings. Tickets prevent a late answer for
 // another agent/page from replacing the page the person is now reading.
+// An archive or restore answer names its agent as an id ("juniper") or, in an
+// older shape, as a row ({ id, name, ... }).
+const agentId = agent => typeof agent === 'string' ? agent : agent?.id
+const agentRow = agent => agent && typeof agent === 'object' ? agent : {}
+
 export function createProfiles({ api, redraw, changedAgent = () => {} }) {
   const st = { target: null, data: null, loading: false, busy: false, error: '', edit: null, activity: false, tab: 'Threads', page: 1, soul: '', soulError: '', archived: null, directoryBusy: false,
     engineers: null, reviewer: null, directoryError: '', directoryLoading: false }
@@ -111,7 +116,10 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
     st.busy = true; st.error = ''; redraw()
     try {
       const result = await api('POST', `${path(target)}/archive`, {})
-      changedAgent({ ...result.agent, archived: result.archived })
+      // The host answers the agent as its id, a string (found by the first-day
+      // walk, 2026-11-16): spread as an object it carried no id, and Chats kept
+      // showing the archived agent until a reload.
+      changedAgent({ ...agentRow(result.agent), id: agentId(result.agent) ?? target.id, archived: result.archived })
       if (current === ticket) { st.data.identity.archived = result.archived; st.confirmArchive = false }
       return true
     } catch (e) { if (current === ticket) st.error = e.message; return false }
@@ -126,7 +134,14 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
   async function restore(id) {
     if (st.directoryBusy) return
     st.directoryBusy = true; st.directoryError = ''; redraw()
-    try { const result = await api('POST', `/agents/${enc(id)}/restore`, {}); changedAgent({ ...result.agent, archived: null }); await archived() }
+    try {
+      const result = await api('POST', `/agents/${enc(id)}/restore`, {})
+      const restored = agentId(result.agent) ?? id
+      // The answer names the agent by id only; Chats needs its name and face back.
+      let row = agentRow(result.agent)
+      if (!row.name) { try { row = (await api('GET', `/agents/${enc(restored)}`)).agent ?? {} } catch { row = {} } }
+      changedAgent({ ...row, id: restored, archived: null }); await archived()
+    }
     catch (e) { st.directoryError = e.message }
     finally { st.directoryBusy = false; redraw() }
   }
