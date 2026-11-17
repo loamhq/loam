@@ -138,7 +138,7 @@ test("Shared Docs draws each doc with core's own row: the file's row, its people
   assert.equal(plan.row.capabilities.write, true)
   assert.equal(plan.row.kind, 'file')
   // The second line: what is new, the modes open, the last activity.
-  assert.equal(plan.extras.meta.map(textOf).join(''), '2 new · Edit, comment, view · ago(11-17)')
+  assert.equal(plan.extras.meta.map(textOf).join(''), '2 new · 4 links · ago(11-17)')
   assert.equal(quiet.extras.meta.map(textOf).join(''), 'View · ago(11-16)')
   assert.equal(/Nothing new/.test(quiet.extras.meta.map(textOf).join('')), false, 'a quiet row says nothing about news')
   // The dot sits on the tile for the doc with news, and nowhere else.
@@ -158,7 +158,7 @@ test("Shared Docs draws each doc with core's own row: the file's row, its people
   drawn.length = 0
   roots[0].render({ go() {}, files, entry, wide: true })
   assert.match(drawn[0].extras.badge.props.class, /\bseen\b/)
-  assert.equal(drawn[0].extras.meta.map(textOf).join(''), 'Edit, comment, view · ago(11-17)')
+  assert.equal(drawn[0].extras.meta.map(textOf).join(''), '4 links · ago(11-17)')
 })
 
 test('a doc whose last link goes off leaves the list gently, then is gone', async () => {
