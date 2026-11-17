@@ -260,7 +260,10 @@ export function applyThreadEvent(open, e) {
   if (e.type === 'message.delta') {
     open.typing.add(e.persona); open.steps.delete(e.persona); open.waiting.delete(e.persona)
     const draft = draftFor(open, e.persona), id = draft.id, at = open.messages.indexOf(draft)
+    // `reply_to` rides on the delta once the reply's opening named it: the
+    // quote shows while the words come in, in the place it keeps when posted.
     const message = { ...draft, id, author: e.persona, text: e.draft ?? e.text ?? '', kind: 'message', did: [], segments: open.progress.get(e.persona) ?? [],
+      ...(typeof e.reply_to === 'string' ? { reply_to: e.reply_to } : {}),
       ...(at >= 0 && open.messages[at].trailingDid ? { trailingDid: open.messages[at].trailingDid } : {}), streaming: true }
     if (at < 0) open.messages.push(message); else open.messages[at] = message
   }
@@ -361,7 +364,26 @@ export function firstMessageTitle(text) {
   return clean.length > 60 ? `${clean.slice(0, 59).trimEnd()}…` : clean
 }
 
+// A reply's `↩ m12` opening is Loam's linkage, shown as the quote above the
+// reply and never as words (2026-11-17). Only an opening naming the message's
+// own `reply_to` comes off; every other id, arrow and word stays as written.
+const REPLY_MARK = /^\s*(?:↩|<-)\s*(m\d+)\b[ \t]*[:.,—-]?[ \t]*\n?/
+export function withoutReplyMark(text, replyTo) {
+  const match = replyTo && typeof text === 'string' ? text.match(REPLY_MARK) : null
+  return match && match[1] === replyTo ? text.slice(match[0].length).trimStart() : text
+}
+function unmarked(parts, replyTo) {
+  const at = replyTo ? parts.findIndex((part) => part.text?.trim()) : -1
+  if (at < 0) return parts
+  const text = withoutReplyMark(parts[at].text, replyTo)
+  if (text === parts[at].text) return parts
+  return parts.map((part, index) => index === at ? { ...part, text } : part).filter((part, index) => index !== at || part.text.trim())
+}
+
 export function messageSegments(message) {
+  return unmarked(segmentsOf(message), message.reply_to)
+}
+function segmentsOf(message) {
   if (message.preset === true) return message.text ? [{ text: message.text }] : []
   if (Array.isArray(message.steps)) {
     const segments = fullStepSegments(message.steps, message.model)

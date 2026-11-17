@@ -595,3 +595,23 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **A set-aside draft has to come back as a draft.** When its note returns
   attached while Suggesting, the editor adopts it again (`adoptReturned`),
   or the editor and the stored text with my drafts disagree.
+
+## Reply markers: three places, not one (2026-11-17)
+
+- **Stripping a marker off the posted message is not stripping it off the
+  page.** `reply_mark` cleaned the message, but the page rebuilds a reply's
+  words from the full record (`steps` jsonl, raw events) once the reply is
+  near the viewport, and from raw `message.delta` drafts while it streams;
+  both still said `↩ m111`. Any transform on a reply's text has to hold for
+  all three: the message, the full record as served, and the live draft.
+- **Strip at read, not in the file.** The steps file stays as the events
+  came; `steps.read` applies `unmark_steps` only when the entry's own
+  `reply_to` names the marker. That fixes old records with no backfill.
+- **A streamed marker must be held, not shown and taken back.** `↩ m11` is a
+  whole match for the regex while `↩ m111` is still arriving; the stream
+  sends nothing until words follow the marker (`streamed_opening`).
+- **Browser checks:** `~/pw` (the shared Playwright) can vanish mid-job;
+  install `playwright@<same version>` in the job's `$TMPDIR` with
+  `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` and point `LOAM_CHROME` at
+  `~/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`. A fixture
+  script must `process.exit(0)`: its servers hold the event loop.

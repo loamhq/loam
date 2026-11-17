@@ -281,7 +281,11 @@ def read(thread_id: str, message: str | None = None) -> dict[str, dict]:
 
     An entry with no message (``"unspoken": true``, 2026-11-10: a harness
     turn that worked and said nothing) is in the whole thread's read only,
-    keyed ``unspoken:<first seq>``; no message carries it."""
+    keyed ``unspoken:<first seq>``; no message carries it.
+
+    A reply's ``↩ m12`` opening is read off its first words when the entry's
+    ``reply_to`` is m12 (2026-11-17, ``threads.unmark_steps``): the page
+    builds a reply's words from this record, and the id is not words."""
     out: dict[str, dict] = {}
     path = steps_path(thread_id)
     if not path.exists():
@@ -297,7 +301,8 @@ def read(thread_id: str, message: str | None = None) -> dict[str, dict]:
                 continue
             mid = rec.get("message")
             if isinstance(rec.get("steps"), list):
-                rec["steps"] = nest_carried(rec["steps"])
+                rec["steps"] = threads.unmark_steps(nest_carried(rec["steps"]),
+                                                    rec.get("reply_to"))
             if mid and (message is None or mid == message):
                 out[mid] = rec
             elif not mid and rec.get("unspoken") and message is None:
