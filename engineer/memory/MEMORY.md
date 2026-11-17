@@ -71,6 +71,10 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **`gen-rc-units` has no `--help`.** Any argument starting with `-` is
   ignored and the run is live: `gen-rc-units --help` writes every rc unit.
   Use `--dry-run`.
+- **Nor has `gen-deploy`** (caused 2026-11-17): `gen-deploy --help` is a
+  live render. It wrote the Caddyfile, reloaded Caddy and ran `compose up`
+  on the login and the browser. Read a generator's docstring, never its
+  `--help`.
 
 ## 2026-11-16 — a correct record can still draw in the wrong order
 
@@ -790,3 +794,31 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   wiki-links) is not shipped in core.** Files stamps Markdown it saves
   (`with_provenance`). An agent's own writes rely on its instructions, so a
   library skill that writes notes says so itself.
+
+## 2026-11-17 — a job that is stuck must read as stuck
+
+- **A ticking heartbeat proves the launcher is alive, not the engine.** The
+  launcher writes it. What says the engine is working is its own newest
+  event: the Claude transcript's last line (and its subagents' own
+  transcripts, `<id>/subagents/*.jsonl`, which the main one is silent
+  behind), or the Codex/Antigravity stream the launcher writes line by
+  line. `box_status()` carries it per running job (`last_activity`,
+  `quiet_since`), so `--status`, the MCP status and Activity all say it.
+- **Antigravity has no per-command timeout** (agy 1.5.9): a test that never
+  exits holds a job forever. It runs each command as `bash -c <cmd>`, a
+  direct child in a process group of its own, and writes a `step_update`
+  `ACTIVE` event as it starts it. Killing that group comes back to the model
+  as "Command was terminated by signal or canceled", and the run goes on.
+  `lib/loam_stuck.py` does exactly that after 30 silent minutes, only while
+  the engine's last event says a command runs, and only to processes that
+  started in the last step (the engine's own helpers started before it).
+- **Claude Code engines need none of it**: their Bash tool's own timeout
+  (2 min default, 10 max) ends a command, and a background command returns
+  at once.
+- **A watcher thread must be joined before the record is read.** The engine
+  can finish in the moment between a command's death and the watcher's
+  write; the first test run read an empty record for a stop that happened.
+- **Authelia answers its own API for a session when asked on the portal's
+  host** (`X-Forwarded-Host: auth.<domain>`, `X-Forwarded-Proto: https`)
+  with the `loam_auth` cookie alone; that is how `/_loam/passkeys` lists the
+  signed-in person's passkeys without Loam deciding whose they are.
