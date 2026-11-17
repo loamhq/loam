@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, mkdir, writeFile, readdir, utimes } from 'node:fs/promises'
+import { mkdtemp, rm, mkdir, writeFile, readdir, utimes, readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -27,6 +27,26 @@ test('preview cache coalesces jobs, survives restart, refreshes on age/change, a
   assert.equal((await media.resolve(app, { origin })).preview, ready.preview); await media.idle(); assert.equal(captures, 2)
   assert.equal((await media.resolve(app, { origin })).preview, ready.preview)
   fail = false; await media.resolve({ ...app, version: '2' }, { origin }); await media.idle(); assert.equal(captures, 3)
+})
+test('two resolves at once read the note once, so a read that answers late cannot start a second capture', async t => {
+  // The order a loaded box can give (a landing's full test run did): one
+  // read runs before any note exists, and its answer arrives after the
+  // other resolve's capture has written the note. Held here on purpose.
+  const dir = await directory(t); let captures = 0, reads = 0, release
+  const held = new Promise(resolve => { release = resolve })
+  const read = async (file, encoding) => {
+    reads++
+    const answer = await readFile(file, encoding).then(text => [null, text], error => [error])
+    if (reads === 1) await held
+    if (answer[0]) throw answer[0]
+    return answer[1]
+  }
+  const media = createAppMedia({ dir, appsDomain: 'example.org' }, { now: () => 10000, read, capture: async () => { captures++; return jpeg }, icons: async () => null })
+  const both = Promise.all([media.resolve(app, { origin }), media.resolve(app, { origin })])
+  await new Promise(resolve => setTimeout(resolve, 20)); release()
+  assert.ok((await both).every(row => row.pending)); await media.idle()
+  assert.equal(reads, 1); assert.equal(captures, 1)
+  assert.equal((await media.resolve(app, { origin })).pending, false); assert.equal(captures, 1)
 })
 test('only one browser runs at a time; browser-only apps are captured while unsafe URLs and stopped plugins are excluded', async t => {
   const dir = await directory(t); let active = 0, max = 0, calls = 0

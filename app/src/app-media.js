@@ -14,10 +14,10 @@ export function previewable(app, appsDomain) {
   try { const url = new URL(app.url); return url.protocol === 'https:' && !url.port && !url.username && !url.password && url.hostname.endsWith(`.${appsDomain}`) } catch { return false }
 }
 export function createAppMedia({ dir = '/storage/app-media', chrome = 'chromium', oomScoreAdj = null, ttlHours = 6, appsDomain = '', previewBase = '', previewAddr = '' } = {}, {
-  capture = captureAppPage, icons = null, now = Date.now, log = null,
+  capture = captureAppPage, icons = null, now = Date.now, log = null, read = readFile,
 } = {}) {
   icons ??= createAppIcons({ fetcher: createPreviewFetch({ base: previewBase, addr: previewAddr }) })
-  const tasks = new Map(), notes = new Map()
+  const tasks = new Map(), notes = new Map(), reading = new Map()
   let capturing = false
   const queue = []
   const ready = mkdir(path.join(dir, 'tmp'), { recursive: true }).then(() => true).catch(() => false)
@@ -29,12 +29,23 @@ export function createAppMedia({ dir = '/storage/app-media', chrome = 'chromium'
     return { url: app.url, pending, refresh_after_ms: note?.until ? Math.max(0, note.until - now()) : null,
       preview: note?.preview ? `${base}&kind=preview&v=${note.preview}` : null, icon: note?.icon ? `${base}&kind=icon&v=${note.icon}` : null }
   }
-  async function noteFor(app) {
-    if (notes.has(app.url)) return notes.get(app.url)
-    let note = null
-    try { note = JSON.parse(await readFile(path.join(location(app), 'meta.json'), 'utf8')) } catch {}
-    notes.set(app.url, note)
-    return note
+  // One read of an app's note at a time, and a read never replaces a note
+  // a capture has set meanwhile: two resolves at once used to read twice,
+  // and a read that answered after the capture finished put its stale
+  // "none" back and started a second capture.
+  function noteFor(app) {
+    if (notes.has(app.url)) return Promise.resolve(notes.get(app.url))
+    if (!reading.has(app.url)) {
+      reading.set(app.url, Promise.resolve()
+        .then(() => read(path.join(location(app), 'meta.json'), 'utf8'))
+        .then(text => JSON.parse(text), () => null).catch(() => null)
+        .then(note => {
+          reading.delete(app.url)
+          if (!notes.has(app.url)) notes.set(app.url, note)
+          return notes.get(app.url)
+        }))
+    }
+    return reading.get(app.url)
   }
   async function atomic(file, body) { await writeFile(file + '.new', body); await rename(file + '.new', file) }
   async function sweep() {
