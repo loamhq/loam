@@ -513,8 +513,10 @@ class Project:
         # folder for the project under another spelling: `widget`'s receipts go
         # to `Widget/`, because the Mac and the phone cannot hold two folders
         # that differ only in case.
+        # Under the install's projects folder (`vault.projects`; 40_PROJECTS
+        # on the first install, Projects on one made by install.sh).
         folder = self.record.get("vault_folder") or self.name
-        return vault / "40_PROJECTS" / folder / "receipts"
+        return vault / lc.vault_folder("projects") / folder / "receipts"
 
     def __repr__(self) -> str:
         return f"Project({self.name!r}, root={str(self.root)!r})"

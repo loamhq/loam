@@ -149,9 +149,13 @@ def test_command(project: eng.Project) -> str | None:
 
 def git(repo: Path, *args: str, check: bool = True,
         timeout: int = 300) -> subprocess.CompletedProcess:
+    # errors="replace": the push gate reads diffs with --text, and a binary
+    # file in a commit (a font, 2026-11-16) is not UTF-8; undecodable bytes
+    # become U+FFFD instead of crashing the landing. A name the gate looks
+    # for is text, so nothing it must see is lost.
     result = subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True,
-        check=False, timeout=timeout)
+        errors="replace", check=False, timeout=timeout)
     if check and result.returncode != 0:
         raise WorktreeError(
             f"`git {' '.join(args)}` in {repo} exited {result.returncode}: "

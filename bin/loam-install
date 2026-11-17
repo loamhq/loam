@@ -789,14 +789,15 @@ STEP_FUNCS = {1: step_preflight, 2: step_name, 3: step_packages, 4: step_user,
               9: step_units, 10: step_edge, 11: step_claim}
 
 
-def finale() -> None:
+def finale(elapsed: float | None = None) -> None:
     cfg = config_values()
     sys.path.insert(0, f"{cfg['root']}/lib")
     import loam_deploy as dep  # noqa: PLC0415
     domain = cfg["edge"]["domain"]
     state = dep.edge_state()
     print()
-    say("Loam is installed.")
+    say("Loam is installed." if elapsed is None
+        else f"Loam is installed. That took {li.took(elapsed)}.")
     print()
     if dep.unclaimed():
         link = li.claim_link(domain)
@@ -842,6 +843,7 @@ def main() -> int:
         return 0
     if start > 1:
         say(f"Carrying on from step {start} of 11; steps 1 to {start - 1} finished earlier.")
+    began = time.time()
     for n, _key, label in li.STEPS:
         if n < start:
             continue
@@ -872,7 +874,9 @@ def main() -> int:
             return 1
         mark_done(n)
         logline(f"DONE step {n} in {time.time() - t0:.0f}s")
-    finale()
+    # The time this run took, said only when it ran every step: a re-run's
+    # clock leaves out the steps an earlier run finished.
+    finale(time.time() - began if start == 1 else None)
     return 0
 
 

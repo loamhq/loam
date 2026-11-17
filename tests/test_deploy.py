@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -429,7 +430,8 @@ try:
     check("own domain: one block per hostname, all gated",
           {h: blocks.get(h) for h in ("owner.me", "www.owner.me", "site.example.test")} == {"owner.me": True, "www.owner.me": True, "site.example.test": True})
     check("own domain: a portal block on the extra domain, read as gated",
-          blocks.get("auth.owner.me") is True and "auth.owner.me {\n\timport access_log auth.owner.me\n\timport compress\n\treverse_proxy 127.0.0.1:9091" in text)
+          blocks.get("auth.owner.me") is True and "auth.owner.me {\n\timport access_log auth.owner.me\n\timport compress\n" in text
+          and dep.caddy_portal_block("auth.owner.me") in text)
     hosts = [h for h, _ in dep._live_blocks(text)]
     check("compress: every host block imports it, once",
           all(body.splitlines().count("import compress") == 1 for _, body in dep._live_blocks(text))
@@ -539,10 +541,86 @@ try:
     record("gamma", 'exposure = "shared"\n[share]\nexpires = 2026-09-01\n', COMPOSE_OK.format(name="gamma", port=8103))
     record("pages", f'exposure = "private"\nstatic_root = "{root}/www"\nhide = [".git", "private/notes"]\n')
 
-    check("generated() covers ten live paths", set(dep.generated(today)) == {
+    check("generated() covers ten live paths and the sign-in page's four", set(dep.generated(today)) == {
         dep.CADDYFILE, dep.DAEMON_JSON, dep.AUTHELIA_CONFIG, dep.AUTHELIA_COMPOSE,
         dep.BROWSER_COMPOSE, dep.SIGHT_FIREWALL_SCRIPT, dep.SIGHT_FIREWALL_UNIT, dep.SUDOERS,
-        dep.PREVIEW_SYSCTL, dep.SERVICE_UNIT})
+        dep.PREVIEW_SYSCTL, dep.SERVICE_UNIT,
+        *(dep.LOGIN_DIR / n for n in ("index.html", "login.css", "login.js", "icon.svg"))})
+
+    # -- Loam's sign-in page in front of Authelia (2026-11-16) ---------------
+    real_get = dep.lc.get
+
+    def login_as(**values):
+        dep.lc.get = lambda key, default=None: (
+            values.get(key.removeprefix("login."), default) if key.startswith("login.")
+            else real_get(key, default))
+    try:
+        login_as()
+        files = dep.login_files()
+        html = files[dep.LOGIN_DIR / "index.html"]
+        css = files[dep.LOGIN_DIR / "login.css"]
+        check("login: every mark in the page is filled", "@@" not in html)
+        check("login: the fonts are inside the stylesheet, nothing fetched",
+              css.count("data:font/woff2;base64,") == 2 and "/*@@FONTS@@*/" not in css
+              and "url(/" not in css and "http" not in css)
+        check("login: the script and stylesheet carry the render's version",
+              html.count("?v=") == 2 and len(set(re.findall(r"\?v=([0-9a-f]{12})", html))) == 1)
+        check("login: an install's page offers no password reset; a box set up by hand keeps it",
+              ('data-reset="off"' in html) == bool(dep.EDGE))
+        check("login: the page makes no request off the portal",
+              not re.search(r"https?://", files[dep.LOGIN_DIR / "login.js"].replace(
+                  "http://www.w3.org/2000/svg", ""))
+              and "fetch(path" in files[dep.LOGIN_DIR / "login.js"])
+        block = dep.caddy_portal_block("auth.example.test")
+        lines = [ln.strip() for ln in block.splitlines()]
+        check("login (default 'loam'): the portal serves Loam's page on its own routes",
+              "path / /2fa /2fa/* /authenticated /logout /settings /settings/*" in lines
+              and "not query authelia=*" in lines and "rewrite * /index.html" in lines
+              and "expression" not in block)
+        check("login: everything else, the API above all, is still Authelia's",
+              block.rstrip().endswith("handle {\n\t\treverse_proxy 127.0.0.1:9091\n\t}\n}"))
+        check("login: the page is sent with its own policy, framed by nobody",
+              f'Content-Security-Policy "{dep.LOGIN_CSP}"' in lines and "X-Frame-Options DENY" in lines
+              and "script-src 'self'" in dep.LOGIN_CSP and "frame-ancestors 'none'" in dep.LOGIN_CSP
+              and "unsafe" not in dep.LOGIN_CSP)
+        check("login: the portal still reads as gated to check-drift",
+              dict(dep.live_host_blocks(block)) == {"auth.example.test": True})
+        login_as(page="authelia")
+        check("login 'authelia' (the rollback): the portal block is what it was before",
+              dep.caddy_portal_block("auth.example.test")
+              == "auth.example.test {\n\timport access_log auth.example.test\n\timport compress\n"
+                 "\treverse_proxy 127.0.0.1:9091\n}\n")
+        check("login 'authelia': the page is still rendered, so going back is the Caddyfile alone",
+              set(dep.login_files()) == set(files))
+        login_as(page="staged", staged_host="next")
+        staged = dep.caddy_portal_block("auth.example.test")
+        check("login 'staged': Loam's page only for the staging host's sign-ins or page=loam",
+              'expression `{query.rd}.startsWith("https://next.example.test/") || {query.page} == "loam"`' in staged)
+        check("login 'staged': its links keep asking for Loam's page",
+              'data-keep="loam"' in dep.login_files()[dep.LOGIN_DIR / "index.html"])
+        for bad in ({"page": "pretty"}, {"page": "staged", "staged_host": "next.evil"}):
+            login_as(**bad)
+            try:
+                dep.caddy_portal_block("auth.example.test")
+                check(f"login: {bad} is refused", False)
+            except dep.DeployError:
+                check(f"login: {bad} is refused", True)
+        # Caddy itself reads all three, when it is on the box (the expression
+        # matcher's placeholder syntax is checked by nothing else).
+        if shutil.which("caddy"):
+            blocks = []
+            for i, mode in enumerate(("loam", "staged", "authelia")):
+                login_as(page=mode, staged_host="next")
+                blocks.append(dep.caddy_portal_block(f"auth{i}.example.test")
+                              .replace(f"\timport access_log auth{i}.example.test\n\timport compress\n", ""))
+            cf = root / "Caddyfile.login"
+            cf.write_text("{\n\tadmin off\n}\n" + "\n".join(blocks), encoding="utf-8")
+            res = subprocess.run(["caddy", "adapt", "--config", str(cf), "--adapter", "caddyfile"],
+                                 capture_output=True, text=True, check=False)
+            check("login: Caddy adapts the portal block in all three modes", res.returncode == 0,
+                  res.stderr[-600:] if res.returncode else "")
+    finally:
+        dep.lc.get = real_get
     check("is_loopback", dep.is_loopback("127.0.0.1:8000") and dep.is_loopback("[::1]:22")
           and not dep.is_loopback("*:443") and not dep.is_loopback("0.0.0.0:22"))
 finally:

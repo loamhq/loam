@@ -1,6 +1,7 @@
 """Where the machinery writes to the owner's inbox, and the only place it does.
 
-``vault/00_INBOX/from-agents/`` is the pull-only outlet decided 2026-09-04
+``vault/<General's board folder>/`` (``00_INBOX/from-agents/`` on the first
+install) is the pull-only outlet decided 2026-09-04
 (phase-5 closing plan, decision 13). Two files live there and this module
 owns both of the machinery's writes into them:
 
@@ -38,8 +39,8 @@ records the ones that killed the wrapper before it could, and
 ``bin/rc-preflight`` records what is wrong at a Remote Control start. Three
 callers, three very different lifetimes -- and until this module they were
 two different implementations of "how a failure is written", which is the
-same defect as the second copy of the RC units. Everything here is stdlib
-and takes the vault as an argument, so a test can point it at a temp tree
+same defect as the second copy of the RC units. Everything here is stdlib (and
+loam_config, for the folder's name) and takes the vault as an argument, so a test can point it at a temp tree
 and nothing in it can fail a wake: every write is best-effort and swallows
 OSError, exactly as the code it replaces did.
 """
@@ -48,14 +49,26 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+import loam_config as lc
 
 # Relative to the vault root. The machinery never hardcodes an absolute
 # vault: bin/wake and bin/rc-preflight both read it out of agent.json, so a
 # test tree and the live tree take the same path through here.
-FROM_AGENTS = "00_INBOX/from-agents"
+#
+# The folder is the install's, not the first install's (2026-11-16, the
+# first-day walk): comms.md is General's board (`vault.general_board`), and
+# the failure log sits beside it -- on the first install in
+# 00_INBOX/from-agents/, as it always was. Unless General's board sits in the
+# boards folder itself, as on an install made by install.sh
+# (Inbox/boards/general.md): every note there is read as a board
+# (loam_threads.board_files), so the log goes in the inbox folder instead.
+COMMS = lc.vault_folder("general_board")
+FROM_AGENTS = str(PurePosixPath(COMMS).parent)
+if PurePosixPath(FROM_AGENTS) == PurePosixPath(lc.vault_folder("boards")):
+    FROM_AGENTS = lc.vault_folder("inbox")
 FAILURE_LOG = f"{FROM_AGENTS}/loam-wake-failures.md"
-COMMS = f"{FROM_AGENTS}/comms.md"
 
 # The wiki-link the comms line points at. Obsidian resolves by basename, so
 # this keeps working if the file moves again.

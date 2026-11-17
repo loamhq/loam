@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <clipPath id="loam-blob"><path d="M34 3 C52 3 61 15 60 33 C59 51 49 61 31 61 C13 61 3 50 4 32 C5 14 16 3 34 3 Z"/></clipPath>
+  </defs>
+  <g clip-path="url(#loam-blob)">
+    <rect width="64" height="64" fill="#CDA57F"/>
+    <path d="M0 27 C12 21 22 33 34 27 S54 23 64 29 V64 H0 Z" fill="#7A5236"/>
+    <path d="M0 45 C14 39 24 51 36 45 S56 41 64 47 V64 H0 Z" fill="#4A3A2E"/>
+  </g>
+</svg>

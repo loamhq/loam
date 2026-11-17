@@ -479,6 +479,18 @@ try:
     check("same patch (d): main's own commits are untouched (a fast-forward)",
           (in_main(proj, rewritten), origin_main(origin) == git(proj.root, "rev-parse", "main")),
           (True, True))
+    # A binary file in a commit (2026-11-16: the sign-in page's fonts). The
+    # gate reads diffs with --text, and the bytes are not UTF-8: it read them
+    # as a crash before; now they are U+FFFD and the gate goes on.
+    bin_repo = root / "binary"
+    git(root, "init", "-q", "-b", "main", str(bin_repo))
+    (bin_repo / "font.woff2").write_bytes(b"wOF2\x00\x01\x98\xff\xfe" * 300)
+    git(bin_repo, "add", "-A")
+    git(bin_repo, "commit", "-qm", "a font", who="Demo")
+    sha = git(bin_repo, "rev-parse", "HEAD")
+    shown = wt.git(bin_repo, "show", "--format=", "-U0", "--text", sha, check=False)
+    check("a binary file's diff is read, not a crash",
+          (shown.returncode, "\ufffd" in shown.stdout), (0, True))
 finally:
     wt.WORKTREES, loam_lock.LOCK_DIR = saved
     shutil.rmtree(root, ignore_errors=True)

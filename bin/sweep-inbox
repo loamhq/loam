@@ -49,8 +49,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
 
 VAULT = lc.VAULT
-ARCHIVE = "00_INBOX/archive"
-COMMS = "00_INBOX/from-agents/comms.md"
+# The install's folders (`vault.inbox`, `vault.general_board`); on the first
+# install, 00_INBOX/archive and 00_INBOX/from-agents/comms.md.
+ARCHIVE = f"{lc.vault_folder('inbox')}/archive"
+COMMS = lc.vault_folder("general_board")
 
 ARCHIVE_WINDOW = timedelta(days=30)
 COMMS_WINDOW = timedelta(days=14)

@@ -51,6 +51,7 @@ import loam_config as lc
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import loam_broker as cfg
+import loam_inbox  # the failure log's place, for RENAME_PINNED
 
 LIST_DEFAULT = 200
 LIST_MAX = 1000
@@ -132,9 +133,12 @@ SYSTEM_FILES = {
 # ENGINEER_ROLE_SRC and ENGINEER_PROJECT_SRC; check-drift holds them equal).
 # Their rows name the note as `source`: the vault note is the one to edit,
 # and the System copy follows it on the next provision.
+# Under the install's projects folder (`vault.projects`), like every other
+# path below that names one (2026-11-16, the first-day walk).
 SYSTEM_VAULT_SOURCES = {
-    "Engineer/Role.md": "40_PROJECTS/Loam/engineer/role.md",
-    "Engineer/Platform project.md": "40_PROJECTS/Loam/engineer/projects/loam.md",
+    "Engineer/Role.md": f"{lc.vault_folder('projects')}/Loam/engineer/role.md",
+    "Engineer/Platform project.md":
+        f"{lc.vault_folder('projects')}/Loam/engineer/projects/loam.md",
 }
 
 # Where the vault keeps the system's own documents: its conventions and
@@ -366,20 +370,26 @@ def capabilities(root: str, parts: list[str], kind: str) -> dict:
 # too: they are the vault's structure. Not exhaustive of every note a persona
 # cites by path; a persona's link to a renamed note breaks as it would in
 # Obsidian with link-updating off, and is mended the same way.
+# The folders are the install's (`vault.*`): on the first install these are
+# 00_INBOX, 40_PROJECTS and 99_SYSTEM, as they were written until 2026-11-16;
+# on an install made by install.sh, Inbox, Projects and System.
+_INBOX, _BOARDS = lc.vault_folder("inbox"), lc.vault_folder("boards")
+_GENERAL = lc.vault_folder("general_board")
+_PROJECTS, _SYSTEM = lc.vault_folder("projects"), lc.vault_folder("system")
 RENAME_PINNED = (
-    "00_INBOX/boards/*",
-    "00_INBOX/from-agents/comms.md",
-    "00_INBOX/from-agents/loam-wake-failures.md",
-    "00_INBOX/archive",
-    "40_PROJECTS/*/receipts",
-    "40_PROJECTS/Loam/engineer/role.md",
-    "40_PROJECTS/Loam/engineer/projects/loam.md",
-    "40_PROJECTS/Loam/infrastructure/schedule.md",
-    "40_PROJECTS/Loam/architecture",
-    "40_PROJECTS/Loam/decisions",
-    "40_PROJECTS/Loam/reports",
-    "99_SYSTEM/Dictation terms.md",
-    "99_SYSTEM/conventions",
+    f"{_BOARDS}/*",
+    _GENERAL,
+    loam_inbox.FAILURE_LOG,
+    f"{_INBOX}/archive",
+    f"{_PROJECTS}/*/receipts",
+    f"{_PROJECTS}/Loam/engineer/role.md",
+    f"{_PROJECTS}/Loam/engineer/projects/loam.md",
+    f"{_PROJECTS}/Loam/infrastructure/schedule.md",
+    f"{_PROJECTS}/Loam/architecture",
+    f"{_PROJECTS}/Loam/decisions",
+    f"{_PROJECTS}/Loam/reports",
+    f"{_SYSTEM}/Dictation terms.md",
+    f"{_SYSTEM}/conventions",
 )
 
 

@@ -139,6 +139,12 @@ SIGHT_FIREWALL_SCRIPT = BROWSER_DIR / "firewall.sh"
 SIGHT_FIREWALL_UNIT = Path("/etc/systemd/system/loam-sight-firewall.service")
 SUDOERS = Path("/etc/sudoers.d/loam-deploy")
 DEPLOY_BIN = AGENTS / "bin" / "deploy"
+# Loam's own sign-in page (2026-11-16; deploy/login/README.md): its source in the
+# checkout, its render beside the login's other files, and the path on the
+# portal its assets answer on (Authelia uses nothing under /_loam/).
+LOGIN_SRC = Path(__file__).resolve().parent.parent / "deploy" / "login"
+LOGIN_DIR = ETC / "login"
+LOGIN_ASSETS = "/_loam/login"
 
 # Modes for the files gen-deploy writes; anything not named here is 0644.
 # sudo refuses a sudoers file that is writable by anyone, so this one is
@@ -1820,6 +1826,150 @@ def caddy_claim_block(fq: str) -> str:
     ]) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# The sign-in page (2026-11-16)
+# ---------------------------------------------------------------------------
+#
+# The portal's own pages are Loam's, not Authelia's: deploy/login/ in the checkout,
+# rendered into LOGIN_DIR and served by Caddy on the portal host, in front of
+# Authelia's API, which is unchanged and still answers every /api/ request.
+# Authelia's theming reaches a logo, a favicon and its words (asset_path), not
+# its look, so it could not be made Loam's (the first-day walk, 2026-11-16).
+#
+# Which page answers is `login.page` in /etc/loam/loam.toml:
+#
+#   "loam"      Loam's page for the portal's own routes (LOGIN_ROUTES). The
+#               default, on every install.
+#   "authelia"  Authelia's page, as before 2026-11-16. The rollback: set it,
+#               `sudo bin/gen-deploy`, and the portal is what it was.
+#   "staged"    Authelia's page, except to a request that asks for Loam's:
+#               one whose `rd` is under `login.staged_host` (the staging copy,
+#               `next`), or that carries `page=loam`. How it was proven behind
+#               the owner's real login before it was the default.
+#
+# Either way `?authelia=1` on a route reaches Authelia's own page, which is
+# where what Loam's page leaves out (an authenticator app's set-up) still is.
+
+LOGIN_MODES = ("loam", "authelia", "staged")
+# Every route of Authelia's portal a person lands on while signing in, out,
+# or in its settings (web/src/constants/Routes.ts in Authelia 4.39). The
+# others (a password reset, a revoked code, OpenID consent) stay Authelia's.
+LOGIN_ROUTES = ("/", "/2fa", "/2fa/*", "/authenticated", "/logout",
+                "/settings", "/settings/*")
+LOGIN_FILES = ("index.html", "login.css", "login.js", "icon.svg")
+# The app's own copies of Loam's two faces (app/public/fonts), the same files
+# the claim page embeds: one copy of each in the repository.
+LOGIN_FONT_DIR = LOGIN_SRC.parent.parent / "app" / "public" / "fonts"
+LOGIN_FONTS = (("Caprasimo", "400", "caprasimo-400-latin.woff2"),
+               ("Figtree", "300 900", "figtree-400-latin.woff2"))
+LATIN = ("U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, "
+         "U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, "
+         "U+2212, U+2215, U+FEFF, U+FFFD")
+# The page's own policy, sent by Caddy with it: its script and stylesheet
+# from the portal itself, fonts embedded, requests to the portal only.
+LOGIN_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
+             "img-src 'self' data:; font-src data:; connect-src 'self'; "
+             "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+
+
+def login_mode() -> tuple[str, str | None]:
+    """(mode, the staged host's label or None) from `login.*`."""
+    mode = lc.get("login.page") or "loam"
+    if mode not in LOGIN_MODES:
+        raise DeployError(f"{lc.CONFIG_FILE}: login.page is one of "
+                          f"{', '.join(LOGIN_MODES)}, not {mode!r}")
+    if mode != "staged":
+        return mode, None
+    host = lc.get("login.staged_host") or "next"
+    if not isinstance(host, str) or not re.fullmatch(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?", host):
+        raise DeployError(f"{lc.CONFIG_FILE}: login.staged_host {host!r} is one label")
+    return mode, host
+
+
+def login_files() -> dict[Path, str]:
+    """The page, its stylesheet (fonts inside), its script and its icon, as
+    LOGIN_DIR holds them. Rendered whatever `login.page` says, so turning it
+    on or back is a Caddyfile change alone."""
+    import base64  # noqa: PLC0415
+    import hashlib  # noqa: PLC0415
+    src = {name: (LOGIN_SRC / name).read_text(encoding="utf-8") for name in LOGIN_FILES}
+    faces = []
+    for family, weight, file in LOGIN_FONTS:
+        data = base64.b64encode((LOGIN_FONT_DIR / file).read_bytes()).decode()
+        faces.append(f"@font-face{{font-family:'{family}';font-style:normal;"
+                     f"font-weight:{weight};font-display:swap;"
+                     f"src:url(data:font/woff2;base64,{data}) format('woff2');"
+                     f"unicode-range:{LATIN}}}")
+    css = src["login.css"].replace("/*@@FONTS@@*/", "\n".join(faces))
+    js = src["login.js"]
+    version = hashlib.sha256((css + js).encode()).hexdigest()[:12]
+    apex = next((a for a in records() if a.apex), None)
+    mode, _ = login_mode()
+    marks = {
+        "@@VERSION@@": version,
+        "@@HOME@@": f"https://{apex.fqdn}/" if apex else "",
+        "@@REMEMBER@@": "on",            # session.remember_me is set below
+        # An install's reset is off (no one reads the file notifier's mail).
+        "@@RESET@@": "off" if EDGE else "on",
+        "@@PASSKEYS@@": "on",            # webauthn.enable_passkey_login
+        "@@KEEP@@": "loam" if mode == "staged" else "",
+    }
+    html = src["index.html"]
+    for mark, value in marks.items():
+        html = html.replace(mark, value)
+    return {LOGIN_DIR / "index.html": html, LOGIN_DIR / "login.css": css,
+            LOGIN_DIR / "login.js": js, LOGIN_DIR / "icon.svg": src["icon.svg"]}
+
+
+def caddy_portal_block(fq: str) -> str:
+    """The login portal on one name: Loam's sign-in page for the portal's own
+    routes (unless `login.page` says otherwise), Authelia for everything
+    else, its API above all."""
+    mode, staged = login_mode()
+    out = [f"{fq} {{", access_log_line(fq)]
+    if mode != "authelia":
+        when = ""
+        if staged:
+            target = f"https://{staged}.{domain()}/"
+            when = (f'\t\texpression `{{query.rd}}.startsWith("{target}") '
+                    f'|| {{query.page}} == "loam"`\n')
+        out += [
+            "\t# Loam's sign-in page (deploy/login/, rendered into "
+            f"{LOGIN_DIR}). login.page = {mode!r}.",
+            f"\thandle_path {LOGIN_ASSETS}/* {{",
+            f"\t\troot * {LOGIN_DIR}",
+            "\t\theader Cache-Control \"no-cache\"",
+            "\t\theader X-Content-Type-Options nosniff",
+            "\t\tfile_server",
+            "\t}",
+            "\t@loam_page {",
+            f"\t\tpath {' '.join(LOGIN_ROUTES)}",
+            "\t\tnot query authelia=*",
+            when.rstrip("\n"),
+            "\t}",
+            "\thandle @loam_page {",
+            f"\t\troot * {LOGIN_DIR}",
+            "\t\trewrite * /index.html",
+            "\t\theader {",
+            f"\t\t\tContent-Security-Policy \"{LOGIN_CSP}\"",
+            "\t\t\tCache-Control \"no-store\"",
+            "\t\t\tX-Content-Type-Options nosniff",
+            "\t\t\tX-Frame-Options DENY",
+            "\t\t\tReferrer-Policy no-referrer",
+            "\t\t}",
+            "\t\tfile_server",
+            "\t}",
+            "\thandle {",
+            f"\t\treverse_proxy 127.0.0.1:{AUTHELIA_PORT}",
+            "\t}",
+        ]
+        out = [line for line in out if line]
+    else:
+        out.append(f"\treverse_proxy 127.0.0.1:{AUTHELIA_PORT}")
+    out.append("}")
+    return "\n".join(out) + "\n"
+
+
 def caddyfile(today: dt.date | None = None) -> str:
     """The whole live Caddyfile. Deterministic for a given day and set of
     inputs, which is what lets check-drift diff it."""
@@ -1851,24 +2001,13 @@ def caddyfile(today: dt.date | None = None) -> str:
                 "# renders the hosts once it does; a block for a name that does not",
                 "# resolve here would fail Let's Encrypt on every load.", ""]
         return "\n".join(out)
-    out += [
-        f"# The login portal.",
-        f"{auth}.{dom} {{",
-        access_log_line(f"{auth}.{dom}"),
-        f"\treverse_proxy 127.0.0.1:{AUTHELIA_PORT}",
-        "}",
-        "",
-    ]
+    out += ["# The login portal.", caddy_portal_block(f"{auth}.{dom}")]
     # One portal per extra domain: Authelia's session cookie is scoped to a
     # domain, so a gated host on another domain redirects to a portal on
     # that domain, and the cookie it sets is sent back to the host.
     for extra in extra_domains(apps):
         out += [f"# The login portal on {extra}, for the hosts below that carry it.",
-                f"{auth}.{extra} {{",
-                access_log_line(f"{auth}.{extra}"),
-                f"\treverse_proxy 127.0.0.1:{AUTHELIA_PORT}",
-                "}",
-                ""]
+                caddy_portal_block(f"{auth}.{extra}")]
     claim = unclaimed()
     for app in apps:
         for fq in app.hostnames:
@@ -2393,6 +2532,7 @@ def generated(today: dt.date | None = None) -> dict[Path, str]:
         SUDOERS: sudoers(),
         PREVIEW_SYSCTL: preview_sysctl(),
         SERVICE_UNIT: service_unit(),
+        **login_files(),
     }
 
 

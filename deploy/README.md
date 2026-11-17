@@ -69,6 +69,7 @@ Rendered by `sudo bin/gen-deploy` into, and diffed by `bin/check-drift` against:
 | `/etc/systemd/system/loam-sight-firewall.service` | `loam_deploy.sight_firewall_unit()` |
 | `/etc/sudoers.d/loam-deploy` | `loam_deploy.sudoers()` |
 | `/etc/sysctl.d/60-loam-preview.conf` | `loam_deploy.preview_sysctl()`; check-drift also reads the kernel's value |
+| `/etc/loam/login/{index.html,login.css,login.js,icon.svg}` | `loam_deploy.login_files()`, from `deploy/login/` |
 
 Three things are never rendered: Authelia's secrets (`/etc/loam/authelia/secrets.env`,
 root-only, written once by `gen-deploy --init-login`), the users file (in the
@@ -99,6 +100,16 @@ changes.
 Every app publishes on `127.0.0.1` only, and the daemon's default publish
 address is loopback too, so a compose file that forgets the address still
 does not leave the box. The generator refuses any other address.
+
+**The sign-in page is Loam's, the login is Authelia's** (since
+2026-11-16). On the portal host, Caddy serves `deploy/login/` (rendered
+into `/etc/loam/login/`, four files check-drift diffs like the rest) for
+the portal's own routes, and passes everything else, the API above all, to
+Authelia. Factors, sessions, redirect checks and the gate are Authelia's
+and unchanged. `login.page` in `/etc/loam/loam.toml` picks the page:
+`loam` (default), `authelia` (the rollback: set it, `sudo bin/gen-deploy`),
+or `staged` (Loam's only for sign-ins to `login.staged_host`). `?authelia=1`
+always reaches Authelia's own page. `deploy/login/README.md` has the rest.
 
 The login is **Authelia** in a container on loopback, one user, file
 backend with an argon2id hash, passkey login on, password plus TOTP as the

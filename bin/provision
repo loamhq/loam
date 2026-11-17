@@ -1286,9 +1286,9 @@ ENGINEER = AGENTS / "engineer"
 # project file is this engineer's own. check-drift diffs both against these
 # paths, so an edit to the vault copy shows up as drift here rather than as a
 # divergence nobody notices.
-ENGINEER_ROLE_SRC = VAULT / "40_PROJECTS" / "Loam" / "engineer" / "role.md"
+ENGINEER_ROLE_SRC = VAULT / lc.vault_folder("projects") / "Loam" / "engineer" / "role.md"
 ENGINEER_PROJECT_SRC = (
-    VAULT / "40_PROJECTS" / "Loam" / "engineer" / "projects" / "loam.md"
+    VAULT / lc.vault_folder("projects") / "Loam" / "engineer" / "projects" / "loam.md"
 )
 
 # The whole of it. Three imports, in that order, and nothing else -- no surface
@@ -1672,7 +1672,7 @@ def provision_reviewer(dry: bool = False) -> None:
     # the row is derived from the installed timer, never typed here.
     from loam_cron import write_schedule_page  # noqa: PLC0415
     if write_schedule_page(VAULT):
-        print(f"  rewrote {VAULT}/40_PROJECTS/Loam/infrastructure/schedule.md")
+        print(f"  rewrote {VAULT}/{lc.vault_folder('projects')}/Loam/infrastructure/schedule.md")
     print(f"  provisioned the reviewer: config, settings, one MCP server; "
           f"state under {REVIEWER_STATE} (gitignored)")
     print(f"  its lane is the static unit loam-reviewer.service ({AGENTS}/systemd/, "
@@ -2319,18 +2319,20 @@ def set_commit_identity(name: str, identity: dict, dry: bool = False) -> None:
 def vault_folder_for(name: str, given: str | None,
                      vault: Path | None = None) -> str | None:
     """The `vault_folder` a project's record carries, or None for its name.
-    Receipts land in `40_PROJECTS/<folder>/receipts/`. A folder that differs
+    Receipts land in `<vault.projects>/<folder>/receipts/` (40_PROJECTS on the
+    first install). A folder that differs
     from an existing one only in case is refused: the Mac and the phone
     cannot hold both (found adopting the first adopted project into a vault
     folder of its own spelled with a capital, 2026-10-07)."""
-    projects = (vault or VAULT) / "40_PROJECTS"
+    top = lc.vault_folder("projects")
+    projects = (vault or VAULT) / top
     folder = given or name
     if "/" in folder or folder in ("", ".", ".."):
-        die(f"--vault-folder {folder!r}: one folder name under 40_PROJECTS")
+        die(f"--vault-folder {folder!r}: one folder name under {top}")
     existing = [p.name for p in projects.iterdir() if p.is_dir()] if projects.is_dir() else []
     twins = [e for e in existing if e.lower() == folder.lower() and e != folder]
     if twins:
-        die(f"40_PROJECTS/{twins[0]}/ exists and 40_PROJECTS/{folder}/ would be "
+        die(f"{top}/{twins[0]}/ exists and {top}/{folder}/ would be "
             f"its case-only twin; pass --vault-folder {twins[0]}")
     return given if given and given != name else None
 
@@ -2470,7 +2472,7 @@ def adopt_project(name: str, repository: str, project_file: Path | None,
           + (f"; tests: {test_command}" if test_command else
              "; no test_command, so each pull request says it is untested")
           + f"); jobs at {eng.PROJECT_STATE / name / 'jobs'}; receipts to "
-          f"{VAULT / '40_PROJECTS' / (vault_folder or name) / 'receipts'}")
+          f"{VAULT / lc.vault_folder('projects') / (vault_folder or name) / 'receipts'}")
 
 
 def deployment_blocker(name: str, deploy_dir: Path | None = None) -> str | None:
@@ -2771,7 +2773,7 @@ def main() -> None:
     # because both derive every row from disk rather than editing in place.
     from loam_cron import write_schedule_page  # noqa: PLC0415
     if write_schedule_page(VAULT):
-        print(f"  rewrote {VAULT}/40_PROJECTS/Loam/infrastructure/schedule.md")
+        print(f"  rewrote {VAULT}/{lc.vault_folder('projects')}/Loam/infrastructure/schedule.md")
 
     print(f"  provisioned {name}: project files, wake units, RC unit")
     report_readiness(name, workspace)

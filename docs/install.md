@@ -19,7 +19,9 @@ curl -fsSL https://<where the release is>/install.sh | sudo bash -s -- --name sa
 
 It asks for anything not given (`--owner "Sam"`, `--timezone
 Europe/Berlin`), from the terminal even though the script came down a pipe.
-It takes about fifteen minutes. Every line it prints is meant for someone
+It takes a few minutes (about two on a fresh Debian 12 or
+Ubuntu 24.04 server in the rehearsals of 2026-11-16), and says how long it
+took when it is done. Every line it prints is meant for someone
 who has never used a terminal; what it runs goes to
 `/var/log/loam-install.log` (root, 0600).
 
