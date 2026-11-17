@@ -375,3 +375,29 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Sun transition ids are fixed host-side** (`loam_appearance.TRANSITIONS`,
   like the size's range), not read from the handoff like the modes are; the
   parity test holds them equal to the handoff's enum.
+
+## 2026-11-17 — doc comments: the staging walk's fixes
+
+- **Loam's page is zoomed** (`body { zoom: var(--ui-scale) }`, Settings ›
+  Size; the owner's desktop is at 90%). Inside it, `getBoundingClientRect`
+  and CodeMirror's `lineBlockAt` heights are screen pixels, while a `top` you
+  set is layout pixels: everything placed from a line drifts by (1 − zoom) of
+  its distance. Divide by `root.getBoundingClientRect().width /
+  root.offsetWidth`. The plugin harness has `?zoom=0.9`; a test at 100%
+  alone never sees it. The earlier "height map" fix (widget margins) was
+  real but not this.
+- **CodeMirror estimates heights it has not drawn** (a table or picture
+  counts as one line until it renders), so anything placed from
+  `lineBlockAt` for an off-screen line is wrong until scrolled near; it heals
+  ~1000 px before it shows. Measure positions only for drawn lines, and tell
+  CodeMirror (`requestMeasure`) when a picture loads.
+- **Prove a fix by failing the test on the old code first**: put `main`'s
+  `page/editor` and `server` back, run the browser suite, see the reported
+  numbers (−118 px, the editor reverting after an accept), restore.
+- **Playwright 1.65.1 asks for chromium-1255**; the box caches 1234. Pass
+  `executablePath` to the cached headless shell (it runs without extra
+  libraries). The Write tool cannot write `/tmp` (the guard); scratch files
+  go there through the shell.
+- **`pkill -f <pattern>` matches its own shell's command line** when the
+  pattern is in the same command, and kills the session's shell. Keep a pid
+  file.

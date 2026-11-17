@@ -127,6 +127,12 @@ class Service:
                 self._write_sidecar(sc, sc_rev)
             return self._answer(who, doc, sc)
 
+    def revision(self, who: dict, root: str, path: str) -> dict:
+        """Only the doc's revision: what an open editor asks every second or
+        two, to take in a change made on disk without reading it all."""
+        self._need(who, "view")
+        return {"revision": self.store.read_doc(root, path)["revision"]}
+
     # -- writing ----------------------------------------------------------------------
 
     def _write_sidecar(self, sc: dict, rev):
@@ -220,6 +226,8 @@ class Service:
                     sc_mod.relocate(sc, doc2["text"])
                 note = sc_mod.add(sc, doc2["text"], kind, start, end, args.get("text", ""),
                                   who, replacement=args.get("replacement"))
+                if kind == "suggestion" and args.get("supersedes"):
+                    sc_mod.supersede(sc, args["supersedes"], note, who)
                 self._write_sidecar(sc, sc_rev)
                 out = self._answer(who, doc2, sc)
                 out["note"] = note["id"]
@@ -252,6 +260,21 @@ class Service:
             sc, tid, who, self.may(who, "resolve_any")))
 
     def reopen(self, who, root, path, tid) -> dict:
+        def go_unaccept():
+            with self._lock(root, path):
+                doc, sc, sc_rev, _ = self._load(root, path)
+                if sc is None:
+                    raise NoteError(404, "this doc has no notes")
+                if sc_mod.find(sc, tid)["state"] != "accepted":
+                    return None
+                return self._unaccept(who, root, path, doc, sc, sc_rev, tid)
+        # Reopening an accepted suggestion is its Undo: only while its accept
+        # is still the doc's last change (the editor's toast offers it then).
+        self._need(who, "view")
+        undone = self._with_retry(go_unaccept)
+        if undone is not None:
+            return undone
+
         def fn(d, sc):
             note = sc_mod.find(sc, tid)
             if note["kind"] == "comment" and not self.may(who, "resolve_any") \
@@ -261,6 +284,27 @@ class Service:
                 self._need(who, "accept")
             sc_mod.reopen(sc, tid, who)
         return self._note_op(who, root, path, fn)
+
+    def _unaccept(self, who, root, path, doc, sc, sc_rev, tid) -> dict:
+        """Undo an accept that is still the doc's last change: the text goes
+        back to what it was just before, as a save of its own, and the
+        suggestion is open again. Later than that, History restores."""
+        self._need(who, "accept")
+        last = sc["saves"][-1] if sc["saves"] else None
+        if not last or last.get("kind") != "accept" or last.get("note") != tid \
+                or last["revision"] != doc["revision"]:
+            raise NoteError(409, "the doc has changed since that was accepted; "
+                                 "History can restore the text from before it")
+        before = sc_mod.text_at(sc, sc["saves"][-2]["id"]) if len(sc["saves"]) > 1 else sc["base"]["text"]
+        stored = self._write_doc(who, root, path, before, doc["revision"])
+        ops = textdiff.delta(doc["text"], stored["text"])
+        sc_mod.record_save(sc, doc["text"], stored["text"], who, "restore", undid=last["id"])
+        note = sc_mod.find(sc, tid)
+        note["state"] = sc_mod.OPEN
+        note["closed"] = None
+        sc_mod.relocate(sc, stored["text"], ops)
+        self._write_sidecar(sc, sc_rev)
+        return self._answer(who, {**doc, **stored}, sc)
 
     def reject(self, who, root, path, tid) -> dict:
         self._need(who, "accept")

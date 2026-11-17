@@ -281,6 +281,60 @@ class Service_(unittest.TestCase):
         hist = svc.history(OWNER, *self.P)["saves"][0]
         self.assertEqual((hist["kind"], hist["author"]["id"], hist["by"]["id"]), ("accept", "ada", "sam"))
 
+    def test_accept_undone_while_it_is_the_last_change(self):
+        # Accept's Undo (reopen on an accepted suggestion): the text as it
+        # was, the suggestion open again, a save of its own in History.
+        store, svc = make()
+        _, nid = self.suggest(svc, "eighteen months", "two years")
+        before = store.files["vault:Essays/staying.md"]
+        svc.accept(OWNER, *self.P, nid)
+        self.assertIn("every two years", store.files["vault:Essays/staying.md"])
+        got = svc.reopen(OWNER, *self.P, nid)
+        after = store.files["vault:Essays/staying.md"]
+        unstamped = lambda t: "\n".join(ln for ln in t.split("\n") if not ln.startswith("last_modified_by"))
+        self.assertEqual(unstamped(after), unstamped(before))
+        n = [x for x in got["notes"] if x["id"] == nid][0]
+        self.assertEqual((n["state"], n["where"]["state"]), ("open", "attached"))
+        self.assertEqual(after[n["where"]["start"]:n["where"]["end"]], "eighteen months")
+        self.assertEqual(svc.history(OWNER, *self.P)["saves"][0]["kind"], "restore")
+
+    def test_accept_not_undone_after_another_change(self):
+        store, svc = make()
+        _, nid = self.suggest(svc, "eighteen months", "two years")
+        svc.accept(OWNER, *self.P, nid)
+        doc = store.files["vault:Essays/staying.md"]
+        store.outside_edit(*self.P, doc.replace("curiosity", "wanderlust"))
+        with self.assertRaises(NoteError) as e:
+            svc.reopen(OWNER, *self.P, nid)
+        self.assertEqual(e.exception.status, 409)
+        self.assertIn("wanderlust", store.files["vault:Essays/staying.md"])
+
+    def test_growing_my_suggestion_replaces_it(self):
+        # Typing next to my own open suggestion sends the grown one with
+        # `supersedes`: one suggestion is left, not two.
+        store, svc = make()
+        out, first = self.suggest(svc, "eighteen months", "two years", who=OWNER)
+        got = svc.get(OWNER, *self.P)
+        s = got["text"].index("eighteen months")
+        grown = svc.add(OWNER, *self.P, {"kind": "suggestion", "start": s, "end": s + len("eighteen months,"),
+                                         "quote": "eighteen months,", "replacement": "two years, maybe three,",
+                                         "revision": got["revision"], "supersedes": first})
+        open_ = [n for n in grown["notes"] if n["state"] == "open" and n["kind"] == "suggestion"]
+        self.assertEqual([n["id"] for n in open_], [grown["note"]])
+        # Someone else's is never replaced.
+        got = svc.get(OWNER, *self.P)
+        s = got["text"].index("I told myself")
+        theirs = svc.add(store.agent("ada"), *self.P, {"kind": "suggestion", "quote": "I told myself", "replacement": "I said"})
+        mine = svc.add(OWNER, *self.P, {"kind": "suggestion", "quote": "I told myself it", "replacement": "I said it",
+                                        "supersedes": theirs["note"]})
+        ids = {n["id"] for n in mine["notes"] if n["state"] == "open"}
+        self.assertIn(theirs["note"], ids)
+
+    def test_revision_alone(self):
+        store, svc = make()
+        got = svc.revision(OWNER, *self.P)
+        self.assertEqual(got, {"revision": svc.get(OWNER, *self.P)["revision"]})
+
     def test_reject_leaves_text(self):
         store, svc = make()
         _, nid = self.suggest(svc, "eighteen months", "two years")

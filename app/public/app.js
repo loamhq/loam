@@ -1009,6 +1009,9 @@ pluginLoader = createPluginLoader({ registry, themes: pluginThemes, request: api
   importer: url => import(url.startsWith('/plugins/') ? new URL('.' + url, import.meta.url).href : url),
 })
 pluginSettingsUI = createPluginSettings({ loader: pluginLoader, theme, host: page, changed: schedule })
+// Files holds its own Markdown preview while a plugin that draws Markdown
+// files is still starting (plugin-loader.js, `pending`).
+files.pluginPending = (place) => pluginLoader.pending(place)
 const pluginsReady = pluginLoader.refresh()
 dailyNotes.refresh()
 

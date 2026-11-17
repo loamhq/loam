@@ -11,10 +11,10 @@
 
 import {
   EditorState, EditorView, EditorSelection, ChangeSet, Compartment, Transaction, Annotation, Prec,
-  keymap, history, historyKeymap, defaultKeymap, drawSelection, indentMore, indentLess,
+  keymap, history, historyKeymap, defaultKeymap, drawSelection, indentMore, indentLess, syntaxTree,
 } from '../vendor/codemirror.js'
 import { h, icon, rel, stamp, put } from './dom.js'
-import { changes as diffChanges, posMap, editorText } from './textdiff.js'
+import { changes as diffChanges, posMap, editorText, suggestionShape } from './textdiff.js'
 import {
   markdownLanguage, inline, blocks, notesField, setNotes, authorsField, setAuthors,
   modeField, setMode, suggestBase, setSuggestBase, liveSuggest, focusField, setFocused,
@@ -22,6 +22,7 @@ import {
 import { INLINE, BLOCKS, active, toggleInline, setLink, linkAt, setBlock, blockOf } from './format.js'
 
 export const AUTOSAVE_MS = 1200
+export const WATCH_MS = 1500
 const remote = Annotation.define()
 const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')
 const MOD = MAC ? '⌘' : 'Ctrl'
@@ -71,12 +72,15 @@ export function createDocEditor(opts) {
     mapBase: ed(opts.doc.text),
     sinceBase: ChangeSet.empty(ed(opts.doc.text).length),
     notes: [], me: opts.doc.me, can: opts.doc.can || {}, id: opts.doc.id, resolved: 0,
-    mode: settings?.get('mode', 'edit') || 'edit',
+    // Every doc opens in Editing; a mode lasts while that doc is open and is
+    // never remembered (a remembered Suggesting made a doc never opened
+    // before grow a sidecar at its first keystroke).
+    mode: 'edit',
     focus: null, peek: null, compose: null,
     drawer: null, history: null, authors: Boolean(settings?.get('authors', false)), authorSpans: null,
     menu: null, saving: false, dirty: false, again: false, word: '', error: '',
     phone: Boolean(opts.phone), reattach: null, toast: null, sheet: null, bmenu: null, link: null,
-    destroyed: false,
+    destroyed: false, editing: null, openReplies: new Set(), preview: null, sheetFor: null,
   }
   if (!opts.doc.can?.edit && st.mode !== 'view') st.mode = opts.doc.can?.suggest ? 'suggest' : 'view'
   let saveTimer = null, suggestTimer = null, layoutQueued = false
@@ -112,6 +116,34 @@ export function createDocEditor(opts) {
   scroll.append(page)
   root.append(head, take, player, banner, scroll, kbar, vbar, selbar, bmenu, qpop, drawer, sheetScrim, sheet, toast)
 
+  // -- placing things beside the text ----------------------------------------------
+  //
+  // Loam zooms its whole page (Settings, Size: `body { zoom }`), so a rectangle
+  // read from the DOM, and CodeMirror's own line heights, are in screen pixels,
+  // while a `top` or `left` set on an element inside the page is in the page's
+  // own pixels. At 90% every placement drifted by a tenth of its distance (29 px
+  // by the first paragraph, 200 by the end of a long doc). Everything placed
+  // goes through these.
+  function zoom() {
+    const w = root.offsetWidth
+    const z = w ? root.getBoundingClientRect().width / w : 1
+    return z > 0.2 && z < 5 ? z : 1
+  }
+  // A screen rectangle, in the page's pixels relative to `el` (the editor's
+  // root unless named).
+  function local(rect, el = root) {
+    const z = zoom(), box = el.getBoundingClientRect()
+    return { left: (rect.left - box.left) / z, right: (rect.right - box.left) / z, top: (rect.top - box.top) / z, bottom: (rect.bottom - box.top) / z }
+  }
+  function rootSize() {
+    return { width: root.offsetWidth, height: root.offsetHeight }
+  }
+  // Where the line holding `pos` begins, in the page's pixels from the top of
+  // the editor's content (what the gutter, the "+" and the margin count from).
+  function lineTop(pos) {
+    return view.lineBlockAt(pos).top / zoom()
+  }
+
   // -- CodeMirror --------------------------------------------------------------------
 
   const keys = [
@@ -137,23 +169,100 @@ export function createDocEditor(opts) {
   }
 
   // A list continues on Enter, and an empty item ends it: the Markdown habit.
+  // Ending it leaves a blank line, so on disk what follows is a paragraph of
+  // its own and not still inside the last item (or quote); an empty item
+  // that is indented steps out one level instead.
   function continueList(v) {
     const { state } = v
     const r = state.selection.main
     if (!r.empty) return false
     const line = state.doc.lineAt(r.head)
-    const m = /^(\s*)([-*+] \[[ xX]\] |[-*+] |(\d+)([.)]) |> )/.exec(line.text)
+    const m = /^(\s*)([-*+] \[[ xX]\] |[-*+] |(\d+)([.)]) |> ?)/.exec(line.text)
     if (!m || r.head < line.from + m[0].length) return false
     if (line.text.trim() === m[0].trim()) {
-      v.dispatch({ changes: { from: line.from, to: line.to, insert: '' }, userEvent: 'input' })
+      if (m[1] && !m[2].startsWith('>')) return indentLess(v)
+      const sep = state.lineBreak
+      const prevBlank = line.number > 1 && !state.doc.line(line.number - 1).text.trim()
+      const insert = prevBlank ? '' : sep
+      v.dispatch({ changes: { from: line.from, to: line.to, insert }, selection: { anchor: line.from + insert.length }, userEvent: 'input', scrollIntoView: true })
       return true
     }
+    if (m[2].startsWith('>') && !m[2].endsWith(' ')) return false
     let next = m[2]
     if (m[3]) next = `${Number(m[3]) + 1}${m[4]} `
     else if (/\[[xX]\]/.test(next)) next = next.replace(/\[[xX]\]/, '[ ]')
     const sep = state.lineBreak
     v.dispatch({ changes: { from: r.head, insert: sep + m[1] + next }, selection: { anchor: r.head + sep.length + m[1].length + next.length }, userEvent: 'input', scrollIntoView: true })
     return true
+  }
+
+  // Where Enter keeps its own meaning: code, tables, the frontmatter.
+  function inRawBlock(state, pos) {
+    const fm = /^---\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?=\r?\n|$)/.exec(state.doc.sliceString(0, Math.min(state.doc.length, 20000)))
+    if (fm && pos <= fm[0].length) return true
+    for (let n = syntaxTree(state).resolveInner(pos, -1); n; n = n.parent) {
+      if (/^(FencedCode|CodeBlock|Table|HTMLBlock|CommentBlock)$/.test(n.name)) return true
+    }
+    return false
+  }
+
+  // In a paragraph or a heading, Enter starts a new paragraph: a blank line on
+  // disk, as Markdown needs (one line break is the same paragraph). Shift-Enter
+  // is one line break. Lists and quotes continue (above); code blocks, tables
+  // and the frontmatter keep CodeMirror's own Enter.
+  function newParagraph(v) {
+    if (!canFormat()) return false
+    const { state } = v
+    const r = state.selection.main
+    const line = state.doc.lineAt(r.from)
+    if (!line.text.trim() || inRawBlock(state, r.from)) return false
+    const sep = state.lineBreak
+    // Splitting a line: the words after the caret start the new paragraph,
+    // without the spaces that were before them.
+    let to = r.to
+    while (to < state.doc.lineAt(r.to).to && /[ \t]/.test(state.sliceDoc(to, to + 1))) to++
+    let from = r.from
+    while (from > line.from && /[ \t]/.test(state.sliceDoc(from - 1, from))) from--
+    const insert = sep + sep
+    v.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length }, userEvent: 'input', scrollIntoView: true })
+    return true
+  }
+
+  function lineBreak(v) {
+    if (!canFormat()) return false
+    v.dispatch(v.state.replaceSelection(v.state.lineBreak), { userEvent: 'input', scrollIntoView: true })
+    return true
+  }
+
+  // Typed shortcuts that Markdown alone does not give: "[] " (or "[ ] ") at
+  // the start of a line is a checklist item, and a third backtick opening a
+  // code block closes it too, so the rest of the doc does not become code.
+  function typedShortcut(v, from, to, text) {
+    if (!canFormat() || from !== to) return false
+    const { state } = v
+    const line = state.doc.lineAt(from)
+    const before = state.sliceDoc(line.from, from)
+    const after = state.sliceDoc(to, line.to)
+    if (text === ' ' && !after.trim()) {
+      const m = /^(\s*)(?:[-*+] )?\[( |x|X)?\]$/.exec(before)
+      if (m && !inRawBlock(state, from)) {
+        const mark = `- [${m[2] && m[2] !== ' ' ? 'x' : ' '}] `
+        const at = line.from + m[1].length
+        v.dispatch({ changes: { from: at, to, insert: mark }, selection: { anchor: at + mark.length }, userEvent: 'input.type' })
+        return true
+      }
+    }
+    if (text === '`' && /^\s*``$/.test(before) && !after.trim()) {
+      const indent = /^\s*/.exec(before)[0]
+      const nextLine = line.number < state.doc.lines ? state.doc.line(line.number + 1).text : ''
+      const inCode = inRawBlock(state, line.from)
+      if (!inCode && !/^\s*```/.test(nextLine)) {
+        const sep = state.lineBreak
+        v.dispatch({ changes: { from, to, insert: '`' + sep + indent + '```' }, selection: { anchor: from + 1 }, userEvent: 'input.type' })
+        return true
+      }
+    }
+    return false
   }
 
   const view = new EditorView({
@@ -170,7 +279,10 @@ export function createDocEditor(opts) {
         editableC.of(editableExt()),
         drawSelection(),
         EditorView.lineWrapping,
-        Prec.high(keymap.of([...keys, { key: 'Enter', run: continueList }])),
+        Prec.high(keymap.of([...keys, { key: 'Enter', run: (v) => continueList(v) || newParagraph(v) }, { key: 'Shift-Enter', run: lineBreak }])),
+        EditorView.inputHandler.of(typedShortcut),
+        // Room below the caret while typing at the end, and above it.
+        EditorView.scrollMargins.of(() => ({ top: 24, bottom: st.phone ? 132 : 96 })),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         inline,
         blocks(embed),
@@ -191,6 +303,9 @@ export function createDocEditor(opts) {
           blur: () => setTimeout(() => {
             if (st.destroyed) return
             if (!view.hasFocus) view.dispatch({ effects: setFocused.of(false), annotations: remote.of(true) })
+            // Focus went elsewhere (the margin, the header): the selection's
+            // popup goes with it, unless it is the link field being typed in.
+            if (!view.hasFocus && !st.link) hideSelbar()
             renderBars()
             if (st.mode === 'edit' && st.dirty) save()
           }, 120),
@@ -223,11 +338,28 @@ export function createDocEditor(opts) {
     if (st.destroyed || !ans) return
     const T = ans.text
     const ET = ed(T)
-    const serverCS = ChangeSet.of(diffChanges(st.mapBase, ET), st.mapBase.length, '\n')
-    const userOver = st.sinceBase.map(serverCS, true)
-    const forEditor = serverCS.map(st.sinceBase)
-    if (!forEditor.empty) {
-      view.dispatch({ changes: forEditor, annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
+    let userOver
+    try {
+      const serverCS = ChangeSet.of(diffChanges(st.mapBase, ET), st.mapBase.length, '\n')
+      userOver = st.sinceBase.map(serverCS, true)
+      const forEditor = serverCS.map(st.sinceBase)
+      if (!forEditor.empty) {
+        const keep = scrollAnchor()
+        view.dispatch({ changes: forEditor, annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
+        if (keep) holdScroll(keep, forEditor)
+      }
+    } catch (err) {
+      // The bookkeeping lost track (it never should): keep what is on the
+      // screen as edits over the stored text, rather than lose either.
+      console.error('doc-comments: rebasing on the stored text', err)
+      const now = view.state.doc.toString()
+      userOver = ChangeSet.of(diffChanges(ET, now), ET.length, '\n')
+    }
+    // Suggesting draws what is typed over the text as stored. When the stored
+    // text moves (an accept, a save from elsewhere, an outside edit), that is
+    // the base from now on, so nothing already in the text is suggested again.
+    if (view.state.field(suggestBase, false) != null) {
+      view.dispatch({ effects: setSuggestBase.of(ET), annotations: remote.of(true) })
     }
     st.server = { text: T, revision: ans.revision }
     st.pm = posMap(T, CRLF)
@@ -252,6 +384,56 @@ export function createDocEditor(opts) {
     render()
   }
 
+  // A change that lands above what the person is reading (someone else's
+  // save, an edit on disk) must not move what they are reading: the first line
+  // in view stays where it was on the screen.
+  function scrollAnchor() {
+    if (scroll.scrollTop <= 0) return null
+    const y = scroll.getBoundingClientRect().top - view.documentTop
+    if (y <= 0) return null
+    const block = view.lineBlockAtHeight(y)
+    return { pos: block.from, y: view.documentTop + block.top }
+  }
+
+  function holdScroll(keep, cs) {
+    if (cs.touchesRange(0, keep.pos) === false) return
+    const pos = cs.mapPos(keep.pos, 1)
+    view.requestMeasure({
+      read: () => view.documentTop + view.lineBlockAt(Math.min(pos, view.state.doc.length)).top,
+      write: (y) => { if (Math.abs(y - keep.y) > 0.5) scroll.scrollTop += (y - keep.y) / zoom() },
+    })
+  }
+
+  // A fresh read, quietly: with nothing unsaved the stored text is simply taken
+  // in (the caret and the passages map through it); with unsaved edits they
+  // are saved now, and the save merges them with what changed.
+  function reloadQuietly() {
+    if (st.destroyed) return Promise.resolve()
+    if (st.mode === 'edit' && !st.sinceBase.empty) return save()
+    return run(async () => applyAnswer(await api.get())).catch(fail)
+  }
+
+  // Changes made on disk (a persona, another app) are noticed while the doc is
+  // open: its revision is asked every so often while the page is visible, and
+  // a new one is read in. Nothing is asked while a call is on its way.
+  let watchTimer = null, watching = false
+  function watch() {
+    clearTimeout(watchTimer)
+    if (st.destroyed) return
+    watchTimer = setTimeout(async () => {
+      const visible = typeof document === 'undefined' || document.visibilityState !== 'hidden'
+      if (visible && root.isConnected && !st.saving && !watching && api.revision) {
+        watching = true
+        try {
+          const ans = await api.revision()
+          if (ans?.revision && ans.revision !== st.server.revision && !st.saving) await reloadQuietly()
+        } catch { /* the next look tries again */ }
+        watching = false
+      }
+      watch()
+    }, WATCH_MS)
+  }
+
   function pushNotes() {
     const list = []
     for (const n of st.notes) {
@@ -274,8 +456,16 @@ export function createDocEditor(opts) {
     return p
   }
 
+  // What a person is told when something fails: the server's own words
+  // (they are written for people), and never a library's. Anything else is a
+  // fault of the page's: it is logged, and the doc is read again.
   function fail(err) {
-    const msg = err?.message || String(err)
+    const ours = typeof err?.status === 'number'
+    const msg = ours ? (err.message || 'That did not work.') : 'Something went wrong here, so the doc has been read again.'
+    if (!ours) {
+      console.error('doc-comments:', err)
+      setTimeout(() => { if (!st.destroyed) reloadQuietly() }, 0)
+    }
     st.error = msg
     showToast(msg, null, true)
     render()
@@ -402,6 +592,7 @@ export function createDocEditor(opts) {
     view.dispatch({ changes: back, selection: { anchor: Math.min(caretBack, base.length) }, effects: setSuggestBase.of(base), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
     view.dispatch({ effects: historyC.reconfigure(history()), annotations: remote.of(true) })
     st.sinceBase = ChangeSet.empty(base.length)
+    const bodies = []
     for (const c of hunks) {
       let from = c.from, to = c.to
       let insert = c.insert
@@ -431,14 +622,20 @@ export function createDocEditor(opts) {
       } else {
         body = { start: from, end: to, replacement: insert }
       }
-      // Editor positions to the server's.
-      body.quote = st.pm.slice(body.start, body.end)
-      body.replacement = raw(body.replacement)
-      body.start = st.pm.toServer(body.start)
-      body.end = st.pm.toServer(body.end)
-      body.kind = 'suggestion'
-      body.text = ''
-      body.revision = st.server.revision
+      bodies.push(body)
+    }
+    // Each is sent in turn. The first note on a doc adds its id line, so the
+    // stored text can move between two of them: what is left is mapped
+    // through that move before it is sent.
+    for (const b of bodies) {
+      const moved = ChangeSet.of(diffChanges(base, st.mapBase), base.length, '\n')
+      const start = moved.mapPos(b.start, 1), end = moved.mapPos(b.end, -1)
+      const body = {
+        kind: 'suggestion', text: '', revision: st.server.revision,
+        quote: st.pm.slice(start, end), replacement: raw(b.replacement),
+        start: st.pm.toServer(start), end: st.pm.toServer(end),
+      }
+      if (b.supersedes) body.supersedes = b.supersedes
       try {
         last = await api.add(body)
         applyAnswer(last)
@@ -457,7 +654,6 @@ export function createDocEditor(opts) {
     if ((mode === 'edit' && !st.can.edit) || (mode === 'suggest' && !st.can.suggest)) return
     await run(flushNow).catch(fail)
     st.mode = mode
-    settings?.set('mode', mode)
     view.dispatch({ effects: [setMode.of(mode), editableC.reconfigure(editableExt()), setSuggestBase.of(mode === 'suggest' ? view.state.doc.toString() : null)], annotations: remote.of(true) })
     st.menu = null
     hideSelbar()
@@ -549,7 +745,9 @@ export function createDocEditor(opts) {
 
   async function accept(note) {
     const ans = await call(() => api.accept(note.id))
-    if (ans) { st.focus = null; showToast('Accepted'); render() }
+    // Undo puts the words back and the suggestion with them, while the accept
+    // is still the doc's last change (the server checks).
+    if (ans) { st.focus = null; showToast('Accepted', () => call(() => api.reopen(note.id)), false, true); render() }
   }
 
   async function reject(note) {
@@ -572,6 +770,7 @@ export function createDocEditor(opts) {
     const r = selectionRange()
     if (!note || !r) return
     st.reattach = null
+    hideSelbar()
     await call(async () => {
       const back = st.sinceBase.invertedDesc
       const from = back.mapPos(r.from, 1), to = back.mapPos(r.to, -1)
@@ -704,19 +903,22 @@ export function createDocEditor(opts) {
   }
 
   function placeAbove(el, from, to) {
-    const a = view.coordsAtPos(from), b = view.coordsAtPos(to, -1)
-    if (!a || !b) return
-    const box = root.getBoundingClientRect()
+    const ca = view.coordsAtPos(from), cb = view.coordsAtPos(to, -1)
+    if (!ca || !cb) return
+    const a = local(ca), b = local(cb), c = local(col.getBoundingClientRect())
+    const box = rootSize()
     el.style.visibility = 'hidden'
     el.classList.add('on')
     const w = el.offsetWidth, hgt = el.offsetHeight
     el.style.visibility = ''
     const sameLine = Math.abs(a.top - b.top) < 4
-    const mid = sameLine ? (a.left + b.right) / 2 : (a.left + Math.min(b.right, col.getBoundingClientRect().right)) / 2
-    let left = mid - w / 2 - box.left
+    const mid = sameLine ? (a.left + b.right) / 2 : (a.left + Math.min(b.right, c.right)) / 2
+    let left = mid - w / 2
     left = Math.max(8, Math.min(left, box.width - w - 8))
-    let top = a.top - box.top - hgt - 10
-    if (top < 52) top = b.bottom - box.top + 10
+    // Just above the first line of the selection, clear of the header;
+    // below its last line when there is no room above.
+    let top = a.top - hgt - 8
+    if (top < head.offsetHeight + 4) top = b.bottom + 8
     el.style.left = `${left}px`
     el.style.top = `${top}px`
   }
@@ -760,7 +962,8 @@ export function createDocEditor(opts) {
     const line = st.phone ? null : emptyLineAtCaret()
     if (!line) { plus.classList.remove('on'); return }
     const block = view.lineBlockAt(line.from)
-    plus.style.top = `${block.top + (block.height - 26) / 2}px`
+    const z = zoom()
+    plus.style.top = `${block.top / z + (block.height / z - 26) / 2}px`
     plus.classList.add('on')
   }
 
@@ -805,9 +1008,18 @@ export function createDocEditor(opts) {
     bmenu.classList.remove('on')
   }
 
+  // From a selection, the menu turns what is selected into another kind of
+  // block; a code block, a divider and a table are added below rather than
+  // turned into, so they are offered only where a block is being added.
+  const ADDS = new Set(['code', 'hr', 'table'])
+  function turnable() {
+    return BLOCKS.filter(b => !ADDS.has(b.id))
+  }
+
   function bmenuItems() {
     const q = st.bmenu?.query || ''
-    return BLOCKS.filter(b => !q || b.label.toLowerCase().includes(q) || b.id.startsWith(q))
+    const list = st.bmenu?.at === 'selbar' ? turnable() : BLOCKS
+    return list.filter(b => !q || b.label.toLowerCase().includes(q) || b.id.startsWith(q))
   }
 
   function chooseBlock(b) {
@@ -839,24 +1051,36 @@ export function createDocEditor(opts) {
       b.at === 'selbar' && current === it.id ? h('span', { class: 'dc-bck' }, icon('check', 14)) : h('span', { class: 'dc-bk', text: it.md.trim() || '' }))),
       items.length ? null : h('div', { class: 'dc-bn', text: 'No block by that name' }),
     )
-    const box = root.getBoundingClientRect()
-    let top, left
+    // Below what opened it when every row fits there, above when they fit
+    // there instead, and otherwise on the roomier side, scrolling only then.
+    const box = rootSize()
+    let below, above, left
     if (b.at === 'selbar' && b.anchor) {
-      const r = b.anchor.getBoundingClientRect()
-      top = r.bottom - box.top + 8
-      left = r.left - box.left - 4
+      const r = local(b.anchor.getBoundingClientRect())
+      below = r.bottom + 6
+      above = r.top - 6
+      left = r.left - 4
     } else {
-      const pos = view.state.selection.main.head
-      const c = view.coordsAtPos(pos)
-      if (!c) return
-      top = c.bottom - box.top + 8
-      left = (b.at === 'plus' ? plus.getBoundingClientRect().left : c.left) - box.left
+      const c0 = view.coordsAtPos(view.state.selection.main.head)
+      if (!c0) return
+      const c = local(c0)
+      below = c.bottom + 6
+      above = c.top - 6
+      left = b.at === 'plus' ? local(plus.getBoundingClientRect()).left : c.left
     }
+    bmenu.style.maxHeight = ''
     bmenu.classList.add('on')
-    const hgt = bmenu.offsetHeight
-    if (top + hgt > box.height - 10) top = Math.max(10, top - hgt - 40)
+    const hgt = bmenu.scrollHeight
+    const floor = head.offsetHeight + 6
+    const roomBelow = box.height - 12 - below, roomAbove = above - floor
+    let top
+    if (hgt <= roomBelow) top = below
+    else if (hgt <= roomAbove) top = above - hgt
+    else if (roomBelow >= roomAbove) { top = below; bmenu.style.maxHeight = `${roomBelow}px` }
+    else { top = floor; bmenu.style.maxHeight = `${roomAbove}px` }
+    bmenu.classList.toggle('up', top < below)
     bmenu.style.top = `${top}px`
-    bmenu.style.left = `${Math.max(8, Math.min(left, box.width - 260))}px`
+    bmenu.style.left = `${Math.max(8, Math.min(left, box.width - bmenu.offsetWidth - 8))}px`
   }
 
   view.dom.addEventListener('keydown', (e) => {
@@ -897,17 +1121,60 @@ export function createDocEditor(opts) {
       focused ? h('span', { class: 'dc-tm', title: stamp(n.created), text: rel(n.created) }) : null,
       changed ? h('span', { class: 'dc-chg', title: `Text changed since. It read: “${n.anchor.quote}”` }, icon('changed', 14)) : null,
       h('span', { class: 'dc-grow' }),
+      focused && mine(n) && !st.editing ? ownTools(n) : null,
       focused && isComment && mayResolve(n) ? h('button', { class: 'dc-ib dc-resolve', type: 'button', title: 'Resolve', 'aria-label': 'Resolve', onclick: (e) => { e.stopPropagation(); resolve(n) } }, icon('check', 15)) : null,
     )
+  }
+
+  // One's own words: the note's (from its head) and each reply's.
+  function mine(item) {
+    return Boolean(item?.author?.id && st.me?.id && item.author.id === st.me.id)
+  }
+
+  function ownTools(n, r = null) {
+    return h('span', { class: 'dc-own' },
+      h('button', { class: 'dc-ib', type: 'button', title: 'Change your words', 'aria-label': 'Change your words', onclick: (e) => { e.stopPropagation(); st.editing = { id: n.id, rid: r ? r.id : null }; render(); setTimeout(() => root.querySelector('.dc-edit-fld textarea')?.focus(), 30) } }, icon('pencil', 13)),
+      r ? h('button', { class: 'dc-ib', type: 'button', title: 'Remove your reply', 'aria-label': 'Remove your reply', onclick: (e) => { e.stopPropagation(); removeReply(n, r) } }, icon('trash', 13)) : null)
+  }
+
+  function editField(n, rid, text) {
+    const t = h('textarea', { rows: '1', 'aria-label': 'Your words' })
+    t.value = text
+    const done = async (keep) => {
+      const next = t.value
+      st.editing = null
+      if (keep && next.trim() !== (text || '').trim()) await call(() => api.edit(n.id, rid, next))
+      else render()
+    }
+    t.addEventListener('input', () => fit(t))
+    t.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); done(true) }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false) }
+    })
+    setTimeout(() => fit(t), 0)
+    return h('div', { class: 'dc-edit-fld' },
+      h('div', { class: 'dc-fld' }, t),
+      h('div', { class: 'dc-dbtns' },
+        h('button', { class: 'dc-sm ghost', type: 'button', onclick: (e) => { e.stopPropagation(); done(false) } }, 'Cancel'),
+        h('button', { class: 'dc-sm ok', type: 'button', onclick: (e) => { e.stopPropagation(); done(true) } }, 'Save')))
+  }
+
+  async function removeReply(n, r) {
+    const ans = await call(() => api.deleteReply(n.id, r.id))
+    if (ans) showToast('Reply removed')
   }
 
   function mayResolve(n) {
     return st.can.resolve_any || n.author?.id === st.me?.id
   }
 
+  // What a suggestion does, in words: an insertion says what it adds, a
+  // deletion what it takes out, anything else what the passage becomes.
   function suggestionLine(n) {
     const from = n.anchor?.quote ?? ''
-    if (n.replacement === '') return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete ' }), h('del', { text: `“${clip(from)}”` }))
+    const shape = suggestionShape(from, n.replacement ?? '')
+    if (shape.kind === 'insert') return h('div', { class: 'dc-stl' }, h('span', { text: 'Add ' }), h('ins', { text: `“${clip(shape.insert)}”` }))
+    if (shape.kind === 'delete') return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete ' }), h('del', { text: `“${clip(from.slice(shape.from, shape.to))}”` }))
     return h('div', { class: 'dc-stl' }, h('span', { text: 'Replace with ' }), h('ins', { text: `“${clip(n.replacement)}”` }))
   }
 
@@ -938,7 +1205,12 @@ export function createDocEditor(opts) {
     const out = []
     if (n.kind === 'suggestion') out.push(suggestionLine(n))
     const text = bodyText(n)
-    if (text) out.push(h('p', { class: `dc-tx${full ? '' : ' clamp'}`, text }))
+    const editingNote = full && st.editing?.id === n.id && st.editing.rid == null
+    if (editingNote) out.push(editField(n, null, n.text || ''))
+    else if (text) out.push(h('p', { class: `dc-tx${full ? '' : ' clamp'}`, text }))
+    // The glyph in the head says it at rest; the focused note says it in
+    // words, where a phone can read it too.
+    if (full && n.where?.state === 'changed') out.push(h('div', { class: 'dc-chgl' }, 'The words changed since. They read ', h('q', { text: clip(n.anchor?.quote || '', 120) })))
     if (!full) {
       if (n.replies?.length) out.push(h('div', { class: 'dc-more', text: n.replies.length === 1 ? '1 reply' : `${n.replies.length} replies` }))
       return out
@@ -947,8 +1219,8 @@ export function createDocEditor(opts) {
       out.push(h('div', { class: 'dc-rps' }, n.replies.map(r => h('div', { class: 'dc-rp' },
         avatar(r.author, 18),
         h('div', {},
-          h('div', { class: 'dc-rh' }, h('b', { text: name(r.author) }), h('span', { class: 'dc-tm', title: stamp(r.created), text: ` ${rel(r.created)}` })),
-          h('div', { class: 'dc-rt', text: r.text }))))))
+          h('div', { class: 'dc-rh' }, h('b', { text: name(r.author) }), h('span', { class: 'dc-tm', title: stamp(r.created), text: ` ${rel(r.created)}` }), mine(r) && !st.editing ? ownTools(n, r) : null),
+          st.editing?.id === n.id && st.editing.rid === r.id ? editField(n, r.id, r.text) : h('div', { class: 'dc-rt', text: r.text }))))))
     }
     if (n.kind === 'suggestion' && st.can.accept) {
       out.push(h('div', { class: 'dc-dbtns' },
@@ -1035,12 +1307,15 @@ export function createDocEditor(opts) {
     requestAnimationFrame(() => { layoutQueued = false; layout() })
   }
 
+  // The top of the words a passage starts with, in the page's pixels from the
+  // top of `.dc-page` (where the margin's cards are placed from): measured
+  // where the line is drawn, else from CodeMirror's height map.
   function anchorTop(pos) {
+    const z = zoom()
     const pageTop = page.getBoundingClientRect().top
-    const c = view.coordsAtPos(pos)
-    if (c) return c.top - pageTop
-    const block = view.lineBlockAt(pos)
-    return view.documentTop - pageTop + block.top
+    const c = view.coordsAtPos(pos, 1)
+    if (c) return (c.top - pageTop) / z
+    return (view.documentTop - pageTop + view.lineBlockAt(pos).top) / z + 4
   }
 
   function layout() {
@@ -1051,7 +1326,9 @@ export function createDocEditor(opts) {
       for (const [id, el] of cardEls) {
         const r = ranges.get(id)
         if (!r || r.from == null) continue
-        items.push({ id, el, want: anchorTop(r.from) - 8, hgt: el.offsetHeight })
+        // The card's head row (below its 10 px of padding) level with the
+        // first line of its passage.
+        items.push({ id, el, want: anchorTop(r.from) - 10, hgt: el.offsetHeight })
       }
       items.sort((a, b) => a.want - b.want)
       const gap = 10
@@ -1086,7 +1363,7 @@ export function createDocEditor(opts) {
     for (const n of openNotes()) {
       const r = ranges.get(n.id)
       if (!r || r.from == null) continue
-      const top = Math.round(view.lineBlockAt(r.from).top)
+      const top = Math.round(lineTop(r.from))
       if (!byLine.has(top)) byLine.set(top, [])
       byLine.get(top).push(n)
     }
@@ -1105,15 +1382,16 @@ export function createDocEditor(opts) {
     const r = currentNoteRanges().find(x => x.id === st.focus)
     if (!n || !r) { qpop.classList.remove('on'); return }
     put(qpop, h('div', { class: 'dc-card on pop' }, cardHead(n, true), ...threadBody(n, { full: true })))
-    const box = root.getBoundingClientRect()
-    const c = view.coordsAtPos(r.to, -1) || view.coordsAtPos(r.from)
-    if (!c) return
+    const box = rootSize()
+    const c0 = view.coordsAtPos(r.to, -1) || view.coordsAtPos(r.from)
+    if (!c0) return
+    const c = local(c0)
     qpop.classList.add('on')
     const w = qpop.offsetWidth
-    let left = Math.min(c.left - box.left - 20, box.width - w - 16)
+    let left = Math.min(c.left - 20, box.width - w - 16)
     left = Math.max(16, left)
-    let top = c.bottom - box.top + 10
-    if (top + qpop.offsetHeight > box.height - 10) top = Math.max(60, c.top - box.top - qpop.offsetHeight - 10)
+    let top = c.bottom + 10
+    if (top + qpop.offsetHeight > box.height - 10) top = Math.max(head.offsetHeight + 8, c.top - qpop.offsetHeight - 10)
     qpop.style.left = `${left}px`
     qpop.style.top = `${top}px`
   }
@@ -1235,6 +1513,7 @@ export function createDocEditor(opts) {
     const sum = s.summary || {}
     const where = sum.section ? `“${clip(sum.section, 44)}”` : sum.first ? `“${clip(sum.first, 40)}”` : ''
     if (s.kind === 'base') return s.folded ? 'Earlier versions, folded' : 'Where the record begins'
+    if (s.kind === 'restore' && s.undid) return 'Undid accepting a suggestion'
     if (s.kind === 'restore') return 'Restored an earlier version'
     if (s.kind === 'accept') return where ? `Accepted a suggestion in ${where}` : 'Accepted a suggestion'
     if (sum.frontmatter && !where) return 'Changed the properties'
@@ -1246,12 +1525,20 @@ export function createDocEditor(opts) {
 
   function historyView() {
     const H = st.history
-    const rows = (H?.saves || []).map((s, i) => h('div', { class: `dc-hrow${i === 0 ? ' now' : ''}` },
+    // A version is read before it is restored: a click opens it, with what
+    // differs from now marked, and Restore is there.
+    const rows = (H?.saves || []).flatMap((s, i) => [h('div', {
+      class: `dc-hrow${i === 0 ? ' now' : ''}${st.preview?.id === s.id ? ' sel' : ''}`,
+      role: i === 0 ? null : 'button', tabindex: i === 0 ? null : '0', 'aria-expanded': i === 0 ? null : String(st.preview?.id === s.id),
+      onclick: i === 0 ? null : () => togglePreview(s),
+      onkeydown: i === 0 ? null : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePreview(s) } },
+    },
       avatar(s.author, 22),
       h('div', { class: 'dc-l' },
         h('b', { text: saveTitle(s) }),
         h('small', { text: [name(s.author), stamp(s.at), s.kind === 'outside' ? 'outside the editor' : null, s.by && s.by.id !== s.author?.id ? `accepted by ${name(s.by)}` : null].filter(Boolean).join(' · ') })),
-      i === 0 ? h('span', { class: 'dc-now', text: 'Now' }) : st.can.edit ? h('button', { class: 'dc-sm dc-restore', type: 'button', onclick: () => restore(s, H.saves[0]) }, 'Restore') : null))
+      i === 0 ? h('span', { class: 'dc-now', text: 'Now' }) : h('span', { class: 'dc-chv' }, icon(st.preview?.id === s.id ? 'chevronDown' : 'chevronRight', 14))),
+      st.preview?.id === s.id ? previewView(s, H.saves[0]) : null])
     const det = detached()
     return [
       H ? null : h('div', { class: 'dc-quiet', text: 'Reading the history…' }),
@@ -1260,7 +1547,7 @@ export function createDocEditor(opts) {
       det.length ? h('div', { class: 'dc-dsec', text: `Detached · ${det.length}` }) : null,
       ...det.map(n => h('div', { class: 'dc-det' },
         h('div', { class: 'dc-qt gone', text: n.anchor.quote }),
-        h('div', { class: 'dc-gone', text: `Passage gone · ${rel(n.created)}` }),
+        h('div', { class: 'dc-gone', text: 'Passage gone' }),
         h('div', { class: 'dc-ch' }, avatar(n.author, 20), h('span', { class: 'dc-nm', text: name(n.author) }), h('span', { class: 'dc-tm', text: rel(n.created) })),
         bodyText(n) ? h('p', { class: 'dc-tx', text: bodyText(n) }) : null,
         n.kind === 'suggestion' ? suggestionLine(n) : null,
@@ -1268,7 +1555,54 @@ export function createDocEditor(opts) {
     ]
   }
 
+  async function togglePreview(s) {
+    if (st.preview?.id === s.id) { st.preview = null; render(); return }
+    st.preview = { id: s.id, text: null }
+    render()
+    try {
+      const ans = await api.version(s.id)
+      if (st.preview?.id === s.id) { st.preview = { id: s.id, text: ans.text }; render() }
+    } catch (err) {
+      st.preview = null
+      fail(err)
+    }
+  }
+
+  // The version as it was, around what differs from the text now: its words
+  // that are gone now are marked, and words added since are shown struck.
+  function previewView(s, head_) {
+    const p = st.preview
+    const body = []
+    if (p.text == null) body.push(h('div', { class: 'dc-quiet', text: 'Reading that version…' }))
+    else {
+      const now = st.server.text
+      const hunks = diffChanges(now, p.text)
+      const CONTEXT = 140
+      const pre = h('pre')
+      if (!hunks.length) pre.append('The same as now.')
+      let at = 0
+      hunks.forEach((c, i) => {
+        const lead = now.slice(at, c.from)
+        const clipped = i === 0 ? (c.from > CONTEXT ? '…' + lead.slice(-CONTEXT) : lead) : (lead.length > CONTEXT * 2 ? lead.slice(0, CONTEXT) + ' … ' + lead.slice(-CONTEXT) : lead)
+        pre.append(clipped)
+        if (c.insert) pre.append(h('ins', { text: c.insert }))
+        if (c.to > c.from) pre.append(h('del', { text: now.slice(c.from, c.to) }))
+        at = c.to
+      })
+      if (hunks.length) {
+        const tail = now.slice(at)
+        pre.append(tail.length > CONTEXT ? tail.slice(0, CONTEXT) + '…' : tail)
+      }
+      body.push(pre)
+    }
+    return h('div', { class: 'dc-preview' },
+      h('div', { class: 'dc-preview-h' }, h('span', { text: 'As it was then; marked where it differs from now' }), h('span', { class: 'dc-grow' }),
+        st.can.edit && p.text != null ? h('button', { class: 'dc-sm ok', type: 'button', onclick: () => restore(s, head_) }, 'Restore this version') : null),
+      ...body)
+  }
+
   async function restore(s, head_) {
+    st.preview = null
     const ans = await call(() => api.restore(s.id))
     if (!ans) return
     showToast('Restored', head_ ? () => call(() => api.restore(head_.id)).then(loadHistory) : null)
@@ -1284,7 +1618,12 @@ export function createDocEditor(opts) {
       h('div', { class: 'dc-qt', text: clip(n.anchor.quote, 140) }),
       n.kind === 'suggestion' ? suggestionLine(n) : null,
       bodyText(n) ? h('p', { class: 'dc-tx', text: bodyText(n) }) : null,
-      n.replies?.length ? h('div', { class: 'dc-more', text: n.replies.length === 1 ? '1 reply' : `${n.replies.length} replies` }) : null,
+      n.replies?.length ? h('button', { class: `dc-more dc-open-replies${st.openReplies.has(n.id) ? ' open' : ''}`, type: 'button', 'aria-expanded': String(st.openReplies.has(n.id)), onclick: () => { if (st.openReplies.has(n.id)) st.openReplies.delete(n.id); else st.openReplies.add(n.id); render() } }, icon('chevronRight', 12), n.replies.length === 1 ? '1 reply' : `${n.replies.length} replies`) : null,
+      n.replies?.length && st.openReplies.has(n.id) ? h('div', { class: 'dc-rps' }, n.replies.map(r => h('div', { class: 'dc-rp' },
+        avatar(r.author, 18),
+        h('div', {},
+          h('div', { class: 'dc-rh' }, h('b', { text: name(r.author) }), h('span', { class: 'dc-tm', title: stamp(r.created), text: ` ${rel(r.created)}` })),
+          h('div', { class: 'dc-rt', text: r.text }))))) : null,
       h('div', { class: 'dc-stl', text: `${{ resolved: 'Resolved', accepted: 'Accepted', rejected: 'Rejected' }[n.state]}${n.closed?.by ? ` by ${name(n.closed.by)}` : ''} · ${rel(n.closed?.at)}` })))
   }
 
@@ -1359,7 +1698,7 @@ export function createDocEditor(opts) {
         tools.length ? h('span', { class: 'dc-ksep' }) : null,
         st.can.comment ? h('button', { class: 'dc-kc', type: 'button', disabled: r ? null : true, onclick: () => startNote('comment') }, icon('comment', 17), h('span', { text: 'Comment' })) : null,
         r && st.can.suggest ? h('button', { class: 'dc-kc', type: 'button', onclick: () => startNote('suggestion') }, icon('suggest', 17), h('span', { text: 'Suggest' })) : null,
-        opts.barExtras?.() || null,
+        opts.barExtras?.() ? h('span', { class: 'dc-kmic' }, opts.barExtras()) : null,
       )
     }
     if (!writing && r) {
@@ -1383,6 +1722,26 @@ export function createDocEditor(opts) {
 
   sheetScrim.addEventListener('click', closeSheet)
 
+  // The phone's thread sheet covers the lower part of the page: the passage it
+  // is about is scrolled into what is left above it, with room made below the
+  // text when the passage is near the end.
+  function revealAboveSheet() {
+    if (st.destroyed || !st.phone || st.sheet !== 'thread') return
+    const r = currentNoteRanges().find(x => x.id === st.focus)
+    if (!r || r.from == null) return
+    const z = zoom()
+    const sh = sheet.offsetHeight
+    col.style.paddingBottom = `${sh + 48}px`
+    const sr = scroll.getBoundingClientRect()
+    const passageTop = (view.documentTop - sr.top + view.lineBlockAt(r.from).top) / z + scroll.scrollTop
+    const passageEnd = (view.documentTop - sr.top + view.lineBlockAt(r.to).bottom) / z + scroll.scrollTop
+    const sheetTop = (root.getBoundingClientRect().bottom - sr.top) / z - sh
+    const top = scroll.scrollTop
+    if (passageTop >= top + 12 && Math.min(passageEnd, passageTop + 90) <= top + sheetTop - 12) return
+    const target = Math.max(0, passageTop - Math.max(16, (sheetTop - Math.min(passageEnd - passageTop, sheetTop * 0.6)) / 3))
+    scroll.scrollTo({ top: target, behavior: 'smooth' })
+  }
+
   function renderSheet() {
     const k = st.phone ? st.sheet : null
     sheetScrim.classList.toggle('on', Boolean(k))
@@ -1402,7 +1761,7 @@ export function createDocEditor(opts) {
     } else if (k === 'blocks') {
       const current = blockOf(view.state)
       body = [h('div', { class: 'dc-sh' }, h('b', { text: 'Text style' }), h('span', { class: 'dc-grow' }), close),
-        h('div', { class: 'dc-bsh' }, BLOCKS.map(b => h('button', { class: `dc-bi${current === b.id ? ' on' : ''}`, type: 'button', onclick: () => { st.sheet = null; setBlock(view, b.id); render() } },
+        h('div', { class: 'dc-bsh' }, (blockOf(view.state) === 'p' && !view.state.doc.lineAt(view.state.selection.main.head).text.trim() ? BLOCKS : turnable()).map(b => h('button', { class: `dc-bi${current === b.id ? ' on' : ''}`, type: 'button', onclick: () => { st.sheet = null; setBlock(view, b.id); render() } },
           h('span', { class: `dc-bt${b.glyph ? ' g' : ''}` }, b.icon ? icon(b.icon, 17) : b.glyph), h('span', { class: 'dc-bl', text: b.label }), h('span', { class: 'dc-bk', text: b.md.trim() }))))]
     } else if (k === 'history' || k === 'resolved') {
       body = [h('div', { class: 'dc-sh' }, h('b', { text: k === 'history' ? 'History' : 'Resolved' }), h('span', { class: 'dc-grow' }), close),
@@ -1429,7 +1788,8 @@ export function createDocEditor(opts) {
 
   function render() {
     if (st.destroyed) return
-    root.className = `dc mode-${st.mode}${st.phone ? ' phone' : ' desk'}${st.authors ? ' authors' : ''}${st.reattach ? ' reattaching' : ''}${st.drawer && !st.phone ? ' drawer-open' : ''}`
+    const bare = !st.phone && !st.compose && openNotes().length === 0
+    root.className = `dc mode-${st.mode}${st.phone ? ' phone' : ' desk'}${bare ? ' bare' : ''}${st.authors ? ' authors' : ''}${st.reattach ? ' reattaching' : ''}${st.drawer && !st.phone ? ' drawer-open' : ''}`
     renderHead()
     banner.classList.toggle('on', Boolean(st.reattach))
     if (st.reattach) {
@@ -1439,6 +1799,9 @@ export function createDocEditor(opts) {
     renderMargin()
     renderDrawer()
     renderSheet()
+    if (st.phone && st.sheet === 'thread' && st.focus) {
+      if (st.sheetFor !== st.focus) { st.sheetFor = st.focus; requestAnimationFrame(revealAboveSheet) }
+    } else if (st.sheetFor) { st.sheetFor = null; col.style.paddingBottom = '' }
     renderBars()
     renderLegend()
     if (st.mode !== 'view' || !st.focus || st.phone) qpop.classList.remove('on')
@@ -1451,6 +1814,7 @@ export function createDocEditor(opts) {
   ro?.observe(col)
 
   applyAnswer(opts.doc)
+  watch()
   if (st.mode === 'suggest') startSuggesting()
   if (st.authors) loadAuthors()
 
@@ -1472,9 +1836,7 @@ export function createDocEditor(opts) {
     },
     refreshHead: () => renderHead(),
     // A fresh read of the doc (focus came back, the file changed on disk).
-    async reload() {
-      try { applyAnswer(await run(() => api.get())) } catch (err) { fail(err) }
-    },
+    reload: () => reloadQuietly(),
     // The text as the editor holds it; replacing it is an edit like typing.
     // In editor space, with editor positions (what dictation's field reads).
     text: () => view.state.doc.toString(),
@@ -1488,6 +1850,7 @@ export function createDocEditor(opts) {
       st.destroyed = true
       clearTimeout(saveTimer)
       clearTimeout(suggestTimer)
+      clearTimeout(watchTimer)
       ro?.disconnect()
       view.destroy()
     },
