@@ -2,6 +2,8 @@ import { h } from './ui.js'
 
 export const updateInProgress = run => ['starting', 'running'].includes(run?.outcome)
 const outcomes = { starting: 'Getting ready…', running: 'Updating Loam…', applied: 'Loam is up to date', 'rolled-back': 'Previous version restored', refused: 'Nothing changed', failed: 'The update couldn’t finish', interrupted: 'The update was interrupted' }
+const changeKeys = check => ['added', 'changed', 'removed'].filter(key => check?.changes?.[key]?.length)
+
 export function createUpdate({ api, changed, reload = () => location.reload(), later = setTimeout, cancel = clearTimeout }) {
   const st = { data: null, busy: false, operation: null, error: '', refusal: null, review: null, reconnecting: false, confirmRollback: false }
   let timer = null, disposed = false, reloaded = false
@@ -79,9 +81,12 @@ export function createUpdate({ api, changed, reload = () => location.reload(), l
       st.busy && st.operation !== 'check' ? h('p', { role: 'status', text: st.operation === 'rollback' ? 'Starting the rollback…' : 'Starting the update…' }) : null,
       check?.latest && !active ? h('section', { class: 'card update-release' },
         h('h3', { text: check.available ? `Loam ${check.latest.version} is ready` : 'You’re up to date' }),
-        check.available ? [h('h4', { class: 'kicker', text: 'What’s new' }),
-          h('p', { class: 'note', text: 'Files included in this release:' }),
-          ...['added', 'changed', 'removed'].filter(key => check.changes?.[key]?.length).map(key => h('div', {}, h('p', { class: 'kicker', text: key }), h('ul', {}, check.changes[key].map(file => h('li', { text: file }))))),
+        // A release that changes nothing in System/Loam drew the heading and
+        // "Files included in this release:" over an empty list (the first-day
+        // walk, 2026-11-16). The release notes go to the person's agent.
+        check.available ? [h('p', { class: 'note', text: 'After the update, your agent will tell you what’s new.' }),
+          changeKeys(check).length ? [h('h4', { class: 'kicker', text: 'Files in System/Loam this release replaces' }),
+            ...changeKeys(check).map(key => h('div', {}, h('p', { class: 'kicker', text: key }), h('ul', {}, check.changes[key].map(file => h('li', { text: file })))))] : null,
           library && !st.review ? libraryView(library) : null,
           !st.review ? button('Update Loam', () => { if (library) { st.review = library; changed() } else runAction() }, true, locked || Boolean(check.blocked && check.blocked.code !== 'library-edits')) : null] : null) : null,
       st.review ? h('section', { class: 'card update-review', 'aria-label': 'Review library changes' },

@@ -84,3 +84,21 @@ test('claim is self-contained; token leaves the address; exact refusals and alre
   missing.location.hash = '#fixture-token'; missing.windowEvents.hashchange(); assert.deepEqual(missing.reloads, ['#fixture-token'])
   missing.location.hash = ''; missing.windowEvents.hashchange(); assert.equal(missing.reloads.length, 1, 'an emptied fragment reloads nothing')
 })
+
+test('an available release with no System/Loam changes draws no empty file list', async () => {
+  // Found by the 2026-11-16 first-day walk: "What's new" and "Files included in this release:"
+  // over nothing. The release notes reach the person through their agent.
+  const { installDom } = await import('./fakedom.js'), { text } = await import('./browser.js')
+  installDom()
+  const data = changes => ({ current: { version: '0.1.0', kind: 'stock' }, check: { latest: { version: '0.1.1' }, available: true, changes } })
+  for (const [changes, listed] of [[{ added: [], changed: [], removed: [] }, false], [{ added: [], changed: ['System/Loam/skills/x/SKILL.md'], removed: [] }, true]]) {
+    const c = createUpdate({ changed() {}, reload() {}, later() {}, cancel() {}, api: async () => data(changes) })
+    await c.check()
+    const words = text(c.view())
+    assert.match(words, /Loam 0\.1\.1 is ready/)
+    assert.match(words, /your agent will tell you what’s new/)
+    assert.doesNotMatch(words, /Files included in this release/)
+    assert.equal(/System\/Loam this release replaces/.test(words), listed)
+    assert.equal(words.includes('SKILL.md'), listed)
+  }
+})
