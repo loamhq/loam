@@ -87,6 +87,11 @@ export function createDocEditor(opts) {
   }
   if (!opts.doc.can?.edit && st.mode !== 'view') st.mode = opts.doc.can?.suggest ? 'suggest' : 'view'
   let saveTimer = null, suggestTimer = null, layoutQueued = false
+  // The text moves aside for the margin (or back to the middle) only between
+  // keystrokes: `typedAt` is the last key in the text, `shownBare` what the
+  // page shows, `bareTimer` the redraw that waits for the pause.
+  let typedAt = 0, shownBare = null, bareTimer = null
+  const TYPING_PAUSE = 900
   let queue = Promise.resolve()
   const people = { ...(opts.people || {}) }
   const historyC = new Compartment(), editableC = new Compartment()
@@ -315,6 +320,7 @@ export function createDocEditor(opts) {
           click: onEditorClick,
           mouseover: onEditorOver,
           mouseout: onEditorOut,
+          keydown: () => { typedAt = Date.now() },
           keyup: () => { if (!st.phone) queueSelbar() },
           mouseup: () => { if (!st.phone) setTimeout(queueSelbar, 0) },
           focus: () => { view.dispatch({ effects: setFocused.of(true), annotations: remote.of(true) }); renderBars() },
@@ -2341,7 +2347,18 @@ export function createDocEditor(opts) {
 
   function render() {
     if (st.destroyed) return
-    const bare = !st.phone && !st.compose && openNotes().length === 0
+    // No notes to show: no margin, the text in the middle. A change of that
+    // moves the text, so it waits while keys are going down in it (someone
+    // else's note can arrive mid-sentence) and lands at the pause;
+    // a note being started is never kept waiting.
+    let bare = !st.phone && !st.compose && openNotes().length === 0
+    clearTimeout(bareTimer)
+    const quiet = Date.now() - typedAt
+    if (shownBare != null && bare !== shownBare && !st.compose && view.hasFocus && quiet < TYPING_PAUSE) {
+      bare = shownBare
+      bareTimer = setTimeout(render, TYPING_PAUSE - quiet + 20)
+    }
+    shownBare = bare
     root.className = `dc mode-${st.mode}${st.phone ? ' phone' : ' desk'}${st.phone && st.sheet ? ' sheet-open' : ''}${bare ? ' bare' : ''}${st.authors ? ' authors' : ''}${st.reattach ? ' reattaching' : ''}${st.drawer && !st.phone ? ' drawer-open' : ''}`
     renderHead()
     banner.classList.toggle('on', Boolean(st.reattach))

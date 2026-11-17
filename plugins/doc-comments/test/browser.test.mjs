@@ -1953,3 +1953,103 @@ test('B5 (round 6): the Share button\'s faces sit apart, each ring in the button
   await page.screenshot({ path: `${SHOTS || '/tmp'}/share-faces.png`, clip: await page.evaluate(() => { const r = document.querySelector('.dc-sharebtn').getBoundingClientRect(); return { x: r.x - 20, y: r.y - 10, width: r.width + 40, height: r.height + 20 } }) }).catch(() => {})
   await page.done()
 })
+
+// -- the measure on wide screens ------------------------------------------------------------------
+//
+// The text grows with the pane to 720 px and stops; past that the room is air.
+// With nothing in the margin the text sits in the middle of the pane; with
+// notes, the text and the margin are one block in the middle.
+const MEASURE = 720
+const geometry = (page) => page.evaluate(() => {
+  const z = (() => { const r = document.querySelector('.dc'); return r.getBoundingClientRect().width / r.offsetWidth || 1 })()
+  const t = document.querySelector('.cm-content').getBoundingClientRect()
+  const p = document.querySelector('.dc-page').getBoundingClientRect()
+  const m = document.querySelector('.dc-margin').getBoundingClientRect()
+  const props = document.querySelector('.dc-props')?.getBoundingClientRect()
+  return { text: t.width / z, left: (t.left - p.left) / z, right: (p.right - t.right) / z, margin: m.width / z,
+    blockRight: (p.right - Math.max(t.right, m.right)) / z, propsLeft: props ? (props.left - t.left) / z : 0,
+    bare: document.querySelector('.dc').classList.contains('bare') }
+})
+
+for (const zoom of [1, 0.9]) {
+  test(`the text column never passes ${MEASURE} px, and centres with or without notes (${zoom * 100}%)`, { skip }, async () => {
+    await start()
+    const fresh = await newDoc('---\ncreated_by: Test\n---\n# Fresh\n\n' + 'A paragraph long enough to wrap across the whole measure several times over, so the line is as long as the column lets it be. '.repeat(6) + '\n')
+    for (const w of [1280, 1470, 1920, 2560, 3400]) {
+      for (const [doc, notes] of [['Essays/drafts/Long.md', true], [fresh, false]]) {
+        const page = await open({ doc, w, zoom })
+        const g = await geometry(page)
+        const label = `${w}${notes ? ' with notes' : ' without'} at ${zoom * 100}%`
+        assert.ok(g.text <= MEASURE + 0.5, `${label}: the text is ${g.text.toFixed(1)} px`)
+        assert.ok(Math.abs(g.propsLeft) <= 1, `${label}: the properties line starts at the text's left edge (${g.propsLeft})`)
+        assert.equal(g.bare, !notes, `${label}: the margin is shown only for notes`)
+        if (!notes) {
+          assert.ok(Math.abs(g.left - g.right) <= 2, `${label}: the text is centred (${g.left.toFixed(1)} | ${g.right.toFixed(1)})`)
+        } else {
+          assert.ok(g.margin >= 255, `${label}: the margin keeps its room (${g.margin})`)
+          // the block (gutter, text, margin) sits in the middle: the air either side within the gutter's width
+          assert.ok(Math.abs((g.left - 76) - g.blockRight) <= 4, `${label}: text and margin are one centred block (${(g.left - 76).toFixed(1)} | ${g.blockRight.toFixed(1)})`)
+        }
+        if (w * zoom >= 1900) assert.ok(g.text >= MEASURE - 0.5, `${label}: a wide pane gives the text its whole measure (${g.text.toFixed(1)})`)
+        await shot(page, `measure-${w}-${notes ? 'notes' : 'bare'}-${zoom}`)
+        assert.deepEqual(page.errors, [])
+        await page.done()
+      }
+    }
+  })
+}
+
+for (const w of [1280, 1920]) {
+  test(`a note's card stays level with its passage at ${w}, on load, scrolled and in Suggesting`, { skip }, async () => {
+    await start()
+    const page = await open({ w, h: 900 })
+    const g = await geometry(page)
+    assert.ok(g.text <= MEASURE + 0.5)
+    let seen = 0
+    for (const y of [0, 1200, 2600, 4000, 99999]) {
+      await scrollTo(page, y)
+      const o = await offsets(page, false)
+      seen += o.length
+      if (o.length) near(o, `${w}, scrolled to ${y}`)
+    }
+    assert.ok(seen >= 4, `notes were drawn and measured (${seen})`)
+    await scrollTo(page, 0)
+    await mode(page, 'Suggesting')
+    for (const y of [0, 2600]) {
+      await scrollTo(page, y)
+      const o = await offsets(page, false)
+      if (o.length) near(o, `${w} in Suggesting, scrolled to ${y}`)
+    }
+    assert.deepEqual(page.errors, [])
+    await page.done()
+  })
+}
+
+test('a doc without notes: a note arriving while keys go down moves the text aside only at the pause', { skip }, async () => {
+  await start()
+  const p = await newDoc(TEXT)
+  const page = await open({ doc: p })
+  const before = await geometry(page)
+  assert.ok(before.bare, 'no notes: no margin')
+  await caretAfter(page, 'learned my order.')
+  const lefts = []
+  let sent = false, arrivedWhileTyping = false
+  for (const ch of ' And then more words, typed at an even pace while a note comes in from an agent.') {
+    await page.keyboard.type(ch)
+    await page.waitForTimeout(110)
+    if (!sent && lefts.length === 5) { sent = true; await api(p, 'doc/notes', 'POST', { kind: 'comment', quote: 'the grey dog', text: 'From an agent, mid-sentence.' }, 'ada') }
+    lefts.push((await geometry(page)).left)
+    if (await page.evaluate(() => window.__ed.state.notes.some(n => n.state === 'open'))) arrivedWhileTyping = true
+  }
+  assert.ok(arrivedWhileTyping, 'the note reached the page while keys were going down')
+  assert.ok(lefts.every(l => Math.abs(l - before.left) < 0.5), `the text stayed put while keys went down: ${lefts.map(l => l.toFixed(0)).join(',')}`)
+  await page.waitForTimeout(1400)
+  const after = await geometry(page)
+  assert.ok(!after.bare && after.left < before.left - 20, `at the pause the text made room for the card (${before.left.toFixed(0)} → ${after.left.toFixed(0)})`)
+  near(await offsets(page, false), 'the new card')
+  // Starting a note moves it at once: resolve the agent's, then start one.
+  for (const n of (await api(p, 'doc', 'GET')).notes) await api(p, `doc/notes/${n.id}/resolve`, 'POST', {}, 'ada')
+  await until(page, () => document.querySelector('.dc').classList.contains('bare'), null, 6000)
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
