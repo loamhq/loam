@@ -246,5 +246,211 @@ class Seeded(unittest.TestCase):
         print(f"# {runs} seeded runs, {checked} note places checked after a change outside them; changes: {kinds}")
 
 
+
+# -- round 5: whole blocks removed and put back ------------------------------------
+
+def block_bounds(text, kind, r):
+    """A block of the walk doc: a paragraph, a section, or several sections."""
+    heads = [i for i in range(len(text)) if text.startswith("## Section", i)]
+    if kind == "sections":
+        a = r.randrange(len(heads) - 1)
+        b = min(len(heads), a + r.randint(2, 3))
+        return heads[a], heads[b] if b < len(heads) else len(text)
+    if kind == "section":
+        a = r.randrange(len(heads))
+        return heads[a], heads[a + 1] if a + 1 < len(heads) else len(text)
+    paras = [i for i in range(len(text)) if text.startswith("Paragraph ", i)]
+    a = r.choice(paras)
+    e = text.find("\n\n", a)
+    return a, (e + 2 if e >= 0 else len(text))
+
+
+class WholeBlocks(unittest.TestCase):
+    def test_case_1_a_suggestion_in_removed_sections_does_not_move_to_section_1(self):
+        w = World()
+        nid = w.add("suggestion", "remarkable", 3, replacement="dazzling")
+        t = w.text()
+        a, b = t.index("## Section 3"), t.index("## Section 5")
+        w.store.outside_edit(*P, t[:a] + t[b:])
+        n = w.note(nid)
+        self.assertEqual(n["where"]["state"], "detached")
+        with self.assertRaises(Exception):
+            w.svc.accept(OWNER, *P, nid)
+        self.assertNotIn("dazzling", w.text())
+        # put back byte for byte: home again (case 6)
+        w.store.outside_edit(*P, t)
+        n = w.note(nid)
+        self.assertEqual((n["where"]["state"], n["where"]["start"]), ("attached", nth(t, "remarkable", 3)))
+
+    def test_case_2_cut_paste_suggest_and_restore_the_cut(self):
+        w = World()
+        w.add("comment", "Walk", 1)                  # the doc has notes, so a history
+        t = w.text()
+        a, b = t.index("## Section 3"), t.index("## Section 4")
+        block = t[a:b]
+        w.save(a, delete=b - a)                       # Ctrl+X
+        cut_rev = w.svc.history(OWNER, *P)["saves"][0]["id"]
+        w.save(a, insert=block)                       # Ctrl+V
+        nid = w.add("suggestion", "remarkable", 3, replacement="bright")
+        w.svc.restore(OWNER, *P, cut_rev)              # History: the version from the cut
+        n = w.note(nid)
+        self.assertEqual(n["where"]["state"], "detached")
+        with self.assertRaises(Exception):
+            w.svc.accept(OWNER, *P, nid)
+        self.assertNotIn("bright", w.text())
+
+    def test_case_3_comments_in_a_removed_section_stay_detached_and_come_home(self):
+        w = World()
+        c4 = w.add("comment", "line of the callout", 4)
+        c2 = w.add("comment", "The river kept its own time", 2)
+        t = w.text()
+        a, b = t.index("## Section 4"), t.index("## Section 5")
+        w.store.outside_edit(*P, t[:a] + t[b:])
+        self.assertEqual(w.note(c4)["where"]["state"], "detached")
+        self.assertEqual(w.note(c2)["where"]["start"], nth(w.text(), "The river kept its own time", 2))
+        w.store.outside_edit(*P, t)
+        self.assertEqual((w.note(c4)["where"]["state"], w.note(c4)["where"]["start"]), ("attached", nth(t, "line of the callout", 4)))
+
+    def test_case_6_a_line_deleted_and_put_back_reattaches(self):
+        w = World()
+        nid = w.add("comment", "Paragraph 4c closes the section", 1)
+        t = w.text()
+        a = t.index("Paragraph 4c")
+        b = t.index("\n", a) + 1
+        w.store.outside_edit(*P, t[:a] + t[b:])
+        self.assertEqual(w.note(nid)["where"]["state"], "detached")
+        w.store.outside_edit(*P, t)
+        self.assertEqual((w.note(nid)["where"]["state"], w.note(nid)["where"]["start"]), ("attached", a))
+        # cut and undo in the editor, the same
+        w.save(a, delete=b - a)
+        w.save(a, insert=t[a:b])
+        self.assertEqual((w.note(nid)["where"]["state"], w.note(nid)["where"]["start"]), ("attached", a))
+
+    def test_seeded_whole_blocks(self):
+        runs, checked, back = 250, 0, 0
+        ambiguous_total = 0
+        import os
+        only = int(os.environ.get("DC_SEED") or 0)
+        for seed in (range(only, only + 1) if only else range(1, runs + 1)):
+            r = random.Random(seed * 7919)
+            w = World()
+            truth = {}
+            ambiguous = set()
+            for _ in range(r.randint(3, 6)):
+                ph = r.choice(PHRASES)
+                n = r.randint(1, w.text().count(ph))
+                s = nth(w.text(), ph, n)
+                if any(not (s + len(ph) <= x or y <= s) for x, y in truth.values()):
+                    continue
+                kind = r.choice(["comment", "suggestion"])
+                nid = w.add(kind, ph, n, **({"replacement": ph.upper()} if kind == "suggestion" else {}))
+                truth[nid] = (s, s + len(ph))
+            removed = None                  # (at, text, notes inside with their offsets)
+            since = False                   # anything saved since the removal
+            for step in range(8):
+                t = w.text()
+                if removed and r.random() < 0.6:
+                    at, block, inside, how = removed
+                    # put it back, the way it went, or by restoring the version before
+                    if how == "save" and not since and r.random() < 0.5:
+                        before = w.svc.history(OWNER, *P)["saves"]
+                        w.svc.restore(OWNER, *P, before[1]["id"])
+                        if only: print("by restore")
+                    elif how == "disk":
+                        w.store.outside_edit(*P, t[:at] + block + t[at:])
+                    else:
+                        w.save(at, insert=block)
+                    for i, v in list(truth.items()):
+                        if v and v[0] >= at:
+                            truth[i] = (v[0] + len(block), v[1] + len(block))
+                    for i, off in inside.items():
+                        truth[i] = (at + off[0], at + off[1])
+                    removed = None
+                    back += 1
+                    if only: print("put back", how, at, len(block))
+                elif not removed:
+                    a, b = block_bounds(t, r.choice(["paragraph", "section", "sections"]), r)
+                    inside = {i: (v[0] - a, v[1] - a) for i, v in truth.items() if v and a <= v[0] and v[1] <= b}
+                    if any(v and v[0] < b and a < v[1] and i not in inside for i, v in truth.items()):
+                        continue
+                    how = r.choice(["disk", "save"])
+                    if how == "disk":
+                        w.store.outside_edit(*P, t[:a] + t[b:])
+                    else:
+                        w.save(a, delete=b - a)
+                    for i in inside:
+                        truth[i] = None
+                    for i, v in list(truth.items()):
+                        if v and v[0] >= b:
+                            truth[i] = (v[0] - (b - a), v[1] - (b - a))
+                    removed = (a, t[a:b], inside, how)
+                    since = False
+                    if only: print("removed", how, a, b, list(inside))
+                else:
+                    # an Accept, on any suggestion: it writes in its own passage or refuses
+                    sug = [i for i in truth if w.note(i)["kind"] == "suggestion" and w.note(i)["state"] == "open"]
+                    if not sug:
+                        continue
+                    i = r.choice(sug)
+                    before = w.text()
+                    if only: print("accept", w.note(i)["anchor"]["quote"], truth[i], w.note(i)["where"], i in ambiguous, repr(w.text()[truth[i][0]:truth[i][1]] if truth[i] else None))
+                    since = True
+                    at_note = dict(w.note(i)["where"])
+                    if i in ambiguous:
+                        # kept on an equal run: an accept writes exactly at its own
+                        # stored place, or refuses and writes nothing
+                        try:
+                            w.svc.accept(OWNER, *P, i)
+                        except Exception:
+                            self.assertEqual(w.text(), before, f"seed {seed}: a refused accept wrote")
+                            continue
+                        a2, b2 = at_note["start"], at_note["end"]
+                        self.assertEqual(w.text(), before[:a2] + w.note(i)["replacement"] + before[b2:], f"seed {seed}: an accept wrote outside its stored place")
+                        truth = {k: (None if k == i else v) for k, v in truth.items()}
+                        removed = None
+                        continue
+                    try:
+                        w.svc.accept(OWNER, *P, i)
+                    except Exception:
+                        self.assertEqual(w.text(), before, f"seed {seed}: a refused accept wrote")
+                        self.assertIsNone(truth[i], f"seed {seed}: an accept on a passage that is there was refused")
+                        continue
+                    self.assertIsNotNone(truth[i], f"seed {seed} step {step}: an accept wrote though its passage was removed")
+                    a, b = truth[i]
+                    rep = w.note(i)["replacement"]
+                    self.assertEqual(w.text(), before[:a] + rep + before[b:], f"seed {seed} step {step}: an accept wrote outside its passage")
+                    d = len(rep) - (b - a)
+                    truth = {k: (None if v is None else (v if v[1] <= a else (v[0] + d, v[1] + d) if v[0] >= b else v)) for k, v in truth.items()}
+                    truth[i] = None
+                    if removed:
+                        at0, blk, ins, how0 = removed
+                        if at0 >= b:
+                            removed = (at0 + d, blk, ins, how0)
+                    continue
+                for i, v in truth.items():
+                    n = w.note(i)
+                    if n["state"] != "open" or i in ambiguous:
+                        continue
+                    if v is None:
+                        # Removed by a change nobody described: of two equal runs side
+                        # by side, the one the comparison kept may keep the note (the
+                        # text is the same either way) -- at the point of removal only.
+                        kept_equal = (removed and removed[3] == "disk" and i in removed[2]
+                                      and n["where"]["state"] == "attached" and abs(n["where"]["start"] - removed[0]) <= 120
+                                      and w.text()[n["where"]["start"]:n["where"]["end"]] == n["anchor"]["quote"])
+                        if kept_equal:
+                            ambiguous.add(i)
+                        if not kept_equal:
+                            self.assertNotEqual(n["where"]["state"], "attached", f"seed {seed} step {step}: a note whose words were removed is attached elsewhere ({n['where']}, {n['anchor']['quote']!r})")
+                    else:
+                        if only and (n["where"]["state"], n["where"]["start"]) != ("attached", v[0]):
+                            print("ANCHOR", n["anchor"], n["where"], repr(w.text()[v[0]-40:v[0]+40]))
+                        self.assertEqual((n["where"]["state"], n["where"]["start"]), ("attached", v[0]), f"seed {seed} step {step}: a note is not on its own occurrence ({n['anchor']['quote']!r})")
+                        checked += 1
+            ambiguous_total += len(ambiguous)
+        print(f"# {runs} seeded runs of whole blocks removed and put back ({back} put back), {checked} places checked; "
+              f"{ambiguous_total} notes kept on an equal run the comparison kept")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

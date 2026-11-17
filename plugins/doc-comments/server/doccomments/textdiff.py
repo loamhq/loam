@@ -108,7 +108,59 @@ def delta(old: str, new: str) -> list[list]:
             put("-", len(gone))
         if came:
             put("+", came)
+    return _slide(old, out)
+
+
+def _slide(old: str, ops: list[list]) -> list[list]:
+    """Each insertion or deletion that could equally sit further right (the
+    text after it repeats it) is moved as far right as it goes: of two equal
+    runs side by side, the first is the one kept. A diff cannot tell which
+    was typed; this way a note on the first is never taken for changed."""
+    out = [list(o) for o in ops]
+    i, old_at = 0, 0
+    while i < len(out):
+        op, val = out[i]
+        if op == "=":
+            old_at += val
+            i += 1
+            continue
+        nxt = out[i + 1] if i + 1 < len(out) and out[i + 1][0] == "=" else None
+        if nxt is not None and not (op == "-" and i + 1 < len(out) and out[i + 1][0] == "+"):
+            room = nxt[1]
+            k = 0
+            if op == "+":
+                x = val
+                while k < room and x and old[old_at + k] == x[0]:
+                    x = x[1:] + x[0]
+                    k += 1
+                if k:
+                    out[i][1] = x
+            elif op == "-":
+                while k < room and old[old_at + k] == old[old_at + val + k]:
+                    k += 1
+            if k:
+                prev = out[i - 1] if i and out[i - 1][0] == "=" else None
+                if prev is not None:
+                    prev[1] += k
+                else:
+                    out.insert(i, ["=", k])
+                    i += 1
+                nxt[1] -= k
+                old_at += k
+                if not nxt[1]:
+                    out.pop(i + 1)
+        if op == "-":
+            old_at += val
+        i += 1
     return out
+
+
+def lean_left(old: str, ops: list[list]) -> list[list]:
+    """The same change with each insertion or deletion moved as far left as
+    it equally goes: the other reading of two equal runs side by side."""
+    rev = [[op, val[::-1] if op == "+" else val] for op, val in reversed(ops)]
+    back = _slide(old[::-1], rev)
+    return [[op, val[::-1] if op == "+" else val] for op, val in reversed(back)]
 
 
 def apply(old: str, ops: list[list]) -> str:

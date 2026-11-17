@@ -428,68 +428,140 @@ def _churn(ops: list, start: int, end: int) -> int:
     return n
 
 
-def locate(note: dict, text: str, ops: list | None = None, guessed: bool = False) -> dict:
+def _deleted_run(ops: list, pos: int):
+    """The old range of the deleted run ``pos`` lies strictly inside, or at
+    whose start it lies, when one does: ``(start, end)``; else None."""
+    old = 0
+    for op, val in ops:
+        if op == "=":
+            old += val
+        elif op == "-":
+            if old <= pos < old + val:
+                return old, old + val
+            old += val
+    return None
+
+
+def _inside_deleted(ops: list, pos: int) -> bool:
+    run = _deleted_run(ops, pos)
+    return bool(run) and run[0] < pos < run[1]
+
+
+def locate(note: dict, text: str, ops: list | None = None, guessed: bool = False,
+           old: str | None = None) -> dict:
+    """``_carry``; for a worked-out change, when the note does not survive it
+    as read, the other equal reading of the same change too (of two equal
+    runs side by side, which one was removed is not known: the note keeps
+    the one that stayed). Never a place found anywhere else."""
+    where = _carry(note, text, ops, old)
+    if guessed and ops and old is not None:
+        other = _carry(note, text, textdiff.lean_left(old, ops), old)
+        if other["state"] == "attached" and where["state"] != "attached":
+            return other
+        if other["state"] == "attached" and other["start"] != where["start"]:
+            # Both readings keep the note: the one whose surroundings still
+            # read as the note's own (its recorded context) is its place.
+            a = note["anchor"]
+            suf = a.get("suffix", "")
+            # all its recorded context; on a tie, the words after it (its own
+            # sentence: the words before may be what the change was)
+            score = lambda w: (anchors._score(text, a, w["start"], w["end"], w["start"]),
+                               anchors._common_head(text[w["end"]:w["end"] + len(suf)], suf))
+            if score(other) > score(where):
+                return other
+    return where
+
+
+def _inserted(ops: list) -> list[tuple[int, int]]:
+    """The ranges, in the new text, that a change put in."""
+    out, new = [], 0
+    for op, val in ops:
+        if op == "=":
+            new += val
+        elif op == "+":
+            out.append((new, new + len(val)))
+            new += len(val)
+    return out
+
+
+def _carry(note: dict, text: str, ops: list | None = None, old: str | None = None) -> dict:
     """Where a note's passage is in ``text``. Its place is **carried**, never
     searched for: ``ops`` is the change from the text its place was last
     known in (every change the server makes is known; a file changed on
-    disk is worked out from the old and new stored text first), and the
-    place moves through it exactly, the way the editor's drafts move
-    through an edit. Then: the quote still there is attached; other words
-    there are "changed since", there; nothing left (or almost nothing like
-    it) is detached, remembering the carried point, so the note comes back
-    if those exact words return there. A like passage elsewhere is never the
-    note's (2026-11-17: a suggestion on one of several "remarkable"s moved
-    to another on a word typed beside it, and Accept wrote there).
+    disk, or a restore, is worked out from the old and new stored text
+    first), and the place moves through it exactly. Then: the quote at the
+    carried place is attached; other words there, most of its own letters
+    kept, are "changed since", there; its words removed, it is detached at
+    the carried point, remembering where in the removed run it sat, so it
+    comes back if those exact words return there. **Nothing is looked for
+    anywhere else, at any distance** (2026-11-17, round 5: a section removed
+    on disk let a note take the next section's copy of its words, and
+    Accept wrote there). ``guessed`` is kept for the callers' sake and
+    changes nothing.
 
-    Only a note that has never been placed (a sidecar from before places
-    were kept) is found by searching."""
+    A note that has never had a place kept is placed only where its anchor
+    last saw it, or detached."""
     a = note["anchor"]
     quote = a.get("quote") or ""
     w = note.get("where")
     if not w or (w.get("start") is None and w.get("pos") is None):
-        if w and w.get("state") == "detached":
-            return {"start": None, "end": None, "state": "detached"}
-        return anchors.locate(text, a)
-    if w.get("start") is None:
-        # detached: its carried point; back when the exact words return there
-        p = w["pos"] if not ops else textdiff.map_pos(ops, w["pos"], after=True)
-        p = max(0, min(len(text), p))
-        if quote and text[p:p + len(quote)] == quote:
+        p = a.get("pos")
+        if quote and isinstance(p, int) and text[p:p + len(quote)] == quote:
             return {"start": p, "end": p + len(quote), "state": "attached"}
-        return {"start": None, "end": None, "state": "detached", "pos": p}
+        return {"start": None, "end": None, "state": "detached"}
+    if w.get("start") is None:
+        # Detached: back only when a change puts the very run of text that
+        # was removed back at its carried point (a diff may write that
+        # insertion a little before or after, in text that repeats itself),
+        # and its exact words sit in it where they sat. Words that merely lie
+        # there now (the next section's copy, moved up by the removal) are
+        # not its own.
+        off = w.get("off") or 0
+        pos = w["pos"]
+        gone = w.get("gone") or ""
+        keep = {"start": None, "end": None, "state": "detached", "off": off, **({"gone": gone} if gone else {})}
+        if not ops:
+            return {**keep, "pos": pos}
+        p = max(0, min(len(text), textdiff.map_pos(ops, pos, after=False)))
+        ins = _inserted(ops)
+        if ins and gone and quote:
+            lo = max(0, p - len(gone))
+            at = text.find(gone, lo, p + 2 * len(gone))
+            while at >= 0 and at <= p + len(gone):
+                b0, b1 = at, at + len(gone)
+                st = at + off
+                if any(x < b1 and b0 < y for x, y in ins) and text[st:st + len(quote)] == quote:
+                    return {"start": st, "end": st + len(quote), "state": "attached"}
+                at = text.find(gone, at + 1, p + 2 * len(gone))
+        return {**keep, "pos": p}
     s, e = w["start"], w["end"]
     if ops:
-        s2 = textdiff.map_pos(ops, s, after=True)
-        e2 = max(s2, textdiff.map_pos(ops, e, after=False))
+        # A passage's edges move with what its words became: an edge inside
+        # a replaced run takes the whole replacement (a comment whose last
+        # word was rewritten by an accept covers the new words, not fewer).
+        s2 = textdiff.map_pos(ops, s, after=not _inside_deleted(ops, s))
+        e2 = max(s2, textdiff.map_pos(ops, e, after=_inside_deleted(ops, e)))
     else:
         s2, e2 = s, e
     s2, e2 = max(0, min(len(text), s2)), max(0, min(len(text), e2))
     now = text[s2:e2]
     if now == quote:
         return {"start": s2, "end": e2, "state": "attached"}
-    if guessed and ops and quote:
-        # A change nobody described (the file, edited on disk) is worked out
-        # by comparing, which cannot tell two equal runs of words apart: the
-        # note's exact words within the size of the change around its
-        # carried place are still its own place.
-        reach = min(400, _churn(ops, s, e))
-        lo, hi = max(0, s2 - reach), min(len(text), e2 + reach)
-        hits, at = [], text.find(quote, lo)
-        while 0 <= at and at + len(quote) <= hi:
-            hits.append(at)
-            at = text.find(quote, at + 1)
-        if hits:
-            best = min(hits, key=lambda h: abs(h - s2))
-            return {"start": best, "end": best + len(quote), "state": "attached"}
     # Most of the passage's own letters gone (a diff may keep a "the" or a
     # "Paragraph" of a deleted paragraph by aligning it with the next): gone.
     kept = _survived(ops, s, e) if ops else len(now)
     if not now.strip() or kept < SURVIVE * max(1, e - s):
-        return {"start": None, "end": None, "state": "detached", "pos": s2}
+        run = _deleted_run(ops, s) if ops else None
+        at, off = (run[0], s - run[0]) if run else (s, 0)
+        gone = old[run[0]:run[1]] if run and old is not None and run[1] - run[0] <= 50000 else ""
+        return {"start": None, "end": None, "state": "detached",
+                "pos": textdiff.map_pos(ops, at, after=False) if ops else s2, "off": off,
+                **({"gone": gone} if gone else {})}
     return {"start": s2, "end": e2, "state": "changed"}
 
 
-def relocate(sc: dict, text: str, ops: list | None = None, guessed: bool = False) -> bool:
+def relocate(sc: dict, text: str, ops: list | None = None, guessed: bool = False,
+             old: str | None = None) -> bool:
     """Find every note's passage in ``text``; ``ops`` is the delta from the
     text they were last found in, when it is known. Returns whether anything
     in the sidecar changed. An attached note's context is refreshed so it
@@ -500,7 +572,7 @@ def relocate(sc: dict, text: str, ops: list | None = None, guessed: bool = False
         if note["state"] == "accepted":
             continue
         before = copy.deepcopy((note.get("anchor"), note.get("found"), note.get("where")))
-        where = locate(note, text, ops, guessed)
+        where = locate(note, text, ops, guessed, old)
         if where["state"] == "attached":
             note["anchor"] = anchors.make(text, where["start"], where["end"])
             note.pop("found", None)
