@@ -4,11 +4,11 @@
 /* Navigation keeps its component paint, including shared icon/round buttons. */
 /* Docked audio play/speed own neutral surfaces in the plugin stylesheet.
  * :where() keeps the inline speed control's selector specificity unchanged. */
-:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.settings-select,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile) {
+:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.settings-select,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile,.fs-entry *) {
   background:transparent; color:var(--paper-ink); border-color:transparent; box-shadow:none;
 }
 /* Keep border boxes the same size; borderless controls have no painted edge. */
-:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile):is(:hover,:active,:focus-visible) {
+:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile,.fs-entry *):is(:hover,:active,:focus-visible) {
   background:var(--paper-hover); color:var(--paper-ink); border-color:transparent; box-shadow:none;
 }
 /* Selection is information, not an action tier. A paper thumb and an underline
@@ -24,6 +24,24 @@
 :root .provider-chip .dot { background:var(--paper-ink); }
 :root .provider-chip.add { border-color:transparent; }
 :root :is(.navrow.on,.setrow.on,.tt-configuration-options .setrow.on) { background:var(--paper-hover); color:var(--paper-ink); }
+/* File-row action buttons sit over resting, hovered, selected and side-marked rows;
+ * keep their row button transparent and icon hovers a rounded translucent tint. */
+:root .fs-entry > .setrow,
+:root .fs-entry > .setrow.on { background:transparent; color:inherit; }
+:root :is(.fs-entry > .iconbtn,.fs-entry > .row-side-action > .iconbtn) {
+  background:transparent; color:var(--paper-ink-3); border-color:transparent; box-shadow:none;
+}
+@media (hover: hover) {
+  :root :is(.fs-entry > .iconbtn,.fs-entry > .row-side-action > .iconbtn):hover {
+    background:color-mix(in srgb,var(--paper-ink) 8%,transparent); color:var(--paper-ink);
+  }
+}
+:root :is(.fs-entry > .iconbtn,.fs-entry > .row-side-action > .iconbtn):active {
+  background:var(--paper-pressed); color:var(--paper-ink);
+}
+:root :is(.fs-entry > .iconbtn,.fs-entry > .row-side-action > .iconbtn):focus-visible {
+  background:color-mix(in srgb,var(--paper-ink) 8%,transparent); color:var(--paper-ink);
+}
 :root :is(.search .clear,.theme-choice-check) { background:var(--paper-pane); color:var(--paper-ink); }
 :root .theme-choice.on { border-color:var(--paper-ink); }
 :root .fs-rootcard:active { background:var(--paper-hover); }

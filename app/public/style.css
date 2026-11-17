@@ -2121,7 +2121,7 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-folder.wide .icon-tile { width: 40px; height: 40px; }
 .icon-tile span { font-size: 8.5px; font-weight: 700; letter-spacing: .06em; }
 .fs-foldertile { background: var(--paper-card); color: var(--paper-ink-2); border-radius: 58% 42% 55% 45% / 48% 56% 44% 52%; }
-.fs-words { flex: 1; min-width: 0; }
+.fs-words { position: relative; flex: 1; min-width: 0; }
 .fs-name { font-weight: 600; font-size: 15.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs-folder.wide .fs-name { font-size: 14.5px; }
 .fs-meta { font-size: 12.5px; color: var(--paper-ink-2); }
@@ -2154,9 +2154,28 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-stripes { background: repeating-linear-gradient(135deg, var(--paper-pane) 0 10px, var(--paper-page) 10px 20px); }
 .fs-chip { font-family: var(--font-mono); font-size: 12px; color: var(--paper-ink-3); background: var(--paper-pane); padding: 6px 12px; border-radius: 999px; }
 .fs-img { max-width: 100%; max-height: calc(70vh / var(--ui-scale, 1)); border-radius: 16px; }
-.fs-entry { display: flex; align-items: center; min-width: 0; }
-.fs-entry > .setrow { flex: 1; min-width: 0; }
-.fs-entry > .iconbtn { flex: none; margin-right: 4px; color: var(--latte-foam-ink); }
+.fs-entry { display: flex; align-items: center; min-width: 0; border-radius: 20px; transition: background-color 180ms ease-out; }
+.fs-entry > .setrow { flex: 1; min-width: 0; background: transparent; }
+.fs-entry > .setrow:active { background: transparent; }
+.fs-entry:has(> .setrow:active) { background: var(--paper-pressed); }
+.fs-entry.on, .fs-entry:has(> .setrow.on) { background: color-mix(in srgb, var(--paper-ink) 10%, transparent); color: var(--paper-ink); }
+.fs-entry.on .fs-name, .fs-entry > .setrow.on .fs-name { font-weight: 700; }
+.fs-entry.on .fs-words::after, .fs-entry > .setrow.on .fs-words::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -5px; height: 1.5px; border-radius: 1px;
+  background: color-mix(in srgb, var(--paper-ink) 85%, transparent); pointer-events: none;
+}
+.fs-entry.in-side:not(.on):not(:has(> .setrow.on)), .fs-entry:has(> .row-side-mark):not(.on):not(:has(> .setrow.on)) {
+  background: color-mix(in srgb, var(--paper-ink) 4.5%, transparent);
+}
+.fs-entry.in-side:not(.on):not(:has(> .setrow.on)) .fs-words::after, .fs-entry:has(> .row-side-mark):not(.on):not(:has(> .setrow.on)) .fs-words::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -5px; height: 1.5px; border-radius: 1px;
+  background: color-mix(in srgb, var(--paper-ink) 32%, transparent); pointer-events: none;
+}
+@media (forced-colors: active) {
+  .fs-entry.on, .fs-entry:has(> .setrow.on) { outline: 1px solid CanvasText; outline-offset: -1px; }
+  .fs-entry.on .fs-words::after, .fs-entry > .setrow.on .fs-words::after { background: Highlight; }
+}
+.fs-entry > .iconbtn { flex: none; margin-right: 4px; color: var(--paper-ink-3); }
 .fs-edhead { flex: none; }
 .fs-edhead > .fs-chatback, .fs-edhead > .iconbtn, .fs-edhead > .segmented { flex: none; }
 .fs-edhead > .headspace { min-width: 0; }
@@ -2302,6 +2321,12 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .fs-retry { flex: none; padding: 8px 14px; }
 .fs-uploaddone { margin: 10px 6px 6px; width: calc(100% - 12px); }
 @media (hover: hover) {
+  .fs-entry:hover { background: var(--paper-hover-alpha); }
+  .fs-entry > .setrow:hover { background: transparent; }
+  .fs-entry.on:hover, .fs-entry:has(> .setrow.on):hover { background: color-mix(in srgb, var(--paper-ink) 10%, transparent); }
+  .fs-entry.in-side:not(.on):not(:has(> .setrow.on)):hover, .fs-entry:has(> .row-side-mark):not(.on):not(:has(> .setrow.on)):hover {
+    background: color-mix(in srgb, var(--paper-ink) 6.5%, transparent);
+  }
   .fs-add:hover { background: var(--latte-hover);  color:var(--latte-foam-ink); }
   .fs-rootcard:hover { background: var(--paper-hover); }
   .fs-action:hover { background: var(--paper-card); }

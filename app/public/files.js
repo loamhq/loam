@@ -1279,7 +1279,19 @@ export function createFiles({
     schedule()
   }
 
-  return { registry, st, pluginRoot, beginRename, cancelRename, editRename, rename, applyRename, focusRename, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  let revealed = null
+  function revealOpen(root = document) {
+    const f = st.file
+    const key = f ? `${st.root ?? ''}:${st.path ?? ''}|${f.root}:${f.path}` : null
+    const folder = [...(root?.querySelectorAll?.('.fs-folder') ?? [])].find((n) => !n.closest?.('.side-pane') && !n.closest?.('.away'))
+    const row = key && folder ? (folder.querySelector('.fs-entry.on') ?? folder.querySelector('.setrow.on')) : null
+    if (!row?.isConnected) { revealed = null; return }
+    if (revealed?.key === key && revealed.row === row) return
+    revealed = { key, row }
+    row.scrollIntoView?.({ block: 'nearest' })
+  }
+
+  return { registry, st, pluginRoot, beginRename, cancelRename, editRename, rename, applyRename, focusRename, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function extWord(e) {
@@ -1352,7 +1364,7 @@ function rowButton(row, { on, onclick, key }) {
   const tile = tileOf(row.name)
   return h(
     'button',
-    { class: `setrow${on ? ' on' : ''}`, key, onclick },
+    { class: `setrow${on ? ' on' : ''}`, key, 'aria-current': on ? 'page' : null, onclick },
     folder
       ? h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18))
       : h('div', { class: 'icon-tile', style: { background: tile.bg, color: tile.fg } }, icon.file(14), h('span', { text: tile.label })),
@@ -1361,10 +1373,23 @@ function rowButton(row, { on, onclick, key }) {
   )
 }
 
+function openFileMarks(files, go) {
+  const open = files.st.file ? `${files.st.file.root}:${files.st.file.path}` : null
+  const side = go.side?.()?.visible() && go.side().st.side?.kind === 'file' ? go.side().st.side : null
+  const sideKey = side ? `${side.root}:${side.path}` : null
+  return (root, path, file = true) => {
+    if (!file) return { isMain: false, isSide: false }
+    const key = `${root}:${path}`
+    const isMain = open === key
+    return { isMain, isSide: !isMain && sideKey === key }
+  }
+}
+
 // Chosen files and folders, in their chosen order, as one card of rows, or the
 // empty state that says how to make one.
 function homeShortcuts(files, home, go) {
   const list = home?.shortcuts ?? fileShortcuts(null, files.st.roots.shortcuts)
+  const marksFor = openFileMarks(files, go)
   return h(
     'div',
     { class: 'fs-shortcuts', key: 'fs:myshortcuts' },
@@ -1384,16 +1409,18 @@ function homeShortcuts(files, home, go) {
       : h(
           'div',
           { class: 'card card-group' },
-          ...list.map((s) =>
-            h('div', { class: 'fs-entry', key: `shortcut:${s.root}:${s.path}` }, renameField(files, s, 'shortcut') ?? h(
+          ...list.map((s) => {
+            const { isMain, isSide } = marksFor(s.root, s.path, s.kind === 'file')
+            return h('div', { class: `fs-entry${isMain ? ' on' : ''}${isSide ? ' in-side' : ''}`, key: `shortcut:${s.root}:${s.path}` }, renameField(files, s, 'shortcut') ?? h(
               'button',
-              { class: `setrow ${s.offered ? 'fs-host-shortcut' : 'fs-shortcut'}`, key: `my:${s.root}:${s.path}`, onclick: event => event.altKey && go.side?.()?.available() && s.kind === 'file' ? go.side().openSide({ kind: 'file', root: s.root, path: s.path }) : files.openShortcut(s, go) },
+              { class: `setrow ${s.offered ? 'fs-host-shortcut' : 'fs-shortcut'}${isMain ? ' on' : ''}`, key: `my:${s.root}:${s.path}`, 'aria-current': isMain ? 'page' : null, onclick: event => event.altKey && go.side?.()?.available() && s.kind === 'file' ? go.side().openSide({ kind: 'file', root: s.root, path: s.path }) : files.openShortcut(s, go) },
               s.kind === 'file' ? h('div', { class: 'icon-tile', style: { background: tileOf(s.path).bg, color: tileOf(s.path).fg } }, icon.file(14), h('span', { text: tileOf(s.path).label })) : h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18)),
               h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: s.label || nameOf(s.path) || (ROOT_LOOK[s.root]?.name ?? s.root) }), h('div', { class: 'fs-meta', text: [ROOT_LOOK[s.root]?.name ?? s.root, ...splitPath(parentOf(s.path))].join(' / ') })),
               icon.chevronRight(10),
             ), s.kind === 'file' && go.side?.()?.available() ? h('span', { class: 'row-side-action' }, go.side().affordance({ kind: 'file', root: s.root, path: s.path })) : null,
-            renamingHere(files, s, 'shortcut') ? null : h('button', { class: 'iconbtn content-mark fs-shortcutmenu', title: `Shortcut actions for ${s.label || nameOf(s.path)}`, 'aria-label': `Shortcut actions for ${s.label || nameOf(s.path)}`, onclick: () => files.shortcutMenu(s, home) }, icon.dots(18))),
-          ),
+            isSide ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
+            renamingHere(files, s, 'shortcut') ? null : h('button', { class: 'iconbtn content-mark fs-shortcutmenu', title: `Shortcut actions for ${s.label || nameOf(s.path)}`, 'aria-label': `Shortcut actions for ${s.label || nameOf(s.path)}`, onclick: () => files.shortcutMenu(s, home) }, icon.dots(18)))
+          }),
         ),
   )
 }
@@ -1500,20 +1527,21 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
   } else {
     if (st.listing.rows.length === 0) body.push(h('div', { class: 'fs-quiet', text: 'Nothing here yet.' }))
     else if (st.listing.rows.length > 0) {
-      const open = st.file ? `${st.file.root}:${st.file.path}` : null
+      const marksFor = openFileMarks(files, go)
       body.push(
         h(
           'div',
           { class: 'card card-group' },
-          ...st.listing.rows.map((row) =>
-            h('div', { class: 'fs-entry', key: `entry:${row.root}:${row.path}` }, renameField(files, row, 'row') ?? rowButton(row, {
-              on: open === `${row.root}:${row.path}`,
+          ...st.listing.rows.map((row) => {
+            const { isMain, isSide } = marksFor(row.root, row.path, !isFolder(row))
+            return h('div', { class: `fs-entry${isMain ? ' on' : ''}${isSide ? ' in-side' : ''}`, key: `entry:${row.root}:${row.path}` }, renameField(files, row, 'row') ?? rowButton(row, {
+              on: isMain,
               key: `row:${row.root}:${row.path}`,
               onclick: event => event.altKey && go.side?.()?.available() && !isFolder(row) ? go.side().openSide({ kind: 'file', root: row.root, path: row.path, row }) : go(row.root, row.path, { isFile: !isFolder(row), row }),
             }), !isFolder(row) && go.side?.()?.available() ? h('span', { class: 'row-side-action' }, go.side().affordance({ kind: 'file', root: row.root, path: row.path, row })) : null,
-            go.side?.()?.visible() && go.side().st.side?.kind === 'file' && go.side().st.side.root === row.root && go.side().st.side.path === row.path ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
-            renamingHere(files, row, 'row') ? null : h('button', { class: 'iconbtn content-mark fs-rowmenu', title: `Actions for ${row.name}`, 'aria-label': `Actions for ${row.name}`, onclick: () => files.resourceMenu(row, home) }, icon.dots(18))),
-          ),
+            isSide ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
+            renamingHere(files, row, 'row') ? null : h('button', { class: 'iconbtn content-mark fs-rowmenu', title: `Actions for ${row.name}`, 'aria-label': `Actions for ${row.name}`, onclick: () => files.resourceMenu(row, home) }, icon.dots(18)))
+          }),
         ),
       )
     }

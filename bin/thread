@@ -20,7 +20,8 @@ two-second look at the records. Like the app's, it leaves no line in the
 thread. ``--reply-to m12`` (2026-11-11) makes the post a reply to message
 m12 of that thread, as the app's reply does; a text opening with ``↩ m12``
 means the same, the marker taken off. An id the thread does not hold is
-refused. ``branch`` (2026-11-11) is the app's Branch into a new thread:
+refused. Ids are Loam's linkage: the app shows the quoted words, and a
+post names an earlier message by its words, never by its id (2026-11-17). ``branch`` (2026-11-11) is the app's Branch into a new thread:
 a new thread with ``--persona`` (the source's default if not given) as its
 default, titled ``--title`` (or the draft's first line), its first line
 linking back to the message and a line under the message linking forward,

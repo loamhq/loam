@@ -334,6 +334,43 @@ def take_reply_mark(text: str) -> tuple[str, str | None]:
     return text[match.end():].lstrip(), match.group(1)
 
 
+# A reply's opening that may still become a marker while it streams: an
+# arrow, an id still being written, nothing after it yet (2026-11-17). The
+# stream holds such an opening back rather than flash `↩ m1` on the page.
+PARTIAL_MARK_RE = re.compile(r"^\s*(?:(?:↩|<-?)\s*(?:m\d*)?[ \t]*[:.,—-]?[ \t]*)?$")
+
+
+def streamed_opening(draft: str) -> tuple[str | None, str | None]:
+    """A reply's opening words as they stream: ``(None, None)`` while they
+    may still be a ``↩ m12`` marker, ``(rest, id)`` once a whole marker has
+    words after it, else ``(draft, None)``."""
+    if PARTIAL_MARK_RE.match(draft or ""):
+        return None, None
+    rest, target = take_reply_mark(draft)
+    return (rest, target) if target else (draft, None)
+
+
+def unmark_steps(entry_steps: list, reply_to: str | None) -> list:
+    """A reply's full record as it is shown (2026-11-17): the ``↩ m12`` its
+    first top-level words opened with comes off when ``reply_to`` names that
+    same id -- the marker the writer already took off the message. Any other
+    words, ids and markers stay as written; the file itself is never
+    changed."""
+    if not reply_to or not isinstance(entry_steps, list):
+        return entry_steps
+    for index, step in enumerate(entry_steps):
+        if not isinstance(step, dict) or step.get("parent") is not None \
+                or step.get("type") != "text" or not str(step.get("text") or "").strip():
+            continue
+        rest, target = take_reply_mark(step["text"])
+        if target != reply_to:
+            return entry_steps
+        out = list(entry_steps)
+        out[index] = {**step, "text": rest}
+        return out
+    return entry_steps
+
+
 def find(msgs: list[dict], msg_id: str | None) -> dict | None:
     return next((m for m in msgs if msg_id and m.get("id") == msg_id), None)
 
@@ -1595,7 +1632,12 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
             "\n\nWhatever you write now is posted to the thread as your message. "
             "Mention a peer with @Name only when you are sure it adds a lot. "
             "To reply to one earlier message, begin with ↩ and its id "
-            "(\"↩ m12\"); otherwise just write.")
+            "(\"↩ m12\"); otherwise just write. Loam turns that opening into a "
+            "quote of the message's own words and hides the id. Message ids "
+            "are Loam's bookkeeping, never words for the reader: do not write "
+            "one anywhere else in your reply. Name an earlier message by who "
+            "said it and what it said (\"your point about subtlety\"), not by "
+            "its id.")
     return head + transcript(msgs, record, record_file) + pointer + tail
 
 
