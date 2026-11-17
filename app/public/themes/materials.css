@@ -97,7 +97,7 @@
 :root[data-look="foundry"] .display { font-weight:800; letter-spacing:.025em; }
 :root[data-look="foundry"] .theme-preview[data-look="foundry"] :is(.theme-choice-name,.theme-miniature .primary) { font-weight:800; letter-spacing:.025em; }
 :root[data-look="foundry"] :is(.tt-section-heading,.tt-details-section h3,.theme-option h4) { text-transform:uppercase; letter-spacing:.12em; font-size:11px; }
-:root[data-look="foundry"] :is(.iconbtn,.pillbtn,.chip,.navbtn,.roundbtn,.plusbtn,.modelbtn,.roundsend,.roundmic,.thread-tile,.segmented,.segmented button,.appearance-modes,.appearance-modes button,.navrow,.railtab,.theme-preview,.theme-choice-check,.tt-board-item,.tt-list-item,.card,.setrow) { border-radius:var(--radius-md); }
+:root[data-look="foundry"] :is(.iconbtn,.pillbtn,.chip,.navbtn,.roundbtn,.plusbtn,.modelbtn,.roundsend,.roundmic,.thread-tile,.segmented,.segmented button,.appearance-modes,.appearance-modes button,.navrow,.railtab,.theme-preview,.theme-choice-check,.tt-board-item,.tt-list-item,.card,.fs-entry,.setrow) { border-radius:var(--radius-md); }
 :root[data-look="foundry"] :is(.composer,.composer-box,.tt-compose,.navpill,.popover,.menu-surface,.theme-choice) { border-radius:var(--radius-lg); }
 :root[data-look="foundry"] :is(.pane,.tt-board,.tt-tasks-panel,.tt-configuration,.settings,.pinned-card,.rows,.card.card-group,.fs-rootcard,.fs-preview,.fs-field,.fs-media,.fs-pdf,.apps-desk > main) { border-radius:var(--radius-xl); }
 :root[data-look="foundry"] [data-menu-surface] { border-radius:var(--radius-xl); }
