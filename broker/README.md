@@ -4844,8 +4844,44 @@ name one earlier message of the same thread as the one it answers, by id:
   outside its own turn, a persona posts with `bin/thread post <thread>
   <text> --reply-to m12` or `mcp__engineer__thread` `post` with
   `reply_to`; a text opening with `↩ m12` means the same there.
+- **The id is never words on the page** (2026-11-17; the owner: replies
+  "point to words, not message IDs"). Ids stay Loam's linkage -- the
+  record's comment, the prompt, `reply_to` -- and the reader sees one
+  quote of the message's words with its author above the reply, which
+  jumps to the message and marks it. Three places had still shown a
+  persona's `↩ m111` under its own quote, and each now holds it back:
+  - *The full record.* It keeps every event as it came, so a reply's first
+    words in it still open with the marker; the page builds a reply's
+    words from that record once its steps are read. `thread_steps.read`
+    (and so `GET /v1/threads/:id/steps` and `?steps=full`) serves an
+    entry's first top-level words without the marker when the entry's
+    `reply_to` names that same id (`threads.unmark_steps`). The file is
+    not rewritten; any other id, arrow or mention of `m12` in the words
+    stays as written.
+  - *The live draft.* `message.delta` used to carry the raw draft. While a
+    reply's opening may still become a marker (`↩`, `↩ m1`, nothing after
+    it yet) no delta is sent (`threads.streamed_opening`); once it is
+    whole and names a message of this thread, the draft goes out without
+    it and the delta carries `reply_to`, so the page shows the quote as
+    the words come in, in the place the posted reply keeps
+    (`ThreadEngine.shown_draft`). A marker naming an id the thread lacks
+    streams as written, as it is posted.
+  - *The page.* `messageSegments` (`app/public/thread-record.js`) takes off
+    an opening marker naming the message's own `reply_to`, and nothing
+    else, so a full record from an older broker reads the same; and a
+    quote is the first line of the words read as words, its markdown marks
+    off (`plainLine`, `app/public/thread-replies.js`).
 
-Proved by `tests/test_thread_reply_to.py`.
+  An original that is gone shows as a quiet, unlinked "Earlier message",
+  never its id. The turn prompt's last lines now also say ids are Loam's
+  bookkeeping: a persona names an earlier message by who said it and what
+  ("your point about subtlety"), never by its id. Nothing rewrites ids in
+  what anyone wrote: a bare `m111` in prose, code or a quote is the
+  writer's own words.
+
+Proved by `tests/test_thread_reply_to.py`; the page by
+`app/test/thread-reply-marker.test.js` and, in a real browser at 390 and
+1440 px in light and dark, `app/test/thread-reply-marker-browser.mjs`.
 
 **A member only waiting on background work is not mid-turn.** (2026-11-10;
 The owner, 15:41 PT, after m53 and m54 in t-6daf5a6f started no turn while

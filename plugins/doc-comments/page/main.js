@@ -106,8 +106,15 @@ export function activate(loam) {
         crumbs: crumbs(file, entry.options.go || host.goFiles),
         back: entry.options.close ? { label: entry.options.closeLabel || 'Back', go: entry.options.close } : null,
         fileMenu: files.resourceMenu ? () => files.resourceMenu({ ...file.row, root: file.root, path: file.path, kind: 'file' }, entry.options.home, { openFolder: entry.options.returnBack ? entry.options.close : null }) : null,
-        headExtras: () => [entry.options.readAloud?.glyph || null, entry.options.wide ? entry.options.mic || null : null].filter(Boolean),
-        barExtras: () => entry.options.mic || null,
+        headExtras: () => [entry.options.readAloud?.glyph || null].filter(Boolean),
+        // Dictation's mic: the editor draws it only while the doc takes typed
+        // text from this person (never in Viewing, never on a read-only file),
+        // in the header on a wide page and in the phone's keyboard bar.
+        mic: () => entry.options.mic || null,
+        micInHead: () => Boolean(entry.options.wide),
+        // Into Viewing (or the right to write gone) with a take running into
+        // the doc: the take is stopped and nothing of it lands.
+        onCanType: (yes) => { if (!yes) stopDictation(entry) },
         onText: () => files.registry?.emit?.('file.edited', { root: file.root, path: file.path }),
       })
       entry.editor = ed
@@ -134,10 +141,20 @@ export function activate(loam) {
     return entry
   }
 
+  // Dictation's take into this doc, if one runs, is ended the way closing the
+  // field ends it (dictation's own `field.closed`), in the page or panel that
+  // holds the doc.
+  function stopDictation(entry) {
+    const owner = (host.panelHosts?.() || []).find(o => o?.files && o.files === entry.files) || host
+    loam.events?.emit?.('field.closed', { target: 'file', host: owner })
+  }
+
   function fieldFor(ed) {
     return {
       get value() { return ed.text() },
-      set value(v) { if (v !== ed.text()) ed.replaceText(v) },
+      // Nothing is written through the field while the doc does not take
+      // typed text (Viewing): a late take has nowhere to land.
+      set value(v) { if (ed.canType() && v !== ed.text()) ed.replaceText(v) },
       get selectionStart() { return ed.view.state.selection.main.from },
       get selectionEnd() { return ed.view.state.selection.main.to },
       setSelectionRange(a, b = a) { const n = ed.view.state.doc.length; ed.view.dispatch({ selection: { anchor: Math.min(a, n), head: Math.min(b, n) } }) },

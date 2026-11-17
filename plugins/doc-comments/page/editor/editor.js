@@ -7,7 +7,10 @@
 // page. Everything it needs from its host comes in through `createDocEditor`'s
 // options: the operations (`api`, the plugin server's routes), faces, links,
 // embeds, the breadcrumb, and whatever the host puts in the header or bar
-// (Loam's dictation mic, read aloud).
+// (read aloud). Dictation's mic comes in apart (`mic`), because it is drawn
+// only while the doc takes typed text from this person (`canType`): never in
+// Viewing, never on a doc that cannot be written. `onCanType(yes)` tells the
+// host when that changes, so a take running into the doc can be stopped.
 
 import {
   EditorState, EditorView, EditorSelection, ChangeSet, Compartment, Transaction, Annotation, Prec, ViewPlugin,
@@ -347,6 +350,11 @@ export function createDocEditor(opts) {
   function canFormat() {
     return (st.mode === 'edit' && st.can.edit) || (st.mode === 'suggest' && st.can.suggest)
   }
+
+  // Whether the doc takes typed text from this person just now: Editing or
+  // Suggesting, with the right to. It is what CodeMirror is told
+  // (`editableExt`), and it is the rule for dictation's mic (`opts.mic`).
+  function canType() { return canFormat() }
 
   // -- the server's answers ----------------------------------------------------------
 
@@ -1902,7 +1910,8 @@ export function createDocEditor(opts) {
   // under the pointer once let a click on ⋯ land on a detached button.
   let headKey = null, headNodes = []
   function renderHead() {
-    const extras = [...(opts.headExtras?.() || []), null, ...(opts.headEnd?.() || [])]
+    const mic = canType() && opts.micInHead?.() ? opts.mic?.() || null : null
+    const extras = [...(opts.headExtras?.() || []), ...(mic ? [mic] : []), null, ...(opts.headEnd?.() || [])]
     const sw = saveWordNode()
     const key = JSON.stringify([st.mode, st.menu, st.phone, sw?.textContent || '', sw?.className || '', (opts.crumbs || []).map(c => c.label), opts.titleBar || null, opts.back?.label || null,
       st.authors, st.resolved, detached().length, st.can, (opts.menuExtras?.() || []).map(x => x.label), Boolean(fileMenu)])
@@ -1948,7 +1957,9 @@ export function createDocEditor(opts) {
   // shows its icon alone (its name is still its label) when the title needs
   // the room.
   function fitHead() {
-    head.classList.remove('tight')
+    // (Only when it is there: `remove` rewrites the class even when it is
+    // absent, and an idle page must change nothing.)
+    if (head.classList.contains('tight')) head.classList.remove('tight')
     if (!st.phone || !head.isConnected) return
     const t = head.querySelector('.dc-crumb > b')
     if (t && t.scrollWidth > t.clientWidth + 0.5) head.classList.add('tight')
@@ -2209,7 +2220,7 @@ export function createDocEditor(opts) {
   // -- the phone: the bar above the keyboard and the sheet --------------------------------------------
 
   function renderBars() {
-    if (!st.phone) { kbar.classList.remove('on'); vbar.classList.remove('on'); return }
+    if (!st.phone) { kbar.classList.remove('on'); vbar.classList.remove('on'); if (kbar.firstChild) put(kbar); return }
     const focused = view.hasFocus
     const r = selectionRange()
     const writing = focused && canFormat()
@@ -2257,8 +2268,12 @@ export function createDocEditor(opts) {
         st.can.comment ? h('button', { class: 'dc-kc', type: 'button', disabled: r ? null : true, onclick: () => startNote('comment') }, icon('comment', 17), h('span', { text: 'Comment' })) : null,
         r && st.can.suggest ? h('button', { class: 'dc-kc', type: 'button', onclick: () => startNote('suggestion') }, icon('suggest', 17), h('span', { text: 'Suggest' })) : null,
         opts.barExtras?.() ? h('span', { class: 'dc-kmic' }, opts.barExtras()) : null,
+        canType() && opts.mic?.() ? h('span', { class: 'dc-kmic' }, opts.mic()) : null,
       )
     }
+    // A bar that is off keeps nothing (the mic least of all: in Viewing
+    // there is no dictating into the doc).
+    if (!writing && kbar.firstChild) put(kbar)
     if (!writing && r) {
       put(vbar, h('button', { type: 'button', onclick: () => startNote('comment') }, icon('comment', 17), h('span', { text: 'Comment' })))
     }
@@ -2345,8 +2360,10 @@ export function createDocEditor(opts) {
 
   // -- render ---------------------------------------------------------------------------------------------
 
+  let typable = canType()
   function render() {
     if (st.destroyed) return
+    if (typable !== canType()) { typable = canType(); opts.onCanType?.(typable) }
     // No notes to show: no margin, the text in the middle. A change of that
     // moves the text, so it waits while keys are going down in it (someone
     // else's note can arrive mid-sentence) and lands at the pause;
@@ -2414,6 +2431,9 @@ export function createDocEditor(opts) {
       if (p !== player.firstChild) put(player, ...(p ? [p] : []))
     },
     refreshHead: () => renderHead(),
+    // Whether the doc takes typed text from this person (Editing or
+    // Suggesting, with the right to): where dictation may put its words.
+    canType: () => canType(),
     // A quiet line above the doc (the share page's "new since your last visit").
     setNotice(node) { put(notice, node); notice.classList.toggle('on', Boolean(node)); queueLayout() },
     focusNote: (id) => focusNote(id, { scrollTo: true }),

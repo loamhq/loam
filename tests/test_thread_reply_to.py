@@ -14,6 +14,11 @@ Driven through the broker's routes with a fake harness:
   - a persona's `↩ m2` opening becomes `reply_to`, marker gone, also from its
     first text segment; an id the thread lacks stays as text
   - the full record's entry carries it; `bin/thread post --reply-to`
+  - (2026-11-17) the marker is never words on the page: the full record is
+    served without it when `reply_to` names it, the live stream holds an
+    opening that may be one and sends `reply_to` with the words, a natural
+    reply and an unknown id stream as written, and the prompt asks for words
+    rather than ids
 
 Run: python3 tests/test_thread_reply_to.py
 """
@@ -341,6 +346,92 @@ async def main():
           (answer.get("reply_to"), answer["text"]), (None, "↩ m9999 hello"))
     status, counts = await call(server, "GET", "/v1/threads/writer")
     check("the writer counts persona replies-to", counts.get("reply_to"), 2)
+
+    # -- the marker is never words on the page (2026-11-17) ----------------------
+    # The page builds a reply's words from its full record once its steps are
+    # read; before, the record's raw `↩ m111` showed under the quote.
+    marked = [m for m in threads.read(tid)[1] if m.get("reply_to") == plan["id"]
+              and m["author"] == "ada"]
+    status, served = await call(server, "GET", f"/v1/threads/{tid}/steps")
+    by_id = {e["message"]: e for e in served["steps"] if e.get("message")}
+    first_words = [next(s["text"] for s in by_id[m["id"]]["steps"]
+                        if s.get("type") == "text" and s.get("parent") is None)
+                   for m in marked]
+    check("GET .../steps: a reply's first words carry no marker",
+          first_words, ["Still the south wall.", "Looking."])
+    status, full = await call(server, "GET", f"/v1/threads/{tid}",
+                              params={"seen": "0", "steps": "full"})
+    words = [s["text"] for m in full["messages"] if m["id"] == marked[0]["id"]
+             for s in m["steps"] if s.get("type") == "text"]
+    check("...nor on the thread read with ?steps=full", words, ["Still the south wall."])
+    bad = threads.read(tid)[1][-1]
+    check("...while a marker the thread lacks stays as written",
+          [s["text"] for s in by_id[bad["id"]]["steps"] if s.get("type") == "text"],
+          ["↩ m9999 hello"])
+    raw_lines = steps_mod.steps_path(tid).read_text("utf-8")
+    check("...and the file itself is left as written", f"↩ {plan['id']} Still" in raw_lines,
+          True)
+    # A record written before today, and what it must not touch.
+    legacy = [{"type": "text", "text": "thinking", "parent": "t9"},
+              {"type": "text", "text": f"↩ {plan['id']}\n\n**Yes.** m12 stays.",
+               "parent": None},
+              {"type": "text", "text": f"↩ {plan['id']} later", "parent": None}]
+    check("unmark_steps: the opening only, the id it names only",
+          [s["text"] for s in threads.unmark_steps(legacy, plan["id"])],
+          ["thinking", "**Yes.** m12 stays.", f"↩ {plan['id']} later"])
+    check("unmark_steps: another id, or none, leaves the words",
+          (threads.unmark_steps(legacy, "m1") is legacy,
+           threads.unmark_steps(legacy, None) is legacy), (True, True))
+    natural = [{"type": "text", "text": "About m111: your point about subtlety.",
+                "parent": None}]
+    check("unmark_steps: an id in ordinary prose is not a marker",
+          threads.unmark_steps(natural, "m111") is natural, True)
+
+    # The live stream: the opening is held while it may be a marker, then
+    # sent without it and with `reply_to`, so the quote shows as it streams.
+    def delta(t):
+        return {"type": "stream_event", "parent_tool_use_id": None,
+                "event": {"type": "content_block_delta",
+                          "delta": {"type": "text_delta", "text": t}}}
+
+    async def streamed(pieces, whole):
+        w = FakeWriter()
+        task = asyncio.create_task(server.thread_stream(tid, None, w))
+        await asyncio.sleep(0.05)
+        ada.script = [*(delta(p) for p in pieces), text(whole), result(1)]
+        await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "and now?"})
+        await settle(server, tid)
+        await asyncio.sleep(0.05)
+        task.cancel()
+        items = w.items()
+        return ([e for e in items if e.get("type") == "message.delta"],
+                [e["message"] for e in items if e.get("type") == "message.done"
+                 and e["message"]["author"] == "ada"])
+
+    pid = plan["id"]
+    deltas, done = await streamed(["↩", f" {pid[:2]}", pid[2:], "\n\nStill", " sure."],
+                                  f"↩ {pid}\n\nStill sure.")
+    check("streamed marker: no delta shows the arrow or the id",
+          [d["draft"] for d in deltas if "↩" in d["draft"] or pid in d["draft"]], [])
+    check("...the drafts grow from the words alone",
+          [d["draft"] for d in deltas], ["Still", "Still sure."])
+    check("...each carries reply_to, and the deltas add up to the draft",
+          ({d.get("reply_to") for d in deltas}, "".join(d["text"] for d in deltas)),
+          ({pid}, "Still sure."))
+    check("...and the posted message is the same words, the same reply_to",
+          [(m["text"], m.get("reply_to")) for m in done], [("Still sure.", pid)])
+    deltas, done = await streamed(["Your point", " about subtlety holds."],
+                                  "Your point about subtlety holds.")
+    check("a natural reply streams as it is, with no reply_to",
+          ([d["draft"] for d in deltas], [d.get("reply_to") for d in deltas],
+           [m.get("reply_to") for m in done]),
+          (["Your point", "Your point about subtlety holds."], [None, None], [None]))
+    deltas, done = await streamed(["↩ m9999", " hello"], "↩ m9999 hello")
+    check("a streamed marker the thread lacks streams as written",
+          ([d["draft"] for d in deltas], [m["text"] for m in done]),
+          (["↩ m9999 hello"], ["↩ m9999 hello"]))
+    check("the turn prompt asks for words, not ids, in what a persona says",
+          "never words for the reader" in ada.prompts[-1], True)
 
     # -- bin/thread ------------------------------------------------------------
     env = {**os.environ, "LOAM_AGENT": "iris"}
