@@ -453,3 +453,31 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **`pkill -f <pattern>` matches its own shell's command line** when the
   pattern is in the same command, and kills the session's shell. Keep a pid
   file.
+
+## 2026-11-16 — a real hello conversation on a scratch install
+
+- **A scratch broker inherits the shell it is started from.** Started from
+  a job session, its agents saw the job's `LOAM_JOB_*`, `LOAM_WAKE` and
+  `CLAUDE_CODE_*` variables (and one went reading them). Start it with
+  `env -i HOME=… PATH=… LOAM_CONFIG=… XDG_RUNTIME_DIR=… DBUS_SESSION_BUS_ADDRESS=…`.
+- **`bin/settings` reaches the broker at `loam_broker.PORT` (8932), not the
+  scratch broker's `--port`**, so a scratch agent's settings call lands on
+  the box's real broker with the scratch token and gets a 401. Set
+  `LOAM_BROKER_URL=http://127.0.0.1:<port>` in the scratch broker's
+  environment; its children inherit it.
+- **The CLI ignores a workspace's permissions until it is trusted**
+  (`projects[<path>].hasTrustDialogAccepted` in the real `~/.claude.json`).
+  Add the scratch workspace for the run, keep the file's 0600 mode when
+  rewriting it, and remove the entry and its `~/.claude/projects/` folder
+  after. Other jobs add their own entries meanwhile: compare your own keys.
+- **A yes must come after the draft's revision** (`check_yes(after=…)`), so
+  an agent that shows a short version, hears yes, and only then calls
+  `agent.draft` has to ask again. Iris did, gracefully; it is a second yes
+  the owner gives.
+- **One config proves nothing shared.** `fleet_clauses` keeps lines most
+  configs carry unmasked; with a single agent that was every line, so the
+  next agent's config said it was Iris. It now masks everything when there
+  is only one config.
+- **`tests/test_engineer.py` fails inside a job's wall** (the jobs folder is
+  read-only there): same on unchanged `main`. The landing's run is the one
+  that counts.
