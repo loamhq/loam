@@ -94,17 +94,17 @@
 @media (max-width: 1100px) { .dc.desk .dc-col { padding-left: 52px; padding-right: 28px; } }
 
 /* CodeMirror, dressed as the doc */
-.dc .cm-editor { outline: none !important; background: transparent; color: var(--dc-ink); font-size: 17px; line-height: 1.76; }
+.dc .cm-editor { outline: none !important; background: transparent; color: var(--dc-ink); font-size: 17px; line-height: 1.76; font-family: inherit; }
 .dc .cm-editor.cm-focused { outline: none; }
-.dc .cm-scroller { font-family: inherit; line-height: inherit; overflow: visible !important; }
-.dc .cm-content { padding: 0; caret-color: var(--dc-ink); white-space: pre-wrap; }
+.dc .cm-editor .cm-scroller { font-family: inherit !important; line-height: inherit; overflow: visible !important; }
+.dc .cm-editor .cm-content { padding: 0; caret-color: var(--dc-ink); white-space: pre-wrap; }
 .dc.mode-suggest .cm-content { caret-color: var(--dc-accent); }
-.dc .cm-line { padding: 0; }
-.dc .cm-cursor { border-left: 1.5px solid currentColor; }
-.dc .cm-selectionBackground { background: color-mix(in srgb, var(--dc-accent) 22%, transparent) !important; }
-.dc .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--dc-accent) 28%, transparent) !important; }
-.dc .cm-content ::selection { background: transparent; }
-.dc .cm-gutters { display: none; }
+.dc .cm-editor .cm-line { padding: 0; }
+.dc .cm-editor .cm-cursor { border-left: 1.5px solid currentColor; }
+.dc .cm-editor .cm-selectionBackground { background: color-mix(in srgb, var(--dc-accent) 22%, transparent) !important; }
+.dc .cm-editor .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--dc-accent) 28%, transparent) !important; }
+.dc .cm-editor .cm-content ::selection { background: transparent; }
+.dc .cm-editor .cm-gutters { display: none; }
 
 /* what the .md renders as */
 .dc .dc-h { font-weight: 650; color: var(--dc-ink); }
