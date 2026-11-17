@@ -892,3 +892,42 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Live dark shots:** the owner's theme mode in `/appearance-state.js` is
   `sun` (follows the sun), `dark`, `light` or `system`; rewrite it to
   `"mode":"dark"`, not `moon`.
+
+## 2026-11-17 — doc comments on Loam's design system
+
+- **Where the system lives** (no single page said it): tokens in
+  `app/public/tokens.css` plus each theme's overrides
+  (`app/public/themes/<id>/theme.css`; Foundry also sets the radius
+  tokens, pill = 8px); action tiers in `app/public/button-tiers.css`
+  (Newspaper default, foam `.secondary`, espresso `.primary` in the display
+  face; selection is paper ink); content marks, fields, notices in
+  `style.css`; menus and dialogs in `menu-surface.css`. The contract's
+  checkers: `app/tools/colour-families.mjs` (guarded to Latte; strip the
+  guard to run it in every look) and `app/test/control-style-guard.mjs`.
+  `app/docs/appearance.md` links a `design-system/tokens.md` that is not
+  in this repo.
+- **Core's focus ring differs by element**: buttons, links, selects get
+  2px paper ink (button-tiers wins on specificity); inputs and textareas
+  keep the 2px `--signal-crema` ring from style.css.
+- **`--signal-crema` is not a text ink**: Latte's is 3.6:1 on its raised
+  paper. Mixing it toward the ink in oklab (72/28) keeps the hue and
+  clears 4.5:1 in all seven themes.
+- **Every `button` in Loam's page has `min-height: 44px`** (style.css:40),
+  so a plugin's 28px button is 44px tall in the app and 28px on its own
+  page; a filled button shows it.
+- **A plugin's tier paint needs `.dc .primary` (two classes)**: the
+  plugin's own `.dc button` reset beats core's one-class `.primary`. Using
+  core's class names still pays: core's id-scoped rules (an open menu or
+  dialog quiets the actions behind it) reach the plugin's buttons.
+- **Photographing a plugin in every theme without the live box**: the
+  app's own fake host (`app/test/harness.js` `fakeBroker` + `appAgainst`,
+  `files-host.js`, `shippedPlugins` for the theme rows, the plugin's files
+  as `GET /v1/plugins/<id>/files/<path>` routes) and the plugin's real
+  server on seeded docs behind a Playwright route for `/x/<id>/`.
+  `plugins/doc-comments/test/look-browser.mjs` is the worked example:
+  ~450 frames in 15 min; with core's checkers per frame, slower. A share
+  link made with `links.create` alone is not in the sidecar: call
+  `service.sync_links` as the API does.
+- **A handler subclass must not define `_route`**: the plugin server's
+  handler already has one, and overriding it answers every request with
+  a crash.
