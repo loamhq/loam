@@ -93,6 +93,12 @@ ls.WAKE_STATE = TMP / "wake"
 ls.BROKER_SESSIONS = TMP / "sessions"
 ls.WRITE_PAGE = False
 activity.WAKE_LOGS = TMP / "logs"
+# No project's jobs but the test's own (2026-11-17): Activity lists every
+# project's finished jobs, read from the box's real jobs folders, and a job
+# finishing there while this runs -- another test's fixture, or a real job --
+# became the newest item and failed "an agent's change" below. The cancel
+# section further down puts its own scratch project in.
+eng.projects = lambda: {}
 
 
 class FakeSystemd(ls.Systemd):
