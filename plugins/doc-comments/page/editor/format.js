@@ -155,6 +155,7 @@ export function setBlock(view, id) {
     return
   }
   const changes = []
+  let caret = null
   for (let n = first; n <= last; n++) {
     const line = state.doc.line(n)
     const m = PREFIX.exec(line.text)
@@ -162,7 +163,14 @@ export function setBlock(view, id) {
     const old = m[2] || ''
     const want = id === 'ol' ? `${n - first + 1}. ` : block.md
     changes.push({ from: line.from + indent.length, to: line.from + indent.length + old.length, insert: want })
+    // One line: the caret goes where its words are, after the new mark.
+    if (first === last) caret = sel.empty ? Math.max(sel.head - (line.from + indent.length + old.length), 0) + line.from + indent.length + want.length : null
   }
-  view.dispatch({ changes, userEvent: 'input.format', scrollIntoView: true })
+  const cs = state.changes(changes)
+  view.dispatch({
+    changes: cs,
+    selection: caret != null ? { anchor: caret } : state.selection.map(cs, 1),
+    userEvent: 'input.format', scrollIntoView: true,
+  })
   view.focus()
 }

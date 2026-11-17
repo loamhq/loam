@@ -156,12 +156,12 @@ export function activate(loam) {
   const onFocus = () => {
     if (cur?.status === 'ready' && !cur.editor.dirty()) cur.editor.reload()
   }
-  window.addEventListener('focus', onFocus)
+  globalThis.addEventListener?.('focus', onFocus)
   const renamed = loam.events?.on?.('file.renamed', () => { /* the next render opens it under its new name */ })
 
   return () => {
     disposed = true
-    window.removeEventListener('focus', onFocus)
+    globalThis.removeEventListener?.('focus', onFocus)
     renamed?.remove?.()
     reg?.remove?.()
     close(cur)

@@ -3183,10 +3183,17 @@ too big, `415` not text / not a type Files creates or uploads.
 
 | route | body | answers |
 |---|---|---|
-| `PUT /v1/files/text` | `{"root", "path", "text", "base_revision"}` | `200` the row plus `text`, `revision`, `provenance` |
+| `PUT /v1/files/text` | `{"root", "path", "text", "base_revision", "by"?}` | `200` the row plus `text`, `revision`, `provenance` |
 | `POST /v1/files/file` | `{"root", "path", "text"?}` | `201` the same; `409` if anything has that name |
 | `POST /v1/files/folder` | `{"root", "path"}` | `201` the folder's row; `409` if it exists |
 
+- **A save may say whom it was made for** (`by`, since 2026-11-16): a live
+  persona's id, from a plugin acting for it (doc-comments, when a persona
+  comments or accepts through its tool). The provenance stamp then carries
+  that persona's link (`last_modified_by: "[[Name]]"`, the name from its
+  `agent.json` as its transcripts spell it) instead of the owner's. The
+  owner's id, or none, is the owner; anything else is `400`. It changes the
+  stamp only: who may save what is the same.
 - **A save names the revision it was edited from**, as `read` answered it.
   If the file is no longer that revision -- a persona wrote it meanwhile --
   the answer is `409 {"error", "current_revision"}` and the file is untouched:
