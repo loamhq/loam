@@ -5,6 +5,8 @@ import { markdown } from './markdown.js'
 import { ordinalDraft } from './thread-experience.js'
 
 const stripFrontmatter = (text = '') => String(text ?? '').replace(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/, '').trim()
+// The name is the card's title; a soul that opens by repeating it as a heading starts below it.
+const withoutTitle = (text, name) => { const [first, ...rest] = text.split('\n'); return /^#\s/.test(first) && first.replace(/^#+\s*/, '').trim().toLowerCase() === name.toLowerCase() ? rest.join('\n').trim() : text }
 
 // Drafts belong to the host and the conversation. Only an explicit confirmation
 // publishes the revision currently on screen; the host rejects a stale revision.
@@ -44,7 +46,7 @@ export function createAgentDrafts({ api, redraw, made = () => {}, askChanges = (
     const who = soulExcerpt(d.soul || '')
     const draftLabel = ordinalDraft(d.rev)
     const expanded = st.expanded.has(d.draft)
-    const soulText = stripFrontmatter(d.soul)
+    const soulText = withoutTitle(stripFrontmatter(d.soul), name)
     const configText = stripFrontmatter(d.config)
     const toggle = () => { if (expanded) st.expanded.delete(d.draft); else st.expanded.add(d.draft); redraw() }
     return h('article', { class: 'card agent-draft-card', key: d.draft, 'aria-label': `${name}, a new agent to review` },

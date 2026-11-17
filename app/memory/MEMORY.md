@@ -57,3 +57,25 @@ have never met.
   `.row-side-action > .iconbtn` share a rounded translucent tint.
   `files.revealOpen(root)` scrolls an off-screen `.fs-entry.on` into view once
   per `(folder, file)` visit.
+- **A test that opens a thread must close it.** `createThreads().open()` (and
+  `create()`) attaches the live-updates stream through the global `fetch`; when
+  that fails it reconnects every 2.5 s (`threads.js`, `connect`'s retry) for as
+  long as the thread is open. A test whose assertion throws before
+  `threads.close()` leaves that timer behind and its file never exits, even
+  with `--test-timeout` (the test is over; the process is not). Close in
+  `t.after`, and stub `fetch` with a stream that ends on abort
+  (`test/first-day-polish.test.js`, `test/thread-opening.test.js`). Find a
+  hang's timer with an `async_hooks` hook on `Timeout` that records the stack.
+- **Day-one decisions** (`docs/first-day.md`): the new agent's review is a card
+  in the thread's flow; Loam's lines are drawn without ids
+  (`formatSystemLine`); a failed turn is a system line (`failedTurnInfo`);
+  Files hides the three developer shortcuts until their folders hold more
+  than the install put there; Sign-in reads passkeys only from a host relay
+  at `/_loam/passkeys` and removes them only on the portal. Any change to the
+  broker's words for drafts and first threads must keep `formatSystemLine`'s
+  patterns (copied from `bin/session-broker`) in step.
+- **Before/after pictures** come from running the same capture script in a
+  `git archive` of the commit before (`test/first-day-polish-browser.mjs`):
+  the fixture and the scene steps must not depend on the change, so the script
+  finds controls by role and text that exist on both sides, or skips a step
+  that is not there.

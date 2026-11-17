@@ -153,7 +153,7 @@ function goSettings(page, provider = null) {
     if (provider) {
       const openPlugin = () => {
         if (host.state.sheet?.kind !== 'settings' || settingsHome(host.state.sheet.page) !== 'plugins') return
-        const row = host.pluginLoader?.st.rows?.find(r => r.id === provider)
+        const row = host.pluginLoader?.st.rows?.find(r => r.id === provider && (r.effective || r.broken)) ?? host.pluginLoader?.st.rows?.find(r => r.id === provider)
         if (row) host.pluginSettingsUI?.open(row)
       }
       if (host.pluginLoader?.st.rows?.some(r => r.id === provider)) openPlugin()

@@ -2741,6 +2741,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .agent-draft-doc > .kicker { margin:0 0 6px; }
 .agent-draft-doc .md > :first-child { margin-top:0; }
 .agent-draft-doc .md > :last-child { margin-bottom:0; }
+.agent-draft-doc .md :is(h1,h2,h3,h4) { font-size:15px; line-height:1.35; font-weight:650; letter-spacing:0; margin:16px 0 6px; }
 .agent-draft-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
 .agent-draft-actions .pillbtn { min-height:44px; }
 .agent-draft-result { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:0; padding:14px 18px; }
