@@ -124,7 +124,7 @@ on everything but `/up`.
 | `GET /up` | `{"ok": true}`. No token. |
 | `GET /v1/limits` | the numbers a client must know before it does something this interface would refuse: `attachment_max_bytes`, `inline_image_max_bytes`, `attachment_types` — "Attachments" below |
 | `GET /v1/dictation-terms` | the dictation terms note, read fresh → `{path, obsidian_url, modified, text}`, `Cache-Control: no-store`; **`404`** when there is no note. No parameter names a file — "The dictation terms note" below |
-| `GET /v1/agents` | the personas, derived from disk, each with its name and emoji |
+| `GET /v1/agents` | the personas, derived from disk, each with its name and uploaded face |
 | `GET /v1/providers[?agent=<name>]` | the four providers, which are connected, the quota, when the login expires (`login`), and what each offers a chat: its `models` and its `efforts`. `?agent=` only decides whose default is ticked. |
 | `POST /v1/providers/claude-code/login` | begins a fresh Claude Code sign-in → **`201`** with `{state: "pending", url, code: null, instructions, login}`. Idempotent: a second POST while one is pending answers `200` with the same URL. "Making the login again" below. |
 | `GET /v1/providers/claude-code/login` | how that flow is going: `idle \| pending \| done \| failed`, with `message` when it failed and `login` always |
@@ -292,8 +292,8 @@ answer, so here is the answer:
 ```jsonc
 GET /v1/agents
 { "agents": [                                   // objects, sorted by id
-    { "id": "cleo", "name": "Cleo", "emoji": "🪐" },
-    { "id": "ada",   "name": "Ada",   "emoji": "🧱" }, ... ] }
+    { "id": "cleo", "name": "Cleo", "face": null },
+    { "id": "ada",   "name": "Ada",   "face": null }, ... ] }
 
 GET /v1/sessions
 { "sessions": [ <session record>, ... ],        // newest last_activity first
@@ -325,12 +325,16 @@ because the page draws an agent's name and mark on every row and in the
 agents strip, and a page given only `ada` had to invent both — which means
 inventing them differently from the record the moment the owner renames one.
 
-`name` and `emoji` are **read** from the persona's own `agent.json` in its
-workspace, the file the runtime renders and the same two fields the
-transcript writer puts at the head of a conversation: `display` and `emoji`.
-The fallback for `name` is the capitalised id, which is what an agent with no
-`display` gets; `emoji` is `null` when the file states none, so a client
-draws its own mark rather than being handed a guess. Nothing else from
+`name` is **read** from the persona's own `agent.json` in its workspace,
+the file the runtime renders: `display`. The fallback is the capitalised id,
+which is what an agent with no `display` gets. `face` is an uploaded image
+or `null`, and with `null` the client draws the theme's face.
+
+**`emoji` left every row on 2026-11-16** (the owner: "We should remove the
+concept of persona face emoji. That was a legacy feature from the Telegram
+days"). An older `agent.json` may still hold the key; nothing serves it, and
+a client that read it reads nothing there, which it already handled as an
+agent with no emoji. Nothing else from
 `agent.json` leaves the box — it also holds the workspace, the vault path and
 the wake schedule, and none of that is an app's business. `id` is the
 session-starting name and is unchanged: `POST /v1/sessions` still takes
@@ -4230,10 +4234,10 @@ relay should spell them `/^\/agents\/([^/]+)$/`, `rest === '/engineers'`,
 
 ```json
 {
-  "agent": {"id": "ada", "name": "Ada", "emoji": "🧱", "face": null},
-  "identity": {"id": "ada", "display": "Ada", "emoji": "🧱",
+  "agent": {"id": "ada", "name": "Ada", "face": null},
+  "identity": {"id": "ada", "display": "Ada",
                "face": null, "archived": null,
-               "default_display": "Ada", "default_emoji": "🧱",
+               "default_display": "Ada",
                "rename": "display name only: ..."},
   "defaults": {
     "provider": null, "model": null, "effort": null,
@@ -4282,7 +4286,8 @@ relay should spell them `/^\/agents\/([^/]+)$/`, `rest === '/engineers'`,
 }
 ```
 
-- `identity.display` and `.emoji` are what every card and line shows.
+- `identity.display` and `.face` are what every card and line shows (no
+  face: the theme's). `emoji` and `default_emoji` were retired 2026-11-16.
   Renaming changes the display name only; the id never changes (it is the
   workspace, the units and every old `@`), and an `@` matches the id and the
   display name.
@@ -4313,13 +4318,13 @@ relay should spell them `/^\/agents\/([^/]+)$/`, `rest === '/engineers'`,
 
 ### `PATCH /v1/agents/<agent>` — identity and defaults
 
-Body: any of `display`, `emoji`, `provider`, `model`, `effort` (and `by`).
+Body: any of `display`, `provider`, `model`, `effort` (and `by`). `emoji`
+is refused as a field the profile does not have (retired 2026-11-16).
 Answers 200 with the whole profile, as GET.
 
 | Field | Takes | null |
 |---|---|---|
 | `display` | 1–40 characters (spaces collapsed, no control characters), not another agent's id or display name, not `owner`, `all`, `everyone`, `system` | the id's own (`Ada`) |
-| `emoji` | one emoji, at most 16 characters, no spaces | the agent's atlas note's |
 | `provider` | `claude-code`, `codex`, `antigravity` | Claude Code |
 | `model` | a model the (new) provider takes: Claude Code's aliases or a `claude-…` id, a model Codex's `model/list` gives, one Antigravity lists | the provider's own |
 | `effort` | Claude Code: `low` `medium` `high` `xhigh` `max`; Codex: its listed levels; Antigravity: the same five, passed only beside a model id that does not end in its own level (`-low` ... `-xhigh`; the id wins, since 2026-11-15) | the provider's own |
@@ -4491,7 +4496,7 @@ First-party plugins get nothing more than this.
 
 ### `bin/settings` / `mcp__engineer__settings`
 
-`agent.display`, `agent.emoji`, `agent.provider`, `agent.model`,
+`agent.display`, `agent.provider`, `agent.model`,
 `agent.effort` (target the agent); `engineer.provider`, `engineer.model`,
 `engineer.effort`, `engineer.deploy_on_land`, `engineer.tiers.quick`,
 `engineer.tiers.standard`, `engineer.tiers.hard` (target a project or
@@ -4532,7 +4537,7 @@ when the starter agent is not awake. The person writes first.
 
 ### Drafts
 
-- `POST /v1/agents/drafts` — `{"thread", "name", "emoji", "soul", "config"}`
+- `POST /v1/agents/drafts` — `{"thread", "name", "soul", "config"}`
   and optionally `"id"` (the folder name; from the name when absent),
   `"provider"` (`claude-code`, `codex`, `antigravity`), `"wake"` (`HH:MM`; a
   free slot when absent), `"active"` and `"reflection"` (the loading files;
@@ -4542,20 +4547,22 @@ when the starter agent is not awake. The person writes first.
 
   ```json
   {"draft": "d-3f9c2a1b", "rev": 1, "by": "iris", "thread": "t-6daf5a6f",
-   "id": "juniper", "name": "Juniper", "emoji": "🌿",
+   "id": "juniper", "name": "Juniper",
    "soul": "...", "config": "...", "wake": null, "provider": null,
    "created": "2026-11-14T23:10:00Z", "updated": "2026-11-14T23:10:00Z",
-   "revisions": [{"rev": 1, "at": "...", "by": "iris", "fields": ["config", "emoji", "name", "soul", "thread"]}],
+   "revisions": [{"rev": 1, "at": "...", "by": "iris", "fields": ["config", "name", "soul", "thread"]}],
    "problems": [], "ready": true,
    "fleet_clauses": ["Namespace boundaries", "Deletion judgment", "..."]}
   ```
 
   `problems` says what stands between the draft and an agent (an id or name
-  taken by any agent, archived ones included; a reserved id; no face; no
-  soul or config); `ready` is true when there are none. `fleet_clauses` are
+  taken by any agent, archived ones included; a reserved id; no soul or
+  config); an `emoji` field is refused, 400 (retired 2026-11-16: the face
+  is the theme's until an image is uploaded); `ready` is true when there are none. `fleet_clauses` are
   the clauses every agent's config carries, which the made `config.md`
   starts with (below). The thread gets a Loam line: "Iris drafted a new
-  agent: 🌿 Juniper (draft d-3f9c2a1b, revision 1)".
+  agent: Juniper (draft d-3f9c2a1b, revision 1)". How to draft one (a
+  character, never a job) is the library skill `loam-making-an-agent`.
 - `GET /v1/agents/drafts[?thread=<id>]` — `{"drafts": [...]}`, open drafts
   only.
 - `GET /v1/agents/drafts/<draft>` — one draft, made or not.
@@ -4572,7 +4579,7 @@ when the starter agent is not awake. The person writes first.
 a draft with problems, or one already made. 201:
 
 ```json
-{"agent": {"id": "juniper", "name": "Juniper", "emoji": "🌿", "face": null},
+{"agent": {"id": "juniper", "name": "Juniper", "face": null},
  "first_thread": "t-1a2b3c4d", "workspace": "/home/…/ai-labs/juniper",
  "wake": "01:20", "rc": "active", "fleet_clauses": ["..."],
  "draft": {"...": "the draft, with made, made_at and yes"}}
@@ -4618,7 +4625,7 @@ same timers from the same records, armed without firing; the Remote
 Control unit comes back if it was on.
 
 `GET /v1/agents?archived=1` — Settings › Agents › Archived:
-`{"agents": [{"id", "name", "emoji", "face", "archived": {"at", "by", ...}}]}`.
+`{"agents": [{"id", "name", "face", "archived": {"at", "by", ...}}]}`.
 
 ### `/v1/agents/<agent>/face` — an uploaded face
 
@@ -4630,19 +4637,19 @@ Control unit comes back if it was on.
 - `GET` — the image, with its own `Content-Type`, cacheable forever: the URL
   carries the digest (`/v1/agents/iris/face?v=<12 hex>`), so a new face is a
   new URL.
-- `DELETE` — back to the emoji.
+- `DELETE` — back to the theme's face.
 
 Kept in the agent's workspace as `face.<ext>` and named in `agent.json`
 (`face`). Every card (`GET /v1/agents`, a thread's agents) and the profile's
-`identity` carry `face` (null without one); the page draws it over the emoji
-and over any theme's face. Provision keeps `face` and `archived` when it
+`identity` carry `face` (null without one); the page draws it over any theme's
+face. Provision keeps `face` and `archived` when it
 renders `agent.json` again.
 
 ### Rename
 
 Unchanged: `PATCH /v1/agents/<agent> {"display": "..."}` (above). The id
-never changes. An agent renames itself, or changes its emoji or face, with
-`agent.display`, `agent.emoji` and `agent.face`.
+never changes. An agent renames itself, or changes its face, with
+`agent.display` and `agent.face`.
 
 ### `bin/settings` / `mcp__engineer__settings`
 

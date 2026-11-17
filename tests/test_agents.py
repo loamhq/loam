@@ -19,8 +19,10 @@ release L10), through a real broker listener on loopback and through
     an agent mid-turn waits; a persona's archive needs a fresh yes
   - restore: the same timers back byte for byte, back in /v1/agents
   - the face: multipart and a path, PNG/JPEG/WebP/GIF only, served back,
-    on the card; null goes back to the emoji; provision keeps face and the
+    on the card; null goes back to the theme's; provision keeps face and the
     archive mark
+  - the emoji face is retired (2026-11-16): a draft refuses it, a made
+    agent has none, and an older agent.json's is kept but never served
   - no route deletes an agent
 
 Run: python3 tests/test_agents.py
@@ -245,7 +247,7 @@ async def main():
 
         # -- drafting --------------------------------------------------------
         out = await cli(port, "do", "agent.draft",
-                        json.dumps({"name": "Juniper", "emoji": "🌿",
+                        json.dumps({"name": "Juniper",
                                     "soul": "I am Juniper.", "config": "Config."}))
         check("a persona's draft needs its thread", not out.get("ok")
               and "thread" in out.get("error", ""), out)
@@ -253,12 +255,17 @@ async def main():
                         json.dumps({"thread": tid, "name": "Ada", "soul": "x",
                                     "config": "y"}))
         probs = out.get("answer", {}).get("problems", [])
-        check("a taken name and a missing face are the draft's problems",
+        check("a taken name is the draft's problem, and a face is not asked for",
               out.get("ok") and any("ada" in p.lower() for p in probs)
-              and any("face" in p for p in probs), out)
-        (LABS / "iris" / "draft-soul.md").write_text("# Juniper\n\nI am Juniper. I tend things.\n")
+              and not any("face" in p for p in probs), out)
         out = await cli(port, "do", "agent.draft",
                         json.dumps({"thread": tid, "name": "Juniper", "emoji": "🌿",
+                                    "soul": "s", "config": "c"}))
+        check("a draft with an emoji face is refused: retired",
+              not out.get("ok") and "retired" in out.get("error", ""), out)
+        (LABS / "iris" / "draft-soul.md").write_text("# Juniper\n\nI am Juniper. I tend things.\n")
+        out = await cli(port, "do", "agent.draft",
+                        json.dumps({"thread": tid, "name": "Juniper",
                                     "soul_file": "draft-soul.md",
                                     "config": "Juniper's config.\n"}))
         ans = out.get("answer", {})
@@ -270,12 +277,12 @@ async def main():
               any(draft in t and "revision 1" in t for t in system_lines(tid)),
               system_lines(tid))
         out = await cli(port, "do", "agent.draft",
-                        json.dumps({"thread": tid, "name": "Etc", "emoji": "x",
+                        json.dumps({"thread": tid, "name": "Etc",
                                     "soul_file": "/etc/hostname", "config": "c"}))
         check("a soul file outside the workspaces and vault is refused",
               not out.get("ok") and "workspace" in out.get("error", ""), out)
         status, body = await http(port, "POST", "/v1/agents/drafts",
-                                  {"name": "Commons", "id": "commons", "emoji": "x",
+                                  {"name": "Commons", "id": "commons",
                                    "soul": "s", "config": "c"})
         check("a reserved id is a problem",
               status == 201 and any("keeps for itself" in p for p in body["problems"]),
@@ -285,10 +292,14 @@ async def main():
         early = server.threads.post_person(tid, "Sounds nice")
         await asyncio.sleep(1.1)
         out = await cli(port, "do", "agent.revise",
-                        json.dumps({"emoji": "🌲"}), "--target", draft)
+                        json.dumps({"config": "Juniper's own config.\n"}), "--target", draft)
         check("a revision is numbered", out.get("ok")
               and out["answer"].get("rev") == 2
-              and out["answer"].get("emoji") == "🌲", out)
+              and out["answer"].get("config") == "Juniper's own config.\n", out)
+        out = await cli(port, "do", "agent.revise",
+                        json.dumps({"emoji": "🌲"}), "--target", draft)
+        check("...and a revision with an emoji is refused: retired",
+              not out.get("ok") and "retired" in out.get("error", ""), out)
 
         # -- confirm ---------------------------------------------------------
         out = await cli(port, "do", "agent.confirm", json.dumps({"rev": 2}),
@@ -333,22 +344,27 @@ async def main():
         made_config = (ws / "config.md").read_text()
         check("the config is the fleet's clauses with its name, then its own",
               made_config.startswith("juniper config.md")
-              and made_config.endswith("## Its own rules\n\nJuniper's config.\n"),
+              and made_config.endswith("## Its own rules\n\nJuniper's own config.\n"),
               made_config)
+        check("a vault with no About me.md: no _always.md from the make",
+              not (ws / "_always.md").exists())
         check("the loading files exist (structural starters)",
               all((ws / f).read_text().strip() for f in ("_active.md", "_reflection.md"))
               and "END OF ACTIVE" in (ws / "_active.md").read_text())
-        check("agent.json carries its name and face, in the one order",
-              card("juniper")["display"] == "Juniper" and card("juniper")["emoji"] == "🌲"
-              and list(card("juniper"))[:3] == ["name", "display", "emoji"], card("juniper"))
+        check("agent.json carries its name and no emoji, in the one order",
+              card("juniper")["display"] == "Juniper" and "emoji" not in card("juniper")
+              and list(card("juniper"))[:3] == ["name", "display", "workspace"], card("juniper"))
         check("provisioned at a free wake, its unit turned on",
               PROVISIONED == [("juniper", card("juniper")["wake_schedule"])]
               and card("juniper")["wake_schedule"] != "03:20"
               and ("juniper", True) in UNIT_CALLS, (PROVISIONED, UNIT_CALLS))
         status, body = await http(port, "GET", "/v1/agents")
         check("it is in /v1/agents (Chats and every picker)",
-              {"id": "juniper", "name": "Juniper", "emoji": "🌲", "face": None}
+              {"id": "juniper", "name": "Juniper", "face": None}
               in body["agents"], body)
+        check("...and no row serves an emoji, an older agent.json's included",
+              all("emoji" not in a for a in body["agents"])
+              and card("ada").get("emoji") == "🧱", body)
         first = ans.get("first_thread")
         meta = threads.read(first)[0]
         check("its first thread is its own, and says it was made on a yes",
@@ -447,8 +463,8 @@ async def main():
         check("the face is served back", status == 200 and got == PNG)
         status, body = await http(port, "GET", "/v1/agents")
         iris = [a for a in body["agents"] if a["id"] == "iris"][0]
-        check("the card carries the face over the emoji", iris["face"]
-              and iris["face"]["url"] == url and iris["emoji"] == "🪻", iris)
+        check("the card carries the face, and no emoji", iris["face"]
+              and iris["face"]["url"] == url and "emoji" not in iris, iris)
         raw, ctype = multipart(b"<svg onload=alert(1)>", "x.svg", "image/svg+xml")
         status, body = await http(port, "PUT", "/v1/agents/iris/face", raw=raw, ctype=ctype)
         check("an SVG (or anything not PNG/JPEG/WebP/GIF) is a 415", status == 415, body)
@@ -469,7 +485,7 @@ async def main():
         check("an agent renames itself through the same route",
               out.get("ok") and card("iris")["display"] == "Irene", out)
         status, body = await http(port, "DELETE", "/v1/agents/iris/face", {})
-        check("DELETE goes back to the emoji", status == 200 and body["face"] is None
+        check("DELETE goes back to the theme's face", status == 200 and body["face"] is None
               and "face" not in card("iris")
               and not (LABS / "iris" / "face.jpg").exists(), body)
 
@@ -486,6 +502,16 @@ async def main():
         text, fleet = loam_agents.compose_config(
             "juniper", "# Juniper\n\nNever prune unasked.\n\n## Permission first\n\nmine\n",
             fleet_root)
+        solo = TMP / "solo"
+        (solo / "iris").mkdir(parents=True)
+        (solo / "iris" / "agent.json").write_text(json.dumps({"name": "iris"}))
+        (solo / "iris" / "config.md").write_text(
+            "# Iris — Config\n\nHard rules.\n\n## Where things live\n\n"
+            "Your workspace is `/x/agents/iris/`.\n")
+        solo_text, _ = loam_agents.compose_config("wren", "Wren's own.\n", solo, name="Wren")
+        check("a box with one agent: the next agent's config is its own name, not Iris's",
+              solo_text.startswith("# Wren — Config") and "/x/agents/wren/" in solo_text
+              and "iris" not in solo_text.lower(), solo_text)
         check("the fleet's clauses come first, a minority one is left out",
               fleet == ["Permission first", "Where things live"]
               and "Ask the owner before editing juniper's soul." in text
@@ -500,24 +526,21 @@ async def main():
         drift.check_config_clauses(found, ["ash", "birch", "cedar", "juniper"])
         check("check-drift finds nothing in the made config", found == [], found)
 
-        # -- provision takes a made agent's own face without an atlas note ----
+        # -- provision: no emoji to derive, and an older file's is kept ----------
         loader = importlib.machinery.SourceFileLoader("provision", str(AGENTS / "bin" / "provision"))
         pspec = importlib.util.spec_from_loader("provision", loader)
         prov = importlib.util.module_from_spec(pspec)
         loader.exec_module(prov)
-        prov.VAULT = TMP / "no-vault"
-        check("provision's emoji_for falls back to the agent's own face",
-              prov.emoji_for("Juniper", "🌲") == "🌲")
-        try:
-            prov.emoji_for("Juniper")
-            refused = False
-        except SystemExit:
-            refused = True
-        check("...and still refuses with neither", refused)
+        check("provision derives no emoji (retired 2026-11-16)",
+              not hasattr(prov, "emoji_for"))
+        before = (LABS / "ada" / "agent.json").read_text()
+        check("...and an older agent.json's emoji renders back byte for byte",
+              profile.render_agent({**json.loads(before), **profile.kept(json.loads(before))})
+              == before, before)
 
         # -- a name with a space: the id is a slug, its own files say the name --
         status, body = await http(port, "POST", "/v1/agents/drafts",
-                                  {"name": "Old Sam", "emoji": "🧓", "soul": "I am Old Sam.\n",
+                                  {"name": "Old Sam", "soul": "I am Old Sam.\n",
                                    "config": "Old Sam keeps the garden.\n"})
         status, made = await http(port, "POST", f"/v1/agents/drafts/{body['draft']}/confirm",
                                   {"rev": 1})

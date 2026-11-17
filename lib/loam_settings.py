@@ -297,7 +297,9 @@ ENTRIES: list[Entry] = [
     # -- Settings > Agents: an agent's profile (2026-11-13) ----------------
     # lib/loam_profile.py. Each is the agent's agent.json; done only in a
     # conversation, on the owner's word (a persona's config is Permission
-    # first), and a persona's change is said in General.
+    # first), and a persona's change is said in General. agent.emoji retired
+    # 2026-11-16 (the owner: "We should remove the concept of persona face
+    # emoji"): a face is the theme's or agent.face's image.
     *[Entry(f"agent.{field}", "setting", label,
             "PATCH /api/agents/{agent}", route="PATCH /v1/agents/{agent}",
             target="agent", values=values, options=opts, unattended=False,
@@ -309,9 +311,6 @@ ENTRIES: list[Entry] = [
           ("display", "An agent's display name (its id never changes)",
            "1 to 40 characters, not another agent's id or name; null for the "
            "id's own", None, ("identity", "display")),
-          ("emoji", "An agent's face (its emoji)",
-           "one emoji, 16 characters at most; null for its atlas note's", None,
-           ("identity", "emoji")),
           ("provider", "An agent's default provider (new threads, wakes, crons)",
            "claude-code, codex or antigravity; null for Claude Code. A change "
            "puts the model and thinking level back to the provider's own",
@@ -334,7 +333,7 @@ ENTRIES: list[Entry] = [
           "PUT /api/agents/{agent}/face", route="PUT /v1/agents/{agent}/face",
           target="agent", unattended=False,
           values="the path of a PNG, JPEG, WebP or GIF file (2 MB at most) in a "
-                 "workspace or the vault; null to go back to the emoji",
+                 "workspace or the vault; null to go back to the theme's face",
           body=lambda v, m: {"path": v}, read="GET /v1/agents/{agent}",
           pick=lambda a, m: a["identity"].get("face"),
           note="Holds through any theme; a theme's faces apply only to agents "
@@ -342,20 +341,22 @@ ENTRIES: list[Entry] = [
     Entry("agent.draft", "action", "Draft a new agent, to show the person",
           "POST /api/agents/drafts", route="POST /v1/agents/drafts",
           unattended=False,
-          values='{"thread": <this thread\'s id>, "name": "Juniper", "emoji": '
-                 '"🌿", "soul": <text> or "soul_file": <path>, "config": <text> '
+          values='{"thread": <this thread\'s id>, "name": "Juniper", '
+                 '"soul": <text> or "soul_file": <path>, "config": <text> '
                  'or "config_file": <path>}; optional "id" (the folder name, '
                  'from the name), "provider", "wake" (HH:MM), "active"/'
                  '"reflection" (their loading files; plain starters otherwise)',
           body=lambda v, m: dict(v) if isinstance(v, dict) else {"name": v},
-          note="How to make an agent: ask what the person wants, then draft "
-               "their name, face (one emoji), soul and config here. Show the "
-               "person a short version of each (and the whole soul if they "
-               "ask), change it with agent.revise on their word, and once they "
-               "say yes to the version shown, agent.confirm with that "
-               "revision and the id of their yes message. The answer's "
-               "`problems` say what still stands in the way. Their files are "
-               "theirs from the moment they are made."),
+          note="How to make an agent: read the library skill "
+               "loam-making-an-agent first (a character, never a job). Draft "
+               "their name, soul and config here; the face is the theme's "
+               "until the person uploads one (agent.face). Show the person a "
+               "short version (and the whole soul if they ask), change it "
+               "with agent.revise on their word, and once they say yes to "
+               "the version shown, agent.confirm with that revision and the "
+               "id of their yes message. The answer's `problems` say what "
+               "still stands in the way. Their files are theirs from the "
+               "moment they are made."),
     Entry("agent.revise", "action", "Change a draft on the person's word",
           "PATCH /api/agents/drafts/{draft}", route="PATCH /v1/agents/drafts/{draft}",
           target="draft id (d-...)", unattended=False,
@@ -751,7 +752,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
 PAGE_RELAY_AHEAD: dict[str, list[str] | str] = {
     # Settings > Agents (2026-11-13; broker/README.md, "Agent profiles,
     # engineers and the reviewer"). `/agents` itself is in PAGE_RELAY.
-    "/^\\/agents\\/([^/]+)$/": ["agent.display", "agent.emoji", "agent.provider",
+    "/^\\/agents\\/([^/]+)$/": ["agent.display", "agent.provider",
                               "agent.model", "agent.effort"],
     # Making, archiving, restoring and the face (2026-11-14, first release L10).
     "rest === '/agents/new'": "New agent: opens a thread with the starter agent "

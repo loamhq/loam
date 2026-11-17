@@ -2674,7 +2674,14 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .profile-soul cite { display:block; font-size:11px; font-style:normal; margin-top:4px; color:var(--paper-ink-3); }
 .agent-profile .profile-actions { justify-content:flex-start; gap:8px; margin-top:0; }
 .agent-profile .profile-actions .pillbtn { padding-inline:14px; font-size:12px; }
-.profile-face-options,.agent-directory-actions,.profile-pagination { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.agent-directory-actions,.profile-pagination { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.profile-face-menu { gap:4px; }
+.popover.profile-face-menu[data-menu-layout="anchored"] { padding:var(--space-md); }
+.profile-face-preview { display:flex; justify-content:center; padding:10px 0 12px; }
+.profile-face-menu .popdiv { margin:2px 6px 6px; }
+.profile-face-menu-actions { display:flex; flex-direction:column; gap:2px; }
+.profile-face-menu .setrow { width:100%; min-height:44px; padding:10px 12px; border-radius:14px; }
+.profile-face-menu .setrow > svg:last-child { display:none; }
 .profile-tabs { display:flex; border-bottom:1px solid var(--paper-rule); flex:none; gap:4px; }
 .profile-tab { flex:1; min-height:48px; padding:0 8px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--paper-ink-2); font:inherit; font-size:13px; cursor:pointer; }
 .profile-tab[aria-selected="true"] { border-bottom-color:var(--paper-ink); color:var(--paper-ink); font-weight:600; }

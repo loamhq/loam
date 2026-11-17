@@ -3,7 +3,8 @@
 Decided 2026-11-14 (first release, decisions 6 and 7; job L10):
 
 - **Created by conversation only.** An agent (Iris, or any other) drafts the
-  new agent's name, face, soul and config, shows them to the person, revises
+  new agent's name, soul and config (the library skill
+  ``loam-making-an-agent`` says how: a character, never a job), shows them to the person, revises
   on their word, and the agent is made only on their yes. The draft is a file
   here (``<state>/agents/drafts/<id>.json``) with a revision number, so the
   yes is tied to the version that was shown.
@@ -18,6 +19,15 @@ Decided 2026-11-14 (first release, decisions 6 and 7; job L10):
   agent's own workspace (``face.<ext>``) and named in ``agent.json``
   (``face``). It is the agent's, so it holds through any theme; a theme's
   faces apply only to agents without one.
+- **No emoji face** (the owner, 2026-11-16: "We should remove the concept
+  of persona face emoji. That was a legacy feature from the Telegram
+  days"). A draft takes none and a made agent's ``agent.json`` has none; an
+  older ``agent.json`` that still holds ``emoji`` is left as it is, and
+  nothing serves the key.
+- **About me.** An install whose vault has ``About me.md`` at its top
+  (``bin/library seed-vault`` writes it) gives every agent made on it a line
+  in its ``_always.md`` pointing there (``ABOUT_LINE``). A vault without one
+  gets no line.
 
 **The yes.** A person's own call (the page, which sends no ``by``) is the
 person's yes. An agent's call (``by``) must name the thread it is talking to
@@ -53,6 +63,10 @@ from pathlib import Path
 
 import loam_config as lc
 
+# `About me.md`'s name (lib/loam_skills.py, which seeds it; not imported, to
+# keep this module light).
+ABOUT_ME = "About me.md"
+
 ARCHIVE_KEY = "archived"
 FACE_KEY = "face"
 # Folders under the workspaces root that are not agents, and words an id may
@@ -72,7 +86,9 @@ YES_WINDOW = timedelta(minutes=30)
 STARTER = lc.get("agents.starter", "iris")
 # Where the agent's soul and config come from, as fields of a draft.
 DRAFT_TEXT = ("soul", "config", "active", "reflection")
-DRAFT_FIELDS = ("id", "name", "emoji", "provider", "wake", *DRAFT_TEXT)
+DRAFT_FIELDS = ("id", "name", "provider", "wake", *DRAFT_TEXT)
+# Retired keys a draft may still carry from before 2026-11-16: never shown.
+RETIRED_DRAFT_KEYS = ("emoji",)
 PROVIDERS = ("claude-code", "codex", "antigravity")
 
 # The loading files a new agent needs before its first run, when the draft
@@ -86,6 +102,19 @@ how you want to be with {owner}.
 
 <!-- END OF ACTIVE -->
 """
+# A new agent's `_always.md`, on an install whose vault has `About me.md`
+# (the owner, 2026-11-16): one line, and the file is the agent's from then on.
+STARTER_ALWAYS = """\
+# Always
+
+This file loads into every run you have, with {owner} and alone. It is yours:
+write it, cut it, restructure it however serves you.
+
+{about}
+"""
+ABOUT_LINE = ("`About me.md`, at the top of the vault ({path}), is what "
+              "{owner}'s agents know about them. Read it; add what lasts about "
+              "{owner}; tell them when you do.")
 STARTER_REFLECTION = """\
 # Reflection
 
@@ -367,12 +396,6 @@ def _clean_fields(patch: dict, draft: dict, by: str | None) -> dict:
         out["name"] = name
     if "id" in patch and patch["id"] is not None:
         out["id"] = str(patch["id"]).strip().lower()
-    if "emoji" in patch:
-        v = patch["emoji"]
-        if v is not None and (not isinstance(v, str) or not v.strip() or len(v) > 16
-                              or any(ch.isspace() for ch in v)):
-            raise AgentsError("`emoji` is one emoji (16 characters at most, no spaces)")
-        out["emoji"] = v
     if "provider" in patch:
         v = patch["provider"]
         if v is not None and v not in PROVIDERS:
@@ -425,9 +448,6 @@ def check_new(draft: dict) -> list[str]:
     for field in ("soul", "config"):
         if not draft.get(field):
             problems.append(f"it has no {field}")
-    if not draft.get("emoji"):
-        problems.append("it has no face yet (give `emoji`; an image can be "
-                        "uploaded once it is made)")
     return problems
 
 
@@ -457,7 +477,8 @@ def _all_drafts() -> list[dict]:
 
 def shown(draft: dict) -> dict:
     """A draft as a route answers it: everything, and what stands in its way."""
-    out = {k: v for k, v in draft.items() if k != "id_given"}
+    out = {k: v for k, v in draft.items()
+           if k != "id_given" and k not in RETIRED_DRAFT_KEYS}
     out["problems"] = [] if draft.get("made") else check_new(draft)
     # What the made config.md adds to the draft's own: the protocol every
     # agent's config carries, copied (see compose_config).
@@ -477,12 +498,19 @@ def drafts(thread: str | None = None) -> list[dict]:
     return [shown(d) for d in rows]
 
 
+def _refuse_retired(fields) -> None:
+    if "emoji" in fields:
+        raise AgentsError("`emoji` is retired: an agent's face is the one the theme "
+                          "draws, or an image uploaded once it is made (agent.face)")
+
+
 def new_draft(payload: dict, by: str | None) -> dict:
     payload = dict(payload or {})
     thread = payload.pop("thread", None)
     payload.pop("by", None)
     unknown = sorted(set(payload) - set(DRAFT_FIELDS)
                      - {f"{f}_file" for f in DRAFT_TEXT})
+    _refuse_retired(unknown)
     if unknown:
         raise AgentsError(f"a draft has no field {', '.join(unknown)}; it takes "
                           f"{', '.join(DRAFT_FIELDS)} (soul, config, active and "
@@ -511,6 +539,7 @@ def new_draft(payload: dict, by: str | None) -> dict:
 def revise(draft_id: str, patch: dict, by: str | None) -> dict:
     patch = {k: v for k, v in (patch or {}).items() if k not in ("by", "thread")}
     unknown = sorted(set(patch) - set(DRAFT_FIELDS) - {f"{f}_file" for f in DRAFT_TEXT})
+    _refuse_retired(unknown)
     if unknown:
         raise AgentsError(f"a draft has no field {', '.join(unknown)}")
     if not patch:
@@ -580,7 +609,12 @@ def fleet_clauses(root: Path | None = None) -> list[tuple[str, str]]:
         return []
     drift = _drift_module()
     lines = Counter(l for text in raw.values() for l in set(text.splitlines()))
-    shared = {l for l, n in lines.items() if n >= len(raw) // 2 + 1}
+    # Lines most configs carry word for word are kept unmasked. One config
+    # proves nothing is shared: on a new install, whose only agent is Iris,
+    # every line counted, nothing was masked, and the next agent's config
+    # said "# Iris — Config" and named her workspace (found 2026-11-16).
+    shared = ({l for l, n in lines.items() if n >= len(raw) // 2 + 1}
+              if len(raw) > 1 else set())
     import loam_profile  # noqa: PLC0415
     per = {n: drift.config_clauses(text, n, loam_profile.self_name(n, card(n, root)), shared)
            for n, text in raw.items()}
@@ -730,7 +764,13 @@ def make(agent: str, draft: dict, wake: str, *, provision=None, units=None) -> d
         encoding="utf-8")
     (ws / "_reflection.md").write_text(
         draft.get("reflection") or STARTER_REFLECTION, encoding="utf-8")
-    config = {"name": agent, "display": draft["name"], "emoji": draft["emoji"],
+    about = Path(lc.VAULT) / ABOUT_ME
+    if about.is_file():
+        # Before provisioning, which seeds `_always.md` only where there is none.
+        (ws / "_always.md").write_text(STARTER_ALWAYS.format(
+            owner=lc.OWNER_NAME,
+            about=ABOUT_LINE.format(path=about, owner=lc.OWNER_NAME)), encoding="utf-8")
+    config = {"name": agent, "display": draft["name"],
               "workspace": str(ws), "vault": str(lc.VAULT),
               "wake_schedule": wake, "wake_timezone": lc.TIMEZONE}
     if draft.get("provider") and draft["provider"] != "claude-code":
@@ -938,8 +978,8 @@ def _face_path_arg(path, by: str | None) -> bytes:
 
 
 def set_face(agent: str, data: bytes | None, by: str | None) -> dict:
-    """An uploaded image as the agent's face, or ``None`` to go back to its
-    emoji. The old file is removed when a new one lands."""
+    """An uploaded image as the agent's face, or ``None`` to go back to the
+    theme's. The old file is removed when a new one lands."""
     if agent not in every():
         raise AgentsError(f"no agent named {agent!r} on this box", 404)
     import loam_schedule  # noqa: PLC0415
@@ -977,7 +1017,7 @@ def face_from_payload(agent: str, payload: dict, by: str | None) -> dict:
     if "path" not in (payload or {}):
         raise AgentsError("send the image as multipart/form-data in a `file` part, "
                           "or JSON {\"path\": <an image file on this box>} "
-                          "({\"path\": null} goes back to the emoji)")
+                          "({\"path\": null} goes back to the theme's face)")
     if payload["path"] is None:
         return set_face(agent, None, by)
     return set_face(agent, _face_path_arg(payload["path"], by), by)

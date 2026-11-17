@@ -81,7 +81,7 @@ def main() -> int:
     check("bin/library seed-vault exits 0", (out.returncode, out.stderr), (0, ""))
     shape = [p for p in tree(lc.VAULT) if "/skills/loam-" not in p and "skills/loam-" not in p]
     check("a blank install's vault: the plain folders, the README, both shelves",
-          shape, ["Attachments/", "Conversations/", "Inbox/", "Inbox/boards/", "Projects/",
+          shape, ["About me.md", "Attachments/", "Conversations/", "Inbox/", "Inbox/boards/", "Projects/",
                   "README.md", "System/", "System/Loam/", "System/Loam/README.md",
                   "System/Loam/skills/", "System/skills/", "System/skills/README.md"])
     check("...and Loam's shelf is the library, file for file",
@@ -112,6 +112,8 @@ def main() -> int:
     check("numbered folder names are used as configured, nothing else made",
           made, ["00_INBOX/", "00_INBOX/boards/", "15_CONVERSATIONS/", "40_PROJECTS/",
                  "98_ATTACHMENTS/", "99_SYSTEM/skills/", "99_SYSTEM/Loam/ (installed)"])
+    check("...and an existing vault gets no About me.md",
+          (numbered / "About me.md").exists(), False)
     check("...an existing vault's own folders and README are untouched",
           ((numbered / "99_SYSTEM" / "conventions").is_dir(),
            (numbered / "README.md").read_text()), (True, "an old vault\n"))
@@ -145,7 +147,7 @@ def main() -> int:
     check("...and everything else shared is seen",
           sorted(n for n, (shelf, _f) in seen.items() if shelf != "personal"),
           ["loam-agent-name-and-face", "loam-filing-a-bug-or-feature",
-           "loam-publishing-to-the-marketplace", "loam-skills", "loam-what-you-can-reach",
+           "loam-making-an-agent", "loam-publishing-to-the-marketplace", "loam-skills", "loam-what-you-can-reach",
            "loam-working-with-the-engineer"])
 
     # -- the view (.agents/skills) -----------------------------------------------------

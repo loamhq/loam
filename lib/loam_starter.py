@@ -20,8 +20,8 @@ turn: no session, no engine, no cost. The agent's first real turn is handed
 it marked as Loam's (``loam_threads.transcript``), and answers the person's
 reply. The page contract is docs/starter.md.
 
-The words are placeholders, designed later; docs/starter/README.md says
-which file holds which.
+The words are the owner's approved starter (2026-11-16); docs/starter/README.md
+says which file holds which.
 """
 
 from __future__ import annotations
@@ -64,8 +64,7 @@ def draft(root: Path | None = None) -> dict:
     """The starter agent as a draft of L10's shape."""
     src = (root or STARTER_DIR) / "iris"
     card = json.loads((src / "agent.json").read_text(encoding="utf-8"))
-    out = {"id": card["id"], "name": card["name"], "emoji": card["emoji"],
-           "provider": card.get("provider")}
+    out = {"id": card["id"], "name": card["name"], "provider": card.get("provider")}
     for field, name in (("soul", "soul.md"), ("config", "config.md"),
                         ("active", "_active.md"), ("reflection", "_reflection.md")):
         out[field] = fill((src / name).read_text(encoding="utf-8"))

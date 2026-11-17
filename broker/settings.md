@@ -100,12 +100,11 @@ own `thread.*` rows cover the same things.
 | `integration.github` | Connect / disconnect GitHub | /api/integrations/github/… | owner | — |
 | `plugin.secret` | A plugin's API key (read aloud, dictation), pasted and checked on entry (2026-11-14) | PUT/DELETE /api/plugins/{plugin}/secrets/{name} | owner | — |
 | `agent.display` | An agent's display name; its id never changes (2026-11-13) | PATCH /api/agents/{agent} | persona, conversation only | no |
-| `agent.emoji` | An agent's face, its emoji | PATCH /api/agents/{agent} | persona, conversation only | no |
 | `agent.provider` | An agent's default provider: new threads, members brought in; wakes and crons only on Claude Code | PATCH /api/agents/{agent} | persona, conversation only | no (was `persona.provider`, the owner's hands) |
 | `agent.model` | An agent's default model, on its provider | PATCH /api/agents/{agent} | persona, conversation only | no |
 | `agent.effort` | An agent's default thinking level, on its provider | PATCH /api/agents/{agent} | persona, conversation only | no |
-| `agent.face` | An agent's face, an uploaded image (PNG, JPEG, WebP, GIF; 2 MB) over its emoji and any theme's (2026-11-14) | PUT /api/agents/{agent}/face | persona, conversation only | no |
-| `agent.draft` | Draft a new agent (name, face, soul, config) in a thread, to show the person (2026-11-14) | POST /api/agents/drafts | persona, conversation only | no |
+| `agent.face` | An agent's face, an uploaded image (PNG, JPEG, WebP, GIF; 2 MB) over the theme's drawn face (2026-11-14). The emoji face, `agent.emoji`, is retired (2026-11-16) | PUT /api/agents/{agent}/face | persona, conversation only | no |
+| `agent.draft` | Draft a new agent (name, soul, config; a character, not a job: the library skill `loam-making-an-agent`) in a thread, to show the person (2026-11-14) | POST /api/agents/drafts | persona, conversation only | no |
 | `agent.revise` | Change a draft on the person's word; each change is a revision | PATCH /api/agents/drafts/{draft} | persona, conversation only | no |
 | `agent.confirm` | Make the agent, on the person's yes to the revision shown (their message's id) | POST /api/agents/drafts/{draft}/confirm | persona, conversation only | no |
 | `agent.archive` | Archive an agent, never delete: out of Chats and pickers, wakes and crons stopped | POST /api/agents/{agent}/archive | persona, conversation only, on the person's yes | no |

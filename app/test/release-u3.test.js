@@ -234,13 +234,15 @@ test('agent drafts and profile face controls never draw or edit emoji regardless
 
     for (const face of [null, { url: '/v1/agents/test/face?sha=abc' }]) {
       const data = { identity: { display: 'Test', face, ...(emoji !== undefined ? { emoji } : {}) }, status: {}, files: { memory: {} }, schedule: [], plugins: [] }
-      const st = { target: { kind: 'agent', id: 'test' }, data, tab: 'Threads', page: 1, edit: { field: 'face' } }
+      const st = { target: { kind: 'agent', id: 'test' }, data, tab: 'Threads', page: 1, faceMenu: true }
       const host = { profiles: { st }, state: { agents: createAgents([{ id: 'test', name: 'Test', ...(emoji !== undefined ? { emoji } : {}) }]), providers: [] }, threads: { st: { threads: [] } }, schedule() {}, goFiles() {} }
       const profileView = mountProfile(host).body('test')[0]
-      const options = find(profileView, 'profile-face-options')
-      assert.ok(options)
-      const labels = all(options, 'pillbtn').map(b => text(b))
-      assert.deepEqual(labels, face ? ['Upload a face', 'Remove uploaded face'] : ['Upload a face'])
+      const menu = find(profileView, 'profile-face-menu')
+      assert.ok(menu)
+      assert.ok(find(menu, 'profile-face-preview'))
+      const labels = all(menu, 'setrow-title').map(b => text(b))
+      assert.deepEqual(labels, face ? ['Upload a picture', 'Use the theme’s face'] : ['Upload a picture'])
+      assert.equal(find(profileView, 'primary').getAttribute('class').includes('quiet-primary'), false)
       assert.equal(all(profileView, 'profile-editor').length, 0)
       assert.equal(text(profileView).includes('🌱'), false)
     }

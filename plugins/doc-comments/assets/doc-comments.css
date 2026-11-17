@@ -565,3 +565,5 @@
 
 /* Marks are placed centred on their line by the editor itself. */
 .dc-mk, .dc.phone .dc-mk { margin-top: 0; }
+
+.dc-dlg :is(.dc-iv-name, .dc-tk-pwin):is(:focus, :focus-visible) { outline: none; }

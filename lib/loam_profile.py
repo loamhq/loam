@@ -10,10 +10,12 @@ broker/README.md, "Agent profiles, engineers and the reviewer".
 
 **Where each setting lives.**
 
-- An agent's display name, face (emoji) and default provider, model and
-  thinking level are its ``agent.json`` (``display``, ``emoji``,
-  ``provider``, ``model``, ``effort``). That file already held the first
-  three, and every reader of an agent's name or face already reads it
+- An agent's display name and default provider, model and thinking level
+  are its ``agent.json`` (``display``, ``provider``, ``model``,
+  ``effort``); its face is the theme's, or an uploaded image
+  (lib/loam_agents.py). The emoji face is retired (the owner, 2026-11-16):
+  an older file's ``emoji`` is kept through a provision, in its old place,
+  and served by nothing. That file already held the name, and every reader of an agent's name or face already reads it
   (the page's cards, threads' lines and mentions, the schedule page). The
   id (the folder's name) never changes: it is the workspace, the units, the
   session records and the ``@`` an old message carries, so a rename is the
@@ -61,12 +63,12 @@ PROVIDER_NAMES = {"claude-code": "Claude Code", "codex": "Codex",
 BASE_KEYS = ("name", "display", "emoji", "workspace", "vault", "wake_schedule",
              "wake_timezone")
 DEFAULT_KEYS = ("provider", "model", "effort")
-SETTABLE = ("display", "emoji", *DEFAULT_KEYS)
+SETTABLE = ("display", *DEFAULT_KEYS)
 # Kept over a provision besides the settable ones: an uploaded face and the
-# archive mark (lib/loam_agents.py, 2026-11-14).
-KEPT = (*SETTABLE, "face", "archived", "self_name")
+# archive mark (lib/loam_agents.py, 2026-11-14), and the retired emoji an
+# older file still holds (2026-11-16), so its bytes do not change.
+KEPT = (*SETTABLE, "face", "archived", "self_name", "emoji")
 DISPLAY_MAX = 40
-EMOJI_MAX = 16
 # Words a display name may not be: the owner's, and `@all` / `@everyone`.
 RESERVED_NAMES = tuple(dict.fromkeys((lc.OWNER_ID, *lc.LEGACY_OWNER_IDS, "all", "everyone", "system")))
 
@@ -256,18 +258,6 @@ def read_agent(agent: str) -> dict:
     return config
 
 
-def atlas_emoji(display: str) -> str | None:
-    """The emoji an agent's atlas note gives (bin/provision's `emoji_for`):
-    the face a provision starts it with, and the one ``emoji: null`` puts
-    back."""
-    try:
-        text = (_vault() / "20_ATLAS" / f"{display}.md").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    m = re.search(r"^emoji:\s*(\S+)", text, re.MULTILINE)
-    return m.group(1) if m else None
-
-
 def _clean_display(agent: str, value) -> str:
     if value is None:
         return agent.capitalize()
@@ -293,22 +283,11 @@ def _clean_display(agent: str, value) -> str:
     return name
 
 
-def _clean_emoji(agent: str, value) -> str | None:
-    if value is None:
-        return atlas_emoji(agent.capitalize())
-    if (not isinstance(value, str) or not value.strip() or len(value) > EMOJI_MAX
-            or any(ch.isspace() for ch in value)):
-        raise ProfileError(f"`emoji` is one emoji ({EMOJI_MAX} characters at most, "
-                           f"no spaces), or null for the atlas note's")
-    return value
-
-
 def update_agent(agent: str, patch: dict, check) -> dict:
     """Write the named fields of an agent's agent.json in one write.
 
-    ``patch`` takes ``display``, ``emoji``, ``provider``, ``model`` and
-    ``effort``; null puts a field back (the id's name, the atlas note's
-    emoji, Claude Code, the provider's own model and level). A provider that
+    ``patch`` takes ``display``, ``provider``, ``model`` and
+    ``effort``; null puts a field back (the id's name, Claude Code, the provider's own model and level). A provider that
     changes takes the model and level back to its own unless the same patch
     names them. ``check(provider, field, value)`` is the broker's: it
     answers the value as that provider takes it or raises. Nothing is
@@ -327,8 +306,6 @@ def update_agent(agent: str, patch: dict, check) -> dict:
         new = dict(config)
         if "display" in patch:
             new["display"] = _clean_display(agent, patch["display"])
-        if "emoji" in patch:
-            new["emoji"] = _clean_emoji(agent, patch["emoji"])
         before = config.get("provider") or "claude-code"
         if "provider" in patch:
             p = patch["provider"]
@@ -371,15 +348,12 @@ def _face(agent: str, config: dict) -> dict | None:
 
 def identity(agent: str, config: dict) -> dict:
     display = config.get("display")
-    emoji = config.get("emoji")
     return {"id": agent,
             "display": display if isinstance(display, str) and display.strip()
             else agent.capitalize(),
-            "emoji": emoji if isinstance(emoji, str) and emoji.strip() else None,
             "face": _face(agent, config),
             "archived": config.get("archived") or None,
             "default_display": agent.capitalize(),
-            "default_emoji": atlas_emoji(agent.capitalize()),
             "rename": "display name only: the id is the workspace, the units "
                       "and every old @; @ matches the id and the display name"}
 
