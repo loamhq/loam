@@ -316,7 +316,54 @@ APT = ["git", "python3", "python3-yaml", "sqlite3", "ripgrep", "ffmpeg", "nftabl
        # previews' browser, their fonts, and `choom` (util-linux) to start
        # the browser at the agents' OOM score. ffmpeg above is its speech
        # encoder; Node 24 comes from NodeSource below.
-       "chromium-headless-shell", "fonts-noto-core", "util-linux"]
+       "fonts-noto-core", "util-linux"]
+
+# The previews' browser. Debian ships Chromium's headless shell as a package;
+# Ubuntu 24.04 has none (its `chromium-browser` is a snap, and a server has no
+# snapd to give it), so there the same headless shell is fetched by Playwright
+# at a pinned version, with the libraries it needs, and given the Debian
+# package's command name, which is what the app is told to run (bin/deploy
+# APP_PREVIEW_CHROME). Found 2026-11-16: a fresh Ubuntu 24.04 stopped at step
+# 3, "Unable to locate package chromium-headless-shell".
+PREVIEW_BROWSER = "chromium-headless-shell"
+PLAYWRIGHT = "1.65.1"
+PLAYWRIGHT_BROWSERS = Path("/opt/loam/chromium")
+
+
+def apt_packages(distro: str) -> list[str]:
+    """Step 3's packages from the distribution's own archive."""
+    return APT + ([PREVIEW_BROWSER] if distro == "debian" else [])
+
+
+def playwright_shell() -> Path | None:
+    """The headless shell under PLAYWRIGHT_BROWSERS, newest build first."""
+    found = sorted(PLAYWRIGHT_BROWSERS.glob(
+        "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"),
+        key=lambda f: int(re.sub(r"\D", "", f.parts[-3]) or 0), reverse=True)
+    return found[0] if found else None
+
+
+def ensure_preview_browser(distro: str) -> None:
+    """Where the archive has no headless shell (Ubuntu), Playwright's, as
+    /usr/local/bin/chromium-headless-shell. Safe to repeat."""
+    if distro == "debian":
+        return
+    if playwright_shell() is None:
+        PLAYWRIGHT_BROWSERS.mkdir(parents=True, exist_ok=True)
+        run(["npx", "--yes", f"playwright@{PLAYWRIGHT}", "install", "--with-deps",
+             "--only-shell", "chromium"],
+            env={"DEBIAN_FRONTEND": "noninteractive",
+                 "PLAYWRIGHT_BROWSERS_PATH": str(PLAYWRIGHT_BROWSERS),
+                 "npm_config_cache": "/var/cache/loam/npm"}, timeout=1800)
+    shell = playwright_shell()
+    if shell is None:
+        raise Stop("the browser for the apps' previews could not be installed")
+    link = Path("/usr/local/bin") / PREVIEW_BROWSER
+    if not (link.is_symlink() and link.resolve() == shell.resolve()):
+        tmp = link.with_name(link.name + ".tmp")
+        tmp.unlink(missing_ok=True)
+        tmp.symlink_to(shell)
+        os.replace(tmp, link)
 
 
 def clock_skew() -> float | None:
@@ -367,7 +414,7 @@ def step_packages(a, ans: dict) -> None:
     distro, codename = osr["ID"], osr.get("VERSION_CODENAME", "bookworm")
     env = {"DEBIAN_FRONTEND": "noninteractive"}
     run(["apt-get", "update", "-q"], env=env)
-    apt(*APT)
+    apt(*apt_packages(distro))
     arch = run(["dpkg", "--print-architecture"]).stdout.strip()
     add_repo("caddy-stable", "https://dl.cloudsmith.io/public/caddy/stable/gpg.key",
              "deb [signed-by={keyring}] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main")
@@ -378,6 +425,7 @@ def step_packages(a, ans: dict) -> None:
     run(["apt-get", "update", "-q"], env=env)
     apt("caddy", "docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin", "nodejs")
     run(["systemctl", "enable", "--now", "docker", "caddy"])
+    ensure_preview_browser(distro)
     ensure_clock()
     # Docker carries the login (Authelia) and the agents' shared browser, and
     # is there for an agent's own project; Loam's app does not use it.

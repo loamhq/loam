@@ -333,6 +333,39 @@ def cases() -> int:
     claim.Handler.send(fake, 200, b"{}")
     check("...and JSON answers carry no CSP", "Content-Security-Policy" in fake.headers, False)
 
+    # -- step 3: the previews' browser on each distribution ---------------------
+    # Ubuntu 24.04 has no chromium-headless-shell package (found by the
+    # 2026-11-16 fresh install: step 3 stopped on it); there Playwright's
+    # pinned headless shell is linked under the Debian package's name.
+    inst = load_cmd("loam-install")
+    check("Debian takes the headless shell from its archive, Ubuntu does not ask for it",
+          (inst.PREVIEW_BROWSER in inst.apt_packages("debian"),
+           inst.PREVIEW_BROWSER in inst.apt_packages("ubuntu")), (True, False))
+    with tempfile.TemporaryDirectory() as td:
+        saved_pw = inst.PLAYWRIGHT_BROWSERS
+        inst.PLAYWRIGHT_BROWSERS = Path(td)
+        try:
+            check("no Playwright shell yet: none found", inst.playwright_shell(), None)
+            for build in ("1200", "1255", "999"):
+                f = (Path(td) / f"chromium_headless_shell-{build}" / "chrome-headless-shell-linux64"
+                     / "chrome-headless-shell")
+                f.parent.mkdir(parents=True)
+                f.write_text("")
+            check("...the newest build is the one linked",
+                  inst.playwright_shell().parts[-3], "chromium_headless_shell-1255")
+            ran = []
+            saved_run = inst.run
+            inst.run = lambda *a, **k: ran.append(a)
+            try:
+                inst.ensure_preview_browser("debian")
+            finally:
+                inst.run = saved_run
+            check("...and on Debian nothing is fetched or linked", ran, [])
+        finally:
+            inst.PLAYWRIGHT_BROWSERS = saved_pw
+    check("the app is told to run the same command name on both",
+          inst.PREVIEW_BROWSER, "chromium-headless-shell")
+
     # -- the command ----------------------------------------------------------
     res = subprocess.run([str(ROOT / "bin" / "loam"), "help"], capture_output=True, text=True, check=False)
     check("`loam help` lists status and hides the services' own commands",
