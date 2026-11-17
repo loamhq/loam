@@ -60,10 +60,11 @@ try {
     await page.getByLabel('Display name',{exact:true}).fill('Sprout')
     await page.getByRole('button',{name:'Save',exact:true}).click()
     await page.waitForFunction(()=>!__profile.profiles.st.busy)
-    await page.getByRole('button',{name:'Change Sprout’s emoji',exact:true}).click()
-    await page.getByLabel('Emoji',{exact:true}).fill('🌱')
-    await page.getByRole('button',{name:'Save',exact:true}).click()
-    await page.waitForFunction(()=>!__profile.profiles.st.busy)
+    await page.getByRole('button',{name:'Change Sprout’s face',exact:true}).click()
+    await page.getByRole('button',{name:'Upload a face',exact:true}).waitFor()
+    assert.equal(await page.getByRole('button',{name:'Change emoji',exact:true}).count(),0)
+    assert.equal(await page.getByLabel('Emoji',{exact:true}).count(),0)
+    await page.getByRole('button',{name:'Change Sprout’s face',exact:true}).click()
     await page.getByLabel('Provider',{exact:true}).selectOption('codex')
     await page.waitForFunction(()=>!__profile.profiles.st.busy)
     await page.getByText('Wakes and scheduled runs stay on Claude Code for now.',{exact:false}).waitFor()
@@ -103,7 +104,7 @@ try {
     const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)
     assert.equal(overflow,false)
     assert.deepEqual(errors,[])
-    reports.push({width,mode,overflow,errors,checks:'directory order, engineer deploy, unreachable instructions, project jobs, reviewer time, rename conflict, emoji, provider/model/thinking, schedule toggle/edit, plugin voice, full activity'})
+    reports.push({width,mode,overflow,errors,checks:'directory order, engineer deploy, unreachable instructions, project jobs, reviewer time, rename conflict, face control, provider/model/thinking, schedule toggle/edit, plugin voice, full activity'})
     // Reset mutable fixture data for the next viewport/mode.
     const p=app.profiles.get('sprout');p.defaults={provider:null,model:null,effort:null,effective:{provider:'claude-code',model:'fable',effort:null},applies:p.defaults.applies,not_honoured:[]}
     p.schedule[0].schedule='daily at 03:20 PT';p.schedule[0].plain='Every day at 3:20 AM';app.reviewer.schedule='daily at 04:20 PT';app.reviewer.plain='Every day at 4:20 AM'

@@ -11,7 +11,7 @@ import { createAgents, agentLook } from '../public/sessions.js'
 import { createSecretSettings } from '../public/plugin-secrets.js'
 import { shippedPlugins } from '../src/shipped-plugins.js'
 import { installDom } from './fakedom.js'
-import { text, all } from './browser.js'
+import { text, all, find } from './browser.js'
 
 const reply = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 async function appFor(t, broker, extra = {}) {
@@ -219,4 +219,30 @@ test('archive and restore tell Chats by id when the host answers the agent as a 
   await c.restore('juniper')
   assert.deepEqual(changed.at(-1), { id: 'juniper', name: 'Juniper', emoji: '🌿', archived: null })
   apply(changed.at(-1)); assert.deepEqual(agents.list.map(a => [a.id, a.name]), [['iris', 'Iris'], ['juniper', 'Juniper']])
+})
+
+test('agent drafts and profile face controls never draw or edit emoji regardless of host emoji field', async () => {
+  installDom()
+  for (const emoji of ['🌱', null, undefined]) {
+    const draft = { draft: 'one', thread: 't1', rev: 2, name: 'Throwaway', soul: 'Soul.', config: 'Config.', ready: true, problems: [], ...(emoji !== undefined ? { emoji } : {}) }
+    const drafts = createAgentDrafts({ redraw() {}, api: async () => ({ drafts: [draft] }) })
+    await drafts.load('t1')
+    drafts.st.open = true
+    const view = drafts.view('t1')
+    assert.equal(text(view).includes('🌱'), false)
+    assert.ok(text(view).includes('Throwaway'))
+
+    for (const face of [null, { url: '/v1/agents/test/face?sha=abc' }]) {
+      const data = { identity: { display: 'Test', face, ...(emoji !== undefined ? { emoji } : {}) }, status: {}, files: { memory: {} }, schedule: [], plugins: [] }
+      const st = { target: { kind: 'agent', id: 'test' }, data, tab: 'Threads', page: 1, edit: { field: 'face' } }
+      const host = { profiles: { st }, state: { agents: createAgents([{ id: 'test', name: 'Test', ...(emoji !== undefined ? { emoji } : {}) }]), providers: [] }, threads: { st: { threads: [] } }, schedule() {}, goFiles() {} }
+      const profileView = mountProfile(host).body('test')[0]
+      const options = find(profileView, 'profile-face-options')
+      assert.ok(options)
+      const labels = all(options, 'pillbtn').map(b => text(b))
+      assert.deepEqual(labels, face ? ['Upload a face', 'Remove uploaded face'] : ['Upload a face'])
+      assert.equal(all(profileView, 'profile-editor').length, 0)
+      assert.equal(text(profileView).includes('🌱'), false)
+    }
+  }
 })

@@ -42,7 +42,7 @@ test('a name the host states is the name shown, and the id is what starts a sess
   const agents = createAgents(AGENTS)
   assert.equal(agentName(agents, 'scout'), 'Scout')
   assert.equal(agentOf(agents, 'scout').id, 'scout')
-  assert.equal(agentOf(agents, 'scout').emoji, '🔭')
+  assert.equal(Object.hasOwn(agentOf(agents, 'scout'), 'emoji'), false)
 })
 
 test('one letter for an avatar, two when two agents share the first', () => {
@@ -66,11 +66,12 @@ test('a name the host did not give falls back to the capitalised id, never to no
   assert.equal(agentLook('gone-away', agents).initial, 'G')
 })
 
-test('the emoji is the agent’s own and is never the avatar', () => {
-  const agents = createAgents(AGENTS)
-  // The blob is the page's: its colour and its shape are computed from the id,
-  // and a null emoji is not a gap to fill with a guess.
-  assert.equal(agentLook('sable', agents).emoji, null)
+test('agent emoji fields are ignored whether present, null, or absent', () => {
+  const agents = createAgents([...AGENTS, { id: 'wren', name: 'Wren' }])
+  for (const id of ['alfred', 'sable', 'scout', 'wren']) {
+    assert.equal(Object.hasOwn(agentOf(agents, id), 'emoji'), false)
+    assert.equal(Object.hasOwn(agentLook(id, agents), 'emoji'), false)
+  }
   assert.equal(agentLook('scout', agents).initial, 'Sc')
   assert.match(agentLook('scout', agents).color, /^var\(--persona-[a-z]+\)$/)
 })

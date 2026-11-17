@@ -22,7 +22,7 @@ export async function profileHost({ appOverrides = {} } = {}) {
   const ref = file => ({root:'spaces',path:`sprout/${file}`,exists:true})
   const schedule = {agent:'sprout',name:'reflection',label:'Nightly wake',plain:'Every day at 3:20 AM',schedule:'daily at 03:20 PT',enabled:true,next_fire:'2026-11-14T11:20:00Z',last_fire:{ts:'2026-11-13T11:20:00Z',outcome:'ran'},file:ref('crons/reflection.md')}
   const profiles = new Map(app.f.agents.map(agent => [agent.id,{
-    agent, identity:{id:agent.id,display:agent.name,emoji:agent.emoji},
+    agent, identity:{id:agent.id,display:agent.name},
     defaults:{provider:null,model:null,effort:null,effective:{provider:'claude-code',model:'fable',effort:null},applies:'New threads and members brought in start on this provider. Model and thinking apply from the next turn unless the thread chose its own.',not_honoured:[]},
     files:{workspace:ref(''),soul:ref('soul.md'),config:ref('config.md'),memory:{always:ref('_always.md'),active:ref('_active.md'),reflection:ref('_reflection.md'),folder:ref('memory')},skills:{...ref('skills'),count:4}},
     schedule:[structuredClone(schedule)],status:{threads:[{thread:'a-quieter-week'}],jobs:[{job:'build-notes'}],queued:[],run:null,next_wake:schedule.next_fire,box_read:true},
@@ -63,7 +63,6 @@ export async function profileHost({ appOverrides = {} } = {}) {
       const b=JSON.parse(raw);writes.push({path:url.pathname,body:b})
       if(b.display==='Scout') return json(res,{error:'That name belongs to another agent.'},409)
       if(b.display) {p.identity.display=b.display;p.agent.name=b.display}
-      if ('emoji' in b) {p.identity.emoji=b.emoji;p.agent.emoji=b.emoji}
       for(const key of ['provider','model','effort']) if(key in b) {p.defaults[key]=b[key];p.defaults.effective[key]=b[key]}
       if(b.provider) {p.defaults.model=null;p.defaults.effort=null;p.defaults.effective.model=null;p.defaults.effective.effort=null;p.defaults.not_honoured=b.provider==='claude-code'?[]:['Wakes and schedules continue on Claude Code.']}
       json(res,p)

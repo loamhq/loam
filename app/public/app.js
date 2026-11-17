@@ -90,7 +90,7 @@ const state = {
   screen: 'home', // 'home' | 'threads' | 'profile' | 'files' | 'activity'
   // Shared settings, attachments, Running now, Files controls and integrations.
   sheet: null,
-  agents: createAgents([]), // the host's agents: id, name, emoji — see sessions.js
+  agents: createAgents([]), // the host's agents: id, name — see sessions.js
   agentsReady: false,
   providers: [],
   profileAgent: null,
@@ -534,7 +534,7 @@ async function loadHealth() {
 async function loadAgents() {
   try {
     const body = await api('GET', '/agents')
-    // Objects — `{id, name, emoji}` — sorted by id. One answer, so this reads
+    // Objects — `{id, name}` — sorted by id. One answer, so this reads
     // one shape rather than guessing between two. `name` is what a person is
     // shown and the host is the only one that can state it; the avatar's
     // initial is a fact about the whole set, and sessions.js works it out.

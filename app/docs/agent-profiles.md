@@ -18,9 +18,9 @@ the workspace, Soul, Config, memory files named by their loading time and Skills
 The header stays above each tab's independent scroller on phones and desktop,
 including the desktop Settings dialog.
 
-Tap the face for image upload, removal or emoji editing. Uploaded faces come
+Tap the face for image upload or removal. Uploaded faces come
 from the host card, have digest-addressed URLs, and take priority over every
-theme's art. Removing the image restores the selected theme/emoji face. Tap the
+theme's art. Removing the image restores the selected theme face. Tap the
 name to rename; conflicts leave the field and the host's sentence in place.
 The stable id never changes.
 
