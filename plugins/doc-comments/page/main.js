@@ -202,17 +202,18 @@ export function activate(loam) {
     render({ go }) {
       const H = loam.ui.h
       if (!shared.loaded) return H('div', { class: 'fs-quiet', text: 'Loading…' })
-      if (!shared.docs.length) return H('div', { class: 'fs-quiet dc-sd-empty', text: 'No doc is shared with anyone outside Loam. Share one from its ⋯ Share button.' })
+      if (!shared.docs.length) return H('div', { class: 'fs-quiet dc-sd-empty', text: 'No doc is shared with anyone outside Loam yet. Share one with the Share button at the top of the doc.' })
       return H('div', { class: 'card card-group dc-sd' }, shared.docs.map(d => {
         const name = (d.path || '').split('/').pop().replace(/\.(md|markdown)$/i, '')
         const on = (d.links || []).filter(l => l.on)
         const modes = [...new Set(on.map(l => l.mode))]
-        const sub = d.new ? `${d.new} new${d.people.length ? ` · ${d.people.slice(0, 3).join(', ')}` : ''}` : (d.people.length ? d.people.slice(0, 3).join(', ') : 'Nothing new')
+        const who = d.people.length ? d.people.slice(0, 3).join(', ') : ''
+        const what = modes.map(m => ({ view: 'View', comment: 'Comment', edit: 'Edit' }[m])).join(', ')
+        const sub = [d.new ? `${d.new} new` : (who ? '' : 'Nothing new'), who, what].filter(Boolean).join(' · ')
         return H('button', { class: `dc-sd-row${d.new ? ' fresh' : ''}`, key: `sd:${d.id}`, onclick: () => { d.new = 0; go(d.root, d.path, { isFile: true }) } },
           H('span', { class: 'dc-sd-dot', 'aria-label': d.new ? 'Something new' : null }),
           H('span', { class: 'dc-sd-tile' }, docIcon()),
           H('span', { class: 'dc-sd-words' }, H('b', { text: name }), H('small', { text: sub })),
-          H('span', { class: 'dc-sd-modes' }, modes.map(m => H('span', { class: 'dc-sd-mode', text: { view: 'View', comment: 'Comment', edit: 'Edit' }[m] }))),
           H('span', { class: 'dc-sd-time', text: when(d.last) }))
       }))
     },
