@@ -575,6 +575,78 @@ def caddy_forward_block(f: dict) -> str:
     ]) + "\n"
 
 
+# A public static page on a name outside the domain (2026-11-16): the bare
+# name above the owner's domain, say, holding a landing page while
+# `<owner>.<that name>` is the install. `[[landing]]` in deploy/loam.toml:
+#
+#   [[landing]]
+#   host = "example.net"
+#   root = "/home/sam/ai-labs/ada/sites/landing"   # served in place
+#   public = "Sam, 2026-11-16, in chat: \"put it on example.net\""
+#
+# One ungated block per entry: the folder, read by Caddy where it lies, so
+# an edit to it is live with no deploy; no directory listing, and `.git` and
+# `.env` hidden at any depth. `public` is the owner's yes quoted, and there
+# is no other way to write the table: an entry without one is refused, so no
+# missing line opens a host. A host under the domain is a site's or an
+# app's (bin/site, deploy records), and one `[moved]` or `[[forward]]`
+# already answers is refused, because Caddy loads one block per name. The
+# name needs its own DNS A record to this box. An install's edge has none.
+
+def landings() -> list[dict]:
+    """[{"host", "root", "public"}] from deploy/loam.toml's `[[landing]]`,
+    or []."""
+    if EDGE.get("domain") or not CONFIG_PATH.is_file():
+        return []
+    raw = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8")).get("landing")
+    if raw is None:
+        return []
+    where = f"{CONFIG_PATH}: [[landing]]"
+    if not isinstance(raw, list):
+        raise DeployError(f"{where} is an array of tables")
+    dom = domain()
+    m = moved()
+    taken = {f"{h}.{m['from']}": "[moved]" for h in m["hosts"]} if m else {}
+    taken |= {h: "[[forward]]" for h in forward_hosts()}
+    out: list[dict] = []
+    for e in raw:
+        e = e if isinstance(e, dict) else {}
+        host, root, public = e.get("host"), e.get("root"), e.get("public")
+        if set(e) - {"host", "root", "public"}:
+            raise DeployError(f"{where}: {host}: only host, root and public")
+        if not isinstance(host, str) or not DOMAIN_RE.match(host):
+            raise DeployError(f"{where}: host {host!r} is not a hostname")
+        if host == dom or host.endswith("." + dom):
+            raise DeployError(f"{where}: {host} is under {dom}; a site or a record serves it")
+        if host in taken:
+            raise DeployError(f"{where}: {host} is already {taken[host]}'s")
+        if (not isinstance(root, str) or not SITE_ROOT_RE.match(root)
+                or ".." in root.split("/") or root == "/"):
+            raise DeployError(f"{where}: {host}: root {root!r} must be an absolute "
+                              f"path of letters, digits and ._/@+- only")
+        if not isinstance(public, str) or not public.strip():
+            raise DeployError(f"{where}: {host}: public is {lc.OWNER_NAME}'s yes quoted; "
+                              f"without one the host is not served")
+        taken[host] = "[[landing]]"
+        out.append({"host": host, "root": root.rstrip("/"), "public": " ".join(public.split())})
+    return out
+
+
+def caddy_landing_block(e: dict) -> str:
+    """One public static folder on its own name: no gate, no listing."""
+    host = e["host"]
+    return "\n".join([
+        f"# PUBLIC: {lc.OWNER_NAME}'s yes in [[landing]] (deploy/loam.toml): {e['public']}. No gate.",
+        f"{host} {{",
+        access_log_line(host),
+        f"\troot * {e['root']}",
+        "\tfile_server {",
+        f"\t\thide {' '.join(SITE_HIDE)}",
+        "\t}",
+        "}",
+    ]) + "\n"
+
+
 def read_root_text(path: Path) -> str | None:
     """A file that may be root-only. Direct when possible, `sudo -n cat`
     otherwise, None when absent either way."""
@@ -2033,6 +2105,8 @@ def caddyfile(today: dt.date | None = None) -> str:
     for f in forwards():
         if f["host"] not in moved_hosts:
             out.append(caddy_forward_block(f))
+    for e in landings():
+        out.append(caddy_landing_block(e))
     out.append(caddy_preview_block(previewable(apps, agent_sites)))
     if unknown:
         out.append(f"# {PUBLIC_FILE} names {', '.join(sorted(unknown))}, which "

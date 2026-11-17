@@ -1072,6 +1072,16 @@ Done once, on 2026-11-15 (first release L14): the base domain became
   404s. While `[moved]` still lists the host its whole-host redirect covers
   the paths and nothing extra renders. Its A record is not one to delete,
   and check-drift's "due to go" list says so (2026-11-15).
+- **A page on the old name itself.** `[[landing]]` serves one static folder
+  on a name outside the domain, with no login: the bare name above an
+  owner's domain holding a landing page, say (2026-11-16). Each entry is a
+  `host`, a `root` Caddy reads in place (an edit to the folder is live with
+  no deploy; no directory listing; `.git` and `.env` hidden) and `public`,
+  the owner's yes quoted, without which the entry is refused. A host under
+  the domain, or one `[moved]` or `[[forward]]` answers, is refused too.
+  The name needs its own A record. Removing one is deleting the entry and
+  `sudo bin/gen-deploy`; check-drift reads the entry as that host's public
+  file, as a site's record is for a site.
 - **What does not follow.** Anything the browser keeps per origin (the
   app's theme and device settings in local storage) starts empty at the new
   name, and a passkey enrolled at `auth.<old>` does not sign in at
