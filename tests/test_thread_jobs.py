@@ -239,7 +239,8 @@ iris_id = finished("Another thread's", timedelta(minutes=2),
 
 FIELDS = {"job", "project", "title", "briefed_by", "thread", "state", "phase",
           "since", "started", "finished", "elapsed_seconds", "outcome",
-          "outcome_detail", "ok", "receipt", "position", "held_by"}
+          "outcome_detail", "ok", "receipt", "position", "held_by",
+          "last_activity", "quiet_since", "child_stops"}
 
 
 class FakeBroker:

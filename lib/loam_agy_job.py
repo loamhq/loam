@@ -60,6 +60,7 @@ from pathlib import Path
 import loam_antigravity as agy
 import loam_codex_job as codex_job
 import loam_engineer as eng
+import loam_stuck
 
 PROVIDER_LINE = (
     "You are a project engineer running on Antigravity (`agy --print`), "
@@ -237,7 +238,7 @@ class Run:
 
 
 def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
-        stderr: Path, on_thread=None, resumed: str | None = None
+        stderr: Path, on_thread=None, on_stop=None, resumed: str | None = None
         ) -> tuple[int, Run, bool]:
     """Run ``agy``: (returncode, Run, timed_out). The stream goes to
     ``agy.jsonl`` line by line, which is what the heartbeat reads; the
@@ -259,10 +260,15 @@ def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
 
         watcher = threading.Thread(target=clock, daemon=True)
         watcher.start()
+        # A command that never returns is stopped, not the job
+        # (lib/loam_stuck.py, since 2026-11-17).
+        stuck = loam_stuck.Watch(proc.pid, loam_stuck.agy_busy, job_dir,
+                                 on_stop=on_stop).start()
         assert proc.stdout is not None
         for line in proc.stdout:
             out.write(line)
             out.flush()
+            stuck.line(line)
             had = state.conversation_id
             state.read(line)
             if state.conversation_id and not had and on_thread:
@@ -272,6 +278,7 @@ def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
                 state.capped = True
                 codex_job.end(proc)
         returncode = proc.wait()
+        stuck.stop()
     if returncode == 0 and not state.seen_result and not state.failed:
         state.failed = "no result event (the stream ended without one)"
     if state.resumed_other and not state.failed:

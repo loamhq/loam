@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { threadBackground, taskTitle, jobStatus, jobElapsed } from '../public/thread-experience.js'
+import { threadBackground, taskTitle, jobStatus, jobActivity, jobElapsed } from '../public/thread-experience.js'
 import { createThreads } from '../public/threads.js'
 import { installDom } from './fakedom.js'
 import { h } from '../public/ui.js'
@@ -121,6 +121,15 @@ test('job words cover every host outcome and queue/landing phases; durations fre
   assert.equal(jobElapsed(job({ state: 'queued', started: null }), clock), null)
   assert.equal(jobElapsed(job({ state: 'finished', finished: new Date(clock).toISOString() }), clock + 60000), '2 min')
   assert.equal(jobElapsed(job({ state: 'finished', elapsed_seconds: null, finished: null }), clock), null)
+})
+test('a running job says its last engine event, and a quiet one says it is quiet, not Running', () => {
+  const at = (minutes) => new Date(clock - minutes * 60000).toISOString()
+  assert.equal(jobStatus(job({ last_activity: at(3) }), clock), 'Running · active 3 min ago')
+  assert.equal(jobStatus(job({ last_activity: at(0) }), clock), 'Running · active just now')
+  assert.equal(jobStatus(job({ last_activity: at(789), quiet_since: at(789) }), clock), 'No activity for 13 hr 9 min')
+  assert.equal(jobActivity(job({ last_activity: at(789), quiet_since: at(789) }), clock).stuck, true)
+  assert.equal(jobStatus(job(), clock), 'Running', 'a host without the field still reads Running')
+  assert.equal(jobActivity(job({ state: 'landing', quiet_since: at(30) }), clock), null, 'only a running job is quiet')
 })
 test('completed-only jobs keep Tasks available without an active badge, open their receipt and expire', (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: clock })

@@ -72,9 +72,25 @@ export function threadBackground(thread, now = Date.now()) {
       ...jobs.map((job) => ({ ...job, id: job.job, persona: job.briefed_by, kind: 'job' }))] }
 }
 
-export function jobStatus(job) {
+// A running job's last real activity: the engine's newest event, read by the
+// host (`last_activity`), and `quiet_since` once there has been none for 15
+// minutes. A job frozen for 13 hours read as plain "Running" (2026-11-16).
+export function jobActivity(job, now = Date.now()) {
+  if (job.state !== 'running') return null
+  if (job.quiet_since) {
+    const quiet = taskElapsed(job.quiet_since, now)
+    if (quiet !== null) return { stuck: true, text: `No activity for ${quiet}` }
+  }
+  const last = taskElapsed(job.last_activity, now)
+  return last === null ? null : { stuck: false, text: last === '<1 min' ? 'active just now' : `active ${last} ago` }
+}
+
+export function jobStatus(job, now = Date.now()) {
   if (job.state === 'queued') return job.held_by || 'Waiting to start'
-  if (job.state === 'running') return 'Running'
+  if (job.state === 'running') {
+    const activity = jobActivity(job, now)
+    return !activity ? 'Running' : activity.stuck ? activity.text : `Running · ${activity.text}`
+  }
   if (job.state === 'landing') return ({ ci: 'Checking the changes', deploy: 'Making it live' })[job.phase] || 'Landing the changes'
   return ({ deployed: 'Landed and live', landed: 'Landed', 'not landed': 'Didn’t land', failed: 'Didn’t land',
     'cut off': 'Stopped before finishing', cancelled: 'Cancelled', finished: 'Done', 'deploy failed': 'Landed, not live',

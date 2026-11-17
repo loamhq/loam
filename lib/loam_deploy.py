@@ -369,6 +369,12 @@ CLAIMED_FILE = ETC / "claimed"                   # who claimed the install, and 
 CLAIM_PORT = 8934                                # the claim service, loopback
 CLAIM_PATH = "/claim"
 RELAY_PATH = "/_loam/login-code"
+# The signed-in person's own passkeys (2026-11-17): on every app-shell host,
+# through the gate to the same service, which asks the login's own API with
+# the person's own session (deploy/README.md, "The claim and the relay").
+PASSKEYS_PATH = "/_loam/passkeys"
+# The login's session cookie: the one cookie the passkeys relay forwards.
+SESSION_COOKIE = "loam_auth"
 
 
 def edge_state() -> dict:
@@ -1680,6 +1686,16 @@ def caddy_host_block(app: App, public: bool, today: dt.date,
             "\t}",
         ]
     if app.app_shell:
+        # Also ahead of the browser's subnet: a passkey list is a signed-in
+        # person's own, never the personas' browser's.
+        lines += [
+            "\t# The signed-in person's own passkeys, from the login's own list; see deploy/README.md.",
+            f"\thandle {PASSKEYS_PATH}* {{",
+            "\t\timport gate",
+            f"\t\treverse_proxy 127.0.0.1:{CLAIM_PORT}",
+            "\t}",
+        ]
+    if app.app_shell:
         # Ahead of everything else on these hosts (a `handle /path` is ordered
         # before every `handle @named`): the one path of the app's host that
         # does not meet the login. The gateway's door port answers only share
@@ -2247,7 +2263,7 @@ def authelia_config() -> str:
             # under the old) still carries; Authelia read it before the new one, so every login
             # succeeded and then bounced back to the portal. A new name cannot
             # collide. Rename it again on any future domain move.
-            "name": "loam_auth",
+            "name": SESSION_COOKIE,
             "same_site": "lax",
             # 1d / 7d since 2026-11-09 (were 1h / 12h): the owner leaves phone
             # tabs open all day, and their standing ask is that it works

@@ -228,6 +228,21 @@ admin, which on an install is the one person who claimed it.
   code" and its age. A code is shown to the person only, never logged by
   the app and never sent to an agent.
 
+### The page contract for the passkeys (2026-11-17)
+
+- `GET /_loam/passkeys`, same origin, with the session cookie, on the app's
+  host or its staging copy's.
+- **200** `{"passkeys": [{"id": 3, "description": "Phone", "created_at":
+  "<ISO>", "last_used_at": "<ISO or null>"}]}`: the signed-in person's own,
+  as the login lists them, and nothing of the key itself; `[]` for none.
+- **401** `{"error"}` when the request carries no signed-in session the gate
+  passed; **403** when the login refuses the session; **502** when the login
+  does not answer. Without a session the gate answers first (a 302).
+- `DELETE /_loam/passkeys/<id>`: **200** `{"ok": true}`, or the login's own
+  refusal passed on (a **403** when it wants an elevated session first).
+- The app (`app/public/passkey.js`) lists them under Settings › Sign-in and
+  falls back to a link to the portal's own list on any answer but a 200.
+
 ## `loam status`
 
 `loam status` (root; it re-runs itself under sudo) says, part by part, in

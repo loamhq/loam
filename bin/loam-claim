@@ -25,6 +25,20 @@ app's host and on nothing else (lib/loam_deploy.py, `[edge]`):
                           without a shell adds a passkey: Authelia asks for
                           a code it "emailed", and this box has no mail.
 
+  /_loam/passkeys         BEHIND the login, ahead of the browser's subnet, on
+                          every app-shell host (2026-11-17).
+    GET                   {"passkeys": [{id, description, created_at,
+                          last_used_at}]}: the signed-in person's own, from
+                          the login's own API, asked with that person's own
+                          session cookie and nothing else, so the login
+                          decides whose list it is. The app's Settings ›
+                          Sign-in shows it (app/public/passkey.js).
+    DELETE /_loam/passkeys/<id>
+                          the login's own removal, passed through the same
+                          way; the login asks for the elevated session it
+                          always asks for. The app does not call it today:
+                          its Remove opens the portal's settings.
+
 docs/install.md has the page contract both answer to. First release L12.
 """
 
@@ -39,6 +53,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -199,6 +215,93 @@ def newest_code() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# The signed-in person's passkeys, from the login's own API
+# ---------------------------------------------------------------------------
+
+AUTHELIA = f"http://127.0.0.1:{dep.AUTHELIA_PORT}"
+WEBAUTHN_API = "/api/secondfactor/webauthn/credentials"
+WEBAUTHN_ONE = "/api/secondfactor/webauthn/credential"   # singular: one, by id
+PASSKEY_FIELDS = ("id", "description", "created_at", "last_used_at")
+CREDENTIAL_ID_RE = re.compile(r"^[0-9]{1,12}$")
+
+
+def session_cookie(header: str | None) -> str | None:
+    """The login's session cookie out of a Cookie header, alone: no other
+    cookie the browser sends this host goes on to the login."""
+    for part in (header or "").split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == dep.SESSION_COOKIE and value:
+            return value
+    return None
+
+
+def portal_for(host: str | None) -> str:
+    """The login's portal for the cookie domain the request's host is in:
+    the session is per cookie domain, and the login reads which one from
+    the host it is asked on."""
+    cfg = dep.config()
+    host = (host or "").split(":")[0].lower()
+    domains = [cfg["domain"]]
+    try:
+        domains += list(dep.extra_domains(dep.records()))
+    except Exception:  # noqa: BLE001 - the main domain stands without them
+        pass
+    for dom in sorted(domains, key=len, reverse=True):
+        if host == dom or host.endswith("." + dom):
+            return f"{cfg['auth_host']}.{dom}"
+    return f"{cfg['auth_host']}.{cfg['domain']}"
+
+
+def ask_login(method: str, path: str, cookie: str, host: str | None,
+              client: str | None, base: str | None = None) -> tuple[int, dict]:
+    """One request to the login's API as the browser would make it on its
+    portal: (status, JSON body, or {} when it sent none)."""
+    req = urllib.request.Request(
+        (base or AUTHELIA) + path, method=method, headers={
+            "Cookie": f"{dep.SESSION_COOKIE}={cookie}",
+            "X-Forwarded-Host": portal_for(host),
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-For": client or "127.0.0.1",
+            "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as res:
+            status, raw = res.status, res.read()
+    except urllib.error.HTTPError as exc:
+        status, raw = exc.code, exc.read()
+    try:
+        body = json.loads(raw or b"{}")
+    except ValueError:
+        body = {}
+    return status, body if isinstance(body, dict) else {}
+
+
+def passkeys(cookie: str, host: str | None, client: str | None,
+             base: str | None = None) -> tuple[int, dict]:
+    """(status, answer) for GET /_loam/passkeys: the four fields the app
+    reads, and nothing of the key itself."""
+    status, body = ask_login("GET", WEBAUTHN_API, cookie, host, client, base)
+    if status != 200 or body.get("status") != "OK":
+        return (403 if status in (401, 403) else 502), {
+            "error": "the login did not list this session's passkeys"}
+    rows = body.get("data") or []
+    return 200, {"passkeys": [{k: row.get(k) for k in PASSKEY_FIELDS}
+                              for row in rows if isinstance(row, dict)]}
+
+
+def remove_passkey(cookie: str, cred: str, host: str | None, client: str | None,
+                   base: str | None = None) -> tuple[int, dict]:
+    """(status, answer) for DELETE /_loam/passkeys/<id>: the login's own
+    removal, its answer passed on (an elevation it wants is its 403)."""
+    status, body = ask_login("DELETE", f"{WEBAUTHN_ONE}/{cred}", cookie, host,
+                             client, base)
+    if status == 200 and body.get("status") == "OK":
+        return 200, {"ok": True}
+    return status if 400 <= status < 500 else 502, {
+        "error": body.get("message") or "the login did not remove it",
+        "login_status": status}
+
+
+# ---------------------------------------------------------------------------
 # The page
 # ---------------------------------------------------------------------------
 
@@ -331,7 +434,49 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, page(), "text/html; charset=utf-8")
         if path == dep.RELAY_PATH:
             return self.relay()
+        if path == dep.PASSKEYS_PATH:
+            return self.passkeys()
         return self.json(404, {"error": "not found"})
+
+    def signed_in(self) -> str | None:
+        """The login's session cookie, when the gate let a signed-in person
+        through (Remote-User is the gate's), else None and a 401 sent."""
+        cookie = session_cookie(self.headers.get("Cookie"))
+        if not (self.headers.get("Remote-User") or "").strip() or not cookie:
+            self.json(401, {"error": "sign in to see your passkeys"})
+            return None
+        return cookie
+
+    def client(self) -> str | None:
+        return (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip() or None
+
+    def passkeys(self) -> None:
+        cookie = self.signed_in()
+        if cookie is None:
+            return
+        try:
+            status, body = passkeys(cookie, self.headers.get("Host"), self.client())
+        except (OSError, urllib.error.URLError) as exc:
+            log(f"passkeys: the login did not answer: {exc}")
+            status, body = 502, {"error": "the login did not answer"}
+        return self.json(status, body)
+
+    def do_DELETE(self):  # noqa: N802
+        path = self.path.split("?")[0]
+        prefix = dep.PASSKEYS_PATH + "/"
+        cred = path[len(prefix):] if path.startswith(prefix) else ""
+        if not CREDENTIAL_ID_RE.match(cred):
+            return self.json(404, {"error": "not found"})
+        cookie = self.signed_in()
+        if cookie is None:
+            return
+        try:
+            status, body = remove_passkey(cookie, cred, self.headers.get("Host"),
+                                          self.client())
+        except (OSError, urllib.error.URLError) as exc:
+            log(f"passkeys: the login did not answer: {exc}")
+            status, body = 502, {"error": "the login did not answer"}
+        return self.json(status, body)
 
     def relay(self) -> None:
         who = (self.headers.get("Remote-User") or "").strip()
