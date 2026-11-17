@@ -488,7 +488,7 @@ export function createDocEditor(opts) {
           try { ans = await api.revision() } catch (err) {
             // A share page whose link was turned off (or whose session ended):
             // stop asking, and say so in place of the doc.
-            if ((err?.status === 404 || err?.status === 401 || err?.status === 410) && opts.onGone) { watching = false; st.gone = true; opts.onGone(err); return }
+            if ((err?.status === 404 || err?.status === 401) && opts.onGone) { watching = false; st.gone = true; opts.onGone(err); return }
             throw err
           }
           const notesMoved = ans && 'notes' in ans && st.notesRev !== undefined && ans.notes !== st.notesRev

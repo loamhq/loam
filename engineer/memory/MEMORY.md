@@ -615,60 +615,6 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` and point `LOAM_CHROME` at
   `~/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`. A fixture
   script must `process.exit(0)`: its servers hold the event loop.
-## 2026-11-17 — Shared Docs on core's own row
-
-- **A plugin list that copies a core row drifts.** Shared Docs drew its own
-  row and lost the ⋯ menu and open-beside within a day. Core now exports
-  the row (`fileEntry` in app/public/files.js); a plugin root gets it as
-  `entry(row, extras)` and a menu item through `files.action`, slot `menu`
-  (app/docs/plugins/places.md).
-- **A plugin viewer is drawn once per Files, and there are two** (the
-  main panel's and the side panel's). One `cur` slot made each panel's draw
-  close the other's editor; key per-panel state by the `files` object.
-- **Opening a doc through the plugin marks it seen** (GET `doc` calls
-  `mark_seen`). Anything that only needs its text reads through Files
-  (`files.readText`).
-- **Core's reconciler keeps handlers only from `on*` props** (`node.__on`);
-  an `addEventListener` on a node built in a draw is lost when the node is
-  patched into an older one.
-- **Seeing the live page from the host, without the login or the personas'
-  browser:** Playwright with `context.route` sending the live domain to
-  127.0.0.1:8081 (the app) and `/x/*` to 127.0.0.1:8933 (the plugin
-  gateway), passing the original headers with `host` set to the domain (the
-  app's same-origin check refuses otherwise). Serving a tree's
-  `app/public` and `plugins/<id>` from the same route previews a change
-  against live data before it lands.
-- **`$TMPDIR` can be empty in a job's shell.** A `cp x $TMPDIR/y` that
-  fails leaves the next step (a `git show HEAD:x > x`) to overwrite work.
-  Write the job's scratch path out, and `git add` before experiments.
-
-## 2026-11-17 — Shared with me: a server that fetches what a person pasted
-
-- **Staging and live are one Loam.** One broker, one vault, one plugin
-  server; only the app copies differ. A link shared "from staging" and added
-  "on live" is a doc shared with oneself, so a client of another Loam's door
-  needs an own-Loam path to be walkable at all: doc-comments recognises its
-  own tokens and calls its door in-process (`withme.Own`). The network path
-  is proved by `test/test_withme.py` against a second door over real https
-  on a local port with a throwaway certificate (`openssl req -x509 …
-  -addext subjectAltName=DNS:door.test`, a resolver that maps the name).
-- **Refuse by address, connect to the address you checked.** Resolve once,
-  refuse if any record is loopback, private, link-local, shared (100.64/10),
-  reserved, multicast or one of the box's own (`ip -j addr`), then dial that
-  IP with SNI and certificate checks for the name (`_Pinned`). A second
-  lookup at connect time is the rebinding hole.
-- **A Caddy site address without `bind` listens on every interface.** A
-  throwaway loopback Caddy for a headless browser (`https://host:9443 { tls
-  internal … }`) was up on `*:9443` for a minute, routing to staging without
-  the login; the host firewall's input policy (drop, with 80 and 443 open) is what
-  kept it off the internet. Put `bind 127.0.0.1` in every site block, and
-  check with `ss -ltnp` before pointing anything at it.
-- **The push gate again** (see "doc comments: a plugin with a real editor"):
-  a persona's name in a docstring example and a test fixture held the
-  branch. Grep the branch's added lines with the deny file before the first
-  `--land`, and squash with `git reset --soft <base>` once clean.
-- **app/test's fake DOM has no `classList` or `Event`**: a dialog built with
-  the editor's `h` cannot be driven there; prove it in a real browser.
 ## 2026-11-17 — doc comments: no dictation in Viewing
 
 - **What a host hands an editor is drawn by the editor's rule, not the
@@ -742,23 +688,29 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   fails leaves the next step (a `git show HEAD:x > x`) to overwrite work.
   Write the job's scratch path out, and `git add` before experiments.
 
-## 2026-11-17 — Opening from a plugin's list keeps the list
+## 2026-11-17 — bringing context from another AI
 
-- **Opening a file synced the list column to its folder in core** (`show()`
-  in app/public/files.js set `st.root`/`st.path` from the file), not in the
-  plugin. The fix is an explicit `list` option from `goFiles` through the
-  panels' `openMain` item and back into `show`, and `?list=@<id>` on the
-  file's address (`filesHref`'s third argument, `listFromURL`). Only a
-  plugin's root passes one (`fromList` wraps its `go`); shortcuts on the
-  Files home, Open daily note, New inbox note and chat links still go to
-  the file's folder.
-- **On the desktop a Files address is the main panel's item.** Browsing a
-  folder there does not push an address; only opening a file does. Anything
-  that must survive a reload rides on the file's address, and routePanels
-  (Back/Forward) and the cold load (`landedOn`) both read it.
-- **A side-panel item promoted to the main panel carries no list** (the
-  side's descriptor is root and path only), so promoting moves the list
-  to the folder, as before.
-- **A browser test against the fake host hangs on exit** (its event
-  streams stay open): race `closing()` against a timer and `process.exit`
-  in `test.after`, as app/test/files-plugin-list-browser.mjs does.
+- **The library can ship a helper beside a skill.** `install_library`
+  copies the whole folder (only dotfiles and `__pycache__` are skipped), so
+  `docs/library/skills/<name>/inspect_export.py` reaches every install's
+  `<vault>/<system>/Loam/skills/<name>/`, and an agent runs it with
+  `python3 -I <path>`. Keep such a helper stdlib-only: it runs under
+  whatever Python the box has.
+- **Python 3.11's `zipfile` does not notice overlapping entries** (3.12
+  added a check). `inspect_export.py` compares each entry's local header
+  offset plus packed size with the next one itself; the test makes an
+  overlap by rewriting a central-directory offset (byte 42 of a
+  `PK\x01\x02` record).
+- **Both upload routes cap a file at 10 MiB, held in memory**
+  (`ATTACHMENT_MAX_BYTES`; Files uses the same cap). `.zip` is accepted on
+  both since this date, so a small export arrives whole. A typical ChatGPT
+  export with images is bigger than that, and taking it needs a streaming
+  upload, not a raised number.
+- **OpenAI's help centre answers automated fetches with 403** (a
+  JavaScript challenge). The Wayback Machine's snapshot of the article
+  (`/web/<ts>id_/<url>`, fetched with `--compressed`) is the page's own text.
+  Claude's help centre serves `<article>.md`.
+- **A model walk of a skill can run without the broker**: `claude -p` in a
+  scratch folder whose `.claude/skills/` holds the skill, with `--add-dir`
+  pointing at a synthetic vault. It shows what one model did once. It
+  proves no behaviour.

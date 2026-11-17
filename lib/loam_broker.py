@@ -714,6 +714,10 @@ ATTACHMENT_TYPES = {
     "odt": "application/vnd.oasis.opendocument.text",
     "epub": "application/epub+zip",
     "rtf": "application/rtf",
+    # An export from another AI service arrives as one ZIP (the library skill
+    # loam-bringing-context-from-another-ai). Stored as sent, never unpacked
+    # here; the agent inspects it without extracting.
+    "zip": "application/zip",
 
     "txt": "text/plain", "md": "text/markdown", "markdown": "text/markdown",
     "csv": "text/csv", "tsv": "text/tab-separated-values",

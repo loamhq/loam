@@ -40,7 +40,7 @@ import { authenticatedFetch as fetch, authExpired, expireAuth, failureSentence }
 
 import { blockView, toolSummary, foldFacts, foldsAsStep, contextWords, compactionWords, modelShortName } from './transcript.js'
 import { richField, readField, caretPoint, setMarkdown } from './compose.js'
-import { createFiles, folderView, fileView, fitPreviewTables, addSheet, parseFilesPath, listFromURL, filesHref, FILES_LOCATION_HIDDEN, isFolder, nameOf as fileNameOf, resolveOf, missingSentence, externalHref, vaultUrlRef, formatText, uploadAccept, ROOT_LOOK, drawnTypeOf, bytesAre, downloadHref } from './files.js'
+import { createFiles, folderView, fileView, fitPreviewTables, addSheet, parseFilesPath, filesHref, FILES_LOCATION_HIDDEN, isFolder, nameOf as fileNameOf, resolveOf, missingSentence, externalHref, vaultUrlRef, formatText, uploadAccept, ROOT_LOOK, drawnTypeOf, bytesAre, downloadHref } from './files.js'
 import { createActivity } from './activity.js'
 import { createApps, canFrame, buildAppThread } from './apps.js'
 import { SETTINGS_SECTIONS, settingsHome } from './app-shape.js'
@@ -920,7 +920,7 @@ const mainPanel = {
       if (item.message && threads.st.open) Object.assign(threads.st.open, { replyJump: item.message, jumpKind: 'quote' })
       return pending
     }
-    if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false, list: item.list })
+    if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false })
     if (item.kind === 'profile') return goProfile(item.id, { push: item.push !== false })
     const ticket = ++importRequest
     threads.close({ navigate: false }); files.closeFile(); closeThread(); page.closeSheet()
@@ -973,7 +973,7 @@ function routePanels(value = globalThis.location?.href) {
         if (side?.kind === 'thread' && itemKey(side) === itemKey(mainPanel.item())) mainPanel.transfer(sidePanel, side.id)
         if (!panels.close()) return
       }
-      if (item) panels.openMain({ ...item, ...(item.kind === 'file' ? { list: listFromURL(value) } : {}), push: false })
+      if (item) panels.openMain({ ...item, push: false })
       else { mainPanel.clear(); state.screen = 'home'; schedule() }
       if (sideChanges && side && itemKey(side) !== itemKey(mainPanel.item())) {
         panels.st.side = side; panels.st.loaded = false; panels.restore()
@@ -1194,7 +1194,7 @@ page.githubReturn()
 // choices, and a pre-retirement stored session is resolved once into its
 // imported thread above before the obsolete storage key is forgotten.
 const landedOn = parseFilesPath(page.herePath())
-if (landedOn) { state.navigator = 'files'; page.goFiles(landedOn.root, landedOn.path, { push: false, list: listFromURL(globalThis.location?.search ?? '') }) }
+if (landedOn) { state.navigator = 'files'; page.goFiles(landedOn.root, landedOn.path, { push: false }) }
 else render()
 // Initial main routing may finish after the saved side was mounted during
 // startup. With no interaction yet, the restored side owns attention.
