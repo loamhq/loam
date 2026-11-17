@@ -46,7 +46,9 @@ Viewing are one pill in the header. Saves merge: two people's changes to
 different passages both land, and where both changed one passage the first
 save stands and the second becomes a suggestion in its author's name.
 History lists every save and restores any of them; Show authors tints the
-text by who wrote it.
+text by who wrote it. A doc with three headings or more has a quiet table of
+contents: dashes at the text's left on a desktop, the section's name in the
+bar on a phone.
 
 **The file stays clean.** Nothing is written into a doc's body. Its first
 note adds one line to its frontmatter, `loam_doc_id: d-…`, which finds its

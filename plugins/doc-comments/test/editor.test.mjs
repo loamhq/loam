@@ -98,3 +98,23 @@ test('server positions (code points, raw CRLF) and editor positions agree', () =
 test('the diff never splits a word', () => {
   assert.deepEqual(changes('happened, and that', 'happened, aa and that'), [{ from: 10, to: 10, insert: 'aa ' }])
 })
+
+// The table of contents (toc.js): which headings count.
+import { headingsOf, plainHeading } from '../page/editor/toc.js'
+const tocOf = (text) => headingsOf(EditorState.create({ doc: text, extensions: [markdownLanguage] })).items.map(x => `${x.depth}:${x.text}`)
+
+test('contents: the two levels below a single leading # title; code, quotes, lists and frontmatter never count', () => {
+  const doc = '---\ntitle: x\n---\n# Title\n\n## One **bold**\n\n```\n## code\n```\n\n> ## quoted\n\n- ## in a list\n\n### Sub [a link](u) and [[Note|nice]]\n\n#### Too deep\n\nSetext\n---\n\n## Closed ##\n'
+  assert.deepEqual(tocOf(doc), ['0:One bold', '1:Sub a link and nice', '0:Setext', '0:Closed'])
+})
+
+test('contents: a doc whose sections are # takes the top two levels present; fewer than three is none', () => {
+  assert.deepEqual(tocOf('# A\n\n## a\n\n# B\n\n### deep\n\n# C\n'), ['0:A', '1:a', '0:B', '0:C'])
+  assert.deepEqual(tocOf('# Title\n\n## One\n\n## Two\n'), [])
+  assert.deepEqual(tocOf('## One\n\n## Two\n\n## Three\n'), ['0:One', '0:Two', '0:Three'])
+  assert.deepEqual(tocOf('# Title\n\n##\n\n## One\n\n## Two\n'), [], 'an empty heading being typed is not one')
+})
+
+test('contents: a heading reads without its marks', () => {
+  assert.equal(plainHeading('*Why* `code` ~~not~~ ==this== and snake_case_name \\#1'), 'Why code not this and snake_case_name #1')
+})

@@ -124,6 +124,21 @@ adds and does not rewrite (below, "What step 2 adds").
   Comment and reply boxes have no dictation of their own. Dictation has no
   keyboard shortcut.
 - **Share** is in the header (step 2, below).
+- **A table of contents** (2026-11-17, the owner, on the mockup's forms:
+  "I love your leaning with A on desktop and C on phones"). Never above the
+  text; always within reach. On a desktop, a short dash per heading sits at
+  the text's left (the notes keep the right margin), longer for sections,
+  shorter for subsections, the one being read darker, centred in the visible
+  pane. Hovering or focusing the dashes opens the titles in a small floating
+  card, the current one bold; a title scrolls there smoothly and lights the
+  heading softly for a moment; the card closes when the pointer leaves. On a
+  phone and in the side panel (the phone layout, and Loam's compact layout at
+  1024 px), the bar's title becomes the section being read, changing with a
+  small fade as the doc scrolls (the doc's own name above the first heading);
+  a tap opens the list in the bottom sheet, headed by the doc's name, which
+  goes back to the top. Below three headings there is none at all. The same
+  in Editing, Suggesting and Viewing, and for a visitor on a share page. See
+  *The table of contents* below.
 
 ## How it is built
 
@@ -401,6 +416,50 @@ when it arrives, so its height map (which places what is below it) is
 right. `test/browser.test.mjs` holds each note within 4 px of its passage's
 first line at 1280×850 and 430×900, at 100% and 90%, after load, scrolling,
 a resize and an edit above.
+
+### The table of contents
+
+`page/editor/toc.js`, created by the editor. **Which headings:** the
+children of the syntax tree's top node only, so a heading in code, a quote
+or a list never counts, nor the frontmatter (which Lezer would read as a
+setext heading). A single `#` heading that comes first is the doc's title
+and is left out; of the rest, the top two levels present count, so a doc of
+`##`/`###` lists those and a doc whose sections are `#` lists `#`/`##`.
+Fewer than three: no contents (`MIN_HEADINGS`). The words are read without
+their Markdown marks (`plainHeading`). A long doc is parsed with
+`ensureSyntaxTree` within 40 ms, and read again shortly when that did not
+reach the end.
+
+**Live, without flicker:** every change to the editor's text (typed, a
+visitor's, a save from disk) re-reads the headings on the next frame; the
+lists and dashes are drawn again only when the headings' words or levels
+changed, and positions and the current one otherwise. An idle page changes
+nothing (the editor's idle-page test holds it).
+
+**Where the reader is:** the last heading whose line has passed 72 px below
+the top of the pane, measured from CodeMirror's height map. After a jump the
+heading jumped to stays current (a short last section never reaches the top)
+until the reader scrolls by hand. **A jump** scrolls smoothly to an estimate
+(lines not yet drawn have estimated heights), then measures the drawn
+heading and corrects once the scroll has stopped, and lights it
+(`.dc-tocflash`, drawn beneath the words). Reduced motion: no smooth scroll
+and no slide; the light still fades. A jump made from the keyboard also puts
+the caret on the heading.
+
+**Many headings:** the dashes close up (11 px apart down to 4) to stay
+within 62% of the pane; past that only sections keep a dash. The card is
+never taller than the pane and opens scrolled to the current title. Tested
+with 60.
+
+**Accessible:** the dashes are one button (`aria-expanded`, labelled
+Contents) in a `nav`; focusing it opens the card, Tab and the arrows move
+through the titles (real buttons, the current one `aria-current`), Escape
+closes it and returns to the dashes, Enter opens it again. On a phone the
+title is a button labelled with the section and opens a dialog sheet.
+
+**The phone's bar** stays still as sections change: with contents, the mode
+pill is always compact (icon and chevron; its name stays its label), and the
+shown words size the title while the others fade out over them.
 
 ### The sidecar
 

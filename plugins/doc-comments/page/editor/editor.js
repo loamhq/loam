@@ -24,6 +24,7 @@ import {
 } from './live.js'
 import { remote, draftsField, setDrafts, setRecording, inBase, applied, passages, draftDecos } from './record.js'
 import { INLINE, BLOCKS, active, toggleInline, setLink, linkAt, setBlock, blockOf } from './format.js'
+import { createToc } from './toc.js'
 
 export const AUTOSAVE_MS = 1200
 export const WATCH_MS = 1500
@@ -343,6 +344,18 @@ export function createDocEditor(opts) {
     }),
   })
 
+  // The table of contents (toc.js): ticks at the text's left on a desktop,
+  // the section in the bar's title on a phone.
+  const docTitle = () => opts.titleBar?.title || (opts.crumbs || []).at(-1)?.label || ''
+  const toc = createToc({
+    view, root, scroll, col, zoom, local,
+    phone: () => st.phone,
+    title: docTitle,
+    openList: () => openSheet('toc'),
+    picked: (where) => { if (where === 'sheet' && st.sheet === 'toc') closeSheet() },
+    onActive: () => { renderHead(); if (st.sheet === 'toc') renderSheet() },
+  })
+
   function editableExt() {
     const writable = st.mode === 'view' ? false : st.mode === 'suggest' ? Boolean(st.can.suggest) : Boolean(st.can.edit)
     return [EditorView.editable.of(writable), EditorState.readOnly.of(!writable)]
@@ -590,6 +603,7 @@ export function createDocEditor(opts) {
       closeBmenuIfStale()
     }
     if (u.docChanged || u.geometryChanged || u.viewportChanged || u.transactions.some(t => t.effects.length)) queueLayout()
+    if (u.docChanged) toc.changed(true)
     if (u.selectionSet) selectionMoved(u)
     if (u.selectionSet || u.focusChanged) { renderPlus(); if (st.phone) renderBars() }
   }
@@ -1928,6 +1942,7 @@ export function createDocEditor(opts) {
       if (!want) st.revealFor = null
     } else margin.style.minHeight = ''
     renderGutter(ranges)
+    toc.changed(false)
     renderPlus()
     if ((selbar.classList.contains('on') || st.selWant) && !st.link) renderSelbar()
     if (st.mode === 'view' && st.focus && !st.phone) placeQpop()
@@ -2064,7 +2079,7 @@ export function createDocEditor(opts) {
     const extras = [...(opts.headExtras?.() || []), ...(mic ? [mic] : []), null, ...(opts.headEnd?.() || [])]
     const sw = saveWordNode()
     const key = JSON.stringify([st.mode, st.menu, st.phone, sw?.textContent || '', sw?.className || '', (opts.crumbs || []).map(c => c.label), opts.titleBar || null, opts.back?.label || null,
-      st.authors, st.resolved, detached().length, st.can, (opts.menuExtras?.() || []).map(x => x.label), Boolean(fileMenu)])
+      st.authors, st.resolved, detached().length, st.can, (opts.menuExtras?.() || []).map(x => x.label), Boolean(fileMenu), st.phone && toc.active()])
     const cls = `dc-head${scroll.scrollTop > 4 ? ' scd' : ''}${head.classList.contains('tight') ? ' tight' : ''}`
     if (head.className !== cls) head.className = cls
     // A host's own buttons may be made afresh on every call (Share is):
@@ -2077,8 +2092,10 @@ export function createDocEditor(opts) {
     // The phone names the doc (its folders are one tap away, behind the back
     // button); the desktop shows the whole path (shortened by the host).
     const all = opts.crumbs || []
+    // With contents, the phone's title is the section being read (toc.js).
+    const secTitle = st.phone ? toc.titleNode() : null
     const crumbs = st.phone && all.length
-      ? [h('b', { class: 'dc-docname', text: all[all.length - 1].label })]
+      ? [secTitle || h('b', { class: 'dc-docname', text: all[all.length - 1].label })]
       : all.flatMap((c, i) => [
         i ? h('span', { class: 'dc-sl', text: '/' }) : null,
         c.go ? h('button', { class: 'dc-crumb-b', type: 'button', onclick: c.go, text: c.label }) : h('span', { text: c.label }),
@@ -2091,7 +2108,7 @@ export function createDocEditor(opts) {
     put(head, 
       opts.back ? h('button', { class: 'dc-gbtn dc-back', type: 'button', 'aria-label': opts.back.label, title: opts.back.label, onclick: opts.back.go }, icon('chevronLeft', 20)) : null,
       opts.titleBar
-        ? h('div', { class: 'dc-crumb dc-titlebar' }, h('b', { text: opts.titleBar.title }), opts.titleBar.sub ? h('span', { class: 'dc-sl', text: '·' }) : null, opts.titleBar.sub ? h('span', { text: opts.titleBar.sub }) : null)
+        ? h('div', { class: 'dc-crumb dc-titlebar' }, secTitle || h('b', { text: opts.titleBar.title }), opts.titleBar.sub ? h('span', { class: 'dc-sl', text: '·' }) : null, opts.titleBar.sub ? h('span', { text: opts.titleBar.sub }) : null)
         : h('div', { class: 'dc-crumb' }, crumbs),
       h('span', { class: 'dc-saveslot' }, sw),
       ...extras.slice(0, extras.indexOf(null)),
@@ -2109,6 +2126,13 @@ export function createDocEditor(opts) {
   function fitHead() {
     // (Only when it is there: `remove` rewrites the class even when it is
     // absent, and an idle page must change nothing.)
+    // With contents, the title is the section being read, whose length
+    // changes as the doc scrolls: the pill is always compact then, so the
+    // bar does not shift at each section.
+    if (st.phone && head.isConnected && head.querySelector('.dc-secbtn')) {
+      if (!head.classList.contains('tight')) head.classList.add('tight')
+      return
+    }
     if (head.classList.contains('tight')) head.classList.remove('tight')
     if (!st.phone || !head.isConnected) return
     const t = head.querySelector('.dc-crumb > b')
@@ -2487,6 +2511,9 @@ export function createDocEditor(opts) {
       body = [h('div', { class: 'dc-sh' }, h('b', { text: 'Text style' }), h('span', { class: 'dc-grow' }), close),
         h('div', { class: 'dc-bsh' }, (blockOf(view.state) === 'p' && !view.state.doc.lineAt(view.state.selection.main.head).text.trim() ? BLOCKS : turnable()).map(b => h('button', { class: `dc-bi${current === b.id ? ' on' : ''}`, type: 'button', onclick: () => { st.sheet = null; setBlock(view, b.id); render() } },
           h('span', { class: `dc-bt${b.glyph ? ' g' : ''}` }, b.icon ? icon(b.icon, 17) : b.glyph), h('span', { class: 'dc-bl', text: b.label }), h('span', { class: 'dc-bk', text: b.md.trim() }))))]
+    } else if (k === 'toc') {
+      if (!toc.active()) { st.sheet = null; return renderSheet() }
+      body = [h('div', { class: 'dc-sh' }, h('b', { text: 'Contents' }), h('span', { class: 'dc-grow' }), close), toc.sheetBody()]
     } else if (k === 'history' || k === 'resolved') {
       body = [h('div', { class: 'dc-sh' }, h('b', { text: k === 'history' ? 'History' : 'Resolved' }), h('span', { class: 'dc-grow' }), close),
         h('div', { class: 'dc-sbody' }, k === 'history' ? historyView() : resolvedView())]
@@ -2616,6 +2643,7 @@ export function createDocEditor(opts) {
       globalThis.removeEventListener?.('touchend', onTouchEnd, true)
       globalThis.removeEventListener?.('touchcancel', onTouchEnd, true)
       ro?.disconnect()
+      toc.destroy()
       view.destroy()
     },
   }
