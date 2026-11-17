@@ -34,6 +34,8 @@ export function createThreadFixture({ modern = true } = {}) {
       records.set(t.id, { thread: t, messages: [], has_more: false, turn: null, board: { path: `${installation().boards}/New thread — board.md`, markdown: '' } })
       emitRow(t.id); return copy(t)
     }
+    // Sample replies keep no full steps; a 404 is how a runtime says so, and the page shows each reply's `did` instead.
+    if (/^\/threads\/[^/?]+\/steps\b/.test(path)) throw Object.assign(new Error('Sample threads keep no steps.'), { status: 404 })
     const match = /^\/threads\/([^/?]+)(?:\/(messages|board|attachments))?/.exec(path)
     if (!match) return { accepted: true }
     const id = decodeURIComponent(match[1]), action = match[2], r = records.get(id)
