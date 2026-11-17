@@ -665,12 +665,14 @@ def step_starter(a, ans: dict) -> None:
 # ---------------------------------------------------------------------------
 
 SYSTEM_UNITS = ("loam-broker-firewall.service", "loam-claim.service",
-                "loam-await-dns.service", "loam-await-dns.timer")
+                "loam-await-dns.service", "loam-await-dns.timer",
+                "loam-user-manager.service")
 
 
 def system_unit_text(name: str, cfg: dict) -> str:
     text = (Path(cfg["root"]) / "systemd" / "system" / name).read_text(encoding="utf-8")
-    return (text.replace("@ROOT@", cfg["root"]).replace("@PYCACHE@", ROOT_PYCACHE))
+    return (text.replace("@ROOT@", cfg["root"]).replace("@PYCACHE@", ROOT_PYCACHE)
+            .replace("@USER@", cfg["user"]))
 
 
 def install_system_units(cfg: dict) -> bool:
@@ -699,6 +701,9 @@ def step_units(a, ans: dict) -> None:
     run(["install", "-D", "-o", "root", "-g", "root", "-m", "755", str(fw), str(brk.FIREWALL_SCRIPT)])
     install_system_units(cfg)
     run(["systemctl", "enable", "--now", brk.WALL_SERVICE])
+    # Loam's user manager comes back at boot even where lingering alone does
+    # not bring it (found by the 2026-11-16 first-day walk's reboot).
+    run(["systemctl", "enable", "loam-user-manager.service"])
     # The user's units, rendered from the templates; services started and
     # timers armed so that none fires on the spot (lib/loam_units.py).
     as_user(cfg, ["python3", f"{root}/bin/gen-units"])

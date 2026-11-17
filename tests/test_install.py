@@ -366,6 +366,16 @@ def cases() -> int:
     check("the app is told to run the same command name on both",
           inst.PREVIEW_BROWSER, "chromium-headless-shell")
 
+    # -- the boot unit for Loam's user manager ---------------------------------
+    # After a reboot of the walk's VM, lingering did not start Loam's user
+    # manager: the system came back, the agents' engine and timers did not.
+    unit = inst.system_unit_text("loam-user-manager.service", {"root": str(ROOT), "user": "sam"})
+    check("step 9 installs the boot unit for Loam's user manager",
+          "loam-user-manager.service" in inst.SYSTEM_UNITS, True)
+    check("...which starts the install user's manager, after logind, at boot",
+          ('id -u sam' in unit, "@USER@" in unit, "After=systemd-logind.service" in unit,
+           "WantedBy=multi-user.target" in unit), (True, False, True, True))
+
     # -- `loam status` reads the app as a unit, not a container ---------------
     # A fresh install's status read "App: absent" with the app up (found by
     # the 2026-11-16 first-day walk): it asked Docker, and the app has run as
