@@ -222,6 +222,7 @@ def add(sc: dict, text: str, kind: str, start: int, end: int, body: str,
             "where": {"state": "attached", "start": start, "end": end}, **extra}
     if kind == "suggestion":
         note["replacement"] = replacement
+    _remember(note, text, start, end)
     sc["threads"].append(note)
     return note
 
@@ -373,6 +374,7 @@ def reattach(sc: dict, text: str, tid: str, start: int, end: int) -> dict:
         raise NoteError(400, "attach a note to a non-empty passage")
     note.setdefault("first_anchor", note["anchor"])
     note["anchor"] = anchors.make(text, start, end)
+    _remember(note, text, start, end)
     note.pop("found", None)
     note["where"] = {"state": "attached", "start": start, "end": end}
     return note
@@ -485,7 +487,154 @@ def _ends(ops: list, s: int, e: int) -> tuple[bool, bool]:
     return s_after, e_after
 
 
+WIDE = 200      # characters of surroundings kept on each side of a passage
+HOMES = 16      # texts a note remembers being attached in
+
+
+def _body_from(text: str) -> int:
+    m = textdiff._FM.match(text or "")
+    return m.end() if m else 0
+
+
+def _text_key(text: str) -> str:
+    """A text's identity, its frontmatter aside (a stamp there is not the
+    doc changing)."""
+    return hashlib.sha1(text[_body_from(text):].encode("utf-8")).hexdigest()[:20]
+
+
+def _remember(note: dict, text: str, s: int, e: int, key: str | None = None) -> None:
+    """What an attached note keeps of where it is: its wider surroundings
+    (``wide``, the body's text up to ``WIDE`` characters each side) and this
+    text's identity with its place in it (``homes``), so that when the file
+    returns to this very text the note is where it was."""
+    b0 = _body_from(text)
+    note["wide"] = {"b": text[max(b0, s - WIDE):s], "a": text[e:e + WIDE]}
+    key = key or _text_key(text)
+    homes = [h for h in note.get("homes") or [] if h.get("h") != key]
+    homes.append({"h": key, "s": s - b0, "e": e - b0})
+    note["homes"] = homes[-HOMES:]
+
+
+def _holds(note: dict, text: str, s: int, e: int) -> bool:
+    """Whether the note's recorded surroundings are still around ``s..e``."""
+    w = note.get("wide")
+    if not w:
+        # a note from before surroundings were kept: its anchor's own
+        a = note.get("anchor") or {}
+        b, af = a.get("prefix", ""), a.get("suffix", "")
+        return s - len(b) >= 0 and text[s - len(b):s] == b and text[e:e + len(af)] == af
+    b, af = w.get("b", ""), w.get("a", "")
+    b0 = _body_from(text)
+    if s - len(b) < b0 or text[s - len(b):s] != b or text[e:e + len(af)] != af:
+        return False
+    # surroundings cut short by the body's start or the text's end are only
+    # whole if they still reach them
+    if len(b) < WIDE and s - len(b) != b0:
+        return False
+    if len(af) < WIDE and e + len(af) != len(text):
+        return False
+    return True
+
+
+def _twin_elsewhere(text: str, quote: str, s: int) -> bool:
+    """Whether the quote occurs in ``text`` anywhere but at ``s``."""
+    at = text.find(quote)
+    while at >= 0:
+        if at != s:
+            return True
+        at = text.find(quote, at + 1)
+    return False
+
+
+def _home(note: dict, text: str, key: str | None) -> dict | None:
+    """The note's place when ``text`` is a text it was attached in."""
+    if not key:
+        return None
+    quote = (note.get("anchor") or {}).get("quote") or ""
+    b0 = _body_from(text)
+    for h in reversed(note.get("homes") or []):
+        if h.get("h") == key:
+            s, e = h["s"] + b0, h["e"] + b0
+            if quote and text[s:e] == quote:
+                return {"start": s, "end": e, "state": "attached"}
+    return None
+
+
+def _returned(note: dict, text: str, ops: list, p: int) -> dict | None:
+    """A detached note whose own words come back at its carried point, with
+    its surroundings: they lie in the text a change put in around ``p`` (its
+    inserted runs and what little was kept between them), sit in their
+    recorded surroundings, and do so once there."""
+    quote = (note.get("anchor") or {}).get("quote") or ""
+    if not quote or not note.get("wide"):
+        return None
+    lo = hi = None
+    for a, b in _hunks(ops):
+        if a <= p <= b:
+            lo, hi = a, b
+            break
+    if lo is None:
+        return None
+    hits = []
+    at = text.find(quote, lo)
+    while 0 <= at and at + len(quote) <= hi:
+        if _holds(note, text, at, at + len(quote)):
+            hits.append(at)
+        at = text.find(quote, at + 1)
+    if len(hits) == 1:
+        return {"start": hits[0], "end": hits[0] + len(quote), "state": "attached"}
+    return None
+
+
+def _hunks(ops: list, glue: int = 64) -> list[tuple[int, int]]:
+    """The stretches of the new text a change rewrote: its inserted runs,
+    joined across kept runs shorter than ``glue`` (a comparison keeps a
+    "the" here and there inside text that was replaced wholesale)."""
+    out, new = [], 0
+    for op, val in ops:
+        if op == "=":
+            new += val
+        elif op == "+":
+            a, b = new, new + len(val)
+            if out and a - out[-1][1] < glue:
+                out[-1] = (out[-1][0], b)
+            else:
+                out.append((a, b))
+            new = b
+    return out
+
+
 def locate(note: dict, text: str, ops: list | None = None, guessed: bool = False,
+           old: str | None = None, key: str | None = None) -> dict:
+    """``_where``; and for a change nobody described (a disk edit, a
+    restore), two things more (2026-11-17, round 6). A text the note was
+    attached in returns it to its place there. And a note carried onto
+    words that also occur elsewhere stays only if its wider surroundings
+    still hold there: a comparison cannot tell twin sections apart, and a
+    note carried onto a twin is detached at that point instead. A quote
+    that occurred once before the change and once after cannot have hopped
+    and is not checked."""
+    if guessed:
+        home = _home(note, text, key)
+        if home:
+            return home
+    where = _where(note, text, ops, guessed, old)
+    if guessed and where.get("start") is not None:
+        quote = (note.get("anchor") or {}).get("quote") or ""
+        s2, e2 = where["start"], where["end"]
+        # (a twin before the change counts too: with one of two twin
+        # paragraphs deleted, the survivor is the only copy left)
+        twin = _twin_elsewhere(text, quote, s2) or (old is not None and old.count(quote) > 1)
+        if quote and twin and not _holds(note, text, s2, e2):
+            return {"start": None, "end": None, "state": "detached", "pos": s2, "off": 0}
+    if guessed and where.get("start") is None and ops and where.get("pos") is not None:
+        back = _returned(note, text, ops, where["pos"])
+        if back:
+            return back
+    return where
+
+
+def _where(note: dict, text: str, ops: list | None = None, guessed: bool = False,
            old: str | None = None) -> dict:
     """``_carry``; for a worked-out change, when the note does not survive it
     as read, the other equal reading of the same change too (of two equal
@@ -613,18 +762,22 @@ def relocate(sc: dict, text: str, ops: list | None = None, guessed: bool = False
     keeps up with the doc; a changed one keeps its original quote and
     remembers where its passage is now (``found``)."""
     changed = False
+    key = _text_key(text)
     for note in sc["threads"]:
         if note["state"] == "accepted":
             continue
-        before = copy.deepcopy((note.get("anchor"), note.get("found"), note.get("where")))
-        where = locate(note, text, ops, guessed, old)
+        before = copy.deepcopy((note.get("anchor"), note.get("found"), note.get("where"),
+                                note.get("wide"), note.get("homes")))
+        where = locate(note, text, ops, guessed, old, key=key)
         if where["state"] == "attached":
             note["anchor"] = anchors.make(text, where["start"], where["end"])
+            _remember(note, text, where["start"], where["end"], key)
             note.pop("found", None)
         elif where["state"] == "changed":
             note["found"] = anchors.make(text, where["start"], where["end"])
         note["where"] = where
-        if before != (note.get("anchor"), note.get("found"), note.get("where")):
+        if before != (note.get("anchor"), note.get("found"), note.get("where"),
+                      note.get("wide"), note.get("homes")):
             changed = True
     return changed
 

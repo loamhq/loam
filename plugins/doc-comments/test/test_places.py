@@ -17,6 +17,7 @@ note is on the very occurrence it was put on.
 Run: python3 plugins/doc-comments/test/test_places.py
 """
 
+import os
 import random
 import sys
 import unittest
@@ -27,6 +28,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "server"))
 
 from doccomments.service import Service  # noqa: E402
+from doccomments.sidecar import WIDE  # noqa: E402
 from doccomments.store import MemoryStore  # noqa: E402
 
 OWNER = {"id": "sam", "name": "Sam", "kind": "owner"}
@@ -146,11 +148,12 @@ PHRASES = ["remarkable", "line of the callout", "the light", "the river", "Parag
 class Seeded(unittest.TestCase):
     def test_seeded_runs(self):
         runs = 300
-        checked = 0
+        checked = waited = returned = 0
         kinds = {}
         for seed in range(1, runs + 1):
             r = random.Random(seed)
             w = World()
+            seen = {}
             # notes on repeated phrases, each remembered with its true place
             truth = {}
             for _ in range(r.randint(2, 5)):
@@ -238,12 +241,39 @@ class Seeded(unittest.TestCase):
                             # changed (or the words came back): at the same place
                             self.assertLessEqual(abs(n["where"]["start"] - v[1]), len(n["anchor"]["quote"]) + 12, f"seed {seed} step {step}: a note on an edited passage moved")
                         continue
+                    if st == "detached" and how.__name__ in ("disk", "restore") and at <= v[1] + WIDE and at + max(delete, len(insert)) >= v[0] - WIDE \
+                            and max(w.text().count(n["anchor"]["quote"]), t.count(n["anchor"]["quote"])) > 1:
+                        # a change nobody described came within its surroundings,
+                        # and its words have a twin: it waits, never elsewhere
+                        truth[i] = ("inside", v[0])
+                        waited += 1
+                        continue
                     self.assertEqual(st, "attached", f"seed {seed} step {step}: a change outside a note changed its state: {how.__name__}({at}, {delete}, {insert!r}) note {v} {n['anchor']['quote']!r} now {w.text()[v[0]-15:v[1]+15]!r}")
                     self.assertEqual((n["where"]["start"], n["where"]["end"]), v, f"seed {seed} step {step}: a change outside a note moved it")
                     checked += 1
                 # once inside, stop tracking exactly
                 truth = {i: (None if (v is not None and v[0] == "inside") else v) for i, v in truth.items()}
-        print(f"# {runs} seeded runs, {checked} note places checked after a change outside them; changes: {kinds}")
+                returned += self.same_text_same_places(w, seen, seed, step)
+        print(f"# {runs} seeded runs, {checked} note places checked after a change outside them; "
+              f"{waited} waited after a change within their surroundings; {returned} back in an earlier text; changes: {kinds}")
+
+    def same_text_same_places(self, w, seen, seed, step):
+        """When the text is byte for byte one it was in before, every note
+        still open is where it was then (if it was attached then)."""
+        t = w.text()
+        notes = {n["id"]: n for n in w.get()["notes"]}
+        k = 0
+        for nid, place in (seen.get(t) or {}).items():
+            n = notes.get(nid)
+            if not n or n["state"] != "open":
+                continue
+            self.assertEqual((n["where"]["state"], n["where"].get("start"), n["where"].get("end")), ("attached",) + place,
+                             f"seed {seed} step {step}: the text came back, the note did not ({n['anchor']['quote']!r})")
+            k += 1
+        now = {nid: (n["where"]["start"], n["where"]["end"]) for nid, n in notes.items()
+               if n["state"] == "open" and n["where"]["state"] == "attached"}
+        seen[t] = {**(seen.get(t) or {}), **now}
+        return k
 
 
 
@@ -328,14 +358,16 @@ class WholeBlocks(unittest.TestCase):
 
     def test_seeded_whole_blocks(self):
         runs, checked, back = 250, 0, 0
-        ambiguous_total = 0
+        waited_total = returned = 0
         import os
         only = int(os.environ.get("DC_SEED") or 0)
         for seed in (range(only, only + 1) if only else range(1, runs + 1)):
             r = random.Random(seed * 7919)
             w = World()
             truth = {}
-            ambiguous = set()
+            waiting = set()             # detached, on words with a twin, after a change near them
+            seen = {}
+            near = None                 # (lo, hi) in the new text of the last change nobody described
             for _ in range(r.randint(3, 6)):
                 ph = r.choice(PHRASES)
                 n = r.randint(1, w.text().count(ph))
@@ -352,12 +384,15 @@ class WholeBlocks(unittest.TestCase):
                 if removed and r.random() < 0.6:
                     at, block, inside, how = removed
                     # put it back, the way it went, or by restoring the version before
+                    near = None
                     if how == "save" and not since and r.random() < 0.5:
                         before = w.svc.history(OWNER, *P)["saves"]
                         w.svc.restore(OWNER, *P, before[1]["id"])
+                        near = (at, at + len(block))
                         if only: print("by restore")
                     elif how == "disk":
                         w.store.outside_edit(*P, t[:at] + block + t[at:])
+                        near = (at, at + len(block))
                     else:
                         w.save(at, insert=block)
                     for i, v in list(truth.items()):
@@ -374,8 +409,10 @@ class WholeBlocks(unittest.TestCase):
                     if any(v and v[0] < b and a < v[1] and i not in inside for i, v in truth.items()):
                         continue
                     how = r.choice(["disk", "save"])
+                    near = None
                     if how == "disk":
                         w.store.outside_edit(*P, t[:a] + t[b:])
+                        near = (a, a)
                     else:
                         w.save(a, delete=b - a)
                     for i in inside:
@@ -393,27 +430,16 @@ class WholeBlocks(unittest.TestCase):
                         continue
                     i = r.choice(sug)
                     before = w.text()
-                    if only: print("accept", w.note(i)["anchor"]["quote"], truth[i], w.note(i)["where"], i in ambiguous, repr(w.text()[truth[i][0]:truth[i][1]] if truth[i] else None))
+                    if only: print("accept", w.note(i)["anchor"]["quote"], truth[i], w.note(i)["where"], i in waiting, repr(w.text()[truth[i][0]:truth[i][1]] if truth[i] else None))
                     since = True
+                    near = None
                     at_note = dict(w.note(i)["where"])
-                    if i in ambiguous:
-                        # kept on an equal run: an accept writes exactly at its own
-                        # stored place, or refuses and writes nothing
-                        try:
-                            w.svc.accept(OWNER, *P, i)
-                        except Exception:
-                            self.assertEqual(w.text(), before, f"seed {seed}: a refused accept wrote")
-                            continue
-                        a2, b2 = at_note["start"], at_note["end"]
-                        self.assertEqual(w.text(), before[:a2] + w.note(i)["replacement"] + before[b2:], f"seed {seed}: an accept wrote outside its stored place")
-                        truth = {k: (None if k == i else v) for k, v in truth.items()}
-                        removed = None
-                        continue
                     try:
                         w.svc.accept(OWNER, *P, i)
                     except Exception:
                         self.assertEqual(w.text(), before, f"seed {seed}: a refused accept wrote")
-                        self.assertIsNone(truth[i], f"seed {seed}: an accept on a passage that is there was refused")
+                        if i not in waiting:
+                            self.assertIsNone(truth[i], f"seed {seed}: an accept on a passage that is there was refused")
                         continue
                     self.assertIsNotNone(truth[i], f"seed {seed} step {step}: an accept wrote though its passage was removed")
                     a, b = truth[i]
@@ -429,27 +455,23 @@ class WholeBlocks(unittest.TestCase):
                     continue
                 for i, v in truth.items():
                     n = w.note(i)
-                    if n["state"] != "open" or i in ambiguous:
+                    if n["state"] != "open":
                         continue
                     if v is None:
-                        # Removed by a change nobody described: of two equal runs side
-                        # by side, the one the comparison kept may keep the note (the
-                        # text is the same either way) -- at the point of removal only.
-                        kept_equal = (removed and removed[3] == "disk" and i in removed[2]
-                                      and n["where"]["state"] == "attached" and abs(n["where"]["start"] - removed[0]) <= 120
-                                      and w.text()[n["where"]["start"]:n["where"]["end"]] == n["anchor"]["quote"])
-                        if kept_equal:
-                            ambiguous.add(i)
-                        if not kept_equal:
-                            self.assertNotEqual(n["where"]["state"], "attached", f"seed {seed} step {step}: a note whose words were removed is attached elsewhere ({n['where']}, {n['anchor']['quote']!r})")
+                        self.assertNotEqual(n["where"]["state"], "attached", f"seed {seed} step {step}: a note whose words were removed is attached elsewhere ({n['where']}, {n['anchor']['quote']!r})")
                     else:
-                        if only and (n["where"]["state"], n["where"]["start"]) != ("attached", v[0]):
-                            print("ANCHOR", n["anchor"], n["where"], repr(w.text()[v[0]-40:v[0]+40]))
+                        if n["where"]["state"] == "detached" and (i in waiting or (
+                                near and near[0] - WIDE <= v[1] and v[0] <= near[1] + WIDE
+                                and max(w.text().count(n["anchor"]["quote"]), t.count(n["anchor"]["quote"])) > 1)):
+                            waiting.add(i)
+                            continue
+                        waiting.discard(i)
                         self.assertEqual((n["where"]["state"], n["where"]["start"]), ("attached", v[0]), f"seed {seed} step {step}: a note is not on its own occurrence ({n['anchor']['quote']!r})")
                         checked += 1
-            ambiguous_total += len(ambiguous)
+                returned += Seeded.same_text_same_places(self, w, seen, seed, step)
+            waited_total += len(waiting)
         print(f"# {runs} seeded runs of whole blocks removed and put back ({back} put back), {checked} places checked; "
-              f"{ambiguous_total} notes kept on an equal run the comparison kept")
+              f"{waited_total} waited after a change within their surroundings; {returned} back in an earlier text")
 
 
 
@@ -490,6 +512,206 @@ class HistoryRows(unittest.TestCase):
         self.assertEqual(textdiff.summary(t, t[:c] + "New words. " + t[c:])["section"], "Section 2")
         d = t.index("## Section 5") + len("## Section ")
         self.assertEqual(textdiff.summary(t, t[:d] + "Five" + t[d + 1:])["section"], "Section Five")
+
+
+# -- round 6: twins, after a change nobody described ------------------------------
+
+def without(text, i):
+    """The text with Section i taken out whole."""
+    a = text.index(f"## Section {i}")
+    nxt = text.find("## Section ", a + 1)
+    return text[:a] + (text[nxt:] if nxt >= 0 else "")
+
+
+class Twins(unittest.TestCase):
+    """Round 6 (2026-11-17): sections that differ only in their digits. A
+    comparison cannot tell them apart; a note carried onto a twin is
+    detached there, and one whose text returns byte for byte is home."""
+
+    def test_case_1_swapping_which_twin_section_is_missing(self):
+        w = World()
+        t0 = w.text()
+        bright = w.add("suggestion", "remarkable", 3, replacement="bright")
+        splendid = w.add("suggestion", "remarkable", 2, replacement="splendid")
+        full = w.text()
+        w.store.outside_edit(*P, without(full, 2))                 # Section 2 gone
+        t = w.text()
+        self.assertEqual((w.note(bright)["where"]["state"], w.note(bright)["where"]["start"]), ("attached", nth(t, "remarkable", 2)))
+        self.assertEqual(w.note(splendid)["where"]["state"], "detached")
+        w.store.outside_edit(*P, without(full, 3))                 # 2 back, 3 gone, one write
+        t = w.text()
+        for nid in (bright, splendid):
+            wh = w.note(nid)["where"]
+            if wh["state"] == "attached":
+                self.assertNotEqual(nid, bright, "bright is on 2b, a twin of its own 3b")
+                self.assertEqual(wh["start"], nth(t, "remarkable", 2))
+        self.assertNotEqual(w.note(bright)["where"]["state"], "attached")
+        w.store.outside_edit(*P, full)                             # byte for byte the start
+        t = w.text()
+        self.assertEqual(t, full)
+        self.assertEqual((w.note(bright)["where"]["state"], w.note(bright)["where"]["start"]), ("attached", nth(t, "remarkable", 3)))
+        self.assertEqual((w.note(splendid)["where"]["state"], w.note(splendid)["where"]["start"]), ("attached", nth(t, "remarkable", 2)))
+        w.svc.accept(OWNER, *P, bright)
+        after = w.text()
+        self.assertIn("Paragraph 3b, after the blocks. Nothing here is bright", after)
+        self.assertIn("Paragraph 2b, after the blocks. Nothing here is remarkable", after)
+
+    def test_case_2_through_history_restores(self):
+        w = World()
+        full = w.text()
+        w.add("comment", "Walk", 1)                                # a history
+        full = w.text()
+        fm = full[:full.index("\n---\n") + 5]
+        tiny = fm + "\n# Walk\n\nA short page. Paragraph 9c closes the section with a sentence, and that is all it says here.\n"
+        w.store.outside_edit(*P, tiny)
+        w.get()
+        v_tiny = w.svc.history(OWNER, *P)["saves"][0]["id"]
+        w.store.outside_edit(*P, without(full, 2))
+        w.get()
+        v_no2 = w.svc.history(OWNER, *P)["saves"][0]["id"]
+        w.store.outside_edit(*P, full)
+        w.get()
+        v_full = w.svc.history(OWNER, *P)["saves"][0]["id"]
+        ends = w.add("suggestion", "closes", 2, replacement="ends")
+        others = {w.add("comment", "The river kept its own time", i): i for i in (1, 3, 4, 5, 6)}
+        others[w.add("comment", "A callout in section 5", 1)] = 5
+        w.svc.restore(OWNER, *P, v_tiny)
+        self.assertEqual(w.note(ends)["where"]["state"], "detached", "not on the small file's \"closes\"")
+        w.svc.restore(OWNER, *P, v_no2)
+        t = w.text()
+        self.assertEqual(w.note(ends)["where"]["state"], "detached", "not on 3c's \"closes\"")
+        back = 0
+        for nid, i in others.items():
+            wh = w.note(nid)["where"]
+            if wh["state"] == "attached":
+                sec = t.index(f"## Section {i}")
+                nxt = t.find("## Section ", sec + 1)
+                self.assertTrue(sec < wh["start"] < (nxt if nxt >= 0 else len(t)), f"a note of section {i} is in its own section")
+                back += 1
+        self.assertGreaterEqual(back, 4, "the notes whose passages are on the page come back")
+        w.svc.restore(OWNER, *P, v_full)
+        t = w.text()
+        self.assertEqual((w.note(ends)["where"]["state"], w.note(ends)["where"]["start"]), ("attached", nth(t, "closes", 2)))
+        for nid, i in others.items():
+            self.assertEqual(w.note(nid)["where"]["state"], "attached")
+        w.svc.accept(OWNER, *P, ends)
+        self.assertIn("Paragraph 2c ends the section", w.text())
+        self.assertIn("Paragraph 3c closes the section", w.text())
+
+    def test_case_3_two_twin_paragraphs_the_first_deleted_on_disk(self):
+        tw = "---\nloam_doc_id: d-abcdefghij\n---\n\n# Twins\n\n" + "The same paragraph, word for word, twice over in this doc.\n\n" * 2 + "And then the end.\n"
+        w = World()
+        w.store.outside_edit(*P, tw)
+        nid = w.add("suggestion", "word for word", 1, replacement="letter for letter")
+        t = w.text()
+        a = t.index("The same paragraph")
+        b = t.index("The same paragraph", a + 1)
+        w.store.outside_edit(*P, t[:a] + t[b:])
+        self.assertNotEqual(w.note(nid)["where"]["state"], "attached", "not on the surviving twin")
+        with self.assertRaises(Exception):
+            w.svc.accept(OWNER, *P, nid)
+        self.assertNotIn("letter for letter", w.text())
+        w.store.outside_edit(*P, t)
+        self.assertEqual((w.note(nid)["where"]["state"], w.note(nid)["where"]["start"]), ("attached", a + len("The same paragraph, ")))
+
+
+class TwinsSeeded(unittest.TestCase):
+    """Seeded: twin sections swapped in and out in single writes, on disk and
+    by restoring earlier versions (some of them a short page that shares
+    only a phrase), with notes on words every twin has. After each step a
+    note that is attached is on its own section's words; a note whose
+    section is gone is not attached; and when the text is byte for byte one
+    it was in before, every note is where it was then."""
+
+    def test_seeded_twins(self):
+        runs, checked, waited, returned, unique, kinds = 200, 0, 0, 0, 0, {}
+        spots = ["remarkable", "closes the section", "The river kept its own time", "the light", "A second line of the callout"]
+        for seed in range(1, runs + 1):
+            if os.environ.get("DC_SEED") and os.environ["DC_SEED"] != str(seed):
+                continue
+            r = random.Random(seed * 104729)
+            w = World()
+            w.add("comment", "Walk", 1)                 # (its id line written first)
+            head = w.text()[:w.text().index("## Section 1")]
+            build = lambda on: head + "\n".join(section(i) for i in sorted(on))
+            on = set(range(1, 7))
+            notes = {}
+            for _ in range(r.randint(3, 6)):
+                k, ph = r.randint(1, 6), r.choice(spots)
+                t = w.text()
+                a = t.index(ph, t.index(f"## Section {k}"))
+                if any(v == (k, ph) for v in notes.values()):
+                    continue
+                kind = r.choice(["comment", "suggestion"])
+                got = w.svc.add(OWNER, *P, {"kind": kind, "start": a, "end": a + len(ph), "quote": ph, "revision": w.get()["revision"],
+                                            "text": "x", **({"replacement": ph.upper()} if kind == "suggestion" else {})})
+                notes[got["note"]] = (k, ph)
+            seen = {}
+            returned += Seeded.same_text_same_places(self, w, seen, seed, -1)
+            for step in range(14):
+                x = r.random()
+                prev = w.text()
+                on = on or set()
+                absent = sorted(set(range(1, 7)) - on)
+                if x < 0.35 and absent and on:
+                    i, j = r.choice(sorted(on)), r.choice(absent)
+                    on = (on - {i}) | {j}
+                    w.store.outside_edit(*P, build(on))
+                    how = "swap"
+                elif x < 0.55 and len(on) > 1:
+                    on = on - {r.choice(sorted(on))}
+                    w.store.outside_edit(*P, build(on))
+                    how = "remove"
+                elif x < 0.7 and absent:
+                    on = on | {r.choice(absent)}
+                    w.store.outside_edit(*P, build(on))
+                    how = "put back"
+                elif x < 0.78:
+                    w.store.outside_edit(*P, head + "A short page. Paragraph 9c closes the section with a sentence; the light is remarkable.\n")
+                    on = None
+                    how = "short page"
+                else:
+                    saves = w.svc.history(OWNER, *P)["saves"]
+                    pick = r.choice(saves[1:]) if len(saves) > 1 else None
+                    if not pick:
+                        continue
+                    w.svc.restore(OWNER, *P, pick["id"])
+                    t = w.text()
+                    on = {i for i in range(1, 7) if f"## Section {i}" in t} if "## Section" in t else None
+                    how = "restore"
+                kinds[how] = kinds.get(how, 0) + 1
+                t = w.text()
+                if os.environ.get("DC_SEED") == str(seed):
+                    print(step, how, sorted(on or []), [(notes[n["id"]], n["where"].get("state"), n["where"].get("start")) for n in w.get()["notes"] if n["id"] in notes])
+                for nid, (k, ph) in list(notes.items()):
+                    n = w.note(nid)
+                    wh = n["where"]
+                    present = on is not None and k in on
+                    sec_at = lambda x: max(i for i in range(1, 7) if f"## Section {i}" in t[:x]) if "## Section" in t[:x] else None
+                    if nid in (seen.get(t) or {}):
+                        # a text it was in before: the same-places check below
+                        # holds it to where it was then
+                        if wh["state"] == "attached":
+                            notes[nid] = (sec_at(wh["start"]), ph)
+                        continue
+                    if wh["state"] == "attached" and t.count(ph) == 1 and prev.count(ph) == 1:
+                        # the only copy before and after: the brief's rule keeps it
+                        # there (it cannot be told from the passage edited), and it
+                        # is that section's note from now on
+                        notes[nid] = (sec_at(wh["start"]), ph)
+                        unique += 1
+                        continue
+                    if wh["state"] == "attached":
+                        self.assertTrue(present, f"seed {seed} step {step} ({how}): a note of absent section {k} is attached at {wh['start']}")
+                        want = t.index(ph, t.index(f"## Section {k}"))
+                        self.assertEqual(wh["start"], want, f"seed {seed} step {step} ({how}): a note of section {k} ({ph!r}) is on another section's words")
+                        checked += 1
+                    elif present:
+                        waited += 1
+                returned += Seeded.same_text_same_places(self, w, seen, seed, step)
+        print(f"# {runs} seeded runs of twin sections swapped, removed, put back and restored ({kinds}); "
+              f"{checked} attached notes checked on their own words, {waited} waited, {returned} back in an earlier text, "
+              f"{unique} kept on the doc's only copy of their words")
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
