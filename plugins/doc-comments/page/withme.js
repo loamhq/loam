@@ -6,6 +6,7 @@
 // and their menu, and the sheet that adds one.
 
 import { h, icon, put, tone } from './editor/dom.js'
+import { bottomSheet, grab } from './sheet.js'
 
 export const WITHME_PREFIX = 'with-me/'
 const MODE = { view: 'View', comment: 'Comment', edit: 'Edit' }
@@ -117,10 +118,12 @@ export function createWithMe({ base, root, schedule, toast, files, side }) {
   // -- the add sheet ----------------------------------------------------------------------
 
   let scrim = null
+  let bs = null
   function openAdd() {
     if (scrim) return
     const s = { link: '', password: '', name: '', needName: false, suggest: '', busy: false, error: '', code: '' }
     scrim = h('div', { class: 'dc-dlg-scrim dc-wm-scrim', onclick: (e) => { if (e.target === scrim) close() } })
+    bs = bottomSheet(scrim, { close })
     document.body.append(scrim)
     requestAnimationFrame(() => scrim?.classList.add('on'))
     document.addEventListener('keydown', onKey)
@@ -133,8 +136,10 @@ export function createWithMe({ base, root, schedule, toast, files, side }) {
     if (!scrim) return
     const node = scrim
     scrim = null
+    bs?.dispose()
+    bs = null
     node.classList.remove('on')
-    setTimeout(() => node.remove(), 240)
+    setTimeout(() => node.remove(), 320)
     document.removeEventListener('keydown', onKey)
   }
 
@@ -176,8 +181,8 @@ export function createWithMe({ base, root, schedule, toast, files, side }) {
     const badField = { 'not-link': 'link', private: 'link', redirect: 'link', unreachable: 'link', gone: 'link', 'too-old': 'link', 'too-new': 'link', password: 'password', throttled: 'password', 'name-taken': 'name' }[s.code]
     const field = (label, input, which, hint = null) => h('label', { class: `dc-wm-field${s.error && badField === which ? ' bad' : ''}` },
       h('span', { class: 'dc-wm-lbl', text: label }), input, hint ? h('span', { class: 'dc-wm-hint', text: hint }) : null)
-    put(scrim, h('form', { class: 'dc-dlg dc-wm-dlg', role: 'dialog', 'aria-label': 'Add a shared doc', onsubmit: (e) => { e.preventDefault(); add(s) } },
-      h('div', { class: 'dc-wm-grab', 'aria-hidden': 'true' }),
+    bs.keep(() => put(scrim, h('form', { class: 'dc-dlg dc-wm-dlg', role: 'dialog', 'aria-label': 'Add a shared doc', onsubmit: (e) => { e.preventDefault(); add(s) } },
+      grab(h),
       h('div', { class: 'dc-sh-head' },
         h('h2', { text: 'Add a shared doc' }),
         h('button', { class: 'dc-ib', type: 'button', 'aria-label': 'Close', onclick: close }, icon('x', 18))),
@@ -189,7 +194,7 @@ export function createWithMe({ base, root, schedule, toast, files, side }) {
       h('button', { class: 'dc-sh-go dc-wm-go', type: 'submit', disabled: s.busy ? true : null },
         s.busy ? h('span', { class: 'dc-wm-spin', 'aria-hidden': 'true' }) : icon('plus', 15),
         s.busy ? 'Checking with their Loam…' : 'Add'),
-      h('p', { class: 'dc-sh-cap', text: 'The password is kept by your Loam, never shown again, and your agents can use it too.' })))
+      h('p', { class: 'dc-sh-cap', text: 'The password is kept by your Loam, never shown again, and your agents can use it too.' }))))
     if (focus) setTimeout(() => (s.needName ? nameIn : linkIn)?.focus(), 60)
   }
 

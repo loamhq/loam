@@ -4,6 +4,7 @@
 // Talks to the plugin server's owner routes (`/x/doc-comments/doc/links`).
 
 import { tone, h, icon, put } from './editor/dom.js'
+import { bottomSheet, grab } from './sheet.js'
 
 const MODES = [
   { id: 'view', label: 'can view', verb: 'view' },
@@ -61,6 +62,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
   // -- the dialog -------------------------------------------------------------------
 
   let scrim = null
+  let bs = null
   async function open(which = null) {
     try {
       const got = await req('GET', 'doc/links')
@@ -74,6 +76,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
     if (st.open === 'card') await freshCard()
     if (!scrim) {
       scrim = h('div', { class: 'dc-dlg-scrim dc-share-scrim', onclick: (e) => { if (e.target === scrim) close() } })
+      bs = bottomSheet(scrim, { close })
       document.body.append(scrim)
       requestAnimationFrame(() => scrim.classList.add('on'))
       document.addEventListener('keydown', onKey)
@@ -89,8 +92,10 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
     if (!scrim) return
     const s = scrim
     scrim = null
+    bs?.dispose()
+    bs = null
     s.classList.remove('on')
-    setTimeout(() => s.remove(), 220)
+    setTimeout(() => s.remove(), 320)
     document.removeEventListener('keydown', onKey)
     st.open = null
     onChange?.()
@@ -104,7 +109,9 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
 
   function draw() {
     if (!scrim) return
-    put(scrim, st.open === 'card' ? cardView() : listView())
+    // On a phone the dialog is a bottom sheet (sheet.js), with its handle.
+    bs.keep(() => put(scrim, st.open === 'card' ? cardView() : listView()))
+    scrim.firstChild?.prepend(grab(h))
   }
 
   function head(text, back = null) {

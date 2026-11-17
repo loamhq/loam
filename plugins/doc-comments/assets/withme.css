@@ -33,12 +33,9 @@
 .dc-wm-go { margin-top: 4px; }
 .dc-wm-spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: dc-wm-spin .8s linear infinite; box-sizing: border-box; }
 @keyframes dc-wm-spin { to { transform: rotate(360deg); } }
-.dc-wm-grab { display: none; }
+/* On a phone the add sheet is a bottom sheet: `.dc-bs` in doc-comments.css. */
+.dc-wm-dlg > .dc-bs-grab { margin-bottom: -2px; }
 @media (max-width: 600px) {
-  .dc-wm-scrim { place-items: end stretch; padding: 0; }
-  .dc-wm-scrim .dc-wm-dlg { width: 100%; max-height: 92dvh; overflow-y: auto; border-radius: 26px 26px 0 0; padding: 8px 20px calc(18px + env(safe-area-inset-bottom)); transform: translateY(100%); transition: transform .32s cubic-bezier(.2,.8,.2,1); }
-  .dc-wm-scrim.on .dc-wm-dlg { transform: none; }
-  .dc-wm-grab { display: block; justify-self: center; width: 38px; height: 5px; border-radius: 999px; background: var(--paper-rule, rgba(0,0,0,.16)); margin-bottom: 2px; }
   .dc-wm-in { height: 50px; font-size: 16px; }
 }
 
