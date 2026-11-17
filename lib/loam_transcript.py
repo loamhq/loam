@@ -2,8 +2,10 @@
 
 The output has to be indistinguishable from what the chassis writes into
 ``vault/15_CONVERSATIONS/`` -- same frontmatter fields in the same order,
-same ``<!-- turn ... -->`` markers, same emoji-prefixed speaker headers,
-same wiki-links. A human reading the folder should not be able to tell
+same ``<!-- turn ... -->`` markers, same speaker headers, same wiki-links.
+A header is the agent's plain name (2026-11-17): the emoji face is retired,
+and an older ``agent.json`` that still holds ``emoji`` no longer prefixes
+the headers written from now on. Files already written keep theirs. A human reading the folder should not be able to tell
 which runtime produced a given file.
 
 Upstream calls the session JSONL schema internal and version-unstable, so
@@ -535,7 +537,6 @@ def render_file(
     title: str,
     turns: list[Turn],
     agent: str,
-    emoji: str,
     session_id: str | None = None,
     surface: str = SURFACE_CLAUDE_CODE,
     origin: str | None = None,
@@ -543,7 +544,7 @@ def render_file(
 ) -> str:
     display_agent = agent.capitalize()
     link = f"[[{display_agent}]]"
-    agent_display = f"{emoji} {display_agent}" if emoji else display_agent
+    agent_display = display_agent
     fm = {
         "title": title,
         "created_at": turns[0].timestamp,
@@ -796,7 +797,6 @@ def plan_update(
     existing: str,
     turns: list[Turn],
     agent: str,
-    emoji: str,
 ) -> tuple[str | None, str]:
     """The text this transcript should now hold, and why; None if it matches.
 
@@ -816,7 +816,9 @@ def plan_update(
     if not blocks:
         return None, "no turn markers in file"
     bodies = [turn_body(b) for b in blocks]
-    display = f"{emoji} {agent.capitalize()}" if emoji else agent.capitalize()
+    # The turns kept are left as written, an old emoji header included; only
+    # the turns rendered now get the plain name.
+    display = agent.capitalize()
 
     i = 0
     while i < min(len(bodies), len(turns)) and bodies[i] == turns[i].content:

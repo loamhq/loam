@@ -129,7 +129,7 @@ def backward(turns: list[lt.Turn]) -> None:
     # A transcript written the old way: every user-role entry filed, including
     # the notification and the peer message, built from the same fixture.
     def render(rows):
-        return lt.render_file("T", rows, "pax", "\N{TIGER}", session_id="s-1")
+        return lt.render_file("T", rows, "pax", session_id="s-1")
 
     notification = lt.Turn(
         "user",
@@ -206,7 +206,7 @@ def backward(turns: list[lt.Turn]) -> None:
     check("the writer's own output needs no repair",
           lt.repair_transcript(written).text is None)
     check("a repaired file is what the writer would now write: no update planned",
-          lt.plan_update(written, turns, "pax", "\N{TIGER}")[0] is None)
+          lt.plan_update(written, turns, "pax")[0] is None)
 
     # A file that is nothing but harness content is reported, never emptied.
     all_harness = render([notification, peer])
