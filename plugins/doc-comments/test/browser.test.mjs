@@ -184,7 +184,9 @@ test('the selection popup, the link field and the "+" sit at their lines (90%)',
   })
   await page.mouse.move(400, 400)
   await page.evaluate(() => window.__ed.view.contentDOM.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
-  await page.waitForTimeout(300)
+  // It comes once the selection has been still a moment (the selecting tests).
+  await page.waitForSelector('.dc-selbar.on')
+  await page.waitForTimeout(250)
   const gap = await page.evaluate(({ from }) => {
     const bar = document.querySelector('.dc-selbar.on').getBoundingClientRect()
     const c = window.__ed.view.coordsAtPos(from, 1)
@@ -1952,4 +1954,286 @@ test('B5 (round 6): the Share button\'s faces sit apart, each ring in the button
   assert.ok(m.ring.includes(m.btn), 'the ring is the button\'s colour')
   await page.screenshot({ path: `${SHOTS || '/tmp'}/share-faces.png`, clip: await page.evaluate(() => { const r = document.querySelector('.dc-sharebtn').getBoundingClientRect(); return { x: r.x - 20, y: r.y - 10, width: r.width + 40, height: r.height + 20 } }) }).catch(() => {})
   await page.done()
+})
+
+// -- the selection popup waits until the selecting stops -------------------------
+
+// Every change of the popup's classes, timed, from the page itself: what the
+// eye would see between the test's own looks.
+async function watchSelbar(page) {
+  await page.evaluate(() => {
+    const bar = document.querySelector('.dc-selbar')
+    window.__sel = { log: [], t0: performance.now() }
+    const note = () => window.__sel.log.push({ t: performance.now(), on: bar.classList.contains('on'), out: bar.classList.contains('out'), left: bar.style.left, top: bar.style.top })
+    new MutationObserver(note).observe(bar, { attributes: true, attributeFilter: ['class', 'style'] })
+  })
+}
+const selbarState = (page) => page.evaluate(() => {
+  const bar = document.querySelector('.dc-selbar')
+  const cs = getComputedStyle(bar)
+  return { on: bar.classList.contains('on'), seen: cs.display !== 'none' && Number(cs.opacity) > 0.02 && !bar.classList.contains('out'), r: bar.getBoundingClientRect().toJSON() }
+})
+const shownSince = (page, t) => page.evaluate((t) => window.__sel.log.filter(e => e.t >= t && e.on).length, t)
+const now = (page) => page.evaluate(() => performance.now())
+// The screen point of a character, from the editor's own measure.
+const pointAt = (page, pos, side = 1) => page.evaluate(([p, s]) => { const c = window.__ed.view.coordsAtPos(p, s); return { x: s > 0 ? c.left + 1 : c.right - 1, y: (c.top + c.bottom) / 2 } }, [pos, side])
+
+for (const [w, h, label] of [[1280, 850, 'desktop'], [430, 900, 'narrow']]) {
+  test(`a real drag: no popup on any step of it, forwards, backwards, paused; it comes after the release, above the words, not under the pointer (${label})`, { skip }, async () => {
+    await start()
+    const p = await newDoc(REPEATS)
+    const page = await open({ doc: p, w, h })
+    await watchSelbar(page)
+    const t = await page.evaluate(() => window.__ed.text())
+    const from = t.indexOf('The river kept'), to = t.indexOf('Paragraph 1b')
+    const a = await pointAt(page, from), b = await pointAt(page, from + 'The river kept its own time'.length, -1)
+    // Forwards across the line, a long pause to read, backwards, on again.
+    await page.mouse.move(a.x, a.y)
+    await page.mouse.down()
+    const t0 = await now(page)
+    const steps = []
+    for (let i = 1; i <= 24; i++) steps.push({ x: a.x + (b.x - a.x) * i / 24, y: a.y + (b.y - a.y) * i / 24 })
+    for (let i = 23; i >= 10; i--) steps.push(steps[i - 1])
+    for (let i = 10; i <= 24; i++) steps.push(steps[i - 1])
+    let n = 0
+    for (const s of steps) {
+      await page.mouse.move(s.x, s.y)
+      await page.waitForTimeout(++n === 24 ? 700 : 25)
+      const st = await selbarState(page)
+      assert.equal(st.seen, false, `no popup on step ${n} of the drag`)
+    }
+    // Down the page: over the callout and the table, into the next paragraph.
+    const c = await pointAt(page, to + 4, -1)
+    for (let i = 1; i <= 12; i++) {
+      await page.mouse.move(b.x + (c.x - b.x) * i / 12, b.y + (c.y - b.y) * i / 12)
+      await page.waitForTimeout(30)
+      assert.equal((await selbarState(page)).seen, false, `no popup crossing the callout and table, step ${i}`)
+    }
+    assert.ok(await page.evaluate(() => !window.__ed.view.state.selection.main.empty), 'the drag made a selection')
+    assert.equal(await shownSince(page, t0), 0, 'never shown during the drag, by the page\'s own record')
+    await shot(page, `drag-mid-${label}`)
+    // Back to a one-line selection, then let go.
+    await page.mouse.move(b.x, b.y)
+    await page.waitForTimeout(40)
+    const up = await now(page)
+    await page.mouse.up()
+    assert.equal((await selbarState(page)).seen, false, 'not at the instant of release')
+    await page.waitForSelector('.dc-selbar.on', { timeout: 1500 })
+    const first = await page.evaluate((up) => window.__sel.log.find(e => e.t >= up && e.on).t - up, up)
+    assert.ok(first >= 90 && first <= 400, `it comes a short beat after the release (${first.toFixed(0)} ms)`)
+    await page.waitForTimeout(260)
+    const st = await selbarState(page)
+    assert.equal(st.seen, true)
+    const sel = await page.evaluate(() => { const v = window.__ed.view, r = v.state.selection.main; return v.coordsAtPos(r.from, 1).top })
+    assert.ok(st.r.bottom <= sel + 1 && sel - st.r.bottom <= 16, `above the selection (${(sel - st.r.bottom).toFixed(1)} px)`)
+    const inside = b.x >= st.r.left - 2 && b.x <= st.r.right + 2 && b.y >= st.r.top - 2 && b.y <= st.r.bottom + 2
+    assert.equal(inside, false, 'not under the pointer')
+    // Shown once, in one place: no move after it came.
+    const moves = await page.evaluate((up) => new Set(window.__sel.log.filter(e => e.t >= up && e.on).map(e => `${e.left},${e.top}`)).size, up)
+    assert.equal(moves, 1, 'it does not move once it has come')
+    assert.equal(await page.evaluate(() => document.activeElement?.closest?.('.cm-content') != null), true, 'focus stays in the text')
+    await shot(page, `drag-released-${label}`)
+    // A new drag sends it away at once.
+    await page.mouse.move(a.x, a.y + 2)
+    await page.mouse.down()
+    const gone = await selbarState(page)
+    assert.equal(gone.seen, false, 'gone the moment a new selection starts')
+    assert.equal(await page.evaluate(() => { const b = document.querySelector('.dc-selbar'); return getComputedStyle(b).display === 'none' || getComputedStyle(b).pointerEvents === 'none' }), true, 'its fade is out of the pointer\'s way')
+    await page.mouse.up()
+    assert.deepEqual(page.errors, [])
+    await page.done()
+  })
+}
+
+test('a double-click and a triple-click are one gesture: shown once, for the paragraph', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const page = await open({ doc: p })
+  await watchSelbar(page)
+  const t = await page.evaluate(() => window.__ed.text())
+  const at = await pointAt(page, t.indexOf('river kept') + 2)
+  const t0 = await now(page)
+  // A person's triple-click: the third press comes ~180 ms after the second.
+  await page.mouse.click(at.x, at.y, { clickCount: 1 })
+  await page.waitForTimeout(90)
+  await page.mouse.click(at.x, at.y, { clickCount: 2 })
+  await page.waitForTimeout(180)
+  assert.equal(await shownSince(page, t0), 0, 'not shown for the word while a third click may come')
+  await page.mouse.click(at.x, at.y, { clickCount: 3 })
+  await page.waitForSelector('.dc-selbar.on', { timeout: 1500 })
+  await page.waitForTimeout(300)
+  const shows = await page.evaluate((t0) => { let n = 0, was = false; for (const e of window.__sel.log) { if (e.t < t0) continue; if (e.on && !was) n++; was = e.on } return n }, t0)
+  assert.equal(shows, 1, 'it came once')
+  const sel = await page.evaluate(() => window.__ed.view.state.sliceDoc(window.__ed.view.state.selection.main.from, window.__ed.view.state.selection.main.to))
+  assert.match(sel, /^Paragraph 1a\. The river kept/, 'the paragraph is chosen')
+  // A double-click alone: shown for the word, once the sequence is over.
+  await page.mouse.click(10, 10)
+  await page.waitForTimeout(600)
+  const t1 = await now(page)
+  const w = await pointAt(page, t.indexOf('learned') + 2)
+  await page.mouse.dblclick(w.x, w.y)
+  await page.waitForSelector('.dc-selbar.on', { timeout: 1500 })
+  const after = await page.evaluate((t1) => window.__sel.log.find(e => e.t >= t1 && e.on).t - t1, t1)
+  assert.ok(after >= 250, `after a double-click it waits for a third (${after.toFixed(0)} ms)`)
+  assert.equal(await page.evaluate(() => { const s = window.__ed.view.state.selection.main; return window.__ed.view.state.sliceDoc(s.from, s.to) }), 'learned')
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('keyboard selection: nothing while Shift+arrows move, it comes once the selection is still; Select All too; typing and Shift+click send it away', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const page = await open({ doc: p })
+  await watchSelbar(page)
+  const t = await page.evaluate(() => window.__ed.text())
+  const at = await pointAt(page, t.indexOf('The river kept'))
+  await page.mouse.click(at.x, at.y)
+  await page.waitForTimeout(400)
+  const t0 = await now(page)
+  for (let i = 0; i < 14; i++) {
+    await page.keyboard.press('Shift+ArrowRight')
+    await page.waitForTimeout(70)
+    assert.equal((await selbarState(page)).seen, false, `no popup while Shift+→ is pressed (${i + 1})`)
+  }
+  let last = 0
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press('Shift+Control+ArrowRight')
+    last = await now(page)
+    await page.waitForTimeout(120)
+    assert.equal((await selbarState(page)).seen, false, 'nor by words')
+  }
+  assert.equal(await shownSince(page, t0), 0, 'never shown while the keys moved it')
+  await page.waitForSelector('.dc-selbar.on', { timeout: 1500 })
+  const after = await page.evaluate((last) => window.__sel.log.find(e => e.t >= last && e.on).t - last, last)
+  assert.ok(after >= 300 && after <= 700, `once still for a moment (${after.toFixed(0)} ms)`)
+  await page.waitForTimeout(250)
+  assert.equal((await selbarState(page)).seen, true)
+  // Shift+click extends it: gone at once, back in the new place.
+  const before = (await selbarState(page)).r
+  const further = await pointAt(page, t.indexOf('Paragraph 1b') + 9, -1)
+  await page.keyboard.down('Shift')
+  await page.mouse.move(further.x, further.y)
+  await page.mouse.down()
+  assert.equal((await selbarState(page)).seen, false, 'Shift+click: gone at once')
+  await page.mouse.up()
+  await page.keyboard.up('Shift')
+  await page.waitForSelector('.dc-selbar.on', { timeout: 1500 })
+  await page.waitForTimeout(250)
+  const moved = (await selbarState(page)).r
+  const sel2 = await page.evaluate(() => { const v = window.__ed.view, r = v.state.selection.main; return { len: r.to - r.from, top: v.coordsAtPos(r.from, 1).top } })
+  assert.ok(sel2.len > 30, 'Shift+click extended the selection')
+  assert.ok(moved.bottom <= sel2.top + 1 && sel2.top - moved.bottom <= 16, 'placed for the new selection')
+  assert.ok(before.width > 0)
+  // Select All: once still.
+  await page.mouse.click(at.x, at.y)
+  await page.waitForTimeout(300)
+  const t2 = await now(page)
+  await page.keyboard.press('Control+a')
+  await page.waitForTimeout(150)
+  assert.equal(await shownSince(page, t2), 0, 'not at once after Select All')
+  await page.waitForTimeout(500)
+  // (Select All may run past the screen: shown when any of it is in view.)
+  assert.equal(await shownSince(page, t2) > 0, true, 'Select All brings it')
+  // Typing sends it away at once.
+  await page.keyboard.press('ArrowLeft')
+  await page.waitForTimeout(50)
+  assert.equal((await selbarState(page)).seen, false, 'a caret: gone')
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('the popup goes when its words scroll out of sight and comes back with them; the formatting buttons keep it in place', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const page = await open({ doc: p })
+  const t = await page.evaluate(() => window.__ed.text())
+  const s = t.indexOf('The river kept')
+  const a = await pointAt(page, s), b = await pointAt(page, s + 9, -1)
+  await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 6 }); await page.mouse.up()
+  await page.waitForSelector('.dc-selbar.on')
+  await page.waitForTimeout(250)
+  const place = (await selbarState(page)).r
+  await watchSelbar(page)
+  const t0 = await now(page)
+  await page.click('.dc-selbar.on .dc-fb[aria-label="Bold"]')
+  await page.waitForTimeout(250)
+  assert.equal((await selbarState(page)).seen, true, 'Bold keeps it')
+  const shows = await page.evaluate((t0) => window.__sel.log.filter(e => e.t >= t0 && !e.on).length, t0)
+  assert.equal(shows, 0, 'no blink on Bold')
+  assert.ok(Math.abs((await selbarState(page)).r.top - place.top) < 2)
+  await page.evaluate(() => { document.querySelector('.dc-scroll').scrollTop += 1400 })
+  await page.waitForTimeout(150)
+  assert.equal((await selbarState(page)).seen, false, 'scrolled out of sight: gone')
+  await page.evaluate(() => { document.querySelector('.dc-scroll').scrollTop = 0 })
+  await page.waitForTimeout(300)
+  assert.equal((await selbarState(page)).seen, true, 'and back with its words')
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('reduced motion: the popup fades in without the movement', { skip }, async () => {
+  await start()
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 850 }, reducedMotion: 'reduce' })
+  const page = await ctx.newPage()
+  await page.goto(`${base}/?dark&path=${encodeURIComponent('Essays/drafts/Long.md')}`)
+  await page.waitForSelector('.cm-content')
+  await page.waitForTimeout(400)
+  const t = await page.evaluate(() => window.__ed.text())
+  const s = t.indexOf('# A long doc') + 2
+  const a = await pointAt(page, s), b = await pointAt(page, s + 6, -1)
+  await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 4 }); await page.mouse.up()
+  await page.waitForSelector('.dc-selbar.in', { timeout: 1500 })
+  const anim = await page.evaluate(() => { const cs = getComputedStyle(document.querySelector('.dc-selbar')); return { name: cs.animationName, d: cs.animationDuration } })
+  assert.equal(anim.name, 'dc-fade', 'a plain fade')
+  assert.ok(parseFloat(anim.d) >= 0.1, `a fade you can see (${anim.d})`)
+  await ctx.close()
+})
+
+test('phone: the bars offer Comment and Suggest once the fingers are up and the handles still; moving handles do not flicker them', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const ctx = await browser.newContext({ viewport: { width: 430, height: 900 }, hasTouch: true, isMobile: true })
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto(`${base}/?dark&phone&path=${encodeURIComponent(p)}`)
+  await page.waitForSelector('.cm-content')
+  await page.waitForTimeout(500)
+  await page.evaluate(() => window.__ed.view.focus())
+  await page.waitForTimeout(200)
+  const cdp = await ctx.newCDPSession(page)
+  const kc = () => page.evaluate(() => { const b = [...document.querySelectorAll('.dc-kbar.on .dc-kc')]; return { comment: b.some(x => /Comment/.test(x.textContent) && !x.disabled), suggest: b.some(x => /Suggest/.test(x.textContent)) } })
+  const t = await page.evaluate(() => window.__ed.text())
+  const s = t.indexOf('The river kept')
+  // Real touches, held on the text (a long press does not become a click).
+  const spot = await pointAt(page, s + 2)
+  const touch = (type) => cdp.send('Input.dispatchTouchEvent', type === 'touchstart' ? { type: 'touchStart', touchPoints: [{ x: spot.x, y: spot.y }] } : { type: 'touchEnd', touchPoints: [] })
+  // A long press and handles dragged: fingers down the whole time.
+  await touch('touchstart')
+  for (let i = 3; i <= 30; i += 3) {
+    await page.evaluate(([a, b]) => window.__ed.view.dispatch({ selection: { anchor: a, head: b }, userEvent: 'select' }), [s, s + i])
+    await page.waitForTimeout(60)
+    assert.equal((await kc()).comment, false, `not offered while the handles move (${i})`)
+  }
+  await page.waitForTimeout(500)
+  assert.equal((await kc()).comment, false, 'nor while the finger rests')
+  await touch('touchend')
+  await page.waitForTimeout(150)
+  assert.equal((await kc()).comment, false, 'not at the instant the finger lifts')
+  await page.waitForTimeout(400)
+  assert.deepEqual(await kc(), { comment: true, suggest: true }, 'offered once still')
+  await shot(page, 'phone-bar-settled')
+  // A handle moved again: the bar stays as it is, no blink.
+  await touch('touchstart')
+  await page.evaluate(([a, b]) => window.__ed.view.dispatch({ selection: { anchor: a, head: b }, userEvent: 'select' }), [s, s + 40])
+  await page.waitForTimeout(60)
+  assert.equal((await kc()).comment, true, 'extending keeps the bar')
+  await touch('touchend')
+  await page.waitForTimeout(500)
+  // A caret: back at once.
+  await page.evaluate(([a]) => window.__ed.view.dispatch({ selection: { anchor: a }, userEvent: 'select' }), [s])
+  await page.waitForTimeout(30)
+  assert.equal((await kc()).comment, false, 'a caret: gone at once')
+  assert.deepEqual(errors, [])
+  await ctx.close()
 })
