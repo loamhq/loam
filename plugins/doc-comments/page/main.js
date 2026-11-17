@@ -12,6 +12,7 @@ import { docApi } from './api.js'
 const BASE = '/x/doc-comments/'
 const ROOTS = { vault: 'Vault', spaces: 'AI Spaces', system: 'System' }
 const COMPACT_PX = 760
+export const STAGING_ONLY = true
 
 export function activate(loam) {
   const host = loam.ui?.host
@@ -22,6 +23,12 @@ export function activate(loam) {
   // changes a page only once that page is deployed from a release that has
   // it (staging first, then live).
   if (!host || !viewer || typeof host.files?.own !== 'function') return
+  // Staging first (2026-11-16): the calm editor draws only on Loam's staging
+  // copy (`next.<domain>`, deploy/README.md) until it has been walked there.
+  // Another release reached live before the walk, so the app version alone
+  // was not a gate. Going live is setting this to false. The server, the
+  // sidecars and the agents' tools are not gated: they serve both.
+  if (STAGING_ONLY && !String(globalThis.location?.hostname || '').startsWith('next.')) return
   loam.ui.styles?.add?.('assets/doc-comments.css')
   const kept = loam.ui.kept || host.kept
   let cur = null

@@ -235,8 +235,10 @@ read or written. The sidecars and id lines stay for when it is turned on
 again.
 
 The page module also does nothing on a copy of the app older than
-`files.own`, so turning the plugin on changes a page only once that page
-runs a release that has it (staging first, then live).
+`files.own`, and, while `STAGING_ONLY` in `page/main.js` is true, on any
+host but Loam's staging copy (`next.<domain>`): the editor is walked on
+staging before it goes live, and the app's version was not enough of a gate
+(another release reached live first). Going live is setting it to false.
 
 ## What step 2 adds
 

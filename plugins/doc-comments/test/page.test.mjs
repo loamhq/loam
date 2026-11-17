@@ -6,7 +6,10 @@
 // Run: node --test plugins/doc-comments/test/page.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { activate } from '../page/main.js'
+import { activate, STAGING_ONLY } from '../page/main.js'
+
+// The page module draws only on staging while STAGING_ONLY holds.
+globalThis.location = { hostname: 'next.example.test' }
 
 function fakeLoam({ own = true } = {}) {
   const regs = []
@@ -43,4 +46,13 @@ test('a current page: one viewer, for Markdown only; disposing removes it', () =
   assert.equal(r.when(file('a.md', 'markdown', { error: 'gone' })), false)
   dispose()
   assert.equal(regs.length, 0)
+})
+
+test('staging only: on any other host, nothing is registered', () => {
+  assert.equal(STAGING_ONLY, true)
+  globalThis.location = { hostname: 'loam.example.test' }
+  const { loam, regs } = fakeLoam()
+  activate(loam)
+  assert.equal(regs.length, 0)
+  globalThis.location = { hostname: 'next.example.test' }
 })
