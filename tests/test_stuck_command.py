@@ -16,6 +16,8 @@ Held here with real processes and stub engines, through the real
   not busy        a silence after a command finished (a background server
                   started in the last step, the model thinking) stops nothing.
   the receipt     `receipt_text` names each stop; none, no paragraph.
+  the thread      the second stop on one job, and only the second, posts one
+                  system line to the thread that briefed it.
   the status      `activity_of` and `quiet_words` (bin/engineer-job) say the
                   last engine event, and NO ACTIVITY once the heartbeat says
                   stalled; `transcript_last` counts a Claude session's
@@ -203,6 +205,29 @@ def main() -> int:
         check("status: a stuck one says so, with its stops",
               words, "NO ACTIVITY FOR 13 h 9 min (last engine event 2026-11-16T22:51:00Z); "
                      "it may be stuck; the launcher stopped 1 command that never returned")
+
+        # The second stop on one job posts one line to the briefing thread.
+        posted = []
+        fake = type(sys)("loam_threads")
+        fake.append = lambda tid, author, text, kind="message", **kw: posted.append((tid, author, kind, text))
+        sys.modules["loam_threads"] = fake
+        try:
+            on_stop = job_mod.stuck_stopped({}, {"thread": "t-1", "title": "Polish"}, "j1")
+            record = {"pid": 7, "quiet_minutes": 30, "argv": "bash -c node --test",
+                      "command": "node --test test/x.test.js"}
+            on_stop(record, 1)
+            check("first stop: nothing posted", posted, [])
+            on_stop(record, 2)
+            on_stop(record, 3)
+            check("second stop: one system line to the briefing thread, and only one",
+                  [(tid, author, kind) for tid, author, kind, _ in posted], [("t-1", "system", "system")])
+            check("...naming the job and the command",
+                  "“Polish”" in posted[0][3] and "node --test test/x.test.js" in posted[0][3], True)
+            posted.clear()
+            job_mod.stuck_stopped({}, {"thread": "", "title": "x"}, "j2")(record, 2)
+            check("a job with no thread posts nothing", posted, [])
+        finally:
+            sys.modules.pop("loam_threads", None)
 
         sessions = tmp / "sessions"
         (sessions / "sid" / "subagents").mkdir(parents=True)

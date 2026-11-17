@@ -71,6 +71,10 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **`gen-rc-units` has no `--help`.** Any argument starting with `-` is
   ignored and the run is live: `gen-rc-units --help` writes every rc unit.
   Use `--dry-run`.
+- **Nor has `gen-deploy`** (caused 2026-11-17): `gen-deploy --help` is a
+  live render. It wrote the Caddyfile, reloaded Caddy and ran `compose up`
+  on the login and the browser. Read a generator's docstring, never its
+  `--help`.
 
 ## 2026-11-16 — a correct record can still draw in the wrong order
 
