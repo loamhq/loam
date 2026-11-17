@@ -41,5 +41,9 @@ have never met.
   always the theme's drawn face (`blob()` / `agentFace()`) or its uploaded
   image (`face`). `sessions.js`, `agent-profile.js` and `agent-drafts.js`
   ignore any `emoji` field on agent/draft records, and the profile face
-  control offers only upload and removal. Thread icons (`thread.icon` in
-  `thread-identity.js`) remain a separate concept.
+  control is a `menuSurface` popover (`st.faceMenu` / `.profile-face-menu`)
+  anchored to `.profile-face` (exempt from `button-tiers.css` popover
+  suppression so **New thread** keeps its primary pill) offering a large face
+  preview, `Upload a picture`, and (when a picture is set) `Use the theme’s
+  face`. Thread icons (`thread.icon` in `thread-identity.js`) remain a
+  separate concept.
