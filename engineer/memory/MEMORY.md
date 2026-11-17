@@ -332,7 +332,17 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   alike the moment it is on, whatever commit each app copy runs. To put a
   page change on staging first, gate it on a capability only the new app has
   (doc-comments waits for `files.own`); it turns on for live when live is
-  deployed from that release.
+  deployed from that release. **That is not enough on its own**: on 11-16
+  another job deployed live from a `main` that already had the capability,
+  and the editor reached live before the staging walk. A staging-only page
+  change needs an explicit gate (doc-comments: `STAGING_ONLY` and the
+  `next.` host), lifted by a later change.
+- **The personas' browser is one Chromium with a 1 GB cap, shared by every
+  session.** Driving it over its MCP HTTP endpoint for screenshots leaves a
+  browser context per session unless it is closed (`browser_close`, then an
+  HTTP `DELETE` with the `Mcp-Session-Id`). A dozen contexts holding Loam's
+  page (which keeps its streams open) took it to 758 MB, after which every
+  call from anyone hung until `docker restart loam-browser`.
 - **CodeMirror 6 measures block widgets without their CSS margins.** A
   margin on a block widget (the Properties line, a table) leaves the height
   map short by that much, and everything placed from `lineBlockAt` (gutter
