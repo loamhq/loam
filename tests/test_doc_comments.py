@@ -244,7 +244,7 @@ def test_with_broker(tmp: Path):
             check("the tool lists its operations, Shared with me's included", names,
                   sorted(["doc_notes", "doc_comment", "doc_suggest", "doc_reply", "doc_resolve",
                           "doc_reopen", "doc_accept", "doc_reject", "doc_shared_with_me", "doc_read",
-                          "doc_save", "doc_add_shared", "doc_remove_shared"]))
+                          "doc_save", "doc_add_shared", "doc_remove_shared", "doc_appear"]))
             check("a persona suggests by quote through the tool (absolute path)",
                   answers[3]["result"].get("isError"), None)
             listing = answers[4]["result"]["content"][0]["text"]

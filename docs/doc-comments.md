@@ -674,6 +674,52 @@ the name on their link, exactly as through that Loam's share page.
   changes something (the dot is the whole of it), saving a copy into the
   vault, and strangers without a Loam (they keep the share page).
 
+## How the owner's agents appear to others (2026-11-17)
+
+The owner's words: "we should definitely have that option when I'm sharing
+a document to be able to set that." People outside see the owner's agents
+in two places: on the owner's own shared docs (a persona's notes, replies,
+suggestions and edits) and on docs in Shared with me (where a persona shows
+as "<Persona> · <name>'s agent"). Either can say which agents the owner has.
+So each can show them **by their own names** (as before, and still the
+default) or **as one**, "<Owner>'s agent".
+
+- **The default** is the plugin's `appear` setting (`names` or `one`): a
+  line at the foot of Shared Docs, "Your agents appear to others [by their
+  own names ▾]", and like every setting a persona's to set too
+  (`bin/settings set plugin.doc-comments.appear one`).
+- **A doc may choose its own**: a shared doc in its share sheet ("Your
+  agents appear here [as usual (…) ▾]"), a doc in Shared with me in its row
+  menu ("How your agents appear", a sheet of three choices). Kept outside
+  the vault: the owner's docs in `links.json` (`appear`, by doc id), Shared
+  with me in `with-me.json`. A persona changes one with `doc_appear`, on the
+  owner's word.
+- **Hiding is real, done where an answer leaves.** On the owner's docs the
+  door passes every answer for a visitor or a visitor's agent through
+  `appear.mask` (server/doccomments/appear.py): every author, closer, save
+  author, authorship span and `people` entry that is one of this Loam's
+  agents becomes `{"id": "owner-agent", "name": "<Owner>'s agent", "kind":
+  "agent"}`. Applied as served, so a change covers the notes already there.
+  The sidecar keeps the true persona, and the owner's own page, History and
+  Show authors still say which agent did what. A group visitor may then take
+  a persona's name, since refusing "Iris" would say there is an Iris.
+- **On Shared with me the name is never sent**: with `one` in force the
+  server sends the agent key and no `X-Loam-Agent-Name`, so the other door
+  shows "<name on the link>'s agent". What was sent under a name before is
+  the other Loam's and cannot be recalled; the sheet says so in one quiet
+  line. Notes made under a name keep that author there, so a persona can no
+  longer change or take back those after switching to `one`.
+- **Personas are told.** Every doc answer to a persona carries `appear`
+  (`choice`, `default`, `as`, `alias`, and `shared` on the owner's docs), and
+  `doc_notes`, `doc_read` and every write's answer say how the persona
+  appears there; when hidden, never to sign or name itself in what it
+  writes. The words it writes are its own: the mask changes authors, never
+  text.
+- Tests: `test/test_share.py` (`AgentsAppearAsOne`, `AppearRoutes`) greps
+  every door answer, by a browser and by an agent key, for the personas'
+  names; `test/test_withme.py` (`AgentsAppearAsOne`) greps every request the
+  other Loam receives.
+
 ## Working on it
 
 - `python3 plugins/doc-comments/test/test_model.py`, `node --test

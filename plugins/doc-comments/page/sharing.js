@@ -1,9 +1,11 @@
 // The owner's side of sharing, in Loam's editor: the Share button, the
 // invite card (who, what they can do, the ticket they get) and Shared with
-// (one row per link: its mode, Copy invite again, Turn off with Undo).
+// (one row per link: its mode, Copy invite again, Turn off with Undo), and
+// how the owner's agents appear to them on this doc (appear.js).
 // Talks to the plugin server's owner routes (`/x/doc-comments/doc/links`).
 
 import { tone, h, icon, put } from './editor/dom.js'
+import { appearSelect } from './appear.js'
 
 const MODES = [
   { id: 'view', label: 'can view', verb: 'view' },
@@ -13,7 +15,7 @@ const MODES = [
 const DAYS = [1, 7, 30, 90, 365]
 
 export function createSharing({ base, root, path, title, owner, toast, onChange, notes = () => 0, resolved = () => 0 }) {
-  const st = { links: [], owner: owner || 'You', open: null, card: null, menu: null }
+  const st = { links: [], owner: owner || 'You', open: null, card: null, menu: null, appear: null }
   const req = async (method, route, body) => {
     const q = method === 'GET' ? `?${new URLSearchParams({ root, path })}` : ''
     const res = await fetch(`${base}${route}${q}`, {
@@ -66,6 +68,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
       const got = await req('GET', 'doc/links')
       st.links = got.links
       st.owner = got.owner || st.owner
+      st.appear = got.appear || null
     } catch (err) {
       toast?.(err.message)
       return
@@ -194,7 +197,32 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
       head('Shared with'),
       h('div', { class: 'dc-sw-list' }, rows.length ? rows : h('p', { class: 'dc-quiet', text: 'No one has a link to this doc.' })),
       h('button', { class: 'dc-gate-go dc-sh-go', type: 'button', onclick: async () => { await freshCard(); st.open = 'card'; draw() } }, icon('plus', 15), 'New invite'),
-      h('p', { class: 'dc-sh-cap', text: 'Each link has its own password.' }))
+      h('p', { class: 'dc-sh-cap', text: 'Each link has its own password.' }),
+      appearLine())
+  }
+
+  // How the owner's agents appear to everyone with a link to this doc: one
+  // line, the default or this doc's own choice. Applied as notes are served,
+  // so it covers what is already on the doc too.
+  function appearLine() {
+    const a = st.appear
+    if (!a) return null
+    return h('div', { class: 'dc-tk-mem dc-ap-line' },
+      h('span', { text: 'Your agents appear here' }),
+      appearSelect({
+        value: a.choice, def: a.default, alias: a.alias, withDefault: true,
+        label: 'How your agents appear on this doc',
+        onChange: async (v) => {
+          try {
+            const out = await req('PATCH', 'doc/links/appear', { appear: v })
+            st.appear = out.appear
+            toast?.(st.appear.as === 'one'
+              ? `Your agents appear as ${st.appear.alias} here, on notes already here too`
+              : 'Your agents appear here by their own names')
+          } catch (err) { toast?.(err.message) }
+          draw()
+        },
+      }))
   }
 
   function rowMenu(l) {

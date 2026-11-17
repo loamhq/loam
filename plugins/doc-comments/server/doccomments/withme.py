@@ -53,6 +53,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
+from . import appear as appear_mod
 from .sidecar import NoteError, now_iso
 
 CLIENT_PROTOCOL = 1            # the door protocol this client speaks (door.PROTOCOL)
@@ -295,12 +296,16 @@ def public(entry: dict) -> dict:
             "owner": entry.get("owner") or "", "mode": entry.get("mode") or "view",
             "name": entry.get("name") or "", "state": entry.get("state") or "ok",
             "problem": entry.get("problem") or "", "new": new, "added": entry.get("added"),
-            "seen_at": entry.get("seen_at"), "checked": entry.get("checked")}
+            "seen_at": entry.get("seen_at"), "checked": entry.get("checked"),
+            # How the owner's agents appear there: this doc's own choice
+            # (``default`` follows the plugin's setting).
+            "appear": entry.get("appear") if entry.get("appear") in appear_mod.CHOICES else "default"}
 
 
 class WithMe:
     def __init__(self, folder, own_tokens=lambda: set(), door=None, remote: Remote | None = None,
-                 owner=lambda: {"id": "owner", "name": "Owner"}, agent=lambda aid: None):
+                 owner=lambda: {"id": "owner", "name": "Owner"}, agent=lambda aid: None,
+                 appear_default=lambda: appear_mod.DEFAULT):
         self.folder = Path(folder)
         self.path = self.folder / "with-me.json"
         self.own_tokens = own_tokens
@@ -308,6 +313,7 @@ class WithMe:
         self.remote = remote or Remote()
         self.owner = owner
         self.agent = agent
+        self.appear_default = appear_default
         self._lock = threading.RLock()
 
     # -- the file ------------------------------------------------------------------------
@@ -454,6 +460,20 @@ class WithMe:
             pass
         return public(self._get(wid))
 
+    def appear(self, e: dict) -> str:
+        """How the owner's agents appear on this doc now: ``names`` or ``one``."""
+        return appear_mod.effective(e.get("appear"), self.appear_default())
+
+    def set_appear(self, wid: str, value) -> dict:
+        """This doc's own choice (``names``, ``one``) or ``default``. Only what
+        is sent from now on follows it: what the other Loam was sent under a
+        name before is kept there."""
+        if value not in appear_mod.CHOICES + ("default",):
+            raise NoteError(400, "appear is names, one or default")
+        self._get(wid)
+        self._update(wid, appear=None if value == "default" else value)
+        return public(self._get(wid))
+
     def remove(self, wid: str) -> dict:
         """Forget the link, the password, the session and the key. Nothing
         on the other side changes."""
@@ -468,11 +488,15 @@ class WithMe:
 
     def _auth(self, e: dict, who: dict, fresh: bool = False) -> dict:
         """The headers that make this request the owner (the session) or one
-        of their agents (the door's agent key, with the agent's own name)."""
+        of their agents (the door's agent key, with the agent's own name, or
+        with no name at all when the owner's agents appear as one there: the
+        door then shows "<the owner's name there>'s agent")."""
         if who.get("kind") == "agent":
             key = e.get("agent_key")
             if not key or fresh:
                 key = self._new_key(e)
+            if self.appear(e) == "one":
+                return {"Authorization": f"Bearer {key}"}
             label = who.get("name") or who.get("id") or ""
             try:
                 label.encode("latin-1")
@@ -579,6 +603,8 @@ class WithMe:
             if m:
                 changes["title"] = m.group(1)[:200]
         self._update(wid, **changes)
+        # How the agents appear there, for the tools (and nothing else of ours).
+        got["appear"] = {"choice": public(e)["appear"], "as": self.appear(e)}
         return ans.status, got
 
     def status(self, wid: str) -> dict:

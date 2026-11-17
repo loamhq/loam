@@ -17,6 +17,10 @@ the link alone:
   the link is on. Wrong passwords are slowed, then blocked (links.py).
 - **An agent's key**, ``Authorization: Bearer lak_…``, acts as "<Name>'s
   agent" with the link's mode, and stops with the link.
+- **The owner's agents appear as the owner chose** (appear.py): by their
+  own names, or all as one, "<Owner>'s agent". Chosen per doc or by
+  default, and applied to every answer as it leaves (``_masked``), so the
+  sidecar keeps who really wrote what and a change applies to past notes.
 - **Writes** need the custom header ``X-Loam-Share: 1`` from a browser (so
   another site cannot post with the visitor's cookie), count against the
   link's limits, and are refused when the doc's sidecar is already large.
@@ -39,6 +43,7 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import parse_qs
 
+from . import appear as appear_mod
 from . import links as links_mod
 from . import frontmatter as fm
 from .sidecar import NoteError
@@ -117,7 +122,8 @@ def _json(status, obj, headers=None):
 
 class Door:
     def __init__(self, service, links, plugin_dir: Path, reach=lambda: "staging",
-                 owner_name=lambda: "Loam", sleep=time.sleep, home=lambda: ""):
+                 owner_name=lambda: "Loam", sleep=time.sleep, home=lambda: "",
+                 appear_default=lambda: appear_mod.DEFAULT):
         self.svc = service
         self.links = links
         self.page_dir = Path(plugin_dir) / "page"
@@ -126,6 +132,19 @@ class Door:
         self.owner_name = owner_name
         self.sleep = sleep
         self.home = home
+        self.appear_default = appear_default
+
+    def appear(self, did: str) -> str:
+        """How the owner's agents appear on this doc now: ``names`` or ``one``."""
+        return appear_mod.effective(self.links.appear(did), self.appear_default())
+
+    def _masked(self, link, out):
+        """An answer as it leaves: when this doc shows the owner's agents as
+        one, none of them is named in it."""
+        if self.appear(link["did"]) != "one":
+            return out
+        agents = [pid for pid, p in (self.svc.store.people() or {}).items() if p.get("kind") == "agent"]
+        return appear_mod.mask(out, agents, appear_mod.alias(self.owner_name()))
 
     # -- the request ------------------------------------------------------------------
 
@@ -225,16 +244,16 @@ class Door:
                                "guide": _origin(headers) + prefix + "/agent.md",
                                "as": f"{who['name']}'s agent", "mode": link["mode"]})
         if api == ["me"] and method == "GET":
-            return _json(200, {"me": who, "mode": link["mode"], "link": link["id"]})
+            return _json(200, self._masked(link, {"me": who, "mode": link["mode"], "link": link["id"]}))
         if api == ["status"] and method == "GET":
             # What another Loam's list shows of this doc, in one call: its
             # title, whose it is, the link's mode now, and the two revisions
             # its dot compares (the text's and the notes').
             doc = self.svc.store.read_doc(*doc_where)
             rev = self.svc.revision(who, *doc_where)
-            return _json(200, {"protocol": PROTOCOL, "title": _title(doc["text"], doc_where[1]),
-                               "owner": self.owner_name(), "mode": link["mode"], "me": who,
-                               "revision": rev["revision"], "notes": rev["notes"]})
+            return _json(200, self._masked(link, {"protocol": PROTOCOL, "title": _title(doc["text"], doc_where[1]),
+                                                  "owner": self.owner_name(), "mode": link["mode"], "me": who,
+                                                  "revision": rev["revision"], "notes": rev["notes"]}))
         if not api or api[0] != "doc":
             return _json(404, {"error": "no such route"})
         if writes:
@@ -247,7 +266,7 @@ class Door:
         cut = _front(stored)
         out = self._route(method, api[1:], _shift_in(args, stored[:cut]), who, root, dpath)
         created = method == "POST" and (api[1:] == ["notes"] or api[-1:] == ["replies"])
-        return _json(201 if created else 200, _for_visitor(out))
+        return _json(201 if created else 200, self._masked(link, _for_visitor(out)))
 
     def _route(self, method, api, args, who, root, path):
         svc = self.svc
@@ -362,9 +381,13 @@ class Door:
             return True          # how agents and Loam itself are shown
         if "owner" in key.replace(" ", ""):
             return True
-        people = (self.svc.store.people() or {}).values()
+        people = list((self.svc.store.people() or {}).values())
         first = (key.split(" ") or [""])[0].strip(".,;:!?'’\"-")
         claimed = {_name_key(self.owner_name()).split(" ")[0]} if self.owner_name() else set()
+        # When the owner's agents appear as one, their names are not known
+        # here and are not claimed: refusing "Iris" would say there is one.
+        if self.appear(link["did"]) == "one":
+            people = [p for p in people if p.get("kind") != "agent"]
         claimed |= {_name_key(p.get("name", "")).split(" ")[0] for p in people if p.get("name")}
         claimed |= {_name_key(p.get("id", "")) for p in people if p.get("kind") == "agent" and p.get("id")}
         if first and first in (claimed - {""}):

@@ -534,6 +534,70 @@ class PersonaTools(unittest.TestCase):
             self.assertNotIn(PASSWORD.encode(), raw)
 
 
+class AgentsAppearAsOne(unittest.TestCase):
+    """With the owner's agents shown as one there, a persona's name never
+    leaves this Loam: no X-Loam-Agent-Name, nothing in any request."""
+
+    def test_no_persona_name_is_sent(self):
+        theirs, mine = Theirs(), Mine()
+        self.addCleanup(theirs.srv.shutdown)
+        _, url = theirs.link("comment", "Sam")
+        st, out = mine.call("POST", "/withme", {"link": url, "password": PASSWORD})
+        wid = out["doc"]["id"]
+        self.assertEqual(out["doc"]["appear"], "default")
+        st, out = mine.call("POST", f"/withme/{wid}/doc/notes",
+                            {"kind": "comment", "quote": "beans", "text": "Which kind?"}, agent="iris")
+        self.assertEqual(st, 201, out)
+        self.assertEqual(theirs.notes()[-1]["author"]["name"], "Iris · Sam's agent")   # names: today's way
+        st, out = mine.call("PATCH", f"/withme/{wid}", {"appear": "one"})
+        self.assertEqual((st, out["doc"]["appear"]), (200, "one"))
+        before = len(theirs.seen)
+        st, out = mine.call("POST", f"/withme/{wid}/doc/notes",
+                            {"kind": "comment", "quote": "May", "text": "June is warmer."}, agent="iris")
+        self.assertEqual(st, 201, out)
+        self.assertEqual(out["appear"], {"choice": "one", "as": "one"})
+        st, doc = mine.call("GET", f"/withme/{wid}/doc", agent="iris")
+        self.assertEqual(doc["me"]["name"], "Sam's agent")
+        sent = theirs.seen[before:]
+        self.assertTrue(sent)
+        for method, path, headers in sent:
+            self.assertNotIn("x-loam-agent-name", {k.lower() for k in headers})
+            self.assertIsNone(re.search(r"\biris\b", json.dumps([path, headers]), re.I), (path, headers))
+        self.assertEqual(theirs.notes()[-1]["author"]["name"], "Sam's agent")
+        # What was sent under a name before stays as it was there.
+        self.assertEqual(theirs.notes()[0]["author"]["name"], "Iris · Sam's agent")
+        # The default decides until the doc chooses.
+        mine.call("PATCH", f"/withme/{wid}", {"appear": "default"})
+        mine.withme.appear_default = lambda: "one"
+        before = len(theirs.seen)
+        mine.call("GET", f"/withme/{wid}/doc", agent="iris")
+        self.assertFalse(any("X-Loam-Agent-Name" in h for _, _, h in theirs.seen[before:]))
+        mine.withme.appear_default = lambda: "names"
+        before = len(theirs.seen)
+        mine.call("GET", f"/withme/{wid}/doc", agent="iris")
+        self.assertTrue(any(h.get("X-Loam-Agent-Name") == "Iris" for _, _, h in theirs.seen[before:]))
+        st, out = mine.call("PATCH", f"/withme/{wid}", {"appear": "nobody"})
+        self.assertEqual(st, 400)
+
+    def test_the_tools_say_how_the_persona_appears(self):
+        theirs, mine = Theirs(), Mine()
+        self.addCleanup(theirs.srv.shutdown)
+        sys.path.insert(0, str(HERE.parent / "tools"))
+        import notes_mcp as T
+        T.URL, T.AGENT = mine.base, "iris"
+        _, url = theirs.link("comment", "Sam")
+        T.run_tool("doc_add_shared", {"link": url, "password": PASSWORD})
+        address = re.search(r"shared:w-[a-z0-9]{10}", T.run_tool("doc_shared_with_me", {})).group(0)
+        self.assertNotIn("never sign", T.run_tool("doc_read", {"path": address}))
+        out = T.run_tool("doc_appear", {"path": address, "appear": "one"})
+        self.assertIn("from now on", out)
+        read = T.run_tool("doc_read", {"path": address})
+        self.assertIn("never sign or name yourself", read)
+        notes = T.run_tool("doc_notes", {"path": address})
+        self.assertIn("You are Sam's agent there", notes)
+        self.assertIn("never sign or name yourself", notes)
+
+
 class OwnLoam(unittest.TestCase):
     def test_own_link_opens_in_process(self):
         theirs = Theirs()

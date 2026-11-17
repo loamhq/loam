@@ -106,6 +106,16 @@ TOOLS = [
      "description": "Remove a doc from Shared with me, on the owner's ask: their Loam forgets "
                     "its link and password. Nothing changes on the other side.",
      "inputSchema": {"type": "object", "properties": {"path": SHARED}, "required": ["path"]}},
+    {"name": "doc_appear",
+     "description": "How the owner's agents appear to people outside this Loam on one doc: "
+                    "each by its own name (names), all as one \"<owner>'s agent\" (one), or as "
+                    "the owner's default (default; the setting plugin.doc-comments.appear). For "
+                    "a doc the owner shares, it applies to everything already on it too; for a "
+                    "doc shared with the owner, only to what is sent from now on. Change it only "
+                    "when the owner asks.",
+     "inputSchema": {"type": "object", "properties": {
+         "path": PATH, "appear": {"type": "string", "enum": ["names", "one", "default"]}},
+         "required": ["path", "appear"]}},
     {"name": "doc_reply",
      "description": "Reply in a note's thread.",
      "inputSchema": {"type": "object", "properties": {
@@ -223,6 +233,8 @@ def describe(doc: dict, include_all: bool = False, focus: str | None = None, add
         lines.append(f"You are {me.get('name', 'the owner’s agent')} there; the link gives "
                      f"{(me.get('mode') or 'view')}.")
         lines.append(OUTSIDE_DOC)
+    if appear_line(doc, address):
+        lines.append(appear_line(doc, address))
     for n in shown:
         w = n.get("where") or {}
         state = {"attached": "", "changed": " (text changed since)",
@@ -242,6 +254,28 @@ def describe(doc: dict, include_all: bool = False, focus: str | None = None, add
         for r in n.get("replies", []):
             lines.append(f"  {r['author']['name']}{whose(r['author'], short=True)} ({r['created']}): {r['text']}")
     return "\n".join(lines)
+
+
+def appear_line(doc: dict, address: str | None = None) -> str:
+    """How this agent shows to people outside on this doc, so it never signs
+    its own name where the owner hides it."""
+    a = doc.get("appear") or {}
+    if not a:
+        return ""
+    if address:
+        if a.get("as") == "one":
+            return ("The owner's agents all appear there as one, under the owner's name "
+                    "(“…'s agent”), not by their own names: never sign or name yourself in what you write.")
+        return ""
+    alias = a.get("alias") or "the owner's agent"
+    me = (doc.get("me") or {}).get("name") or "your own name"
+    if a.get("as") == "one":
+        where = "People outside, on this doc's share links," if a.get("shared") else "If this doc is shared, people outside"
+        return (f"{where} see you, and every other agent of the owner's, as “{alias}”: "
+                "your own name is hidden. Never sign or name yourself in what you write here.")
+    if a.get("shared"):
+        return f"People outside, on this doc's share links, see you as {me}."
+    return ""
 
 
 def shared_row(d: dict) -> str:
@@ -278,6 +312,8 @@ def run_tool(name: str, args: dict) -> str:
         doc = call("GET", "/doc", root, path)
         head = address or f"{root}/{path}"
         extra = ("\n" + OUTSIDE_DOC) if address else ""
+        if appear_line(doc, address):
+            extra += "\n" + appear_line(doc, address)
         return f"{head} (revision {doc['revision']}){extra}\n\n{doc['text']}"
     if name == "doc_save":
         if root != "shared":
@@ -286,6 +322,18 @@ def run_tool(name: str, args: dict) -> str:
         conflicts = [n for n in doc.get("notes") or [] if n.get("origin") == "conflict" and n.get("state") == "open"]
         tail = (f" {len(conflicts)} passage(s) someone else had changed became suggestions." if conflicts else "")
         return f"Saved (revision {doc['revision']}).{tail}"
+    if name == "doc_appear":
+        value = args.get("appear")
+        if value not in ("names", "one", "default"):
+            raise ToolError("appear is names, one or default")
+        if address:
+            d = call("PATCH", f"/withme/{path}", None, None, {"appear": value})["doc"]
+            return (f"On {address}, the owner's agents now appear as "
+                    f"{'one' if value == 'one' else 'their own names' if value == 'names' else 'the default says'}"
+                    " in what is sent from now on; what was sent before stays as it was there.")
+        a = call("PATCH", "/doc/links/appear", root, path, {"appear": value})["appear"]
+        how = f"one, “{a['alias']}”" if a["as"] == "one" else "their own names"
+        return f"On {root}/{path}, the owner's agents appear to people outside as {how} ({a['choice']}); past notes included."
     if name == "doc_notes":
         return describe(call("GET", "/doc", root, path), bool(args.get("all")), address=address)
     if name == "doc_comment":
