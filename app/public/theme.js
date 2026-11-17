@@ -2,6 +2,7 @@
 import { authenticatedFetch as fetch } from './auth.js'
 import { optionValues, mergeAppearance, applyOptions } from './theme-options.js'
 import './sun.js'
+import { createShift, transitionMs } from './sun-shift.js'
 import { formatTime, browserTimeZone } from './time.js'
 
 export function createTheme(media = globalThis.matchMedia?.('(prefers-color-scheme: dark)'), {
@@ -20,41 +21,86 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     if (!globalThis.navigator?.geolocation) return reject(new Error('Location unavailable'))
     navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 10000, maximumAge: 86400000 })
   }),
+  reducedMotion,
+  shift: customShift,
 } = {}) {
   const root = document.documentElement
   const installed = boot?.themes || [{ id: 'latte', name: 'Latte & Newspaper' }, { id: 'plain', name: 'Plain' }]
   const themeId = id => installed.some(t => t.id === id) ? id : 'latte'
+  const transitionId = id => ['fast', 'normal', 'long'].includes(id) ? id : 'normal'
   const sun = globalThis.LoamSun
-  let draft = sun.local(kind), localOnly = false, sunUnsupported = false, locating = false, sunTimer
-  let value = { mode: 'system', size: 100, ...boot?.values?.[kind], ...(sun.location(boot?.values?.location) ? { location: sun.location(boot.values.location) } : {}), ...draft, theme: themeId(boot?.values?.[kind]?.theme) }
+  let draft = sun.local(kind), localOnly = false, sunUnsupported = false, locating = false, sunTimer, activeMode = null
+  let value = { mode: 'system', transition: 'normal', size: 100, ...boot?.values?.[kind], ...(sun.location(boot?.values?.location) ? { location: sun.location(boot.values.location) } : {}), ...draft, theme: themeId(boot?.values?.[kind]?.theme), transition: transitionId(draft.transition ?? boot?.values?.[kind]?.transition) }
   let withOptions = installed.some(t => t.options?.length)
   if (withOptions) value.options = optionValues(value.options, installed)
   let pending = { ...draft }, timer, saving = false, revision = 0, reading = 0
   let error = boot?.available !== true ? 'Appearance settings are not available on the host yet. Changes apply here until you reload.' : null
+  const motionQuery = reducedMotion ?? globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')
+  const isHidden = () => Boolean(globalThis.document?.hidden || globalThis.document?.visibilityState === 'hidden')
+  const isReducedMotion = () => Boolean(motionQuery?.matches)
+  const updateThemeColor = (ground = globalThis.getComputedStyle?.(root).getPropertyValue('--paper-page').trim()) => {
+    if (ground) globalThis.document?.querySelector?.('meta[name="theme-color"]')?.setAttribute('content', ground)
+  }
+  const shift = customShift ?? createShift({ root, setThemeColor: updateThemeColor })
   const status = () => ({ saving: saving || Object.keys(pending).length > 0, error: localOnly && !error?.includes('until saved') ? null : error, localOnly, locating })
   function cache(patch) { draft = { ...draft, ...patch }; sun.local(kind, draft) }
   function acknowledge(patch) {
-    for (const key of ['mode', 'location']) if (JSON.stringify(draft[key]) === JSON.stringify(patch[key])) delete draft[key]
+    for (const key of ['mode', 'location', 'transition']) if (JSON.stringify(draft[key]) === JSON.stringify(patch[key])) delete draft[key]
     sun.local(kind, draft); localOnly = Object.keys(draft).length > 0
   }
   function solarPatch(patch) {
-    return { ...(patch.mode === 'sun' ? { mode: 'sun' } : {}), ...(patch.location ? { location: patch.location } : {}) }
+    return { ...(patch.mode === 'sun' ? { mode: 'sun' } : {}), ...(patch.location ? { location: patch.location } : {}), ...(patch.transition ? { transition: patch.transition } : {}) }
   }
-  function apply() {
+  function optionsSignature() {
+    return withOptions ? JSON.stringify(value.options?.[value.theme] || {}) : ''
+  }
+  function apply({ allowShift = false, keepActiveShift = false } = {}) {
     clearTimeout(sunTimer)
     const solar = value.mode === 'sun' ? sun.state(now(), value.location) : null
     const chosen = solar ? solar.mode : value.mode === 'system' ? (media?.matches ? 'dark' : 'light') : value.mode
     if (solar) {
-      sunTimer = setTimeout(() => { apply(); changed() }, Math.max(1, Math.ceil(solar.next - now())))
+      const targetAt = solar.next
+      sunTimer = setTimeout(() => {
+        const late = now() - targetAt > 60000
+        apply({ allowShift: !late })
+        changed()
+      }, Math.max(1, Math.ceil(targetAt - now())))
       sunTimer.unref?.()
     }
+    const optKey = optionsSignature()
+    const currentShift = shift.active
+    if (keepActiveShift && currentShift && value.mode === 'sun' && currentShift.toMode === chosen && currentShift.look === value.theme && currentShift.optionsKey === optKey && !isHidden() && !isReducedMotion()) {
+      root.style.setProperty('--ui-scale', value.size / 100)
+      activeMode = chosen
+      return chosen
+    }
+    if (allowShift && value.mode === 'sun' && activeMode && activeMode !== chosen && !isHidden() && !isReducedMotion()) {
+      const fromMode = activeMode
+      root.dataset.look = value.theme
+      globalThis.LoamThemeFonts?.(value.theme)
+      applyOptions(root, value.options, installed, value.theme)
+      root.style.setProperty('--ui-scale', value.size / 100)
+      if (shift.start({
+        fromMode,
+        toMode: chosen,
+        duration: transitionMs(value.transition),
+        look: value.theme,
+        optionsKey: optKey,
+        onMidpoint: () => changed(),
+        onComplete: () => changed(),
+      })) {
+        activeMode = chosen
+        return chosen
+      }
+    }
+    shift.cancel()
+    activeMode = chosen
     root.dataset.theme = chosen
     root.dataset.look = value.theme
     globalThis.LoamThemeFonts?.(value.theme)
     applyOptions(root, value.options, installed, value.theme)
     root.style.setProperty('--ui-scale', value.size / 100)
-    const ground = globalThis.getComputedStyle?.(root).getPropertyValue('--paper-page').trim()
-    if (ground) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', ground)
+    updateThemeColor()
     return chosen
   }
   async function save() {
@@ -99,7 +145,7 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
   function set(changes) {
     const patch = { ...changes }
     if (!Object.keys(patch).length) return
-    if (Object.keys(patch).some(k => !['mode', 'size', 'theme', 'options', 'location'].includes(k))) return
+    if (Object.keys(patch).some(k => !['mode', 'transition', 'size', 'theme', 'options', 'location'].includes(k))) return
     if (patch.options !== undefined) {
       if (!patch.options || typeof patch.options !== 'object' || Array.isArray(patch.options)) return
       if (!Object.keys(patch.options).length) return
@@ -114,6 +160,7 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     }
     if (patch.theme !== undefined && themeId(patch.theme) !== patch.theme) return
     if (patch.mode !== undefined && !['light', 'dark', 'sun', 'system'].includes(patch.mode)) return
+    if (patch.transition !== undefined && !['fast', 'normal', 'long'].includes(patch.transition)) return
     if (patch.location !== undefined) {
       patch.location = sun.location(patch.location)
       if (!patch.location) return
@@ -125,9 +172,12 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     revision++
     const firstSun = patch.mode === 'sun' && !sun.location(value.location)
     if (firstSun) patch.location = sun.fallback()
-    if (patch.mode === 'sun' || draft.mode !== undefined || patch.location) cache({ ...(patch.mode ? { mode: patch.mode } : {}), ...(patch.location ? { location: patch.location } : {}) })
+    if (patch.mode === 'sun' || draft.mode !== undefined || patch.location || patch.transition !== undefined || draft.transition !== undefined) {
+      cache({ ...(patch.mode ? { mode: patch.mode } : {}), ...(patch.location ? { location: patch.location } : {}), ...(patch.transition ? { transition: patch.transition } : {}) })
+    }
     value = mergeAppearance(value, patch); pending = mergeAppearance(pending, patch)
-    apply(); changed(); clearTimeout(timer); timer = setTimeout(save, 180)
+    const keepActiveShift = !('mode' in patch || 'theme' in patch || 'options' in patch || 'transition' in patch)
+    apply({ keepActiveShift }); changed(); clearTimeout(timer); timer = setTimeout(save, 180)
     if (firstSun) useLocation()
   }
   async function useLocation() {
@@ -140,7 +190,7 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     finally { locating = false; changed() }
   }
   async function refresh() {
-    apply() // Recheck immediately after sleep/focus, including when offline.
+    apply({ keepActiveShift: true }) // Recheck immediately after sleep/focus, including when offline.
     if (saving || Object.keys(pending).length) return
     const at = revision, read = ++reading
     try {
@@ -148,14 +198,15 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
       if (at !== revision || read !== reading || saving || Object.keys(pending).length || !out?.[kind]) return
       const next = out[kind]
       if (!['light', 'dark', 'sun', 'system'].includes(next.mode) || !Number.isInteger(next.size) || next.size < 75 || next.size > 150 || next.size % 5) return
-      value = { mode: next.mode, size: next.size, theme: themeId(next.theme), ...(sun.location(out.location) ? { location: sun.location(out.location) } : {}), ...draft, ...(withOptions ? { options: optionValues(next.options, installed) } : {}) }; error = null; apply(); changed()
+      value = { mode: next.mode, transition: transitionId(next.transition), size: next.size, theme: themeId(next.theme), ...(sun.location(out.location) ? { location: sun.location(out.location) } : {}), ...draft, ...(withOptions ? { options: optionValues(next.options, installed) } : {}) }; error = null; apply({ keepActiveShift: true }); changed()
     } catch (e) { if (at === revision && read === reading) { error = e.message; changed() } }
   }
   media?.addEventListener?.('change', () => { if (value.mode === 'system') { apply(); changed() } })
-  globalThis.addEventListener?.('focus', () => { if (value.mode === 'sun') { apply(); changed() } })
+  motionQuery?.addEventListener?.('change', () => { if (shift.active && isReducedMotion()) { apply(); changed() } })
+  globalThis.addEventListener?.('focus', () => { if (value.mode === 'sun') { apply({ keepActiveShift: true }); changed() } })
   document.addEventListener?.('visibilitychange', () => { if (!document.hidden && value.mode === 'sun') { apply(); changed() } })
   // Timer callbacks run on waking; this also catches a changed system clock.
-  const wake = setInterval(() => { if (value.mode === 'sun') { apply(); changed() } }, 60000)
+  const wake = setInterval(() => { if (value.mode === 'sun') { apply({ keepActiveShift: true }); changed() } }, 60000)
   wake.unref?.()
   if (Object.keys(pending).length) { timer = setTimeout(save, 180); timer.unref?.() }
   return { apply, set, save, refresh, useLocation, kind, installed,
@@ -169,6 +220,7 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
       value = { ...value, theme: themeId(value.theme), ...(withOptions ? { options: optionValues(value.options, installed) } : {}) }; apply(); changed()
     }, get value() { return structuredClone(value) }, get status() { return status() },
     get current() { return root.dataset.theme === 'dark' ? 'dark' : 'light' },
+    get shifting() { return Boolean(shift.active) },
     toggle() { set({ mode: this.current === 'dark' ? 'light' : 'dark' }); return this.current },
     key(event, desktop) {
       if (!desktop || event.altKey || event.isComposing || !(event.ctrlKey || event.metaKey)) return false

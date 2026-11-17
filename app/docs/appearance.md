@@ -141,8 +141,10 @@ store and expose these **same base keys** through its persona settings tool:
 | Registry key | Values | Default |
 | --- | --- | --- |
 | `appearance.phone.mode` | `light`, `dark`, `sun`, `system` | `system` |
+| `appearance.phone.transition` | `fast`, `normal`, `long` | `normal` |
 | `appearance.phone.size` | integer 75–150, step 5 | 100 |
 | `appearance.desktop.mode` | `light`, `dark`, `sun`, `system` | `system` |
+| `appearance.desktop.transition` | `fast`, `normal`, `long` | `normal` |
 | `appearance.desktop.size` | integer 75–150, step 5 | 100 |
 | `appearance.phone.theme` | installed theme ID (seven first-party themes above) | `latte` |
 | `appearance.desktop.theme` | installed theme ID (seven first-party themes above) | `latte` |
@@ -174,8 +176,17 @@ local edit is pending. There is no new settings poll or stream contract.
 ## Sun mode
 
 Sun is light from sunrise minus 30 minutes (inclusive) to sunset plus 30 minutes
-(exclusive) at the saved place. It uses the same instant token swap as the other
-modes. `public/sun.js` implements the NOAA/Meeus solar equations with the standard
+(exclusive) at the saved place. On a live boundary while the page is open and
+visible (and `prefers-reduced-motion` is not `reduce`), `public/sun-shift.js`
+gradually shifts the active theme's resolved colour tokens in OKLCH over the
+selected **Transition** duration (`fast` 3 s, `normal` 10 s default, `long` 20 s):
+surfaces drift across the whole shift, inks hold their contrast and flip quickly
+near the midpoint (`0.485`–`0.515` of surface progress), and non-token state
+(`data-theme`, `theme-color` meta, cover images, embeds) switches at the midpoint
+before clearing all inline overrides at the end. First paint, hidden tabs,
+manual mode or theme changes, and `prefers-reduced-motion: reduce` switch
+instantly, and any manual change interrupts an in-progress shift cleanly.
+`public/sun.js` implements the NOAA/Meeus solar equations with the standard
 −0.833° apparent horizon. The parser-blocking boot and live controller use that
 same code. There is no weather, location lookup or astronomy service, and no
 runtime dependency. Polar day stays light, polar night stays dark, with explicit
@@ -230,9 +241,9 @@ include the schema. This repo declares that extension; host installation and
 persona-tool parity require verification on the host.
 
 An older host may reject these new values or silently omit them from its answer.
-Sun/location edits apply immediately and are cached under the one browser key
+Sun/location/transition edits apply immediately and are cached under the one browser key
 `loam.appearance.sun` until acknowledged. Its shape is
-`{phone?:{mode},desktop?:{mode},location?:{latitude,longitude,source,timeZone}}`.
+`{phone?:{mode,transition},desktop?:{mode,transition},location?:{latitude,longitude,source,timeZone}}`.
 Only pending edits live there; it is not another store for theme, size, options
 or acknowledged settings. Both boot and controller overlay those pending fields.
 A refusal shows a quiet local-save message, drops them from the normal retry
