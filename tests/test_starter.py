@@ -72,6 +72,13 @@ def main() -> int:
     lc.WORKSPACES.mkdir(parents=True)
     loam_skills.seed_vault(lc.VAULT)
 
+    # The page draws a single newline as a line break, so the hello message
+    # is one line per paragraph: hard-wrapped, it broke mid-sentence on a
+    # phone (the first-day walk, 2026-11-16).
+    _, hello = st.read_hello()
+    check("the hello message has no line break inside a paragraph",
+          [p for p in hello.split("\n\n") if "\n" in p], [])
+
     # A first try whose provisioning fails (first release L12): the half-made
     # workspace is left with agent.json.failed, and the next run, with no
     # hand clearing it, sets it aside and makes Iris properly.
