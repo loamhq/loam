@@ -6,6 +6,7 @@
 // and their menu, and the sheet that adds one.
 
 import { h, icon, put, tone } from './editor/dom.js'
+import { how, openAppearSheet } from './appear.js'
 
 export const WITHME_PREFIX = 'with-me/'
 const MODE = { view: 'View', comment: 'Comment', edit: 'Edit' }
@@ -13,8 +14,8 @@ const MODE = { view: 'View', comment: 'Comment', edit: 'Edit' }
 export function withmePath(id) { return `${WITHME_PREFIX}${id}.md` }
 export function withmeId(path) { return /^with-me\/(w-[a-z0-9]{10})\.md$/.exec(path || '')?.[1] || null }
 
-export function createWithMe({ base, root, schedule, toast, files, side }) {
-  const st = { docs: [], loaded: false, loading: false, error: '', fresh: new Set(), leaving: new Map() }
+export function createWithMe({ base, root, schedule, toast, files, side, agentName = () => '' }) {
+  const st = { docs: [], loaded: false, loading: false, error: '', fresh: new Set(), leaving: new Map(), appear: null }
 
   async function req(method, route, body) {
     let res
@@ -37,6 +38,7 @@ export function createWithMe({ base, root, schedule, toast, files, side }) {
     st.loading = true
     st.loadingPromise = req('GET', `withme${refresh ? '' : '?refresh=0'}`).then((got) => {
       st.docs = got.docs || []
+      if (got.appear) st.appear = { appear: got.appear, owner: got.owner, alias: got.alias }
       st.loaded = true
       st.error = ''
     }).catch((err) => { st.error = err.message; st.loaded = true }).finally(() => { st.loading = false; schedule() })
@@ -94,8 +96,36 @@ export function createWithMe({ base, root, schedule, toast, files, side }) {
       { id: 'open', label: 'Open', icon: (s) => icon('file', s), run: () => go(root, r.path, { isFile: true, row: r }) },
       sideOk ? { id: 'side', label: 'Open to the side', icon: 'panelRight', run: () => side().openSide({ kind: 'file', root, path: r.path, row: r }) } : null,
       { id: 'copy', label: 'Copy link', icon: (s) => icon('link', s), run: () => copyLink(d) },
+      st.appear ? { id: 'appear', label: 'How your agents appear', icon: (s) => icon('people', s), sub: appearSub(d), run: () => chooseAppear(d) } : null,
       { id: 'remove', label: 'Remove', icon: (s) => icon('trash', s), danger: true, sub: 'Forgets the link and password here. Nothing changes for the owner.', run: () => remove(d) },
     ].filter(Boolean)
+  }
+
+  // How the owner's agents appear on this doc, there: by their own names or
+  // as one, "<the name on the link>'s agent". Only what is sent from now on
+  // follows a change; the sheet says so.
+  const aliasFor = (d) => `${d.name || st.appear?.owner || 'Your'}'s agent`
+  const effective = (d) => (d.appear === 'names' || d.appear === 'one' ? d.appear : st.appear?.appear || 'names')
+  function appearSub(d) {
+    const words = how(effective(d), aliasFor(d))
+    return words.charAt(0).toUpperCase() + words.slice(1) + (d.appear === 'names' || d.appear === 'one' ? '' : ', as usual')
+  }
+
+  function chooseAppear(d) {
+    openAppearSheet({
+      title: d.title, there: d.owner ? `${d.owner}’s Loam` : d.host,
+      value: d.appear || 'default', def: st.appear?.appear || 'names', alias: aliasFor(d), agent: agentName(),
+      onChoose: async (v) => {
+        try {
+          const got = await req('PATCH', `withme/${d.id}`, { appear: v })
+          Object.assign(d, got.doc)
+          st.docs = st.docs.map(x => (x.id === d.id ? d : x))
+          schedule()
+          toast?.(`Your agents appear ${how(effective(d), aliasFor(d))} on “${d.title}” from now on`)
+          return true
+        } catch (err) { toast?.(err.message); return false }
+      },
+    })
   }
 
   async function copyLink(d) {

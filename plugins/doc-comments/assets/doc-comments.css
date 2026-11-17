@@ -647,3 +647,19 @@
 
 /* A struck deletion's wrapper; a deleted paragraph sits on the line before. */
 .dc .dc-sg-live-delw { white-space: pre-wrap; }
+
+/* How the owner's agents appear to others (2026-11-17): a select that reads
+   as part of its sentence, at the foot of Shared Docs and of a doc's share
+   sheet, and a small sheet of three choices for a doc in Shared with me. */
+.dc-ap-sel { max-width: 100%; text-overflow: ellipsis; }
+.dc-tk-mem .dc-ap-sel:focus-visible { outline: 2px solid var(--signal-crema, #B4733A); outline-offset: 1px; }
+.dc-ap-line { flex-wrap: wrap; margin: 12px 0 0; text-align: center; }
+.dc-ap-foot { flex-wrap: wrap; margin: 26px 8px 10px; text-align: center; cursor: default; }
+.dc-ap-list { display: grid; gap: 2px; }
+.dc-dlg .dc-ap-opt { padding: 11px 12px; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.dc-dlg .dc-ap-opt.on { background: var(--paper-card, #E9E4DC); }
+.dc-dlg .dc-ap-opt small { margin-top: 1px; }
+.dc-ap-opt .dc-ck { display: inline-flex; flex: none; color: var(--signal-crema, #B4733A); opacity: 0; transform: scale(.6); transition: opacity .15s, transform .2s cubic-bezier(.2,.8,.2,1); }
+.dc-ap-opt.on .dc-ck { opacity: 1; transform: none; }
+.dc-ap-note { margin-top: 2px; }
+@media (prefers-reduced-motion: reduce) { .dc-ap-opt .dc-ck { transition: none; } }

@@ -11,6 +11,7 @@ import { tone, icon as glyph } from './editor/dom.js'
 import { docApi } from './api.js'
 import { createSharing } from './sharing.js'
 import { createWithMe, withmeId, WITHME_PREFIX } from './withme.js'
+import { how } from './appear.js'
 
 const BASE = '/x/doc-comments/'
 const ROOTS = { vault: 'Vault', spaces: 'AI Spaces', system: 'System' }
@@ -323,13 +324,15 @@ export function activate(loam) {
   // and what they can do on hover or a long press), what is open (the
   // modes) and when it last moved, and a dot on the tile where something is
   // new since the owner last looked. A quiet row says nothing about news.
-  const shared = { docs: [], loaded: false, rows: new Map(), leaving: new Map(), seen: new Set() }
+  const shared = { docs: [], loaded: false, rows: new Map(), leaving: new Map(), seen: new Set(), appear: null }
   const filesOf = () => host.files
   const docKey = (root, path) => `${root}:${path}`
   async function loadShared() {
     const res = await fetch(`${BASE}shared`, { credentials: 'same-origin' })
     if (!res.ok) throw new Error('Shared Docs could not be read just now.')
-    const docs = (await res.json()).docs || []
+    const got = await res.json()
+    const docs = got.docs || []
+    if (got.appear) shared.appear = { appear: got.appear, owner: got.owner, alias: got.alias }
     // The row as a folder would list it (size, age, what it may do), asked
     // of Files once per doc; a doc it cannot answer for is still listed.
     const files = filesOf()
@@ -411,6 +414,7 @@ export function activate(loam) {
   const withme = createWithMe({
     base: BASE, root: ROOT_ID, schedule: () => host.schedule?.(),
     toast: (text) => listToast(text), files: filesOf, side: () => filesOf()?.side?.() || null,
+    agentName: () => host.state?.agents?.list?.find(a => !a.archived)?.name || '',
   })
   if (withMeOn()) loam.ui.styles?.add?.('assets/withme.css')
 
@@ -440,10 +444,39 @@ export function activate(loam) {
         H('div', { class: 'kicker fs-kicker dc-sd-kicker', text: 'Shared by me' }),
         sharedByMe({ go, files, entry }),
         H('div', { class: 'kicker fs-kicker dc-sd-kicker', text: 'Shared with me' }),
-        withme.st.loaded ? withme.section({ entry, go, H }) : H('div', { class: 'fs-quiet', text: 'Loading…' }))
-      return sharedByMe({ go, files, entry })
+        withme.st.loaded ? withme.section({ entry, go, H }) : H('div', { class: 'fs-quiet', text: 'Loading…' }),
+        appearFoot(H))
+      return H('div', { class: 'dc-sd-sections', key: 'sd:sections' }, sharedByMe({ go, files, entry }), appearFoot(H))
     },
   })
+
+  // How the owner's agents appear to people outside, unless a doc says
+  // otherwise (its share sheet; a doc in Shared with me, its menu): one
+  // quiet line at the foot of Shared Docs. The plugin's `appear` setting,
+  // so a persona can set it too (`bin/settings set plugin.doc-comments.appear one`).
+  function appearFoot(H) {
+    const a = shared.appear || withme.st.appear
+    if (!a) return null
+    const choose = async (v) => {
+      if (v === a.appear) return
+      try {
+        const res = await fetch('/api/plugins/doc-comments/settings', {
+          method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: { appear: v } }),
+        })
+        if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'That wasn’t saved. Try again in a moment.')
+        a.appear = v
+        shared.appear = { ...a }
+        if (withme.st.appear) withme.st.appear = { ...withme.st.appear, appear: v }
+        listToast(`Your agents appear to others ${how(v, a.alias)}, unless a doc says otherwise`)
+      } catch (err) { listToast(err.message) }
+      host.schedule?.()
+    }
+    return H('label', { class: 'dc-tk-mem dc-ap-foot', key: 'sd:appear' },
+      H('span', { text: 'Your agents appear to others' }),
+      H('select', { class: 'dc-ap-sel', 'aria-label': 'How your agents appear to others', onchange: (e) => choose(e.target.value) },
+        ['names', 'one'].map(v => H('option', { value: v, selected: v === a.appear, text: how(v, a.alias) }))))
+  }
 
   function sharedByMe({ go, files, entry }) {
       const H = loam.ui.h
