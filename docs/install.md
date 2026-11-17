@@ -232,8 +232,8 @@ admin, which on an install is the one person who claimed it.
 plain words with what to do when a part is not right: the install's steps;
 the name (with the two records while it does not point here, or "someone
 else's" when taken); the certificate; the agents' engine (the broker, its
-unit and its `/up`); the plugins (the gateway); the app (its container's
-health); the sign-in (Authelia; "starts when you claim" before then); the
+unit and its `/up`); the plugins (the gateway); the app (its unit,
+`loam-app@<app>.service`, and its `/up`); the sign-in (Authelia; "starts when you claim" before then); the
 agents' browser; the sign-in helper (`loam-claim`); the timers this release
 ships. While the install is unclaimed it ends with the claim link, saying
 whether it works yet. `loam status --json` is the same as one object
