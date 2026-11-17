@@ -22,9 +22,11 @@ or a DELETE and in the JSON body otherwise)::
     GET    /doc/history                  saves newest first, and who wrote what
     GET    /doc/version?save=<id>        the text as it was after one save
     POST   /doc/restore                  write an earlier version back {save}
+    PATCH  /doc/links/appear             how the owner's agents appear on this doc {appear}
     GET    /withme                       Shared with me: the docs others shared from their Loams
     POST   /withme                       add one {link, password, name?}; checked at once
     GET    /withme/<id>                  one of them
+    PATCH  /withme/<id>                  how the owner's agents appear there {appear}
     DELETE /withme/<id>                  forget it (nothing changes on the other side)
     *      /withme/<id>/doc…             the doc routes above, sent to its own Loam's door
     GET    /health
@@ -46,6 +48,7 @@ from urllib.parse import parse_qs, urlparse
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from doccomments import appear as appear_mod  # noqa: E402
 from doccomments import links as links_mod  # noqa: E402
 from doccomments import store as stores  # noqa: E402
 from doccomments.door import Door  # noqa: E402
@@ -56,7 +59,8 @@ from doccomments.withme import WithMe  # noqa: E402
 BODY_MAX = 8 * 1024 * 1024
 
 
-def make_handler(service: Service, links=None, door=None, reach=lambda: "staging", withme=None):
+def make_handler(service: Service, links=None, door=None, reach=lambda: "staging", withme=None,
+                 appear_default=lambda: appear_mod.DEFAULT):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "doc-comments"
@@ -114,7 +118,7 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
                 docs = links.all() if links else []
                 on = sorted({l["did"] for l in docs if l["on"]})
                 seen = {d: links.seen(d) for d in on}
-                return 200, {"docs": service.shared(on, seen)}
+                return 200, {"docs": service.shared(on, seen), **self._appear_info()}
             if parts and parts[0] == "withme":
                 return self._withme(method, parts[1:], q)
             if not parts or parts[0] != "doc":
@@ -130,6 +134,15 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
             rest = parts[1:]
             if rest[:1] == ["links"]:
                 return self._links(method, rest[1:], who, root, path, args)
+            status, out = self._doc_op(method, rest, who, root, path, args, url)
+            if links and isinstance(out, dict) and out.get("id") and "notes" in out:
+                # How the owner's agents show to anyone outside on this doc,
+                # so a persona's tools can say so (and the owner's page).
+                on = any(l["on"] for l in links.for_doc(out["id"]))
+                out["appear"] = {**self._appear_of(out["id"]), "shared": on}
+            return status, out
+
+        def _doc_op(self, method, rest, who, root, path, args, url):
             if method == "GET" and rest == []:
                 out = service.get(who, root, path)
                 if links and out.get("id") and who.get("kind") == "owner":
@@ -185,7 +198,7 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
             who = self._who()
             body = self._body() if method in ("POST", "PATCH") else {}
             if rest == [] and method == "GET":
-                return 200, {"docs": withme.list(refresh=q.get("refresh") != "0")}
+                return 200, {"docs": withme.list(refresh=q.get("refresh") != "0"), **self._appear_info()}
             if rest == [] and method == "POST":
                 return 201, {"doc": withme.add(body.get("link"), body.get("password"), body.get("name"), by=who)}
             if not rest:
@@ -195,12 +208,29 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
                 return 200, {"doc": withme.status(wid) if q.get("refresh") == "1" else withme.get(wid)}
             if rest[1:] == [] and method == "DELETE":
                 return 200, withme.remove(wid)
+            if rest[1:] == [] and method == "PATCH":
+                if "appear" not in body:
+                    raise NoteError(400, "nothing to change: {appear}")
+                return 200, {"doc": withme.set_appear(wid, body.get("appear"))}
             if rest[1:2] == ["doc"]:
                 route = "/".join(rest[1:])
                 args = {**q, **body}
                 status, out = withme.request(wid, who, method, route, args)
                 return status, out
             raise NoteError(405, "no such route")
+
+        def _appear_info(self) -> dict:
+            """The default, and the names it is drawn with."""
+            owner = service.store.owner()["name"]
+            return {"appear": appear_mod.effective(None, appear_default()),
+                    "owner": owner, "alias": appear_mod.alias_name(owner)}
+
+        def _appear_of(self, did: str) -> dict:
+            """One doc's choice (``default``, ``names``, ``one``) and what is in force."""
+            info = self._appear_info()
+            mine = links.appear(did) if links and did else "default"
+            return {"choice": mine, "default": info["appear"], "as": appear_mod.effective(mine, info["appear"]),
+                    "alias": info["alias"]}
 
         def _owner(self):
             if (self.headers.get("X-Loam-Agent") or "").strip():
@@ -211,6 +241,15 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
 
         def _links(self, method, rest, who, root, path, args):
             """The owner's share links for one doc."""
+            if method == "PATCH" and rest == ["appear"] and links is not None:
+                # How the agents appear on it: the owner's choice, and like
+                # every setting, a persona's to change on their word.
+                value = args.get("appear")
+                if value not in appear_mod.CHOICES + ("default",):
+                    raise NoteError(400, "appear is names, one or default")
+                did = service.ensure_id(service.store.owner(), root, path)
+                links.set_appear(did, value)
+                return 200, {"appear": self._appear_of(did)}
             self._owner()
             if links is None:
                 raise NoteError(503, "share links are not set up here")
@@ -219,7 +258,10 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
             if method == "GET" and rest == []:
                 did = service.get(who, root, path).get("id")
                 return 200, {"links": [self._public(l) for l in links.for_doc(did)] if did else [],
-                             "owner": service.store.owner()["name"]}
+                             "owner": service.store.owner()["name"],
+                             "appear": self._appear_of(did) if did else
+                             {**self._appear_of(""), "choice": "default"}}
+
             if method == "POST" and rest == []:
                 did = service.ensure_id(who, root, path)
                 days = args.get("days", links_mod.DEFAULT_DAYS)
@@ -298,8 +340,8 @@ def make_handler(service: Service, links=None, door=None, reach=lambda: "staging
 
 
 def serve(service: Service, port: int, host: str = "127.0.0.1", links=None, door=None,
-          reach=lambda: "staging", withme=None) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((host, port), make_handler(service, links, door, reach, withme))
+          reach=lambda: "staging", withme=None, appear_default=lambda: appear_mod.DEFAULT) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((host, port), make_handler(service, links, door, reach, withme, appear_default))
     server.daemon_threads = True
     return server
 
@@ -332,11 +374,21 @@ def main() -> int:
         url = str(values.get("home") or "")
         return url if url.startswith("https://") and len(url) < 200 else ""
 
+    def appear_default() -> str:
+        # How the owner's agents appear to others unless a doc says otherwise
+        # (the `appear` setting: `names` or `one`), read each time.
+        try:
+            values = json.loads((Path(os.environ.get("LOAM_PLUGIN_SETTINGS_DIR", ".")) / "values.json").read_text())
+        except (OSError, ValueError):
+            values = {}
+        return appear_mod.effective(values.get("appear"), appear_mod.DEFAULT)
+
     door = Door(service, links, Path(__file__).resolve().parent.parent, reach=reach,
-                owner_name=lambda: service.store.owner()["name"], home=home)
+                owner_name=lambda: service.store.owner()["name"], home=home, appear_default=appear_default)
     shared = WithMe(private, own_tokens=lambda: {l["token"] for l in links.all()}, door=door,
-                    owner=service.store.owner, agent=service.store.agent)
-    server = serve(service, port, links=links, door=door, reach=reach, withme=shared)
+                    owner=service.store.owner, agent=service.store.agent, appear_default=appear_default)
+    server = serve(service, port, links=links, door=door, reach=reach, withme=shared,
+                   appear_default=appear_default)
     print(f"doc-comments: listening on 127.0.0.1:{port}", file=sys.stderr, flush=True)
     try:
         server.serve_forever()

@@ -36,6 +36,11 @@ from pathlib import Path
 from .sidecar import NoteError, now_iso
 
 MODES = ("view", "comment", "edit")
+# How the owner's agents appear to people outside: each by its own name
+# ("Iris · Sam's agent"), or all as one ("Sam's agent"). The plugin's
+# `appear` setting is the default; a doc, or a doc in Shared with me, may
+# choose its own (2026-11-17).
+APPEAR = ("names", "one")
 PBKDF2_ROUNDS = 200_000
 DEFAULT_DAYS = 30
 MAX_DAYS = 365
@@ -127,6 +132,7 @@ class Links:
         data.setdefault("fails", {})
         data.setdefault("writes", {})
         data.setdefault("seen", {})
+        data.setdefault("appear", {})
         return data
 
     def _write(self, data: dict) -> None:
@@ -375,6 +381,27 @@ class Links:
 
     def mark_seen(self, did: str) -> None:
         self._mutate(lambda d: d["seen"].__setitem__(did, now_iso()))
+
+    # -- how the owner's agents appear on this doc -----------------------------------------
+
+    def appear(self, did: str) -> str:
+        """This doc's own choice: ``names``, ``one``, or ``default`` (the
+        plugin's ``appear`` setting decides)."""
+        with self._lock:
+            got = self._read()["appear"].get(did)
+        return got if got in APPEAR else "default"
+
+    def set_appear(self, did: str, value: str) -> str:
+        if value not in APPEAR + ("default",):
+            raise NoteError(400, "agents appear by their own names (names), as one (one), or as the default")
+
+        def fn(d):
+            if value == "default":
+                d["appear"].pop(did, None)
+            else:
+                d["appear"][did] = value
+        self._mutate(fn)
+        return value
 
 
 def public(link: dict) -> dict:
