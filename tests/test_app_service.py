@@ -302,6 +302,11 @@ check("...with the same values it had",
       ("8081", "https://vault.example.com/", "https://loam-ui-content.example.com", "Aoede=147",
        '[{"root":"spaces","path":"commons/www","url":"https://files.example.com"}]',
        "chromium-headless-shell"))
+check("...and the install's own vault folders and zone (a fresh install said 00_INBOX)",
+      (env["VAULT_INBOX_FOLDER"], env["VAULT_BOARDS_FOLDER"], env["VAULT_GENERAL_BOARD"],
+       env["VAULT_ATTACHMENTS_FOLDER"], env["APP_TIME_ZONE"]),
+      (lc.vault_folder("inbox"), lc.vault_folder("boards"), lc.vault_folder("general_board"),
+       lc.vault_folder("attachments"), lc.TIMEZONE))
 check("...and what the host adds: loopback, its state directory, the browser's OOM score",
       (env["APP_HOST"], env["SPEECH_DIR"], env["APP_MEDIA_DIR"], env["APP_PREVIEW_OOM_SCORE_ADJ"]),
       ("127.0.0.1", "/var/lib/loam-app/loam-ui/speech", "/var/lib/loam-app/loam-ui/app-media",

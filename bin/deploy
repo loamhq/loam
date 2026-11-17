@@ -813,6 +813,15 @@ def service_env(app: dep.App) -> dict:
         "APPS_PREVIEW_ADDR": dep.PREVIEW_LOCAL_ADDR,
         "APP_MEDIA_DIR": str(state / "app-media"),
         "APP_PREVIEW_CHROME": "chromium-headless-shell",
+        # The install's own vault folders and zone (`vault.*`, `timezone`).
+        # Unset, the app falls back to the first install's 00_INBOX layout
+        # and Los Angeles: a fresh install's "New inbox note" said 00_INBOX
+        # (the first-day walk, 2026-11-16).
+        "VAULT_INBOX_FOLDER": lc.vault_folder("inbox"),
+        "VAULT_BOARDS_FOLDER": lc.vault_folder("boards"),
+        "VAULT_GENERAL_BOARD": lc.vault_folder("general_board"),
+        "VAULT_ATTACHMENTS_FOLDER": lc.vault_folder("attachments"),
+        "APP_TIME_ZONE": lc.TIMEZONE,
         "APP_PREVIEW_OOM_SCORE_ADJ": str(lc.AGENT_OOM_SCORE_ADJ),
     }
     if app.content_fqdn:
