@@ -52,6 +52,25 @@ def container_health(name: str) -> str:
     return res.stdout.strip() if res.returncode == 0 else "absent"
 
 
+def app_health(name: str) -> str:
+    """The app's state in `container_health`'s words. Since 2026-11-16 Loam's
+    own app runs as `loam-app@<name>.service` (a `[service]` record), not a
+    container: then "running healthy" is the unit active and GET /up 200.
+    Until 2026-11-16 this asked Docker only, so every fresh install's status
+    read "App: absent" with the app up (found by the first-day walk)."""
+    app = next((a for a in dep.records() if a.name == name), None)
+    if app is None or not app.service:
+        return container_health(name)
+    state = run(["systemctl", "is-active", app.unit]).stdout.strip() or "unknown"
+    if state != "active":
+        return "absent" if state in ("inactive", "unknown") else state
+    try:
+        with urllib.request.urlopen(f"http://{dep.SERVICE_HOST}:{app.port}/up", timeout=4) as r:
+            return "running healthy" if r.status == 200 else f"running answering {r.status}"
+    except (OSError, ValueError):
+        return "running starting"
+
+
 def broker_up() -> bool:
     import loam_broker as brk  # noqa: PLC0415
     try:
@@ -120,7 +139,7 @@ def gather() -> dict:
          "" if gw == "active" else
          f"sudo -u {lc.USER} systemctl --user restart loam-plugins-gateway.service")
     app_name = edge.get("app") or "loam-ui"
-    app = container_health(app_name)
+    app = app_health(app_name)
     part("app", "App", OK if app.endswith("healthy") and "unhealthy" not in app else BAD,
          "running" if app == "running healthy" else app,
          "" if app == "running healthy" else f"sudo {lc.ROOT}/bin/deploy {app_name} logs 40")

@@ -366,6 +366,53 @@ def cases() -> int:
     check("the app is told to run the same command name on both",
           inst.PREVIEW_BROWSER, "chromium-headless-shell")
 
+    # -- `loam status` reads the app as a unit, not a container ---------------
+    # A fresh install's status read "App: absent" with the app up (found by
+    # the 2026-11-16 first-day walk): it asked Docker, and the app has run as
+    # loam-app@<name>.service since that day.
+    import http.server  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+
+    class Up(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            self.send_response(200 if self.path == "/up" else 404)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Up)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    st = load_cmd("loam-status")
+    bare = dict(exposure="private", host="", policy="one_factor", static_root=None,
+                share_expires=None, compose=None, checkout=None)
+    svc = dep.App(name="loam-ui", port=srv.server_port, service=True, **bare)
+    ctr = dep.App(name="other", port=None, service=False, **bare)
+    asked: list = []
+    unit_state = {"v": "active"}
+
+    def fake_run(argv, **kw):
+        asked.append(argv[:2])
+        out = unit_state["v"] if argv[0] == "systemctl" else "running healthy"
+        return subprocess.CompletedProcess(argv, 0, out + "\n", "")
+
+    saved_records, saved_run = st.dep.records, st.run
+    st.dep.records, st.run = (lambda: [svc, ctr]), fake_run
+    try:
+        check("a service app, active and answering /up, is running healthy",
+              st.app_health("loam-ui"), "running healthy")
+        check("...asked of systemd, not Docker", ["docker", "inspect"] in asked, False)
+        unit_state["v"] = "inactive"
+        check("...a stopped unit is absent", st.app_health("loam-ui"), "absent")
+        unit_state["v"] = "failed"
+        check("...a failed one says so", st.app_health("loam-ui"), "failed")
+        asked.clear()
+        check("a container app is still asked of Docker",
+              (st.app_health("other"), ["docker", "inspect"] in asked), ("running healthy", True))
+    finally:
+        st.dep.records, st.run = saved_records, saved_run
+        srv.shutdown()
+
     # -- the command ----------------------------------------------------------
     res = subprocess.run([str(ROOT / "bin" / "loam"), "help"], capture_output=True, text=True, check=False)
     check("`loam help` lists status and hides the services' own commands",
