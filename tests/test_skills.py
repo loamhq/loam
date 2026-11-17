@@ -146,9 +146,8 @@ def main() -> int:
           ("loam-how-it-works" in seen, "loam-building-a-plugin" in seen), (False, False))
     check("...and everything else shared is seen",
           sorted(n for n, (shelf, _f) in seen.items() if shelf != "personal"),
-          ["loam-agent-name-and-face", "loam-filing-a-bug-or-feature",
-           "loam-making-an-agent", "loam-publishing-to-the-marketplace", "loam-skills", "loam-what-you-can-reach",
-           "loam-working-with-the-engineer"])
+          sorted({d.name for d in (sk.LIBRARY / "skills").iterdir() if d.is_dir()}
+                 - {"loam-how-it-works", "loam-building-a-plugin"}))
 
     # -- the view (.agents/skills) -----------------------------------------------------
     view = sk.view_dir(ada)
