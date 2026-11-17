@@ -18,5 +18,6 @@ provider lists it and reads it when its subject comes up:
 | `loam-building-a-plugin` | A plugin's folder and manifest, and trying one |
 | `loam-publishing-to-the-marketplace` | Sharing a plugin or a skill today |
 | `loam-making-an-agent` | Making a new agent with the owner: a character, not a job |
+| `loam-bringing-context-from-another-ai` | Bringing what another AI knew about the owner into the vault, if they want to |
 | `loam-agent-name-and-face` | Renaming an agent and changing its picture |
 | `loam-working-with-the-engineer` | Briefing an engineer, and checking what comes back |
