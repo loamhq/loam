@@ -112,7 +112,9 @@ commits), plus the folders listed:
 | `gateway` | `bin/plugin-gateway` | |
 
 - **The broker** is restarted by `restart-broker --when-idle`. That waits
-  until no session is working or asking, and it has no time limit. The
+  until no session is working or asking; after half an hour (its ceiling)
+  it goes at the first moment no session has produced output for a
+  minute. The
   wait's lines ("held by iris (working)") become the step's `detail` as
   they come. The step then requires a new main process that answers `/up`
   within 90 s.

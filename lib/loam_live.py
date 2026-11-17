@@ -59,14 +59,58 @@ UNIT_KINDS = (("engineer_jobs", "loam-engineer-"), ("wakes", "loam-wake-"),
 RESTART_HOLDS = ("working", "asking")
 
 
-def restart_blockers(rows: list[dict] | None) -> list[str]:
+# Past the ceiling (2026-11-16), a restart that has waited
+# `RESTART_CEILING_S` stops waiting for turns to end: what holds it then is a
+# session producing output now, a `working` row whose newest event (or turn
+# start) is under `RESTART_OUTPUT_S` old. A turn that went silent -- a stuck
+# turn, a long tool call -- and a question nobody has answered no longer
+# hold it; on 11-12 a wait looped for over an hour. A landing in progress
+# still does, through the live lock bin/restart-broker takes. Engineer jobs
+# are units of their own and survive the restart either way.
+RESTART_CEILING_S = 30 * 60
+RESTART_OUTPUT_S = 60
+
+
+def _ts(value) -> float | None:
+    from datetime import datetime  # noqa: PLC0415
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def output_age_s(row: dict, now: float) -> float | None:
+    """Seconds since the row last showed output (its newest event, or the
+    turn's start), or None when it says neither."""
+    seen = [t for t in (_ts(row.get("last_event_at")), _ts(row.get("last_active")))
+            if t is not None]
+    return now - max(seen) if seen else None
+
+
+def restart_blockers(rows: list[dict] | None, past_ceiling: bool = False,
+                     now: float | None = None) -> list[str]:
     """Why the broker may not restart now, one line a row; empty means it
     may. ``rows`` is `GET /v1/sessions/live`'s; None (a failed read)
-    holds the restart, because a broker that cannot answer may be mid-turn."""
+    holds the restart, because a broker that cannot answer may be mid-turn.
+    ``past_ceiling``: only a session producing output holds it."""
     if rows is None:
         return ["the broker's live list could not be read (counted as busy)"]
-    return [f"{r.get('agent')}/{str(r.get('id'))[:8]} {r.get('state')}"
-            for r in rows if r.get("state") in RESTART_HOLDS]
+    if not past_ceiling:
+        return [f"{r.get('agent')}/{str(r.get('id'))[:8]} {r.get('state')}"
+                for r in rows if r.get("state") in RESTART_HOLDS]
+    import time  # noqa: PLC0415
+    now = time.time() if now is None else now
+    held = []
+    for r in rows:
+        if r.get("state") != "working":
+            continue
+        age = output_age_s(r, now)
+        if age is not None and age < RESTART_OUTPUT_S:
+            held.append(f"{r.get('agent')}/{str(r.get('id'))[:8]} working, "
+                        f"output {max(0, int(age))} s ago")
+    return held
 
 
 def state_of(busy: str | None) -> str:
