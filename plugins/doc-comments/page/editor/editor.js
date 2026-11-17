@@ -570,6 +570,7 @@ export function createDocEditor(opts) {
 
   async function saveNow() {
     if (st.sinceBase.empty || st.destroyed) return
+    keepFinalNewline()
     const text = view.state.sliceDoc()
     const body = { base_revision: st.server.revision, base_text: st.server.text, text }
     st.saving = true
@@ -601,6 +602,17 @@ export function createDocEditor(opts) {
       saveTimer = setTimeout(() => save(), 8000)
       throw err
     }
+  }
+
+  // A file that ended with a line break keeps it, and a new (empty) one gets
+  // one, even when the last words were typed on its last, empty line.
+  function keepFinalNewline() {
+    const was = st.server.text
+    if (was !== '' && !/\n$/.test(was)) return
+    const doc = view.state.doc
+    if (!doc.length || /\n$/.test(doc.sliceString(Math.max(0, doc.length - 1)))) return
+    const sel = view.state.selection
+    view.dispatch({ changes: { from: doc.length, insert: view.state.lineBreak }, selection: sel, annotations: Transaction.addToHistory.of(false) })
   }
 
   async function flushNow() {
@@ -1035,9 +1047,12 @@ export function createDocEditor(opts) {
   function renderPlus() {
     const line = st.phone ? null : emptyLineAtCaret()
     if (!line) { plus.classList.remove('on'); return }
-    const block = view.lineBlockAt(line.from)
-    const z = zoom()
-    plus.style.top = `${block.top / z + (block.height / z - 26) / 2}px`
+    const c = view.coordsAtPos(line.from, 1)
+    let top
+    if (c) { const l = local(c, col); top = (l.top + l.bottom) / 2 - 13 }
+    else { const block = view.lineBlockAt(line.from), z = zoom(); top = block.top / z + (block.height / z - 26) / 2 + 40 }
+    plus.style.marginTop = '0'
+    plus.style.top = `${top}px`
     plus.classList.add('on')
   }
 
@@ -1077,6 +1092,7 @@ export function createDocEditor(opts) {
   }
 
   function closeBmenu() {
+    if (st.bmenu && !st.phone) col.style.paddingBottom = ''
     st.bmenu = null
     plus.classList.remove('open')
     bmenu.classList.remove('on')
@@ -1143,6 +1159,7 @@ export function createDocEditor(opts) {
       left = b.at === 'plus' ? local(plus.getBoundingClientRect()).left : c.left
     }
     bmenu.style.maxHeight = ''
+    bmenu.style.visibility = ''
     bmenu.classList.add('on')
     const hgt = bmenu.scrollHeight
     const floor = head.offsetHeight + 6
@@ -1151,10 +1168,20 @@ export function createDocEditor(opts) {
     // long as the caret line stays in view under the header.
     if (hgt > roomBelow && b.at !== 'selbar') {
       const need = Math.ceil(hgt - roomBelow)
-      const canScroll = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop
+      let canScroll = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop
+      // Near the end of the doc (where blocks get added) there is room to
+      // make below the last line for as long as the menu is open.
+      if (above - need > floor + 8 && canScroll < need) {
+        col.style.paddingBottom = `${parseFloat(getComputedStyle(col).paddingBottom) + need - canScroll + 8}px`
+        canScroll = need
+      }
       if (above - need > floor + 8 && canScroll >= need) {
-        scroll.scrollTop += need
+        // After CodeMirror's own measuring of the keystroke (which would undo
+        // a scroll made now); the scroll places the menu again, below.
+        const target = scroll.scrollTop + need
+        requestAnimationFrame(() => requestAnimationFrame(() => { if (!st.bmenu) return; scroll.scrollTop = Math.max(scroll.scrollTop, target); renderBmenu() }))
         below -= need; above -= need; roomBelow += need
+        bmenu.style.visibility = 'hidden'
       }
     }
     const roomAbove = above - floor
@@ -1446,8 +1473,26 @@ export function createDocEditor(opts) {
         it.el.style.top = `${Math.round(it.top)}px`
         lowest = Math.max(lowest, it.top + it.hgt)
       }
-      margin.style.minHeight = `${Math.ceil(lowest + 40)}px`
-    }
+      // Never taller than the text by more than a card's room: a card placed
+      // from a guessed height must not leave pages of empty scroll.
+      margin.style.minHeight = `${Math.ceil(Math.min(lowest + 40, col.offsetHeight + 240))}px`
+      // A thread just opened is brought wholly into view, its reply field too.
+      const want = st.compose ? '__new' : st.focus
+      const it = items.find(x => x.id === want)
+      if (it && st.revealFor !== want) {
+        st.revealFor = want
+        const z = zoom()
+        const sr = scroll.getBoundingClientRect()
+        const top = (page.getBoundingClientRect().top - sr.top) / z + scroll.scrollTop + it.top
+        const bottom = top + it.hgt
+        const view0 = scroll.scrollTop, viewH = scroll.clientHeight
+        let to = null
+        if (bottom > view0 + viewH - 16) to = Math.min(top - 16, bottom - viewH + 24)
+        else if (top < view0 + 8) to = top - 16
+        if (to != null) scroll.scrollTo({ top: Math.max(0, to), behavior: 'smooth' })
+      }
+      if (!want) st.revealFor = null
+    } else margin.style.minHeight = ''
     renderGutter(ranges)
     renderPlus()
     if (selbar.classList.contains('on') && !st.link) renderSelbar()
@@ -1456,17 +1501,35 @@ export function createDocEditor(opts) {
 
   // Viewing (desktop) and the phone: small marks in the gutter, one per line
   // with notes; a click opens the thread.
+  // A mark sits centred on the line its passage starts on (the visual line,
+  // not the paragraph's first), measured where the line is drawn.
+  function markTop(pos, size) {
+    const c = view.coordsAtPos(pos, 1)
+    if (c) {
+      const l = local(c, gutter)
+      return (l.top + l.bottom) / 2 - size / 2
+    }
+    const block = view.lineBlockAt(pos)
+    const z = zoom()
+    return (block.top + Math.min(block.height, 30 * z) / 2) / z - size / 2
+  }
+
+  let gutterKey = ''
   function renderGutter(ranges) {
     const show = st.phone || st.mode === 'view'
-    if (!show) { put(gutter, ); return }
+    if (!show) { if (gutterKey) { put(gutter); gutterKey = '' } return }
     const byLine = new Map()
     for (const n of openNotes()) {
       const r = ranges.get(n.id)
       if (!r || r.from == null) continue
-      const top = Math.round(lineTop(r.from))
+      const top = Math.round(markTop(r.from, 24))
       if (!byLine.has(top)) byLine.set(top, [])
       byLine.get(top).push(n)
     }
+    // Drawn again only when a mark moved or changed (layout runs often).
+    const key = JSON.stringify([st.phone, st.focus, [...byLine].map(([t, ns]) => [t, ns.map(n => n.id)])])
+    if (key === gutterKey) return
+    gutterKey = key
     const marks = []
     for (const [top, ns] of byLine) {
       const on = ns.some(n => n.id === st.focus)
@@ -1530,6 +1593,9 @@ export function createDocEditor(opts) {
   function moreMenu() {
     const det = detached().length
     return h('div', { class: 'dc-menu', role: 'menu' },
+      det ? h('button', { class: 'dc-mi dc-mi-lost', type: 'button', role: 'menuitem', onclick: () => openDrawer('history', { detached: true }) },
+        icon('reattach', 17), h('span', { class: 'dc-l' }, h('b', { text: det === 1 ? '1 note lost its passage' : `${det} notes lost their passages` }), h('small', { text: 'Attach again, or read what it was about' })), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
+      det ? h('div', { class: 'dc-msep' }) : null,
       h('button', { class: `dc-mi${st.authors ? ' on' : ''}`, type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(st.authors), onclick: toggleAuthors },
         icon('people', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Show authors' })), h('span', { class: `dc-sw${st.authors ? ' on' : ''}` })),
       h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('history') },
@@ -1556,8 +1622,12 @@ export function createDocEditor(opts) {
     const sw = saveWordNode()
     const key = JSON.stringify([st.mode, st.menu, st.phone, sw?.textContent || '', sw?.className || '', (opts.crumbs || []).map(c => c.label), opts.titleBar || null, opts.back?.label || null,
       st.authors, st.resolved, detached().length, st.can, (opts.menuExtras?.() || []).map(x => x.label), Boolean(fileMenu)])
-    head.className = `dc-head${scroll.scrollTop > 4 ? ' scd' : ''}`
-    if (key === headKey && extras.length === headNodes.length && extras.every((n, i) => n === headNodes[i]) && head.firstChild) return
+    const cls = `dc-head${scroll.scrollTop > 4 ? ' scd' : ''}`
+    if (head.className !== cls) head.className = cls
+    // A host's own buttons may be made afresh on every call (Share is):
+    // the same markup is the same button.
+    const same = (n, o) => n === o || (n && o && n.outerHTML === o.outerHTML)
+    if (key === headKey && extras.length === headNodes.length && extras.every((n, i) => same(n, headNodes[i])) && head.firstChild) return
     headKey = key
     headNodes = extras
     const m = MODES.find(x => x.id === st.mode)
@@ -1571,7 +1641,9 @@ export function createDocEditor(opts) {
     ])
     const pill = h('button', { class: 'dc-mpill', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': String(st.menu === 'mode'), 'aria-label': `Mode: ${m.label}`, onclick: () => toggleMenu('mode') },
       icon(m.icon, 15), h('span', { text: m.label }), h('span', { class: 'dc-cv' }, icon('chevronDown', 12)))
-    const dots = h('button', { class: 'dc-gbtn', type: 'button', 'aria-label': 'More', title: 'More', 'aria-haspopup': 'menu', onclick: () => toggleMenu('more') }, icon('dots', 18))
+    // A note whose passage is gone puts a small quiet mark on ⋯ (no banner).
+    const lost = detached().length
+    const dots = h('button', { class: `dc-gbtn${lost ? ' dc-lost' : ''}`, type: 'button', 'aria-label': lost ? `More (${lost} note${lost > 1 ? 's' : ''} lost ${lost > 1 ? 'their passages' : 'its passage'})` : 'More', title: 'More', 'aria-haspopup': 'menu', onclick: () => toggleMenu('more') }, icon('dots', 18))
     put(head, 
       opts.back ? h('button', { class: 'dc-gbtn dc-back', type: 'button', 'aria-label': opts.back.label, title: opts.back.label, onclick: opts.back.go }, icon('chevronLeft', 20)) : null,
       opts.titleBar
@@ -1594,6 +1666,15 @@ export function createDocEditor(opts) {
     if (st.mode === 'view' && st.focus && !st.phone) placeQpop()
   }, { passive: true })
 
+  // On the document: after a click in a drawer, focus is often the page's
+  // body, outside the editor.
+  const onEscape = (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || !root.isConnected) return
+    if (st.drawer && !st.phone) { e.preventDefault(); st.drawer = null; st.preview = null; render() }
+    else if (st.menu) { e.preventDefault(); st.menu = null; render() }
+  }
+  globalThis.document?.addEventListener('keydown', onEscape)
+
   root.addEventListener('mousedown', (e) => {
     if (st.menu && !e.target.closest('.dc-ddw')) { st.menu = null; render() }
     if (st.bmenu && !e.target.closest('.dc-bmenu,.dc-plus,.dc-fb.aa,.dc-kb-aa')) closeBmenu()
@@ -1603,12 +1684,13 @@ export function createDocEditor(opts) {
 
   // -- drawers: History and Resolved ----------------------------------------------------------------
 
-  async function openDrawer(which) {
+  async function openDrawer(which, { detached: toDetached = false } = {}) {
     st.menu = null
     st.drawer = which
     if (st.phone) openSheet(which)
     render()
     if (which === 'history') await loadHistory()
+    if (toDetached) requestAnimationFrame(() => root.querySelector('.dc-drawer.on .dc-dsec, .dc-sheet.on .dc-dsec')?.scrollIntoView({ block: 'start', behavior: 'smooth' }))
   }
 
   async function loadHistory() {
@@ -1668,6 +1750,11 @@ export function createDocEditor(opts) {
     ]
   }
 
+  // A version is read as words, not Markdown: no heading marks or emphasis.
+  function plain(t) {
+    return t.replace(/(^|\n)#{1,6} /g, '$1').replace(/\*\*([^*\n]+)\*\*/g, '$1').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2').replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/\[\[([^\]]+)\]\]/g, '$1')
+  }
+
   async function togglePreview(s) {
     if (st.preview?.id === s.id) { st.preview = null; render(); return }
     st.preview = { id: s.id, text: null }
@@ -1697,14 +1784,14 @@ export function createDocEditor(opts) {
       hunks.forEach((c, i) => {
         const lead = now.slice(at, c.from)
         const clipped = i === 0 ? (c.from > CONTEXT ? '…' + lead.slice(-CONTEXT) : lead) : (lead.length > CONTEXT * 2 ? lead.slice(0, CONTEXT) + ' … ' + lead.slice(-CONTEXT) : lead)
-        pre.append(clipped)
-        if (c.insert) pre.append(h('ins', { text: c.insert }))
-        if (c.to > c.from) pre.append(h('del', { text: now.slice(c.from, c.to) }))
+        pre.append(plain(clipped))
+        if (c.insert) pre.append(h('ins', { text: plain(c.insert) }))
+        if (c.to > c.from) pre.append(h('del', { text: plain(now.slice(c.from, c.to)) }))
         at = c.to
       })
       if (hunks.length) {
         const tail = now.slice(at)
-        pre.append(tail.length > CONTEXT ? tail.slice(0, CONTEXT) + '…' : tail)
+        pre.append(plain(tail.length > CONTEXT ? tail.slice(0, CONTEXT) + '…' : tail))
       }
       body.push(pre)
     }
@@ -1793,8 +1880,10 @@ export function createDocEditor(opts) {
     const focused = view.hasFocus
     const r = selectionRange()
     const writing = focused && canFormat()
-    kbar.classList.toggle('on', (writing || st.klink) && !st.sheet)
-    vbar.classList.toggle('on', !writing && Boolean(r) && st.can.comment && !st.sheet)
+    // Forced booleans: `toggle(name, undefined)` flips the class instead,
+    // which left an empty bar at load and two bars after a blur.
+    kbar.classList.toggle('on', Boolean((writing || st.klink) && !st.sheet))
+    vbar.classList.toggle('on', Boolean(!writing && !st.klink && r && st.can.comment && !st.sheet))
     if (st.klink && st.phone) {
       // The link, typed in the bar itself, where the keyboard already is.
       const l = st.klink
@@ -1889,7 +1978,7 @@ export function createDocEditor(opts) {
       const n = st.notes.find(x => x.id === st.focus)
       if (!n) { st.sheet = null; return renderSheet() }
       body = [h('div', { class: 'dc-thr' },
-        h('div', { class: 'dc-ch' }, avatar(n.author, 24), h('span', { class: 'dc-nm', text: name(n.author) }), h('span', { class: 'dc-tm', text: rel(n.created) }), h('span', { class: 'dc-grow' }),
+        h('div', { class: 'dc-ch' }, avatar(n.author, 24), h('span', { class: 'dc-nm', text: name(n.author) }), h('span', { class: 'dc-tm', text: rel(n.created) }), mine(n) && !st.editing ? ownTools(n) : null, h('span', { class: 'dc-grow' }),
           n.kind === 'comment' && mayResolve(n) ? h('button', { class: 'dc-sm ghost dc-resolve', type: 'button', onclick: () => resolve(n).then(closeSheet) }, icon('check', 14), ' Resolve') : null, close),
         ...threadBody(n, { full: true }))]
     } else if (k === 'compose' && st.compose) {
@@ -1961,10 +2050,19 @@ export function createDocEditor(opts) {
     flush,
     setPhone(phone) {
       if (st.phone === Boolean(phone)) return
+      // The line at the top stays at the top across the change of width.
+      const y = scroll.getBoundingClientRect().top - view.documentTop
+      const pos = scroll.scrollTop > 0 && y > 0 ? view.lineBlockAtHeight(y).from : null
       st.phone = Boolean(phone)
       st.sheet = null
       hideSelbar()
       render()
+      if (pos != null) {
+        view.requestMeasure({
+          read: () => (view.documentTop - scroll.getBoundingClientRect().top + view.lineBlockAt(pos).top) / zoom(),
+          write: (d) => { scroll.scrollTop += d },
+        })
+      }
     },
     setSlots({ take: t = null, player: p = null } = {}) {
       if (t !== take.firstChild) put(take, ...(t ? [t] : []))
@@ -1994,6 +2092,7 @@ export function createDocEditor(opts) {
       clearTimeout(saveTimer)
       clearTimeout(suggestTimer)
       clearTimeout(watchTimer)
+      globalThis.document?.removeEventListener('keydown', onEscape)
       ro?.disconnect()
       view.destroy()
     },

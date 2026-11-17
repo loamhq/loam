@@ -546,3 +546,22 @@
 .dc-kbar.dc-klink input { flex: 1; min-width: 0; height: 34px; border: 0; outline: none; border-radius: 10px; background: var(--dc-well); padding: 0 12px; font: inherit; font-size: 16px; color: var(--dc-ink); }
 .dc-kbar.dc-klink .dc-kok { width: 34px; height: 34px; min-width: 34px; border-radius: 50% !important; background: var(--dc-pri) !important; color: var(--dc-onpri) !important; }
 .dc-kbar.dc-klink .dc-kx { min-width: 30px !important; color: var(--dc-ink3) !important; }
+
+/* ⋯ carries a small quiet mark while a note has lost its passage. */
+.dc-gbtn.dc-lost { position: relative; }
+.dc-gbtn.dc-lost::after { content: ""; position: absolute; top: 7px; right: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--dc-accent); opacity: .75; }
+.dc-mi-lost small { display: block; }
+
+/* A reply's head keeps its height whether or not its tools show. */
+.dc-rh { display: flex; align-items: center; gap: 4px; min-height: 22px; }
+.dc-rh .dc-own { margin-left: 2px; }
+
+/* History: what was cut and what was added read as separate words. */
+.dc-preview pre del + ins, .dc-preview pre ins + del { margin-left: .3em; }
+
+/* Desktop: toasts sit at the bottom right, over the margin, not the text. */
+.dc.desk .dc-toast { left: auto; right: 28px; transform: translate(0, 12px); }
+.dc.desk .dc-toast.on { transform: none; }
+
+/* Marks are placed centred on their line by the editor itself. */
+.dc-mk, .dc.phone .dc-mk { margin-top: 0; }

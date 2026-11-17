@@ -87,14 +87,17 @@ async function offsets(page, phone) {
         out.push({ id: card.dataset.id, d: card.querySelector('.dc-ch').getBoundingClientRect().top - range.getClientRects()[0].top })
       }
     } else {
-      const ed = window.__ed
-      for (const n of ed.state.notes.filter(n => n.state === 'open' && n.from != null)) {
+      // the dot's centre against the centre of the passage's first character
+      for (const n of window.__ed.state.notes.filter(n => n.state === 'open' && n.from != null)) {
         const span = document.querySelector(`.cm-content [data-note="${n.id}"]`)
         if (!span) continue
-        const line = span.closest('.cm-line').getBoundingClientRect().top
-        const marks = [...document.querySelectorAll('.dc-mk')].map(m => m.getBoundingClientRect().top - parseFloat(getComputedStyle(m).marginTop) * (window.__ed.dom.getBoundingClientRect().width / window.__ed.dom.offsetWidth))
-        const best = marks.reduce((a, t) => (Math.abs(t - line) < Math.abs(a - line) ? t : a), Infinity)
-        out.push({ id: n.id, d: best - line })
+        const node = document.createTreeWalker(span, NodeFilter.SHOW_TEXT).nextNode()
+        const range = document.createRange(); range.setStart(node, 0); range.setEnd(node, Math.min(1, node.length))
+        const g = range.getClientRects()[0]
+        const mid = (g.top + g.bottom) / 2
+        const marks = [...document.querySelectorAll('.dc-mk')].map(m => { const r = m.getBoundingClientRect(); return (r.top + r.bottom) / 2 })
+        const best = marks.reduce((a, t) => (Math.abs(t - mid) < Math.abs(a - mid) ? t : a), Infinity)
+        out.push({ id: n.id, d: best - mid })
       }
     }
     return out
@@ -119,7 +122,8 @@ for (const zoom of [1, 0.9]) {
       const tag = `pos-${w}-${zoom}`
       const original = (await disk('Essays/drafts/Long.md')).text
       await page.waitForTimeout(400)
-      near(await offsets(page, phone), 'after load')
+      const atLoad = await offsets(page, phone)
+      if (atLoad.length) near(atLoad, 'after load')
       await shot(page, `${tag}-top`)
       let seen = 0
       for (const y of [1200, 2600, 4000, 6000, 99999]) {
@@ -556,7 +560,7 @@ test('typing: Enter makes paragraphs, lists and quotes end with a blank line, "[
   await page.keyboard.press('Control+s')
   await page.waitForTimeout(800)
   const d = await disk(p)
-  const want = '# Typing\n\nFirst paragraph.\n\nSecond paragraph.\nSame paragraph, next line.\n\n- one\n- two\n\nAfter the list.\n\n> quoted\n\nAfter the quote.\n\n- [ ] a task\n\n```\n```'
+  const want = '# Typing\n\nFirst paragraph.\n\nSecond paragraph.\nSame paragraph, next line.\n\n- one\n- two\n\nAfter the list.\n\n> quoted\n\nAfter the quote.\n\n- [ ] a task\n\n```\n```\n'  // the file ended with a line break, and still does
   // (the store stamps who saved it in the frontmatter, as the broker does)
   assert.equal(d.text.replace(/^---\n[\s\S]*?\n---\n\n?/, ''), want)
   assert.deepEqual(page.errors, [])
@@ -602,5 +606,168 @@ test('phone: the thread sheet leaves its passage in view above it', { skip }, as
   }, id)
   assert.ok(r.passage <= r.sheet - 8 && r.top >= r.scrollTop, `the passage (${r.top}–${r.passage}) is above the sheet (${r.sheet})`)
   await shot(page, 'phone-sheet')
+  await page.done()
+})
+
+// -- the watch ----------------------------------------------------------------
+
+test('an open doc shows a note an agent adds, a reply and a close, within a few seconds', { skip }, async () => {
+  await start()
+  const p = await newDoc(TEXT)
+  const page = await open({ doc: p })
+  const added = await api(p, 'doc/notes', 'POST', { kind: 'comment', quote: 'the grey dog', text: 'From an agent, while the doc is open.' }, 'ada')
+  await until(page, () => document.querySelectorAll('.dc-margin .dc-card').length === 1, null, 4000)
+  await shot(page, 'agent-note-arrives')
+  await api(p, `doc/notes/${added.note}/replies`, 'POST', { text: 'And a reply.' }, 'ada')
+  await until(page, () => document.querySelector('.dc-margin .dc-card .dc-more')?.textContent === '1 reply', null, 4000)
+  await api(p, `doc/notes/${added.note}/resolve`, 'POST', {}, 'ada')
+  await until(page, () => document.querySelectorAll('.dc-margin .dc-card').length === 0, null, 4000)
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('an idle open doc changes nothing on the page (the watch draws only what changed)', { skip }, async () => {
+  await start()
+  const page = await open({ doc: 'Essays/drafts/On staying.md' })
+  await page.waitForTimeout(800)
+  const n = await page.evaluate(() => new Promise((res) => {
+    let count = 0
+    const mo = new MutationObserver((ms) => { for (const m of ms) if (!m.target.closest?.('.cm-content, .cm-cursorLayer, .cm-selectionLayer') && !(m.target.classList?.contains('cm-cursorLayer'))) count++ })
+    mo.observe(document.querySelector('.dc'), { subtree: true, childList: true, attributes: true, characterData: true })
+    // the watch asks every 1.5 s; and Loam's page asks for the header often
+    const t = setInterval(() => window.__ed.refreshHead(), 300)
+    setTimeout(() => { mo.disconnect(); clearInterval(t); res(count) }, 6000)
+  }))
+  assert.equal(n, 0, 'no change to the page in 6 s of idling')
+  await page.done()
+})
+
+test('Viewing at the end of a long doc shows the end of it, and scrolling grows the doc little', { skip }, async () => {
+  await start()
+  const page = await open({ doc: 'Essays/drafts/Long.md', zoom: 0.9 })
+  const h0 = await page.evaluate(() => document.querySelector('.dc-scroll').scrollHeight)
+  for (const y of [1500, 3000, 4500, 99999]) await scrollTo(page, y)
+  await page.evaluate(() => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: v.state.doc.length }, scrollIntoView: true }) })
+  await page.waitForTimeout(400)
+  const h1 = await page.evaluate(() => document.querySelector('.dc-scroll').scrollHeight)
+  assert.ok(h1 / h0 < 1.15, `the doc grew from ${h0} to ${h1} while scrolled`)
+  await mode(page, 'Viewing')
+  await page.waitForTimeout(800)
+  const r = await page.evaluate(() => {
+    const s = document.querySelector('.dc-scroll').getBoundingClientRect()
+    const lines = [...document.querySelectorAll('.cm-line')].filter(l => { const b = l.getBoundingClientRect(); return b.bottom > s.top && b.top < s.bottom && l.textContent.trim() })
+    const last = [...document.querySelectorAll('.cm-line')].pop().getBoundingClientRect()
+    return { lines: lines.length, emptyBelow: s.bottom - last.bottom }
+  })
+  assert.ok(r.lines >= 4, `text is in view (${r.lines} lines)`)
+  assert.ok(r.emptyBelow < 400, `little empty space below the end (${r.emptyBelow})`)
+  await shot(page, 'viewing-at-end')
+  await page.done()
+})
+
+test('phone: one bar, and none when there is nothing to show', { skip }, async () => {
+  await start()
+  const page = await open({ doc: 'Essays/drafts/Long.md', w: 430, h: 900, phone: true })
+  const bars = () => page.evaluate(() => [...document.querySelectorAll('.dc-kbar, .dc-vbar')].filter(b => b.offsetHeight > 0).length)
+  assert.equal(await bars(), 0, 'nothing at load')
+  await page.evaluate(() => window.__ed.view.focus())
+  await page.waitForTimeout(200)
+  assert.equal(await bars(), 1)
+  await page.evaluate(() => window.__ed.view.dispatch({ selection: { anchor: 200, head: 210 } }))
+  await page.evaluate(() => document.activeElement.blur())
+  await page.waitForTimeout(300)
+  assert.equal(await bars(), 1, 'one bar after a blur with a selection')
+  await shot(page, 'phone-one-bar')
+  await page.done()
+})
+
+test('a file without a final line break keeps it that way; a new one gets one', { skip }, async () => {
+  await start()
+  for (const [text, want] of [['No break at the end', 'No break at the end, more'], ['', 'Words in a new file\n']]) {
+    const p = await newDoc(text)
+    const page = await open({ doc: p })
+    await page.evaluate(() => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: v.state.doc.length } }) })
+    await page.keyboard.type(text ? ', more' : 'Words in a new file')
+    await page.evaluate(() => window.__ed.flush())
+    assert.equal((await disk(p)).text.replace(/^---\n[\s\S]*?\n---\n\n?/, ''), want)
+    await page.done()
+  }
+})
+
+test('a focused card near the bottom of the pane is brought wholly into view', { skip }, async () => {
+  await start()
+  const page = await open({ doc: 'Essays/drafts/On staying.md' })
+  // the last note (Sam's, with a reply) placed near the bottom edge
+  const id = await page.evaluate(() => {
+    const n = window.__ed.state.notes.filter(n => n.state === 'open').sort((a, b) => b.from - a.from)[0]
+    const card = document.querySelector(`.dc-card[data-id="${n.id}"]`)
+    const s = document.querySelector('.dc-scroll')
+    s.scrollTop += card.getBoundingClientRect().top - s.getBoundingClientRect().bottom + 60
+    return n.id
+  })
+  await page.waitForTimeout(300)
+  await page.click(`.dc-card[data-id="${id}"]`, { position: { x: 30, y: 10 } })
+  await page.waitForTimeout(900)
+  const r = await page.evaluate((id) => {
+    const c = document.querySelector(`.dc-card[data-id="${id}"]`).getBoundingClientRect()
+    const s = document.querySelector('.dc-scroll').getBoundingClientRect()
+    const reply = document.querySelector(`.dc-card[data-id="${id}"] .dc-cmp`).getBoundingClientRect()
+    return { bottom: c.bottom, top: c.top, sBottom: s.bottom, sTop: s.top, reply: reply.bottom }
+  }, id)
+  assert.ok(r.reply <= r.sBottom && r.top >= r.sTop, JSON.stringify(r))
+  await page.done()
+})
+
+test('Viewing: the gutter marks sit centred on their passage\'s first line (90%)', { skip }, async () => {
+  await start()
+  const page = await open({ doc: 'Essays/drafts/Long.md', zoom: 0.9 })
+  await mode(page, 'Viewing')
+  let seen = 0
+  for (const y of [0, 1400, 3000, 99999]) {
+    await scrollTo(page, y)
+    const o = await offsets(page, true)
+    seen += o.length
+    if (o.length) near(o, `Viewing, scrolled to ${y}`)
+  }
+  assert.ok(seen >= 3)
+  await page.done()
+})
+
+test('the block menu at the end of a doc opens below the caret, the doc making room', { skip }, async () => {
+  await start()
+  const p = await newDoc('# End\n\n' + Array.from({ length: 30 }, (_, i) => `Paragraph ${i} of a doc long enough to scroll.`).join('\n\n') + '\n\n')
+  const page = await open({ doc: p, zoom: 0.9 })
+  await page.evaluate(() => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: v.state.doc.length }, scrollIntoView: true }) })
+  await page.waitForTimeout(300)
+  await page.keyboard.type('/')
+  await page.waitForSelector('.dc-bmenu.on')
+  await page.waitForTimeout(300)
+  const m = await page.evaluate(() => {
+    const menu = document.querySelector('.dc-bmenu.on').getBoundingClientRect()
+    const c = window.__ed.view.coordsAtPos(window.__ed.view.state.selection.main.head)
+    const el = document.querySelector('.dc-bmenu.on')
+    return { below: menu.top >= c.bottom - 1, scrolls: el.scrollHeight > el.clientHeight + 1, bottom: menu.bottom, h: innerHeight }
+  })
+  assert.deepEqual({ below: m.below, scrolls: m.scrolls }, { below: true, scrolls: false })
+  assert.ok(m.bottom <= m.h)
+  await page.keyboard.press('Escape')
+  await page.done()
+})
+
+test('Escape closes History and Resolved; a change of width keeps the line in view', { skip }, async () => {
+  await start()
+  const page = await open({ doc: 'Essays/drafts/Long.md' })
+  await page.click('.dc-gbtn[aria-label^="More"]')
+  await page.click('.dc-mi >> text=History')
+  await page.waitForSelector('.dc-drawer.on')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  assert.equal(await page.locator('.dc-drawer.on').count(), 0, 'Escape closed History')
+  await scrollTo(page, 2400)
+  const before = await page.evaluate(() => { const s = document.querySelector('.dc-scroll').getBoundingClientRect(); return document.elementFromPoint(s.left + 260, s.top + 120)?.closest('.cm-line')?.textContent.slice(0, 40) })
+  await page.evaluate(() => window.__ed.setPhone(true))
+  await page.waitForTimeout(500)
+  const after = await page.evaluate(() => { const s = document.querySelector('.dc-scroll'); return s.scrollTop })
+  assert.ok(after > 1000, `the scroll was kept (${after}, was showing ${before})`)
   await page.done()
 })

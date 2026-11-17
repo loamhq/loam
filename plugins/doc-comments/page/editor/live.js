@@ -70,9 +70,14 @@ export function frontmatterRange(doc) {
 
 const HIDDEN_KEYS = new Set(['loam_doc_id'])
 
+// Each block widget says roughly how tall it is: until CodeMirror has drawn
+// it, that is all it knows, and a table or a picture counted as one line made
+// a long doc grow by thousands of pixels as it was scrolled (and left Viewing
+// at the end of one almost blank).
 class PropertiesWidget extends WidgetType {
   constructor(source) { super(); this.source = source }
   eq(o) { return o.source === this.source }
+  get estimatedHeight() { return 44 }
   toDOM(view) {
     const rows = []
     for (const line of this.source.split(/\r?\n/).slice(1, -1)) {
@@ -120,6 +125,7 @@ function plainInline(s) {
 class TableWidget extends WidgetType {
   constructor(source, from) { super(); this.source = source; this.from = from }
   eq(o) { return o.source === this.source }
+  get estimatedHeight() { return 22 + 34 * Math.max(1, this.source.split(/\r?\n/).filter(l => l.trim()).length - 1) }
   toDOM(view) {
     const lines = this.source.split(/\r?\n/).filter(l => l.trim())
     const head = cellsOf(lines[0] || '')
@@ -142,12 +148,14 @@ class TableWidget extends WidgetType {
 
 class RuleWidget extends WidgetType {
   eq() { return true }
+  get estimatedHeight() { return 29 }
   toDOM() { return h('div', { class: 'dc-hr', 'aria-hidden': 'true' }, h('span')) }
 }
 
 class EmbedWidget extends WidgetType {
   constructor(target, embed) { super(); this.target = target; this.embed = embed }
   eq(o) { return o.target === this.target }
+  get estimatedHeight() { return EmbedWidget.seen.get(this.target) || 300 }
   toDOM(view) {
     const wrap = h('span', { class: 'dc-embed' })
     let tries = 0
@@ -156,6 +164,7 @@ class EmbedWidget extends WidgetType {
       try { node = this.embed?.(this.target) } catch { node = null }
       if (node && node.tagName === 'IMG') {
         const img = node.cloneNode(true)
+        img.addEventListener('load', () => { const hgt = wrap.offsetHeight; if (hgt) EmbedWidget.seen.set(this.target, hgt) }, { once: true })
         // A picture changes the line's height when it arrives; CodeMirror is
         // told, so what is placed by its height map (the gutter's marks, the
         // margin's notes below it) moves with it.
@@ -563,3 +572,5 @@ export function liveSuggest(hunksOf, noteFor = () => null) {
     }
   }, { decorations: (v) => v.decorations })
 }
+
+EmbedWidget.seen = new Map()

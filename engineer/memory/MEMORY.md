@@ -470,3 +470,26 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Caddy reads agent workspaces in place**: `/home/<user>` and
   `ai-labs/<agent>/sites/` are world-readable, so a folder served there is
   live as the agent edits it, with no copy and no deploy.
+
+## 2026-11-17 — doc comments: Suggesting as real text
+
+- **An editor that swaps typed text for a widget will corrupt it.** The
+  Suggesting pause used to revert the typed words and draw them as a widget;
+  CodeMirror has no caret position inside a widget, so the caret landed
+  beside it and the next keystrokes went to the wrong side. Keep one's own
+  pending edits as real, decorated text and treat the server as bookkeeping
+  (`plugins/doc-comments/page/editor/drafts.js`).
+- **`ChangeSet` composition does not cancel.** A change composed with its
+  own undoing is a replacement of the words by themselves; mapping another
+  change over it drops that change's deletion and leaves both texts side by
+  side. Recount from a diff after undoing anything.
+- **`classList.toggle(name, undefined)` flips** instead of forcing; always
+  pass a boolean.
+- **A Playwright handle in a failing `assert.equal`** makes node's test
+  runner serialise it and get killed for memory (exit 137, empty log). Assert
+  on a count or a boolean.
+- **A merge can silently drop a commit that was meant to land at session
+  end**: `9d381d7` was on the job branch when the session ended, but the
+  launcher found "nothing left to merge" (it compared against a landing made
+  mid-job) and it never reached `main`. After a mid-job `--land`, land again
+  before ending, or check `git branch --contains` on `main`.

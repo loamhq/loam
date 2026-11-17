@@ -109,3 +109,13 @@ for (let seed = 1; seed <= 400; seed++) {
     assert.deepEqual(plan(base, now, drafts), [])
   })
 }
+
+import { suggestionShape } from '../page/editor/textdiff.js'
+test('a typed " Sfive." reads as an insertion of "Sfive."', () => {
+  for (const [b, n] of [['a Sfour. The man', 'a Sfour. Sfive. The man'], ['ends Sfour.\n', 'ends Sfour. Sfive.\n']]) {
+    const [r] = runs(b, n)
+    const shape = suggestionShape(b.slice(r.from, r.to), r.replacement)
+    assert.equal(shape.kind, 'insert')
+    assert.equal(shape.insert.trim(), 'Sfive.')
+  }
+})

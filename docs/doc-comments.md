@@ -188,19 +188,38 @@ notes that meets such a conflict gets its sidecar then, to hold the
 suggestion. This replaces Files' "Keep mine / Take theirs" box for Markdown
 files while the plugin is on.
 
-Suggesting works the same way from the other side: what is typed while
-Suggesting is shown live (struck old words, new words in the accent), and on
-a pause each changed run of words becomes a suggestion; a run that touches
-one of your own open suggestions grows it rather than starting another (the
-new one is sent with `supersedes`, and the server puts it in the old one's
-place, replies and all; anyone else's suggestion is never replaced).
+**Suggesting keeps my own suggestions as real text** (`page/editor/drafts.js`,
+2026-11-17). While a person is Suggesting, their own open suggestions
+("drafts") are applied to the editor's text and drawn over it as suggestions
+(old words struck, new words in the accent), so the caret always sits in
+real text: typing, deleting, pausing and typing again in one place is one run
+of edits. A pause sends what changed: each changed run of whole words, as the
+stored text has it and what it would become; a run that touches a draft
+grows it (`supersedes`: the server puts the new one in the old one's place,
+replies and all, and never replaces anyone else's), and a draft whose words
+are back as they were is withdrawn (`withdraw`; kept as rejected if someone
+replied). Nothing in the editor changes at a pause. When a draft is closed by
+anyone (accepted, rejected) its words in the editor go back to the stored
+ones before the stored text is mapped in, so an accept is not counted twice
+and a reject restores the words exactly. Leaving Suggesting draws the drafts
+over the stored text again; entering it makes my open suggestions drafts.
+
+*Why:* until then a pause took the typed words out of the editor and drew
+them as a widget. The caret was left beside the widget or inside the next
+word, so typing on after a pause wrote onto the wrong side of it ("order.
+Aaa.  Bbb.The man") or made three overlapping suggestions out of one word.
+The page's diff also never splits a word now (`textdiff.js`, `changes`).
+`test/drafts.test.mjs` runs 400 seeded sequences of typing, pausing and
+deleting through the planner; `test/browser.test.mjs` types in bursts with
+real pauses (start, middle and end of a word, before punctuation, a
+paragraph's end, the top of the doc, Backspace across what was typed, beside
+and inside someone else's suggestion, a disk change mid-pause) and 200 seeded
+runs in the browser, and holds after each that accepting writes exactly what
+was on the screen and rejecting restores the original.
 
 The live marks are drawn over **the text as stored**: whenever the stored
 text moves (an accept, someone's save, an edit on disk), that is the base
-Suggesting draws from. Until 2026-11-17 it kept the text from when
-Suggesting began, so after an accept the next keystroke suggested the
-accepted words again, put the editor back to the old text and anchored the
-new suggestion as far off as the accepted words were long.
+Suggesting draws from.
 
 A typed insertion has to be anchored on a word beside it (a passage is never
 empty), so "order." becomes "order. She smiled.". It is drawn and described
@@ -215,9 +234,12 @@ restores.
 
 ### Changes on disk
 
-An open doc asks the plugin's server for its revision alone
-(`GET doc/revision`) every 1.5 s while the page is visible. A new one is
-read in quietly: with nothing unsaved the editor takes the new text (the
+An open doc asks the plugin's server for its revision and its notes'
+(the sidecar's) alone (`GET doc/revision`) every 1.5 s while the page is
+visible, so a note, reply or close from anyone (an agent's tool) arrives as
+well as an edit on disk. A new one is read in quietly, and an answer that
+changes nothing draws nothing (the header is rebuilt only when it changed,
+since Loam's page asks for it on every re-render): with nothing unsaved the editor takes the new text (the
 caret and the passages map through it, and the first line in view stays
 where it was on the screen); with unsaved edits they are saved at once, and
 the save merges. The window regaining focus does the same.
