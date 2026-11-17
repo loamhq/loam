@@ -723,16 +723,29 @@ def _frontmatter_set(text: str, fields: dict[str, str]) -> str:
                                     else "") + text
 
 
-def with_provenance(root: str, parts: list[str], text: str, created: bool) -> str:
+def author_link(by) -> str:
+    """The provenance link a save is stamped with: the owner's, or, when a
+    save names a live persona as ``by`` (2026-11-16, for a plugin acting for
+    one: doc-comments), that persona's, as its transcripts spell it. Anything
+    else ``by`` might say is refused rather than stamped."""
+    if by is None or lc.is_owner(by):
+        return USER_LINK
+    if not isinstance(by, str) or by not in cfg.roster():
+        raise FilesError(400, f"`by` names a persona of this Loam; {by!r} is not one")
+    return f'"[[{cfg.agent_card(by)["name"]}]]"'
+
+
+def with_provenance(root: str, parts: list[str], text: str, created: bool,
+                    link: str = USER_LINK) -> str:
     """The owner's identity on a vault note they wrote through Files: the
     provenance convention's two fields, with their link. The vault only: a
     schedule record in particular is never stamped, because its header has
     no such key (loam_cron.HEADER_KEYS) and the schedule log already names
-    who saved it."""
+    who saved it. ``link`` is a persona's when the save was made for one."""
     if root != "vault" or _ext(parts[-1]) not in ("md", "markdown"):
         return text
-    fields = {"created_by": USER_LINK} if created else {}
-    fields["last_modified_by"] = USER_LINK
+    fields = {"created_by": link} if created else {}
+    fields["last_modified_by"] = link
     match = FRONTMATTER.match(text)
     if created and match and re.search(r"(?m)^created_by\s*:", match.group(2) or ""):
         fields.pop("created_by")      # a created_by the person typed is theirs
@@ -809,8 +822,11 @@ def _settle(dfd: int, root: str, parts: list[str]) -> dict:
 
 def save_text(payload: dict) -> dict:
     """Replace a text file the owner may edit, only if it is still the revision
-    they read. ``{root, path, text, base_revision}``."""
+    they read. ``{root, path, text, base_revision, by?}``: ``by`` names the
+    persona a plugin saved it for, whose link the provenance stamp then
+    carries (``author_link``)."""
     root, parts = _write_target(payload)
+    link = author_link(payload.get("by"))
     base = payload.get("base_revision")
     if not isinstance(base, str) or not base.startswith("sha256:"):
         raise FilesError(400, "`base_revision` is the revision the edit began "
@@ -841,7 +857,7 @@ def save_text(payload: dict) -> dict:
                                   f"that revision; read it again and redo the "
                                   f"edit on top", current_revision=revision(current))
         text = with_provenance(root, parts, data.decode("utf-8", "surrogatepass"),
-                               created=False)
+                               created=False, link=link)
         data = text.encode("utf-8", "surrogatepass")
         tmp = _tmp_in(dfd, data, stat.S_IMODE(st.st_mode))
         try:

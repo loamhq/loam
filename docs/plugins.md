@@ -317,6 +317,17 @@ value of one of its settings. It is made when the plugin is on (at the
 switch, at a setting's change) and never removed: turning a plugin off takes
 its button away and leaves the notes.
 
+**What an agent's tool is told** (2026-11-16, first for doc-comments; any
+plugin's `agent.tool` gets it), besides what every plugin process is told:
+`LOAM_LANE`; `LOAM_AGENT`, the persona it serves (persona lane only);
+`LOAM_VAULT` and `LOAM_WORKSPACES`, so a tool can take the absolute paths an
+agent knows; and, for a plugin with a server, `LOAM_PLUGIN_URL`, that
+server's loopback address (`http://127.0.0.1:<port>/`), so the tool can be a
+thin client of the one process that writes the plugin's data. A plugin
+server trusts what it is told on loopback the way the box trusts its own
+user: a tool says which agent it is with a header of the plugin's own
+(doc-comments: `X-Loam-Agent`).
+
 **Lanes.** `persona` covers a persona's conversation, wakes and crons: the
 three share one workspace, and so one set of tools and one `CLAUDE.md`.
 `engineer` and `reviewer` are the other two. A conversation and a wake are
@@ -517,6 +528,8 @@ across restarts (9100–9299, `state/plugins/ports.json`), and:
 | `LOAM_BROKER_URL` | the broker, as the app reaches it (`http://172.31.0.1:8932`) |
 | `LOAM_BROKER_TOKEN_FILE` | the file holding the broker's bearer token: a path, so the token is never a unit property `systemctl show` prints |
 | `LOAM_API` | the plugin interface version |
+| `LOAM_VAULT_DATA` | `<system>/Loam/data/<id>`, the plugin's folder in the vault, relative to it (for the broker's Files routes); an update keeps it (docs/update.md). Not made until the plugin writes there. Since 2026-11-16 |
+| `LOAM_VAULT_DATA_DIR` | the same folder as a host path |
 
 **Limits**: `MemoryMax=512M`, no swap, `TasksMax=256`, `NoNewPrivileges`
 (this user has sudo; a plugin's server never does), `OOMScoreAdjust=700`

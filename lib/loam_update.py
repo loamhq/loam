@@ -991,7 +991,9 @@ def backup_library(run_id: str) -> str | None:
         return None
     dst = _path(f"backups/{run_id}/{sk.LOAM_DIR}")
     dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src, dst, symlinks=True)
+    # Not the kept folder: it is never restored from a backup (restore_library).
+    shutil.copytree(src, dst, symlinks=True,
+                    ignore=lambda d, names: [sk.KEPT_DIR] if Path(d) == src else [])
     folders = sorted(p for p in _path("backups").iterdir() if p.is_dir())
     for old in folders[:-KEEP_BACKUPS]:
         shutil.rmtree(old, ignore_errors=True)
@@ -1008,6 +1010,11 @@ def restore_library(backup: str | None) -> str:
     old = dst.with_name(f".{sk.LOAM_DIR}.undone-{os.getpid()}")
     if dst.exists():
         os.replace(dst, old)
+    # The kept folder is the person's data as it is now, never the backup's
+    # older copy (lib/loam_skills.py, KEPT_DIR).
+    if tmp.exists() or (old / sk.KEPT_DIR).is_dir():
+        tmp.mkdir(parents=True, exist_ok=True)
+        sk.carry_kept(old, tmp)
     if tmp.exists():
         os.replace(tmp, dst)
     shutil.rmtree(old, ignore_errors=True)

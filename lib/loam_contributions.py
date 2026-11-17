@@ -387,7 +387,8 @@ def active() -> list[dict]:
                         "contributes": contrib,
                         "settings": loam_plugins.yours_root() / "_settings" / row["id"],
                         "settings_file": Path(row.get("settings") or "settings.md").name,
-                        "data": loam_plugins.yours_root() / "_data" / row["id"]})
+                        "data": loam_plugins.yours_root() / "_data" / row["id"],
+                        "has_server": bool((row.get("has") or {}).get("server"))})
     return out
 
 
@@ -443,8 +444,29 @@ def lane_servers(lane: str, agent: str | None = None,
                 out[server_name(p["id"], t["name"])] = {
                     "command": "/bin/sh",
                     "args": ["-c", f"cd {_q(str(p['folder']))} && exec {t['run']}"],
-                    "env": _env(p, t.get("secrets"))}
+                    "env": {**_env(p, t.get("secrets")), **_tool_env(p, lane, agent)}}
     return out
+
+
+def _tool_env(plugin: dict, lane: str, agent: str | None) -> dict[str, str]:
+    """What an agent's tool is told besides what every plugin process is
+    (2026-11-16, for doc-comments; any plugin's tool gets it): which agent
+    and lane it serves (`LOAM_AGENT` on the persona lane, `LOAM_LANE`), where
+    the vault and the workspaces are (`LOAM_VAULT`, `LOAM_WORKSPACES`, so a
+    tool can take the absolute paths an agent knows), and, for a plugin with
+    a server, that server's loopback address (`LOAM_PLUGIN_URL`), so a tool
+    can be a thin client of the one process that writes the plugin's data."""
+    env = {"LOAM_LANE": lane, "LOAM_VAULT": str(lc.VAULT),
+           "LOAM_WORKSPACES": str(lc.WORKSPACES)}
+    if agent and lane == "persona":
+        env["LOAM_AGENT"] = agent
+    if plugin.get("has_server"):
+        try:
+            import loam_plugin_servers  # noqa: PLC0415
+            env["LOAM_PLUGIN_URL"] = f"http://127.0.0.1:{loam_plugin_servers.port_for(plugin['id'])}/"
+        except Exception:  # noqa: BLE001 -- no port table: the tool says it has no address
+            pass
+    return env
 
 
 def lane_prompt(lane: str, agent: str | None = None,

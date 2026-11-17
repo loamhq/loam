@@ -516,7 +516,9 @@ return Object.defineProperties({}, {
     files: { enumerable: true, get: () => files },
     filesUploadChooser: { enumerable: true, get: () => filesUploadChooser },
     chooseUpload: { enumerable: true, get: () => chooseUpload },
-    fileField: { enumerable: true, get: () => fileField },
+    // A plugin's editor that holds the open file supplies its own field
+    // (`files.own`), so dictation lands in it.
+    fileField: { enumerable: true, get: () => files.st.file?.owner?.field ?? fileField },
     fileNameField: { enumerable: true, get: () => fileNameField },
     fileFieldFor: { enumerable: true, get: () => fileFieldFor },
     goFiles: { enumerable: true, get: () => goFiles },

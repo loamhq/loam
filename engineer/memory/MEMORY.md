@@ -292,3 +292,28 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `engineer-job --brief` with `continue_job` set to the original job, told
   to change nothing. The session ends, and the launcher tests, merges and
   pushes the reopened branch.
+## 2026-11-16 — doc comments: a plugin with a real editor
+
+- **A plugin's page code is served from the checkout, not from the app's
+  deployed release.** The broker's files route reads the shipped plugin
+  folders from Loam's checkout, so a landed plugin reaches live and staging
+  alike the moment it is on, whatever commit each app copy runs. To put a
+  page change on staging first, gate it on a capability only the new app has
+  (doc-comments waits for `files.own`); it turns on for live when live is
+  deployed from that release.
+- **CodeMirror 6 measures block widgets without their CSS margins.** A
+  margin on a block widget (the Properties line, a table) leaves the height
+  map short by that much, and everything placed from `lineBlockAt` (gutter
+  marks, margin notes) sits that far too high. Use padding inside widgets.
+- **`ChangeSet.of(changes, length)` splits inserted text on any line ending**
+  unless given the separator as its third argument; without it a merged
+  CRLF quietly became LF. And CodeMirror counts a CRLF as one position, in
+  UTF-16, while Python counts code points of the raw text: convert at every
+  boundary (`plugins/doc-comments/page/editor/textdiff.js`, `posMap`).
+- **`node.replaceChildren(null)` draws the text "null".** Filter first.
+- **The push gate's deny list covers fixtures and comments too.** Names of
+  the install's people and agents in a test fixture hold the whole branch,
+  and the history keeps them after a fix. Before landing, grep the branch's
+  added lines with the deny file's patterns (`git diff main | grep '^+' |
+  grep -oE -f <patterns>`), use synthetic names (the starter's Iris, or
+  Ada, Sam), and squash your own unpushed commits once they are clean.
