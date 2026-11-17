@@ -453,3 +453,20 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **`pkill -f <pattern>` matches its own shell's command line** when the
   pattern is in the same command, and kills the session's shell. Keep a pid
   file.
+
+## 2026-11-16 — a public page on a name outside the domain
+
+- **`[[landing]]` is the way**, not a site record and not `[domains]`: a
+  site is always `<name>.<domain>`, and an app's extra domain brings a
+  login portal on that domain, which would collide with `[moved]`'s `auth`
+  on the old one. The entry carries the owner's quoted yes and check-drift
+  reads it as the host's public file.
+- **The push gate refuses this box's own names** in any commit's message or
+  added lines, on every commit of the branch, not only the last. Write the
+  docs and the test generically (`example.test`); the box's own entry
+  goes in the deployment config outside the checkout (`deploy.config`).
+- **`bin/gen-deploy` takes no `--help`**: it ran for real. Read the
+  script's head before passing it a flag.
+- **Caddy reads agent workspaces in place**: `/home/<user>` and
+  `ai-labs/<agent>/sites/` are world-readable, so a folder served there is
+  live as the agent edits it, with no copy and no deploy.
