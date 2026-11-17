@@ -6,7 +6,7 @@ author: Loam contributors
 api: 0
 default_on: false
 kind: [extension]
-places: [files.viewer]
+places: [files.viewer, files.root]
 overrides: []
 server:
   run: python3 server/main.py
@@ -16,6 +16,13 @@ touches:
   memory: none
   server: true
 contributes:
+  settings.entry:
+    - key: reach
+      label: Where the editor and share links work
+      choices: [staging, everywhere]
+      default: staging
+  web.door:
+    - why: "People the owner shares a doc with, by a password-protected link (/s/<token>), and their agents with the link's key: each reaches that one doc, by the link's mode, and nothing else."
   agent.tool:
     - name: doc-comments
       run: python3 tools/notes_mcp.py

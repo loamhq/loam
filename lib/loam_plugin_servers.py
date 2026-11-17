@@ -67,6 +67,7 @@ import loam_plugins as plugins
 
 UNIT_PREFIX = "loam-plugin-"
 GATEWAY_PORT = 8933                 # bin/plugin-gateway, on 127.0.0.1
+DOOR_PORT = 8936                    # its share door, /s/*, without the login (2026-11-16)
 PORTS = range(9100, 9300)           # one per plugin, kept across restarts
 MEMORY_MAX = "512M"
 TASKS_MAX = 256

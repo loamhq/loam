@@ -898,3 +898,40 @@ the way `check-drift` would compare an overlay's. Its job side is the
 plugin's `engineer.job` hook. The overlay is worth building when a second
 root part needs installing after every update, or when an installer has to
 carry one; until then it stays a design.
+
+## The share door (2026-11-16)
+
+The one path of the app's host that does not meet the owner's login:
+`/s/*`. It exists for share links (doc-comments: an outside person opens a
+doc by a password-protected link) and is general: **a plugin opts in with
+`contributes: web.door: [{why: …}]`**, and the first plugin in force by id
+that has one holds it. The `why` is shown in the plugin's declaration before
+it is installed (`open_web`), because it is the plugin's reach onto the
+open web.
+
+- **Caddy** (lib/loam_deploy.py, `caddy_host_block`, `app_shell` hosts only:
+  Loam's page and its staging copy) sends `/s/*` to the plugin gateway's door
+  port, `PLUGIN_DOOR_PORT` (8936), with no `import gate`. A `handle /path` is
+  ordered ahead of every other handle on the host, so nothing else changes
+  order. `/robots.txt` on the same hosts answers `Disallow: /`.
+- **The gateway** (bin/plugin-gateway, `door`) answers only `/s/<token>…`
+  (32 to 64 of `A-Z a-z 0-9 _ -`) and only for the door's holder, as
+  `/door/<token>…` on the plugin's own port with `X-Loam-Door: 1`. It passes
+  an allowlist of headers: `Host`, `Content-Type`, `Content-Length`,
+  `Accept`, `Accept-Language`, `User-Agent`, `Origin`, `X-Forwarded-For`,
+  `X-Loam-Share`, the one cookie `loam_share`, and `Authorization` only when
+  it is `Bearer lak_…`. Never the login's cookie, never a header naming a
+  user. No upgrade, no chunked body, at most 2 MiB. Anything else is a 404.
+- **On the login's port** (`/x/…`) the gateway takes `X-Loam-Door` off, so
+  only the door's port can say a request came through the door.
+- **The plugin** must treat a request marked `X-Loam-Door: 1` as a
+  stranger's: it answers only its `/door/` routes for those, decides from
+  its own credentials (doc-comments: the link's password and its session,
+  or an agent key) and never from a path, a root or a header the visitor
+  sent. Unmarked requests on `/door/` are refused.
+
+Put back: remove the plugin's `web.door` (or turn it off) and the door
+answers 404 for everything; to take the path itself away, drop the
+`app_shell` block that writes `handle /s/*` in `caddy_host_block` and run
+`sudo bin/gen-deploy` (it rewrites /etc/caddy/Caddyfile and reloads Caddy;
+**it has no `--help`: any run is live**).

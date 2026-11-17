@@ -375,3 +375,19 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Sun transition ids are fixed host-side** (`loam_appearance.TRANSITIONS`,
   like the size's range), not read from the handoff like the modes are; the
   parity test holds them equal to the handoff's enum.
+
+## 2026-11-17 — the share door
+
+- **`bin/gen-deploy` has no `--help` either.** Like `gen-rc-units`, any
+  argument it does not know is ignored and the run is live: it rewrites
+  /etc/caddy/Caddyfile from the tree you run it in and reloads Caddy.
+- **Check a new port against every `*_PORT` constant, not against `ss`.**
+  The door's first port, 8934, looked free in the code beside it and was
+  the claim service's (`CLAIM_PORT`, further down lib/loam_deploy.py); for
+  four minutes `/s/*` reached the claim service without the login (it
+  answered its own 404). `tests/test_doc_comments.py` now checks the door's
+  port against every constant.
+- **A door past the login is narrowest as a port of its own.** Caddy sends
+  one path, ungated, to a port that answers nothing else; the gateway
+  passes an allowlist of headers (never the login's cookie) and marks the
+  request, and strips that mark on the gated port.

@@ -9,6 +9,17 @@ with `/x/<id>` taken off the path and given as `X-Forwarded-Prefix`, so a
 plugin serves `/` and its relative links work under the prefix. Nothing
 here runs a plugin's code; the broker never carries a plugin's traffic.
 
+**The share door** (2026-11-16, docs/plugins.md, "The share door"): a
+second port, `DOOR_PORT`, to which Caddy sends `/s/*` on the app's hosts
+WITHOUT the login. It answers only `/s/<token>…` (a token is 32 to 64 of
+`A-Z a-z 0-9 _ -`), only for the one plugin in force that contributes
+`web.door`, and passes it as `/door/<token>…` with `X-Loam-Door: 1`. Of the
+browser's headers it passes an allowlist and no more: never the login's
+cookie (only `loam_share`), never a header naming a user, a `Bearer`
+authorization only when it is an agent key (`lak_…`). No upgrade, no
+chunked body, at most 2 MiB. On the login's port (`/x/…`) the marker header
+is taken off, so only this port can say a request came through the door.
+
 One request per connection to the plugin (`Connection: close` on the way
 up), so a connection never carries two plugins' requests; a WebSocket's
 upgrade goes through and is piped as it is. Its own unit
@@ -28,10 +39,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import loam_plugin_servers as servers  # noqa: E402
 
+DOOR_PATH = re.compile(r"^/s/([A-Za-z0-9_-]{32,64})(/[^?#]*)?(\?[^#]*)?$")
+DOOR_METHODS = {"GET", "HEAD", "POST", "PATCH", "DELETE"}
+DOOR_HEADERS = {"host", "content-type", "content-length", "accept", "accept-language",
+                "user-agent", "x-loam-share", "x-forwarded-for", "origin"}
+DOOR_BODY_MAX = 2 * 1024 * 1024
+_owner_cache = {"at": 0.0, "pid": None}
+
 HEAD_MAX = 64 * 1024
 PATH = re.compile(r"^/x/([a-z][a-z0-9-]*)(/[^?#]*)?(\?.*)?$")
 HOP = {"connection", "keep-alive", "proxy-connection", "te", "trailer",
-       "x-forwarded-prefix"}
+       "x-forwarded-prefix", "x-loam-door"}
 
 
 def answer(status: int, reason: str, text: str, extra: str = "") -> bytes:
@@ -132,12 +150,108 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
             pass
 
 
+def door_owner() -> str | None:
+    """The plugin holding the door, looked up at most every 5 seconds."""
+    import time
+    now = time.monotonic()
+    if now - _owner_cache["at"] > 5:
+        try:
+            import loam_contributions  # noqa: PLC0415
+            _owner_cache["pid"] = loam_contributions.door_owner()
+        except Exception as exc:  # noqa: BLE001 -- no owner is a closed door
+            print(f"plugin-gateway: door owner: {exc!r}", file=sys.stderr, flush=True)
+            _owner_cache["pid"] = None
+        _owner_cache["at"] = now
+    return _owner_cache["pid"]
+
+
+def door_headers(lines: list[str]) -> list[str] | None:
+    """The browser's headers that may pass the door, or None to refuse."""
+    out = []
+    for line in lines:
+        if not line or ":" not in line:
+            continue
+        name, value = line.split(":", 1)
+        low = name.strip().lower()
+        value = value.strip()
+        if low in ("upgrade", "transfer-encoding"):
+            return None
+        if low == "content-length" and (not value.isdigit() or int(value) > DOOR_BODY_MAX):
+            return None
+        if low in DOOR_HEADERS:
+            out.append(f"{name.strip()}: {value}")
+        elif low == "cookie":
+            keep = [c.strip() for c in value.split(";") if c.strip().startswith("loam_share=")]
+            if keep:
+                out.append("Cookie: " + "; ".join(keep[:1]))
+        elif low == "authorization" and value.lower().startswith("bearer lak_"):
+            out.append(f"Authorization: {value}")
+    return out
+
+
+async def door(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    """The share door's port: `/s/<token>…` to the door's plugin, nothing else."""
+    try:
+        try:
+            head = await reader.readuntil(b"\r\n\r\n")
+        except asyncio.LimitOverrunError:
+            writer.write(answer(431, "Request Header Fields Too Large", "headers too large"))
+            return
+        except asyncio.IncompleteReadError:
+            return
+        lines = head.decode("latin-1").split("\r\n")
+        try:
+            method, target, version = lines[0].split(" ", 2)
+        except ValueError:
+            writer.write(answer(400, "Bad Request", "not an HTTP request"))
+            return
+        m = DOOR_PATH.match(target)
+        if not m or method not in DOOR_METHODS:
+            writer.write(answer(404, "Not Found", "not found", "X-Robots-Tag: noindex\r\n"))
+            return
+        pid = door_owner()
+        port = servers.read_ports().get(pid) if pid else None
+        if port is None:
+            writer.write(answer(404, "Not Found", "not found", "X-Robots-Tag: noindex\r\n"))
+            return
+        headers = door_headers(lines[1:])
+        if headers is None:
+            writer.write(answer(413, "Payload Too Large", "that request is not taken here",
+                                "X-Robots-Tag: noindex\r\n"))
+            return
+        token, rest, query = m.group(1), m.group(2) or "/", m.group(3) or ""
+        length = next((int(h.split(":", 1)[1]) for h in headers if h.lower().startswith("content-length:")), 0)
+        headers += ["X-Loam-Door: 1", f"X-Forwarded-Prefix: /s/{token}", "Connection: close"]
+        up_head = f"{method} /door/{token}{rest}{query} {version}\r\n" + "\r\n".join(headers) + "\r\n\r\n"
+        body = await reader.readexactly(length) if length else b""
+        try:
+            up_reader, up_writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
+        except (OSError, asyncio.TimeoutError):
+            writer.write(answer(502, "Bad Gateway", "this page is not answering just now",
+                                "X-Robots-Tag: noindex\r\n"))
+            return
+        up_writer.write(up_head.encode("latin-1") + body)
+        await up_writer.drain()
+        await pipe(up_reader, writer)
+        up_writer.close()
+    except Exception as exc:  # noqa: BLE001 -- one request never takes the gateway
+        print(f"plugin-gateway door: {exc!r}", file=sys.stderr, flush=True)
+    finally:
+        try:
+            await writer.drain()
+            writer.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 async def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else servers.GATEWAY_PORT
+    door_port = int(sys.argv[2]) if len(sys.argv) > 2 else servers.DOOR_PORT
     server = await asyncio.start_server(handle, "127.0.0.1", port, limit=HEAD_MAX)
-    print(json.dumps({"listening": f"127.0.0.1:{port}"}), flush=True)
-    async with server:
-        await server.serve_forever()
+    door_server = await asyncio.start_server(door, "127.0.0.1", door_port, limit=HEAD_MAX)
+    print(json.dumps({"listening": f"127.0.0.1:{port}", "door": f"127.0.0.1:{door_port}"}), flush=True)
+    async with server, door_server:
+        await asyncio.gather(server.serve_forever(), door_server.serve_forever())
 
 
 if __name__ == "__main__":

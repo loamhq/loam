@@ -69,7 +69,11 @@ PLACES = ("agent.tool", "agent.prompt", "schedule.kind", "settings.entry",
           # whose output is that job's environment: what carries a project's
           # cloud credentials, written fresh for each job, which a fixed
           # value cannot.
-          "engineer.job")
+          "engineer.job",
+          # 2026-11-16 (doc-comments' share links): the one path, /s/, that
+          # reaches a plugin without the owner's login (docs/plugins.md, "The
+          # share door").
+          "web.door")
 # The checks the host runs itself for a `settings.secret` (`check: builtin:<n>`),
 # so a plugin with no code of its own (read aloud, dictation) can have its key
 # checked: lib/loam_keys.py.
@@ -307,6 +311,14 @@ def contributes_of(value, folder: Path | None, warnings: list[str]) -> dict:
                     raise ContributionError(f"{where}: `setting` is one of its own "
                                             f"settings.entry keys")
                 items.append({"path": path, "setting": setting})
+            elif place == "web.door":
+                why = e.get("why")
+                if not isinstance(why, str) or not why.strip():
+                    raise ContributionError(f"{where}: `why` says who comes in through "
+                                            f"the door and what they reach")
+                if items:
+                    raise ContributionError(f"{where}: a plugin has one door")
+                items.append({"why": why.strip()})
             elif place == "box.listener":
                 proc = e.get("process")
                 why = e.get("why")
@@ -365,7 +377,20 @@ def declared(contrib: dict) -> dict:
                               for f in contrib["vault.folder"])
     if contrib.get("box.listener"):
         out["inbound"] = sorted(f"{l['process']}: {l['why']}" for l in contrib["box.listener"])
+    if contrib.get("web.door"):
+        out["open_web"] = contrib["web.door"][0]["why"]
     return out
+
+
+def door_owner(plugins: list[dict] | None = None) -> str | None:
+    """The plugin in force that holds the share door, `/s/` (2026-11-16):
+    the first by id that contributes `web.door`, or None. A second one is
+    left without it (and `check-drift` is not needed to see it: the
+    gateway answers for the first only)."""
+    for p in sorted(active() if plugins is None else plugins, key=lambda p: p["id"]):
+        if p["contributes"].get("web.door"):
+            return p["id"]
+    return None
 
 
 # ---------------------------------------------------------------------------

@@ -44,10 +44,19 @@ class Service:
     # -- permissions ----------------------------------------------------------------
     # One place, so step 2 can add a link's mode (view / comment / edit).
 
+    # What a share link's visitor (kind `guest`) and their agent
+    # (`guest-agent`) may do, by the link's mode. Restoring a version and
+    # anything about links are the owner's and the personas' alone.
+    GUEST = {"view": {"view"},
+             "comment": {"view", "comment", "suggest"},
+             "edit": {"view", "comment", "suggest", "edit", "accept", "resolve_any"}}
+
     def may(self, who: dict, action: str, note: dict | None = None) -> bool:
         kind = who.get("kind")
         if kind in ("owner", "agent"):
             return True
+        if kind in ("guest", "guest-agent"):
+            return action in self.GUEST.get(who.get("mode"), set())
         return False
 
     def _need(self, who, action, note=None):
@@ -108,7 +117,7 @@ class Service:
     def _answer(self, who, doc, sc) -> dict:
         out = {"root": doc["root"], "path": doc["path"], "text": doc["text"],
                "revision": doc["revision"], "me": who,
-               "can": {a: self.may(who, a) for a in ("comment", "suggest", "edit", "accept", "resolve_any")},
+               "can": {a: self.may(who, a) for a in ("comment", "suggest", "edit", "accept", "resolve_any", "restore")},
                "id": None, "notes": []}
         if doc.get("row"):
             out["row"] = doc["row"]
@@ -396,7 +405,7 @@ class Service:
             return {"text": sc_mod.text_at(sc, save_id), "save": save_id}
 
     def restore(self, who, root, path, save_id) -> dict:
-        self._need(who, "edit")
+        self._need(who, "restore")
 
         def go():
             with self._lock(root, path):
@@ -418,3 +427,71 @@ class Service:
                 self._write_sidecar(sc, sc_rev)
                 return self._answer(who, {**doc, **stored}, sc)
         return self._with_retry(go)
+
+    # -- share links: the sidecar's side ---------------------------------------------------
+
+    def ensure_id(self, who: dict, root: str, path: str) -> str:
+        """The doc's id, giving it one (and its sidecar) if it has none: a
+        link points at a doc by its id, so it follows the doc's moves."""
+        self._need(who, "restore")
+
+        def go():
+            with self._lock(root, path):
+                doc, sc, sc_rev, dirty = self._load(root, path)
+                if sc is not None:
+                    if dirty:
+                        self._write_sidecar(sc, sc_rev)
+                    return sc["id"]
+                doc2, sc, sc_rev, _ = self._ensure_sidecar(who, root, path, doc, sc, sc_rev)
+                self._write_sidecar(sc, sc_rev)
+                return sc["id"]
+        return self._with_retry(go)
+
+    def sync_links(self, did: str, public: list[dict]) -> None:
+        """Write what anyone reading the vault may see of a doc's links into
+        its sidecar (never a token, hash or key)."""
+        def go():
+            got = self.store.read_sidecar(did)
+            if not got:
+                return
+            sc, rev = got
+            if sc.get("links") == public:
+                return
+            sc["links"] = public
+            self._write_sidecar(sc, rev)
+        self._with_retry(go)
+
+    def shared(self, dids: list[str], seen: dict) -> list[dict]:
+        """Shared Docs: each doc with a link on, its title and path, and how
+        much is new since the owner last opened it."""
+        out = []
+        owner_ids = {p["id"] for p in self.store.people().values()}
+        for did in dids:
+            got = self.store.read_sidecar(did)
+            if not got:
+                continue
+            sc = got[0]
+            where = sc.get("doc") or {}
+            since = seen.get(did) or ""
+            new = 0
+            people = []
+            last = sc.get("created", "")
+            for t in sc["threads"]:
+                for item in [t] + t.get("replies", []):
+                    a = item.get("author") or {}
+                    at = item.get("created", "")
+                    last = max(last, at)
+                    if a.get("id") not in owner_ids:
+                        if a.get("name") and a.get("name") not in people:
+                            people.append(a.get("name"))
+                        if at > since:
+                            new += 1
+            for s in sc["saves"]:
+                last = max(last, s.get("at", ""))
+                a = s.get("author") or {}
+                if a.get("id") not in owner_ids and s.get("at", "") > since:
+                    new += 1
+            out.append({"id": did, "root": where.get("root"), "path": where.get("path"),
+                        "links": sc.get("links", []), "new": new, "people": people[:6], "last": last})
+        out.sort(key=lambda d: d["last"], reverse=True)
+        return out

@@ -107,7 +107,8 @@ export function createDocEditor(opts) {
   const sheet = h('div', { class: 'dc-sheet', role: 'dialog' })
   const toast = h('div', { class: 'dc-toast', role: 'status' })
   const banner = h('div', { class: 'dc-banner', role: 'status' })
-  col.append(legend, gutter, plus)
+  const notice = h('div', { class: 'dc-notice' })
+  col.append(notice, legend, gutter, plus)
   page.append(col, margin)
   scroll.append(page)
   root.append(head, take, player, banner, scroll, kbar, vbar, selbar, bmenu, qpop, drawer, sheetScrim, sheet, toast)
@@ -894,11 +895,26 @@ export function createDocEditor(opts) {
     return h('div', { class: 'dc-ch' },
       avatar(n.author, 20),
       h('span', { class: 'dc-nm', text: name(n.author) }),
+      viaLink(n.author) ? h('span', { class: 'dc-via', title: 'Came in through a share link', text: n.author.kind === 'guest-agent' ? 'agent · via link' : 'via link' }) : null,
+      isNew(n) ? h('span', { class: 'dc-new', title: 'New since you last opened this doc' }) : null,
       focused ? h('span', { class: 'dc-tm', title: stamp(n.created), text: rel(n.created) }) : null,
       changed ? h('span', { class: 'dc-chg', title: `Text changed since. It read: “${n.anchor.quote}”` }, icon('changed', 14)) : null,
       h('span', { class: 'dc-grow' }),
       focused && isComment && mayResolve(n) ? h('button', { class: 'dc-ib dc-resolve', type: 'button', title: 'Resolve', 'aria-label': 'Resolve', onclick: (e) => { e.stopPropagation(); resolve(n) } }, icon('check', 15)) : null,
     )
+  }
+
+  // Someone outside Loam, shown so to Loam's own people (not to visitors,
+  // who know it already).
+  function viaLink(a) {
+    return /^guest/.test(a?.kind || '') && /^(owner|agent)$/.test(st.me?.kind || '')
+  }
+
+  function isNew(n) {
+    const seen = opts.doc.seen
+    if (!seen) return false
+    const other = (a) => a?.id !== st.me?.id
+    return (n.created > seen && other(n.author)) || (n.replies || []).some(r => r.created > seen && other(r.author))
   }
 
   function mayResolve(n) {
@@ -1185,7 +1201,9 @@ export function createDocEditor(opts) {
     head.className = `dc-head${scroll.scrollTop > 4 ? ' scd' : ''}`
     put(head, 
       opts.back ? h('button', { class: 'dc-gbtn dc-back', type: 'button', 'aria-label': opts.back.label, title: opts.back.label, onclick: opts.back.go }, icon('chevronLeft', 20)) : null,
-      h('div', { class: 'dc-crumb' }, crumbs),
+      opts.titleBar
+        ? h('div', { class: 'dc-crumb dc-titlebar' }, h('b', { text: opts.titleBar.title }), opts.titleBar.sub ? h('span', { class: 'dc-sl', text: '·' }) : null, opts.titleBar.sub ? h('span', { text: opts.titleBar.sub }) : null)
+        : h('div', { class: 'dc-crumb' }, crumbs),
       h('span', { class: 'dc-saveslot' }, saveWordNode()),
       ...(opts.headExtras?.() || []),
       menuWrap('mode', pill, modeMenu()),
@@ -1251,7 +1269,7 @@ export function createDocEditor(opts) {
       h('div', { class: 'dc-l' },
         h('b', { text: saveTitle(s) }),
         h('small', { text: [name(s.author), stamp(s.at), s.kind === 'outside' ? 'outside the editor' : null, s.by && s.by.id !== s.author?.id ? `accepted by ${name(s.by)}` : null].filter(Boolean).join(' · ') })),
-      i === 0 ? h('span', { class: 'dc-now', text: 'Now' }) : st.can.edit ? h('button', { class: 'dc-sm dc-restore', type: 'button', onclick: () => restore(s, H.saves[0]) }, 'Restore') : null))
+      i === 0 ? h('span', { class: 'dc-now', text: 'Now' }) : st.can.restore ? h('button', { class: 'dc-sm dc-restore', type: 'button', onclick: () => restore(s, H.saves[0]) }, 'Restore') : null))
     const det = detached()
     return [
       H ? null : h('div', { class: 'dc-quiet', text: 'Reading the history…' }),
@@ -1341,15 +1359,38 @@ export function createDocEditor(opts) {
     const focused = view.hasFocus
     const r = selectionRange()
     const writing = focused && canFormat()
-    kbar.classList.toggle('on', writing && !st.sheet)
+    kbar.classList.toggle('on', (writing || st.klink) && !st.sheet)
     vbar.classList.toggle('on', !writing && Boolean(r) && st.can.comment && !st.sheet)
+    if (st.klink && st.phone) {
+      // The link, typed in the bar itself, where the keyboard already is.
+      const l = st.klink
+      if (kbar.classList.contains('dc-klink') && kbar.querySelector('input')) return
+      const input = h('input', { type: 'url', inputmode: 'url', placeholder: 'Paste or type a link', value: l.url, 'aria-label': 'Link address', enterkeyhint: 'done' })
+      const done = (apply) => {
+        st.klink = null
+        if (apply) setLink(view, input.value.trim(), { from: l.from, to: l.to })
+        else view.focus()
+        renderBars()
+      }
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); done(true) } if (e.key === 'Escape') done(false) })
+      kbar.classList.add('on')
+      kbar.classList.add('dc-klink')
+      put(kbar,
+        h('span', { class: 'dc-kl' }, icon('link', 17)),
+        input,
+        h('button', { class: 'dc-kx', type: 'button', 'aria-label': 'Cancel', onclick: () => done(false) }, icon('x', 16)),
+        h('button', { class: 'dc-kok', type: 'button', 'aria-label': 'Apply link', onclick: () => done(true) }, icon('check', 16)))
+      if (document.activeElement !== input) setTimeout(() => input.focus(), 0)
+      return
+    }
+    kbar.classList.remove('dc-klink')
     if (writing) {
       const a = active(view.state)
       const tools = st.mode === 'edit' ? [
         h('button', { class: 'dc-kb-aa', type: 'button', 'aria-label': 'Text style', onclick: () => openSheet('blocks') }, h('span', { text: 'Aa' }), icon('chevronDown', 12)),
         h('button', { class: a.bold ? 'on' : '', type: 'button', 'aria-label': 'Bold', onclick: () => toggleInline(view, 'bold') }, icon('bold', 19)),
         h('button', { class: a.italic ? 'on' : '', type: 'button', 'aria-label': 'Italic', onclick: () => toggleInline(view, 'italic') }, icon('italic', 19)),
-        h('button', { class: a.link ? 'on' : '', type: 'button', 'aria-label': 'Link', onclick: () => { const url = prompt('Link address', linkAt(view.state, view.state.selection.main.from)); if (url !== null) setLink(view, url.trim()) } }, icon('link', 19)),
+        h('button', { class: a.link ? 'on' : '', type: 'button', 'aria-label': 'Link', onclick: () => { const r = view.state.selection.main; st.klink = { from: r.from, to: r.to, url: linkAt(view.state, r.from) || '' }; renderBars() } }, icon('link', 19)),
         r ? null : h('button', { class: a.block === 'ul' ? 'on' : '', type: 'button', 'aria-label': 'List', onclick: () => setBlock(view, a.block === 'ul' ? 'p' : 'ul') }, icon('list', 19)),
         r ? null : h('button', { class: a.block === 'task' ? 'on' : '', type: 'button', 'aria-label': 'Checklist', onclick: () => setBlock(view, a.block === 'task' ? 'p' : 'task') }, icon('checklist', 19)),
       ] : []
@@ -1471,6 +1512,12 @@ export function createDocEditor(opts) {
       if (p !== player.firstChild) put(player, ...(p ? [p] : []))
     },
     refreshHead: () => renderHead(),
+    // A quiet line above the doc (the share page's "new since your last visit").
+    setNotice(node) { put(notice, node); notice.classList.toggle('on', Boolean(node)); queueLayout() },
+    focusNote: (id) => focusNote(id, { scrollTo: true }),
+    toast: (text, undo = null) => showToast(text, undo),
+    notes: () => st.notes,
+    me: () => st.me,
     // A fresh read of the doc (focus came back, the file changed on disk).
     async reload() {
       try { applyAnswer(await run(() => api.get())) } catch (err) { fail(err) }

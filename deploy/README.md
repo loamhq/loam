@@ -449,6 +449,26 @@ the same command; with a shell they can run the command itself.
 - `site down <name>` removes the name and leaves the files; `site private`
   undoes a publish; `site list` shows them all.
 
+## The share door
+
+*Added 2026-11-16, for doc-comments' share links (docs/doc-comments.md,
+docs/plugins.md, "The share door").* On the two `app_shell` hosts (the
+app's apex and `next.`), `handle /s/*` reaches `127.0.0.1:8936`, the plugin
+gateway's door port, **without the login**, and `/robots.txt` answers
+`User-agent: * / Disallow: /`. Every other path of those hosts still meets
+`import gate`. The gateway answers only `/s/<token>…` for the plugin that
+holds the door and passes a short allowlist of headers (never the login's
+cookie). Proved from outside with curl on 2026-11-17 (the job's receipt):
+the gate answers, its page holds nothing of the doc's text and says
+noindex, and `/`, `/api/*`, `/x/*` and the broker's addresses still answer
+the login's redirect.
+
+To put it back: delete the `if app.app_shell:` block that writes `handle
+/s/*` in `lib/loam_deploy.caddy_host_block` and run `sudo bin/gen-deploy`.
+Port 8934 is the claim service's; the door's is 8936 (a first try at 8934
+sent `/s/*` to the claim service for four minutes on 11-17; its answer to
+every `/s/` path was its own 404).
+
 ## Staging: a second copy of loam-ui
 
 *Added 2026-11-12, on a persona's brief for a long run of large page changes

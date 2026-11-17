@@ -79,6 +79,12 @@ def test_suites():
     check("the editor's suite passes (round trips byte for byte, positions)", r.returncode, 0)
     if r.returncode:
         print(r.stdout[-3000:], r.stderr[-3000:])
+    r = subprocess.run([sys.executable, str(PLUGIN / "test" / "test_share.py")],
+                       capture_output=True, text=True, env=env, timeout=600)
+    tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
+    check("the share door's suite passes (modes, throttling, off, one doc, text, agents)", (r.returncode, tail[0]), (0, "OK"))
+    if r.returncode:
+        print(r.stdout[-3000:], r.stderr[-3000:])
     r = subprocess.run([node, "--test", str(PLUGIN / "test" / "page.test.mjs")],
                        capture_output=True, text=True, timeout=300)
     check("the page module registers nothing without files.own, and cleans up", r.returncode, 0)
@@ -301,6 +307,54 @@ def test_off(tmp: Path):
     check("off: no agent gets its tool", "doc-comments" in lcon.lane_servers("persona", "ada"), False)
 
 
+# -- the share door in core ------------------------------------------------------------
+
+def test_door():
+    import importlib.machinery
+    import importlib.util
+    import loam_deploy
+    import loam_plugin_servers
+    loader = importlib.machinery.SourceFileLoader("plugin_gateway", str(ROOT / "bin" / "plugin-gateway"))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    gw = importlib.util.module_from_spec(spec)
+    loader.exec_module(gw)
+    tok = "a" * 32
+    check("the door takes /s/<token> and its paths only",
+          [bool(gw.DOOR_PATH.match(p)) for p in (f"/s/{tok}", f"/s/{tok}/api/doc?x=1", "/s/short", "/x/doc-comments/",
+                                                 f"/s/{tok}#f", "/api/threads", f"/s/{'a' * 65}")],
+          [True, True, False, False, False, False, False])
+    hdrs = gw.door_headers(["Host: next.example", "Cookie: authelia_session=SECRET; loam_share=abc; other=1",
+                            "Remote-User: owner", "Authorization: Bearer lak_xyz", "X-Loam-Door: 1",
+                            "X-Loam-Agent: ada", "X-Forwarded-Prefix: /x/doc-comments", "Content-Type: application/json"])
+    check("the door passes only allowed headers: no login cookie, no user, no marker from outside",
+          hdrs, ["Host: next.example", "Cookie: loam_share=abc", "Authorization: Bearer lak_xyz",
+                 "Content-Type: application/json"])
+    check("...a bearer that is not an agent key is dropped",
+          gw.door_headers(["Authorization: Bearer some-broker-token"]), [])
+    check("...an upgrade, a chunked or an oversized body is refused",
+          [gw.door_headers(["Upgrade: websocket"]), gw.door_headers(["Transfer-Encoding: chunked"]),
+           gw.door_headers([f"Content-Length: {3 * 1024 * 1024}"])], [None, None, None])
+    check("the login's port takes the door's marker off", "x-loam-door" in gw.HOP, True)
+    ports = {n: v for n, v in vars(loam_deploy).items() if n.endswith("_PORT") and isinstance(v, int)}
+    ports.update({f"servers.{n}": v for n, v in vars(loam_plugin_servers).items()
+                  if n.endswith("_PORT") and isinstance(v, int)})
+    dupes = sorted(n for n, v in ports.items() if v == loam_deploy.PLUGIN_DOOR_PORT)
+    check("the door's port is no other service's", dupes, ["PLUGIN_DOOR_PORT", "servers.DOOR_PORT"])
+    import loam_contributions as lcon
+    w: list = []
+    got = lcon.contributes_of({"web.door": [{"why": "visitors reach one doc"}]}, None, w)
+    check("web.door is a contribution, with its why", got, {"web.door": [{"why": "visitors reach one doc"}]})
+    try:
+        lcon.contributes_of({"web.door": [{}]}, None, [])
+        refused = False
+    except lcon.ContributionError:
+        refused = True
+    check("...and a door with no why is refused", refused, True)
+    check("the door's holder is the first plugin by id that has one",
+          lcon.door_owner([{"id": "b", "contributes": {"web.door": [{}]}}, {"id": "a", "contributes": {}},
+                           {"id": "c", "contributes": {"web.door": [{}]}}]), "b")
+
+
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="doc-comments-test-"))
     saved = {k: os.environ.get(k) for k in ("LOAM_PLUGIN_STATE", "LOAM_PLUGINS_DIR", "LOAM_PLUGIN_SHIPPED")}
@@ -310,6 +364,7 @@ def main() -> int:
         test_kept(tmp)
         test_environment(tmp)
         test_off(tmp)
+        test_door()
     finally:
         for k, v in saved.items():
             if v is None:

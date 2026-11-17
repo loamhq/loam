@@ -8,11 +8,11 @@
 
 import { createDocEditor } from './editor/editor.js'
 import { docApi } from './api.js'
+import { createSharing } from './sharing.js'
 
 const BASE = '/x/doc-comments/'
 const ROOTS = { vault: 'Vault', spaces: 'AI Spaces', system: 'System' }
 const COMPACT_PX = 760
-export const STAGING_ONLY = true
 
 export function activate(loam) {
   const host = loam.ui?.host
@@ -23,12 +23,22 @@ export function activate(loam) {
   // changes a page only once that page is deployed from a release that has
   // it (staging first, then live).
   if (!host || !viewer || typeof host.files?.own !== 'function') return
-  // Staging first (2026-11-16): the calm editor draws only on Loam's staging
-  // copy (`next.<domain>`, deploy/README.md) until it has been walked there.
-  // Another release reached live before the walk, so the app version alone
-  // was not a gate. Going live is setting this to false. The server, the
-  // sidecars and the agents' tools are not gated: they serve both.
-  if (STAGING_ONLY && !String(globalThis.location?.hostname || '').startsWith('next.')) return
+  // Staging first: the plugin's `reach` setting (settings.entry, `staging` or
+  // `everywhere`; `bin/settings set plugin.doc-comments.reach everywhere`, or
+  // Settings > Plugins) says whether the calm editor and the share door work
+  // beyond Loam's staging copy (`next.<domain>`). It replaces the hostname
+  // constant of 2026-11-16. Until the server answers, the last answer this
+  // browser had decides, so a page does not flicker between editors.
+  const onStaging = String(globalThis.location?.hostname || '').startsWith('next.')
+  let reach = loam.settings?.get?.('reach', 'staging') || 'staging'
+  const allowed = () => onStaging || reach === 'everywhere'
+  fetch(`${BASE}config`, { credentials: 'same-origin' }).then(r => (r.ok ? r.json() : null)).then((cfg) => {
+    if (!cfg || disposed) return
+    const was = allowed()
+    reach = cfg.reach === 'everywhere' ? 'everywhere' : 'staging'
+    loam.settings?.set?.('reach', reach)
+    if (was !== allowed()) host.schedule?.()
+  }).catch(() => {})
   loam.ui.styles?.add?.('assets/doc-comments.css')
   const kept = loam.ui.kept || host.kept
   let cur = null
@@ -68,8 +78,16 @@ export function activate(loam) {
       if (disposed || cur !== entry) return
       const writable = Boolean(file.caps?.write)
       if (!writable) doc = { ...doc, can: { comment: false, suggest: false, edit: false, accept: false, resolve_any: false } }
-      const ed = createDocEditor({
+      const titleOf = () => (/^#\s+(.+?)\s*#*\s*$/m.exec(ed?.text?.() || doc.text)?.[1]) || file.path.split('/').pop().replace(/\.(md|markdown)$/i, '')
+      let ed = null
+      const sharing = file.root === 'vault' && writable ? createSharing({
+        base: BASE, root: file.root, path: file.path, title: titleOf,
+        toast: (text, undo) => ed?.toast(text, undo), onChange: () => ed?.refreshHead(),
+      }) : null
+      if (sharing) sharing.links = doc.links
+      ed = createDocEditor({
         api, doc, face,
+        headEnd: () => (sharing ? [sharing.button()] : []),
         phone: !options.wide,
         settings: loam.settings,
         embed: options.embed || host.embedFor || null,
@@ -141,7 +159,7 @@ export function activate(loam) {
 
   const reg = viewer.add({
     id: 'doc-comments.editor',
-    when: (c) => isMarkdown(c.file),
+    when: (c) => allowed() && isMarkdown(c.file),
     render(c) {
       const key = `${c.file.root}:${c.file.path}`
       if (!cur || cur.key !== key) {
@@ -165,6 +183,41 @@ export function activate(loam) {
     },
   })
 
+  // Shared Docs: a root of its own in Files (core's `files.root`), listing
+  // only docs with a link on. A dot marks one with something new since the
+  // owner last opened it; nothing else anywhere gets a dot.
+  const shared = { docs: [], loaded: false }
+  const sharedRoot = loam.places?.files?.root?.add?.({
+    id: 'doc-comments',
+    name: 'Shared Docs',
+    desc: 'Docs open to people outside',
+    icon: (size) => peopleIcon(size),
+    when: () => allowed(),
+    async load() {
+      const res = await fetch(`${BASE}shared`, { credentials: 'same-origin' })
+      if (!res.ok) throw new Error('Shared Docs could not be read just now.')
+      shared.docs = (await res.json()).docs || []
+      shared.loaded = true
+    },
+    render({ go }) {
+      const H = loam.ui.h
+      if (!shared.loaded) return H('div', { class: 'fs-quiet', text: 'Loading…' })
+      if (!shared.docs.length) return H('div', { class: 'fs-quiet dc-sd-empty', text: 'No doc is shared with anyone outside Loam. Share one from its ⋯ Share button.' })
+      return H('div', { class: 'card card-group dc-sd' }, shared.docs.map(d => {
+        const name = (d.path || '').split('/').pop().replace(/\.(md|markdown)$/i, '')
+        const on = (d.links || []).filter(l => l.on)
+        const modes = [...new Set(on.map(l => l.mode))]
+        const sub = d.new ? `${d.new} new${d.people.length ? ` · ${d.people.slice(0, 3).join(', ')}` : ''}` : (d.people.length ? d.people.slice(0, 3).join(', ') : 'Nothing new')
+        return H('button', { class: `dc-sd-row${d.new ? ' fresh' : ''}`, key: `sd:${d.id}`, onclick: () => { d.new = 0; go(d.root, d.path, { isFile: true }) } },
+          H('span', { class: 'dc-sd-dot', 'aria-label': d.new ? 'Something new' : null }),
+          H('span', { class: 'dc-sd-tile' }, docIcon()),
+          H('span', { class: 'dc-sd-words' }, H('b', { text: name }), H('small', { text: sub })),
+          H('span', { class: 'dc-sd-modes' }, modes.map(m => H('span', { class: 'dc-sd-mode', text: { view: 'View', comment: 'Comment', edit: 'Edit' }[m] }))),
+          H('span', { class: 'dc-sd-time', text: when(d.last) }))
+      }))
+    },
+  })
+
   const onFocus = () => {
     if (cur?.status === 'ready' && !cur.editor.dirty()) cur.editor.reload()
   }
@@ -176,7 +229,40 @@ export function activate(loam) {
     globalThis.removeEventListener?.('focus', onFocus)
     renamed?.remove?.()
     reg?.remove?.()
+    sharedRoot?.remove?.()
     close(cur)
     cur = null
   }
+}
+
+
+function peopleIcon(size) {
+  const NS = 'http://www.w3.org/2000/svg'
+  const s = document.createElementNS(NS, 'svg')
+  for (const [k, v] of Object.entries({ viewBox: '0 0 24 24', width: size, height: size, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round' })) s.setAttribute(k, v)
+  for (const d of ['M3 19c.7-3.2 3-5 6-5s5.3 1.8 6 5', 'M15.5 5.5a3 3 0 0 1 0 6', 'M18 14.3c1.6.7 2.6 2.3 3 4.7']) {
+    const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); s.append(p)
+  }
+  const c = document.createElementNS(NS, 'circle'); c.setAttribute('cx', 9); c.setAttribute('cy', 8.5); c.setAttribute('r', 3.2); s.append(c)
+  return s
+}
+
+function docIcon() {
+  const NS = 'http://www.w3.org/2000/svg'
+  const s = document.createElementNS(NS, 'svg')
+  for (const [k, v] of Object.entries({ viewBox: '0 0 24 24', width: 18, height: 18, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.4, 'stroke-linecap': 'round' })) s.setAttribute(k, v)
+  for (const d of ['M7 3.5h6.5l4 4V20a.5.5 0 0 1-.5.5H7a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z', 'M9 11h6', 'M9 14h6', 'M9 17h4']) {
+    const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); s.append(p)
+  }
+  return s
+}
+
+function when(iso) {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return ''
+  const s = (Date.now() - t) / 1000
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min`
+  if (s < 86400) return `${Math.round(s / 3600)} h`
+  if (s < 2 * 86400) return 'Yesterday'
+  return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }

@@ -515,8 +515,22 @@ export function createFiles({
     schedule()
   }
 
+  // A plugin's own root (2026-11-16, `files.root`; doc-comments' Shared
+  // Docs first): `@<id>` in the address, listed and drawn by the plugin.
+  function pluginRoot(root = st.root) {
+    if (typeof root !== 'string' || !root.startsWith('@')) return null
+    return registry.entries('files.root', {}).find(r => `@${r.id}` === root) ?? null
+  }
+
   async function loadFolder(more = false) {
     if (!st.root) return
+    const own = pluginRoot()
+    if (own) {
+      st.listing = { key: `${st.root}:`, rows: [], folder: null, cursor: null, total: null, loading: false, error: '', status: null }
+      try { await own.load?.() } catch (err) { st.listing.error = err.message }
+      schedule()
+      return
+    }
     const key = `${st.root}:${st.path}`
     if (!more) st.listing = { key, rows: [], folder: null, cursor: null, total: null, loading: true, error: '', status: null }
     else st.listing.loading = true
@@ -1257,7 +1271,7 @@ export function createFiles({
     schedule()
   }
 
-  return { registry, st, beginRename, cancelRename, editRename, rename, applyRename, focusRename, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, pluginRoot, beginRename, cancelRename, editRename, rename, applyRename, focusRename, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function extWord(e) {
@@ -1395,15 +1409,16 @@ function homeActions(home) {
 export function folderView(files, { go, wide, collapse = null, returnBack = null, home = null }) {
   const { st } = files
   const atRoot = !st.root
+  const own = files.pluginRoot?.() ?? null
   const rootRow = st.roots.items.find((r) => r.root === st.root) ?? null
   const rootName = rootRow?.name ?? ROOT_LOOK[st.root]?.name ?? st.root
   const folderRow = st.listing.folder ?? (st.path === '' && rootRow ? { capabilities: rootRow.capabilities } : null)
   const folderCaps = capsOf(folderRow)
   const canAdd = !atRoot && folderCaps.create
-  const title = atRoot ? 'Files' : st.path === '' ? rootName : nameOf(st.path)
+  const title = atRoot ? 'Files' : own ? own.name : st.path === '' ? rootName : nameOf(st.path)
   const parent = atRoot ? null : st.path === '' ? 'Files' : parentOf(st.path) === '' ? rootName : nameOf(parentOf(st.path))
-  const sub = atRoot ? '' : st.path === '' ? (rootRow?.desc ?? ROOT_LOOK[st.root]?.desc ?? '') : [rootName, ...splitPath(st.path)].join(' / ')
-  const pinned = !atRoot && home?.isShortcut ? home.isShortcut(st.root, st.path) : false
+  const sub = atRoot ? '' : own ? (own.desc || '') : st.path === '' ? (rootRow?.desc ?? ROOT_LOOK[st.root]?.desc ?? '') : [rootName, ...splitPath(st.path)].join(' / ')
+  const pinned = !atRoot && !own && home?.isShortcut ? home.isShortcut(st.root, st.path) : false
 
   // The home's header is the Chats header, class for class, so the two tabs
   // start at the same place: no back row above it and no line under it.
@@ -1422,12 +1437,12 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
         )
       : null,
     h('div', { class: 'headspace' }),
-    home?.toggleShortcut
+    home?.toggleShortcut && !own
       ? h('button', { class: 'iconbtn fs-menu', title: 'This folder', 'aria-label': 'This folder', onclick: () => { st.sheet = { kind: 'folder', resource: folderRow, renameSlot: 'folder', name: title, on: pinned, toggle: () => home.toggleShortcut(st.root, st.path) }; go.redraw() } }, icon.dots(18))
       : null,
     canAdd
       ? h('button', { class: 'roundbtn fs-add', title: 'Add to this folder', onclick: () => { st.sheet = { kind: 'add' }; go.redraw() } }, icon.plus(20))
-      : !atRoot && !st.listing.loading && !st.listing.error && folderRow
+      : !atRoot && !own && !st.listing.loading && !st.listing.error && folderRow
         ? h('span', { class: 'fs-tag', text: 'Read-only' })
         : null,
     collapse,
@@ -1450,7 +1465,21 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
         ),
       )
     }
+    for (const r of files.registry.entries('files.root', {})) {
+      body.push(
+        h(
+          'button',
+          { class: 'fs-rootcard', key: `root:@${r.id}`, onclick: () => go(`@${r.id}`, '') },
+          h('div', { class: 'fs-blob', style: { background: 'var(--paper-card)' } }, typeof r.icon === 'function' ? r.icon(20) : icon[r.icon]?.(20) ?? icon.folder(20)),
+          h('div', { class: 'fs-rootwords' }, h('div', { class: 'display fs-rootname', text: r.name }), r.desc ? h('div', { class: 'fs-rootdesc', text: r.desc }) : null),
+          icon.chevronRight(10),
+        ),
+      )
+    }
     if (st.roots.loaded && !st.roots.error) body.push(homeShortcuts(files, home, go))
+  } else if (own) {
+    if (st.listing.error) body.push(errorBox(st.listing.error, st.listing.status, () => files.loadFolder()))
+    else body.push(files.registry.invoke(own, 'render', { files, go, wide }))
   } else if (st.listing.error) {
     body.push(errorBox(st.listing.error, st.listing.status, () => files.loadFolder()))
   } else if (st.listing.loading && st.listing.rows.length === 0) {

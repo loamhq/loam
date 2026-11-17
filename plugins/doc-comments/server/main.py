@@ -37,14 +37,16 @@ from urllib.parse import parse_qs, urlparse
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from doccomments import links as links_mod  # noqa: E402
 from doccomments import store as stores  # noqa: E402
+from doccomments.door import Door  # noqa: E402
 from doccomments.service import Service  # noqa: E402
 from doccomments.sidecar import NoteError  # noqa: E402
 
 BODY_MAX = 8 * 1024 * 1024
 
 
-def make_handler(service: Service):
+def make_handler(service: Service, links=None, door=None, reach=lambda: "staging"):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "doc-comments/1"
@@ -91,6 +93,17 @@ def make_handler(service: Service):
             q = {k: v[-1] for k, v in parse_qs(url.query).items()}
             if parts == ["health"]:
                 return 200, {"ok": True}
+            if parts and parts[0] == "door":
+                # Only the gateway's door sends these, marked; never the owner.
+                raise NoteError(404, "no such route")
+            if parts == ["config"] and method == "GET":
+                return 200, {"reach": reach()}
+            if parts == ["shared"] and method == "GET":
+                self._owner()
+                docs = links.all() if links else []
+                on = sorted({l["did"] for l in docs if l["on"]})
+                seen = {d: links.seen(d) for d in on}
+                return 200, {"docs": service.shared(on, seen)}
             if not parts or parts[0] != "doc":
                 raise NoteError(404, "no such route")
             body = self._body() if method in ("POST", "PATCH", "PUT") else {}
@@ -102,8 +115,17 @@ def make_handler(service: Service):
                 raise NoteError(415, "notes are for Markdown docs")
             who = self._who()
             rest = parts[1:]
+            if rest[:1] == ["links"]:
+                return self._links(method, rest[1:], who, root, path, args)
             if method == "GET" and rest == []:
-                return 200, service.get(who, root, path)
+                out = service.get(who, root, path)
+                if links and out.get("id") and who.get("kind") == "owner":
+                    mine = links.for_doc(out["id"])
+                    out["links"] = [self._public(l) for l in mine]
+                    if any(l["on"] for l in mine):
+                        out["seen"] = links.seen(out["id"])
+                        links.mark_seen(out["id"])
+                return 200, out
             if method == "GET" and rest == ["history"]:
                 return 200, service.history(who, root, path)
             if method == "GET" and rest == ["version"]:
@@ -136,7 +158,73 @@ def make_handler(service: Service):
                         return 200, service.reattach(who, root, path, tid, args)
             raise NoteError(405, f"no route for {method} {url.path}")
 
+        def _owner(self):
+            if (self.headers.get("X-Loam-Agent") or "").strip():
+                raise NoteError(403, "share links are the owner's")
+
+        def _public(self, link):
+            return {**links_mod.public(link), "url_path": f"/s/{link['token']}"}
+
+        def _links(self, method, rest, who, root, path, args):
+            """The owner's share links for one doc."""
+            self._owner()
+            if links is None:
+                raise NoteError(503, "share links are not set up here")
+            if method == "GET" and rest == ["password"]:
+                return 200, {"password": links_mod.make_password()}
+            if method == "GET" and rest == []:
+                did = service.get(who, root, path).get("id")
+                return 200, {"links": [self._public(l) for l in links.for_doc(did)] if did else [],
+                             "owner": service.store.owner()["name"]}
+            if method == "POST" and rest == []:
+                did = service.ensure_id(who, root, path)
+                days = args.get("days", links_mod.DEFAULT_DAYS)
+                link, token, password = links.create(did, args.get("mode", "comment"), args.get("name"),
+                                                     days, args.get("password") or None)
+                service.sync_links(did, [links_mod.public(l) for l in links.for_doc(did)])
+                return 201, {"link": self._public(link), "password": password,
+                             "owner": service.store.owner()["name"]}
+            if method == "PATCH" and len(rest) == 1:
+                old = links.get(rest[0])
+                did = service.get(who, root, path).get("id")
+                if not old or old["did"] != did:
+                    raise NoteError(404, "no such link on this doc")
+                link, password = links.update(rest[0], mode=args.get("mode"), days=args.get("days"),
+                                              on=args.get("on"), name=args.get("name"),
+                                              new_password=args.get("password"))
+                service.sync_links(did, [links_mod.public(l) for l in links.for_doc(did)])
+                return 200, {"link": self._public(link), "password": password}
+            raise NoteError(405, "no such route")
+
+        def _door(self, method: str):
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 2 * 1024 * 1024:
+                return self._raw(413, b'{"error":"that request is too large"}', "application/json",
+                                 [("X-Robots-Tag", "noindex, nofollow"), ("Cache-Control", "no-store")])
+            body = self.rfile.read(n) if n else b""
+            hdrs = {k.lower(): v for k, v in self.headers.items()}
+            client = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip() or self.client_address[0]
+            ans = door.handle(method, self.path, hdrs, body, client)
+            self._raw(ans.status, ans.body, ans.ctype, ans.headers)
+
+        def _raw(self, status, body, ctype, headers):
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            for k, v in headers:
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(body)
+
         def _handle(self, method: str):
+            if self.headers.get("X-Loam-Door") == "1":
+                if door is None or not self.path.startswith("/door/"):
+                    return self._raw(404, b'{"error":"no such route"}', "application/json", [])
+                try:
+                    return self._door(method)
+                except Exception:  # noqa: BLE001
+                    traceback.print_exc()
+                    return self._raw(500, b'{"error":"the share door failed"}', "application/json", [])
             try:
                 status, body = self._route(method)
             except NoteError as exc:
@@ -161,8 +249,9 @@ def make_handler(service: Service):
     return Handler
 
 
-def serve(service: Service, port: int, host: str = "127.0.0.1") -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((host, port), make_handler(service))
+def serve(service: Service, port: int, host: str = "127.0.0.1", links=None, door=None,
+          reach=lambda: "staging") -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((host, port), make_handler(service, links, door, reach))
     server.daemon_threads = True
     return server
 
@@ -172,7 +261,22 @@ def main() -> int:
     if not port:
         print("doc-comments: no PORT given", file=sys.stderr)
         return 2
-    server = serve(Service(stores.from_env()), port)
+    service = Service(stores.from_env())
+    private = os.environ.get("LOAM_PLUGIN_PRIVATE") or str(Path(os.environ.get("LOAM_PLUGIN_DATA", ".")) / "private")
+    links = links_mod.Links(private)
+
+    def reach() -> str:
+        # The `reach` setting (settings.entry), read each time so a change
+        # through Settings or `bin/settings` is in force at once.
+        try:
+            values = json.loads((Path(os.environ.get("LOAM_PLUGIN_SETTINGS_DIR", ".")) / "values.json").read_text())
+        except (OSError, ValueError):
+            values = {}
+        return "everywhere" if values.get("reach") == "everywhere" else "staging"
+
+    door = Door(service, links, Path(__file__).resolve().parent.parent, reach=reach,
+                owner_name=lambda: service.store.owner()["name"])
+    server = serve(service, port, links=links, door=door, reach=reach)
     print(f"doc-comments: listening on 127.0.0.1:{port}", file=sys.stderr, flush=True)
     try:
         server.serve_forever()

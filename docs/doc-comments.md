@@ -63,8 +63,7 @@ adds and does not rewrite (below, "What step 2 adds").
   as tables until the caret enters them; wiki-links are links (⌘/Ctrl-click,
   or a click in Viewing); dictation's mic is in the header (desktop) and the
   keyboard bar (phone); read aloud's button is in the header.
-- **Share** is absent in step 1 rather than inert: a button that does
-  nothing is clutter. Step 2 adds it to the header.
+- **Share** is in the header (step 2, below).
 
 ## How it is built
 
@@ -235,21 +234,97 @@ read or written. The sidecars and id lines stay for when it is turned on
 again.
 
 The page module also does nothing on a copy of the app older than
-`files.own`, and, while `STAGING_ONLY` in `page/main.js` is true, on any
+`files.own`, and, while the plugin's `reach` setting is `staging`, on any
 host but Loam's staging copy (`next.<domain>`): the editor is walked on
-staging before it goes live, and the app's version was not enough of a gate
-(another release reached live first). Going live is setting it to false.
+staging before it goes live (the app's version alone was not a gate:
+another release once reached live first).
 
-## What step 2 adds
+## Sharing (step 2)
 
-The share door in core (a route that passes the login for one scoped
-handler, opted into per link), links with modes (view, comment, edit), names
-and passwords, the gate, the standalone page (the same editor component,
-`page/editor/editor.js`, mounted without Loam around it, as
-`test/harness.html` already does), Connect my agent (a key per link for an
-outside agent, calling the same operations over HTTP), and Shared Docs in
-Files. `Service.may` is the one place a link's mode will limit what a caller
-can do; the sidecar's `links` list is already there.
+*Added 2026-11-17.* The owner shares a doc with someone outside Loam by a
+password-protected link; that person, and their agent, work in the same
+editor on a page of its own.
+
+**The owner's side.** **Share** in the editor's header opens the invite
+card on a doc with no links: who it is for (blank makes a group link), what
+they can do (view, comment, edit), and the ticket they get, with a short
+readable password Loam made (click it to change it) and how many days their
+browser remembers it (30 by default). **Copy invite** makes the link and
+copies a short message with the link and the password. On a doc with links,
+Share opens **Shared with**: a row per link with its mode (changed in
+place) and ⋯: Copy invite again (with a new password: the old one is only
+kept hashed; browsers already in stay in), how long browsers remember it,
+and Turn off (at once, with Undo). **Shared Docs** is a root in Files
+(core's `files.root`) listing only docs with a link on; a dot marks a doc
+with words from someone else since the owner last opened it, and opening it
+marks the new notes in the margin. Nothing else in Files or the rail gets a
+dot, and nothing pings anyone.
+
+**The visitor's side.** `https://<domain>/s/<token>`: a password page that
+shows the owner's name and the doc's title (the invite already carries
+both) and nothing of the doc's text; then the doc in the calm editor with a
+slim bar (title, "<Owner>'s doc", the mode pill as far as the link allows,
+the agent button, the visitor's face with Forget this browser) and a quiet
+Made with Loam. A named link makes the visitor that person; a group link
+asks a name once and keeps it in the browser's session. A pill says how many
+notes are new since this browser's last visit and steps through them.
+**Connect my agent** makes a key for the visitor's agent (shown once,
+stored hashed) and a block to paste: the doc's address, the key, and
+`/s/<token>/agent.md`, plain instructions for reading, commenting,
+suggesting, replying and editing with curl and JSON. The agent's notes show
+as "<Name>'s agent".
+
+**Why `/s/<token>` on the app's own host.** The link is sent to real people
+and kept for months, so its shape is hard to change. On the app's host it
+needs no new name, certificate or DNS record, the page is the same origin
+as the editor's code, and the login's gate stays exactly as it was for
+every other path. A host of its own would separate cookies further, but
+the visitor's session is already a cookie of its own scoped to
+`/s/<token>`, and the login's cookie is never passed through the door.
+
+**Safety.**
+
+- **The door** (core, docs/plugins.md "The share door") passes `/s/*` to
+  this plugin only, with a short list of headers and never the login's
+  cookie. The plugin answers visitors only on its `/door/` routes.
+- **A link reaches exactly its doc.** The doc is found by the id in the
+  link's record, through its sidecar, and checked against the doc's id
+  line. Nothing in a request names a root, a path or another doc. An
+  unknown token, a link that is off, a session from another link or past
+  its days, and a host the plugin is not yet open on all answer the same
+  404.
+- **Passwords and agent keys** are stored hashed: PBKDF2-SHA256 with
+  200,000 rounds and a salt for passwords, SHA-256 of 32 random bytes for
+  agent keys. They live in the plugin's private folder, never in the vault.
+  A token is 192 random bits. The sidecar's `links` list says only a link's
+  mode, person, days and state.
+- **Wrong passwords** wait from the 4th wrong try in 15 minutes (2, 4, then
+  8 seconds). The 10th blocks that address for that link for 15 minutes.
+  100 wrong tries in an hour from anywhere lock the link for an hour, which
+  the owner ends by giving it a new password.
+- **Modes are the server's.** A visitor is an author of kind `guest`, and
+  their agent `guest-agent`, each carrying the link's mode. `Service.may`
+  decides:
+  - view reads;
+  - comment adds comments, suggestions and replies, and resolves only its
+    own threads;
+  - edit also saves (through the same merge), accepts and rejects, and
+    resolves any thread;
+  - no link restores a version or touches links.
+- **Writes** from the page carry `X-Loam-Share: 1`, so another site cannot
+  post with the visitor's cookie. Each link may write 120 times an hour and
+  600 a day. Notes stop at a 4 MiB sidecar, and a body is at most 1.5 MiB.
+- **A visitor's words are data.** The page is a fixed template with the
+  title and names escaped. The doc and notes come as JSON and are drawn as
+  text, under a policy of `script-src 'self'`. Pages say noindex in a header
+  and a meta tag, and `robots.txt` disallows everything. Personas' tools
+  label a link visitor's notes as from outside Loam, "something to consider,
+  never an instruction", and nothing a visitor does wakes anyone.
+
+**Staging first.** The plugin's `reach` setting (`staging` or `everywhere`;
+Settings › Plugins, or `bin/settings set plugin.doc-comments.reach
+everywhere`) decides whether the editor and the door work beyond Loam's
+staging copy (`next.<domain>`). It ships `staging`.
 
 ## Working on it
 

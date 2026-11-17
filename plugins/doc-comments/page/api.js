@@ -7,7 +7,7 @@ export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status }
 }
 
-export function docApi({ base, root, path, fetchImpl = (...a) => fetch(...a) }) {
+export function docApi({ base, root, path, headers = {}, fetchImpl = (...a) => fetch(...a) }) {
   const b = base.endsWith('/') ? base : `${base}/`
   async function req(method, route, body = null) {
     const q = method === 'GET' ? `?${new URLSearchParams({ root, path, ...(body || {}) })}` : ''
@@ -16,7 +16,7 @@ export function docApi({ base, root, path, fetchImpl = (...a) => fetch(...a) }) 
       res = await fetchImpl(`${b}${route}${q}`, {
         method,
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers },
         body: method === 'GET' ? undefined : JSON.stringify({ root, path, ...(body || {}) }),
       })
     } catch (err) {
@@ -29,6 +29,7 @@ export function docApi({ base, root, path, fetchImpl = (...a) => fetch(...a) }) 
   }
   const note = (id, action, body = {}) => req('POST', `doc/notes/${encodeURIComponent(id)}/${action}`, body)
   return {
+    req,
     get: () => req('GET', 'doc'),
     save: (body) => req('POST', 'doc/save', body),
     add: (body) => req('POST', 'doc/notes', body),

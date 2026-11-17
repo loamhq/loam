@@ -172,6 +172,10 @@ AUTHELIA_PORT = 9091
 # record that says `app_shell` (Loam's page and its staging copy) sends /x/*
 # there, inside the same handles as the page, so the same login guards it.
 PLUGIN_GATEWAY_PORT = 8933
+# The gateway's share door (2026-11-16): `/s/*` on an `app_shell` host goes
+# here WITHOUT the login; bin/plugin-gateway answers only `/s/<token>…`, for
+# the one plugin that contributes `web.door` (docs/plugins.md).
+PLUGIN_DOOR_PORT = 8936
 BROWSER_PORT = 8931
 BROWSER_URL = f"http://127.0.0.1:{BROWSER_PORT}/mcp"
 BROWSER_SERVER_NAME = "browser"   # the MCP server's name in every persona
@@ -1595,6 +1599,25 @@ def caddy_host_block(app: App, public: bool, today: dt.date,
             f"\thandle {RELAY_PATH} {{",
             "\t\timport gate",
             f"\t\treverse_proxy 127.0.0.1:{CLAIM_PORT}",
+            "\t}",
+        ]
+    if app.app_shell:
+        # Ahead of everything else on these hosts (a `handle /path` is ordered
+        # before every `handle @named`): the one path of the app's host that
+        # does not meet the login. The gateway's door port answers only share
+        # links, and only for the plugin holding the door; see deploy/README.md,
+        # "The share door". robots.txt says no to every crawler on every path.
+        lines += [
+            "\t# The share door: /s/* passes the login to the plugin gateway's door only.",
+            "\thandle /s/* {",
+            f"\t\treverse_proxy 127.0.0.1:{PLUGIN_DOOR_PORT}",
+            "\t}",
+            "\thandle /robots.txt {",
+            "\t\theader Content-Type \"text/plain; charset=utf-8\"",
+            "\t\trespond <<ROBOTS",
+            "\t\t\tUser-agent: *",
+            "\t\t\tDisallow: /",
+            "\t\t\tROBOTS 200",
             "\t}",
         ]
     lines += [

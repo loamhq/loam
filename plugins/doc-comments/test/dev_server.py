@@ -19,7 +19,10 @@ PLUGIN = HERE.parent
 sys.path.insert(0, str(PLUGIN / "server"))
 
 import main as server_main  # noqa: E402
+from doccomments.door import Door  # noqa: E402
+from doccomments.links import Links  # noqa: E402
 from doccomments.service import Service  # noqa: E402
+import tempfile  # noqa: E402
 from doccomments.store import MemoryStore  # noqa: E402
 
 ESSAY = """---
@@ -78,7 +81,13 @@ def seeded() -> Service:
 def main() -> int:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8790
     svc = seeded()
-    api = server_main.make_handler(svc)
+    links = Links(tempfile.mkdtemp(prefix="dc-dev-links-"))
+    door = Door(svc, links, PLUGIN, reach=lambda: "everywhere", owner_name=lambda: "Sam", sleep=lambda s: None)
+    did = svc.get(svc.store.owner(), "vault", "Essays/drafts/On staying.md")["id"]
+    for mode, name in (("comment", "Robin"), ("edit", None)):
+        link, token, pw = links.create(did, mode, name, 30, "pass-" + mode)
+        print(f"{mode} link: http://127.0.0.1:{port}/s/{token}  password: pass-{mode}", flush=True)
+    api = server_main.make_handler(svc, links, door)
 
     class Handler(api):
         def _static(self):
@@ -107,17 +116,29 @@ def main() -> int:
             self.end_headers()
             self.wfile.write(data)
 
+        def _share(self, method):
+            n = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(n) if n else b""
+            hdrs = {k.lower(): v for k, v in self.headers.items()}
+            ans = door.handle(method, "/door/" + self.path[3:], hdrs, body, "127.0.0.1")
+            headers = [(k, v.replace("; Secure", "")) for k, v in ans.headers]
+            self._raw(ans.status, ans.body, ans.ctype, headers)
+
         def _api(self, method):
             prefix = "/x/doc-comments"
             self.path = self.path[len(prefix):] or "/"
             self._handle(method)
 
         def do_GET(self):
+            if self.path.startswith("/s/"):
+                return self._share("GET")
             if self.path.startswith("/x/doc-comments/"):
                 return self._api("GET")
             return self._static()
 
         def do_POST(self):
+            if self.path.startswith("/s/"):
+                return self._share("POST")
             return self._api("POST")
 
         def do_PATCH(self):
