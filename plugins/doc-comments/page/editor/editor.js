@@ -1900,12 +1900,12 @@ export function createDocEditor(opts) {
     const sw = saveWordNode()
     const key = JSON.stringify([st.mode, st.menu, st.phone, sw?.textContent || '', sw?.className || '', (opts.crumbs || []).map(c => c.label), opts.titleBar || null, opts.back?.label || null,
       st.authors, st.resolved, detached().length, st.can, (opts.menuExtras?.() || []).map(x => x.label), Boolean(fileMenu)])
-    const cls = `dc-head${scroll.scrollTop > 4 ? ' scd' : ''}`
+    const cls = `dc-head${scroll.scrollTop > 4 ? ' scd' : ''}${head.classList.contains('tight') ? ' tight' : ''}`
     if (head.className !== cls) head.className = cls
     // A host's own buttons may be made afresh on every call (Share is):
     // the same markup is the same button.
     const same = (n, o) => n === o || (n && o && n.outerHTML === o.outerHTML)
-    if (key === headKey && extras.length === headNodes.length && extras.every((n, i) => same(n, headNodes[i])) && head.firstChild) return
+    if (key === headKey && extras.length === headNodes.length && extras.every((n, i) => same(n, headNodes[i])) && head.firstChild) { fitHead(); return }
     headKey = key
     headNodes = extras
     const m = MODES.find(x => x.id === st.mode)

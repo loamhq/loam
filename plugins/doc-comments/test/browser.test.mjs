@@ -1806,6 +1806,23 @@ test('B1 (round 6): at 430, a 24-character title is whole on the visitor\'s bar 
   const mo = await barAt(o)
   await shot(o, 'phone-bar-owner-24')
   await o.done()
+  // a name that needs the room, measured again after the page draws itself
+  // again (an answer, a scroll): the bar keeps it whole
+  const long = `Tests/Allotment notes ${process.pid}.md`
+  await outside(long, '# Allotment\n\nRows of beans.\n')
+  const o2 = await open({ doc: long, w: 430, h: 900, phone: true })
+  await o2.evaluate(() => window.__ed.reload())
+  await o2.waitForTimeout(600)
+  // Loam asks for the bar again on each of its own re-renders
+  await o2.evaluate(() => { for (let i = 0; i < 3; i++) window.__ed.refreshHead() })
+  await o2.waitForTimeout(200)
+  await o2.evaluate(() => { const s = document.querySelector('.dc-scroll'); s.scrollTop = 40; s.dispatchEvent(new Event('scroll')) })
+  await o2.waitForTimeout(300)
+  const mo2 = await barAt(o2)
+  mo2.head = await o2.evaluate(() => [document.querySelector('.dc-head').className, document.querySelector('.dc').className, Math.round(document.querySelector('.dc-mpill').getBoundingClientRect().width)])
+  await o2.done()
+  console.log('# owner, a longer name, after drawing again', JSON.stringify(mo2))
+  assert.ok(!mo2.clipped, `owner: "${mo2.title}" needs ${mo2.needs}, has ${mo2.box}`)
   console.log('# visitor', JSON.stringify(mv), '\n# owner', JSON.stringify(mo))
   assert.equal(mv.title, 'Notes from the allotment')
   assert.ok(!mv.clipped, `visitor: the title needs ${mv.needs}, has ${mv.box}`)
