@@ -396,6 +396,7 @@ export function createDocEditor(opts) {
     st.me = ans.me || st.me
     st.can = ans.can || st.can
     st.resolved = ans.resolved || 0
+    if (view.state.field(draftsField).on && adoptReturned(ans.notes || [])) editorUnchanged = false
     // Positions from the server are clamped to the text: a closed note's
     // stored place can lie past a text that has since grown shorter, and it
     // must never stop a doc from opening.
@@ -715,7 +716,7 @@ export function createDocEditor(opts) {
     for (const r of rs) {
       const id = r.d.ids[0]
       const gone = id ? whereOf.get(id) === 'detached' : removedAround(pre, r.start, r.end)
-      if (gone) { lost++; back.push({ from: r.d.from, to: r.d.to, insert: r.d.orig }); continue }
+      if (gone) { lost++; if (id) (st.lostIds ||= new Set()).add(id); back.push({ from: r.d.from, to: r.d.to, insert: r.d.orig }); continue }
       if (!id || open.has(id)) { keep.push(r.d); continue }
       if (states.get(id) === 'accepted' && r.d.sent != null) {
         // Its words as last sent are in the stored text now.
@@ -728,6 +729,7 @@ export function createDocEditor(opts) {
     }
     base = acc + base.slice(at)
     if (lost) showToast(lost === 1 ? 'A suggestion of yours was on words just removed from the file. It waits in ⋯ History, detached.' : `${lost} suggestions of yours were on words just removed from the file. They wait in ⋯ History, detached.`)
+    if (lost) st.lostToast = true
     if (back.length) {
       view.dispatch({ changes: back, effects: setDrafts.of({ list: keep }), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
     } else if (keep.length !== rs.length) {
@@ -824,7 +826,63 @@ export function createDocEditor(opts) {
   // My open suggestions as drafts: their words put into the editor's text,
   // only the part that differs (the passage's anchoring words are not).
   function adoptDrafts(notes, base) {
-    const mineOpen = notes.filter(n => n.kind === 'suggestion' && n.state === 'open' && n.author?.id === st.me?.id && n.where?.state === 'attached' && n.where.start != null)
+    const mineOpen = mineAsDrafts(notes, base)
+    const take = []
+    for (const m of mineOpen) if (!take.length || m.start >= take[take.length - 1].end) take.push(m)
+    const changes = take.map(m => ({ from: m.start, to: m.end, insert: m.text }))
+    let shift = 0
+    const list = take.map(m => {
+      const from = m.start + shift
+      shift += m.text.length - m.orig.length
+      return { key: `n:${m.id}`, from, to: from + m.text.length, orig: m.orig, ids: [m.id], sent: m.text }
+    })
+    // Built against the text after the change: set the list after it.
+    const cs = ChangeSet.of(changes, view.state.doc.length, '\n')
+    view.dispatch({ changes: cs, selection: view.state.selection.map(cs, -1), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
+    view.dispatch({ effects: setDrafts.of({ list, gone: [] }), annotations: remote.of(true) })
+  }
+
+  // While Suggesting, a suggestion of mine that is attached again (its words
+  // came back to the file, after it was set aside) becomes a draft again,
+  // where nothing of mine already is; and the line that said it was set
+  // aside goes. Returns whether any came back.
+  function adoptReturned(notes) {
+    if (!view.state.field(draftsField).on) return false
+    const have = draftById()
+    const now = inBase(drafts(), view.state.doc)
+    const clear = (m) => now.every(r => m.end < r.start || m.start > r.end)
+    const take = []
+    for (const m of mineAsDrafts(notes, st.mapBase)) {
+      if (have.has(m.id) || !clear(m)) continue
+      if (take.length && m.start <= take[take.length - 1].end) continue
+      take.push(m)
+    }
+    if (!take.length) return false
+    const toEd = draftsCS()
+    const changes = take.map(m => ({ from: toEd.mapPos(m.start, 1), to: toEd.mapPos(m.end, -1), insert: m.text }))
+    const cs = ChangeSet.of(changes, view.state.doc.length, '\n')
+    view.dispatch({ changes: cs, selection: view.state.selection.map(cs, -1), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
+    let shift = 0
+    const added = take.map((m, i) => {
+      const from = changes[i].from + shift
+      shift += m.text.length - (changes[i].to - changes[i].from)
+      return { key: `n:${m.id}`, from, to: from + m.text.length, orig: m.orig, ids: [m.id], sent: m.text }
+    })
+    const list = [...drafts(), ...added].sort((x, y) => x.from - y.from)
+    view.dispatch({ effects: setDrafts.of({ list }), annotations: remote.of(true) })
+    st.sinceBase = draftsCS()
+    if (st.lostIds && take.filter(m => st.lostIds.delete(m.id)).length && !st.lostIds.size && st.lostToast) {
+      toast.classList.remove('on')
+      st.lostToast = false
+    }
+    return true
+  }
+
+  // My open, attached suggestions as drafts over ``base``: their words put
+  // into the editor's text, only the part that differs (the passage's
+  // anchoring words are not).
+  function mineAsDrafts(notes, base) {
+    return notes.filter(n => n.kind === 'suggestion' && n.state === 'open' && n.author?.id === st.me?.id && n.where?.state === 'attached' && n.where.start != null)
       .map(n => {
         const s = Math.max(0, Math.min(base.length, st.pm.toEditor(n.where.start))), e = Math.max(s, Math.min(base.length, st.pm.toEditor(n.where.end)))
         const quote = base.slice(s, e), rep = ed(n.replacement || '')
@@ -841,19 +899,6 @@ export function createDocEditor(opts) {
         return { id: n.id, start: s + p, end: e - q, orig: quote.slice(p, quote.length - q), text: rep.slice(p, rep.length - q) }
       })
       .sort((a, b) => a.start - b.start)
-    const take = []
-    for (const m of mineOpen) if (!take.length || m.start >= take[take.length - 1].end) take.push(m)
-    const changes = take.map(m => ({ from: m.start, to: m.end, insert: m.text }))
-    let shift = 0
-    const list = take.map(m => {
-      const from = m.start + shift
-      shift += m.text.length - m.orig.length
-      return { key: `n:${m.id}`, from, to: from + m.text.length, orig: m.orig, ids: [m.id], sent: m.text }
-    })
-    // Built against the text after the change: set the list after it.
-    const cs = ChangeSet.of(changes, view.state.doc.length, '\n')
-    view.dispatch({ changes: cs, selection: view.state.selection.map(cs, -1), annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
-    view.dispatch({ effects: setDrafts.of({ list, gone: [] }), annotations: remote.of(true) })
   }
 
   // Into Suggesting: recording on, my open suggestions become drafts. Out of
@@ -1073,7 +1118,9 @@ export function createDocEditor(opts) {
     const id = noteAt(e.target)
     if (id && id !== '__new') {
       const sel = view.state.selection.main
-      if (sel.empty || st.mode === 'view' || st.phone) focusNote(id)
+      // (a mark in a drawn table cannot move the selection: a click there is
+      // always for its note)
+      if (sel.empty || st.mode === 'view' || st.phone || e.target.closest('.dc-tablewrap')) focusNote(id)
     } else if (st.focus && !st.phone && view.state.selection.main.empty) {
       st.focus = null
       pushNotes()
@@ -1667,6 +1714,7 @@ export function createDocEditor(opts) {
   }
 
   function layout() {
+    fitHead()
     if (st.destroyed || !root.isConnected) return
     const ranges = new Map(currentNoteRanges().map(n => [n.id, n]))
     if (!st.phone && st.mode !== 'view') {
@@ -1861,14 +1909,15 @@ export function createDocEditor(opts) {
     headKey = key
     headNodes = extras
     const m = MODES.find(x => x.id === st.mode)
-    // The phone shows the two folders the doc is in, as the mockup does; the
-    // desktop the whole path (shortened by the host).
+    // The phone names the doc (its folders are one tap away, behind the back
+    // button); the desktop shows the whole path (shortened by the host).
     const all = opts.crumbs || []
-    const shown = st.phone && all.length > 2 ? all.slice(0, -1).filter(c => c.label !== '…').slice(-2) : all
-    const crumbs = shown.flatMap((c, i) => [
-      i ? h('span', { class: 'dc-sl', text: '/' }) : null,
-      c.go ? h('button', { class: 'dc-crumb-b', type: 'button', onclick: c.go, text: c.label }) : h('span', { text: c.label }),
-    ])
+    const crumbs = st.phone && all.length
+      ? [h('b', { class: 'dc-docname', text: all[all.length - 1].label })]
+      : all.flatMap((c, i) => [
+        i ? h('span', { class: 'dc-sl', text: '/' }) : null,
+        c.go ? h('button', { class: 'dc-crumb-b', type: 'button', onclick: c.go, text: c.label }) : h('span', { text: c.label }),
+      ])
     const pill = h('button', { class: 'dc-mpill', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': String(st.menu === 'mode'), 'aria-label': `Mode: ${m.label}`, onclick: () => toggleMenu('mode') },
       icon(m.icon, 15), h('span', { text: m.label }), h('span', { class: 'dc-cv' }, icon('chevronDown', 12)))
     // A note whose passage is gone puts a small quiet mark on ⋯ (no banner).
@@ -1886,6 +1935,17 @@ export function createDocEditor(opts) {
       menuWrap('more', dots, moreMenu()),
       ...extras.slice(extras.indexOf(null) + 1),
     )
+    fitHead()
+  }
+
+  // On a phone the title is never cut while the mode pill can give way: it
+  // shows its icon alone (its name is still its label) when the title needs
+  // the room.
+  function fitHead() {
+    head.classList.remove('tight')
+    if (!st.phone || !head.isConnected) return
+    const t = head.querySelector('.dc-crumb > b')
+    if (t && t.scrollWidth > t.clientWidth + 0.5) head.classList.add('tight')
   }
 
   scroll.addEventListener('scroll', () => {
@@ -2267,6 +2327,7 @@ export function createDocEditor(opts) {
   let toastTimer = null
   function showToast(text, undo = null, bad = false, tick = false) {
     clearTimeout(toastTimer)
+    st.lostToast = false
     toast.className = `dc-toast on${bad ? ' bad' : ''}${undo ? '' : ' plain'}`
     put(toast, 
       tick ? h('span', { class: 'dc-tk' }, icon('check', 13)) : null,

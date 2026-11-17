@@ -995,7 +995,7 @@ test('Places: seeded runs of typing, deleting and disk edits near, inside and fa
   await start()
   const PH = ['remarkable', 'line of the callout', 'the light', 'the river', 'Nothing here is', 'callout']
   const failures = []
-  let ctx = null, page = null, checked = 0
+  let ctx = null, page = null, checked = 0, waited = 0
   const RUNS = Number(process.env.DC_PLACES || 30)
   for (let seed = 1; seed <= RUNS && failures.length < 4; seed++) {
     if (!ctx || (seed - 1) % 10 === 0) { await ctx?.close(); ctx = await browser.newContext({ viewport: { width: 1280, height: 850 } }); page = await ctx.newPage() }
@@ -1024,7 +1024,8 @@ test('Places: seeded runs of typing, deleting and disk edits near, inside and fa
       at = Math.max(fm + 1, Math.min(t.length - 1, at))
       const del = [0, 0, 1, 4][pick(4)]
       const ins = ['', ' truly', 'x', 'the river '][pick(4)] || (del ? '' : 'y')
-      if (r() < 0.7) {
+      const onDisk = r() >= 0.7
+      if (!onDisk) {
         await page.evaluate(([a2, d]) => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: a2, head: a2 + d } }) }, [at, del])
         if (del) await page.keyboard.press('Delete')
         if (ins) await page.keyboard.type(ins)
@@ -1043,19 +1044,23 @@ test('Places: seeded runs of typing, deleting and disk edits near, inside and fa
       for (const [id, v] of Object.entries(truth)) {
         if (!v) continue
         const n = notes.find(m => m.id === id)
+        // (round 6) an edit on disk within a note's surroundings, on words
+        // that repeat: it may wait detached there, never sit elsewhere
+        if (onDisk && n.where.state === 'detached' && at <= v[1] + 200 && at + Math.max(del, ins.length) >= v[0] - 200
+            && Math.max(t.split(n.anchor.quote).length, (await disk(p)).text.split(n.anchor.quote).length) > 2) { truth[id] = null; waited++; continue }
         checked++
         if (n.where.state === 'detached' || n.where.start !== v[0]) failures.push(`seed ${seed} step ${step}: ${JSON.stringify(n.anchor.quote)} at ${n.where.start} (${n.where.state}), put on ${v[0]}; change ${at} -${del} +${JSON.stringify(ins)}`)
       }
     }
   }
   await ctx?.close()
-  console.log(`# ${checked} note places checked`)
+  console.log(`# ${checked} note places checked, ${waited} waited after an edit on disk within their surroundings`)
   assert.deepEqual(failures, [])
 })
 
 // -- round 4: the visitor's side ------------------------------------------------
 
-const devLink = async (mode, name = null) => (await fetch(`${base}/dev/link`, { method: 'POST', body: JSON.stringify({ mode, name }) })).json()
+const devLink = async (mode, name = null, path = null) => (await fetch(`${base}/dev/link`, { method: 'POST', body: JSON.stringify({ mode, name, path }) })).json()
 async function visitor(link, { w = 1280, h = 850, name = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h } })
   const page = await ctx.newPage()
@@ -1433,7 +1438,7 @@ const WHOLE = Number(process.env.DC_WHOLE || 16)
 test(`Whole: ${WHOLE} seeded runs of sections removed and put back, on disk and by restore, with drafts open`, { skip, timeout: 1800000 }, async () => {
   await start()
   const failures = [], errors = []
-  let ctx = null, page = null, checked = 0, drafts = 0, restores = 0
+  let ctx = null, page = null, checked = 0, drafts = 0, restores = 0, waitedNear = 0
   const SPOTS = (i) => [`Paragraph ${i}b, after the blocks`, `A callout in section ${i}`, `| 202${i} | Porto |`, `Paragraph ${i}c closes`, `keep it too`]
   const history = async (p) => (await (await fetch(`${base}/x/doc-comments/doc/history?${new URLSearchParams({ root: 'vault', path: p })}`)).json()).saves
   for (let seed = 1; seed <= WHOLE && failures.length < 4; seed++) {
@@ -1509,6 +1514,10 @@ test(`Whole: ${WHOLE} seeded runs of sections removed and put back, on disk and 
           else if (await drawnFor(page, n.id)) fail(`a detached note is drawn (${n.words})`)
         } else {
           const want = n.words === 'keep it too' ? nthIn(T, n.words, [1, 2, 3, 4, 5, 6].filter(i => !removed(i)).indexOf(n.sec) + 1) : T.indexOf(n.words)
+          const cutAt = T.indexOf(`## Section ${b}`) >= 0 ? T.indexOf(`## Section ${b}`) : T.length
+          // (round 6) a note on repeated words within 200 characters of the
+          // cut may wait detached; never on other words
+          if (w?.state === 'detached' && T.split(n.words).length > 2 && Math.abs(want - cutAt) <= 200 + n.words.length) { waitedNear++; continue }
           if (w?.state !== 'attached' || w.start !== want) fail(`a note in section ${n.sec} (${n.words}) moved: ${JSON.stringify(w)} want ${want}`)
         }
       }
@@ -1537,7 +1546,393 @@ test(`Whole: ${WHOLE} seeded runs of sections removed and put back, on disk and 
     } catch (err) { fail(`threw ${err.message.split('\n')[0]}`) }
   }
   await ctx?.close()
-  console.log(`# ${WHOLE} seeded runs of whole sections removed and put back (${restores} by restore, ${drafts} with a draft open), ${checked} note places checked`)
+  console.log(`# ${WHOLE} seeded runs of whole sections removed and put back (${restores} by restore, ${drafts} with a draft open), ${checked} note places checked, ${waitedNear} waited near the cut`)
   assert.deepEqual(failures, [])
   assert.deepEqual(errors, [])
+})
+
+// -- round 6: twins after a change nobody described -------------------------------
+
+// The doc's text cut into its head and its sections, to write it back with
+// some of them: twins differ only in their digits.
+function sectionsOf(t) {
+  const at = [1, 2, 3, 4, 5, 6].map(i => t.indexOf(`## Section ${i}`))
+  const head = t.slice(0, at[0])
+  const secs = {}
+  at.forEach((a, k) => { secs[k + 1] = t.slice(a, k < 5 ? at[k + 1] : t.length) })
+  return { head, secs, build: (on) => head + [...on].sort().map(i => secs[i]).join('') }
+}
+const stateOf = (page, id) => page.evaluate((id) => window.__ed.state.notes.find(n => n.id === id)?.where?.state, id)
+
+test('Twins 1: swapping which twin section is missing, on disk: "bright" never lands on 2b, and is home on 3b when the file is back', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const bright = await noteOn(p, 'suggestion', 'remarkable', 3, { replacement: 'bright' })
+  const splendid = await noteOn(p, 'suggestion', 'remarkable', 2, { replacement: 'splendid' })
+  const page = await open({ doc: p, h: 3200 })
+  const full = (await disk(p)).text
+  const S = sectionsOf(full)
+  await outside(p, S.build([1, 3, 4, 5, 6]))
+  await until(page, (id) => window.__ed.state.notes.find(n => n.id === id)?.where?.state === 'detached', splendid)
+  assert.equal((await whereOf(p, bright)).where.start, nthIn((await disk(p)).text, 'remarkable', 2), 'bright on 3b, the second "remarkable" now')
+  await outside(p, S.build([1, 2, 4, 5, 6]))
+  await page.waitForTimeout(2500)
+  const wb = (await whereOf(p, bright)).where
+  assert.notEqual(wb.state, 'attached', `bright is not on 2b: ${JSON.stringify(wb)}`)
+  assert.equal(await drawnFor(page, bright), 0)
+  await outside(p, full)
+  await until(page, (id) => window.__ed.state.notes.find(n => n.id === id)?.where?.state === 'attached', bright)
+  const t = (await disk(p)).text
+  assert.equal(t, full)
+  assert.equal((await whereOf(p, bright)).where.start, nthIn(t, 'remarkable', 3), 'home on 3b')
+  assert.equal((await whereOf(p, splendid)).where.start, nthIn(t, 'remarkable', 2), 'home on 2b')
+  await page.waitForTimeout(300)
+  await page.click(`.dc-card[data-id="${bright}"]`)
+  await page.click('.dc-card.on .dc-sm.ok')
+  await until(page, (id) => window.__ed.state.notes.find(x => x.id === id)?.state === 'accepted', bright)
+  const after = (await disk(p)).text
+  assert.ok(after.includes('Paragraph 3b, after the blocks. Nothing here is bright'), 'Accept wrote on 3b')
+  assert.ok(after.includes('Paragraph 2b, after the blocks. Nothing here is remarkable'))
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('Twins 2: through History restores, a suggestion on 2c never sits on another "closes"; the full version brings every note home', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  await noteOn(p, 'comment', 'Walk', 1)
+  const full = (await disk(p)).text
+  const S = sectionsOf(full)
+  const history = async () => (await (await fetch(`${base}/x/doc-comments/doc/history?${new URLSearchParams({ root: 'vault', path: p })}`)).json()).saves
+  const page = await open({ doc: p, h: 3200 })
+  await outside(p, S.head + 'A short page. Paragraph 9c closes the section with a sentence, and that is all.\n')
+  await page.waitForTimeout(2000)
+  const vTiny = (await history())[0].id
+  await outside(p, S.build([1, 3, 4, 5, 6]))
+  await page.waitForTimeout(2000)
+  const vNo2 = (await history())[0].id
+  await outside(p, full)
+  await page.waitForTimeout(2000)
+  const vFull = (await history())[0].id
+  const ends = await noteOn(p, 'suggestion', 'closes', 2, { replacement: 'ends' })
+  const others = []
+  for (const i of [1, 3, 4, 5, 6]) others.push(await noteOn(p, 'comment', `Paragraph ${i}a. The river`, 1))
+  await api(p, 'doc/restore', 'POST', { save: vTiny })
+  await page.waitForTimeout(2000)
+  assert.notEqual((await whereOf(p, ends)).where.state, 'attached', 'not on the short page\'s "closes"')
+  await api(p, 'doc/restore', 'POST', { save: vNo2 })
+  await page.waitForTimeout(2000)
+  assert.notEqual((await whereOf(p, ends)).where.state, 'attached', 'not on 3c\'s "closes"')
+  assert.equal(await drawnFor(page, ends), 0)
+  const back = (await Promise.all(others.map(id => whereOf(p, id)))).filter(n => n.where.state === 'attached').length
+  assert.ok(back >= 4, `the notes whose passages are on the page are back (${back} of 5)`)
+  await api(p, 'doc/restore', 'POST', { save: vFull })
+  await until(page, (id) => window.__ed.state.notes.find(n => n.id === id)?.where?.state === 'attached', ends)
+  const t = (await disk(p)).text
+  assert.equal((await whereOf(p, ends)).where.start, nthIn(t, 'closes', 2))
+  for (const id of others) assert.equal((await whereOf(p, id)).where.state, 'attached')
+  await api(p, `doc/notes/${ends}/accept`)
+  assert.ok((await disk(p)).text.includes('Paragraph 2c ends the section'))
+  assert.ok((await disk(p)).text.includes('Paragraph 3c closes the section'))
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('Twins 3: two twin paragraphs, the first deleted on disk: its suggestion waits, Accept writes nothing; put back, it is home', { skip }, async () => {
+  await start()
+  const para = 'The same paragraph, word for word, twice over in this doc.\n\n'
+  const p = await newDoc('# Twins\n\n' + para + para + 'And then the end.\n')
+  const id = await noteOn(p, 'suggestion', 'word for word', 1, { replacement: 'letter for letter' })
+  const page = await open({ doc: p })
+  const t = (await disk(p)).text
+  const a = t.indexOf('The same paragraph'), b = t.indexOf('The same paragraph', a + 1)
+  await outside(p, t.slice(0, a) + t.slice(b))
+  await until(page, (id) => window.__ed.state.notes.find(n => n.id === id)?.where?.state === 'detached', id)
+  assert.equal(await drawnFor(page, id), 0)
+  const acc = await api(p, `doc/notes/${id}/accept`)
+  assert.ok(acc.error, 'Accept refuses')
+  assert.ok(!(await disk(p)).text.includes('letter for letter'))
+  await outside(p, t)
+  await until(page, (id) => window.__ed.state.notes.find(n => n.id === id)?.where?.state === 'attached', id)
+  assert.equal((await whereOf(p, id)).where.start, a + 'The same paragraph, '.length)
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+// Seeded: twin sections swapped in and out in single writes, removed, put
+// back, a short page sharing a phrase, and History restores across them, with
+// the doc open (Suggesting with a draft in some runs). An attached note is on
+// its own section's words; a draft of mine is never sent on another
+// section's words; the editor is the stored text with my drafts; and a text
+// back byte for byte has every note where it was in it.
+const TWINS = Number(process.env.DC_TWINS || 12)
+test(`Twins: ${TWINS} seeded runs of twin sections swapped, removed, put back and restored, with drafts open`, { skip, timeout: 1800000 }, async () => {
+  await start()
+  const failures = [], errors = []
+  let ctx = null, page = null, checked = 0, waited = 0, returned = 0, drafts = 0, restores = 0
+  const SPOTS = ['remarkable', 'closes the section', 'The river kept its own time', 'the light']
+  const history = async (p) => (await (await fetch(`${base}/x/doc-comments/doc/history?${new URLSearchParams({ root: 'vault', path: p })}`)).json()).saves
+  for (let seed = Number(process.env.DC_TWIN_SEED || 1); seed <= (Number(process.env.DC_TWIN_SEED) || TWINS) && failures.length < 4; seed++) {
+    if (!ctx || (seed - 1) % 6 === 0) {
+      await ctx?.close()
+      ctx = await browser.newContext({ viewport: { width: 1280, height: 3400 } })
+      page = await ctx.newPage()
+      page.on('pageerror', (e) => errors.push(`seed ${seed}: ${e.message}`))
+    }
+    let s = (seed * 3266489917) >>> 0
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const pick = (n) => Math.floor(r() * n)
+    const fail = (m) => failures.push(`seed ${seed}: ${m}`)
+    try {
+      const p = await newDoc(REPEATS)
+      await noteOn(p, 'comment', 'Walk', 1)
+      const S = sectionsOf((await disk(p)).text)
+      const notes = {}
+      for (let k = 0; k < 4; k++) {
+        const sec = 1 + pick(6), ph = SPOTS[pick(SPOTS.length)]
+        if (Object.values(notes).some(v => v.sec === sec && v.ph === ph)) continue
+        const t = (await disk(p)).text
+        const at = t.indexOf(ph, t.indexOf(`## Section ${sec}`))
+        const d = await api(p, 'doc', 'GET')
+        const kind = r() < 0.5 ? 'comment' : 'suggestion'
+        const got = await api(p, 'doc/notes', 'POST', { kind, start: at, end: at + ph.length, quote: ph, revision: d.revision, text: 'x', ...(kind === 'suggestion' ? { replacement: ph + ' too' } : {}) }, 'ada')
+        notes[got.note] = { sec, ph }
+      }
+      await page.goto(`${base}/?path=${encodeURIComponent(p)}`)
+      await page.waitForSelector('.cm-content')
+      await page.waitForTimeout(300)
+      let draft = null
+      if (r() < 0.5) {
+        draft = { sec: 1 + pick(6), word: `zq${seed}x` }
+        await mode(page, 'Suggesting')
+        const at = await page.evaluate((i) => { const t = window.__ed.text(); return t.indexOf(`Paragraph ${i}a.`) + `Paragraph ${i}a. `.length }, draft.sec)
+        await page.evaluate((x) => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: x } }) }, at)
+        await page.keyboard.type(draft.word)
+        await settle(page)
+        drafts++
+      }
+      let on = new Set([1, 2, 3, 4, 5, 6])
+      const seen = new Map()
+      for (let step = 0; step < 7; step++) {
+        const prev = (await disk(p)).text
+        const absent = [1, 2, 3, 4, 5, 6].filter(i => !on.has(i))
+        const x = r()
+        let how
+        if (x < 0.35 && absent.length && on.size) { const i = [...on][pick(on.size)], j = absent[pick(absent.length)]; on.delete(i); on.add(j); how = 'swap' }
+        else if (x < 0.55 && on.size > 1) { on.delete([...on][pick(on.size)]); how = 'remove' }
+        else if (x < 0.7 && absent.length) { on.add(absent[pick(absent.length)]); how = 'put back' }
+        else if (x < 0.78) { on = null; how = 'short page' }
+        else how = 'restore'
+        if (how === 'restore') {
+          const saves = await history(p)
+          if (saves.length < 2) continue
+          await api(p, 'doc/restore', 'POST', { save: saves[1 + pick(saves.length - 1)].id })
+          restores++
+        } else {
+          await outside(p, on ? S.build(on) : S.head + 'A short page. Paragraph 9c closes the section with a sentence; the light is remarkable.\n')
+        }
+        await page.waitForTimeout(2200)
+        await settle(page)
+        const d = await api(p, 'doc', 'GET')
+        const t = d.text
+        on = t.includes('## Section') ? new Set([1, 2, 3, 4, 5, 6].filter(i => t.includes(`## Section ${i}`))) : new Set()
+        const secAt = (x) => { let k = null; for (let i = 1; i <= 6; i++) { const a = t.indexOf(`## Section ${i}`); if (a >= 0 && a <= x) k = (k === null || a > t.indexOf(`## Section ${k}`)) ? i : k } return k }
+        const was = seen.get(t)
+        for (const [id, v] of Object.entries(notes)) {
+          const n = d.notes.find(x => x.id === id)
+          if (!n || n.state !== 'open') continue
+          const w = n.where
+          if (was && was[id]) {
+            if (w.state !== 'attached' || w.start !== was[id]) fail(`${how}: the text came back, the note (${v.ph}) did not: ${JSON.stringify(w)} want ${was[id]}`)
+            else returned++
+            if (w.state === 'attached') v.sec = secAt(w.start)
+            continue
+          }
+          if (w.state !== 'attached') { if (on.has(v.sec)) waited++; if (await drawnFor(page, id)) fail('a detached note is drawn'); continue }
+          if (t.split(v.ph).length === 2 && prev.split(v.ph).length === 2) { v.sec = secAt(w.start); continue }   // the only copy
+          const want = on.has(v.sec) ? t.indexOf(v.ph, t.indexOf(`## Section ${v.sec}`)) : -1
+          if (w.start !== want) fail(`${how}: a note of section ${v.sec} (${v.ph}) is on other words at ${w.start} (want ${want})`)
+          else checked++
+        }
+        for (const n of d.notes.filter(n => n.kind === 'suggestion' && n.state === 'open' && n.author.id === 'sam' && n.where.state === 'attached')) {
+          if (!draft || !n.replacement.includes(draft.word)) fail(`${how}: a suggestion of mine on other words: ${JSON.stringify(n.anchor.quote)} → ${JSON.stringify(n.replacement)}`)
+        }
+        const now = await storedWithMine(p)
+        const ed_ = await shown(page)
+        if (body(now.text) !== body(ed_)) {
+          const A = body(now.text), B = body(ed_)
+          let k0 = 0; while (A[k0] === B[k0]) k0++
+          fail(`${how}: the editor differs from the stored text with my drafts at ${k0}: ${JSON.stringify(A.slice(k0 - 30, k0 + 30))} vs ${JSON.stringify(B.slice(k0 - 30, k0 + 30))}; mine ${JSON.stringify(d.notes.filter(n => n.author.id === 'sam' && n.kind === 'suggestion').map(n => [n.state, n.where.state, n.replacement]))}`)
+        }
+        const places = {}
+        for (const n of d.notes) if (n.state === 'open' && n.where.state === 'attached' && notes[n.id]) places[n.id] = n.where.start
+        seen.set(t, { ...(was || {}), ...places })
+      }
+    } catch (err) { fail(`threw ${err.message.split('\n')[0]}`) }
+  }
+  await ctx?.close()
+  console.log(`# ${TWINS} seeded runs of twin sections (${restores} restores, ${drafts} with a draft open): ${checked} attached notes on their own words, ${waited} waited, ${returned} back in an earlier text`)
+  assert.deepEqual(failures, [])
+  assert.deepEqual(errors, [])
+})
+
+// Round 6, B1: at 430 a 24-character title is whole on both bars, and the
+// owner's phone bar names the doc, not its folders.
+async function barAt(page) {
+  return page.evaluate(() => {
+    const head = document.querySelector('.dc-head')
+    const crumb = head.querySelector('.dc-crumb')
+    const b = crumb.querySelector('b') || crumb.lastElementChild || crumb
+    const kids = [...head.children].filter(e => e.offsetWidth > 0)
+    const next = kids[kids.indexOf(crumb) + 1]
+    return {
+      text: crumb.innerText.replace(/\s+/g, ' ').trim(), title: b.textContent,
+      box: Math.round(b.getBoundingClientRect().width), needs: b.scrollWidth, clipped: b.scrollWidth > b.clientWidth + 0.5,
+      free: next ? Math.round(next.getBoundingClientRect().left - b.getBoundingClientRect().right) : null,
+      padding: getComputedStyle(head).padding,
+    }
+  })
+}
+test('B1 (round 6): at 430, a 24-character title is whole on the visitor\'s bar and the owner\'s, and the owner\'s names the doc', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Notes from the allotment\n\nThe beans came up in a row, then the frost took half of them.\n')
+  const link = await devLink('comment', 'Robin', p)
+  const v = await visitor(link, { w: 430, h: 900 })
+  await v.waitForTimeout(600)
+  const mv = await barAt(v)
+  await shot(v, 'phone-bar-visitor-24')
+  await v.done()
+  const o = await open({ doc: p, w: 430, h: 900, phone: true })
+  const mo = await barAt(o)
+  await shot(o, 'phone-bar-owner-24')
+  await o.done()
+  console.log('# visitor', JSON.stringify(mv), '\n# owner', JSON.stringify(mo))
+  assert.equal(mv.title, 'Notes from the allotment')
+  assert.ok(!mv.clipped, `visitor: the title needs ${mv.needs}, has ${mv.box}`)
+  assert.equal(mo.text, p.replace(/^Tests\//, '').replace(/\.md$/, ''), 'owner: the bar names the doc, not its folders')
+  assert.ok(!mo.clipped, `owner: the name needs ${mo.needs}, has ${mo.box}`)
+})
+
+test('B2 (round 6): in Suggesting, with my draft\'s card focused, a click on a table cell\'s mark focuses that note', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const id = await noteOn(p, 'comment', 'Porto', 1)
+  const page = await open({ doc: p, h: 2000 })
+  await mode(page, 'Suggesting')
+  await caretAfter(page, 'Paragraph 1a.')
+  await page.keyboard.type(' Quietly')
+  await settle(page)
+  await page.waitForTimeout(300)
+  const mine = (await mineOpen(p))[0]
+  await page.click(`.dc-card[data-id="${mine.id}"]`)
+  await until(page, (x) => window.__ed.state.focus === x, mine.id)
+  // her own words selected, as after working on the draft
+  const t0 = await shown(page)
+  await selectText(page, t0.indexOf('Quietly'), t0.indexOf('Quietly') + 7)
+  await page.click(`.dc-table [data-note="${id}"]`)
+  await page.waitForTimeout(300)
+  assert.equal(await page.evaluate(() => window.__ed.state.focus), id)
+  assert.equal(await page.locator('.dc-table').count() > 0, true, 'the table is still drawn, not opened as source')
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('B2 (round 6), the visitor\'s page: with her draft\'s card focused, a click on a table cell\'s mark focuses that note', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const id = await noteOn(p, 'comment', 'Porto', 1)
+  const link = await devLink('comment', 'Robin', p)
+  const page = await visitor(link, { h: 2000 })
+  await mode(page, 'Suggesting')
+  await page.evaluate(() => { const v = document.querySelector('.cm-content').cmTile.view, at = v.state.doc.toString().indexOf('Paragraph 1a.') + 13; v.focus(); v.dispatch({ selection: { anchor: at } }) })
+  await page.keyboard.type(' Quietly')
+  await page.waitForTimeout(PAUSE + 600)
+  const mine = (await api(p, 'doc', 'GET')).notes.find(n => n.kind === 'suggestion' && n.state === 'open')
+  await page.click(`.dc-card[data-id="${mine.id}"]`)
+  await page.waitForTimeout(300)
+  await page.click(`.dc-table [data-note="${id}"]`)
+  await page.waitForTimeout(400)
+  const focused = await page.evaluate(() => document.querySelector('.dc-card.on')?.getAttribute('data-id'))
+  assert.equal(focused, id)
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('B3 (round 6): a note on two words of a table cell marks those words, not the cell', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Rows\n\n| Year | Where | Why |\n| --- | --- | --- |\n| 2016 | Lisbon | the light on the river |\n')
+  const id = await noteOn(p, 'comment', 'the river', 1)
+  const page = await open({ doc: p })
+  await page.waitForTimeout(300)
+  const got = await page.evaluate((id) => { const e = document.querySelector(`.dc-table [data-note="${id}"]`); return { mark: e?.textContent, cell: e?.closest('td')?.textContent } }, id)
+  assert.deepEqual(got, { mark: 'the river', cell: 'the light on the river' })
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('B4 (round 6): the "words just removed" line goes when the passage comes back, and the draft is back in the editor', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const page = await open({ doc: p, h: 3200 })
+  await mode(page, 'Suggesting')
+  await caretAfter(page, 'Paragraph 2a.')
+  await page.keyboard.type(' Slowly')
+  await settle(page)
+  const full = (await disk(p)).text
+  const S = sectionsOf(full)
+  await outside(p, S.build([1, 3, 4, 5, 6]))
+  await until(page, () => document.querySelector('.dc-toast.on')?.textContent.includes('removed from the file'), null, 6000)
+  assert.ok(!(await shown(page)).includes('Slowly'))
+  await outside(p, full)
+  await until(page, () => window.__ed.text().includes('Paragraph 2a. Slowly'), null, 6000)
+  assert.equal(await page.evaluate(() => document.querySelector('.dc-toast')?.classList.contains('on')), false, 'the line has gone')
+  assert.equal(body((await storedWithMine(p)).text), body(await shown(page)))
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('B5 (round 6): a wrapped list item\'s second line starts under its first line\'s words (bullets and numbers)', { skip }, async () => {
+  await start()
+  const long = 'The first winter I stayed, nothing happened, and that was the point. The baker learned my order and the man with the grey dog started nodding.'
+  const p = await newDoc(`# Lists\n\nA paragraph first.\n\n- ${long}\n\n1. ${long}\n`)
+  const page = await open({ doc: p, w: 900 })
+  await page.evaluate(() => { const v = window.__ed.view; v.dispatch({ selection: { anchor: 2 } }) })
+  await page.waitForTimeout(300)
+  const gaps = await page.evaluate((long) => {
+    const v = window.__ed.view, t = v.state.doc.toString()
+    return ['- ', '1. '].map(m => {
+      const a = t.indexOf(m + long) + m.length
+      const first = v.coordsAtPos(a, 1)
+      let k = a + 1
+      while (k < a + long.length && Math.abs(v.coordsAtPos(k, 1).top - first.top) < 4) k++
+      const second = v.coordsAtPos(k, 1)
+      return Math.round((second.left - first.left) * 10) / 10
+    })
+  }, long)
+  console.log('# second line minus first line, px:', JSON.stringify(gaps))
+  for (const g of gaps) assert.ok(Math.abs(g) <= 1, `the wrapped line is ${g}px off`)
+  await shot(page, 'list-wrap')
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('B5 (round 6): the Share button\'s faces sit apart, each ring in the button\'s colour', { skip }, async () => {
+  await start()
+  const p = await newDoc('# Shared\n\nA line.\n')
+  await devLink('comment', 'Robin', p)
+  await devLink('comment', null, p)
+  const page = await open({ doc: p })
+  await page.waitForSelector('.dc-sharebtn.has .dc-sf')
+  const m = await page.evaluate(() => {
+    const f = [...document.querySelectorAll('.dc-sharebtn .dc-sf')].map(e => e.getBoundingClientRect())
+    const btn = getComputedStyle(document.querySelector('.dc-sharebtn')).backgroundColor
+    const ring = getComputedStyle(document.querySelector('.dc-sharebtn .dc-sf')).boxShadow
+    return { n: f.length, overlap: f.length > 1 ? Math.round(f[0].right - f[1].left) : 0, btn, ring }
+  })
+  console.log('# share faces', JSON.stringify(m))
+  assert.equal(m.n, 2)
+  assert.ok(m.overlap <= 3, `faces overlap ${m.overlap}px`)
+  assert.ok(m.ring.includes(m.btn), 'the ring is the button\'s colour')
+  await page.screenshot({ path: `${SHOTS || '/tmp'}/share-faces.png`, clip: await page.evaluate(() => { const r = document.querySelector('.dc-sharebtn').getBoundingClientRect(); return { x: r.x - 20, y: r.y - 10, width: r.width + 40, height: r.height + 20 } }) }).catch(() => {})
+  await page.done()
 })

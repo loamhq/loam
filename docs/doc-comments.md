@@ -166,16 +166,19 @@ mixed files keep each CR).
 
 ### What a note points at
 
-A quote of the passage plus up to 32 characters before and after, and where
-it last was. To find it again (`anchor.py`): every exact occurrence is scored
-by how much of its context still matches, then by nearness; if there is none,
-a passage still bracketed by the context, or a window of the text close
-enough to the quote (similarity ≥ 0.6), is the passage **changed since**
-(the note keeps its original quote to show what it was about); otherwise the
-note is **detached**: kept, never deleted, listed in History, and
-re-attachable to a new selection. After a known edit (a save through the
-editor) the old position is mapped through the edit first, so the right one
-of two identical phrases is kept.
+A quote of the passage plus up to 32 characters before and after
+(`anchor.py`), its place in the text (`where`), and, while attached, its
+wider surroundings and the texts it was attached in. A note is never found
+again by searching for its words: its place is carried through every change
+(below). If most of its words are rewritten it is **changed since** (it keeps
+its original quote to show what it was about); if they are gone it is
+**detached**: kept, never deleted, listed in History, and re-attachable to a
+new selection. The old searcher in `anchor.py` was removed in round 6.
+
+A note on part of a table cell marks just those words in the drawn table
+(a cell with formatting is marked whole), and a click there opens the note.
+On a phone the bar names the doc (its folders are behind the back button),
+and the mode pill shows its icon alone when the title needs the room.
 
 ### Saves merge
 
@@ -278,10 +281,33 @@ accept rewrote covers the new words). `textdiff.delta` is exact to the
 letter inside a replaced run of words, and slides each change to its
 rightmost equal place.
 
+**Twins, after a change nobody described** (2026-11-17, round 6). A
+comparison cannot tell twin passages apart (sections that differ only in
+their digits), so after a disk edit or a restore being carried onto the same
+words is not enough. Each note keeps its wider surroundings (`wide`: up to
+200 characters of the body on each side, as last attached) and the texts it
+was attached in (`homes`: a hash of the body and its place there, the last
+16). Then, for such a change only:
+
+- a text the note was attached in puts it back where it was there (a file
+  returned byte for byte has every note home);
+- a note carried onto words that also occur elsewhere, before or after the
+  change, stays only if its surroundings still hold there; otherwise it waits
+  detached at that point (a twin swapped in, one of two twin paragraphs
+  deleted);
+- a detached note comes back when its words return, with their recorded
+  surroundings, once, in the text the change put in around its point.
+
+A quote that occurs once before and once after the change is not checked: it
+cannot be told from the passage edited, and stays. The cost is that a disk
+edit within 200 characters of a note on repeated words detaches it until the
+text returns or someone re-attaches it.
+
 A draft of mine open in Suggesting whose original words are removed on disk
 is set aside: its typed words leave with the passage, it is never sent again
 on other words, and the editor says so in one line. Its note, if it was
-sent, waits detached.
+sent, waits detached; if its words come back, it is a draft again and the
+line goes.
 
 `test/test_places.py` runs 300 seeded sequences on a doc that repeats itself
 (saves, edits on disk, restores, accepts and rejects near, inside and far

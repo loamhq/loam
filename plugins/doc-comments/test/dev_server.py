@@ -217,7 +217,9 @@ def main() -> int:
                 # A fresh link for a test: {mode, name}.
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}")
-                link, token, pw = links.create(did, body.get("mode", "comment"), body.get("name"), 30, "pass-test")
+                # (or for another doc: {path})
+                d = did if not body.get("path") else svc.ensure_id(svc.store.owner(), "vault", body["path"])
+                link, token, pw = links.create(d, body.get("mode", "comment"), body.get("name"), 30, "pass-test")
                 data = json.dumps({"path": f"/s/{token}", "token": token, "password": "pass-test"}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")

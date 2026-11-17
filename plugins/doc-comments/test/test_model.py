@@ -75,38 +75,16 @@ class Tokens(unittest.TestCase):
 
 
 class Anchors(unittest.TestCase):
-    def quote_anchor(self, text, quote):
-        s = text.index(quote)
-        return anchor.make(text, s, s + len(quote))
-
-    def test_refind_after_edit_elsewhere(self):
+    def test_an_anchor_is_its_words_and_a_little_either_side(self):
         q = "a habit of leaving"
-        a = self.quote_anchor(ESSAY, q)
-        edited = ESSAY.replace("For ten years", "For ten long, restless years")
-        w = anchor.locate(edited, a)
-        self.assertEqual(w["state"], "attached")
-        self.assertEqual(edited[w["start"]:w["end"]], q)
+        s = ESSAY.index(q)
+        a = anchor.make(ESSAY, s, s + len(q))
+        self.assertEqual((a["quote"], a["pos"]), (q, s))
+        self.assertEqual(a["prefix"], ESSAY[s - anchor.CONTEXT:s])
+        self.assertEqual(a["suffix"], ESSAY[s + len(q):s + len(q) + anchor.CONTEXT])
 
-    def test_picks_the_right_duplicate_by_context(self):
-        text = "small things matter. And then, small things are most of a life."
-        a = anchor.make(text, text.rindex("small things"), text.rindex("small things") + 12)
-        edited = "Intro. " + text
-        w = anchor.locate(edited, a)
-        self.assertEqual(w["start"], edited.rindex("small things"))
-
-    def test_changed_since(self):
-        q = "It was closer to a habit of leaving before anything could ask something of me."
-        a = self.quote_anchor(ESSAY, q)
-        edited = ESSAY.replace("a habit of leaving", "a habit of going")
-        w = anchor.locate(edited, a)
-        self.assertEqual(w["state"], "changed")
-        self.assertIn("a habit of going", edited[w["start"]:w["end"]])
-
-    def test_detached_when_gone(self):
-        q = "These are small things, but small things are most of a life."
-        a = self.quote_anchor(ESSAY, q)
-        edited = ESSAY.replace(q, "")
-        self.assertEqual(anchor.locate(edited, a)["state"], "detached")
+    def test_nothing_searches_for_a_quote(self):
+        self.assertFalse(hasattr(anchor, "locate"))
 
 
 class Merge(unittest.TestCase):

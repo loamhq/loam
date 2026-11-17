@@ -28,7 +28,8 @@ ed = createDocEditor({
   headEnd: () => [sharing.button()],
   phone: params.has('phone'),
   settings: { get: (k, d) => (store.has(k) ? store.get(k) : d), set: (k, v) => store.set(k, v) },
-  crumbs: [{ label: 'Essays', go: () => {} }, { label: 'drafts', go: () => {} }, { label: 'On staying' }],
+  // as Loam's Files gives them: the folders, then the doc's name
+  crumbs: (params.get('path') || 'Essays/drafts/On staying.md').replace(/\.md$/, '').split('/').map((label, i, all) => (i < all.length - 1 ? { label, go: () => {} } : { label })),
   back: params.has('phone') ? { label: 'Back', go: () => {} } : null,
   fileMenu: () => {},
   openLink: (ref) => console.log('open', ref),

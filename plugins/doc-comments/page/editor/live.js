@@ -161,8 +161,11 @@ function cellMarks(source, from, notes) {
         const a = n.from - from, b = n.to - from
         if (a < c.to && b > c.from || (a === b && a >= c.from && a <= c.to && n.kind !== 'comment')) {
           const on = n.focus ? ' on' : n.peek ? ' peek' : ''
-          marks[`${r ? r - 1 : 0}:${r ? 'b' : 'h'}:${k}`] = { id: n.id, cls: `dc-pass${n.changed ? ' changed' : ''}${on}` }
-          break
+          const key = `${r ? r - 1 : 0}:${r ? 'b' : 'h'}:${k}`
+          // the note's own words in the cell, as offsets in its text
+          const x = Math.max(0, a - c.from), y = Math.min(c.to - c.from, Math.max(b, a + 1) - c.from)
+          const list = marks[key] || (marks[key] = [])
+          if (list.every(m => y <= m.a || x >= m.b)) list.push({ id: n.id, cls: `dc-pass${n.changed ? ' changed' : ''}${on}`, a: x, b: y })
         }
       }
     })
@@ -181,17 +184,31 @@ class TableWidget extends WidgetType {
     const body = lines.slice(2).map(cellsOf)
     // A cell a note sits in carries the note's mark, as its words would in a
     // paragraph (and opens it when clicked, like any mark).
-    const words = (key, text) => {
-      const m = this.marks[key]
-      return m ? [h('span', { class: m.cls, 'data-note': m.id, text })] : text
+    // Only the note's own words carry its mark where the cell is plain
+    // text (offsets in the source are offsets in what is drawn); a cell with
+    // formatting is marked whole.
+    const words = (key, raw) => {
+      const text = plainInline(raw)
+      const list = (this.marks[key] || []).slice().sort((m, n) => m.a - n.a)
+      if (!list.length) return text
+      if (text !== raw) return [h('span', { class: list[0].cls, 'data-note': list[0].id, text })]
+      const out = []
+      let at = 0
+      for (const m of list) {
+        if (m.a > at) out.push(text.slice(at, m.a))
+        out.push(h('span', { class: m.cls, 'data-note': m.id, text: text.slice(m.a, m.b) }))
+        at = m.b
+      }
+      if (at < text.length) out.push(text.slice(at))
+      return out
     }
-    const cell = (tag, key, text, i) => {
-      const w = words(key, text)
+    const cell = (tag, key, raw, i) => {
+      const w = words(key, raw)
       return typeof w === 'string' ? h(tag, { class: align[i] ? `al-${align[i]}` : null, text: w }) : h(tag, { class: align[i] ? `al-${align[i]}` : null }, ...w)
     }
     const table = h('table', { class: 'dc-table' },
-      h('thead', {}, h('tr', {}, head.map((c, i) => cell('th', `0:h:${i}`, plainInline(c), i)))),
-      h('tbody', {}, body.map((r, ri) => h('tr', {}, head.map((_, i) => cell('td', `${ri + 1}:b:${i}`, plainInline(r[i] ?? ''), i))))))
+      h('thead', {}, h('tr', {}, head.map((c, i) => cell('th', `0:h:${i}`, c, i)))),
+      h('tbody', {}, body.map((r, ri) => h('tr', {}, head.map((_, i) => cell('td', `${ri + 1}:b:${i}`, r[i] ?? '', i))))))
     const wrap = h('div', { class: 'dc-tablewrap' }, table)
     wrap.addEventListener('mousedown', (e) => {
       // A note's mark in a cell opens the note (the editor's click), and
@@ -455,7 +472,13 @@ function inlineDecos(view) {
             if (!near) add(node.from, end, hide)
             else add(node.from, node.to, mk('dc-mark'))
           } else if (/^[-*+]$/.test(text) && !near) {
-            add(node.from, node.to, Decoration.replace({ widget: new BulletWidget() }))
+            // the mark and the space after it are the bullet's fixed width, so
+            // a wrapped line's words line up under the first line's
+            const end = state.sliceDoc(node.to, node.to + 1) === ' ' ? node.to + 1 : node.to
+            add(node.from, end, Decoration.replace({ widget: new BulletWidget() }))
+          } else if (/^\d+[.)]$/.test(text) && !near && state.sliceDoc(node.to, node.to + 1) === ' ') {
+            // a number and its space in the same fixed width
+            add(node.from, node.to + 1, mk('dc-listmark dc-listnum'))
           } else add(node.from, node.to, mk('dc-listmark'))
           return false
         }

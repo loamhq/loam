@@ -582,3 +582,16 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Places worked out over a drawn text go stale when drafts enter or
   leave it.** After a mode change, `applyAnswer` runs again on the last
   answer (`redrawPlaces`), or marks land on the wrong letters.
+- **Carried onto the same words is not proof (round 6).** A comparison sees
+  twin sections as one text with a few digits changed, so a note "carried"
+  through it lands on the twin, and a later change makes that a different
+  passage. After a disk edit or restore a note on repeated words must also
+  keep its 200-character surroundings, and each note remembers the texts it
+  was attached in (body hash → place), so a byte-for-byte return is exact. A
+  unique quote can still follow a twin swap: indistinguishable from an edit.
+- **The repeat check must look at the text before the change too.** With one
+  of two twin paragraphs deleted, the quote is unique afterwards; counting
+  only the new text let the note sit on the survivor.
+- **A set-aside draft has to come back as a draft.** When its note returns
+  attached while Suggesting, the editor adopts it again (`adoptReturned`),
+  or the editor and the stored text with my drafts disagree.

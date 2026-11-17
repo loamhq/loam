@@ -130,6 +130,7 @@
 .dc .dc-li-4 { padding-left: 5.6em !important; }
 .dc .dc-bullet { color: var(--dc-ink3); display: inline-block; width: 1.1em; text-indent: 0; }
 .dc .dc-listmark { color: var(--dc-ink3); }
+.dc .dc-listnum { display: inline-block; min-width: 1.1em; text-indent: 0; white-space: pre; }
 .dc .dc-cbx { display: inline-block; width: 17px; height: 17px; margin-right: 10px; border-radius: 5px; vertical-align: -2.5px; text-indent: 0; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--dc-ink3) 70%, transparent); cursor: pointer; transition: background .18s, box-shadow .18s; user-select: none; }
 .dc .dc-cbx::after { content: ""; display: block; width: 4px; height: 8.5px; border: solid var(--dc-onpri); border-width: 0 2px 2px 0; transform: translate(6.2px, 2.6px) rotate(45deg) scale(0); transition: transform .22s var(--dc-ease); }
 .dc .dc-cbx:hover { box-shadow: inset 0 0 0 1.5px var(--dc-ink2); }
@@ -356,6 +357,10 @@
 .dc.phone .dc-head { padding: 6px 8px 8px 4px; min-height: 50px; }
 .dc.phone .dc-head .dc-back { margin-left: 0; }
 .dc.phone .dc-crumb { font-size: 13.5px; padding-left: 2px; }
+.dc.phone .dc-crumb > b { flex: 0 1 auto; max-width: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--dc-ink); }
+/* a title that needs the room: the mode pill keeps its icon and chevron */
+.dc.phone .dc-head.tight .dc-mpill > span:not(.dc-cv) { display: none; }
+.dc.phone .dc-head.tight .dc-mpill { gap: 2px; padding: 0 7px 0 9px !important; }
 .dc.phone .dc-mpill { height: 34px; }
 .dc.phone .dc-page { padding: 0; }
 .dc.phone .dc-col { width: 100%; flex-basis: 100%; padding: 22px 24px 160px 38px; }
@@ -453,6 +458,12 @@
 .dc-sharebtn { height: 32px; margin-left: 6px; padding: 0 15px 0 15px !important; border-radius: 999px; background: var(--dc-pri) !important; color: var(--dc-onpri) !important; font-size: 13px !important; font-weight: 650; display: inline-flex !important; align-items: center; gap: 8px; transition: transform .12s, box-shadow .2s; }
 .dc-sharebtn.has { padding-left: 4px !important; }
 .dc-sharebtn:active { transform: scale(.97); }
+/* the faces on the button: a ring of the button's own colour parts them, and
+   each overlaps the one before by a little, not most of it */
+.dc-sharebtn .dc-sharefaces { padding-left: 1px; }
+.dc-sharebtn .dc-sf { width: 22px; height: 22px; font-size: 10px; margin-right: 0; box-shadow: 0 0 0 2px var(--dc-pri); }
+.dc-sharebtn .dc-sf + .dc-sf { margin-left: -3px; }
+.dc-sharebtn.has { gap: 7px; }
 .dc-sharefaces { display: inline-flex; }
 .dc-sf { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 10px; font-weight: 700; background: var(--paper-card, #E9E4DC); color: var(--paper-ink-2, #4B4741); box-shadow: 0 0 0 2px var(--latte-espresso, #2F2017); margin-right: -5px; }
 .dc-sf.grp { color: var(--paper-ink-3, #645F59); }
