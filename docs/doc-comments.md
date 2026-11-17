@@ -562,14 +562,26 @@ with its own full editor and notes.
 
 **On a phone** (600 px wide and less) the share sheet is a bottom sheet,
 wherever it opens (the doc's Share button, a ⋯ menu in Shared Docs or any
-folder), and so is Shared with me's add sheet, like the notes' sheet: it
+folder), and so are Shared with me's add sheet and its "How your agents
+appear" sheet, like the notes' sheet: it
 rises from the foot with a gentle ease and a handle at its top, closes on a
 drag down (from the handle or its title, or from anywhere once it is
 scrolled to its top) or a tap above it, keeps clear of the home bar,
 scrolls inside when it is taller than the screen, and stands on the
 keyboard, with the field being typed in kept in view (`page/sheet.js`;
 the look is `.dc-bs` in `doc-comments.css`). A menu in it that would hang
-past its foot opens upward. A wider screen keeps the centred card.
+past its foot opens upward. A wider screen keeps the centred card, which
+lets such a menu hang past its foot when the card does not scroll, rather
+than cut it off.
+
+A choice made inside a sentence or a menu ("Their browser remembers it for
+[30 days ▾]", the days in a link's ⋯ menu, how the agents appear) is drawn
+as the words chosen with a chevron, and the native select is laid over them
+at opacity 0 (`wordSelect` in `page/appear.js`): it still takes the
+keyboard and the phone's own picker, and it is as wide as its words, not
+its longest choice. In the ⋯ menu the select covers the whole row. Core
+gives every select a 44 px touch height; the laid-over select sets that
+aside, so it never makes a sheet scroll.
 
 **The visitor's side.** `https://<domain>/s/<token>`: a password page that
 shows the owner's name and the doc's title (the invite already carries

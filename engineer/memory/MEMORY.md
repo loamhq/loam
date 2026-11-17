@@ -870,3 +870,51 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **The side panel from a walk:** `loam.panels` in localStorage is cleared
   on load when a file address is opened; hover the row in the Files list and
   click its `.row-side-action` instead.
+
+## 2026-11-17 — the share sheet as a bottom sheet on phones
+
+- **A dialog redrawn whole needs its gestures on the scrim.** The share
+  sheet's `draw()` replaces the dialog node on every change, so touch,
+  focus and the menu-flip observer live on the lasting scrim
+  (`page/sheet.js`) and find the dialog anew each time.
+- **A fixed scrim sized to `visualViewport` needs `box-sizing:
+  border-box`,** or its top padding pushes the sheet past the screen's foot
+  by exactly that much. The keyboard can't be shown in headless Chromium;
+  the browser test fakes `window.visualViewport` with an init script.
+- **Live shots past the login, through the app on loopback, also need
+  `Origin` and `Sec-Fetch-Site` dropped** from the proxied request, or the
+  app's same-origin guard 403s the plugins' page code. Abort
+  `text/event-stream` requests, or the proxy's read never ends. Theme
+  is the owner's server-side setting (`"mode":"sun"`), not
+  `prefers-color-scheme`: rewrite it in `/appearance-state.js` in the proxy
+  for dark shots. Serving `/api/plugins/<id>/files/*` from a job's tree
+  previews a plugin change live before it lands.
+- **Two jobs adding an import under the same line conflict.** Put a new
+  import on a different line from the parallel job's (above the shared
+  one), and check with `git merge-tree --write-tree HEAD <their branch>`.
+- **The Bash tool's own background limit kills `engineer-job --land` too**
+  (10 min foreground, then moved to background with the same cap). Start it
+  with `run_in_background` and a long timeout from the outset.
+
+## 2026-11-17 — the agents sheet on phones; "Remembered for" that fits
+
+- **Core's `select { min-height: 44px }` (app/public/style.css:40) reaches
+  every select a plugin draws.** A select laid over its words at opacity 0
+  with `inset: 0` still grew to 44px and overhung them; at the foot of a
+  bottom sheet that made the sheet scroll by 3px, which in turn stopped the
+  ⋯ menu from showing past the sheet's top. Set `min-height: 0` on any
+  select whose size you mean. The plugin's test harness does not load core,
+  so a test that cares adds the rule itself (`CORE_SELECT`).
+- **The harness has no global `box-sizing: border-box`; core does.** A
+  `width: 100%` row with padding overflowed its menu by 20px in the harness
+  only. Plugin rules that rely on border-box say it themselves.
+- **A menu hanging past a dialog's foot makes the dialog scroll** at the
+  moment the flip observer looks. "Does the sheet scroll of itself?" is
+  measured with the new menus set to `display: none`.
+- **When one dialog adopts a shared component, check its siblings.** The
+  share-sheet job moved the add sheet's phone CSS to `.dc-bs` and deleted
+  `.dc-wm-scrim`'s own; the agents sheet shared that class and silently
+  became a centred card on phones.
+- **Live dark shots:** the owner's theme mode in `/appearance-state.js` is
+  `sun` (follows the sun), `dark`, `light` or `system`; rewrite it to
+  `"mode":"dark"`, not `moon`.
