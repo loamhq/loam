@@ -356,6 +356,10 @@ def accept(sc: dict, text: str, tid: str, author: dict, now: str | None = None) 
         raise NoteError(409, "the passage has changed since this was suggested; "
                              "reply or reject it, or attach it again")
     new_text = text[:where["start"]] + note["replacement"] + text[where["end"]:]
+    # A file that ended with a line break keeps one (a suggestion typed on
+    # the empty last line is anchored on the words before that break).
+    if text.endswith("\n") and not new_text.endswith("\n"):
+        new_text += "\r\n" if text.endswith("\r\n") else "\n"
     note["state"] = "accepted"
     note["closed"] = {"by": author, "at": now or now_iso()}
     note["where"] = {"state": "attached", "start": where["start"],

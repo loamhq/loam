@@ -88,3 +88,15 @@ html, body { margin: 0; height: 100%; background: var(--paper-raised); color: va
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; } }
 .dc-dlg .dc-gate-go { height: 48px; border-radius: 999px; background: var(--latte-espresso); color: var(--latte-espresso-ink); font-size: 15.5px; font-weight: 650; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+
+/* Phone: the title takes the room it has (the owner's name gives way), and
+   the bar keeps a comfortable edge. */
+@media (max-width: 760px) {
+  .dc-sharepage .dc-head { padding-left: 16px; padding-right: 12px; }
+  .dc-sharepage .dc-titlebar { flex: 1 1 auto; min-width: 0; max-width: none; }
+  .dc-sharepage .dc-titlebar .dc-sl, .dc-sharepage .dc-titlebar > span:not(.dc-sl) { display: none; }
+  .dc-sharepage .dc-titlebar b { white-space: nowrap; }
+}
+/* The page for a link that opens nothing, or was turned off. */
+.dc-gone-card { text-align: center; }
+.dc-gone-card .dc-gate-msg { margin-top: 10px; }

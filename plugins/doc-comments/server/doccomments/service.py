@@ -15,6 +15,8 @@ redone, up to a few times.
 
 from __future__ import annotations
 
+import json
+
 import threading
 
 from . import frontmatter as fm
@@ -126,6 +128,10 @@ class Service:
         if sc is not None:
             out.update(sc_mod.view(sc, doc["text"]))
             out["resolved"] = sum(1 for t in sc["threads"] if t["state"] != "open")
+            # The notes' revision as the poll reports it (the sidecar file's,
+            # written as `store.write_sidecar` writes it), so a page starts
+            # from the right one: a note made before its first poll arrives.
+            out["notes_revision"] = sc_mod.revision(json.dumps(sc, ensure_ascii=False, indent=1) + "\n")
         return out
 
     def get(self, who: dict, root: str, path: str) -> dict:
@@ -268,7 +274,12 @@ class Service:
 
     def reply(self, who, root, path, tid, body) -> dict:
         self._need(who, "comment")
-        return self._note_op(who, root, path, lambda d, sc: sc_mod.reply(sc, tid, body, who))
+        made = {}
+        out = self._note_op(who, root, path, lambda d, sc: made.update(r=sc_mod.reply(sc, tid, body, who)))
+        # As every write answers: the note under `note`, and the reply made.
+        out["note"] = tid
+        out["reply"] = made["r"]["id"]
+        return out
 
     def edit(self, who, root, path, tid, rid, body) -> dict:
         return self._note_op(who, root, path, lambda d, sc: sc_mod.edit_reply(sc, tid, rid, body, who))

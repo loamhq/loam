@@ -244,16 +244,33 @@ doc's last change, the server writes the text from just before it back (a
 save of its own) and the suggestion is open again; later than that, History
 restores.
 
-### What a note points at, strictly
+### Where a note sits: carried, not searched for
 
-A note whose passage was edited is found again near where it was ("text
-changed since"). A passage *elsewhere* that merely looks like it is not
-the note's: a changed match must lie within the quote's own length of the
-note's old place mapped through the edit, and share at least half the quote
-in one run. Otherwise the note is detached, ⋯ carries a quiet mark, and its
-menu's first row reads "1 note lost its passage" (2026-11-17: a note on
-"Paragraph 6b, after the blocks", deleted, had moved to "Paragraph 5b, after
-the blocks").
+A note keeps its exact place (`where`) and **carries it through every
+change** (`sidecar.locate`), the way the editor's drafts move through an
+edit (2026-11-17, after a suggestion on one of several "remarkable"s moved to
+another on a word typed beside it, and Accept wrote there). Every change the
+server makes is known: the editor sends its own record of each save
+(`changes`, in the stored text's positions), an accept is the passage
+replaced, and these are used exactly. A change nobody described (the file
+edited on disk) is worked out from the old and new stored text first, and
+the places carried through that; a restore likewise. Then:
+
+- the quote still at the carried place: attached, there;
+- other words there, most of its own letters kept: "changed since", there;
+- most of its letters gone: detached, remembering the carried point, and
+  back when those exact words return there.
+
+A like passage elsewhere is never the note's. Only for a worked-out change
+(where a diff cannot tell two equal runs of words apart) may a note whose
+words changed take its exact quote within the size of that change around its
+carried place. `textdiff.delta` is exact to the letter inside a replaced run
+of words. Searching is left only for a note that was never placed.
+`test/test_places.py` runs 300 seeded sequences on a doc that repeats itself
+(saves, edits on disk, restores, accepts and rejects near, inside and far
+from notes on repeated phrases) and checks after every step that each note
+outside a change is on the occurrence it was put on; `test/browser.test.mjs`
+does the same through the editor.
 
 ### Changes on disk
 

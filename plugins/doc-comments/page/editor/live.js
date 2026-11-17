@@ -488,7 +488,11 @@ function notesDecos(state, notes) {
       // Only what changes is drawn: a typed insertion is its new words alone,
       // with nothing struck (textdiff.js, suggestionShape).
       const shape = suggestionShape(state.sliceDoc(n.from, n.to), n.replacement || '')
-      const a = n.from + shape.from, b = n.from + shape.to
+      let a = n.from + shape.from, b = n.from + shape.to
+      // The words are struck, not the space beside them (a struck space at a
+      // line's end reads as a stray hyphen).
+      while (a < b && /\s/.test(state.sliceDoc(a, a + 1))) a++
+      while (b > a && /\s/.test(state.sliceDoc(b - 1, b))) b--
       if (b > a) out.push(Decoration.mark({ class: `dc-sg dc-sg-del${on}`, attributes: { 'data-note': n.id } }).range(a, b))
       else if (n.to > n.from) out.push(Decoration.mark({ class: `dc-sg dc-sg-at${on}`, attributes: { 'data-note': n.id } }).range(n.from, n.to))
       if (shape.insert) out.push(Decoration.widget({ widget: new InsWidget(shape.insert, n.id, `dc-sg dc-sg-ins${shape.kind === 'insert' ? ' add' : ''}${on}`), side: 1 }).range(b))

@@ -546,3 +546,21 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   the door in a real browser, failing on any 404.
 - **Loam's page enlarges buttons on a phone** (touch targets), so anything
   absolutely placed by a fixed height must measure its real height.
+
+## 2026-11-17 — doc comments round 4: carry places; check an edit landed
+
+- **The same lesson twice: carry, do not search.** Note places were found
+  again by searching the text for their quote (scored by context), so on a
+  doc that repeats itself a note jumped to another occurrence. Places are now
+  carried through every change; a known change (the editor sends its own
+  change list) is used exactly, a disk change is diffed first. A diff cannot
+  tell two equal runs apart; the editor's own record can.
+- **An edit script that fails its first assertion writes nothing.** Round 3
+  claimed a client change (resolving one's own agent's thread) that a
+  failed `assert` had skipped; only a browser test through the visitor's page
+  found it. Re-run the whole script, and test the claim, not the code.
+- **A page's first poll is not a baseline.** A note made between load and
+  the first poll was never shown; every answer now carries the notes'
+  revision.
+- **`pkill -f <pattern>` in the same command line kills its own shell**
+  (again). Kill by the pid from `ss -ltnp`, or keep a pid file.

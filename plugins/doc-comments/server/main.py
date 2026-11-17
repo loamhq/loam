@@ -282,8 +282,18 @@ def main() -> int:
             values = {}
         return "everywhere" if values.get("reach") == "everywhere" else "staging"
 
+    def home() -> str:
+        # Where a share page's "Made with Loam" points: the install's own
+        # setting, never written into the code.
+        try:
+            values = json.loads((Path(os.environ.get("LOAM_PLUGIN_SETTINGS_DIR", ".")) / "values.json").read_text())
+        except (OSError, ValueError):
+            values = {}
+        url = str(values.get("home") or "")
+        return url if url.startswith("https://") and len(url) < 200 else ""
+
     door = Door(service, links, Path(__file__).resolve().parent.parent, reach=reach,
-                owner_name=lambda: service.store.owner()["name"])
+                owner_name=lambda: service.store.owner()["name"], home=home)
     server = serve(service, port, links=links, door=door, reach=reach)
     print(f"doc-comments: listening on 127.0.0.1:{port}", file=sys.stderr, flush=True)
     try:

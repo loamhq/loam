@@ -3,7 +3,7 @@
 // (one row per link: its mode, Copy invite again, Turn off with Undo).
 // Talks to the plugin server's owner routes (`/x/doc-comments/doc/links`).
 
-import { h, icon, put } from './editor/dom.js'
+import { tone, h, icon, put } from './editor/dom.js'
 
 const MODES = [
   { id: 'view', label: 'can view', verb: 'view' },
@@ -128,8 +128,8 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
   function cardView() {
     const c = st.card
     const nameIn = h('input', { class: 'dc-iv-name', type: 'text', placeholder: 'Who is it for? (optional)', value: c.name, maxlength: '60', 'aria-label': 'Who is it for' })
-    nameIn.addEventListener('input', () => { c.name = nameIn.value; if (seen) seen.textContent = `${c.name || 'They'} will also see the ${n === 1 ? 'note' : `${n} notes`} already on this doc.`; forName.textContent = c.name ? `For ${c.name}` : 'For anyone with the link'; av.textContent = (c.name || '').charAt(0).toUpperCase(); av.classList.toggle('grp', !c.name); cap.textContent = c.name ? `The card is what ${c.name} gets.` : 'A group link: each visitor gives a name once.' })
-    const av = h('span', { class: `dc-iv-av${c.name ? '' : ' grp'}`, text: c.name.charAt(0).toUpperCase() })
+    nameIn.addEventListener('input', () => { c.name = nameIn.value; if (seen) seen.textContent = `${c.name || 'They'} will also see the ${n === 1 ? 'note' : `${n} notes`} already on this doc.`; forName.textContent = c.name ? `For ${c.name}` : 'For anyone with the link'; av.textContent = (c.name || '').charAt(0).toUpperCase(); av.classList.toggle('grp', !c.name); av.style.background = c.name ? tone(c.name) : ''; cap.textContent = c.name ? `The card is what ${c.name} gets.` : 'A group link: each visitor gives a name once.' })
+    const av = h('span', { class: `dc-iv-av${c.name ? '' : ' grp'}`, style: c.name ? { background: tone(c.name) } : {}, text: c.name.charAt(0).toUpperCase() })
     const forName = h('div', { class: 'dc-tk-for', text: c.name ? `For ${c.name}` : 'For anyone with the link' })
     const cap = h('p', { class: 'dc-sh-cap', text: c.name ? `The card is what ${c.name} gets.` : 'A group link: each visitor gives a name once.' })
     // The notes already on the doc are seen by whoever the link is for: said
@@ -137,7 +137,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
     const n = notes()
     const seen = n ? h('p', { class: 'dc-sh-cap dc-sh-notes', text: `${c.name || 'They'} will also see the ${n === 1 ? 'note' : `${n} notes`} already on this doc.` }) : null
     const pw = c.editing
-      ? h('input', { class: 'dc-tk-pwin', type: 'text', value: c.password, maxlength: '100', 'aria-label': 'Password', onkeydown: (e) => { if (e.key === 'Enter') { c.password = e.target.value.trim() || c.password; c.editing = false; draw() } }, onblur: (e) => { c.password = e.target.value.trim() || c.password; c.editing = false; draw() } })
+      ? h('input', { class: 'dc-tk-pwin', type: 'text', value: c.password, maxlength: '100', 'aria-label': 'Password', oninput: (e) => { if (c.short && e.target.value.trim().length >= 6) { c.short = false; scrim?.querySelector('.dc-sh-warn')?.remove() } }, onkeydown: (e) => { if (e.key === 'Enter') { c.password = e.target.value.trim() || c.password; c.editing = false; c.short = c.password.length < 6 && c.short; draw() } }, onblur: (e) => { c.password = e.target.value.trim() || c.password; c.editing = false; c.short = c.password.length < 6 && c.short; draw() } })
       : h('button', { class: 'dc-tk-pw', type: 'button', title: 'Change the password', onclick: () => { c.editing = true; draw(); setTimeout(() => scrim?.querySelector('.dc-tk-pwin')?.select(), 0) } }, c.password)
     const daysSel = h('select', { class: 'dc-tk-days', 'aria-label': 'Remembered for' }, DAYS.map(d => h('option', { value: String(d), selected: d === c.days ? true : null }, d === 1 ? '1 day' : `${d} days`)))
     daysSel.addEventListener('change', () => { c.days = Number(daysSel.value) })
@@ -252,11 +252,3 @@ function plainError(msg, status) {
   return m ? m.charAt(0).toUpperCase() + m.slice(1) + (/[.!?]$/.test(m) ? '' : '.') : `The share server answered ${status}.`
 }
 
-// A person's face has a tone of its own, from their name: calm colours that
-// read with white initials in light and dark.
-const TONES = ['#59749A', '#7A6A9E', '#5E8A6E', '#A0704E', '#8A5A6E', '#4F7F86', '#86753F']
-export function tone(name) {
-  let h = 0
-  for (const ch of String(name || '').toLowerCase()) h = (h * 31 + ch.codePointAt(0)) >>> 0
-  return TONES[h % TONES.length]
-}

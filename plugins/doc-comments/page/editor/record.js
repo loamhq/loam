@@ -144,21 +144,39 @@ export const draftsField = StateField.define({
   },
 })
 
+// Struck words, without striking the space around them: a space is kept
+// (unstruck) only where the text beside the widget has none, so a deletion
+// leaves neither a struck gap nor a double space.
 class DelWidget extends WidgetType {
-  constructor(text, id, extra) { super(); this.text = text; this.id = id; this.extra = extra }
-  eq(o) { return o.text === this.text && o.id === this.id && o.extra === this.extra }
-  toDOM() { return h('del', { class: `dc-sg-live-del${this.extra}`, 'data-note': this.id || null, text: this.text }) }
+  constructor(text, id, extra, spaceBefore = true, spaceAfter = true) { super(); this.text = text; this.id = id; this.extra = extra; this.sb = spaceBefore; this.sa = spaceAfter }
+  eq(o) { return o.text === this.text && o.id === this.id && o.extra === this.extra && o.sb === this.sb && o.sa === this.sa }
+  toDOM() {
+    const t = this.text.replace(/\n+$/, '')
+    const core = t.trim()
+    const lead = /^\s/.test(t) && !this.sb ? ' ' : ''
+    const trail = /\s$/.test(t) && !this.sa ? ' ' : ''
+    return h('span', { class: 'dc-sg-live-delw', 'data-note': this.id || null }, lead,
+      h('del', { class: `dc-sg-live-del${this.extra}`, 'data-note': this.id || null, text: core || t }), trail)
+  }
   ignoreEvent() { return false }
 }
 
 // The drafts drawn: the original words struck, the draft's words in the
 // accent. `look(d)` gives {id, on, peek} for the card it belongs to.
-export function draftDecos(list, look = () => null) {
+export function draftDecos(list, look = () => null, doc = null) {
   const out = []
   for (const d of list) {
     const n = look(d)
     const extra = n ? `${n.on ? ' on' : ''}${n.peek ? ' peek' : ''}` : ''
-    if (d.orig) out.push(Decoration.widget({ widget: new DelWidget(d.orig, n?.id, extra), side: -1 }).range(d.from))
+    if (d.orig) {
+      // A deleted paragraph is drawn at the end of the line before it, not
+      // at the start of the next one (where a heading would give it its type).
+      let at = d.from
+      if (doc && /\n$/.test(d.orig) && at > 0 && doc.sliceString(at - 1, at) === '\n') at = doc.lineAt(at - 1).to
+      const before = doc && at > 0 ? /\s/.test(doc.sliceString(at - 1, at)) : true
+      const after = doc && d.to < doc.length ? /\s/.test(doc.sliceString(d.to, d.to + 1)) : true
+      out.push(Decoration.widget({ widget: new DelWidget(d.orig, n?.id, extra, before, after), side: -1 }).range(at))
+    }
     if (d.to > d.from) out.push(Decoration.mark({ class: `dc-sg-live-ins${extra}`, attributes: n?.id ? { 'data-note': n.id } : {} }).range(d.from, d.to))
   }
   return Decoration.set(out, true)

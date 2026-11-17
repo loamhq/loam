@@ -6,11 +6,13 @@
 
 import { createDocEditor } from '../editor/editor.js'
 import { docApi } from '../api.js'
-import { h, icon, put } from '../editor/dom.js'
+import { h, icon, put, tone } from '../editor/dom.js'
 
 const boot = JSON.parse(document.getElementById('dc-boot').textContent)
 const P = boot.prefix
-const HOME = 'https://github.com/loamhq/loam'
+// Where "Made with Loam" points: the install's own setting (`home`), or no
+// link at all.
+const HOME = /^https:\/\//.test(boot.home || '') ? boot.home : null
 const mount = document.getElementById('dc-share')
 const SHARE = { 'X-Loam-Share': '1' }
 
@@ -25,11 +27,12 @@ async function post(route, body) {
 }
 
 function made() {
+  if (!HOME) return h('span', { class: 'dc-made' }, h('i'), 'Made with Loam')
   return h('a', { class: 'dc-made', href: HOME, target: '_blank', rel: 'noopener noreferrer' }, h('i'), 'Made with Loam')
 }
 
 function face(name, size = 22) {
-  return h('span', { class: 'dc-face', style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.46)}px` }, text: (name || '?').charAt(0).toUpperCase() })
+  return h('span', { class: 'dc-face', style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.46)}px`, background: tone(name), color: '#fff' }, text: (name || '?').charAt(0).toUpperCase() })
 }
 
 // -- the password ----------------------------------------------------------------
@@ -59,6 +62,12 @@ function gate() {
   })
   put(mount, h('main', { class: 'dc-gate' }, card), made())
   setTimeout(() => input.focus(), 50)
+}
+
+function gone() {
+  put(mount, h('main', { class: 'dc-gate' }, h('div', { class: 'dc-gate-card dc-gone-card' },
+    h('h1', { class: 'dc-gate-title', text: 'This link has been turned off' }),
+    h('p', { class: 'dc-gate-msg', text: `${boot.owner} turned it off. Your notes are kept in the doc; ask ${boot.owner} for a new link to see it again.` }))), made())
 }
 
 function shake(el) {
@@ -122,6 +131,8 @@ async function docPage() {
     settings: store,
     titleBar: { title: boot.title, sub: `${boot.owner}’s doc` },
     history: false,
+    // The link turned off while the doc was open: say so, in its place.
+    onGone: () => gone(),
     headEnd: () => [agentBtn, meWrap],
     openLink: (ref) => { if (/^https?:/i.test(ref)) window.open(ref, '_blank', 'noopener,noreferrer') },
   })
@@ -169,7 +180,7 @@ async function docPage() {
   let dialog = null
   async function openAgent() {
     if (dialog) return
-    const body = h('div', { class: 'dc-agentbody' }, h('p', { class: 'dc-quiet', text: 'Making a key…' }))
+    const body = h('div', { class: 'dc-agentbody' }, h('p', { class: 'dc-quiet', text: '…' }))
     const scrim = h('div', { class: 'dc-dlg-scrim', onclick: (e) => { if (e.target === scrim) close() } })
     dialog = h('div', { class: 'dc-dlg', role: 'dialog', 'aria-label': 'Connect my agent' },
       h('button', { class: 'dc-ib dc-dlg-x', type: 'button', 'aria-label': 'Close', onclick: () => close() }, icon('x', 17)),
@@ -181,6 +192,21 @@ async function docPage() {
     requestAnimationFrame(() => scrim.classList.add('on'))
     function close() { scrim.classList.remove('on'); setTimeout(() => scrim.remove(), 200); dialog = null }
     document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc) } })
+    // Opening the sheet changes nothing: it says whether a key exists, and a
+    // new one is made only on the button (which stops the old one).
+    const st0 = await fetch(`${P}/api/agent-key`, { credentials: 'same-origin', headers: SHARE }).then(x => x.json()).catch(() => ({}))
+    if (st0?.made) {
+      const when = new Date(st0.made).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      await new Promise((resolve) => put(body,
+        h('p', { class: 'dc-agentfoot', text: `Your agent has a key, made ${when}. It works until the link is turned off.` }),
+        h('button', { class: 'dc-gate-go dc-copy', type: 'button', onclick: resolve }, 'Make a new key'),
+        h('p', { class: 'dc-agentfoot', text: 'A new key stops the old one working at once.' })))
+    } else {
+      await new Promise((resolve) => put(body,
+        h('button', { class: 'dc-gate-go dc-copy', type: 'button', onclick: resolve }, robot(), 'Make a key for my agent'),
+        h('p', { class: 'dc-agentfoot', text: 'Your agent uses it to read and write here, as you can.' })))
+    }
+    put(body, h('p', { class: 'dc-quiet', text: 'Making a key…' }))
     const r = await post('api/agent-key', {})
     if (!r.ok) { put(body, h('p', { class: 'dc-gate-msg bad', text: r.data?.error || 'No key could be made.' })); return }
     const k = r.data

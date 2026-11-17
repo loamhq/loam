@@ -21,6 +21,9 @@ contributes:
       label: Where the editor and share links work
       choices: [staging, everywhere]
       default: staging
+    - key: home
+      label: "Where “Made with Loam” on a share page points (a https address; empty: no link)"
+      default: ""
   web.door:
     - why: "People the owner shares a doc with, by a password-protected link (/s/<token>), and their agents with the link's key: each reaches that one doc, by the link's mode, and nothing else."
   agent.tool:

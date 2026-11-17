@@ -203,6 +203,28 @@ def main() -> int:
         def do_POST(self):
             if self.path.startswith("/s/"):
                 return self._share("POST")
+            if self.path == "/dev/link-off":
+                # A test turning a share link off while its page is open.
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+                link = links.by_token(body["token"])
+                links.update(link["id"], on=False)
+                self.send_response(204)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if self.path == "/dev/link":
+                # A fresh link for a test: {mode, name}.
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+                link, token, pw = links.create(did, body.get("mode", "comment"), body.get("name"), 30, "pass-test")
+                data = json.dumps({"path": f"/s/{token}", "token": token, "password": "pass-test"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if self.path == "/dev/outside":
                 # A stand-in for an edit made on disk by someone else.
                 n = int(self.headers.get("Content-Length") or 0)

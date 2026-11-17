@@ -13,8 +13,8 @@ import {
   EditorState, EditorView, EditorSelection, ChangeSet, Compartment, Transaction, Annotation, Prec, ViewPlugin,
   keymap, history, historyKeymap, defaultKeymap, drawSelection, indentMore, indentLess, syntaxTree,
 } from '../vendor/codemirror.js'
-import { h, icon, rel, stamp, put } from './dom.js'
-import { changes as diffChanges, posMap, editorText, suggestionShape } from './textdiff.js'
+import { h, icon, rel, stamp, put, tone } from './dom.js'
+import { changes as diffChanges, posMap, editorText, suggestionShape, tokens as tokenize } from './textdiff.js'
 import {
   markdownLanguage, inline, blocks, notesField, setNotes, authorsField, setAuthors,
   modeField, setMode, suggestBase, setSuggestBase, focusField, setFocused,
@@ -41,7 +41,7 @@ export function lineSeparatorOf(text) {
 
 function defaultFace(author, size) {
   const name = author?.name || '?'
-  return h('span', { class: 'dc-face', style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.48)}px` }, text: name.charAt(0).toUpperCase() })
+  return h('span', { class: 'dc-face', style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.48)}px`, background: tone(name), color: '#fff' }, text: name.charAt(0).toUpperCase() })
 }
 
 // Where the doc's own words begin: after its frontmatter, so the caret does
@@ -278,7 +278,7 @@ export function createDocEditor(opts) {
     }
     build(state) {
       const rec = state.field(draftsField)
-      return draftDecos(rec.list, (d) => d.ids[0] ? { id: d.ids[0], on: st.focus === d.ids[0], peek: st.peek === d.ids[0] } : null)
+      return draftDecos(rec.list, (d) => d.ids[0] ? { id: d.ids[0], on: st.focus === d.ids[0], peek: st.peek === d.ids[0] } : null, state.doc)
     }
   }, { decorations: (v) => v.decorations })
 
@@ -388,6 +388,7 @@ export function createDocEditor(opts) {
       view.dispatch({ effects: setSuggestBase.of(ET), annotations: remote.of(true) })
     }
     st.server = { text: T, revision: ans.revision }
+    if ('notes_revision' in ans) st.notesRev = ans.notes_revision
     st.pm = posMap(T, CRLF)
     st.mapBase = ET
     st.sinceBase = userOver
@@ -467,7 +468,13 @@ export function createDocEditor(opts) {
         watching = true
         try {
           // The doc's text, or its notes (a note, reply or close from anyone).
-          const ans = await api.revision()
+          let ans
+          try { ans = await api.revision() } catch (err) {
+            // A share page whose link was turned off (or whose session ended):
+            // stop asking, and say so in place of the doc.
+            if ((err?.status === 404 || err?.status === 401) && opts.onGone) { watching = false; st.gone = true; opts.onGone(err); return }
+            throw err
+          }
           const notesMoved = ans && 'notes' in ans && st.notesRev !== undefined && ans.notes !== st.notesRev
           if (ans && 'notes' in ans) st.notesRev = ans.notes
           if (ans?.revision && (ans.revision !== st.server.revision || notesMoved) && !st.saving) await reloadQuietly()
@@ -800,10 +807,16 @@ export function createDocEditor(opts) {
       .map(n => {
         const s = Math.max(0, Math.min(base.length, st.pm.toEditor(n.where.start))), e = Math.max(s, Math.min(base.length, st.pm.toEditor(n.where.end)))
         const quote = base.slice(s, e), rep = ed(n.replacement || '')
-        let p = 0
-        while (p < quote.length && p < rep.length && quote[p] === rep[p]) p++
-        let q = 0
-        while (q < quote.length - p && q < rep.length - p && quote[quote.length - 1 - q] === rep[rep.length - 1 - q]) q++
+        // Whole words shared at either end are left out, never letters: a
+        // suggestion of "forty-three" for "forty-one" is "one" → "three", not
+        // "on" → "thre" with an "e" between.
+        const A = tokenize(quote), B = tokenize(rep)
+        let pt = 0
+        while (pt < A.length && pt < B.length && A[pt] === B[pt]) pt++
+        let qt = 0
+        while (qt < A.length - pt && qt < B.length - pt && A[A.length - 1 - qt] === B[B.length - 1 - qt]) qt++
+        const p = A.slice(0, pt).join('').length
+        const q = A.slice(A.length - qt).join('').length
         return { id: n.id, start: s + p, end: e - q, orig: quote.slice(p, quote.length - q), text: rep.slice(p, rep.length - q) }
       })
       .sort((a, b) => a.start - b.start)
@@ -1006,6 +1019,12 @@ export function createDocEditor(opts) {
   }
 
   function onEditorMouseDown(e) {
+    // Phone: a tap on a note's words opens its sheet and does not also put
+    // the caret there (inside a list item it would show the raw "- ").
+    if (st.phone && !(e.metaKey || e.ctrlKey)) {
+      const id = noteAt(e.target)
+      if (id && id !== '__new') { e.preventDefault(); focusNote(id); return true }
+    }
     const wiki = e.target?.closest?.('.dc-wiki[data-wiki]')
     if (wiki && (e.metaKey || e.ctrlKey || st.mode === 'view')) {
       e.preventDefault()
@@ -1370,7 +1389,10 @@ export function createDocEditor(opts) {
     return h('span', { class: 'dc-own' },
       h('button', { class: 'dc-ib', type: 'button', title: 'Change your words', 'aria-label': 'Change your words', onclick: (e) => { e.stopPropagation(); st.editing = { id: n.id, rid: r ? r.id : null }; render(); setTimeout(() => (st.phone ? sheet : root).querySelector('.dc-edit-fld textarea')?.focus({ preventScroll: true }), 30) } }, icon('pencil', 13)),
       r ? h('button', { class: 'dc-ib', type: 'button', title: 'Remove your reply', 'aria-label': 'Remove your reply', onclick: (e) => { e.stopPropagation(); removeReply(n, r) } }, icon('trash', 13))
-        : h('button', { class: 'dc-ib', type: 'button', title: 'Delete your note', 'aria-label': 'Delete your note', onclick: (e) => { e.stopPropagation(); removeNote(n) } }, icon('trash', 13)))
+        : n.kind === 'suggestion'
+          // One's own suggestion is withdrawn, said in a word, in sight.
+          ? h('button', { class: 'dc-sm ghost dc-withdraw', type: 'button', onclick: (e) => { e.stopPropagation(); removeNote(n) } }, 'Withdraw')
+          : h('button', { class: 'dc-ib', type: 'button', title: 'Delete your note', 'aria-label': 'Delete your note', onclick: (e) => { e.stopPropagation(); removeNote(n) } }, icon('trash', 13)))
   }
 
   function editField(n, rid, text) {
@@ -1404,17 +1426,26 @@ export function createDocEditor(opts) {
   // One's own note goes with its replies only when nobody else has replied
   // (the server checks); a suggestion of one's own is withdrawn.
   async function removeNote(n) {
+    const w = n.where || {}
     const ans = await call(() => (n.kind === 'suggestion' ? api.withdraw(n.id) : api.removeNote(n.id)))
     if (ans) {
       if (st.sheet === 'thread') closeSheet()
       st.focus = null
-      showToast('Note deleted')
+      // Undo puts it back: the same words on the same passage, and one's
+      // own replies after it.
+      const again = async () => {
+        const back = await call(() => api.add({ kind: n.kind, text: n.text || '', start: w.start, end: w.end, quote: n.anchor?.quote, revision: st.server.revision, ...(n.kind === 'suggestion' ? { replacement: n.replacement } : {}) }))
+        for (const r of n.replies || []) if (back?.note) await call(() => api.reply(back.note, r.text))
+      }
+      showToast(n.kind === 'suggestion' ? 'Suggestion withdrawn' : 'Note deleted', w.start != null ? again : null)
       render()
     }
   }
 
   function mayResolve(n) {
-    return st.can.resolve_any || n.author?.id === st.me?.id
+    const a = n.author?.id || '', me = st.me?.id || ''
+    // one's own, or (a visitor) one's own agent's
+    return st.can.resolve_any || a === me || (me.startsWith('guest:') && a === `guest-agent:${me.slice(6)}`)
   }
 
   // What a suggestion does, in words: an insertion says what it adds, a
@@ -1422,6 +1453,15 @@ export function createDocEditor(opts) {
   function suggestionLine(n) {
     const from = n.anchor?.quote ?? ''
     const shape = suggestionShape(from, n.replacement ?? '')
+    // Paragraphs made, joined, added or taken away are said as such: a
+    // line break quoted is nothing to read ("Replace with “”").
+    const gone = from.slice(shape.from, shape.to), came = shape.insert
+    const para = /\n[ \t]*\n/
+    if (shape.kind === 'insert' && !came.trim() && /\n/.test(came)) return h('div', { class: 'dc-stl' }, h('span', { text: 'Split the paragraph' }))
+    if (shape.kind === 'delete' && !gone.trim() && /\n/.test(gone)) return h('div', { class: 'dc-stl' }, h('span', { text: 'Join two paragraphs' }))
+    if (shape.kind === 'insert' && para.test(came)) return h('div', { class: 'dc-stl' }, h('span', { text: 'Add a paragraph ' }), h('ins', { text: `“${clip(came)}”` }))
+    if (shape.kind === 'delete' && para.test(gone)) return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete a paragraph ' }), h('del', { text: `“${clip(gone)}”` }))
+    if (shape.kind === 'replace' && !n.replacement?.trim()) return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete ' }), h('del', { text: `“${clip(from)}”` }))
     if (shape.kind === 'insert') return h('div', { class: 'dc-stl' }, h('span', { text: 'Add ' }), h('ins', { text: `“${clip(shape.insert)}”` }))
     if (shape.kind === 'delete') return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete ' }), h('del', { text: `“${clip(from.slice(shape.from, shape.to))}”` }))
     return h('div', { class: 'dc-stl' }, h('span', { text: 'Replace with ' }), h('ins', { text: `“${clip(n.replacement)}”` }))
@@ -1559,9 +1599,27 @@ export function createDocEditor(opts) {
   // The top of the words a passage starts with, in the page's pixels from the
   // top of `.dc-page` (where the margin's cards are placed from): measured
   // where the line is drawn, else from CodeMirror's height map.
-  function anchorTop(pos) {
+  // Where a note's own drawn words begin (its first mark or struck words):
+  // a deletion that wraps, or a deleted paragraph, starts where it is drawn,
+  // not on the line after it.
+  function drawnTop(id) {
+    if (!id) return null
+    const el = view.contentDOM.querySelector(`[data-note="${CSS.escape(id)}"]`)
+    const r = el?.getClientRects?.()[0]
+    if (!r) return null
+    if (el.matches('del, ins')) return r
+    const node = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode()
+    if (!node) return r
+    const range = document.createRange()
+    range.setStart(node, 0); range.setEnd(node, Math.min(1, node.length))
+    return range.getClientRects()[0] || r
+  }
+
+  function anchorTop(pos, id = null) {
     const z = zoom()
     const pageTop = page.getBoundingClientRect().top
+    const d = drawnTop(id)
+    if (d) return (d.top - pageTop) / z
     const c = view.coordsAtPos(pos, 1)
     if (c) return (c.top - pageTop) / z
     return (view.documentTop - pageTop + view.lineBlockAt(pos).top) / z + 4
@@ -1577,9 +1635,10 @@ export function createDocEditor(opts) {
         if (!r || r.from == null) continue
         // The card's head row (below its 10 px of padding) level with the
         // first line of its passage.
-        items.push({ id, el, want: anchorTop(r.from) - 10, hgt: el.offsetHeight })
+        items.push({ id, el, want: anchorTop(r.from, id) - 10, hgt: el.offsetHeight, at: r.from })
       }
-      items.sort((a, b) => a.want - b.want)
+      // Reading order: by line, and along a line by place, never by when made.
+      items.sort((a, b) => (Math.abs(a.want - b.want) < 6 ? a.at - b.at : a.want - b.want))
       const gap = 10
       const fi = items.findIndex(i => i.id === (st.compose ? '__new' : st.focus))
       if (fi >= 0) {
@@ -1625,8 +1684,8 @@ export function createDocEditor(opts) {
   // with notes; a click opens the thread.
   // A mark sits centred on the line its passage starts on (the visual line,
   // not the paragraph's first), measured where the line is drawn.
-  function markTop(pos, size) {
-    const c = view.coordsAtPos(pos, 1)
+  function markTop(pos, size, id = null) {
+    const c = drawnTop(id) || view.coordsAtPos(pos, 1)
     if (c) {
       const l = local(c, gutter)
       return (l.top + l.bottom) / 2 - size / 2
@@ -1644,7 +1703,7 @@ export function createDocEditor(opts) {
     for (const n of openNotes()) {
       const r = ranges.get(n.id)
       if (!r || r.from == null) continue
-      const top = Math.round(markTop(r.from, 24))
+      const top = Math.round(markTop(r.from, 24, n.id))
       if (!byLine.has(top)) byLine.set(top, [])
       byLine.get(top).push(n)
     }
@@ -1711,8 +1770,8 @@ export function createDocEditor(opts) {
   }
 
   function modeMenu() {
-    return h('div', { class: 'dc-menu', role: 'menu' }, MODES.map(m => {
-      const allowed = m.id === 'view' || (m.id === 'edit' ? st.can.edit : st.can.suggest)
+    return h('div', { class: 'dc-menu', role: 'menu' }, MODES.filter(m => m.id === 'view' || (m.id === 'edit' ? st.can.edit : st.can.suggest)).map(m => {
+      const allowed = true
       return h('button', { class: `dc-mi top${st.mode === m.id ? ' on' : ''}`, type: 'button', role: 'menuitemradio', 'aria-checked': String(st.mode === m.id), disabled: allowed ? null : true, onclick: () => setModeTo(m.id) },
         icon(m.icon, 17), h('span', { class: 'dc-l' }, h('b', { text: m.label }), h('small', { text: m.hint })), h('span', { class: 'dc-ck' }, icon('check', 16)))
     }))
@@ -1729,7 +1788,7 @@ export function createDocEditor(opts) {
       opts.history === false ? null : h('button', { class: `dc-mi${st.authors ? ' on' : ''}`, type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(st.authors), onclick: toggleAuthors },
         icon('people', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Show authors' })), h('span', { class: `dc-sw${st.authors ? ' on' : ''}` })),
       opts.history === false ? null : h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('history') },
-        icon('history', 17), h('span', { class: 'dc-l' }, h('b', { text: 'History' })), det ? h('span', { class: 'dc-ct', text: `${det} detached` }) : null, h('span', { class: 'dc-chv' }, icon('chevronRight', 14))),
+        icon('history', 17), h('span', { class: 'dc-l' }, h('b', { text: 'History' })), det && opts.history === false ? h('span', { class: 'dc-ct', text: `${det} detached` }) : null, h('span', { class: 'dc-chv' }, icon('chevronRight', 14))),
       h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('resolved') },
         icon('resolved', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Resolved' })), h('span', { class: 'dc-ct', text: String(st.resolved || 0) }), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))),
       ...(opts.menuExtras?.() || []).map(x => h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); x.run() } }, icon(x.icon || 'file', 17), h('span', { class: 'dc-l' }, h('b', { text: x.label })))),
@@ -1781,7 +1840,8 @@ export function createDocEditor(opts) {
         : h('div', { class: 'dc-crumb' }, crumbs),
       h('span', { class: 'dc-saveslot' }, sw),
       ...extras.slice(0, extras.indexOf(null)),
-      menuWrap('mode', pill, modeMenu()),
+      // Only Viewing allowed: a quiet word, no menu.
+      !st.can.edit && !st.can.suggest ? h('span', { class: 'dc-mpill dc-mpill-only' }, icon('eye', 15), h('span', { text: 'Viewing' })) : menuWrap('mode', pill, modeMenu()),
       menuWrap('more', dots, moreMenu()),
       ...extras.slice(extras.indexOf(null) + 1),
     )
@@ -1910,30 +1970,61 @@ export function createDocEditor(opts) {
     const body = []
     if (p.text == null) body.push(h('div', { class: 'dc-quiet', text: 'Reading that version…' }))
     else {
-      const now = st.server.text
-      const hunks = diffChanges(now, p.text)
-      const CONTEXT = 140
+      // Line by line first (changes at both ends of a doc are two changes,
+      // not the whole doc), then word by word inside the changed lines; the
+      // frontmatter is left out, and unchanged lines between become "…".
+      const body_ = (t) => t.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/, '')
+      const groups = lineChanges(body_(st.server.text), body_(p.text))
       const pre = h('pre')
-      if (!hunks.length) pre.append('The same as now.')
-      let at = 0
-      hunks.forEach((c, i) => {
-        const lead = now.slice(at, c.from)
-        const clipped = i === 0 ? (c.from > CONTEXT ? '…' + lead.slice(-CONTEXT) : lead) : (lead.length > CONTEXT * 2 ? lead.slice(0, CONTEXT) + ' … ' + lead.slice(-CONTEXT) : lead)
-        pre.append(plain(clipped))
-        if (c.insert) pre.append(h('ins', { text: plain(c.insert) }))
-        if (c.to > c.from) pre.append(h('del', { text: plain(now.slice(c.from, c.to)) }))
-        at = c.to
+      if (!groups.some(g => g.kind !== 'same')) pre.append('The same as now.')
+      else groups.forEach((g, i) => {
+        if (g.kind === 'same') {
+          const lines = g.now
+          const first = i === 0, last = i === groups.length - 1
+          const keep = lines.length <= 4 ? lines : first ? ['…', ...lines.slice(-2)] : last ? [...lines.slice(0, 2), '…'] : [...lines.slice(0, 2), '…', ...lines.slice(-2)]
+          pre.append(plain(keep.join('\n')) + '\n')
+          return
+        }
+        const a = g.now.join('\n'), b = g.then.join('\n')
+        let at = 0
+        for (const c of diffChanges(a, b)) {
+          pre.append(plain(a.slice(at, c.from)))
+          if (c.insert) pre.append(h('ins', { text: plain(c.insert) }))
+          if (c.to > c.from) pre.append(h('del', { text: plain(a.slice(c.from, c.to)) }))
+          at = c.to
+        }
+        pre.append(plain(a.slice(at)) + '\n')
       })
-      if (hunks.length) {
-        const tail = now.slice(at)
-        pre.append(plain(tail.length > CONTEXT ? tail.slice(0, CONTEXT) + '…' : tail))
-      }
       body.push(pre)
     }
     return h('div', { class: 'dc-preview' },
       h('div', { class: 'dc-preview-h', text: 'As it was then, marked where it differs from now' }),
       ...body,
       st.can.restore && p.text != null ? h('div', { class: 'dc-dbtns' }, h('button', { class: 'dc-sm ok', type: 'button', onclick: () => restore(s, head_) }, 'Restore this version')) : null)
+  }
+
+  // Groups of lines: unchanged, or changed between now and then.
+  function lineChanges(now, then) {
+    const A = now.split('\n'), B = then.split('\n')
+    if (A.length * B.length > 4_000_000) return [{ kind: 'changed', now: A, then: B }]
+    const m = A.length, n = B.length, w = n + 1
+    const t = new Uint32Array((m + 1) * w)
+    for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) t[i * w + j] = A[i] === B[j] ? t[(i + 1) * w + j + 1] + 1 : Math.max(t[(i + 1) * w + j], t[i * w + j + 1])
+    const out = []
+    const push = (kind, a, b) => {
+      const last = out[out.length - 1]
+      if (last && last.kind === kind) { if (a != null) last.now.push(a); if (b != null && kind !== 'same') last.then.push(b) }
+      else out.push({ kind, now: a != null ? [a] : [], then: b != null && kind !== 'same' ? [b] : [] })
+    }
+    let i = 0, j = 0
+    while (i < m && j < n) {
+      if (A[i] === B[j]) { push('same', A[i]); i++; j++ }
+      else if (t[(i + 1) * w + j] >= t[i * w + j + 1]) { push('changed', A[i], null); i++ }
+      else { push('changed', null, B[j]); j++ }
+    }
+    while (i < m) push('changed', A[i++], null)
+    while (j < n) push('changed', null, B[j++])
+    return out
   }
 
   async function restore(s, head_) {

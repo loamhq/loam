@@ -1052,3 +1052,91 @@ test('Places: seeded runs of typing, deleting and disk edits near, inside and fa
   console.log(`# ${checked} note places checked`)
   assert.deepEqual(failures, [])
 })
+
+// -- round 4: the visitor's side ------------------------------------------------
+
+const devLink = async (mode, name = null) => (await fetch(`${base}/dev/link`, { method: 'POST', body: JSON.stringify({ mode, name }) })).json()
+async function visitor(link, { w = 1280, h = 850, name = null } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: w, height: h } })
+  const page = await ctx.newPage()
+  page.errors = []
+  page.on('pageerror', (e) => page.errors.push(e.message))
+  await page.goto(`${base}${link.path}`)
+  await page.fill('input[type=password]', link.password)
+  await page.keyboard.press('Enter')
+  if (name) {
+    await page.waitForSelector('input[autocomplete=name]')
+    await page.fill('input[autocomplete=name]', name)
+    await page.keyboard.press('Enter')
+  }
+  await page.waitForSelector('.dc .cm-content', { timeout: 8000 })
+  page.done = () => ctx.close()
+  return page
+}
+
+test('a visitor with the doc open when its link is turned off is told so, and the page stops asking', { skip }, async () => {
+  await start()
+  const link = await devLink('comment', 'Robin')
+  const page = await visitor(link)
+  let asks = 0
+  page.on('request', (r) => { if (r.url().includes('/api/')) asks++ })
+  await fetch(`${base}/dev/link-off`, { method: 'POST', body: JSON.stringify({ token: link.token }) })
+  await page.waitForSelector('.dc-gone-card', { timeout: 6000 })
+  assert.match(await page.textContent('.dc-gone-card'), /turned off/)
+  const n = asks
+  await page.waitForTimeout(4000)
+  assert.ok(asks - n <= 1, `the page stopped asking (${asks - n} more)`)
+  await shot(page, 'visitor-turned-off')
+  await page.done()
+  // and a fresh visit to it: the gate's look, one calm sentence
+  const ctx = await browser.newContext()
+  const p2 = await ctx.newPage()
+  const res = await p2.goto(`${base}${link.path}`)
+  assert.equal(res.status(), 404)
+  assert.ok(await p2.$('.dc-gone-card'), 'styled')
+  assert.equal(await p2.evaluate(() => getComputedStyle(document.querySelector('.dc-gate-card')).borderRadius !== '0px'), true)
+  await ctx.close()
+})
+
+test('a visitor resolves a thread their own agent opened, in the page', { skip }, async () => {
+  await start()
+  const link = await devLink('comment', 'Robin')
+  const page = await visitor(link)
+  const key = (await page.evaluate(async (P) => (await (await fetch(`${P}/api/agent-key`, { method: 'POST', credentials: 'same-origin', headers: { 'X-Loam-Share': '1', 'Content-Type': 'application/json' }, body: '{}' })).json()).key, link.path))
+  const made = await (await fetch(`${base}${link.path}/api/doc/notes`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'comment', quote: 'the point', text: 'From my agent' }) })).json()
+  await page.evaluate(() => window.__ed?.reload?.())
+  await page.waitForTimeout(2500)
+  await page.click(`.dc-card[data-id="${made.note}"]`)
+  await page.waitForSelector('.dc-card.on .dc-resolve', { timeout: 4000 })
+  await page.click('.dc-card.on .dc-resolve')
+  await page.waitForTimeout(800)
+  assert.equal(await page.locator(`.dc-card[data-id="${made.note}"]`).count(), 0)
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('a group visitor named "<b>x</b>" is shown as those letters', { skip }, async () => {
+  await start()
+  const link = await devLink('comment', null)
+  const page = await visitor(link, { name: '<b>x</b>' })
+  await page.click('.dc-mebtn')
+  assert.equal(await page.textContent('.dc-mehead b'), '<b>x</b>')
+  assert.equal(await page.locator('.dc-mehead b b').count(), 0)
+  await page.done()
+})
+
+test('a suggestion typed on the empty last line, accepted, keeps the file\'s final line break', { skip }, async () => {
+  await start()
+  const p = await newDoc('# End\n\nThe last paragraph ends at the column.\n')
+  const page = await open({ doc: p })
+  await mode(page, 'Suggesting')
+  await page.evaluate(() => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: v.state.doc.length } }) })
+  await page.keyboard.type('End words here.')
+  await page.evaluate(() => window.__ed.flush())
+  const d = await api(p, 'doc', 'GET')
+  const n = d.notes.find(x => x.state === 'open')
+  await api(p, `doc/notes/${n.id}/accept`)
+  const t = (await disk(p)).text
+  assert.ok(t.endsWith('End words here.\n'), JSON.stringify(t.slice(-30)))
+  await page.done()
+})

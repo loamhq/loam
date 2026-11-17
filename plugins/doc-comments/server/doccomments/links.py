@@ -282,11 +282,15 @@ class Links:
                 self._write(data)
             return bytes.fromhex(data["secret"])
 
-    def session_cookie(self, link: dict, visitor: str | None) -> tuple[str, int]:
-        """A signed session for this browser: ``(value, max_age)``."""
+    def session_cookie(self, link: dict, visitor: str | None, vid: str | None = None) -> tuple[str, int]:
+        """A signed session for this browser: ``(value, max_age)``. On a
+        group link a named browser carries its own id (``i``): two browsers
+        that type one name are not one person."""
         exp = int(self.clock()) + link["days"] * 86400
-        body = _b64(json.dumps({"l": link["id"], "g": link["gen"], "v": visitor, "e": exp},
-                               separators=(",", ":")).encode())
+        s = {"l": link["id"], "g": link["gen"], "v": visitor, "e": exp}
+        if vid:
+            s["i"] = vid
+        body = _b64(json.dumps(s, separators=(",", ":")).encode())
         sig = _b64(hmac.new(self._secret(), body.encode(), hashlib.sha256).digest())
         return f"{body}.{sig}", link["days"] * 86400
 
@@ -310,33 +314,43 @@ class Links:
 
     # -- people and agents ----------------------------------------------------------------
 
-    def join(self, lid: str, name: str) -> None:
+    def join(self, lid: str, name: str, vid: str | None = None) -> None:
         def fn(d):
             link = d["links"][lid]
-            if not any(p["name"] == name for p in link["people"]):
-                link["people"].append({"name": name, "joined": now_iso()})
+            if not any(p["name"] == name and p.get("id") == vid for p in link["people"]):
+                link["people"].append({"name": name, "joined": now_iso(), **({"id": vid} if vid else {})})
                 link["people"] = link["people"][-200:]
         self._mutate(fn)
 
-    def new_agent_key(self, lid: str, visitor: str) -> str:
+    def agent_key_made(self, lid: str, vkey: str) -> str | None:
+        """When this visitor's agent's key was made, if it has one."""
+        link = self.get(lid) or {}
+        for a in link.get("agents", []):
+            if a["visitor"] == vkey:
+                return a.get("created")
+        return None
+
+    def new_agent_key(self, lid: str, visitor: str, name: str | None = None) -> str:
+        """A new key for this visitor's agent; their old one stops working."""
         key = "lak_" + secrets.token_urlsafe(32)
 
         def fn(d):
             link = d["links"][lid]
             link["agents"] = [a for a in link["agents"] if a["visitor"] != visitor]
-            link["agents"].append({"hash": _key_hash(key), "visitor": visitor, "created": now_iso()})
+            link["agents"].append({"hash": _key_hash(key), "visitor": visitor, "name": name or visitor, "created": now_iso()})
             link["agents"] = link["agents"][-200:]
         self._mutate(fn)
         return key
 
-    def agent_for(self, link: dict, key: str | None) -> str | None:
-        """The visitor whose agent holds this key, if it is good."""
+    def agent_for(self, link: dict, key: str | None) -> dict | None:
+        """The visitor whose agent holds this key, if it is good:
+        ``{"visitor": their key, "name": their name}``."""
         if not key or not key.startswith("lak_") or len(key) > 200 or not link["on"]:
             return None
         h = _key_hash(key)
         for a in link.get("agents", []):
             if hmac.compare_digest(a["hash"], h):
-                return a["visitor"]
+                return {"visitor": a["visitor"], "name": a.get("name") or a["visitor"]}
         return None
 
     # -- what one link may write ------------------------------------------------------------

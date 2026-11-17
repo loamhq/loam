@@ -32,6 +32,7 @@ import html
 import json
 import mimetypes
 import re
+import secrets
 import time
 import unicodedata
 from http.cookies import SimpleCookie
@@ -108,7 +109,7 @@ def _json(status, obj, headers=None):
 
 class Door:
     def __init__(self, service, links, plugin_dir: Path, reach=lambda: "staging",
-                 owner_name=lambda: "Loam", sleep=time.sleep):
+                 owner_name=lambda: "Loam", sleep=time.sleep, home=lambda: ""):
         self.svc = service
         self.links = links
         self.page_dir = Path(plugin_dir) / "page"
@@ -116,6 +117,7 @@ class Door:
         self.reach = reach
         self.owner_name = owner_name
         self.sleep = sleep
+        self.home = home
 
     # -- the request ------------------------------------------------------------------
 
@@ -129,9 +131,14 @@ class Door:
                         ("X-Frame-Options", "DENY")]
         return ans
 
-    def _not_found(self):
-        return Answer(404, _page("Not found", "<main class=\"dc-share-gone\"><p>This link does not "
-                                 "open anything.</p></main>", None, None), "text/html; charset=utf-8",
+    def _not_found(self, prefix=None):
+        """One calm page for every link that opens nothing (off, wrong,
+        expired), in the gate's look: a stranger cannot tell them apart."""
+        body = ('<main class="dc-gate"><div class="dc-gate-card dc-gone-card">'
+                '<h1 class="dc-gate-title">This link doesn’t open anything</h1>'
+                '<p class="dc-gate-msg">It may have been turned off. Ask the person who sent it for a new one.</p>'
+                '</div></main>' + _made(self.home()))
+        return Answer(404, _page("Not found", body, None, prefix), "text/html; charset=utf-8",
                       [("Content-Security-Policy", PAGE_POLICY)])
 
     def _handle(self, method, path, headers, body, client):
@@ -139,19 +146,20 @@ class Door:
         if not m:
             return self._not_found()
         token, rest, query = m.group(1), m.group(2) or "/", (m.group(3) or "")[1:]
+        gone = f"/s/{token}"
         if ".." in rest or "//" in rest or "\\" in rest or "%" in rest:
-            return self._not_found()
+            return self._not_found(gone)
         host = (headers.get("host") or "").split(":")[0].lower()
         if self.reach() != "everywhere" and not host.startswith("next."):
-            return self._not_found()
+            return self._not_found(gone)
         if rest.startswith("/_/") and method == "GET":
             return self._static(rest[3:])
         link = self.links.by_token(token)
         if not link or not link["on"]:
-            return self._not_found()
+            return self._not_found(gone)
         doc_where = self._doc(link)
         if doc_where is None:
-            return self._not_found()
+            return self._not_found(gone)
         prefix = f"/s/{token}"
         session = self.links.read_session(link, _cookie(headers))
         agent_visitor = self.links.agent_for(link, _bearer(headers))
@@ -160,7 +168,7 @@ class Door:
             return self._shell(link, session, doc_where, prefix)
         if rest == "/agent.md" and method == "GET":
             if not session and not agent_visitor:
-                return self._not_found()
+                return self._not_found(gone)
             return Answer(200, agent_guide(prefix, link["mode"], _origin(headers)),
                           "text/markdown; charset=utf-8")
         if rest == "/open" and method == "POST":
@@ -168,18 +176,18 @@ class Door:
         if rest == "/forget" and method == "POST":
             return _json(200, {"ok": True}, [("Set-Cookie", _cookie_header("", 0, prefix))])
         if not rest.startswith("/api/"):
-            return self._not_found()
+            return self._not_found(gone)
 
         # Who is asking: the agent by its key, or the browser by its session.
         if agent_visitor:
-            who = self._who(link, agent_visitor, agent=True)
+            who = self._who(link, agent_visitor["name"], agent=True, key=agent_visitor["visitor"])
         elif session:
             visitor = link["name"] or session.get("v")
             if rest == "/api/name" and method == "POST" and not link["name"]:
                 return self._name(link, body, headers, prefix)
             if not visitor:
                 return _json(409, {"error": "say your name first", "need": "name"})
-            who = self._who(link, visitor)
+            who = self._who(link, visitor, key=_vkey(link, session))
         else:
             return _json(401, {"error": "this link needs its password"})
         writes = method in ("POST", "PATCH", "DELETE")
@@ -190,9 +198,13 @@ class Door:
         args = _body(body) if writes else {k: v[-1] for k, v in parse_qs(query).items()}
         root, dpath = doc_where
         api = rest[len("/api/"):].strip("/").split("/")
+        if api == ["agent-key"] and method == "GET" and not agent_visitor:
+            # Whether this person's agent already has a key; asking never
+            # makes one (opening the sheet twice once killed a working key).
+            return _json(200, {"made": self.links.agent_key_made(link["id"], _vkey(link, session))})
         if api == ["agent-key"] and method == "POST" and not agent_visitor:
             self.links.count_write(link["id"])
-            key = self.links.new_agent_key(link["id"], who["name"])
+            key = self.links.new_agent_key(link["id"], _vkey(link, session), who["name"])
             return _json(201, {"key": key, "doc": _origin(headers) + prefix,
                                "guide": _origin(headers) + prefix + "/agent.md",
                                "as": f"{who['name']}'s agent", "mode": link["mode"]})
@@ -266,12 +278,16 @@ class Door:
         got = self.svc.store.read_sidecar(link["did"])
         return bool(got) and len(json.dumps(got[0])) > links_mod.SIDECAR_MAX_BYTES
 
-    def _who(self, link, visitor, agent=False):
+    def _who(self, link, visitor, agent=False, key=None):
+        """A visitor, or their agent. ``key`` is who they are on this link:
+        the link's name for a named link, the browser's own id on a group
+        link (two browsers that type one name are two people)."""
         base = {"mode": link["mode"], "link": link["id"]}
+        k = key or links_mod.slug(visitor)
         if agent:
-            return {"id": f"guest-agent:{link['id']}:{links_mod.slug(visitor)}",
+            return {"id": f"guest-agent:{link['id']}:{k}",
                     "name": f"{visitor}'s agent", "kind": "guest-agent", **base}
-        return {"id": f"guest:{link['id']}:{links_mod.slug(visitor)}", "name": visitor,
+        return {"id": f"guest:{link['id']}:{k}", "name": visitor,
                 "kind": "guest", **base}
 
     def _open(self, link, body, client, prefix):
@@ -296,8 +312,9 @@ class Door:
         if self._taken(link, name):
             return _json(409, {"error": "That name is taken here. Add an initial, or use another."})
         self.links.count_write(link["id"])
-        self.links.join(link["id"], name)
-        value, age = self.links.session_cookie(link, name)
+        vid = "b" + secrets.token_hex(5)
+        self.links.join(link["id"], name, vid)
+        value, age = self.links.session_cookie(link, name, vid)
         return _json(200, {"ok": True}, [("Set-Cookie", _cookie_header(value, age, prefix))])
 
     def _taken(self, link, name) -> bool:
@@ -305,10 +322,19 @@ class Door:
         name on one of this doc's named links, compared case-folded and
         Unicode-normalised."""
         key = _name_key(name)
+        if key.endswith("'s agent") or key.endswith("’s agent") or key == "loam":
+            return True          # how agents and Loam itself are shown
+        people = (self.svc.store.people() or {}).values()
         others = [self.owner_name()]
-        others += [p.get("name", "") for p in (self.svc.store.people() or {}).values()]
+        others += [p.get("name", "") for p in people]
         others += [l.get("name") or "" for l in self.links.for_doc(link["did"]) if l.get("name")]
-        return any(key == _name_key(o) for o in others if o)
+        # and anyone on this link already (another browser)
+        here = self.links.get(link["id"]) or {}
+        others += [p.get("name", "") for p in here.get("people", [])]
+        names = {_name_key(o) for o in others if o}
+        # the owner's first name alone, too
+        names |= {n.split(" ")[0] for n in names if " " in n and n.split(" ")[0]}
+        return key in names
 
     def _shell(self, link, session, doc_where, prefix):
         doc = self.svc.store.read_doc(*doc_where)
@@ -320,7 +346,7 @@ class Door:
             state = "name"
         else:
             state = "doc"
-        boot = {"state": state, "title": title, "owner": owner, "days": link["days"],
+        boot = {"state": state, "title": title, "owner": owner, "days": link["days"], "home": self.home(),
                 "mode": link["mode"], "named": bool(link["name"]), "prefix": prefix,
                 "name": link["name"] or session.get("v") if session else None}
         return Answer(200, _page(f"{title} · {owner}", '<div id="dc-share"></div>', boot, prefix),
@@ -329,7 +355,7 @@ class Door:
     def _static(self, rel):
         if rel.startswith("assets/"):
             base, name = self.assets_dir, rel[len("assets/"):]
-            if name != "doc-comments.css" and not re.fullmatch(r"fonts/[a-z0-9-]+\.woff2", name):
+            if name not in ("doc-comments.css", "icon.svg") and not re.fullmatch(r"fonts/[a-z0-9-]+\.woff2", name):
                 return Answer(404, b"not found", "text/plain")
         else:
             base, name = self.page_dir, rel
@@ -389,8 +415,34 @@ def _title(text: str, path: str) -> str:
     return path.rsplit("/", 1)[-1].rsplit(".", 1)[0][:200]
 
 
+# Letters from other alphabets that look like Latin ones, folded before names
+# are compared (a Cyrillic "М" passed for "M").
+_LOOKALIKE = str.maketrans({
+    "а": "a", "в": "b", "е": "e", "ё": "e", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p",
+    "с": "c", "т": "t", "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "ԛ": "q", "ԝ": "w",
+    "α": "a", "β": "b", "ε": "e", "η": "n", "ι": "i", "κ": "k", "μ": "m", "ν": "v", "ο": "o",
+    "ρ": "p", "τ": "t", "υ": "u", "χ": "x", "γ": "y", "ω": "w",
+})
+
+
+def _made(home: str) -> str:
+    if home:
+        return (f'<a class="dc-made" href="{html.escape(home)}" target="_blank" rel="noopener noreferrer">'
+                '<i></i>Made with Loam</a>')
+    return '<span class="dc-made"><i></i>Made with Loam</span>'
+
+
 def _name_key(name: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", name or "").casefold().split())
+    folded = unicodedata.normalize("NFKC", name or "").casefold().translate(_LOOKALIKE)
+    folded = "".join(c for c in unicodedata.normalize("NFKD", folded) if not unicodedata.combining(c))
+    return " ".join(folded.split())
+
+
+def _vkey(link, session) -> str:
+    """Who a browser is on its link: the link's name, or its own id."""
+    if link["name"]:
+        return links_mod.slug(link["name"])
+    return (session or {}).get("i") or links_mod.slug((session or {}).get("v") or "")
 
 
 def _front(text: str) -> int:
@@ -415,7 +467,12 @@ def _shift_in(args: dict, front: str) -> dict:
             out[k] = out[k] + len(front)
     for k in ("text", "base_text"):
         if isinstance(out.get(k), str) and "base_revision" in out:
-            out[k] = front + out[k]
+            body = out[k]
+            # A body that begins with a "---" block of its own keeps a blank
+            # line under the real frontmatter, so no reader takes it for it.
+            if k == "text" and body.startswith("---"):
+                body = "\n" + body
+            out[k] = front + body
     if isinstance(out.get("changes"), list):
         n = len(front)
         out["changes"] = [[c[0] + n, c[1] + n, c[2]] for c in out["changes"]
@@ -461,8 +518,9 @@ def _for_visitor(out):
 
 def _page(title, body, boot, prefix):
     css = f'<link rel="stylesheet" href="{prefix}/_/assets/doc-comments.css">' \
-          f'<link rel="stylesheet" href="{prefix}/_/share/share.css">' if prefix else ""
-    script = f'<script type="module" src="{prefix}/_/share/share.js"></script>' if prefix else ""
+          f'<link rel="stylesheet" href="{prefix}/_/share/share.css">' \
+          f'<link rel="icon" href="{prefix}/_/assets/icon.svg" type="image/svg+xml">' if prefix else ""
+    script = f'<script type="module" src="{prefix}/_/share/share.js"></script>' if prefix and boot is not None else ""
     data = ""
     if boot is not None:
         data = ('<script type="application/json" id="dc-boot">'

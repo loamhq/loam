@@ -586,3 +586,24 @@
 /* A long password stays on one line in the ticket, scrolled if it must. */
 .dc-tk-pw { white-space: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 @media (max-width: 480px) { .dc-tk-pw { font-size: 16px !important; } }
+
+/* The invite card: a long password wraps inside the ticket; nothing is
+   clipped; the dialog fits a phone and scrolls within itself if it must. */
+.dc-tk-foot { flex-wrap: wrap; }
+.dc-tk-foot > div:first-child { min-width: 0; flex: 1 1 12em; }
+.dc-tk-pw { white-space: normal; overflow: visible; overflow-wrap: anywhere; word-break: break-all; text-align: left; max-width: 100%; }
+@media (max-width: 480px) { .dc-tk-pw { font-size: 16px !important; } }
+.dc-dlg { max-height: calc(100dvh - 36px); overflow-y: auto; overscroll-behavior: contain; }
+.dc-sh-warn { margin: 8px 0 10px; }
+
+/* A note's head: the name keeps its room; the time gives way first. */
+.dc-ch .dc-nm { flex: 0 1 auto; min-width: 3.5em; }
+.dc-ch .dc-tm { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.dc-ch .dc-own { flex: none; }
+.dc-withdraw { height: 24px; padding: 0 10px !important; font-size: 12px !important; }
+
+/* The mode, when Viewing is all there is: a quiet word. */
+.dc-mpill-only { cursor: default; opacity: .8; }
+
+/* A struck deletion's wrapper; a deleted paragraph sits on the line before. */
+.dc .dc-sg-live-delw { white-space: pre-wrap; }

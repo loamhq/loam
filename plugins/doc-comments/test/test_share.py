@@ -177,6 +177,81 @@ class WhatALinkReads(unittest.TestCase):
         self.assertNotIn(nid, [n["id"] for n in got["notes"]])
 
 
+class VisitorsRoundFour(unittest.TestCase):
+    """Round 4 of the walk (2026-11-17): one identity per browser on a group
+    link, names that are not anyone else's here, the agent's key asked about
+    without being made, a reply answering with its note, a visitor's own
+    `---` block kept clear of the frontmatter."""
+
+    def browser(self, w, tok, name):
+        ans, _ = w.req("POST", tok, "/open", {"password": "right-password"})
+        c = [v for k, v in ans.headers if k == "Set-Cookie"][0].split(";")[0].split("=", 1)[1]
+        ans, got = w.req("POST", tok, "/api/name", {"name": name}, cookie=c)
+        if ans.status != 200:
+            return None, ans.status
+        return [v for k, v in ans.headers if k == "Set-Cookie"][0].split(";")[0].split("=", 1)[1], 200
+
+    def test_two_browsers_are_two_people_and_a_name_is_taken_once(self):
+        w = World()
+        _, tok = w.link("comment", name=None)
+        a, st = self.browser(w, tok, "Robin")
+        self.assertEqual(st, 200)
+        _, st = self.browser(w, tok, "robin")
+        self.assertEqual(st, 409, "a name in use on this link by another browser is taken")
+        b, st = self.browser(w, tok, "Robin B")
+        _, me_a = w.req("GET", tok, "/api/me", cookie=a)
+        _, me_b = w.req("GET", tok, "/api/me", cookie=b)
+        self.assertNotEqual(me_a["me"]["id"], me_b["me"]["id"])
+        for bad in ("Robin's agent", "Someone’s agent", "Loam", "loam", "Sаm", "ＳＡＭ", "Ada"):
+            _, st = self.browser(w, tok, bad)
+            self.assertEqual(st, 409, bad)
+
+    def test_a_name_is_drawn_as_text(self):
+        w = World()
+        _, tok = w.link("comment", name=None)
+        c, st = self.browser(w, tok, "<b>x</b>")
+        self.assertEqual(st, 200)
+        ans, _ = w.req("GET", tok, "/", cookie=c)
+        page = ans.body.decode()
+        self.assertNotIn("<b>x</b>", page)          # escaped in the boot JSON
+        self.assertIn("\\u003cb>x\\u003c/b>", page)
+
+    def test_the_agent_key_is_asked_about_without_being_made(self):
+        w = World()
+        _, tok = w.link("comment", name="Robin")
+        c = w.login(tok)
+        _, got = w.req("GET", tok, "/api/agent-key", cookie=c)
+        self.assertIsNone(got["made"])
+        ans, got = w.req("POST", tok, "/api/agent-key", {}, cookie=c)
+        key = got["key"]
+        for _ in range(2):
+            _, got = w.req("GET", tok, "/api/agent-key", cookie=c)
+            self.assertTrue(got["made"])
+        ans, _ = w.req("GET", tok, "/api/doc", key=key, share=False)
+        self.assertEqual(ans.status, 200, "asking twice did not stop the key")
+
+    def test_a_reply_answers_with_its_note(self):
+        w = World()
+        _, tok = w.link("comment", name="Robin")
+        c = w.login(tok)
+        _, got = w.req("POST", tok, "/api/doc/notes", quote_body(), cookie=c)
+        nid = got["note"]
+        ans, got = w.req("POST", tok, f"/api/doc/notes/{nid}/replies", {"text": "and a reply"}, cookie=c)
+        self.assertEqual((ans.status, got["note"]), (201, nid))
+        self.assertTrue(got["reply"])
+
+    def test_a_visitors_own_dashes_stay_clear_of_the_frontmatter(self):
+        w = World()
+        _, tok = w.link("edit", name="Robin")
+        c = w.login(tok)
+        _, doc = w.req("GET", tok, "/api/doc", cookie=c)
+        text = "---\nmine: 1\n---\n" + doc["text"]
+        ans, _ = w.req("POST", tok, "/api/doc/save", {"base_revision": doc["revision"], "base_text": doc["text"], "text": text}, cookie=c)
+        self.assertEqual(ans.status, 200)
+        stored = w.store.files["vault:Plans/plan.md"]
+        self.assertIn("\n---\n\n---\nmine: 1", stored)
+
+
 class Modes(unittest.TestCase):
     def test_view(self):
         w = World()

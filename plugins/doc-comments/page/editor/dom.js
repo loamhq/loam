@@ -126,3 +126,13 @@ export function stamp(iso) {
   if (d.toDateString() === y.toDateString()) return `Yesterday ${time}`
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ` · ${time}`
 }
+
+// A person's face has a tone of its own, from their name, the same
+// everywhere (the owner's lists, the invite card, the visitor's page): calm
+// colours that read with white initials in light and dark.
+const TONES = ['#59749A', '#7A6A9E', '#5E8A6E', '#A0704E', '#8A5A6E', '#4F7F86', '#86753F']
+export function tone(name) {
+  let n = 0
+  for (const ch of String(name || '').trim().toLowerCase()) n = (n * 31 + ch.codePointAt(0)) >>> 0
+  return TONES[n % TONES.length]
+}
