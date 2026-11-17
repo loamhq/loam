@@ -246,3 +246,36 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   stops it. **It moves every process of the cgroup it starts in into its
   `init.scope`**: start it in a child cgroup of its own
   (tests/private_systemd.py does), or it reorganises the calling unit.
+
+## 2026-11-16 — a new person's first day, walked on a fresh install
+
+- **Walking the UI on a throwaway VM without exposing it:** a Modal
+  `runtime="vm"` sandbox with systemd booted in a PID namespace (as the
+  release's rehearse.py does), the names in the VM's `/etc/hosts`,
+  `--local-certs`, and Playwright's Chromium *on the VM* driven by a small
+  aiohttp server on 127.0.0.1 there (one exec per batch of ops; screenshots
+  pulled back as a base64 tarball). No tunnel, so nothing is on the open
+  web. `--use-fake-device-for-media-stream` gives the VM a microphone; CDP
+  `WebAuthn.addVirtualAuthenticator` gives it a passkey, which dies with the
+  browser process.
+- **The release source for a rehearsal of `main`:** a bare clone served by
+  `git daemon` on loopback (`git://127.0.0.1/loam.git`), `main` tagged as
+  the manifest's version. Newer tags pushed there make `loam update` see a
+  release. A bare repo owned by another uid fails "dubious ownership", and
+  install.sh then says only that no release was found.
+- **The page's CSP blocks an injected `<style>`;** a constructed
+  stylesheet (`new CSSStyleSheet()` + `adoptedStyleSheets`) is allowed, which
+  is how to try a CSS fix in the live page before landing it.
+- **A JS `el.click()` leaves a focus ring on the section heading** that a
+  real mouse click does not; shoot with Playwright's real click.
+- **Linger did not bring Loam's user manager back after a reboot of that
+  VM** (logind started, never started user@1000). Installs now enable
+  `loam-user-manager.service`. Not proven either way on a real kernel boot.
+- **The archive and restore routes answer `{"agent": "<id>"}`, a string;**
+  the page's tests had assumed a row. Test page code against the broker's
+  real answer shapes.
+- **The first install's vault layout leaks into installs** wherever a path
+  is a literal: `00_INBOX` (lib/loam_inbox.py, loam_activity's failure log),
+  `40_PROJECTS` (engineer receipts, RENAME_PINNED, SYSTEM_VAULT_SOURCES).
+  The app, the Files shortcuts and the schedule page now read `vault.*`;
+  those others still do not.
