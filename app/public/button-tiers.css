@@ -83,7 +83,7 @@
 
 /* An open task/menu, editor or Settings surface owns attention. Suppress the
  * actions behind it, including a drafted Send, without moving or disabling it. */
-#app:has([data-menu-surface]:popover-open) :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary):not([data-menu-surface] *,dialog *),
+#app:has([data-menu-surface]:not(.profile-face-menu):popover-open) :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary):not([data-menu-surface] *,dialog *),
 #app:has(dialog[open]) :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary):not(dialog *),
 #app:has(.sheet.settings) :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary):not(.settings *,[data-menu-surface] *,dialog *) {
   background:var(--paper-hover); color:var(--paper-ink); border-color:transparent;

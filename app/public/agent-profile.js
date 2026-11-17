@@ -46,7 +46,7 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
   }
   async function load(kind, id) {
     const current = ++ticket
-    st.lastRead = Date.now(); st.refreshing = false; st.tab = 'Threads'; st.page = 1; st.soul = ''; st.soulError = ''; st.menu = false; st.confirmArchive = false; st.focusField = null; st.manageSchedules = false; st.target = { kind, id }; st.data = null; st.edit = null; st.error = ''; st.activity = false; st.busy = false; st.loading = true; redraw()
+    st.lastRead = Date.now(); st.refreshing = false; st.tab = 'Threads'; st.page = 1; st.soul = ''; st.soulError = ''; st.menu = false; st.faceMenu = false; st.confirmArchive = false; st.focusField = null; st.manageSchedules = false; st.target = { kind, id }; st.data = null; st.edit = null; st.error = ''; st.activity = false; st.busy = false; st.loading = true; redraw()
     try { const data = await api('GET', path(st.target)); if (current === ticket) {
       st.data = kind === 'engineer' ? { ...data, applies: data.applies || st.engineers?.applies } : data
       if (kind === 'agent' && data.files?.soul?.root && data.files.soul.exists !== false) {
@@ -105,7 +105,7 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
       const response = await fetch(`/api/agents/${enc(target.id)}/face`, { method: file ? 'PUT' : 'DELETE', ...(file ? { body: form } : {}) })
       const body = await response.json(); if (!response.ok) throw new Error(body.error)
       const data = await api('GET', path(target)); changedAgent(data.agent)
-      if (current === ticket) { st.data = data; st.edit = null }
+      if (current === ticket) { st.data = data; st.edit = null; st.faceMenu = false }
     } catch (e) { if (current === ticket) st.error = e.message }
     finally { if (current === ticket) { st.busy = false; redraw() } }
   }
@@ -234,24 +234,31 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     const pageSize = 12, pages = Math.max(1, Math.ceil(threads.length / pageSize))
     st.page = Math.min(st.page, pages)
     const tabs = ['Threads', 'Schedules', 'Settings', 'Files']
-    const chooseTab = tab => { st.tab = tab; st.edit = null; host.schedule() }
+    const chooseTab = tab => { st.tab = tab; st.edit = null; st.faceMenu = false; st.menu = false; host.schedule() }
+    const faceSrc = data.identity.face === null ? null : data.identity.face?.url?.replace(/^\/v1\//, '/api/') || look.imageSrc
     const upload = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', hidden: true, 'aria-label': 'Upload face', onchange: e => { const f = e.target.files[0]; if (f) c.face(f); e.target.value = '' } })
     const files = [file('Open workspace', data.files.workspace, null, null, { folder: true }), file('Soul', data.files.soul), file('Config', data.files.config),
       group('Memory', Object.entries(data.files.memory || {}).map(([key, ref]) => file(({ always: 'Every conversation', active: 'While working', reflection: 'On reflection', folder: 'Memory folder' })[key] || key, ref, null, null, { folder: key === 'folder' }))),
       file('Skills', data.files.skills, null, h('span', { class: 'setrow-value', text: String(data.files.skills?.count ?? '') }), { folder: true })]
     return [h('div', { class: 'agent-profile', key: `agent-profile:${agent}` },
       h('header', { class: 'profile-hero' },
+        upload,
         h('div', { class: 'profile-identity' },
-          h('button', { class: 'profile-face', disabled: st.busy, 'aria-label': `Change ${name}’s face`, onclick: () => { st.edit = st.edit?.field === 'face' ? null : { field: 'face' }; host.schedule() } }, blob({ ...look, imageSrc: data.identity.face === null ? null : data.identity.face?.url?.replace(/^\/v1\//, '/api/') || look.imageSrc }, { size: 64, font: 28 })),
+          h('button', { class: 'profile-face', disabled: st.busy, 'data-profile-face': c === host.profiles ? 'page' : 'settings', 'aria-label': `Change ${name}’s face`, 'aria-haspopup': 'dialog', 'aria-expanded': String(Boolean(st.faceMenu)), onclick: () => { st.menu = false; st.faceMenu = !st.faceMenu; host.schedule() } }, blob({ ...look, imageSrc: faceSrc }, { size: 64, font: 28 })),
           h('div', {}, st.edit?.field === 'display' ? editor('display', name, value => c.patch({ display: value }), { label: 'Display name' }) : h('button', { class: 'profile-name display', disabled: st.busy, 'aria-label': `Rename ${name}`, text: name, onclick: () => edit('display', name) }),
             h('p', { class: 'profile-status note', text: isArchived ? 'Archived' : profileStatus(data.status) })),
-          h('button', { class: 'iconbtn profile-menu-button', 'data-profile-actions': c === host.profiles ? 'page' : 'settings', 'aria-label': 'Agent actions', 'aria-haspopup': 'menu', 'aria-expanded': String(Boolean(st.menu)), onclick: () => { st.menu = !st.menu; host.schedule() } }, icon.dots(20))),
+          h('button', { class: 'iconbtn profile-menu-button', 'data-profile-actions': c === host.profiles ? 'page' : 'settings', 'aria-label': 'Agent actions', 'aria-haspopup': 'menu', 'aria-expanded': String(Boolean(st.menu)), onclick: () => { st.faceMenu = false; st.menu = !st.menu; host.schedule() } }, icon.dots(20))),
         st.menu ? menuSurface(h('div', { class: 'popover profile-actions-menu', role: 'menu', key: 'profile-menu' },
           settingsRow({ title: 'Archive agent', onclick: () => { st.menu = false; st.confirmArchive = true; host.schedule() }, props: { role: 'menuitem', disabled: st.busy || isArchived } })),
           { title: 'Agent actions', heading: false, anchored: true, width: 220, anchor: `[data-profile-actions="${c === host.profiles ? 'page' : 'settings'}"]`, close: () => { st.menu = false; host.schedule() } }) : null,
-        st.edit?.field === 'face' ? h('div', { class: 'profile-face-options' }, upload,
-          h('button', { class: 'pillbtn', text: 'Upload a face', disabled: st.busy, onclick: () => upload.click() }),
-          data.identity.face ? h('button', { class: 'pillbtn', text: 'Remove uploaded face', disabled: st.busy, onclick: () => c.face() }) : null) : null,
+        st.faceMenu ? menuSurface(h('div', { class: 'popover profile-face-menu', key: 'profile-face-menu' },
+          h('div', { class: 'profile-face-preview', 'aria-hidden': 'true' },
+            blob({ ...look, imageSrc: faceSrc }, { size: 96, font: 40 })),
+          h('div', { class: 'popdiv' }),
+          h('div', { class: 'profile-face-menu-actions', role: 'menu', 'aria-label': `${name}’s face options` },
+            settingsRow({ title: 'Upload a picture', lead: icon.image(18), onclick: () => { st.faceMenu = false; upload.click(); host.schedule() }, props: { role: 'menuitem', disabled: st.busy } }),
+            data.identity.face ? settingsRow({ title: 'Use the theme’s face', lead: icon.refresh(18), onclick: () => { st.faceMenu = false; c.face() }, props: { role: 'menuitem', disabled: st.busy } }) : null)),
+          { title: `${name}’s face`, heading: false, width: 280, anchor: `[data-profile-face="${c === host.profiles ? 'page' : 'settings'}"]`, close: () => { st.faceMenu = false; host.schedule() } }) : null,
         st.soul ? h('blockquote', { class: 'profile-soul', cite: data.files.soul?.path }, h('p', { text: st.soul }), h('cite', { text: 'From the soul' })) : null,
         st.soulError ? h('p', { class: 'note', role: 'status', text: st.soulError }) : null,
         h('div', { class: 'profile-actions' },

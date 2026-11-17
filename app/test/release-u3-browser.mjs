@@ -91,7 +91,7 @@ try {
       await shot('uploaded-face')
       await page.evaluate(() => { __u3.theme.set({ theme: 'latte' }) })
       await page.getByRole('button', { name: 'Change Little Green’s face', exact: true }).click()
-      await page.getByRole('button', { name: 'Remove uploaded face', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Use the theme’s face', exact: true }).click()
       await page.locator('.profile-face:not(:has(img))').waitFor()
       await page.getByLabel('Agent actions', { exact: true }).click()
       await page.getByRole('menuitem', { name: 'Archive agent', exact: true }).click()
