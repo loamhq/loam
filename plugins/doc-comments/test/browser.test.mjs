@@ -924,3 +924,131 @@ test('a passage deleted on disk: its note is detached, ⋯ carries the mark and 
   assert.deepEqual(page.errors, [])
   await page.done()
 })
+
+// -- where a note sits after the text changes (round 4) -------------------------
+
+const REPEATS = '# Walk\n\n' + [1, 2, 3, 4, 5, 6].map(i => `## Section ${i}\n\nParagraph ${i}a. The river kept its own time, and the town learned to keep it too.\n\n> [!note] A callout in section ${i}\n> The note in the callout runs to two lines.\n> A second line of the callout.\n\n| Year | Where | Why |\n| --- | --- | --- |\n| 201${i} | Lisbon | the light |\n| 202${i} | Porto | the river |\n\nParagraph ${i}b, after the blocks. Nothing here is remarkable except where it sits.\n\nParagraph ${i}c closes the section with a sentence.\n`).join('\n')
+const nthIn = (t, w, n) => { let at = -1; for (let i = 0; i < n; i++) at = t.indexOf(w, at + 1); return at }
+async function noteOn(p, kind, words, n, extra = {}) {
+  const d = await api(p, 'doc', 'GET')
+  const s = nthIn(d.text, words, n)
+  const got = await api(p, 'doc/notes', 'POST', { kind, start: s, end: s + words.length, quote: words, revision: d.revision, text: 'x', ...extra })
+  return got.note
+}
+const whereOf = async (p, id) => (await api(p, 'doc', 'GET')).notes.find(n => n.id === id)
+async function typeAt(page, pos, text) {
+  await page.evaluate((a) => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: a } }) }, pos)
+  await page.keyboard.type(text)
+  await page.evaluate(() => window.__ed.flush())
+}
+
+test('Places 1: a suggestion stays on its paragraph when words are typed before it; Accept writes there', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const id = await noteOn(p, 'suggestion', 'remarkable', 6, { replacement: 'notable' })
+  const page = await open({ doc: p })
+  await typeAt(page, await page.evaluate(() => { const t = window.__ed.text(); let at = -1; for (let i = 0; i < 6; i++) at = t.indexOf('Nothing here', at + 1); return at + 'Nothing here'.length }), ' truly')
+  const n = await whereOf(p, id)
+  const t = (await disk(p)).text
+  assert.equal(n.where.start, nthIn(t, 'remarkable', 6))
+  await page.evaluate(() => window.__ed.reload())
+  await page.click(`.dc-card[data-id="${id}"]`)
+  await page.click('.dc-card.on .dc-sm.ok')
+  await until(page, (id) => window.__ed.state.notes.find(x => x.id === id)?.state === 'accepted', id)
+  const after = (await disk(p)).text
+  assert.ok(after.includes('Paragraph 6b, after the blocks. Nothing here truly is notable'), after.slice(-400))
+  assert.equal(after.split('notable').length, 2)
+  await page.done()
+})
+
+test('Places 2–4: a comment stays on a word typed before it, on an overlapping accept, and a suggestion on an edit inside it', { skip }, async () => {
+  await start()
+  const p = await newDoc(REPEATS)
+  const c5 = await noteOn(p, 'comment', 'line of the callout', 5)
+  const c4 = await noteOn(p, 'comment', 'line of the callout', 4)
+  const s4 = await noteOn(p, 'suggestion', 'callout.', 4, { replacement: 'callout and three.' })
+  const s3 = await noteOn(p, 'suggestion', 'light', 3, { replacement: 'sun' })
+  const page = await open({ doc: p })
+  await typeAt(page, await page.evaluate(() => { const t = window.__ed.text(); let at = -1; for (let i = 0; i < 5; i++) at = t.indexOf('line of the callout', at + 1); return at }), 'fine ')
+  let t = (await disk(p)).text
+  assert.equal((await whereOf(p, c5)).where.start, nthIn(t, 'line of the callout', 5), 'case 2')
+  await api(p, `doc/notes/${s4}/accept`)
+  t = (await disk(p)).text
+  const w4 = (await whereOf(p, c4)).where
+  assert.ok(w4.start > t.indexOf('## Section 4') && w4.start < t.indexOf('## Section 5'), 'case 3: still in section 4')
+  await page.evaluate(() => window.__ed.reload())
+  await page.waitForTimeout(300)
+  const l = await page.evaluate(() => { const t = window.__ed.text(); let at = -1; for (let i = 0; i < 3; i++) at = t.indexOf('light', at + 1); return at })
+  await typeAt(page, l + 2, 'x')
+  t = (await disk(p)).text
+  const w3 = (await whereOf(p, s3)).where
+  assert.equal(w3.start, nthIn(t, 'lixght', 1), 'case 4: on its own cell, changed')
+  assert.equal(w3.state, 'changed')
+  const acc = await api(p, `doc/notes/${s3}/accept`)
+  assert.ok(acc.error, 'Accept refuses rather than write elsewhere')
+  assert.ok(!(await disk(p)).text.includes('sun'))
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('Places: seeded runs of typing, deleting and disk edits near, inside and far from notes on repeated words', { skip, timeout: 1800000 }, async () => {
+  await start()
+  const PH = ['remarkable', 'line of the callout', 'the light', 'the river', 'Nothing here is', 'callout']
+  const failures = []
+  let ctx = null, page = null, checked = 0
+  const RUNS = Number(process.env.DC_PLACES || 30)
+  for (let seed = 1; seed <= RUNS && failures.length < 4; seed++) {
+    if (!ctx || (seed - 1) % 10 === 0) { await ctx?.close(); ctx = await browser.newContext({ viewport: { width: 1280, height: 850 } }); page = await ctx.newPage() }
+    let s = (seed * 2654435761) >>> 0
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const pick = (n) => Math.floor(r() * n)
+    const p = await newDoc(REPEATS)
+    const truth = {}
+    for (let i = 0; i < 4; i++) {
+      const ph = PH[pick(PH.length)], n = 1 + pick(6)
+      const t = (await disk(p)).text
+      const a = nthIn(t, ph, n)
+      if (Object.values(truth).some(([x, y]) => !(a + ph.length <= x || y <= a))) continue
+      const id = await noteOn(p, r() < 0.5 ? 'comment' : 'suggestion', ph, n, { replacement: ph.toUpperCase() })
+      const t2 = (await disk(p)).text
+      truth[id] = [nthIn(t2, ph, n), nthIn(t2, ph, n) + ph.length]
+    }
+    await page.goto(`${base}/?path=${encodeURIComponent(p)}`)
+    await page.waitForSelector('.cm-content')
+    for (let step = 0; step < 8; step++) {
+      const t = (await disk(p)).text
+      const ids = Object.keys(truth).filter(k => truth[k])
+      const [a, b] = ids.length ? truth[ids[pick(ids.length)]] : [0, 0]
+      let at = [a - 1 - pick(8), b + pick(8), a + pick(Math.max(1, b - a))][pick(3)]
+      const fm = /^---\n[\s\S]*?\n---\n/.exec(t)?.[0].length || 0
+      at = Math.max(fm + 1, Math.min(t.length - 1, at))
+      const del = [0, 0, 1, 4][pick(4)]
+      const ins = ['', ' truly', 'x', 'the river '][pick(4)] || (del ? '' : 'y')
+      if (r() < 0.7) {
+        await page.evaluate(([a2, d]) => { const v = window.__ed.view; v.focus(); v.dispatch({ selection: { anchor: a2, head: a2 + d } }) }, [at, del])
+        if (del) await page.keyboard.press('Delete')
+        if (ins) await page.keyboard.type(ins)
+        await page.evaluate(() => window.__ed.flush())
+      } else {
+        await outside(p, t.slice(0, at) + ins + t.slice(at + del))
+        await page.evaluate(() => window.__ed.reload())
+      }
+      for (const [id, v] of Object.entries(truth)) {
+        if (!v) continue
+        const [x, y] = v
+        if (at + del <= x) truth[id] = [x + ins.length - del, y + ins.length - del]
+        else if (at < y) truth[id] = null          // inside: changed or gone there, not tracked further
+      }
+      const notes = (await api(p, 'doc', 'GET')).notes
+      for (const [id, v] of Object.entries(truth)) {
+        if (!v) continue
+        const n = notes.find(m => m.id === id)
+        checked++
+        if (n.where.state === 'detached' || n.where.start !== v[0]) failures.push(`seed ${seed} step ${step}: ${JSON.stringify(n.anchor.quote)} at ${n.where.start} (${n.where.state}), put on ${v[0]}; change ${at} -${del} +${JSON.stringify(ins)}`)
+      }
+    }
+  }
+  await ctx?.close()
+  console.log(`# ${checked} note places checked`)
+  assert.deepEqual(failures, [])
+})

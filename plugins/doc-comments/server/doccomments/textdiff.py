@@ -76,10 +76,38 @@ def delta(old: str, new: str) -> list[list]:
         if tag == "equal":
             put("=", sum(map(len, a[i1:i2])))
             continue
-        if i2 > i1:
-            put("-", sum(map(len, a[i1:i2])))
-        if j2 > j1:
-            put("+", "".join(b[j1:j2]))
+        gone, came = "".join(a[i1:i2]), "".join(b[j1:j2])
+        if gone and came and len(gone) + len(came) <= 4000:
+            # A run of words replaced is exact to the letter inside it: "x"
+            # typed inside "light" keeps "l", "i", "ght" (so a note on the
+            # word is carried as changed, there, not as gone).
+            # Letters both share at its start stay first, then at its end:
+            # "river |" becoming "riverthe river " keeps the old "river" as
+            # the first one, where it was.
+            p = 0
+            while p < len(gone) and p < len(came) and gone[p] == came[p]:
+                p += 1
+            q = 0
+            while q < len(gone) - p and q < len(came) - p and gone[-1 - q] == came[-1 - q]:
+                q += 1
+            if p:
+                put("=", p)
+            g2, c2 = gone[p:len(gone) - q], came[p:len(came) - q]
+            for t2, x1, x2, y1, y2 in difflib.SequenceMatcher(None, g2, c2, autojunk=False).get_opcodes():
+                if t2 == "equal":
+                    put("=", x2 - x1)
+                    continue
+                if x2 > x1:
+                    put("-", x2 - x1)
+                if y2 > y1:
+                    put("+", c2[y1:y2])
+            if q:
+                put("=", q)
+            continue
+        if gone:
+            put("-", len(gone))
+        if came:
+            put("+", came)
     return out
 
 
@@ -181,3 +209,36 @@ def summary(old: str, new: str, ops: list[list] | None = None) -> dict:
         para = new[start + 2 if start >= 0 else 0:].lstrip()
         section = " ".join(para.split()[:6])
     return {"added": added, "removed": removed, "first": first, "section": section[:60]}
+
+
+def from_changes(old: str, changes) -> list[list] | None:
+    """A delta from a client's own record of its edit: ``[[from, to, insert],
+    …]`` in ``old``'s positions, in order and not overlapping. None when it
+    does not fit ``old`` (then the caller works the change out instead)."""
+    if not isinstance(changes, list):
+        return None
+    out, at = [], 0
+    try:
+        for c in changes:
+            a, b, ins = int(c[0]), int(c[1]), c[2]
+            if not isinstance(ins, str) or a < at or b < a or b > len(old):
+                return None
+            if a > at:
+                out.append(["=", a - at])
+            if b > a:
+                out.append(["-", b - a])
+            if ins:
+                out.append(["+", ins])
+            at = b
+    except (TypeError, ValueError, IndexError):
+        return None
+    if at < len(old):
+        out.append(["=", len(old) - at])
+    return out
+
+
+def then(text_a: str, ops_ab: list[list], text_c: str) -> list[list]:
+    """The change from the text ``ops_ab`` makes of ``text_a`` on to
+    ``text_c`` (a stamp the store added on its write), as one more delta to
+    carry places through. Returns the second step only."""
+    return delta(apply(text_a, ops_ab), text_c)

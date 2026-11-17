@@ -376,22 +376,116 @@ def reattach(sc: dict, text: str, tid: str, start: int, end: int) -> dict:
 
 # -- finding passages again ------------------------------------------------------
 
-def locate(note: dict, text: str, ops: list | None = None) -> dict:
+def _touched(ops: list, start: int, end: int) -> bool:
+    """Whether the change ``ops`` alters anything strictly inside the old
+    range [start, end): a deletion overlapping it, or an insertion inside it."""
+    old = 0
+    for op, val in ops:
+        if op == "=":
+            old += val
+        elif op == "-":
+            if old < end and old + val > start:
+                return True
+            old += val
+        elif op == "+":
+            if start < old < end:
+                return True
+    return False
+
+
+SURVIVE = 0.5        # below this share of its own letters left, a passage is gone
+
+
+def _survived(ops: list, start: int, end: int) -> int:
+    """How many letters of the old range [start, end) the change kept."""
+    old, kept = 0, 0
+    for op, val in ops:
+        if op == "=":
+            kept += max(0, min(end, old + val) - max(start, old))
+            old += val
+        elif op == "-":
+            old += val
+    return kept
+
+
+def _churn(ops: list, start: int, end: int) -> int:
+    """How many letters a change put in or took out at or inside [start, end]."""
+    old, n = 0, 0
+    for op, val in ops:
+        if op == "=":
+            old += val
+        elif op == "-":
+            if old <= end and old + val >= start:
+                n += val
+            old += val
+        elif op == "+":
+            if start <= old <= end:
+                n += len(val)
+    return n
+
+
+def locate(note: dict, text: str, ops: list | None = None, guessed: bool = False) -> dict:
+    """Where a note's passage is in ``text``. Its place is **carried**, never
+    searched for: ``ops`` is the change from the text its place was last
+    known in (every change the server makes is known; a file changed on
+    disk is worked out from the old and new stored text first), and the
+    place moves through it exactly, the way the editor's drafts move
+    through an edit. Then: the quote still there is attached; other words
+    there are "changed since", there; nothing left (or almost nothing like
+    it) is detached, remembering the carried point, so the note comes back
+    if those exact words return there. A like passage elsewhere is never the
+    note's (2026-11-17: a suggestion on one of several "remarkable"s moved
+    to another on a word typed beside it, and Accept wrote there).
+
+    Only a note that has never been placed (a sidecar from before places
+    were kept) is found by searching."""
     a = note["anchor"]
-    hint = textdiff.map_pos(ops, a.get("pos", 0)) if ops else None
-    where = anchors.locate(text, a, hint)
-    if where["state"] == "attached":
-        return where
-    found = note.get("found")
-    if found:
-        fhint = textdiff.map_pos(ops, found.get("pos", 0)) if ops else None
-        again = anchors.locate(text, found, fhint)
-        if again["state"] != "detached":
-            return {**again, "state": "changed"}
-    return where
+    quote = a.get("quote") or ""
+    w = note.get("where")
+    if not w or (w.get("start") is None and w.get("pos") is None):
+        if w and w.get("state") == "detached":
+            return {"start": None, "end": None, "state": "detached"}
+        return anchors.locate(text, a)
+    if w.get("start") is None:
+        # detached: its carried point; back when the exact words return there
+        p = w["pos"] if not ops else textdiff.map_pos(ops, w["pos"], after=True)
+        p = max(0, min(len(text), p))
+        if quote and text[p:p + len(quote)] == quote:
+            return {"start": p, "end": p + len(quote), "state": "attached"}
+        return {"start": None, "end": None, "state": "detached", "pos": p}
+    s, e = w["start"], w["end"]
+    if ops:
+        s2 = textdiff.map_pos(ops, s, after=True)
+        e2 = max(s2, textdiff.map_pos(ops, e, after=False))
+    else:
+        s2, e2 = s, e
+    s2, e2 = max(0, min(len(text), s2)), max(0, min(len(text), e2))
+    now = text[s2:e2]
+    if now == quote:
+        return {"start": s2, "end": e2, "state": "attached"}
+    if guessed and ops and quote:
+        # A change nobody described (the file, edited on disk) is worked out
+        # by comparing, which cannot tell two equal runs of words apart: the
+        # note's exact words within the size of the change around its
+        # carried place are still its own place.
+        reach = min(400, _churn(ops, s, e))
+        lo, hi = max(0, s2 - reach), min(len(text), e2 + reach)
+        hits, at = [], text.find(quote, lo)
+        while 0 <= at and at + len(quote) <= hi:
+            hits.append(at)
+            at = text.find(quote, at + 1)
+        if hits:
+            best = min(hits, key=lambda h: abs(h - s2))
+            return {"start": best, "end": best + len(quote), "state": "attached"}
+    # Most of the passage's own letters gone (a diff may keep a "the" or a
+    # "Paragraph" of a deleted paragraph by aligning it with the next): gone.
+    kept = _survived(ops, s, e) if ops else len(now)
+    if not now.strip() or kept < SURVIVE * max(1, e - s):
+        return {"start": None, "end": None, "state": "detached", "pos": s2}
+    return {"start": s2, "end": e2, "state": "changed"}
 
 
-def relocate(sc: dict, text: str, ops: list | None = None) -> bool:
+def relocate(sc: dict, text: str, ops: list | None = None, guessed: bool = False) -> bool:
     """Find every note's passage in ``text``; ``ops`` is the delta from the
     text they were last found in, when it is known. Returns whether anything
     in the sidecar changed. An attached note's context is refreshed so it
@@ -402,7 +496,7 @@ def relocate(sc: dict, text: str, ops: list | None = None) -> bool:
         if note["state"] == "accepted":
             continue
         before = copy.deepcopy((note.get("anchor"), note.get("found"), note.get("where")))
-        where = locate(note, text, ops)
+        where = locate(note, text, ops, guessed)
         if where["state"] == "attached":
             note["anchor"] = anchors.make(text, where["start"], where["end"])
             note.pop("found", None)

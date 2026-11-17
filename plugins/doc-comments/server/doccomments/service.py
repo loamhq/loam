@@ -98,7 +98,7 @@ class Service:
             sc_mod.record_save(sc, old, doc["text"],
                                self._author_of_outside_edit(doc["text"]), "outside",
                                at_modified=doc.get("modified"))
-            sc_mod.relocate(sc, doc["text"], textdiff.delta(old, doc["text"]))
+            sc_mod.relocate(sc, doc["text"], textdiff.delta(old, doc["text"]), guessed=True)
             dirty = True
         elif any("where" not in t for t in sc["threads"]):
             sc_mod.relocate(sc, doc["text"])
@@ -244,7 +244,7 @@ class Service:
                     # doc's first note puts there, never takes it in.
                     start = textdiff.map_pos(ops, start, after=True)
                     end = max(start, textdiff.map_pos(ops, end, after=False))
-                    sc_mod.relocate(sc, doc2["text"])
+                    sc_mod.relocate(sc, doc2["text"], ops)
                 note = sc_mod.add(sc, doc2["text"], kind, start, end, args.get("text", ""),
                                   who, replacement=args.get("replacement"))
                 if kind == "suggestion" and args.get("supersedes"):
@@ -321,9 +321,18 @@ class Service:
         ops = textdiff.delta(doc["text"], stored["text"])
         sc_mod.record_save(sc, doc["text"], stored["text"], who, "restore", undid=last["id"])
         note = sc_mod.find(sc, tid)
+        # The others are carried through the undo; the suggestion is placed
+        # on the words the undo put back, where its accepted words were.
+        sc_mod.relocate(sc, stored["text"], ops)
+        w = note.get("where") or {}
+        start = textdiff.map_pos(ops, w.get("start") or 0, after=False)
+        quote = note["anchor"]["quote"]
+        if stored["text"][start:start + len(quote)] == quote:
+            note["where"] = {"state": "attached", "start": start, "end": start + len(quote)}
+        else:
+            note["where"] = sc_mod.locate({**note, "where": None}, stored["text"])
         note["state"] = sc_mod.OPEN
         note["closed"] = None
-        sc_mod.relocate(sc, stored["text"], ops)
         self._write_sidecar(sc, sc_rev)
         return self._answer(who, {**doc, **stored}, sc)
 
@@ -359,12 +368,24 @@ class Service:
                 if sc is None:
                     raise NoteError(404, "this doc has no notes")
                 note = sc_mod.find(sc, tid)
+                w = dict(note.get("where") or {})
                 new_text = sc_mod.accept(sc, doc["text"], tid, who)
                 stored = self._write_doc(who, root, path, new_text, doc["revision"])
-                ops = textdiff.delta(doc["text"], stored["text"])
                 sc_mod.record_save(sc, doc["text"], stored["text"], note["author"], "accept",
                                    by=who, note=tid)
-                sc_mod.relocate(sc, stored["text"], ops)
+                # The change is known exactly: the passage replaced.
+                done = sc_mod.find(sc, tid)["where"]
+                exact = [["=", done["start"]], ["-", (w.get("end") or 0) - (w.get("start") or 0)],
+                         ["+", note["replacement"]], ["=", len(doc["text"]) - (w.get("end") or 0)]]
+                exact = [o for o in exact if o[1]]
+                try:
+                    if textdiff.apply(doc["text"], exact) != new_text:
+                        raise ValueError
+                    sc_mod.relocate(sc, new_text, exact)
+                    if stored["text"] != new_text:
+                        sc_mod.relocate(sc, stored["text"], textdiff.delta(new_text, stored["text"]))
+                except ValueError:
+                    sc_mod.relocate(sc, stored["text"], textdiff.delta(doc["text"], stored["text"]), guessed=True)
                 self._write_sidecar(sc, sc_rev)
                 return self._answer(who, {**doc, **stored}, sc)
         return self._with_retry(go)
@@ -416,10 +437,19 @@ class Service:
                     sc_rev = None
                 stored = self._write_doc(who, root, path, merged, doc["revision"])
                 if sc is not None:
-                    ops = textdiff.delta(current, stored["text"])
                     sc_mod.record_save(sc, current, stored["text"], who, "editor",
                                        merged_with=None if doc["revision"] == base_rev else doc["revision"])
-                    sc_mod.relocate(sc, stored["text"], ops)
+                    # Notes are carried through the editor's own record of its
+                    # edit when it sent one and nothing was merged: a diff
+                    # cannot tell which of two equal words was typed.
+                    exact = textdiff.from_changes(current, args.get("changes")) \
+                        if doc["revision"] == base_rev and not id_ops else None
+                    if exact is not None and textdiff.apply(current, exact) == merged:
+                        sc_mod.relocate(sc, merged, exact)
+                        if stored["text"] != merged:
+                            sc_mod.relocate(sc, stored["text"], textdiff.delta(merged, stored["text"]))
+                    else:
+                        sc_mod.relocate(sc, stored["text"], textdiff.delta(current, stored["text"]), guessed=True)
                     to_stored = textdiff.delta(merged, stored["text"])
                     for c in conflicts:
                         s, e = c["start"], c["end"]
@@ -490,7 +520,7 @@ class Service:
                 ops = textdiff.delta(doc["text"], stored["text"])
                 sc_mod.record_save(sc, doc["text"], stored["text"], who, "restore",
                                    restored=save_id)
-                sc_mod.relocate(sc, stored["text"], ops)
+                sc_mod.relocate(sc, stored["text"], ops, guessed=True)
                 self._write_sidecar(sc, sc_rev)
                 return self._answer(who, {**doc, **stored}, sc)
         return self._with_retry(go)

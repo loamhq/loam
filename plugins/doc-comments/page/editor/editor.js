@@ -588,6 +588,14 @@ export function createDocEditor(opts) {
     keepFinalNewline()
     const text = view.state.sliceDoc()
     const body = { base_revision: st.server.revision, base_text: st.server.text, text }
+    // The edit as the editor made it, in the stored text's positions: the
+    // server carries every note through it exactly (a diff of the two texts
+    // cannot tell which of two equal words was typed).
+    if (st.mapBase === ed(st.server.text)) {
+      const changes = []
+      st.sinceBase.iterChanges((fromA, toA, _fb, _tb, ins) => changes.push([st.pm.toServer(fromA), st.pm.toServer(toA), raw(ins.toString())]))
+      body.changes = changes
+    }
     st.saving = true
     renderSaveWord()
     // From here, the editor's changes are counted from what is being sent.

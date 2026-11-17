@@ -416,6 +416,10 @@ def _shift_in(args: dict, front: str) -> dict:
     for k in ("text", "base_text"):
         if isinstance(out.get(k), str) and "base_revision" in out:
             out[k] = front + out[k]
+    if isinstance(out.get("changes"), list):
+        n = len(front)
+        out["changes"] = [[c[0] + n, c[1] + n, c[2]] for c in out["changes"]
+                          if isinstance(c, list) and len(c) == 3 and all(isinstance(x, int) for x in c[:2])]
     return out
 
 
