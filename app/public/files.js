@@ -1538,6 +1538,10 @@ function builtinFileView(files, { close, closeLabel, wide, field, onLink = null,
   if (custom) return files.registry.invoke(custom, 'render', context)
   const f = files.st.file
   if (!f) return null
+  // A plugin that draws Markdown files (a `files.viewer` in its manifest) may
+  // still be starting on the page's first load: hold a quiet, empty place
+  // until it has, rather than flash this preview first (2026-11-16).
+  if (f.view === 'markdown' && !f.error && files.pluginPending?.('files.viewer')) return h('div', { key: 'files-viewer-waiting', class: 'fs-viewer-waiting', 'aria-busy': 'true' })
   const name = nameOf(f.path)
   const htmlPreview = f.view === 'html' && f.mode === 'preview' && !f.metadataLoading && !f.metadataError && !renamingHere(files, f.row, 'title')
   const editable = f.caps.write && !f.error && !f.loading && (f.view === 'markdown' || f.view === 'text' || (f.view === 'html' && f.textLoaded))

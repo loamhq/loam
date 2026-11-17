@@ -17,6 +17,7 @@ import {
   Language, defineLanguageFacet, syntaxTree, markdownParser, GFM,
 } from '../vendor/codemirror.js'
 import { h } from './dom.js'
+import { suggestionShape } from './textdiff.js'
 
 // -- the language ------------------------------------------------------------
 
@@ -147,14 +148,20 @@ class RuleWidget extends WidgetType {
 class EmbedWidget extends WidgetType {
   constructor(target, embed) { super(); this.target = target; this.embed = embed }
   eq(o) { return o.target === this.target }
-  toDOM() {
+  toDOM(view) {
     const wrap = h('span', { class: 'dc-embed' })
     let tries = 0
     const fill = () => {
       let node = null
       try { node = this.embed?.(this.target) } catch { node = null }
       if (node && node.tagName === 'IMG') {
-        wrap.replaceChildren(node.cloneNode(true))
+        const img = node.cloneNode(true)
+        // A picture changes the line's height when it arrives; CodeMirror is
+        // told, so what is placed by its height map (the gutter's marks, the
+        // margin's notes below it) moves with it.
+        img.addEventListener('load', () => view.requestMeasure(), { once: true })
+        wrap.replaceChildren(img)
+        view.requestMeasure()
         return
       }
       wrap.replaceChildren(h('span', { class: 'dc-embed-name', text: `![[${this.target}]]` }))
@@ -468,8 +475,13 @@ function notesDecos(state, notes) {
     if (n.from == null || n.to == null || n.to < n.from || n.to > state.doc.length) continue
     const on = n.focus ? ' on' : n.peek ? ' peek' : ''
     if (n.kind === 'suggestion') {
-      if (n.to > n.from) out.push(Decoration.mark({ class: `dc-sg dc-sg-del${on}`, attributes: { 'data-note': n.id } }).range(n.from, n.to))
-      if (n.replacement) out.push(Decoration.widget({ widget: new InsWidget(n.replacement, n.id, `dc-sg dc-sg-ins${on}`), side: 1 }).range(n.to))
+      // Only what changes is drawn: a typed insertion is its new words alone,
+      // with nothing struck (textdiff.js, suggestionShape).
+      const shape = suggestionShape(state.sliceDoc(n.from, n.to), n.replacement || '')
+      const a = n.from + shape.from, b = n.from + shape.to
+      if (b > a) out.push(Decoration.mark({ class: `dc-sg dc-sg-del${on}`, attributes: { 'data-note': n.id } }).range(a, b))
+      else if (n.to > n.from) out.push(Decoration.mark({ class: `dc-sg dc-sg-at${on}`, attributes: { 'data-note': n.id } }).range(n.from, n.to))
+      if (shape.insert) out.push(Decoration.widget({ widget: new InsWidget(shape.insert, n.id, `dc-sg dc-sg-ins${shape.kind === 'insert' ? ' add' : ''}${on}`), side: 1 }).range(b))
     } else if (n.to > n.from) {
       out.push(Decoration.mark({ class: `dc-pass${on}${n.changed ? ' changed' : ''}`, attributes: { 'data-note': n.id } }).range(n.from, n.to))
     }

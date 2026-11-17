@@ -136,3 +136,24 @@ export function posMap(raw, crlf) {
     identity: false,
   }
 }
+
+// -- how a suggestion is drawn -------------------------------------------------
+//
+// A suggestion names a passage and what it becomes. Typed words are anchored
+// on the word next to them (a passage cannot be empty), so "order." becoming
+// "order. She smiled." is an insertion, and "very good" becoming "good" a
+// deletion. Words the two share at either end are left alone when what is
+// left is only added or only removed: `{from, to, insert}`, offsets in the
+// passage. Anything else is drawn as the whole passage replaced.
+export function suggestionShape(quote, replacement) {
+  const a = tokens(quote), b = tokens(replacement)
+  let p = 0
+  while (p < a.length && p < b.length && a[p] === b[p]) p++
+  let q = 0
+  while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++
+  const from = a.slice(0, p).join('').length
+  const to = quote.length - a.slice(a.length - q).join('').length
+  const insert = b.slice(p, b.length - q).join('')
+  if (from === to || !insert) return { from, to, insert, kind: from === to ? 'insert' : 'delete' }
+  return { from: 0, to: quote.length, insert: replacement, kind: 'replace' }
+}
