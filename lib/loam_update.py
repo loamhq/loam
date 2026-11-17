@@ -138,7 +138,7 @@ STEP_WORDS = {
     "broker": "Restarting the broker when every session is idle",
     "gateway": "Restarting the plugin gateway",
     "deploy": "Regenerating the web front and the app's unit",
-    "app": "Starting the app on the new release",
+    "app": "Starting the app on the release now in place",
     "views": "Refreshing the agents' skill views",
     "undo-move": "Putting the previous release's code back",
     "undo-library": "Putting System/Loam back",
