@@ -467,10 +467,24 @@ Share opens **Shared with**: a row per link with its mode (changed in
 place) and ⋯: Copy invite again (with a new password: the old one is only
 kept hashed; browsers already in stay in), how long browsers remember it,
 and Turn off (at once, with Undo). **Shared Docs** is a root in Files
-(core's `files.root`) listing only docs with a link on; a dot marks a doc
-with words from someone else since the owner last opened it, and opening it
-marks the new notes in the margin. Nothing else in Files or the rail gets a
-dot, and nothing pings anyone.
+(core's `files.root`) listing only docs with a link on. Each doc is core's
+own file row (`entry`, the same code a folder listing draws, so it opens,
+opens beside with Option-click or its side button, and has the same ⋯
+menu), with three additions: the second line says the modes that are open
+and the last activity ("Edit, view · 3m ago", "2 new · …" when there is
+news); the faces of the named links (a group link as a people glyph, "+N"
+past three, each naming who and what on hover or a long press) sit before
+the menu; and a dot on the tile's corner marks a doc with words from
+someone else since the owner last opened it. Opening it marks the new
+notes in the margin. A doc whose last link goes off leaves the list with a
+short fade and slide. Nothing else in Files or the rail gets a dot, and
+nothing pings anyone. **Share settings** (or **Share…** on a doc with no
+link yet) is first in every writable vault Markdown file's ⋯ menu, here
+and in any folder (core's `files.action`, slot `menu`): it opens the same
+share sheet as the doc's Share button without opening the doc, and the
+list redraws as soon as anything changes. The editor is kept per Files
+(the main panel's and the side panel's), so a doc opens beside another
+with its own full editor and notes.
 
 **The visitor's side.** `https://<domain>/s/<token>`: a password page that
 shows the owner's name and the doc's title (the invite already carries
