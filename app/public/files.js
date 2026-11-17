@@ -525,6 +525,14 @@ export function createFiles({
   async function loadFolder(more = false) {
     if (!st.root) return
     const own = pluginRoot()
+    if (!own && st.root.startsWith('@')) {
+      // A plugin's root whose plugin has not registered yet (a cold load of
+      // its address): nothing to ask the host; the plugin draws it when it
+      // arrives.
+      st.listing = { key: `${st.root}:`, rows: [], folder: null, cursor: null, total: null, loading: true, error: '', status: null }
+      schedule()
+      return
+    }
     if (own) {
       st.listing = { key: `${st.root}:`, rows: [], folder: null, cursor: null, total: null, loading: false, error: '', status: null }
       try { await own.load?.() } catch (err) { st.listing.error = err.message }
@@ -1477,6 +1485,8 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
       )
     }
     if (st.roots.loaded && !st.roots.error) body.push(homeShortcuts(files, home, go))
+  } else if (!own && st.root?.startsWith?.('@')) {
+    body.push(h('div', { class: 'fs-quiet', text: 'Loading…' }))
   } else if (own) {
     if (st.listing.error) body.push(errorBox(st.listing.error, st.listing.status, () => files.loadFolder()))
     else body.push(files.registry.invoke(own, 'render', { files, go, wide }))
