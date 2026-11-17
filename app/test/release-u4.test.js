@@ -101,4 +101,8 @@ test('an available release with no System/Loam changes draws no empty file list'
     assert.equal(/System\/Loam this release replaces/.test(words), listed)
     assert.equal(words.includes('SKILL.md'), listed)
   }
+  // The last run's card said "Loam is up to date" under "Loam 0.1.2 is ready".
+  const c = createUpdate({ changed() {}, reload() {}, later() {}, cancel() {}, api: async () => ({ ...data({}), run: { outcome: 'applied', from_version: '0.1.0', to_version: '0.1.1', steps: [] } }) })
+  await c.check()
+  assert.doesNotMatch(text(c.view()), /Loam is up to date/)
 })

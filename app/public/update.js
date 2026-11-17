@@ -1,7 +1,7 @@
 import { h } from './ui.js'
 
 export const updateInProgress = run => ['starting', 'running'].includes(run?.outcome)
-const outcomes = { starting: 'Getting ready…', running: 'Updating Loam…', applied: 'Loam is up to date', 'rolled-back': 'Previous version restored', refused: 'Nothing changed', failed: 'The update couldn’t finish', interrupted: 'The update was interrupted' }
+const outcomes = { starting: 'Getting ready…', running: 'Updating Loam…', applied: 'Update finished', 'rolled-back': 'Previous version restored', refused: 'Nothing changed', failed: 'The update couldn’t finish', interrupted: 'The update was interrupted' }
 const changeKeys = check => ['added', 'changed', 'removed'].filter(key => check?.changes?.[key]?.length)
 
 export function createUpdate({ api, changed, reload = () => location.reload(), later = setTimeout, cancel = clearTimeout }) {
