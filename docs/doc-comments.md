@@ -501,6 +501,17 @@ list redraws as soon as anything changes. The editor is kept per Files
 (the main panel's and the side panel's), so a doc opens beside another
 with its own full editor and notes.
 
+**On a phone** (600 px wide and less) the share sheet is a bottom sheet,
+wherever it opens (the doc's Share button, a ⋯ menu in Shared Docs or any
+folder), and so is Shared with me's add sheet, like the notes' sheet: it
+rises from the foot with a gentle ease and a handle at its top, closes on a
+drag down (from the handle or its title, or from anywhere once it is
+scrolled to its top) or a tap above it, keeps clear of the home bar,
+scrolls inside when it is taller than the screen, and stands on the
+keyboard, with the field being typed in kept in view (`page/sheet.js`;
+the look is `.dc-bs` in `doc-comments.css`). A menu in it that would hang
+past its foot opens upward. A wider screen keeps the centred card.
+
 **The visitor's side.** `https://<domain>/s/<token>`: a password page that
 shows the owner's name and the doc's title (the invite already carries
 both) and nothing of the doc's text; then the doc in the calm editor with a
