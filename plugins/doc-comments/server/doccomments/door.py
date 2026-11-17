@@ -274,7 +274,7 @@ class Door:
     def _static(self, rel):
         if rel.startswith("assets/"):
             base, name = self.assets_dir, rel[len("assets/"):]
-            if name != "doc-comments.css":
+            if name != "doc-comments.css" and not re.fullmatch(r"fonts/[a-z0-9-]+\.woff2", name):
                 return Answer(404, b"not found", "text/plain")
         else:
             base, name = self.page_dir, rel
@@ -283,7 +283,7 @@ class Door:
         f = (base / name).resolve()
         if base.resolve() not in f.parents or not f.is_file():
             return Answer(404, b"not found", "text/plain")
-        ctype = "text/javascript; charset=utf-8" if f.suffix == ".js" else (
+        ctype = "text/javascript; charset=utf-8" if f.suffix == ".js" else "font/woff2" if f.suffix == ".woff2" else (
             mimetypes.guess_type(str(f))[0] or "application/octet-stream")
         return Answer(200, f.read_bytes(), ctype)
 
