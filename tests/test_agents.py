@@ -502,6 +502,16 @@ async def main():
         text, fleet = loam_agents.compose_config(
             "juniper", "# Juniper\n\nNever prune unasked.\n\n## Permission first\n\nmine\n",
             fleet_root)
+        solo = TMP / "solo"
+        (solo / "iris").mkdir(parents=True)
+        (solo / "iris" / "agent.json").write_text(json.dumps({"name": "iris"}))
+        (solo / "iris" / "config.md").write_text(
+            "# Iris — Config\n\nHard rules.\n\n## Where things live\n\n"
+            "Your workspace is `/x/agents/iris/`.\n")
+        solo_text, _ = loam_agents.compose_config("wren", "Wren's own.\n", solo, name="Wren")
+        check("a box with one agent: the next agent's config is its own name, not Iris's",
+              solo_text.startswith("# Wren — Config") and "/x/agents/wren/" in solo_text
+              and "iris" not in solo_text.lower(), solo_text)
         check("the fleet's clauses come first, a minority one is left out",
               fleet == ["Permission first", "Where things live"]
               and "Ask the owner before editing juniper's soul." in text
