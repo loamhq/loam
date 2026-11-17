@@ -94,7 +94,7 @@ export function createToc(opts) {
   // -- desktop: the ticks and their card --
   const ticks = h('button', { class: 'dc-ticks', type: 'button', 'aria-label': 'Contents', 'aria-expanded': 'false', title: 'Contents' })
   const cardList = h('div', { class: 'dc-toclist' })
-  const card = h('div', { class: 'dc-toccard', role: 'group', 'aria-label': 'Contents' }, cardList)
+  const card = h('div', { class: 'dc-toccard' }, cardList)
   const rail = h('nav', { class: 'dc-toc', 'aria-label': 'Contents' }, ticks, card)
   // -- phone: the bar's title, and the sheet's list --
   const docName = h('span', { class: 'dc-secdoc' })

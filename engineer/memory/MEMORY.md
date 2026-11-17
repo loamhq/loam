@@ -844,3 +844,29 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   route `/api/plugins/<id>/files/*` to the tree's `plugins/<id>/` in the
   walk's Playwright context, beside the app (8081), gateway (8933) and door
   (8936) routes.
+## 2026-11-17 — doc comments: a table of contents
+- **Read headings from the syntax tree's top level, not a regex.** The top
+  node's children exclude code, quotes and lists for free; skip anything
+  inside the frontmatter range, which Lezer reads as a setext heading
+  (`page/editor/toc.js`, `headingsOf`).
+- **Loam's compact layout reaches 1024 px.** At 1024×768 the app draws the
+  phone layout (the editor's `setPhone(true)`), so a "phone form" is what a
+  1024 visitor in the app sees; a share page at that width is still desktop.
+- **A stacked pair of labels sizes to the wider one.** Two spans in one grid
+  cell (for a crossfade) made the bar's title as wide as the doc's name with
+  a short section centred in it. Keep the shown words in the flow and fade
+  the other out absolutely over them.
+- **A sheet whose list scrolls into view must scroll the list, not the
+  sheet.** `scrollIntoView` scrolled the whole sheet and took its head away;
+  give the list its own scroller and set its `scrollTop`.
+- **Node's `fetch` drops `Host`** (undici forbids it), so a walk's proxy
+  built on it reaches the app as a cross-origin request: plugin files answer
+  403 "same-origin browser requests only". Use `node:http` with the headers
+  as they came. The tree preview hid this, since it served those files itself.
+- **Dark in a walk without touching the owner's setting:** Loam's theme is
+  its own (`data-theme` on the root, from the owner's saved appearance), not
+  `prefers-color-scheme`. Pin `data-theme` with an init script and a
+  MutationObserver; writing `loam.appearance.sun` would be saved back.
+- **The side panel from a walk:** `loam.panels` in localStorage is cleared
+  on load when a file address is opened; hover the row in the Files list and
+  click its `.row-side-action` instead.
