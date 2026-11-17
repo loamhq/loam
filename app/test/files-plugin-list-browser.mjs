@@ -13,6 +13,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { filesHost } from './files-host.js'
+import { row } from './fixtures/files-contract.js'
 import { threadPage } from './thread-page.js'
 import { fakeBroker, appAgainst, closing } from './harness.js'
 
@@ -20,15 +21,13 @@ const PW = process.env.LOAM_PLAYWRIGHT
 const skip = PW ? false : 'LOAM_PLAYWRIGHT is not set (a Playwright install to drive Chromium)'
 const SHOTS = process.env.FILES_LIST_SHOTS || ''
 
-// A plugin with a list of its own: one row, a file that lives in Notes/.
+// A plugin with a list of its own: one row, a file that lives in Notes/,
+// drawn as core's own file row (`entry`), as Shared Docs draws its rows.
 const PLUGIN = `export function activate(loam) {
-  const H = loam.ui.h
   const root = loam.places.files.root.add({
     id: 'shelf', name: 'Shelf', desc: 'Docs picked by hand',
-    render({ go, files }) {
-      const open = files.st.file && files.st.file.path === 'Notes/plan.md'
-      return H('div', { class: 'card card-group shelf' },
-        H('button', { class: 'shelf-row' + (open ? ' on' : ''), onclick: () => go('vault', 'Notes/plan.md', { isFile: true }) }, 'plan'))
+    render({ entry }) {
+      return loam.ui.h('div', { class: 'card card-group shelf' }, entry(${JSON.stringify(row('vault', 'Notes/plan.md', { size: 2048 }))}))
     },
   })
   return () => root.remove()
@@ -68,16 +67,16 @@ async function page({ width = 1440, height = 900 } = {}) {
 const shot = async (p, name) => { if (SHOTS) await p.screenshot({ path: path.join(SHOTS, `${name}.png`) }) }
 const listTitle = (p) => p.locator('.listcol .fs-title').first().textContent()
 const fileOpen = (p) => p.waitForFunction(() => /The plan/.test(document.querySelector('.pane[data-panel="main"]')?.textContent || ''), null, { timeout: 8000 })
-const listIsShelf = (p) => p.waitForFunction(() => document.querySelector('.listcol .fs-title')?.textContent === 'Shelf' && document.querySelector('.listcol .shelf-row'), null, { timeout: 8000 })
+const listIsShelf = (p) => p.waitForFunction(() => document.querySelector('.listcol .fs-title')?.textContent === 'Shelf' && document.querySelector('.listcol .shelf .setrow'), null, { timeout: 8000 })
 
 test('desktop: opening a file from a plugin\'s list keeps the list; reload, Back and Forward too', { skip }, async () => {
   const p = await page()
   await p.goto(`${app.url}/files/@shelf`)
   await listIsShelf(p)
-  await p.click('.listcol .shelf-row')
+  await p.click('.listcol .shelf .setrow')
   await fileOpen(p)
   assert.equal(await listTitle(p), 'Shelf', 'the list column stays on the plugin\'s list')
-  assert.equal(await p.locator('.listcol .shelf-row.on').count(), 1, 'its row is the open one')
+  assert.equal(await p.locator('.listcol .shelf .setrow.on').count(), 1, 'its row is the open one')
   const url = new URL(p.url())
   assert.equal(url.pathname, '/files/vault/Notes/plan.md')
   assert.equal(url.searchParams.get('list'), '@shelf', 'the address names the list')
@@ -86,7 +85,7 @@ test('desktop: opening a file from a plugin\'s list keeps the list; reload, Back
   await p.reload()
   await fileOpen(p)
   await listIsShelf(p)
-  assert.equal(await p.locator('.listcol .shelf-row.on').count(), 1)
+  assert.equal(await p.locator('.listcol .shelf .setrow.on').count(), 1)
   await shot(p, 'desktop-reload')
 
   await p.goBack()
@@ -96,6 +95,13 @@ test('desktop: opening a file from a plugin\'s list keeps the list; reload, Back
   await fileOpen(p)
   await listIsShelf(p)
   assert.equal(new URL(p.url()).searchParams.get('list'), '@shelf')
+
+  // The row's ⋯ menu goes to the file's own folder, one step away; the file
+  // stays open.
+  await p.click('.listcol .shelf .fs-rowmenu')
+  await p.click('.fs-menu-folder')
+  await p.waitForFunction(() => document.querySelector('.listcol .fs-title')?.textContent === 'Notes', null, { timeout: 8000 })
+  assert.match(await p.locator('.pane[data-panel="main"]').textContent(), /The plan/)
   assert.deepEqual(p.errors, [])
   await p.done()
 })
@@ -112,8 +118,8 @@ test('desktop: a file opened by its own address, without a list, still shows its
 test('phone: back from a file opened from a plugin\'s list is that list, and a reload keeps it', { skip }, async () => {
   const p = await page({ width: 430, height: 900 })
   await p.goto(`${app.url}/files/@shelf`)
-  await p.waitForSelector('.shelf-row')
-  await p.click('.shelf-row')
+  await p.waitForSelector('.shelf .setrow')
+  await p.click('.shelf .setrow')
   await p.waitForFunction(() => /The plan/.test(document.body.textContent))
   assert.equal(new URL(p.url()).searchParams.get('list'), '@shelf')
   await p.reload()
@@ -122,7 +128,7 @@ test('phone: back from a file opened from a plugin\'s list is that list, and a r
   assert.equal((await back.textContent()).trim(), 'Shelf', 'the way back names the list')
   await shot(p, 'phone-open')
   await back.click()
-  await p.waitForSelector('.shelf-row')
+  await p.waitForSelector('.shelf .setrow')
   assert.equal(await p.locator('.fs-title').first().textContent(), 'Shelf')
   assert.deepEqual(p.errors, [])
   await p.done()
