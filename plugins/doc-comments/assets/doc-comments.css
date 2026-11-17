@@ -565,6 +565,7 @@
 .dc-sd-face.more { color: var(--paper-ink-2, #4B4741); font-size: 10px; letter-spacing: -.02em; }
 @media (hover: hover) { .dc-sd-face:hover { transform: translateY(-2px); z-index: 1; } }
 .setrow.on .dc-sd-face { box-shadow: 0 0 0 2px var(--latte-control-selected, #E3D6C6); }
+.dc-sd-entry .fs-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dc-sd-new { color: var(--signal-crema, #B4733A); font-weight: 650; }
 .setrow.on .dc-sd-new { color: inherit; }
 .dc-sd-dot { position: absolute; top: -2px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--signal-crema, #B4733A); box-shadow: 0 0 0 2px var(--paper-card, #E9E4DC); transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s; animation: dc-sd-dot-in .4s cubic-bezier(.2,.8,.2,1.4); }

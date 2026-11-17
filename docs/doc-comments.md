@@ -480,9 +480,10 @@ and Turn off (at once, with Undo). **Shared Docs** is a root in Files
 (core's `files.root`) listing only docs with a link on. Each doc is core's
 own file row (`entry`, the same code a folder listing draws, so it opens,
 opens beside with Option-click or its side button, and has the same ⋯
-menu), with three additions: the second line says the modes that are open
-and the last activity ("Edit, view · 3m ago", "2 new · …" when there is
-news); the faces of the named links (a group link as a people glyph, "+N"
+menu), with three additions: the second line, one line always, says the mode when
+there is one ("Edit · 3m ago"), the number of links when there are
+several ("3 links · 3m ago"; each face names its own), and "2 new · …"
+first when there is news; the faces of the named links (a group link as a people glyph, "+N"
 past three, each naming who and what on hover or a long press) sit before
 the menu; and a dot on the tile's corner marks a doc with words from
 someone else since the owner last opened it. Opening it marks the new

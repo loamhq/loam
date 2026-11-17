@@ -363,7 +363,9 @@ export function activate(loam) {
     const H = loam.ui.h
     const on = (d.links || []).filter(l => l.on)
     const modes = MODE_ORDER.filter(m => on.some(l => l.mode === m)).map(m => MODE_WORD[m])
-    const modeText = modes.length ? modes[0] + (modes.length > 1 ? `, ${modes.slice(1).join(', ').toLowerCase()}` : '') : ''
+    // One mode is said by name; several are the faces' to tell (each says
+    // its own on hover or a long press), so the line stays one line.
+    const modeText = modes.length === 1 ? modes[0] : on.length > 1 ? `${on.length} links` : ''
     const ago = typeof files?.ago === 'function' ? files.ago(d.last) : when(d.last)
     const fresh = d.new > 0 && !shared.seen.has(d.id)
     const meta = [
