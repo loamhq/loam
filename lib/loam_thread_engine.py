@@ -355,6 +355,14 @@ class Reply:
         self.segments: list[str] = []
         self.events: list[dict] = []
         self.draft = ""
+        # The reply's ``↩ m12`` as its stream decided it (2026-11-17,
+        # ``ThreadEngine.shown_draft``): None until the opening words are
+        # known, "" for none, else the id; ``mark_run`` while the draft is
+        # still the run of words that opened with it; ``shown``, the draft
+        # last sent.
+        self.mark: str | None = None
+        self.mark_run = False
+        self.shown = ""
         # Background tasks this harness turn launched (2026-11-10): ids, so
         # the reply's message id can be written onto them when it is posted.
         self.launched: list[str] = []
@@ -420,6 +428,8 @@ class Reply:
         else:
             self.ordered.append({"did": [{"label": label}]})
         self.draft = ""
+        self.shown = ""
+        self.mark_run = False
 
     def text(self) -> str:
         return "\n\n".join(s.strip() for s in self.segments if s.strip()).strip()
@@ -1367,9 +1377,11 @@ class ThreadEngine:
                     if inner.get("type") == "content_block_delta" and \
                             delta.get("type") == "text_delta":
                         reply.draft += delta.get("text") or ""
-                        self.publish(turn.thread_id, {
-                            "type": "message.delta", "persona": turn.persona,
-                            "text": delta.get("text") or "", "draft": reply.draft})
+                        shown = self.shown_draft(turn, reply)
+                        if shown is not None:
+                            self.publish(turn.thread_id, {
+                                "type": "message.delta", "persona": turn.persona,
+                                **shown})
                 elif kind == "assistant":
                     heard = True
                     empty_until = None
@@ -1831,6 +1843,38 @@ class ThreadEngine:
         if mentions:
             self.agent_mentions(turn, threads.read(turn.thread_id)[0], text)
         return msg
+
+    def shown_draft(self, turn: Turn, reply: "Reply") -> dict | None:
+        """What a ``message.delta`` carries (2026-11-17): the draft as the
+        reader sees it. A reply's opening that may still be a ``↩ m12``
+        marker is held back (None: nothing is sent); a whole marker naming a
+        message of this thread comes off and its id rides along as
+        ``reply_to``, so the page quotes the message while the words come in
+        and the id is never on screen. Before, the draft went out raw and
+        the marker showed until the message was posted. ``text`` is what
+        the shown draft added since the last delta, as before."""
+        if reply.mark is None:
+            # The opening may be words already said: a reply whose first
+            # words were the marker alone, then steps.
+            said = next((seg["text"] for seg in reply.ordered if "text" in seg), None)
+            rest, target = (threads.take_reply_mark(said) if said is not None
+                            else threads.streamed_opening(reply.draft))
+            if rest is None:
+                return None
+            if target and threads.find(threads.read(turn.thread_id)[1], target) is None:
+                target = None
+            reply.mark, reply.mark_run = target or "", bool(target)
+        draft = reply.draft
+        if reply.mark_run:
+            rest, target = threads.take_reply_mark(draft)
+            if target == reply.mark:
+                draft = rest
+        before, reply.shown = reply.shown, draft
+        out = {"text": draft[len(before):] if draft.startswith(before) else draft,
+               "draft": draft}
+        if reply.mark:
+            out["reply_to"] = reply.mark
+        return out
 
     def reply_mark(self, turn: Turn, text: str, extra: dict) -> tuple[str, dict]:
         """A persona's reply that opens with ``↩ m12`` (2026-11-11) is a reply

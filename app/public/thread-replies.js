@@ -1,9 +1,22 @@
 import { messageSegments } from './thread-record.js'
 
 export const canReply = (message) => Boolean(message?.id && message.kind !== 'system' && !message.streaming && message.id !== 'pending-send')
+// A quote is a glimpse of the words, read as words: its first line with the
+// markdown's marks taken off (2026-11-17: `**Yes to rough edges.**` showed
+// its asterisks). Nothing else of the line changes.
+export function plainLine(line) {
+  return line
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/, '')
+    .replace(/!?\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/!?\[\[([^\]]+)\]\]/g, '$1')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, '$2').replace(/(^|[^\w*])([*_])(?=\S)(.+?)(?<=\S)\2(?![\w*])/g, '$1$3')
+    .replace(/~~(?=\S)(.+?)(?<=\S)~~/g, '$1').replace(/`([^`]+)`/g, '$1')
+    .trim()
+}
 export function quoteLine(message) {
   const text = messageSegments(message).find((part) => part.text?.trim())?.text ?? ''
-  return text.split(/\r?\n/).find((line) => line.trim())?.trim() || message.attachments?.map((file) => file.name).join(', ') || 'Message'
+  const line = text.split(/\r?\n/).find((line) => line.trim() && !/^\s*(```|~~~|[-*_]{3,}\s*$)/.test(line))
+  return (line && plainLine(line)) || message.attachments?.map((file) => file.name).join(', ') || 'Message'
 }
 
 // Resolve quote identities without expanding the reading window or marking an
