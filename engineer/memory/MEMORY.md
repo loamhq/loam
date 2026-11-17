@@ -375,3 +375,41 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Sun transition ids are fixed host-side** (`loam_appearance.TRANSITIONS`,
   like the size's range), not read from the handoff like the modes are; the
   parity test holds them equal to the handoff's enum.
+
+## 2026-11-16 — the sign-in page, in front of Authelia
+
+- **Authelia's theming cannot make it Loam's.** 4.39's `server.asset_path`
+  overrides the favicon, `logo.png` and the locale files only (read in
+  `internal/server/handlers.go`); colours, type and layout are its fixed
+  MUI themes. So the portal's routes are Loam's own page (`deploy/login/`),
+  calling Authelia's API on the same origin, with Caddy routing the rest to
+  Authelia. Same origin means the same WebAuthn RP ID: existing passkeys
+  keep working (`GET /api/firstfactor/passkey` answers `rpId` = the portal
+  host before and after).
+- **`GET /api/user/info` is stale; `POST` refreshes it.** After a passkey
+  is added, the GET still says `has_webauthn: false`; Authelia's own page
+  POSTs. Elevation (`/api/user/session/elevation`) offers
+  `can_skip_second_factor` only when the user has a second factor; a
+  passkey sign-in is one factor with `factor_knowledge: false`, so the
+  password (`/api/secondfactor/password`) is what lifts it to two.
+- **A new top-level folder is not in a landing's test view**
+  (`platform_argv` binds only entries the canonical checkout already has):
+  tests that read it fail as "No such file" on the landing and pass in the
+  tree. Put new files under an existing top-level folder.
+- **The push gate crashed on any binary in a commit** (it diffs with
+  `--text`; a woff2 is not UTF-8). `git()` now decodes with
+  `errors="replace"`, but the landing runs the canonical checkout's copy, so
+  the fix only helps once landed: a branch adding a binary before that had
+  to drop it (the fonts were already in `app/public/fonts/`).
+- **Another job's unlanded generator change can be live.** On 11-16 the
+  doc-comments step-2 job had rendered its share door into the live
+  Caddyfile from its own tree; a `gen-deploy` from `main` would have torn it
+  out. Read `gen-deploy --dry-run` for lines that are not yours before
+  applying, and apply only your blocks if there are any.
+- **A proof user on the owner's box** (to sign in behind the real login):
+  append it to the users file inside the volume (Authelia's watcher reloads
+  it), without `admins` so the code relay stays the owner's, read its
+  one-time code from the notifier as root, then `authelia storage user
+  webauthn delete <user> --all` and remove its lines.
+- **`pgrep -f` in an until-loop matches the loop itself**; wait on a file
+  or a PID instead.
