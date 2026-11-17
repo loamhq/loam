@@ -75,8 +75,8 @@ adds and does not rewrite (below, "What step 2 adds").
   timer while it is held; after a double-click it waits 300 ms, in case a
   third click makes it the paragraph. After Shift+arrows, Select All or a
   selection made by code, it comes once the selection has been still for
-  350 ms. It comes in one motion (180 ms, fading in while it rises 5 px away
-  from the words; a plain 140 ms fade with reduced motion), above the
+  350 ms. It comes in one motion (200 ms, ease-out, fading in while it rises
+  6 px away from the words; a plain 140 ms fade with reduced motion), above the
   selection, below it when there is no room, and on the other side when it
   would sit under the pointer where the button came up; a selection taller
   than the screen is placed by the part in sight. It leaves in an 80 ms fade

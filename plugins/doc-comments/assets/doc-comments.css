@@ -277,11 +277,11 @@
    rises a few pixels away from the words (down, when it sits below them).
    It leaves in a blink, already out of the pointer's way. */
 .dc-selbar.on { display: flex; }
-.dc-selbar.in { animation: dc-selin .18s var(--dc-ease) both; }
+.dc-selbar.in { animation: dc-selin .2s cubic-bezier(.33, 1, .68, 1) both; }
 .dc-selbar.in.blw { animation-name: dc-selin-b; }
 .dc-selbar.out { display: flex; pointer-events: none; animation: dc-selout .08s ease-in both; }
-@keyframes dc-selin { from { opacity: 0; transform: translateY(5px) scale(.985); } to { opacity: 1; transform: none; } }
-@keyframes dc-selin-b { from { opacity: 0; transform: translateY(-5px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes dc-selin { from { opacity: 0; transform: translateY(6px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes dc-selin-b { from { opacity: 0; transform: translateY(-6px) scale(.985); } to { opacity: 1; transform: none; } }
 @keyframes dc-selout { from { opacity: 1; } to { opacity: 0; } }
 .dc-selbar button { height: 30px; padding: 0 11px 0 9px !important; font-size: 12.5px !important; display: inline-flex !important; align-items: center; gap: 6px; border-radius: 999px; position: relative; transition: background .12s; white-space: nowrap; }
 .dc-selbar button svg { color: var(--dc-ink3); }
