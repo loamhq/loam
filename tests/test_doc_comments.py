@@ -113,6 +113,12 @@ def test_suites():
     check("where a note sits after the text changes (carried, seeded)", (r.returncode, tail[0]), (0, "OK"))
     if r.returncode:
         print(r.stdout[-3000:], r.stderr[-3000:])
+    r = subprocess.run([sys.executable, str(PLUGIN / "test" / "test_look.py")],
+                       capture_output=True, text=True, env=env, timeout=120)
+    tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
+    check("the plugin wears core's tokens; the share page carries Latte's exactly", (r.returncode, tail[0]), (0, "OK"))
+    if r.returncode:
+        print(r.stdout[-3000:], r.stderr[-3000:])
     r = subprocess.run([node, "--test", str(PLUGIN / "test" / "page.test.mjs")],
                        capture_output=True, text=True, timeout=300)
     check("the page module registers nothing without files.own, and cleans up", r.returncode, 0)

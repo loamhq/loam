@@ -221,7 +221,7 @@ export function createWithMe({ base, root, schedule, toast, files, side, agentNa
       field('Password', pwIn, 'password'),
       nameIn ? field('Your name there', nameIn, 'name', 'This link isn’t for one person, so they’ll see you by this name.') : null,
       s.error ? h('p', { class: 'dc-wm-err', role: 'alert' }, icon(s.code === 'gone' ? 'x' : 'changed', 15), h('span', { text: s.error })) : null,
-      h('button', { class: 'dc-sh-go dc-wm-go', type: 'submit', disabled: s.busy ? true : null },
+      h('button', { class: 'dc-sh-go dc-wm-go primary', type: 'submit', disabled: s.busy ? true : null },
         s.busy ? h('span', { class: 'dc-wm-spin', 'aria-hidden': 'true' }) : icon('plus', 15),
         s.busy ? 'Checking with their Loam…' : 'Add'),
       h('p', { class: 'dc-sh-cap', text: 'The password is kept by your Loam, never shown again, and your agents can use it too.' }))))

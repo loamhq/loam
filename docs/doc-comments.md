@@ -731,6 +731,83 @@ default) or **as one**, "<Owner>'s agent".
   names; `test/test_withme.py` (`AgentsAppearAsOne`) greps every request the
   other Loam receives.
 
+## How it looks: Loam's design system (2026-11-17)
+
+The plugin was built in a day by several jobs, and its surfaces drifted from
+the rest of Loam: espresso on buttons that were not the main action, the
+theme's signal colour as text and focus rings, hand-picked hexes for faces,
+fixed corners that ignored Foundry's tighter ones, a share page carrying a
+stale copy of Latte. It now follows core's design system, and a test keeps
+it there.
+
+**Where the system is.** Core's tokens are `app/public/tokens.css` (paper
+and latte families, each with its own inks, type, space, radius, motion,
+shadows, the persona palette); each theme overrides only differences
+(`app/public/themes/<id>/theme.css`; Foundry also tightens the radius
+tokens). The action tiers are `app/public/button-tiers.css`; content marks,
+fields and tooltips are in `app/public/style.css`; the menu and dialog shell
+is `app/public/menu-surface.css`. The contract's own checkers are
+`app/tools/colour-families.mjs` (no paper ink on a latte ground or the
+reverse, 4.5:1 text, 3:1 glyphs) and `app/test/control-style-guard.mjs`
+(every control's colours, borders and face are tokens). How themes are made
+and chosen: `app/docs/appearance.md`.
+
+**What the plugin follows.**
+
+- **Three tiers.** Newspaper (no fill, paper ink, `--paper-hover` under a
+  pointer) is the default; foam (`.secondary`) is a secondary action: Share
+  in the editor's bar, Keep the old key on the share page; espresso
+  (`.primary`, in the theme's display face as core's primaries are) is the
+  one action that finishes what is being done: Comment, Suggest, Save,
+  Accept, Attach, Restore this version, the reply's send, apply a link, New
+  invite, Copy invite, Add, Open, Try again, Back to Shared Docs. The
+  classes are core's, so core's own rules also step them down while a menu
+  or dialog is open or the other panel is the one in use; the plugin adds
+  the same for its own sheets, which sit outside core's `#app`. Disabled
+  actions are `--paper-hover` with `--paper-ink-3`, as in core.
+- **Selection is information, not a tier**: a chosen menu item's check, the
+  active format in the selection popup, a switch that is on, a ticked box
+  are all in paper ink (core's switch and checked task).
+- **The signal (`--signal-crema`) marks; it is not a button or a text ink.**
+  A passage with a note, a suggestion's underline, a new-note dot, an
+  arrival's glow. As words (a suggestion's new words, "3 new", a callout's
+  kind) it is `color-mix(in oklab, signal 72%, paper ink)`, which keeps the
+  theme's hue and reads at 4.5:1 in every theme; Latte's crema alone is
+  3.6:1 on its paper.
+- **Fields** are core's: pane paper, the strong rule, a pill, and the
+  signal's 2px ring on focus. Buttons and selects take core's paper-ink
+  ring. Text selection is `--paper-highlight`; links are underlined in
+  `--paper-mark-rule`, as core's `.md a`.
+- **Surfaces.** Menus, the selection popup and sheets are core's anchored
+  surface: `--paper-page`, `--shadow-popover`, the radius tokens; the toast
+  is core's notice (`.listnotice`: raised paper, `--shadow-float`, the
+  danger surface with inverse ink when it reports a failure); tooltips are
+  core's (paper ink, page words, `--radius-sm`). Every corner is a radius
+  token, so Foundry's 4/8/10/14 px reach the plugin too.
+- **Faces.** The owner is espresso, as core draws the owner everywhere; a
+  person is one of core's persona hues with white initials (`tone()` in
+  `page/editor/dom.js`), an agent is core's own face (`loam.ui.blob`). Show
+  authors tints each author's words with a persona hue's tint, never a
+  status colour.
+- **The share page** stands outside the app, so `page/share/share.css`
+  carries Latte's tokens, light and dark, copied exactly; everything else
+  reads them as the app does.
+
+**Kept in place.** `test/test_look.py` fails on a colour in the plugin's
+CSS that is not a token (a literal may only be a `var()` fallback), a pill
+corner that is not `--radius-pill`, a token name core does not define, a
+share-page token that is not Latte's, or a face colour that is not a persona
+hue. `test/look-browser.mjs` drives Loam's real page against the app's
+synthetic host and the plugin's real server on seeded docs, photographs
+every surface in every installed theme, light and dark, at 1440 and 430, and
+with `AUDIT=1` runs core's two checkers over each frame (below).
+
+**Where the system has no answer yet** (each a decision, with what was
+done): a general tooltip (core has only the thread's listener label; the
+plugin uses its paint); which theme the share page wears (Latte, the
+default, whatever the owner's theme); the type scale (core itself uses many
+literal sizes, so the plugin's text sizes were left as they were).
+
 ## Working on it
 
 - `python3 plugins/doc-comments/test/test_model.py`, `node --test
@@ -750,3 +827,11 @@ default) or **as one**, "<Owner>'s agent".
   shows what is stored.
 - `plugins/doc-comments/tools/vendor/build.sh` rebuilds the CodeMirror
   module from the pinned versions.
+- The look of every surface: `OUT=<dir> LOAM_PLAYWRIGHT=… node
+  plugins/doc-comments/test/look-browser.mjs [surface,…]` writes
+  `<surface>/<theme>-<mode>-<width>.jpg` and a report (with `AUDIT=1`, core's
+  colour-family and control checks per frame). The whole set is 18 surfaces
+  in 7 themes, light and dark, at two widths, about 450 frames in some 15
+  minutes. `TREE=<an older checkout>` photographs that tree's app and plugin
+  for a before. On a shared box run it under a cap (`systemd-run --user
+  --scope -p MemoryMax=6G -p MemorySwapMax=0 node …`).

@@ -7,7 +7,7 @@
 // registration goes and Files draws Markdown in its own editor again.
 
 import { createDocEditor } from './editor/editor.js'
-import { tone, icon as glyph } from './editor/dom.js'
+import { tone, TONE_INK, icon as glyph } from './editor/dom.js'
 import { docApi } from './api.js'
 import { createSharing } from './sharing.js'
 import { createWithMe, withmeId, WITHME_PREFIX } from './withme.js'
@@ -68,7 +68,7 @@ export function activate(loam) {
         // their own tone from their name, the one the share page gives them,
         // so two visitors are told apart at a glance.
         const own = author?.kind === 'owner'
-        return loam.ui.blob({ initial: (author?.name || '?').charAt(0).toUpperCase(), color: own ? 'var(--latte-espresso)' : tone(author?.name || '?'), ink: own ? 'var(--latte-espresso-ink)' : '#fff', shape: '50%' }, { size, font })
+        return loam.ui.blob({ initial: (author?.name || '?').charAt(0).toUpperCase(), color: own ? 'var(--latte-espresso)' : tone(author?.name || '?'), ink: own ? 'var(--latte-espresso-ink)' : TONE_INK, shape: '50%' }, { size, font })
       }
     } catch { /* fall through to the editor's own initial */ }
     return null
@@ -229,11 +229,13 @@ export function activate(loam) {
     const d = withme.byId(entry.withme)
     const title = d?.title || 'This doc'
     const remove = d ? H('button', { type: 'button', onclick: async () => { await withme.remove(d); (c.options.go || host.goFiles)?.(ROOT_ID, '') } }, 'Remove it') : null
-    const back = H('button', { type: 'button', class: remove ? '' : 'go', onclick: () => (c.options.go || host.goFiles)?.(ROOT_ID, '') }, 'Back to Shared Docs')
+    // The way back is the state's main action (core's primary), unless the
+    // state offers Try again; Remove it is Newspaper beside it.
+    const back = H('button', { type: 'button', class: entry.status === 'down' ? '' : 'go primary', onclick: () => (c.options.go || host.goFiles)?.(ROOT_ID, '') }, 'Back to Shared Docs')
     const say = {
       gone: ['No longer shared', `${d?.owner || 'Its owner'} turned off the link to “${title}”, or it expired. Nothing of it is kept here.`, [remove, back]],
       missing: ['Not in Shared with me', 'This doc was removed from Shared with me on this Loam.', [back]],
-      down: ['Couldn’t open it just now', entry.error?.message || 'Its Loam didn’t answer.', [H('button', { type: 'button', class: 'go', onclick: () => entry.retry?.() }, 'Try again'), back]],
+      down: ['Couldn’t open it just now', entry.error?.message || 'Its Loam didn’t answer.', [H('button', { type: 'button', class: 'go primary', onclick: () => entry.retry?.() }, 'Try again'), back]],
     }[entry.status] || ['', '', []]
     return H('div', { key: `doc-comments:state:${entry.key}:${entry.status}`, class: 'dc-host dc-wm-host' },
       H('div', { class: 'dc-wm-state', role: 'status' },

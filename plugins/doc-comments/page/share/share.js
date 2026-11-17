@@ -6,7 +6,7 @@
 
 import { createDocEditor } from '../editor/editor.js'
 import { docApi } from '../api.js'
-import { h, icon, put, tone } from '../editor/dom.js'
+import { h, icon, put, tone, TONE_INK } from '../editor/dom.js'
 
 const boot = JSON.parse(document.getElementById('dc-boot').textContent)
 const P = boot.prefix
@@ -32,7 +32,7 @@ function made() {
 }
 
 function face(name, size = 22) {
-  return h('span', { class: 'dc-face', style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.46)}px`, background: tone(name), color: '#fff' }, text: (name || '?').charAt(0).toUpperCase() })
+  return h('span', { class: 'dc-face', style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.46)}px`, background: tone(name), color: TONE_INK }, text: (name || '?').charAt(0).toUpperCase() })
 }
 
 // -- the password ----------------------------------------------------------------

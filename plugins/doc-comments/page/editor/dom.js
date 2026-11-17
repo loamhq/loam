@@ -128,9 +128,14 @@ export function stamp(iso) {
 }
 
 // A person's face has a tone of its own, from their name, the same
-// everywhere (the owner's lists, the invite card, the visitor's page): calm
-// colours that read with white initials in light and dark.
-const TONES = ['#59749A', '#7A6A9E', '#5E8A6E', '#A0704E', '#8A5A6E', '#4F7F86', '#86753F']
+// everywhere (the owner's lists, the invite card, the visitor's page): one of
+// core's persona hues (app/public/tokens.css) that carry white initials
+// (`--text-on-avatar`), so faces are drawn from the same palette as the
+// agents' in every theme. The fallbacks are the same hues, for a page
+// without core's tokens.
+const TONES = [['blue', '#5C6E8A'], ['plum', '#7A5A72'], ['teal', '#4E7A72'], ['slate', '#6E7A52'], ['rose', '#9C4F44'], ['olive', '#4F6478'], ['mauve', '#8A5E80'], ['taupe', '#8C6A4E']]
+  .map(([hue, hex]) => `var(--persona-${hue}, ${hex})`)
+export const TONE_INK = 'var(--text-on-avatar, #FFFFFF)'
 export function tone(name) {
   let n = 0
   for (const ch of String(name || '').trim().toLowerCase()) n = (n * 31 + ch.codePointAt(0)) >>> 0

@@ -16,7 +16,7 @@ import {
   EditorState, EditorView, EditorSelection, ChangeSet, Compartment, Transaction, Annotation, Prec, ViewPlugin,
   keymap, history, historyKeymap, defaultKeymap, drawSelection, indentMore, indentLess, syntaxTree,
 } from '../vendor/codemirror.js'
-import { h, icon, rel, stamp, put, tone } from './dom.js'
+import { h, icon, rel, stamp, put, tone, TONE_INK } from './dom.js'
 import { changes as diffChanges, posMap, editorText, suggestionShape, tokens as tokenize } from './textdiff.js'
 import {
   markdownLanguage, inline, blocks, notesField, setNotes, authorsField, setAuthors,
@@ -44,7 +44,7 @@ export function lineSeparatorOf(text) {
 
 function defaultFace(author, size) {
   const name = author?.name || '?'
-  return h('span', { class: 'dc-face', style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.48)}px`, background: tone(name), color: '#fff' }, text: name.charAt(0).toUpperCase() })
+  return h('span', { class: 'dc-face', style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.48)}px`, background: tone(name), color: TONE_INK }, text: name.charAt(0).toUpperCase() })
 }
 
 // Where the doc's own words begin: after its frontmatter, so the caret does
@@ -1397,7 +1397,7 @@ export function createDocEditor(opts) {
     })
     selbar.classList.remove('fmt')
     selbar.classList.add('lnk')
-    put(selbar, h('span', { class: 'dc-lk' }, icon('link', 15)), input, h('button', { class: 'dc-fb ok', type: 'button', 'aria-label': 'Apply link', onclick: done }, icon('check', 14)))
+    put(selbar, h('span', { class: 'dc-lk' }, icon('link', 15)), input, h('button', { class: 'dc-fb ok primary', type: 'button', 'aria-label': 'Apply link', onclick: done }, icon('check', 14)))
     showSelbar(placeAbove(selbar, l.from, l.to))
     setTimeout(() => input.focus(), 0)
   }
@@ -1654,7 +1654,7 @@ export function createDocEditor(opts) {
       h('div', { class: 'dc-fld' }, t),
       h('div', { class: 'dc-dbtns' },
         h('button', { class: 'dc-sm ghost', type: 'button', onclick: (e) => { e.stopPropagation(); done(false) } }, 'Cancel'),
-        h('button', { class: 'dc-sm ok', type: 'button', onclick: (e) => { e.stopPropagation(); done(true) } }, 'Save')))
+        h('button', { class: 'dc-sm ok primary', type: 'button', onclick: (e) => { e.stopPropagation(); done(true) } }, 'Save')))
   }
 
   // Removing one's own words keeps an Undo: the reply is posted again.
@@ -1727,7 +1727,7 @@ export function createDocEditor(opts) {
   function replyField(n) {
     const input = h('input', { class: 'dc-input', type: 'text', placeholder: 'Reply', 'aria-label': 'Reply' })
     const wrap = h('div', { class: 'dc-cmp' })
-    const send = h('button', { class: 'dc-send', type: 'button', 'aria-label': 'Send reply', onclick: async () => { const t = input.value; input.value = ''; wrap.classList.remove('has'); await reply(n, t) } }, icon('send', 15))
+    const send = h('button', { class: 'dc-send primary', type: 'button', 'aria-label': 'Send reply', onclick: async () => { const t = input.value; input.value = ''; wrap.classList.remove('has'); await reply(n, t) } }, icon('send', 15))
     input.addEventListener('input', () => wrap.classList.toggle('has', Boolean(input.value.trim())))
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send.click() }
@@ -1766,7 +1766,7 @@ export function createDocEditor(opts) {
     if (n.kind === 'suggestion' && st.can.accept) {
       out.push(h('div', { class: 'dc-dbtns' },
         h('button', { class: 'dc-sm', type: 'button', onclick: (e) => { e.stopPropagation(); reject(n) } }, 'Reject'),
-        h('button', { class: 'dc-sm ok', type: 'button', disabled: n.where?.state !== 'attached' ? true : null, title: n.where?.state === 'changed' ? 'The words changed since this was suggested' : null, onclick: (e) => { e.stopPropagation(); accept(n) } }, 'Accept')))
+        h('button', { class: 'dc-sm ok primary', type: 'button', disabled: n.where?.state !== 'attached' ? true : null, title: n.where?.state === 'changed' ? 'The words changed since this was suggested' : null, onclick: (e) => { e.stopPropagation(); accept(n) } }, 'Accept')))
     }
     if (st.can.comment) out.push(replyField(n))
     return out
@@ -1808,7 +1808,7 @@ export function createDocEditor(opts) {
       input.addEventListener('keydown', keyCompose)
       kids.push(h('div', { class: 'dc-fld big' }, input))
     }
-    const btn = h('button', { class: 'dc-sm ok', type: 'button', disabled: c.busy || (c.kind === 'comment' && !c.text.trim()) ? true : null, onclick: submitCompose }, c.kind === 'suggestion' ? 'Suggest' : 'Comment')
+    const btn = h('button', { class: 'dc-sm ok primary', type: 'button', disabled: c.busy || (c.kind === 'comment' && !c.text.trim()) ? true : null, onclick: submitCompose }, c.kind === 'suggestion' ? 'Suggest' : 'Comment')
     kids.push(h('div', { class: 'dc-dbtns' }, h('button', { class: 'dc-sm ghost', type: 'button', onclick: cancelCompose }, 'Cancel'), btn))
     put(el, ...kids)
     return el
@@ -2268,7 +2268,7 @@ export function createDocEditor(opts) {
     return h('div', { class: 'dc-preview' },
       h('div', { class: 'dc-preview-h', text: 'As it was then, marked where it differs from now' }),
       ...body,
-      st.can.restore && p.text != null ? h('div', { class: 'dc-dbtns' }, h('button', { class: 'dc-sm ok', type: 'button', onclick: () => restore(s, head_) }, 'Restore this version')) : null)
+      st.can.restore && p.text != null ? h('div', { class: 'dc-dbtns' }, h('button', { class: 'dc-sm ok primary', type: 'button', onclick: () => restore(s, head_) }, 'Restore this version')) : null)
   }
 
   // Groups of lines: unchanged, or changed between now and then.
@@ -2397,7 +2397,7 @@ export function createDocEditor(opts) {
         h('span', { class: 'dc-kl' }, icon('link', 17)),
         input,
         h('button', { class: 'dc-kx', type: 'button', 'aria-label': 'Cancel', onclick: () => done(false) }, icon('x', 16)),
-        h('button', { class: 'dc-kok', type: 'button', 'aria-label': 'Apply link', onclick: () => done(true) }, icon('check', 16)))
+        h('button', { class: 'dc-kok primary', type: 'button', 'aria-label': 'Apply link', onclick: () => done(true) }, icon('check', 16)))
       if (document.activeElement !== input) setTimeout(() => input.focus(), 0)
       return
     }
@@ -2532,7 +2532,7 @@ export function createDocEditor(opts) {
     banner.classList.toggle('on', Boolean(st.reattach))
     if (st.reattach) {
       put(banner, icon('reattach', 15), h('span', { text: 'Select the words this note is about, then choose Attach.' }),
-        h('button', { class: 'dc-sm ok', type: 'button', onclick: finishReattach }, 'Attach'), h('button', { class: 'dc-sm ghost', type: 'button', onclick: () => { st.reattach = null; render() } }, 'Cancel'))
+        h('button', { class: 'dc-sm ok primary', type: 'button', onclick: finishReattach }, 'Attach'), h('button', { class: 'dc-sm ghost', type: 'button', onclick: () => { st.reattach = null; render() } }, 'Cancel'))
     }
     renderMargin()
     renderDrawer()

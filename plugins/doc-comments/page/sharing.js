@@ -57,7 +57,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
 
   function button() {
     const on = live()
-    return h('button', { class: `dc-sharebtn${on.length ? ' has' : ''}`, type: 'button', onclick: () => open() },
+    return h('button', { class: `dc-sharebtn secondary${on.length ? ' has' : ''}`, type: 'button', onclick: () => open() },
       on.length ? faces(on) : null, h('span', { text: 'Share' }))
   }
 
@@ -154,7 +154,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
       : h('button', { class: 'dc-tk-pw', type: 'button', title: 'Change the password', onclick: () => { c.editing = true; draw(); setTimeout(() => scrim?.querySelector('.dc-tk-pwin')?.select(), 0) } }, c.password)
     const daysSel = h('select', { class: 'dc-tk-days', 'aria-label': 'Remembered for' }, DAYS.map(d => h('option', { value: String(d), selected: d === c.days ? true : null }, d === 1 ? '1 day' : `${d} days`)))
     daysSel.addEventListener('change', () => { c.days = Number(daysSel.value) })
-    const go = h('button', { class: 'dc-gate-go dc-sh-go', type: 'button', disabled: c.busy ? true : null, onclick: create }, icon('file', 15), c.busy ? 'Making the link…' : 'Copy invite')
+    const go = h('button', { class: 'dc-gate-go dc-sh-go primary', type: 'button', disabled: c.busy ? true : null, onclick: create }, icon('file', 15), c.busy ? 'Making the link…' : 'Copy invite')
     setTimeout(() => { if (!c.name && document.activeElement === document.body) nameIn.focus() }, 30)
     return h('div', { class: 'dc-dlg dc-sharedlg', role: 'dialog', 'aria-label': 'Invite' },
       head('Invite', live().length ? () => { st.open = 'list'; draw() } : null),
@@ -203,7 +203,7 @@ export function createSharing({ base, root, path, title, owner, toast, onChange,
     return h('div', { class: 'dc-dlg dc-sharedlg', role: 'dialog', 'aria-label': 'Shared with' },
       head('Shared with'),
       h('div', { class: 'dc-sw-list' }, rows.length ? rows : h('p', { class: 'dc-quiet', text: 'No one has a link to this doc.' })),
-      h('button', { class: 'dc-gate-go dc-sh-go', type: 'button', onclick: async () => { await freshCard(); st.open = 'card'; draw() } }, icon('plus', 15), 'New invite'),
+      h('button', { class: 'dc-gate-go dc-sh-go primary', type: 'button', onclick: async () => { await freshCard(); st.open = 'card'; draw() } }, icon('plus', 15), 'New invite'),
       h('p', { class: 'dc-sh-cap', text: 'Each link has its own password.' }),
       appearLine())
   }
