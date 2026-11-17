@@ -29,7 +29,7 @@ or a DELETE and in the JSON body otherwise)::
     *      /withme/<id>/doc…             the doc routes above, sent to its own Loam's door
     GET    /health
 
-``/withme`` answers the owner and his personas alike: a persona's request
+``/withme`` answers the owner and their personas alike: a persona's request
 reaches the other Loam with the door's agent key, under its own name.
 """
 

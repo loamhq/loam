@@ -17,7 +17,7 @@ a persona's tool reach it).
   - working on the doc: the owner shows on the other side as the name on the
     link, a persona as "Iris · <name>'s agent", each with the link's mode
     and no more; a lapsed session is renewed quietly; the dot follows what
-    he has looked at
+    the owner has looked at
   - the other side says no: a link turned off greys the row, a changed mode
     follows at the next look
   - a link of this Loam's own is opened in-process, with no network
@@ -463,7 +463,7 @@ class Working(unittest.TestCase):
         self.assertTrue(row()["new"])
         self.mine.call("GET", f"/withme/{wid}/doc")
         self.assertFalse(row()["new"])
-        # a persona reading does not count as his looking
+        # a persona reading does not count as the owner looking
         self.theirs.svc.add(THEIRS, "vault", "Garden/plan.md", {"kind": "comment", "quote": "Water", "text": "Twice."})
         self.mine.call("GET", f"/withme/{wid}/doc", agent="iris")
         self.assertTrue(row()["new"])
