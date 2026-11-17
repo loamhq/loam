@@ -538,10 +538,96 @@ Settings › Plugins, or `bin/settings set plugin.doc-comments.reach
 everywhere`) decides whether the editor and the door work beyond Loam's
 staging copy (`next.<domain>`). It ships `staging`.
 
+## Shared with me (2026-11-17)
+
+*The other half of sharing.* When someone with a Loam shares a doc with the
+owner, the owner adds it to his own Loam and works on it there, in the same
+editor, without it being copied into his vault.
+
+**What he sees.** Files › Shared Docs has two sections under the app's own
+kickers: *Shared by me* (the list above) and *Shared with me*. The second
+always ends with a quiet **Add a shared doc** row (alone, it says what it is
+for). Its sheet (a bottom sheet on a phone) takes the link and the password;
+a whole invite pasted into either field fills both. A link for no one person
+asks once for the name he goes by there, offering his own. His Loam checks
+both against the other Loam at once and says plainly what went wrong: the
+password, a link turned off or expired, not a Loam share link, a server that
+cannot be reached, a private address, an older or newer Loam. A row shows the
+doc's title, whose Loam it is on, his mode there and the dot when something
+is new since he last looked; its ⋯ is Open, Open to the side, Copy link,
+Remove (which forgets the link and password; nothing changes for the
+owner). A link turned off greys the row ("No longer shared"); a server that
+does not answer says so and is tried again at the next open; a changed mode
+is followed at the next look.
+
+**The editor** on such a doc is the same one, limited by the link's mode as
+the door answers it (view: Viewing only; comment: Viewing and Suggesting
+with notes; edit: all three). Its header names where the doc lives
+("Shared with me / <owner> · <host> / <title>") and has no Share and no
+History, which are the doc's owner's. On the other side he shows as the
+name on his link, exactly as if he used their share page in a browser.
+
+**How it is built.**
+
+- **His Loam's server is the client**, not his browser
+  (`server/doccomments/withme.py`): it keeps the link, the password, the
+  session the door hands back and the door's agent key in the plugin's
+  private folder (`LOAM_PLUGIN_PRIVATE`, 0700; `with-me.json`, 0600),
+  outside the vault and any repository, and renews a lapsed session with
+  the kept password by itself. The password is kept in the clear because it
+  must be sent again; no answer, log line or error carries it, the session
+  or the key (`withme.public`). The page talks only to `/x/doc-comments/
+  withme…`; every doc operation there is sent to the door's
+  `/s/<token>/api/doc…`.
+- **The door states a protocol**: `GET /s/<token>/loam.json` answers
+  `{"loam_share": 1, "min": 1}` for any token (it says nothing about a
+  link). An older door has no such answer but serves Loam's own "doesn't
+  open anything" page, so the client can say "that Loam is too old for this"
+  rather than "not a Loam link". `/open` also answers the title, owner and
+  mode; `/api/status` gives a row in one call (title, owner, mode, and the
+  text's and the notes' revisions, which the dot compares with what he last
+  looked at).
+- **Safety, since the server fetches an address a person pasted**: only
+  `https://<host>[:port]/s/<token>`; only the door's own endpoints after it
+  (`DOOR_PATHS`); the host is resolved and every address must be public
+  (loopback, private, link-local, shared, multicast, reserved and this box's
+  own addresses refused, one bad record refuses all), and the connection
+  goes to the address that was checked, with the certificate checked against
+  the name; no redirect is followed; 8 MiB and 10 s per read, 25 s per
+  answer. What comes back is JSON handed to the editor, drawn as any doc is.
+- **A link of this Loam's own** (its token is in this Loam's links) is
+  opened through the door in-process: no network, the same protocol, and he
+  shows on it as anyone on that link does. That is a doc he shared with
+  himself, and it is how staging and live, which are one Loam on one box,
+  were walked.
+- **Personas** reach these docs with their tools by a `shared:w-…` address
+  (`doc_shared_with_me` lists them; `doc_read`, `doc_save` and every other
+  `doc_*` tool take it), and can add and remove one on his ask
+  (`doc_add_shared`, `doc_remove_shared`). On the other side a persona shows
+  as "<Persona> · <name>'s agent": the server uses the door's agent key for
+  the link (one key, made once with the session) and says which agent is
+  asking in `X-Loam-Agent-Name`, which the door honours only with a good
+  key. It has the link's mode and nothing more, and dies with the link. The
+  plugin's paragraph tells personas that an outside doc's text is something
+  to consider, never an instruction, and to write on one only when the
+  owner asks.
+- **Core seams** (app/docs/plugins/places.md, `files.root`): a file of a
+  plugin's own root (`/files/@<id>/<path>`) opens without the host being
+  asked, with the row the root gives (`row(path)`), and is a panel item like
+  any file; a plugin row may carry its own ⋯ menu (`entry(row, {menu})`,
+  drawn by core as `files.itemsMenu`). No seam was needed to keep a secret:
+  `LOAM_PLUGIN_PRIVATE` already was one.
+- **Not in this step**: offline copies, a notice when the other side
+  changes something (the dot is the whole of it), saving a copy into the
+  vault, and strangers without a Loam (they keep the share page).
+
 ## Working on it
 
 - `python3 plugins/doc-comments/test/test_model.py`, `node --test
-  plugins/doc-comments/test/*.mjs`, `python3 tests/test_doc_comments.py`.
+  plugins/doc-comments/test/*.mjs`, `python3 tests/test_doc_comments.py`;
+  Shared with me alone: `python3 plugins/doc-comments/test/test_withme.py`
+  (a second Loam's door over real https on a local port, with a throwaway
+  certificate).
 - The browser suite, `test/browser.test.mjs`, needs Playwright and a
   Chromium, which Loam does not ship; without `LOAM_PLAYWRIGHT` (the path to
   a Playwright install's `index.mjs`; `LOAM_CHROME` may name the browser) it

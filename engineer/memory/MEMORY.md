@@ -641,3 +641,31 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **`$TMPDIR` can be empty in a job's shell.** A `cp x $TMPDIR/y` that
   fails leaves the next step (a `git show HEAD:x > x`) to overwrite work.
   Write the job's scratch path out, and `git add` before experiments.
+
+## 2026-11-17 — Shared with me: a server that fetches what a person pasted
+
+- **Staging and live are one Loam.** One broker, one vault, one plugin
+  server; only the app copies differ. A link shared "from staging" and added
+  "on live" is a doc shared with oneself, so a client of another Loam's door
+  needs an own-Loam path to be walkable at all: doc-comments recognises its
+  own tokens and calls its door in-process (`withme.Own`). The network path
+  is proved by `test/test_withme.py` against a second door over real https
+  on a local port with a throwaway certificate (`openssl req -x509 …
+  -addext subjectAltName=DNS:door.test`, a resolver that maps the name).
+- **Refuse by address, connect to the address you checked.** Resolve once,
+  refuse if any record is loopback, private, link-local, shared (100.64/10),
+  reserved, multicast or one of the box's own (`ip -j addr`), then dial that
+  IP with SNI and certificate checks for the name (`_Pinned`). A second
+  lookup at connect time is the rebinding hole.
+- **A Caddy site address without `bind` listens on every interface.** A
+  throwaway loopback Caddy for a headless browser (`https://host:9443 { tls
+  internal … }`) was up on `*:9443` for a minute, routing to staging without
+  the login; the host firewall's input policy (drop, with 80 and 443 open) is what
+  kept it off the internet. Put `bind 127.0.0.1` in every site block, and
+  check with `ss -ltnp` before pointing anything at it.
+- **The push gate again** (see "doc comments: a plugin with a real editor"):
+  a persona's name in a docstring example and a test fixture held the
+  branch. Grep the branch's added lines with the deny file before the first
+  `--land`, and squash with `git reset --soft <base>` once clean.
+- **app/test's fake DOM has no `classList` or `Event`**: a dialog built with
+  the editor's `h` cannot be driven there; prove it in a real browser.
