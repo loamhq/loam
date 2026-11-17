@@ -144,12 +144,17 @@ export function activate(loam) {
       cur.options = c.options
       cur.file = c.file
       if (cur.status === 'down') return c.defaultView()
-      if (cur.status !== 'ready') return loam.ui.h ? loam.ui.h('div', { class: 'fs-quiet dc-opening', text: 'Opening…' }) : document.createElement('div')
+      // Keyed, so Loam's reconciler matches what is drawn here by identity
+      // and never by position: matched by position, the "Opening…" line was
+      // once patched into the editor's place and took the editor's children
+      // with it. The editor itself is the same node every time (kept).
+      const h = loam.ui.h
+      if (cur.status !== 'ready') return h('div', { key: `doc-comments:opening:${key}`, class: 'fs-quiet dc-opening', text: 'Opening…' })
       const ed = cur.editor
       ed.setSlots({ take: c.options.take || null, player: c.options.readAloud?.player || null })
       ed.setPhone(!c.options.wide || (ed.dom.clientWidth > 0 && ed.dom.clientWidth < COMPACT_PX))
       ed.refreshHead()
-      return kept ? kept(ed.dom) : ed.dom
+      return h('div', { key: `doc-comments:${key}`, class: 'dc-host' }, kept ? kept(ed.dom) : ed.dom)
     },
   })
 

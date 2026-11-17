@@ -34,6 +34,8 @@
   overflow: hidden;
   overflow: clip;
 }
+.dc-host { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.dc-host > .dc { flex: 1; }
 .dc button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .dc button:disabled { cursor: default; opacity: .45; }
 .dc svg { display: block; flex: none; }

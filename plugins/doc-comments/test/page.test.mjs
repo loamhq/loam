@@ -13,7 +13,7 @@ function fakeLoam({ own = true } = {}) {
   const styles = []
   const loam = {
     places: { files: { viewer: { add(r) { regs.push(r); return { remove() { regs.splice(regs.indexOf(r), 1) } } } } } },
-    ui: { host: { files: own ? { own() { return { remove() {} } } } : {} }, styles: { add: (f) => styles.push(f) } },
+    ui: { h: () => null, host: { files: own ? { own() { return { remove() {} } } } : {} }, styles: { add: (f) => styles.push(f) } },
     events: { on: () => ({ remove() {} }) },
     settings: { get: (k, d) => d, set: () => {} },
   }

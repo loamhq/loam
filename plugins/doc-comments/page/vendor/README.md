@@ -17,6 +17,11 @@ its own. It holds only what `tools/vendor/entry.js` names. Rebuild it with
 | @lezer/common | 1.5.5 |
 | esbuild (to bundle) | 0.28.2 |
 
+One change after bundling, made by the build script: style-mod's base theme
+goes into a constructed stylesheet (`adoptedStyleSheets`) for the document
+too, not a `<style>` tag, because Loam's page allows no inline styles and a
+constructed stylesheet is not subject to that policy.
+
 ## Licence
 
 CodeMirror and Lezer are MIT-licensed:
