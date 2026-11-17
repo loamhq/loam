@@ -87,3 +87,4 @@ html, body { margin: 0; height: 100%; background: var(--paper-raised); color: va
 .dc-agentfoot { margin: 0; text-align: center; font-size: 12px; color: var(--paper-ink-3); }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; } }
+.dc-dlg .dc-gate-go { height: 48px; border-radius: 999px; background: var(--latte-espresso); color: var(--latte-espresso-ink); font-size: 15.5px; font-weight: 650; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
