@@ -31,7 +31,7 @@ async function start() {
     let buf = ''
     server.stdout.on('data', (d) => {
       buf += d
-      const m = /(http:\/\/127\.0\.0\.1:\d+)\//.exec(buf)
+      const m = /doc-comments dev: (http:\/\/127\.0\.0\.1:\d+)\//.exec(buf)
       if (m) resolve(m[1])
     })
     server.on('exit', (code) => reject(new Error(`dev server exited ${code}`)))
