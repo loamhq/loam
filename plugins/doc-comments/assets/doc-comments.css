@@ -506,11 +506,11 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 .dc-hrow { cursor: pointer; }
 .dc-hrow.now { cursor: default; }
 .dc-preview { margin: 4px 8px 12px; border-radius: var(--dc-r-md); background: var(--dc-well); padding: 12px 14px; animation: dc-fade .2s ease; }
-.dc-preview-h { font-size: 12px; color: var(--dc-ink3); margin-bottom: 8px; }
+.dc-preview-h { font-size: 12px; color: var(--paper-card-ink-3, var(--dc-ink3)); margin-bottom: 8px; }
 .dc-preview .dc-dbtns { margin-top: 10px; }
 .dc-preview pre { margin: 0; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.55; color: var(--dc-ink2); overscroll-behavior: contain; }
 .dc-preview pre ins { text-decoration: none; background: var(--dc-fillon); color: var(--dc-ink); border-radius: 3px; }
-.dc-preview pre del { color: var(--dc-ink3); text-decoration: line-through 1px; }
+.dc-preview pre del { color: var(--paper-card-ink-3, var(--dc-ink3)); text-decoration: line-through 1px; }
 
 /* One's own words: changed in place, a reply removed. */
 .dc-own { display: inline-flex; gap: 2px; margin-left: 2px; opacity: 0; transition: opacity .15s; }

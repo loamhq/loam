@@ -13,6 +13,9 @@ tokens is Latte's.
     exactly Latte's (app/public/themes/latte/theme.css over tokens.css)
   - a person's face is one of core's persona hues, never a hex of the
     plugin's own
+  - the signal as words (`--dc-accent-ink`: the theme's crema mixed toward
+    the ink in oklab) reads at 4.5:1 on every paper in every shipped theme,
+    light and dark; Latte's crema alone does not (3.6:1)
 
 Run: python3 plugins/doc-comments/test/test_look.py
 """
@@ -132,6 +135,60 @@ class Look(unittest.TestCase):
             if js.name == "dom.js":
                 continue
             self.assertNotRegex(js.read_text(), r"color: '#fff'|'#[0-9A-Fa-f]{6}'", f"{js.name} paints a face of its own")
+
+
+def _lin(c):
+    return c / 12.92 if c <= .04045 else ((c + .055) / 1.055) ** 2.4
+
+
+def _gamma(c):
+    c = max(0.0, min(1.0, c))
+    return 12.92 * c if c <= .0031308 else 1.055 * c ** (1 / 2.4) - .055
+
+
+def _oklab(rgb):
+    r, g, b = (_lin(x) for x in rgb)
+    l, m, s = ((.4122214708 * r + .5363325363 * g + .0514459929 * b) ** (1 / 3),
+               (.2119034982 * r + .6806995451 * g + .1073969566 * b) ** (1 / 3),
+               (.0883024619 * r + .2817188376 * g + .6299787005 * b) ** (1 / 3))
+    return (.2104542553 * l + .7936177850 * m - .0040720468 * s,
+            1.9779984951 * l - 2.4285922050 * m + .4505937099 * s,
+            .0259040371 * l + .7827717662 * m - .8086757660 * s)
+
+
+def _rgb(lab):
+    L, a, b = lab
+    l, m, s = ((L + .3963377774 * a + .2158037573 * b) ** 3, (L - .1055613458 * a - .0638541728 * b) ** 3,
+               (L - .0894841775 * a - 1.2914855480 * b) ** 3)
+    return tuple(_gamma(x) for x in (4.0767416621 * l - 3.3077115913 * m + .2309699292 * s,
+                                     -1.2684380046 * l + 2.6097574011 * m - .3413193965 * s,
+                                     -.0041960863 * l - .7034186147 * m + 1.7076147010 * s))
+
+
+def _ratio(x, y):
+    lx, ly = (.2126 * _lin(c[0]) + .7152 * _lin(c[1]) + .0722 * _lin(c[2]) for c in (x, y))
+    return (max(lx, ly) + .05) / (min(lx, ly) + .05)
+
+
+class SignalWords(unittest.TestCase):
+    def test_signal_words_read_in_every_theme(self):
+        css = strip_comments((PLUGIN / "assets" / "doc-comments.css").read_text())
+        m = re.search(r"--dc-accent-ink:\s*color-mix\(in oklab, var\(--dc-accent\) (\d+)%, var\(--dc-ink\)\)", css)
+        self.assertIsNotNone(m, "--dc-accent-ink is the signal mixed toward the ink in oklab")
+        share = float(m.group(1)) / 100
+        core = token_blocks((APP / "tokens.css").read_text())
+        hexes = lambda h: tuple(int(h.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        for look in ["plain", *sorted(p.parent.name for p in APP.glob("themes/*/theme.css") if p.parent.name != "plain")]:
+            theme = token_blocks((APP / "themes" / look / "theme.css").read_text()) if look != "plain" else {}
+            for mode in ("light", "dark"):
+                chain = [theme.get(f':root[data-look="{look}"][data-theme="{mode}"]', {}), theme.get(f':root[data-look="{look}"]', {})]
+                chain += [core.get(':root[data-theme="dark"]', {})] if mode == "dark" else []
+                chain += [core[":root"]]
+                v = lambda n: hexes(next(b[n] for b in chain if n in b and b[n].startswith("#")))
+                crema, ink = _oklab(v("--signal-crema")), _oklab(v("--paper-ink"))
+                words = _rgb(tuple(share * a + (1 - share) * b for a, b in zip(crema, ink)))
+                for ground in ("--paper-raised", "--paper-pane", "--paper-page", "--paper-card"):
+                    self.assertGreaterEqual(_ratio(words, v(ground)), 4.5, f"{look} {mode}: the signal's words on {ground}")
 
 
 if __name__ == "__main__":
