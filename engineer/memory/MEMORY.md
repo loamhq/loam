@@ -1180,3 +1180,10 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   so a pattern allowing them in a segment ran across the sentence into the
   next path; a name is words joined by single spaces, never a space before a
   slash.
+- **A new top-level folder is invisible to the landing's tests.** The
+  landing proves a tree at the runtime's path by binding each top-level
+  entry the tree tracks over the canonical one (`platform_argv`); an entry
+  the canonical lacks has nothing to bind over. `marketplace/` failed
+  `test_marketplace` there and passed in the tree; it moved to
+  `docs/marketplace/`. Put new content under an existing top-level folder,
+  or prove it with `wt.platform_argv(tree, cmd)` before ending the job.
