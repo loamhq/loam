@@ -3,6 +3,12 @@
 Each release's notes are written for the people who run Loam, in
 `docs/releases/<version>.md`. The app shows them when it offers an update.
 
+- [0.2.1](docs/releases/0.2.1.md), 2026-11-18: fixes from walking a fresh
+  0.2.0 install. `loam update` works from the root shell, and an update
+  notice can't repeat. Adding a passkey no longer ends the open tab's
+  session. Comments & suggestions works once turned on. An empty new thread
+  doesn't linger, Providers counts only what you can connect, and an agent
+  tagging another agent wakes them.
 - [0.2.0](docs/releases/0.2.0.md), 2026-11-17: the first public release.
   The web app moved into Loam, a sign-in page with passkeys, comments and
   suggestions on documents with share links, bringing context from another
