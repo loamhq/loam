@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Update Loam: check for a newer release, apply it, or roll it back.
 
+  loam-update                     check, and when a newer release can be
+                                  applied, offer it (at a terminal) and
+                                  apply it on a yes
   loam-update status              the running release, the last check, the
                                   last or current run, and whether a
                                   rollback is possible
@@ -22,6 +25,10 @@
                  never from inside an agent's turn: the broker restart at
                  the end waits for that turn to finish)
   --no-tell      check without leaving the person's agent a notice
+
+Run as root (the shell a person installed from), it switches to the
+install's user first: the checkout and the update state are that user's,
+and nothing it writes is left owned by root.
 
 Only what Loam ships is replaced: this checkout and <vault>/<system>/Loam/.
 lib/loam_update.py is the whole of the rules; docs/update.md the contract.
@@ -125,10 +132,55 @@ def follow(run_id: str | None) -> dict:
         time.sleep(1)
 
 
+def update(a) -> int:
+    """Bare `loam update` (2026-11-17; until then a usage error): check,
+    and if a newer release can be applied, offer it at a terminal and
+    apply it on a yes. Not at a terminal, it says what to type."""
+    st = up.check(tell=False)
+    if a.json:
+        say(json.dumps(st, indent=2, ensure_ascii=False))
+    chk = st.get("check") or {}
+    err = chk.get("error")
+    cur = (st.get("current") or {}).get("version") or "an unknown release"
+    latest = (chk.get("latest") or {}).get("version")
+    if err and err.get("code") != "no-release":
+        if not a.json:
+            say(f"Could not check for a newer release: {err.get('message')}")
+        return 1
+    if not chk.get("available"):
+        if not a.json:
+            say(f"Loam is up to date: {cur} is the newest release.")
+        return 0
+    if chk.get("blocked"):
+        if not a.json:
+            say(f"Loam {latest} is available (this install runs {cur}), but it "
+                f"cannot be applied now: {chk['blocked']['message']}")
+            for f in chk["blocked"].get("files") or []:
+                say(f"  {f}")
+        return 3
+    if a.json:
+        return 0
+    say(f"Loam {latest} is available (this install runs {cur}).")
+    ch = chk.get("changes") or {}
+    if any(ch.values()):
+        say(f"It changes {sum(len(v) for v in ch.values())} file(s) in System/Loam.")
+    if not (sys.stdin.isatty() or a.yes):
+        say("Type `loam update apply` to update.")
+        return 0
+    if not a.yes:
+        answer = input(f"Update to {latest} now? [Y/n] ").strip().lower()
+        if answer not in ("", "y", "yes"):
+            say("Nothing was changed.")
+            return 0
+    a.action, a.to = "apply", None
+    return run(a)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="loam-update", add_help=True,
                                  description=__doc__.split("\n")[0])
-    ap.add_argument("action", choices=["status", "check", "diff", "apply", "rollback"])
+    ap.add_argument("action", nargs="?", default="update",
+                    choices=["update", "status", "check", "diff", "apply", "rollback"])
     ap.add_argument("--to", default=None)
     ap.add_argument("--yes", action="store_true")
     ap.add_argument("--json", action="store_true")
@@ -139,6 +191,17 @@ def main() -> int:
     ap.add_argument("--by", default=os.environ.get("LOAM_AGENT") or None)
     a = ap.parse_args()
 
+    drop = up.as_install_user(sys.argv[1:])
+    if drop:
+        up.repair_owner()
+        try:
+            os.chdir(up.lc.HOME)
+        except OSError:
+            os.chdir("/")
+        os.execvp(drop[0], drop)
+
+    if a.action == "update":
+        return update(a)
     if a.action == "status":
         st = up.status()
         say(json.dumps(st, indent=2, ensure_ascii=False)) if a.json else show_status(st)
@@ -162,6 +225,12 @@ def main() -> int:
         say(json.dumps(lib, indent=2, ensure_ascii=False)) if a.json else show_edits(lib)
         return 0
 
+    return run(a)
+
+
+def run(a) -> int:
+    """`apply` or `rollback`: in this process (`--foreground`), or started
+    as its own unit and followed here."""
     if a.foreground:
         fn = up.apply if a.action == "apply" else up.rollback
         kwargs = {"run_id": a.run_id, "by": a.by}

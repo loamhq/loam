@@ -653,8 +653,102 @@ async def broker_checks():
     up.notice_done(note, got)
     check("...and a delivered notice is gone", notices(), [])
 
+    # The 0.2.0 walk (2026-11-17): a notice its source could not remove was
+    # posted and given a turn every 30 s. The engine gives one notice once,
+    # and the same line to the same agent not again within the hour.
+    before = len(threads.read(threads.GENERAL_ID)[1])
+    check("a notice delivered again is not posted again",
+          server.threads.deliver_note(note), "already delivered")
+    up.notice("refused", "Loam's update did not run: X.", "Fix X.")
+    again = notices()[0]
+    check("...a new notice repeating a line just posted is not delivered",
+          (server.threads.deliver_note({**again, "line": note["line"]})), "repeat")
+    check("...neither posted a line nor gave a turn",
+          (len(threads.read(threads.GENERAL_ID)[1]) - before, len(sent)), (0, 1))
+    server.threads._system_turns = None   # as after a broker restart: read from disk
+    check("...and the record outlives the broker",
+          server.threads.deliver_note(note), "already delivered")
+    job = {"job": "j1", "thread": threads.GENERAL_ID, "persona": "iris"}
+    check("the same guard holds for a job's delivery",
+          (server.threads.deliver_job(job, "Job one finished."),
+           server.threads.deliver_job(job, "Job one finished.")),
+          ("delivered", "already delivered"))
+
+    # A notice whose file cannot be removed (a root run left it) is said
+    # once, loudly, and never swallowed.
+    stuck_dir = up.STATE / "notices"
+    os.chmod(stuck_dir, 0o500)
+    try:
+        import contextlib as _cl
+        import io as _io
+        err = _io.StringIO()
+        with _cl.redirect_stderr(err):
+            first = up.notice_done(again, "delivered")
+            second = up.notice_done(again, "already delivered")
+        log = [json.loads(x) for x in up.LOG.read_text().splitlines()]
+        stuck = [e for e in log if e.get("kind") == "notice-stuck"
+                 and e.get("id") == again["id"]]
+        check("notice_done: a notice that cannot be removed says so",
+              (first, second), (False, False))
+        check("...once, in the log and on stderr, with the fix",
+              (len(stuck), err.getvalue().count("loam_update: update notice"),
+               "chown -R" in stuck[0]["message"] if stuck else None), (1, 1, True))
+    finally:
+        os.chmod(stuck_dir, 0o700)
+    clear_notices()
+
 
 asyncio.run(broker_checks())
+
+
+# -- run as root; bare `loam update` (the 0.2.0 walk, 2026-11-17) -----------------
+
+drop = up.as_install_user(["apply", "--yes"], euid=0)
+check("as root, loam-update re-runs itself as the install's user",
+      (drop[:4], drop[-3:], drop[-4] == sys.executable),
+      (["runuser", "-u", lc.USER, "--"], [str(up.runtime() / "bin" / "loam-update"),
+                                          "apply", "--yes"], True))
+env = dict(x.split("=", 1) for x in drop[drop.index("-i") + 1:drop.index(sys.executable)])
+check("...with that user's home, runtime dir and bytecode cache, and LOAM_ kept",
+      (env["HOME"], env["XDG_RUNTIME_DIR"], env["PYTHONPYCACHEPREFIX"].startswith(str(lc.HOME)),
+       env.get("LOAM_CONFIG")),
+      (str(lc.HOME), f"/run/user/{lc.UID}", True, str(CONFIG)))
+check("...and not when it already is that user",
+      up.as_install_user(["check"], euid=os.geteuid()), None)
+check("repair_owner changes nothing unless run as root", up.repair_owner(euid=1000), [])
+
+bad = TMP / "notmine"
+subprocess.run(["git", "init", "-q", str(bad)], check=True)
+dubious = subprocess.CompletedProcess([], 128, "", "fatal: detected dubious ownership "
+                                      "in repository at '/home/loam/loam'\n")
+real_git = up.git
+up.git = lambda *a, **k: dubious
+try:
+    up.repo_top()
+    got = None
+except up.Refusal as r:
+    got = (r.code, lc.USER in r.message, "not a git checkout" in r.message)
+finally:
+    up.git = real_git
+check("git's ownership refusal reads as whose the checkout is, not 'not a git checkout'",
+      got, ("not-owner", True, False))
+
+
+def bare_update(stdin=subprocess.DEVNULL) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(ROOT / "bin" / "loam-update")],
+                          capture_output=True, text=True, stdin=stdin,
+                          env={**os.environ, "LOAM_UPDATE_NO_UNIT": "1"})
+
+
+clear_notices()
+install(INSTALL)
+done = bare_update()
+newest = sorted(git(ORIGIN, "tag").split(), key=up.version_key)[-1]
+check("bare `loam update` is not a usage error: it checks and says what to type",
+      (done.returncode, f"Loam {newest} is available" in done.stdout,
+       "loam update apply" in done.stdout, git(INSTALL, "rev-parse", "HEAD") == v100),
+      (0, True, True, True))
+check("...and leaves no notice for the agent (the person is right there)", notices(), [])
 
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"\n{'FAILED' if FAILURES else 'OK'}: {FAILURES} failure(s)")

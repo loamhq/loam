@@ -202,6 +202,15 @@ def git(*args: str, check: bool = True, cwd: Path | None = None,
 
 def repo_top() -> Path:
     done = git("rev-parse", "--show-toplevel", check=False)
+    if done.returncode != 0 and "dubious ownership" in done.stderr:
+        # git refuses a repository another user owns (found 2026-11-17 by
+        # the 0.2.0 walk: `loam update` as root read as "not a git
+        # checkout"). bin/loam-update drops to the install's user first;
+        # this says so plainly if anything still reaches here as another.
+        raise Refusal("not-owner", f"{runtime()} belongs to the user "
+                      f"{lc.USER}, and git will not read it as another user. "
+                      f"Run `loam update` (it switches to {lc.USER} by itself "
+                      f"when run as root), or `sudo -u {lc.USER} loam update`.")
     if done.returncode != 0:
         raise Refusal("no-git", f"{runtime()} is not a git checkout, so there is "
                                 "nothing an update can move. Loam is updated by "
@@ -535,10 +544,12 @@ def notice(kind: str, line: str, note: str, key: str | None = None) -> dict | No
     rec = {"id": f"{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}",
            "kind": kind, "line": line, "note": note, "at": now_iso(),
            "thread": None, "persona": None}
-    write_json(f"notices/{rec['id']}.json", rec)
+    # "Told" is written first (2026-11-17): if it cannot be, no notice is
+    # left, rather than a new one on every check that cannot record it.
     if key:
         sent[key] = rec["at"]
         write_json("told.json", sent)
+    write_json(f"notices/{rec['id']}.json", rec)
     log({"kind": "notice", "notice": kind, "id": rec["id"], "line": line})
     return rec
 
@@ -555,10 +566,81 @@ def owed_notices() -> list[dict]:
     return out
 
 
-def notice_done(rec: dict, outcome: str) -> None:
-    log({"kind": "notice-delivered", "id": rec.get("id"), "outcome": outcome})
-    with contextlib.suppress(OSError):
-        Path(rec["_path"]).unlink()
+# Notices whose file could not be removed, said once each (2026-11-17).
+_STUCK: set[str] = set()
+
+
+def notice_done(rec: dict, outcome: str) -> bool:
+    """A notice dealt with: logged and removed. Until 2026-11-17 a failed
+    removal was swallowed, and a notice a root run had left (root-owned,
+    so the broker could not unlink it) was posted to General and given a
+    turn every pass, without end. Now a notice that cannot be removed is
+    said once, loudly, with the fix (the thread engine will not deliver
+    the same notice twice either way). False when it is still there."""
+    path = Path(rec["_path"])
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        nid = str(rec.get("id"))
+        if nid not in _STUCK:
+            _STUCK.add(nid)
+            why = (f"update notice {nid} could not be removed ({exc}); it will "
+                   f"not be delivered again. Fix the owner: "
+                   f"chown -R {lc.USER}: {STATE}")
+            log({"kind": "notice-stuck", "id": nid, "outcome": outcome,
+                 "error": str(exc), "message": why})
+            print(f"loam_update: {why}", file=sys.stderr, flush=True)
+        return False
+    if rec.get("id") not in _STUCK:
+        log({"kind": "notice-delivered", "id": rec.get("id"), "outcome": outcome})
+    return True
+
+
+def as_install_user(argv: list[str], euid: int | None = None) -> list[str] | None:
+    """What to exec so a root shell's `loam update` runs as the install's
+    user (2026-11-17, the 0.2.0 walk): the checkout and the update state
+    are that user's, git will not read the checkout as root, and a root
+    run used to leave root-owned files that broke every later run. None
+    when this process already is that user (or the install's user is
+    root). ``argv`` is the command's own arguments."""
+    euid = os.geteuid() if euid is None else euid
+    if euid != 0 or lc.UID == 0:
+        return None
+    runtime_dir = f"/run/user/{lc.UID}"
+    env = {"HOME": str(lc.HOME), "USER": lc.USER, "LOGNAME": lc.USER,
+           "PATH": "/usr/local/bin:/usr/bin:/bin",
+           "LANG": os.environ.get("LANG", "C.UTF-8"),
+           "XDG_RUNTIME_DIR": runtime_dir,
+           "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime_dir}/bus",
+           "PYTHONPYCACHEPREFIX": str(lc.HOME / ".cache" / "loam" / "pycache")}
+    env.update({k: v for k, v in os.environ.items() if k.startswith("LOAM_")})
+    return ["runuser", "-u", lc.USER, "--", "env", "-i",
+            *(f"{k}={v}" for k, v in env.items()),
+            sys.executable, str(runtime() / "bin" / "loam-update"), *argv]
+
+
+def repair_owner(euid: int | None = None) -> list[str]:
+    """As root: give back to the install's user anything in the update
+    state (and its log) that a root run left owned by someone else.
+    Answers the paths changed; nothing as any other user."""
+    euid = os.geteuid() if euid is None else euid
+    if euid != 0:
+        return []
+    fixed = []
+    roots = [STATE, LOG] if STATE.exists() else [LOG]
+    for top in roots:
+        if not top.exists():
+            continue
+        paths = [top] + (sorted(top.rglob("*")) if top.is_dir() else [])
+        for path in paths:
+            try:
+                st = path.lstat()
+                if st.st_uid != lc.UID:
+                    os.lchown(path, lc.UID, lc.GID)
+                    fixed.append(str(path))
+            except OSError:
+                continue
+    return fixed
 
 
 def _owner() -> str:

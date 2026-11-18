@@ -63,6 +63,7 @@ def get(dotted: str, default=None):
 USER = get("user") or pwd.getpwuid(os.getuid()).pw_name
 _pw = pwd.getpwnam(USER)
 UID = _pw.pw_uid
+GID = _pw.pw_gid
 HOME = Path(get("paths.home") or _pw.pw_dir)
 
 

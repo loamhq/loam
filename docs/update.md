@@ -187,6 +187,15 @@ The note names the notes file (`<state>/update/notes/<version>.md`) and
 asks the agent to tell the owner, briefly and in its own words, what the
 release means for them (`ThreadEngine.deliver_note`).
 
+A notice gives its turn once (since 0.2.1). The engine keeps every notice
+it has delivered in `<state>/threads/system-turns.json` for 30 days and
+never delivers the same one again, and the same line for the same agent
+in the same thread is not posted again within an hour under any id. The
+same holds for a finished job's delivery. A notice whose file cannot be
+removed is logged once (`notice-stuck` in the update log, and the
+broker's journal) with the `chown` that fixes it. Until 0.2.1 a notice a
+root run had left was posted, and given a paid turn, every 30 seconds.
+
 The notes come from the release's own `docs/releases/<version>.md`. If
 there is none, the annotated tag's message is used. If neither exists, the
 commit subjects since the running release are used, labelled as material
@@ -203,6 +212,7 @@ for the agent.
 ## The command
 
 ```
+loam update                     check; if a newer release can be applied, offer it and apply on a yes
 loam update status              the running release, the last check and run, rollback
 loam update check [--no-tell]   the newest release; can it be applied now; System/Loam's edits
 loam update diff                System/Loam's edits against the running release's library
@@ -218,6 +228,12 @@ die in the restart the run ends with. Inside an agent's turn
 (`LOAM_SESSION_ID` set), following stops at the broker step, because that
 step waits for the turn to end. `--foreground` is what the unit itself
 runs; never use it from inside a turn.
+
+Run as root (the shell a person installed from), `loam update` gives
+anything in the update state a root run left back to the install's user,
+then runs itself again as that user (`runuser`). The checkout and the
+state are that user's: git refuses to read a checkout another user owns,
+and until 0.2.1 a root run left root-owned files that broke the next run.
 
 Exit codes: 0 done or nothing to do, 1 failed, 3 refused, 4 waiting for a
 yes to System/Loam's edits.
