@@ -398,25 +398,27 @@ def engineer_boundary(
     agents_root = Path(config["workspace"]).parent
     ai_labs = Path(config.get("ai_labs") or lc.WORKSPACES)
     vault = Path(config["vault"])
-    conversations = vault / "15_CONVERSATIONS"
+    conversations = vault / lc.vault_folder("conversations")
 
     # The runtime's state and the engineer's job folders are its reach too,
     # wherever the install keeps them (lib/loam_config.py): inside the
     # checkout until 2026-11-14's move, beside it since.
-    state, jobs = lc.STATE, lc.JOBS
+    # The owner's plugins folder too (2026-11-18): the role says to prefer a
+    # plugin to a change in Loam's own parts.
+    state, jobs, plugins = lc.STATE, lc.JOBS, lc.PLUGINS
     if not any(
         target.is_relative_to(root)
-        for root in (agents_root, vault, ai_labs, state, jobs)
+        for root in (agents_root, vault, ai_labs, state, jobs, plugins)
     ):
         refuse(
             f"{verb} of {str(raw)!r} is outside {agents_root}, the vault, "
-            f"{ai_labs} and the runtime's state ({state}). Those are your "
-            f"whole reach."
+            f"{ai_labs}, the plugins folder ({plugins}) and the runtime's "
+            f"state ({state}). Those are your whole reach."
         )
 
     if target == conversations or target.is_relative_to(conversations):
         refuse(
-            f"{verb} of {str(raw)!r} is inside vault/15_CONVERSATIONS, owned "
+            f"{verb} of {str(raw)!r} is inside the vault's conversations folder, owned "
             f"by the transcript writer. Your record of a job is its receipt."
         )
 
@@ -619,7 +621,7 @@ def check(payload: dict, tool_name: str, tool_input: dict) -> None:
     # own workspace plus this.
     commons = ai_labs / "commons"
     vault = Path(config["vault"])
-    conversations = vault / "15_CONVERSATIONS"
+    conversations = vault / lc.vault_folder("conversations")
     filename_checked = FILENAME_FIELDS.get(tool_name, ())
 
     for field, raw in targets:
@@ -663,7 +665,7 @@ def check(payload: dict, tool_name: str, tool_input: dict) -> None:
 
         if target == conversations or target.is_relative_to(conversations):
             refuse(
-                f"{verb} of {str(raw)!r} is inside vault/15_CONVERSATIONS, "
+                f"{verb} of {str(raw)!r} is inside the vault's conversations folder, "
                 f"owned by the transcript writer."
             )
 

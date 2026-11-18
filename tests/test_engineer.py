@@ -75,7 +75,9 @@ try:
                 "tool_name": tool, "tool_input": tool_input,
                 "cwd": str(engineer),
             }), capture_output=True, text=True,
-            env={"PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": str(engineer)},
+            env={"PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": str(engineer),
+                 **({"LOAM_CONFIG": os.environ["LOAM_CONFIG"]}
+                    if os.environ.get("LOAM_CONFIG") else {})},
         )
         return out.returncode == 0, (out.stderr or "").strip()
 
@@ -418,7 +420,8 @@ check("another persona may not brief Loam", refusal is None, False)
 check("the refusal names who may send it", f"briefed by {BRIEFER}" in refusal, True)
 check("the refusal names where the rule is set", "`engineer.briefers`" in refusal, True)
 check("the refusal names the deploy lane it could have used",
-      "`Deploy <project>`" in refusal, True)
+      ("`Deploy <project>`" if others else "no project engineer is provisioned")
+      in refusal, True)
 check("the refusal names the provisioned projects",
       all(p.name in refusal for p in others) if others else True, True)
 check("the refusal quotes the title it refused",

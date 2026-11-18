@@ -113,7 +113,7 @@ DIFF_LINES = 400
 TRIGGERS = {
     "units": {"script": "bin/gen-units", "dirs": ["systemd/"],
               "skip": ["systemd/system/"]},
-    "agents": {"script": "bin/provision", "dirs": ["engineer-template/"]},
+    "agents": {"script": "bin/provision", "dirs": ["engineer-template/", "engineer/install/"]},
     "provider-memory": {"script": "bin/provider-memory", "dirs": []},
     "broker": {"script": "bin/session-broker", "dirs": ["broker/", "plugins/"]},
     "gateway": {"script": "bin/plugin-gateway", "dirs": []},
@@ -324,11 +324,24 @@ def local_commits(current: str | None) -> list[str]:
 
 def dirt(kind: str) -> list[str]:
     """What `git status` says is in the tree: with ignored files on a stock
-    install (rule a), without them on a development one."""
+    install (rule a), without them on a development one. The engineer's
+    rendered files (``lc.ENGINEER_HARNESS``) are not dirt: provision writes
+    them on every install, no release carries them, and an update never
+    touches them (2026-11-18)."""
     args = ["status", "--porcelain", "--untracked-files=all"]
     if kind == "stock":
         args.append("--ignored")
-    return [ln for ln in git(*args).stdout.splitlines() if ln.strip()]
+    harness = tuple(prefix() + name for name in lc.ENGINEER_HARNESS)
+
+    def ours(line: str) -> bool:
+        path = line[3:].strip().strip('"')
+        return untracked(line) and any(
+            path == h or path.startswith(h + "/") for h in harness)
+    return [ln for ln in git(*args).stdout.splitlines() if ln.strip() and not ours(ln)]
+
+
+def untracked(line: str) -> bool:
+    return line[:2] in ("??", "!!")
 
 
 def merge_conflicts(tag: str) -> list[str]:
@@ -942,6 +955,12 @@ class Box:
                 continue
             self._run(self.bin("provision"), name, wake)
             said.append(name)
+        # The engineer too (2026-11-18): its role and project file come from
+        # the vault, seeded from this release's and never over the owner's
+        # own (bin/provision, ENGINEER_SEEDS).
+        if (runtime() / "engineer" / "install" / "role.md").is_file():
+            self._run(self.bin("provision"), "--engineer")
+            said.append("the engineer")
         return f"provisioned {', '.join(said) or 'no agent'}"
 
     def provider_memory(self) -> str:

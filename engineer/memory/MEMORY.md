@@ -1240,3 +1240,51 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   Origin matching the backend's view. On 443 the two agree.
 - **The push gate reads test fixtures too.** A made-up hostname carrying the
   owner's name held a landing; use `owner.example`.
+## 2026-11-18 — an engineer on every install (0.2.2)
+
+- **The role every install gets is `engineer/install/role.md`**, the
+  owner-approved text, shipped verbatim (operator-authored: never reworded;
+  a change to it is the owner's). `engineer/install/project.md` is what the
+  engineer owns on an install. `provision --engineer` seeds both into
+  `<vault.projects>/Loam/engineer/` (`role.md`, `projects/loam.md`) and the
+  vault copy stays the source, copied verbatim as before. A newer release
+  replaces a vault copy only while its hash is the one last seeded
+  (`<paths.state>/engineer/seeded.json`); a copy changed by the owner, or
+  never seeded (the developing install's own), is kept and said to be.
+- **Three doors provision it:** the installer's step 8, every update's
+  `agents` step, and any agent's provision (`ensure_engineer`). The last is
+  for an install updating from 0.2.1: the update code that runs is the old
+  release's, which provisions only agents, but with the new `bin/provision`.
+  Proved: a 0.2.1 install updated to 0.2.2 had the engineer after.
+- **A release install's checkout has no git identity**, so the engineer's
+  first commit failed ("unable to auto-detect email address"). Provision now
+  sets `Loam engineer <engineer+loam@noreply.local>` when the checkout says
+  nobody. A VPS whose hostname has no domain fails the same way.
+- **The suite did not pass on a fresh install.** 35 test files failed on an
+  untouched 0.2.2 checkout, so no engineer change could ever land on a
+  friend's install. Causes: the tests read the install's own
+  `/etc/loam/loam.toml` and were written against the developing box's
+  (numbered vault folders, America/Los_Angeles, no `[edge]`); a few read the
+  real vault or the real briefers; `python3-cryptography` was not
+  installed. `tests/run-all` now lays that layout over the install's config
+  (identical to the real file on the developing box). A new test that reads
+  config must pass under it. To check on a VM: `tests/run-all test_x.py`
+  runs only those, each in full.
+- **The install's user is `loam`**, so anything that scrubs or matches the
+  user name matches the product name. The report scrubber made every "Loam"
+  `<user>`; `loam_feedback.NEVER_PRIVATE` holds it out.
+- **Project engineers cannot be provisioned on an install made by
+  install.sh.** Their role is rendered from the platform role by tables
+  written for the developing box's text (`CRAFT_*` in bin/provision), and
+  the shipped role matches none of them. Provision refuses in a sentence;
+  a role for project engineers on every install is the owner's to settle.
+- **A rehearsal engineer job without a model login:** set `[bin] claude` in
+  the VM's loam.toml to a stand-in script that edits and commits in
+  `$LOAM_JOB_TREE` and writes `$LOAM_JOB_DIR/receipt.md`. Remove it before
+  the landing's tests run: the suite reads the same config, and every test
+  that starts `claude` gets the stand-in (the wake tests failed on it).
+- **On a Modal VM with systemd in a PID namespace, an `nsenter`'d process is
+  in the root cgroup and `systemd --user` exits 1 saying nothing**, even at
+  debug. `test_schedule` skips there (`private_systemd.Unavailable`).
+- **`vm.py run` keeps only the last 12,000 characters.** Write long output to
+  a file on the VM and fetch it.

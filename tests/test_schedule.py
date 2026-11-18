@@ -42,7 +42,7 @@ sys.path.insert(0, str(LIB))
 import loam_schedule as ls  # noqa: E402
 import loam_cron  # noqa: E402
 import loam_config as lc  # noqa: E402
-from private_systemd import PrivateManager  # noqa: E402
+from private_systemd import PrivateManager, Unavailable  # noqa: E402
 OWNER = lc.OWNER_ID
 
 results: list[bool] = []
@@ -59,7 +59,12 @@ TMP = Path(tempfile.mkdtemp(prefix="loam-schedule-test-"))
 LABS = TMP / "ai-labs"
 # The test's own user manager; every `systemctl --user` below, this
 # process's and its children's, reaches it and not the box's.
-MANAGER = PrivateManager(TMP / "systemd").start()
+try:
+    MANAGER = PrivateManager(TMP / "systemd").start()
+except Unavailable as exc:
+    print(f"SKIP  {exc}")
+    shutil.rmtree(TMP, ignore_errors=True)
+    sys.exit(0)
 UNITS = MANAGER.unit_dir
 
 for name in (AGENT, OTHER):

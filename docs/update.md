@@ -50,6 +50,19 @@ tarball cannot be updated.
 An install's agent can brief its own engineer to change Loam itself. What
 happens to that change:
 
+- **Every install has the engineer** (since 0.2.2). Loam ships its role and
+  project file in `engineer/install/`. `bin/provision --engineer` (the
+  installer's starter step, every update's `agents` step, and any agent's
+  provision) seeds them into the vault at `<vault.projects>/Loam/engineer/`
+  (`role.md`, `projects/loam.md`) and renders the engineer beside the code
+  from the vault copies, verbatim. The vault copy is the owner's to change.
+  A newer release replaces it only while it is still exactly what was last
+  seeded (the hashes are in `<paths.state>/engineer/seeded.json`); a copy
+  the owner changed, or one provision never wrote, is kept, and provision
+  says so. The rendered files (`engineer/CLAUDE.md`, `role.md`,
+  `project.md`, `agent.json`, `.claude/`) are put in the checkout's
+  `info/exclude`, and the clean-tree rule passes over them.
+
 - **The first engineer job on Loam makes the install's own `main`.** A
   release install is detached at its tag with no branch, so a job's tree
   could not be made at all before this ("Remote branch main not found").
@@ -152,7 +165,7 @@ commits), plus the folders listed:
 |---|---|---|
 | `library` | always: `bin/library install` (System/Loam, then the skill views) | |
 | `units` | `bin/gen-units` | `systemd/`, except `systemd/system/` (still installed by hand) |
-| `agents` | `bin/provision`, once for each live agent | `engineer-template/` |
+| `agents` | `bin/provision`, once for each live agent, then `bin/provision --engineer` | `engineer-template/`, `engineer/install/` |
 | `provider-memory` | `bin/provider-memory pin` | |
 | `broker` | `bin/session-broker` | `broker/`, `plugins/` |
 | `gateway` | `bin/plugin-gateway` | |

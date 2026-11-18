@@ -51,9 +51,11 @@ them: it reaches only repositories on their own account.
 ## Fix it here, if it cannot wait
 
 Brief the engineer with `mcp__engineer__brief`, project `Loam` (see
-`loam-working-with-the-engineer`). If the brief is refused because this
-install's engineer is not set up, tell the owner plainly; the report to
-Loam's makers still goes, and a plugin may still do it. A change to Loam's
+`loam-working-with-the-engineer`). Every install has one since Loam 0.2.2.
+If a brief is refused because the engineer is not set up (an install
+older than that, not yet updated), tell the owner plainly: updating Loam
+sets it up, the report to Loam's makers still goes, and a plugin may still
+do it. A change to Loam's
 own code stays on this install: it is never sent anywhere, and every update
 keeps it, merging the new release around it. If a release later changes the
 same lines, the update stops before anything moves, names the files, and

@@ -7,9 +7,10 @@ Each test is run with the interpreter its own docstring names on its `Run:`
 line when that is the MCP venv -- a test of an MCP server imports `mcp`, which
 lives only there -- and with python3 otherwise.
 
-Run: python3 tests/run-all
+Run: python3 tests/run-all [test_x.py ...]   (named ones only, in full)
 """
 
+import json
 import os
 import re
 import shutil
@@ -31,6 +32,62 @@ def interpreter(test: Path) -> str:
     if re.search(r"^Run: mcp/\.venv/bin/python", head, re.MULTILINE):
         return str(VENV)
     return sys.executable
+
+
+# What the tests' fixtures assume of an install, over whatever it says.
+FIXTURE = {
+    "timezone": "America/Los_Angeles",
+    "vault": {"inbox": "00_INBOX", "boards": "00_INBOX/boards",
+              "general_board": "00_INBOX/from-agents/comms.md",
+              "conversations": "15_CONVERSATIONS", "projects": "40_PROJECTS",
+              "attachments": "98_ATTACHMENTS", "system": "99_SYSTEM"},
+}
+
+
+# And what the tests' fixtures assume an install does not say: an install
+# made by install.sh names its web front in `[edge]` (its domain, and which
+# app records it serves), and the deploy layer's tests render their own; a
+# `[bin]` table moves the tools a test's own stub stands in for.
+FIXTURE_DROP = ("edge", "bin")
+
+
+def toml_value(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(toml_value(v) for v in value) + "]"
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def toml_text(table: dict, prefix: str = "") -> str:
+    plain = [f"{json.dumps(k)} = {toml_value(v)}" for k, v in table.items()
+             if not isinstance(v, dict)]
+    out = ([f"[{prefix}]"] if prefix and plain else []) + plain
+    for key, value in table.items():
+        if isinstance(value, dict):
+            out.append(toml_text(value, f"{prefix}.{json.dumps(key)}" if prefix
+                                 else json.dumps(key)))
+    return "\n".join(out) + "\n"
+
+
+def fixture_config(where: Path) -> str:
+    """The install's configuration with FIXTURE laid over it, as a file."""
+    import tomllib  # noqa: PLC0415
+    real = Path(os.environ.get("LOAM_CONFIG") or loam_config.CONFIG_FILE)
+    try:
+        table = tomllib.loads(real.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        table = {}
+    for key in FIXTURE_DROP:
+        table.pop(key, None)
+    for key, value in FIXTURE.items():
+        table[key] = ({**table.get(key, {}), **value} if isinstance(value, dict)
+                      else value)
+    path = where / "loam.toml"
+    path.write_text(toml_text(table), encoding="utf-8")
+    return str(path)
 
 
 def main() -> int:
@@ -74,6 +131,18 @@ def main() -> int:
             os.environ["LOAM_THREADS_STATE"] = os.path.join(stores, "threads")
         if not os.environ.get("LOAM_VAULT"):
             os.environ["LOAM_VAULT"] = os.path.join(stores, "vault")
+    # And the layout the suite was written against (2026-11-18): the
+    # install's own configuration, with the vault's folder names and the
+    # time zone the tests' fixtures spell out laid over it. Found by the
+    # 0.2.2 rehearsal: on a fresh install (`Conversations`, `Inbox`, UTC)
+    # 35 test files failed on a checkout nothing had changed, so no engineer
+    # change could land there. A test that names its own LOAM_CONFIG keeps it.
+    fixture = None
+    if not os.environ.get("LOAM_TEST_INSTALL_CONFIG"):
+        fixture = tempfile.mkdtemp(prefix="loam-test-config-")
+        os.environ["LOAM_CONFIG"] = fixture_config(Path(fixture))
+        # The clock's zone too, for what reads the machine's local time.
+        os.environ["TZ"] = FIXTURE["timezone"]
     # No test's broker object reads the box's real usage through a real CLI
     # (lib/loam_provider_usage.py); the ones that build a Server say so too.
     os.environ["LOAM_USAGE_READS"] = "off"
@@ -97,12 +166,18 @@ def main() -> int:
             shutil.rmtree(settings, ignore_errors=True)
         if stores:
             shutil.rmtree(stores, ignore_errors=True)
+        if fixture:
+            shutil.rmtree(fixture, ignore_errors=True)
 
 
 def run_all() -> int:
     failed, tails = [], []
     started = time.monotonic()
+    # `run-all test_a.py test_b.py` runs only those, each in full.
+    only = [a for a in sys.argv[1:] if a.endswith(".py")]
     for test in sorted((ROOT / "tests").glob("test_*.py")):
+        if only and test.name not in only:
+            continue
         t0 = time.monotonic()
         try:
             out = subprocess.run([interpreter(test), str(test)], cwd=ROOT,
@@ -112,6 +187,8 @@ def run_all() -> int:
         except subprocess.TimeoutExpired:
             code, text = "timeout", ""
         mark = "ok  " if code == 0 else "FAIL"
+        if only:
+            print(text, flush=True)
         print(f"{mark} {test.name} ({time.monotonic() - t0:.0f} s)", flush=True)
         if code != 0:
             failed.append(test.name)
