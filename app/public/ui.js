@@ -442,6 +442,33 @@ function svg(size, paths, { stroke = 2.75, viewBox = '0 0 24 24', fill = 'none' 
   return root
 }
 
+// Loam's mark, the earth blob the sign-in page and the icon wear, drawn in
+// the page so it shows even when nothing more can be fetched (the ended
+// session's screen, 0.2.1).
+export function loamMark(size = 52) {
+  const root = document.createElementNS(NS, 'svg')
+  for (const [k, v] of Object.entries({ width: size, height: size, viewBox: '0 0 64 64', 'aria-hidden': 'true', focusable: 'false', class: 'loam-mark' })) root.setAttribute(k, v)
+  const clip = document.createElementNS(NS, 'clipPath'), id = 'loam-mark-clip'
+  clip.setAttribute('id', id)
+  const blob = document.createElementNS(NS, 'path')
+  blob.setAttribute('d', 'M34 3 C52 3 61 15 60 33 C59 51 49 61 31 61 C13 61 3 50 4 32 C5 14 16 3 34 3 Z')
+  clip.append(blob)
+  const defs = document.createElementNS(NS, 'defs'); defs.append(clip)
+  const g = document.createElementNS(NS, 'g'); g.setAttribute('clip-path', `url(#${id})`)
+  for (const [tag, attrs, tone] of [['rect', { width: 64, height: 64 }, 'sand'],
+    ['path', { d: 'M0 27 C12 21 22 33 34 27 S54 23 64 29 V64 H0 Z' }, 'umber'],
+    ['path', { d: 'M0 45 C14 39 24 51 36 45 S56 41 64 47 V64 H0 Z' }, 'earth']]) {
+    const el = document.createElementNS(NS, tag)
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v)
+    // Through the CSSOM, which the page's CSP allows (a style attribute it
+    // would refuse); the colours are core tokens (tokens.css).
+    el.style.fill = `var(--loam-mark-${tone})`
+    g.append(el)
+  }
+  root.append(defs, g)
+  return root
+}
+
 const PIN = 'M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.8l-1.8-.9A2 2 0 0 1 15 10.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z'
 
 export const icon = {

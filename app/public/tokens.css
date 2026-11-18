@@ -50,6 +50,10 @@
   --avatar-ink: var(--text-on-avatar);
   /* Physical coffee and ceramic stay the same in either lighting mode. */
   --latte-art-bone: #F3EEE4;
+  /* Loam's mark (ui.js loamMark), the sign-in page's earth: one brand, every theme. */
+  --loam-mark-sand: #CDA57F;
+  --loam-mark-umber: #7A5236;
+  --loam-mark-earth: #4A3A2E;
   --latte-art-edge: #D9D1C3;
   --latte-art-foam: #F6EDDF;
   --latte-art-crema: #BC8552;

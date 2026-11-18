@@ -76,7 +76,7 @@ import { createPanels, panelDOM, itemKey, readPanels } from './panels.js'
 import { mount as mountConversation } from './page/conversation.js'
 import { mountSidePanel } from './page/side-panel.js'
 
-import { h, morph, kept, blob, icon, wave, on as onNode } from './ui.js'
+import { h, morph, kept, blob, icon, wave, loamMark, on as onNode } from './ui.js'
 
 const lastClassicSession = rememberedSession()
 const store = createStore()
@@ -146,6 +146,19 @@ const state = {
 // The width the desktop layout starts at, from the handoff: "minimum window
 // width to implement: ~1100px". Below it the phone's screens stand unchanged.
 const WIDE = 1100
+
+// The page's session has ended (auth.js): Loam's sign-in look, from what the
+// page already holds (its stylesheets and the mark drawn in place), since
+// nothing behind the login can be fetched any more. Until 0.2.1 it was a bare
+// line and a link.
+function signInAgain() {
+  return h('main', { class: 'signin-again', key: 'screen:signin-again' },
+    h('div', { class: 'signin-again-sheet' },
+      loamMark(52),
+      h('h1', { class: 'display', text: 'Your session has ended' }),
+      h('p', { class: 'signin-again-intro', text: 'Sign in again to carry on. Your agents kept working.' }),
+      h('a', { class: 'pillbtn primary', href: globalThis.location?.href ?? '/', text: 'Sign in again' })))
+}
 
 function isWide() {
   const query = globalThis.matchMedia?.(`(min-width: ${WIDE}px)`)
@@ -809,7 +822,7 @@ function render() {
   const beside = panels.visible() ? sidePanel.view() : null
   const content = !state.wide && section ? registry.invoke(section, 'render', { wide: false, screen: state.screen }) : null
   const welcoming = onboarding.checking || onboarding.needed
-  const screen = authExpired() ? h('main', { class: 'signin-again' }, h('p', { text: 'Your session has ended.' }), h('a', { class: 'pillbtn', href: globalThis.location?.href ?? '/', text: 'Sign in again' }))
+  const screen = authExpired() ? signInAgain()
     : welcoming ? welcomeScreen({ checking: onboarding.checking, providers: state.providers, signIn: page.providerSignIn, continueWith: finishWelcome, retry: loadProviders, error: state.providersError })
     : state.wide ? page.desk(beside) : section?.frame === 'full' ? content : h('div', { class: 'screen plugin-screen' }, content, page.nav())
   morph(root, authExpired() || welcoming ? [screen] : [screen, ...registry.draw('app.overlay', { slot: 'overlay', screen: state.screen, wide: state.wide })])
