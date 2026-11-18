@@ -1288,3 +1288,34 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   debug. `test_schedule` skips there (`private_systemd.Unavailable`).
 - **`vm.py run` keeps only the last 12,000 characters.** Write long output to
   a file on the VM and fetch it.
+## 2026-11-18 — nothing in a launch grows with the vault; every wake's end is on the record
+
+- **One argv string is capped at 128 KiB** (MAX_ARG_STRLEN), whatever
+  `ulimit -s` says, and `execve` fails with E2BIG before the program exists.
+  The wake put the whole vault `git diff --name-status` into `-p`; one
+  1,033-file autocommit made it 183,749 bytes and every reflection wake died
+  in `subprocess.run`. Repository state goes in a file the prompt names (or
+  in a list capped by a constant, `INLINE_CHANGES_MAX`), never in argv.
+  `tests/test_wake_launch.py` execs a real stand-in CLI against a 300 KB diff.
+- **An exception out of bin/wake used to vanish.** It ran the `finally`
+  that clears `.running`, so bin/wake-failed (which reports only a run that
+  left its marker) stayed silent, and neither the jsonl nor the failure log
+  had a line: the failure log read as a clean night. `main()` now records
+  any exception as stage `crash`, with the step it reached (`CRASH["at"]`)
+  and whether the CLI had started.
+- **A failed unit is not evidence against a CLI build.** provider-follow
+  rolled Claude Code back twice for wakes our own launcher refused or
+  crashed. It now reads the run's own jsonl line (`explained`), excuses
+  `preflight`, `crash`, `account_refused`, `lock_timeout` and another
+  provider's run, still blames a unit that left no line, and lifts an old
+  refusal whose every reason it now excuses (`lift_refusals`).
+- **The size limit refuses nothing at run time.** `OVER_LIMIT_REFUSED_FROM`
+  is gone; the wake, a cron record (`loam_cron.parse_record`) and an RC
+  start report a file over 10,000 characters as "reported, not refused" and
+  run. Only the engineer/reviewer edit guard still refuses past it.
+- **A persona hears about its own dark night** (`lib/loam_lane_notice.py`):
+  the thread engine prepends one line to its next turn when a lane's last
+  jsonl row is `ok: false`, once per failure (told stamps in
+  `STATE/lane-notice/`), cleared by the lane's next good row. It goes
+  quiet when `LOAM_AI_LABS` points at scratch without `LOAM_LANE_NOTICE_LOGS`,
+  because thread tests reuse live persona names.

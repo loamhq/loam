@@ -59,7 +59,6 @@ import loam_engineer  # noqa: E402
 from loam_lock import WAIT_SECONDS  # noqa: E402
 from loam_memory import (  # noqa: E402
     CRON_LANE_DIR,
-    LIMIT_CHARS,
     front_matter,
     strip_frontmatter,
 )
@@ -386,11 +385,9 @@ def parse_record(agent: str, name: str, text: str,
             f"{', '.join(unknown)}. The keys are {', '.join(HEADER_KEYS[:-1])}"
             f". Tool grants are not a record's to carry: they are {lc.OWNER_NAME}'s, "
             f"in agents/lib/loam_engineer.py.", key=unknown[0])
-    if len(text) > LIMIT_CHARS:
-        raise CronError(
-            f"{path} is {len(text):,} characters, over the {LIMIT_CHARS:,}-"
-            f"character limit on files that load automatically."
-        )
+    # No size refusal (2026-11-18): a record over LIMIT_CHARS is still a
+    # record, and its lane runs. The wake reports the size at launch and the
+    # edit hook at write time; refusing here took the timer away instead.
     enabled = parse_enabled(header)
     body = strip_frontmatter(text).strip()
     lane = header.get("lane", "").strip().lower()

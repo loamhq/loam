@@ -147,7 +147,7 @@ try:
         ("schedule not in the grammar",   "soon",           False),
         ("header but no body",            "no-body",        False),
         ("no header at all",              "no-header",      False),
-        ("body over the char limit",      "huge",           False),
+        ("over the char limit: not refused", "huge",         True),
         ("no such file",                  "missing",        False),
         ("name is not kebab-safe",        "../escape",      False),
     ]

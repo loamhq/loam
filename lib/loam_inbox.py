@@ -92,6 +92,8 @@ the account refused (`account_refused`), which shares one line a night with
 every other refused run, counted. A line that says
 "a warning, not a refusal" is the exception: the run went ahead, nothing
 reached `comms.md`, and the same warning is written at most once a night.
+A line that says "reported, not refused" is a loading file over its limit:
+it reached `comms.md`, and the run went ahead all the same.
 
 """
 

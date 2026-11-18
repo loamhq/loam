@@ -21,9 +21,9 @@ size limit worth having: the cost lands on every run, and nothing in any of
 the three transports announces itself when a file grows. So one constant,
 here, is the authority -- ``bin/provision`` renders it into every CLAUDE.md so
 the agent can read the number, ``hooks/boundary_guard.py`` enforces it at edit
-time, ``bin/wake`` refuses an over-limit lane on the path that runs
-unattended, and ``bin/rc-preflight`` reports one on the path that must not
-refuse. Since 2026-09-07 a second, lower number sits beside it:
+time (on the engineer and reviewer lanes; a persona's hook only reports),
+and ``bin/wake`` and ``bin/rc-preflight`` report one -- neither refuses a run
+over it (since 2026-11-18 for the wake). Since 2026-09-07 a second, lower number sits beside it:
 ``NEAR_LIMIT_CHARS``, at which the same two reporters write a warning line
 and change nothing else.
 
@@ -70,11 +70,11 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import date
 from pathlib import Path
 
 # ONE authority for the limit. bin/provision renders it into CLAUDE.md,
-# boundary_guard.py refuses past it, bin/wake and bin/rc-preflight report it.
+# boundary_guard.py refuses past it, bin/wake and bin/rc-preflight report it
+# and never refuse a run.
 # Characters, not bytes: it is what an agent can reason about, and what the
 # CLAUDE.md sentence promises.
 LIMIT_CHARS = 10_000
@@ -92,14 +92,11 @@ LIMIT_CHARS = 10_000
 # characters still to spend.
 NEAR_LIMIT_CHARS = 9_000
 
-# The wake refuses an over-limit lane file FROM this date, and only reports it
-# before. One persona's _reflection.md was 30,025 characters on the day this was
-# built, and a day-one refusal would have taken her offline until she trimmed
-# -- with her wake, the only process that could do the trimming, being the
-# thing refusing. That is the trap that cost Iris several days on 08-31.
-#
-# Flipping to refuse is deliberately one edit: change this date to the past.
-OVER_LIMIT_REFUSED_FROM = date(2026, 9, 11)
+# Nothing refuses a run over the limit (2026-11-18). From 2026-09-11 to
+# 2026-11-18 bin/wake refused an over-limit lane file (OVER_LIMIT_REFUSED_FROM,
+# gone); the owner's word of 2026-11-08 had made the limit a warning, and the
+# refusal outlived it by ten days, keeping one persona's wake dark two nights
+# over 9 characters. Every reporter now warns and the run goes ahead.
 
 ALWAYS_LAYER = "_always.md"
 CONVERSATION_LAYER = "_active.md"
@@ -192,9 +189,16 @@ def near_limit_reason(name: str, size: int, path: Path) -> str:
     )
 
 
-def refuse_over_limit_now(today: date | None = None) -> bool:
-    """Whether the wake refuses an over-limit lane, or only reports it."""
-    return (today or date.today()) >= OVER_LIMIT_REFUSED_FROM
+def over_limit_reason(name: str, size: int, path: Path,
+                      run: str = "the run went ahead") -> str:
+    """The sentence both reporters write for a file over the limit. It says
+    the run went ahead, because it did: nothing refuses a run over it."""
+    return (
+        f"`{name}` is {size:,} characters, over the {LIMIT_CHARS:,}-character "
+        f"limit on files that load automatically, by {size - LIMIT_CHARS:,} "
+        f"({path}). Reported, not refused: the file still loads whole and "
+        f"{run}. Trim it when you next can."
+    )
 
 
 def resolve_lane(project_dir: Path, lane: str = REFLECTION_LAYER) -> tuple[str, str, Path]:

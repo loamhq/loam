@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
-"""The wake's two responses to an over-limit lane file, both sides.
+"""The wake's responses to a lane file's size: none of them a refusal.
 
-The grace period is a date in one place -- ``OVER_LIMIT_REFUSED_FROM`` in
-lib/loam_memory.py -- and flipping the whole system from reporting to
-refusing is meant to be one edit to it. That is only true if both branches
-are exercised, and only one of them can be exercised by the calendar on any
-given day. So this drives the module directly with the date pushed either
-side of the constant.
+Until 2026-11-18 a lane file over the limit refused the wake from a date in
+lib/loam_memory.py (``OVER_LIMIT_REFUSED_FROM``, 2026-09-11); the owner's
+word of 2026-11-08 had made the limit a warning, and that refusal kept one
+persona's reflection dark two nights over 9 characters. Now an over-limit
+file is reported -- the failure log and comms, as a Remote Control start
+reports one -- the line says the lane went ahead, and it did. The calendar
+no longer matters, and the scenarios are driven on either side of the old
+date to prove it.
 
-The refusal branch is the one with teeth: it returns before a session is
-ever launched, which is the whole point of a preflight on the unattended
-path. The report branch is the one that could rot unnoticed, because until
-2026-09-11 it is the only one anybody sees.
-
-Since 2026-09-07 there is a third response, below both: a file past
-``NEAR_LIMIT_CHARS`` but not over the limit gets one warning line in the log,
-no comms line, and the wake runs. Driven here on both sides of that number
-and both sides of the limit, and written twice on one day to prove the line
-is once a night.
+Below the limit: a file past ``NEAR_LIMIT_CHARS`` gets one warning line in
+the log, no comms line, and the wake runs. Driven here on both sides of
+that number and both sides of the limit, and written twice on one day to
+prove the line is once a night. A MISSING lane file still refuses (exit 3):
+that is a layer that will not load, not a size.
 
 Two things are stubbed and nothing else: ``preflight_identity``, which would
 spend a real model call proving a fake agent's soul, and ``subprocess.run``,
@@ -45,8 +42,9 @@ import loam_memory  # noqa: E402
 from loam_memory import (  # noqa: E402
     LIMIT_CHARS,
     NEAR_LIMIT_CHARS,
-    OVER_LIMIT_REFUSED_FROM,
 )
+
+OLD_REFUSAL_DATE = date(2026, 9, 11)
 
 AGENT = "wakelimittest"
 REAL_RUN = subprocess.run
@@ -155,8 +153,8 @@ over = "o" * (LIMIT_CHARS + 1)          # 10,001: the limit
 nearly = "n" * (LIMIT_CHARS - 1)        #  9,999: under the limit, warned
 warned = "w" * (NEAR_LIMIT_CHARS + 1)   #  9,001: just over the warning
 clear = "c" * (NEAR_LIMIT_CHARS - 1)    #  8,999: nothing to say
-before = OVER_LIMIT_REFUSED_FROM - timedelta(days=1)
-after = OVER_LIMIT_REFUSED_FROM
+before = OLD_REFUSAL_DATE - timedelta(days=1)
+after = date(2026, 11, 18)
 WARNING = f"within {LIMIT_CHARS - NEAR_LIMIT_CHARS:,} characters of the"
 
 results = [
@@ -170,10 +168,12 @@ results = [
              WARNING, expect_comms=False),
     scenario("just under the limit, after the date", nearly, after, 0,
              WARNING, expect_comms=False),
-    scenario("OVER limit, before the date", over, before, 0,
+    scenario("OVER limit, before the old date", over, before, 0,
              "Reported, not refused"),
-    scenario("OVER limit, after the date", over, after, 3,
-             "preflight refused"),
+    scenario("OVER limit, after it: still runs", over, after, 0,
+             "the reflection lane went ahead"),
+    scenario("9 over (11-17's case): runs", "o" * (LIMIT_CHARS + 9), after,
+             0, "over the 10,000-character limit"),
     scenario("missing lane file", "", after, 3, "is empty"),
 ]
 
