@@ -66,18 +66,23 @@ CASES = [
     # assumed to still match. The output field is still target_path, which
     # is what keeps these cases meaningful: if a later edit renames it,
     # these fail loudly instead of the boundary going quiet.
-    ("gen_image own workspace",     "mcp__composition__generate_image", {"target_path": f"{W}/art/x.png"}, True),
-    ("gen_image sibling",           "mcp__composition__generate_image", {"target_path": f"{L}/ada/x.png"}, False),
-    ("gen_image outside roots",     "mcp__composition__generate_image", {"target_path": f"{H}/x.png"}, False),
-    ("gen_image 15_CONVERSATIONS",  "mcp__composition__generate_image", {"target_path": f"{V}/15_CONVERSATIONS/x.png"}, False),
-    ("gen_image traversal escape",  "mcp__composition__generate_image", {"target_path": f"{W}/../ada/x.png"}, False),
-    ("gen_image illegal name",      "mcp__composition__generate_image", {"target_path": f"{W}/cover: v2.png"}, False),
+    ("gen_image own workspace",     "mcp__images__generate_image", {"target_path": f"{W}/art/x.png"}, True),
+    ("gen_image sibling",           "mcp__images__generate_image", {"target_path": f"{L}/ada/x.png"}, False),
+    ("gen_image outside roots",     "mcp__images__generate_image", {"target_path": f"{H}/x.png"}, False),
+    ("gen_image 15_CONVERSATIONS",  "mcp__images__generate_image", {"target_path": f"{V}/15_CONVERSATIONS/x.png"}, False),
+    ("gen_image traversal escape",  "mcp__images__generate_image", {"target_path": f"{W}/../ada/x.png"}, False),
+    ("gen_image illegal name",      "mcp__images__generate_image", {"target_path": f"{W}/cover: v2.png"}, False),
     # Sources and masks are READS, and reads are open across the vault and
     # all of ai-labs by design -- an agent using a sibling's cover art as a
     # style reference is the capability working, not a breach. The guard
     # must not start policing them because they appear in the same call.
-    ("gen_image sibling as SOURCE", "mcp__composition__generate_image", {"target_path": f"{W}/x.png", "source_images": [f"{L}/ada/cover.png"], "mask": f"{L}/ada/m.png"}, True),
-    ("gen_image bad target ok src", "mcp__composition__generate_image", {"target_path": f"{L}/ada/x.png", "source_images": [f"{W}/mine.png"]}, False),
+    ("gen_image sibling as SOURCE", "mcp__images__generate_image", {"target_path": f"{W}/x.png", "source_images": [f"{L}/ada/cover.png"], "mask": f"{L}/ada/m.png"}, True),
+    ("gen_image bad target ok src", "mcp__images__generate_image", {"target_path": f"{L}/ada/x.png", "source_images": [f"{W}/mine.png"]}, False),
+    # The Images plugin takes a path relative to the vault (2026-11-18): it is
+    # checked where it writes, not under the agent's working folder.
+    ("gen_image vault-relative",    "mcp__images__generate_image", {"target_path": "Images/x.png"}, True),
+    ("gen_image relative 15_CONV",  "mcp__images__generate_image", {"target_path": "15_CONVERSATIONS/x.png"}, False),
+    ("gen_image no target at all",  "mcp__images__generate_image", {"prompt": "a fox"}, True),
     # delete_file was extended on 2026-09-03 to remove EMPTY directories.
     # The argument shape did not change -- still one `path` -- but the kind
     # of thing that path names did, and a changed write tool gets its

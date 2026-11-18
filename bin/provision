@@ -260,7 +260,6 @@ def settings(workspace: Path) -> dict:
                 "mcp__loam__read_epub",
                 "mcp__loam__delete_file",
                 "mcp__loam__move_file",
-                "mcp__composition__generate_image",
                 "mcp__composition__generate_pdf",
                 "mcp__composition__typst_fonts",
                 "mcp__composition__render_typst_pages",

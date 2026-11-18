@@ -76,7 +76,8 @@ WRITE_TOOLS = {
     "Edit": ("Write", ("file_path",)),
     "MultiEdit": ("Write", ("file_path",)),
     "NotebookEdit": ("Write", ("notebook_path",)),
-    "mcp__composition__generate_image": ("Write", ("target_path",)),
+    # The Images plugin's tool (2026-11-18; it left the composition server).
+    "mcp__images__generate_image": ("Write", ("target_path",)),
     "mcp__composition__generate_pdf": ("Write", ("target_path",)),
     "mcp__composition__render_typst_pages": ("Write", ("output_dir",)),
     # The servers check their own targets too; neither layer is trusted alone.
@@ -92,7 +93,7 @@ WRITE_TOOLS = {
 # which is the most useful thing move_file does.
 FILENAME_FIELDS = {
     "Write": ("file_path",),
-    "mcp__composition__generate_image": ("target_path",),
+    "mcp__images__generate_image": ("target_path",),
     "mcp__composition__generate_pdf": ("target_path",),
     "mcp__composition__render_typst_pages": ("output_dir",),
     "mcp__loam__move_file": ("destination",),
@@ -557,11 +558,20 @@ def main() -> None:
     sys.exit(0)
 
 
+# Tools that take a path relative to the vault: checked where they write,
+# not where the agent's working folder would put it (Images, 2026-11-18).
+VAULT_RELATIVE = {"mcp__images__generate_image": ("target_path",)}
+
+
 def check(payload: dict, tool_name: str, tool_input: dict) -> None:
     """One call against the boundary. Refuses by exiting 2; else returns."""
     entry = WRITE_TOOLS.get(tool_name)
     if not entry:
         return
+    for f in VAULT_RELATIVE.get(tool_name, ()):
+        raw = tool_input.get(f)
+        if isinstance(raw, str) and raw and not raw.startswith("/"):
+            tool_input = {**tool_input, f: str(lc.VAULT / raw)}
     verb, fields = entry
     targets = [(f, tool_input.get(f)) for f in fields]
     if not any(raw for _, raw in targets):

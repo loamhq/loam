@@ -48,7 +48,7 @@ RESULT_FIELDS = {
     "MultiEdit": ("file_path",),
     "NotebookEdit": ("notebook_path",),
     "mcp__loam__move_file": ("destination",),
-    "mcp__composition__generate_image": ("target_path",),
+    "mcp__images__generate_image": ("target_path",),
     "mcp__composition__generate_pdf": ("target_path",),
 }
 
