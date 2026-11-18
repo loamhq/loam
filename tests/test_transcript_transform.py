@@ -60,7 +60,7 @@ def main() -> None:
     check("no tool_result blocks leaked", "tool_result" not in joined)
 
     rendered = lt.render_file(
-        "A title", turns, "pax", "\N{TIGER}", session_id="abc-123"
+        "A title", turns, "pax", session_id="abc-123"
     )
 
     check("frontmatter opens the file", rendered.startswith("---\ntitle: "))
@@ -86,16 +86,16 @@ def main() -> None:
         in rendered,
     )
     check(
-        "agent turn marker with emoji header",
+        "agent turn marker with the plain name as its header (no emoji, 2026-11-17)",
         f"<!-- turn speaker=pax timestamp={turns[1].timestamp} -->\n"
-        f"### \N{TIGER} Pax\n\n" in rendered,
+        f"### Pax\n\n" in rendered,
     )
     check("no telegram fields", "telegram_" not in rendered)
     check("surface is a positive fact", "surface: claude-code" in rendered)
     check("session id is traceable", "session_id: abc-123" in rendered)
     check(
         "session id omitted when absent (chassis files get no empty field)",
-        "session_id" not in lt.render_file("T", turns, "pax", "", session_id=None),
+        "session_id" not in lt.render_file("T", turns, "pax", session_id=None),
     )
 
     # /clear opens a new session whose first entry is the assistant's own
@@ -204,16 +204,16 @@ def main() -> None:
     # Reconciling a filed transcript with its session. The hook is fired
     # before the CLI has finished writing a turn, so the file can hold a
     # truncated version of a turn it already wrote.
-    filed = lt.render_file("T", reply, "iris", "🐅", session_id="s-1")
-    unchanged, why = lt.plan_update(filed, reply, "iris", "🐅")
+    filed = lt.render_file("T", reply, "iris", session_id="s-1")
+    unchanged, why = lt.plan_update(filed, reply, "iris")
     check("a file that matches its session is not rewritten",
           unchanged is None and why == "unchanged", why)
 
     truncated_turn = lt.Turn("iris", "Let me look first.", reply[1].timestamp)
     truncated = lt.render_file(
-        "T", [reply[0], truncated_turn], "iris", "🐅", session_id="s-1"
+        "T", [reply[0], truncated_turn], "iris", session_id="s-1"
     )
-    repaired, why = lt.plan_update(truncated, reply, "iris", "🐅")
+    repaired, why = lt.plan_update(truncated, reply, "iris")
     check("a turn that grew after it was written is repaired",
           repaired is not None and "The answer, at last." in repaired, why)
     check("repairing does not duplicate the turn",
@@ -229,7 +229,7 @@ def main() -> None:
         lt.Turn("user", "and the shell?", "2026-09-17T00:01:00Z"),
         lt.Turn("iris", "Stoic skin.", "2026-09-17T00:01:02Z"),
     ]
-    grown, why = lt.plan_update(filed, later, "iris", "🐅")
+    grown, why = lt.plan_update(filed, later, "iris")
     check("new turns are appended",
           grown is not None and grown.count("<!-- turn speaker=") == 4, why)
     check("appending leaves the earlier turns byte-identical",
@@ -240,10 +240,10 @@ def main() -> None:
     # The record may gain and may never lose: a file holding something the
     # session does not is left exactly as it stands.
     hand_edited = filed.replace("The answer, at last.", "something else entirely")
-    left, why = lt.plan_update(hand_edited, reply, "iris", "🐅")
+    left, why = lt.plan_update(hand_edited, reply, "iris")
     check("a diverged turn is never overwritten",
           left is None and "diverged" in why, why)
-    diverged_then_grown, why = lt.plan_update(hand_edited, later, "iris", "🐅")
+    diverged_then_grown, why = lt.plan_update(hand_edited, later, "iris")
     check("but later turns still land on a diverged file",
           diverged_then_grown is not None
           and "something else entirely" in diverged_then_grown

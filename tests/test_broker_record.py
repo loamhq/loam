@@ -195,7 +195,7 @@ def file_transcript(session_id: str, title: str) -> Path:
              loam_transcript.Turn("probe", "checked.", "2026-09-22T19:00:04Z")]
     path = VAULT / f"{title}.md"
     path.write_text(
-        loam_transcript.render_file(title, turns, "probe", "🧪",
+        loam_transcript.render_file(title, turns, "probe",
                                     session_id=session_id,
                                     surface=loam_transcript.SURFACE_LOAM_UI),
         encoding="utf-8")

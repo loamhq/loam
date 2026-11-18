@@ -109,6 +109,9 @@ QUIET_POLL_S = float(os.environ.get("LOAM_FOLLOW_QUIET_POLL_S", "60"))
 # the next run. Not a clock on a turn: nothing is cut, the restart waits.
 QUIET_MAX_S = int(os.environ.get("LOAM_FOLLOW_QUIET_MAX_S", str(6 * 3600)))
 KEEP_PREVIOUS = 2
+# The least time bin/restart-broker is given to see idle again under the
+# live lock, after this module's own wait saw it.
+RESTART_RECHECK_S = 300
 
 BROKER_UNIT = "loam-session-broker.service"
 BUSY_STATES = set(loam_live.RESTART_HOLDS)   # the one rule, lib/loam_live.py
@@ -201,8 +204,8 @@ def alias_moves(before: dict, after: dict) -> list[str]:
 
 # --- the broker -----------------------------------------------------------
 
-def broker_rows(timeout: float = 10) -> list[dict] | None:
-    """`GET /v1/sessions/live`'s rows, or None when the read failed."""
+def broker_live(timeout: float = 10) -> dict | None:
+    """`GET /v1/sessions/live`'s body, or None when the read failed."""
     import http.client  # noqa: PLC0415
     try:
         conn = http.client.HTTPConnection(cfg.BIND_ADDR, cfg.PORT, timeout=timeout)
@@ -212,9 +215,26 @@ def broker_rows(timeout: float = 10) -> list[dict] | None:
         body = resp.read()
         if resp.status != 200:
             return None
-        return list(json.loads(body).get("sessions") or [])
+        live = json.loads(body)
+        return live if isinstance(live, dict) else None
     except (OSError, ValueError):
         return None
+
+
+def broker_rows(timeout: float = 10) -> list[dict] | None:
+    """`GET /v1/sessions/live`'s rows, or None when the read failed."""
+    live = broker_live(timeout)
+    return None if live is None else list(live.get("sessions") or [])
+
+
+def restart_read(timeout: float = 10) -> list[str]:
+    """One fresh read of what holds a planned restart (`loam_live.
+    restart_blockers` over the rows and the thread turns in flight). Empty
+    means idle; a failed read is busy."""
+    live = broker_live(timeout)
+    if live is None:
+        return loam_live.restart_blockers(None)
+    return loam_live.restart_blockers(live.get("sessions"), live.get("turns"))
 
 
 def busy(rows: list[dict] | None) -> list[str]:
@@ -816,11 +836,15 @@ class Hands:
         return done.returncode == 0
 
     def restart_broker(self) -> bool:
-        """Once no session is working or asking. Polled; a failed read is
-        busy; never past `quiet_max_s` (then the next run restarts it)."""
+        """Once every session is idle and no thread turn is in flight.
+        Polled; a failed read is busy; never past `quiet_max_s` (then the next
+        run restarts it). The decision itself is bin/restart-broker
+        --when-idle's, under the live lock and on fresh reads (2026-11-17:
+        until then one clear read here was followed by a plain restart,
+        however long the lock took)."""
         started = time.monotonic()
         while True:
-            why = busy(broker_rows())
+            why = restart_read()
             if not why:
                 break
             if time.monotonic() - started >= self.quiet_max_s:
@@ -832,10 +856,14 @@ class Hands:
         if self.dry:
             log("box", "restart-broker", True, dry=True, note="quiet now; would restart")
             return True
-        done = run([str(AGENTS / "bin" / "restart-broker")], timeout=600)
+        left = max(RESTART_RECHECK_S,
+                   self.quiet_max_s - (time.monotonic() - started))
+        done = run([str(AGENTS / "bin" / "restart-broker"), "--when-idle",
+                    "--max-wait", str(round(left)), "--ceiling", "0"],
+                   timeout=left + 900)
         ok = done.returncode == 0
         log("box", "restart-broker", ok, waited_s=round(time.monotonic() - started),
-            rc=done.returncode)
+            rc=done.returncode, **({"deferred": True} if done.returncode == 75 else {}))
         return ok
 
     def comms(self, section: str, text: str) -> bool:

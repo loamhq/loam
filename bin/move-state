@@ -137,7 +137,7 @@ def blockers() -> list[str]:
     try:
         import loam_follow
         import loam_live
-        why += loam_live.restart_blockers(loam_follow.broker_rows())
+        why += loam_follow.restart_read()
     except Exception as exc:  # noqa: BLE001 -- a broker we cannot read is busy
         why.append(f"the broker's live list could not be read ({exc})")
     why += rc_calls()

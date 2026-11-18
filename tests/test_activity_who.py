@@ -17,8 +17,9 @@ receipt a waiting call could not carry.
      gives the persona a turn whose input names the receipt's path, and
      refuses a thread the persona is not in; a turn the restart cuts off
      posts no "turn ended" line while a delivery for it is pending.
-  4. **lib/loam_live.restart_blockers**: only `working` and `asking` hold a
-     restart; `background` and `idle` do not; a failed read does.
+  4. **lib/loam_live.restart_blockers** (2026-11-17): only `idle` lets a
+     planned restart go; `working`, `asking`, `background`, a thread turn in
+     flight and a failed read hold it.
 
 Run: python3 tests/test_activity_who.py
 """
@@ -401,35 +402,18 @@ asyncio.run(broker_checks())
 
 rows = [{"agent": "ada", "id": "a" * 10, "state": "background"},
         {"agent": "iris", "id": "b" * 10, "state": "idle"}]
-check("background and idle do not hold a restart", loam_live.restart_blockers(rows), [])
-check("working and asking do",
+# 2026-11-17: only `idle` lets a planned restart go; background holds it
+# (a subagent dies with its session, a waiting call is cut), and so does a
+# thread turn in flight. tests/test_restart_ceiling.py has the rest.
+check("idle does not hold a restart", loam_live.restart_blockers(rows[1:]), [])
+check("background, working and asking do",
       loam_live.restart_blockers(rows + [{"agent": "ada", "id": "c" * 10, "state": "working"},
                                          {"agent": "pax", "id": "d" * 10, "state": "asking"}]),
-      ["ada/cccccccc working", "pax/dddddddd asking"])
+      ["ada/aaaaaaaa background", "ada/cccccccc working", "pax/dddddddd asking"])
 check("a failed read holds it", bool(loam_live.restart_blockers(None)), True)
-
-# Past the ceiling (2026-11-16) only output holds it: a working row whose
-# newest event is under RESTART_OUTPUT_S old. A silent turn and a question
-# nobody answered do not; a failed read still does.
-T = 1_800_000_000.0
-def iso(ts):
-    from datetime import datetime, timezone
-    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-late = [{"agent": "ada", "id": "c" * 10, "state": "working",
-         "last_active": iso(T - 3600), "last_event_at": iso(T - 10)},
-        {"agent": "iris", "id": "e" * 10, "state": "working",
-         "last_active": iso(T - 3600), "last_event_at": iso(T - 900)},
-        {"agent": "pax", "id": "d" * 10, "state": "asking",
-         "last_active": iso(T - 5), "last_event_at": iso(T - 5)},
-        {"agent": "juno", "id": "f" * 10, "state": "working",
-         "last_active": iso(T - 20), "last_event_at": None}]
-check("past the ceiling, only a session producing output holds it",
-      loam_live.restart_blockers(late, past_ceiling=True, now=T),
-      ["ada/cccccccc working, output 10 s ago", "juno/ffffffff working, output 20 s ago"])
-check("...before it, every working and asking row still does",
-      len(loam_live.restart_blockers(late, now=T)), 4)
-check("...and a failed read holds it past the ceiling too",
-      bool(loam_live.restart_blockers(None, past_ceiling=True)), True)
+check("a thread turn in flight holds it",
+      loam_live.restart_blockers(rows[1:], [{"thread_id": "t-1", "persona": "iris"}]),
+      ["iris's turn in t-1 in flight"])
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

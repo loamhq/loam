@@ -285,7 +285,8 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   those others still do not.
 ## 2026-11-16 — restarts that end, probes that leave nothing
 
-- **`restart-broker --when-idle` has a ceiling** (`loam_live.RESTART_CEILING_S`,
+- *(Superseded 2026-11-17, below: the ceiling now defers, it never
+  forces.)* **`restart-broker --when-idle` has a ceiling** (`loam_live.RESTART_CEILING_S`,
   30 min). Before it, a `working` or `asking` session holds the restart
   (three clear reads); past it only a `working` row whose `last_event_at`
   (or turn start) is under `RESTART_OUTPUT_S` (60 s) old does, and one
@@ -516,7 +517,8 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **A yes must come after the draft's revision** (`check_yes(after=…)`), so
   an agent that shows a short version, hears yes, and only then calls
   `agent.draft` has to ask again. Iris did, gracefully; it is a second yes
-  the owner gives.
+  the owner gives. *(Fixed 2026-11-17: the skill now says draft first, then
+  show; see below.)*
 - **One config proves nothing shared.** `fleet_clauses` keeps lines most
   configs carry unmasked; with a single agent that was every line, so the
   next agent's config said it was Iris. It now masks everything when there
@@ -757,6 +759,52 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 
 ## 2026-11-17 — bringing context from another AI
 
+- **Opening a file synced the list column to its folder in core** (`show()`
+  in app/public/files.js set `st.root`/`st.path` from the file), not in the
+  plugin. The fix is an explicit `list` option from `goFiles` through the
+  panels' `openMain` item and back into `show`, and `?list=@<id>` on the
+  file's address (`filesHref`'s third argument, `listFromURL`). Only a
+  plugin's root passes one (`fromList` wraps its `go`); shortcuts on the
+  Files home, Open daily note, New inbox note and chat links still go to
+  the file's folder.
+- **On the desktop a Files address is the main panel's item.** Browsing a
+  folder there does not push an address; only opening a file does. Anything
+  that must survive a reload rides on the file's address, and routePanels
+  (Back/Forward) and the cold load (`landedOn`) both read it.
+- **A side-panel item promoted to the main panel carries no list** (the
+  side's descriptor is root and path only), so promoting moves the list
+  to the folder, as before.
+- **A browser test against the fake host hangs on exit** (its event
+  streams stay open): race `closing()` against a timer and `process.exit`
+  in `test.after`, as app/test/files-plugin-list-browser.mjs does.
+
+## 2026-11-17 — one yes, plain headers, restarts that never cut
+
+- **A planned restart needs positive evidence of idle.** On 11-16
+  `restart-broker --when-idle` reached its 1800 s ceiling, stopped waiting
+  for silent turns and restarted, cutting four, three of them blocked on
+  engineer calls. A turn waiting on an engineer job is `working` and
+  silent, which is exactly what the ceiling stopped counting. Now only a
+  live list whose every row is `idle`, with an empty `turns` (thread turns
+  in flight or queued, a field the live view gained), lets it go; at the
+  ceiling or `--max-wait` it exits 75 with nothing restarted. A restart
+  that must happen now is the plain `restart-broker`, the operator's.
+- **A deferral is the caller's to retry.** `loam_follow` leaves the final
+  decision to `restart-broker --when-idle` (it used to read once, then
+  restart plainly after however long the live lock took). `loam update`
+  marks the broker step `deferred` and skips `undo-broker`, since a broker
+  that never restarted already runs the old release.
+- **The re-check under the live lock is short** (`UNDER_LOCK_READS`):
+  landings wait on that lock, so a box busy again by then defers.
+- **A yes's place in the thread decides, not its stamp.** Stamps are to the
+  second; a yes posted in the same second as a revision made the revised
+  draft (shown by running the new test against the old guard). Each
+  revision records the thread's newest message (`after_message`) and a yes
+  must come after it.
+- **Transcript headers are the plain name.** `hooks/transcript_capture.py`
+  read the retired `emoji` from every older `agent.json` and prefixed new
+  headers with it. It no longer does; `plan_update` keeps the turns already
+  in a file byte for byte, so old headers stay as written.
 - **The library can ship a helper beside a skill.** `install_library`
   copies the whole folder (only dotfiles and `__pycache__` are skipped), so
   `docs/library/skills/<name>/inspect_export.py` reaches every install's
@@ -918,3 +966,13 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Live dark shots:** the owner's theme mode in `/appearance-state.js` is
   `sun` (follows the sun), `dark`, `light` or `system`; rewrite it to
   `"mode":"dark"`, not `moon`.
+- **A test that fails only in a full run is often an answer arriving late,
+  not a slow step.** The app's preview cache read an app's note once per
+  resolve; two at once read twice, and a read that ran before the note
+  existed but answered after a capture wrote it restored "no note" and
+  captured again (`app/src/app-media.js`, `noteFor`). Alone it passed 136
+  of 136 runs, parallel load too. It reproduced every time once the read's
+  *answer* was held, not the read itself (a held read just sees the new
+  file). Holding one: a `read` dependency, or for a scratch script
+  `fs.promises.readFile = …` plus `syncBuiltinESMExports()` from
+  `node:module`, which rebinds the ESM named import.
