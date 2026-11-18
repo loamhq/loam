@@ -346,6 +346,36 @@ async def main():
           (snap["pending"], snap["turn"]), ([], None))
     fake.kind = FakeSession
 
+    # General leads the pinned threads by its id, whatever else is newer
+    # (2026-11-18); a plain thread titled "General" is not it, and
+    # with General unpinned or absent the order is pinned-then-newest as before.
+    def ordered(rows):
+        saved = threads.index, threads.summary
+        by_id = {r["id"]: r for r in rows}
+        threads.index = lambda: dict.fromkeys(by_id)
+        threads.summary = lambda tid, running=None: by_id[tid]
+        try:
+            return [r["id"] for r in threads.listing()]
+        finally:
+            threads.index, threads.summary = saved
+
+    def row(tid, at, pinned, title=None):
+        return {"id": tid, "title": title or tid, "pinned": pinned, "archived": False,
+                "last": {"at": at}, "created": at}
+    rows = [row("general", "2026-11-01T00:00:00Z", True, "General"),
+            row("newest-pin", "2026-11-18T00:00:00Z", True),
+            row("pin-b", "2026-11-10T00:00:00Z", True),
+            row("pin-c", "2026-11-05T00:00:00Z", True),
+            row("plain-general", "2026-11-17T00:00:00Z", False, "General"),
+            row("plain", "2026-11-12T00:00:00Z", False)]
+    check("General first among pinned, the rest by newest",
+          ordered(rows), ["general", "newest-pin", "pin-b", "pin-c", "plain-general", "plain"])
+    unpinned = [dict(r, pinned=False) if r["id"] == "general" else r for r in rows]
+    check("an unpinned General takes no special place",
+          ordered(unpinned), ["newest-pin", "pin-b", "pin-c", "plain-general", "plain", "general"])
+    check("with General absent the order is unchanged",
+          ordered(rows[1:]), ["newest-pin", "pin-b", "pin-c", "plain-general", "plain"])
+
     check("mentions match id or name, once each",
           threads.mentions("@Iris and @ada and @iris, not me@x"), ["iris", "ada"])
 

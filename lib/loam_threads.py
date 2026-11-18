@@ -1406,7 +1406,7 @@ def listing(running: dict | None = None,
         rows.append(row)
     rows.sort(key=lambda r: (r["last"] or {}).get("at") or r.get("created") or "",
               reverse=True)
-    rows.sort(key=lambda r: not r["pinned"])
+    rows.sort(key=lambda r: (not r["pinned"], not (r["pinned"] and r["id"] == GENERAL_ID)))
     return rows
 
 
