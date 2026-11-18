@@ -46,8 +46,9 @@ FIXTURE = {
 
 # And what the tests' fixtures assume an install does not say: an install
 # made by install.sh names its web front in `[edge]` (its domain, and which
-# app records it serves), and the deploy layer's tests render their own.
-FIXTURE_DROP = ("edge",)
+# app records it serves), and the deploy layer's tests render their own; a
+# `[bin]` table moves the tools a test's own stub stands in for.
+FIXTURE_DROP = ("edge", "bin")
 
 
 def toml_value(value) -> str:
