@@ -77,6 +77,12 @@ byte-preserving board edits. `public/permission-cards.js` supplies the same
 approval and question cards to threads and classic chats.
 
 Pinned and Recent are matching headings above a continuous, unboxed list.
+Each section is newest activity first, except that General (the thread whose
+id is `general`, never one that only shares its title) always leads Pinned
+while it is pinned (2026-11-18). Unpinned, it takes its place in Recent like
+any other thread. `compareThreads` in `public/thread-record.js` is the one
+comparator the page uses; `listing` in `lib/loam_threads.py` answers in the
+same order.
 The current desktop thread uses a rounded 1.5 px rule in 85% ink beneath its
 text column, from the title's start to the row's right padding. One retained
 indicator serves Pinned and Recent in their shared flow. It retracts toward

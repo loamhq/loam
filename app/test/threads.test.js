@@ -3,7 +3,7 @@ setOwner({ id: 'you', name: 'Sam', accepts: ['you', 'owner', 'person'] })
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
-import { boardLines, boardBlocks, reflowBoardQuotes, editBoard, markBoardSeen, addBoardItem, applyThreadEvent, readThreadRecord, readThreadSummary, readThreadList, readThreadBoard, readAcceptedMessage, recentMembers, messageSegments, firstMessageTitle, groupJoinNotices, messageRecipients } from '../public/thread-record.js'
+import { boardLines, boardBlocks, reflowBoardQuotes, editBoard, markBoardSeen, addBoardItem, applyThreadEvent, readThreadRecord, readThreadSummary, readThreadList, readThreadBoard, readAcceptedMessage, compareThreads, recentMembers, messageSegments, firstMessageTitle, groupJoinNotices, messageRecipients } from '../public/thread-record.js'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
 
 const board = '# Notes\r\n\r\n- [ ] First <!-- Scout · new · until 2026-11-22 -->\r\n* [X] Second <!-- Quill · new · future field -->\r\n- A plain note\r\n\r\n```md\r\n- [ ] A fenced example <!-- Scout · new -->\r\n```\r\n'
@@ -254,4 +254,21 @@ test('addressed model recipients include newly mentioned agents and retain exist
   assert.deepEqual(messageRecipients(thread,'@QUILL @scout Reply',agents),[thread.members[0],{persona:'scout',engine:'claude-code',model:null}])
   assert.deepEqual(messageRecipients(thread,'No mention',agents),[])
   assert.deepEqual(messageRecipients(thread,'mail@quill @quillish',agents),[])
+})
+
+test('General leads the pinned threads by id; everything else keeps pinned-then-newest', () => {
+  const row = (id, at, pinned, title = id) => ({ id, title, pinned, archived: false, last: { at }, created: at, members: [] })
+  const rows = [row('plain', '2026-11-12', false), row('pin-c', '2026-11-05', true), row('plain-general', '2026-11-17', false, 'General'),
+    row('newest-pin', '2026-11-18', true), row('general', '2026-11-01', true, 'General'), row('pin-b', '2026-11-10', true)]
+  const ids = (list, options) => [...list].sort((a, b) => compareThreads(a, b, options)).map((t) => t.id)
+  assert.deepEqual(ids(rows), ['general', 'newest-pin', 'pin-b', 'pin-c', 'plain-general', 'plain'])
+  // After activity in another pinned thread, General still leads.
+  const later = rows.map((t) => t.id === 'pin-c' ? { ...t, last: { at: '2026-11-19' } } : t)
+  assert.deepEqual(ids(later), ['general', 'pin-c', 'newest-pin', 'pin-b', 'plain-general', 'plain'])
+  // Unpinned or absent, General has no place of its own.
+  const unpinned = rows.map((t) => t.id === 'general' ? { ...t, pinned: false } : t)
+  assert.deepEqual(ids(unpinned), ['newest-pin', 'pin-b', 'pin-c', 'plain-general', 'plain', 'general'])
+  assert.deepEqual(ids(rows.filter((t) => t.id !== 'general')), ['newest-pin', 'pin-b', 'pin-c', 'plain-general', 'plain'])
+  // The archived view sorts by newest alone, as before.
+  assert.deepEqual(ids(rows, { pinned: false }), ['newest-pin', 'plain-general', 'plain', 'pin-b', 'pin-c', 'general'])
 })
