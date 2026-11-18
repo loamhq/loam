@@ -1288,3 +1288,43 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   debug. `test_schedule` skips there (`private_systemd.Unavailable`).
 - **`vm.py run` keeps only the last 12,000 characters.** Write long output to
   a file on the VM and fetch it.
+
+## 2026-11-18 — shared keys, Images, an agent's images (0.2.3)
+
+- **A key's three homes, in order**: a plugin's own (`<private>/secrets.env`),
+  the shared one (`<state>/plugins/keys/<provider>.env`), the box's secrets
+  file. `lib/loam_keys.py` resolves; `keys.env` in each declaring plugin's
+  private folder is the resolved copy its processes read (`LOAM_PLUGIN_KEYS`),
+  rewritten by `sync()` on every change and by the five-minute reconcile.
+  Rendered files carry the path, never a value.
+- **`adopt()` must not undo a choice.** It moves a plugin's pre-shared-keys
+  key to the shared slot; run on every listing, it first swallowed a key the
+  owner had just given one plugin on purpose. A key set through "use a
+  different key" leaves a `<provider>@<plugin>` record in `checks.json`, and
+  adopt skips any key that has one.
+- **The box's secrets file used to reach any plugin by name**
+  (`secret_for`'s fallback). Since 0.2.3 a name the plugin never declared
+  gets None. A plugin that read a box secret it did not declare stops
+  getting it: declare it.
+- **`button-tiers.css` outranks a component's own colours** (`:root :is(…)`
+  with three `:not()`s is specificity 0,5,0). A surface that paints its own
+  buttons (the image view, light on dark) is excluded in that rule's
+  `:not(.nav *, …, .image-view *)`; out-specifying it fails on
+  `:focus-visible`, which the open view's first focus triggers.
+- **`test/fakedom.js` answers class selectors only and reflects no
+  `dataset`.** Page code that a unit test drives reads `getAttribute('data-…')`
+  and queries by class.
+- **Core ships no image tool.** `generate_image` is the Images plugin's
+  (`plugins/_listed/images/`, standard library only), at
+  `mcp__images__generate_image`, whose vault-relative `target_path` the
+  boundary guard resolves against the vault (`VAULT_RELATIVE`) before
+  checking; a relative path checked as the agent's working folder would
+  have let `15_CONVERSATIONS/x.png` through.
+- **`plugins/_listed/`** holds first-party plugins published from their own
+  folder and listed, never shipped: a `_` folder is never read as a plugin.
+- **Captures without anyone's data**: `tools/capture-accounts.mjs` (the
+  fixture app, `tools/fake-keys.json`, pictures drawn in the script), at 390
+  and 1440, light and dark; it fails on a page error or sideways overflow.
+  The box's Playwright lives in an old job's scratch; Chromium is
+  `/usr/bin/chromium-headless-shell` (`LOAM_CHROME`), because the cached
+  Playwright browser build is older than that Playwright.

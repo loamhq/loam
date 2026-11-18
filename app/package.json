@@ -1,6 +1,6 @@
 {
   "name": "loam-ui",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "license": "AGPL-3.0-only",
   "description": "A web page for talking to the coding agents on your own machine, through a session broker.",

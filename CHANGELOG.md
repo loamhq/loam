@@ -3,6 +3,10 @@
 Each release's notes are written for the people who run Loam, in
 `docs/releases/<version>.md`. The app shows them when it offers an update.
 
+- [0.2.3](docs/releases/0.2.3.md), 2026-11-18: API keys have one home,
+  Settings › Accounts, and a plugin is given only the keys it asked for.
+  Images, a plugin for making pictures; an agent's reply can show up to
+  three, and a tap opens one full size.
 - [0.2.2](docs/releases/0.2.2.md), 2026-11-18: every install has an
   engineer that can change Loam itself, and those changes are kept across
   updates. Reports to Loam's makers have personal details taken out, and a
