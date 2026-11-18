@@ -57,6 +57,7 @@ import time
 
 import loam_agents
 import loam_config as lc
+import loam_lane_notice as lane_notice
 import loam_provider_memory as provider_memory
 import loam_broker as cfg
 import loam_thread_steps as steps
@@ -1251,6 +1252,14 @@ class ThreadEngine:
                                      record=msgs, summary=summary, unshown=unshown)
         if turn.note:
             prompt += "\n\n" + turn.note
+        # A scheduled run of this persona's that failed since it last heard
+        # (2026-11-18): one line, once, at the top of its next turn on any
+        # thread and any provider; cleared by that lane's next good run.
+        dark = lane_notice.take(turn.persona)
+        if dark:
+            prompt = dark + "\n\n" + prompt
+            steps.log(f"{turn.thread_id} {turn.persona}: told of a failed "
+                      f"scheduled run: {dark[:200]}")
         through = msgs[-1]["id"] if msgs else "m0"
         turn.read_through = through
 

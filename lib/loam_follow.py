@@ -40,6 +40,13 @@ Once a day (``loam-provider-follow.timer``, 02:50 Pacific), per provider:
    the link goes back to the previous build, the same careful restarts
    follow, one Important line says what failed, and the build is refused.
    After a clean hour, builds older than the previous two are removed.
+   **Only a failure that is the CLI's counts** (2026-11-18): a wake or cron
+   unit whose run's own line in ``wake-<agent>.jsonl`` says it was refused
+   at preflight, crashed in bin/wake, was refused by the account or the
+   sign-in, or was skipped by the lock is excused (``NOT_THE_CLIS``,
+   ``explained``), as is another provider's run; a unit whose run left no
+   line is still blamed. A build refused before this rule whose every reason
+   it now excuses is taken again (``lift_refusals``).
 
 One adapter per provider (``ClaudeCode``, ``Codex``, ``Antigravity``); a
 provider added later is one more subclass of ``Provider`` in ``PROVIDERS``.
@@ -125,6 +132,15 @@ JOURNAL_START_FAILURE = re.compile(
     r" libraries|panicked at")
 # bin/wake's log stages that mean the CLI itself did not run to the end.
 WAKE_FAILURE_STAGES = {"identity", "invoke"}
+# And the ones that are never the CLI's (2026-11-18): the lane refused at
+# its own preflight, bin/wake crashed in its own code, the account or the
+# sign-in refused, the lock skipped it. A wake or cron unit that failed with
+# one of these as its run's line is not a failure of the new build. Until
+# then every failed wake unit was: Claude Code 2.1.326 was rolled back for a
+# reflection refused over a 10,009-character file (11-17), and 2.1.327 for
+# a wake that died in `execve` with E2BIG before the CLI existed (11-18).
+NOT_THE_CLIS = {"preflight", "crash", "account_refused", "lock_timeout",
+                "not_enabled"}
 
 
 def iso(ts: float | None = None) -> str:
@@ -250,19 +266,33 @@ def systemctl(*args: str) -> subprocess.CompletedProcess:
                           text=True, check=False)
 
 
-def wake_failures(since: float, log_dir: Path | None = None) -> list[str]:
+def wake_rows(path: Path) -> list[dict]:
+    """The last 200 rows of one wake log, the unreadable ones skipped."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()[-200:]
+    except OSError:
+        return []
+    rows = []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def wake_failures(since: float, log_dir: Path | None = None,
+                  provider: str | None = None) -> list[str]:
     """Wakes and crons that STARTED after `since` and whose CLI did not run
-    to the end (bin/wake's own log lines)."""
+    to the end (bin/wake's own log lines). With `provider`, only a row of
+    that provider's run (a row without one predates 2026-11-13 and is
+    Claude Code's): a Codex wake's failure is not Claude Code's."""
     out = []
     for path in sorted((log_dir or WAKE_LOGS).glob("wake-*.jsonl")):
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()[-200:]
-        except OSError:
-            continue
-        for line in lines:
-            try:
-                row = json.loads(line)
-            except ValueError:
+        for row in wake_rows(path):
+            if provider and (row.get("provider") or "claude-code") != provider:
                 continue
             if (row.get("ok") is False and row.get("stage") in WAKE_FAILURE_STAGES
                     and parse_iso(row.get("ts")) >= since):
@@ -290,6 +320,70 @@ def failed_units(since: float, patterns: tuple[str, ...]) -> list[str]:
         if at >= since:
             found.append(f"{unit} failed at {iso(at)}")
     return found
+
+
+_FAILED_UNIT = re.compile(r"^(?P<unit>\S+)\.service failed at (?P<at>\S+)$")
+
+
+def unit_lane(unit: str) -> tuple[str, str] | None:
+    """``(agent, lane)`` for a wake or cron unit's name, else None."""
+    if unit.startswith("loam-wake-"):
+        return unit[len("loam-wake-"):], "reflection"
+    if unit.startswith("loam-cron-"):
+        try:
+            import loam_cron  # noqa: PLC0415
+            agent, name = loam_cron.split_unit(unit)
+        except Exception:  # noqa: BLE001 - an unknown unit is blamed
+            return None
+        return agent, f"cron:{name}"
+    return None
+
+
+def explained(failure: str, log_dir: Path | None = None,
+              provider: str | None = None) -> str | None:
+    """Why a failed wake or cron unit is not the build's, from its run's own
+    line in the wake log; None when it is, or when nothing says.
+
+    The run's line is the lane's last row that started at or before the
+    unit failed (within a day). A stage in NOT_THE_CLIS excuses it; so
+    does a stage in WAKE_FAILURE_STAGES of this provider's, which
+    `wake_failures` already reports -- once is enough; and so does a run of
+    another provider. A unit whose run left no line is blamed: nothing says
+    it was not the build."""
+    hit = _FAILED_UNIT.match(failure)
+    lane = unit_lane(hit["unit"]) if hit else None
+    if lane is None:
+        return None
+    agent, lane_name = lane
+    at = parse_iso(hit["at"])
+    rows = [r for r in wake_rows((log_dir or WAKE_LOGS) / f"wake-{agent}.jsonl")
+            if (r.get("lane") or "reflection") == lane_name
+            and at - 86400 <= parse_iso(r.get("ts")) <= at + 60]
+    if not rows:
+        return None
+    row = rows[-1]
+    stage = row.get("stage")
+    if provider and (row.get("provider") or "claude-code") != provider:
+        return f"{row.get('provider')}'s run, not this provider's"
+    if row.get("ok") is False and stage in NOT_THE_CLIS:
+        return f"bin/wake recorded `{stage}`: {(row.get('error') or '')[:160]}"
+    if row.get("ok") is False and stage in WAKE_FAILURE_STAGES:
+        return f"already counted as the run's `{stage}` failure"
+    return None
+
+
+def blamed(failures: list[str], log_dir: Path | None = None,
+           provider: str | None = None) -> list[str]:
+    """`failures` without the wake and cron units whose own run line says the
+    failure was not the CLI's. Each excusal is a line in the run log."""
+    kept = []
+    for failure in failures:
+        why = explained(failure, log_dir, provider)
+        if why:
+            log(provider or "box", "excused", None, failure=failure, why=why)
+            continue
+        kept.append(failure)
+    return kept
 
 
 def inactive_units(pattern: str) -> list[str]:
@@ -642,9 +736,11 @@ class ClaudeCode(Provider):
 
     def lane_failures(self, since: float) -> list[str]:
         found = super().lane_failures(since)
-        found += wake_failures(since)
-        found += failed_units(since, ("loam-wake-*.service", "loam-cron-*.service",
-                                      "loam-reviewer.service"))
+        found += wake_failures(since, provider=self.broker_provider)
+        found += blamed(failed_units(since, ("loam-wake-*.service",
+                                             "loam-cron-*.service",
+                                             "loam-reviewer.service")),
+                        provider=self.broker_provider)
         found += inactive_units("loam-rc-*.service")
         return found
 
@@ -950,7 +1046,7 @@ def decide(p: Provider, force: bool, hands: Hands | None = None) -> Plan | None:
     except (OSError, ValueError, KeyError) as exc:
         log(p.name, "latest", False, error=str(exc)[:300], live=live)
         return None
-    refused = read_state(p).get("refused", {})
+    refused = lift_refusals(p)
     log(p.name, "latest", True, latest=latest, live=live)
     if latest in refused:
         log(p.name, "skip", None, reason=f"{latest} was rolled back on "
@@ -1090,6 +1186,34 @@ def clear_agy_files(dry: bool = False) -> list[dict]:
     return rows
 
 
+def lift_refusals(p: Provider, log_dir: Path | None = None) -> dict:
+    """The provider's refused builds, less any whose every reason the wake
+    log now says was not the CLI's (2026-11-18). A rollback before the rule
+    in ``explained`` existed blamed a build for a wake its own launcher
+    refused or crashed; such a build is taken again, by the ordinary route
+    -- installed beside, smoked, switched, watched -- and the lifting is a
+    line in the run log. Returns what stays refused."""
+    state = read_state(p)
+    refused = state.get("refused", {})
+    lifted = {}
+    for version, entry in list(refused.items()):
+        reasons = entry.get("reasons") or [
+            part.strip() for part in str(entry.get("reason") or "").split("; ")
+            if part.strip()]
+        whys = [explained(r, log_dir, p.broker_provider) for r in reasons]
+        if reasons and all(whys):
+            lifted[version] = whys
+            refused.pop(version)
+    if lifted:
+        state["refused"] = refused
+        state.setdefault("lifted", {}).update(
+            {v: {"at": iso(), "why": w} for v, w in lifted.items()})
+        write_state(p, state)
+        for version, whys in lifted.items():
+            log(p.name, "refusal lifted", True, version=version, why=whys)
+    return refused
+
+
 def rollback(p: Provider, hands: Hands, state: dict, reasons: list[str]) -> None:
     bad, back = state["live"], state["previous"]
     hands.repoint(p, back)
@@ -1099,7 +1223,8 @@ def rollback(p: Provider, hands: Hands, state: dict, reasons: list[str]) -> None
     what = "; ".join(reasons)[:300]
     hands.comms("Important", f"{p.label} {bad} rolled back to {back} by itself: "
                 f"{what}. {bad} will not be taken again; the next release will")
-    state.setdefault("refused", {})[bad] = {"at": iso(), "reason": what}
+    state.setdefault("refused", {})[bad] = {"at": iso(), "reason": what,
+                                            "reasons": reasons}
     state.update({"live": back, "previous": None, "watched": True,
                   "rolled_back_at": iso()})
     write_state(p, state)
