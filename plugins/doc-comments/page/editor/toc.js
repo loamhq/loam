@@ -77,6 +77,18 @@ export function headingsOf(state, timeout = 40) {
   return { items: items.length >= MIN_HEADINGS ? items : [], complete: Boolean(full) }
 }
 
+// Where a scrolling list opens: the one being read centred, then on to the
+// top of a whole row, so it never opens on half a title; near the end, the
+// end (the last row flush, the top as it falls). (Rows' offsetTop is from the
+// scroller, which is their offset parent.)
+export function rowScroll(scroller, list, el) {
+  const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+  const want = Math.max(0, el.offsetTop - (scroller.clientHeight - el.offsetHeight) / 2)
+  const pad = parseFloat(getComputedStyle(scroller).paddingTop) || 0
+  const row = [...list.children].find(r => r.offsetTop >= want + pad)
+  return Math.min(max, row ? Math.max(0, row.offsetTop - pad) : want)
+}
+
 function setStyle(el, k, v) { if (el.style[k] !== v) el.style[k] = v }
 
 const reduced = () => Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
@@ -246,7 +258,9 @@ export function createToc(opts) {
     setStyle(rail, 'height', `${Math.round(paneH)}px`)
     const want = Math.max(4, Math.min(11, Math.floor(Math.max(120, paneH * 0.62) / Math.max(1, onlySections ? items.filter(x => !x.depth).length : items.length))))
     if (want !== pitch) drawTicks()
-    setStyle(card, 'maxHeight', `${Math.max(160, paneH - 24)}px`)
+    // A long doc's card is at most 60% of the pane and scrolls inside,
+    // opening on the heading being read (setOpen).
+    setStyle(card, 'maxHeight', `${Math.round(Math.max(160, paneH * 0.6))}px`)
   }
 
   function setOpen(yes) {
@@ -258,9 +272,7 @@ export function createToc(opts) {
     if (yes) {
       // The one being read in view inside a long card.
       const el = cardList.querySelector('.on') || cardList.firstChild
-      if (el && card.scrollHeight > card.clientHeight) {
-        card.scrollTop = Math.max(0, el.offsetTop - (card.clientHeight - el.offsetHeight) / 2)
-      }
+      if (el && card.scrollHeight > card.clientHeight) card.scrollTop = rowScroll(card, cardList, el)
     }
   }
   rail.addEventListener('mouseenter', () => { clearTimeout(closeTimer); openTimer = setTimeout(() => setOpen(true), 60) })
@@ -396,7 +408,7 @@ export function createToc(opts) {
       // The list scrolls under the sheet's own head, which stays.
       requestAnimationFrame(() => {
         const el = sheetList.querySelector('.on')
-        if (el && sheetList.scrollHeight > sheetList.clientHeight) sheetList.scrollTop = Math.max(0, el.offsetTop - (sheetList.clientHeight - el.offsetHeight) / 2)
+        if (el && sheetList.scrollHeight > sheetList.clientHeight) sheetList.scrollTop = rowScroll(sheetList, sheetList, el)
         else sheetList.scrollTop = 0
       })
       return sheetList

@@ -1905,6 +1905,10 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
   animation: loamFadeIn 160ms ease-out 220ms both;
 }
 .desk.collapsed .chat-head { padding-left: 62px; }
+/* The same room for a header core does not draw (a plugin's viewer): a pane
+ * holding Show sidebar says how much, and the header pads by it. See
+ * docs/design-system.md, "Pane lead". */
+.pane:has(> .showbar) { --pane-lead: 62px; }
 
 /* Above the loading card, like the phone's own header: a chat being opened is
  * still a chat you can leave. */

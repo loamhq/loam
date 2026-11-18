@@ -89,13 +89,20 @@ Paragraph {i}b, after the blocks. Nothing here is remarkable except where it sit
 Paragraph {i}c closes the section with a sentence long enough to wrap onto a second line at the desktop width of the column.
 """)
 LONG = "---\ncreated_by: \"[[Sam]]\"\n---\n\n# A long doc\n\n" + "\n".join(LONG_SECTIONS)
+# Sixty headings (twenty sections of two parts), for the contents card on a
+# long doc: it must stay a card and scroll inside.
+SIXTY = "# Sixty headings\n\n" + "\n".join(
+    f"## Section {i}: a reasonably long section title\n\nThe engine begins every story from a single remembered object.\n\n"
+    + "".join(f"### Part {i}.{j}\n\nWhere it guesses, the prose should show the guess.\n\n" for j in (1, 2))
+    for i in range(1, 21))
 FRESH = "# A doc nobody has commented on\n\nIt has two short paragraphs.\n\nThis is the second.\n"
 
 
 def seeded() -> Service:
     store = MemoryStore({"vault:Essays/drafts/On staying.md": ESSAY,
                          "vault:Essays/drafts/Long.md": LONG,
-                         "vault:Essays/drafts/Fresh.md": FRESH})
+                         "vault:Essays/drafts/Fresh.md": FRESH,
+                         "vault:Essays/drafts/Sixty.md": SIXTY})
     svc = Service(store)
     owner = store.owner()
     ada = store.agent("ada")

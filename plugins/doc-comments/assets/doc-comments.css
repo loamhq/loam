@@ -78,7 +78,10 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 :is(.dc, .dc-dlg) :is(input, textarea):focus-visible { outline: 2px solid var(--signal-crema, #B4733A); outline-offset: 2px; }
 
 /* header: a faint breadcrumb, one mode pill, ⋯ */
-.dc-head { display: flex; align-items: center; gap: 4px; padding: 14px 16px 12px 30px; border-bottom: 1px solid transparent; transition: border-color .2s; flex: none; min-height: 58px; box-sizing: border-box; }
+/* --pane-lead is core's (app/docs/design-system.md, "Pane lead"): the room a
+   pane's header leaves at its left for core's Show sidebar when the list is
+   hidden. Unset on the share page and in an untucked pane. */
+.dc-head { display: flex; align-items: center; gap: 4px; padding: 14px 16px 12px max(30px, var(--pane-lead, 0px)); border-bottom: 1px solid transparent; transition: border-color .2s; flex: none; min-height: 58px; box-sizing: border-box; }
 .dc-head.scd { border-bottom-color: var(--dc-rule); }
 .dc-crumb { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--dc-ink3); white-space: nowrap; overflow: hidden; }
 .dc-crumb > * { overflow: hidden; text-overflow: ellipsis; flex: none; max-width: 40%; }
@@ -97,7 +100,7 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 .dc-ddw.open > .dc-mpill .dc-cv { transform: rotate(180deg); }
 .dc-gbtn { width: 34px; height: 34px; border-radius: var(--dc-pill); display: grid; place-items: center; color: var(--dc-ink3) !important; transition: background .15s, color .15s; }
 .dc-gbtn:hover, .dc-ddw.open > .dc-gbtn { background: var(--dc-hover); color: var(--dc-ink) !important; }
-.dc-head .dc-back { margin-left: -18px; margin-right: 2px; }
+.dc-head .dc-back { margin-left: calc(-18px + min(18px, var(--pane-lead, 0px))); margin-right: 2px; }
 .dc-headx { display: inline-flex; align-items: center; }
 
 .dc-menu { position: absolute; top: calc(100% + 8px); right: 0; width: 284px; background: var(--dc-ground); color: var(--dc-ink); border-radius: var(--dc-r-lg); box-shadow: var(--dc-float); padding: 6px; z-index: 40; transform-origin: top right; animation: dc-pop .16s var(--dc-ease); }
@@ -414,7 +417,7 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 .dc-take { padding: 0 30px; }
 
 /* phone */
-.dc.phone .dc-head { padding: 6px 8px 8px 4px; min-height: 50px; }
+.dc.phone .dc-head { padding: 6px 8px 8px max(4px, var(--pane-lead, 0px)); min-height: 50px; }
 .dc.phone .dc-head .dc-back { margin-left: 0; }
 .dc.phone .dc-crumb { font-size: 13.5px; padding-left: 2px; }
 .dc.phone .dc-crumb > b { flex: 0 1 auto; max-width: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--dc-ink); }
@@ -776,6 +779,12 @@ body:has(.dc-dlg-scrim.on) .dc-sharebtn .dc-sf { box-shadow: 0 0 0 2px var(--pap
 .dc-tocitem.d1 { padding-left: 26px !important; font-size: 13px !important; }
 .dc-tocitem:hover, .dc-tocitem:focus-visible { background: var(--dc-hover); color: var(--dc-ink) !important; }
 .dc-tocitem:focus-visible { outline: 2px solid var(--dc-ink); outline-offset: -2px; }
+/* Compact under a fine pointer: Loam's page gives every button a 44px
+   minimum (app/public/style.css), which spread the card's rows 45px apart
+   beside ticks 11px apart. With a mouse they are ~29px (5px + the line),
+   subsections indented and a size smaller; a touch screen keeps 44px, and
+   so does the phone's sheet below. */
+@media (pointer: fine) { .dc-toccard .dc-tocitem { min-height: 0; } }
 .dc-tocitem.on { color: var(--dc-ink) !important; font-weight: 650; }
 .dc-tocflash { position: absolute; pointer-events: none; border-radius: var(--dc-r-sm); background: color-mix(in srgb, var(--dc-accent) 16%, transparent); opacity: 0; animation: dc-tocflash 1.5s ease-out; }
 @keyframes dc-tocflash { 0% { opacity: 0; } 12% { opacity: 1; } 45% { opacity: 1; } 100% { opacity: 0; } }

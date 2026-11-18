@@ -25,9 +25,9 @@ lighting, including Sun and System; absent dark fields reuse the default.
 Latte & Newspaper ships a 25 KB, 640×427 WebP; Plain demonstrates
 the component fallback. Captions use each theme's display face, with a bottom
 gradient over photos and a two-line clamp. The saved theme ID remains `latte`,
-and options remain under `options.latte`. The [manifest contract](design-system/tokens.md)
-and [captures and verification](evidence/theme-covers/README.md) include the
-host-validation handoff.
+and options remain under `options.latte`. What a theme sets is in the
+[design system](design-system.md); the [captures and verification](evidence/theme-covers/README.md)
+include the host-validation handoff.
 
 The five additional first-party themes use the approved reading/control/primary
 roles in both modes, with photo-tinted paper, Figtree body and JetBrains Mono.
@@ -316,7 +316,7 @@ even though the initial link blocks rendering. Failed or superseded refreshes
 leave the current sheet active. [Paint captures and regression checks](evidence/message-media-boot/README.md)
 cover cold loads and reloads with delayed stylesheets.
 
-See [token/theme contract](design-system/tokens.md). `node test/themes-browser.mjs`
+See [token/theme contract](design-system.md). `node test/themes-browser.mjs`
 uses the optional Playwright package (set `LOAM_PLAYWRIGHT` and browser paths as
 above) to verify the first contentful paint in both themes/modes at both widths,
 instant switches without CSS requests, host writes and fresh-navigation reads.
@@ -327,7 +327,7 @@ instant switches without CSS requests, host writes and fresh-navigation reads.
 theme’s choices while other themes are selected. Missing or obsolete values use
 manifest defaults; unknown fields never enter the public boot script. Root
 `data-option-<id>` attributes apply the active theme’s choices before paint and
-are removed when switching away. See the [manifest contract](design-system/tokens.md#theme-options)
+are removed when switching away. See the [manifest contract](appearance-options-handoff.md)
 and [precise host/registry handoff](appearance-options-handoff.md).
 
 The schema is data, not a list of Latte switches inside the settings view. A

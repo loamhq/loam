@@ -31,7 +31,7 @@ two foam secondaries, and Newspaper for everything else. The thread reserves
 primary for Send and secondary for Dictate and Listen-card play. Chats uses a
 secondary New thread and Newspaper Search. Navigation keeps its original
 selected Latte treatment, exempt from action tiers; utility actions stay in ink.
-See the [rule](docs/design-system/tokens.md#three-tiers-of-action)
+See the [rule](docs/design-system.md#three-tiers-of-action)
 and [before/after captures and control inventory](docs/evidence/button-tiers/README.md).
 The sticky listening bar keeps a neutral Play/Pause circle and speed pill,
 with a quiet Close control. See its [states and checks](docs/evidence/sticky-audio-controls/README.md).
@@ -49,7 +49,7 @@ outcomes stay for ten minutes and open their receipt in Files. See
 
 - [Threads, boards, models, replies and opening behavior](docs/threads-and-boards.md)
 - [Live sessions](docs/running.md), [Activity](docs/activity.md), [schedules](docs/schedules.md)
-- [Appearance](docs/appearance.md), [themes and tokens](docs/design-system/tokens.md), [shared menus](docs/menu-surfaces.md)
+- [Appearance](docs/appearance.md), [themes and tokens](docs/design-system.md), [shared menus](docs/menu-surfaces.md)
   — Light, Dark, Sun and System; Sun follows the saved home's sunrise/sunset offline.
 - [Files content and HTML previews](docs/files-content-origin.md)
 - [Approved design](design/README.md), [shared components](docs/one-product.md)
@@ -308,7 +308,7 @@ describes the runtime contract and staging checks. Owner identity comes from
 | `APP_PORT` | `8080` | the one HTTP port the server listens on |
 | `APP_HOST` | `127.0.0.1` | the address it listens on. Loopback, because the host's proxy is the one public listener; `0.0.0.0` only on purpose. |
 | `BROKER_URL` | — | the session broker's base URL, e.g. `http://<address>:<port>`. Unset, the app still serves and the page says no broker is configured. |
-| `AVATAR_COLOURS` | `{}` | optional JSON object of persona IDs to semantic persona palette tokens, e.g. `{"persona-id":"persona-plum"}`. Numbered aliases and the six extra Newsprint-era names normalize to the fixed eleven-slot Palette at input. In Palette, only named personas change; all others keep their original ID mapping. Latte tones overrides every agent with its warm ramp. See [palette aliases](docs/design-system/tokens.md#runtime-avatar-references) and [Latte tones](docs/evidence/latte-tones/README.md). |
+| `AVATAR_COLOURS` | `{}` | optional JSON object of persona IDs to semantic persona palette tokens, e.g. `{"persona-id":"persona-plum"}`. Numbered aliases and the six extra Newsprint-era names normalize to the fixed eleven-slot Palette at input. In Palette, only named personas change; all others keep their original ID mapping. Latte tones overrides every agent with its warm ramp. See [palette aliases](docs/design-system.md#tokens) and [Latte tones](docs/evidence/latte-tones/README.md). |
 | `AVATAR_VARIANTS` | `{}` | JSON object of agent IDs to unique permanent face slots 0–7, e.g. `{"persona-a":0,"persona-b":1}`. Shared by Latte pours and signature materials; append assignments without renumbering. Unlisted IDs retain their original hash. Delivered in the existing parser-blocking appearance boot. See [face identity](docs/appearance.md#permanent-face-identity). |
 | `BROKER_TOKEN` | — | the bearer token for the broker, supplied at run time. **Never in this repo, never in the image.** The browser never sees it: every call the page makes goes to this app's own `/api`, and the token is added on the way out. |
 | `FILES_VAULT_URLS` | — | optional: comma-separated `https://` prefixes of the published vault; the first is the standalone **Copy link** base, and links to any prefix open in Files. No unauthenticated existence probe. Anything not `https://` is ignored. |

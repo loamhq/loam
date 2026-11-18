@@ -116,6 +116,9 @@
   --space-xl: 24px;
   --space-2xl: 32px;
   --space-3xl: 48px;
+  /* The room a pane's header leaves at its left for Show sidebar: 0 here,
+   * set by style.css on a pane that holds it (docs/design-system.md). */
+  --pane-lead: 0px;
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius-lg: 18px;
