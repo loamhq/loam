@@ -2892,6 +2892,8 @@ test('contents with sixty headings: the ticks close up inside the pane and the c
   await start()
   const p = await newDoc(tocDoc(20, 2))
   const page = await open({ doc: p, w: 1440, h: 800 })
+  // Loam's page gives every button 44px; the card's rows must not take it under a mouse
+  await page.addStyleTag({ content: CORE_SELECT })
   assert.equal((await tocState(page)).ticks.length, 60)
   // (the doc grows as CodeMirror measures what it draws: scroll until the end stays the end)
   for (let i = 0; i < 4; i++) await scrollTo(page, 999999)
@@ -2912,6 +2914,22 @@ test('contents with sixty headings: the ticks close up inside the pane and the c
     return on && on.top >= card.top && on.bottom <= card.bottom
   })
   assert.ok(seen, 'the current title is in view inside the card')
+  // 2026-11-17: never taller than 60% of the pane, compact rows, a whole row at the top
+  const fitNow = () => page.evaluate(() => {
+    const card = document.querySelector('.dc-toccard'), r = card.getBoundingClientRect()
+    const pane = document.querySelector('.dc-scroll').clientHeight
+    const rows = [...card.querySelectorAll('.dc-tocitem')]
+    const pad = parseFloat(getComputedStyle(card).paddingTop)
+    const first = rows.find(x => x.getBoundingClientRect().bottom > r.top + pad)
+    return { share: r.height / pane, pitch: rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().top,
+      sub: getComputedStyle(rows.find(x => x.classList.contains('d1'))).fontSize, sec: getComputedStyle(rows[0]).fontSize,
+      cut: r.top + pad - first.getBoundingClientRect().top, scrolled: card.scrollTop, atEnd: card.scrollTop >= card.scrollHeight - card.clientHeight - 1 }
+  })
+  let fit = await fitNow()
+  assert.ok(fit.share <= 0.61, `the card is at most 60% of the pane (${JSON.stringify(fit)})`)
+  assert.ok(fit.pitch >= 27 && fit.pitch <= 31, `rows are ~29px apart under a mouse (${JSON.stringify(fit)})`)
+  assert.ok(parseFloat(fit.sub) < parseFloat(fit.sec), 'subsections are a touch smaller')
+  assert.ok(fit.atEnd, `at the doc's end, the card's end (${JSON.stringify(fit)})`)
   // (before, the last sections never became current: they cannot reach the top)
   const end = await page.evaluate(() => {
     const sc = document.querySelector('.dc-scroll').getBoundingClientRect()
@@ -2922,6 +2940,21 @@ test('contents with sixty headings: the ticks close up inside the pane and the c
   assert.notEqual(end.mid, end.top, 'the pane is placed so the two rules differ')
   assert.equal(end.on, end.mid, `at the very end, the section at the middle of the pane is current (${JSON.stringify(end)})`)
   await shot(page, 'toc-sixty')
+  // from the middle of the doc, the card opens on a whole row
+  await page.mouse.move(1400, 400)
+  await until(page, () => !document.querySelector('.dc-toc.open'))
+  await scrollTo(page, await page.evaluate(() => document.querySelector('.dc-scroll').scrollHeight * 0.45))
+  await page.waitForTimeout(200)
+  await page.mouse.move(box.x + box.width / 2, box.y + 30)
+  await until(page, () => document.querySelector('.dc-toc.open'))
+  await page.waitForTimeout(250)
+  fit = await fitNow()
+  assert.ok(fit.scrolled > 0 && !fit.atEnd && Math.abs(fit.cut) <= 1, `mid-doc, the card opens scrolled on a whole row (${JSON.stringify(fit)})`)
+  assert.ok(await page.evaluate(() => {
+    const card = document.querySelector('.dc-toccard').getBoundingClientRect()
+    const on = document.querySelector('.dc-toccard .dc-tocitem.on')?.getBoundingClientRect()
+    return on && on.top >= card.top && on.bottom <= card.bottom
+  }), 'and the current title is in view')
   assert.deepEqual(page.errors, [])
   await page.done()
 })
@@ -2930,6 +2963,7 @@ test('contents on a phone: the bar names the section being read, a tap opens the
   await start()
   const p = await newDoc(tocDoc())
   const page = await open({ doc: p, w: 375, h: 812, phone: true })
+  await page.addStyleTag({ content: CORE_SELECT })
   let s = await tocState(page)
   assert.equal(s.rail, false, 'no ticks on a phone')
   assert.ok(s.title && s.title.startsWith('t-'), `at the top, the doc's name (${s.title})`)
@@ -2943,6 +2977,8 @@ test('contents on a phone: the bar names the section being read, a tap opens the
   await until(page, () => document.querySelector('.dc-sheet.on .dc-toclist'))
   const items = await page.evaluate(() => [...document.querySelectorAll('.dc-sheet .dc-tocitem')].map(b => b.textContent))
   assert.equal(items.length, 19, 'the doc itself, then the eighteen')
+  const rowH = await page.evaluate(() => Math.min(...[...document.querySelectorAll('.dc-sheet .dc-tocitem')].map(b => b.getBoundingClientRect().height)))
+  assert.ok(rowH >= 43.5, `the phone's rows keep a finger's room (${rowH})`)
   await shot(page, 'toc-phone-sheet')
   await page.locator('.dc-sheet .dc-tocitem', { hasText: 'Section 5' }).click()
   await page.waitForTimeout(1600)

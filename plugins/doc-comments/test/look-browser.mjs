@@ -57,7 +57,7 @@ const gbase = await new Promise((resolve, reject) => {
 const shareLinks = await (await fetch(`${gbase}/look/links`)).json()
 const getDoc = async (p) => (await (await fetch(`${gbase}/x/doc-comments/doc?root=vault&path=${encodeURIComponent(p)}`)).json())
 const docs = {}
-for (const p of ['Essays/drafts/On staying.md', 'Essays/drafts/Long.md', 'Essays/drafts/Fresh.md']) docs[p] = (await getDoc(p)).text
+for (const p of ['Essays/drafts/On staying.md', 'Essays/drafts/Long.md', 'Essays/drafts/Fresh.md', 'Essays/drafts/Sixty.md']) docs[p] = (await getDoc(p)).text
 
 const json = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 const texts = Object.fromEntries(Object.entries(docs).map(([p, t]) => [`vault:${p}`, t]))
@@ -209,6 +209,33 @@ const SURFACES = {
     if (p.phone) await p.locator('.dc-secbtn').click(); else await p.locator('.dc-ticks').hover()
     await settle(p, 600)
   },
+  // a long doc's card: never the pane's height, the current heading in view
+  async 'toc-long'(p) {
+    await openDoc(p, 'Sixty.md')
+    await p.evaluate(() => { const s = document.querySelector('.dc-scroll'); s.scrollTop = s.scrollHeight * 0.45 }); await settle(p, 600)
+    if (p.phone) await p.locator('.dc-secbtn').click(); else await p.locator('.dc-ticks').hover()
+    await settle(p, 600)
+  },
+  // a doc in each panel: the main panel's breadcrumb beside core's Show sidebar
+  async 'toc-panels'(p, split = 62) {
+    if (p.phone) return SURFACES['toc-long'](p)
+    await p.goto(`${app.url}/files/vault/Essays/drafts`); await p.waitForSelector('.fs-entry')
+    // the main panel wide enough for the editor's desktop layout
+    await p.evaluate((split) => localStorage.setItem('loam.panels', JSON.stringify({ version: 1, side: null, split, sidebar: false })), split)
+    await p.reload(); await p.waitForSelector('.fs-entry'); await settle(p, 300)
+    const row = p.locator('.fs-entry', { hasText: 'Long' }).first()
+    await row.hover(); await row.locator('.row-side-action').click(); await settle(p, 500)
+    // two panels tuck the list away: bring it back, open the doc, hide it again
+    await p.locator('.showbar').click(); await settle(p, 400)
+    await p.locator('.fs-entry', { hasText: 'Sixty' }).first().click(); await settle(p, 400)
+    await p.getByRole('button', { name: /hide sidebar/i }).first().click()
+    await p.waitForSelector('[data-panel=main] .dc .cm-content'); await settle(p, 900)
+    await p.evaluate(() => { const s = document.querySelector('[data-panel=main] .dc-scroll'); s.scrollTop = s.scrollHeight * 0.3 }); await settle(p, 500)
+    const ticks = p.locator('[data-panel=main] .dc-ticks')
+    if (await ticks.isVisible()) { await ticks.hover(); await settle(p, 600) }
+  },
+  // the same at the default split, where the main panel takes the phone layout
+  async 'toc-panels-even'(p) { return SURFACES['toc-panels'](p, 50) },
   async 'appear-sheet'(p) {
     await p.goto(`${app.url}/files/@doc-comments`); await p.waitForSelector('.dc-wm-entry'); await settle(p, 400)
     await p.locator('.dc-wm-entry', { hasText: 'The garden plan' }).locator('.iconbtn').last().click(); await settle(p, 400)
