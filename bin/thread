@@ -151,11 +151,14 @@ def main() -> int:
         reply_to = args.reply_to.strip() or marked
         if not reply_to:
             text = args.text
-        if not text.strip():
+        # Images it shows, as a reply's (2026-11-18): ![words](path) lines.
+        text, images = threads.reply_images(text)
+        if not text.strip() and not images:
             raise threads.ThreadError(400, "the text is empty")
         msg = threads.append(args.thread, by, text,
                              kind="bulletin" if args.bulletin else "message",
-                             **({"reply_to": reply_to} if reply_to else {}))
+                             **({"reply_to": reply_to} if reply_to else {}),
+                             **({"attachments": images} if images else {}))
         told = None if args.bulletin else tell_broker(args.thread, msg["id"], by)
         print(json.dumps({"ok": True, "thread": args.thread, "message": msg,
                           **({"woke": told.get("woke", [])} if told else {})}))

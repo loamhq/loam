@@ -99,6 +99,29 @@ ROTATE_SHARE = 0.4
 ROTATE_TOKENS = 150_000
 
 
+def reply_images(text: str, extra: dict) -> tuple[str, dict]:
+    """The images a reply shows (2026-11-18, lib/loam_threads.py): taken off
+    what it said last, then off what it said before its steps, at most
+    three in all, onto the message as ``attachments``."""
+    text, found = threads.reply_images(text)
+    segments = extra.get("segments")
+    if segments and len(found) < threads.REPLY_IMAGES_MAX:
+        kept = []
+        for seg in segments:
+            if isinstance(seg.get("text"), str) and len(found) < threads.REPLY_IMAGES_MAX:
+                said, more = threads.reply_images(seg["text"])
+                more = [m for m in more if all((m["root"], m["path"]) != (f["root"], f["path"])
+                                              for f in found)][:threads.REPLY_IMAGES_MAX - len(found)]
+                if more:
+                    seg = {**seg, "text": said}
+                    found += more
+            kept.append(seg)
+        extra = {**extra, "segments": kept}
+    if found:
+        extra = {**extra, "attachments": found}
+    return text, extra
+
+
 def session_context(session) -> dict | None:
     """The session's last stated ``{used, window}``: its last turn record
     whose ``context.used`` is a number. None when it has stated none."""
@@ -1890,6 +1913,7 @@ class ThreadEngine:
         if before and any("text" in seg for seg in before):
             extra["segments"] = before
         text, extra = self.reply_mark(turn, text, extra)
+        text, extra = reply_images(text, extra)
         # The messages steered into this turn since its last reply
         # (2026-11-14): the record says which ones this reply took in.
         active = self.turns.get(turn.key) or {}
@@ -2006,6 +2030,7 @@ class ThreadEngine:
             steps.log(f"{turn.thread_id} {turn.persona}: a reply nobody was watching "
                       f"(session {session.id[:8]}, after seq {since}) recovered")
             said, marked = self.reply_mark(turn, late.spoken(), {})
+            said, marked = reply_images(said, marked)
             msg = threads.append(turn.thread_id, turn.persona, said, did=late.did,
                                  engine=engine, late=True, **marked,
                                  **({"model": used} if (used := used_model(

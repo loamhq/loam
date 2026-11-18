@@ -385,6 +385,96 @@ def check_reply_to(msgs: list[dict], reply_to, thread_id: str) -> dict:
     return target
 
 
+# -- images in an agent's reply (2026-11-18) -------------------------------------
+#
+# An agent shows an image in its reply by writing `![a few words](path)` on a
+# line of its own (or anywhere in its text): a file in the vault or the
+# workspaces, an absolute path or one relative to the vault. Up to three
+# come off the text and ride on the message as `attachments`, the shape the
+# owner's own files have, plus `root` (`vault` or `spaces`, the Files root
+# the page reads them from). Every engine can do it: it is words, not a tool.
+# A reference that is not such a file stays in the text as it was written.
+REPLY_IMAGES_MAX = 3
+REPLY_IMAGE_BYTES = 40 * 1024 * 1024
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif"}
+IMAGE_REF_RE = re.compile(r"!\[([^\]\n]{0,300})\]\(\s*(<[^>\n]+>|[^)\n]+?)\s*\)")
+
+
+def _image_file(raw: str) -> dict | None:
+    from urllib.parse import unquote  # noqa: PLC0415
+    raw = raw.strip()
+    if raw.startswith("<") and raw.endswith(">"):
+        raw = raw[1:-1].strip()
+    elif re.search(r'\s+"[^"]*"$', raw):          # a Markdown title: ![a](p "t")
+        raw = re.sub(r'\s+"[^"]*"$', "", raw)
+    if re.match(r"^[a-z][a-z0-9+.-]*:", raw, re.I) and not raw.lower().startswith("file:"):
+        return None                                 # a web address: not a file here
+    raw = unquote(raw[7:] if raw.lower().startswith("file://") else raw)
+    path = Path(raw) if raw.startswith("/") else VAULT / raw
+    try:
+        path = path.resolve()
+        vault, spaces = VAULT.resolve(), AI_LABS.resolve()
+    except OSError:
+        return None
+    if path.suffix.lower() not in IMAGE_TYPES or not path.is_file():
+        return None
+    conversations = vault / lc.vault_folder("conversations")
+    if path.is_relative_to(vault) and not path.is_relative_to(conversations):
+        root, rel = "vault", path.relative_to(vault)
+    elif path.is_relative_to(spaces):
+        root, rel = "spaces", path.relative_to(spaces)
+    else:
+        return None
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size > REPLY_IMAGE_BYTES:
+        return None
+    return {"path": str(rel), "root": root, "name": path.name,
+            "type": IMAGE_TYPES[path.suffix.lower()], "size": size}
+
+
+def reply_images(text: str) -> tuple[str, list[dict]]:
+    """The images a reply shows, taken off its text: ``(text, attachments)``.
+    At most REPLY_IMAGES_MAX, each once; a line that held only images goes
+    with them."""
+    if not text or "![" not in text:
+        return text, []
+    found: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def take(m: re.Match) -> str:
+        if len(found) >= REPLY_IMAGES_MAX:
+            return m.group(0)
+        f = _image_file(m.group(2))
+        if f is None:
+            return m.group(0)
+        if (f["root"], f["path"]) not in seen:
+            seen.add((f["root"], f["path"]))
+            alt = m.group(1).strip()
+            if alt:
+                f["alt"] = alt[:200]
+            found.append(f)
+        return "\0"
+
+    out = IMAGE_REF_RE.sub(take, text)
+    if not found:
+        return text, []
+    lines = [l for l in out.split("\n") if l.replace("\0", "").strip() or "\0" not in l]
+    out = "\n".join(re.sub(r"[ \t]?\0", "", l) for l in lines)
+    return re.sub(r"\n{3,}", "\n\n", out).strip(), found
+
+
+def attachment_path(a: dict) -> str:
+    """Where an attachment is on disk, for an agent reading the thread."""
+    path = a.get("path") or ""
+    if path.startswith("/"):
+        return path
+    return str((AI_LABS if a.get("root") == "spaces" else VAULT) / path)
+
+
 def render_message(msg: dict, quoted: dict | None = None) -> str:
     at = heading_at(msg["at"])
     who = display(msg["author"]) if msg["author"] != "system" else "Loam"
@@ -1501,7 +1591,7 @@ def transcript(msgs: list[dict], record: list[dict] | None = None,
         # The files a message carried are named by path, which is what a
         # persona can read.
         body = _said(m)
-        files = [f"- {a.get('path')}" for a in (m.get("attachments") or [])
+        files = [f"- {attachment_path(a)}" for a in (m.get("attachments") or [])
                  if isinstance(a, dict) and a.get("path")]
         if files:
             body += "\nAttached (files on disk):\n" + "\n".join(files)
@@ -1631,6 +1721,9 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
             "material changed (make its folder if it is missing)."
             "\n\nWhatever you write now is posted to the thread as your message. "
             "Mention a peer with @Name only when you are sure it adds a lot. "
+            "To show an image (at most three), put ![a few words](its path) "
+            "on a line of its own: a file in the vault or the workspaces, "
+            "and it shows in your message. "
             "To reply to one earlier message, begin with ↩ and its id "
             "(\"↩ m12\"); otherwise just write. Loam turns that opening into a "
             "quote of the message's own words and hides the id. Message ids "
