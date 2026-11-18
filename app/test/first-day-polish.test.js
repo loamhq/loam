@@ -398,3 +398,50 @@ test('10. Build an app opens a thread with an agent in it and a short prompt ask
     threads.close({ navigate: false })
   }
 })
+
+// The 0.2.0 walk: "Build an app" left an empty "New thread with Iris" in Recent
+// when the person never sent. Leaving a thread this page made, with nothing in
+// it, deletes it (0.2.1); a draft or a message keeps it.
+test('an unsent new thread does not linger: leaving it empty deletes it', async (t) => {
+  const field = h('textarea')
+  const calls = []
+  let n = 0
+  const api = async (method, path, body) => {
+    calls.push(`${method} ${path}`)
+    if (method === 'POST' && path === '/threads') { n++; return { id: `t-new${n}`, title: 'New thread', default: body.persona, members: [{ persona: body.persona, engine: 'claude-code' }] } }
+    if (method === 'POST' && path.endsWith('/messages')) return { id: 'm1', author: 'owner', kind: 'message', text: body.text, at: '2026-11-17T00:00:00Z' }
+    return path.startsWith('/agents/drafts') ? { drafts: [] } : {}
+  }
+  const threads = createThreads({ api, redraw() {}, agents: () => [{ id: 'iris', name: 'Iris' }], providers: () => [], rail: () => null, nav: () => null, enter() {}, leave() {},
+    compose: { ...compose(), field: () => field } })
+  t.after(() => threads.close({ navigate: false }))
+
+  await buildAppThread(threads, [{ id: 'iris', name: 'Iris' }])
+  assert.equal(threads.st.threads.some((x) => x.id === 't-new1'), true)
+  threads.close({ navigate: false })
+  await tick()
+  assert.equal(calls.includes('DELETE /threads/t-new1'), true, 'left empty, it is deleted')
+  assert.equal(threads.st.threads.some((x) => x.id === 't-new1'), false, 'and gone from Recent at once')
+
+  await buildAppThread(threads, [{ id: 'iris', name: 'Iris' }])
+  field.value = 'A habit tracker'
+  threads.close({ navigate: false })
+  await tick()
+  assert.equal(calls.includes('DELETE /threads/t-new2'), false, 'a thread with a draft stays')
+  field.value = ''
+
+  await buildAppThread(threads, [{ id: 'iris', name: 'Iris' }])
+  field.value = 'A habit tracker'
+  await threads.send()
+  threads.close({ navigate: false })
+  await tick()
+  assert.equal(calls.includes('DELETE /threads/t-new3'), false, 'a thread with a message stays')
+
+  // Opening an existing empty thread and leaving it deletes nothing: only one
+  // this page made.
+  calls.length = 0
+  await threads.open('t-old', { routed: true }).catch(() => {})
+  threads.close({ navigate: false })
+  await tick()
+  assert.equal(calls.some((c) => c.startsWith('DELETE')), false)
+})

@@ -304,6 +304,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     follow.watch(null)
     if (!st.open) return
     const o = st.open, id = o.thread.id
+    const drop = unsentHere(o) && transferred !== id
     if (!o.readFailed && o.messages.length) {
       visits.delete(id)
       visits.set(id, { messages: o.messages.filter((m) => !m.streaming).map(({ steps, ...message }) => message), has_more: o.has_more, thread: o.thread, board: o.board,
@@ -331,7 +332,27 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       returnTimer = setTimeout(() => { clearReturn(); redraw() }, 1000)
     }
     if (navigate && !st.fixture) address(null)
+    if (drop) dropUnsent(id)
   }
+  // A thread this page made and the person left without a word (0.2.1; the
+  // 0.2.0 walk: "Build an app" left an empty "New thread with Iris" in Recent
+  // when nothing was sent). Leaving it deletes it, so an unsent new thread
+  // never lingers as a chat; one with any message, draft, file or board text
+  // stays.
+  function unsentHere(o) {
+    return Boolean(o?.madeHere && !o.creating && !o.createFailed && !o.sending && !o.readFailed
+      && !o.messages.some((m) => m.kind !== 'system') && !draft.value.trim() && !compose.files().length
+      && !String(o.board?.markdown ?? '').trim() && !(o.editing && String(o.editText ?? '').trim()))
+  }
+  function dropUnsent(id) {
+    st.threads = st.threads.filter((t) => t.id !== id); listingRequest++
+    for (const kept of [st.drafts, st.quickDrafts, st.boardDrafts, visits]) kept.delete(id)
+    transport('DELETE', path(id)).catch(() => refreshList())
+  }
+  if (!fixture && !sidePanel) globalThis.addEventListener?.('pagehide', () => {
+    const o = st.open
+    if (unsentHere(o)) globalThis.fetch?.(`/api${path(o.thread.id)}`, { method: 'DELETE', keepalive: true, credentials: 'same-origin' })?.catch?.(() => {})
+  })
   async function open(id, { push = true, listing = null, routed = false } = {}) {
     if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing })
     close({ navigate: false }); enter({ kind: 'thread', id })
@@ -641,8 +662,9 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     redraw(); setTimeout(() => draft.focus(), 0)
     return transport('POST', '/threads', persona ? { persona } : {}).then((body) => {
       const thread = readThreadSummary(body)
-      if (ticket !== generation) { refreshList(); return }
-      o.thread = thread; o.board.path = thread.board ?? ''; o.creating = false
+      // Left before it was made: nothing can have been sent, so it goes.
+      if (ticket !== generation) { transport('DELETE', path(thread.id)).catch(() => {}).finally(() => refreshList()); return }
+      o.thread = thread; o.board.path = thread.board ?? ''; o.creating = false; o.madeHere = true
       attachReplySteps(o)
       attachProse(o); if (!st.fixture) address(thread.id)
       attachQuotes(o)
