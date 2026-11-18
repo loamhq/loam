@@ -497,7 +497,11 @@ Every write takes `by` like any other setting route.
 
 **`settings.secret` stays** for a key that belongs to one plugin and no
 provider (a plugin's own service), pasted on the plugin's page. Read aloud
-and dictation moved from it to `keys: [google]` on 2026-11-18.
+and dictation moved from it to `keys: [google]` on 2026-11-18; their
+`settings.secret` of the same name stays through 0.2.3, so that a broker
+started before the update (it reads the new manifests until it restarts)
+still hands them the key. The page draws no pasted-key form for a plugin
+that declares `keys:`.
 
 ## The installed list: `installed.json`
 

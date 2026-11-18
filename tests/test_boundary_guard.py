@@ -83,6 +83,9 @@ CASES = [
     ("gen_image vault-relative",    "mcp__images__generate_image", {"target_path": "Images/x.png"}, True),
     ("gen_image relative 15_CONV",  "mcp__images__generate_image", {"target_path": "15_CONVERSATIONS/x.png"}, False),
     ("gen_image no target at all",  "mcp__images__generate_image", {"prompt": "a fox"}, True),
+    # A session started before Images left composition still has the old
+    # tool; the guard keeps checking it.
+    ("old gen_image sibling",       "mcp__composition__generate_image", {"target_path": f"{L}/ada/x.png"}, False),
     # delete_file was extended on 2026-09-03 to remove EMPTY directories.
     # The argument shape did not change -- still one `path` -- but the kind
     # of thing that path names did, and a changed write tool gets its

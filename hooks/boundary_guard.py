@@ -77,7 +77,9 @@ WRITE_TOOLS = {
     "MultiEdit": ("Write", ("file_path",)),
     "NotebookEdit": ("Write", ("notebook_path",)),
     # The Images plugin's tool (2026-11-18; it left the composition server).
+    # The old name stays while a session started before then still has it.
     "mcp__images__generate_image": ("Write", ("target_path",)),
+    "mcp__composition__generate_image": ("Write", ("target_path",)),
     "mcp__composition__generate_pdf": ("Write", ("target_path",)),
     "mcp__composition__render_typst_pages": ("Write", ("output_dir",)),
     # The servers check their own targets too; neither layer is trusted alone.
@@ -94,6 +96,7 @@ WRITE_TOOLS = {
 FILENAME_FIELDS = {
     "Write": ("file_path",),
     "mcp__images__generate_image": ("target_path",),
+    "mcp__composition__generate_image": ("target_path",),
     "mcp__composition__generate_pdf": ("target_path",),
     "mcp__composition__render_typst_pages": ("output_dir",),
     "mcp__loam__move_file": ("destination",),

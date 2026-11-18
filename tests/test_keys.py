@@ -287,9 +287,13 @@ asyncio.run(routes())
 for name in ("read-aloud", "dictation"):
     data, _ = lp.parse_frontmatter((AGENTS / "app" / "public" / "plugins" / name / "PLUGIN.md").read_text())
     man, _ = lp.manifest_of(data, name)
-    check(f"{name} declares Google's key and no pasted secret of its own",
-          [x["provider"] for x in man.get("keys") or []] == ["google"]
-          and "settings.secret" not in (man.get("contributes") or {}), man.get("keys"))
+    check(f"{name} declares Google's key", [x["provider"] for x in man.get("keys") or []]
+          == ["google"], man.get("keys"))
+    # Its settings.secret of the same name stays for one release, so a broker
+    # from before 0.2.3 still hands it the key; a field of a declared
+    # provider resolves through keys first all the same.
+    check(f"{name}: its old settings.secret is the same name",
+          [x["name"] for x in man["contributes"]["settings.secret"]] == ["GEMINI_API_KEY"])
 
 srv.shutdown()
 print(f"\n{sum(results)}/{len(results)} passed")

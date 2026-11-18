@@ -49,6 +49,7 @@ RESULT_FIELDS = {
     "NotebookEdit": ("notebook_path",),
     "mcp__loam__move_file": ("destination",),
     "mcp__images__generate_image": ("target_path",),
+    "mcp__composition__generate_image": ("target_path",),   # a session from before 2026-11-18
     "mcp__composition__generate_pdf": ("target_path",),
 }
 

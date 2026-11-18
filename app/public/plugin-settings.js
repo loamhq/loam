@@ -43,7 +43,10 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           try { const settings = await host.api('GET', `/plugins/${encodeURIComponent(row.id)}/settings`); if (st.selected?.key === row.key) hostSettings = settings }
           catch (e) { if (st.selected?.key === row.key) st.detailError = e.message }
         }
-        if (st.selected?.key === row.key && (out.plugin?.contributes || row.contributes)?.['settings.secret']?.length) {
+        // A plugin that declares `keys:` takes them from Accounts (2026-11-18);
+        // its `settings.secret` of the same name stays only so a broker from
+        // before 0.2.3 still hands it the key, and is not drawn here.
+        if (st.selected?.key === row.key && !(out.plugin?.keys || row.keys)?.length && (out.plugin?.contributes || row.contributes)?.['settings.secret']?.length) {
           secretSettings = createSecretSettings({ id: row.id, request: host.api, redraw: changed })
         }
         if (out.plugin) loader.st.rows = loader.st.rows.map(current => current.key === row.key ? { ...current, ...out.plugin, key: current.key } : current)
