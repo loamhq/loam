@@ -1187,3 +1187,30 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `test_marketplace` there and passed in the tree; it moved to
   `docs/marketplace/`. Put new content under an existing top-level folder,
   or prove it with `wt.platform_argv(tree, cmd)` before ending the job.
+
+## 2026-11-18 — moving Docker Engine a minor release under live-restore
+
+- **Live-restore held across a minor move**, 29.8.2 → 29.9.3 together with
+  containerd.io 2.3.6 → 2.4.2 (runc 1.5.1 → 1.5.3), in one pinned
+  `apt-get install`. Docker's docs still promise it only for patch releases,
+  in calendar-version words (`YY.MM.x`), so check the release notes for
+  state-format or containerd-namespace changes before trusting it again.
+  The proof: every container kept its pid and `StartedAt`, and the shims
+  kept their pids.
+- **What the daemon restart costs**: published ports refused connections
+  for about 2 s, because docker-proxy is a child of dockerd and the new
+  daemon starts fresh proxies. Health checks go back to `starting` until
+  their next run. A `docker restart` cut its own port for about 1 s.
+- **A running container keeps the runtime it was created under.** After an
+  upgrade, its shim's `/proc/<pid>/exe` reads `containerd-shim-runc-v2
+  (deleted)`. A restart gives it a new shim on the new binary, and runc
+  runs only at create time. So "on the new runc" is proved by a shim that
+  started after the upgrade, whose exe is not deleted, plus
+  `docker info`'s runtime annotation `org.opencontainers.runc.version`.
+- **Restart Redis-backed session stores only after a `SAVE`.** With
+  `--appendonly no`, a store snapshotted only by `--save` loses what the
+  last snapshot missed. Run `redis-cli SAVE` first, then compare `DBSIZE`
+  before and after.
+- **29.9 adds a unix socket**, `/var/run/docker/extensions/callback.sock`
+  (the extensions framework). It sits under the root-only `/var/run/docker`,
+  so it adds no TCP listener and no reach beyond root.
