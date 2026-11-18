@@ -56,5 +56,7 @@ test('a server without shared keys says so plainly', async () => {
   installDom()
   const keys = createApiKeys({ api: async () => { const e = new Error('nope'); e.status = 404; throw e } })
   await keys.load()
-  assert.match(text(h('div', {}, keys.view({}))), /does not hold shared keys yet/)
+  const said = text(h('div', {}, keys.view({})))
+  assert.match(said, /does not hold shared keys yet/)
+  assert.doesNotMatch(said, /Reading keys/)
 })

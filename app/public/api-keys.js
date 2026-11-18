@@ -191,7 +191,7 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
         h('div', { class: `icon-tile glyph keys-mark ${p.id}` }, mark(p.id)),
         h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: p.name }), h('div', { class: 'setrow-sub', text: providerLine(p) })),
         providerWarn(p) ? h('span', { class: 'navdot', title: 'Needs you' }) : null,
-        icon.chevronRight(10)))) : h('p', { class: 'note', role: 'status', text: 'Reading keys…' }),
+        icon.chevronRight(10)))) : st.error ? null : h('p', { class: 'note', role: 'status', text: 'Reading keys…' }),
       st.list ? h('p', { class: 'footnote keys-foot', text: 'Keys stay on this server. Each goes only to the plugins that asked for it, and nobody can read one back. Your agents can save one for you.' }) : null]
   }
 
