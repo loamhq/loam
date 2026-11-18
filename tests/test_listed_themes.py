@@ -14,6 +14,8 @@ holding the release's own ``plugins/_listed/<id>/`` folders at the tags
     look removed after it was kept is not put back at the next start;
   - when the link cannot be read, the release's copy is put in the plugins
     folder (built here) and Appearance wears it;
+  - an installed theme serves its fonts.css and font files (and no other
+    top-level file);
   - every MOVED id is a listed folder whose version is its MOVED version,
     and none is in the shipped themes any more.
 
@@ -122,6 +124,16 @@ try:
            "foundry": ("loamhq/plugins", "foundry-v1.0.0", "loam-update")})
     check("Appearance lists them again", loam_appearance.themes(),
           ["latte", "autumn", "foundry", "plain"])
+    # Its display faces are served from its folder (0.2.5); nothing else new.
+    served = {}
+    for rel in (["fonts.css"], ["display-latin.woff2"], ["OFL.txt"], ["theme.css"]):
+        try:
+            served[rel[0]] = loam_plugins.file_for("autumn", rel)[1]
+        except loam_plugins.PluginError as exc:
+            served[rel[0]] = exc.args[0][:10]
+    check("a theme serves its fonts.css and font files, not its other files", served,
+          {"fonts.css": "text/css; charset=utf-8", "display-latin.woff2": "font/woff2",
+           "OFL.txt": "a plugin s", "theme.css": "text/css; charset=utf-8"})
     check("the phone still wears Foundry", loam_appearance.read()["phone"]["theme"], "foundry")
     check("the saved Autumn choice still stands",
           loam_appearance.read()["desktop"]["options"]["autumn"]["agent-shapes"], "signature")
