@@ -47,7 +47,11 @@ owner's to read and edit.
 
 **The engineer** builds and changes Loam itself and the owner's projects.
 An agent hands it a job as a brief; it works in its own copy of the
-repository and returns a receipt with the evidence.
+repository and returns a receipt with the evidence. Every install has one
+for Loam (project `Loam`). Its role and what it owns are in the vault's
+projects folder, under `Loam/engineer/` (`role.md`, `projects/loam.md`):
+the owner's to read and change, and an update never overwrites a change of
+theirs.
 
 **Plugins** add themes, page code, tools and servers. Loam's own ship with
 it; the owner's live in their own folder, which updates never touch (see

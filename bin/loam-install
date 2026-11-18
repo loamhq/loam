@@ -658,6 +658,17 @@ def step_starter(a, ans: dict) -> None:
     ans["starter"] = out
     save_answers(ans)
     say("Made Iris, your first agent, and your first conversation with her.", 2)
+    # The engineer, which makes changes to Loam itself when an agent briefs
+    # it (2026-11-18): its role and project file are seeded into the vault
+    # from this release and rendered beside the code (bin/provision).
+    res = as_user(cfg, ["python3", f"{cfg['root']}/bin/provision", "--engineer"],
+                  check=False)
+    if res.returncode != 0:
+        raise Stop("The engineer, which changes Loam itself when your agents ask, "
+                   "could not be set up.",
+                   "run the install command again; the details are at the end of "
+                   "/var/log/loam-install.log")
+    say("Set up the engineer, which changes Loam itself when your agents ask.", 2)
 
 
 # ---------------------------------------------------------------------------

@@ -704,8 +704,7 @@ def memory_base(record: dict) -> Path:
 # ships none of them and an install's checkout carries them untracked (in
 # `info/exclude`). A tree gets them the way a project's tree gets its own.
 # Its memory is the repository's, tracked, so it is never seeded.
-PLATFORM_HARNESS = tuple(f"engineer/{name}" for name in
-                         ("CLAUDE.md", "role.md", "project.md", "agent.json", ".claude"))
+PLATFORM_HARNESS = lc.ENGINEER_HARNESS
 
 
 def harness_names(project: eng.Project) -> tuple[str, ...]:

@@ -94,6 +94,14 @@ PYCACHE = _path("paths.pycache", HOME / ".cache" / "loam" / "pycache")
 # not change after it is set.
 REVIEWER_STATE = _path("paths.reviewer_state", STATE / "reviewer")
 
+# The platform engineer's rendered files, relative to the checkout (bin/provision
+# --engineer writes them). Never in a release and never committed: provision
+# puts them in the checkout's `info/exclude`, a job's tree gets them copied in
+# (loam_worktree.seed_harness), and an update's clean-tree rule passes over
+# them (loam_update.dirt).
+ENGINEER_HARNESS = tuple(f"engineer/{name}" for name in
+                         ("CLAUDE.md", "role.md", "project.md", "agent.json", ".claude"))
+
 # -- where: the user's own tools -----------------------------------------------
 
 LOCAL_BIN = HOME / ".local" / "bin"

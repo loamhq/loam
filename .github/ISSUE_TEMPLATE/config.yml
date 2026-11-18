@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: List a plugin in the marketplace
+    url: https://github.com/loamhq/marketplace
+    about: Themes and extensions are listed in loamhq/marketplace, one file per listing, by pull request.

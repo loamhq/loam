@@ -1272,6 +1272,23 @@ ENGINEER_PROJECT_SRC = (
     VAULT / lc.vault_folder("projects") / "Loam" / "engineer" / "projects" / "loam.md"
 )
 
+# What Loam ships for every install (2026-11-18, release 0.2.2). Until then
+# the two sources above existed on the first install alone, the installer
+# never provisioned the engineer, and a brief to project `Loam` on any other
+# install was refused ("the engineer's own composition is broken"). The role
+# is the owner-approved text for every install (2026-11-18, "Lgtm"), shipped
+# verbatim; the project file says what the engineer owns on an install.
+#
+# They are SEEDED into the vault paths above, and the vault copy stays the
+# source: the owner reads and changes it there, and provision copies it
+# verbatim, exactly as before. A copy is replaced by a newer shipped text only
+# while it is still byte-for-byte what was last seeded (its hash is in
+# ENGINEER_SEEDED); a copy the owner changed, or one this module never wrote
+# (the first install's own), is never touched.
+ENGINEER_SHIPPED = AGENTS / "engineer" / "install"
+ENGINEER_SEEDS = (("role.md", ENGINEER_ROLE_SRC), ("project.md", ENGINEER_PROJECT_SRC))
+ENGINEER_SEEDED = lc.STATE / "engineer" / "seeded.json"
+
 # The whole of it. Three imports, in that order, and nothing else -- no surface
 # declaration, no identity line. The third is the shared reach.md (2026-11-10),
 # the one file outside this root, loaded because the launcher approves external
@@ -1328,9 +1345,13 @@ def engineer_settings() -> dict:
             # is which tool it uses to get there -- an `Edit` is refusable by
             # the PreToolUse guard, reviewable in a diff, and cannot half-
             # apply, and a `sed -i` is none of those.
-            "additionalDirectories": [str(AGENTS), str(VAULT), str(AI_LABS)],
+            # And the owner's plugins folder (2026-11-18): the role says to
+            # prefer a plugin to a change in Loam's own parts, and a plugin
+            # lives there.
+            "additionalDirectories": [str(AGENTS), str(VAULT), str(AI_LABS),
+                                      str(lc.PLUGINS)],
             "deny": [
-                f"Edit(//{VAULT}/15_CONVERSATIONS/**)".replace("///", "//"),
+                f"Edit(//{VAULT}/{lc.vault_folder('conversations')}/**)".replace("///", "//"),
                 # Operator-authored, and the engineer's own composition. It
                 # may not edit what it is. `role.md` and `project.md` are
                 # settled with the owner and copied verbatim; an engineer that
@@ -1437,15 +1458,109 @@ def engineer_config() -> dict:
     }
 
 
+def _sha(text: str) -> str:
+    import hashlib  # noqa: PLC0415
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def seed_engineer_sources(dry: bool = False) -> dict[str, str]:
+    """The vault's role and project file for the engineer, from what this
+    release ships. Returns {name: what happened}: `seeded` (there was none),
+    `current`, `updated` (still the last seeded text, now the new one), or
+    `kept` (the owner's own: changed since seeding, or never seeded here).
+    """
+    try:
+        record = json.loads(ENGINEER_SEEDED.read_text(encoding="utf-8"))
+        record = record if isinstance(record, dict) else {}
+    except (OSError, ValueError):
+        record = {}
+    said: dict[str, str] = {}
+    for name, dst in ENGINEER_SEEDS:
+        src = ENGINEER_SHIPPED / name
+        if not src.is_file():
+            continue
+        shipped = src.read_text(encoding="utf-8")
+        if not dst.exists():
+            said[name] = "seeded"
+        else:
+            have = _sha(dst.read_text(encoding="utf-8"))
+            if have == _sha(shipped):
+                said[name] = "current"
+            elif record.get(name) == have:
+                said[name] = "updated"
+            else:
+                said[name] = "kept"
+        if said[name] in ("seeded", "updated"):
+            print(f"  {said[name]} {dst} from {src}")
+            if not dry:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_text(shipped, encoding="utf-8")
+                record[name] = _sha(shipped)
+        elif said[name] == "current":
+            record[name] = _sha(shipped)
+        else:
+            print(f"  kept {dst}: it is this install's own, not the text "
+                  f"{src} ships")
+    if not dry and said:
+        ENGINEER_SEEDED.parent.mkdir(parents=True, exist_ok=True)
+        text = json.dumps(record, indent=2, sort_keys=True) + "\n"
+        if not ENGINEER_SEEDED.exists() or ENGINEER_SEEDED.read_text(encoding="utf-8") != text:
+            ENGINEER_SEEDED.write_text(text, encoding="utf-8")
+    return said
+
+
+def ensure_engineer_excluded() -> None:
+    """The engineer's rendered files are never the repository's: on the
+    install's own checkout they sit in `info/exclude`, so `git status` shows
+    nothing and an update reads the tree as clean (the first install's
+    exclude carried them by hand since first release L16)."""
+    done = subprocess.run(["git", "-C", str(AGENTS), "rev-parse", "--git-common-dir"],
+                          capture_output=True, text=True, check=False)
+    if done.returncode:
+        return
+    common = Path(done.stdout.strip())
+    exclude = (common if common.is_absolute() else AGENTS / common) / "info" / "exclude"
+    have = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+    lines = [f"/{name}" for name in lc.ENGINEER_HARNESS]
+    missing = [ln for ln in lines if ln not in have.splitlines()]
+    if not missing:
+        return
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text(
+        have + ("" if not have or have.endswith("\n") else "\n")
+        + "# bin/provision --engineer: the engineer's rendered files.\n"
+        + "".join(f"{ln}\n" for ln in missing), encoding="utf-8")
+    print(f"  excluded {', '.join(missing)} in {exclude}")
+
+
+def ensure_engineer() -> None:
+    """The engineer, from any provision of an agent (2026-11-18). An install
+    updated from a release whose update code knew no engineer re-provisions
+    only its agents, with the new code; this is how such an install gets one.
+    A failure here is said and never fails the agent's provision."""
+    if not (ENGINEER_SHIPPED / "role.md").is_file():
+        return
+    try:
+        provision_engineer()
+    except (Exception, SystemExit) as exc:  # noqa: BLE001
+        print(f"  the engineer was not provisioned: {exc}", file=sys.stderr)
+
+
 def provision_engineer(dry: bool = False) -> None:
     print(f"engineer project at {ENGINEER}")
-    for src in (ENGINEER_ROLE_SRC, ENGINEER_PROJECT_SRC):
+    seed_engineer_sources(dry)
+    def source(dst: Path, name: str) -> Path:
+        # A dry run seeds nothing, so it reads what a real run would write.
+        return dst if dst.is_file() or not dry else ENGINEER_SHIPPED / name
+    role_src = source(ENGINEER_ROLE_SRC, "role.md")
+    project_src = source(ENGINEER_PROJECT_SRC, "project.md")
+    for src in (role_src, project_src):
         if not src.is_file():
             die(f"{src} is missing; refusing to provision the engineer")
-    role = ENGINEER_ROLE_SRC.read_text(encoding="utf-8")
-    project = ENGINEER_PROJECT_SRC.read_text(encoding="utf-8")
-    print(f"  role={ENGINEER_ROLE_SRC} ({len(role):,} chars)")
-    print(f"  project={ENGINEER_PROJECT_SRC} ({len(project):,} chars)")
+    role = role_src.read_text(encoding="utf-8")
+    project = project_src.read_text(encoding="utf-8")
+    print(f"  role={role_src} ({len(role):,} chars)")
+    print(f"  project={project_src} ({len(project):,} chars)")
     if dry:
         print("  [dry-run] no files written")
         return
@@ -1453,6 +1568,7 @@ def provision_engineer(dry: bool = False) -> None:
     (ENGINEER / ".claude").mkdir(parents=True, exist_ok=True)
     (ENGINEER / "memory").mkdir(parents=True, exist_ok=True)
     lc.JOBS.mkdir(parents=True, exist_ok=True)
+    ensure_engineer_excluded()
 
     # Verbatim, both of them. write_if_changed rather than an unconditional
     # copy so a re-provision that changes nothing leaves no mtime behind.
@@ -1544,7 +1660,7 @@ def reviewer_settings() -> dict:
                 # instruction file says so, and this is the wall behind the
                 # sentence. Every other agent's deny on this path fences
                 # writes; the reviewer's fences reads too.
-                f"Read(//{VAULT}/15_CONVERSATIONS/**)".replace("///", "//"),
+                f"Read(//{VAULT}/{lc.vault_folder('conversations')}/**)".replace("///", "//"),
                 # Its own home: the instruction file, this settings file,
                 # agent.json. It may not edit what it is.
                 f"Edit(//{ws}/**)".replace("///", "//"),
@@ -2725,6 +2841,7 @@ def main() -> None:
     ensure_user_settings()
     provision_codex([name])
     provision_antigravity([name])
+    ensure_engineer()
 
     SYSTEMD.mkdir(parents=True, exist_ok=True)
     svc, _ = wake_units(name, workspace, wake)
