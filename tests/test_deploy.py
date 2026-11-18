@@ -302,7 +302,9 @@ try:
     check("share deadline is end of the expiry date UTC",
           f"< {dep._deadline_unix(dt.date(2026, 10, 8))}" in text
           and dep._deadline_unix(dt.date(2026, 10, 8)) == 1791504000)
-    check("sight bypass on every private block", text.count(f"remote_ip {dep.SIGHT_SUBNET}") == 4)
+    # Twice per block: the cross-origin writes refused, then the rest passed.
+    check("sight bypass on every private block", text.count(f"remote_ip {dep.SIGHT_SUBNET}") == 2 * 4
+          and text.count("handle @sight_cross {") == text.count("handle @sight {") == 4)
     check("static host is a file_server behind the gate",
           "file_server browse" in text and blocks.get("pages.example.test") is True)
     check("every block writes its own access log", dep.live_hosts_unlogged(text) == []
@@ -443,7 +445,7 @@ try:
     # Three public blocks, two handles each, and one more on the previews'
     # internal route (caddy_preview_block).
     check("own domain: every block proxies the same upstream", text.count("reverse_proxy 127.0.0.1:8101") == 3 * 2 + 1)
-    check("own domain: sight bypass on the extra hosts too", text.count(f"remote_ip {dep.SIGHT_SUBNET}") == 4)
+    check("own domain: sight bypass on the extra hosts too", text.count(f"remote_ip {dep.SIGHT_SUBNET}") == 2 * 4)
     authelia = dep.authelia_config()
     check("own domain: a second session cookie with its own portal",
           "- domain: owner.me\n    authelia_url: https://auth.owner.me" in authelia
