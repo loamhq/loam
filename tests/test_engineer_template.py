@@ -25,6 +25,17 @@ spec = importlib.util.spec_from_loader("provision", loader)
 prov = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prov)
 
+# Project engineers are rendered from the shared engineer role in the vault,
+# by substitution tables written for the developing install's role. An
+# install without that role (any install made by install.sh, 2026-11-18)
+# cannot render one, and provision says so; there is nothing here to test.
+_shipped = prov.ENGINEER_SHIPPED / "role.md"
+if not prov.ENGINEER_ROLE_SRC.is_file() or (_shipped.is_file() and prov.ENGINEER_ROLE_SRC.read_text(
+        encoding="utf-8") == _shipped.read_text(encoding="utf-8")):
+    print(f"SKIP  no shared engineer role a project engineer renders from "
+          f"({prov.ENGINEER_ROLE_SRC})")
+    sys.exit(0)
+
 fails = 0
 
 

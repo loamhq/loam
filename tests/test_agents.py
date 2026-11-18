@@ -82,6 +82,10 @@ cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 cfg.AI_LABS = LABS
 cfg.VAULT = TMP / "vault"
+# And the install's vault as loam_agents reads it: a fresh install's has an
+# About me.md, which the make would read (found 2026-11-18).
+import loam_config  # noqa: E402
+loam_config.VAULT = TMP / "vault"
 import loam_threads as threads  # noqa: E402
 import loam_cron  # noqa: E402
 import loam_schedule as ls  # noqa: E402

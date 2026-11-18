@@ -109,6 +109,9 @@ def _domain() -> str | None:
         return None
 
 
+NEVER_PRIVATE = {"loam"}
+
+
 def private_names() -> list[tuple[str, str]]:
     """``(term, what it is)`` for every name this install knows is its own,
     longest first so a full name goes before its parts."""
@@ -116,6 +119,11 @@ def private_names() -> list[tuple[str, str]]:
 
     def add(term, what):
         term = str(term or "").strip()
+        # The product's own name is never personal, and an install's user
+        # is `loam` by default: scrubbing it made every "Loam" in a report
+        # "<user>" (found by the 0.2.2 rehearsal, 2026-11-18).
+        if term.lower() in NEVER_PRIVATE:
+            return
         if len(term) >= 3 and term.lower() not in {t.lower() for t, _ in found}:
             found.append((term, what))
 

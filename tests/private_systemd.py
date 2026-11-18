@@ -46,6 +46,13 @@ SYSTEMD = next((p for p in ("/lib/systemd/systemd", "/usr/lib/systemd/systemd")
 DISTRO_UNITS = "/usr/lib/systemd/user"
 
 
+class Unavailable(RuntimeError):
+    """This machine cannot run a second user manager at all: `systemd
+    --user` exits at once and says nothing, even at debug level. Seen on a
+    rehearsal VM whose systemd runs in a PID namespace, with every entered
+    process in the root cgroup (2026-11-18); not on a booted server."""
+
+
 class PrivateManager:
     def __init__(self, root: Path):
         self.root = Path(root)
@@ -119,7 +126,11 @@ class PrivateManager:
                 return self
             time.sleep(0.2)
         log = (self.root / "manager.log").read_text(errors="replace")[-600:]
+        exited = self.proc.poll()
         self.stop()
+        if exited is not None and not log.strip():
+            raise Unavailable(f"systemd --user exited {exited} at once, saying "
+                              f"nothing: this machine runs no private user manager")
         raise RuntimeError(f"the private user manager did not start "
                            f"(state {state!r}): {log}")
 

@@ -98,7 +98,11 @@ try:
             f"test_engineer_queue_wait_for_the_slot_now. See [[Therapy notes]]. "
             f"{USER} ran it.")
     clean, removed = fb.scrub(text)
-    for gone in ("Sam", "Rivera", "Wren", f" {USER} ran", "sam.example.test", "Journal/today",
+    # The install's user is `loam` on an install made by install.sh: the
+    # product's name, which a report keeps.
+    for gone in ("Sam", "Rivera", "Wren",
+                 *([f" {USER} ran"] if USER.lower() != "loam" else []),
+                 "sam.example.test", "Journal/today",
                  "someone", "share=abc", "sam@example.com", "203.0.113.9", TOKEN,
                  "hunter2", RANDOM, "Therapy notes"):
         check(f"scrub takes out {gone!r}", gone in clean, False)

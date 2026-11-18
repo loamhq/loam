@@ -837,7 +837,8 @@ tracked = git("ls-files", cwd=LAYER).splitlines()
 check("the first run makes the folder a repository on main and commits it",
       done.returncode == 0 and git("branch", "--show-current", cwd=LAYER) == "main"
       and sorted(tracked) == [".gitignore", "lamp/PLUGIN.md", "lamp/page/main.js"]
-      and git("log", "-1", "--format=%an %s", cwd=LAYER).startswith("loam-vps plugins: "),
+      and git("log", "-1", "--format=%an %s", cwd=LAYER).startswith(
+          f"{__import__('loam_config').AUTOCOMMIT_NAME} plugins: "),
       (done.stderr, tracked))
 check("...the staging folder is not committed",
       not any(t.startswith(".staging") for t in tracked))

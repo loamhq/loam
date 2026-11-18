@@ -2101,6 +2101,16 @@ def project_render(name: str, project_file: str | None,
                    harness_tracked: bool = False) -> dict[str, str]:
     """Every file the template puts in a checkout, path -> content. One
     function so provision writes it and check-drift compares against it."""
+    shipped = ENGINEER_SHIPPED / "role.md"
+    if not ENGINEER_ROLE_SRC.is_file() or (
+            shipped.is_file() and ENGINEER_ROLE_SRC.read_text(encoding="utf-8")
+            == shipped.read_text(encoding="utf-8")):
+        # The tables above are written for the developing install's role;
+        # the role Loam ships for every install has no rendering for a
+        # project engineer yet (2026-11-18).
+        die("a project engineer is rendered from the shared engineer role, and "
+            "this install's role (the one Loam ships) has no rendering for a "
+            "project engineer yet. Nothing was written.")
     role = ENGINEER_ROLE_SRC.read_text(encoding="utf-8")
     skeleton = (TEMPLATE / "project.md").read_text(encoding="utf-8")
     return {
