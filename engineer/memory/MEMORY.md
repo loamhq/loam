@@ -940,3 +940,13 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Live dark shots:** the owner's theme mode in `/appearance-state.js` is
   `sun` (follows the sun), `dark`, `light` or `system`; rewrite it to
   `"mode":"dark"`, not `moon`.
+- **A test that fails only in a full run is often an answer arriving late,
+  not a slow step.** The app's preview cache read an app's note once per
+  resolve; two at once read twice, and a read that ran before the note
+  existed but answered after a capture wrote it restored "no note" and
+  captured again (`app/src/app-media.js`, `noteFor`). Alone it passed 136
+  of 136 runs, parallel load too. It reproduced every time once the read's
+  *answer* was held, not the read itself (a held read just sees the new
+  file). Holding one: a `read` dependency, or for a scratch script
+  `fs.promises.readFile = …` plus `syncBuiltinESMExports()` from
+  `node:module`, which rebinds the ESM named import.
