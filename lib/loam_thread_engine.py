@@ -101,23 +101,13 @@ ROTATE_TOKENS = 150_000
 
 
 def reply_images(text: str, extra: dict) -> tuple[str, dict]:
-    """The images a reply shows (2026-11-18, lib/loam_threads.py): taken off
-    what it said last, then off what it said before its steps, at most
-    three in all, onto the message as ``attachments``."""
-    text, found = threads.reply_images(text)
-    segments = extra.get("segments")
-    if segments and len(found) < threads.REPLY_IMAGES_MAX:
-        kept = []
-        for seg in segments:
-            if isinstance(seg.get("text"), str) and len(found) < threads.REPLY_IMAGES_MAX:
-                said, more = threads.reply_images(seg["text"])
-                more = [m for m in more if all((m["root"], m["path"]) != (f["root"], f["path"])
-                                              for f in found)][:threads.REPLY_IMAGES_MAX - len(found)]
-                if more:
-                    seg = {**seg, "text": said}
-                    found += more
-            kept.append(seg)
-        extra = {**extra, "segments": kept}
+    """The images a reply shows (2026-11-18, lib/loam_threads.py), onto the
+    message as ``attachments``: at most three in all, in reading order --
+    what it said before its steps, then what it said last. The words are
+    left as they were; each reference is where its image is drawn."""
+    said = [seg["text"] for seg in extra.get("segments") or []
+            if isinstance(seg, dict) and isinstance(seg.get("text"), str)]
+    _, found = threads.reply_images("\n\n".join([*said, text or ""]))
     if found:
         extra = {**extra, "attachments": found}
     return text, extra

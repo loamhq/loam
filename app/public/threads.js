@@ -13,7 +13,7 @@ import { canReply, quoteLine, replyQuotes, replyGesture } from './thread-replies
 import { OPENING_MESSAGES, HISTORY_MESSAGES, openingContext, readingAnchor, restoreAnchor, mergeHistory, progressiveProse } from './thread-opening.js'
 import { follower } from './follow.js'
 import { layoutPixels } from './scale.js'
-import { modelPill, settingsRow, listHeading, personaGrid, rowTop, chatHeader, chatFrame, chatDock, agentProse, userBubble, messageFiles, stepFold, thinkingLine, emptyConversation, panelHeader, composerHint, settingsNav, selectionMark, createMessageState, sheetHandle } from './chat-ui.js'
+import { modelPill, settingsRow, listHeading, personaGrid, rowTop, chatHeader, chatFrame, chatDock, agentProse, userBubble, messageFiles, replyImages, stepFold, thinkingLine, emptyConversation, panelHeader, composerHint, settingsNav, selectionMark, createMessageState, sheetHandle } from './chat-ui.js'
 import { sendHint, isMac } from './keys.js'
 import { authenticatedFetch as fetch, authExpired, failureSentence } from './auth.js'
 import { createPermissionCards } from './permission-cards.js'
@@ -446,8 +446,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       cache,
       // A newly formatted node must replace its plain node, rather than lend
       // its children to it: this cache keeps the actual node across redraws.
-      plain: (text, key) => h('div', { key: `prose:${++proseSerial}`, class: 'tt-prose-content tt-prose-plain', 'data-prose-pending': key, text }),
-      build: (text) => h('div', { key: `prose:${++proseSerial}`, class: 'tt-prose-content' }, ...mentionMarkdown(text)),
+      plain: (text, key, pictures) => h('div', { key: `prose:${++proseSerial}`, class: 'tt-prose-content tt-prose-plain', 'data-prose-pending': key, text: pictures ? pictures.words(text) : text }),
+      build: (text, pictures) => h('div', { key: `prose:${++proseSerial}`, class: 'tt-prose-content' }, ...mentionMarkdown(text, pictures)),
       changed: (format) => { if (st.open !== o) return; rememberReading(o); format(); redraw() },
     })
   }
@@ -1055,7 +1055,9 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   }
   async function copyMessage(message) {
     const o = st.open
-    const copied = await copyText(messageSegments(message).filter((p) => p.text).map((p) => p.text).join('\n\n') || quoteLine(message))
+    // An agent's pictures are not words: Copy takes the words around them.
+    const pictures = isOwner(message.author) ? null : replyImages(message)
+    const copied = await copyText(messageSegments(message).filter((p) => p.text).map((p) => pictures ? pictures.words(p.text) : p.text).filter((t) => t?.trim()).join('\n\n') || quoteLine(message))
     if (!copied || st.open !== o) return
     clearTimeout(o.copyMessageTimer)
     o.copiedMessage = message.id; redraw()
@@ -1206,20 +1208,24 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     }
     const mine = isOwner(m.author) || m === st.open.pending
     const permissions = [...st.open.permissions.values()].filter((p) => p.message_id === m.id)
-    const files = messageFiles(m.attachments, `${st.open.thread.id}:${m.viewKey ?? m.id}`)
+    const viewKey = `${st.open.thread.id}:${m.viewKey ?? m.id}`
+    // An agent's images sit where it wrote them (replyImages); what has no
+    // place in its words, and everything the owner attached, is drawn as files.
+    const pictures = mine ? null : replyImages(m, viewKey, { streaming: Boolean(m.streaming) })
     const segments = messageSegments(m), lastText = segments.findLastIndex((part) => part.text?.trim())
+    const files = messageFiles(pictures ? pictures.rest(segments.filter((part) => part.text).map((part) => part.text)) : m.attachments, viewKey)
     const footer = messageFooter(m, segments, mine)
     const key = `thread:${st.open.thread.id}:${m.id}`, long = longMessages.has(key), shown = openMessages.has(key)
     // Live prose is already formatted. Completion must not send it through
     // the plain-text opening placeholder and replace it a second time.
-    const prose = (text, slot) => st.open.prose && !m.streaming && !m.viewKey ? kept(st.open.prose.node(text, `${m.id}:${slot}`)) : mentionMarkdown(text)
+    const prose = (text, slot) => st.open.prose && !m.streaming && !m.viewKey ? kept(st.open.prose.node(text, `${m.id}:${slot}`, pictures)) : mentionMarkdown(pictures ? pictures.live(text) : text, pictures)
     const body = mine ? h('div', { class: 'line right' }, h('div', { class: 'mine' }, userBubble({ class: `${m.id === 'pending-send' ? 'pending ' : ''}tt-bubble${files ? ' with-files' : ''}${long ? ' foldable' : ''}${long && !shown ? ' clamped' : ''}`, 'data-mine': key }, files, h('div', { class: 'user-message-body' }, messageQuote(m), prose(m.text, 'person')),
       long ? button(shown ? 'Show less' : 'Show more', () => { if (shown) openMessages.delete(key); else openMessages.add(key); redraw() }, { class: 'morebtn', 'aria-expanded': String(shown) }) : null), footer))
       : segments.map((part, index) => {
         if (part.text !== undefined) return h('div', { class: 'line left', key: `text:${index}` }, agentProse([
           prose(part.text, index),
-          // An agent's images (2026-11-18) sit under its last words, above
-          // the time and the actions, as the owner's sit in the bubble.
+          // The files with no place in its words sit under its last words,
+          // above the time and the actions, as the owner's sit in the bubble.
           index === lastText ? files : null,
           index === lastText ? footer : null,
         ], { class: `say agent md${m.streaming ? ' streaming' : ''}` }))
@@ -1352,10 +1358,10 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
         pulse && id !== 'more' && !entry.leaving ? h('span', { key: `pulse:${o.pulse}`, class: 'tt-listener-ripple', 'aria-hidden': 'true' }) : null,
         h('span', { class: 'tt-listener-look' }, id === 'more' ? h('span', { class: 'tt-listener-more', text: `+${extra || o.listenerExtra || 0}` }) : avatar(id, 26)))))
   }
-  function mentionMarkdown(text) {
-    const nodes = renderText(text ?? '')
+  function mentionMarkdown(text, pictures = null) {
+    const nodes = pictures ? renderText(text ?? '', { images: pictures.images }) : renderText(text ?? '')
     const visit = (node) => {
-      if (['CODE', 'PRE', 'A'].includes(node.nodeName)) return
+      if (['CODE', 'PRE', 'A', 'FIGURE'].includes(node.nodeName)) return
       for (const child of [...(node.childNodes ?? [])]) {
         if (child.nodeType !== 3) { visit(child); continue }
         const parts = String(child.nodeValue).split(/((?<![\w@])@[\p{L}\p{N}_-]+)/u)

@@ -1406,3 +1406,24 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   is set only after the module's top-level awaits, so wait for it. The
   owner's appearance may follow the sun: set the browser clock, not the
   setting, for light and dark.
+## 2026-11-18 — an agent's images, drawn where it wrote them
+
+- **Keep the reference; don't take it off.** The morning's version took
+  `![alt](path)` off the message text and put the file in `attachments`, and
+  the page still showed the raw syntax: it rebuilds a reply's words from the
+  full record (raw events), which never lost it, and from live deltas. The
+  same lesson as reply markers, from the other side: when three sources feed
+  the page, make the page's rule work on what all three already say. The
+  reference stays in the text and each attachment carries `refs` (the
+  destinations as written); the page draws a picture at a reference whose
+  destination is in `refs`, and leaves anything else as text.
+- **The app's thread renderer is `page/conversation.js`'s `renderText`,
+  not `markdown` itself.** It wraps `markdown(text, {copy, onLink})`; an
+  option passed to `renderText` is dropped unless that wrapper forwards it.
+  Unit tests with the default `renderText = markdown` passed while the real
+  page ignored the option. Only the browser capture found it.
+- **A lazy picture inside a just-opened thread may never load in a capture**:
+  the thread settles at its end after opening and undoes a single scroll.
+  Re-scroll inside the wait (`tools/capture-reply-images.mjs`).
+- **`image_size` reads PNG/GIF/WebP/JPEG headers** with seeks, no library,
+  so the page can hold a picture's exact space before it loads.

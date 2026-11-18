@@ -56,10 +56,12 @@ import { SIDE_MIN } from './panels.js'
 // (`onTask(n, checked)`, the nth task in the note) and an embed drawn
 // (`embed(target)`, a node). In a chat none of that is asked for and a task is
 // a box nobody can tick.
-export function markdown(text, { copy = null, from = null, onLink = null, anchors = false, vault = false, onTask = null, embed = null } = {}) {
+export function markdown(text, { copy = null, from = null, onLink = null, anchors = false, vault = false, onTask = null, embed = null, images = null } = {}) {
   const before = linking
   const beforeAnchors = anchoring
   const beforeVault = vaulting
+  const beforeImages = imaging
+  imaging = images
   const handler = onLink ?? fileLinks
   linking = handler ? { handler, from } : null
   anchoring = anchors
@@ -73,10 +75,39 @@ export function markdown(text, { copy = null, from = null, onLink = null, anchor
     linking = before
     anchoring = beforeAnchors
     vaulting = beforeVault
+    imaging = beforeImages
   }
 }
 
 let vaulting = null
+
+// Images drawn where they were written (2026-11-18), for a caller that knows
+// which pictures a text may show: an agent's reply, whose images the host
+// checked and named on the message. `images.draw(alt, dest)` answers a node,
+// `false` (drawn elsewhere: leave nothing here) or null (not one of them: the
+// text stays as it was written, which is what it always was). Images on
+// consecutive lines, or in paragraphs one after the other, sit together:
+// `images.group(nodes)` makes the row. Without `images` nothing changes.
+let imaging = null
+
+// The destinations of the `![alt](dest)` images a text draws, as written, in
+// order: what a caller needs to know which of its pictures have a place.
+export function imageRefs(text) {
+  const out = []
+  const inline = (nodes) => { for (const n of nodes ?? []) { if (n.type === 'image') out.push({ alt: n.alt, dest: n.dest }); else if (n.children) inline(n.children) } }
+  const blocks = (list) => {
+    for (const b of list ?? []) {
+      if (b.children) inline(b.children)
+      if (b.title) inline(b.title)
+      if (b.blocks) blocks(b.blocks)
+      if (b.items) for (const item of b.items) blocks(item)
+      if (b.head) for (const cell of b.head) inline(cell)
+      if (b.rows) for (const row of b.rows) for (const cell of row) inline(cell)
+    }
+  }
+  blocks(parse(text))
+  return out
+}
 
 // The note with its nth task ticked or cleared — the nth in the order the
 // preview draws them, which is the order they are written in, frontmatter and
@@ -304,6 +335,7 @@ function stripInline(nodes) {
     if (node.type === 'text') text += node.text
     else if (node.type === 'code' || node.type === 'tag') text += node.text
     else if (node.type === 'embed') text += node.label || node.target
+    else if (node.type === 'image') text += node.alt.trim() || 'Image'
     else if (node.type === 'break') text += ' '
     else if (node.children) text += stripInline(node.children)
   }
@@ -929,6 +961,16 @@ function parseLink(src, at) {
   if (end < 0) return null
 
   const label = src.slice(open + 1, close)
+  if (image) {
+    // An image is its own node, carrying what it was before (a link, or the
+    // characters as written) for a page that does not draw it.
+    const before = linkNode(src, open, close, end, label, true)
+    return { node: { type: 'image', alt: label, dest: src.slice(close + 2, end).trim(), raw: src.slice(at, end + 1), fallback: before?.node ?? null }, end: end + 1 }
+  }
+  return linkNode(src, open, close, end, label, image)
+}
+
+function linkNode(src, open, close, end, label, image) {
   // `(url "title")` — the title is markdown's tooltip and this design has none.
   const dest = src.slice(close + 2, end).trim().split(/\s+/)[0] ?? ''
   const href = safeHref(dest)
@@ -969,15 +1011,63 @@ function renderBlocks(blocks, copy = null) {
   const out = []
   for (const block of blocks) {
     const node = renderBlock(block, copy)
-    if (node) out.push(node)
+    if (!node) continue
+    if (!Array.isArray(node)) { out.push(node); continue }
+    // A paragraph with images in it comes back in pieces: its words, and
+    // its pictures as a `{ figures }` row. A row right after a row is one
+    // row (images a blank line apart still sit together).
+    for (const piece of node) {
+      const last = out.at(-1)
+      if (piece.figures && last?.figures && node.indexOf(piece) === 0) last.figures.push(...piece.figures)
+      else out.push(piece)
+    }
   }
-  return out
+  return out.map((piece) => piece.figures ? imaging.group(piece.figures) : piece)
+}
+
+// A paragraph, or the pieces of one when it holds images the caller draws.
+function renderParagraph(children) {
+  if (!imaging || !children.some((n) => n.type === 'image')) return h('p', {}, ...renderInline(children))
+  const out = []
+  let words = [], figures = null
+  const blank = (n) => n.type === 'break' || (n.type === 'text' && n.text.trim() === '')
+  const flushWords = () => {
+    while (words.length && blank(words[0])) words.shift()
+    while (words.length && blank(words.at(-1))) words.pop()
+    if (words.length) {
+      const first = words[0], last = words.at(-1)
+      if (first.type === 'text') words[0] = { ...first, text: first.text.replace(/^\s+/, '') }
+      if (last.type === 'text') words[words.length - 1] = { ...words.at(-1), text: words.at(-1).text.replace(/\s+$/, '') }
+      out.push(h('p', {}, ...renderInline(words)))
+    }
+    words = []
+  }
+  for (const n of children) {
+    if (n.type === 'image') {
+      const drawn = imaging.draw(n.alt, n.dest)
+      if (drawn === false) continue
+      if (drawn) {
+        flushWords()
+        if (!figures) { figures = { figures: [] }; out.push(figures) }
+        figures.figures.push(drawn)
+        continue
+      }
+      figures = null
+      words.push({ type: 'drawn-as-written', node: n })
+      continue
+    }
+    if (figures && blank(n)) continue
+    figures = null
+    words.push(n)
+  }
+  flushWords()
+  return out.length ? out : null
 }
 
 function renderBlock(block, copy = null) {
   switch (block.type) {
     case 'paragraph':
-      return block.children.length === 0 ? null : h('p', {}, ...renderInline(block.children))
+      return block.children.length === 0 ? null : renderParagraph(block.children)
     case 'heading':
       return h(`h${Math.min(block.level, 6)}`, anchoring ? { class: 'anchored', 'data-anchor': anchorOf(stripInline(block.children)) } : {}, ...renderInline(block.children))
     case 'code':
@@ -1031,10 +1121,7 @@ function renderItem(blocks, loose, copy = null) {
   }
   for (const block of blocks) {
     if (!loose && block.type === 'paragraph') out.push(...renderInline(block.children))
-    else {
-      const node = renderBlock(block, copy)
-      if (node) out.push(node)
-    }
+    else out.push(...renderBlocks([block], copy))
   }
   if (!task) return h('li', {}, ...out)
   return h('li', { class: `task${blocks.task ? ' done' : ''}` }, task, h('span', { class: 'md-taskbody' }, ...out))
@@ -1113,6 +1200,17 @@ function renderInline(nodes) {
         break
       case 'tag':
         out.push(vaulting ? h('span', { class: 'md-tag', text: node.text }) : document.createTextNode(node.text))
+        break
+      case 'image': {
+        const drawn = imaging ? imaging.draw(node.alt, node.dest) : null
+        if (drawn === false) break
+        if (drawn) { out.push(imaging.group([drawn])); break }
+        out.push(...renderInline([{ type: 'drawn-as-written', node }]))
+        break
+      }
+      case 'drawn-as-written':
+        if (node.node.fallback) out.push(...renderInline([node.node.fallback]))
+        else out.push(document.createTextNode(node.node.raw))
         break
       case 'embed': {
         const drawn = vaulting?.embed?.(node.target, node.label)

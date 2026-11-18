@@ -387,18 +387,85 @@ def check_reply_to(msgs: list[dict], reply_to, thread_id: str) -> dict:
 
 # -- images in an agent's reply (2026-11-18) -------------------------------------
 #
-# An agent shows an image in its reply by writing `![a few words](path)` on a
-# line of its own (or anywhere in its text): a file in the vault or the
-# workspaces, an absolute path or one relative to the vault. Up to three
-# come off the text and ride on the message as `attachments`, the shape the
-# owner's own files have, plus `root` (`vault` or `spaces`, the Files root
-# the page reads them from). Every engine can do it: it is words, not a tool.
-# A reference that is not such a file stays in the text as it was written.
+# An agent shows an image in its reply by writing `![a few words](path)` where
+# it wants it, usually on a line of its own: a file in the vault or the
+# workspaces, an absolute path or one relative to the vault. Up to three ride
+# on the message as `attachments`, the shape the owner's own files have, plus
+# `root` (`vault` or `spaces`, the Files root the page reads them from).
+# Every engine can do it: it is words, not a tool. A reference that is not
+# such a file is just text, as it was written.
+#
+# The reference stays in the text (since the evening of 2026-11-18): it is
+# where the image goes. Each attachment carries `refs`, the destinations as
+# written that named it, and the page draws the image at the reference whose
+# destination is one of them -- in the message, in its full record (built
+# from the raw events, where the reference always was) and while it streams,
+# one rule for all three. The morning's version took the references off the
+# text and the place was lost; a message stored then has attachments without
+# `refs`, and the page still draws those under the words. `width`/`height`,
+# read off the file's header where the format says them, let the page keep
+# the image's space before it loads.
 REPLY_IMAGES_MAX = 3
 REPLY_IMAGE_BYTES = 40 * 1024 * 1024
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif"}
 IMAGE_REF_RE = re.compile(r"!\[([^\]\n]{0,300})\]\(\s*(<[^>\n]+>|[^)\n]+?)\s*\)")
+
+
+def image_size(path: Path) -> tuple[int, int] | None:
+    """``(width, height)`` from a PNG, GIF, JPEG or WebP header; None when the
+    file does not say (AVIF, a damaged file). Reads the header, never the
+    picture: a JPEG is walked marker by marker with seeks."""
+    import struct  # noqa: PLC0415
+    try:
+        with path.open("rb") as f:
+            head = f.read(32)
+            if head[:8] == b"\x89PNG\r\n\x1a\n" and head[12:16] == b"IHDR":
+                w, h = struct.unpack(">II", head[16:24])
+            elif head[:6] in (b"GIF87a", b"GIF89a"):
+                w, h = struct.unpack("<HH", head[6:10])
+            elif head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+                kind = head[12:16]
+                if kind == b"VP8X":
+                    w = 1 + int.from_bytes(head[24:27], "little")
+                    h = 1 + int.from_bytes(head[27:30], "little")
+                elif kind == b"VP8 ":
+                    f.seek(26)
+                    w, h = (v & 0x3FFF for v in struct.unpack("<HH", f.read(4)))
+                elif kind == b"VP8L":
+                    f.seek(21)
+                    b = f.read(4)
+                    w = 1 + (((b[1] & 0x3F) << 8) | b[0])
+                    h = 1 + (((b[3] & 0xF) << 10) | (b[2] << 2) | ((b[1] & 0xC0) >> 6))
+                else:
+                    return None
+            elif head[:2] == b"\xff\xd8":
+                f.seek(2)
+                for _ in range(10_000):
+                    marker = f.read(2)
+                    while len(marker) == 2 and marker[0] == 0xFF and marker[1] == 0xFF:
+                        marker = marker[1:] + f.read(1)       # fill bytes
+                    if len(marker) < 2 or marker[0] != 0xFF:
+                        return None
+                    if marker[1] in (0xD8, 0x01) or 0xD0 <= marker[1] <= 0xD7:
+                        continue                                # no length
+                    size = f.read(2)
+                    if len(size) < 2:
+                        return None
+                    length = struct.unpack(">H", size)[0]
+                    if marker[1] in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                                     0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                        sof = f.read(5)
+                        h, w = struct.unpack(">HH", sof[1:5])
+                        break
+                    f.seek(length - 2, 1)
+                else:
+                    return None
+            else:
+                return None
+    except (OSError, struct.error, ValueError):
+        return None
+    return (w, h) if 0 < w <= 100_000 and 0 < h <= 100_000 else None
 
 
 def _image_file(raw: str) -> dict | None:
@@ -432,39 +499,49 @@ def _image_file(raw: str) -> dict | None:
         return None
     if size > REPLY_IMAGE_BYTES:
         return None
-    return {"path": str(rel), "root": root, "name": path.name,
-            "type": IMAGE_TYPES[path.suffix.lower()], "size": size}
+    out = {"path": str(rel), "root": root, "name": path.name,
+           "type": IMAGE_TYPES[path.suffix.lower()], "size": size}
+    dims = image_size(path)
+    if dims:
+        out["width"], out["height"] = dims
+    return out
 
 
 def reply_images(text: str) -> tuple[str, list[dict]]:
-    """The images a reply shows, taken off its text: ``(text, attachments)``.
-    At most REPLY_IMAGES_MAX, each once; a line that held only images goes
-    with them."""
+    """The images a reply shows: ``(text, attachments)``. At most
+    REPLY_IMAGES_MAX files, each once, every destination that named it in
+    its ``refs``. The text comes back as it was: each reference is where
+    its image is drawn."""
     if not text or "![" not in text:
         return text, []
     found: list[dict] = []
-    seen: set[tuple[str, str]] = set()
-
-    def take(m: re.Match) -> str:
+    by_file: dict[tuple[str, str], dict] = {}
+    for m in IMAGE_REF_RE.finditer(text):
+        ref = m.group(2).strip()
+        known = next((f for f in found if ref in f["refs"]), None)
+        if known is not None:
+            continue
         if len(found) >= REPLY_IMAGES_MAX:
-            return m.group(0)
-        f = _image_file(m.group(2))
+            # A fourth file stays text; one more name for a file already
+            # shown is still that file.
+            f = _image_file(ref)
+            if f is not None and (f["root"], f["path"]) in by_file:
+                by_file[(f["root"], f["path"])]["refs"].append(ref)
+            continue
+        f = _image_file(ref)
         if f is None:
-            return m.group(0)
-        if (f["root"], f["path"]) not in seen:
-            seen.add((f["root"], f["path"]))
-            alt = m.group(1).strip()
-            if alt:
-                f["alt"] = alt[:200]
-            found.append(f)
-        return "\0"
-
-    out = IMAGE_REF_RE.sub(take, text)
-    if not found:
-        return text, []
-    lines = [l for l in out.split("\n") if l.replace("\0", "").strip() or "\0" not in l]
-    out = "\n".join(re.sub(r"[ \t]?\0", "", l) for l in lines)
-    return re.sub(r"\n{3,}", "\n\n", out).strip(), found
+            continue
+        key = (f["root"], f["path"])
+        if key in by_file:
+            by_file[key]["refs"].append(ref)
+            continue
+        alt = m.group(1).strip()
+        if alt:
+            f["alt"] = alt[:200]
+        f["refs"] = [ref]
+        by_file[key] = f
+        found.append(f)
+    return text, found
 
 
 def attachment_path(a: dict) -> str:
@@ -1722,8 +1799,9 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
             "\n\nWhatever you write now is posted to the thread as your message. "
             "Mention a peer with @Name only when you are sure it adds a lot. "
             "To show an image (at most three), put ![a few words](its path) "
-            "on a line of its own: a file in the vault or the workspaces, "
-            "and it shows in your message. "
+            "on a line of its own where you want it: a file in the vault or "
+            "the workspaces, and it shows there in your message, its words "
+            "as a caption. "
             "To reply to one earlier message, begin with ↩ and its id "
             "(\"↩ m12\"); otherwise just write. Loam turns that opening into a "
             "quote of the message's own words and hides the id. Message ids "

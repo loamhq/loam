@@ -2965,15 +2965,21 @@ it is a picture. Added 2026-09-21, for the app's composer.
 
 **An agent's reply can carry images too** (2026-11-18): `![a few words](path)`
 in what it says, a file in the vault (absolute, or relative to the vault)
-or in the workspaces, comes off the text and onto the message as
-`attachments`, at most three: `{"path": <relative to its root>, "root":
-"vault"|"spaces", "name", "type", "size", "alt"?}`. Every engine can, being
-words; the turn prompt says so, and `bin/thread post` does the same. A
-reference to anything else (a web address, a missing file, the
-conversations folder, a fourth image) stays in the text as written. The
-page draws them as it draws the owner's, from the Files download route of
-their `root`, and a tap opens one full size. `lib/loam_threads.py`
-(`reply_images`), `tests/test_reply_images.py`.
+or in the workspaces, goes onto the message as `attachments`, at most three:
+`{"path": <relative to its root>, "root": "vault"|"spaces", "name", "type",
+"size", "width"?, "height"?, "alt"?, "refs": [<destinations as written>]}`.
+**The reference stays in the text** (since that evening): it is where the
+image goes. The page draws the picture at each `![…](dest)` whose `dest` is
+in an attachment's `refs`, in the message, in its full record and while it
+streams alike, with `width`/`height` (read off the file's header) holding its
+space. Every engine can, being words; the turn prompt says so, and `bin/thread
+post` does the same. A reference to anything else (a web address, a missing
+file, the conversations folder, a fourth image) is just text. A message from
+the morning before has its references taken off the text and no `refs`; the
+page draws those images under its words. `lib/loam_threads.py`
+(`reply_images`, `image_size`), `app/public/chat-ui.js` (`replyImages`),
+`tests/test_reply_images.py`, `app/test/reply-images.test.js`,
+`app/tools/capture-reply-images.mjs`.
 
 **Upload, then send.** Two requests, never one:
 

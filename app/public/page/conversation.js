@@ -11,7 +11,7 @@ export function mount(host, options = {}) {
     running: host.running, rail: host.rail, nav: host.nav, openProfile: host.goProfile, openSettings: (page, provider) => host.goSettings?.(page, provider),
     listIsMain: () => ['home', 'threads'].includes(host.state.screen),
     messageState: options.messageState ?? createMessageState(),
-    renderText: text => markdown(text, { copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event) }),
+    renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event) }),
     openRef: ref => host.openFileRef(ref),
     stepUI: { fold: host.foldCard, tool: host.toolNode, item: item => host.itemNode({ what: item.kind, item }),
       facts: (item, engine) => host.turnFacts(item, host.state.providers.find(p => p.id === engine) ?? null),
