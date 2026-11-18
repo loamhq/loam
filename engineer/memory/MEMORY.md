@@ -1359,3 +1359,26 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `STATE/lane-notice/`), cleared by the lane's next good row. It goes
   quiet when `LOAM_AI_LABS` points at scratch without `LOAM_LANE_NOTICE_LOGS`,
   because thread tests reuse live persona names.
+
+## 2026-11-18 — 0.2.4: what walking 0.2.3 on staging found
+
+- **A plugin row's `files` is the broker's `/v1/...` path**; the page loads
+  only `/api/...`. The icon was a broken image until the page built its own
+  `/api/plugins/<id>/files/<icon>` (a unit test fed `/api/` and hid it).
+- **A sentence-long `settings.entry` label in a `.setrow` folded to a few
+  pixels wide** beside a 100%-wide field: the section ran 3,115 px tall and
+  read as an empty grey panel. Label above field.
+- **`button-tiers.css`'s focus ring matched every `[tabindex]`**, `-1`
+  included, at a specificity no heading rule beat, so a sheet heading
+  focused for screen readers drew a box. Programmatic focus counts as
+  `:focus-visible` there.
+- **The message gallery was cached by the attachments array**, and every
+  read of a thread hands over a new one: the images were rebuilt and their
+  loading restarted on each refresh. Keyed by thread, message and contents.
+- **`aspect-ratio: auto 4 / 3`, not `auto`**, for a lazy image that should
+  take its own shape: with `auto` alone it has no height before it loads.
+- **Walking the real app from the box**: the app's loopback port (staging
+  8082, live 8081) needs no login; a hook appended to the served `app.js`
+  is set only after the module's top-level awaits, so wait for it. The
+  owner's appearance may follow the sun: set the browser clock, not the
+  setting, for light and dark.
