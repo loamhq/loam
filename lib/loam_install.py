@@ -191,7 +191,7 @@ leave a dated line under *Changes*. An update of Loam never touches it. Keep
 it short: it is paid for on every run.
 
 **What you can reach and use, and how** (your reach, your own subdomains,
-threads and boards, settings, the reviewer) is the shared skill
+threads and boards, settings, the Market, the reviewer) is the shared skill
 `loam-what-you-can-reach`, at `{skill}`. Read it when you need to know
 whether or how you can do something.
 

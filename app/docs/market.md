@@ -16,8 +16,9 @@ are in `docs/plugins.md` at the repository's root, "The marketplace".
   Market at Extensions and at Themes.
 - On a desktop the Market has an address, like Settings:
   `?modal=market`, with `&listing=<id>`, `&kind=<kind>` or `&q=<words>`.
-- From code (a thread's listing card, the next piece of work):
-  `host.openMarket({ id })` (a listing's page), `host.openMarket({ kind, q })`,
+- From code (a thread's listing card does this): `host.openMarket({ id })`
+  (a listing's page; with `from: { label }` its way back is to there),
+  `host.openMarket({ kind, q })`,
   `host.openMarketInstall(id)` (the install sheet alone, over anything), and
   the commands `market.open` and `market.install`.
 
@@ -75,6 +76,48 @@ Agents and skills are listed and read but not installed yet (the host's
 A persona sets the same things through the same routes: `plugin.install`
 and `appearance.<kind>.theme` (`bin/settings`).
 
+## A listing card in a thread
+
+*Built 2026-11-18. The owner: "Agents should be able to go navigate the
+Marketplace and create that card in chat to let the user install something
+if they wanted to … It should just be a capability that the agents have
+access to, and the UI supports it too."*
+
+An agent finds a listing with its Market tool (`loam market search`, which
+ranks with this page's own `search`) and puts the result's `card` line in
+its reply, on a line of its own:
+
+    [Pocket Sync](https://<the app>/?modal=market&listing=pocket-sync)
+
+- **Where it is drawn:** `public/threads.js` cuts an agent's words at such
+  lines (`splitCards`, `public/market-card.js`) and draws each run of them
+  with `marketCards` (`page/market.js`) in its place, between the words
+  before and after. The words stay in the cached prose; the cards are drawn
+  on every redraw, so a card reads Installed the moment it is.
+- **The card:** the listing's tile (its icon, a theme's own colours, else
+  its letter), a quiet "Market · Kind" kicker with the spark, the name in
+  the display face, one line (two at most), the maker, how far it reaches
+  (`reachOf`, from the declaration the broker reads at the listing's link:
+  only colours and type, stays on your Loam, stays on your server, talks to
+  a service), and the Market's button for it (`actionOf`): Install, or Get
+  for a theme, opens **the Market's install sheet** over the thread, so the
+  yes is the same yes; then Installed, Use or In use, or Open for an app.
+  Agents and skills say See it. Two or three stack, each a step behind the
+  last as they appear.
+- **The name** (and the whole card, the name's hit area stretched over it)
+  opens the listing's page; its way back names the thread and returns there,
+  as Escape does.
+- **Hard to make by accident:** the link alone on its line, outside fenced
+  code, to the app's root with exactly `modal=market` and a listing id. A
+  line in a sentence, a list item or code is the Markdown it is. At most
+  three cards in a message; a fourth line stays a link.
+- **A listing the Market does not have** (an id it never listed, one that
+  left, or a Market that is off or out of reach) is drawn as the link's
+  words, plain: no card, no link, no error. While the list is first read,
+  a quiet card holds the place with the name.
+- **The thread record** (`15_CONVERSATIONS/`) keeps the line as written:
+  the name, linked to the listing's page in the app.
+
 ## Try it
 
 **Try it** wears a theme without choosing it (`theme.try(id)`, public/theme.js):
@@ -100,3 +143,10 @@ Sun. Twinkles and the agent's bob stop under reduced motion.
   nothing in it is in the public marketplace), with colour families, control
   styles and no sideways scroll checked.
 - `tools/capture-market.mjs`: the pictures, in Latte and Autumn.
+- `test/market-card.test.js`: the card's form (what is one and what is
+  not, in order, three at most, never in code), an unknown id drawn as its
+  words, and the agent's search ranking every query as this page does.
+- `test/market-card-browser.mjs`: a reply with one card and with two, the
+  install sheet from a card, Installed after, the listing and its way back,
+  at 390 and 1440, light and dark; `tools/capture-market-cards.mjs` runs it
+  with pictures, in Latte and Autumn.

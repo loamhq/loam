@@ -238,7 +238,7 @@ const moved = Object.fromEntries(Object.entries({
   settings: "settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsAccounts apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks",
   layout: "nav profileScreen profileBody desk rail filesList listColumn browseSection setCollapsed mainPane profilePane backToChat filesPane",
   sheets: "openSheet closeSheet sheetTop SHEET_SETTLE_MS pickerNodes filesSheetNodes sheetNodes",
-  market: "marketState openMarket openMarketInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore loadMarket"
+  market: "marketCards marketState openMarket openMarketInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore loadMarket"
 }).flatMap(([group, names]) => names.split(' ').map(name => [name, group])))
 const shell = Object.defineProperties({}, {
   routePanels: { get: () => routePanels },

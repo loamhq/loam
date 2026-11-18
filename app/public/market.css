@@ -308,3 +308,65 @@
 .market-phone .market-trybar + .market-close { margin-left: auto; }
 /* A swatch's pill is a picture of a button, not a target: no finger room. */
 .market .theme-preview .pillbtn, .market .theme-preview .say { min-height: 0; min-width: 0; }
+
+/* ------------------------------------------- a listing card in a thread */
+/* (2026-11-18, page/market.js `marketCards`.) An agent's offer, in its own
+ * words' column: a raised card with the listing's tile, a quiet "Market"
+ * kicker so it never reads as the agent's own work, the name, one line, the
+ * maker and how far it reaches, and the Market's own button. The whole card
+ * opens the listing (the name's hit area stretches over it); the button sits
+ * above that. */
+.market-cards { display: flex; flex-direction: column; gap: var(--space-sm); max-width: 560px; margin: var(--space-sm) 0 var(--space-md); container-type: inline-size; }
+.market-card {
+  position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-md);
+  padding: var(--space-md) var(--space-md) var(--space-md) var(--space-md);
+  background: var(--paper-raised); color: var(--paper-raised-ink);
+  border: 1px solid var(--paper-rule); border-radius: var(--radius-lg);
+  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+  animation: market-card-in var(--motion-normal) var(--ease-standard) both;
+}
+.market-cards-many .market-card:nth-child(2) { animation-delay: 60ms; }
+.market-cards-many .market-card:nth-child(3) { animation-delay: 120ms; }
+@keyframes market-card-in { from { opacity: 0; transform: translateY(4px); } }
+@media (hover: hover) { .market-card:not(.is-loading):hover { border-color: var(--paper-rule-strong); box-shadow: var(--shadow-float); transform: translateY(-1px); } }
+.market-card:focus-within:has(.market-card-name:focus-visible) { border-color: var(--paper-rule-strong); }
+.market-card .market-card-tile, .market-card > .market-tile { width: 52px; height: 52px; border-radius: 15px; font-size: 22px; }
+.market-card-words { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.market-card-kicker { display: inline-flex; align-items: center; gap: 5px; margin: 0; font-size: var(--type-caption); font-weight: 600; letter-spacing: .02em; color: var(--paper-raised-ink-3); }
+.market-card-kicker svg { color: var(--signal-crema); flex: none; }
+.market-card-name {
+  justify-self: start; align-self: flex-start; min-height: 0; min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  font: inherit; font-family: var(--font-display); font-size: var(--type-lead); line-height: 1.2; color: var(--paper-raised-ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: var(--radius-sm);
+}
+/* The name's hit area is the whole card. */
+.market-card-name::after { content: ''; position: absolute; inset: 0; border-radius: var(--radius-lg); }
+.market-card-name:focus-visible { outline: none; }
+.market-card-name:focus-visible::after { box-shadow: 0 0 0 2px var(--paper-raised), 0 0 0 4px var(--paper-ink-3); }
+@media (hover: hover) { .market-card:hover .market-card-name { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--paper-rule-strong); } }
+.market-card-line { font-size: var(--type-small); line-height: 1.45; color: var(--paper-raised-ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.market-card-by { display: flex; align-items: center; flex-wrap: wrap; gap: 2px var(--space-md); margin-top: 3px; font-size: var(--type-caption); color: var(--paper-raised-ink-3); }
+.market-card-by .market-reach { color: var(--paper-raised-ink-2); }
+.market-card-acts { position: relative; z-index: 1; display: flex; align-items: center; }
+.market-card-acts .pillbtn.small { display: inline-flex; align-items: center; justify-content: center; height: 40px; min-height: 40px; padding: 0 16px; font-size: 14px; white-space: nowrap; }
+.market-card-state { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 var(--space-sm); font-size: var(--type-small); font-weight: 600; color: var(--paper-raised-ink-2); white-space: nowrap; }
+.market-card-state svg { color: var(--success); animation: market-card-tick var(--motion-normal) var(--ease-standard) both; }
+@keyframes market-card-tick { from { opacity: 0; transform: scale(.4); } 60% { transform: scale(1.15); } }
+/* The listing is still being read: its words from the link, a quiet shape. */
+.market-card.is-loading { animation: none; }
+.market-card-ghost { background: var(--paper-hover); animation: market-breathe 1.2s ease-in-out infinite; }
+.market-card-ghost-line { display: block; width: 70%; height: .8em; margin-top: 4px; border-radius: var(--radius-pill); background: var(--paper-hover); }
+.market-card.is-loading .market-card-name { cursor: default; }
+@media (prefers-reduced-motion: reduce) { .market-card, .market-card-state svg, .market-card-ghost { animation: none; } .market-card { transition: none; } }
+/* A narrow column (a phone, the side panel): the button goes under the
+ * words, so the name and its line keep the width. */
+@container (max-width: 440px) {
+  .market-card { grid-template-columns: auto minmax(0, 1fr); align-items: start; row-gap: var(--space-sm); }
+  .market-card .market-card-tile, .market-card > .market-tile { width: 46px; height: 46px; border-radius: 13px; font-size: 20px; }
+  .market-card-acts { grid-column: 2; justify-content: flex-start; }
+  .market-card-acts .pillbtn.small { height: 44px; min-height: 44px; }
+  .market-card-name { white-space: normal; }
+}
+/* The listing opened from a card: its way back is the thread, by name. */
+.market-back-from { max-width: min(46vw, 360px); min-width: 0; }
+.market-back-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

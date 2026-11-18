@@ -464,6 +464,45 @@ async def thread(action: str = "list", thread: str = "general", text: str = "",
     return await _hand_off(argv)
 
 
+MARKET = str(lc.ROOT / "bin" / "loam-market")
+
+
+# The Market, for an agent (2026-11-18). The owner: "Agents should be able to
+# go navigate the Marketplace and create that card in chat to let the user
+# install something if they wanted to ... It should just be a capability that
+# the agents have access to." The ranking is the Market page's own
+# (lib/loam_marketplace.search); the card is a line of the reply.
+@mcp.tool(
+    name="market",
+    description=(
+        "Look in the Market (Settings › Market: themes, extensions, apps, "
+        f"agents and skills others made for Loam) for something {lc.OWNER_NAME} "
+        "wants that Loam can't do yet. `query` is plain words, as a person "
+        "would type them (\"sync with my phone\", \"a calm dark theme\"); "
+        "`kind` (theme, extension, app, agent or skill) narrows it. The same "
+        "search, in the same order, as the Market's own field.\n"
+        "Each result: id, name, author, kind, description, whether it is "
+        "installed here, whether it is installable today (agents and skills are "
+        "listed, not installed yet), and `card`.\n"
+        "To offer one, put its `card` line in your reply on a line of its own, "
+        "exactly as given (one to three): the app draws it as a card with the "
+        "listing's icon, maker, reach and an Install button, and the thread "
+        "record keeps it as the name linked to its page. Say in a sentence why "
+        "it fits. The card is an offer: installing is always "
+        f"{lc.OWNER_NAME}'s tap on it, never yours. When nothing fits, or the "
+        "Market lists nothing (`say` tells you), offer to build it as their own "
+        "plugin instead."
+    ),
+)
+async def market(query: str = "", kind: str = "", limit: int = 8) -> str:
+    argv = [MARKET, "search", "--json", "--limit", str(limit or 8)]
+    if kind:
+        argv += ["--kind", kind]
+    # Words after `--`, so a query that starts with a dash is words.
+    argv += ["--", *query.split()]
+    return await _hand_off(argv)
+
+
 SETTINGS = str(lc.ROOT / "bin" / "settings")
 
 
