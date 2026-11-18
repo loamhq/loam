@@ -5,6 +5,11 @@
       What the marketplace lists now, each marked installed or not. Install
       one with its link, as any link (Settings › Market, or `bin/settings
       plugin.install`).
+  loam market search [words…] [--kind theme|extension|app|agent|skill] [--json]
+      What the Market lists that answers the words, best first: the Market
+      page's own search. Each result carries `card`, the line that shows its
+      listing card in a reply (a line of its own). Nothing listed, or nothing
+      matching, says so; offer to build it then.
   loam market share <plugin id> <owner/name> [--json]
       Share a plugin from the owner's plugins folder by link: its folder is
       pushed to that GitHub repository (the owner makes it on github.com;
@@ -41,6 +46,12 @@ def main(argv: list[str]) -> int:
     ls = sub.add_parser("list")
     ls.add_argument("--refresh", action="store_true")
     ls.add_argument("--json", action="store_true")
+    se = sub.add_parser("search")
+    se.add_argument("words", nargs="*")
+    se.add_argument("--kind", default="all")
+    se.add_argument("--limit", type=int, default=mk.SEARCH_LIMIT)
+    se.add_argument("--refresh", action="store_true")
+    se.add_argument("--json", action="store_true")
     sh = sub.add_parser("share")
     sh.add_argument("plugin")
     sh.add_argument("repository")
@@ -72,6 +83,28 @@ def main(argv: list[str]) -> int:
             print(f"  {e['link']}")
         for why in out["skipped"]:
             print(f"(left out: {why})", file=sys.stderr)
+        return 0
+
+    if args.verb == "search":
+        try:
+            out = mk.search(" ".join(args.words), args.kind, args.limit, args.refresh)
+        except (ValueError, mk.SearchError) as exc:
+            if args.json:
+                print(json.dumps({"ok": False, "error": str(exc)}))
+                return 2
+            print(exc, file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(out, indent=2, ensure_ascii=False))
+            return 0
+        print(out["say"])
+        for e in out["results"]:
+            state = "installed" if e["installed"] else "" if e["installable"] else "listed, not installable yet"
+            print(f"\n{e['name']} ({e['id']}), by {e['author']} · {', '.join(e['kind'])}"
+                  f"{' · ' + state if state else ''}")
+            if e["description"]:
+                print(f"  {e['description']}")
+            print(f"  card: {e['card']}")
         return 0
 
     if args.verb == "share":

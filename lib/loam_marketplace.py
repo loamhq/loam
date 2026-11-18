@@ -44,6 +44,11 @@ what it holds does not change under a reader.
 the Market's lead story; ``image`` is a picture inside the plugin's folder
 (the same rule as a theme's cover) drawn as that story's cover.
 
+**Finding things, for an agent** (``search``, 2026-11-18): the listings
+that answer plain words, ranked by the Market page's own search (run in
+Node from app/public/market.js, so there is one matching rule), each with
+the line that shows its card in a reply (``card_line``).
+
 The tests are tests/test_marketplace.py.
 """
 
@@ -368,6 +373,134 @@ def file(pid: str, name: str) -> tuple[bytes, str]:
     if not got:
         raise NotListed(f"{pid} has no {name}")
     return got
+
+
+# ---------------------------------------------------------------------------
+# Finding things, for an agent
+# ---------------------------------------------------------------------------
+#
+# The owner, 2026-11-18: "Agents should be able to go navigate the
+# Marketplace and create that card in chat to let the user install something
+# if they wanted to ... It should just be a capability that the agents have
+# access to, and the UI supports it too." `search` is the agent's half
+# (bin/loam-market search, the `market` tool of mcp/engineer_server.py); the
+# card is app/public/market-card.js and page/market.js.
+#
+# **One matching rule.** The ranking is the Market page's own: the list is
+# handed to app/tools/market-search.mjs, which runs public/market.js's
+# `search` in Node (the app's own runtime, on every Loam host). A second
+# matcher in Python would drift from the page's the first time either
+# changed; app/test/market-agent-search.test.js holds the two answers equal.
+
+SEARCH_LIMIT = 8
+SEARCH_SCRIPT = lc.ROOT / "app" / "tools" / "market-search.mjs"
+
+
+class SearchError(RuntimeError):
+    pass
+
+
+def _node() -> str | None:
+    found = shutil.which("node")
+    if found:
+        return found
+    return "/usr/bin/node" if Path("/usr/bin/node").is_file() else None
+
+
+def ranked(entries: list[dict], q: str, kind: str = "all") -> list[str]:
+    """The ids of ``entries`` that answer ``q``, in the Market page's order."""
+    node = _node()
+    if not node or not SEARCH_SCRIPT.is_file():
+        raise SearchError("the Market's search needs Node and app/tools/market-search.mjs")
+    run = subprocess.run([node, str(SEARCH_SCRIPT)], cwd=str(SEARCH_SCRIPT.parent),
+                         input=json.dumps({"entries": entries, "q": q, "kind": kind}),
+                         capture_output=True, text=True, timeout=20, check=False)
+    try:
+        return json.loads(run.stdout)["ids"]
+    except (ValueError, KeyError, TypeError):
+        raise SearchError(f"the Market's search failed: {run.stderr.strip()[-300:]}") from None
+
+
+def app_origin() -> str | None:
+    """Where the app is, `https://<host>`: the record that serves Loam's
+    page at the install's own domain, else the first that serves it, else
+    the domain. None without a deploy layer (a test, a bare checkout)."""
+    try:
+        import loam_deploy  # noqa: PLC0415
+        dom = loam_deploy.domain()
+        shells = [a for a in loam_deploy.records() if a.app_shell]
+    except Exception:  # noqa: BLE001 -- no deploy layer here
+        return None
+    for app in shells:
+        if dom in app.hostnames:
+            return f"https://{dom}"
+    return f"https://{shells[0].fqdn}" if shells else f"https://{dom}"
+
+
+def listing_address(pid: str, origin: str | None = None) -> str:
+    """A listing's page in the app; the same form app/public/market-card.js
+    reads as a card (`listingAddress` there)."""
+    origin = origin if origin is not None else (app_origin() or "https://loam.invalid")
+    return f"{origin.rstrip('/')}/?modal=market&listing={pid}"
+
+
+def card_line(entry: dict, origin: str | None = None) -> str:
+    """The line an agent puts in its reply to show a listing's card: the
+    name, linked to its page. Plain Markdown, so the thread record reads it
+    as what it is; brackets in a name are dropped so the link stays one."""
+    name = re.sub(r"[\[\]\n]", "", entry.get("name") or entry["id"]).strip() or entry["id"]
+    return f"[{name}]({listing_address(entry['id'], origin)})"
+
+
+def search(q: str = "", kind: str = "all", limit: int = SEARCH_LIMIT,
+           refresh: bool = False) -> dict:
+    """What the Market lists that answers ``q`` (plain words, as a person
+    types them in the Market's field), best first, each with what an agent
+    needs to choose and explain it and the line that shows its card."""
+    kind = (kind or "all").strip().lower()
+    if kind not in ("all", *KINDS):
+        raise ValueError(f"kind is one of {', '.join(KINDS)} (or empty for everything)")
+    q = " ".join(str(q or "").split())[:200]
+    out = listing(refresh=refresh)
+    entries = out.get("plugins", [])
+    base = {"query": q, "kind": kind, "state": out["state"], "results": [], "count": 0,
+            "listed": len(entries)}
+    if out["state"] == "off":
+        return {**base, "say": "This Loam has the Market turned off (marketplace.list "
+                "in its config). Nothing can be found there; offer to build it instead."}
+    if out["state"] == "unreachable":
+        return {**base, "say": f"The Market can't be read just now ({out.get('message')}). "
+                "Say so, and offer to build it instead or to look again later."}
+    if not entries:
+        return {**base, "say": "The Market lists nothing yet. Offer to build it: "
+                "you can make it as the owner's own plugin."}
+    ids = ranked(entries, q, kind)
+    by_id = {e["id"]: e for e in entries}
+    import loam_plugins  # noqa: PLC0415
+    origin = app_origin()
+    results = []
+    for pid in ids[:max(1, min(int(limit or SEARCH_LIMIT), 20))]:
+        e = by_id[pid]
+        listed_only = [k for k in e["kind"] if k in loam_plugins.LISTED_ONLY]
+        results.append({
+            "id": pid, "name": e["name"], "author": e["author"], "kind": e["kind"],
+            "description": e.get("description") or "",
+            "installed": bool(e.get("installed")),
+            "installable": not listed_only,
+            **({"why_not": f"Loam lists {listed_only[0]} packages and installs none yet"}
+               if listed_only else {}),
+            "card": card_line(e, origin),
+        })
+    where = f" among {kind}s" if kind != "all" else ""
+    if not ids:
+        say = (f"Nothing in the Market matches “{q}”{where}. Offer to build it as the "
+               "owner's own plugin.")
+    else:
+        say = (f"{len(ids)} {'listing matches' if len(ids) == 1 else 'listings match'}"
+               f"{f' “{q}”' if q else ''}{where}, best first. To offer one, put its `card` "
+               "on a line of its own in your reply (one to three); installing is the "
+               "owner's tap on the card, never yours.")
+    return {**base, "results": results, "count": len(ids), "say": say}
 
 
 # ---------------------------------------------------------------------------

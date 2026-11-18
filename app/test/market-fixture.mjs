@@ -44,8 +44,40 @@ export const LISTINGS = [
 ]
 const ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="#B4733A"/><circle cx="33" cy="15" r="6" fill="#F6EDDF"/><path d="M6 40 L19 22 L28 33 L33 27 L42 40Z" fill="#2F2017"/></svg>'
 
-export async function marketFixture({ mode = 'light', look = 'latte', listings = LISTINGS, slow = 0 } = {}) {
+// A thread where agents offer listings from the Market (2026-11-18): one
+// card, two together, and a line naming a listing the Market does not have,
+// which reads as its words. The lines are the ones bin/loam-market search
+// hands an agent as `card`.
+export const CARD_ORIGIN = 'https://loam.example'
+export const cardLine = (name, id) => `[${name}](${CARD_ORIGIN}/?modal=market&listing=${id})`
+export const CARD_MESSAGES = [
+  { id: 'm5', author: 'you', kind: 'message', text: 'Could Loam keep my notes on my phone too? I keep wanting them on the train.', did: [] },
+  { id: 'm6', author: 'sprout', kind: 'message', did: [{ label: 'Looked in the Market' }],
+    text: `There’s one in the Market that does exactly this: it keeps the vault in step with your phone and laptop, device to device.\n\n${cardLine('Pocket Sync', 'pocket-sync')}\n\nIt runs a small program on your server and talks only to your own devices. If you’d rather have one of your own, I can build it.` },
+  { id: 'm7', author: 'you', kind: 'message', text: 'And something softer for the evenings?', did: [] },
+  { id: 'm8', author: 'quill', kind: 'message', did: [{ label: 'Looked in the Market' }],
+    text: `Two that suit long evenings:\n\n${cardLine('Moss', 'moss')}\n${cardLine('Tide', 'tide')}\n\nYou can try either on before you get it.` },
+]
+export const UNKNOWN_CARD = { id: 'm9', author: 'sprout', kind: 'message', did: [], text: `I also remembered this one, though it may have left the Market:\n\n${cardLine('Nightjar', 'nightjar')}` }
+
+export async function marketFixture({ mode = 'light', look = 'latte', listings = LISTINGS, slow = 0, cards = null } = {}) {
   const app = await oneProductFixture(), writes = []
+  if (cards) {
+    const route = 'GET /v1/threads/a-quieter-week', read = app.routes[route]
+    app.routes[route] = (req, res, url, raw) => {
+      const end = res.end.bind(res)
+      res.end = body => {
+        try {
+          const record = JSON.parse(body)
+          const at = new Date(Date.parse(record.messages.at(-1)?.at ?? '2026-11-18T21:00:00Z') + 60000)
+          record.messages.push(...cards.map((m, i) => ({ ...m, author: m.author === 'you' ? 'you' : m.author, at: new Date(+at + i * 60000).toISOString() })))
+          record.thread.unread = 0
+          return end(JSON.stringify(record))
+        } catch { return end(body) }
+      }
+      return read(req, res, url, raw)
+    }
+  }
   const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
   const wait = () => new Promise(resolve => setTimeout(resolve, slow))
   const appearance = { phone: { mode, size: 100, theme: look }, desktop: { mode, size: 100, theme: look } }

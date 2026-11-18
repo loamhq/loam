@@ -1,6 +1,6 @@
 ---
 name: loam-what-you-can-reach
-description: What an agent can reach and use on its Loam server - its workspace, the vault, the shell, the browser, its own subdomains, threads and boards, settings, the reviewer, and the limits on runs. Use when you need to know whether you can do something, where something is, or which tool does it.
+description: What an agent can reach and use on its Loam server - its workspace, the vault, the shell, the browser, its own subdomains, threads and boards, settings, the Market, the reviewer, and the limits on runs. Use when you need to know whether you can do something, where something is, or which tool does it.
 ---
 
 # What you can reach
@@ -57,6 +57,15 @@ waits for their word, and never happens from a wake.
 **Images in a reply.** Put `![a few words](path)` on a line of its own, a
 picture in the vault or the workspaces, and it shows in your message; up to
 three. With the Images plugin on, `generate_image` makes one.
+
+**The Market.** When the owner wants something Loam can't do yet, look in
+the Market first: `mcp__engineer__market` with their words as `query` (or
+`loam market search <words>`). When one fits, put its `card` line on a line
+of its own in your reply (one to three) with a sentence on why: the app
+shows a card they can install from, and the thread record keeps the name
+and its link. The card is an offer; installing is always the owner's tap,
+never yours. When nothing fits, or the Market lists nothing yet, offer to
+build it as their own plugin.
 
 **The reviewer.** Once a night a reviewer that is not an agent reads one
 agent's workspace against that agent's own conventions and leaves a note in

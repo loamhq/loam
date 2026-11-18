@@ -370,6 +370,43 @@ try:
     check("loam market list, nothing listed: calm", (cli.returncode, cli.stdout.strip()),
           (0, "Nothing is listed in the marketplace yet."))
 
+    # -- finding things, for an agent (2026-11-18) ----------------------------------
+    # The ranking is the page's own, run in Node; app/test/market-card.test.js
+    # holds it equal to the page's over the fixture list. Here: the states.
+    ANSWERS.pop("/list.json", None)
+    found = mk.search("anything", refresh=True)
+    check("search, nothing listed: no results, said plainly",
+          (found["state"], found["results"], found["say"].startswith("The Market lists nothing yet")),
+          ("empty", [], True))
+    ANSWERS["/list.json"] = (200, json.dumps({"version": 1, "plugins": [
+        entry("pet", name="A pet", description="A small animal that sleeps in the corner."),
+        entry("dusk", kind=["theme"], name="Dusk", description="Low light for evenings."),
+        entry("coach", kind=["agent"], name="Running coach")]}))
+    mk.read(refresh=True)
+    found = mk.search("an animal", limit=5)
+    check("search finds by plain words", [r["id"] for r in found["results"]], ["pet"])
+    check("each result carries what an agent needs and its card line",
+          found["results"][0], {"id": "pet", "name": "A pet", "author": "A friend", "kind": ["extension"],
+                                "description": "A small animal that sleeps in the corner.",
+                                "installed": False, "installable": True,
+                                "card": mk.card_line({"id": "pet", "name": "A pet"})})
+    check("a kind narrows it", [r["id"] for r in mk.search("", "theme")["results"]], ["dusk"])
+    check("an agent package is listed, not installable",
+          {k: mk.search("coach")["results"][0].get(k) for k in ("installable", "why_not")},
+          {"installable": False, "why_not": "Loam lists agent packages and installs none yet"})
+    check("no match: offer to build it", mk.search("zebra jokes")["say"].endswith(
+          "Offer to build it as the owner's own plugin."), True)
+    try:
+        mk.search("x", "toy")
+        check("an unknown kind is refused", False, True)
+    except ValueError:
+        check("an unknown kind is refused", True, True)
+    check("a card line: the name linked to the listing's page",
+          mk.card_line({"id": "pet", "name": "A [pet]"}, "https://loam.example/"),
+          "[A pet](https://loam.example/?modal=market&listing=pet)")
+    ANSWERS.pop("/list.json", None)
+    mk.read(refresh=True)
+
     # -- the broker's route ---------------------------------------------------------
     src = (ROOT / "bin" / "session-broker").read_text()
     check("the broker serves GET /v1/marketplace",
