@@ -55,8 +55,13 @@ function providers() {
 }
 
 test('the Settings row counts what the host said, and counts nothing of its own', () => {
-  assert.equal(connectedCount(providers()).label, '1 of 4 connected')
+  assert.equal(connectedCount(providers()).label, '1 of 1 connected', 'the three "not wired" are Coming later, not counted')
   assert.equal(connectedCount([]).label, 'None known yet')
+  // The 0.2.0 walk: "0 of 5 connected" counted the two marked "Coming later".
+  const fresh = [{ id: 'claude', sign_in: true }, { id: 'codex', sign_in: true }, { id: 'antigravity', login: {} },
+    { id: 'gemini', reason: 'Not wired yet' }, { id: 'kimi', reason: 'Coming later' }]
+  assert.equal(connectedCount(fresh).label, '0 of 3 connected')
+  assert.deepEqual(providerRows(fresh).map(r => r.line), ['Not signed in', 'Not signed in', 'Not signed in', 'Coming later', 'Coming later'])
 })
 
 test('a provider that is not wired is a row, and the words on it are the host’s', () => {

@@ -203,9 +203,16 @@ export function nameOf(choices, id) {
 
 // "1 of 4 connected" — the Settings row's second line. Both numbers are the
 // host's: this page never carries a list of providers of its own.
+// A provider the host lists but cannot connect yet ("Coming later" on the
+// Providers page) is not counted (0.2.1; the 0.2.0 walk read "0 of 5
+// connected" with two of the five not connectable).
+export function comingLater(provider) {
+  return Boolean(provider) && !provider.connected && !wiredProvider(provider) && /not wired|not implemented|coming/i.test(provider.reason || '')
+}
 export function connectedCount(providers = []) {
-  const total = providers.length
-  const connected = providers.filter((p) => p?.connected).length
+  const usable = providers.filter((p) => p && !comingLater(p))
+  const total = usable.length
+  const connected = usable.filter((p) => p.connected).length
   return { connected, total, label: total === 0 ? 'None known yet' : `${connected} of ${total} connected` }
 }
 
@@ -229,7 +236,7 @@ export function providerRows(providers = [], { now = Date.now() } = {}) {
         ? [planOf(p), amount ? (lead.key === 'seven_day' ? `${amount} of this week used` : `${amount} of the ${lead.label.toLowerCase()} used`) : null]
             .filter(Boolean)
             .join(' · ') || (p.login?.account ? `Signed in as ${p.login.account}` : 'Connected · no quota reading yet')
-        : wiredProvider(p) ? 'Not signed in' : /not wired|not implemented|coming/i.test(p.reason || '') ? 'Coming later' : 'Not signed in',
+        : comingLater(p) ? 'Coming later' : 'Not signed in',
       badge: connected ? 'Connected' : 'Not connected',
     }
   })
