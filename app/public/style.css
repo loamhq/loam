@@ -2541,13 +2541,6 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .github-account-details a { display:block; margin-top:12px; }
 .plugin-list-row .plugin-row { flex:1; min-width:0; padding-right:0; }
 .plugin-list-row .setrow-sub { white-space:normal; overflow-wrap:anywhere; }
-/* The marketplace: a row reads as a plugin row, its Get at the end. */
-.plugin-market-row { padding:var(--space-lg) var(--space-md); gap:var(--space-md); }
-.plugin-market-row .setrow-who { display:flex; flex-direction:column; gap:3px; }
-.plugin-market-row .setrow-title { white-space:normal; overflow-wrap:anywhere; }
-.plugin-market-row .plugin-mark { margin-top:2px; }
-.plugin-market-row .pillbtn { flex:none; min-height:44px; min-width:64px; }
-.plugin-market-empty { margin:0; }
 .plugin-state { margin-left:0; flex:none; white-space:nowrap; font-size:12px; line-height:1.4; text-align:right; color:var(--paper-ink-2); }
 /* Three action tiers. Reading-column affordances are marks, including the
  * existing adapter and plugin classes. Explicit content marks also override

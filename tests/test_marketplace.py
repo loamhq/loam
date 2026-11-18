@@ -208,6 +208,20 @@ try:
                              capture_output=True, text=True)
         check(f"--check refuses: {why}", (res.returncode, why in res.stderr), (1, True))
         (repo / "listings" / name).unlink()
+    (repo / "listings" / "dusk.json").write_text(json.dumps(entry("dusk", kind="theme", featured=True, image="cover.webp")))
+    check("build.py takes featured and image",
+          subprocess.run([sys.executable, str(repo / "build.py")], capture_output=True).returncode, 0)
+    check("and the box reads them back",
+          {k: next(e for e in mk.parse((repo / "list.json").read_text())[0] if e["id"] == "dusk").get(k)
+           for k in ("featured", "image")}, {"featured": True, "image": "cover.webp"})
+    for value, why in ((entry("dusk", featured="yes"), "`featured` is true"),
+                       (entry("dusk", image="../cover.webp"), "`image` is a picture")):
+        (repo / "listings" / "dusk.json").write_text(json.dumps(value))
+        res = subprocess.run([sys.executable, str(repo / "build.py"), "--check"],
+                             capture_output=True, text=True)
+        check(f"--check refuses: {why}", (res.returncode, why in res.stderr), (1, True))
+    check("the README says Settings › Market reads it",
+          "every Loam reads in Settings › Market" in (ROOT / "docs" / "marketplace" / "README.md").read_text(), True)
     check("the shipped list is the empty one",
           json.loads((ROOT / "docs" / "marketplace" / "list.json").read_text()),
           {"version": 1, "plugins": []})
@@ -249,6 +263,105 @@ try:
     check("a new version is a new tag beside the old",
           mk.share("dusk", "sam/loam-dusk")["tag"], "v1.1.0")
     os.environ.pop("LOAM_SHARE_GIT_BASE")
+
+    # -- a listing's own page (2026-11-18, Settings › Market) ---------------------
+    check("featured and an image in the plugin's folder are kept",
+          {k: mk.check_entry(entry("dusk", featured=True, image="cover.webp"))[0].get(k)
+           for k in ("featured", "image")}, {"featured": True, "image": "cover.webp"})
+    check("a featured that is not true, or an image path that leaves, is left out",
+          [k for k in ("featured", "image")
+           if k in mk.check_entry(entry("dusk", featured="yes", image="../x.png"))[0]], [])
+    git = lambda *a, cwd=None: subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True)
+    work = TMP / "dusk-src"
+    (work / "dusk").mkdir(parents=True)
+    (work / "dusk" / "PLUGIN.md").write_text(
+        "---\nid: dusk\nname: Dusk\nversion: 1.2.0\napi: 0\nkind: [theme]\nauthor: Sam\n"
+        "icon: icon.svg\n---\nA warm dark theme, for evenings.\n")
+    (work / "dusk" / "theme.css").write_text(':root[data-look="dusk"] { --paper-page: #222222; }\n')
+    (work / "dusk" / "icon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    (work / "dusk" / "cover.webp").write_bytes(b"RIFF0000WEBPVP8 ")
+    git("init", "-q", "-b", "main", cwd=work)
+    git("add", "-A", cwd=work)
+    git("commit", "-q", "-m", "dusk", cwd=work)
+    git("tag", "v1.2.0", cwd=work)
+    (hub / "friend").mkdir(parents=True, exist_ok=True)
+    git("clone", "-q", "--bare", str(work), str(hub / "friend" / "loam-dusk"))
+    os.environ["LOAM_PLUGIN_GIT_BASE"] = f"file://{hub}/"
+    listed = entry("dusk", kind=["theme"], name="Dusk", author="Sam", featured=True, image="cover.webp",
+                   link="https://github.com/friend/loam-dusk/tree/v1.2.0/dusk")
+    ANSWERS["/list.json"] = (200, json.dumps({"version": 1, "plugins": [listed, entry("ghost")]}))
+    mk.read(refresh=True)
+    about = mk.details("dusk")
+    check("details: what the plugin at the link says of itself",
+          (about["name"], about["version"], about["kind"], about["installable"], about["guide"]),
+          ("Dusk", "1.2.0", ["theme"], True, "A warm dark theme, for evenings."))
+    check("details: its declaration, as an install's first call shows it",
+          (about["declaration"]["touches"]["network"], about["declaration"]["page_code"],
+           about["declaration"]["touches"]["server"]), ([], False, False))
+    check("details: the listing marked featured, its icon, cover and theme",
+          (about["listing"]["featured"], about["icon"], about["image"], about["theme"]),
+          (True, True, True, {"options": []}))
+    check("the theme's own CSS, for the swatch and Try it",
+          mk.file("dusk", "theme.css"), (b':root[data-look="dusk"] { --paper-page: #222222; }\n',
+                                         "text/css; charset=utf-8"))
+    check("its icon and its cover, by type", (mk.file("dusk", "icon")[1], mk.file("dusk", "image")[1]),
+          ("image/svg+xml", "image/webp"))
+    check("nothing is installed by reading", (TMP / "plugins" / "dusk" / "theme.css").read_text().startswith(":root {"), True)
+    shutil.rmtree(hub / "friend" / "loam-dusk")
+    check("details are kept: a second read does not fetch", mk.details("dusk")["version"], "1.2.0")
+    for args, kind, why in ((("nobody",), mk.NotListed, "not listed"),
+                            (("ghost",), loam_plugins.PluginError, "unreadable link"),
+                            (("dusk", "server/main.py"), mk.NotListed, "not a listing file")):
+        try:
+            (mk.file if len(args) == 2 else mk.details)(*args)
+            check(f"refused: {why}", "no error", kind.__name__)
+        except kind:
+            check(f"refused: {why}", kind.__name__, kind.__name__)
+    # The broker's own routes, through its real handler.
+    import asyncio  # noqa: PLC0415
+    import importlib.machinery  # noqa: PLC0415
+    import importlib.util  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+    loader = importlib.machinery.SourceFileLoader("session_broker", str(ROOT / "bin" / "session-broker"))
+    broker_mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(broker_mod)
+
+    class FakeBroker:
+        sessions: dict = {}
+        token = "test-token"
+
+    def ask(port, path):
+        req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
+                                     headers={"Authorization": "Bearer test-token"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, r.headers.get("Content-Type"), r.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.headers.get("Content-Type"), exc.read()
+
+    async def routes():
+        server = broker_mod.Server.__new__(broker_mod.Server)
+        server.broker = FakeBroker()
+        tcp = await asyncio.start_server(server.handle, "127.0.0.1", 0)
+        port = tcp.sockets[0].getsockname()[1]
+        try:
+            return [await asyncio.to_thread(ask, port, p) for p in (
+                "/v1/marketplace/dusk", "/v1/marketplace/dusk/theme.css",
+                "/v1/marketplace/dusk/icon", "/v1/marketplace/nobody", "/v1/marketplace/dusk/server")]
+        finally:
+            tcp.close()
+
+    got = asyncio.run(routes())
+    check("broker: GET /v1/marketplace/<id> is the details",
+          (got[0][0], json.loads(got[0][2])["name"]), (200, "Dusk"))
+    check("broker: its theme.css and icon, by type",
+          [(g[0], g[1]) for g in got[1:3]], [(200, "text/css; charset=utf-8"), (200, "image/svg+xml")])
+    check("broker: a listing it does not have, and a file a listing has not, are 404",
+          [g[0] for g in got[3:]], [404, 404])
+    os.environ.pop("LOAM_PLUGIN_GIT_BASE")
+    src = (ROOT / "bin" / "session-broker").read_text()
+    check("the broker serves GET /v1/marketplace/<id> and its files",
+          "loam_marketplace.details" in src and "loam_marketplace.file" in src, True)
 
     # -- the command ----------------------------------------------------------------
     ANSWERS.pop("/list.json", None)

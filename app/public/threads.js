@@ -659,7 +659,10 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       messages: [], loading: false, creating: true, typing: new Set(), permissions: new Map(), steps: new Map(),
       board: { markdown: '', path: '' }, boardBusy: false, boardOpen: false,
       promptTitle: options.promptTitle ?? null, promptBody: options.promptBody ?? null, promptPlaceholder: options.placeholder ?? null }
-    redraw(); setTimeout(() => draft.focus(), 0)
+    // Words already in the composer, unsent (2026-11-18: the Market's
+    // "Ask one of your agents to build it"). The person sends them, or not.
+    if (typeof options.draft === 'string' && options.draft) draft.value = options.draft
+    redraw(); setTimeout(() => { draft.focus(); if (options.draft) draft.setSelectionRange(draft.value.length) }, 0)
     return transport('POST', '/threads', persona ? { persona } : {}).then((body) => {
       const thread = readThreadSummary(body)
       // Left before it was made: nothing can have been sent, so it goes.

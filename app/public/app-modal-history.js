@@ -1,7 +1,8 @@
 // The path remains the document behind the desktop modal. Only these query
 // keys belong to the overlay; opening adds one history entry, drill-ins replace
 // it, and Back/Forward never reopen or unmount the underlying document.
-const keys = ['modal', 'section', 'provider', 'account', 'profile', 'profile_id']
+// The Market (2026-11-18) is an overlay of its own: `listing`, `kind`, `q`.
+const keys = ['modal', 'section', 'provider', 'account', 'profile', 'profile_id', 'listing', 'kind', 'q']
 function baseURL(url) {
   const base = new URL(url)
   for (const key of keys) base.searchParams.delete(key)
@@ -10,14 +11,25 @@ function baseURL(url) {
 export function modalFromURL(url) {
   const q = new URL(url).searchParams, kind = q.get('modal')
   if (kind === 'activity') return { kind }
+  if (kind === 'market') {
+    const listing = /^[a-z][a-z0-9-]*$/.test(q.get('listing') ?? '') ? q.get('listing') : null
+    const k = ['theme', 'extension', 'app', 'agent', 'skill'].includes(q.get('kind')) ? q.get('kind') : 'all'
+    const query = (q.get('q') ?? '').slice(0, 200)
+    return { kind, view: listing ? 'listing' : query ? 'results' : k !== 'all' ? 'kind' : 'front', id: listing, k, q: query }
+  }
   if (kind !== 'settings') return null
   return { kind, page: q.get('section') || 'root', provider: q.get('provider'), account: q.get('account'),
     ...(['agent', 'engineer', 'reviewer'].includes(q.get('profile')) && q.get('profile_id') ? { detail: { kind: q.get('profile'), id: q.get('profile_id') } } : {}) }
 }
 export function modalURL(url, sheet) {
   const next = baseURL(url)
-  if (!['settings', 'activity'].includes(sheet?.kind)) return next
+  if (!['settings', 'activity', 'market'].includes(sheet?.kind)) return next
   next.searchParams.set('modal', sheet.kind)
+  if (sheet.kind === 'market') {
+    if (sheet.view === 'listing' && sheet.id) next.searchParams.set('listing', sheet.id)
+    else if (sheet.view === 'results' && sheet.q) next.searchParams.set('q', sheet.q)
+    if (sheet.view !== 'listing' && sheet.k && sheet.k !== 'all') next.searchParams.set('kind', sheet.k)
+  }
   if (sheet.kind === 'settings') {
     if (sheet.page && sheet.page !== 'root') next.searchParams.set('section', sheet.page)
     if (sheet.provider) next.searchParams.set('provider', sheet.provider)
@@ -49,7 +61,7 @@ export function createAppModalHistory({ wide, sheet, restore, close, changed, wi
   win.addEventListener('popstate', event => {
     if (!wide()) return
     const nextModal = Boolean(modalFromURL(win.location.href))
-    const modalNavigation = pending || hadModal || nextModal || ['settings', 'activity'].includes(sheet()?.kind)
+    const modalNavigation = pending || hadModal || nextModal || ['settings', 'activity', 'market'].includes(sheet()?.kind)
     pending = false
     const sameDocument = baseURL(win.location.href).href === base
     hadModal = nextModal

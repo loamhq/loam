@@ -66,7 +66,7 @@ function settingsDialog(...args) { return host.registry.component('core.settings
 function builtinSettingsDialog(sheet) {
   const page = settingsHome(sheet.page === 'root' ? 'appearance' : sheet.page)
   return h('div', { class: 'sheet settings twopane' },
-    settingsNav({ title: 'Settings', items: settingsItems(), active: page === 'provider' ? 'providers' : page === 'integration' ? 'integrations' : page, choose: item => goSettings(item.id) }),
+    settingsNav({ title: 'Settings', items: settingsItems(), active: page === 'provider' ? 'providers' : page === 'integration' ? 'integrations' : page, choose: item => goSettings(item.id), footer: host.marketDoor({ nav: true }) }),
     h('div', { class: 'setmain' },
       h('header', { class: 'app-modal-head settings-modal-close' },
         h('button', { class: 'iconbtn ghost', title: 'Close', 'aria-label': 'Close settings', onclick: () => host.closeSheet({ historyBack: true }) }, icon.close(14))),
@@ -111,6 +111,7 @@ function settingsAppearance({ back = true } = {}) {
             h('span', { class: 'theme-choice-label' }, h('span', { class: 'theme-choice-name', text: option.name })),
             look === option.id ? h('span', { class: 'theme-choice-check' }, icon.check(13)) : null))
       }))),
+    host.marketFindMore('theme', 'Find more themes'),
     chosen?.options?.length ? h('section', { class: 'card appearance-card theme-options', 'aria-labelledby': 'appearance-options' },
       h('h3', { class: 'kicker', id: 'appearance-options', text: chosen.name }),
       chosen.options.some(option => ['agent-colours', 'agent-shapes'].includes(option.id)) ?
@@ -206,7 +207,8 @@ function settingsRoot() {
   return [settingsHead('Settings'), !host.state.wide ? h('div', { class: 'rows settings-place' }, settingsRow({
     lead: tile(icon.clock(16)), title: 'Activity', sub: working ? `${working} working` : 'Nothing running', onclick: host.openPhoneActivity })) : null,
     h('div', { class: 'rows' }, ...settingsItems().map(item => settingsRow({
-    lead: tile(item.glyph), title: item.label, sub: summaries[item.id], dot: item.dot, onclick: () => goSettings(item.id) })))]
+    lead: tile(item.glyph), title: item.label, sub: summaries[item.id], dot: item.dot, onclick: () => goSettings(item.id) }))),
+    host.marketDoor()]
 }
 
 

@@ -51,3 +51,16 @@ export async function loadThemes(roots = [shipped], { rows = null, readTheme = n
   const styles = themes.flatMap(theme => { const css = chosen.get(theme.id).css; return [css, previewCSS(theme.id, css, theme.options ?? [], defaults)] })
   return { themes, css: styles.join('\n'), tokens, failures }
 }
+
+// A theme from the Market (2026-11-18), before it is installed: its own
+// theme.css, read from the listing's link by the broker, held to the same
+// rules as an installed theme's (tokens only, nothing fetched), and its
+// swatch scoping (`.theme-preview[data-look=<id>]`) beside it. The page
+// loads this to draw the theme's card and, on Try it, to wear it.
+export async function marketThemeCSS(id, css, options = []) {
+  if (!slug.test(id)) throw new Error(`Invalid theme id: ${id}`)
+  const defaults = await loadCoreTokens()
+  const checked = validateThemeOptions(options?.length ? options : undefined, id)
+  validateThemeCSS(css, id, defaults, checked)
+  return `${css}\n${previewCSS(id, css, checked, defaults)}\n`
+}

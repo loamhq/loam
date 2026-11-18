@@ -1062,7 +1062,8 @@ answers 404 for everything; to take the path itself away, drop the
 Decided 2026-11-13: **one public GitHub repository holds a list file.**
 Builders host their own work in their own repositories; they ask to be
 listed by pull request; a maintainer reviews every listing by hand; every
-Loam reads the list in Settings › Plugins and installs from it by the
+Loam reads the list in Settings › Market (Settings › Plugins until
+2026-11-18) and installs from it by the
 listed link, through the same two calls as any link (above). Installing from
 any link still works, listed or not. The code is `lib/loam_marketplace.py`
 and `bin/loam-market`; the tests are `tests/test_marketplace.py`.
@@ -1096,6 +1097,8 @@ and `bin/loam-market`; the tests are `tests/test_marketplace.py`.
 | `kind` | one or more of `theme`, `extension`, `app`, `agent`, `skill` |
 | `link` | the plugin's folder at a tag or a full commit, as an install link takes it; a branch is refused when it is installed |
 | `version`, `homepage` | optional: the version at the link; an https link about it |
+| `featured` | optional, `true`: the Market's lead story (2026-11-18). Without one, a listing by Loam leads |
+| `image` | optional: a picture inside the plugin's folder (`.webp`, `.avif`, `.jpg`, `.png`, the theme-cover rule), the lead story's cover (2026-11-18) |
 
 A Loam leaves out an entry that breaks a rule, says why in `skipped`, and
 draws the rest, sorted by name.
@@ -1121,16 +1124,39 @@ empty string turns the section off. `marketplace.repo` (default
 
 | `state` | Meaning | The page |
 |---|---|---|
-| `listed` | entries to draw | a row each: name, description, author · kind, and **Get** (or *Installed*) |
-| `empty` | no list there yet (404) or nothing in it | "Nothing is listed yet. Anything shared as a link installs below." Never an error |
-| `unreachable` | the host failed, or the list is not one; `message` says why | the same calm line, saying it can't be reached right now |
-| `off` | `marketplace.list` is empty | the section is not drawn |
+| `listed` | entries to draw | the Market's front page: a lead story, a section per kind |
+| `empty` | no list there yet (404) or nothing in it | the masthead, the search and "Ask one of your agents to build it". Never an error |
+| `unreachable` | the host failed, or the list is not one; `message` says why | a calm line saying it can't be reached right now, and Try again |
+| `off` | `marketplace.list` is empty | a line saying the Market is turned off here |
 
 The broker keeps the answer ten minutes; `?refresh=1` reads again. **Get**
-puts the entry's `link` through `POST /api/plugins` without a confirm: the
-person sees the same declaration question as for any link and says yes to
-install. *Installed* is worked out on the page from the plugin list, so it
-is right the moment an install lands.
+(or **Install**) puts the entry's `link` through `POST /api/plugins` without
+a confirm, in the Market's one install sheet: the person sees what it
+declares, in plain words, and says yes to install (the second call, with the
+`confirm`). *Installed* is worked out on the page from the plugin list, so it
+is right the moment an install lands. The page is `app/docs/market.md`.
+
+### `GET /api/marketplace/<id>` (relayed to `GET /v1/marketplace/<id>`)
+
+What the plugin at a listing's link says of itself, read before anything is
+installed (2026-11-18): the broker fetches the link at its tag and reads its
+`PLUGIN.md` the way an install's first call does, writing nothing, and keeps
+the answer an hour per link (`DETAILS_TTL`; `?refresh=1` reads again).
+
+```json
+{"id": "dusk", "listing": {…the list's entry…}, "name": "Dusk", "version": "1.2.0",
+ "author": "Sam", "kind": ["theme"], "declaration": {"touches": {…}, "overrides": [], "page_code": false},
+ "guide": "A warm dark theme, for evenings.", "warnings": [], "installable": true, "why": null,
+ "source": {"kind": "link", "repo": "friend/loam-dusk", "ref": "v1.2.0", "commit": "…", "url": "…"},
+ "icon": true, "image": true, "theme": {"options": []}}
+```
+
+`/api/marketplace/<id>/icon` and `/image` are the plugin's `icon` and the
+listing's `image` (else a theme's own cover); `/api/marketplace/<id>/theme.css`
+is a theme's CSS, held by the app to the installed themes' rules
+(`marketThemeCSS`, `app/src/themes.js`: tokens only, nothing fetched) with its
+swatch scope added. A listing the list does not have, or a file it lacks, is
+404; a link GitHub cannot read is the install path's own error.
 
 ### Asking to be listed
 

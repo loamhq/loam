@@ -3,7 +3,7 @@
 
   loam market list [--refresh] [--json]
       What the marketplace lists now, each marked installed or not. Install
-      one with its link, as any link (Settings › Plugins, or `bin/settings
+      one with its link, as any link (Settings › Market, or `bin/settings
       plugin.install`).
   loam market share <plugin id> <owner/name> [--json]
       Share a plugin from the owner's plugins folder by link: its folder is

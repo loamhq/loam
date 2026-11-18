@@ -17,7 +17,7 @@ export function touchSentences(declaration = {}) {
 }
 const external = source => { try { const u = new URL(source?.url); return u.protocol === 'https:' ? u.href : null } catch { return null } }
 export function createPluginSettings({ loader, theme, host, changed = () => {} }) {
-  const st = { selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', url: '', ref: '', path: '', preview: null, request: null, installError: '', busy: false, guide: false, allDeclarations: false, refOptions: false, focusPreview: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set(), market: null, marketLoading: false }
+  const st = { selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', url: '', ref: '', path: '', preview: null, request: null, installError: '', busy: false, guide: false, allDeclarations: false, refOptions: false, focusPreview: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set() }
   let hostSettings = null, secretSettings = null
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, text, onclick, ...props })
   const notice = (text, bad = true) => text ? h('p', { class: `plugin-notice${bad ? ' err' : ''}`, role: bad ? 'alert' : 'status', text }) : null
@@ -208,39 +208,6 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       h('div', { class: 'plugin-preview-actions' }, button('Change link', () => { st.preview = null; st.installError = ''; changed() }, 'pillbtn content-mark', { disabled: st.busy }),
         button(st.busy ? 'Installing…' : update ? 'Update plugin' : 'Install plugin', () => install(true), 'pillbtn primary', { disabled: st.busy || !p.confirm })))
   }
-  // The marketplace (2026-11-17): the list the broker reads from the
-  // marketplace's repository. Never an error: a list not there yet is the
-  // calm empty line, a broker without the route hides the section. "Get"
-  // puts the entry's link through the same install question as any link.
-  async function loadMarket() {
-    if (st.marketLoading) return
-    st.marketLoading = true
-    try { st.market = await host.api('GET', '/marketplace') }
-    catch (error) { st.market = { state: [404, 405].includes(error.status) ? 'off' : 'unreachable', plugins: [] } }
-    finally { st.marketLoading = false; changed() }
-  }
-  const kindWords = kind => (kind ?? []).map(k => ({ theme: 'Theme', extension: 'Extension', app: 'App', agent: 'Agent', skill: 'Skill' }[k] ?? k)).join(', ')
-  function getFromMarket(entry) {
-    st.url = entry.link; st.ref = ''; st.path = ''; st.refOptions = false; st.preview = null
-    install()
-  }
-  function marketView() {
-    if (!st.market && !st.marketLoading) loadMarket()
-    const market = st.market
-    if (market?.state === 'off') return null
-    const installed = new Set(loader.st.rows.filter(row => row.effective).map(row => row.id))
-    const entries = market?.plugins ?? []
-    return h('section', { class: 'plugin-group plugin-market', 'aria-label': 'Marketplace' }, h('h3', { class: 'kicker', text: 'Marketplace' }),
-      !market ? h('p', { class: 'note', role: 'status', text: 'Reading the marketplace…' })
-        : !entries.length ? h('p', { class: 'note plugin-market-empty', text: market.state === 'unreachable' ? 'The marketplace can’t be reached right now. Anything shared as a link still installs below.' : 'Nothing is listed yet. Anything shared as a link installs below.' })
-        : h('div', { class: 'rows' }, ...entries.map(entry => h('div', { class: 'plugin-list-item', key: `market:${entry.id}` }, h('div', { class: 'plugin-list-row plugin-market-row' },
-          h('div', { class: 'setrow-who' },
-            h('div', { class: 'setrow-title', text: entry.name }),
-            entry.description ? h('div', { class: 'setrow-sub', text: entry.description }) : null,
-            h('div', { class: 'plugin-mark', text: [entry.author, kindWords(entry.kind)].filter(Boolean).join(' · ') })),
-          installed.has(entry.id) ? h('span', { class: 'plugin-state', text: 'Installed' })
-            : button(st.busy && st.request?.url === entry.link ? 'Reading…' : 'Get', () => getFromMarket(entry), 'pillbtn content-mark', { disabled: st.busy, 'aria-label': `Get ${entry.name}` }))))))
-  }
   function installView() {
     return h('section', { class: 'plugin-install', 'aria-label': 'Install from a link' }, h('h3', { class: 'kicker', text: 'Install from a link' }),
       st.preview ? previewView() : h('form', { onsubmit: event => { event.preventDefault(); install() } },
@@ -257,7 +224,9 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     return [back ? host.settingsBack('Settings', 'root') : null, host.settingsHead('Plugins'), notice(st.error), notice(st.done, false), notice(loader.st.error),
       !loader.st.loaded ? h('p', { class: 'note', role: 'status', text: 'Reading plugins…' }) : null,
       ...[['Themes', true], ['Extensions', false]].map(([title, themes]) => { const group = rows.filter(row => Boolean(row.kind?.includes('theme')) === themes); return group.length ? h('section', { class: 'plugin-group', 'aria-label': title }, h('h3', { class: 'kicker', text: title }), h('div', { class: 'rows' }, ...group.map(rowView))) : null }),
-      marketView(), installView()]
+      // Settings › Market (2026-11-18) holds what can be got; this page shows
+      // what is installed, and ends with the way there.
+      host.marketFindMore?.('extension', 'Find more plugins'), installView()]
   }
   function sync() {
     if (st.focusDetail && st.selected) {

@@ -19,6 +19,7 @@ import { mount as mountTranscript } from './page/transcript.js'
 import { mount as mountSettings } from './page/settings.js'
 import { mount as mountLayout } from './page/layout.js'
 import { mount as mountSheets } from './page/sheets.js'
+import { mount as mountMarket } from './page/market.js'
 import { menuSurface, createMenuSurfaces } from './menu-surface.js'
 import { createAppModalHistory } from './app-modal-history.js'
 import { settingsRow, agentProse, userBubble, messageFiles, stepFold, emptyConversation, panelHeader, settingsNav, segmentedControl, createMessageState, sheetHandle } from './chat-ui.js'
@@ -236,7 +237,8 @@ const moved = Object.fromEntries(Object.entries({
   transcript: "lineKeys lineCount keyOf MINE_MAX_PX MINE_SLACK_PX fitMine COPIED_MS copied copyWithCue copyButton stepItems stepChildren itemNode foldCard stepNode askLine openBlocks longToolDetails toggleOpen toolNode toolDetail fitToolOutputs answeredLine openTurns toggleTurn turnModelName turnFacts turnLine",
   settings: "settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsAccounts apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks",
   layout: "nav profileScreen profileBody desk rail filesList listColumn browseSection setCollapsed mainPane profilePane backToChat filesPane",
-  sheets: "openSheet closeSheet sheetTop SHEET_SETTLE_MS pickerNodes filesSheetNodes sheetNodes"
+  sheets: "openSheet closeSheet sheetTop SHEET_SETTLE_MS pickerNodes filesSheetNodes sheetNodes",
+  market: "marketState openMarket openMarketInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore loadMarket"
 }).flatMap(([group, names]) => names.split(' ').map(name => [name, group])))
 const shell = Object.defineProperties({}, {
   routePanels: { get: () => routePanels },
@@ -904,6 +906,7 @@ function fitViewport() {
 // never reach the thread opener and replace its in-memory conversation.
 const appModalHistory = createAppModalHistory({ wide: isWide, sheet: () => state.sheet,
   changed: schedule, close: () => page.closeSheet(), restore: sheet => {
+    if (sheet.kind === 'market') { modules.market.openMarket({ kind: sheet.k, q: sheet.q, id: sheet.id }); return }
     page.openSheet(sheet)
     if (sheet.kind === 'activity') activity.load()
     if (sheet.detail) modules.settings.goSettingsDetail(sheet.detail.kind, sheet.detail.id)
@@ -915,6 +918,7 @@ modules.transcript = mountTranscript(page)
 modules.settings = mountSettings(page)
 modules.layout = mountLayout(page)
 modules.sheets = mountSheets(page)
+modules.market = mountMarket(page)
 const sidePanel = mountSidePanel(page)
 const mainPanel = {
   threads,
