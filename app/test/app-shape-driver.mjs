@@ -44,10 +44,10 @@ try {
   const face = find(root, 'blob')
   assert.match(face.style.background, /^var\(--agent-avatar-tone-\d+, var\(--persona-/)
 
-  for (const label of ['Appearance', 'Agents', 'Providers', 'Integrations', 'Files', 'Plugins', 'Sign-in', 'Update']) {
+  for (const label of ['Appearance', 'Agents', 'Providers', 'Integrations', 'Accounts', 'Files', 'Plugins', 'Sign-in', 'Update']) {
     click(utility('Settings')); await until(() => find(root, 'settings'))
     const destinations = width >= 1100 ? all(root, 'navrow').map(text) : all(root, 'setrow-title').map(text)
-    assert.deepEqual(destinations, [...(width < 1100 ? ['Activity'] : []), 'Appearance', 'Agents', 'Providers', 'Integrations', 'Files', 'Plugins', 'Sign-in', 'Update'])
+    assert.deepEqual(destinations, [...(width < 1100 ? ['Activity'] : []), 'Appearance', 'Agents', 'Providers', 'Integrations', 'Accounts', 'Files', 'Plugins', 'Sign-in', 'Update'])
     if (width < 1100) await until(() => text(find(setting('Activity'), 'setrow-sub')) === '1 working')
     click(setting(label))
     await until(() => all(root, 'sheet-title').some(node => text(node) === label))

@@ -45,6 +45,9 @@
   --shadow-ink: rgba(28,28,28,.22);
   --shine: rgba(255,255,255,.45);
   --scrim: rgba(28,28,28,.45);
+  /* An image seen full size (2026-11-18): near-black in both modes, as a photo is shown. */
+  --image-view-scrim: rgba(12,12,12,.94);
+  --image-view-ink: #f4f4f4;
   --mask-opaque: #000;
   --text-on-avatar: #FFFFFF;
   --avatar-ink: var(--text-on-avatar);
@@ -197,6 +200,7 @@
   --shadow-ink: rgba(0,0,0,.55);
   --shine: rgba(255,255,255,.10);
   --scrim: rgba(0,0,0,.55);
+  --image-view-scrim: rgba(0,0,0,.96);
   --persona-slate-tint: #2E3128;
   --persona-olive-tint: #262B36;
   --persona-rust-tint: #3A2B24;

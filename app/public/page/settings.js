@@ -13,6 +13,7 @@ import { createGithubAccounts } from '../github-accounts.js'
 import { formatDate } from '../time.js'
 import { themeImageURL, themeImagePosition } from '../theme-image.js'
 import { fileShortcuts, toggleFileShortcut } from '../store.js'
+import { createApiKeys } from '../api-keys.js'
 
 // Mounted once. Cross-module state and operations are explicit host services.
 export function mount(host) {
@@ -23,6 +24,16 @@ const passkey = createPasskey({ changed: () => host.schedule() })
 settingsEvents?.on('settings.opened', ({ opening, page }) => { if (opening || page === 'update') updates.check() })
 settingsEvents?.on('sheet.changing', ({ sheet }) => { if (sheet?.kind !== 'settings' || sheet.page !== 'signin') passkey.stop() })
 settingsEvents?.on('page.leaving', () => { updates.stop(); passkey.stop() })
+
+// Settings › Accounts (2026-11-18): API keys by provider, entered once.
+const apiKeys = createApiKeys({ api: (...args) => host.api(...args), changed: () => host.schedule(), openPlugin: id => goSettings('plugins', id) })
+function settingsAccounts({ back = true } = {}) {
+  const provider = host.state.sheet?.page === 'accounts' ? host.state.sheet.provider : null
+  return apiKeys.view({ provider,
+    back: provider ? settingsBack('Accounts', 'accounts') : null,
+    head: [back ? settingsBack('Settings', 'root') : null, settingsHead('Accounts', 'API keys for the services your plugins use, entered once.')],
+    open: id => goSettings('accounts', id) })
+}
 
 const githubAccounts = createGithubAccounts({ state: () => host.state.github, api: (...args) => host.api(...args), changed: () => host.schedule(), reload: () => host.loadGithub() })
 function settingsBody(sheet, back) {
@@ -47,7 +58,7 @@ function builtinSettingsSheet(sheet) {
 }
 
 function settingsItems() {
-  return host.registry.entries('settings.section').filter(item => !item.component && !item.group && (!item.children || host.registry.entries('settings.section').some(child => child.group === item.children))).map(item => ({ ...item, label: item.title, glyph: typeof item.icon === 'function' ? item.icon(16) : (icon[item.icon] ?? icon.code)(16), dot: item.id === 'providers' ? providersWarn() : item.id === 'integrations' && integrationsWarn() }))
+  return host.registry.entries('settings.section').filter(item => !item.component && !item.group && (!item.children || host.registry.entries('settings.section').some(child => child.group === item.children))).map(item => ({ ...item, label: item.title, glyph: typeof item.icon === 'function' ? item.icon(16) : (icon[item.icon] ?? icon.code)(16), dot: item.id === 'providers' ? providersWarn() : item.id === 'accounts' ? apiKeys.warn() : item.id === 'integrations' && integrationsWarn() }))
 }
 
 function settingsDialog(...args) { return host.registry.component('core.settings', { args, variant: 'settingsDialog', defaultView: () => builtinSettingsDialog(...args) }) }
@@ -161,6 +172,7 @@ function goSettings(page, provider = null) {
     } else host.pluginLoader?.refresh()
   }
   if (page === 'signin') passkey.loadPasskeys()
+  if (page === 'accounts' || page === 'root') apiKeys.load(page === 'accounts' && !provider)
   host.registry.emit('settings.opened', { page })
   if (page === 'agents') host.settingsProfiles.directory()
   host.schedule()
@@ -187,7 +199,7 @@ function settingsRoot() {
   const summaries = { appearance: `${({ system: 'System', sun: 'Sun', dark: 'Dark', light: 'Light' })[host.theme.value.mode]} · ${host.theme.value.size}%`,
     agents: `${host.state.agents.list.length} agents`, providers: connectedCount(host.state.providers).label,
     integrations: integrationCatalog(host.state).filter(service => service.connected).map(service => service.name).join(' · ') || 'Connect your services',
-    files: 'Shortcuts and folders', plugins: 'Themes and extensions' }
+    files: 'Shortcuts and folders', plugins: 'Themes and extensions', accounts: apiKeys.summary() }
   const jobs = host.activity.st.now
   const working = host.running.rows().filter(row => row.state === 'working').length
     + (jobs?.slots.filter(job => !job.free).length ?? 0) + (jobs?.landing.length ?? 0)
@@ -721,6 +733,8 @@ return Object.defineProperties({}, {
     settingsAgents: { enumerable: true, get: () => settingsAgents },
     goSettingsDetail: { enumerable: true, get: () => goSettingsDetail },
     settingsProviders: { enumerable: true, get: () => settingsProviders },
+    settingsAccounts: { enumerable: true, get: () => settingsAccounts },
+    apiKeys: { enumerable: true, get: () => apiKeys },
     settingsProvider: { enumerable: true, get: () => settingsProvider },
     usageCard: { enumerable: true, get: () => usageCard },
     providersWarn: { enumerable: true, get: () => providersWarn },

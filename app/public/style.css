@@ -2769,3 +2769,57 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .app-modal-body:has(> .agent-profile) > .backbtn { flex:none; align-self:flex-start; }
 
 .profile-menu-button { align-self:flex-start; flex:none; }
+
+/* Settings › Accounts (2026-11-18): API keys by provider. One card for the
+   key, a list of the plugins that use it, each opening in place. */
+.icon-tile.glyph.keys-mark { background:var(--paper-card); color:var(--paper-card-ink); }
+.rows .icon-tile.glyph.keys-mark { background:var(--paper-page); }
+.keys-hero .sheet-head { min-width:0; }
+.keys-card { gap:var(--space-md); }
+.keys-form { display:flex; flex-direction:column; gap:var(--space-md); min-width:0; }
+.keys-field { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.keys-field-label { font-size:13px; font-weight:600; color:var(--paper-ink-2); }
+.keys-field .field-input { font-family:var(--font-mono); font-size:14px; }
+.keys-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.keys-actions .pillbtn { min-height:44px; }
+.keys-where { display:inline-flex; align-items:center; gap:6px; min-height:44px; margin-inline-start:auto; }
+.keys-check, .keys-done { margin:0; }
+.keys-users { display:flex; flex-direction:column; gap:8px; }
+.keys-users > .kicker { padding:0 6px; color:var(--paper-ink-2); }
+.keys-user > .setrow { width:100%; }
+.keys-user > .setrow > svg:last-child { transition:transform .18s ease; }
+.keys-user.open > .setrow > svg:last-child { transform:rotate(180deg); }
+.keys-badge { flex:none; font-size:12px; font-weight:600; line-height:1; padding:6px 10px; border-radius:999px; background:var(--paper-page); color:var(--paper-ink-2); white-space:nowrap; }
+.keys-badge.own { background:var(--latte-foam); color:var(--latte-foam-ink); }
+.keys-badge.none { color:var(--warning); }
+.keys-user-detail { display:flex; flex-direction:column; gap:var(--space-md); padding:4px 14px 16px; min-width:0; }
+.keys-user-detail .note { margin:0; }
+.keys-user-detail > .pillbtn, .keys-user-detail > .quietlink { align-self:flex-start; }
+.keys-unused, .keys-foot { margin:0; padding:0 6px; }
+.plugin-keys { display:flex; flex-direction:column; gap:10px; }
+.plugin-keys .note { margin:0; }
+.plugin-keys .pillbtn { align-self:flex-start; }
+@media (max-width: 480px) {
+  .keys-badge { padding:5px 8px; }
+  .keys-user > .setrow .setrow-sub { white-space:normal; }
+}
+
+/* An image seen full size (2026-11-18): public/image-view.js. */
+html.image-view-open, html.image-view-open body { overflow:hidden; }
+.image-view { position:fixed; inset:0; z-index:1000; display:grid; grid-template-rows:auto 1fr; background:var(--image-view-scrim); color:var(--image-view-ink); animation:image-view-in .16s ease-out; touch-action:pan-y pinch-zoom; }
+@keyframes image-view-in { from { opacity:0; } to { opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .image-view { animation:none; } }
+.image-view-top { display:flex; align-items:center; gap:8px; padding:max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left)); min-width:0; }
+.image-view-title { flex:1; min-width:0; display:flex; align-items:baseline; gap:10px; font-size:14px; }
+.image-view-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.image-view-count { flex:none; opacity:.7; font-size:13px; }
+.image-view .iconbtn, .image-view-save { color:inherit; min-width:44px; min-height:44px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:transparent; }
+.image-view-save { gap:6px; padding:0 14px; text-decoration:none; font-size:13px; font-weight:600; }
+@media (hover: hover) { .image-view .iconbtn:hover, .image-view-save:hover { background:color-mix(in srgb, var(--image-view-ink) 14%, transparent); } }
+.image-view .iconbtn:focus-visible, .image-view-save:focus-visible { outline:2px solid var(--image-view-ink); outline-offset:2px; }
+.image-view-stage { min-height:0; display:flex; align-items:center; justify-content:center; padding:8px max(12px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+.image-view-img { display:block; max-width:100%; max-height:100%; object-fit:contain; border-radius:6px; user-select:none; -webkit-user-drag:none; }
+.image-view-step { position:absolute; top:50%; transform:translateY(-50%); background:color-mix(in srgb, var(--image-view-scrim) 60%, transparent); }
+.image-view-step.prev { left:max(8px, env(safe-area-inset-left)); }
+.image-view-step.next { right:max(8px, env(safe-area-inset-right)); }
+@media (max-width: 480px) { .image-view-save span { display:none; } .image-view-save { padding:0; } }

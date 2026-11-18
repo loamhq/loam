@@ -9,6 +9,9 @@ export function touchSentences(declaration = {}) {
   if (touches.record && touches.record !== 'none') lines.push(touches.record === 'read' ? 'Reads conversation records.' : 'Reads and changes conversation records.')
   if (touches.memory && touches.memory !== 'none') lines.push(touches.memory === 'read' ? 'Reads shared memory.' : 'Reads and changes shared memory.')
   if (touches.server) lines.push('Contains code for the host.')
+  // Shared keys (2026-11-18): the providers whose keys it is given, from
+  // Settings › Accounts. A plugin is handed no key it did not declare here.
+  for (const key of touches.keys ?? []) lines.push(`Uses your ${key.name} key${key.optional ? ' if you have one' : ''}${key.why ? `: ${key.why}` : '.'}`)
   for (const id of declaration.overrides ?? []) lines.push(`Replaces ${label(id)}.`)
   return lines
 }
@@ -154,6 +157,9 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         .map(entry => h('section', { class: 'plugin-preferences', key: `${entry.owner}:${entry.id}`, 'aria-label': entry.title }, host.registry.invoke(entry, 'render', { plugin: true, back: false }))) : []),
       row.on && row.id !== 'daily-notes' ? entrySettings(row) : null,
       row.on ? secretSettings?.view() : null,
+      row.keys?.length ? h('section', { class: 'plugin-keys', 'aria-label': 'Keys' }, h('h3', { class: 'kicker', text: 'Keys' }),
+        h('p', { class: 'note', text: `Uses your ${row.keys.map(k => k.name).join(' and ')} ${row.keys.length > 1 ? 'keys' : 'key'} from Accounts${row.keys.every(k => k.optional) && row.keys.length > 1 ? ', whichever you have' : ''}.` }),
+        host.goSettings ? button('Open Accounts', () => host.goSettings('accounts', row.keys.length === 1 ? row.keys[0].provider : null), 'pillbtn content-mark') : null) : null,
       declarations(declaration), ...(row.warnings ?? []).map(warning => notice(typeof warning === 'string' ? warning : JSON.stringify(warning), false)),
       st.detail?.plugin?.guide ? h('details', { class: 'plugin-guide', open: st.guide, ontoggle: event => { st.guide = event.currentTarget.open } }, h('summary', { text: 'About this plugin' }), h('div', { class: 'md' }, host.markdown?.(st.detail.plugin.guide) ?? h('p', { text: st.detail.plugin.guide }))) : null,
       loader.st.failures.has(row.id) ? button('Try again', () => loader.refresh(), 'pillbtn content-mark') : null,

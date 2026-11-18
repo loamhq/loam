@@ -1,4 +1,5 @@
 import { isImage, attachmentFilePath } from './attach.js'
+import { openImageView } from './image-view.js'
 import { h, kept, blob, avatarLook, icon } from './ui.js'
 
 // Rendering primitives shared by threads and page panels.
@@ -152,9 +153,12 @@ export function segmentedControl({ label, options, value, choose, props = {} }) 
 const fileViews = new WeakMap()
 export function messageFiles(files = []) {
   if (!files?.length) return null
-  const signature = JSON.stringify(files.map(({ path, name, type }) => [path, name, type]))
+  const signature = JSON.stringify(files.map(({ path, name, type, root }) => [path, name, type, root]))
   const cached = fileViews.get(files)
   if (cached?.signature === signature) return kept(cached.view)
+  // The images, in order, for the full view a tap opens (2026-11-18). The
+  // owner's files are the vault's; an agent's may be a workspace's (`root`).
+  const shown = [], failed = new Set()
   const view = h('div', { class: 'bubble-files' }, ...files.map((file, i) => {
     const name = file.name ?? file.path
     // Only host-stored paths are read, through the existing authenticated,
@@ -163,10 +167,20 @@ export function messageFiles(files = []) {
     const image = isImage(file.type) && path !== null
     if (!image) return h('span', { class: 'attachment-chip sent', key: `f${i}`, title: file.path ?? '' },
       isImage(file.type) ? icon.image(13) : icon.file(13), h('span', { class: 'chip-name', text: name }))
-    const href = `/api/files/download?${new URLSearchParams({ root: 'vault', path })}`
+    const root = file.root === 'spaces' ? 'spaces' : 'vault'
+    const href = `/api/files/download?${new URLSearchParams({ root, path })}`
+    const at = shown.push({ src: href, href, name }) - 1
     const label = h('span', { class: 'message-image-name', text: name })
-    const link = h('a', { class: 'message-image', key: `f${i}`, href, title: name },
-      h('img', { src: href, alt: '', loading: 'lazy', decoding: 'async', onerror: (e) => {
+    const link = h('a', { class: 'message-image', key: `f${i}`, href, title: name, 'aria-label': `Open ${name}`, onclick: (e) => {
+      // A plain tap opens it full size; a modified click keeps the browser's own.
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button > 0) return
+      if (link.className !== 'message-image') return
+      e.preventDefault()
+      e.stopPropagation()
+      openImageView(shown.filter((_, j) => !failed.has(j)), shown.slice(0, at + 1).filter((_, j) => !failed.has(j)).length - 1)
+    } },
+      h('img', { src: href, alt: file.alt ?? '', loading: 'lazy', decoding: 'async', onerror: (e) => {
+        failed.add(at)
         e.target.hidden = true
         link.className = 'attachment-chip sent'
         label.className = 'chip-name'

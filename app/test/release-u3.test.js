@@ -100,8 +100,10 @@ test('plugin key metadata renders broker sentences; refuses never replace the sa
   assert.ok(text(c.view()).includes(why)); assert.ok(!JSON.stringify(c.st).includes('synthetic'))
 })
 
-test('both shipped voice plugins declare the broker-checked secret', async () => {
-  for (const p of (await shippedPlugins('public')).filter(p => ['dictation', 'read-aloud'].includes(p.id))) assert.deepEqual(p.contributes['settings.secret'], [{ name: 'GEMINI_API_KEY', label: 'Gemini API key', check: 'builtin:gemini' }])
+test('both shipped voice plugins declare the shared Google key, and no key of their own', async () => {
+  const voice = (await shippedPlugins('public')).filter(p => ['dictation', 'read-aloud'].includes(p.id))
+  assert.equal(voice.length, 2)
+  for (const p of voice) { assert.deepEqual(p.keys.map(k => k.provider), ['google']); assert.equal(p.contributes?.['settings.secret'], undefined) }
 })
 
 test('browser key routes relay metadata and refusals, and never expose the server-only value route', async t => {

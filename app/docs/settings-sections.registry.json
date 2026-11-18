@@ -85,6 +85,19 @@
       "accountOperations": "GitHub lists personal accounts, installations and organizations in host order. Refresh/disconnect use the encoded account login; personal disconnect confirms disconnect_also. Adding uses the existing GitHub manifest/install callbacks. Older hosts without the accounts route retain the legacy shared flow."
     },
     {
+      "id": "accounts",
+      "views": [
+        "provider"
+      ],
+      "routes": [
+        "/v1/keys",
+        "/v1/keys/:provider",
+        "/v1/keys/:provider/check",
+        "/v1/keys/:provider/plugins/:plugin"
+      ],
+      "keyOperations": "API keys by provider, entered once (2026-11-18). Save checks the key first and keeps it only when the provider accepts it; Forget removes the saved key; a plugin that declared the provider can be given its own key and put back on the shared one. No route answers a whole value."
+    },
+    {
       "id": "files",
       "browserPreferences": {
         "loam-ui.files": [

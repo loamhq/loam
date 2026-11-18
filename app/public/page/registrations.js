@@ -33,6 +33,7 @@ export function registerPage(loam) {
     ['agents', 'Agents', 'users', () => host.settingsAgents],
     ['providers', 'Providers', 'code', () => host.settingsProviders],
     ['integrations', 'Integrations', 'link', () => host.settingsIntegrations],
+    ['accounts', 'Accounts', 'key', () => host.settingsAccounts],
     ['files', 'Files', 'folder', () => host.settingsFiles],
     ['plugins', 'Plugins', 'puzzle', () => host.settingsPlugins],
     ['signin', 'Sign-in', 'lock', () => context => host.settingsBody({ page: 'signin' }, context.back)],
