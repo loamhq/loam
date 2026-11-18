@@ -1101,3 +1101,47 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Name each shot once.** A later shot under the same name overwrote the
   only picture of a transient bug; pull the shots off the VM before
   reusing a name.
+
+## 2026-11-18 — 0.2.1: what the 0.2.0 walk found broken
+
+- **The login renews its session in the middle of a passkey add, and the
+  gap is about 0.9 s.** Measured on a fresh install: the one-time code's
+  `PUT /api/user/session/elevation` ends the old session as it starts and
+  sends the new `loam_auth` cookie with its answer ~0.9 s later (the
+  passkey `register` calls set it again). Every request in that gap is
+  anonymous (21 polls in a row at 45 ms spacing). A single re-check 700 ms
+  later still fell inside it, so `app/public/auth.js` backs off
+  (`timing.confirmSchedule`, 0.7/1.5/3/6 s) before ending the page. Prove a
+  change here by causing it: hammer `/_loam/login-code` from the app tab
+  with a raw `fetch(..., {redirect: 'manual'})` beside `authenticatedFetch`
+  while the portal tab adds a passkey (`trials/2026-11-18-0.2.1-proof/`).
+- **A system notice can give a paid turn on its own, so the engine guards
+  the class.** `ThreadEngine.system_turn_allowed` keeps every delivered
+  notice key (update and job deliveries) in `<state>/threads/system-turns.json`
+  for 30 days and refuses the same line to the same agent within an hour.
+  A new kind of notice must go through it.
+- **`bin/loam-update` as root re-runs itself as the install's user**
+  (`loam_update.as_install_user`, `runuser ... env -i`) after
+  `repair_owner` gives back anything a root run left. A root shell's
+  `loam update` on 0.2.0 cannot be fixed by 0.2.1's code (the old code runs
+  the update); the release notes carry the `chown`.
+- **A persona's post is told to the broker** (`bin/thread post` ->
+  `POST /v1/threads/<id>/posted` -> `ThreadEngine.posted`): it goes on the
+  stream and its @mentions wake members. The chain for a post is the
+  poster's live turn here, or the agents' *posts* since the owner wrote
+  (a reply carries `engine`, a post does not), so reply chatter cannot
+  starve a tag and posts across threads cannot ping-pong past the cap.
+- **The app's CSP refuses `setAttribute('style', …)`; the CSSOM is
+  allowed** (`el.style.fill = 'var(--token)'`). And `themes.test.js` refuses
+  any literal colour outside `tokens.css` and theme folders: a brand colour
+  is a core token.
+- **On a walk VM, a failed turn on a placeholder Claude login clears the
+  placeholder**, and the welcome screen returns for a fresh browser. Write
+  it again before each browser run. Each Playwright run is a new context:
+  sign in each time, and `?modal=settings&section=signin` is dropped while
+  the welcome finishes; open it again on the thread's own address.
+- **Modal 1.6.3's `Sandbox` has no `open()`**; move files over `exec`'s
+  stdin as base64 in 1 MiB chunks (`base64 -d > path`).
+- **Inside a job, `tests/test_engineer.py` fails** writing a fixture into
+  the read-only jobs folder (`Errno 30`); it does on `main` too. The
+  landing runs the suite outside the job's mounts.
