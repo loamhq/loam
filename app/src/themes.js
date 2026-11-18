@@ -64,3 +64,44 @@ export async function marketThemeCSS(id, css, options = []) {
   validateThemeCSS(css, id, defaults, checked)
   return `${css}\n${previewCSS(id, css, checked, defaults)}\n`
 }
+
+// A theme's own display faces (2026-11-18, when the first-party looks left
+// the shipped set for the Market): the `fonts.css` in an installed theme's
+// folder, held to @font-face rules and nothing else. Each `src` is a font
+// file beside it (`url(display-latin.woff2) format('woff2')`), rewritten to
+// the plugin's files route, so a theme's fonts come from its own folder and
+// never from another host. Anything else in the file refuses the whole file.
+const FONT_DESCRIPTORS = new Set(['font-family', 'font-style', 'font-weight', 'font-display', 'font-stretch', 'unicode-range', 'src'])
+const FONT_SRC = /^url\(\s*(['"]?)([A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:woff2|woff))\1\s*\)(?:\s+format\(\s*(['"])(woff2|woff)\3\s*\))?$/
+export function themeFontsCSS(id, css) {
+  if (!slug.test(id)) throw new Error(`Invalid theme id: ${id}`)
+  if (typeof css !== 'string' || css.length > 64 * 1024) throw new Error('A theme’s fonts.css is at most 64 KB.')
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  const faces = [], rule = /@font-face\s*\{([^{}]*)\}/g
+  let rest = text.replace(rule, (_, body) => { faces.push(body); return '' })
+  if (rest.trim()) throw new Error('A theme’s fonts.css holds @font-face rules only.')
+  if (faces.length > 16) throw new Error('A theme’s fonts.css has at most 16 faces.')
+  const out = faces.map(body => {
+    const lines = []
+    for (const part of body.split(';').map(s => s.trim()).filter(Boolean)) {
+      const colon = part.indexOf(':')
+      const name = part.slice(0, colon).trim().toLowerCase(), value = part.slice(colon + 1).trim()
+      if (colon < 1 || !FONT_DESCRIPTORS.has(name)) throw new Error(`A theme’s font rule may not say ${name || part}.`)
+      if (name === 'src') {
+        const sources = value.split(',').map(s => s.trim()).map(source => {
+          const m = FONT_SRC.exec(source)
+          if (!m) throw new Error('A theme’s font is a .woff2 or .woff file in its own folder.')
+          const file = m[2].split('/').map(encodeURIComponent).join('/')
+          return `url(/api/plugins/${id}/files/${file})${m[4] ? ` format('${m[4]}')` : ''}`
+        })
+        lines.push(`  src: ${sources.join(', ')};`)
+      } else {
+        if (!/^[A-Za-z0-9 ,'"+\-%.]+$/.test(value) || value.length > 2000) throw new Error(`A theme’s ${name} is plain words, numbers and ranges.`)
+        lines.push(`  ${name}: ${value};`)
+      }
+    }
+    if (!lines.some(l => l.startsWith('  src:')) || !lines.some(l => l.startsWith('  font-family:'))) throw new Error('A theme’s font rule names its family and its file.')
+    return `@font-face {\n${lines.join('\n')}\n}`
+  })
+  return out.join('\n') + (out.length ? '\n' : '')
+}

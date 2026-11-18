@@ -5,6 +5,7 @@
 import { readFile } from 'node:fs/promises'
 import { oneProductFixture } from './one-product-fixture.mjs'
 import { shippedPlugins } from '../src/shipped-plugins.js'
+import { readThemeCSS } from './listed-themes.mjs'
 
 const link = (repo, id, tag = 'v1.0.0') => `https://github.com/${repo}/tree/${tag}/${id}`
 const at = (repo, id, tag = 'v1.0.0') => ({ link: link(repo, id, tag), repo, ref: tag, path: id })
@@ -51,7 +52,7 @@ export async function marketFixture({ mode = 'light', look = 'latte', listings =
   app.routes['GET /v1/settings/appearance'] = (req, res) => json(res, 200, appearance)
   app.routes['PATCH /v1/settings/appearance'] = (req, res, url, raw) => { for (const [kind, patch] of Object.entries(JSON.parse(raw))) Object.assign(appearance[kind], patch); json(res, 200, appearance) }
   const css = new Map()
-  for (const entry of listings.filter(e => e.from)) css.set(entry.id, (await readFile(`public/themes/${entry.from}/theme.css`, 'utf8')).replaceAll(`data-look="${entry.from}"`, `data-look="${entry.id}"`))
+  for (const entry of listings.filter(e => e.from)) css.set(entry.id, (await readThemeCSS(entry.from)).replaceAll(`data-look="${entry.from}"`, `data-look="${entry.id}"`))
   const base = await shippedPlugins('public')
   const installed = new Map()
   const rowOf = entry => ({ id: entry.id, name: entry.name, version: entry.version, author: entry.author, api: 0, kind: entry.kind, places: [], overrides: [], layer: 'yours', folder: `fixtures/${entry.id}`, effective: true, on: true,

@@ -300,6 +300,24 @@ with tempfile.TemporaryDirectory() as tmp:
           did == "made fresh, started"
           and ("enable", "--runtime", "loam-cron-x-y.timer") in sd.fake.calls, sd.fake.calls)
 
+# settings.entry reads for a person (2026-11-18, Images 1.1.0): a label per
+# choice, a note, and `advanced`. Older hosts ignore all three.
+nice = c.contributes_of({"settings.entry": [
+    {"key": "backend", "label": "Made with", "choices": ["auto", "openai"],
+     "labels": {"auto": " Whichever key you have "}, "note": "A sentence.", "default": "auto"},
+    {"key": "model", "label": "Model", "advanced": True, "default": "m"}]}, None, [])["settings.entry"]
+check("labels, note and advanced are kept",
+      nice[0].get("labels") == {"auto": "Whichever key you have"} and nice[0].get("note") == "A sentence."
+      and nice[1].get("advanced") is True and "labels" not in nice[1], nice)
+for bad in ({"labels": {"other": "x"}, "choices": ["a"]}, {"labels": {"a": ""}, "choices": ["a"]},
+            {"labels": {"a": "x"}}, {"labels": ["a"], "choices": ["a"]},
+            {"note": ""}, {"note": "x" * 301}, {"advanced": "yes"}):
+    try:
+        c.contributes_of({"settings.entry": [{"key": "k", "label": "K", **bad}]}, None, [])
+        check(f"settings.entry {bad} is refused", False)
+    except c.ContributionError:
+        check(f"settings.entry {sorted(bad)} is refused", True)
+
 failed = results.count(False)
 print(f"\n{len(results) - failed}/{len(results)} passed")
 sys.exit(1 if failed else 0)

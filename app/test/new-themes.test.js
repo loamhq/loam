@@ -5,17 +5,18 @@ import { loadThemes } from '../src/themes.js'
 import { resolvedTheme, contrast, themeContrasts } from '../tools/theme-contrast.mjs'
 import { newThemes } from '../tools/new-themes.js'
 import { shippedPlugins } from '../src/shipped-plugins.js'
+import { allRoots, listedFile, readListed } from './listed-themes.mjs'
 
-test('the five shipped themes preserve approved role values, core scales and agent palette in both modes', async () => {
+test('the five first-party listed themes preserve approved role values, core scales and agent palette in both modes', async () => {
   const palettes = JSON.parse(await readFile('tools/theme-palettes.json', 'utf8'))
   const roles = { page: 'paper-page', pane: 'paper-pane', raised: 'paper-raised', card: 'paper-card', ink: 'paper-ink', ink2: 'paper-ink-2', ink3: 'paper-ink-3', rule: 'paper-rule', foam: 'latte-foam', coffee: 'latte-coffee', coffee2: 'latte-coffee-2', esp: 'latte-espresso', espink: 'latte-espresso-ink', signal: 'signal-crema' }
-  const catalog = await loadThemes()
+  const catalog = await loadThemes(await allRoots())
   assert.deepEqual(catalog.failures, {})
   for (const { id, name, font, weight } of newThemes) {
     const manifest = catalog.themes.find(t => t.id === id)
     assert.equal(manifest.name, name)
     assert.deepEqual(manifest.options.map(o => [o.id, o.default, o.choices.map(c => c.id)]), [['agent-shapes', id === 'foundry' ? 'rounded-square' : 'circle', ['signature', 'distinct', 'circle', 'rounded-square']], ['face-content', 'mark', ['mark', 'initials']]])
-    assert.ok((await stat(`public/themes/${id}/cover.webp`)).size < 30000)
+    assert.ok((await stat(listedFile(id, 'cover.webp'))).size < 30000)
     for (const mode of ['light', 'dark']) {
       const values = await resolvedTheme(id, mode), core = await resolvedTheme('plain', mode)
       for (const [role, token] of Object.entries(roles)) assert.equal(values[token], palettes[id][mode][role], `${id}/${mode}/${role}`)
@@ -32,12 +33,14 @@ test('the five shipped themes preserve approved role values, core scales and age
       }
     }
     for (const subset of ['latin', 'latin-ext']) {
-      const bytes = await readFile(`public/themes/${id}/display-${subset}.woff2`)
+      const bytes = await readListed(id, `display-${subset}.woff2`, null)
       assert.equal(bytes.toString('ascii', 0, 4), 'wOF2')
     }
-    assert.match(await readFile(`public/themes/${id}/OFL.txt`, 'utf8'), /SIL OPEN FONT LICENSE/)
-    const fonts = await readFile(`public/themes/${id}/fonts.css`, 'utf8')
+    assert.match(await readListed(id, 'OFL.txt'), /SIL OPEN FONT LICENSE/)
+    const fonts = await readListed(id, 'fonts.css')
     assert.doesNotMatch(fonts, /https?:/)
+    // Relative to its own folder: it is served from the plugin's files route.
+    assert.doesNotMatch(fonts, /url\(\//)
     assert.match(fonts, /latin-ext/)
     assert.ok(fonts.includes(`font-weight: ${weight};`))
   }
@@ -66,8 +69,11 @@ test('semantic status colours retain red, amber and green hue families and AA in
 })
 
 test('shipped options follow the local material implementation when a host catalog is older', async () => {
+  // Latte is the shipped look with options since the others became listed
+  // plugins (2026-11-18), whose options are their installed row's.
   const rows = await shippedPlugins('public'), current = await loadThemes()
-  for (const row of rows.filter(row => newThemes.some(t => t.id === row.id))) row.options = [{ id:'agent-shapes', label:'Agent shapes', default:'distinct', choices:[{id:'distinct',label:'Each its own'},{id:'circle',label:'Circle'},{id:'rounded-square',label:'Rounded square'}] }]
+  for (const row of rows.filter(row => row.id === 'latte')) row.options = [{ id:'agent-shapes', label:'Agent shapes', default:'distinct', choices:[{id:'distinct',label:'Each its own'},{id:'circle',label:'Circle'}] }]
   const hosted = await loadThemes(undefined,{rows})
-  for (const {id} of newThemes) assert.deepEqual(hosted.themes.find(t=>t.id===id).options,current.themes.find(t=>t.id===id).options)
+  assert.ok(current.themes.find(t=>t.id==='latte').options.length)
+  assert.deepEqual(hosted.themes.find(t=>t.id==='latte').options,current.themes.find(t=>t.id==='latte').options)
 })

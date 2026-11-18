@@ -10,7 +10,7 @@ switch on); turning it off takes every entry away. The places:
 | `agent.tool` | `{name, run, lanes?, agents?}`: a stdio MCP server, `run` by `/bin/sh -c` in the plugin's folder | the lanes' MCP servers |
 | `agent.prompt` | `{text \\| file, lanes?, agents?}`: what the plugin lets an agent do, in words | the lanes' instructions |
 | `schedule.kind` | `{name, schedule, run}`: a run on Loam's schedule grammar (`daily at 05:00 PT`) | a timer, `loam-plugin-<id>-<name>` |
-| `settings.entry` | `{key, label, choices?, default?}`: a value an agent may read and set | the settings registry, `plugin.<id>.<key>` |
+| `settings.entry` | `{key, label, choices?, default?, labels?, note?, advanced?}`: a value an agent may read and set | the settings registry, `plugin.<id>.<key>` |
 | `engineer.env` | `{name, value \\| setting \\| secret, projects?}` | an engineer job's environment |
 | `engineer.job` | `{run, projects?, timeout?}`: a command run at each job's launch, in the plugin's folder; each `NAME=value` line it prints is the job's environment | an engineer job's environment, and files in its folder |
 | `drift.check` | `{run, timeout?}`: exit 0 is "nothing wrong", else each line of its output is a finding | `check-drift` |
@@ -247,8 +247,34 @@ def contributes_of(value, folder: Path | None, warnings: list[str]) -> dict:
                 default = e.get("default")
                 if choices and default is not None and default not in choices:
                     raise ContributionError(f"{where}: `default` is one of its choices")
-                items.append({"key": key, "label": label.strip(), "choices": choices,
-                              "default": default})
+                item = {"key": key, "label": label.strip(), "choices": choices,
+                        "default": default}
+                # How it reads for a person (2026-11-18, Images 1.1.0): a
+                # label per choice, a sentence under it, and `advanced` to
+                # keep it behind the page's Advanced. Older hosts ignore all
+                # three, so a plugin that uses them installs on them too.
+                labels = e.get("labels")
+                if labels is not None:
+                    if (not choices or not isinstance(labels, dict)
+                            or not all(isinstance(k, str) and k in choices
+                                       and isinstance(v, str) and v.strip()
+                                       and len(v) <= 80 for k, v in labels.items())):
+                        raise ContributionError(
+                            f"{where}: `labels` maps some of its choices to words "
+                            f"of at most 80 characters")
+                    item["labels"] = {k: v.strip() for k, v in labels.items()}
+                note = e.get("note")
+                if note is not None:
+                    if not isinstance(note, str) or not note.strip() or len(note) > 300:
+                        raise ContributionError(f"{where}: `note` is a sentence of at "
+                                                f"most 300 characters")
+                    item["note"] = note.strip()
+                advanced = e.get("advanced")
+                if advanced is not None:
+                    if not isinstance(advanced, bool):
+                        raise ContributionError(f"{where}: `advanced` is true or false")
+                    item["advanced"] = advanced
+                items.append(item)
             elif place == "engineer.env":
                 name = e.get("name")
                 if not isinstance(name, str) or not VAR.match(name):

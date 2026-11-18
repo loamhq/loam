@@ -17,7 +17,7 @@ export function touchSentences(declaration = {}) {
 }
 const external = source => { try { const u = new URL(source?.url); return u.protocol === 'https:' ? u.href : null } catch { return null } }
 export function createPluginSettings({ loader, theme, host, changed = () => {} }) {
-  const st = { selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', url: '', ref: '', path: '', preview: null, request: null, installError: '', busy: false, guide: false, allDeclarations: false, refOptions: false, focusPreview: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set() }
+  const st = { selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', url: '', ref: '', path: '', preview: null, request: null, installError: '', busy: false, guide: false, allDeclarations: false, refOptions: false, focusPreview: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set(), advanced: null }
   let hostSettings = null, secretSettings = null
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, text, onclick, ...props })
   const notice = (text, bad = true) => text ? h('p', { class: `plugin-notice${bad ? ' err' : ''}`, role: bad ? 'alert' : 'status', text }) : null
@@ -129,18 +129,27 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     } catch (e) { st.error = e.message }
     changed()
   }
+  // A choice shows its words (`labels`, 2026-11-18), a `note` sits under its
+  // control, and `advanced` entries wait behind a quiet Advanced.
+  function entryRow(row, entry) {
+    const id = `plugin-setting-${row.id}-${entry.key}`, value = hostSettings.values?.[entry.key] ?? entry.default ?? ''
+    const noteId = entry.note ? `${id}-note` : null
+    const control = entry.choices?.length
+      ? h('select', { id, class: 'field-input', value: String(value), ...(noteId ? { 'aria-describedby': noteId } : {}), onchange: e => saveEntry(row, entry.key, e.currentTarget.value) },
+        ...entry.choices.map(c => h('option', { value: c, text: entry.labels?.[c] ?? c, selected: c === value })))
+      : h('input', { id, class: 'field-input', value: String(value), ...(noteId ? { 'aria-describedby': noteId } : {}), onchange: e => saveEntry(row, entry.key, e.currentTarget.value) })
+    return h('div', { class: 'setrow plugin-entry', key: entry.key }, h('label', { class: 'setrow-who', for: id }, h('div', { class: 'setrow-title', text: entry.label })), control,
+      entry.note ? h('p', { class: 'note plugin-entry-note', id: noteId, text: entry.note }) : null)
+  }
   function entrySettings(row) {
     const entries = hostSettings?.entries ?? []
     if (!entries.length) return null
+    const plain = entries.filter(entry => !entry.advanced), advanced = entries.filter(entry => entry.advanced)
     return h('section', { class: 'plugin-entry-settings rows', 'aria-label': `${row.name || row.id} settings` },
-      ...entries.map(entry => {
-        const id = `plugin-setting-${row.id}-${entry.key}`, value = hostSettings.values?.[entry.key] ?? entry.default ?? ''
-        const control = entry.choices?.length
-          ? h('select', { id, class: 'field-input', value: String(value), onchange: e => saveEntry(row, entry.key, e.currentTarget.value) },
-            ...entry.choices.map(c => h('option', { value: c, text: c, selected: c === value })))
-          : h('input', { id, class: 'field-input', value: String(value), onchange: e => saveEntry(row, entry.key, e.currentTarget.value) })
-        return h('div', { class: 'setrow plugin-entry', key: entry.key }, h('label', { class: 'setrow-who', for: id }, h('div', { class: 'setrow-title', text: entry.label })), control)
-      }), notice(st.done, false))
+      ...plain.map(entry => entryRow(row, entry)),
+      advanced.length ? h('details', { class: 'plugin-entry-advanced', open: st.advanced === row.id, ontoggle: event => { st.advanced = event.currentTarget.open ? row.id : null } },
+        h('summary', { text: 'Advanced' }), ...advanced.map(entry => entryRow(row, entry))) : null,
+      notice(st.done, false))
   }
   function detail() {
     const original = st.selected, current = loader.st.rows.find(row => row.key === original.key) ?? original

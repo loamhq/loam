@@ -29,6 +29,9 @@ What the owner needs: a GitHub account, connected in Settings › Integrations
    It puts the folder in the repository as `<id>/`, tags it `v<version>`,
    and answers the link: `https://github.com/<owner>/<repository>/tree/v1.0.0/<id>`.
    A new version is a higher `version` in `PLUGIN.md` and the same command.
+   A repository that holds several plugins tags each `<id>-v<version>`
+   instead, so a tag names its plugin; Loam's own first-party plugins are
+   published that way, in `loamhq/plugins`.
 4. **Give the owner the link.** It works for others once the repository is
    public. Whoever installs it is shown what it declares under `touches`
    before anything is installed, and every later version is confirmed again.

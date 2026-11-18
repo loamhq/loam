@@ -4,7 +4,6 @@ name: Autumn
 version: 1.0.0
 author: Loam contributors
 api: 0
-default_on: true
 kind: [theme]
 image: cover.webp
 image_position: 50% 48%
