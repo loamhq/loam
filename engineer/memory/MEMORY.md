@@ -1076,3 +1076,28 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   left them out. Check a link exists before pointing at its neighbour.
 - **`pkill -f <pattern>` from the Bash tool matches its own shell** (the
   command line holds the pattern) and kills the call. Kill by PID.
+
+## 2026-11-17 — the 0.2.0 release walk (a picture report)
+
+- **The 11-16 walk method still holds** (Modal `runtime="vm"`, systemd in a
+  PID namespace, names in the VM's `/etc/hosts`, `--resolver system
+  --local-certs --address <vm ip>` after the README's own line, Playwright
+  driven on the VM). The installer can take the product's real base domain
+  this way: the name resolves only inside the VM and no record is made.
+- **Dark in a walk needs both switches:** `emulate_media(color_scheme)` for
+  the claim and sign-in pages (they follow the system), and a pinned
+  `data-theme` for the app (it follows the owner's saved appearance).
+- **`?modal=settings&section=…` does not open Settings at phone width;**
+  tap the Settings button and the row instead.
+- **A CDP virtual authenticator belongs to one page.** The sign-in settings
+  open in a new tab: add the authenticator on that tab, and know it dies
+  when the driver restarts.
+- **Running `loam update` as root on an install breaks two things** (found
+  on 0.2.0, not fixed in that job): git's ownership check makes the
+  checkout read as "not a git checkout", and the run leaves root-owned
+  files in the loam user's update state. A root-owned notice then can't be
+  unlinked (`notice_done` suppresses the error), so the engine posts it to
+  General and gives the default agent a turn every 30 s, without end.
+- **Name each shot once.** A later shot under the same name overwrote the
+  only picture of a transient bug; pull the shots off the VM before
+  reusing a name.
