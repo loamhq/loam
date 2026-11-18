@@ -1533,6 +1533,31 @@ def ensure_engineer_excluded() -> None:
     print(f"  excluded {', '.join(missing)} in {exclude}")
 
 
+# Who the engineer's commits are by when the checkout says nobody: a release
+# install's checkout has no git identity, so its first job's commit failed
+# ("unable to auto-detect email address"), found by the 0.2.2 rehearsal on a
+# fresh install, 2026-11-18. A job's tree copies the checkout's identity
+# (loam_worktree.configure_identity). Never a person's address: the same name
+# Loam's own engineer commits under, so a patch offered upstream carries
+# nothing of the install.
+ENGINEER_GIT_NAME = "Loam engineer"
+ENGINEER_GIT_EMAIL = "engineer+loam@noreply.local"
+
+
+def ensure_engineer_identity() -> None:
+    def get(key: str) -> str:
+        return subprocess.run(["git", "-C", str(AGENTS), "config", key],
+                              capture_output=True, text=True, check=False).stdout.strip()
+    if subprocess.run(["git", "-C", str(AGENTS), "rev-parse", "--git-dir"],
+                      capture_output=True, check=False).returncode:
+        return
+    if get("user.name") and get("user.email"):
+        return
+    for key, value in (("user.name", ENGINEER_GIT_NAME), ("user.email", ENGINEER_GIT_EMAIL)):
+        subprocess.run(["git", "-C", str(AGENTS), "config", "--local", key, value], check=True)
+    print(f"  the checkout commits as {ENGINEER_GIT_NAME} <{ENGINEER_GIT_EMAIL}>")
+
+
 def ensure_engineer() -> None:
     """The engineer, from any provision of an agent (2026-11-18). An install
     updated from a release whose update code knew no engineer re-provisions
@@ -1569,6 +1594,7 @@ def provision_engineer(dry: bool = False) -> None:
     (ENGINEER / "memory").mkdir(parents=True, exist_ok=True)
     lc.JOBS.mkdir(parents=True, exist_ok=True)
     ensure_engineer_excluded()
+    ensure_engineer_identity()
 
     # Verbatim, both of them. write_if_changed rather than an unconditional
     # copy so a re-provision that changes nothing leaves no mtime behind.

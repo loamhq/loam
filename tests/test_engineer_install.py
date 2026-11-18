@@ -142,6 +142,9 @@ try:
     check("fresh: the rendered files are in info/exclude",
           all(f"/engineer/{n}" in exclude
               for n in ("CLAUDE.md", "role.md", "project.md", "agent.json", ".claude")), True)
+    check("fresh: the checkout commits as the engineer, not as nobody",
+          (git("config", "user.name").strip(), git("config", "user.email").strip()),
+          ("Loam engineer", "engineer+loam@noreply.local"))
     check("fresh: git status shows nothing", git("status", "--porcelain"), "")
     ignored = git("status", "--porcelain", "--ignored", "--untracked-files=all")
     check("fresh: the rendered files are there, ignored", "!! engineer/role.md" in ignored, True)
@@ -157,6 +160,11 @@ try:
     out = provision()
     check("again: the vault copy is not rewritten", ROLE.stat().st_mtime_ns, before)
     check("again: nothing is seeded", "seeded " in out or "updated " in out, False)
+    git("config", "user.name", "Ada")
+    git("config", "user.email", "ada@example.test")
+    provision()
+    check("again: an identity the checkout has is kept",
+          git("config", "user.email").strip(), "ada@example.test")
 
     # -- a newer release, the vault copy as seeded ------------------------------
     release_role(shipped_role + "\nA line a later release added.\n")
