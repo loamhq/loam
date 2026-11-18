@@ -25,6 +25,16 @@ up), so a connection never carries two plugins' requests; a WebSocket's
 upgrade goes through and is piped as it is. Its own unit
 (systemd/loam-plugins-gateway.service): a plugin crashing or restarting
 touches neither this nor the broker.
+
+**Other pages' requests** (2026-11-18): on the login's port, a request that
+could change something -- any method but GET, HEAD and OPTIONS, or any
+upgrade -- is refused with a 403 when the browser says it came from another
+origin: a `Sec-Fetch-Site` other than `same-origin` or `none`, or an `Origin`
+that is not this host's. It is the app's own rule for `/api/*`
+(app/src/server.js), here so every plugin server has it without writing it.
+A request with neither header (a tool, not a page) is not a page's and
+passes as before. The share door is a separate port and is not this rule's:
+its visitors come from wherever the link was opened.
 """
 
 from __future__ import annotations
@@ -48,8 +58,25 @@ _owner_cache = {"at": 0.0, "pid": None}
 
 HEAD_MAX = 64 * 1024
 PATH = re.compile(r"^/x/([a-z][a-z0-9-]*)(/[^?#]*)?(\?.*)?$")
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 HOP = {"connection", "keep-alive", "proxy-connection", "te", "trailer",
        "x-forwarded-prefix", "x-loam-door"}
+
+
+def cross_origin(method: str, lines: list[str]) -> bool:
+    """Whether a request a page caused, from a page of another origin, could
+    change something: the app's /api/* rule, for every plugin server."""
+    head = {}
+    for line in lines:
+        if ":" in line:
+            name, value = line.split(":", 1)
+            head.setdefault(name.strip().lower(), value.strip())
+    if method.upper() in SAFE_METHODS and "upgrade" not in head:
+        return False
+    site, origin, host = head.get("sec-fetch-site"), head.get("origin"), head.get("host", "")
+    if site and site not in ("same-origin", "none"):
+        return True
+    return bool(origin) and origin not in (f"https://{host}", f"http://{host}")
 
 
 def answer(status: int, reason: str, text: str, extra: str = "") -> bytes:
@@ -103,6 +130,11 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
         if rest is None:
             writer.write(answer(308, "Permanent Redirect", f"/x/{pid}/",
                                 f"Location: /x/{pid}/{query}\r\n"))
+            return
+        if cross_origin(method, lines[1:]):
+            writer.write(answer(403, "Forbidden",
+                                "a plugin's server takes changes from its own origin's pages only",
+                                "Vary: Sec-Fetch-Site, Origin\r\n"))
             return
         port = servers.read_ports().get(pid)
         if port is None:

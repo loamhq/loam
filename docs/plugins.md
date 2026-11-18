@@ -550,6 +550,19 @@ plugin serves `/` and its relative links work. One request per upstream
 connection (`Connection: close`), a WebSocket's upgrade piped through.
 `/x/<id>` is a 308 to `/x/<id>/`; an id with no server is a 404; a server
 that does not answer is a 502 that says it is off, starting or failing.
+**What protects a plugin's server from other pages** (2026-11-18): the
+gateway refuses with a 403 any request that could change something -- every
+method but GET, HEAD and OPTIONS, and any upgrade -- when the browser says it
+came from another origin (`Sec-Fetch-Site` other than `same-origin` or
+`none`, or an `Origin` that is not the host's), the app's own rule for
+`/api/*`; and Caddy lets the agents' browser past the login for such a
+request only when it is same-origin (`deploy/README.md`, "The personas'
+sight"). So the app's page and the plugin's own page under `/x/<id>/` can
+call it, and a page on any other site, a sibling subdomain included, cannot.
+What it does not protect: a GET that changes something (keep every GET
+safe), a request with no browser headers at all (a tool on the box), and
+the share door, `/s/*`, whose visitors come from anywhere and which a
+plugin guards with its own token.
 *Why a gateway and not the page's relay or the broker*: the relay is the
 page's code and would put every plugin's traffic through the app's
 container and the broker; Caddy alone cannot map a path to a port that

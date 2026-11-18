@@ -26,7 +26,7 @@ import { providerMark } from './marks.js'
 import { readEvents } from './sse.js'
 import { createLink } from './link.js'
 import { readField, caretPoint, setMarkdown } from './compose.js'
-import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuotes, editBoard, markBoardSeen, addBoardItem, applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readThreadBoard, readAcceptedMessage, messageSegments, firstMessageTitle, groupJoinNotices, withPending } from './thread-record.js'
+import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuotes, editBoard, markBoardSeen, addBoardItem, applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readThreadBoard, readAcceptedMessage, compareThreads, messageSegments, firstMessageTitle, groupJoinNotices, withPending } from './thread-record.js'
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
@@ -218,7 +218,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (o) o.summaryBarrier = null
     const at = st.threads.findIndex((t) => t.id === row.id)
     if (at < 0) st.threads.push(row); else st.threads[at] = row
-    st.threads.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || String(b.last?.at ?? b.created ?? '').localeCompare(String(a.last?.at ?? a.created ?? '')))
+    st.threads.sort(compareThreads)
     if (st.open?.thread.id === row.id) {
       if (st.open.loading) st.open.latestSummary = row
       else st.open.thread = row
@@ -228,7 +228,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (e.type === 'threads.snapshot') {
       const body = readThreadList(e)
       for (const row of body.threads) cancelRemoval(row.id)
-      st.threads = body.threads; runtimeAgents = body.agents
+      st.threads = body.threads.sort(compareThreads); runtimeAgents = body.agents
       st.listRetryAt = 0; st.listSnapshot = true; st.listLive = true; st.available = true; st.checked = true
       const current = st.open && body.threads.find((t) => t.id === st.open.thread.id)
       if (current) { st.open.summaryBarrier = null; updateRow(current) }
@@ -267,7 +267,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       if (ticket !== listingRequest) return
       for (const row of body.threads) cancelRemoval(row.id)
       if (Array.isArray(body.agents)) runtimeAgents = body.agents
-      st.threads = body.threads; st.available = true; st.error = ''; ensureList()
+      st.threads = body.threads.sort(compareThreads); st.available = true; st.error = ''; ensureList()
       // A list request can predate a PATCH; it never overwrites the open record.
     } catch (error) {
       if (ticket !== listingRequest) return
@@ -954,7 +954,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   function builtinList(wide = st.wide) {
     st.wide = wide
 
-    const rows = [...st.threads].sort((a, b) => (!st.archived ? Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) : 0) || String(b.last?.at ?? b.created ?? '').localeCompare(String(a.last?.at ?? a.created ?? ''))).filter((t) => Boolean(t.archived) === Boolean(st.archived)).filter((t) => `${t.title} ${t.last?.text ?? ''}`.toLowerCase().includes(st.query.toLowerCase()))
+    const rows = [...st.threads].sort((a, b) => compareThreads(a, b, { pinned: !st.archived })).filter((t) => Boolean(t.archived) === Boolean(st.archived)).filter((t) => `${t.title} ${t.last?.text ?? ''}`.toLowerCase().includes(st.query.toLowerCase()))
     if (archiveQuery !== st.query) { archiveQuery = st.query; archiveLimit = archivePage; st.resetListScroll = true }
     const visible = st.archived ? rows.slice(0, archiveLimit) : rows
     return h('section', { class: `${st.wide ? 'listcol' : 'screen home'} tt-list${st.wide && collapsed() ? ' away' : ''}`, inert: st.wide && collapsed() ? true : null, 'aria-hidden': st.wide && collapsed() ? 'true' : null, 'aria-label': 'Threads' },

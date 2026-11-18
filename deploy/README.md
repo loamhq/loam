@@ -698,6 +698,22 @@ withholds no tool from any lane. `browser_run_code_unsafe` is denied by name. Th
 persona `CLAUDE.md` carries one paragraph on all of this (`sight_paragraph`
 in `bin/provision`), rendered from the deployment records.
 
+- **It reads past the login; it changes nothing from another site's page**
+  (2026-11-18). Every private host lets the `loam-sight` subnet past the
+  gate, because a persona cannot hold the owner's passkey. Until this date
+  that passed every request, so any page the browser opened, from anywhere
+  on the web, could send a cross-site POST to the app's host (the plugin
+  gateway's `/x/*` had no origin check) and be the owner. Now
+  `lib/loam_deploy.sight_lines` puts a refusal ahead of the pass: from the
+  subnet, any method but GET, HEAD and OPTIONS, or any upgrade, is a 403
+  unless `Sec-Fetch-Site` is `same-origin` (or, with no fetch metadata, the
+  `Origin` is the host's own). Chromium sends both on every https request
+  and a page cannot forge them, so a walk that clicks through the app,
+  staging or a site still works and a stranger's page is refused before any
+  backend. The login's `Remote-*` headers are taken off on this path, since
+  nobody but a client could have set them there. `tests/test_sight_writes.py`
+  runs the generated block in real Caddy. The share door, `/s/*`, is ahead
+  of both handles and unchanged.
 - **Each MCP session is its own browser context.** Two clients, one
   navigated, the other's tab list still empty (caused 2026-09-08).
 - **Open to the web, walled off from the box.** Since 2026-09-09 (the owner:

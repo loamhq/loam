@@ -29,3 +29,13 @@ What the edge lets through (the sign-in, share links, the agents' browser
 and its wall) is described in `deploy/README.md`; what each agent may reach
 on the server is in `docs/config.md` and `docs/plugins.md`. A report that a
 wall described there does not hold is exactly the kind we want.
+
+A plugin's server is protected from other pages by one rule, which the
+plugin gateway applies to every plugin so its author need not write it: a
+request that could change something (any method but GET, HEAD and OPTIONS,
+or a WebSocket) is refused when the browser says another origin's page sent
+it, and the agents' browser, which passes the sign-in, may change nothing
+from another origin on any host. It does not protect a plugin whose GET
+changes something, a plugin's own page code (that runs in the app's origin
+with the app's reach), or a caller that is not a browser and has its own way
+past the sign-in.

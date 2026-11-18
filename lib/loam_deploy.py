@@ -1639,6 +1639,56 @@ def _deadline_unix(expires: dt.date) -> int:
     return int(end.timestamp())
 
 
+# What the browser's subnet may do past the login (2026-11-18). The bypass
+# exists so the personas can SEE: read any private page, screenshot it, walk
+# the app on staging. It used to pass every request whole, so any page the
+# browser opened -- a stranger's, on the open web -- could send a cross-site
+# POST to the app's host and be treated as the signed-in owner (the plugin
+# gateway's /x/* had no origin check; a site with a backend had none of its
+# own). Now a request from the subnet that could change something -- any
+# method but GET, HEAD and OPTIONS, or any protocol upgrade (a WebSocket
+# reads AND writes) -- passes only when the browser itself says it came from
+# a page of the same origin: `Sec-Fetch-Site: same-origin`, or, where a
+# browser sends no fetch metadata, an `Origin` equal to this host. A page
+# cannot forge either; Chromium sends both on every https request. A request
+# that says neither is refused too: nothing in that container but Chromium
+# has any business writing here. So a walk that clicks through a page still
+# works (its own requests are same-origin) and a page from anywhere else is
+# refused before it reaches any backend. The login's identity headers are
+# taken off on this path: past the gate Authelia sets them, and here nobody
+# has, so a value arriving here is the client's own.
+SIGHT_UNSAFE = (
+    "({http.request.method} != \"GET\" && {http.request.method} != \"HEAD\""
+    " && {http.request.method} != \"OPTIONS\" || {http.request.header.Upgrade} != \"\")"
+    " && !({http.request.header.Sec-Fetch-Site} == \"same-origin\""
+    " || ({http.request.header.Sec-Fetch-Site} == \"\""
+    " && {http.request.header.Origin} == \"https://\" + {http.request.host}))"
+)
+SIGHT_IDENTITY_HEADERS = ("Remote-User", "Remote-Groups", "Remote-Email", "Remote-Name")
+
+
+def sight_lines(backend: str) -> list[str]:
+    """The browser's subnet on a private host: refused if it would change
+    something from another origin, else passed without the login."""
+    return [
+        "\t# The personas' browser, by its own network: it reads past the login, and",
+        "\t# changes nothing from another page's origin. See lib/loam_deploy.SIGHT_UNSAFE.",
+        "\t@sight_cross {",
+        f"\t\tremote_ip {SIGHT_SUBNET}",
+        f"\t\texpression `{SIGHT_UNSAFE}`",
+        "\t}",
+        "\thandle @sight_cross {",
+        "\t\theader Vary \"Sec-Fetch-Site, Origin\"",
+        "\t\trespond \"The agents' browser changes nothing here from another site's page.\" 403",
+        "\t}",
+        f"\t@sight remote_ip {SIGHT_SUBNET}",
+        "\thandle @sight {",
+        *(f"\t\trequest_header -{h}" for h in SIGHT_IDENTITY_HEADERS),
+        f"\t\t{backend}",
+        "\t}",
+    ]
+
+
 def caddy_host_block(app: App, public: bool, today: dt.date,
                      fqdn: str | None = None,
                      framed_by: tuple[str, ...] | None = None) -> str:
@@ -1714,13 +1764,7 @@ def caddy_host_block(app: App, public: bool, today: dt.date,
             "\t\t\tROBOTS 200",
             "\t}",
         ]
-    lines += [
-        "\t# The personas' browser, by its own network. See lib/loam_deploy.py.",
-        f"\t@sight remote_ip {SIGHT_SUBNET}",
-        "\thandle @sight {",
-        f"\t\t{backend}",
-        "\t}",
-    ]
+    lines += sight_lines(backend)
     share = app.share_active(today)
     if share:
         token, expires = share
@@ -1793,11 +1837,7 @@ def caddy_content_block(app: App) -> str:
         "\thandle @not_content {",
         "\t\trespond \"not found\" 404",
         "\t}",
-        "\t# The personas' browser, by its own network. See lib/loam_deploy.py.",
-        f"\t@sight remote_ip {SIGHT_SUBNET}",
-        "\thandle @sight {",
-        f"\t\t{proxy}",
-        "\t}",
+        *sight_lines(proxy),
         "\thandle {",
         "\t\timport gate",
         f"\t\t{proxy}",

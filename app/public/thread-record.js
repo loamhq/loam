@@ -12,6 +12,17 @@ export function readThreadList(body) {
   body.threads.forEach(readThreadSummary)
   return body
 }
+// The thread list's order: pinned first, then newest activity. Among pinned
+// threads, General (by its id, never its title) leads. An unpinned General
+// takes no place of its own.
+export function compareThreads(a, b, { pinned = true } = {}) {
+  if (pinned) {
+    const byPin = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
+    if (byPin) return byPin
+    if (a.pinned) { const byGeneral = Number(b.id === 'general') - Number(a.id === 'general'); if (byGeneral) return byGeneral }
+  }
+  return String(b.last?.at ?? b.created ?? '').localeCompare(String(a.last?.at ?? a.created ?? ''))
+}
 export function readThreadBoard(board) {
   if (typeof board?.markdown !== 'string' || typeof board?.path !== 'string') throw new Error('The board could not be read.')
   return board
