@@ -66,6 +66,7 @@ from loam_memory import (  # noqa: E402
     load_config,
     near_limit,
     near_limit_reason,
+    over_limit_reason,
     style_frontmatter_intact,
 )
 
@@ -97,10 +98,8 @@ def findings(workspace: Path) -> tuple[list[str], list[tuple[str, str]]]:
             out.append(f"`{name}` is empty.")
             continue
         if len(text) > LIMIT_CHARS:
-            out.append(
-                f"`{name}` is {len(text):,} characters, over the "
-                f"{LIMIT_CHARS:,}-character limit on auto-loaded files."
-            )
+            out.append(over_limit_reason(name, len(text), path,
+                                         "the server starts as always"))
         elif near_limit(len(text)):
             warnings.append((f"`{name}`", near_limit_reason(name, len(text), path)))
 

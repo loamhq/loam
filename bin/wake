@@ -35,7 +35,9 @@ grid held only because the seven reflection timers were twenty minutes apart;
 crons remove that spacing as a guarantee.
 
 Carried across from chassis/cron.py: the prompt body and the vault diff
-since the last wake. Dropped: the run ledger, per-wake cost accounting and
+since the last wake -- inline only while it is small since 2026-11-18, and
+otherwise a count, a file and a git command (``vault_diff``), so no part of
+a launch grows with the vault. Dropped: the run ledger, per-wake cost accounting and
 the Langfuse export, all of which metered a metered API. On a subscription
 there is no per-wake bill to record -- but since 2026-09-30 the envelope's
 own usage and cost estimate are on every line that had an envelope, because
@@ -64,7 +66,14 @@ The preflight is still the part that matters. A ``SessionStart`` hook could
 not abort a session (measured 2026-08-25) and there is no longer a
 ``SessionStart`` hook at all, so the loud failure D4 asks for happens before
 the session exists. If the reflection layer will not load, this refuses to
-launch -- a true abort on the one path that runs unattended.
+launch -- a true abort on the one path that runs unattended. Its size never
+refuses (2026-11-18): an over-limit file is reported and the lane runs.
+
+Every way this file ends is on the record (2026-11-18): each refusal and
+failure above writes its own line, and an exception out of this file's own
+code is caught by ``main`` and written as a ``crash`` -- the lane's log line
+and the failure log, with the step it died at. A run killed from outside is
+bin/wake-failed's to report, from the marker it leaves.
 
 Usage: wake <agent-project-dir> [--cron <name>]
 """
@@ -220,13 +229,75 @@ def git(vault: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def vault_diff(vault: Path, since: str | None) -> tuple[str, str]:
-    """(diff_block, head_ref). Falls back to the no-changes line."""
+# The changes reach the prompt inline only while they are small; past this
+# many characters the prompt names a file that holds them and the command
+# that lists them, and says how many there are (2026-11-18). Until then the
+# whole `git diff --name-status` went into the one `-p` argument, and the
+# night after a 1,033-file autocommit it was 183,749 bytes: over the
+# kernel's 128 KiB limit on one argument (MAX_ARG_STRLEN), so `execve`
+# failed with E2BIG and every reflection wake on the box died before the
+# model ran -- and, the marker never advancing, would have died every night
+# after. Nothing in a launch may grow with the vault; this cap is what
+# keeps the prompt's size a constant.
+INLINE_CHANGES_MAX = 4_000
+
+
+def changes_path(agent: str) -> Path:
+    """Where a wake writes the whole list when it is too long to inline."""
+    return STATE_DIR / f"{agent}.vault-changes.txt"
+
+
+def summarise(raw: str) -> str:
+    """``1,033 files: 1,020 added, 13 modified`` from name-status lines."""
+    names = {"A": "added", "M": "modified", "D": "deleted", "R": "renamed",
+             "C": "copied", "T": "changed type"}
+    counts: dict[str, int] = {}
+    lines = raw.splitlines()
+    for line in lines:
+        word = names.get(line[:1], "other")
+        counts[word] = counts.get(word, 0) + 1
+    parts = ", ".join(f"{n:,} {word}" for word, n in counts.items())
+    return f"{len(lines):,} file{'s' if len(lines) != 1 else ''}: {parts}"
+
+
+def vault_diff(vault: Path, since: str | None, agent: str | None = None,
+               last_wake: str | None = None) -> tuple[str, str]:
+    """(diff_block, head_ref). Falls back to the no-changes line.
+
+    The block is bounded whatever the vault did: the list itself when it is
+    under INLINE_CHANGES_MAX characters, else a count, the file the list was
+    written to, and the git command that gives it. ``since`` is the last
+    GOOD wake's head -- a failed wake never advances it -- so after a dark
+    night the interval is everything since the last wake that finished."""
     head = git(vault, "rev-parse", "HEAD")
     if not since or since == head:
         return NO_CHANGES, head
+    command = f"git -C {vault} diff --name-status {since} {head}"
+    if subprocess.run(["git", "-C", str(vault), "cat-file", "-e",
+                       f"{since}^{{commit}}"], capture_output=True,
+                      check=False).returncode != 0:
+        return (f"Your last wake's marker, vault commit {since[:12]}"
+                f"{f' ({last_wake})' if last_wake else ''}, is no longer in the "
+                f"vault's history, so the changes since then cannot be listed. "
+                f"`git -C {vault} log --name-status"
+                f"{f' --since={last_wake}' if last_wake else ''}` shows what was "
+                f"committed since."), head
     raw = git(vault, "diff", "--name-status", since, head)
-    return (raw or NO_CHANGES), head
+    if not raw:
+        return NO_CHANGES, head
+    if len(raw) <= INLINE_CHANGES_MAX:
+        return raw, head
+    where = changes_path(agent or "wake")
+    try:
+        where.parent.mkdir(parents=True, exist_ok=True)
+        where.write_text(raw + "\n", encoding="utf-8")
+        listed = (f"The whole list is in `{where}`, one `status<TAB>path` line "
+                  f"each; `{command}` gives the same.")
+    except OSError:
+        listed = f"`{command}` lists them."
+    return (f"{summarise(raw)}, since your last wake"
+            f"{f' ({last_wake})' if last_wake else ''} -- too many to list "
+            f"here. {listed}"), head
 
 
 def mark_running(agent: str, started: str, vault: Path, lane: str) -> None:
@@ -361,7 +432,7 @@ def parse_argv(argv: list[str]) -> tuple[Path, str | None]:
     return project, rest[1]
 
 
-def main() -> int:
+def _main() -> int:
     try:
         project, cron = parse_argv(sys.argv[1:])
     except ValueError as exc:
@@ -372,8 +443,10 @@ def main() -> int:
     if loam_due.refuse_if_not_due("wake"):
         return 0
 
+    CRASH["agent"], CRASH["lane"] = project.name, (f"cron:{cron}" if cron else "reflection")
     config = json.loads((project / "agent.json").read_text(encoding="utf-8"))
     agent = config["name"]
+    CRASH["agent"] = agent
     # An archived agent sleeps (lib/loam_agents.py, 2026-11-14). Its timers
     # are taken down with the archive; this holds a timer that fired in the
     # minute before the reconciler reached it, and a hand run.
@@ -383,6 +456,7 @@ def main() -> int:
         return 0
     vault = Path(config["vault"])
     lane = f"cron:{cron}" if cron else "reflection"
+    CRASH["vault"] = vault
     global LANE_MODEL, LANE_EFFORT, LANE_NOTE, LANE_PROVIDER
     LANE_MODEL, LANE_EFFORT, LANE_NOTE = loam_profile.lane_choice(
         config, WAKE_MODEL, pinned=bool(os.environ.get("LOAM_WAKE_MODEL")))
@@ -399,6 +473,7 @@ def main() -> int:
     os.environ["CLAUDE_PROJECT_DIR"] = str(project)
 
     started = now_iso()
+    CRASH["started"] = started
 
     # The lock, before the preflight. A launch that is going to be skipped
     # should not first spend a live model call proving an identity it will
@@ -430,6 +505,10 @@ def main() -> int:
                 fire["outcome"] = "killed"
                 fire["stage"] = f"wall clock: cut after {exc.timeout:.0f} s"
                 raise
+            except Exception as exc:  # noqa: BLE001 - main() records it
+                fire["stage"] = (f"crashed in bin/wake at {CRASH['at']}: "
+                                 f"{type(exc).__name__}")
+                raise
             finally:
                 clear_running(agent)
                 loam_schedule.record_fire(
@@ -456,6 +535,65 @@ def main() -> int:
         return 0
 
 
+# What a crash in this file is recorded against, filled in as main() learns
+# it (2026-11-18). `at` is the step reached; `launched` turns true once the
+# CLI process has started, so the record can say whether the model ran.
+CRASH: dict = {"agent": None, "lane": None, "vault": None, "started": None,
+               "at": "start", "launched": False}
+
+
+def step(name: str) -> None:
+    CRASH["at"] = name
+
+
+def record_crash(exc: BaseException) -> int:
+    """A wake that died in this file, recorded where every other failure is.
+
+    On 2026-11-18 six reflection wakes died in `subprocess.run` with
+    `OSError: [Errno 7] Argument list too long` and left nothing in
+    `wake-<agent>.jsonl` or the failure log: the exception ran the
+    `finally` that clears the `.running` marker, so bin/wake-failed, which
+    reports only a run that left its marker, had nothing to say, and the
+    failure log read as a clean night. Now any exception out of this
+    file's own code -- before the model, or after it -- gets the lane's log
+    line (stage `crash`) and a failure-log line with its cause. Exit 8."""
+    import traceback  # noqa: PLC0415
+    agent = CRASH["agent"] or "unknown"
+    lane = CRASH["lane"] or "wake"
+    vault = Path(CRASH["vault"] or lc.VAULT)
+    started = CRASH["started"] or now_iso()
+    when = ("after the model ran" if CRASH["launched"]
+            else "before the model ran")
+    cause = f"{type(exc).__name__}: {exc}"
+    reason = (f"{lane} crashed in bin/wake at `{CRASH['at']}`, {when}: "
+              f"{cause[:400]}. The marker did not advance, so the next wake "
+              f"sees this interval too.")
+    print(traceback.format_exc(), file=sys.stderr)
+    print(reason, file=sys.stderr)
+    try:
+        record_failure(agent, vault, reason)
+    except Exception:  # noqa: BLE001 - the record is best-effort
+        pass
+    try:
+        log_line(agent, {
+            "ts": started, "finished": now_iso(), "ok": False,
+            "stage": "crash", "at": CRASH["at"],
+            "model_ran": CRASH["launched"], "lane": lane,
+            "error": cause[:2000],
+            "traceback": traceback.format_exc()[-2000:],
+        })
+    except Exception:  # noqa: BLE001
+        pass
+    return 8
+
+
+def main() -> int:
+    try:
+        return _main()
+    except Exception as exc:  # noqa: BLE001 - every death is recorded
+        return record_crash(exc)
+
+
 def lane_prompt(agent: str, vault: Path, started: str, cron: str | None
                 ) -> tuple[str, str | None, Path]:
     """(prompt, vault head to advance to or None, the marker's path).
@@ -470,7 +608,8 @@ def lane_prompt(agent: str, vault: Path, started: str, cron: str | None
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         state = {}
-    diff_block, head = vault_diff(vault, state.get("last_vault_ref"))
+    diff_block, head = vault_diff(vault, state.get("last_vault_ref"), agent,
+                                  state.get("last_wake"))
     return PROMPT_TEMPLATE.format(timestamp=started, diff_block=diff_block), head, state_path
 
 
@@ -499,6 +638,7 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
     from loam_identity import IdentityError, preflight_identity  # noqa: PLC0415
 
     global LANE_MODEL
+    step("identity")
     refused_login = cw.login_refusal()
     if refused_login:
         return account_refused(agent, vault, started, lane, "identity", refused_login)
@@ -519,7 +659,9 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
                          "lane": lane, "error": str(exc)})
         return 5
 
+    step("prompt")
     prompt, head, state_path = lane_prompt(agent, vault, started, cron)
+    step("launch")
     try:
         out = cw.run(project, text, prompt, model=LANE_MODEL, effort=LANE_EFFORT,
                      timeout=loam_cron.lane_timeout_s(agent, lane), env=env)
@@ -535,6 +677,8 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
                          "stage": "invoke", "lane": lane, "error": str(exc),
                          **cgroup_memory()})
         return 4
+    CRASH["launched"] = True
+    step("record")
     finished = now_iso()
     memory = cgroup_memory()
     LANE_MODEL = out.model or LANE_MODEL
@@ -579,18 +723,18 @@ def run(project: Path, agent: str, vault: Path, started: str,
     from loam_memory import (  # noqa: PLC0415
         CRON_LANE_DIR,
         LIMIT_CHARS,
-        OVER_LIMIT_REFUSED_FROM,
         REFLECTION_LAYER,
         LayerError,
         near_limit,
         near_limit_reason,
-        refuse_over_limit_now,
+        over_limit_reason,
         resolve_lane,
     )
 
     lane = f"cron:{cron}" if cron else "reflection"
     lane_file = f"{CRON_LANE_DIR}/{cron}.md" if cron else REFLECTION_LAYER
 
+    step("preflight")
     try:
         _, lane_text, lane_path = resolve_lane(project, lane_file)
     except LayerError as exc:
@@ -614,33 +758,20 @@ def run(project: Path, agent: str, vault: Path, started: str,
                          "lane": lane, "detail": why})
         return 0
 
-    # The size limit, on the path that can afford to refuse -- because it is
-    # also the path that can repair. An over-limit file is the agent's to
-    # trim and the wake is when it would do the trimming, so refusing on day
-    # one would lock the only repair behind the thing being refused. That is
-    # the trap that took Iris offline for days on 08-31, and it is why this
-    # reports until OVER_LIMIT_REFUSED_FROM and refuses after. Same file,
-    # same shape, as a missing-layer refusal: it surfaces where the owner
-    # already looks.
+    # The size limit is a warning, never a refusal (the owner, 2026-11-08:
+    # runtime mechanisms are for capacity and recovery, never permission;
+    # this wake applied it on 2026-11-18). Until then an over-limit lane file
+    # refused the wake from 2026-09-11 -- the wake, the one run whose work is
+    # trimming that file -- and one persona's _reflection.md at 10,009
+    # characters kept it dark two nights running. The file loads whole (the
+    # append-file route has no cap near 10,000; see lib/loam_memory.py) and
+    # the failure log and comms say so, as a Remote Control start's do.
     size = len(lane_path.read_text(encoding="utf-8"))
     if size > LIMIT_CHARS:
-        reason = (
-            f"{lane_file} is {size:,} characters, over the "
-            f"{LIMIT_CHARS:,}-character limit on files that load "
-            f"automatically ({lane_path})"
-        )
-        if refuse_over_limit_now():
-            print(f"preflight refused: {reason}", file=sys.stderr)
-            record_failure(agent, vault, f"preflight refused: {reason}")
-            log_line(agent, {
-                "ts": started, "ok": False, "stage": "preflight",
-                "lane": lane, "error": reason, "lane_chars": size,
-            })
-            return 3
-        record_failure(agent, vault, (
-            f"{reason}. Reported, not refused: the wake ran. Refusals begin "
-            f"{OVER_LIMIT_REFUSED_FROM.isoformat()}."
-        ))
+        reason = f"{lane}: " + over_limit_reason(
+            lane_file, size, lane_path, f"the {lane} lane went ahead")
+        print(f"preflight warning: {reason}", file=sys.stderr)
+        record_failure(agent, vault, reason)
     elif near_limit(size):
         # The earlier warning (2026-09-07). The file that grows every night
         # is told while there is still room to act; the log line is the
@@ -674,6 +805,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
         return run_codex(project, agent, vault, started, cron, lane,
                          lane_text, lane_path)
 
+    step("identity")
     try:
         canary, decoy_owner = preflight_identity(project, model=LANE_MODEL)
     except AccountRefused as exc:
@@ -686,6 +818,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
                          "lane": lane, "error": str(exc)})
         return 5
 
+    step("prompt")
     prompt, head, state_path = lane_prompt(agent, vault, started, cron)
 
     # The shared skills, current for this run (first release L7): the Claude
@@ -716,6 +849,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
         handle.write(lane_text)
         lane_temp = Path(handle.name)
 
+    step("launch")
     try:
         result = subprocess.run(
             claude_argv(agent, lane, prompt, lane_temp),
@@ -725,6 +859,8 @@ def run(project: Path, agent: str, vault: Path, started: str,
         )
     finally:
         lane_temp.unlink(missing_ok=True)
+    CRASH["launched"] = True
+    step("record")
     finished = now_iso()
     memory = cgroup_memory()
 
