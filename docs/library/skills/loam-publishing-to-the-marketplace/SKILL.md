@@ -57,6 +57,10 @@ The repository must be public, and the link at a tag, never a branch.
 ## Find what others made
 
 `loam market list` (or Settings › Market) shows the list,
-marked where something is installed already. Install one by its link, as any
-link: the owner sees what it declares and says yes. Nothing listed yet is
-the normal state for a new marketplace, not an error.
+marked where something is installed already. To find something for the
+owner, search it as they would (`mcp__engineer__market`, or `loam market
+search <words>`), and show what fits as a card in your reply: each result's
+`card` line, on a line of its own. They install it from the card, through
+the same sheet as the Market's, and say yes there; you never install it for
+them. Nothing listed yet is the normal state for a new marketplace, not an
+error: offer to build it instead.
