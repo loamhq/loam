@@ -10,6 +10,7 @@ import { appearanceValues } from '../src/appearance.js'
 import { optionValues, mergeAppearance } from '../public/theme-options.js'
 import { createTheme } from '../public/theme.js'
 import { contrast } from '../tools/theme-contrast.mjs'
+import { allRoots, readThemeCSS } from './listed-themes.mjs'
 
 const ids = ['deep-forest','autumn','yosemite','mist-trail','foundry']
 test('material suppliers have eight permanent distinct variants without shared SVG references', () => {
@@ -36,7 +37,7 @@ test('shared faces preserve selection offsets, unchanged redraws, and image prio
 })
 test('saved faces survive simple defaults and signature content uses the existing settings route', async () => {
   const doc = installDom(); doc.documentElement = doc.createElement('html'); doc.querySelector = () => null
-  const themes = (await loadThemes()).themes, host = appearanceValues(null,themes), writes=[]
+  const themes = (await loadThemes(await allRoots())).themes, host = appearanceValues(null,themes), writes=[]
   const request = async (method,patch) => { if(patch){writes.push(patch);for(const kind of Object.keys(patch)) host[kind]=mergeAppearance(host[kind],patch[kind])}return structuredClone(host) }
   for (const id of ids) {
     for (const shape of ['signature','distinct','circle','rounded-square']) assert.equal(optionValues({[id]:{'agent-shapes':shape}},themes)[id]['agent-shapes'],shape)

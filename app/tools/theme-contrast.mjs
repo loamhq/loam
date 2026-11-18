@@ -11,7 +11,9 @@ export function contrast(a, b) {
   return (Math.max(x, y) + .05) / (Math.min(x, y) + .05)
 }
 export async function resolvedTheme(id, mode) {
+  // Latte and Plain ship; the other first-party looks are listed plugins (2026-11-18).
   const css = await readFile(new URL(`../public/themes/${id}/theme.css`, import.meta.url), 'utf8')
+    .catch(() => readFile(new URL(`../../plugins/_listed/${id}/theme.css`, import.meta.url), 'utf8'))
   const defaults = await loadCoreTokens()
   validateThemeCSS(css, id, defaults)
   const resolved = new Map(defaults[mode])

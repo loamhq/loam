@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { installDom } from './fakedom.js'
 import { createPluginThemes } from '../public/plugin-themes.js'
 import { shippedPlugins } from '../src/shipped-plugins.js'
+import { allRoots, readThemeCSS } from './listed-themes.mjs'
 
 test('theme refresh keeps the loaded sheet through success, failure and overlapping refreshes', async () => {
   const doc = installDom(), create = doc.createElement.bind(doc)
@@ -43,16 +44,19 @@ test('theme refresh keeps the loaded sheet through success, failure and overlapp
 })
 
 test('live refresh fills dark-cover metadata omitted by an older host without hiding broken themes', async () => {
+  // Latte is the shipped theme with a cover since the other first-party looks
+  // became listed plugins (2026-11-18); a dark cover is added to the shipped
+  // catalog here to hold the merge to it.
   const doc = installDom(); doc.querySelector = () => null
-  const shipped = await shippedPlugins('public'), autumn = shipped.find(row => row.id === 'autumn')
-  const { image_dark, image_position_dark, ...oldRow } = autumn
-  oldRow.options = [{ id:'agent-shapes', label:'Agent shapes', default:'distinct', choices:[{id:'distinct',label:'Each its own'},{id:'circle',label:'Circle'},{id:'rounded-square',label:'Rounded square'}] }]
+  const shipped = (await shippedPlugins('public')).map(row => row.id === 'latte' ? { ...row, image_dark: 'cover-dark.webp', image_position_dark: '50% 42%' } : row), latte = shipped.find(row => row.id === 'latte')
+  const { image_dark, image_position_dark, ...oldRow } = latte
+  oldRow.options = [{ id:'agent-shapes', label:'Agent shapes', default:'distinct', choices:[{id:'distinct',label:'Each its own'},{id:'circle',label:'Circle'}] }]
   let installed
   const refresh = createPluginThemes({ theme: { install: catalog => { installed = catalog }, apply() {} }, request: async () => ({ json: async () => ({ plugins: shipped }) }) })
   await refresh([{ ...oldRow, warnings: ['Unknown field: image_dark'] }])
-  assert.equal(installed.find(t => t.id === 'autumn').image_dark, 'cover-dark.webp')
-  assert.equal(installed.find(t => t.id === 'autumn').image_position_dark, '50% 42%')
-  assert.deepEqual(installed.find(t => t.id === 'autumn').options, autumn.options)
-  await refresh([{ ...autumn, broken: 'A real validation failure' }, shipped.find(row => row.id === 'plain')])
+  assert.equal(installed.find(t => t.id === 'latte').image_dark, 'cover-dark.webp')
+  assert.equal(installed.find(t => t.id === 'latte').image_position_dark, '50% 42%')
+  assert.deepEqual(installed.find(t => t.id === 'latte').options, latte.options)
+  await refresh([{ ...latte, id: 'autumn', layer: 'yours', broken: 'A real validation failure' }, shipped.find(row => row.id === 'plain')])
   assert.equal(installed.some(t => t.id === 'autumn'), false)
 })

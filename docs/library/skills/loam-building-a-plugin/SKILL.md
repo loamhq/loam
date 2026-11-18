@@ -58,7 +58,8 @@ listed as broken with its reason, line by line, and breaks nothing else.
 
 **A theme** is the quickest plugin to make. Copy one Loam ships (in
 `app/public/themes/` of the checkout, `paths.root`; `plain` is the
-simplest, `autumn` a full one) into the plugins folder under a new id,
+simplest, `latte` a full one; a first-party theme from the Market, such as
+`autumn` in `plugins/_listed/`, also carries its own display font) into the plugins folder under a new id,
 change `id` and `name` in its `PLUGIN.md`, rename the id in every
 `:root[data-look="…"]` selector of its `theme.css`, and change the token
 values, light and dark. Keep to the tokens the original sets: the page drops

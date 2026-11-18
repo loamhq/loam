@@ -24,7 +24,7 @@ import { createTranscriber, TRANSCRIBE_MAX_BYTES, tooBig } from './transcribe.js
 import { createLog, requestId, loggedQuery } from './log.js'
 import { createSpeech } from './speech.js'
 import { appearanceBoot } from './appearance.js'
-import { loadThemes, marketThemeCSS } from './themes.js'
+import { loadThemes, marketThemeCSS, themeFontsCSS } from './themes.js'
 import { createBranchDrafter } from './thread-branch.js'
 import { INSTALLATION_DEFAULTS } from '../public/installation.js'
 import { createAppMedia } from './app-media.js'
@@ -138,6 +138,23 @@ export function createApp({
       if (pathname === '/shipped-plugins.json' && ['GET', 'HEAD'].includes(req.method)) {
         res.setHeader('cache-control', 'no-cache')
         return sendJson(res, 200, { plugins: await shippedPlugins(publicDir) })
+      }
+
+      // An installed theme's display faces (2026-11-18): its own fonts.css,
+      // read from its folder through the broker and held to @font-face rules
+      // whose files are beside it (themeFontsCSS). A theme with none answers
+      // an empty sheet, so the page can ask for any look it wears.
+      const fonts = /^\/theme-fonts\/([a-z][a-z0-9-]*)\.css$/.exec(pathname)
+      if (fonts && ['GET', 'HEAD'].includes(req.method)) {
+        res.setHeader('cache-control', 'no-cache')
+        let css = ''
+        try {
+          const out = await broker.file(`/v1/plugins/${fonts[1]}/files/fonts.css`, { signal: AbortSignal.timeout(5000) })
+          const chunks = []; let size = 0
+          if (out.stream) for await (const chunk of out.stream) { size += chunk.length; if (size > MAX_BODY) { out.stream.destroy(); throw new Error('too large') } chunks.push(chunk) }
+          if (out.status === 200) css = themeFontsCSS(fonts[1], Buffer.concat(chunks).toString('utf8'))
+        } catch { css = '' }
+        return send(res, 200, 'text/css; charset=utf-8', req.method === 'HEAD' ? '' : css)
       }
 
       if (pathname === '/themes.css' && ['GET', 'HEAD'].includes(req.method)) {

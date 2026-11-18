@@ -176,6 +176,11 @@ COVER_FIELDS = ("image", "image_position", "image_dark", "image_position_dark")
 # assets, its theme and its guide. Never `server/`, never anything else.
 SERVED_DIRS = ("page", "assets")
 SERVED_FILES = ("theme.css", "PLUGIN.md")
+# A theme's display faces (2026-11-18, 0.2.5): its `fonts.css` and the font
+# files beside it, which the app serves checked (app/src/themes.js,
+# themeFontsCSS) at /theme-fonts/<id>.css.
+THEME_FILES = ("fonts.css",)
+FONT_SUFFIXES = (".woff2", ".woff")
 FILE_MAX = 20 * 1024 * 1024
 HASH_MAX = 64 * 1024 * 1024              # past this a folder is not fingerprinted
 GIT_TIMEOUT = 180
@@ -1976,8 +1981,9 @@ def install(body: dict, by: str | None = None) -> dict:
 def file_for(pid: str, rel: list[str]) -> tuple[Path, str]:
     """``GET /v1/plugins/<id>/files/<path>``: the file and its type, from
     the folder in force for the id. Only ``page/``, ``assets/``,
-    ``theme.css``, ``PLUGIN.md`` and the files a theme names as its
-    ``image`` and ``image_dark``; a path that leaves the folder (``..``,
+    ``theme.css``, ``PLUGIN.md``, the files a theme names as its
+    ``image`` and ``image_dark``, and a theme's ``fonts.css`` and the
+    ``.woff2``/``.woff`` files beside it; a path that leaves the folder (``..``,
     a link pointing out) is not found."""
     _need_id(pid)
     if not rel or any(p in ("", ".", "..") or "\0" in p or "/" in p or "\\" in p
@@ -1986,11 +1992,13 @@ def file_for(pid: str, rel: list[str]) -> tuple[Path, str]:
     row = next((r for r in _rows() if r["id"] == pid and r["effective"]), None)
     cover = "/".join(rel) in {(row or {}).get(k)
                               for k in ("image", "image_dark", "icon")} - {None}
+    font = (len(rel) == 1 and "theme" in ((row or {}).get("kind") or [])
+            and (rel[0] in THEME_FILES or rel[0].lower().endswith(FONT_SUFFIXES)))
     if not ((len(rel) > 1 and rel[0] in SERVED_DIRS)
-            or (len(rel) == 1 and rel[0] in SERVED_FILES) or cover):
+            or (len(rel) == 1 and rel[0] in SERVED_FILES) or cover or font):
         raise PluginError("a plugin serves its page/ and assets/ files, theme.css, "
-                          "PLUGIN.md, its icon and a theme's cover image, nothing "
-                          "else", 404)
+                          "PLUGIN.md, its icon, a theme's cover image and its "
+                          "fonts, nothing else", 404)
     if row is None:
         raise PluginError(f"no plugin {pid!r} is in force", 404)
     base = Path(row["folder"]).resolve()

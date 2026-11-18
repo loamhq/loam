@@ -76,12 +76,7 @@
       "type": "string",
       "enum": [
         "latte",
-        "autumn",
-        "deep-forest",
-        "foundry",
-        "mist-trail",
-        "plain",
-        "yosemite"
+        "plain"
       ],
       "default": "latte"
     },
@@ -124,106 +119,6 @@
       "default": "pour"
     },
     {
-      "key": "appearance.phone.options.autumn.agent-shapes",
-      "type": "string",
-      "enum": [
-        "signature",
-        "distinct",
-        "circle",
-        "rounded-square"
-      ],
-      "default": "circle"
-    },
-    {
-      "key": "appearance.phone.options.autumn.face-content",
-      "type": "string",
-      "enum": [
-        "mark",
-        "initials"
-      ],
-      "default": "mark"
-    },
-    {
-      "key": "appearance.phone.options.deep-forest.agent-shapes",
-      "type": "string",
-      "enum": [
-        "signature",
-        "distinct",
-        "circle",
-        "rounded-square"
-      ],
-      "default": "circle"
-    },
-    {
-      "key": "appearance.phone.options.deep-forest.face-content",
-      "type": "string",
-      "enum": [
-        "mark",
-        "initials"
-      ],
-      "default": "mark"
-    },
-    {
-      "key": "appearance.phone.options.foundry.agent-shapes",
-      "type": "string",
-      "enum": [
-        "signature",
-        "distinct",
-        "circle",
-        "rounded-square"
-      ],
-      "default": "rounded-square"
-    },
-    {
-      "key": "appearance.phone.options.foundry.face-content",
-      "type": "string",
-      "enum": [
-        "mark",
-        "initials"
-      ],
-      "default": "mark"
-    },
-    {
-      "key": "appearance.phone.options.mist-trail.agent-shapes",
-      "type": "string",
-      "enum": [
-        "signature",
-        "distinct",
-        "circle",
-        "rounded-square"
-      ],
-      "default": "circle"
-    },
-    {
-      "key": "appearance.phone.options.mist-trail.face-content",
-      "type": "string",
-      "enum": [
-        "mark",
-        "initials"
-      ],
-      "default": "mark"
-    },
-    {
-      "key": "appearance.phone.options.yosemite.agent-shapes",
-      "type": "string",
-      "enum": [
-        "signature",
-        "distinct",
-        "circle",
-        "rounded-square"
-      ],
-      "default": "circle"
-    },
-    {
-      "key": "appearance.phone.options.yosemite.face-content",
-      "type": "string",
-      "enum": [
-        "mark",
-        "initials"
-      ],
-      "default": "mark"
-    },
-    {
       "key": "appearance.desktop.mode",
       "type": "string",
       "enum": [
@@ -257,12 +152,7 @@
       "type": "string",
       "enum": [
         "latte",
-        "autumn",
-        "deep-forest",
-        "foundry",
-        "mist-trail",
-        "plain",
-        "yosemite"
+        "plain"
       ],
       "default": "latte"
     },
@@ -303,106 +193,6 @@
         "initials"
       ],
       "default": "pour"
-    },
-    {
-      "key": "appearance.desktop.options.autumn.agent-shapes",
-      "type": "string",
-      "enum": [
-        "signature",
-        "distinct",
-        "circle",
-        "rounded-square"
-      ],
-      "default": "circle"
-    },
-    {
-      "key": "appearance.desktop.options.autumn.face-content",
-      "type": "string",
-      "enum": [
-        "mark",
-        "initials"
-      ],
-      "default": "mark"
-    },
-    {
-      "key": "appearance.desktop.options.deep-forest.agent-shapes",
-      "type": "string",
-      "enum": [
-        "signature",
-        "distinct",
-        "circle",
-        "rounded-square"
-      ],
-      "default": "circle"
-    },
-    {
-      "key": "appearance.desktop.options.deep-forest.face-content",
-      "type": "string",
-      "enum": [
-        "mark",
-        "initials"
-      ],
-      "default": "mark"
-    },
-    {
-      "key": "appearance.desktop.options.foundry.agent-shapes",
-      "type": "string",
-      "enum": [
-        "signature",
-        "distinct",
-        "circle",
-        "rounded-square"
-      ],
-      "default": "rounded-square"
-    },
-    {
-      "key": "appearance.desktop.options.foundry.face-content",
-      "type": "string",
-      "enum": [
-        "mark",
-        "initials"
-      ],
-      "default": "mark"
-    },
-    {
-      "key": "appearance.desktop.options.mist-trail.agent-shapes",
-      "type": "string",
-      "enum": [
-        "signature",
-        "distinct",
-        "circle",
-        "rounded-square"
-      ],
-      "default": "circle"
-    },
-    {
-      "key": "appearance.desktop.options.mist-trail.face-content",
-      "type": "string",
-      "enum": [
-        "mark",
-        "initials"
-      ],
-      "default": "mark"
-    },
-    {
-      "key": "appearance.desktop.options.yosemite.agent-shapes",
-      "type": "string",
-      "enum": [
-        "signature",
-        "distinct",
-        "circle",
-        "rounded-square"
-      ],
-      "default": "circle"
-    },
-    {
-      "key": "appearance.desktop.options.yosemite.face-content",
-      "type": "string",
-      "enum": [
-        "mark",
-        "initials"
-      ],
-      "default": "mark"
     }
   ]
 }

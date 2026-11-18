@@ -2512,6 +2512,13 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-entry-settings .plugin-entry { flex-direction:column; align-items:stretch; gap:8px; }
 .plugin-entry-settings .plugin-entry .setrow-title { white-space:normal; font-weight:500; font-size:14px; }
 .plugin-entry-settings .plugin-entry > .field-input { width:100%; }
+.plugin-entry-settings .plugin-entry-note { margin:0; font-size:13px; }
+/* Advanced (2026-11-18): the settings a person rarely needs, behind a quiet
+   line in the same rows. */
+.plugin-entry-advanced { border-top:1px solid var(--paper-rule); }
+.plugin-entry-advanced > summary { padding:12px 16px; min-height:44px; display:flex; align-items:center; cursor:pointer; font-size:13px; color:var(--paper-ink-2); }
+.plugin-entry-advanced > summary::before { content:'›'; display:inline-block; margin-right:8px; }
+.plugin-entry-advanced[open] > summary::before { transform:rotate(90deg); }
 .plugin-service { padding:0 16px 14px; }
 .plugin-service-state { margin:0; font-size:12px; }
 .plugin-service-failure { display:flex; align-items:flex-start; gap:12px; margin-top:8px; }

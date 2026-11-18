@@ -14,7 +14,8 @@ import { paintMention } from '../public/thread-identity.js'
 import { readField } from '../public/compose.js'
 import { contrast, resolvedTheme } from '../tools/theme-contrast.mjs'
 import { installDom } from './fakedom.js'
-const themes = (await loadThemes()).themes
+import { allRoots, readThemeCSS } from './listed-themes.mjs'
+const themes = (await loadThemes(await allRoots())).themes
 const defaults = { latte: { 'agent-colours': 'palette', 'agent-shapes': 'circle', 'latte-mug': 'on', 'latte-inside': 'pour' }, ...Object.fromEntries(['deep-forest', 'autumn', 'yosemite', 'mist-trail', 'foundry'].map(id => [id, { 'agent-shapes': id === 'foundry' ? 'rounded-square' : 'circle', 'face-content': 'mark' }])) }
 const custom = { id: 'texture', label: 'Texture', default: 'smooth', choices: [{ id: 'smooth', label: 'Smooth' }, { id: 'grain', label: 'Grain' }] }
 function page() {

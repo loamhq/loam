@@ -10,7 +10,7 @@ await mkdir(out,{recursive:true})
 for(const id of ['deep-forest','autumn','yosemite','mist-trail','foundry']) for(const width of [390,1440]) for(const mode of ['light','dark']) {
   const height=width===390?844:1000, cellWidth=width+320, cellHeight=height+40
   const layers=[]
-  const photo=await sharp(`public/themes/${id}/cover${id==='autumn'&&mode==='dark'?'-dark':''}.webp`).resize(300,200,{fit:'cover'}).toBuffer()
+  const photo=await sharp(`${id==="latte"||id==="plain"?"public/themes":"../plugins/_listed"}/${id}/cover${id==='autumn'&&mode==='dark'?'-dark':''}.webp`).resize(300,200,{fit:'cover'}).toBuffer()
   for(const [i,surface]of ['list','thread','appearance','controls'].entries()) {
     const x=i%2*cellWidth, y=Math.floor(i/2)*cellHeight
     const caption=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${cellWidth}" height="40"><text x="12" y="26" fill="#eee" font-size="16" font-family="sans-serif">${id} · ${mode} · ${width}px · ${surface}</text></svg>`)

@@ -2,9 +2,10 @@
 
 Settings opens on Appearance on desktop; Appearance is the first entry on the
 phone. Theme preview cards show each installed theme’s paper, ink, controls and
-display face. Latte & Newspaper (the default, id `latte`), Plain (the neutral
-core fallback), Deep Forest, Autumn, Yosemite, Mist Trail and Foundry share the
-picker with installed themes. The chosen theme’s named option group follows the
+display face. Latte & Newspaper (the default, id `latte`) and Plain (the
+neutral core fallback) are built in; Deep Forest, Autumn, Yosemite, Mist Trail
+and Foundry are first-party themes from the Market (since 0.2.5, 2026-11-18),
+and share the picker with any other installed theme. The chosen theme’s named option group follows the
 picker, then Mode and Size. Choices update immediately without a reload or
 palette stylesheet fetch. A new display face loads on first selection. Latte & Newspaper offers Agent colours (Palette or Latte tones) and Agent
 shapes (Each its own, Circle, Rounded square or Latte art). Circle is the
@@ -29,7 +30,8 @@ and options remain under `options.latte`. What a theme sets is in the
 [design system](design-system.md); the [captures and verification](evidence/theme-covers/README.md)
 include the host-validation handoff.
 
-The five additional first-party themes use the approved reading/control/primary
+The five first-party themes in the Market (their source is
+`plugins/_listed/<id>/` in this repository, published to `loamhq/plugins`) use the approved reading/control/primary
 roles in both modes, with photo-tinted paper, Figtree body and JetBrains Mono.
 Each offers **Agent faces: Signature, Each its own, Circle or Rounded
 square**. Circle is the default, except Foundry, which defaults to Rounded
@@ -49,7 +51,11 @@ Foundry tightens radius tokens and component corners. Their display faces are:
 | `foundry` | Foundry | Big Shoulders Display 800 |
 
 Latin and Latin-ext WOFF2 files and each SIL OFL license live inside the theme.
-`theme-fonts.js` registers a face only when that theme is active. Inactive cover
+`theme-fonts.js` registers a face only when that theme is active, from
+`/theme-fonts/<id>.css`: the app reads the installed theme's own `fonts.css`
+and serves it only if it is `@font-face` rules for font files beside it,
+rewritten to `/api/plugins/<id>/files/…` (`themeFontsCSS` in `src/themes.js`;
+any other theme with a `fonts.css` of that shape gets its faces the same way). Inactive cover
 captions use the declared serif fallback until their face has been activated;
 opening Appearance does not download five fonts. The saved active theme's font
 stylesheet enters the parser before first paint. No vendor is contacted by the app.
@@ -146,8 +152,8 @@ store and expose these **same base keys** through its persona settings tool:
 | `appearance.desktop.mode` | `light`, `dark`, `sun`, `system` | `system` |
 | `appearance.desktop.transition` | `fast`, `normal`, `long` | `normal` |
 | `appearance.desktop.size` | integer 75–150, step 5 | 100 |
-| `appearance.phone.theme` | installed theme ID (seven first-party themes above) | `latte` |
-| `appearance.desktop.theme` | installed theme ID (seven first-party themes above) | `latte` |
+| `appearance.phone.theme` | installed theme ID (Latte, Plain and any installed theme) | `latte` |
+| `appearance.desktop.theme` | installed theme ID (Latte, Plain and any installed theme) | `latte` |
 | `appearance.location` | shared rounded location object described below, or `null` | `null` |
 
 [Machine-readable registry handoff](appearance-settings.registry.json). This is

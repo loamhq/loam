@@ -5,6 +5,7 @@ import { themeImage, themeImageURL, themeImagePosition } from '../public/theme-i
 import { loadThemes } from '../src/themes.js'
 import { shippedPlugins } from '../src/shipped-plugins.js'
 import { appAgainst, closing, fakeBroker } from './harness.js'
+import { allRoots, readThemeCSS } from './listed-themes.mjs'
 
 test('theme cover metadata stays within the package and validates focal percentages', () => {
   assert.deepEqual(themeImage({}), {})
@@ -32,19 +33,20 @@ test('shipped, boot and host-selected catalogs retain cover metadata and stable 
   assert.equal(latte.image, 'cover.webp')
   const offline = await loadThemes(), hosted = await loadThemes(undefined, { rows: plugins })
   for (const { themes } of [offline, hosted]) {
-    assert.deepEqual(themes.map(t => t.id), ['latte', 'autumn', 'deep-forest', 'foundry', 'mist-trail', 'plain', 'yosemite'])
+    // Latte and Plain ship; the other first-party looks are plugins from the Market (2026-11-18).
+    assert.deepEqual(themes.map(t => t.id), ['latte', 'plain'])
     assert.equal(themes[0].image_position, '62% 45%')
     assert.equal(themeImageURL(themes[0]), '/themes/latte/cover.webp')
     assert.equal(themes.find(t => t.id === 'plain').image, undefined)
-    const autumn = themes.find(t => t.id === 'autumn')
-    assert.equal(themeImageURL(autumn, 'light'), '/themes/autumn/cover.webp')
-    assert.equal(themeImageURL(autumn, 'dark'), '/themes/autumn/cover-dark.webp')
-    assert.equal(themeImagePosition(autumn, 'dark'), '50% 42%')
   }
-  // An older host may warn about/omit the new optional cover fields.
-  const olderRows = plugins.map(({ image_dark, image_position_dark, ...row }) => row)
-  const older = await loadThemes(undefined, { rows: olderRows })
-  assert.equal(themeImageURL(older.themes.find(t => t.id === 'autumn'), 'dark'), '/themes/autumn/cover-dark.webp')
+  // A listed look installed in Yours keeps its light and dark covers, from its own folder.
+  const [listedAutumn] = (await loadThemes(await allRoots())).themes.filter(t => t.id === 'autumn')
+  const autumnRow = { ...listedAutumn, api: 0, kind: ['theme'], effective: true, layer: 'yours' }
+  const yours = await loadThemes(undefined, { rows: [...plugins, autumnRow], readTheme: async () => readThemeCSS('autumn') })
+  const autumn = yours.themes.find(t => t.id === 'autumn')
+  assert.equal(themeImageURL(autumn, 'light'), '/api/plugins/autumn/files/cover.webp')
+  assert.equal(themeImageURL(autumn, 'dark'), '/api/plugins/autumn/files/cover-dark.webp')
+  assert.equal(themeImagePosition(autumn, 'dark'), '50% 42%')
   const installed = { ...latte, id: 'example', layer: 'yours', image: 'assets/card.webp' }
   const custom = await loadThemes(undefined, { rows: [installed], readTheme: async () => '/* core tokens */' })
   assert.equal(themeImageURL(custom.themes.find(t => t.id === 'example')), '/api/plugins/example/files/assets/card.webp')

@@ -9,10 +9,10 @@ import { newThemes } from './new-themes.js'
 test('theme font generator reproduces committed CSS, weight descriptors, subset bytes and OFL notices offline', () => {
   const dir = mkdtempSync(join(tmpdir(), 'theme-fonts-'))
   try {
-    mkdirSync(join(dir, 'tools'))
-    for (const file of ['fetch-theme-fonts.js', 'new-themes.js']) writeFileSync(join(dir, 'tools', file), readFileSync(new URL(file, import.meta.url)))
+    mkdirSync(join(dir, 'app', 'tools'), { recursive: true })
+    for (const file of ['fetch-theme-fonts.js', 'new-themes.js']) writeFileSync(join(dir, 'app', 'tools', file), readFileSync(new URL(file, import.meta.url)))
     const fixtures = newThemes.map(({ id, font }) => {
-      const root = new URL(`../public/themes/${id}/`, import.meta.url)
+      const root = new URL(`../../plugins/_listed/${id}/`, import.meta.url)
       return { id, font, css: readFileSync(new URL('fonts.css', root), 'utf8'), license: readFileSync(new URL('OFL.txt', root), 'utf8'),
         bytes: Object.fromEntries(['display-latin.woff2', 'display-latin-ext.woff2'].map(file => [file, readFileSync(new URL(file, root)).toString('base64')])) }
     })
@@ -22,7 +22,7 @@ test('theme font generator reproduces committed CSS, weight descriptors, subset 
         const url = new URL(value);
         if (url.hostname === 'fonts.googleapis.com') {
           const family = url.searchParams.get('family').split(':')[0], f = fixtures.find(f => f.font === family);
-          return { ok: true, text: async () => f.css.replaceAll('/themes/', 'https://font-fixture.invalid/') };
+          return { ok: true, text: async () => f.css.replaceAll('url(', 'url(https://font-fixture.invalid/' + f.id + '/') };
         }
         if (url.hostname === 'font-fixture.invalid') {
           const [, id, file] = url.pathname.split('/'), f = fixtures.find(f => f.id === id);
@@ -32,9 +32,9 @@ test('theme font generator reproduces committed CSS, weight descriptors, subset 
         return { ok: true, text: async () => f.license };
       };
     `)
-    execFileSync(process.execPath, ['--import', join(dir, 'fetch-fixture.mjs'), join(dir, 'tools/fetch-theme-fonts.js')])
+    execFileSync(process.execPath, ['--import', join(dir, 'fetch-fixture.mjs'), join(dir, 'app/tools/fetch-theme-fonts.js')])
     for (const f of fixtures) {
-      const root = join(dir, 'public/themes', f.id)
+      const root = join(dir, 'plugins/_listed', f.id)
       assert.equal(readFileSync(join(root, 'fonts.css'), 'utf8'), f.css)
       assert.equal(readFileSync(join(root, 'OFL.txt'), 'utf8'), f.license)
       for (const [file, bytes] of Object.entries(f.bytes)) assert.equal(readFileSync(join(root, file)).toString('base64'), bytes)

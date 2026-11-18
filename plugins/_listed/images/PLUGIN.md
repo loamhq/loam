@@ -1,7 +1,7 @@
 ---
 id: images
 name: Images
-version: 1.0.0
+version: 1.1.0
 author: Loam contributors
 api: 0
 kind: [extension]
@@ -32,17 +32,22 @@ contributes:
       text: "You can make and change images with generate_image (the Images plugin): from words, or from pictures you pass as sources. It saves each into the vault as an ordinary file. Read the file to see what you made before you show it. To show an image in your reply, put ![a few words](its path) on a line of its own; up to three show in your message."
   settings.entry:
     - key: folder
-      label: "The vault folder new images are saved in"
+      label: Save new images in
+      note: A folder in your vault. An agent can still save one somewhere else when you ask.
       default: Images
     - key: backend
-      label: "Which service makes images: auto (OpenAI when its key is there, else Google), openai or google"
+      label: Made with
       choices: [auto, openai, google]
+      labels: {auto: "Whichever key you have", openai: OpenAI, google: Google Gemini}
+      note: With both keys in Accounts, OpenAI makes them unless you choose Google.
       default: auto
     - key: openai_model
-      label: "OpenAI's image model"
+      label: OpenAI model
+      advanced: true
       default: gpt-image-2
     - key: gemini_model
-      label: "Google's image model"
+      label: Google model
+      advanced: true
       default: gemini-3-pro-image-preview
   vault.folder:
     - setting: folder
@@ -56,8 +61,8 @@ ordinary PNG, JPEG or WebP file, in the **Images** folder unless the agent
 names another place, so it is yours like any other file.
 
 **It needs a key.** Add an OpenAI key or a Google (Gemini) key in
-Settings › Accounts; Images uses OpenAI when that key is there and Google
-otherwise, and a setting can name one. The images are billed to you by the
+Settings › Accounts. With both, OpenAI makes your images unless you choose
+Google under **Made with** in this plugin's settings. The images are billed to you by the
 service that makes them; a high-quality OpenAI image costs roughly 35 times
 a low-quality one, and each call's cost is in the agent's answer.
 
