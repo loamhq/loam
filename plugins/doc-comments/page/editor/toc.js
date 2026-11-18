@@ -165,7 +165,10 @@ export function createToc(opts) {
   function current() {
     if (!items.length) return -1
     if (hold >= 0 && hold < items.length) return hold
-    const y = scroll.scrollTop + 72
+    // At the very end the last sections can never reach the top: the line
+    // moves to the middle of the pane there, so the end reads as the end.
+    const atEnd = scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 2 && scroll.scrollTop > 0
+    const y = scroll.scrollTop + (atEnd ? scroll.clientHeight / 2 : 72)
     let c = -1
     for (let i = 0; i < items.length; i++) {
       if (headingTop(items[i].from) <= y) c = i
