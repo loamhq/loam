@@ -2505,6 +2505,13 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-list-row + .plugin-list-row { border-top:1px solid var(--paper-rule); }
 .plugin-list-item + .plugin-list-item { border-top:1px solid var(--paper-rule); }
 .plugin-icon { width:36px; height:36px; object-fit:contain; border-radius:10px; flex:none; }
+.plugin-icon-letter { display:inline-flex; align-items:center; justify-content:center; background:var(--paper-card); color:var(--paper-card-ink-2); font-family:var(--font-display); font-weight:700; font-size:17px; line-height:1; }
+.plugin-row .plugin-icon-letter { background:var(--paper-page); }
+/* A plugin's own settings (settings.entry): the label above its control, so a
+   sentence-long label never folds into a column a few pixels wide. */
+.plugin-entry-settings .plugin-entry { flex-direction:column; align-items:stretch; gap:8px; }
+.plugin-entry-settings .plugin-entry .setrow-title { white-space:normal; font-weight:500; font-size:14px; }
+.plugin-entry-settings .plugin-entry > .field-input { width:100%; }
 .plugin-service { padding:0 16px 14px; }
 .plugin-service-state { margin:0; font-size:12px; }
 .plugin-service-failure { display:flex; align-items:flex-start; gap:12px; margin-top:8px; }
@@ -2831,3 +2838,7 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
 .say .bubble-files:has(.message-image) { max-width:560px; }
 .say .bubble-files:has(.message-image:only-child) { max-width:420px; }
 @media (max-width: 480px) { .image-view-save span { display:none; } .image-view-save { padding:0; } }
+
+/* A heading the page focuses when a sheet opens (tabindex -1, for screen
+   readers) draws no box: nobody can tab to it, so there is nothing to show. */
+:is(.sheet-title, [role="heading"], h1, h2, h3)[tabindex="-1"]:focus { outline:none; box-shadow:none; }

@@ -91,7 +91,17 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         button(st.restarting === row.id ? 'Restarting…' : 'Restart', () => restart(row), 'pillbtn content-mark', { disabled: st.restarting !== null, 'aria-label': `Restart ${row.name || row.id}` })) : null,
       st.serviceError?.id === row.id ? notice(st.serviceError.message) : null)
   }
-  const pluginIcon = row => row.icon && row.files ? h('img', { class: 'plugin-icon', src: `${row.files.replace(/\/$/, '')}/${row.icon.replace(/^\//, '')}`, alt: '', loading: 'lazy' }) : null
+  // A plugin's picture (2026-11-18): its icon through the page's own files
+  // route (the row's `files` is the broker's /v1 path, which the page cannot
+  // load), and a calm letter tile when it has none or the file fails.
+  const letterTile = row => h('span', { class: 'plugin-icon plugin-icon-letter', 'aria-hidden': 'true', text: (row.name || row.id || '?').trim().charAt(0).toUpperCase() })
+  const pluginIcon = row => {
+    if (row.kind?.includes?.('theme') && !row.icon) return null
+    if (!row.icon) return letterTile(row)
+    const img = h('img', { class: 'plugin-icon', src: `/api/plugins/${encodeURIComponent(row.id)}/files/${row.icon.replace(/^\//, '').split('/').map(encodeURIComponent).join('/')}`, alt: '', loading: 'lazy',
+      onerror: e => { const tile = letterTile(row); e.currentTarget?.replaceWith?.(tile) } })
+    return img
+  }
   function rowView(row) {
     row = { ...row, overrides: [...new Set([...(row.overrides ?? []), ...(host.registry?.overrides(row.id) ?? [])])] }
     const failed = loader.st.failures.get(row.id), broken = row.broken || failed

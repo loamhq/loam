@@ -3,6 +3,9 @@
 Each release's notes are written for the people who run Loam, in
 `docs/releases/<version>.md`. The app shows them when it offers an update.
 
+- [0.2.4](docs/releases/0.2.4.md), 2026-11-18: a plugin's icon and its own
+  settings show properly in Settings › Plugins, and opening a sheet no longer
+  draws a box around its heading.
 - [0.2.3](docs/releases/0.2.3.md), 2026-11-18: API keys have one home,
   Settings › Accounts, and a plugin is given only the keys it asked for.
   Images, a plugin for making pictures; an agent's reply can show up to
