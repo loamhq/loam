@@ -81,7 +81,7 @@
   background:var(--paper-hover); color:var(--paper-ink-3);
 }
 /* Every tier has a high-contrast paper focus ring, including plugin controls. */
-:root :is(button,a,select,summary,[role="button"],[tabindex]):not(.nav *,.rail *,.accounttile):focus-visible { outline:2px solid var(--paper-ink); outline-offset:2px; }
+:root :is(button,a,select,summary,[role="button"],[tabindex]:not([tabindex="-1"])):not(.nav *,.rail *,.accounttile):focus-visible { outline:2px solid var(--paper-ink); outline-offset:2px; }
 
 /* Repeated preference forms have no single main action at rest. Only the form
  * being completed promotes its save action. Other saves remain Newspaper. */

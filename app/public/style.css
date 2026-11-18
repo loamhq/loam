@@ -2830,6 +2830,7 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
 .say .bubble-files { margin:10px 0 2px; }
 .say .bubble-files:has(.message-image) { max-width:560px; }
 .say .bubble-files:has(.message-image:only-child) { max-width:420px; }
+.say .message-image img { aspect-ratio:auto 4 / 3; max-height:320px; object-fit:contain; object-position:left top; }
 @media (max-width: 480px) { .image-view-save span { display:none; } .image-view-save { padding:0; } }
 
 /* A heading the page focuses when a sheet opens (tabindex -1, for screen
