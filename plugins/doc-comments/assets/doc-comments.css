@@ -190,7 +190,7 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 .dc .dc-pre { font-family: var(--dc-mono); font-size: 13.5px; line-height: 1.65; background: var(--dc-well); padding-left: 16px !important; padding-right: 16px !important; }
 .dc .dc-pre-first { border-top-left-radius: var(--dc-r-md); border-top-right-radius: var(--dc-r-md); padding-top: 10px !important; }
 .dc .dc-pre-last { border-bottom-left-radius: var(--dc-r-md); border-bottom-right-radius: var(--dc-r-md); padding-bottom: 10px !important; }
-.dc .dc-pre-fence { color: var(--dc-ink3); font-size: 12px; }
+.dc .dc-pre-fence { color: var(--paper-card-ink-3, var(--dc-ink3)); font-size: 12px; }
 .dc .dc-props { margin: 0; padding: 0 0 22px; font-size: 13px; color: var(--dc-ink3); }
 .dc .dc-props-head { display: inline-flex !important; gap: 10px; align-items: baseline; padding: 4px 8px !important; margin-left: -8px !important; border-radius: var(--dc-r-sm); max-width: 100%; transition: background .15s; }
 .dc .dc-props-head:hover { background: var(--dc-hover); }
@@ -625,7 +625,7 @@ body:has(.dc-dlg-scrim.on) .dc-sharebtn .dc-sf { box-shadow: 0 0 0 2px var(--pap
 }
 
 /* who came in by a link, and what is new since the owner looked */
-.dc-via { font-size: 11px; color: var(--dc-ink3); background: var(--dc-well); padding: 1px 7px; border-radius: var(--dc-pill); white-space: nowrap; }
+.dc-via { font-size: 11px; color: var(--paper-card-ink-3, var(--dc-ink3)); background: var(--dc-well); padding: 1px 7px; border-radius: var(--dc-pill); white-space: nowrap; }
 .dc-new { width: 6px; height: 6px; border-radius: 50%; background: var(--dc-accent); flex: none; }
 .dc.phone .dc-titlebar span { display: none; }
 
