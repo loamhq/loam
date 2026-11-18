@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """lib/loam_marketplace.py, bin/loam-market and the marketplace repository's
-own build.py (marketplace/ here) (2026-11-17).
+own build.py (docs/marketplace/ here) (2026-11-17).
 
 The list is served by a local HTTP server, so every answer a host can give
 is real: a list, an empty one, none at all (404), a server error, not JSON.
@@ -187,7 +187,7 @@ try:
 
     # -- the marketplace repository's build.py -------------------------------------
     repo = TMP / "marketplace"
-    shutil.copytree(ROOT / "marketplace", repo)
+    shutil.copytree(ROOT / "docs" / "marketplace", repo)
     (repo / "listings" / "pet.json").write_text(json.dumps(req["entry"]))
     (repo / "listings" / "dusk.json").write_text(json.dumps(entry("dusk", kind="theme")))
     built = subprocess.run([sys.executable, str(repo / "build.py")], capture_output=True,
@@ -209,7 +209,7 @@ try:
         check(f"--check refuses: {why}", (res.returncode, why in res.stderr), (1, True))
         (repo / "listings" / name).unlink()
     check("the shipped list is the empty one",
-          json.loads((ROOT / "marketplace" / "list.json").read_text()),
+          json.loads((ROOT / "docs" / "marketplace" / "list.json").read_text()),
           {"version": 1, "plugins": []})
 
     # -- sharing by link ---------------------------------------------------------

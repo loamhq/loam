@@ -1027,7 +1027,7 @@ fork and the pull request. Nothing is sent from the box, and the owner's
 press is the yes.
 
 The repository's content (README with the review bar, the empty list,
-`build.py`, the workflow, the pull request template) is `marketplace/` in
+`build.py`, the workflow, the pull request template) is `docs/marketplace/` in
 this repository, until the repository exists.
 
 ### Sharing by link: `loam market share`

@@ -9,7 +9,7 @@ installs from it through the same two calls as any link
 **The list** is ``list.json`` at ``marketplace.list`` in loam.toml (default
 ``DEFAULT_LIST``; an empty string turns the section off). Its format, and the
 repository it comes from, are in docs/plugins.md, "The marketplace";
-``marketplace/`` in this repository is that repository's content.
+``docs/marketplace/`` in this repository is that repository's content.
 
 **Reading it** never errors at the page. A list that is not there (404: not
 published yet) or that lists nothing is ``state: "empty"``; one that cannot
