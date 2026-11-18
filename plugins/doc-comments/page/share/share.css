@@ -5,7 +5,7 @@
 /* The share page: the editor alone, a slim bar, and the gate. It stands
    outside the app, so it carries Latte's tokens, light and dark, copied
    exactly from core (app/public/tokens.css and app/public/themes/latte/
-   theme.css): `test/test_share_tokens.py` fails when the two disagree, so a
+   theme.css): `test/test_look.py` fails when the two disagree, so a
    change to Latte reaches the visitor's page too. Everything below reads
    these tokens, as the app's own page does. */
 :root {
