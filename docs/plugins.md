@@ -54,6 +54,10 @@ image_position_dark: 50% 30%  # dark mode's crop (falls back to image_position)
 server:                     # how its server starts (only with server/; 2026-11-13)
   run: python3 server/main.py
 icon: assets/icon.svg       # its picture in Apps and Settings > Plugins (2026-11-13)
+keys:                       # the providers whose API keys it uses (2026-11-18)
+  - provider: openai          # a provider Loam knows: openai, google, hetzner, cloudflare, modal
+    why: makes the pet's portrait   # shown before install, beside touches
+    optional: true            # it works without this one (another key will do)
 agent_settings:             # what it keeps for each agent, on the agent's profile
   - id: voice
     label: Voice
@@ -358,6 +362,7 @@ drift check):
 | `LOAM_PLUGIN_SETTINGS`, `LOAM_PLUGIN_SETTINGS_DIR` | its settings file, and the folder holding it and `values.json` (`settings.entry`) |
 | `LOAM_PLUGIN_DATA` | `_data/<id>/` in Yours: its data, in open formats, committed and backed up with Yours |
 | `LOAM_PLUGIN_PRIVATE` | its machine-local folder, `<state>/plugins/private/<id>/` (0700, since 2026-11-14): credentials, caches, binaries, operational state. Never in Yours, so never in a repository or its backup. A plugin's own secrets go in its `secrets.env` there |
+| `LOAM_PLUGIN_KEYS` | (2026-11-18) for a plugin that declares `keys:`: the file of its providers' keys, resolved ("Keys", above). A path, never a value |
 | `LOAM_PLUGIN_SECRETS` | for a tool that declares `secrets: [NAME, ...]`: the names it may read from its `secrets.env`. Names, never values, so no rendered file carries a secret |
 | `LOAM_LIB` | Loam's own `lib/`, for a plugin that chooses to import it. **No promise is made about anything in it**: an update may change any of it, and a marketplace plugin should not use it |
 
@@ -389,11 +394,110 @@ core's, and a plugin reaches it as the page does.
 
 **The declaration.** What `contributes:` adds is computed into the
 declaration shown before install (`touches.agents`, `.schedule`, `.settings`,
-`.engineer_env`, `.engineer_job`, `.secrets`, `.drift_check`, `.inbound`), so a plugin cannot
+`.engineer_env`, `.engineer_job`, `.secrets`, `.drift_check`, `.inbound`, and `.keys` from
+`keys:`), so a plugin cannot
 declare less than it does. A later version that adds a tool, a lane, a timer
 or a secret asks again, as a new network host does. Side-loaded plugins get
 the same display and no rules: what Loam stamps is held to the principles,
 and nothing else is.
+
+## Keys: API keys by provider, entered once (2026-11-18)
+
+The owner, m444 and m446 (2026-11-17): **Settings › Accounts holds API keys
+by provider**, entered once; a plugin says which providers' keys it uses; a
+plugin uses the shared key of each, with "use a different key" as an
+override for that plugin alone; and a key is handed only to the plugins that
+declared its provider. The code is `lib/loam_keys.py`; the tests are
+`tests/test_keys.py`.
+
+**`keys:`** in `PLUGIN.md` (top level, not under `contributes`) lists the
+providers, at most 8:
+
+```yaml
+keys:
+  - provider: google                  # a provider Loam knows
+    why: Transcribes and tidies what you record
+  - provider: replicate               # one Loam does not know: say its name and fields
+    name: Replicate
+    why: runs the upscaler
+    optional: true
+    fields: [{name: REPLICATE_API_TOKEN, label: API token}]   # 1 to 4, NAMES_IN_CAPITALS
+```
+
+| Provider | Fields | Checked by |
+|---|---|---|
+| `openai` | `OPENAI_API_KEY` | listing its models |
+| `google` | `GEMINI_API_KEY` | listing its models |
+| `hetzner` | `HCLOUD_TOKEN` | reading one location |
+| `cloudflare` | `CLOUDFLARE_API_KEY`, `CLOUDFLARE_EMAIL` (optional: a global key needs it, a token does not) | `/user` or `/user/tokens/verify` |
+| `modal` | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | not checked |
+
+A provider Loam knows takes Loam's fields whatever the manifest says (a
+warning). Another must name itself and its fields, and its key is kept as
+given. `optional: true` says the plugin works without that provider: Images
+declares OpenAI and Google, each optional, and uses whichever is there.
+Accounts shows OpenAI, Google and Hetzner always, and any other provider
+once a plugin in either layer declares it or a key of it is saved.
+
+**The declaration.** `keys:` is shown before install as `touches.keys`
+(`[{provider, name, why, optional?}]`), and a later version that declares a
+new provider asks again, as a new network host does. The page says each as
+"Uses your OpenAI key: …".
+
+**Where a key comes from**, for each provider a plugin declared, first found:
+
+1. **its own key**, set in Accounts under that provider ("use a different
+   key"), kept in its private `secrets.env`;
+2. **the shared key**, saved in Accounts: `<state>/plugins/keys/<provider>.env`
+   (0600, in a 0700 folder);
+3. **the box's own secrets file** (`paths.secrets_env`), as before shared
+   keys, so a key an install already set there keeps working. Accounts shows
+   it as "Set on this server" and cannot forget it.
+
+A key a plugin kept of its own before shared keys becomes the shared one
+when that provider has none yet (`adopt`, run with the five-minute reconcile
+and when Accounts is read); one equal to the shared key is dropped; a
+different one stays that plugin's own.
+
+**What a plugin's process reads**: `LOAM_PLUGIN_KEYS`, the path of
+`<private>/keys.env`, which Loam writes with every field of every provider
+the plugin declared, resolved as above, and nothing else. It is written
+again on every change (a key saved or forgotten, a plugin's own key, a
+plugin installed, switched or removed, and the five-minute reconcile), and
+removed when the plugin declares nothing. A process not given the variable
+finds the same file at `$LOAM_PLUGIN_PRIVATE/keys.env`. The app's own server
+asks the broker for a field (`GET /v1/plugins/<id>/secrets/<name>/value`,
+which the page's relay never passes), resolved the same way.
+
+**Nothing else is handed over.** A secret name a plugin never declared (by
+`keys:`, `settings.secret`, a tool's `secrets` or an `engineer.env` secret)
+is given to it by no route; until 2026-11-18 any name in the box's secrets
+file was. Plugins run as the install's user, so this is what Loam hands a
+plugin, not a wall around it.
+
+**Who changes them**: the owner in Settings › Accounts, and any persona in a
+conversation through `bin/settings` (`keys.set`, `keys.forget`, `keys.check`,
+`keys.own`, `keys.shared`; the owner, 2026-11-10: every setting is an
+agent's to change too). No route answers a whole value: a listing carries
+`set`, `source` (`saved` or `box`), the last check, the last four characters
+of a secret field, a non-secret field whole (an account email), and the
+plugins that use it.
+
+| Route | What |
+|---|---|
+| `GET /v1/keys` | every provider worth drawing: `{providers: [{id, name, where, checks, fields, set, source, shown, checked, refused, plugins: [{id, name, on, why, optional, uses: "shared"\|"own", has_key, checked}]}]}` |
+| `GET /v1/keys/<provider>` | one, the same shape; 404 for a provider nobody knows |
+| `PUT /v1/keys/<provider>` | save the shared key: `{"value": "…"}` for a provider of one field, `{"values": {"NAME": "…"}}` for any; a missing field keeps what was saved (an email kept while the key is replaced). Checked first: 422 with the provider's sentence keeps nothing |
+| `DELETE /v1/keys/<provider>` | forget the shared key; 404 when none is saved (and says so when the box's own file still serves one) |
+| `POST /v1/keys/<provider>/check` | check the key in force again |
+| `PUT /v1/keys/<provider>/plugins/<id>` | give one plugin its own key of that provider, checked the same way; 409 when it did not declare the provider |
+| `DELETE /v1/keys/<provider>/plugins/<id>` | put it back on the shared key |
+
+Every write takes `by` like any other setting route.
+
+**`settings.secret` stays** for a key that belongs to one plugin and no
+provider (a plugin's own service), pasted on the plugin's page. Read aloud
+and dictation moved from it to `keys: [google]` on 2026-11-18.
 
 ## The installed list: `installed.json`
 

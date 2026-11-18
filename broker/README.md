@@ -2963,6 +2963,18 @@ whether a prompt happens. Two things worth knowing before writing a client:
 A person hands a file to a conversation; the persona reads it, and sees it if
 it is a picture. Added 2026-09-21, for the app's composer.
 
+**An agent's reply can carry images too** (2026-11-18): `![a few words](path)`
+in what it says, a file in the vault (absolute, or relative to the vault)
+or in the workspaces, comes off the text and onto the message as
+`attachments`, at most three: `{"path": <relative to its root>, "root":
+"vault"|"spaces", "name", "type", "size", "alt"?}`. Every engine can, being
+words; the turn prompt says so, and `bin/thread post` does the same. A
+reference to anything else (a web address, a missing file, the
+conversations folder, a fourth image) stays in the text as written. The
+page draws them as it draws the owner's, from the Files download route of
+their `root`, and a tap opens one full size. `lib/loam_threads.py`
+(`reply_images`), `tests/test_reply_images.py`.
+
 **Upload, then send.** Two requests, never one:
 
 ```
@@ -3965,6 +3977,18 @@ posts is the app's bot. The app and its installation both held
 `pull_requests: write` and `issues: write` on 2026-10-09 (`GET /app` and
 `GET /app/installations` with the app JWT). Tests:
 `tests/test_pr_update.py`.
+
+## Shared keys: Settings › Accounts (2026-11-18)
+
+API keys by provider, entered once, handed only to the plugins that
+declared the provider in `keys:`. Every rule, the routes and their answers
+are docs/plugins.md, "Keys"; the code is `lib/loam_keys.py`, the tests
+`tests/test_keys.py`. `GET /v1/keys`, `GET|PUT|DELETE /v1/keys/<provider>`,
+`POST /v1/keys/<provider>/check`, `PUT|DELETE /v1/keys/<provider>/plugins/<id>`.
+Unlike the per-plugin routes below, a `by` is accepted and attributed: a
+key is a setting, every setting is an agent's to change too (the owner,
+2026-11-10), and no route answers a value. The `/value` route below resolves
+a field of a declared provider the same way, for the app's own server.
 
 ## A plugin's keys, and daily notes (2026-11-14)
 
