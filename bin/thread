@@ -11,7 +11,10 @@
 The author is ``LOAM_AGENT`` (or ``--by``). ``--bulletin`` marks a wake
 bulletin ("woke"), which belongs in General, short, and only when there is
 something worth saying. A post is appended to the thread's record in the
-vault; it gives nobody a turn -- an @mention here is text. Boards are edited
+vault, then told to the broker (0.2.1): it shows in an open page at once,
+and an @mention wakes the member it names as a reply's would, under the
+same cap on turns between agents (until 0.2.1 a post gave nobody a turn).
+A bulletin gives no turn. Boards are edited
 as files. ``rename`` (2026-11-10) is the app's own rename -- the
 details page's PATCH -- through ``loam_threads.update``: the record's
 ``title:``, its file name, and the board's file and ``board:`` key move
@@ -40,6 +43,32 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_threads as threads  # noqa: E402
+
+
+def tell_broker(thread_id: str, message_id: str, by: str) -> dict | None:
+    """Tell the broker a post is in the record (0.2.1): it goes on the
+    thread's stream, and its @mentions wake the members named as a reply's
+    do (`ThreadEngine.posted`, under the agents' chain cap). None when the
+    broker did not answer: the post stands, and gives nobody a turn."""
+    import http.client  # noqa: PLC0415
+    try:
+        import loam_broker as cfg  # noqa: PLC0415
+        conn = http.client.HTTPConnection(cfg.BIND_ADDR, cfg.PORT, timeout=15)
+        conn.request("POST", f"/v1/threads/{thread_id}/posted",
+                     body=json.dumps({"message": message_id, "by": by}),
+                     headers={"Authorization": f"Bearer {cfg.read_token()}",
+                              "Content-Type": "application/json"})
+        resp = conn.getresponse()
+        body = json.loads(resp.read() or b"{}")
+        if resp.status != 200:
+            print(f"thread: the broker answered {resp.status} for the post: "
+                  f"{body.get('error') or body}", file=sys.stderr)
+            return None
+        return body if isinstance(body, dict) else None
+    except (OSError, ValueError) as exc:
+        print(f"thread: the broker was not told of the post ({exc}); it gives "
+              f"nobody a turn", file=sys.stderr)
+        return None
 
 
 def main() -> int:
@@ -127,7 +156,9 @@ def main() -> int:
         msg = threads.append(args.thread, by, text,
                              kind="bulletin" if args.bulletin else "message",
                              **({"reply_to": reply_to} if reply_to else {}))
-        print(json.dumps({"ok": True, "thread": args.thread, "message": msg}))
+        told = None if args.bulletin else tell_broker(args.thread, msg["id"], by)
+        print(json.dumps({"ok": True, "thread": args.thread, "message": msg,
+                          **({"woke": told.get("woke", [])} if told else {})}))
         return 0
     except threads.ThreadError as exc:
         print(json.dumps({"ok": False, "error": exc.message}))

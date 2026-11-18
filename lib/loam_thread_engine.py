@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 
 import loam_agents
@@ -67,6 +68,12 @@ import loam_waiters
 # the wait is said in the thread now, and a seat is only ever this short when
 # every session on the box is mid-turn or asking.
 CAP_WAIT_S = 300
+# System turns (2026-11-17): a notice's key is remembered this long, and the
+# same line for the same agent in one thread is not given again within
+# SYSTEM_REPEAT_S, under any key. The record is in the threads' state.
+SYSTEM_TURNS = "system-turns.json"
+SYSTEM_KEEP_S = 30 * 86400
+SYSTEM_REPEAT_S = 3600
 CAP_RETRY_S = 5
 # A turn has no clock (2026-11-10, the owner: "I don't want any limitations at
 # all"). `TURN_TIMEOUT_S` (1800) ended the watch on a turn at 30 minutes and
@@ -465,6 +472,7 @@ class ThreadEngine:
 
     def __init__(self, broker) -> None:
         self.broker = broker
+        self._system_turns: dict | None = None   # read on first use
         self.queues: dict[tuple[str, str], asyncio.Queue] = {}
         self.workers: dict[tuple[str, str], asyncio.Task] = {}
         self.listeners: dict[str, set[asyncio.Queue]] = {}
@@ -1718,6 +1726,63 @@ class ThreadEngine:
         self.publish(thread_id, {"type": "message.done", "message": line})
         return line
 
+    # -- system turns: once each, never in a loop (2026-11-17) ---------------
+    #
+    # A notice the runtime leaves (an update's, a job's its waiting call could
+    # not carry) posts a Loam line and gives an agent a turn on its own: no
+    # person is there to notice a repeat, and each turn is a paid one. The
+    # 0.2.0 walk found an update notice its source could not remove posted
+    # and given a turn every 30 s without end. Whatever the source does, the
+    # engine now delivers one notice once (its ``key``, kept on disk across
+    # restarts), and the same line for the same agent in the same thread not
+    # again within SYSTEM_REPEAT_S, under any key.
+
+    def _system_seen(self) -> dict:
+        if self._system_turns is None:
+            try:
+                self._system_turns = json.loads(
+                    (threads.STATE / SYSTEM_TURNS).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                self._system_turns = {}
+            if not isinstance(self._system_turns, dict):
+                self._system_turns = {}
+            self._system_turns.setdefault("keys", {})
+            self._system_turns.setdefault("lines", {})
+        return self._system_turns
+
+    def system_turn_allowed(self, key: str, tid: str, persona: str,
+                            line: str) -> str | None:
+        """None when this notice may post its line and give its turn, and
+        then it is recorded as given; otherwise why not (``already
+        delivered``, ``repeat``), and nothing is posted."""
+        seen = self._system_seen()
+        now = time.time()
+        for bucket, keep in (("keys", SYSTEM_KEEP_S), ("lines", SYSTEM_REPEAT_S)):
+            seen[bucket] = {k: t for k, t in seen[bucket].items()
+                            if isinstance(t, (int, float)) and now - t < keep}
+        same = f"{tid} {persona} {line}"
+        if key in seen["keys"]:
+            return "already delivered"
+        if same in seen["lines"]:
+            seen["keys"][key] = now
+            self._system_save()
+            steps.log(f"{tid} {persona}: notice {key} repeats a line posted "
+                      f"{int(now - seen['lines'][same])} s ago; not posted, no turn")
+            return "repeat"
+        seen["keys"][key], seen["lines"][same] = now, now
+        self._system_save()
+        return None
+
+    def _system_save(self) -> None:
+        try:
+            path = threads.STATE / SYSTEM_TURNS
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f".{path.name}.{os.getpid()}")
+            tmp.write_text(json.dumps(self._system_turns), encoding="utf-8")
+            tmp.replace(path)
+        except OSError as exc:  # kept in memory still: once per process
+            steps.log(f"system turns: the record could not be written ({exc})")
+
     def delivery_follows(self, turn: Turn) -> bool:
         """A turn the broker's restart cut off while its persona waited on an
         engineer job (2026-11-12): the job's delivery line will say what
@@ -1754,6 +1819,9 @@ class ThreadEngine:
             return "thread gone"
         if persona not in meta["members"]:
             return "not a member"
+        why = self.system_turn_allowed(f"job:{record.get('job')}", tid, persona, text)
+        if why:
+            return why
         line = self.system_line(tid, text)
         steps.log(f"{tid} {persona}: job {record.get('job')} finished after its "
                   f"waiting call ended; one line posted as {line.get('id')} and a "
@@ -1782,7 +1850,11 @@ class ThreadEngine:
             return "no agent"
         if persona not in meta["members"]:
             return "not a member"
-        line = self.system_line(tid, note.get("line") or "Loam's update.")
+        text = note.get("line") or "Loam's update."
+        why = self.system_turn_allowed(f"update:{note.get('id')}", tid, persona, text)
+        if why:
+            return why
+        line = self.system_line(tid, text)
         steps.log(f"{tid} {persona}: update notice {note.get('id')} "
                   f"({note.get('kind')}) posted as {line.get('id')}; a turn "
                   f"given to say it")
@@ -1941,6 +2013,50 @@ class ThreadEngine:
             steps.write(turn.thread_id, steps.entry(msg, turn.thread_id, session.id,
                                                     chunk, ended="late"))
             self.publish(turn.thread_id, {"type": "message.done", "message": msg})
+
+    def posted(self, thread_id: str, message_id: str, by: str) -> dict:
+        """A persona's message posted outside a turn's reply (``bin/thread
+        post``, the agents' ``thread`` tool), told to the broker after it is
+        in the record (0.2.1). Until then such a post gave nobody a turn: on
+        2026-11-17 one agent, from another thread, posted "@<other> …"
+        into a thread both were members of, and the other answered only
+        when the owner next wrote. Now the post is on the stream at once (it showed only
+        after a reload) and its mentions wake members as a reply's do,
+        under the same chain cap: the chain is the poster's turn in this
+        thread when it has one, or the agents' posts since the owner last
+        wrote here, whichever is longer. Each message is taken once.
+        Answers who was woken."""
+        meta, msgs, _ = threads.read(thread_id)
+        msg = next((m for m in msgs if m.get("id") == message_id), None)
+        if msg is None:
+            raise threads.ThreadError(404, f"{thread_id} has no message {message_id}")
+        if msg.get("author") != by or by not in meta["members"]:
+            raise threads.ThreadError(400, f"{message_id} is not {by}'s post")
+        seen = self.__dict__.setdefault("_posted", set())
+        if (thread_id, message_id) in seen:
+            return {"woke": [], "already": True}
+        seen.add((thread_id, message_id))
+        self.publish(thread_id, {"type": "message.done", "message": msg})
+        text = msg.get("text") or ""
+        live = self.turn_live.get((thread_id, by))
+        since = 0
+        for m in reversed(msgs):
+            if threads.is_owner(m.get("author")):
+                break
+            # Posts alone (a reply carries its `engine`): replies are
+            # bounded by their turns' own chain, and two agents posting at
+            # each other from other threads are bounded by this count.
+            if m.get("kind") == "message" and not m.get("engine") \
+                    and m.get("author") in meta["members"]:
+                since += 1
+        chain = max(live.chain if live else 0, since - 1)
+        named = [p for p in threads.mentions(text) if p != by]
+        self.agent_mentions(Turn(thread_id, by, chain, "post"), meta, text)
+        woke = [p for p in named if chain + 1 <= threads.AGENT_CHAIN_CAP]
+        steps.log(f"{thread_id} {by}: post {message_id} outside a turn; "
+                  f"{'woke ' + ', '.join(woke) if woke else 'no turn given'}"
+                  f"{' (chain cap)' if named and not woke else ''}")
+        return {"woke": woke}
 
     def agent_mentions(self, turn: Turn, meta: dict, text: str) -> None:
         # `@all` from a persona is plain text: no fan-out (2026-11-10), so two

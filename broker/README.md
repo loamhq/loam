@@ -5423,7 +5423,11 @@ again as it ends, since Codex names its thread once the session is open.
 
 Agent-to-agent mentions are capped at `AGENT_CHAIN_CAP` (lib/loam_threads.py)
 turns since the owner last wrote. Agents post with `bin/thread post` or
-`mcp__engineer__thread`; a post gives nobody a turn. They rename one with
+`mcp__engineer__thread`. Since 0.2.1 a post is told to the broker
+(`POST /v1/threads/<id>/posted {"message", "by"}`, `ThreadEngine.posted`):
+it goes on the thread's stream at once, and its @mentions wake members as a
+reply's do, under the same cap, counting the agents' posts since the owner
+last wrote; before, a post gave nobody a turn. They rename one with
 `bin/thread rename <id> <title>` (the tool's `rename` action, 2026-11-10),
 which is the details page's PATCH path, `loam_threads.update(title=)`: the
 record's `title:` and file name and the board's file and `board:` key move

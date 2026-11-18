@@ -6019,6 +6019,8 @@ class Server:
                             threads_rec.display(record.get("persona") or "")),
                         loam_waiters.handoff_text(record, title))
                     loam_waiters.done(record, outcome)
+                    if outcome == "already delivered":
+                        continue  # said when it was; a record that would not go
                     print(f"deliver: job {record.get('job')} -> "
                           f"{record.get('thread') or 'no thread'} "
                           f"{record.get('persona')}: {outcome}",
@@ -6032,7 +6034,9 @@ class Server:
             try:
                 for note in await asyncio.to_thread(loam_update.owed_notices):
                     outcome = self.threads.deliver_note(note)  # on the loop, as deliver_job
-                    loam_update.notice_done(note, outcome)
+                    loam_update.notice_done(note, outcome)  # says a stuck one once
+                    if outcome == "already delivered":
+                        continue
                     print(f"deliver: update notice {note.get('id')} "
                           f"({note.get('kind')}): {outcome}", file=sys.stderr,
                           flush=True)
@@ -6448,6 +6452,21 @@ class Server:
                                      attachments=carried, model=model,
                                      reply_to=reply_to)
             writer.write(response(200, {"accepted": True, "message": msg}))
+            await writer.drain()
+            return
+        if rest == ["posted"] and method == "POST":
+            # A persona's post outside a turn (bin/thread post), told here
+            # once it is in the record (0.2.1): on the stream at once, and
+            # its @mentions wake members as a reply's do.
+            by = str(payload.get("by") or "").strip().lower()
+            mid = str(payload.get("message") or "").strip()
+            if not by or not mid:
+                raise BrokerError(400, "the body is {\"message\": id, \"by\": persona}")
+            try:
+                body = engine.posted(thread_id, mid, by)
+            except threads_rec.ThreadError as exc:
+                raise BrokerError(exc.status, str(exc))
+            writer.write(response(200, body))
             await writer.drain()
             return
         if rest == ["board"] and method in ("GET", "PUT"):
