@@ -2754,3 +2754,197 @@ test('a doc without notes: a note arriving while keys go down moves the text asi
   assert.deepEqual(page.errors, [])
   await page.done()
 })
+
+// -- the table of contents (page/editor/toc.js) --------------------------------
+
+const TOC_PARA = 'Words of a paragraph long enough to wrap onto a second line in the column, so the doc has some length to it and the headings are spread out the way a real document spreads them.'
+function tocDoc(sections = 6, subs = 2) {
+  let t = '---\ntags: [toc]\n---\n\n# The doc title\n\n' + TOC_PARA + '\n\n'
+  for (let i = 1; i <= sections; i++) {
+    t += `## Section ${i}\n\n${TOC_PARA}\n\n${TOC_PARA}\n\n`
+    for (let j = 1; j <= subs; j++) t += `### Part ${i}.${j}\n\n${TOC_PARA}\n\n`
+  }
+  return t + '```\n## not a heading, in code\n```\n\n> ## not one in a quote either\n'
+}
+const tocState = (page) => page.evaluate(() => ({
+  rail: Boolean(document.querySelector('.dc-toc.on')),
+  ticks: [...document.querySelectorAll('.dc-ticks i')].map(i => i.className),
+  items: [...document.querySelectorAll('.dc-toccard .dc-tocitem')].map(b => b.textContent),
+  on: document.querySelector('.dc-toccard .dc-tocitem.on')?.textContent || null,
+  open: Boolean(document.querySelector('.dc-toc.open')),
+  title: document.querySelector('.dc-secbtn') ? (document.querySelector('.dc-secbtn.insec') ? document.querySelector('.dc-secname').textContent : document.querySelector('.dc-secdoc').textContent) : null,
+}))
+// Where a heading's line sits below the top of the pane, in page pixels.
+const headingAt = (page, text) => page.evaluate((text) => {
+  const l = [...document.querySelectorAll('.cm-line')].find(x => x.textContent.replace(/^#+\s*/, '').trim() === text)
+  if (!l) return null
+  const z = document.querySelector('.dc').getBoundingClientRect().width / document.querySelector('.dc').offsetWidth
+  return (l.getBoundingClientRect().top - document.querySelector('.dc-scroll').getBoundingClientRect().top) / z
+}, text)
+
+test('contents on a desktop: a tick per heading below the title, code and quotes not counted; hover opens the titles; a click goes there', { skip }, async () => {
+  await start()
+  const p = await newDoc(tocDoc())
+  for (const zoom of [1, 0.9]) {
+    const page = await open({ doc: p, w: 1440, h: 900, zoom })
+    let s = await tocState(page)
+    assert.ok(s.rail, 'the ticks are there')
+    assert.equal(s.ticks.length, 18, 'six sections and twelve parts; not the title, the code or the quote')
+    assert.equal(s.ticks.filter(c => c.includes('d0')).length, 6)
+    assert.equal(s.on, null, 'above the first heading nothing is current')
+    // the ticks sit at the text's left, clear of it, centred in the pane
+    const g = await page.evaluate(() => {
+      const t = document.querySelector('.dc-ticks').getBoundingClientRect()
+      const c = document.querySelector('.cm-content').getBoundingClientRect()
+      const sc = document.querySelector('.dc-scroll').getBoundingClientRect()
+      return { right: t.right, text: c.left, mid: (t.top + t.bottom) / 2, pane: (sc.top + sc.bottom) / 2 }
+    })
+    assert.ok(g.right < g.text - 30, `left of the text (${g.right} < ${g.text})`)
+    assert.ok(Math.abs(g.mid - g.pane) < 3, `centred in the pane (${g.mid} vs ${g.pane})`)
+    // hover: the card, every title, nothing else
+    const box = await page.locator('.dc-ticks').boundingBox()
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await until(page, () => document.querySelector('.dc-toc.open'))
+    s = await tocState(page)
+    assert.equal(s.items.length, 18)
+    assert.equal(s.items[0], 'Section 1')
+    await shot(page, `toc-card-${zoom}`)
+    await page.locator('.dc-toccard .dc-tocitem', { hasText: 'Part 4.2' }).click()
+    await until(page, () => document.querySelector('.dc-tocflash'))
+    await page.waitForTimeout(300)
+    const at = await headingAt(page, 'Part 4.2')
+    assert.ok(at != null && at > 0 && at < 40, `the heading arrived near the top (${at})`)
+    s = await tocState(page)
+    assert.equal(s.on, 'Part 4.2', 'and is the current one')
+    assert.ok(s.ticks[11].includes('on'), 'its tick is the dark one')
+    await page.mouse.move(900, 450)
+    await until(page, () => !document.querySelector('.dc-toc.open'))
+    // scrolling by hand moves the current one
+    await page.mouse.wheel(0, -1400)
+    await page.waitForTimeout(500)
+    s = await tocState(page)
+    assert.ok(s.on && s.on !== 'Part 4.2', `scrolled up, another is current (${s.on})`)
+    assert.deepEqual(page.errors, [])
+    await page.done()
+  }
+})
+
+test('contents by keyboard: focus opens them, Escape closes, Enter opens, Tab and arrows move, Enter goes there and puts the caret on the heading', { skip }, async () => {
+  await start()
+  const p = await newDoc(tocDoc())
+  const page = await open({ doc: p, w: 1280, h: 850 })
+  await page.focus('.dc-ticks')
+  await until(page, () => document.querySelector('.dc-toc.open'))
+  assert.equal(await page.getAttribute('.dc-ticks', 'aria-expanded'), 'true')
+  await page.keyboard.press('Escape')
+  await until(page, () => !document.querySelector('.dc-toc.open'))
+  assert.equal(await page.evaluate(() => document.activeElement.className), 'dc-ticks')
+  // Enter opens them again; Tab goes into the titles, arrows move along
+  await page.keyboard.press('Enter')
+  await until(page, () => document.querySelector('.dc-toc.open'))
+  await page.waitForTimeout(250)
+  await page.keyboard.press('Tab')
+  assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Section 1')
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown')
+  assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Section 2')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(1600)
+  const at = await headingAt(page, 'Section 2')
+  assert.ok(at != null && at > 0 && at < 50, `Section 2 near the top (${at})`)
+  const caret = await page.evaluate(() => { const v = window.__ed.view; return v.hasFocus && v.state.doc.lineAt(v.state.selection.main.head).text })
+  assert.equal(caret, '## Section 2')
+  assert.equal(await page.evaluate(() => Boolean(document.querySelector('.dc-toc.open'))), false)
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('contents: none below three headings; they follow typing and a save from disk, in every mode and on a view link', { skip }, async () => {
+  await start()
+  const short = await newDoc('# Title\n\n## One\n\nWords.\n\n## Two\n\nWords.\n')
+  let page = await open({ doc: short })
+  assert.equal((await tocState(page)).rail, false, 'two headings: no contents')
+  // a third one typed in: the ticks come
+  await page.evaluate(() => { const v = window.__ed.view; v.dispatch({ changes: { from: v.state.doc.length, insert: '\n## Three\n' }, userEvent: 'input' }) })
+  await until(page, () => document.querySelectorAll('.dc-ticks i').length === 3)
+  // a save from disk takes one away: they go, without a reload
+  await page.waitForTimeout(1500)
+  await outside(short, '# Title\n\n## One\n\nWords.\n')
+  await until(page, () => !document.querySelector('.dc-toc.on'), null, 8000)
+  await page.done()
+  const p = await newDoc(tocDoc(3, 1))
+  for (const m of ['Suggesting', 'Viewing']) {
+    page = await open({ doc: p })
+    await mode(page, m)
+    assert.equal((await tocState(page)).ticks.length, 6, `${m}: the ticks are there`)
+    await page.done()
+  }
+  page = await open({ doc: p, extra: '&can=view' })
+  assert.equal((await tocState(page)).ticks.length, 6, 'a view link: the ticks are there')
+  await page.done()
+  // a doc whose sections are #: the top two levels present
+  const hashes = await newDoc('# One\n\nx\n\n## One.a\n\nx\n\n# Two\n\nx\n\n### Deep\n\nx\n\n# Three\n')
+  page = await open({ doc: hashes })
+  assert.deepEqual((await tocState(page)).ticks.map(c => c.replace(' on', '')), ['d0', 'd1', 'd0', 'd0'])
+  await page.done()
+})
+
+test('contents with sixty headings: the ticks close up inside the pane and the card opens on the current one', { skip }, async () => {
+  await start()
+  const p = await newDoc(tocDoc(20, 2))
+  const page = await open({ doc: p, w: 1440, h: 800 })
+  assert.equal((await tocState(page)).ticks.length, 60)
+  await scrollTo(page, 999999)
+  const g = await page.evaluate(() => {
+    const t = document.querySelector('.dc-ticks').getBoundingClientRect()
+    const s = document.querySelector('.dc-scroll').getBoundingClientRect()
+    return { h: t.height, top: t.top - s.top, bottom: s.bottom - t.bottom }
+  })
+  assert.ok(g.top > 20 && g.bottom > 20, `the ticks stay inside the pane (${JSON.stringify(g)})`)
+  const box = await page.locator('.dc-ticks').boundingBox()
+  await page.mouse.move(box.x + box.width / 2, box.y + 30)
+  await until(page, () => document.querySelector('.dc-toc.open'))
+  await page.waitForTimeout(250)
+  const seen = await page.evaluate(() => {
+    const card = document.querySelector('.dc-toccard').getBoundingClientRect()
+    const on = document.querySelector('.dc-toccard .dc-tocitem.on')?.getBoundingClientRect()
+    return on && on.top >= card.top && on.bottom <= card.bottom
+  })
+  assert.ok(seen, 'the current title is in view inside the card')
+  await shot(page, 'toc-sixty')
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})
+
+test('contents on a phone: the bar names the section being read, a tap opens the list in the sheet, a title goes there', { skip }, async () => {
+  await start()
+  const p = await newDoc(tocDoc())
+  const page = await open({ doc: p, w: 375, h: 812, phone: true })
+  let s = await tocState(page)
+  assert.equal(s.rail, false, 'no ticks on a phone')
+  assert.ok(s.title && s.title.startsWith('t-'), `at the top, the doc's name (${s.title})`)
+  await scrollTo(page, 2600)
+  await page.waitForTimeout(300)
+  s = await tocState(page)
+  assert.ok(/^(Section|Part) /.test(s.title || ''), `scrolled, the section (${s.title})`)
+  // the bar does not move as the section changes: the pill stays compact
+  assert.ok(await page.evaluate(() => document.querySelector('.dc-head').classList.contains('tight')))
+  await page.locator('.dc-secbtn').click()
+  await until(page, () => document.querySelector('.dc-sheet.on .dc-toclist'))
+  const items = await page.evaluate(() => [...document.querySelectorAll('.dc-sheet .dc-tocitem')].map(b => b.textContent))
+  assert.equal(items.length, 19, 'the doc itself, then the eighteen')
+  await shot(page, 'toc-phone-sheet')
+  await page.locator('.dc-sheet .dc-tocitem', { hasText: 'Section 5' }).click()
+  await page.waitForTimeout(1600)
+  assert.equal(await page.evaluate(() => Boolean(document.querySelector('.dc-sheet.on'))), false, 'the sheet closed')
+  const at = await headingAt(page, 'Section 5')
+  assert.ok(at != null && at > 0 && at < 50, `Section 5 near the top (${at})`)
+  assert.equal((await tocState(page)).title, 'Section 5')
+  // the doc's own name goes back to the top
+  await page.locator('.dc-secbtn').click()
+  await until(page, () => document.querySelector('.dc-sheet.on .dc-toclist'))
+  await page.locator('.dc-sheet .dc-toctop').click()
+  await page.waitForTimeout(1600)
+  assert.ok(await page.evaluate(() => document.querySelector('.dc-scroll').scrollTop) < 2)
+  assert.deepEqual(page.errors, [])
+  await page.done()
+})

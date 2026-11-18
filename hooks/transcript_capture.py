@@ -206,7 +206,8 @@ def main() -> None:
         sys.exit(0)
 
     agent = config["name"]
-    emoji = config.get("emoji", "")
+    # No emoji in a speaker header (2026-11-17): an older agent.json's
+    # retired `emoji` is not read here any more.
     conversations, quarantined = lt.destination_dir(Path(config["vault"]))
 
     # The CLI is still writing this turn's last assistant entry when it fires
@@ -279,7 +280,7 @@ def main() -> None:
         surface, origin = lt.surface_of_env()
         target.write_text(
             lt.render_file(
-                title, turns, agent, emoji,
+                title, turns, agent,
                 session_id=session_id,
                 surface=surface,
                 origin=origin,
@@ -300,7 +301,7 @@ def main() -> None:
         # earlier firing read it keeps its index, so a count sees nothing to
         # do; comparing the text finds it and repairs it.
         updated, reason = lt.plan_update(
-            target.read_text(encoding="utf-8"), turns, agent, emoji
+            target.read_text(encoding="utf-8"), turns, agent
         )
         if updated is not None:
             target.write_text(updated, encoding="utf-8")

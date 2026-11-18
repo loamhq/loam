@@ -12,8 +12,10 @@
                broker, writes one Other line naming the alias move; a fail
                re-points nothing and writes an Important line; a rehearsal
                acts on nothing, even beside a real switch's hands.
-  broker       busy is `working` or `asking`, a failed read is busy, the
-               restart waits for quiet and defers past its bound.
+  broker       busy is anything but `idle` (2026-11-17), a thread turn in
+               flight, a failed read; the restart waits for idle, leaves the
+               last word to restart-broker --when-idle under the live lock,
+               and defers past its bound or when that defers.
   watch        a lane failure after the switch rolls the link back, writes
                Important, refuses the build; a clean window closes and prunes.
   signals      bin/wake's failed stages since the switch, broker sessions of
@@ -244,22 +246,37 @@ check("a rehearsal leaves no switch in the state", not f.read_state(r).get("swit
 
 # --- the broker --------------------------------------------------------------
 
-check("working and asking are busy",
+check("working, asking and background are busy",
       len(f.busy([{"state": "working"}, {"state": "asking"}, {"state": "idle"},
-                  {"state": "background"}])) == 2)
+                  {"state": "background"}])) == 3)
 check("a failed read counts as busy", bool(f.busy(None)))
-check("idle and background are quiet", f.busy([{"state": "idle"}, {"state": "background"}]) == [])
+check("only idle is quiet", f.busy([{"state": "idle"}]) == []
+      and f.busy([{"state": "idle"}, {"state": "background"}]) != [])
 
-reads = iter([None, [{"state": "working", "agent": "ada", "id": "abc"}], []])
-f.broker_rows = lambda timeout=10: next(reads)
+reads = iter([None, {"sessions": [{"state": "working", "agent": "ada", "id": "abc"}]},
+              {"sessions": [{"state": "idle", "agent": "ada", "id": "abc"}],
+               "turns": [{"thread_id": "t-1", "persona": "ada"}]},
+              {"sessions": [], "turns": []}])
+seen_reads = []
+f.broker_live = lambda timeout=10: seen_reads.append(1) or next(reads)
 f.QUIET_POLL_S = 0
 real_run = f.run
 calls = []
-f.run = lambda argv, **kw: calls.append(argv) or type("D", (), {"returncode": 0, "stdout": ""})()
+rcs = iter([0, 75])
+f.run = lambda argv, **kw: calls.append(argv) or type("D", (), {"returncode": next(rcs),
+                                                                "stdout": ""})()
 h = f.Hands(dry=False, vault=TMP / "vault", quiet_max_s=60)
-check("the restart waits through a failed read and a working session, then restarts",
-      h.restart_broker() and len(calls) == 1 and calls[0][0].endswith("restart-broker"))
-f.broker_rows = lambda timeout=10: None
+check("the restart waits through a failed read, a working session and a turn in "
+      "flight, then restarts",
+      h.restart_broker() and len(calls) == 1 and len(seen_reads) == 4
+      and calls[0][0].endswith("restart-broker"))
+check("...by restart-broker --when-idle, which reads again under the live lock",
+      calls[0][1:2], ["--when-idle"])
+f.broker_live = lambda timeout=10: {"sessions": [], "turns": []}
+calls.clear()
+check("...and when that defers (75), so does the follow",
+      h.restart_broker() is False and len(calls) == 1)
+f.broker_live = lambda timeout=10: None
 calls.clear()
 h = f.Hands(dry=False, vault=TMP / "vault", quiet_max_s=0)
 check("past its bound the restart is deferred, never forced",

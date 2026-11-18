@@ -256,15 +256,23 @@ no "(no reply)" is written, a mention in it starts no turn, and one system
 line says "Sam ended Iris's turn". `POST /v1/sessions/end-idle` ends every
 `idle` one and lists the rest in `kept` with why.
 
-**Restarting when idle (2026-11-12).** `bin/restart-broker --when-idle`
-waits for three clear reads of this list, 20 s apart, and restarts.
-What holds it is `lib/loam_live.restart_blockers`, the one rule, which
-`lib/loam_follow.py` uses too: a row `working` or `asking`, or a failed
-read. `background` does not: a session waiting on a job or a subagent can
-wait for hours, and an engineer job runs on as its own unit and its receipt
-reaches the thread anyway (below, "A receipt no waiting call carried").
-What a restart does cost such a session is a subagent's own run, which ends
-with the session's process tree.
+**Restarting when idle (2026-11-12; its rule replaced 2026-11-17).**
+`bin/restart-broker --when-idle` restarts only on positive evidence that
+nothing would be cut: every row of this list reads `idle`, and the body's
+`turns` (every thread turn in flight or queued, `{"thread_id", "persona",
+"queued"}`) is empty, on three clear reads 20 s apart, and on three more once
+the live lock is its own, the last just before the restart. Anything else
+holds it: `working` (a silent turn in a long tool call or a call waiting on
+an engineer job included), `asking`, `background` (a subagent ends with the
+session's process tree, and a waiting call is cut), a state the rule does
+not know, and a failed read. The rule is `lib/loam_live.restart_blockers`,
+which `lib/loam_follow.py` and `bin/move-state` use too. At its ceiling
+(`loam_live.RESTART_CEILING_S`, 30 min) or `--max-wait` it **defers**:
+exit 75, nothing restarted, and the caller tries again later. On 11-16 the
+ceiling used to let it go past silent turns, and it cut four, three of them
+waiting on engineer jobs. `restart-broker` without `--when-idle` is the
+operator's explicit restart and waits only for the live lock. A broker
+older than `turns` answers rows alone, and they are the evidence then.
 
 ### List rows carry the tail of `turns` (2026-11-09)
 

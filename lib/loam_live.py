@@ -45,71 +45,59 @@ UNIT_KINDS = (("engineer_jobs", "loam-engineer-"), ("wakes", "loam-wake-"),
               ("crons", "loam-cron-"), ("rc_servers", "loam-rc-"))
 
 
-# What holds a broker restart back (2026-11-12): a session producing a turn
-# now (`working`), or one whose open turn waits on the owner's answer
-# (`asking`, which a restart would lose). Nothing else. `background` -- a
-# turn that ended and waits on work it launched, an engineer job or a
-# subagent -- is idle for a restart: it can wait for hours (it did on 11-12,
-# the Appearance restart armed at 17:17 PT), the job runs on as its own
-# unit, and its receipt reaches the thread when the job finishes
-# (lib/loam_waiters.py). What a restart costs such a session is the
-# subagent's own run, if it was a subagent and not a job: that work ends
-# with the session's process tree. The one rule, for bin/restart-broker
-# --when-idle and lib/loam_follow.py alike.
-RESTART_HOLDS = ("working", "asking")
-
-
-# Past the ceiling (2026-11-16), a restart that has waited
-# `RESTART_CEILING_S` stops waiting for turns to end: what holds it then is a
-# session producing output now, a `working` row whose newest event (or turn
-# start) is under `RESTART_OUTPUT_S` old. A turn that went silent -- a stuck
-# turn, a long tool call -- and a question nobody has answered no longer
-# hold it; on 11-12 a wait looped for over an hour. A landing in progress
-# still does, through the live lock bin/restart-broker takes. Engineer jobs
-# are units of their own and survive the restart either way.
+# What lets a planned broker restart go (2026-11-17, replacing the rules of
+# 11-12 and 11-16): positive evidence that nothing would be cut. Every row of
+# the live list reads exactly `idle`, and no thread turn is in flight.
+# Anything else holds it: `working` (a turn open, including one sitting
+# silent in a long tool call or a call waiting on an engineer job),
+# `asking`, `background` (a turn that ended and waits on work it launched:
+# a subagent dies with the session's process tree, and a waiting call is
+# cut), a state this rule does not know, a row with none, and a list that
+# could not be read. On 11-16 the ceiling let a restart go past four silent
+# `working` turns, three of them waiting on engineer jobs, and cut them. A
+# planned restart now defers instead (bin/restart-broker); an explicit
+# restart, without `--when-idle`, is the operator's and unchanged.
+RESTART_IDLE = "idle"
+# Kept for readers that name the holding states (lib/loam_follow.py): the
+# known ones. An unknown state holds a restart too; see `restart_blockers`.
+RESTART_HOLDS = ("working", "asking", "background")
+# How long a planned restart waits for idle before it defers: no restart,
+# exit 75, and the caller tries again later. Never a restart at the ceiling.
 RESTART_CEILING_S = 30 * 60
-RESTART_OUTPUT_S = 60
 
 
-def _ts(value) -> float | None:
-    from datetime import datetime  # noqa: PLC0415
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
+def _who(r: dict) -> str:
+    return f"{r.get('agent')}/{str(r.get('id'))[:8]}"
 
 
-def output_age_s(row: dict, now: float) -> float | None:
-    """Seconds since the row last showed output (its newest event, or the
-    turn's start), or None when it says neither."""
-    seen = [t for t in (_ts(row.get("last_event_at")), _ts(row.get("last_active")))
-            if t is not None]
-    return now - max(seen) if seen else None
-
-
-def restart_blockers(rows: list[dict] | None, past_ceiling: bool = False,
-                     now: float | None = None) -> list[str]:
-    """Why the broker may not restart now, one line a row; empty means it
-    may. ``rows`` is `GET /v1/sessions/live`'s; None (a failed read)
-    holds the restart, because a broker that cannot answer may be mid-turn.
-    ``past_ceiling``: only a session producing output holds it."""
-    if rows is None:
+def restart_blockers(rows: list[dict] | None,
+                     turns: list[dict] | None = None) -> list[str]:
+    """Why a planned broker restart may not go now, one line a reason; empty
+    means it may. ``rows`` is `GET /v1/sessions/live`'s ``sessions``; None
+    (a failed read) holds it. ``turns`` is its ``turns`` (thread turns in
+    flight, 2026-11-17), None when the broker is older than that field: then
+    the rows alone are the evidence, and a turn about to start is caught by
+    the clear reads bin/restart-broker takes."""
+    if not isinstance(rows, list):
         return ["the broker's live list could not be read (counted as busy)"]
-    if not past_ceiling:
-        return [f"{r.get('agent')}/{str(r.get('id'))[:8]} {r.get('state')}"
-                for r in rows if r.get("state") in RESTART_HOLDS]
-    import time  # noqa: PLC0415
-    now = time.time() if now is None else now
     held = []
     for r in rows:
-        if r.get("state") != "working":
+        if not isinstance(r, dict):
+            held.append(f"a live row that is not a row ({r!r:.40}; counted as busy)")
             continue
-        age = output_age_s(r, now)
-        if age is not None and age < RESTART_OUTPUT_S:
-            held.append(f"{r.get('agent')}/{str(r.get('id'))[:8]} working, "
-                        f"output {max(0, int(age))} s ago")
+        state = r.get("state")
+        if state == RESTART_IDLE:
+            continue
+        held.append(f"{_who(r)} {state}" if state in RESTART_HOLDS
+                    else f"{_who(r)} in an unknown state ({state!r}; counted as busy)")
+    if turns is not None and not isinstance(turns, list):
+        held.append("the broker's turns in flight could not be read (counted as busy)")
+        turns = []
+    for t in turns or []:
+        who = t.get("persona") if isinstance(t, dict) else None
+        tid = t.get("thread_id") if isinstance(t, dict) else None
+        held.append(f"{who}'s turn in {tid} "
+                    f"{'queued' if isinstance(t, dict) and t.get('queued') else 'in flight'}")
     return held
 
 

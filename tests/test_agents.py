@@ -384,6 +384,60 @@ async def main():
         check("a yes is taken once", not out.get("ok")
               and "taken once" in out.get("error", ""), out)
 
+        # -- the skill's order: write the draft, show it, one yes (2026-11-17)
+        # A scratch run on 11-16 showed the person a summary before any
+        # draft existed, so their yes came before the draft and they had to
+        # say it twice. loam-making-an-agent now says: draft, then show.
+        status, body = await http(port, "POST", "/v1/agents/new", {})
+        t1 = body["id"]
+        out = await cli(port, "do", "agent.draft",
+                        json.dumps({"thread": t1, "name": "Wren", "soul": "# Wren\n\nDry.\n",
+                                    "config": "Wren's config.\n"}))
+        d1 = out.get("answer", {}).get("draft")
+        threads.append(t1, "iris", "Here is Wren, as drafted: dry, direct. Shall I make her?")
+        only = server.threads.post_person(t1, "Yes, make Wren")
+        out = await cli(port, "do", "agent.confirm",
+                        json.dumps({"rev": 1, "yes": only["id"]}), "--target", d1)
+        check("draft, then show, then one yes: the agent is made on it",
+              out.get("ok") and out["answer"]["agent"]["id"] == "wren", out)
+        check("...and the person said yes once",
+              [m["text"] for m in threads.read(t1)[1]
+               if loam_agents.lc.is_owner(m.get("author"))], ["Yes, make Wren"])
+
+        # A yes, then a revision in the same second: the yes was to revision
+        # 1 and does not make revision 2, which a one-second stamp alone
+        # could not tell.
+        status, body = await http(port, "POST", "/v1/agents/new", {})
+        t2 = body["id"]
+        out = await cli(port, "do", "agent.draft",
+                        json.dumps({"thread": t2, "name": "Fern", "soul": "# Fern\n\nGentle.\n",
+                                    "config": "Fern's config.\n"}))
+        d2 = out.get("answer", {}).get("draft")
+        threads.append(t2, "iris", "Here is Fern: gentle. Shall I make her?")
+        first_yes = server.threads.post_person(t2, "Yes, but a bit less gentle")
+        out = await cli(port, "do", "agent.revise",
+                        json.dumps({"soul": "# Fern\n\nBlunt.\n"}), "--target", d2)
+        check("a revision after the yes", out.get("ok") and out["answer"]["rev"] == 2, out)
+        same_second = (loam_agents._utc(first_yes["at"])
+                       >= loam_agents._utc(out["answer"]["updated"]))
+        out = await cli(port, "do", "agent.confirm",
+                        json.dumps({"rev": 2, "yes": first_yes["id"]}), "--target", d2)
+        check("a stale yes does not make the revised draft"
+              + (" (same second as the revision)" if same_second else ""),
+              not out.get("ok") and "before this version" in out.get("error", ""), out)
+        out = await cli(port, "do", "agent.confirm",
+                        json.dumps({"rev": 1, "yes": first_yes["id"]}), "--target", d2)
+        check("...nor does it make the old revision, once revised",
+              not out.get("ok") and "revision 2" in out.get("error", ""), out)
+        check("...nothing was made", not (LABS / "fern").exists())
+        threads.append(t2, "iris", "Here is Fern again: blunt now. Make her?")
+        second_yes = server.threads.post_person(t2, "Yes, that's her")
+        out = await cli(port, "do", "agent.confirm",
+                        json.dumps({"rev": 2, "yes": second_yes["id"]}), "--target", d2)
+        check("an explicit yes to the revised draft makes it",
+              out.get("ok") and out["answer"]["agent"]["id"] == "fern"
+              and (LABS / "fern" / "soul.md").read_text() == "# Fern\n\nBlunt.\n", out)
+
         # -- archive ---------------------------------------------------------
         clay_thread = threads.create("ada", "Ada's old thread")
         before = unit_files("ada")

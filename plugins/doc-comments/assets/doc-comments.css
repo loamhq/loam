@@ -752,3 +752,56 @@ body:has(.dc-dlg-scrim.on) .dc-sharebtn .dc-sf { box-shadow: 0 0 0 2px var(--pap
 .dc-ap-opt.on .dc-ck { opacity: 1; transform: none; }
 .dc-ap-note { margin-top: 2px; }
 @media (prefers-reduced-motion: reduce) { .dc-ap-opt .dc-ck { transition: none; } }
+
+/* The table of contents (page/editor/toc.js, 2026-11-17). Desktop: a dash
+   per heading at the text's left, centred in the pane, the one being read
+   darker; hovered or focused, the titles in a small card. Phone: the bar's
+   title is the section being read; the list is the bottom sheet. */
+.dc-toc { position: absolute; z-index: 30; width: 0; display: none; pointer-events: none; }
+.dc-toc.on { display: block; }
+.dc.phone .dc-toc { display: none; }
+.dc-ticks { position: absolute; top: 50%; left: -10px; transform: translateY(-50%); display: flex !important; flex-direction: column; align-items: flex-start; gap: var(--dc-tkgap, 9px); padding: 12px 12px 12px 10px !important; border-radius: 10px; pointer-events: auto; transition: opacity .2s; }
+.dc-ticks i { display: block; height: 2px; border-radius: 2px; background: var(--dc-ink3); opacity: .42; transition: opacity .2s, background-color .2s, width .2s var(--dc-ease); }
+.dc-ticks i.d0 { width: 18px; }
+.dc-ticks i.d1 { width: 10px; }
+.dc-ticks i.on { background: var(--dc-ink); opacity: 1; }
+.dc-ticks:hover i:not(.on) { opacity: .6; }
+.dc-ticks:focus-visible { outline: 2px solid color-mix(in srgb, var(--dc-accent) 60%, transparent); outline-offset: 0; }
+.dc-toccard { position: absolute; top: 50%; left: -14px; width: 264px; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; background: var(--dc-paper); border-radius: 14px; box-shadow: var(--dc-float); padding: 8px 6px; opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(-50%) translateX(-6px); transition: opacity .16s ease, transform .18s var(--dc-ease), visibility 0s linear .18s; scrollbar-width: thin; }
+.dc-toc.open .dc-toccard { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(-50%); transition: opacity .16s ease, transform .18s var(--dc-ease), visibility 0s; }
+.dc-toc.open .dc-ticks { opacity: 0; }
+.dc-toclist { display: flex; flex-direction: column; gap: 1px; }
+.dc-tocitem { display: block !important; width: 100%; text-align: left; padding: 5px 12px !important; border-radius: 8px; font-size: 13.5px !important; line-height: 1.35; color: var(--dc-ink3) !important; transition: background .12s, color .12s; }
+.dc-tocitem > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-tocitem.d1 { padding-left: 26px !important; font-size: 13px !important; }
+.dc-tocitem:hover, .dc-tocitem:focus-visible { background: var(--dc-hover); color: var(--dc-ink) !important; }
+.dc-tocitem:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--dc-accent) 55%, transparent); }
+.dc-tocitem.on { color: var(--dc-ink) !important; font-weight: 650; }
+.dc-tocflash { position: absolute; pointer-events: none; border-radius: 8px; background: color-mix(in srgb, var(--dc-accent) 16%, transparent); opacity: 0; animation: dc-tocflash 1.5s ease-out; }
+@keyframes dc-tocflash { 0% { opacity: 0; } 12% { opacity: 1; } 45% { opacity: 1; } 100% { opacity: 0; } }
+/* the phone's title: the doc's name, then the section being read */
+.dc-crumb > .dc-secbtn { flex: 0 1 auto; max-width: none; min-width: 0; display: inline-flex !important; align-items: center; gap: 6px; height: 34px; padding: 0 8px 0 6px !important; margin-left: -4px; border-radius: 999px; color: var(--dc-ink) !important; font-weight: 600; transition: background .15s; }
+.dc-crumb > .dc-secbtn:hover, .dc-crumb > .dc-secbtn:active { background: var(--dc-surface); }
+.dc .dc-crumb .dc-secbtn span { display: block; }
+/* the words shown are in the flow and size the button; the other fades out over them */
+.dc .dc-crumb .dc-secstack { position: relative; min-width: 0; text-align: left; }
+.dc .dc-crumb .dc-secstack > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: opacity .18s, transform .18s var(--dc-ease); }
+.dc .dc-crumb .dc-secname, .dc .dc-crumb .dc-secbtn.insec .dc-secdoc { position: absolute; left: 0; top: 0; right: 0; }
+.dc .dc-crumb .dc-secbtn.insec .dc-secname { position: static; }
+.dc .dc-crumb .dc-secname { opacity: 0; transform: translateY(4px); }
+.dc .dc-crumb .dc-secbtn.insec .dc-secdoc { opacity: 0; transform: translateY(-4px); }
+.dc .dc-crumb .dc-secbtn.insec .dc-secname { opacity: 1; transform: none; }
+.dc .dc-crumb .dc-secbtn.insec .dc-secname.swap { opacity: 0; transform: translateY(4px); }
+.dc .dc-crumb .dc-secic { display: inline-flex !important; flex: none; color: var(--dc-ink3); width: 0; opacity: 0; margin-right: -6px; overflow: hidden; transition: width .18s var(--dc-ease), opacity .18s, margin .18s var(--dc-ease); }
+.dc .dc-crumb .dc-secbtn.insec .dc-secic { width: 15px; opacity: 1; margin-right: 0; }
+.dc .dc-crumb .dc-seccv { display: inline-flex !important; color: var(--dc-ink3); flex: none; }
+.dc-sheet .dc-toclist-sheet { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 -4px; padding: 0 4px 6px; }
+.dc-sheet:has(.dc-toclist-sheet) { overflow: hidden; }
+.dc-sheet .dc-tocitem { padding: 10px 12px !important; font-size: 15.5px !important; border-radius: 12px; }
+.dc-sheet .dc-tocitem.d1 { padding-left: 30px !important; font-size: 15px !important; }
+.dc-sheet .dc-toctop { color: var(--dc-ink2) !important; font-family: var(--font-display, Georgia, serif); font-size: 17px !important; }
+@media (prefers-reduced-motion: reduce) {
+  /* the light on the heading arrived at still fades; nothing moves */
+  .dc .dc-col .dc-tocflash { animation-duration: 1.4s !important; }
+  .dc .dc-toccard, .dc .dc-toc.open .dc-toccard { transform: translateY(-50%); }
+}
