@@ -1015,3 +1015,36 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   file). Holding one: a `read` dependency, or for a scratch script
   `fs.promises.readFile = …` plus `syncBuiltinESMExports()` from
   `node:module`, which rebinds the ESM named import.
+
+## 2026-11-17 — the contents card made compact; core's pane lead
+
+- **Core's `button { min-height: 44px }` is why a plugin's list reads
+  loose in the app and tight on its own page.** The ToC card's rows were 28px
+  by their CSS and 45px in Loam. Take the minimum off with `(pointer: fine)`
+  only, so a touch screen keeps its targets; tests add core's rule
+  themselves (`CORE_SELECT` in the browser suite).
+- **Core's Show sidebar is absolutely placed** (`.showbar`, style.css) and
+  each core header pads 62px around it; a plugin header did not, from the
+  plugin's first day. Core now sets `--pane-lead` on `.pane:has(> .showbar)`
+  (0px in tokens.css); `app/docs/design-system.md` says how to use it. Two
+  panels at a 1440 window tuck the list (`panels.tucked()`, under 1700px).
+- **A walk that needs two panels with the list hidden:** open the folder,
+  set `loam.panels` `{version:1, side:null, split, sidebar:false}` and
+  reload (a *file* address clears it), side-open a row, click `.showbar`,
+  open the main doc, then "Hide sidebar for a focused view". At 1440 the
+  main pane takes the editor's phone layout at an even split, the desktop
+  one at 62
+  (`look-browser.mjs` `toc-panels`, `toc-panels-even`).
+- **Reading computed colours: use a canvas, not a regex.** Chromium returns
+  `oklab(…)` for anything mixed in oklab and `color(srgb …)` (0–1) for srgb
+  mixes; `colour-families.mjs` took the first three numbers as bytes.
+  `app/test/colour-families-browser.mjs` proves the fix. look-browser
+  rewrites that function's source by two literal strings (the Latte guard
+  and `document.querySelectorAll('body *')`); keep them verbatim.
+- **Snapping a scrolled list to a whole row fails at its max scroll**: the
+  browser clamps. At the end, prefer the end (`rowScroll`, toc.js).
+- **`app/docs` links many files that were never in this repo** (all of
+  `design-system/`, most of `evidence/`, `../handoffs/`): the 0.1.0 tree
+  left them out. Check a link exists before pointing at its neighbour.
+- **`pkill -f <pattern>` from the Bash tool matches its own shell** (the
+  command line holds the pattern) and kills the call. Kill by PID.

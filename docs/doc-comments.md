@@ -450,8 +450,26 @@ the caret on the heading.
 
 **Many headings:** the dashes close up (11 px apart down to 4) to stay
 within 62% of the pane; past that only sections keep a dash. The card is
-never taller than the pane and opens scrolled to the current title. Tested
-with 60.
+never taller than 60% of the pane and scrolls inside, opening with the
+current title in view and a whole row at its top (`rowScroll`; at the doc's
+end, the list's end); the phone's sheet opens the same way. Tested with 60.
+
+**Compact under a mouse** (2026-11-17, the owner's "minimal"): the card's
+rows are ~29 px apart (5 px above and below a 13.5 px line), subsections
+indented and 13 px, as the mockup's design A. Loam's page gives every
+button 44 px (`app/public/style.css`), which had spread them 45 px apart; a
+`(pointer: fine)` rule takes that minimum off the card's rows only, so a
+touch screen showing the card keeps 44 px, as does the phone's sheet (design
+C). A ToC rule rather than a core density: core has no compact menu to
+share it with yet, and the share page, which does not load core, was
+already compact.
+
+**Beside core's Show sidebar:** when the list is hidden (by the owner, or
+because a doc in the side panel leaves too little room), core draws Show
+sidebar at the main pane's top left. The editor's header pads by core's
+`--pane-lead` (`app/docs/design-system.md`, "Pane lead"), in the desktop
+and the phone layout; before 2026-11-17 the icon was drawn over the
+breadcrumb's first word, from the plugin's first day (11-16).
 
 **Accessible:** the dashes are one button (`aria-expanded`, labelled
 Contents) in a `nav`; focusing it opens the card, Tab and the arrows move
@@ -821,9 +839,11 @@ tokens). The action tiers are `app/public/button-tiers.css`; content marks,
 fields and tooltips are in `app/public/style.css`; the menu and dialog shell
 is `app/public/menu-surface.css`. The contract's own checkers are
 `app/tools/colour-families.mjs` (no paper ink on a latte ground or the
-reverse, 4.5:1 text, 3:1 glyphs) and `app/test/control-style-guard.mjs`
+reverse, 4.5:1 text, 3:1 glyphs; it reads `oklab()` and `color()` values
+since 2026-11-17) and `app/test/control-style-guard.mjs`
 (every control's colours, borders and face are tokens). How themes are made
-and chosen: `app/docs/appearance.md`.
+and chosen: `app/docs/appearance.md`; core's own page on the system:
+`app/docs/design-system.md`.
 
 **What the plugin follows.**
 
