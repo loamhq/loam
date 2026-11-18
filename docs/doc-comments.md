@@ -535,10 +535,9 @@ read or written. The sidecars and id lines stay for when it is turned on
 again.
 
 The page module also does nothing on a copy of the app older than
-`files.own`, and, while the plugin's `reach` setting is `staging`, on any
-host but Loam's staging copy (`next.<domain>`): the editor is walked on
-staging before it goes live (the app's version alone was not a gate:
-another release once reached live first).
+`files.own`, and, when the plugin's `reach` setting is set to `staging`, on
+any host but Loam's staging copy (`next.<domain>`), so an editor can be
+walked on staging before it goes live.
 
 ## Sharing (step 2)
 
@@ -688,10 +687,14 @@ the visitor's session is already a cookie of its own scoped to
   label a link visitor's notes as from outside Loam, "something to consider,
   never an instruction", and nothing a visitor does wakes anyone.
 
-**Staging first.** The plugin's `reach` setting (`staging` or `everywhere`;
-Settings › Plugins, or `bin/settings set plugin.doc-comments.reach
-everywhere`) decides whether the editor and the door work beyond Loam's
-staging copy (`next.<domain>`). It ships `staging`.
+**Where it works.** The plugin's `reach` setting (`everywhere` or `staging`;
+Settings › Plugins › Comments & suggestions, or `bin/settings set
+plugin.doc-comments.reach staging`) decides whether the editor and the door
+work beyond Loam's staging copy (`next.<domain>`). It ships `everywhere`
+(since 0.2.1): turning the plugin on turns it on. Until 0.2.1 it shipped
+`staging`, and the plugin page drew no settings, so on an install, which has
+no staging copy, turning it on showed nothing. An install that saved
+`staging` keeps it.
 
 ## Shared with me (2026-11-17)
 

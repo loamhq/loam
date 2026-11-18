@@ -37,12 +37,14 @@ export function activate(loam) {
   // constant of 2026-11-16. Until the server answers, the last answer this
   // browser had decides, so a page does not flicker between editors.
   const onStaging = String(globalThis.location?.hostname || '').startsWith('next.')
-  let reach = loam.settings?.get?.('reach', 'staging') || 'staging'
+  // Everywhere unless set to staging (0.2.1; the default was staging, so a
+  // fresh install that turned the plugin on saw nothing).
+  let reach = loam.settings?.get?.('reach', 'everywhere') || 'everywhere'
   const allowed = () => onStaging || reach === 'everywhere'
   fetch(`${BASE}config`, { credentials: 'same-origin' }).then(r => (r.ok ? r.json() : null)).then((cfg) => {
     if (!cfg || disposed) return
     const was = allowed()
-    reach = cfg.reach === 'everywhere' ? 'everywhere' : 'staging'
+    reach = cfg.reach === 'staging' ? 'staging' : 'everywhere'
     loam.settings?.set?.('reach', reach)
     if (was !== allowed()) host.schedule?.()
   }).catch(() => {})

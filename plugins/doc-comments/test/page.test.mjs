@@ -82,6 +82,23 @@ test('elsewhere: off while reach is staging, on once the setting says everywhere
   reachAnswer = 'staging'
 })
 
+// The 0.2.0 walk: on an install (no staging copy) turning the plugin on showed
+// nothing, because reach defaulted to staging. With nothing saved and nothing
+// set, it is on everywhere (0.2.1).
+test('a fresh install: with no reach saved or set, the editor is on everywhere', async () => {
+  globalThis.location = { hostname: 'sam.example.test' }
+  const was = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({}) })
+  try {
+    const w = fakeLoam()
+    activate(w.loam)
+    assert.equal(w.regs[0].when(md()), true, 'on before the server answers')
+    await tick()
+    assert.equal(w.regs[0].when(md()), true, 'and after an answer with no reach')
+    assert.equal(w.roots[0].when(), true)
+  } finally { globalThis.fetch = was }
+})
+
 // -- Shared Docs and the Share item (2026-11-17) --------------------------------
 
 const { installDom } = await import('../../../app/test/fakedom.js')

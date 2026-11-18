@@ -697,5 +697,27 @@ class AppearRoutes(unittest.TestCase):
         self.assertEqual(st, 403)
 
 
+class FreshInstallReach(unittest.TestCase):
+    """The 0.2.0 walk: on an install (no staging copy) turning the plugin on
+    showed nothing, because `reach` defaulted to staging. With no value
+    saved it is everywhere (0.2.1); a saved `staging` still holds it there."""
+
+    def test_default_is_everywhere(self):
+        import main as server_main
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(server_main.reach_of(Path(d)), "everywhere")
+            (Path(d) / "values.json").write_text('{"home": ""}')
+            self.assertEqual(server_main.reach_of(Path(d)), "everywhere")
+            (Path(d) / "values.json").write_text('{"reach": "staging"}')
+            self.assertEqual(server_main.reach_of(Path(d)), "staging")
+            (Path(d) / "values.json").write_text('{"reach": "everywhere"}')
+            self.assertEqual(server_main.reach_of(Path(d)), "everywhere")
+
+    def test_manifest_default(self):
+        text = (HERE.parent / "PLUGIN.md").read_text()
+        block = text.split("- key: reach", 1)[1].split("- key:", 1)[0]
+        self.assertIn("default: everywhere", block)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

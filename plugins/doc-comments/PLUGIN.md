@@ -18,9 +18,9 @@ touches:
 contributes:
   settings.entry:
     - key: reach
-      label: Where the editor and share links work
-      choices: [staging, everywhere]
-      default: staging
+      label: "Where the editor and share links work: everywhere, or only on Loam's staging copy (staging: next.<domain>)"
+      choices: [everywhere, staging]
+      default: everywhere
     - key: home
       label: "Where “Made with Loam” on a share page points (a https address; empty: no link)"
       default: ""

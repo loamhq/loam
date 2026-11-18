@@ -33,7 +33,10 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       const out = await host.api('GET', `/plugins/${encodeURIComponent(row.id)}`)
       if (st.selected?.key === row.key) {
         st.detail = out
-        if (row.id === 'daily-notes') {
+        // A plugin's own settings (`settings.entry`): until 0.2.1 only Daily
+        // notes' were read and shown, so no other plugin's could be changed
+        // here (the 0.2.0 walk: Comments & suggestions' `reach`).
+        if (row.id === 'daily-notes' || (out.plugin?.contributes || row.contributes)?.['settings.entry']?.length) {
           try { const settings = await host.api('GET', `/plugins/${encodeURIComponent(row.id)}/settings`); if (st.selected?.key === row.key) hostSettings = settings }
           catch (e) { if (st.selected?.key === row.key) st.detailError = e.message }
         }
@@ -99,6 +102,30 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           broken ? h('div', { class: 'plugin-row-error', text: broken }) : row.warnings?.length ? h('div', { class: 'plugin-row-warning', text: `${row.warnings.length} ${row.warnings.length === 1 ? 'warning' : 'warnings'}` }) : null),
         row.switch === 'appearance' ? control : null, icon.chevronRight(12)), row.switch === 'appearance' ? null : control), serviceView(row))
   }
+  // Each `settings.entry` of a plugin that is on: a choice as a menu, text as
+  // a field, each saved by itself (PATCH /plugins/<id>/settings).
+  async function saveEntry(row, key, value) {
+    st.error = ''; st.done = ''; changed()
+    try {
+      const out = await host.api('PATCH', `/plugins/${encodeURIComponent(row.id)}/settings`, { values: { [key]: value } })
+      if (hostSettings) hostSettings = { ...hostSettings, values: { ...hostSettings.values, ...out.values } }
+      st.done = 'Saved.'
+    } catch (e) { st.error = e.message }
+    changed()
+  }
+  function entrySettings(row) {
+    const entries = hostSettings?.entries ?? []
+    if (!entries.length) return null
+    return h('section', { class: 'plugin-entry-settings rows', 'aria-label': `${row.name || row.id} settings` },
+      ...entries.map(entry => {
+        const id = `plugin-setting-${row.id}-${entry.key}`, value = hostSettings.values?.[entry.key] ?? entry.default ?? ''
+        const control = entry.choices?.length
+          ? h('select', { id, class: 'field-input', value: String(value), onchange: e => saveEntry(row, entry.key, e.currentTarget.value) },
+            ...entry.choices.map(c => h('option', { value: c, text: c, selected: c === value })))
+          : h('input', { id, class: 'field-input', value: String(value), onchange: e => saveEntry(row, entry.key, e.currentTarget.value) })
+        return h('div', { class: 'setrow plugin-entry', key: entry.key }, h('label', { class: 'setrow-who', for: id }, h('div', { class: 'setrow-title', text: entry.label })), control)
+      }), notice(st.done, false))
+  }
   function detail() {
     const original = st.selected, current = loader.st.rows.find(row => row.key === original.key) ?? original
     const row = current
@@ -125,6 +152,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         } }, h('label', { for: 'daily-note-folder', text: 'Daily notes folder' }), h('input', { id: 'daily-note-folder', class: 'field-input', value: hostSettings.values.folder, disabled: !row.on }), h('p', { class: 'note', text: 'Daily notes use YYYY-MM-DD.md in this vault folder.' }), h('button', { class: 'pillbtn', type: 'submit', disabled: !row.on, text: 'Save folder' })) : null, notice(st.done, false)) : null,
       ...(row.on ? (host.registry?.entries('settings.section') ?? []).filter(entry => entry.plugin === row.id || (entry.group === 'plugin' && entry.owner === row.id))
         .map(entry => h('section', { class: 'plugin-preferences', key: `${entry.owner}:${entry.id}`, 'aria-label': entry.title }, host.registry.invoke(entry, 'render', { plugin: true, back: false }))) : []),
+      row.on && row.id !== 'daily-notes' ? entrySettings(row) : null,
       row.on ? secretSettings?.view() : null,
       declarations(declaration), ...(row.warnings ?? []).map(warning => notice(typeof warning === 'string' ? warning : JSON.stringify(warning), false)),
       st.detail?.plugin?.guide ? h('details', { class: 'plugin-guide', open: st.guide, ontoggle: event => { st.guide = event.currentTarget.open } }, h('summary', { text: 'About this plugin' }), h('div', { class: 'md' }, host.markdown?.(st.detail.plugin.guide) ?? h('p', { text: st.detail.plugin.guide }))) : null,

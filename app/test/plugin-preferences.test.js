@@ -68,3 +68,32 @@ test('pre-existing audio preferences survive first activation, off/on and a fres
   await loader.dispose(); loader = makeLoader(); await loader.refresh(); check(); await loader.dispose()
   assert.deepEqual(writes, [], 'changing the settings destination needs no migration write')
 })
+
+// The 0.2.0 walk: Comments & suggestions' `reach` could be set only from the
+// shell; the plugin page drew no setting for any plugin but Daily notes.
+test('a plugin’s own settings (settings.entry) are drawn on its page and saved one by one', async () => {
+  installDom()
+  const registry = createRegistry(), calls = []
+  const entries = [{ key: 'reach', label: 'Where the editor and share links work', choices: ['everywhere', 'staging'], default: 'everywhere' },
+    { key: 'home', label: 'Where “Made with Loam” points', choices: null, default: '' }]
+  const row = { id: 'doc-comments', key: 'shipped:doc-comments', name: 'Comments & suggestions', layer: 'shipped', on: true, effective: true, switch: 'plugin', contributes: { 'settings.entry': entries } }
+  const loader = { st: { rows: [row], loaded: true, failures: new Map(), writing: new Set() } }
+  const api = async (method, path, body) => {
+    calls.push([method, path, body])
+    if (path.endsWith('/settings') && method === 'GET') return { id: row.id, entries, values: { reach: 'everywhere', home: '' } }
+    if (path.endsWith('/settings') && method === 'PATCH') return { id: row.id, values: body.values }
+    return { plugin: row }
+  }
+  const settings = createPluginSettings({ loader, theme: { value: {} }, host: { registry, settingsHead: title => h('h2', { text: title }), api } })
+  await settings.open(row)
+  const draw = () => h('div', {}, settings.view())
+  assert.equal(all(draw(), 'plugin-entry').length, 2)
+  assert.match(text(draw()), /Where the editor and share links work/)
+  const select = all(draw(), 'field-input').find(n => n.tagName === 'SELECT' || n.tag === 'select')
+  assert.ok(select, 'a choice is a menu')
+  select.value = 'staging'
+  select.fire('change', { currentTarget: select })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(calls.at(-1), ['PATCH', '/plugins/doc-comments/settings', { values: { reach: 'staging' } }])
+  assert.match(text(draw()), /Saved\./)
+})

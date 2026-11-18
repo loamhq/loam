@@ -59,6 +59,19 @@ from doccomments.withme import WithMe  # noqa: E402
 BODY_MAX = 8 * 1024 * 1024
 
 
+def reach_of(settings_dir: Path) -> str:
+    """The `reach` setting in ``settings_dir/values.json``: everywhere unless
+    set to staging (0.2.1). The manifest's default is `everywhere`, and with
+    no value saved the plugin, once on, is on. Until 0.2.1 the default was
+    staging only, so on an install (which has no staging copy) turning the
+    plugin on showed nothing."""
+    try:
+        values = json.loads((settings_dir / "values.json").read_text())
+    except (OSError, ValueError):
+        values = {}
+    return "staging" if isinstance(values, dict) and values.get("reach") == "staging" else "everywhere"
+
+
 def make_handler(service: Service, links=None, door=None, reach=lambda: "staging", withme=None,
                  appear_default=lambda: appear_mod.DEFAULT):
     class Handler(BaseHTTPRequestHandler):
@@ -358,11 +371,7 @@ def main() -> int:
     def reach() -> str:
         # The `reach` setting (settings.entry), read each time so a change
         # through Settings or `bin/settings` is in force at once.
-        try:
-            values = json.loads((Path(os.environ.get("LOAM_PLUGIN_SETTINGS_DIR", ".")) / "values.json").read_text())
-        except (OSError, ValueError):
-            values = {}
-        return "everywhere" if values.get("reach") == "everywhere" else "staging"
+        return reach_of(Path(os.environ.get("LOAM_PLUGIN_SETTINGS_DIR", ".")))
 
     def home() -> str:
         # Where a share page's "Made with Loam" points: the install's own
