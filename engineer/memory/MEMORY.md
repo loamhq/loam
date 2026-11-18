@@ -1015,3 +1015,32 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   file). Holding one: a `read` dependency, or for a scratch script
   `fs.promises.readFile = …` plus `syncBuiltinESMExports()` from
   `node:module`, which rebinds the ESM named import.
+
+## 2026-11-17 — cutting 0.2.0, the first public release
+
+- **The push gate reads every commit, not the tree.** A commit that adds a
+  deny-listed term and a later one that removes it are still held. The
+  landing's own check is callable: `loam_worktree.push_gate(<checkout>,
+  'main', head=<branch>, objects=<job clone>)` returns the reasons, empty
+  when it would pass. Run it before the session ends; an unpushed job
+  branch can still be rebuilt clean (reset to `main`, cherry-pick, amend).
+- **The product's base domain may appear only in `lib/loam_install.py`**
+  (the deny list's one `allow`). The README names it by `BASE_DOMAIN`. Test
+  fixtures that write it regex-escaped (`myloam\.space`) slip past the
+  pattern; they are the product domain, not an install's.
+- **A history scan that holds up:** gitleaks and trufflehog (binaries into
+  the job's scratch) over a fresh non-bare clone (trufflehog reads 0 bytes
+  from a bare one), then the install's deny list plus its public addresses
+  and Cloudflare ids over every blob, path, message and tag reachable from
+  the branch, and the printable strings of every binary. At 0.2.0 the only
+  findings were synthetic: `sk-proj-Abc123…` in `tests/test_context_import.py`,
+  `user:password@example.org` URLs in app tests, a commit sha in
+  `app/tools/capture-latte-light.mjs` taken for a GitHub token.
+- **The design preview (`/?threads=fixture`) is the source of screenshots
+  with no person's data**: `node tools/fake-broker.js` (PORT=…) and
+  `APP_PORT=… BROKER_URL=… BROKER_TOKEN=dev node src/server.js`, then a
+  headless Chromium. Its fake API must answer every route the page calls
+  the way a runtime would; an unknown sub-route fell through to the thread
+  record and drew "Steps couldn't be loaded" under every reply.
+- **A job's shell may have no `$TMPDIR`**: `cd $TMPDIR` then lands in the
+  home directory. Name the scratch path in full.
