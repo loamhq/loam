@@ -2,7 +2,8 @@
 
 Added 2026-11-17. Decided 2026-11-13: one public GitHub repository holds a
 list file; builders host their own work and ask by pull request to be listed;
-a maintainer reviews each by hand; Settings › Plugins reads the list and
+a maintainer reviews each by hand; Settings › Market (Settings › Plugins
+until 2026-11-18) reads the list and
 installs from it through the same two calls as any link
 (lib/loam_plugins.install); installing from any link still works.
 
@@ -29,6 +30,20 @@ repository with that entry filled in as ``listings/<id>.json``. The owner
 opens it signed in to their own account; GitHub makes the fork and the pull
 request when they press Propose. Nothing is sent from the box.
 
+**A listing's own page** (``details``, 2026-11-18, Settings › Market): what
+the plugin at the listing's link says of itself, read the way an install's
+first call reads it (fetched at its tag, PLUGIN.md read, nothing written):
+its declaration in full, its version, author and guide, and for a theme its
+token CSS and options, so the Market can draw its swatch and let the owner
+try it before getting it. Its icon, its cover (the listing's ``image``, else
+a theme's own cover) and its theme.css are kept in this process for
+``file``. Kept ``DETAILS_TTL`` seconds per link: a listing names a tag, so
+what it holds does not change under a reader.
+
+**Two optional fields** (2026-11-18): ``featured: true`` makes a listing
+the Market's lead story; ``image`` is a picture inside the plugin's folder
+(the same rule as a theme's cover) drawn as that story's cover.
+
 The tests are tests/test_marketplace.py.
 """
 
@@ -52,6 +67,7 @@ import loam_config as lc
 DEFAULT_REPO = "loamhq/marketplace"
 DEFAULT_LIST = f"https://raw.githubusercontent.com/{DEFAULT_REPO}/main/list.json"
 TTL = 600
+DETAILS_TTL = 3600
 TIMEOUT = 8
 MAX_BYTES = 1 << 20
 FORMAT = 1
@@ -62,6 +78,13 @@ LIMITS = {"name": 60, "author": 60, "description": 200}
 
 _cache: dict = {}
 _lock = threading.Lock()
+# A listing's details, by link: {"at", "body", "files": {name: (bytes, type)}}.
+_details: dict = {}
+_details_locks: dict[str, threading.Lock] = {}
+ICON_MAX = 512 * 1024
+IMAGE_MAX = 3 * 1024 * 1024
+THEME_MAX = 128 * 1024
+GUIDE_MAX = 8000
 
 
 def list_url() -> str:
@@ -117,6 +140,13 @@ def check_entry(entry) -> tuple[dict | None, str | None]:
         out["homepage"] = home
     if isinstance(entry.get("version"), str) and loam_plugins.VERSION.match(entry["version"]):
         out["version"] = entry["version"]
+    # The Market's lead story and its cover (2026-11-18): optional; a value
+    # that is not one is left out, never the listing.
+    if entry.get("featured") is True:
+        out["featured"] = True
+    image = entry.get("image")
+    if isinstance(image, str) and loam_plugins.IMAGE.match(image) and len(image) < 200:
+        out["image"] = image
     return out, None
 
 
@@ -221,6 +251,123 @@ def listing(refresh: bool = False) -> dict:
                         "installed_from": src.get("repo") if src.get("kind") == "link"
                         else src.get("kind")})
     return {**out, "plugins": plugins, "repo": repo()}
+
+
+# ---------------------------------------------------------------------------
+# A listing's own page
+# ---------------------------------------------------------------------------
+
+class NotListed(LookupError):
+    pass
+
+
+def _entry(pid: str) -> dict:
+    if not isinstance(pid, str) or not ID.match(pid):
+        raise NotListed(f"{pid!r} is not a plugin id")
+    for entry in listing().get("plugins", []):
+        if entry["id"] == pid:
+            return entry
+    raise NotListed(f"the marketplace lists no {pid!r}")
+
+
+def _picture(folder: Path, rel, pattern, limit: int):
+    """A picture inside the plugin's folder, as (bytes, type), or None."""
+    import loam_plugins  # noqa: PLC0415
+    if not isinstance(rel, str) or not pattern.match(rel):
+        return None
+    path = (folder / rel)
+    try:
+        path.resolve().relative_to(folder.resolve())
+    except ValueError:
+        return None
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > limit:
+        return None
+    ctype = loam_plugins.TYPES.get(path.suffix.lower())
+    return (path.read_bytes(), ctype) if ctype and ctype.startswith("image/") else None
+
+
+def _read_details(entry: dict) -> dict:
+    import loam_plugins  # noqa: PLC0415
+    src = {"repo": entry["repo"], "ref": entry["ref"], "path": entry["path"]}
+    work = Path(tempfile.mkdtemp(prefix="market-", dir=loam_plugins._staging()))
+    try:
+        got = loam_plugins.fetch(src, work)
+        folder = got["folder"]
+        try:
+            found = loam_plugins.read_folder(folder, None)
+        except loam_plugins.ManifestError as exc:
+            raise loam_plugins.PluginError(f"{entry['name']} at its link is not a plugin "
+                                           f"Loam can read: {exc}", 422) from None
+        manifest = found["manifest"]
+        if manifest["id"] != entry["id"]:
+            raise loam_plugins.PluginError(f"the link holds the plugin {manifest['id']!r}, "
+                                           f"not {entry['id']!r}", 422)
+        files: dict = {}
+        icon = _picture(folder, manifest.get("icon"), loam_plugins.ICON, ICON_MAX)
+        if icon:
+            files["icon"] = icon
+        image = _picture(folder, entry.get("image") or manifest.get("image"),
+                         loam_plugins.IMAGE, IMAGE_MAX)
+        if image:
+            files["image"] = image
+        theme = None
+        if "theme" in manifest["kind"]:
+            css = folder / "theme.css"
+            if css.is_file() and css.stat().st_size <= THEME_MAX:
+                files["theme.css"] = (css.read_bytes(), "text/css; charset=utf-8")
+                theme = {"options": manifest.get("options") or []}
+        listed_only = [k for k in manifest["kind"] if k in loam_plugins.LISTED_ONLY]
+        guide = (found.get("guide") or "").strip()
+        body = {
+            "id": entry["id"], "listing": entry,
+            "name": manifest["name"], "version": manifest["version"],
+            "author": manifest["author"], "kind": manifest["kind"],
+            "declaration": loam_plugins.declaration(manifest, found["has"]),
+            "guide": guide[:GUIDE_MAX] if guide else None,
+            "warnings": found["warnings"],
+            "installable": not listed_only,
+            "why": (f"Loam reads and lists {listed_only[0]} packages and installs none yet"
+                    if listed_only else None),
+            "source": {**got["source"], "url": entry["link"]},
+            "icon": "icon" in files, "image": "image" in files, "theme": theme,
+        }
+        return {"at": time.time(), "body": body, "files": files}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _loaded(pid: str, refresh: bool = False) -> dict:
+    entry = _entry(pid)
+    key = entry["link"]
+    with _lock:
+        gate = _details_locks.setdefault(key, threading.Lock())
+    with gate:
+        hit = _details.get(key)
+        if hit and not refresh and time.time() - hit["at"] < DETAILS_TTL:
+            got = hit
+        else:
+            got = _read_details(entry)
+            _details[key] = got
+    # The installed marks move with this install, not with the cache.
+    return {**got, "body": {**got["body"], "listing": entry}}
+
+
+def details(pid: str, refresh: bool = False) -> dict:
+    """``GET /v1/marketplace/<id>``: the listing and what the plugin at its
+    link declares, before anything is installed. Raises NotListed (404) or
+    loam_plugins.PluginError (GitHub could not be read, not a plugin)."""
+    return _loaded(pid, refresh)["body"]
+
+
+def file(pid: str, name: str) -> tuple[bytes, str]:
+    """``GET /v1/marketplace/<id>/<icon|image|theme.css>``: one of the files
+    ``details`` kept, as (bytes, type)."""
+    if name not in ("icon", "image", "theme.css"):
+        raise NotListed(f"a listing has no file {name!r}")
+    got = _loaded(pid)["files"].get(name)
+    if not got:
+        raise NotListed(f"{pid} has no {name}")
+    return got
 
 
 # ---------------------------------------------------------------------------

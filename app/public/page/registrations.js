@@ -3,7 +3,7 @@ export function registerPage(loam) {
   const host = loam.ui.host
   const openList = (id, fallback) => host.state.wide ? host.browseSection(id) : fallback()
   const selectedList = (id, fallback) => host.state.wide ? host.state.navigator === id : fallback()
-  loam.events.on('rendered', () => host.pluginSettingsUI?.sync())
+  loam.events.on('rendered', () => { host.pluginSettingsUI?.sync(); host.marketSync() })
   loam.events.on('settings.opened', ({ page }) => { if (page === 'plugins') host.pluginSettingsUI?.opened() })
   for (const section of [
     { id: 'chats', frame: 'full', screens: ['home', 'threads'], render: () => host.threads.view(false), list: () => host.threads.list(true), load: () => host.threads.load({ quiet: true }), title: 'Chats', icon: 'chat', selected: () => selectedList('chats', () => !['files', 'activity', 'apps'].includes(host.state.screen) && !host.state.screen.startsWith('plugin:')), open: () => openList('chats', () => host.goChats()) },
@@ -24,6 +24,11 @@ export function registerPage(loam) {
   loam.places.rail.section.add({ id: 'profile', hidden: true, frame: 'full', screens: ['profile'], render: () => host.profileScreen() })
   loam.places.app.overlay.add({ id: 'core.editor', render: () => host.registry.component('core.composer', { variant: 'editor', defaultView: () => host.editorNodes() }) })
   loam.places.app.overlay.add({ id: 'core.sheets', render: () => host.sheetNodes() })
+  // The Market's install sheet, over the Market or over anything else (a
+  // thread's listing card opens it by id), and the Market by id or kind.
+  loam.places.app.overlay.add({ id: 'core.market-install', render: () => host.marketInstallNodes() })
+  loam.commands.register({ id: 'market.open', title: 'Open the Market', run: ({ id = null, kind = 'all', q = '' } = {}) => host.openMarket({ id, kind, q }) })
+  loam.commands.register({ id: 'market.install', title: 'Install from the Market', run: ({ id }) => host.openMarketInstall(id) })
   loam.places.app.overlay.add({ id: 'core.running-notices', render: () => host.registry.component('core.activity', { variant: 'notices', defaultView: () => host.running.toastNodes() }) })
   loam.places.app.overlay.add({ id: 'core.activity-dialogs', render: () => host.registry.component('core.activity', { variant: 'dialogs', defaultView: () => host.activity.dialogNodes() }) })
   loam.places.app.overlay.add({ id: 'core.profile-dialogs', render: () => host.registry.component('core.activity', { variant: 'profile-dialogs', defaultView: () => host.profileActivity.dialogNodes() }) })

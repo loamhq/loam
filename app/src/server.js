@@ -24,7 +24,7 @@ import { createTranscriber, TRANSCRIBE_MAX_BYTES, tooBig } from './transcribe.js
 import { createLog, requestId, loggedQuery } from './log.js'
 import { createSpeech } from './speech.js'
 import { appearanceBoot } from './appearance.js'
-import { loadThemes } from './themes.js'
+import { loadThemes, marketThemeCSS } from './themes.js'
 import { createBranchDrafter } from './thread-branch.js'
 import { INSTALLATION_DEFAULTS } from '../public/installation.js'
 import { createAppMedia } from './app-media.js'
@@ -197,6 +197,35 @@ export function createApp({
     if (rest === '/marketplace') {
       if (method !== 'GET') return sendJson(res, 405, { error: 'Use GET for the marketplace.' })
       return await relayJson(res, 'GET', `/v1/marketplace${url.searchParams.get('refresh') === '1' ? '?refresh=1' : ''}`, undefined, { signal: AbortSignal.timeout(20000) })
+    }
+    // A listing's own page (2026-11-18, Settings › Market): what the plugin
+    // at its link declares, and its icon, cover and theme, read by the broker
+    // from the link before anything is installed. A theme's CSS is held to
+    // the installed themes' rules here, so nothing but tokens reaches the page.
+    const listing = /^\/marketplace\/([a-z][a-z0-9-]*)(?:\/(icon|image|theme\.css))?$/.exec(rest)
+    if (listing) {
+      if (!['GET', 'HEAD'].includes(method)) return sendJson(res, 405, { error: 'Use GET for a listing.' })
+      const [, id, file] = listing
+      if (!file) return await relayJson(res, 'GET', `/v1/marketplace/${id}${url.searchParams.get('refresh') === '1' ? '?refresh=1' : ''}`, undefined, { signal: AbortSignal.timeout(200000) })
+      if (file !== 'theme.css') {
+        const out = await broker.file(`/v1/marketplace/${id}/${file}`, { method, signal: AbortSignal.timeout(200000) })
+        const type = out.status === 200 && /^image\//.test(out.contentType ?? '') ? out.contentType : 'application/json'
+        res.writeHead(out.status, { 'content-type': type, 'cache-control': out.status === 200 ? 'private, max-age=600' : 'no-store', 'x-content-type-options': 'nosniff',
+          ...(type === 'image/svg+xml' ? { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } : {}) })
+        if (method === 'HEAD' || !out.stream) { out.stream?.destroy(); return res.end() }
+        return await new Promise((resolve, reject) => { out.stream.on('error', reject); res.on('close', () => { out.stream.destroy(); resolve() }); out.stream.pipe(res); res.on('finish', resolve) })
+      }
+      const about = await broker.json('GET', `/v1/marketplace/${id}`, undefined, { signal: AbortSignal.timeout(200000) })
+      if (about.status !== 200) { res.writeHead(about.status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(about.body) }
+      const out = await broker.file(`/v1/marketplace/${id}/theme.css`, { signal: AbortSignal.timeout(30000) })
+      const chunks = []; let size = 0
+      if (out.stream) for await (const chunk of out.stream) { size += chunk.length; if (size > MAX_BODY) { out.stream.destroy(); return sendJson(res, 413, { error: 'The theme is too large.' }) } chunks.push(chunk) }
+      if (out.status !== 200) return sendJson(res, out.status, { error: `${id} has no theme to try.` })
+      let css
+      try { css = await marketThemeCSS(id, Buffer.concat(chunks).toString('utf8'), JSON.parse(about.body).theme?.options ?? []) }
+      catch (error) { return sendJson(res, 422, { error: `${id}’s theme is not one Loam can wear: ${error.message}` }) }
+      res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'private, max-age=600', 'x-content-type-options': 'nosniff' })
+      return res.end(method === 'HEAD' ? '' : css)
     }
     if (rest === '/plugins') {
       if (!['GET', 'POST'].includes(method)) return sendJson(res, 405, { error: 'Use GET or POST for plugins.' })

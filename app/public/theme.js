@@ -34,6 +34,9 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
   let withOptions = installed.some(t => t.options?.length)
   if (withOptions) value.options = optionValues(value.options, installed)
   let pending = { ...draft }, timer, saving = false, revision = 0, reading = 0
+  // The Market's Try it (2026-11-18): a look worn until it is stopped; `value`
+  // and what is saved are untouched, so stopping is the theme as it was.
+  let trying = null
   let error = boot?.available !== true ? 'Appearance settings are not available on the host yet. Changes apply here until you reload.' : null
   const motionQuery = reducedMotion ?? globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')
   const isHidden = () => Boolean(globalThis.document?.hidden || globalThis.document?.visibilityState === 'hidden')
@@ -55,6 +58,8 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     return withOptions ? JSON.stringify(value.options?.[value.theme] || {}) : ''
   }
   function apply({ allowShift = false, keepActiveShift = false } = {}) {
+    // A theme being tried from the Market is worn, never saved (2026-11-18).
+    const look = trying ?? value.theme
     clearTimeout(sunTimer)
     const solar = value.mode === 'sun' ? sun.state(now(), value.location) : null
     const chosen = solar ? solar.mode : value.mode === 'system' ? (media?.matches ? 'dark' : 'light') : value.mode
@@ -69,22 +74,22 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     }
     const optKey = optionsSignature()
     const currentShift = shift.active
-    if (keepActiveShift && currentShift && value.mode === 'sun' && currentShift.toMode === chosen && currentShift.look === value.theme && currentShift.optionsKey === optKey && !isHidden() && !isReducedMotion()) {
+    if (keepActiveShift && currentShift && value.mode === 'sun' && currentShift.toMode === chosen && currentShift.look === look && currentShift.optionsKey === optKey && !isHidden() && !isReducedMotion()) {
       root.style.setProperty('--ui-scale', value.size / 100)
       activeMode = chosen
       return chosen
     }
     if (allowShift && value.mode === 'sun' && activeMode && activeMode !== chosen && !isHidden() && !isReducedMotion()) {
       const fromMode = activeMode
-      root.dataset.look = value.theme
-      globalThis.LoamThemeFonts?.(value.theme)
-      applyOptions(root, value.options, installed, value.theme)
+      root.dataset.look = look
+      globalThis.LoamThemeFonts?.(look)
+      applyOptions(root, value.options, installed, look)
       root.style.setProperty('--ui-scale', value.size / 100)
       if (shift.start({
         fromMode,
         toMode: chosen,
         duration: transitionMs(value.transition),
-        look: value.theme,
+        look,
         optionsKey: optKey,
         onMidpoint: () => changed(),
         onComplete: () => changed(),
@@ -96,9 +101,9 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     shift.cancel()
     activeMode = chosen
     root.dataset.theme = chosen
-    root.dataset.look = value.theme
-    globalThis.LoamThemeFonts?.(value.theme)
-    applyOptions(root, value.options, installed, value.theme)
+    root.dataset.look = look
+    globalThis.LoamThemeFonts?.(look)
+    applyOptions(root, value.options, installed, look)
     root.style.setProperty('--ui-scale', value.size / 100)
     updateThemeColor()
     return chosen
@@ -215,6 +220,15 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
       const time = ms => formatTime(Math.round(ms / 60000) * 60000, { timeZone: place.timeZone })
       return { ...solar, place, times: solar.polar ? `Light ${solar.polar === 'day' ? 'all day' : 'returns after polar night'}` : `Light ${time(solar.start)} – ${time(solar.end)}`, coordinates: `${place.latitude.toFixed(1)}°, ${place.longitude.toFixed(1).replace('-', '−')}°` }
     },
+    // Wear a theme without choosing it: the Market's Try it. `null` stops.
+    // The theme's tokens must already be in the page (themes.css for an
+    // installed one; the Market loads a listed one's).
+    try(id) {
+      const next = typeof id === 'string' && /^[a-z][a-z0-9-]*$/.test(id) ? id : null
+      if (next === trying) return
+      trying = next; apply(); changed()
+    },
+    get trying() { return trying },
     install(catalog) {
       installed.splice(0, installed.length, ...catalog); withOptions = installed.some(t => t.options?.length)
       value = { ...value, theme: themeId(value.theme), ...(withOptions ? { options: optionValues(value.options, installed) } : {}) }; apply(); changed()

@@ -120,6 +120,7 @@ function filesSheetNodes() {
 function sheetNodes() {
   const sheet = host.state.sheet
   if (!sheet) return host.picker.st.open ? pickerNodes() : filesSheetNodes()
+  if (sheet.kind === 'market') return host.marketNodes(sheet)
   if (!['settings', 'activity', 'menu'].includes(sheet.kind)) return host.registry.draw('app.overlay', { slot: 'sheet', sheet })
   const centered = host.state.wide && ['settings', 'activity'].includes(sheet.kind)
   const close = () => closeSheet({ historyBack: centered })

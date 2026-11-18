@@ -478,6 +478,8 @@ export const icon = {
   power: (s = 18) => svg(s, [['path', { d: 'M12 3v9M6.2 5.8a9 9 0 1 0 11.6 0' }]]),
   clock: (s = 18) => svg(s, [['circle', { cx: 12, cy: 12, r: 9 }], ['path', { d: 'M12 7v5l3 2' }]]),
   refresh: (s = 18) => svg(s, [['path', { d: 'M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3a7 7 0 0 0 11.6-1' }]]),
+  // The Market's mark: a four-pointed spark (2026-11-18).
+  spark: (s = 18) => svg(s, [['path', { d: 'M12 3l2.1 6.1L20 11.5l-5.9 2.2L12 20l-2.1-6.3L4 11.5l5.9-2.4z' }]], { stroke: 2 }),
   search: (s = 18) => svg(s, [['circle', { cx: 11, cy: 11, r: 7 }], ['path', { d: 'M20 20l-3.5-3.5' }]]),
   plus: (s = 18) => svg(s, [['path', { d: 'M12 5v14M5 12h14' }]]),
   minus: (s = 18) => svg(s, [['path', { d: 'M5 12h14' }]]),

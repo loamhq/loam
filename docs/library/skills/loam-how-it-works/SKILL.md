@@ -56,7 +56,7 @@ theirs.
 **Plugins** add themes, page code, tools and servers. Loam's own ship with
 it; the owner's live in their own folder, which updates never touch (see
 `loam-building-a-plugin`). A customisation is a plugin wherever one can do
-it. Plugins are shared by link, and the marketplace in Settings › Plugins
+it. Plugins are shared by link, and the Market (Settings › Market)
 lists what others made (`loam-publishing-to-the-marketplace`).
 
 **Updates** replace Loam's code and this library (`System/Loam/` in the

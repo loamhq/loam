@@ -79,3 +79,17 @@ have never met.
   the fixture and the scene steps must not depend on the change, so the script
   finds controls by role and text that exist on both sides, or skips a step
   that is not there.
+- **Settings › Market** (2026-11-18, `docs/market.md`): a sheet of kind
+  `market`, drawn by `page/market.js` and placed by `page/sheets.js`; its
+  install sheet is an `app.overlay` so a thread can open it by id. Three
+  things a full-window surface has to undo: the rail's foot rises above any
+  centred popover (`menu-surface.css`) and showed through the Market until
+  `market.css` lowered it there; the shared 44px hit area inflates a picture
+  of a button (a swatch's Send pill) unless that pill opts out; and a test
+  reading a class straight after a keypress reads the last frame (the page
+  redraws on the next one): wait for the class.
+- **Browser tests already failing on `main` at 0.2.4** (same first error with
+  and without the Market): app-modal, menu-surfaces, plugin-preferences,
+  settings-review (cover captions' contrast), sheet-layers, five-themes,
+  plugins-polish, plugin-host, theme-options. Compare against a `git archive`
+  of `main` before blaming a change.

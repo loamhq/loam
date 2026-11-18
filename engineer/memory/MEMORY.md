@@ -1359,3 +1359,28 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `STATE/lane-notice/`), cleared by the lane's next good row. It goes
   quiet when `LOAM_AI_LABS` points at scratch without `LOAM_LANE_NOTICE_LOGS`,
   because thread tests reuse live persona names.
+
+## 2026-11-18 — Settings › Market
+
+- **A listing's page reads the plugin at its link before install**
+  (`loam_marketplace.details`): a shallow fetch at the tag through
+  `loam_plugins.fetch` and `read_folder`, nothing written, kept an hour per
+  link with its icon, cover and theme.css in memory for `file()`. Each first
+  read is a git fetch on the broker, so the page asks three at a time
+  (`page/market.js`, `pump`). The broker routes are reads only; installing
+  stays `POST /v1/plugins`, twice.
+- **A listed theme's CSS reaches the page only through the app's own check**
+  (`marketThemeCSS` in `app/src/themes.js`, the installed themes' rules plus
+  the `.theme-preview[data-look]` swatch scope). Its fonts are not loaded
+  until it is installed (`theme-fonts.js` knows only first-party looks), so
+  Try it shows the serif fallback for its display face.
+- **The list carries no dates**, so the lead story's "newest by Loam" cannot
+  be read from it: `featured` leads, else Loam's own listing with the highest
+  version. A `listed` date stamped by `build.py` would be a schema change to
+  the public repository, which is the owner's call.
+- **Every `/^\/…$/.exec(rest)` the app relays needs a line in
+  `PAGE_RELAY`** (`lib/loam_settings.py`); `test_settings.py` reads
+  `server.js` for them.
+- **The push gate's deny list has product names in it too** (a sync tool's
+  name in a code comment matched). Grep added lines case-sensitively, as the
+  gate does, before landing.

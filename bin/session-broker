@@ -5632,6 +5632,36 @@ class Server:
                 writer.write(response(200, body, "Cache-Control: no-store\r\n"))
             await writer.drain()
             return
+        # A listing's own page (2026-11-18, Settings › Market): what the
+        # plugin at its link declares, read as an install's first call reads
+        # it (nothing written), and its icon, cover and theme.css for the
+        # Market to draw. Reads only; installing is the plugins route's.
+        if parts[:2] == ["v1", "marketplace"] and len(parts) in (3, 4):
+            nocache = "Cache-Control: no-store\r\n"
+            try:
+                if method not in ("GET", "HEAD"):
+                    raise BrokerError(405, "a listing is read with GET")
+                if len(parts) == 3:
+                    body = await asyncio.to_thread(loam_marketplace.details, parts[2],
+                                                   params.get("refresh") == "1")
+                    writer.write(response(200, body, nocache))
+                else:
+                    data, ctype = await asyncio.to_thread(loam_marketplace.file,
+                                                          parts[2], parts[3])
+                    head = (f"HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\n"
+                            f"Content-Length: {len(data)}\r\n"
+                            f"Cache-Control: private, max-age=600\r\n"
+                            f"X-Content-Type-Options: nosniff\r\n"
+                            f"Connection: close\r\n\r\n").encode()
+                    writer.write(head + (b"" if method == "HEAD" else data))
+            except loam_marketplace.NotListed as exc:
+                writer.write(response(404, {"error": str(exc)}, nocache))
+            except loam_plugins.PluginError as exc:
+                writer.write(response(exc.status, {"error": exc.message}, nocache))
+            except BrokerError as exc:
+                writer.write(response(exc.status, {"error": exc.message}, nocache))
+            await writer.drain()
+            return
 
         # Shared keys (2026-11-18): Settings › Accounts. API keys by provider,
         # entered once; each plugin that declared a provider uses its shared
