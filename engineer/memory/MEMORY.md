@@ -1427,3 +1427,27 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   Re-scroll inside the wait (`tools/capture-reply-images.mjs`).
 - **`image_size` reads PNG/GIF/WebP/JPEG headers** with seeks, no library,
   so the page can hold a picture's exact space before it loads.
+
+## 2026-11-18 — the Market for agents: search and the card in a thread
+
+- **One matching rule across two languages.** An agent's Market search
+  (`loam_marketplace.search`, `bin/loam-market search`, the `market` tool on
+  `mcp/engineer_server.py`) does not match in Python: it hands the list to
+  `app/tools/market-search.mjs`, which runs `search` from
+  `app/public/market.js` under Node (`/usr/bin/node`, the app's own unit's
+  runtime). `app/test/market-card.test.js` runs the CLI and the page's
+  function over the fixture list and fails on any difference in order;
+  sorting the CLI's ids by name made it fail (checked).
+- **The card is words, not a tool.** `[Name](https://<app>/?modal=market&listing=<id>)`
+  on a line of its own (the result's `card`); the record keeps it as a
+  working link. `card_line` takes the origin from the deploy records (the
+  `app_shell` record at the install's domain). The page accepts any host,
+  since the card's action is local and the id must be listed.
+- **The engineer server's new tool needs no re-provision**: every lane on
+  every provider already loads `engineer`, and its tool list is read when a
+  conversation's server starts, so new conversations (and wakes, crons) see
+  `market` as soon as `main` lands; open conversations do not.
+- **`tests/test_engineer_server.py` skips in a job's tree**: it looks for
+  `mcp/.venv/bin/python` beside the repo, and the venv lives at
+  `lc.MCP_VENV` (`~/.local/share/loam/mcp-venv`). Run it by hand with
+  `VENV_PYTHON` pointed there to see it pass.

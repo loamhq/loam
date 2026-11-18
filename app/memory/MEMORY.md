@@ -93,3 +93,10 @@ have never met.
   settings-review (cover captions' contrast), sheet-layers, five-themes,
   plugins-polish, plugin-host, theme-options. Compare against a `git archive`
   of `main` before blaming a change.
+- **A listing card in an agent's reply** (2026-11-18, `docs/market.md`, "A
+  listing card in a thread"): `threads.js` cuts an agent's text at card
+  lines (`splitCards`, `public/market-card.js`) and draws them with
+  `host.marketCards` between cached prose pieces. The cards must stay out
+  of the prose cache (`progressiveProse` keeps a node per text), or a card
+  would never turn to Installed. The prose slot for a message with no card
+  is unchanged (`index`), so nothing else re-renders.

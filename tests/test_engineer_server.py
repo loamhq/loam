@@ -86,6 +86,7 @@ def bootstrap(launcher: Path) -> str:
         m.LAUNCHER = {str(launcher)!r}
         m.SETTINGS = {str(launcher.parent / "settings-echo")!r}
         m.THREAD = {str(launcher.parent / "settings-echo")!r}
+        m.MARKET = {str(launcher.parent / "settings-echo")!r}
         import logging
         logging.getLogger().setLevel(logging.DEBUG)
         m.mcp.run()
@@ -237,8 +238,19 @@ def main() -> int:
             rid = server.send("tools/list")
             tools = (server.replies({rid}, 30).get(rid) or {}).get("result", {}).get("tools", [])
             brief = next((t for t in tools if t["name"] == "brief"), None)
-            check("the tools are `brief`, `cancel`, `status`, `settings`, `site`, `thread` (capacity and sandboxes are plugins' since 2026-11-14)",
-                  sorted(t["name"] for t in tools), ["brief", "cancel", "settings", "site", "status", "thread"])
+            check("the tools are `brief`, `cancel`, `market`, `status`, `settings`, `site`, `thread` (capacity and sandboxes are plugins' since 2026-11-14; `market` since 2026-11-18)",
+                  sorted(t["name"] for t in tools), ["brief", "cancel", "market", "settings", "site", "status", "thread"])
+            # `market` (2026-11-18) hands off to bin/loam-market search: the
+            # flags, then `--` and the words, so words that start with a dash
+            # are words.
+            rid = server.send("tools/call", {"name": "market", "arguments": {
+                "query": "sync with -my phone", "kind": "extension"}})
+            got = tool_result(server.replies({rid}, 30).get(rid) or {})
+            if isinstance(got.get("result"), str):
+                got = json.loads(got["result"])
+            check("`market` hands bin/loam-market search its words and kind",
+                  got.get("argv"), ["search", "--json", "--limit", "8", "--kind", "extension",
+                                    "--", "sync", "with", "-my", "phone"])
             # `settings` (2026-11-10) hands off to bin/settings: flags first,
             # then `--`, so a value that starts with a dash is a value.
             rid = server.send("tools/call", {"name": "settings", "arguments": {

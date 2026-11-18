@@ -1177,6 +1177,41 @@ The repository's content (README with the review bar, the empty list,
 `build.py`, the workflow, the pull request template) is `docs/marketplace/` in
 this repository, until the repository exists.
 
+### Finding things, for an agent: `loam market search` and the card
+
+The owner, 2026-11-18: "Agents should be able to go navigate the Marketplace
+and create that card in chat to let the user install something if they
+wanted to … It should just be a capability that the agents have access to,
+and the UI supports it too."
+
+`loam market search <words> [--kind <kind>] [--json]`, and the tool
+`mcp__engineer__market` (every agent, every provider, conversations, wakes
+and crons alike), answer the listings that match plain words, best first:
+id, name, author, kind, description, whether it is installed here, whether
+it is installable today (agents and skills are listed, not installed yet),
+and `card`. The ranking **is the Market page's**: the list is handed to
+`app/tools/market-search.mjs`, which runs `search` from
+`app/public/market.js` in Node, so there is one matching rule
+(`app/test/market-card.test.js` holds the two answers equal). An empty or
+unreachable Market answers no results and a sentence (`say`) telling the
+agent to offer to build it instead.
+
+`card` is the line an agent puts in its reply, on a line of its own, to
+show a listing card:
+
+```markdown
+[Pocket Sync](https://<the app>/?modal=market&listing=pocket-sync)
+```
+
+The thread record keeps that line as it is: the listing's name, linked to
+its page in the app. The app draws it as a card (icon, name, maker, kind,
+one line, how far it reaches, and the Market's own button; Install opens
+the Market's install sheet over the thread), at most three in a message.
+The form is hard to make by accident (alone on its line, outside code, the
+app's root with exactly `modal` and `listing`), and a listing the Market
+does not have is drawn as its words, plain. The rules are
+`app/public/market-card.js`; the app's side is `app/docs/market.md`.
+
 ### Sharing by link: `loam market share`
 
 `loam market share <id> <owner>/<name>` pushes a plugin from the owner's

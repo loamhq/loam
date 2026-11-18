@@ -13,6 +13,8 @@ export function mount(host, options = {}) {
     messageState: options.messageState ?? createMessageState(),
     renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event) }),
     openRef: ref => host.openFileRef(ref),
+    // A listing card in an agent's reply (page/market.js).
+    marketCards: (refs, context) => host.marketCards?.(refs, context) ?? null,
     stepUI: { fold: host.foldCard, tool: host.toolNode, item: item => host.itemNode({ what: item.kind, item }),
       facts: (item, engine) => host.turnFacts(item, host.state.providers.find(p => p.id === engine) ?? null),
       reveal: steps => host.openBlocks.add(`fold:${host.keyOf(steps[0])}`) },
