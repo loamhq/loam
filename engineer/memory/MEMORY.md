@@ -1214,3 +1214,29 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **29.9 adds a unix socket**, `/var/run/docker/extensions/callback.sock`
   (the extensions framework). It sits under the root-only `/var/run/docker`,
   so it adds no TCP listener and no reach beyond root.
+
+## 2026-11-18 — the agents' browser reads past the login, and writes only same-origin
+
+- **A login bypass by network is a bypass for every page that network
+  opens.** The browser's subnet passed the gate whole, so a stranger's page
+  in it could POST to the app's host as the owner. The plugin gateway's
+  `/x/*` had no origin check, though the app's `/api/*` did. Two layers
+  now: `bin/plugin-gateway` applies the app's rule to every non-safe method
+  and every upgrade, and `lib/loam_deploy.sight_lines` refuses such a
+  request from the subnet unless `Sec-Fetch-Site: same-origin` (or, with no
+  fetch metadata, `Origin` is the host). That covers every private host,
+  sites with backends included, without anyone having to list the doors.
+- **Prove it with the real browser, not curl.** The playwright MCP on
+  `127.0.0.1:8931/mcp` takes plain JSON-RPC (initialize, then `tools/call`).
+  From `https://example.com/`, `browser_evaluate` a `fetch(..., {mode:
+  'no-cors'})`; `browser_console_messages` in the SAME session shows the
+  status, and the host's access log shows the headers Chromium really sent.
+  Each client run is a fresh context, so the console is gone by the next run.
+  A body that names no document gets the plugin's own 400, which proves the
+  request reached the plugin without writing anything.
+- **Caddy's `{http.request.host}` has no port; a backend's `Host` may.** In
+  a test on `http://name:port`, an `Origin` that satisfies Caddy (`https://name`)
+  fails the gateway (`http://name:port`). Send `Sec-Fetch-Site` and an
+  Origin matching the backend's view. On 443 the two agree.
+- **The push gate reads test fixtures too.** A made-up hostname carrying the
+  owner's name held a landing; use `owner.example`.
