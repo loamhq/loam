@@ -202,6 +202,20 @@ export function createApp({
       if (!['GET', 'POST'].includes(method)) return sendJson(res, 405, { error: 'Use GET or POST for plugins.' })
       return await relayJson(res, method, '/v1/plugins', method === 'POST' ? await readBody(req) : undefined, { signal: AbortSignal.timeout(method === 'POST' ? 420000 : 5000) })
     }
+    // Shared keys (2026-11-18): Settings › Accounts. The broker never
+    // answers a whole value on these routes; the app server's own key reads
+    // go to /v1/plugins/<id>/secrets/<name>/value, which this relay never
+    // passes.
+    const keysAll = /^\/keys(?:\/([^/]+))?$/.exec(rest)
+    const keysCheck = /^\/keys\/([^/]+)\/check$/.exec(rest)
+    const keysPlugin = /^\/keys\/([^/]+)\/plugins\/([^/]+)$/.exec(rest)
+    if (keysAll || keysCheck || keysPlugin) {
+      if (rest.split('/').some(part => /[/\\\x00]/.test(dec(part)))) return sendJson(res, 400, { error: 'Invalid key path.' })
+      const allowed = keysCheck ? ['POST'] : keysPlugin ? ['PUT', 'DELETE'] : keysAll[1] ? ['GET', 'PUT', 'DELETE'] : ['GET']
+      if (!allowed.includes(method)) return sendJson(res, 405, { error: 'This operation is not available for keys.' })
+      const target = '/v1' + rest.split('/').map(part => encodeURIComponent(dec(part))).join('/')
+      return await relayJson(res, method, target, ['POST', 'PUT'].includes(method) ? await readBody(req) : undefined, { signal: AbortSignal.timeout(30000) })
+    }
     const pluginSettings = /^\/plugins\/[^/]+\/settings$/.test(rest)
     const pluginSecret = /^\/plugins\/[^/]+\/secrets(?:\/[^/]+)?$/.test(rest)
     const secretCheck = /^\/plugins\/[^/]+\/secrets\/[^/]+\/check$/.test(rest)

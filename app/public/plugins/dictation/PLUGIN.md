@@ -7,7 +7,9 @@ api: 0
 default_on: false
 kind: [extension]
 places: [composer.tool, settings.section]
-contributes: {"settings.secret":[{"name":"GEMINI_API_KEY","label":"Gemini API key","check":"builtin:gemini"}]}
+keys:
+  - provider: google
+    why: Transcribes and tidies what you record
 overrides: []
 touches:
   network:

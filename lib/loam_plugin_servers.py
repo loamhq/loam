@@ -185,6 +185,9 @@ def environment(pid: str, want: dict, port: int) -> dict[str, str]:
         # the settings folder, the machine-local private folder, Loam's lib.
         "LOAM_PLUGIN_SETTINGS_DIR": str(settings_dir),
         "LOAM_PLUGIN_PRIVATE": str(private),
+        # Since 2026-11-18 (shared keys): the file of its declared providers'
+        # keys, resolved; absent when it declares none (lib/loam_keys.py).
+        "LOAM_PLUGIN_KEYS": str(private / "keys.env"),
         "LOAM_LIB": str(lc.ROOT / "lib"),
         "LOAM_BROKER_URL": f"http://{cfg.BIND_ADDR}:{cfg.PORT}",
         "LOAM_BROKER_TOKEN_FILE": str(cfg.TOKEN_PATH),
@@ -372,6 +375,15 @@ def reconcile() -> dict:
         import loam_contributions  # noqa: PLC0415
         loam_contributions.apply_units()
     except Exception:  # noqa: BLE001 -- the servers' reconcile never fails for it
+        pass
+    # And each plugin's resolved keys (2026-11-18, lib/loam_keys.py): a
+    # plugin edited in place to declare a provider gets its key within five
+    # minutes, and one that stopped declaring it loses it.
+    try:
+        import loam_keys  # noqa: PLC0415
+        loam_keys.adopt()
+        loam_keys.sync()
+    except Exception:  # noqa: BLE001
         pass
     want = plugins.wanted_servers()
     loaded = set(loaded_units())

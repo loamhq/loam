@@ -98,7 +98,12 @@ own `thread.*` rows cover the same things.
 | `job.cancel` | Cancel an engineer job | POST /api/jobs/{id}/cancel | persona, by `mcp__engineer__cancel` | yes, that tool |
 | `provider.login` | Sign a provider in again, or out | POST /api/providers/{p}/login (+ /code, DELETE), POST /api/providers/{p}/logout | owner | — |
 | `integration.github` | Connect / disconnect GitHub | /api/integrations/github/… | owner | — |
-| `plugin.secret` | A plugin's API key (read aloud, dictation), pasted and checked on entry (2026-11-14) | PUT/DELETE /api/plugins/{plugin}/secrets/{name} | owner | — |
+| `plugin.secret` | A plugin's own API key, pasted and checked on entry (2026-11-14); a plugin that declares `keys:` uses Accounts instead | PUT/DELETE /api/plugins/{plugin}/secrets/{name} | owner | — |
+| `keys.set` | A provider's shared API key in Accounts, checked before it is kept; the value is never read back (2026-11-18) | PUT /api/keys/{provider} | persona, conversation only | — |
+| `keys.forget` | Forget a provider's shared key | DELETE /api/keys/{provider} | persona, conversation only | — |
+| `keys.check` | Check a provider's shared key again | POST /api/keys/{provider}/check | persona | — |
+| `keys.own` | Give one plugin a different key of a provider it declared | PUT /api/keys/{provider}/plugins/{plugin} | persona, conversation only | — |
+| `keys.shared` | Put a plugin back on the provider's shared key | DELETE /api/keys/{provider}/plugins/{plugin} | persona, conversation only | — |
 | `agent.display` | An agent's display name; its id never changes (2026-11-13) | PATCH /api/agents/{agent} | persona, conversation only | no |
 | `agent.provider` | An agent's default provider: new threads, members brought in; wakes and crons only on Claude Code | PATCH /api/agents/{agent} | persona, conversation only | no (was `persona.provider`, the owner's hands) |
 | `agent.model` | An agent's default model, on its provider | PATCH /api/agents/{agent} | persona, conversation only | no |

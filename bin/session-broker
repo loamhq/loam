@@ -241,6 +241,7 @@ import loam_appearance  # noqa: E402
 import loam_apps  # noqa: E402
 import loam_plugins  # noqa: E402
 import loam_marketplace  # noqa: E402
+import loam_keys  # noqa: E402
 import loam_profile  # noqa: E402
 import loam_agents  # noqa: E402
 import loam_skills  # noqa: E402
@@ -5632,6 +5633,50 @@ class Server:
             await writer.drain()
             return
 
+        # Shared keys (2026-11-18): Settings › Accounts. API keys by provider,
+        # entered once; each plugin that declared a provider uses its shared
+        # key unless it has its own. Every rule is lib/loam_keys.py;
+        # docs/plugins.md, "Keys", is the interface. An agent may change them
+        # with `by` (the owner, 2026-11-10: every setting is an agent's too);
+        # no route here ever answers a whole value.
+        if parts[:2] == ["v1", "keys"]:
+            nocache = "Cache-Control: no-store\r\n"
+            rest = parts[2:]
+            try:
+                by = author(payload) if method != "GET" else None
+                if not rest and method == "GET":
+                    body = await asyncio.to_thread(loam_keys.listing)
+                elif len(rest) == 1 and method == "GET":
+                    body = await asyncio.to_thread(loam_keys.one, rest[0])
+                elif len(rest) == 1 and method == "PUT":
+                    body = await asyncio.to_thread(loam_keys.set_shared, rest[0], payload, by)
+                    print(f"keys: {rest[0]} saved by {by or lc.OWNER_ID}",
+                          file=sys.stderr, flush=True)
+                elif len(rest) == 1 and method == "DELETE":
+                    body = await asyncio.to_thread(loam_keys.forget_shared, rest[0], by)
+                    print(f"keys: {rest[0]} forgotten by {by or lc.OWNER_ID}",
+                          file=sys.stderr, flush=True)
+                elif rest[1:] == ["check"] and method == "POST":
+                    body = await asyncio.to_thread(loam_keys.recheck, rest[0], by)
+                elif len(rest) == 3 and rest[1] == "plugins" and method == "PUT":
+                    body = await asyncio.to_thread(loam_keys.set_own, rest[0], rest[2],
+                                                   payload, by)
+                    print(f"keys: {rest[2]} uses its own {rest[0]} key (by "
+                          f"{by or lc.OWNER_ID})", file=sys.stderr, flush=True)
+                elif len(rest) == 3 and rest[1] == "plugins" and method == "DELETE":
+                    body = await asyncio.to_thread(loam_keys.use_shared, rest[0], rest[2], by)
+                    print(f"keys: {rest[2]} uses the shared {rest[0]} key (by "
+                          f"{by or lc.OWNER_ID})", file=sys.stderr, flush=True)
+                else:
+                    raise BrokerError(405, "GET /v1/keys[/<provider>]; PUT or DELETE "
+                                           "/v1/keys/<provider>; POST …/<provider>/check; "
+                                           "PUT or DELETE …/<provider>/plugins/<id>")
+                writer.write(response(200, body, nocache))
+            except loam_keys.KeyError_ as exc:
+                writer.write(response(exc.status, {"error": str(exc)}, nocache))
+            await writer.drain()
+            return
+
         # Updates (2026-11-14, first release L13): Settings › Update reads
         # the state, checks, applies and rolls back. Every rule is
         # lib/loam_update.py; docs/update.md is the page contract.
@@ -7390,8 +7435,12 @@ class Server:
                     elif tail[3:] == ["value"] and method == "GET":
                         # For the app's own server, which makes the provider's
                         # call; the page's relay must never pass this route.
+                        # A field of a provider the plugin declared in `keys:`
+                        # (2026-11-18) resolves as shared keys do.
+                        import loam_keys  # noqa: PLC0415
+                        if not await asyncio.to_thread(loam_keys.declares_field, pid, tail[2]):
+                            await asyncio.to_thread(contrib._secret_entry, pid, tail[2])
                         value = await asyncio.to_thread(contrib.secret_for, pid, tail[2])
-                        await asyncio.to_thread(contrib._secret_entry, pid, tail[2])
                         if not value:
                             raise BrokerError(404, f"no {tail[2]} is set for {pid}")
                         body = {"name": tail[2], "value": value,

@@ -124,7 +124,9 @@ PLACES = (
 FIELDS = ("id", "name", "version", "author", "api", "kind", "places",
           "overrides", "touches", "settings", "forked_from", "options",
           "image", "image_position", "image_dark", "image_position_dark",
-          "agent_settings", "server", "icon", "contributes", "default_on")
+          "agent_settings", "server", "icon", "contributes", "default_on",
+          # 2026-11-18: the providers whose keys it uses (lib/loam_keys.py).
+          "keys")
 LIST_FILE = "installed.json"
 STAGING = ".staging"
 # The Yours layer's default: its own folder and git repository, beside the
@@ -1052,6 +1054,16 @@ def manifest_of(data: dict, folder_name: str | None,
                                                     warnings)
     except loam_contributions.ContributionError as exc:
         raise ManifestError(str(exc))
+    # The providers whose keys it uses (2026-11-18, shared keys): shown
+    # before install beside `touches`; a key is handed to no plugin that did
+    # not declare its provider. lib/loam_keys.py.
+    import loam_keys  # noqa: PLC0415
+    try:
+        keys = loam_keys.keys_of(data.get("keys"), warnings)
+    except ValueError as exc:
+        raise ManifestError(str(exc))
+    if keys:
+        out["keys"] = keys
     default_on = data.get("default_on")
     if default_on is not None:
         if not isinstance(default_on, bool):
@@ -1182,6 +1194,9 @@ def declaration(manifest: dict, has: dict) -> dict:
     # from `contributes:`, so it cannot be declared short of what it does.
     import loam_contributions  # noqa: PLC0415
     touches.update(loam_contributions.declared(manifest.get("contributes") or {}))
+    if manifest.get("keys"):
+        import loam_keys  # noqa: PLC0415
+        touches["keys"] = loam_keys.declaration_of(manifest["keys"])
     return {"touches": touches, "overrides": list(manifest["overrides"]),
             "page_code": bool(has.get("page"))}
 

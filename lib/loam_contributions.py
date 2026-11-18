@@ -413,7 +413,8 @@ def active() -> list[dict]:
                         "settings": loam_plugins.yours_root() / "_settings" / row["id"],
                         "settings_file": Path(row.get("settings") or "settings.md").name,
                         "data": loam_plugins.yours_root() / "_data" / row["id"],
-                        "has_server": bool((row.get("has") or {}).get("server"))})
+                        "has_server": bool((row.get("has") or {}).get("server")),
+                        "keys": bool(row.get("keys"))})
     return out
 
 
@@ -452,6 +453,11 @@ def _env(plugin: dict, secrets: list[str] | None = None) -> dict[str, str]:
         # Names only, never values: the process reads them itself
         # (secret_for), so no rendered file carries a secret.
         env["LOAM_PLUGIN_SECRETS"] = ",".join(secrets)
+    if plugin.get("keys"):
+        # The file of its declared providers' keys, resolved (2026-11-18,
+        # shared keys; lib/loam_keys.py): a path, never a value.
+        import loam_keys  # noqa: PLC0415
+        env["LOAM_PLUGIN_KEYS"] = str(loam_keys.keys_file(plugin["id"]))
     return env
 
 
@@ -790,10 +796,33 @@ def _secret_in(path: Path, name: str) -> str | None:
 
 
 def secret_for(pid: str, name: str) -> str | None:
-    """A plugin's secret: its own private `secrets.env` first, then the
-    box's secrets file. The value goes where asked and nowhere else."""
+    """A plugin's secret. A field of a provider it declared in `keys:`
+    (2026-11-18) resolves as shared keys do: its own key, the shared one,
+    the box's secrets file (lib/loam_keys.py). Any other name: its own
+    private `secrets.env` first, then the box's secrets file, as since L9.
+    The value goes where asked and nowhere else."""
+    import loam_keys  # noqa: PLC0415
+    if loam_keys.declares_field(pid, name):
+        return loam_keys.secret_for(pid, name)
+    # A name it never declared is handed to it by no route (2026-11-18):
+    # before, any name in the box's secrets file reached any plugin.
+    if name not in declared_secret_names(pid):
+        return None
     return (_secret_in(private_dir(pid) / "secrets.env", name)
             or _secret_in(lc.SECRETS_ENV, name))
+
+
+def declared_secret_names(pid: str) -> set[str]:
+    """Every secret name ``pid``'s manifest declares by name: its
+    `settings.secret`, its tools' `secrets`, its `engineer.env` secrets."""
+    import loam_plugins  # noqa: PLC0415
+    for row in loam_plugins._rows():
+        if row["id"] == pid and row["effective"]:
+            contrib = row.get("contributes") or {}
+            return ({s["name"] for s in contrib.get("settings.secret") or []}
+                    | {n for t in contrib.get("agent.tool") or [] for n in t.get("secrets") or []}
+                    | {e["secret"] for e in contrib.get("engineer.env") or [] if "secret" in e})
+    return set()
 
 
 def _secret(name: str) -> str | None:
@@ -1038,6 +1067,13 @@ def apply(reason: str = "") -> dict:
         out["folders_made"] = ensure_vault_folders()
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"vault folders: {exc}")
+    try:
+        # Each plugin's resolved keys (2026-11-18, lib/loam_keys.py): a
+        # plugin installed, switched or removed gains or loses them with it.
+        import loam_keys  # noqa: PLC0415
+        out["keys"] = loam_keys.adopt() + [f"{p}: keys.env" for p in loam_keys.sync()]
+    except Exception as exc:  # noqa: BLE001
+        out["errors"].append(f"keys: {exc}")
     prov = lc.ROOT / "bin" / "provision"
     for ws in sorted(lc.WORKSPACES.iterdir()):
         cfg = ws / "agent.json"

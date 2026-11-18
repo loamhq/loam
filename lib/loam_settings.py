@@ -287,6 +287,38 @@ ENTRIES: list[Entry] = [
           "PUT/DELETE /api/plugins/{plugin}/secrets/{name}", reach=OWNER,
           why=f"a key is a credential {lc.OWNER_NAME} pastes himself, and it is "
               "billed to him"),
+    # Shared keys (2026-11-18): Settings › Accounts, API keys by provider,
+    # each checked on entry and handed only to the plugins that declared the
+    # provider (lib/loam_keys.py). A persona's to change too (the owner,
+    # 2026-11-10: every setting); never to read back.
+    Entry("keys.set", "action", "Save a provider's shared API key (Accounts; checked on entry)",
+          "PUT /api/keys/{provider}", route="PUT /v1/keys/{provider}",
+          target="provider id (openai, google, hetzner, …)", unattended=False,
+          values='the key as text, or {"values": {"NAME": "…"}} for a provider of '
+                 'two fields (cloudflare: CLOUDFLARE_API_KEY and CLOUDFLARE_EMAIL)',
+          body=lambda v, m: dict(v) if isinstance(v, dict) else {"value": v},
+          read="GET /v1/keys/{provider}",
+          pick=lambda a, m: {k: a.get(k) for k in ("set", "source", "checked", "plugins")},
+          options="providers",
+          note="Only when the owner gave you the key to save. The value is never "
+               "read back by anyone; the answer says whether it was accepted."),
+    Entry("keys.forget", "action", "Forget a provider's shared API key",
+          "DELETE /api/keys/{provider}", route="DELETE /v1/keys/{provider}",
+          target="provider id", unattended=False, values="true",
+          body=lambda v, m: {}, options="providers"),
+    Entry("keys.check", "action", "Check a provider's shared API key again",
+          "POST /api/keys/{provider}/check", route="POST /v1/keys/{provider}/check",
+          target="provider id", values="true", body=lambda v, m: {},
+          options="providers"),
+    Entry("keys.own", "action", "Give one plugin a different key of a provider (\"use a different key\")",
+          "PUT /api/keys/{provider}/plugins/{plugin}",
+          route="PUT /v1/keys/{provider}/plugins/{plugin}", target="provider/plugin",
+          unattended=False, values="the key, as keys.set takes it",
+          body=lambda v, m: dict(v) if isinstance(v, dict) else {"value": v}),
+    Entry("keys.shared", "action", "Put a plugin back on the provider's shared key",
+          "DELETE /api/keys/{provider}/plugins/{plugin}",
+          route="DELETE /v1/keys/{provider}/plugins/{plugin}", target="provider/plugin",
+          unattended=False, values="true", body=lambda v, m: {}),
     Entry("integration.github", "action", "Connect or disconnect GitHub",
           "POST/DELETE /api/integrations/github/...", reach=OWNER,
           why=f"GitHub is authorised on {lc.OWNER_NAME}'s account, in their browser"),
@@ -786,6 +818,10 @@ PAGE_RELAY_AHEAD: dict[str, list[str] | str] = {
     # The marketplace's list (2026-11-17, lib/loam_marketplace.py). Installing
     # from it is `rest === '/plugins'`, plugin.install, by the entry's link.
     "rest === '/marketplace'": "a read: the marketplace's list, each entry marked installed or not",
+    # Shared keys (2026-11-18): Settings › Accounts. Never a value.
+    "/^\\/keys(?:\\/([^/]+))?$/": ["keys.set", "keys.forget"],
+    "/^\\/keys\\/([^/]+)\\/check$/": ["keys.check"],
+    "/^\\/keys\\/([^/]+)\\/plugins\\/([^/]+)$/": ["keys.own", "keys.shared"],
 }
 
 
@@ -1052,6 +1088,9 @@ def options(name: str, member_engine: str | None = None) -> list:
         import loam_plugins  # noqa: PLC0415
         return sorted({r["id"] for r in loam_plugins.listing()["plugins"]
                        if r.get("effective") and r.get("switch") == "plugin"})
+    if name == "providers":
+        import loam_keys  # noqa: PLC0415
+        return [p["id"] for p in loam_keys.listing()["providers"]]
     if name == "engines":
         import loam_threads  # noqa: PLC0415
         return list(loam_threads.ENGINES)
