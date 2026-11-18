@@ -11,13 +11,22 @@
 // page of its own, and every install goes through one sheet, the front of
 // the install-from-link path (POST /plugins: what it declares, then a yes).
 //
-// Openable from anywhere by id, for a thread's listing card (the next job):
-//   host.openMarket({ id })            a listing's page
+// Openable from anywhere by id, as a thread's listing card does:
+//   host.openMarket({ id })            a listing's page (`from: { label }`:
+//                                      its way back is to there, not the Market)
 //   host.openMarket({ kind, q })       a kind's page, or a search's results
 //   host.openMarketInstall(id)         the install sheet alone, over anything
 // and as commands `market.open` and `market.install` (page/registrations.js).
 // What the Market sets is a persona's to set through the same routes:
 // `plugin.install` and `appearance.<kind>.theme` (bin/settings).
+//
+// **A listing card in a thread** (2026-11-18, `marketCards`): an agent puts a
+// listing's line in its reply (public/market-card.js says the form) and the
+// thread draws this card in its place: the icon, the name, the maker and
+// kind, one line, how far it reaches, and the same button as the Market's,
+// whose Install opens the same install sheet over the thread. The name opens
+// the listing's page, whose way back is the thread. An id the Market does not
+// list is the link's words, plain.
 import { h, icon, kept, blob, on as onNode } from '../ui.js'
 import { agentLook } from '../sessions.js'
 import { menuSurface } from '../menu-surface.js'
@@ -100,13 +109,13 @@ export function mount(host) {
   }
 
   // ------------------------------------------------------------ opening
-  function openMarket({ kind = 'all', q = '', id = null, install = null, back } = {}) {
+  function openMarket({ kind = 'all', q = '', id = null, install = null, back, from = null } = {}) {
     const prev = host.state.sheet
     const backTo = back !== undefined ? back : prev?.kind === 'settings' ? { page: prev.page === 'root' && host.state.wide ? 'appearance' : prev.page, provider: prev.provider ?? null } : prev?.kind === 'market' ? prev.back : null
     field.value = q ?? ''
     st.drop = false; st.sel = 0; st.picking = false
     const view = id ? 'listing' : q ? 'results' : kind && kind !== 'all' ? 'kind' : 'front'
-    host.openSheet({ kind: 'market', view, q: q ?? '', k: kind || 'all', id, back: backTo, trail: [] })
+    host.openSheet({ kind: 'market', view, q: q ?? '', k: kind || 'all', id, back: backTo, trail: [], from: from?.label ? { label: String(from.label) } : null })
     if (!st.list || Date.now() - (st.loadedAt ?? 0) > 60000) { st.loadedAt = Date.now(); load() }
     if (id) detailsOf(id)
     if (install) openInstall(install)
@@ -128,6 +137,8 @@ export function mount(host) {
     const s = sheet()
     if (!s) return
     const prev = s.trail?.pop()
+    // Opened from a thread's card: the first page's way back is the thread.
+    if (!prev && s.from) return close()
     if (!prev) return go({ view: 'front' }, { push: false })
     Object.assign(s, { view: prev.view, q: prev.q, k: prev.k, id: prev.id })
     field.value = s.view === 'results' ? s.q : ''
@@ -440,7 +451,8 @@ export function mount(host) {
     const root = h('div', { class: `market${host.state.wide ? ' market-wide' : ' market-phone'}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Market', key: 'sheet:market', 'data-view': s.view,
       onkeydown: keys },
       h('header', { class: 'market-top' },
-        inner || s.view === 'kind' ? h('button', { type: 'button', class: 'backbtn market-back', onclick: back }, icon.chevronLeft(18), backLabel)
+        s.from && !s.trail?.length ? h('button', { type: 'button', class: 'backbtn market-back market-back-from', onclick: back, title: s.from.label, 'aria-label': `Back to ${s.from.label}` }, icon.chevronLeft(18), h('span', { class: 'market-back-words', text: s.from.label }))
+          : inner || s.view === 'kind' ? h('button', { type: 'button', class: 'backbtn market-back', onclick: back }, icon.chevronLeft(18), backLabel)
           : s.back ? h('button', { type: 'button', class: 'backbtn market-back', onclick: toSettings }, icon.chevronLeft(18), 'Settings') : h('span', { class: 'market-top-spacer' }),
         inner || s.view === 'kind' ? null : h('span', { class: 'market-crumb', 'aria-hidden': 'true' }, h('span', { class: 'market-crumb-home', text: 'Market' })),
         trybar(),
@@ -581,5 +593,51 @@ export function mount(host) {
       icon.chevronRight(10)))
   }
 
-  return { marketState: st, openMarket, openMarketInstall: openInstall, marketNodes, marketInstallNodes: installNodes, marketSync: sync, marketDoor: settingsDoor, marketFindMore: findMore, loadMarket: load }
+  // ------------------------------------------------------------ a card in a thread
+  // `refs` are `[{ id, label }]` from market-card.js's splitCards; `from` is
+  // where the listing's page goes back to (the thread's title). Drawn on
+  // every redraw, so a card reads Installed the moment it is.
+  function cardsFor(refs, { from = 'the thread', key = '' } = {}) {
+    if (!refs?.length) return null
+    if (!st.list && !st.loading) load()
+    const ready = Boolean(st.list)
+    const shown = refs.map(ref => ({ ref, entry: ready ? entryOf(ref.id) : null }))
+    // Not in the Market (an unknown id, or a Market that is off or out of
+    // reach): the link's words, as plain text, and no error.
+    if (ready && shown.every(c => !c.entry)) return h('p', { class: 'market-card-plain', key: `cards:${key}` }, shown.map(c => c.ref.label || c.ref.id).join(', '))
+    return h('div', { class: `market-cards${shown.length > 1 ? ' market-cards-many' : ''}`, role: 'list', 'aria-label': shown.length > 1 ? 'From the Market' : null, key: `cards:${key}` },
+      ...shown.map(({ ref, entry }, i) => ready && !entry ? h('p', { class: 'market-card-plain', key: `plain:${ref.id}:${i}`, role: 'listitem', text: ref.label || ref.id })
+        : !entry ? h('div', { class: 'market-card is-loading', key: `card:${ref.id}`, role: 'listitem', 'aria-busy': 'true' },
+          h('span', { class: 'market-tile market-card-tile market-card-ghost', 'aria-hidden': 'true' }),
+          h('div', { class: 'market-card-words' },
+            h('p', { class: 'market-card-kicker' }, icon.spark(11), 'Market'),
+            h('span', { class: 'market-card-name', text: ref.label || ref.id }),
+            h('span', { class: 'market-card-line market-card-ghost-line', 'aria-hidden': 'true' })))
+        : card(entry, from)))
+  }
+  function card(entry, from) {
+    const d = detailsOf(entry.id, { queued: true })
+    const kind = kindOf(entry)
+    if (kind === 'theme' && d.state === 'ready') themeCss(entry.id)
+    const r = d.state === 'ready' ? reachOf(d.body.declaration, kind) : null
+    const a = actionOf(entry, { installed: isInstalled(entry), themeInUse: host.theme.value.theme, trying: null })
+    const openIt = () => openMarket({ id: entry.id, from: { label: from } })
+    const act = a.action === 'none'
+      ? h('span', { class: 'market-card-state', role: 'status', 'aria-label': `${entry.name}: ${a.label}` }, icon.check(13), a.label)
+      : h('button', { type: 'button', class: 'pillbtn small secondary market-card-act',
+        'aria-label': a.action === 'view' ? `See ${entry.name}` : `${a.label} ${entry.name}`,
+        onclick: () => a.action === 'install' ? openInstall(entry.id) : a.action === 'view' ? openIt()
+          : a.action === 'use' ? (host.theme.set({ theme: entry.id }), host.schedule()) : host.goApps() }, a.label)
+    return h('article', { class: `market-card market-card-${kind}${a.action === 'none' || a.action === 'use' || a.action === 'open' ? ' is-here' : ''}`, key: `card:${entry.id}`, role: 'listitem', 'aria-label': `${entry.name}, ${KIND_ONE[kind].toLowerCase()} in the Market` },
+      tile(entry, 'md'),
+      h('div', { class: 'market-card-words' },
+        h('p', { class: 'market-card-kicker' }, icon.spark(11), `Market · ${KIND_ONE[kind]}`),
+        h('button', { type: 'button', class: 'market-card-name', onclick: openIt, 'aria-label': `About ${entry.name}` }, entry.name),
+        entry.description ? h('span', { class: 'market-card-line', text: entry.description }) : null,
+        h('span', { class: 'market-card-by' }, h('span', { class: 'market-card-maker', text: entry.author }),
+          r ? h('span', { class: `market-reach market-reach-${r.tone}` }, h('i', { 'aria-hidden': 'true' }), r.text) : null)),
+      h('div', { class: 'market-card-acts' }, act))
+  }
+
+  return { marketCards: cardsFor, marketState: st, openMarket, openMarketInstall: openInstall, marketNodes, marketInstallNodes: installNodes, marketSync: sync, marketDoor: settingsDoor, marketFindMore: findMore, loadMarket: load }
 }

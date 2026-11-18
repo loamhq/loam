@@ -19,6 +19,7 @@ import { authenticatedFetch as fetch, authExpired, failureSentence } from './aut
 import { createPermissionCards } from './permission-cards.js'
 import { h, kept, blob, avatarLook, icon, dress } from './ui.js'
 import { markdown } from './markdown.js'
+import { splitCards, plainWords } from './market-card.js'
 import { copyText } from './clipboard.js'
 import { agentLook, createAgents, when, providerGlyph } from './sessions.js'
 import { modelsOf, modelLabel, modelTooltip } from './providers.js'
@@ -30,7 +31,7 @@ import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuot
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
-export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, messageState = createMessageState(), sidebar = null, renderText = markdown, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
+export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -1213,11 +1214,22 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     // Live prose is already formatted. Completion must not send it through
     // the plain-text opening placeholder and replace it a second time.
     const prose = (text, slot) => st.open.prose && !m.streaming && !m.viewKey ? kept(st.open.prose.node(text, `${m.id}:${slot}`)) : mentionMarkdown(text)
+    // A listing card in an agent's words (2026-11-18, market-card.js): its
+    // line is cut out of the prose and drawn live in its place, so the card
+    // follows what is installed while the words around it stay cached.
+    const said = (text, slot) => {
+      const pieces = splitCards(text)
+      if (pieces.length === 1 && pieces[0].text !== undefined) return prose(text, slot)
+      const from = st.open.thread.title || 'the thread'
+      return pieces.map((piece, j) => piece.cards
+        ? marketCards?.(piece.cards, { from, key: `${m.id}:${slot}:${j}` }) ?? h('p', { class: 'market-card-plain', key: `cards:${m.id}:${slot}:${j}`, text: piece.cards.map(plainWords).join(', ') })
+        : prose(piece.text, `${slot}:${j}`))
+    }
     const body = mine ? h('div', { class: 'line right' }, h('div', { class: 'mine' }, userBubble({ class: `${m.id === 'pending-send' ? 'pending ' : ''}tt-bubble${files ? ' with-files' : ''}${long ? ' foldable' : ''}${long && !shown ? ' clamped' : ''}`, 'data-mine': key }, files, h('div', { class: 'user-message-body' }, messageQuote(m), prose(m.text, 'person')),
       long ? button(shown ? 'Show less' : 'Show more', () => { if (shown) openMessages.delete(key); else openMessages.add(key); redraw() }, { class: 'morebtn', 'aria-expanded': String(shown) }) : null), footer))
       : segments.map((part, index) => {
         if (part.text !== undefined) return h('div', { class: 'line left', key: `text:${index}` }, agentProse([
-          prose(part.text, index),
+          said(part.text, index),
           // An agent's images (2026-11-18) sit under its last words, above
           // the time and the actions, as the owner's sit in the bubble.
           index === lastText ? files : null,
