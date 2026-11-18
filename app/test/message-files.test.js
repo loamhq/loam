@@ -44,3 +44,16 @@ test('redraws retain loaded image nodes and a failure remains a filename chip', 
   morph(host, messageFiles(files))
   assert.equal(all(host, 'message-image-name')[0].textContent, 'renamed.png')
 })
+
+test('a thread read again keeps a message’s pictures: same message, same files, same nodes', () => {
+  installDom()
+  const host = h('div'), first = [{ path: 'Images/a.png', name: 'a.png', type: 'image/png' }]
+  morph(host, messageFiles(first, 't:m2'))
+  const image = all(host, 'message-image')[0].firstChild
+  const again = first.map(f => ({ ...f }))
+  morph(host, messageFiles(again, 't:m2'))
+  assert.equal(all(host, 'message-image')[0].firstChild, image)
+  const changed = [{ path: 'Images/b.png', name: 'b.png', type: 'image/png' }]
+  morph(host, messageFiles(changed, 't:m2'))
+  assert.match(all(host, 'message-image')[0].firstChild.getAttribute('src'), /b\.png/, 'other files are drawn as themselves')
+})

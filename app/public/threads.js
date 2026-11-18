@@ -1203,7 +1203,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     }
     const mine = isOwner(m.author) || m === st.open.pending
     const permissions = [...st.open.permissions.values()].filter((p) => p.message_id === m.id)
-    const files = messageFiles(m.attachments)
+    const files = messageFiles(m.attachments, `${st.open.thread.id}:${m.viewKey ?? m.id}`)
     const segments = messageSegments(m), lastText = segments.findLastIndex((part) => part.text?.trim())
     const footer = messageFooter(m, segments, mine)
     const key = `thread:${st.open.thread.id}:${m.id}`, long = longMessages.has(key), shown = openMessages.has(key)

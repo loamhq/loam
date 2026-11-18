@@ -151,11 +151,16 @@ export function segmentedControl({ label, options, value, choose, props = {} }) 
 // hidden failed image also used to reveal it and restart the lazy load.
 // Weak keys release the DOM when its attachment record is no longer retained.
 const fileViews = new WeakMap()
-export function messageFiles(files = []) {
+// A thread read again hands over a new attachments array for the same
+// message (2026-11-18): with `key` (the message's own), the gallery is found
+// by message and contents, so the pictures are not rebuilt and do not start
+// loading again. Bounded: the oldest are forgotten first.
+const keyedViews = new Map(), KEYED_MAX = 300
+export function messageFiles(files = [], key = null) {
   if (!files?.length) return null
   const signature = JSON.stringify(files.map(({ path, name, type, root }) => [path, name, type, root]))
-  const cached = fileViews.get(files)
-  if (cached?.signature === signature) return kept(cached.view)
+  const cached = fileViews.get(files) ?? (key !== null ? keyedViews.get(key) : undefined)
+  if (cached?.signature === signature) { fileViews.set(files, cached); return kept(cached.view) }
   // The images, in order, for the full view a tap opens (2026-11-18). The
   // owner's files are the vault's; an agent's may be a workspace's (`root`).
   const shown = [], failed = new Set()
@@ -188,6 +193,10 @@ export function messageFiles(files = []) {
     return link
   }))
   fileViews.set(files, { signature, view })
+  if (key !== null) {
+    keyedViews.delete(key); keyedViews.set(key, { signature, view })
+    if (keyedViews.size > KEYED_MAX) keyedViews.delete(keyedViews.keys().next().value)
+  }
   return kept(view)
 }
 
