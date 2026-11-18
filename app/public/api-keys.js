@@ -122,7 +122,7 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
   function status(p) {
     if (!p.set) return 'No key yet.'
     const shown = Object.values(p.shown ?? {}).filter(v => v && v !== 'set')
-    const where = p.source === 'box' ? 'Set in this server’s own settings file' : 'Saved'
+    const where = p.source === 'box' ? 'Set on this server' : 'Saved'
     return shown.length ? `${where} · ${shown.join(' · ')}` : where
   }
 
@@ -165,11 +165,12 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
           h('div', { class: 'note', text: status(p) }))),
       h('section', { class: 'card keys-card', 'aria-label': `${p.name} key` },
         editing ? keyForm(p) : [
-          checkedLine(p.checked),
+          h('div', { class: 'keys-checkrow' },
+            checkedLine(p.checked) ?? h('p', { class: 'note keys-check', text: p.source === 'box' ? 'Set in this server’s own settings file.' : 'Not checked yet.' }),
+            p.checks ? h('button', { class: 'quietlink keys-recheck', type: 'button', disabled: Boolean(st.busy), text: st.busy === `check:${p.id}` ? 'Checking…' : 'Check again', onclick: () => recheck(p) }) : null),
           h('div', { class: 'keys-actions' },
-            h('button', { class: 'pillbtn', type: 'button', disabled: Boolean(st.busy), text: 'Replace', onclick: () => { st.editing = p.id; st.failure = ''; st.message = ''; changed() } }),
-            p.checks ? h('button', { class: 'pillbtn', type: 'button', disabled: Boolean(st.busy), text: st.busy === `check:${p.id}` ? 'Checking…' : 'Check again', onclick: () => recheck(p) }) : null,
-            p.source === 'saved' ? h('button', { class: 'pillbtn danger', type: 'button', disabled: Boolean(st.busy), text: st.busy === `forget:${p.id}` ? 'Forgetting…' : 'Forget', onclick: () => forget(p) }) : null)],
+            h('button', { class: 'pillbtn secondary', type: 'button', disabled: Boolean(st.busy), text: 'Replace key', onclick: () => { st.editing = p.id; st.failure = ''; st.message = ''; changed() } }),
+            p.source === 'saved' ? h('button', { class: 'pillbtn', type: 'button', disabled: Boolean(st.busy), text: st.busy === `forget:${p.id}` ? 'Forgetting…' : 'Forget', onclick: () => forget(p) }) : null)],
         p.refused?.why && p.refused.why !== p.checked?.why && editing ? h('p', { class: 'note warn', text: p.refused.why }) : null,
         st.message ? h('p', { class: 'note keys-done', role: 'status', text: st.message }) : null,
         st.failure ? h('p', { class: 'note warn', role: 'alert', text: st.failure }) : null),

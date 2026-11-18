@@ -1,14 +1,15 @@
 /* Attention is explicit: Newspaper by default, foam for a secondary action,
  * espresso for the one main action. This sheet changes paint only. The shared
  * component rules still own dimensions, spacing, targets and placement. */
-/* Navigation keeps its component paint, including shared icon/round buttons. */
+/* Navigation keeps its component paint, including shared icon/round buttons;
+ * so does an image seen full size, light on its own dark (image-view.js). */
 /* Docked audio play/speed own neutral surfaces in the plugin stylesheet.
  * :where() keeps the inline speed control's selector specificity unchanged. */
-:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.settings-select,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile,.fs-entry *) {
+:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.settings-select,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile,.fs-entry *,.image-view *) {
   background:transparent; color:var(--paper-ink); border-color:transparent; box-shadow:none;
 }
 /* Keep border boxes the same size; borderless controls have no painted edge. */
-:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile,.fs-entry *):is(:hover,:active,:focus-visible) {
+:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile,.fs-entry *,.image-view *):is(:hover,:active,:focus-visible) {
   background:var(--paper-hover); color:var(--paper-ink); border-color:transparent; box-shadow:none;
 }
 /* Selection is information, not an action tier. A paper thumb and an underline

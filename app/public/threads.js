@@ -1215,6 +1215,9 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       : segments.map((part, index) => {
         if (part.text !== undefined) return h('div', { class: 'line left', key: `text:${index}` }, agentProse([
           prose(part.text, index),
+          // An agent's images (2026-11-18) sit under its last words, above
+          // the time and the actions, as the owner's sit in the bubble.
+          index === lastText ? files : null,
           index === lastText ? footer : null,
         ], { class: `say agent md${m.streaming ? ' streaming' : ''}` }))
         if (part.steps) {
@@ -1239,7 +1242,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       !mine ? messageQuote(m) : null,
       generating && !replyHasContent(m) ? waitingLine(m.author) : body,
       generating && replyHasContent(m) && (!m.text || st.open.waiting?.has(m.author) || st.open.steps?.get(m.author)?.waiting) ? waitingLine(m.author) : null,
-      !mine ? files : null, !mine && lastText < 0 ? footer : null,
+      !mine && lastText < 0 ? files : null, !mine && lastText < 0 ? footer : null,
       load?.status === 'error' ? h('div', { class: 'tt-steps-retry muted', role: 'status' }, 'Steps couldn’t be loaded. ', button('Try again', () => st.open.replySteps.ensure(m.id, true), { class: 'quietlink' })) : null,
       ...permissions.map(permission))
   }

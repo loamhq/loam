@@ -1,0 +1,162 @@
+[
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "where": "https://platform.openai.com/api-keys",
+    "checks": true,
+    "fields": [
+      {
+        "name": "OPENAI_API_KEY",
+        "label": "API key",
+        "secret": true
+      }
+    ],
+    "set": true,
+    "source": "saved",
+    "shown": {
+      "OPENAI_API_KEY": "…a41c"
+    },
+    "checked": {
+      "at": "2026-11-18T17:02:00Z",
+      "ok": true,
+      "why": "OpenAI accepted the key."
+    },
+    "refused": null,
+    "plugins": [
+      {
+        "id": "images",
+        "name": "Images",
+        "on": true,
+        "why": "Makes and changes images with gpt-image when you have an OpenAI key",
+        "optional": true,
+        "uses": "shared",
+        "has_key": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "id": "google",
+    "name": "Google Gemini",
+    "where": "https://aistudio.google.com/apikey",
+    "checks": true,
+    "fields": [
+      {
+        "name": "GEMINI_API_KEY",
+        "label": "API key",
+        "secret": true
+      }
+    ],
+    "set": true,
+    "source": "box",
+    "shown": {
+      "GEMINI_API_KEY": "…7QxE"
+    },
+    "checked": null,
+    "refused": null,
+    "plugins": [
+      {
+        "id": "read-aloud",
+        "name": "Read aloud",
+        "on": true,
+        "why": "Makes the speech for replies and files, and the spoken briefs",
+        "optional": false,
+        "uses": "shared",
+        "has_key": true,
+        "checked": null
+      },
+      {
+        "id": "dictation",
+        "name": "Dictation",
+        "on": true,
+        "why": "Transcribes and tidies what you record",
+        "optional": false,
+        "uses": "shared",
+        "has_key": true,
+        "checked": null
+      },
+      {
+        "id": "images",
+        "name": "Images",
+        "on": true,
+        "why": "Makes and changes images with Gemini when you have a Google key",
+        "optional": true,
+        "uses": "shared",
+        "has_key": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "id": "hetzner",
+    "name": "Hetzner Cloud",
+    "where": "https://console.hetzner.cloud/",
+    "checks": true,
+    "fields": [
+      {
+        "name": "HCLOUD_TOKEN",
+        "label": "API token",
+        "secret": true
+      }
+    ],
+    "set": false,
+    "source": null,
+    "shown": {},
+    "checked": null,
+    "refused": null,
+    "plugins": []
+  },
+  {
+    "id": "cloudflare",
+    "name": "Cloudflare",
+    "where": "https://dash.cloudflare.com/profile/api-tokens",
+    "checks": true,
+    "fields": [
+      {
+        "name": "CLOUDFLARE_API_KEY",
+        "label": "API key or token",
+        "secret": true
+      },
+      {
+        "name": "CLOUDFLARE_EMAIL",
+        "label": "Account email",
+        "secret": false,
+        "optional": true
+      }
+    ],
+    "set": true,
+    "source": "saved",
+    "shown": {
+      "CLOUDFLARE_API_KEY": "…0b9e",
+      "CLOUDFLARE_EMAIL": "owner@example.org"
+    },
+    "checked": {
+      "at": "2026-11-18T16:40:00Z",
+      "ok": true,
+      "why": "Cloudflare accepted the key."
+    },
+    "refused": null,
+    "plugins": [
+      {
+        "id": "cloudflare",
+        "name": "Cloudflare",
+        "on": true,
+        "why": "Every call an agent makes to your Cloudflare account",
+        "optional": false,
+        "uses": "shared",
+        "has_key": true,
+        "checked": null
+      },
+      {
+        "id": "headroom",
+        "name": "Headroom",
+        "on": true,
+        "why": "Repoints the box's DNS after a move",
+        "optional": false,
+        "uses": "own",
+        "has_key": true,
+        "checked": null
+      }
+    ]
+  }
+]

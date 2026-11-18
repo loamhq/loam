@@ -652,6 +652,9 @@ function filePart(raw, contentType) {
   return { name, size }
 }
 
+// Shared keys' made-up state, also read by tools/capture-accounts.mjs.
+const FAKE_KEYS = JSON.parse(readFileSync(new URL('./fake-keys.json', import.meta.url), 'utf8'))
+
 function json(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json' })
   res.end(JSON.stringify(body, null, 2))
@@ -738,6 +741,19 @@ const server = http.createServer(async (req, res) => {
   // the note already read by its rule. A made-up list; a real host reads its own.
   if (p === '/v1/dictation-terms' && req.method === 'GET') {
     return json(res, 200, { terms: ['Ada Lovelace', 'Grace Hopper', 'loam', 'broker'], source: 'Notes/Dictation terms.md' })
+  }
+
+  // Shared keys (2026-11-18): Settings › Accounts. Made-up state, no value.
+  const keysRoute = /^\/v1\/keys(?:\/([^/]+))?(?:\/(check|plugins)(?:\/([^/]+))?)?$/.exec(p)
+  if (keysRoute) {
+    const [, id, what, plugin] = keysRoute
+    if (!id) return json(res, 200, { providers: FAKE_KEYS })
+    const row = FAKE_KEYS.find(k => k.id === id)
+    if (!row) return json(res, 404, { error: `no provider '${id}'` })
+    if (req.method === 'PUT' && !what) Object.assign(row, { set: true, source: 'saved', shown: { [row.fields[0].name]: '…9f2c' }, checked: { at: new Date().toISOString(), ok: true, why: `${row.name} accepted the key.` } })
+    if (req.method === 'DELETE' && !what) Object.assign(row, { set: false, source: null, shown: {}, checked: null })
+    if (what === 'plugins' && plugin) for (const u of row.plugins) if (u.id === plugin) u.uses = req.method === 'PUT' ? 'own' : 'shared'
+    return json(res, 200, row)
   }
 
   if (p === '/v1/providers' && req.method === 'GET') {

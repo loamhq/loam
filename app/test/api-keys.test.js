@@ -47,7 +47,8 @@ test('Accounts lists providers, and a saved key is sent once and never kept in t
   assert.equal(keys.st.message, 'OpenAI accepted the key.')
   const after = h('div', {}, keys.view({ provider: 'openai', back: null }))
   assert.ok(text(after).includes('…1234'))
-  assert.deepEqual(all(after, 'pillbtn').map(text).slice(0, 3), ['Replace', 'Check again', 'Forget'])
+  assert.deepEqual(all(after, 'pillbtn').map(text).slice(0, 2), ['Replace key', 'Forget'])
+  assert.equal(text(find(after, 'keys-recheck')), 'Check again')
   assert.equal(keys.summary(), '1 key')
 })
 

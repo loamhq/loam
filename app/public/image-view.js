@@ -45,7 +45,7 @@ export function openImageView(items, index = 0) {
     h('div', { class: 'image-view-top' }, h('div', { class: 'image-view-title' }, name, count), save, close),
     h('div', { class: 'image-view-stage' }, img),
     many ? h('button', { class: 'iconbtn image-view-step prev image-view-stop', type: 'button', 'aria-label': 'Previous image', onclick: step(-1) }, icon.chevronLeft(18)) : null,
-    many ? h('button', { class: 'iconbtn image-view-step next image-view-stop', type: 'button', 'aria-label': 'Next image', onclick: step(1) }, icon.chevronRight(14)) : null)
+    many ? h('button', { class: 'iconbtn image-view-step next image-view-stop', type: 'button', 'aria-label': 'Next image', onclick: step(1) }, icon.chevronLeft(18)) : null)
   // A swipe across the image goes to the next or the previous one.
   let startX = null
   root.addEventListener('pointerdown', (e) => { startX = e.clientX })
