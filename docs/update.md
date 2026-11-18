@@ -45,6 +45,42 @@ install and is never updated this way.
 It must leave nothing in the tree that the release did not put there. A
 tarball cannot be updated.
 
+## A change to Loam's own parts (2026-11-17)
+
+An install's agent can brief its own engineer to change Loam itself. What
+happens to that change:
+
+- **The first engineer job on Loam makes the install's own `main`.** A
+  release install is detached at its tag with no branch, so a job's tree
+  could not be made at all before this ("Remote branch main not found").
+  The job's setup makes `main` at the release the install runs, puts HEAD on
+  it (nothing in the tree moves) and sets `loam.localMain=true` in the
+  checkout's git config (`ensure_local_main`, lib/loam_worktree.py).
+- **That `main` is the install's alone.** A landing on it is tested like
+  any other, and is never pushed, and the canonical is never fast-forwarded
+  to `origin/main` (Loam's development, unreleased). The receipt says the
+  change stayed on the install. A box that develops Loam already has a
+  `main`, never gets the mark, and lands and pushes as before.
+- **An update keeps it.** With commits of its own the install reads as
+  *development*: the update merges the release into `main`, and the local
+  commits stay. If the release changes the same lines, the update is refused
+  (`conflict`) before anything moves, and the agent's notice names the files
+  and the choices it must offer the owner: send the change to Loam's makers
+  (`loam report bug --patch`), or with their yes revert the conflicting
+  commits (`git revert`, so the history keeps them), update, and make the
+  change again, as a plugin where a plugin can do it. Nothing is ever
+  discarded without the owner's word.
+- **An uncommitted edit** (by hand, outside a job) refuses the update
+  (`dirty` on a stock install, `uncommitted` on a development one) and is
+  left exactly as it is.
+
+The skills say the same to every agent: a customisation is a plugin in the
+owner's plugins folder wherever a plugin can do it, because a plugin
+survives every update untouched; Loam's own code is changed only for what no
+plugin can reach (`loam-building-a-plugin`, `loam-filing-a-bug-or-feature`).
+`tests/test_local_changes.py` makes an install the way the installer does
+and proves each line above.
+
 ## The clean-tree rule
 
 The update refuses, and hands the job to the person's agent, when:

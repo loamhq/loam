@@ -659,10 +659,37 @@ def tell_available(tag: str, current: str | None) -> None:
            key=f"available:{bare(tag)}")
 
 
+# What the agent is asked to offer when the refusal is the owner's own change
+# to Loam's parts (2026-11-17): it is never lost, and never silently merged
+# into something that may not run.
+OWN_CHANGE = {
+    "conflict": (
+        "\n\nThese are this install's own changes to Loam (`git -C {root} log "
+        "{base}..HEAD`), and the release changes the same lines. Nothing moved, "
+        "and nothing of theirs is lost. Offer {owner} the choices: (1) send the "
+        "change to Loam's makers (`{root}/bin/loam report bug --patch`, skill "
+        "loam-filing-a-bug-or-feature), and read the release's notes first, "
+        "since it may already fix the same thing; (2) with their yes, brief the "
+        "engineer to revert the conflicting local commits (`git revert`, so the "
+        "history keeps them), update, and make the change again on the new "
+        "release, as a plugin in their plugins folder if a plugin can do it "
+        "(skill loam-building-a-plugin), because a plugin survives every update."),
+    "uncommitted": (
+        "\n\nAn edit to Loam's own files that is not committed is a change "
+        "nobody has decided to keep. Ask {owner} whether it is wanted; if it is, "
+        "brief the engineer to commit it (or to make it a plugin instead); if "
+        "not, it can be put back with their yes."),
+}
+
+
 def tell_refused(tag: str | None, refusal: Refusal) -> None:
     tag = tag or refusal.detail.get("to")
     files = refusal.detail.get("files") or []
     listing = "".join(f"\n  {f}" for f in files[:40])
+    if refusal.code in OWN_CHANGE:
+        listing += OWN_CHANGE[refusal.code].format(
+            root=runtime(), owner=_owner(),
+            base=tag_of(running_version()) or "the release tag")
     notice("refused",
            f"Loam's update{f' to {bare(tag)}' if tag else ''} did not run: "
            f"{refusal.message}",

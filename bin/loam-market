@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""The marketplace: what it lists, and asking for a plugin to be listed.
+
+  loam market list [--refresh] [--json]
+      What the marketplace lists now, each marked installed or not. Install
+      one with its link, as any link (Settings › Plugins, or `bin/settings
+      plugin.install`).
+  loam market share <plugin id> <owner/name> [--json]
+      Share a plugin from the owner's plugins folder by link: its folder is
+      pushed to that GitHub repository (the owner makes it on github.com;
+      whether it is public is their yes) as <id>/ at the tag v<version>,
+      through the GitHub account connected in Settings › Integrations. The
+      answer is the link anyone installs it by.
+  loam market request <link at a tag> --description "one sentence" [--json]
+      The listing for the plugin at that link, read from the plugin itself,
+      and a link to GitHub that proposes it to the marketplace as a pull
+      request. Nothing is sent: show the owner the listing; on their yes,
+      give them the link. They open it signed in to their own GitHub account
+      and press Propose; a maintainer reviews it by hand.
+
+The rules are lib/loam_marketplace.py; the format is docs/plugins.md, "The
+marketplace". Exit 0, or 2 with the reason on stderr.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_marketplace as mk  # noqa: E402
+import loam_plugins  # noqa: E402
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="loam market", description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="verb", required=True)
+    ls = sub.add_parser("list")
+    ls.add_argument("--refresh", action="store_true")
+    ls.add_argument("--json", action="store_true")
+    sh = sub.add_parser("share")
+    sh.add_argument("plugin")
+    sh.add_argument("repository")
+    sh.add_argument("--json", action="store_true")
+    rq = sub.add_parser("request")
+    rq.add_argument("link")
+    rq.add_argument("--description", required=True,
+                    help="one sentence, at most 200 characters, saying what it does")
+    rq.add_argument("--json", action="store_true")
+    args = ap.parse_args(argv)
+
+    if args.verb == "list":
+        out = mk.listing(refresh=args.refresh)
+        if args.json:
+            print(json.dumps(out, indent=2))
+            return 0
+        if out["state"] == "off":
+            print("The marketplace is turned off on this install (marketplace.list is empty).")
+        elif out["state"] == "unreachable":
+            print(f"The marketplace could not be read: {out['message']}")
+        elif not out["plugins"]:
+            print("Nothing is listed in the marketplace yet.")
+        for e in out["plugins"]:
+            mark = f"installed {e['installed_version'] or ''}".strip() if e["installed"] else ""
+            print(f"{e['name']} ({e['id']}), by {e['author']} · {', '.join(e['kind'])}"
+                  f"{' · ' + mark if mark else ''}")
+            if e.get("description"):
+                print(f"  {e['description']}")
+            print(f"  {e['link']}")
+        for why in out["skipped"]:
+            print(f"(left out: {why})", file=sys.stderr)
+        return 0
+
+    if args.verb == "share":
+        try:
+            out = mk.share(args.plugin, args.repository)
+        except mk.ShareError as exc:
+            print(f"loam market: {exc}", file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(out, indent=2))
+            return 0
+        print(f"Shared {out['id']} {out['version']} to {out['repo']} at {out['tag']}.")
+        print(f"The link to install it by: {out['link']}")
+        if out["public"] is False:
+            print("The repository is private, so the link works only for its owner. "
+                  "Making it public is the owner's direct yes (on github.com, the "
+                  "repository's Settings › Danger zone › Change visibility).")
+        return 0
+
+    try:
+        out = mk.listing_request(args.link, args.description)
+    except (ValueError, loam_plugins.PluginError) as exc:
+        print(f"loam market: {getattr(exc, 'message', exc)}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(out, indent=2))
+        return 0
+    print(f"The listing for {out['repo']}, as listings/{out['entry']['id']}.json:\n")
+    print(json.dumps(out["entry"], indent=2, ensure_ascii=False))
+    print("\nOn the owner's yes, give them this link. GitHub opens the file filled in; "
+          "they press Propose, and then Create pull request:")
+    print(out["url"])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

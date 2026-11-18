@@ -783,6 +783,9 @@ PAGE_RELAY_AHEAD: dict[str, list[str] | str] = {
     # owner's buttons on lib/loam_update.py, not agent settings.
     "rest === '/update'": "a read: the installed release, the newest, and whether an update is running",
     "rest === '/update/progress'": "a read: the running update's steps",
+    # The marketplace's list (2026-11-17, lib/loam_marketplace.py). Installing
+    # from it is `rest === '/plugins'`, plugin.install, by the entry's link.
+    "rest === '/marketplace'": "a read: the marketplace's list, each entry marked installed or not",
 }
 
 

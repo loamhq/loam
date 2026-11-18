@@ -1,11 +1,12 @@
 #!/bin/sh
 # `loam <verb>`: the person's command, on their PATH as /usr/local/bin/loam
 # (install.sh puts it there). Each verb is bin/loam-<verb> beside this file
-# and is listed in VERBS: first release L12 `status`, L13 `update`. The
+# and is listed in VERBS: first release L12 `status`, L13 `update`;
+# 2026-11-17 `report` (to Loam's makers) and `market` (the plugin list). The
 # other bin/loam-* files are the runtime's own (the installer, the claim
 # service, the DNS timer) and are not verbs.
 set -eu
-VERBS="status update"
+VERBS="status update report market"
 here=$(dirname "$(readlink -f "$0")")
 # Python's bytecode never lands in the checkout, however `loam` was reached
 # (a root shell over ssh reads no profile): an update refuses a tree with

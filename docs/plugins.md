@@ -935,3 +935,108 @@ answers 404 for everything; to take the path itself away, drop the
 `app_shell` block that writes `handle /s/*` in `caddy_host_block` and run
 `sudo bin/gen-deploy` (it rewrites /etc/caddy/Caddyfile and reloads Caddy;
 **it has no `--help`: any run is live**).
+
+## The marketplace (2026-11-17)
+
+Decided 2026-11-13: **one public GitHub repository holds a list file.**
+Builders host their own work in their own repositories; they ask to be
+listed by pull request; a maintainer reviews every listing by hand; every
+Loam reads the list in Settings › Plugins and installs from it by the
+listed link, through the same two calls as any link (above). Installing from
+any link still works, listed or not. The code is `lib/loam_marketplace.py`
+and `bin/loam-market`; the tests are `tests/test_marketplace.py`.
+
+### The list: `list.json`
+
+```json
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "pet",
+      "name": "A pet",
+      "description": "A small animal that sleeps in the corner of the page.",
+      "author": "A friend",
+      "kind": ["extension"],
+      "version": "1.0.0",
+      "link": "https://github.com/friend/loam-pet/tree/v1.0.0/pet",
+      "homepage": "https://friend.example/pet"
+    }
+  ]
+}
+```
+
+| Field | Rule |
+|---|---|
+| `version` (top) | the format, `1`. A list of another format is not read (`unreachable`, with why) |
+| `id` | the plugin's id, lower case, digits and dashes; once per list |
+| `name`, `author` | a line of text, at most 60 characters |
+| `description` | one sentence, at most 200 characters (required in the repository; optional to a reader) |
+| `kind` | one or more of `theme`, `extension`, `app`, `agent`, `skill` |
+| `link` | the plugin's folder at a tag or a full commit, as an install link takes it; a branch is refused when it is installed |
+| `version`, `homepage` | optional: the version at the link; an https link about it |
+
+A Loam leaves out an entry that breaks a rule, says why in `skipped`, and
+draws the rest, sorted by name.
+
+### Where it is read from
+
+`marketplace.list` in loam.toml, default
+`https://raw.githubusercontent.com/loamhq/marketplace/main/list.json`; an
+empty string turns the section off. `marketplace.repo` (default
+`loamhq/marketplace`) is where a listing is asked for.
+
+### `GET /api/marketplace` (relayed to `GET /v1/marketplace`)
+
+```json
+{"url": "https://raw.githubusercontent.com/loamhq/marketplace/main/list.json",
+ "state": "listed", "checked_at": "2026-11-18T05:40:00Z", "message": null,
+ "repo": "loamhq/marketplace", "skipped": [],
+ "plugins": [{"id": "pet", "name": "A pet", "description": "…", "author": "A friend",
+              "kind": ["extension"], "link": "…", "repo": "friend/loam-pet",
+              "ref": "v1.0.0", "path": "pet",
+              "installed": false, "installed_version": null, "installed_from": null}]}
+```
+
+| `state` | Meaning | The page |
+|---|---|---|
+| `listed` | entries to draw | a row each: name, description, author · kind, and **Get** (or *Installed*) |
+| `empty` | no list there yet (404) or nothing in it | "Nothing is listed yet. Anything shared as a link installs below." Never an error |
+| `unreachable` | the host failed, or the list is not one; `message` says why | the same calm line, saying it can't be reached right now |
+| `off` | `marketplace.list` is empty | the section is not drawn |
+
+The broker keeps the answer ten minutes; `?refresh=1` reads again. **Get**
+puts the entry's `link` through `POST /api/plugins` without a confirm: the
+person sees the same declaration question as for any link and says yes to
+install. *Installed* is worked out on the page from the plugin list, so it
+is right the moment an install lands.
+
+### Asking to be listed
+
+The repository holds one file per listing, `listings/<id>.json` (an entry
+as above), and `list.json`, which its workflow builds from them when a pull
+request is merged (`build.py`; `build.py --check` on every pull request,
+with the same rules a Loam applies). One file per listing is what lets a
+request be one click: `loam market request <link> --description "…"` reads
+the plugin from its link (the first call of an install: nothing is written),
+and answers the entry and a link to
+`https://github.com/loamhq/marketplace/new/main?filename=listings/<id>.json&value=<the entry>`.
+The owner opens it signed in to their own GitHub account and presses
+Propose; for someone who cannot write to the repository, GitHub makes the
+fork and the pull request. Nothing is sent from the box, and the owner's
+press is the yes.
+
+The repository's content (README with the review bar, the empty list,
+`build.py`, the workflow, the pull request template) is `marketplace/` in
+this repository, until the repository exists.
+
+### Sharing by link: `loam market share`
+
+`loam market share <id> <owner>/<name>` pushes a plugin from the owner's
+plugins folder to a repository the owner made on github.com, as `<id>/` at
+the tag `v<version>`, through the owner's connected GitHub (an installation
+token per push, from `bin/git-credential-loam`; never written down). It
+answers the install link, and says when the repository is still private.
+Only that folder changes in the repository; a tag that exists is refused, so
+a new share is a new version. Making the repository public is the owner's
+direct yes on github.com; nothing here changes a repository's visibility.

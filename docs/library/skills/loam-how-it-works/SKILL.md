@@ -51,7 +51,17 @@ repository and returns a receipt with the evidence.
 
 **Plugins** add themes, page code, tools and servers. Loam's own ship with
 it; the owner's live in their own folder, which updates never touch (see
-`loam-building-a-plugin`).
+`loam-building-a-plugin`). A customisation is a plugin wherever one can do
+it. Plugins are shared by link, and the marketplace in Settings › Plugins
+lists what others made (`loam-publishing-to-the-marketplace`).
 
 **Updates** replace Loam's code and this library (`System/Loam/` in the
-vault) and nothing else: agents, the vault, settings and plugins stay.
+vault) and nothing else: agents, the vault, settings and plugins stay. A
+change the engineer made to Loam's own code on this install is kept: each
+update merges the release around it, and stops, changing nothing, if the
+two touch the same lines.
+
+**Loam's makers** hear about a defect or a wish when the owner sends it: an
+agent writes the report with personal details taken out, shows it, and on
+the owner's yes gives them a link that files it from their own GitHub
+account (`loam-filing-a-bug-or-feature`).

@@ -192,6 +192,12 @@ export function createApp({
       if (method === 'HEAD' || !out.stream) { out.stream?.destroy(); return res.end() }
       return await new Promise((resolve, reject) => { out.stream.on('error', reject); res.on('close', () => { out.stream.destroy(); resolve() }); out.stream.pipe(res); res.on('finish', resolve) })
     }
+    // The marketplace's list (2026-11-17): a read. An install from it is
+    // POST /plugins with the entry's link, as any link.
+    if (rest === '/marketplace') {
+      if (method !== 'GET') return sendJson(res, 405, { error: 'Use GET for the marketplace.' })
+      return await relayJson(res, 'GET', `/v1/marketplace${url.searchParams.get('refresh') === '1' ? '?refresh=1' : ''}`, undefined, { signal: AbortSignal.timeout(20000) })
+    }
     if (rest === '/plugins') {
       if (!['GET', 'POST'].includes(method)) return sendJson(res, 405, { error: 'Use GET or POST for plugins.' })
       return await relayJson(res, method, '/v1/plugins', method === 'POST' ? await readBody(req) : undefined, { signal: AbortSignal.timeout(method === 'POST' ? 420000 : 5000) })

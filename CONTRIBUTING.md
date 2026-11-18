@@ -17,6 +17,17 @@ nothing it adds, no path it touches and nothing in its message may match the
 install's deny list of private names. A commit that fails is held on the
 install, not pushed (`push_gate` in `lib/loam_worktree.py`).
 
+## Reports from installs
+
+An agent on any Loam install can write up a bug or a feature request for
+its owner and, on their yes, hand them a link that files it here as an issue
+from their own GitHub account (`loam report`, lib/loam_feedback.py). Before
+it is shown to the owner, the report has their name, their agents' names,
+paths, their install's address, keys, and e-mail and IP addresses taken out.
+A fix that install's engineer made can come with it as a patch
+(`loam report bug --patch`). The templates in `.github/ISSUE_TEMPLATE/`
+ask the same questions for anyone filing by hand.
+
 ## Everyone else opens a pull request
 
 1. Fork the repository, or push a branch if you have write access, and open

@@ -1145,3 +1145,38 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Inside a job, `tests/test_engineer.py` fails** writing a fixture into
   the read-only jobs folder (`Errno 30`); it does on `main` too. The
   landing runs the suite outside the job's mounts.
+
+## 2026-11-17 — reports upstream, local changes, the marketplace
+
+- **A release install has no `main`.** install.sh clones at the tag and
+  bin/loam-install clones that, so the checkout is detached with no branch,
+  and `git clone --branch main <checkout>` (every job's tree) failed. The
+  first Loam job now makes the install's own `main` at the release and marks
+  it `loam.localMain=true`; such a `main` is never synced from `origin/main`
+  (Loam's unreleased development) and never pushed. A landing that did
+  either would have moved a friend's install off its release.
+  `tests/test_local_changes.py` builds the install the installer's way.
+- **A fresh install's platform engineer is not provisioned.**
+  `provision --engineer` copies its role and project file from
+  `<vault>/Projects/Loam/engineer/`, which only the developing install has,
+  and the installer never runs it, so a brief for project `Loam` there is
+  refused ("the engineer's own composition is broken"). Shipping a role for
+  other installs is an operator decision, not a mechanism one.
+- **A GitHub App's user token reaches only the repositories its app is
+  installed on**, so the owner's connected GitHub cannot open an issue or a
+  pull request on `loamhq/*`. Upstream reports are a prefilled new-issue
+  link (`/issues/new?title=&body=&labels=`, kept under ~7,000 characters)
+  the owner submits; a marketplace listing is GitHub's new-file page with
+  `filename=` and `value=` prefilled, which forks and opens the pull request
+  for someone without write access. That is why the marketplace repository
+  holds one file per listing and builds `list.json` on merge.
+- **Pushing to the owner's own repositories needs no new credential**:
+  `loam_github.helper_env(repo)` makes git ask bin/git-credential-loam,
+  which asks the broker for an installation token for that one repository.
+  The repository must exist first (creating one needs the user token, and
+  public is the owner's yes), so `loam market share` asks the owner to make
+  it on github.com.
+- **Scrubbing a vault path**: a name may hold spaces ("Wedding plans.md"),
+  so a pattern allowing them in a segment ran across the sentence into the
+  next path; a name is words joined by single spaces, never a space before a
+  slash.

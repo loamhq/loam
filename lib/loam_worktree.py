@@ -1082,6 +1082,10 @@ def setup(project: eng.Project, job_id: str, job_dir: Path,
     bad = loam_commit_identity.malformed(project.record)
     if bad:
         raise WorktreeError(f"{project.name}: {bad}")
+    made_main = None
+    if project.platform and not rev(repo, f"refs/heads/{MAIN}"):
+        with loam_lock.live(project.name, "local main"):
+            made_main = ensure_local_main(repo)
     identity = loam_commit_identity.of(project.record)
     ensure_union(project)
     git(repo, "worktree", "prune", check=False)
@@ -1122,6 +1126,8 @@ def setup(project: eng.Project, job_id: str, job_dir: Path,
         record["mirror"] = mirror
     if synced:
         record["synced"] = synced
+    if made_main:
+        record["local_main"] = made_main
     if identity:
         # A reused or converted tree too: its config predates the record's
         # identity, or was the engineer's.
@@ -1515,12 +1521,55 @@ def remove_tree(project: eng.Project, record: dict, *, delete_branch: bool) -> N
         git(repo, "branch", "-D", record["branch"], check=False)
 
 
+# A release install's own `main` (2026-11-17). An install is a clone of Loam
+# checked out at a release tag, detached, with no branch at all (install.sh,
+# bin/loam-install), so the first engineer job on Loam there could not even
+# make its tree ("Remote branch main not found"). Its `origin` is Loam's
+# public repository, whose `main` is unreleased development: syncing from it
+# would move the install off its release, and pushing to it is neither
+# possible nor wanted. So the first job makes a `main` at the release it runs
+# (`ensure_local_main`, the tree unchanged) and marks it the install's own
+# (`loam.localMain` in the checkout's git config). Such a `main` is never
+# fetched up to `origin/main` and never pushed; `loam update` merges each
+# newer release into it, keeping the local commits, or refuses with the
+# conflicting files when they collide (docs/update.md, "A change to Loam's
+# own parts"). A box that develops Loam has a `main` already and never gets
+# the mark, so nothing changes there.
+LOCAL_MAIN_KEY = "loam.localMain"
+
+
+def local_main(repo: Path) -> bool:
+    """Whether the checkout's `main` is a release install's own."""
+    return git(repo, "config", "--bool", "--get", LOCAL_MAIN_KEY,
+               check=False).stdout.strip() == "true"
+
+
+def ensure_local_main(repo: Path) -> str | None:
+    """On a checkout detached with no `main` (a release install), make
+    `main` at HEAD, put HEAD on it and mark it local. What it did, or None
+    when there was nothing to do. Nothing in the tree or the index moves."""
+    if rev(repo, f"refs/heads/{MAIN}"):
+        return None
+    if git(repo, "symbolic-ref", "-q", "HEAD", check=False).returncode == 0:
+        return None                     # on another branch: a person's choice
+    head = rev(repo, "HEAD")
+    if not head:
+        return None
+    git(repo, "update-ref", "-m", "loam: the install's own main", f"refs/heads/{MAIN}",
+        head, "")
+    git(repo, "symbolic-ref", "-m", "loam: the install's own main", "HEAD",
+        f"refs/heads/{MAIN}")
+    git(repo, "config", LOCAL_MAIN_KEY, "true")
+    return f"made `{MAIN}` at {head[:7]}, the release this install runs"
+
+
 def sync_with_origin(repo: Path) -> str | None:
     """Bring the canonical `main` up to `origin/main` if it is behind. Returns
     why it could not, or None. A fetch that fails is not a refusal -- the
     push will say so if the remote moved -- but a `main` that has diverged
-    from its remote is, because no merge here may rewrite either."""
-    if not has_remote(repo):
+    from its remote is, because no merge here may rewrite either. A release
+    install's own `main` is never synced (``local_main``)."""
+    if not has_remote(repo) or local_main(repo):
         return None
     if git(repo, "fetch", "--quiet", "origin", MAIN, check=False,
            timeout=120).returncode != 0:
@@ -2223,7 +2272,9 @@ def _finish_landed(project, repo, tree, branch, keep_tree, result, say,
         # The tree goes on; what it has now is already in the canonical copy.
         shutil.rmtree(memory_base(record), ignore_errors=True)
         shutil.copytree(tree / "memory", memory_base(record), symlinks=True)
-    if has_remote(repo):
+    if has_remote(repo) and local_main(repo):
+        result["local_only"] = True     # a release install's own main
+    elif has_remote(repo):
         with timed(result, "push"):
             result["pushed"] = push_origin(repo)
         now = rev(repo, MAIN)
@@ -2559,7 +2610,10 @@ def receipt_section(project: eng.Project, job_id: str, result: dict | None) -> s
               if test.get("command") and test.get("passed") else "")
     if state == "landed":
         pushed = result.get("pushed")
-        push = ("Pushed to origin." if pushed is True else
+        push = ("Kept on this install: its `main` is its own, so nothing is "
+                "pushed upstream (`loam report bug --patch` offers a fix to "
+                "Loam's makers)." if result.get("local_only") else
+                "Pushed to origin." if pushed is True else
                 "No remote to push to." if pushed is None else
                 f"**The push failed**: `{pushed}` — `main` moved on this box "
                 f"and origin is behind it; the recovery sweep tries again.")

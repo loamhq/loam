@@ -240,6 +240,7 @@ import loam_settings  # noqa: E402
 import loam_appearance  # noqa: E402
 import loam_apps  # noqa: E402
 import loam_plugins  # noqa: E402
+import loam_marketplace  # noqa: E402
 import loam_profile  # noqa: E402
 import loam_agents  # noqa: E402
 import loam_skills  # noqa: E402
@@ -5614,6 +5615,21 @@ class Server:
         # is lib/loam_plugins.py; docs/plugins.md is the interface.
         if parts[:2] == ["v1", "plugins"]:
             await self.plugins_route(method, parts[2:], payload, writer)
+            return
+
+        # The marketplace (2026-11-17): the list Settings › Plugins draws
+        # above "Install from a link". A read; an install from it is the
+        # plugins route's, by the entry's link. Never an error for a list
+        # that is not there: lib/loam_marketplace.py says empty.
+        if parts == ["v1", "marketplace"]:
+            if method != "GET":
+                writer.write(response(405, {"error": "use GET for the marketplace's list"},
+                                      "Cache-Control: no-store\r\n"))
+            else:
+                refresh = params.get("refresh") == "1"
+                body = await asyncio.to_thread(loam_marketplace.listing, refresh)
+                writer.write(response(200, body, "Cache-Control: no-store\r\n"))
+            await writer.drain()
             return
 
         # Updates (2026-11-14, first release L13): Settings › Update reads

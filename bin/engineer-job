@@ -2639,6 +2639,8 @@ def push_pending(project: eng.Project) -> dict | None:
     repo = wt.canonical(project)
     if not repo.is_dir():
         return None
+    if wt.local_main(repo):
+        return None                    # a release install's own main: never pushed
     if not wt.has_remote(repo):
         # A checkout with only an off-box copy (wt.BACKUP): pushed again
         # when `main` has moved past the last backup push, which a failed

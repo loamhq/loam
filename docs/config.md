@@ -45,6 +45,8 @@ place on a particular machine. Added 2026-11-14 (first release, job L1).
 | `owner.legacy_ids` | ids an install used for its owner before `owner.id` existed; records that carry one still read as the owner's | absent: none |
 | `deploy.config` | the deployment configuration (domain, `[moved]`, `[[forward]]`) of a box set up by hand, kept outside the checkout so an update never replaces it; same format as `deploy/loam.toml` | absent: `deploy/loam.toml` |
 | `app.speech_voices`, `app.avatar_colours` | the install's agents' read-aloud voices (`agent=Voice:character;...`) and avatar colour overrides (a table of agent id = palette token), passed by `bin/deploy` to the app's compose file | absent: Iris's voice; no override |
+| `feedback.repo` | where `loam report` sends a bug report or a feature request (lib/loam_feedback.py) | absent: `loamhq/loam` |
+| `marketplace.list`, `marketplace.repo` | the marketplace's list (an https URL; `""` turns the section off) and the repository a listing is asked for in (docs/plugins.md, "The marketplace") | absent: `loamhq/marketplace`'s `list.json` on `main` |
 | `edge.*` | an install's name on the web: its domain, address, the app at the domain itself, the records it serves, how DNS is asked, local certificates for a rehearsal, the DNS gate (first release L12; docs/install.md) | absent: the deploy layer reads `deploy/loam.toml` and serves every record, as the first install always has |
 
 `lib/loam_broker` and `lib/loam_engineer` re-export the paths under their
