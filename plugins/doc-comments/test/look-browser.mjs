@@ -203,6 +203,12 @@ const SURFACES = {
     await p.goto(`${app.url}/files/@doc-comments`); await p.waitForSelector('.dc-wm-entry'); await settle(p, 400)
     await p.locator('.dc-wm-entry .setrow', { hasText: 'Trip budget' }).first().click(); await settle(p, 1000)
   },
+  async toc(p) {
+    await openDoc(p, 'Long.md')
+    await p.evaluate(() => { document.querySelector('.dc-scroll').scrollTop = 2600 }); await settle(p, 600)
+    if (p.phone) await p.locator('.dc-secbtn').click(); else await p.locator('.dc-ticks').hover()
+    await settle(p, 600)
+  },
   async 'appear-sheet'(p) {
     await p.goto(`${app.url}/files/@doc-comments`); await p.waitForSelector('.dc-wm-entry'); await settle(p, 400)
     await p.locator('.dc-wm-entry', { hasText: 'The garden plan' }).locator('.iconbtn').last().click(); await settle(p, 400)
