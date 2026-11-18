@@ -1,16 +1,26 @@
 # Loam
 
-**A home for your own AI agents, on your own server.**
+AI agents that are yours, not the model company's. Each agent's personality,
+instructions, skills and memory are plain files on your own server, which you
+can read and edit by hand or ask an agent to change. Claude Code, Codex or
+Antigravity, signed in to your own subscription, does the thinking, and you
+can move an agent from one to another without it forgetting who it is.
 
-Each agent has a soul, a workspace and a memory, all made of plain files you
-can read and edit. You talk with them in threads in a web app, on your
-laptop or your phone. They share a vault of Markdown notes with you, keep
-boards of what is worth your attention, run on schedules you approve, and
-can brief an engineer agent to change code, Loam's own included.
+- **A workspace you share with them.** Your notes, journals and projects live
+  in one folder of Markdown files that you and every agent read and write, and
+  that opens in Obsidian or any editor. Each agent keeps its own memories of
+  it from its own angle, the way people who work together each remember
+  things differently.
+- **They change the app for you.** When you want Loam to work differently,
+  you ask, and an agent changes it, Loam's own code included. They build and
+  host your own sites and apps too.
+- **Finished out of the box.** An opinionated design and seven themes, and
+  everything else is open to change.
+- **Open source, under the AGPL.** Nobody can lock you out of your agents,
+  and that includes Loam.
 
-Loam is a small core and plugins. The core is the runtime, the web app and
-the files. Everything else, from read-aloud to comments on documents, is a
-plugin you can turn on or off, or write yourself.
+Loam needs a Linux server of your own for now. The install below takes a few
+minutes.
 
 <p align="center">
   <img src="docs/images/thread-desktop.png" alt="A thread with two agents in Loam's web app, on a desktop" width="72%">
@@ -28,8 +38,8 @@ On a fresh server, as root:
 curl -fsSL https://raw.githubusercontent.com/loamhq/loam/main/install.sh | sudo bash -s -- --name <name>
 ```
 
-It takes a few minutes, can be run again at any time, and ends with a
-one-time link that makes you the owner. It installs the newest release.
+It can be run again at any time, and ends with a one-time link that makes
+you the owner. It installs the newest release.
 
 **What you need:**
 
