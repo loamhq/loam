@@ -2893,7 +2893,9 @@ test('contents with sixty headings: the ticks close up inside the pane and the c
   const p = await newDoc(tocDoc(20, 2))
   const page = await open({ doc: p, w: 1440, h: 800 })
   assert.equal((await tocState(page)).ticks.length, 60)
-  await scrollTo(page, 999999)
+  // (the doc grows as CodeMirror measures what it draws: scroll until the end stays the end)
+  for (let i = 0; i < 4; i++) await scrollTo(page, 999999)
+  assert.ok(await page.evaluate(() => { const s = document.querySelector('.dc-scroll'); return s.scrollTop + s.clientHeight >= s.scrollHeight - 2 }), 'at the end')
   const g = await page.evaluate(() => {
     const t = document.querySelector('.dc-ticks').getBoundingClientRect()
     const s = document.querySelector('.dc-scroll').getBoundingClientRect()
@@ -2910,6 +2912,15 @@ test('contents with sixty headings: the ticks close up inside the pane and the c
     return on && on.top >= card.top && on.bottom <= card.bottom
   })
   assert.ok(seen, 'the current title is in view inside the card')
+  // (before, the last sections never became current: they cannot reach the top)
+  const end = await page.evaluate(() => {
+    const sc = document.querySelector('.dc-scroll').getBoundingClientRect()
+    const tops = [...document.querySelectorAll('.cm-line.dc-h2, .cm-line.dc-h3')].map(l => ({ t: l.textContent.replace(/^#+\s*/, ''), y: l.getBoundingClientRect().top - sc.top }))
+    const above = (line) => tops.filter(x => x.y <= line).pop()?.t
+    return { on: document.querySelector('.dc-toccard .dc-tocitem.on')?.textContent, mid: above(sc.height / 2), top: above(72) }
+  })
+  assert.notEqual(end.mid, end.top, 'the pane is placed so the two rules differ')
+  assert.equal(end.on, end.mid, `at the very end, the section at the middle of the pane is current (${JSON.stringify(end)})`)
   await shot(page, 'toc-sixty')
   assert.deepEqual(page.errors, [])
   await page.done()

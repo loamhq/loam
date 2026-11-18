@@ -437,7 +437,9 @@ changed, and positions and the current one otherwise. An idle page changes
 nothing (the editor's idle-page test holds it).
 
 **Where the reader is:** the last heading whose line has passed 72 px below
-the top of the pane, measured from CodeMirror's height map. After a jump the
+the top of the pane, measured from CodeMirror's height map; scrolled to the
+very end, the middle of the pane instead, since the last sections can never
+reach the top. After a jump the
 heading jumped to stays current (a short last section never reaches the top)
 until the reader scrolls by hand. **A jump** scrolls smoothly to an estimate
 (lines not yet drawn have estimated heights), then measures the drawn
