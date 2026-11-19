@@ -14,6 +14,13 @@ git.identity …`, ``bin/settings``)::
      "email": "123+ada@users.noreply.github.com"}       # from GitHub
     {"source": "typed", "name": "Ada Lovelace", "email": "ada@example.org"}
 
+**Unset is the default** (since 2026-11-18, the owner: "make sure the same
+is true for other Loam users as well unless they change it"): the owner's
+connected GitHub account, its profile name and its no-reply address, when
+the connection says clearly which account that is (``default``, below).
+``{"source": "neutral"}`` is the opt-out: commits carry the engineer's name
+and no prompt asks for more.
+
 ``github`` takes the connected GitHub account's profile name and GitHub's own
 no-reply address for it (``<id>+<login>@users.noreply.github.com``), which
 GitHub attributes to the account and which keeps the person's real address
@@ -32,10 +39,22 @@ there is no built-in person.
    ``<name> engineer <engineer+<name>@noreply.local>`` that bin/provision
    writes, and always on a checkout with the push gate on
    (``loam.pushGate``), whose gate *is* that identity;
-3. ``owner`` -- the setting above;
-4. ``engineer`` -- nothing set: the checkout's engineer identity, as before
-   this module, never a provider. ``prompt()`` says how to set the owner's,
-   and the job's receipt carries it.
+3. ``owner`` -- the setting above, or with nothing set the default:
+   a. the one GitHub account every authorized connection here is signed in
+      as (lib/loam_github_app.owner_profile), with its no-reply address;
+   b. with no connection at all, the box's own global git identity
+      (``git config --global``), only when its address is already a GitHub
+      no-reply, so no private address is ever newly published;
+   never a guess between two accounts, a new scope or a sign-in;
+4. ``engineer`` -- the opt-out, or no default could be found: the
+   checkout's engineer identity, as before this module, never a provider.
+   Unless the owner opted out, ``prompt()`` says what to do, and the job's
+   receipt carries it.
+
+The default is commit metadata and nothing more. It does not change who
+pushes or opens a pull request (a deploy key or the Loam app, as before);
+only the explicit ``github`` choice lets the owner's own token open one
+(lib/loam_github_app.owner_token).
 
 **Provider attribution.** Each harness is told not to add itself: Claude
 Code by ``CLI_SETTINGS`` (lib/loam_commit_identity), Codex by
@@ -59,7 +78,10 @@ import sys
 from pathlib import Path
 
 KEY = "git"
-SOURCES = ("github", "typed")
+SOURCES = ("github", "typed")          # an identity; "neutral" is the opt-out
+NEUTRAL = "neutral"
+NOREPLY_RE = re.compile(r"^(\d+\+)?[A-Za-z0-9-]+@users\.noreply\.github\.com$",
+                        re.IGNORECASE)
 NAME_MAX, EMAIL_MAX = 100, 254
 EMAIL_RE = re.compile(r"^[^\s@<>,\"]+@[^\s@<>,\"]+\.[^\s@<>,\"]+$")
 ENGINEER_EMAIL_RE = re.compile(r"^engineer\+[^@\s]+@noreply\.local$", re.IGNORECASE)
@@ -102,14 +124,24 @@ def settings_path() -> Path:
     return lc.STATE / "broker" / "settings.json"
 
 
+def _raw():
+    try:
+        data = json.loads(settings_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data.get(KEY) if isinstance(data, dict) else None
+
+
+def opted_out(raw=None) -> bool:
+    raw = _raw() if raw is None else raw
+    return isinstance(raw, dict) and raw.get("source") == NEUTRAL
+
+
 def stored(raw=None) -> dict | None:
-    """The owner's identity as stored, or None when unset or not whole."""
+    """The owner's explicit identity as stored, or None when unset, opted
+    out, or not whole. Only this is an explicit choice."""
     if raw is None:
-        try:
-            data = json.loads(settings_path().read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
-        raw = data.get(KEY) if isinstance(data, dict) else None
+        raw = _raw()
     if not isinstance(raw, dict) or raw.get("source") not in SOURCES:
         return None
     name, email = raw.get("name"), raw.get("email")
@@ -158,16 +190,19 @@ def from_github(user: dict) -> dict:
 
 
 def validate(patch, github_user=None) -> dict | None:
-    """The value a PATCH ``{"identity": …}`` stores, or None to clear it.
-    ``identity`` is ``"github"`` (``github_user()`` answers GitHub's
-    ``/user``), ``{"name", "email"}``, or null. Anything else is refused
-    whole with a sentence."""
+    """The value a PATCH ``{"identity": …}`` stores, or None to clear it
+    (back to the default). ``identity`` is ``"github"`` (``github_user()``
+    answers GitHub's ``/user``), ``{"name", "email"}``, ``"neutral"``, or
+    null / ``"default"``. Anything else is refused whole with a sentence."""
     if not isinstance(patch, dict) or set(patch) != {"identity"}:
         raise IdentityError('send {"identity": "github"}, {"identity": '
-                            '{"name": …, "email": …}} or {"identity": null}')
+                            '{"name": …, "email": …}}, {"identity": "neutral"} '
+                            'or {"identity": null}')
     value = patch["identity"]
-    if value is None:
+    if value is None or value == "default":
         return None
+    if value == NEUTRAL:
+        return {"source": NEUTRAL}
     if value == "github":
         if github_user is None:
             raise IdentityError("connect a GitHub account first (Settings › "
@@ -176,7 +211,8 @@ def validate(patch, github_user=None) -> dict | None:
     if isinstance(value, dict) and set(value) <= {"name", "email"}:
         return {"source": "typed", "name": _clean_name(value.get("name")),
                 "email": _clean_email(value.get("email"))}
-    raise IdentityError('identity is "github", {"name": …, "email": …} or null')
+    raise IdentityError('identity is "github", {"name": …, "email": …}, '
+                        '"neutral" or null (the default)')
 
 
 def masked(email: str) -> str:
@@ -189,21 +225,131 @@ def masked(email: str) -> str:
     return f"{local[:1]}…@{domain}" if domain else "…"
 
 
-def public(value: dict | None) -> dict:
-    """What ``GET /v1/settings/git`` answers. The owner's own page and
+# -- the default --------------------------------------------------------------
+
+def _global_git() -> tuple[str, str]:
+    import subprocess  # noqa: PLC0415
+    out = []
+    for key in ("user.name", "user.email"):
+        try:
+            r = subprocess.run(["git", "config", "--global", "--get", key],
+                               capture_output=True, text=True, timeout=10)
+            out.append(r.stdout.strip() if r.returncode == 0 else "")
+        except (OSError, subprocess.SubprocessError):
+            out.append("")
+    return out[0], out[1]
+
+
+# Where the default is read from. A test sets these (callables); in a test
+# run left unset, the default reads neither the box's GitHub store nor its
+# global git config (lib/loam_offline.py), so no fixture meets a real one.
+PROFILE_SOURCE = None
+GLOBAL_GIT_SOURCE = None
+
+
+def _offline() -> bool:
+    try:
+        import loam_offline  # noqa: PLC0415
+        return loam_offline.offline()
+    except ImportError:
+        return False
+
+
+def default(profile=None, global_git=None) -> dict:
+    """What an unset setting means here, now: ``{"status": "github",
+    "identity": {...}}`` from the one connected account; ``{"status":
+    "git-config", ...}`` from a global git identity whose address is a GitHub
+    no-reply, when nothing is connected; else ``{"status": "missing" |
+    "ambiguous" | "unreachable", "identity": None}`` with what to do in
+    ``prompt``. ``profile`` and ``global_git`` are for tests."""
+    if profile is None and PROFILE_SOURCE is not None:
+        profile = PROFILE_SOURCE()
+    elif profile is None and _offline():
+        profile = {"status": "missing"}
+    elif profile is None:
+        try:
+            import loam_github_app  # noqa: PLC0415
+            profile = loam_github_app.owner_profile()
+        except Exception as exc:  # noqa: BLE001 -- a default never stops a job
+            profile = {"status": "unreachable", "error": str(exc)}
+    status = profile.get("status")
+    if status == "connected":
+        name = (profile.get("name") or "").strip() or profile["login"]
+        try:
+            name = _clean_name(name)
+        except IdentityError:
+            name = profile["login"]
+        return {"status": "github", "identity": {
+            "source": "github", "login": profile["login"], "name": name,
+            "email": noreply(profile["id"], profile["login"])}, "prompt": None}
+    if status == "missing":
+        if global_git is None:
+            global_git = (GLOBAL_GIT_SOURCE() if GLOBAL_GIT_SOURCE is not None
+                          else ("", "") if _offline() else _global_git())
+        gname, gmail = global_git
+        if gname and NOREPLY_RE.match(gmail or "") and not is_provider_email(gmail) \
+                and not engineer_default(gname, gmail):
+            try:
+                return {"status": "git-config", "identity": {
+                    "source": "git-config", "name": _clean_name(gname),
+                    "email": gmail.strip()}, "prompt": None}
+            except IdentityError:
+                pass
+    why = {"ambiguous": "more than one GitHub account is connected ("
+                        + ", ".join(profile.get("logins") or []) + "), and "
+                        "Loam does not choose between them",
+           "unreachable": "GitHub could not be asked which account is "
+                          "connected; it is tried again at the next job"
+           }.get(status, "no GitHub account is connected")
+    return {"status": status if status in ("ambiguous", "unreachable") else "missing",
+            "identity": None, "prompt": prompt(why, status)}
+
+
+def effective(raw=None, profile=None, global_git=None) -> tuple[dict | None, str, str | None]:
+    """The identity an unset-or-chosen setting gives a job, how, and the
+    prompt when there is one: ``(identity, "chosen" | "default" | "neutral"
+    | <default status>, prompt)``."""
+    raw = _raw() if raw is None else raw
+    if opted_out(raw):
+        return None, NEUTRAL, None
+    chosen = stored(raw)
+    if chosen:
+        return chosen, "chosen", None
+    d = default(profile, global_git)
+    return d["identity"], ("default" if d["identity"] else d["status"]), d["prompt"]
+
+
+def public(raw=None, profile=None, global_git=None) -> dict:
+    """What ``GET /v1/settings/git`` answers: ``identity``, the choice as
+    ``settings set`` takes it (null is the default); ``effective``, what new
+    commits carry now; ``status``; and, when nothing would carry the owner's
+    name and they did not opt out, ``prompt``. The owner's own page and
     personas on this box may see the address; it never goes to a log."""
-    if not value:
-        return {"identity": None, "status": "missing", "prompt": prompt()}
-    return {"identity": value, "status": "set", "prompt": None}
+    raw = _raw() if raw is None else raw
+    choice = NEUTRAL if opted_out(raw) else stored(raw)
+    if choice:
+        eff = None if choice == NEUTRAL else choice
+        return {"identity": choice, "effective": eff,
+                "status": NEUTRAL if choice == NEUTRAL else "set", "prompt": None}
+    d = default(profile, global_git)
+    return {"identity": None, "effective": d["identity"],
+            "status": "default" if d["identity"] else d["status"],
+            "default": d["status"], "prompt": d["prompt"]}
 
 
-def prompt() -> str:
-    return ("No name is set for your agents' commits, so they carry the "
-            "engineer's (\"<project> engineer\"). Set yours in Settings › GitHub "
-            "› \"Your name on agents' work\", or ask a persona to run "
-            "`settings set git.identity github` (your GitHub account's name and "
-            "private no-reply address) or `settings set git.identity "
-            "'{\"name\": \"…\", \"email\": \"…\"}'`.")
+def prompt(why: str = "no name is set", status: str = "missing") -> str:
+    fix = {"ambiguous": "Choose one: under Settings › GitHub › \"Your name on "
+                        "agents' work\", type the name and address to use",
+           "unreachable": "Check the connection in Settings › GitHub, or type a "
+                          "name under \"Your name on agents' work\""}.get(
+        status, "Connect your GitHub account in Settings › GitHub to use its "
+                "name and private no-reply address, or type a name under "
+                "\"Your name on agents' work\"")
+    return (f"Your agents' commits carry the engineer's name (\"<project> "
+            f"engineer\") because {why}. {fix}; a persona can do the same with "
+            "`settings set git.identity '{\"name\": \"…\", \"email\": \"…\"}'`. "
+            "To keep the engineer's name and stop this note: `settings set "
+            "git.identity neutral`.")
 
 
 # -- which identity a job commits as ------------------------------------------
@@ -218,23 +364,31 @@ def engineer_default(name: str, email: str) -> bool:
 def resolve(project_identity: dict | None, repo_identity: tuple[str, str],
             gated: bool, owner: dict | None = None) -> dict:
     """``{"name", "email", "source"}`` for a job (see the module doc for the
-    order). ``owner`` defaults to the stored setting. ``source`` is one of
+    order). ``owner`` defaults to ``effective()``: the explicit choice, else
+    the default; pass ``False`` for "none". ``source`` is one of
     ``project``, ``repo``, ``owner``, ``engineer``, or ``none`` when even the
-    checkout has no identity (the commit will fail, as before)."""
+    checkout has no identity (the commit will fail, as before). ``why`` says,
+    for ``engineer``, whether the owner opted out (``neutral``) or which
+    default was missing; ``prompt`` is the sentence for the receipt."""
     if project_identity:
         return {"name": project_identity["name"],
                 "email": project_identity["email"], "source": "project"}
     name, email = repo_identity
     if name and email and (gated or not engineer_default(name, email)):
         return {"name": name, "email": email, "source": "repo"}
-    owner = stored() if owner is None else owner
+    how, why = "chosen", prompt()
+    if owner is None:
+        owner, how, why = effective()
+    elif owner is False:
+        owner, how = None, "missing"
     if owner:
         return {"name": owner["name"], "email": owner["email"], "source": "owner",
-                "via": owner["source"], **({"login": owner["login"]}
-                                           if owner.get("login") else {})}
+                "via": owner["source"], "default": how == "default",
+                **({"login": owner["login"]} if owner.get("login") else {})}
     if name and email:
-        return {"name": name, "email": email, "source": "engineer"}
-    return {"name": "", "email": "", "source": "none"}
+        return {"name": name, "email": email, "source": "engineer", "why": how,
+                "prompt": why}
+    return {"name": "", "email": "", "source": "none", "why": how, "prompt": why}
 
 
 def summary(ident: dict) -> str:
@@ -242,16 +396,21 @@ def summary(ident: dict) -> str:
     src = ident.get("source")
     who = f"{ident.get('name')} <{masked(ident.get('email') or '')}>"
     if src == "owner":
-        how = ("the owner's GitHub account" if ident.get("via") == "github"
-               else "the owner's setting")
-        return f"commits as {who}, from {how}"
+        how = {"github": "the owner's GitHub account",
+               "git-config": "the owner's global git identity"}.get(
+            ident.get("via"), "the owner's setting")
+        return (f"commits as {who}, from {how}"
+                + (" (the default)" if ident.get("default") else ""))
     if src == "project":
         return f"commits as {who}, the project's own person"
     if src == "repo":
         return f"commits as {who}, the repository's own identity (kept)"
     if src == "engineer":
-        return f"commits as {who}, because no owner identity is set. {prompt()}"
-    return "the checkout has no identity at all; commits will fail. " + prompt()
+        if ident.get("why") == NEUTRAL:
+            return f"commits as {who}, the owner's choice (neutral)"
+        return f"commits as {who}. {ident.get('prompt') or prompt()}"
+    return ("the checkout has no identity at all; commits will fail. "
+            + (ident.get("prompt") or prompt()))
 
 
 # -- provider attribution -------------------------------------------------------

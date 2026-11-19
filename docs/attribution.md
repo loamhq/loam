@@ -10,11 +10,45 @@ co-authors.
 ## Setting it
 
 Settings › GitHub › **Your name on agents' work**, or ask a persona. Both use
-the same route, `PATCH /v1/settings/git`:
+the same route, `PATCH /v1/settings/git`. The card has one choice of three,
+**Default**, **Type a name** and **Neutral**, and under Default, with GitHub
+connected, one box: **Also open pull requests as me**.
 
-    settings set git.identity github
+    settings set git.identity null        # Default (how every install starts)
     settings set git.identity '{"name": "Ada Lovelace", "email": "ada@example.org"}'
-    settings set git.identity null
+    settings set git.identity neutral     # always "<project> engineer", no note
+    settings set git.identity github      # the box: Default, and pull requests as you
+
+### The default
+
+Unset is the default, on a fresh install and on one that existed before
+(the owner, 2026-11-18: "the same is true for other Loam users as well
+unless they change it"). At each job it is, in order:
+
+1. **Your connected GitHub account**, when the connection says clearly which
+   account that is: every authorized connection on this install (the Loam
+   app's, and each organization app's) is signed in as the same login. Its
+   profile name and its no-reply address,
+   `<id>+<login>@users.noreply.github.com`. The id and name are read with
+   GitHub's `GET /user`, using the token the connection already has, and
+   kept on that authorization for a day (`profile` in
+   `state/github/integration.json`, never in its public view); a failed read
+   keeps the last one. A connection added later is used at the next job; a
+   removed one is not.
+2. **With nothing connected, your computer's own git identity**
+   (`git config --global`), only when its address is already a GitHub
+   no-reply address. A private address there is never used: Loam does not
+   publish an address you have not already published.
+3. **Otherwise the engineer's name**, `<project> engineer`, and the job's
+   receipt and the Settings card say why and what to do: connect GitHub when
+   nothing is connected; choose (type a name) when two different GitHub
+   accounts are connected, because Loam never picks one; check the
+   connection when GitHub could not be asked.
+
+Loam never signs in for this, never adds a scope and never switches
+accounts.
+
+### The explicit choices
 
 - `github` reads the connected GitHub account once, using the token the
   connection already has; no scope is added. It takes the account's profile
@@ -23,9 +57,11 @@ the same route, `PATCH /v1/settings/git`:
   address to the account, and your real address never appears in them.
 - A typed name and address are used exactly as given. A provider's address
   is refused.
-- Unset, which is how a fresh install starts: commits carry the engineer's
-  identity, `<project> engineer <engineer+<project>@noreply.local>`, never a
-  provider's. Each job's receipt says how to set yours.
+- `neutral` is the opt-out: commits carry the engineer's identity,
+  `<project> engineer <engineer+<project>@noreply.local>`, and no note asks
+  for more.
+- `github` is a snapshot of the account as it was when chosen, and it is the
+  only setting that lets the owner's own token open a pull request (below).
 
 Loam never guesses an address, and it has no built-in person.
 
@@ -41,8 +77,13 @@ The first rule that applies wins:
    other than the default that `bin/provision` writes. A checkout with the
    push gate on (`loam.pushGate`) always keeps its own identity, because the
    gate checks commits against it.
-3. **The owner's setting**, described above.
-4. **The engineer's identity**, with the prompt.
+3. **The owner's setting**, or with nothing set the default, described
+   above.
+4. **The engineer's identity**: with the prompt, unless the owner chose
+   `neutral`.
+
+So a project or repository override, and the gated public Loam checkout's
+neutral `Loam engineer`, are never replaced by the default.
 
 Both author and committer get the chosen identity. So does the landing's
 merge commit, which is made in the job's tree.
@@ -98,7 +139,11 @@ every other line are kept.
   pull request, as before. The result's `actor` says which one did.
 
 Loam never signs in again, never switches accounts and never adds a scope.
-Author metadata never stands in for a GitHub actor.
+Author metadata never stands in for a GitHub actor. **The default is
+metadata only**: it puts your name and no-reply address on the commits, and
+does not authorize anything or change who pushes or opens a pull request.
+Only the explicit `github` choice (the box on the card) lets your own token
+open one.
 
 A landing to `main` pushes with whatever credential the checkout's remote
 uses (a deploy key here). GitHub shows a deploy-key push as the key, not as
@@ -108,7 +153,12 @@ a person.
 
 - What GitHub shows for an address depends on that address being verified
   on the account, or being the account's no-reply address.
-- Commits you or anyone else make by hand, outside a job's clone.
+- Commits you or anyone else make by hand, outside a job's clone, and any
+  git you run yourself (a terminal, an IDE, GitHub's web editor): those use
+  your own git configuration and credentials, not this setting.
+- Who GitHub shows as the pusher or the pull request's author: that is the
+  credential that made the call (a deploy key, the Loam app, or your token
+  when you chose `github`), never the commits' metadata.
 - Remotes Loam does not push to.
 - A provider that changes how it attributes itself. The hook and the
   landing are the backstop for that.

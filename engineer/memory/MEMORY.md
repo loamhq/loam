@@ -1899,3 +1899,14 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   from inside `loam-session-broker.service` (its cgroup). Before this, any
   test broker's `deliver_owed` could also have delivered, or dropped as
   "thread gone", a real owed record.
+- **Unset is the default, not neutral** (the same day, second change). The
+  store keeps no GitHub user id, and the no-reply address needs it, so
+  `owner_profile` reads `/user` once with the existing token and caches
+  `profile` on that authorization for a day. "Clearly designated" is one
+  login across every authorized app slot; two is a prompt, never a pick.
+  `neutral` is the explicit opt-out. Only an explicit `github` reaches
+  `owner_token`: the default is metadata and never changes the PR actor.
+- **In a test run the default reads nothing real.** `loam_offline.offline()`
+  makes `default()` treat the box as unconnected with no global git identity
+  unless a test sets `PROFILE_SOURCE`/`GLOBAL_GIT_SOURCE`; otherwise every
+  worktree test on an unset box would read the live store and its tokens.

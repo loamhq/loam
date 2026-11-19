@@ -29,7 +29,19 @@ host settings file (``LOAM_HOST_SETTINGS``) standing for an install's:
   - a second install's owner gets their own name; an explicit repository
     identity and a project's person win over the owner's;
   - the pull request's actor: the owner's token only when GitHub says it is
-    the owner's chosen account, else the app.
+    the owner's chosen account, else the app;
+  - the default (unset, since the second 2026-11-18 change): the one
+    connected account's name and no-reply address on a fresh and on an
+    existing install; a connection added later is used at the next job and a
+    removed one is not; two accounts, or a connection GitHub cannot be asked
+    about, leave the engineer's name and a prompt; with nothing connected, a
+    global git identity only when its address is a GitHub no-reply (a
+    private address is never used); "neutral" opts out with no prompt; an
+    explicit choice, a repository's identity and a gated checkout win; and
+    the default never makes the owner the pull request's actor;
+  - ``owner_profile`` against a fixture store: one login, two, none; the
+    id cached on the authorization and not re-read within a day; a failed
+    read keeps the cache.
 
 Run: python3 tests/test_git_identity.py
 """
@@ -201,7 +213,7 @@ try:
     r = start(proj, "20261118-100000-00000001")
     check("fresh: the job commits as the engineer", r["attribution"]["source"], "engineer")
     check("fresh: the record carries the prompt",
-          "settings set git.identity github" in r["attribution"]["summary"], True)
+          "Connect your GitHub account" in r["attribution"]["summary"], True)
     commit(r, "b.txt", "Add b" + CLAUDE, verify=False)
     result = land(proj, r)
     check("fresh: lands", result["state"], "landed")
@@ -324,6 +336,195 @@ try:
         check("actor: a typed identity never uses a token", gh.owner_token(proj_pr), None)
     finally:
         gh.load, gh.route, gh.user_token, gh.api, gh.org_apps = saved
+
+    # -- The default: unset means the one connected account ----------------
+    ADA_PROFILE = {"status": "connected", "login": "ada", "id": 1815,
+                   "name": "Ada Lovelace"}
+    profile = {"value": dict(ADA_PROFILE)}
+    gi.PROFILE_SOURCE = lambda: dict(profile["value"])
+    gi.GLOBAL_GIT_SOURCE = lambda: ("", "")
+    set_owner(None)
+    proj_d, origin_d = make("default-fresh")
+    r = start(proj_d, "20261118-110000-00000001")
+    check("default fresh: the job's tree is the connected account",
+          (r["attribution"]["source"], git(Path(r["path"]), "config", "user.name"),
+           git(Path(r["path"]), "config", "user.email")),
+          ("owner", "Ada Lovelace", "1815+ada@users.noreply.github.com"))
+    check("default fresh: the receipt says it is the default, no prompt",
+          (r["attribution"]["summary"].endswith("(the default)"),
+           "Connect your GitHub" in r["attribution"]["summary"]), (True, False))
+    commit(r, "d.txt", "Add d" + CLAUDE, verify=False)
+    result = land(proj_d, r)
+    check("default fresh: lands as the owner, no provider line",
+          (result["state"], people(proj_d.root, "main")[0],
+           any("anthropic" in b for b in bodies(proj_d.root, "main"))),
+          ("landed", "Ada Lovelace <1815+ada@users.noreply.github.com> / "
+                     "Ada Lovelace <1815+ada@users.noreply.github.com>", False))
+    check("default fresh: origin has it", git(origin_d, "rev-parse", "main"),
+          git(proj_d.root, "rev-parse", "main"))
+
+    # An existing install: engineer commits already landed while nothing was
+    # connected; the connection comes later; history keeps its hashes.
+    profile["value"] = {"status": "missing"}
+    proj_e, origin_e = make("default-existing")
+    r = start(proj_e, "20261118-110000-00000002")
+    check("existing: before a connection, the engineer and the prompt",
+          (r["attribution"]["source"], "no GitHub account is connected"
+           in r["attribution"]["summary"]), ("engineer", True))
+    commit(r, "e1.txt", "Add e1")
+    land(proj_e, r)
+    before = git(origin_e, "rev-list", "main").split()
+    profile["value"] = dict(ADA_PROFILE)          # connection added
+    r = start(proj_e, "20261118-110000-00000003")
+    check("existing: connection added, the next job is the owner",
+          r["attribution"]["source"], "owner")
+    commit(r, "e2.txt", "Add e2")
+    land(proj_e, r)
+    after = git(origin_e, "rev-list", "main").split()
+    check("existing: what landed before keeps its hashes",
+          set(before) <= set(after), True)
+    check("existing: earlier commit still the engineer's",
+          people(proj_e.root, before[0])[0].split(" / ")[0],
+          "demo engineer <engineer+demo@noreply.local>")
+    profile["value"] = {"status": "missing"}        # connection removed
+    r = start(proj_e, "20261118-110000-00000004")
+    check("existing: connection removed, back to the engineer with the prompt",
+          (r["attribution"]["source"], git(Path(r["path"]), "config", "user.name")),
+          ("engineer", "demo engineer"))
+
+    # Missing or ambiguous: never a guess.
+    profile["value"] = {"status": "ambiguous", "logins": ["ada", "ada-work"]}
+    r = start(proj_e, "20261118-110000-00000005")
+    check("ambiguous: the engineer, and the prompt names both and says choose",
+          (r["attribution"]["source"], "ada, ada-work" in r["attribution"]["summary"],
+           "Choose one" in r["attribution"]["summary"]), ("engineer", True, True))
+    profile["value"] = {"status": "unreachable", "login": "ada", "error": "x"}
+    check("unreachable: the engineer, never a guessed address",
+          gi.resolve(None, ("demo engineer", "engineer+demo@noreply.local"),
+                     False)["source"], "engineer")
+
+    # No connection: a global git identity only if it is already a no-reply.
+    profile["value"] = {"status": "missing"}
+    eng_id = ("demo engineer", "engineer+demo@noreply.local")
+    gi.GLOBAL_GIT_SOURCE = lambda: ("Ada Box", "ada.private@example.org")
+    check("privacy: a private global address is never used",
+          gi.resolve(None, eng_id, False)["source"], "engineer")
+    gi.GLOBAL_GIT_SOURCE = lambda: ("Ada Box", "77+ada@users.noreply.github.com")
+    got = gi.resolve(None, eng_id, False)
+    check("git-config: a global no-reply identity is the default",
+          (got["source"], got["via"], got["name"]), ("owner", "git-config", "Ada Box"))
+    gi.GLOBAL_GIT_SOURCE = lambda: ("Claude", "noreply@anthropic.com")
+    check("git-config: a provider's global identity is not",
+          gi.resolve(None, eng_id, False)["source"], "engineer")
+    profile["value"] = {"status": "ambiguous", "logins": ["a", "b"]}
+    gi.GLOBAL_GIT_SOURCE = lambda: ("Ada Box", "77+ada@users.noreply.github.com")
+    check("git-config: not consulted when two accounts are connected",
+          gi.resolve(None, eng_id, False)["source"], "engineer")
+    gi.GLOBAL_GIT_SOURCE = lambda: ("", "")
+    profile["value"] = dict(ADA_PROFILE)
+
+    # Explicit choices win over the default; neutral opts out.
+    set_owner({"source": "neutral"})
+    r = start(proj_e, "20261118-110000-00000006")
+    check("neutral: the engineer, no prompt, says it was chosen",
+          (r["attribution"]["source"], "Connect" in r["attribution"]["summary"],
+           "neutral" in r["attribution"]["summary"]), ("engineer", False, True))
+    check("neutral: the view says so",
+          (gi.public()["identity"], gi.public()["status"], gi.public()["prompt"]),
+          ("neutral", "neutral", None))
+    set_owner(bea)
+    check("explicit typed wins over the default",
+          gi.resolve(None, eng_id, False)["name"], "Bea Second")
+    set_owner(None)
+    view = gi.public()
+    check("view: unset is the default, with what commits carry",
+          (view["identity"], view["status"], view["effective"]["email"], view["prompt"]),
+          (None, "default", "1815+ada@users.noreply.github.com", None))
+    check("setting: neutral and default round-trip",
+          (gi.validate({"identity": "neutral"}), gi.validate({"identity": "default"}),
+           gi.validate({"identity": None})), ({"source": "neutral"}, None, None))
+    proj_g, _ = make("gated-default", ident=("Loam engineer", "engineer+loam@noreply.local"))
+    git(proj_g.root, "config", "loam.pushGate", "true")
+    r = start(proj_g, "20261118-110000-00000007")
+    check("gated: the neutral repository identity is kept over the default",
+          (r["attribution"]["source"], git(Path(r["path"]), "config", "user.name")),
+          ("repo", "Loam engineer"))
+    proj_rp, _ = make("repo-default", ident=("Ada Repo", "ada@repo.example"))
+    check("repo override: a repository's own identity wins over the default",
+          start(proj_rp, "20261118-110000-00000008")["attribution"]["source"], "repo")
+
+    # The default is metadata only: it never makes the owner the PR actor.
+    import loam_github_app as gh  # noqa: E402
+    proj_pr = eng.Project("pr", root / "pr", root / "pr-jobs", platform=False,
+                          repo="ada/thing", record={"name": "pr"})
+    saved_gh = (gh.load, gh.route, gh.user_token, gh.api, gh.org_apps)
+    try:
+        gh.load = lambda: {}
+        gh.route = lambda data, repo: ({}, {"installation_id": 1})
+        gh.org_apps = lambda data: {}
+        gh.user_token = lambda **kw: "user-token"
+        gh.api = lambda method, path, token, **kw: (200, {"login": "ada", "id": 1815})
+        set_owner(None)
+        check("actor: the default never uses the owner's token",
+              gh.owner_token(proj_pr), None)
+    finally:
+        gh.load, gh.route, gh.user_token, gh.api, gh.org_apps = saved_gh
+    gi.PROFILE_SOURCE = gi.GLOBAL_GIT_SOURCE = None
+
+    # -- owner_profile, against a fixture store ----------------------------
+    saved_store = (gh.STORE_DIR, gh.STORE_PATH, gh.LOCK_PATH, gh.api, gh.user_token)
+    calls = []
+    try:
+        gh.STORE_DIR = root / "gh"
+        gh.STORE_PATH = gh.STORE_DIR / "integration.json"
+        gh.LOCK_PATH = gh.STORE_DIR / "integration.lock"
+        gh.user_token = lambda force_refresh=False, org=None: f"tok-{org}"
+        me = {"value": {"login": "ada", "id": 1815, "name": "Ada Lovelace"}}
+
+        def fake_api(method, path, token, **kw):
+            calls.append((path, token))
+            if isinstance(me["value"], Exception):
+                raise me["value"]
+            return 200, dict(me["value"])
+        gh.api = fake_api
+        check("profile: no store is missing", gh.owner_profile()["status"], "missing")
+        user = {"login": "ada", "token": "t"}
+        gh.save({"app": {"id": 1}, "user": dict(user),
+                 "org_apps": {"adaorg": {"app": {"id": 2}, "user": dict(user)}}})
+        got = gh.owner_profile()
+        check("profile: one login across both apps is connected",
+              (got["status"], got["id"], got["name"], calls[-1]),
+              ("connected", 1815, "Ada Lovelace", ("/user", "tok-None")))
+        check("profile: the id is cached on the authorization",
+              gh.load()["user"]["profile"]["id"], 1815)
+        n = len(calls)
+        gh.owner_profile()
+        check("profile: not re-read within a day", len(calls), n)
+        me["value"] = gh.IntegrationError("down", 502)
+        got = gh.owner_profile(max_age=0)
+        check("profile: a failed read keeps the cache",
+              (got["status"], got["id"]), ("connected", 1815))
+        data = gh.load()
+        data["user"].pop("profile")
+        gh.save(data)
+        check("profile: never read and unreachable",
+              gh.owner_profile()["status"], "unreachable")
+        data["org_apps"]["adaorg"]["user"]["login"] = "ada-work"
+        gh.save(data)
+        got = gh.owner_profile()
+        check("profile: two logins is ambiguous, never a guess",
+              (got["status"], got["logins"]), ("ambiguous", ["ada", "ada-work"]))
+        gh.save({"app": {"id": 1}})
+        check("profile: an app with no authorization is missing",
+              gh.owner_profile()["status"], "missing")
+        me["value"] = {"login": "bea", "id": 9}
+        gh.save({"app": {"id": 1, "slug": "loam"}, "user": dict(user)})
+        check("profile: GitHub answering for another account is not used",
+              gh.owner_profile()["status"], "unreachable")
+        check("profile: the public view carries no profile or token",
+              "profile" in json.dumps(gh.public_view()), False)
+    finally:
+        gh.STORE_DIR, gh.STORE_PATH, gh.LOCK_PATH, gh.api, gh.user_token = saved_store
 finally:
     if saved_env is None:
         os.environ.pop("LOAM_HOST_SETTINGS", None)

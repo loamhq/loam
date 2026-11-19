@@ -1068,6 +1068,76 @@ def owner_token(project) -> str | None:
     return token
 
 
+# -- the owner's connection, for the default git identity (2026-11-18) --------
+#
+# With nothing chosen, an agent's commits carry the owner's connected GitHub
+# account (lib/loam_git_identity.py, "the default"). Which account that is
+# must be clear: the logins every app here is authorized as, and exactly one
+# of them. Two different logins is a choice Loam does not make for him. The
+# account's id (for its no-reply address) and profile name are read from
+# GitHub's ``/user`` with the token the connection already has -- no new
+# scope, no sign-in -- and kept on that authorization as ``profile``, read
+# again after a day; a read that fails keeps the last one. Nothing here
+# touches the push or pull-request actor: that is ``owner_token``, and only
+# an explicit choice reaches it.
+PROFILE_MAX_AGE_S = 86400
+
+
+def owner_profile(max_age: float = PROFILE_MAX_AGE_S) -> dict:
+    """``{"status": "connected", "login", "id", "name"}``, or ``{"status":
+    "missing"}`` (no authorized connection), ``{"status": "ambiguous",
+    "logins": [...]}`` (more than one account), or ``{"status":
+    "unreachable", "login", "error"}`` (connected, never read)."""
+    try:
+        data = load()
+    except (OSError, ValueError):
+        return {"status": "missing"}
+    slots = [(None, data)] if data.get("app") else []
+    slots += [(org, own) for org, own in sorted(org_apps(data).items()) if own.get("app")]
+    authorized = [(org, slot["user"]) for org, slot in slots
+                  if isinstance(slot.get("user"), dict) and slot["user"].get("login")
+                  and slot["user"].get("token")]
+    logins = sorted({u["login"].lower() for _, u in authorized})
+    if not logins:
+        return {"status": "missing"}
+    if len(logins) > 1:
+        return {"status": "ambiguous",
+                "logins": sorted({u["login"] for _, u in authorized})}
+    org, user = authorized[0]          # the personal app's, when it has one
+    login = user["login"]
+    cached = user.get("profile") if isinstance(user.get("profile"), dict) else None
+    if cached and (cached.get("login") or "").lower() != login.lower():
+        cached = None
+    fresh = cached and (parse_iso(cached.get("read_at")) or 0) > now() - max_age
+    if fresh:
+        return {"status": "connected", "login": login, "id": cached["id"],
+                "name": cached.get("name") or login}
+    try:
+        _, me = api("GET", "/user", user_token(org=org))
+        if (me.get("login") or "").lower() != login.lower() or \
+                not isinstance(me.get("id"), int):
+            raise IntegrationError("GitHub answered for another account")
+    except (IntegrationError, OSError, ValueError) as exc:
+        if cached and isinstance(cached.get("id"), int):
+            return {"status": "connected", "login": login, "id": cached["id"],
+                    "name": cached.get("name") or login}
+        return {"status": "unreachable", "login": login, "error": str(exc)}
+    profile = {"login": me["login"], "id": me["id"],
+               "name": (me.get("name") or "").strip() or me["login"],
+               "read_at": iso(now())}
+    with locked():
+        data = load()
+        try:
+            slot = _slot(data, org)
+        except IntegrationError:
+            slot = None
+        if slot and (slot.get("user") or {}).get("login", "").lower() == login.lower():
+            slot["user"]["profile"] = profile
+            save(data)
+    return {"status": "connected", "login": profile["login"], "id": profile["id"],
+            "name": profile["name"]}
+
+
 def _pr_token(project, branch: str, sha: str, title: str, body: str) -> str:
     """The token a pull-request project's branch is pushed with: the person's
     (``person_token``, which checks the commits and the text first) on a
