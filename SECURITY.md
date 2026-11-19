@@ -23,6 +23,12 @@ a fix is released. We credit you in the release notes if you wish.
 Only the newest release receives fixes. `loam update` moves an install to
 it (`docs/update.md`).
 
+## Releases
+
+An install runs a release only after checking its signature against the
+maintainer keys it already holds; what that covers, and what a first
+install still trusts, is in `docs/signing.md`.
+
 ## Where the walls are
 
 What the edge lets through (the sign-in, share links, the agents' browser

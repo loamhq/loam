@@ -77,14 +77,17 @@ export function createUpdate({ api, changed, reload = () => location.reload(), l
         h('div', { class: 'display update-number', text: data?.current?.version ? `Version ${data.current.version}` : development ? 'Development build' : data ? 'Growing towards our first release' : st.busy ? 'Checking your version…' : 'Version unavailable' }),
         h('p', { class: 'note', text: noVersion ? 'No numbered release is installed yet. You can keep using Loam as usual.' : 'Updates happen only when you choose. Nothing installs automatically.' }),
         data?.current?.kind && data.current.kind !== 'stock' && localDetails ? h('p', { class: 'note', text: localDetails }) : null,
+        data?.current?.signing?.message ? h('p', { class: 'note update-signing', text: data.current.signing.message }) : null,
         button(st.busy && st.operation === 'check' ? 'Checking…' : 'Check for updates', checkUpdate, false, locked)),
       st.busy && st.operation !== 'check' ? h('p', { role: 'status', text: st.operation === 'rollback' ? 'Starting the rollback…' : 'Starting the update…' }) : null,
       check?.latest && !active ? h('section', { class: 'card update-release' },
-        h('h3', { text: check.available ? `Loam ${check.latest.version} is ready` : 'You’re up to date' }),
+        // A release whose signature does not verify (lib/loam_signing.py) is
+        // never offered as ready: the refusal below says why.
+        h('h3', { text: check.blocked?.code === 'signature' ? `Loam ${check.latest.version} could not be verified` : check.available ? `Loam ${check.latest.version} is ready` : 'You’re up to date' }),
         // A release that changes nothing in System/Loam drew the heading and
         // "Files included in this release:" over an empty list (the first-day
         // walk, 2026-11-16). The release notes go to the person's agent.
-        check.available ? [h('p', { class: 'note', text: 'After the update, your agent will tell you what’s new.' }),
+        check.available && check.blocked?.code !== 'signature' ? [h('p', { class: 'note', text: 'After the update, your agent will tell you what’s new.' }),
           changeKeys(check).length ? [h('h4', { class: 'kicker', text: 'Files in System/Loam this release replaces' }),
             ...changeKeys(check).map(key => h('div', {}, h('p', { class: 'kicker', text: key }), h('ul', {}, check.changes[key].map(file => h('li', { text: file })))))] : null,
           library && !st.review ? libraryView(library) : null,
