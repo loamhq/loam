@@ -15,6 +15,8 @@ description: The essentials of handing work to the engineer - whether to, at whi
 
 5. **Check before trusting it.** Read what actually changed, not just the summary, and look at it yourself before it goes live.
 
-6. **Run jobs side by side**: send each one when it is ready. Hold one back only when both change the same feature or screen, or one depends on the other, and then say in the brief which one wins.
+6. **Nothing waits on a job.** `brief` returns at once with the job id. The result comes back to you as your next input when the job ends: a turn in the thread you briefed from, or, from a wake or a cron, a new run that resumes that session. Nothing is posted; say something only if the owner needs to hear it.
 
-7. **Tell the owner the outcome in a few lines:** what is done and what they will see.
+7. **Run jobs side by side**: send each one when it is ready. Hold one back only when both change the same feature or screen, or one depends on the other, and then say in the brief which one wins.
+
+8. **Tell the owner the outcome in a few lines:** what is done and what they will see.

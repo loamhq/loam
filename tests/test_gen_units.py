@@ -97,7 +97,7 @@ try:
           not any((units / n).exists() for n in ("loam-recycle-rc.timer", "loam-recycle-rc.service",
                                                    "loam-rc-iris.service"))
           and "--user disable --now loam-rc-iris.service" in calls.read_text()
-          and res.stdout.count("retired ") == 3, res.stdout.strip()[-160:])
+          and "retired loam-recycle-rc.timer" in res.stdout, res.stdout.strip()[-160:])
     check("...and nothing shipped is touched", (units / "loam-autocommit.timer").exists()
           and (units / "loam-reviewer.service.d").exists())
     shutil.rmtree(units)

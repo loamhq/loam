@@ -1,89 +1,29 @@
 #!/usr/bin/env python3
-"""The engineer, as one tool. A brief goes in, a receipt comes back.
+"""The engineer, as a few tools. A brief goes in and returns at once with
+the job id; the receipt comes back to whoever asked when the job ends.
 
-Move 9, decisions 1-7 of the phase-5 closing plan. This is the whole of the
-persona-facing surface: one server, one tool that does the work, one
-blocking call -- and, since 2026-10-13, one that only looks (`status`).
+Move 9, decisions 1-7 of the phase-5 closing plan; non-blocking since
+2026-11-19 (batch B step 3). Where the result goes is the launcher's and
+lib/loam_waiters.py's: a brief from a thread gets a turn in that thread, any
+other gets a run that resumes the asking session (lib/loam_results.py).
+Until then a brief from a wake, a cron or a job held this call open for up
+to four hours, and the description taught a background subagent for it.
 
-**Why one blocking call and not start-plus-poll.** Both branches of that
-either/or were probed on 2026-09-05 and the start-plus-poll branch died. A
-single stdio MCP tool call waits 65 minutes and there is no practical wall
-behind it once the server's `.mcp.json` entry carries a `timeout` -- which
-`bin/provision` renders for every persona. What kills the polling design is
-not that it fails but that it is unnecessary: the receipt arrives on its own.
-A background subagent ran fifteen model turns over fifteen minutes with NO
-client attached anywhere, and its completion woke the parent session
-unprompted, sixty-eight seconds later, with a `<task-notification>` nobody
-sent. There is no "are you done yet" to build.
-
-**So the loop is the persona's, and the tool's description is where that is
-taught** -- see the description below. For anything past a couple of minutes
-the persona calls this from a same-identity background subagent and gets the
-receipt as a task notification while the conversation carries on. That is
-decision 6 exactly as written, and it needs no configuration change anywhere.
-
-**Since 2026-11-18 a brief from a thread does not block** (batch B, step
-1): the launcher returns the job id at once and the broker hands the result
-to the persona as its next input in that thread, posting nothing
-(lib/loam_waiters.py). The blocking call above is still how a wake, a cron
-or a job is answered, and the subagent routine is no
-longer taught here.
-
-**This server decides nothing, and that is a rule rather than a tidiness
-(since 2026-09-07).** It is spawned by the persona's `claude` session once
-per conversation and lives as long as the conversation does, so whatever
-code it holds is frozen at the moment the conversation opened. Caused that
-morning: a conversation opened at 06:55 held a fixed map of projects, a
-project was provisioned at 08:03, and the first brief to it was refused with
-"No engineer for project" for as long as that conversation lived. Reading the
-registry per call fixed that instance; the rule that closes the class is
-that nothing here may branch on anything. The tool takes its arguments,
-hands them as one JSON object to `bin/engineer-job --brief` -- a fresh
-process on every call, running today's code -- and returns the one JSON
-object that comes back. Which projects exist, whether a field is empty, the
-clock's default and ceiling, the job id, the brief's header, the path the
-receipt lands at, every clock and every refusal: all the launcher's. A
+**This server decides nothing** (since 2026-09-07). It is spawned once per
+conversation and lives as long as it does, so whatever code it held would
+be frozen at the moment the conversation opened -- caused that day, when a
+project provisioned at 08:03 was refused as unknown by a conversation
+opened at 06:55. Each tool hands its arguments to a fresh process
+(`bin/engineer-job --brief`, `--status`, `--cancel`, `bin/site`,
+`bin/thread`, ...) running today's code and returns what comes back. A
 persona in a conversation opened a week ago gets today's behaviour on its
-next call, for everything except this tool's own signature and description.
+next call, for everything except a tool's own signature and description.
+The one thing done here is to say so when the hand-off itself fails.
 
-**A second tool, `status` (since 2026-10-13), by the same rule.** "Where
-are we now?" -- what is running on the box, which jobs are landing, who
-is queued -- was answered by globbing job folders, which a persona's reads
-no longer reach. The tool is `bin/engineer-job --status`, run fresh per
-call, and returns its text: one source, so the tool and the operator's
-command cannot drift apart. Read-only; it takes no arguments.
-
-The one thing this file does that is not a hand-off is to say so when the
-hand-off itself fails: a launcher that printed no JSON is a runtime defect,
-and the persona is told that rather than handed an empty string.
-
-**The wait yields (since 2026-09-07, evening).** Seen that afternoon: two
-briefs from one conversation, to two projects with separate locks and two
-free slots, ran one after the other -- the second job started two seconds
-after the first finished, and the persona was told nothing. The handler
-below was `async def` and called `subprocess.run`, which never yields, so
-the server's event loop was held for the length of the first job and the
-second request sat unread in the pipe until it returned. The library is not
-at fault and was checked rather than assumed: `mcp` 2.1.0's
-`JSONRPCDispatcher.run` spawns every non-`initialize` request as its own
-task in one task group (`shared/jsonrpc_dispatcher.py`, `_dispatch` ->
-`_spawn`), so it serves calls concurrently exactly to the degree the
-handler lets go of the loop. A plain `def` would have been run on a worker
-thread by the same library; an `async def` that blocks is the one shape
-that serialises everything.
-
-So the launcher is awaited with `anyio.run_process`, which is the library's
-own backend (`MCPServer.run` calls `anyio.run`) and is `subprocess.run` in
-async clothing: it drains stdout and stderr in tasks of its own, so a large
-receipt cannot fill a pipe and stall the child, and it holds no thread for
-the hours a job may take. `asyncio.to_thread` around the old call was the
-other candidate; it would have worked, but a worker thread pinned for four
-hours per job is a resource with a cap, and the thread cannot be cancelled.
-This can: if the client cancels the request or the conversation ends, the
-task is cancelled, the pipes close, and the launcher's OUTER process is
-killed. That is the right casualty -- it is only the waiter. The job is a
-transient systemd unit the outer already handed off, it does not notice,
-and its receipt lands on disk and in the vault regardless.
+Every call is awaited with `anyio.run_process`, never blocked on: the
+library serves calls concurrently only as far as a handler lets go of the
+loop (found 2026-09-07, when two briefs from one conversation ran one after
+the other).
 """
 
 from __future__ import annotations
@@ -118,12 +58,11 @@ mcp = MCPServer("loam-engineer")
 @mcp.tool(
     name="brief",
     description=(
-        "Hand a job to the engineer for a project. A brief goes in, a "
-        "receipt comes back. From a thread it returns at once with the job "
-        "id; when the job ends, its result comes to you in that thread as "
-        "your next input, with nothing posted, and you may read it and end "
-        "your turn without saying anything. From any other lane (a wake, a "
-        "cron, a job) the call waits until the job is done.\n"
+        "Hand a job to the engineer for a project. It returns at once with "
+        "the job id, from every lane. When the job ends its result comes "
+        "back to you as your next input (in the thread you briefed from, "
+        "or as a new run that resumes this session), with nothing posted; "
+        "you may read it and stop without saying anything.\n"
         "\n"
         "**Two things first, because the rest of this may reach you "
         "truncated.**\n"
@@ -231,9 +170,7 @@ mcp = MCPServer("loam-engineer")
         "The receipt says whether it landed. One that did not (a conflict "
         "with another job's work, failing tests) keeps its branch and comes "
         "back with the brief that resolves it — send that with "
-        "`continue_job`. The engineer is reachable from every lane: a "
-        "conversation, a wake, a cron or a one-off, and none of them puts a "
-        "clock on the job."
+        "`continue_job`."
     ),
     # No explicit input_schema: this MCP build derives one from the
     # annotations below, and a default makes a parameter optional the way
@@ -262,14 +199,8 @@ async def brief(
     deploy: bool | None = None,
     tier: str = "",
 ) -> dict[str, Any]:
-    # No timeout here. The launcher owns every clock in this system: it
-    # kills the session at a ceiling only when the brief set one, and it
-    # stops waiting a grace period after that or at its own ceiling. A second timeout in this
-    # process could only fire earlier than the one that knows what is going on,
-    # and firing early is exactly how a job gets orphaned with no receipt.
-    #
-    # Awaited, never blocked on: see the docstring. Every other call this
-    # server is handling shares one event loop with this one.
+    # Awaited, never blocked on: see the docstring. The launcher returns
+    # once the job is launched or queued.
     result = await anyio.run_process(
         [LAUNCHER, "--brief"],
         input=json.dumps({

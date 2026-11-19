@@ -1293,6 +1293,24 @@ def main() -> int:
             f"generates these. Stop, disable and remove them.",
         ))
 
+    # A unit this repository retired (lib/loam_units.py RETIRED: the
+    # provider follower since 2026-11-19), still installed: `gen-units`
+    # removes it.
+    retired = loam_units.retire(dry=True)
+    if retired:
+        findings.append((
+            "retired units", str(UNIT_DIR),
+            f"{', '.join(retired)}: retired, and nothing generates them. "
+            f"`bin/gen-units` stops, disables and removes them.",
+        ))
+
+    # The provider CLIs at this release's pin (lib/loam_pins.py, 2026-11-19):
+    # nothing moves a CLI between releases, so a link off its pin is drift
+    # (a CLI that updated itself, or a hand-moved link).
+    import loam_pins  # noqa: PLC0415
+    for line in loam_pins.drift():
+        findings.append(("provider pin", "lib/loam_pins.py", line))
+
     # loam-cron-* are generated per-cron by the schedule reconciler
     # (lib/loam_schedule.py) straight into the user unit dir (since
     # 2026-09-05), so a copy parked in agents/systemd/ would be a second,

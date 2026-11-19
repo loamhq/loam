@@ -14,8 +14,11 @@ can move an agent from one to another without it forgetting who it is.
 - **They change the app for you.** When you want Loam to work differently,
   you ask, and an agent changes it, Loam's own code included. They build and
   host your own sites and apps too.
-- **Finished out of the box.** An opinionated design, two themes built in and more in the Market, and
-  everything else is open to change.
+- **Finished out of the box.** An opinionated design with two themes, and
+  daily notes, comments and suggestions on documents, image making and
+  backups to Git built in. More is in the Market, in Settings: more themes,
+  dictation, read aloud and file sync, each from its maker. Everything else
+  is open to change.
 - **Open source, under the AGPL.** Nobody can lock you out of your agents,
   and that includes Loam.
 
@@ -104,7 +107,7 @@ and [SECURITY.md](SECURITY.md) how to report a vulnerability.
 | `app/` | the web app: Node's standard library, no dependencies |
 | `mcp/`, `hooks/` | the agents' MCP servers and Claude Code hooks |
 | `deploy/`, `systemd/` | the edge (Caddy, Authelia, the sign-in page) and the unit templates |
-| `plugins/` | the built-in plugins: the reviewer, daily notes, comments & suggestions, Images |
+| `plugins/` | the built-in plugins: the reviewer, daily notes, comments & suggestions, Images, Git backup |
 | `docs/` | how each part works and why; `docs/library/` becomes every install's `System/Loam/` |
 | `engineer/memory/` | what building Loam has taught |
 

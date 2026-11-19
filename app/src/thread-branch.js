@@ -13,7 +13,7 @@ export function createBranchDrafter(config, { fetchImpl = fetch, timeoutMs = 20_
         const res = await fetchImpl(`${config.geminiUrl}/v1beta/interactions`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-          body: JSON.stringify({ model: config.speech.briefModel, system_instruction: reading.summarizer.system_instruction,
+          body: JSON.stringify({ model: config.branchModel, system_instruction: reading.summarizer.system_instruction,
             input: reading.summarizer.input, store: false }),
           signal: AbortSignal.timeout(timeoutMs),
         })

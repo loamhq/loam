@@ -10,8 +10,9 @@ import http from 'node:http'
 import { once } from 'node:events'
 
 import { createApp } from '../src/server.js'
-import { readConfig, fixtureBroker } from './key-fixture.js'
-import { TRANSCRIBE_MAX_BYTES, TRANSCRIBE_MODEL, VOCABULARY_MAX_TERMS, cleanVocabulary, geminiType } from '../src/transcribe.js'
+import { readConfig } from './key-fixture.js'
+import { TRANSCRIBE_MAX_BYTES, TRANSCRIBE_MODEL, VOCABULARY_MAX_TERMS, cleanVocabulary, geminiType } from '../../plugins/_listed/dictation/server/transcribe.js'
+import { dictationApp } from './audio-servers.mjs'
 import { shut, logInto } from './harness.js'
 
 const KEY = 'test-gemini-key-not-a-real-one'
@@ -45,10 +46,17 @@ async function fakeGemini(answer = () => [200, said('Hello Ada, the deploy is do
   return { server, seen, url: `http://127.0.0.1:${server.address().port}` }
 }
 
+// Dictation's own server (plugins/_listed/dictation/server/), on a port of
+// its own: the gateway takes `/x/dictation` off, so the take goes to
+// `/transcribe`.
 async function appWith(env) {
+  return dictationApp(env)
+}
+
+// Loam's own app server, for what is the app's and not the plugin's.
+async function coreWith(env) {
   const lines = []
-  const config = readConfig(env)
-  const { server } = createApp({ config, broker: fixtureBroker(config), log: logInto(lines) })
+  const { server } = createApp({ config: readConfig(env), log: logInto(lines) })
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   return { server, lines, url: `http://127.0.0.1:${server.address().port}` }
@@ -71,7 +79,7 @@ function post(app, { body = AUDIO, type = 'audio/webm;codecs=opus', vocabulary }
   if (vocabulary !== undefined) {
     headers['x-vocabulary'] = typeof vocabulary === 'string' ? vocabulary : encodeURIComponent(JSON.stringify(vocabulary))
   }
-  return fetch(`${app.url}/api/transcribe`, { method: 'POST', headers, body })
+  return fetch(`${app.url}/transcribe`, { method: 'POST', headers, body })
 }
 
 test('a take goes to Gemini inline, in smart mode, with the terms it is biased towards', async (t) => {
@@ -137,7 +145,7 @@ function postForm(app, { audio = AUDIO, type = 'audio/webm;codecs=opus', terms, 
   if (audio !== null) form.append('audio', new Blob([audio], { type }), 'take')
   if (terms !== undefined) form.append('terms', typeof terms === 'string' ? terms : JSON.stringify(terms))
   for (const [k, v] of Object.entries(fields ?? {})) form.append(k, v)
-  return fetch(`${app.url}/api/transcribe`, { method: 'POST', body: form })
+  return fetch(`${app.url}/transcribe`, { method: 'POST', body: form })
 }
 
 test('the terms can ride in the body: a form with the audio and a list, all thousand of them', async (t) => {
@@ -199,7 +207,7 @@ test('with no key, the page is told so and nothing is sent', async (t) => {
   })
   const res = await post(app)
   assert.equal(res.status, 503)
-  assert.match((await res.json()).error, /Add one in its plugin settings/)
+  assert.match((await res.json()).error, /Gemini API key. Add a Google key under API keys, in Settings › Connections./)
   assert.equal(gemini.seen.length, 0)
 })
 
@@ -284,16 +292,17 @@ test('the terms are capped, deduplicated and kept to names', () => {
   assert.deepEqual(cleanVocabulary('Ada'), [])
 })
 
-// ------------------------------------------------ the retired door
+// ------------------------------------------------ the retired doors
 //
 // From 2026-09-28 to 10-01 the Obsidian plugin dictated through a token door
-// here, `POST /api/dictate`, with its settings at `GET /api/dictation-setup`.
-// The plugin now has a transcription key of its own and the door is gone: its
-// paths are routes this app does not know, whatever the environment says.
+// here, `POST /api/dictate`, with its settings at `GET /api/dictation-setup`;
+// and until 0.2.12 the app itself transcribed at `/api/transcribe`. Each is a
+// route the app does not know now, whatever the environment says: dictation
+// is the Dictation plugin's own server's (test/audio-routes-gone.test.js).
 
-test('the retired door: /api/dictate and /api/dictation-setup are unknown routes, token or none', async (t) => {
+test('the retired doors: /api/dictate, /api/dictation-setup and /api/transcribe are unknown to the app', async (t) => {
   const gemini = await fakeGemini()
-  const app = await appWith({ GEMINI_API_KEY: KEY, GEMINI_API_URL: gemini.url, DICTATION_TOKEN: 'a-token-nobody-reads' })
+  const app = await coreWith({ GEMINI_API_KEY: KEY, GEMINI_API_URL: gemini.url, DICTATION_TOKEN: 'a-token-nobody-reads' })
   t.after(async () => {
     await shut(app.server)
     await shut(gemini.server)
@@ -303,20 +312,19 @@ test('the retired door: /api/dictate and /api/dictation-setup are unknown routes
     ['POST', '/api/dictate', { 'content-type': 'audio/webm' }, AUDIO],
     ['GET', '/api/dictate', {}, undefined],
     ['GET', '/api/dictation-setup', {}, undefined],
+    ['POST', '/api/transcribe', { 'content-type': 'audio/webm' }, AUDIO],
   ]
   for (const [method, path, headers, body] of asked) {
     const res = await fetch(`${app.url}${path}`, { method, headers, body })
     assert.equal(res.status, 404, `${method} ${path}`)
     assert.deepEqual(await res.json(), { error: `no such route: ${method} ${path}` })
   }
-  assert.equal(gemini.seen.length, 0, 'a take went to Gemini through the old door')
+  assert.equal(gemini.seen.length, 0, 'a take went to Gemini through the app')
   assert.doesNotMatch(JSON.stringify(app.lines), /a-token-nobody-reads/)
-  // And `/api/transcribe`, behind the login, is as it was.
-  assert.equal((await post(app)).status, 200)
 })
 
 test('a path with a dot segment is refused before it is normalised into another route', async (t) => {
-  const app = await appWith({})
+  const app = await coreWith({})
   t.after(() => shut(app.server))
   const { port } = new URL(app.url)
   // `fetch` normalises a path before it sends it; a raw request does not,

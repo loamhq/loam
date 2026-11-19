@@ -57,26 +57,6 @@ def templates(root: Path | None = None) -> list[Path]:
                   if p.suffix in (".service", ".timer", ".path") and p.is_file())
 
 
-# Units a release has taken out (2026-11-19). An update runs the new
-# gen-units, which stops, disables and removes any of these still installed,
-# so an older install does not keep running what its release no longer
-# ships (Remote Control, retired 2026-11-19: its recycle timer would fire a
-# script that is gone, and each agent's `loam-rc-<agent>.service` would keep
-# a server no one talks to). A name or an fnmatch pattern.
-RETIRED = ("loam-recycle-rc.service", "loam-recycle-rc.timer", "loam-rc-*.service")
-
-
-def retired(unit_dir: Path | None = None) -> list[str]:
-    """The retired units still installed, by name."""
-    import fnmatch  # noqa: PLC0415
-    unit_dir = unit_dir or lc.USER_UNIT_DIR
-    try:
-        names = sorted(p.name for p in unit_dir.iterdir() if p.is_file() or p.is_symlink())
-    except OSError:
-        return []
-    return [n for n in names if any(fnmatch.fnmatchcase(n, pat) for pat in RETIRED)]
-
-
 def rendered(root: Path | None = None) -> dict[str, str]:
     return {p.name: render(p.read_text(encoding="utf-8"))
             for p in templates(root)}
@@ -139,3 +119,42 @@ def arm_timer(timer: str, unit_dir: Path | None = None,
     ctl("enable", *flags, timer)
     ctl("start", timer)
     return did
+
+
+# Units this repository once shipped and has retired. `gen-units` stops,
+# disables and removes any it finds installed, so an update to a release
+# without them does not leave them firing a command that is gone; check-drift
+# reports one still there. The provider follower went on 2026-11-19 (the
+# owner: the CLIs are pinned to each release, lib/loam_pins.py).
+RETIRED = ("loam-provider-follow.timer", "loam-provider-follow.service",
+           # Remote Control, retired 2026-11-19: its recycle timer would fire
+           # a script that is gone, and each agent's server would keep
+           # running with no one to talk to (found walking 0.2.0 -> 0.2.12).
+           # A pattern is matched with fnmatch.
+           "loam-recycle-rc.timer", "loam-recycle-rc.service", "loam-rc-*.service")
+
+
+def retire(unit_dir: Path | None = None, dry: bool = False,
+           run=systemctl) -> list[str]:
+    """Every RETIRED unit installed here, stopped, disabled and removed
+    (timers first, so nothing fires in between); the names it found."""
+    unit_dir = unit_dir or lc.USER_UNIT_DIR
+    import fnmatch  # noqa: PLC0415
+    try:
+        here = [p.name for p in unit_dir.iterdir() if p.is_file() or p.is_symlink()]
+    except OSError:
+        here = []
+    found = sorted((n for n in here if any(fnmatch.fnmatchcase(n, pat) for pat in RETIRED)),
+                   key=lambda n: (not n.endswith(".timer"), n))
+    if dry or not found:
+        return found
+    for unit in found:
+        run("disable", "--now", unit)
+    for unit in found:
+        (unit_dir / unit).unlink(missing_ok=True)
+        # An enable link left in a .wants/ directory.
+        for wants in unit_dir.glob("*.wants"):
+            (wants / unit).unlink(missing_ok=True)
+    run("daemon-reload")
+    run("reset-failed", *found)
+    return found

@@ -43,7 +43,8 @@ try {
     })
     await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__latteLight={threads,goChats,draft,growDraft,schedule};' }))
     await context.route('**/api/health', route => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
-    await context.route(/\/api\/speech(?:\/.*)?$/, route => route.fulfill({ json: route.request().url().endsWith('/lookup') ? { status: 'none' } : { id: 'a'.repeat(32), status: 'ready', duration_s: 90, url: '/api/speech/' + 'a'.repeat(32) + '/audio.mp3' } }))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+    await context.route(/\/x\/read-aloud\/speech(?:\/.*)?$/, route => route.fulfill({ json: route.request().url().endsWith('/lookup') ? { status: 'none' } : { id: 'a'.repeat(32), status: 'ready', duration_s: 90, url: '/x/read-aloud/speech/' + 'a'.repeat(32) + '/audio.mp3' } }))
     await context.addInitScript(() => {
       globalThis.Audio = class {
         constructor() { Object.assign(this, { paused: true, ended: false, duration: 90, currentTime: 30, buffered: { length: 0 }, listeners: new Map() }) }

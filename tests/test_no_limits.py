@@ -12,9 +12,7 @@ calling the shipped functions:
   the unit        a job's transient unit carries TimeoutStartSec=infinity
                   with no ceiling, and the ceiling plus grace with one.
   the cap         no engineer, wake or reviewer `--max-turns` by default.
-  the waiter      with no ceiling, a running job is waited for past any
-                  old clock, and the call still ends at its own ceiling with
-                  "Still running", never killing the job.
+  the waiter      there is none (2026-11-19): a brief returns at once.
   the recycle     there is none (Remote Control, which it restarted, was
                   retired 2026-11-19): no recycle-rc, and no recycle timer.
 
@@ -32,8 +30,6 @@ import os
 import shutil
 import sys
 import tempfile
-import threading
-import time
 from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent
@@ -113,31 +109,11 @@ try:
     check("no unattended job clock left",
           hasattr(eng, "UNATTENDED_MAX_MINUTES"), False)
 
-    # The waiter, with no ceiling: waits past what used to be the clock.
-    job.POLL_SECONDS = 0.05
-    job.STARTUP_GRACE_SECONDS = 0.2
-    job.GRACE_SECONDS = 0.1
-    job.unit_state = lambda name: "active"
-    job.resume_queued = lambda: []
-    w = root / "wait"
-    w.mkdir()
-    p = {"dir": w, "queued": w / "queued", "result": w / "result.json",
-         "heartbeat": w / "heartbeat", "landing": w / "landing"}
-
-    def settle():
-        time.sleep(1.0)
-        p["result"].write_text(json.dumps({"ok": True, "stage": "done",
-                                           "receipt_text": "finished"}))
-    threading.Thread(target=settle, daemon=True).start()
-    got = job.wait_for(p, "w1", None)
-    check("waiter: no ceiling waits for the job to finish", got["stage"], "done")
-    p["result"].unlink()
-    job.WAITER_CEILING_SECONDS = 0.5
-    got = job.wait_for(p, "w2", None)
-    check("waiter: the call's own ceiling ends the call, not the job",
-          (got["stage"], "Still running" in got["receipt_text"],
-           "the job did not stop" in got["receipt_text"]),
-          ("waiter_timeout", True, True))
+    # Nothing waits on a job (2026-11-19): no waiter and no ceiling of its
+    # own, and the engineer tool's transport timeout is no longer four hours.
+    check("no waiter and no waiter ceiling",
+          (hasattr(job, "wait_for"), hasattr(job, "WAITER_CEILING_SECONDS")),
+          (False, False))
 finally:
     shutil.rmtree(root, ignore_errors=True)
 

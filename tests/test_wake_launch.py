@@ -20,8 +20,6 @@ marker, so neither `wake-<agent>.jsonl` nor the failure log said anything.
    changes".
 4. **A crash before the model runs is recorded**: exit 8, a `crash` row in
    the wake's own log with the cause, and a failure-log line naming the step.
-5. provider-follow excuses a failed wake unit whose run's line is not the
-   CLI's, blames one with no line, and lifts a refusal that was only that.
 
 Run: python3 tests/test_wake_launch.py
 """
@@ -40,8 +38,6 @@ from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="loam-wake-launch-"))
-os.environ["LOAM_FOLLOW_LOG"] = str(TMP / "follow.jsonl")
-os.environ["LOAM_FOLLOW_STATE"] = str(TMP / "follow-state")
 os.environ["LOAM_LOCK_DIR"] = str(TMP / "locks")
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_identity  # noqa: E402
@@ -230,53 +226,6 @@ try:
           "too long" in line, line)
     check("and the run marker is gone (bin/wake-failed has nothing to repeat)",
           not (wake.STATE_DIR / f"{AGENT}.running").exists())
-
-    # -- 5: provider-follow blames only the CLI's failures -----------------------
-    import loam_follow as f  # noqa: E402
-    logs = TMP / "follow-logs"
-    logs.mkdir()
-    rows = {
-        "ana": {"ts": "2026-11-17T11:20:00Z", "ok": False, "stage": "preflight",
-                 "lane": "reflection", "error": "_reflection.md is 10,009 characters"},
-        "ben": {"ts": "2026-11-18T11:00:00Z", "ok": False, "stage": "crash",
-                 "lane": "reflection", "error": "OSError: [Errno 7]"},
-        "cyd": {"ts": "2026-11-18T11:40:00Z", "ok": False, "stage": "invoke",
-                 "lane": "reflection", "returncode": 1},
-        "dov": {"ts": "2026-11-18T12:00:00Z", "ok": False, "stage": "invoke",
-                 "lane": "reflection", "provider": "codex"},
-    }
-    for who, row in rows.items():
-        (logs / f"wake-{who}.jsonl").write_text(json.dumps(row) + "\n")
-    failures = ["loam-wake-ana.service failed at 2026-11-17T11:20:00Z",
-                "loam-wake-ben.service failed at 2026-11-18T11:00:12Z",
-                "loam-wake-cyd.service failed at 2026-11-18T11:41:00Z",
-                "loam-wake-dov.service failed at 2026-11-18T12:01:00Z",
-                "loam-wake-eli.service failed at 2026-11-18T12:20:00Z",
-                "loam-reviewer.service failed at 2026-11-18T12:30:00Z"]
-    kept = f.blamed(failures, logs, "claude-code")
-    check("a preflight refusal and a launcher crash are not the CLI's",
-          not any("ana" in k or "ben" in k for k in kept), str(kept))
-    check("an invoke failure is counted once (by wake_failures), not twice",
-          not any("cyd" in k for k in kept), str(kept))
-    check("another provider's run is not this one's", not any("dov" in k for k in kept))
-    check("a unit whose run left no line, and the reviewer's, are still blamed",
-          kept == failures[4:], str(kept))
-    found = f.wake_failures(0, logs, provider="claude-code")
-    check("wake_failures: the Claude invoke failure only",
-          len(found) == 1 and "cyd" in found[0], str(found))
-
-    class P:
-        name, broker_provider = "claude-code", "claude-code"
-    f.STATE = TMP / "follow-state"
-    f.write_state(P, {"live": "2.1.325", "refused": {
-        "2.1.326": {"at": "x", "reason": failures[0]},
-        "2.1.327": {"at": "x", "reason": failures[1]},
-        "2.1.328": {"at": "x", "reason": f"{failures[0]}; {failures[4]}"}}})
-    left = f.lift_refusals(P, logs)
-    check("refusals that were only not-the-CLI's are lifted; a mixed one stays",
-          sorted(left) == ["2.1.328"], str(left))
-    check("and the lifting is kept in the state",
-          sorted(f.read_state(P).get("lifted", {})) == ["2.1.326", "2.1.327"])
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

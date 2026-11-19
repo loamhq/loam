@@ -549,27 +549,16 @@ def mcp_config(name: str, workspace: Path) -> dict:
                     "PYTHONPYCACHEPREFIX": str(lc.PYCACHE),
                 },
             },
-            # The engineer. One tool, one blocking call, brief in and receipt
-            # out -- so the only thing this entry has to get right beyond the
-            # command is how long the call may block.
-            #
-            # `timeout` is that, and it is the right knob rather than one of
-            # the three that also work. Measured 2026-09-05: a stdio MCP tool
-            # call is aborted after thirty minutes of IDLE -- no response, no
-            # progress notification -- and the abort ORPHANS the work rather
-            # than cancelling it, leaving a live engineer nobody is reading
-            # and no receipt coming. The two environment variables that move
-            # that limit move it for every MCP call the agent makes; this
-            # field is scoped to this one server, needs no unit change, and
-            # floors the idle window as a side effect, so one number buys
-            # both clocks. Four hours. A job has no clock since 2026-11-10,
-            # so the launcher's waiter ends a call at 3 h 55 min
-            # (WAITER_CEILING_SECONDS) with the job still running, before
-            # this fires.
+            # The engineer: brief, status, cancel, site, thread, market,
+            # settings. Nothing here blocks on a job since 2026-11-19 (batch B
+            # step 3: a brief returns once the job is launched), so the
+            # four-hour `timeout` it carried from 2026-09-05 is gone. Ten
+            # minutes remains, because without a value Codex gives a tool
+            # call 60 s, and `cancel` and `site up` may take about a minute.
             "engineer": {
                 "command": f"{lc.MCP_VENV}/bin/python",
                 "args": [f"{AGENTS}/mcp/engineer_server.py"],
-                "timeout": 14400000,
+                "timeout": 600000,
                 "env": {
                     "LOAM_AGENT": name,
                     "LOAM_AGENT_WORKSPACE": str(workspace),
@@ -871,6 +860,9 @@ OOMScoreAdjust={lc.AGENT_OOM_SCORE_ADJ}
 # it has no "off". This box had autoUpdates:false set the whole time and
 # updated anyway.
 Environment=DISABLE_AUTOUPDATER=1
+# And Antigravity's own updater off (lib/loam_pins.py: the CLIs stay at
+# the release's pin; the variable is read only as `true`).
+Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
 Environment=PATH={lc.UNIT_PATH}
 EnvironmentFile=-{lc.WAKE_ENV}
 WorkingDirectory={workspace}

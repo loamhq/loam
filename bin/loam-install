@@ -693,43 +693,30 @@ def step_vault(a, ans: dict) -> None:
 # 7. The providers
 # ---------------------------------------------------------------------------
 
-PROVIDERS_PY = """
-import sys
-sys.path.insert(0, {lib!r})
-import loam_follow as f
-which, version = sys.argv[1], sys.argv[2]
-p = {{"claude-code": f.ClaudeCode, "codex": f.Codex}}[which]()
-if version not in p.installed():
-    p.install(version)
-p.link.parent.mkdir(parents=True, exist_ok=True)
-p.repoint(version)
-print(p.version_of(p.link))
-"""
-
-
 def step_providers(a, ans: dict) -> None:
+    """Claude Code, Codex and Antigravity at the builds this release pins
+    (lib/loam_pins.py), each installed beside under ~/.local/share, checked
+    by its own --version, and linked from ~/.local/bin; nothing updates them
+    between releases."""
     cfg = config_values()
-    root, home = cfg["root"], cfg["home"]
-    script = PROVIDERS_PY.format(lib=f"{root}/lib")
-    got = {}
-    for which, label in (("claude-code", "Claude Code"), ("codex", "Codex")):
-        want = li.TESTED[which]
-        res = as_user(cfg, ["python3", "-c", script, which, want], timeout=1800, check=False)
-        version = res.stdout.strip().splitlines()[-1:] or [""]
-        if res.returncode != 0 or version[0] != want:
+    root = cfg["root"]
+    res = as_user(cfg, ["python3", f"{root}/bin/provider-pin", "apply", "--no-restart",
+                        "--json"], timeout=3600, check=False)
+    rows = []
+    for line in res.stdout.splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    labels = {"claude-code": "Claude Code", "codex": "Codex", "antigravity": "Antigravity"}
+    got = {r["provider"]: r.get("after") for r in rows}
+    for which, label in labels.items():
+        row = next((r for r in rows if r["provider"] == which), None)
+        if row is None or row["error"] or row.get("after") != row["pinned"]:
+            want = row["pinned"] if row else "its pinned build"
             raise Stop(f"{label} {want} could not be installed.",
                        "check this server can reach the internet, then run the install "
-                       "command again")
-        got[which] = version[0]
-    agy = Path(home) / ".local" / "bin" / "agy"
-    if not agy.exists():
-        as_user(cfg, ["sh", "-c", "curl -fsSL https://antigravity.google/cli/install.sh | bash"],
-                timeout=1800)
-    res = as_user(cfg, [str(agy), "--version"], check=False)
-    got["antigravity"] = (re.search(r"\d+\.\d+\.\d+", res.stdout) or [""])[0] if res.returncode == 0 else ""
-    if not got["antigravity"]:
-        raise Stop("Antigravity could not be installed.",
-                   "check this server can reach the internet, then run the install command again")
+                       "command again; the details are at the end of /var/log/loam-install.log")
     # Every provider's own memory off, and proved off.
     as_user(cfg, ["python3", f"{root}/bin/provider-memory", "pin"])
     check = as_user(cfg, ["python3", f"{root}/bin/provider-memory", "check"], check=False)
@@ -1000,8 +987,8 @@ def backup_step() -> None:
         "from now on: every change is committed every 15 minutes, nothing sent "
         "anywhere.")
     say("Recommended next: back them up to a private GitHub repository (or any git "
-        "host), so a lost server loses nothing. Once you are signed in: Settings › "
-        "Plugins › Git backup, or ask Iris to set it up with you.")
+        "host), so a lost server loses nothing. Loam offers it when you first sign "
+        "in; later it is in Settings › Plugins › Git backup, or ask Iris.")
 
 
 def main() -> int:

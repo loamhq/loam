@@ -233,6 +233,7 @@ import loam_files as files_api  # noqa: E402
 import loam_activity as activity  # noqa: E402
 import loam_schedule  # noqa: E402
 import loam_threads as threads_rec  # noqa: E402
+import loam_results  # noqa: E402
 import loam_waiters  # noqa: E402
 import loam_memory  # noqa: E402
 import loam_thread_engine  # noqa: E402
@@ -1578,8 +1579,8 @@ class Session:
         way, and reading it back is the one answer that cannot be wrong. See
         ``_handle``.
         """
-        # The flags are cfg.CLAUDE_STREAM_FLAGS, one authority shared with the
-        # provider follower's smoke test (2026-11-11). Among them,
+        # The flags are cfg.CLAUDE_STREAM_FLAGS, their one authority
+        # (2026-11-11). Among them,
         # --permission-prompt-tool stdio routes a permission prompt onto the
         # control channel instead of auto-denying it. Without it the CLI
         # denies anything that would prompt and reports it in
@@ -5554,19 +5555,6 @@ class Server:
             await writer.drain()
             return
 
-        # The dictation terms note, read fresh on every ask (2026-09-30). The
-        # file is cfg's one constant; `params` is never read here and a longer
-        # path is not this route, so nothing a client sends can name a file.
-        if parts == ["v1", "dictation-terms"] and method == "GET":
-            note = cfg.dictation_terms()
-            nocache = "Cache-Control: no-store\r\n"
-            if note is None:
-                writer.write(response(404, {"error": "no dictation terms note on this box"},
-                                      nocache))
-            else:
-                writer.write(response(200, note, nocache))
-            await writer.drain()
-            return
 
         # Files (2026-10-02): the vault, the agents' spaces and the runtime's
         # documents, by root and relative path only. lib/loam_files.py holds
@@ -6147,15 +6135,15 @@ class Server:
 
     async def deliver_owed(self) -> None:
         """Every `DELIVER_EVERY_S`, the engineer results owed to a thread
-        (lib/loam_waiters.py): a brief that returned at once (since
-        2026-11-18), or a waiting call ended by a broker restart or its
-        ceiling while its job ran on. Once its job has a verdict, the
-        persona that sent it gets a turn in the thread it briefed from whose
-        input is the result; nothing is posted (`ThreadEngine.deliver_job`).
-        Oldest verdict first. Fail-soft: never the reason a broker is down.
-        It first marks the quiet route live, so the launcher knows a brief
-        from a thread may return at once."""
-        await asyncio.to_thread(loam_waiters.mark_route)
+        (lib/loam_waiters.py): every brief from a thread returns at once
+        (since 2026-11-18). Once its job has a verdict, the persona that
+        sent it gets a turn in the thread it briefed from whose input is the
+        result; nothing is posted (`ThreadEngine.deliver_job`). Oldest
+        verdict first. A result whose thread is gone, or whose persona left
+        it, goes by a run of that persona instead (lib/loam_results.py,
+        2026-11-19), never dropped. Results for runs with no thread are not
+        this pass's: bin/wake delivers them, broker or no broker.
+        Fail-soft: never the reason a broker is down."""
         await asyncio.sleep(DELIVER_FIRST_S)
         while not self.broker.stopping:
             try:
@@ -6169,6 +6157,12 @@ class Server:
                     outcome = self.threads.deliver_job(
                         record, loam_waiters.handoff_text(record, title))
                     loam_waiters.done(record, outcome)
+                    if outcome in ("no thread", "thread gone", "not a member"):
+                        # Logged and removed as a thread's, then written
+                        # again as a run's.
+                        kicked = await asyncio.to_thread(
+                            loam_results.to_headless, record, outcome)
+                        outcome = f"{outcome}; handed to a run ({kicked})"
                     if outcome == "already delivered":
                         continue  # said when it was; a record that would not go
                     print(f"deliver: job {record.get('job')} -> "
@@ -8378,6 +8372,18 @@ async def keep_moved_to_market() -> None:
             print(f"to-market: {pid} {entry['how']}"
                   + (f" ({entry.get('link_error') or entry.get('error')})"
                      if entry["how"] != "link" and (entry.get("link_error") or entry.get("error")) else ""),
+                  file=sys.stderr, flush=True)
+        # Since 0.2.12 each carries its own server half: a copy older than
+        # that gets the listing's version, once, and Read aloud's voices
+        # setting is seeded from the install's old `app.speech_voices`.
+        seeded = await asyncio.to_thread(loam_to_market.seed_voices)
+        if seeded:
+            print(f"to-market: read-aloud voices {seeded['how']}", file=sys.stderr, flush=True)
+        brought = await asyncio.to_thread(loam_to_market.bring_up)
+        for pid, entry in brought.items():
+            print(f"to-market: {pid} server half {entry['how']}"
+                  + (f" ({entry.get('why') or entry.get('error')})"
+                     if entry.get("why") or entry.get("error") else ""),
                   file=sys.stderr, flush=True)
     except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
         print(f"to-market: keeping the moved plugins failed ({exc!r})", file=sys.stderr, flush=True)

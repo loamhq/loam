@@ -176,7 +176,9 @@ def sealed_env(scratch: Path) -> dict[str, str]:
     #                        mid-landing (2026-11-16)
     #   LOAM_THREADS_STATE, LOAM_VAULT  the live probe's threads (2026-11-16)
     #   LOAM_WAITERS_DIR     a test broker delivered a real job's result
-    #                        (2026-11-18)
+    #                        (2026-11-18); a scratch one also keeps a test
+    #                        from starting a real `loam-results-<agent>`
+    #                        unit (lib/loam_results.kicks_enabled)
     for var, rel in (("LOAM_LOCK_DIR", "locks"), ("LOAM_SCHEDULE_STATE", "schedules"),
                      ("LOAM_THREADS_STATE", "threads"), ("LOAM_WAITERS_DIR", "waiters")):
         (scratch / rel).mkdir()

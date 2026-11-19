@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -272,6 +273,76 @@ class Words(unittest.TestCase):
         self.assertEqual(c("ssh: Could not resolve hostname github.com: Temporary failure in "
                            "name resolution")["kind"], "network")
 
+    def test_no_host_is_assumed(self):
+        c = self.core
+        with self.assertRaises(c.BackupError) as said:
+            c.normalise("hello there")
+        words = str(said.exception)
+        self.assertNotIn("github", words.lower())
+        self.assertIn("git@host:you/vault.git", words)
+        self.assertIn("folder on this machine", words)
+        self.assertEqual(c.normalise("~/backups/vault.git"), str(Path.home() / "backups/vault.git"))
+        self.assertEqual(c.normalise("https://git.example.org/sam/vault"), "git@git.example.org:sam/vault.git")
+        for folder in ("/srv/backups/vault.git", "file:///srv/backups/vault.git"):
+            self.assertEqual(c.parts(folder), {})
+            self.assertEqual(c.host_kind(folder), "folder")
+            self.assertIsNone(c.web_address(folder))
+            self.assertIsNone(c.deploy_key_page(folder))
+            self.assertIn("no key is needed", c.steps(folder)[0])
+        own = c.steps("ssh://git@backup.home.arpa:2222/srv/git/vault.git")
+        self.assertEqual(c.host_kind("ssh://git@backup.home.arpa:2222/srv/git/vault.git"), "other")
+        self.assertTrue(any("authorized_keys" in s for s in own), own)
+        self.assertTrue(any("deploy key" in s for s in own), own)
+        self.assertIsNone(c.deploy_key_page("git@backup.home.arpa:vault.git"))
+        for kind_url in ("git@github.com:sam/vault.git", "git@gitlab.com:sam/vault.git",
+                         "git@codeberg.org:sam/vault.git"):
+            self.assertIn("Deploy", " ".join(c.steps(kind_url)))
+
+    def test_a_folders_failures_are_the_folders(self):
+        c = self.core
+        err = "fatal: '/mnt/usb/vault.git' does not appear to be a git repository"
+        self.assertEqual(c.classify(err)["kind"], "key")
+        self.assertEqual(c.classify(err, "/mnt/usb/vault.git")["kind"], "folder")
+        self.assertNotIn("deploy key", c.classify(err, "/mnt/usb/vault.git")["words"])
+        self.assertEqual(c.classify(" ! [rejected] HEAD -> main (fetch first)", "/x.git")["kind"], "diverged")
+
+    def test_a_folder_is_made_ready_and_nobodys_files_are_written_into(self):
+        c = self.core
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            new = base / "drive" / "vault.git"
+            with self.assertRaises(c.BackupError) as said:
+                c.prepare_folder(str(new))
+            self.assertIn("no folder", str(said.exception))
+            (base / "drive").mkdir()
+            c.prepare_folder(str(new))
+            self.assertTrue((new / "HEAD").is_file())
+            c.prepare_folder("file://" + str(new))  # a repository already: left as it is
+            empty = base / "empty"
+            empty.mkdir()
+            c.prepare_folder(str(empty))
+            self.assertTrue((empty / "objects").is_dir())
+            full = base / "photos"
+            full.mkdir()
+            (full / "a.jpg").write_text("x")
+            with self.assertRaises(c.BackupError) as said:
+                c.prepare_folder(str(full))
+            self.assertIn("other files", str(said.exception))
+            self.assertEqual(sorted(p.name for p in full.iterdir()), ["a.jpg"])
+
+    def test_a_key_is_made_once_and_kept_private(self):
+        c = self.core
+        with tempfile.TemporaryDirectory() as tmp:
+            was = c.private
+            c.private = lambda: Path(tmp)
+            try:
+                pub = c.make_key("vault")
+                self.assertTrue(pub.startswith("ssh-ed25519 "), pub)
+                self.assertEqual(oct(c.key_path("vault").stat().st_mode & 0o777), "0o600")
+                self.assertEqual(c.make_key("vault"), pub)
+            finally:
+                c.private = was
+
     def test_deploy_key_pages(self):
         self.assertEqual(self.core.deploy_key_page("git@github.com:sam/vault.git"),
                          "https://github.com/sam/vault/settings/keys/new")
@@ -292,17 +363,35 @@ class Plugin(unittest.TestCase):
         for tree, remote in (("vault", self.rv), ("spaces", self.rs)):
             out = self.i.backup("connect", tree, str(remote))
             self.assertTrue(out["ok"], out)
-            self.assertTrue(out["public_key"].startswith("ssh-ed25519 "))
+            # A folder on this machine: no key made, no host, nothing to add.
+            self.assertIsNone(out["public_key"], out)
+            self.assertEqual(out["host"], "folder")
+            self.assertIn("no key is needed", out["steps"][0])
             out = self.i.backup("test", tree)
             self.assertTrue(out["ok"], out)
             self.assertTrue(out["first_push"]["ok"], out)
+
+    def test_a_new_folder_is_connected_with_no_key_and_no_terminal(self):
+        where = self.base / "usb" / "vault.git"
+        (self.base / "usb").mkdir()
+        out = self.i.backup("connect", "vault", str(where))
+        self.assertTrue(out["ok"], out)
+        self.assertIsNone(out["public_key"])
+        self.assertTrue((where / "HEAD").is_file())
+        out = self.i.backup("test", "vault")
+        self.assertTrue(out["ok"], out)
+        self.assertTrue(out["first_push"]["ok"], out)
+        shutil.rmtree(where)
+        out = self.i.backup("test", "vault")
+        self.assertFalse(out["ok"], out)
+        self.assertEqual(out["kind"], "folder", out)
 
     def test_connect_test_first_push_and_the_routine(self):
         self.connect_both()
         self.assertEqual(git(self.rv, "rev-parse", "main"), git(self.i.vault, "rev-parse", "HEAD"))
         self.assertEqual(git(self.rs, "rev-parse", "main"), git(self.i.spaces, "rev-parse", "HEAD"))
         key = self.i.home / "state" / "plugins" / "private" / "git-backup" / "keys" / "vault"
-        self.assertEqual(oct(key.stat().st_mode & 0o777), "0o600")
+        self.assertFalse(key.exists(), "a folder remote needs no key, so none is made")
         self.assertNotIn("PRIVATE KEY", "".join(p.read_text(errors="ignore") for p in
                                                 self.i.vault.rglob("*") if p.is_file()))
         # Not due yet: nothing sent.

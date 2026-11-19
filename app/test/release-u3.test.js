@@ -103,8 +103,10 @@ test('plugin key metadata renders broker sentences; refuses never replace the sa
 test('both voice plugins (Market plugins since 0.2.9) declare the shared Google key', async () => {
   const voice = await Promise.all(AUDIO_PLUGINS.map(listedManifest))
   assert.equal(voice.length, 2)
-  // The settings.secret stays for one release, for a broker from before 0.2.3.
-  for (const p of voice) { assert.deepEqual(p.keys.map(k => k.provider), ['google']); assert.deepEqual(p.contributes['settings.secret'].map(s => s.name), ['GEMINI_API_KEY']) }
+  // Since 1.1.0 the key is declared once, by provider: the pasted
+  // `settings.secret` of the same name (kept through 0.2.3) made the Market
+  // listing say both "Uses your Google Gemini key" and "Asks for a key of its own".
+  for (const p of voice) { assert.deepEqual(p.keys.map(k => k.provider), ['google']); assert.equal(p.contributes?.['settings.secret'], undefined) }
 })
 
 test('browser key routes relay metadata and refusals, and never expose the server-only value route', async t => {
@@ -123,54 +125,59 @@ test('browser key routes relay metadata and refusals, and never expose the serve
   assert.equal(broker.seen.length, before)
 })
 
-test('production transcription reads the plugin key from the broker at use and observes rotation', async t => {
-  const http = await import('node:http'), keys = []
-  let key = 'synthetic-first'
+test('Dictation’s server reads its key from the file Loam writes for it, at use, and observes rotation', async t => {
+  const http = await import('node:http'), fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path'), keys = []
+  const { keyFrom } = await import('../../plugins/_listed/dictation/server/http.js')
+  const { createTranscriber } = await import('../../plugins/_listed/dictation/server/transcribe.js')
+  const { dictationApp } = await import('./audio-servers.mjs')
   const vendor = http.createServer(async (req, res) => {
     keys.push(req.headers['x-goog-api-key']); for await (const chunk of req) {};
     reply(res, { status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'A synthetic transcript.' }] }] })
   })
   vendor.listen(0, '127.0.0.1'); await once(vendor, 'listening'); t.after(closing({ server: vendor }))
-  const broker = await fakeBroker({ 'GET /v1/plugins/dictation/secrets/GEMINI_API_KEY/value': (req, res) => reply(res, { name: 'GEMINI_API_KEY', value: key, source: 'box' }) })
-  const config = readConfig({ BROKER_URL: broker.url, BROKER_TOKEN: TOKEN, GEMINI_API_KEY: 'ignored-environment-key', GEMINI_API_URL: `http://127.0.0.1:${vendor.address().port}`, LOG_LEVEL: 'off' })
-  assert.equal(config.geminiApiKey, undefined)
-  const app = await appFor(t, broker, { config })
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'u3-keys-')), file = path.join(dir, 'keys.env')
+  t.after(() => fs.rm(dir, { recursive: true, force: true }))
+  const env = { LOAM_PLUGIN_KEYS: file, GEMINI_API_URL: `http://127.0.0.1:${vendor.address().port}`, LOG_LEVEL: 'off' }
+  const { readConfig: pluginConfig } = await import('../../plugins/_listed/dictation/server/config.js')
+  const config = pluginConfig(env)
+  assert.equal(config.keysFile, file)
+  const app = await dictationApp(env, { transcriber: createTranscriber(config, { getKey: keyFrom(config.keysFile, 'GEMINI_API_KEY') }) })
+  t.after(closing(app))
   for (const value of ['synthetic-first', 'synthetic-second']) {
-    key = value
-    const out = await fetch(app.url + '/api/transcribe', { method: 'POST', headers: { 'content-type': 'audio/webm' }, body: Buffer.from([1, 2, 3]) })
-    assert.equal(out.status, 200); const body = await out.text(); assert.ok(!body.includes(key)); assert.match(body, /synthetic transcript/)
+    await fs.writeFile(file, `# Written by Loam for dictation\n# google: saved\nGEMINI_API_KEY=${value}\n`)
+    const out = await fetch(app.url + '/transcribe', { method: 'POST', headers: { 'content-type': 'audio/webm' }, body: Buffer.from([1, 2, 3]) })
+    assert.equal(out.status, 200); const body = await out.text(); assert.ok(!body.includes(value)); assert.match(body, /synthetic transcript/)
   }
   assert.deepEqual(keys, ['synthetic-first', 'synthetic-second'])
-  assert.ok(broker.seen.every(r => r.auth === `Bearer ${TOKEN}`))
 })
 
-test('speech observes broker key appearance, synthesis, rotation and removal without restarting', async t => {
+test('Read aloud’s server observes its key appearing, synthesis, rotation and removal without restarting', async t => {
   const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path')
-  const { createSpeech } = await import('../src/speech.js'), { createBroker } = await import('../src/broker.js'), { brokerSecret } = await import('../src/plugin-secrets.js')
+  const { createSpeech } = await import('../../plugins/_listed/read-aloud/server/speech.js'), { keyFrom } = await import('../../plugins/_listed/read-aloud/server/http.js')
+  const { readConfig: pluginConfig } = await import('../../plugins/_listed/read-aloud/server/config.js')
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'u3-speech-'))
   t.after(() => fs.rm(dir, { recursive: true, force: true }))
-  let key = ''
-  const broker = await fakeBroker({ 'GET /v1/plugins/read-aloud/secrets/GEMINI_API_KEY/value': (req, res) => reply(res, { value: key, source: 'plugin' }) })
-  t.after(closing(broker))
-  const config = readConfig({ BROKER_URL: broker.url, BROKER_TOKEN: TOKEN, SPEECH_DIR: dir }), keys = []
+  const file = path.join(dir, 'keys.env')
+  const setKey = value => fs.writeFile(file, value ? `GEMINI_API_KEY=${value}\n` : '# google: no key\n')
+  const config = pluginConfig({ SPEECH_DIR: path.join(dir, 'speech'), LOAM_PLUGIN_KEYS: file }), keys = []
   const wav = Buffer.alloc(44 + 38400)
   wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVE', 8); wav.write('fmt ', 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(24000, 24); wav.writeUInt32LE(48000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(38400, 40)
-  const speech = createSpeech(config, { getKey: brokerSecret(createBroker(config), 'read-aloud'), encoder: { probe: async () => true, encode: async ({ outPath }) => fs.writeFile(outPath, 'fixture audio') }, fetchImpl: async (url, init) => {
+  const speech = createSpeech(config, { getKey: keyFrom(config.keysFile, 'GEMINI_API_KEY'), encoder: { probe: async () => true, encode: async ({ outPath }) => fs.writeFile(outPath, 'fixture audio') }, fetchImpl: async (url, init) => {
     keys.push(init.headers['x-goog-api-key'])
     return new Response(JSON.stringify(url.includes('/models?') ? { models: [] } : { status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'audio', mime_type: 'audio/wav', data: wav.toString('base64') }] }] }), { status: 200, headers: { 'content-type': 'application/json' } })
   } })
   t.after(() => speech.stop())
   assert.equal((await speech.status()).available, false)
-  key = 'synthetic-speech-first'; assert.equal((await speech.status()).available, true)
+  const key = 'synthetic-speech-first'; await setKey(key); assert.equal((await speech.status()).available, true)
   const out = await speech.request({ source: 'document', title: 'Fixture', mode: 'verbatim', minutes: 'full', text: 'Hello there.' })
   assert.equal(out.status, 202)
   let take
   for (let n = 0; n < 100; n++) { take = await speech.lookup(out.body.id); if (take.status !== 'preparing') break; await new Promise(r => setTimeout(r, 10)) }
   assert.equal(take.status, 'ready'); assert.ok(keys.every(k => k === key))
-  key = ''; assert.equal((await speech.status()).available, false)
-  key = 'synthetic-speech-second'; assert.equal((await speech.status()).available, true)
-  for (const name of await fs.readdir(dir)) assert.doesNotMatch(await fs.readFile(path.join(dir, name), 'utf8'), /synthetic-speech/)
-  assert.ok(broker.seen.every(r => r.path === '/v1/plugins/read-aloud/secrets/GEMINI_API_KEY/value'))
+  assert.equal(take.url, `/x/read-aloud/speech/${take.id}/audio.mp3`, 'the audio is fetched from the plugin’s own address')
+  await setKey(''); assert.equal((await speech.status()).available, false)
+  await setKey('synthetic-speech-second'); assert.equal((await speech.status()).available, true)
+  for (const name of await fs.readdir(path.join(dir, 'speech'))) assert.doesNotMatch(await fs.readFile(path.join(dir, 'speech', name), 'utf8'), /synthetic-speech/)
 })
 
 test('profile file actions open structured host roots and paths directly', () => {

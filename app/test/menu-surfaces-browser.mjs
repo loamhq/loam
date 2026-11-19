@@ -36,6 +36,7 @@ try {
   }
   await ctx.route('**/api/files/roots', route=>route.fulfill({json:{roots:[{root:'vault',name:'Vault',description:'Shared files',writable:true}]}}))
   await ctx.route('**/api/health', route=>route.fulfill({json:{configured:true,ok:true,speech:true}}))
+  await ctx.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
   const page = await ctx.newPage(); page.setDefaultTimeout(10000); page.on('pageerror', e => errors.push(e.message))
   const stamp = `${width}-${collapsed?'collapsed':'open'}-${theme}`
   const settle = async () => { await page.evaluate(async()=>{ await document.fonts.ready; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame) }); await page.waitForTimeout(200) }
