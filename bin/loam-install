@@ -857,9 +857,12 @@ def step_edge(a, ans: dict) -> None:
     run([py, f"{root}/bin/deploy", edge.get("app", "loam-ui"), "up", commit], timeout=3600)
     install_system_units(cfg)
     run(["systemctl", "enable", "--now", "loam-claim.service"])
-    res = run([py, f"{root}/bin/loam-await-dns"], timeout=1800, check=False)
     sys.path.insert(0, f"{root}/lib")
     import loam_deploy as dep  # noqa: PLC0415
+    # gen-deploy raised the inbound wall (lib/loam_deploy.py, "The inbound
+    # wall"); one line says what guards this server now.
+    say(dep.inbound_wall_words(dep.inbound_wall_status()), 2)
+    res = run([py, f"{root}/bin/loam-await-dns"], timeout=1800, check=False)
     state = dep.edge_state()
     if state.get("ready_at"):
         say(f"Loam is on the web at https://{edge['domain']}/ with its certificate.", 2)

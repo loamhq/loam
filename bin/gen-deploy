@@ -276,6 +276,18 @@ def generate(dry: bool) -> int:
     missing = dep.sight_wall_missing()
     print("  wall: every rule present" if not missing else
           "  wall: MISSING\n" + "\n".join("    " + m for m in missing))
+    # The inbound wall (2026-11-19): default-deny on this server's own ports,
+    # standing aside for a firewall the server already has. Restarted when
+    # its script or unit changed, else made sure of; its line is what it did.
+    if dep.INBOUND_FIREWALL_UNIT in changed or dep.INBOUND_FIREWALL_SCRIPT in changed:
+        run(["systemctl", "daemon-reload"])
+        run(["systemctl", "enable", dep.INBOUND_WALL_SERVICE])
+        res = run(["systemctl", "restart", dep.INBOUND_WALL_SERVICE])
+    else:
+        res = run(["systemctl", "enable", "--now", dep.INBOUND_WALL_SERVICE])
+    status = dep.inbound_wall_status()
+    print(f"  inbound wall: {status or 'not raised'} (exit {res.returncode})"
+          f"{': ' + res.stderr.strip() if res.returncode and res.stderr.strip() else ''}")
     for app in dep.records():
         if app.exposure == "shared" and app.share_active(dt.date.today()) is None:
             print(f"  note: {app.name} is recorded as shared but has no live "
@@ -289,6 +301,8 @@ def show(name: str) -> int:
         "authelia": dep.authelia_config, "authelia-compose": dep.authelia_compose,
         "browser": dep.browser_compose, "sudoers": dep.sudoers,
         "firewall": dep.sight_firewall_script, "firewall-unit": dep.sight_firewall_unit,
+        "inbound-firewall": dep.inbound_firewall_script,
+        "inbound-firewall-unit": dep.inbound_firewall_unit,
         "preview-sysctl": dep.preview_sysctl,
     }
     if name not in renders:

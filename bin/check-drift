@@ -909,6 +909,16 @@ def check_deploy(findings: list) -> list[str]:
                              f"kernel. `sudo systemctl restart {dep.SIGHT_WALL_SERVICE}` "
                              f"raises it (after `systemctl restart docker` if a ufw reload "
                              f"took Docker's chains too):\n" + "\n".join("  " + m for m in missing)))
+    # The inbound wall (2026-11-19): a family nobody guards is a finding,
+    # unless the owner turned it off (`firewall.manage = false`).
+    inbound = dep.inbound_wall_status()
+    if dep.inbound_managed() and dep.INBOUND_FIREWALL_SCRIPT.exists() and (
+            not inbound or ":open" in inbound):
+        findings.append(("deploy inbound wall", f"{dep.INBOUND_FIREWALL_SCRIPT} status",
+                         f"inbound is not guarded ({inbound or 'no answer'}): "
+                         f"`sudo systemctl restart {dep.INBOUND_WALL_SERVICE}` raises it"))
+    elif inbound:
+        notes.append(f"  {inbound}")
     members = dep.docker_group_members()
     if lc.USER in members:
         findings.append(("deploy docker group", "/etc/group",
