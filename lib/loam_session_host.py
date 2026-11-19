@@ -246,6 +246,7 @@ class SessionHost:
         # names none is a resume on that one. A conversation cannot move
         # between providers: neither CLI can read the other's thread.
         stored = None
+        requested = provider
         if session_id and session_id in self._opening:
             owner, engine, task = self._opening[session_id]
             if owner != agent or (provider and provider != engine):
@@ -260,14 +261,24 @@ class SessionHost:
                 record = json.loads((cfg.SESSION_DIR / f"{session_id}.json").read_text(encoding="utf-8"))
                 if record.get("agent") and record["agent"] != agent:
                     raise BrokerError(409, "session belongs to another agent")
-                stored = record.get("provider")
+                stored = record.get("provider") or cfg.DEFAULT_PROVIDER
             except (OSError, json.JSONDecodeError):
                 stored = None
         if provider and stored and provider != stored:
             raise BrokerError(
                 409, f"session {session_id} runs on {stored}; a conversation "
                      f"cannot move to {provider}. Start a new session instead.")
-        provider = provider or stored or cfg.DEFAULT_PROVIDER
+        # Older session records already belong to Claude Code, even if
+        # they predate the provider field. A new session can inherit.
+        if not provider and not stored:
+            from loam_provider_defaults import SETUP  # noqa: PLC0415
+            from loam_threads import persona_defaults  # noqa: PLC0415
+            choice = await asyncio.to_thread(persona_defaults, agent)
+            provider = choice["provider"]
+            if provider is None:
+                raise BrokerError(409, SETUP)
+            model, effort = model or choice["model"], effort or choice["effort"]
+        provider = provider or stored
         if provider not in cfg.WIRED_PROVIDERS:
             known = ", ".join(cfg.PROVIDERS)
             wired = ", ".join(cfg.WIRED_PROVIDERS)
@@ -276,11 +287,20 @@ class SessionHost:
                 f"provider {provider!r} is not wired: {wired} are the values "
                 f"this broker accepts today. The providers it knows about are "
                 f"{known}, and GET /v1/providers says which are connected.")
+        # Resolving a default runs off the loop. Another start may have
+        # registered this ID while that read was in progress.
+        if session_id in self._opening:
+            owner, engine, task = self._opening[session_id]
+            if owner != agent or (requested and requested != engine):
+                raise BrokerError(409, "session is starting for another agent or provider")
+            return await asyncio.shield(task)
         # Its own process, if it has one, before admission: a session that is
         # already in RAM needs no room to be used (2026-11-09; a thread member
         # whose session was live was refused at the cap the other way round).
         if session_id and session_id in self.sessions:
             existing = self.sessions[session_id]
+            if existing.agent != agent or (requested and requested != existing.provider):
+                raise BrokerError(409, "session belongs to another agent or provider")
             if existing.state == "running":
                 return existing
         sid = session_id or str(uuid.uuid4())

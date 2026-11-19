@@ -355,9 +355,9 @@ def test_wake_stubbed(root: Path) -> None:
           code == 0 and not touched and line.get("provider") == "claude-code", line)
 
     # Antigravity: not a lane provider yet, and the line says so.
-    check("wake: an Antigravity persona's lanes are Claude Code, not honoured",
-          loam_profile.lane_provider({"provider": "antigravity"}) == "claude-code"
-          and loam_profile.lane_choice({"provider": "antigravity"}, "fable")[2])
+    check("wake: an explicit Antigravity choice pauses the unsupported lane",
+          loam_profile.lane_choice({"provider": "antigravity"}, "fable")["provider"] is None
+          and loam_profile.lane_choice({"provider": "antigravity"}, "fable")["note"])
 
 
 # --- live -------------------------------------------------------------------

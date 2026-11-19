@@ -69,7 +69,7 @@ export async function profileHost({ appOverrides = {} } = {}) {
       if(b.display==='Scout') return json(res,{error:'That name belongs to another agent.'},409)
       if(b.display) {p.identity.display=b.display;p.agent.name=b.display}
       for(const key of ['provider','model','effort']) if(key in b) {p.defaults[key]=b[key];p.defaults.effective[key]=b[key]}
-      if(b.provider) {p.defaults.model=null;p.defaults.effort=null;p.defaults.effective.model=null;p.defaults.effective.effort=null;p.defaults.not_honoured=b.provider==='claude-code'?[]:['Wakes and schedules continue on Claude Code.']}
+      if(b.provider) {p.defaults.model=null;p.defaults.effort=null;p.defaults.effective.model=null;p.defaults.effective.effort=null;p.defaults.not_honoured=b.provider==='antigravity'?['Wakes and scheduled runs do not support Antigravity.']:[]}
       json(res,p)
     }
     app.routes[`PATCH /v1/schedules/${id}/reflection`] = (req,res,url,raw) => {const b=JSON.parse(raw);writes.push({path:url.pathname,body:b});Object.assign(p.schedule[0],b);if(b.schedule) p.schedule[0].plain='Weekdays at 6:10 AM';json(res,{schedule:p.schedule[0]})}

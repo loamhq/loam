@@ -101,7 +101,7 @@ def env(base: dict | None = None) -> dict:
 
 # -- the login -------------------------------------------------------------
 
-_login_cache: tuple[float, dict] | None = None
+_login_cache: tuple[float, tuple, dict] | None = None
 
 
 def _probe() -> dict:
@@ -209,10 +209,23 @@ def carries_level(model: str | None) -> bool:
 _refreshing = threading.Lock()
 
 
+def _login_key() -> tuple:
+    # A sign-in in the HTTP broker must also invalidate the session host's
+    # login reading. The account marker covers keyring-backed app sign-ins.
+    def signature(path):
+        try:
+            stat = path.stat()
+            return stat.st_ino, stat.st_mtime_ns, stat.st_size
+        except OSError:
+            return None
+    return signature(TOKEN_FILE), signature(ACCOUNT_FILE)
+
+
 def _refresh() -> dict:
     global _login_cache
+    key = _login_key()
     state = _probe()
-    _login_cache = (time.monotonic(), state)
+    _login_cache = (time.monotonic(), key, state)
     return state
 
 
@@ -224,7 +237,7 @@ def login_state(fresh: bool = False) -> dict:
     shows on the first fetch after the re-ask, about a minute at most when
     the app is open. ``fresh`` (and the very first call) asks in line."""
     now = time.monotonic()
-    if fresh or not _login_cache:
+    if fresh or not _login_cache or _login_cache[1] != _login_key():
         return _refresh()
     if now - _login_cache[0] >= LOGIN_CACHE_S and _refreshing.acquire(blocking=False):
         def run():
@@ -233,7 +246,7 @@ def login_state(fresh: bool = False) -> dict:
             finally:
                 _refreshing.release()
         threading.Thread(target=run, name="antigravity-login", daemon=True).start()
-    return _login_cache[1]
+    return _login_cache[2]
 
 
 # -- signing in, and out (2026-11-11) --------------------------------------

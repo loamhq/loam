@@ -2729,6 +2729,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .profile-group .setrow-title,.profile-group .setrow-sub { white-space:normal; overflow-wrap:anywhere; }
 .profile-group .footnote { margin:0; }
 .profile-choice { display:grid; grid-template-columns:minmax(80px, 1fr) minmax(0, 1.6fr); align-items:center; gap:16px; padding:6px 12px; min-height:60px; }
+.profile-choice-provider { grid-template-columns:max-content minmax(0, 1fr); }
 .profile-choice .settings-select { background:transparent; }
 .profile-choice select { text-align:right; font-size:14px; }
 .profile-choice .field-input { min-width:0; width:100%; }

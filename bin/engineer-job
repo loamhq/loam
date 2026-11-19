@@ -2868,6 +2868,10 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     # the parent's session and a session belongs to one CLI.
     runtime = (job_runtime(paths(project, continue_job)) if continue_job
                else project.runtime)
+    if runtime is None:
+        write_result(p, {"ok": False, "stage": "refused", "receipt_text":
+                         "Connect a provider in Settings › Connections to run the engineer."})
+        return 3
 
     # LOAM_WAKE keeps this out of vault/15_CONVERSATIONS. hooks/
     # transcript_capture.py files a transcript only when the value is exactly
@@ -3020,7 +3024,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     job_model, job_effort = choice["model"], choice["effort"]
     argv = [
         CLAUDE, "-p", prompt,
-        "--model", job_model,
+        *(["--model", job_model] if job_model else []),
         *(["--effort", job_effort] if job_effort and runtime == "claude" else []),
         "--permission-mode", PERMISSION_MODE,
         "--output-format", "json",
@@ -3101,7 +3105,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             protect = [tree / name for name in agy_job.HARNESS
                        if (tree / name).exists() and not wt.tracked(tree, name)]
 
-        def agy_argv(model: str, effort, text: str = prompt) -> list[str]:
+        def agy_argv(model: str | None, effort, text: str = prompt) -> list[str]:
             """The walled command line for one Antigravity attempt: the
             first, and the quota retry's on the tier below."""
             line = agy_job.argv(

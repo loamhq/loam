@@ -405,7 +405,7 @@ def _clean_fields(patch: dict, draft: dict, by: str | None) -> dict:
         v = patch["provider"]
         if v is not None and v not in PROVIDERS:
             raise AgentsError(f"`provider` is one of {', '.join(PROVIDERS)}, or null "
-                              f"for Claude Code")
+                              f"to use a connected provider")
         out["provider"] = v
     if "wake" in patch:
         v = patch["wake"]
@@ -788,7 +788,7 @@ def make(agent: str, draft: dict, wake: str, *, provision=None) -> dict:
     loam_loading.ensure_owner_page()
     config = {"name": agent, "display": draft["name"],
               "workspace": str(ws), "vault": str(lc.VAULT)}
-    if draft.get("provider") and draft["provider"] != "claude-code":
+    if draft.get("provider"):
         config["provider"] = draft["provider"]
     if draft["name"] != agent.capitalize():
         # Its own files say the name it is made with ("Old Sam", not the

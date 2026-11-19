@@ -133,8 +133,11 @@ class FakeSession:
                 q.put_nowait(ev)
 
         async def go():
+            text = f"{self.agent} on it"
+            put({"type": "stream_event", "event": {"type": "content_block_delta",
+                                                  "delta": {"type": "text_delta", "text": text}}})
             put({"type": "assistant", "parent_tool_use_id": None,
-                 "message": {"content": [{"type": "text", "text": f"{self.agent} on it"}]}})
+                 "message": {"content": [{"type": "text", "text": text}]}})
             if self.answer:
                 put({"type": "result", "parent_tool_use_id": None})
                 self._busy = None
@@ -304,11 +307,16 @@ async def main():
 
     # -- 3. DELETE mid-turn on a thread member ------------------------------
     iris.answer = False
-    await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "@iris one more"})
-    for _ in range(100):
-        await asyncio.sleep(0.01)
-        if server.threads.turn_of(iris.id) and iris._busy == "working":
-            break
+    events = server.threads.listen(tid)
+    try:
+        await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "@iris one more"})
+        # End the turn after its words reached the thread, even if the
+        # harness reported "working" before producing any text.
+        async with asyncio.timeout(5):
+            while (await events.get()).get("type") != "message.delta":
+                pass
+    finally:
+        server.threads.unlisten(tid, events)
     check("the turn is in flight on Iris's resumed session",
           (server.threads.turn_of(iris.id), fake.starts[-1]), (tid, ("iris", iris.id, True)))
     status, view = await call(server, "GET", "/v1/sessions/live")

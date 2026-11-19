@@ -61,6 +61,9 @@ def check(d):
     cli.parent.mkdir(parents=True)
     cli.write_text(STUB)
     cli.chmod(0o700)
+    credentials = d / '.claude/.credentials.json'
+    credentials.parent.mkdir()
+    credentials.write_text('{"claudeAiOauth": {"accessToken": "fixture"}}')
     with socket.socket() as pick:
         pick.bind(('127.0.0.1', 0))
         port = pick.getsockname()[1]

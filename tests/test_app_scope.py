@@ -234,7 +234,7 @@ try:
     choice = eng.engineer_choice(lane)
     check("nothing set on Loam: the scope runs as Loam does (Claude Code, built in)",
           (choice["runtime"], choice["source"]),
-          (eng.engineer_choice(eng.platform_project())["runtime"], "record"))
+          (eng.engineer_choice(eng.platform_project())["runtime"], "automatic"))
     check("...not on its old row, and not on the default",
           choice["runtime"] in ("antigravity", "codex"), False)
     check("...its tiers are Loam's (none set)", eng.tier_models(lane),

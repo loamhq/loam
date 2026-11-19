@@ -166,13 +166,13 @@ def prompt_arg(job_dir: Path, text: str) -> str:
 
 
 def argv(*, prompt: str, job_dir: Path, conversation: str | None,
-         model: str | None = None, effort: str | None = None,
+         model: str | None = eng.AGY_ENGINEER_MODEL, effort: str | None = None,
          extra_dirs: list[Path] = ()) -> list[str]:
     """The ``agy`` command line, started in the work directory."""
-    model = model or eng.AGY_ENGINEER_MODEL
     out = [agy.AGY, f"--print={prompt}", "--output-format", "stream-json",
-           "--dangerously-skip-permissions", "--disable-slash-commands",
-           "--model", model]
+           "--dangerously-skip-permissions", "--disable-slash-commands"]
+    if model:
+        out += ["--model", model]
     if effort and not agy.carries_level(model):
         out += ["--effort", effort]
     if conversation:

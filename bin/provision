@@ -2396,8 +2396,6 @@ def provision_project(name: str, repo_arg: str, project_file: Path | None,
         "deploy_key_id": dk["id"],
         "role_source_rev": rev,
         "provisioned": date,
-        # Which CLI runs the engineer (lib/loam_engineer.py, since 2026-10-07).
-        "runtime": eng.DEFAULT_RUNTIME,
     }
     # The command a landing runs (bin/engineer-job, since 2026-10-02). Written
     # into the record by hand from the project's own README, and carried over
@@ -2645,7 +2643,6 @@ def adopt_project(name: str, repository: str, project_file: Path | None,
         "adopted": date,
         "role_source_rev": rev,
         "provisioned": date,
-        "runtime": eng.DEFAULT_RUNTIME,
     }
     if test_command:
         record["test_command"] = test_command

@@ -510,12 +510,10 @@ def runtime_findings(project, models: list | None = None) -> list[str]:
     import loam_engineer as eng  # noqa: PLC0415
     value = project.record.get("runtime")
     if value is None:
-        return [f"no `runtime` in the record, so it runs on Claude Code; new "
-                f"records get {eng.DEFAULT_RUNTIME!r}. Write the one it should "
-                f"run on."]
+        return []
     if value not in eng.RUNTIMES:
-        return [f"`runtime` is {value!r}, which is none of {eng.RUNTIMES}; the "
-                f"launcher runs it on Claude Code."]
+        return [f"`runtime` is {value!r}, which is none of {eng.RUNTIMES}; "
+                f"the launcher selects a connected provider."]
     if value == "antigravity":
         # Since 2026-11-15: the CLI, and the built-in model in the last list
         # `agy models` gave the broker (loam_antigravity.MODELS_FILE).
@@ -1058,29 +1056,21 @@ def check_lane_models(findings: list, names: list[str], prov) -> list[str]:
             card = json.loads((AI_LABS / n / "agent.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             card = {}
-        # A persona whose lanes run on Codex (2026-11-13) has no Claude
-        # session to read a model family from; its model is Codex's to name.
-        if loam_profile.lane_provider(card) != "claude-code":
-            notes.append(f"  {n}: wakes and crons on "
-                         f"{loam_profile.PROVIDER_NAMES[loam_profile.lane_provider(card)]}"
-                         f" -- no Claude family to check")
+        choice = loam_profile.lane_choice(card, prov.settings(AI_LABS / n)["model"])
+        if choice["provider"] != "claude-code":
+            notes.append(f"  {n}: {choice['note'] or 'wakes and crons run on Codex'}")
             continue
-        lanes.append((n, AI_LABS / n, loam_profile.lane_choice(
-            card, prov.settings(AI_LABS / n)["model"])[0]))
-    lanes.append(("engineer", AGENTS / "engineer",
-                  eng.engineer_choice(eng.platform_project())["model"]))
-    # The reviewer on another provider (Antigravity, the owner's setting) has
-    # no Claude session of its own to read: the newest one on disk is from
-    # before the switch, so comparing it with a Gemini id was a "family
-    # mismatch" that no run had (2026-11-16, the 04:25 run on Claude Code).
-    reviewer_on = loam_profile.reviewer_provider()
-    if reviewer_on != "claude-code":
-        notes.append(f"  reviewer: on {loam_profile.PROVIDER_NAMES[reviewer_on]} "
-                     f"({loam_profile.reviewer_choice(prov.REVIEWER_MODEL)[0]})"
-                     f" -- no Claude family to check")
-    else:
+        lanes.append((n, AI_LABS / n, choice["model"]))
+    engineer = eng.engineer_choice(eng.platform_project())
+    if engineer["runtime"] == "claude":
+        lanes.append(("engineer", AGENTS / "engineer", engineer["model"]))
+    reviewer = loam_profile.reviewer_provider()
+    if reviewer == "claude-code":
         lanes.append(("reviewer", AGENTS / "reviewer",
-                      loam_profile.reviewer_choice(prov.REVIEWER_MODEL)[0]))
+                      loam_profile.reviewer_choice(prov.REVIEWER_MODEL, provider=reviewer)[0]))
+    elif reviewer:
+        notes.append(f"  reviewer: on {loam_profile.PROVIDER_NAMES[reviewer]} "
+                     f"-- no Claude family to check")
 
     for label, ws, configured in lanes:
         # `best` and `opusplan` name a policy, not a family; there is no

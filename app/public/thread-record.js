@@ -323,7 +323,7 @@ export function applyThreadEvent(open, e) {
     if (open.pending?.text === message.text && isOwner(message.author)) open.pending = null
   }
   if (e.type === 'member.joined' && !open.thread.members.some((m) => m.persona === e.persona)) {
-    open.thread.members.push({ persona: e.persona, engine: e.engine ?? 'claude-code' })
+    open.thread.members.push({ persona: e.persona, engine: e.engine ?? null })
   }
   if (e.type === 'broker.permission_request') {
     // Use the shared event validation and normalization, including
@@ -458,12 +458,10 @@ export function messageRecipients(thread, text, agents) {
   const tags = new Set((text.match(/(?<![\w@])@[\p{L}\p{N}_-]+/gu) ?? []).map((tag) => tag.slice(1).toLowerCase()))
   if (!tags.size) return thread.members.filter((m) => m.persona === thread.default)
   const named = agents.filter((a) => tags.has(a.id.toLowerCase())).map((a) => thread.members.find((m) => m.persona === a.id)
-    // Auto-joined mentions use the runtime's Claude Code default, as does its
-    // member.joined event when no engine is stated. Live verification covers it.
-    ?? { persona: a.id, engine: 'claude-code', model: null })
+    ?? { persona: a.id, engine: null, model: null })
   if (tags.has('all') || tags.has('everyone')) {
     for (const member of thread.members) if (!named.some((m) => m.persona === member.persona)) named.push(member)
-    if (thread.default && !named.some((m) => m.persona === thread.default)) named.push({ persona: thread.default, engine: 'claude-code', model: null })
+    if (thread.default && !named.some((m) => m.persona === thread.default)) named.push({ persona: thread.default, engine: null, model: null })
   }
   return named
 }

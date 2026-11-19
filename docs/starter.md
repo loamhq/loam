@@ -103,3 +103,8 @@ things so I know who I'm talking with. First: how old are you?"
   `seed-starter` until it has finished: since L12 a failed make is set aside
   and made again by the next run, with no hand clearing (docs/install.md,
   "A failed starter").
+
+A seeded hello thread inherits its agent's provider on the first turn.
+The agent can use an account connected after installation. With no usable
+sign-in and automatic selection, the app shows Connections and the runtime
+leaves the provider unset.

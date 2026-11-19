@@ -676,7 +676,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (st.creating) return
     close(); enter({ kind: 'thread', id: 'new-thread' }); st.creating = true; st.error = ''
     const ticket = generation
-    const o = st.open = { thread: { id: 'new-thread', title: 'New thread', default: persona, members: persona ? [{ persona, engine: 'claude-code' }] : [] },
+    const o = st.open = { thread: { id: 'new-thread', title: 'New thread', default: persona, members: persona ? [{ persona, engine: null }] : [] },
       messages: [], loading: false, creating: true, typing: new Set(), permissions: new Map(), steps: new Map(),
       board: { markdown: '', path: '' }, boardBusy: false, boardOpen: false,
       promptTitle: options.promptTitle ?? null, promptBody: options.promptBody ?? null, promptPlaceholder: options.placeholder ?? null }
@@ -717,7 +717,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       o.summaryBarrier = acknowledged ? null : identityOf(record)
       delete o.streamSummary; delete o.streamIdentities
       const unsupported = ['title', 'default', 'icon', 'pinned', 'archived'].some((key) => Object.hasOwn(body, key) && (record[key] ?? null) !== body[key])
-        || ['model', 'engine'].some((field) => Object.entries(body[field] ?? {}).some(([persona, value]) => record.members.find((m) => m.persona === persona)?.[field] !== value))
+        || ['model', 'engine'].some((field) => Object.entries(body[field] ?? {}).some(([persona, value]) => (field === 'engine' ? engineOverride(record.members.find((m) => m.persona === persona))
+          : record.members.find((m) => m.persona === persona)?.[field]) !== value))
       if (unsupported) throw new Error('This runtime hasn’t applied that change. It may need an update; your thread is still here.')
       listingRequest++
       st.threads = st.threads.map((t) => t.id === o.thread.id ? o.thread : t); return true
@@ -1327,9 +1328,9 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       h('p', { class: 'tt-failed-summary', text: info.summary }),
       h('div', { class: 'tt-failed-actions' },
         info.action === 'providers' && openSettings ? button('Go to Connections', () => openSettings('providers'), { class: 'pillbtn tt-failed-go' }) : null,
-        h('details', { class: 'tt-failed-details', open: openMessages.has(`failed:${st.open.thread.id}:${m.id}`), ontoggle: (event) => { if (event.currentTarget.isConnected) { if (event.currentTarget.open) openMessages.add(`failed:${st.open.thread.id}:${m.id}`); else openMessages.delete(`failed:${st.open.thread.id}:${m.id}`) } } },
+        info.kind !== 'setup' ? h('details', { class: 'tt-failed-details', open: openMessages.has(`failed:${st.open.thread.id}:${m.id}`), ontoggle: (event) => { if (event.currentTarget.isConnected) { if (event.currentTarget.open) openMessages.add(`failed:${st.open.thread.id}:${m.id}`); else openMessages.delete(`failed:${st.open.thread.id}:${m.id}`) } } },
           h('summary', { text: 'Details' }),
-          h('pre', { class: 'tt-failed-raw', text: info.raw }))))
+          h('pre', { class: 'tt-failed-raw', text: info.raw })) : null))
   }
   const engineOf = (display) => {
     const id = catalog().find((a) => a.name === display)?.id ?? String(display).toLowerCase()
@@ -1441,7 +1442,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     nodes.forEach(visit); return nodes
   }
   const providerCatalog = () => fixtureProviders ?? providers()
-  const providerName = (member) => providerCatalog().find((p) => p.id === member.engine)?.name ?? member.engine
+  const engineOverride = (member) => member && Object.hasOwn(member, 'engine_override') ? member.engine_override : member?.engine
+  const providerName = (member) => providerCatalog().find((p) => p.id === member.engine)?.name ?? member.engine ?? 'Connect a provider'
   const modelName = (member) => modelLabel(providerCatalog().find((p) => p.id === member.engine), member.model).name ?? 'Agent’s default'
   const modelTitle = (member) => modelTooltip(providerCatalog().find((p) => p.id === member.engine), member.model) || 'Agent’s default'
   function openConfiguration() {
@@ -1461,7 +1463,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     const active = o.choice === `${field}:${member.persona}`
     const supported = field === 'engine' || Object.hasOwn(member, 'model')
     return modelPill({ label: field === 'engine' ? providerName(member) : modelName(member), lead: field === 'engine' ? providerMark(member.engine, 14) : null,
-      title: field === 'model' ? `${label} · ${modelTitle(member)}` : label, on: active, disabled: o.patching || !supported,
+      title: field === 'model' ? `${label} · ${modelTitle(member)}` : label, on: active, disabled: o.patching || !supported || (field === 'model' && !member.engine),
       onclick: () => {
         o.choice = active ? null : `${field}:${member.persona}`; redraw()
       }, props: { id: elementId(`tt-${field}-${member.persona}`), class: `modelbtn tt-${field === 'engine' ? 'engine' : 'model'}-select${active ? ' on' : ''}`, 'aria-label': label,
@@ -1476,26 +1478,28 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     let options
     if (field === 'engine') {
       options = catalog.map((p) => ({ ...p, name: p.name ?? p.id, disabled: p.connected !== true }))
-      if (!options.some((p) => p.id === member.engine)) options.push({ id: member.engine, name: member.engine, reason: 'Unavailable', disabled: true })
+      if (Object.hasOwn(member, 'engine_override')) options.unshift({ id: '', name: 'Agent’s default' })
+      if (member.engine && !options.some((p) => p.id === member.engine)) options.push({ id: member.engine, name: member.engine, reason: 'Unavailable', disabled: true })
     } else {
       options = [{ id: '', name: 'Agent’s default' }, ...modelsOf(catalog.find((p) => p.id === member.engine))]
       if (member.model && !options.some((m) => m.id === member.model)) options.push({ id: member.model, name: modelName(member), reason: 'Saved model' })
     }
+    const selected = field === 'engine' ? engineOverride(member) : member[field]
     const close = () => { o.choice = null; o.configurationFocus = label; redraw() }
     return menuSurface(h('div', { class: 'tt-configuration-options', id: elementId(`tt-${field}-${member.persona}-options`), role: 'listbox' }, ...options.map((option) => settingsRow({ title: option.name, sub: option.reason,
         lead: field === 'engine' ? providerMark(option.id, 18) : null,
-        right: (option.id ?? '') === (member[field] ?? '') ? icon.check(16) : null,
+        right: (option.id ?? '') === (selected ?? '') ? icon.check(16) : null,
         onclick: async () => {
           o.choice = null
           const value = option.id || null
-          if (value !== member[field]) {
+          if (value !== selected) {
             o.configurationSaved = false
             const ok = await patch({ [field]: { [member.persona]: value } })
             o.configurationSaved = ok
           }
           if (st.open === o) { o.configurationFocus = label; redraw() }
-        }, props: { class: `setrow${(option.id ?? '') === (member[field] ?? '') ? ' on' : ''}`, role: 'option',
-          'aria-selected': String((option.id ?? '') === (member[field] ?? '')), 'aria-disabled': String(Boolean(option.disabled)), tabindex: '-1', 'data-value': option.id ?? '', disabled: option.disabled,
+        }, props: { class: `setrow${(option.id ?? '') === (selected ?? '') ? ' on' : ''}`, role: 'option',
+          'aria-selected': String((option.id ?? '') === (selected ?? '')), 'aria-disabled': String(Boolean(option.disabled)), tabindex: '-1', 'data-value': option.id ?? '', disabled: option.disabled,
           title: field === 'model' ? modelTooltip(catalog.find((p) => p.id === member.engine), option.id) : option.name } }))),
       { title: label, close, heading: false, anchored: true, initialFocus: 'selected', width: 320,
         anchor: `[id=${JSON.stringify(elementId(`tt-${field}-${member.persona}`))}]` })
@@ -1652,7 +1656,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       actions: [...(sidePanel ? side().controls().slice(0, 2) : [round('Board', [icon.list(18), count ? h('span', { class: 'navdot', 'aria-label': `${count} new board items` }) : null], () => { o.boardOpen = !o.boardOpen; o.focusBoard = o.boardOpen; redraw() }, { class: 'iconbtn ghost tt-board-button', 'aria-description': count ? `${count} new board items` : 'Open thread board', 'aria-expanded': String(Boolean(o.boardOpen)) }), taskIndicator()]),
         round('Thread actions', icon.dots(20), () => { o.headerMenu = !o.headerMenu; redraw() }, { class: 'iconbtn ghost', 'aria-expanded': String(Boolean(o.headerMenu)) }),
         sidePanel ? side().controls().at(-1) : null] })
-    const chosenModel = defaultMember && composerModel(defaultMember, o.messages, providerCatalog())
+    const chosenModel = defaultMember?.engine && composerModel(defaultMember, o.messages, providerCatalog())
     compose.field().__paintMention = decorateMention
     for (const node of compose.field().querySelectorAll?.('.mention') ?? []) decorateMention(node, node.textContent)
     const renderedComposer = compose.render({ sharedThread: true, record: { session_id: `thread:${o.thread.id}` }, agentId: o.thread.default,
@@ -1660,8 +1664,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       readOnly: o.readFailed || o.sending || o.createFailed,
       placeholder: (!o.messages.length && o.promptPlaceholder) || (o.thread.default ? `Message ${name(o.thread.default)}` : o.creating ? 'A little room for your thought…' : 'Write a thought, or @mention someone'),
       mentionPicker: st.mention ? h('div', { key: 'mentions', class: 'popover tt-mentions', role: 'listbox', 'aria-label': 'Mention an agent' }, ...mentionChoices().map((a, i) => settingsRow({ title: a.name, sub: a.sub, lead: a.everyone ? icon.users(24) : avatar(a.id, 24), onclick: () => insertMention(a), props: { type: 'button', role: 'option', 'aria-selected': String(i === (st.mention.index ?? 0)), class: `setrow${i === (st.mention.index ?? 0) ? ' on' : ''}` } }))) : null,
-      modelControl: modelPill({ label: chosenModel?.name ?? 'Providers & models', lead: defaultMember ? providerMark(defaultMember.engine, 14) : icon.users(14),
-        title: defaultMember ? chosenModel.title ?? `${name(defaultMember.persona)} · ${providerName(defaultMember)} · ${modelTitle(defaultMember)} · Settings for this thread` : 'Providers & models',
+      modelControl: modelPill({ label: chosenModel?.name ?? 'Providers & models', lead: defaultMember?.engine ? providerMark(defaultMember.engine, 14) : icon.users(14),
+        title: defaultMember?.engine ? chosenModel.title ?? `${name(defaultMember.persona)} · ${providerName(defaultMember)} · ${modelTitle(defaultMember)} · Settings for this thread` : 'Providers & models',
         disabled: Boolean(compose.dictating?.()) || o.loading || o.readFailed || o.creating || o.createFailed, onclick: () => openConfiguration(),
         props: { 'aria-label': 'Providers & models', 'aria-haspopup': 'dialog', 'aria-expanded': String(Boolean(o.configuration)) } }),
       mentionButton: round(st.mention ? 'Remove mention' : 'Mention an agent', '@', toggleMention, { class: `plusbtn tt-mention-button${st.mention ? ' on' : ''}`, onpointerdown: (e) => e.preventDefault(), disabled: o.sending || Boolean(compose.dictating?.()), 'aria-expanded': String(Boolean(st.mention)) }) })

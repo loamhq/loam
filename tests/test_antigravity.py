@@ -172,13 +172,13 @@ def test_login_cache_serves_and_reasks_behind() -> None:
     try:
         agy._probe, agy._login_cache = probe, None
         assert agy.login_state() == {"connected": False}       # first: in line
-        agy._login_cache = (time.monotonic() - agy.LOGIN_CACHE_S - 1, agy._login_cache[1])
+        agy._login_cache = (time.monotonic() - agy.LOGIN_CACHE_S - 1, *agy._login_cache[1:])
         started = time.monotonic()
         assert agy.login_state() == {"connected": False}       # stale, served now
         assert time.monotonic() - started < 1
         gate.set()
         for _ in range(50):
-            if agy._login_cache[1] == {"connected": True}:
+            if agy._login_cache[2] == {"connected": True}:
                 break
             time.sleep(0.05)
         assert agy.login_state() == {"connected": True}        # the re-ask landed

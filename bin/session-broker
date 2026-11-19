@@ -200,7 +200,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import loam_config as lc  # noqa: E402
-import loam_broker as cfg  # noqa: E402
+import loam_broker as cfg
+import loam_provider_defaults as provider_defaults  # noqa: E402
 # Sessions the owner had in the Claude Code app, which are Claude Code sessions
 # on this box and were simply unknown to the broker. See lib/loam_adopt.py.
 import loam_adopt as adoption  # noqa: E402
@@ -2093,6 +2094,8 @@ class Server:
                     title = None
                 outcome = self.threads.deliver_job(
                     record, loam_waiters.handoff_text(record, title))
+                if outcome == "waiting for a provider":
+                    continue
                 loam_waiters.done(record, outcome)
                 if outcome in ("no thread", "thread gone", "not a member"):
                     # Logged and removed as a thread's, then written
@@ -2257,6 +2260,8 @@ class Server:
         Antigravity's CLI lists. Null is the persona's own."""
         if model is None:
             return None
+        if not engine:
+            raise BrokerError(409, provider_defaults.SETUP)
         if engine in ("claude-code", "codex"):
             return choices({"model": model}, engine).get("model")
         if not isinstance(model, str) or not model.strip():
@@ -2408,9 +2413,12 @@ class Server:
             before = threads_rec.read(thread_id)[0]
             if models:
                 engines_after = {**before["engines"], **(engines or {})}
-                models = {p: self.thread_model(
-                              p, engines_after.get(p) or threads_rec.default_engine(p), m)
-                          for p, m in models.items()}
+                engines = dict(engines or {})
+                for persona, model in models.items():
+                    chosen = engines_after.get(persona) or threads_rec.default_engine(persona)
+                    models[persona] = self.thread_model(persona, chosen, model)
+                    if model is not None:
+                        engines[persona] = chosen
             if "draft" in payload:
                 # A branch's prepared opening (2026-11-11), cleared (null or
                 # "") or replaced; the page clears it once it holds its own.
@@ -2452,6 +2460,7 @@ class Server:
                         kind="system")
                     engine.publish(thread_id, {"type": "member.joined",
                                                "persona": persona,
+                                               "engine": threads_rec.member_engine(after, persona),
                                                "by": by or lc.OWNER_ID})
                     engine.publish(thread_id, {"type": "message.done", "message": line})
             if by:
@@ -2567,8 +2576,7 @@ class Server:
                 meta = threads_rec.read(thread_id)[0]
                 for p in threads_rec.mentions(payload.get("text") or "") or (
                         [meta["default"]] if meta.get("default") else []):
-                    self.thread_model(p, meta["engines"].get(p)
-                                      or threads_rec.default_engine(p), model)
+                    self.thread_model(p, threads_rec.member_engine(meta, p), model)
             # `reply_to` (2026-11-11): the id of the earlier message this
             # one answers; a 400 / 404 from the record when it isn't one.
             reply_to = payload.get("reply_to") or None
@@ -3806,13 +3814,13 @@ class Server:
         # CLI process, ~1 s for Codex and ~3.5 s for Claude Code.
         self.broker.usage.on_fetch()
         login = cfg.login_state()
-        connected, reason = login["connected"], login["reason"]
+        connected, reason = provider_defaults.available("claude-code", login)
         usage = cfg.read_usage()
         default_model = cfg.persona_model(agent)
         # The persona's own default model (2026-11-13, its profile), when it
         # is a Claude Code one, is the row ticked: it is what a turn runs on.
         if agent and agent in cfg.roster():
-            mine = threads_rec.persona_defaults(agent)
+            mine = provider_defaults.agent_choice(threads_rec.provider_card(agent), "claude-code")
             if mine["provider"] == "claude-code" and mine["model"]:
                 default_model = mine["model"]
         out = []
@@ -3871,9 +3879,10 @@ class Server:
         login the box holds."""
         state = agy.login_state()
         usage = agy.row_usage()
+        connected, reason = provider_defaults.available("antigravity", state)
         return {
-            "connected": state["connected"],
-            "reason": state["reason"],
+            "connected": connected,
+            "reason": reason,
             "usage": usage,
             "usage_reason": None if usage is not None else
             "no reading yet: /quota has not answered on this login",
@@ -3916,9 +3925,10 @@ class Server:
         state = codex.login_state()
         usage = codex.row_usage()
         windows = codex.context_windows()
+        connected, reason = provider_defaults.available("codex", state)
         return {
-            "connected": state["connected"],
-            "reason": state["reason"],
+            "connected": connected,
+            "reason": reason,
             "usage": usage,
             "usage_reason": None if usage is not None else
             "no reading yet: the read failed and no Codex turn has run",
@@ -3989,6 +3999,12 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
     else:
         broker.prepare_records()
         asyncio.create_task(broker.reap_idle())
+    try:
+        import loam_starter  # noqa: PLC0415
+        loam_starter.inherit_legacy_hello()
+    except (OSError, ValueError) as exc:
+        print(f"starter: could not update the hello thread ({exc})",
+              file=sys.stderr, flush=True)
     # Each thread member's input still on disk from before this start (the
     # owner's messages, job results; 2026-11-19, batch B step 2,
     # lib/loam_thread_inputs.py), scheduled again once each and in order.

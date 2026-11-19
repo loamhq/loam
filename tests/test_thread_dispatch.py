@@ -325,4 +325,8 @@ if __name__ == "__main__":
             suite = runpy.run_path(str(ROOT / "tests/run-all"))
             suite["MACHINE"]["paths"]["home"] = tmp
             env = suite["sealed_env"](Path(tmp))
+            # Both the host and its replacement workers use the fixture engine.
+            card_path = Path(tmp) / "ai-labs/iris/agent.json"
+            card = json.loads(card_path.read_text())
+            card_path.write_text(json.dumps({**card, "provider": "claude-code"}))
             subprocess.run([sys.executable, __file__, "host"], env=env, check=True)

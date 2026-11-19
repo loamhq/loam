@@ -246,16 +246,30 @@ def provider_logins(names: list[str]) -> dict:
     import loam_antigravity
     import loam_broker
     import loam_codex
+    from loam_provider_defaults import available
     from loam_threads import default_engine
 
     readers = {"claude-code": loam_broker.login_state, "codex": loam_codex.login_state,
                "antigravity": loam_antigravity.login_state}
-    states = {}
-    for provider in sorted({default_engine(agent) for agent in names}):
+    def read(provider):
         try:
-            states[provider] = readers[provider]()
+            state = readers[provider]()
+            connected, reason = available(provider, state)
+            return {**state, "connected": connected, "reason": reason}
         except Exception as exc:  # a broken reading is local to one provider
-            states[provider] = {"reason": type(exc).__name__}
+            return {"reason": type(exc).__name__}
+
+    used = {default_engine(agent) for agent in names}
+    states = {p: read(p) for p in sorted(used - {None})}
+    if None in used:
+        # An automatic choice can be unset because its login expired.
+        # Keep health notices for the existing login that needs repair.
+        for provider in readers:
+            if provider in states:
+                continue
+            state = read(provider)
+            if state.get("source", "none") != "none":
+                states[provider] = state
     return states
 
 
@@ -548,6 +562,9 @@ def run_status(at: float, names: list[str], states: dict) -> dict:
         return {"agents_can_run": False, "why": ["There are no agents yet."],
                 "action": {"kind": "agents", "label": "Open Agents"}}
 
+    if not states:
+        return {"agents_can_run": False, "why": ["Connect a provider to start a reply."],
+                "action": {"kind": "providers", "label": "Open Connections"}}
     connected = {p for p, state in states.items() if state.get("connected")}
     refused = refused_providers(at, names, connected)
     if connected - refused:

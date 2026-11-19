@@ -196,6 +196,9 @@ export function failedTurnInfo(message, { agentName = (id) => id, engineOf = () 
   if (!message || message.streaming) return null
   let agent, raw, engine = message.engine ?? null
   if (message.kind === 'system') {
+    if (message.text === 'Connect a provider in Settings › Connections to start a reply.') {
+      return { kind: 'setup', summary: message.text, raw: message.text, action: 'providers' }
+    }
     const m = /^(.+?)['’]s turn failed:\s*([\s\S]+)$/.exec(String(message.text ?? '').trim())
     if (!m) return null
     agent = m[1].trim(); raw = m[2].trim(); engine ??= engineOf(agent)

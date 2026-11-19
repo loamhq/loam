@@ -577,15 +577,19 @@ function runNotice() {
   if (status?.agents_can_run !== false || !status.why?.[0]) return null
   const why = status.why[0], action = status.action
   const atProvider = action?.kind === 'provider' && state.sheet?.page === 'provider' && state.sheet.provider === action.provider
+  const atConnections = action?.kind === 'providers' && state.sheet?.page === 'connections'
   const atAgents = action?.kind === 'agents' && state.sheet?.page === 'agents' && !state.sheet.detail && !state.sheet.archivedAgents
   const atArchive = action?.kind === 'archived' && state.sheet?.archivedAgents
-  const act = action && !atProvider && !atAgents && !atArchive
+  const act = action && !atProvider && !atConnections && !atAgents && !atArchive
   return h('div', { class: 'loginwarn run-notice', key: 'agent-availability', role: 'status' },
     h('span', { text: `Agents can’t run: ${act && action.label === why ? '' : why}` }),
     act ? h('button', { class: 'loginwarn-act', type: 'button', text: action.label, onclick: () => {
       if (state.editor) page.closeEditor()
       if (action.kind === 'provider') {
         page.goSettings('provider', action.provider)
+        loadProviders()
+      } else if (action.kind === 'providers') {
+        page.goSettings('providers')
         loadProviders()
       } else {
         page.goSettings('agents')

@@ -238,14 +238,14 @@ def record_cases() -> None:
 # --- lanes ------------------------------------------------------------------
 
 def lanes_cases() -> None:
-    got = {p: (loam_profile.lane_provider({"provider": p}),
+    got = {p: (loam_profile.lane_choice({"provider": p}, "fable")["provider"],
                loam_profile.defaults("x", {"provider": p})["not_honoured"])
            for p in ("claude-code", "codex", "antigravity")}
     check("lanes: wakes and crons run on Claude Code and on Codex, nothing not honoured",
           got["claude-code"] == ("claude-code", []) and got["codex"] == ("codex", []), got)
-    check("lanes: Antigravity's run on Claude Code, and the profile says why",
-          got["antigravity"][0] == "claude-code" and got["antigravity"][1]
-          and "sign-in" in got["antigravity"][1][0], got["antigravity"])
+    check("lanes: an explicit Antigravity choice pauses the unsupported lane",
+          got["antigravity"][0] is None and got["antigravity"][1]
+          and "Antigravity" in got["antigravity"][1][0], got["antigravity"])
     wake = (AGENTS / "bin" / "wake").read_text()
     check("lanes: bin/wake takes the lane's provider for the lock and the log line",
           '"engine": LANE_PROVIDER' in wake and 'setdefault("provider", LANE_PROVIDER)' in wake)

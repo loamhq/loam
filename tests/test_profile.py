@@ -254,6 +254,9 @@ def general_lines():
 
 
 async def main():
+    # This profile fixture has a connected Claude Code account.
+    profile.providers.automatic = lambda eligible=profile.PROVIDERS: (
+        "claude-code" if "claude-code" in eligible else None)
     server = broker_mod.Server.__new__(broker_mod.Server)
     fake = FakeBroker()
     server.broker = fake
@@ -355,8 +358,9 @@ async def main():
               and d["wakes"] == {"provider": "claude-code", "model": "opus",
                                  "effort": "high"}, d)
         check("a wake runs on them (lane_choice), a pinned probe on its own",
-              profile.lane_choice(card("ada"), "fable") == ("opus", "high", None)
-              and profile.lane_choice(card("ada"), "haiku", pinned=True)[0] == "haiku")
+              profile.lane_choice(card("ada"), "fable") ==
+              {"provider": "claude-code", "model": "opus", "effort": "high", "note": None}
+              and profile.lane_choice(card("ada"), "haiku", pinned=True)["model"] == "haiku")
         settings_ada = json.loads((LABS / "ada" / ".claude" / "settings.json").read_text())
         check("a chat with no model chosen runs on it too: settings.json follows "
               "(claude_model), its other keys kept",
@@ -388,14 +392,13 @@ async def main():
         check("a Codex wake takes the persona's Codex model and level (lane_choice)",
               profile.lane_choice({"provider": "codex", "model": "gpt-x",
                                    "effort": "high"}, "fable")
-              == ("gpt-x", "high", None)
-              and profile.lane_provider({"provider": "codex"}) == "codex")
+              == {"provider": "codex", "model": "gpt-x", "effort": "high", "note": None})
         status, body = await http(port, "PATCH", "/v1/agents/ada",
                                   {"provider": "antigravity"})
         d = body.get("defaults", {})
-        check("Antigravity: wakes still on Claude Code, and the profile says why",
-              status == 200 and d["wakes"]["provider"] == "claude-code"
-              and d["wakes"]["model"] == "fable" and d["not_honoured"]
+        check("Antigravity: wakes are paused, and the profile says why",
+              status == 200 and d["wakes"]["provider"] is None
+              and d["wakes"]["model"] is None and d["not_honoured"]
               and "Antigravity" in d["not_honoured"][0], d)
         status, body = await http(port, "PATCH", "/v1/agents/ada",
                                   {"provider": "chatgpt"})
@@ -415,7 +418,7 @@ async def main():
               out.get("ok") and out.get("value") == "sonnet"
               and card("iris").get("model") == "sonnet", out)
         check("...and said in General",
-              "Ada changed Iris's model to sonnet" in general_lines(), general_lines())
+              "Ada changed Iris's provider to claude-code, model to sonnet" in general_lines(), general_lines())
         out = await cli(port, "set", "agent.effort", "low", "--target", "iris",
                         lane="cron:infra-watch")
         check("from an unattended lane: refused before any call",
@@ -439,7 +442,7 @@ async def main():
               and rows["Loam"]["providers"] == rows["webapp"]["providers"]
               == ["claude-code", "codex", "antigravity"]
               and rows["Loam"]["effective"]["provider"] == "claude-code"
-              and rows["Loam"]["effective"]["source"] == "record"
+              and rows["Loam"]["effective"]["source"] == "automatic"
               and rows["Loam"]["effective"]["model"] == eng.ENGINEER_MODEL, body)
         check("a project on its record: Codex, its built-in model and level",
               rows["webapp"]["effective"] == {"provider": "codex",
@@ -490,7 +493,7 @@ async def main():
         loam = eng.engineer_choice(eng.platform_project())
         check("...null: back on its built-in Claude Code",
               status == 200 and loam == {"runtime": "claude", "model": eng.ENGINEER_MODEL,
-                                         "effort": None, "source": "record"}, loam)
+                                         "effort": None, "source": "automatic"}, loam)
         status, body = await http(port, "PATCH", "/v1/engineers/Loam",
                                   {"model": "claude-opus-5-5", "effort": "max"})
         loam = eng.engineer_choice(eng.platform_project())
@@ -609,7 +612,7 @@ async def main():
         import loam_antigravity as agy_mod  # noqa: PLC0415
         import time as _time  # noqa: PLC0415
         saved_login = agy_mod._login_cache
-        agy_mod._login_cache = (_time.monotonic() + 3600, {"models": [
+        agy_mod._login_cache = (_time.monotonic() + 3600, agy_mod._login_key(), {"models": [
             {"id": "gemini-4-hydrogen-high"}, {"id": "claude-opus-5-5-high"}]})
         try:
             status, body = await http(port, "GET", "/v1/system/reviewer")
@@ -637,7 +640,7 @@ async def main():
             out = await cli(port, "set", "reviewer.provider", "claude-code")
             check("bin/settings set reviewer.provider: back on Claude Code, its model dropped",
                   out.get("ok") and out.get("value") == "claude-code"
-                  and profile.reviewer_stored() == {}
+                  and profile.reviewer_stored() == {"provider": "claude-code"}
                   and profile.reviewer_choice("fable") == ("fable", None), out)
         finally:
             agy_mod._login_cache = saved_login

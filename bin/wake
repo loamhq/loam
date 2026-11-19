@@ -140,23 +140,12 @@ CLAUDE = str(lc.CLAUDE_BIN)
 # wake proves the soul loads for a session that never runs.
 WAKE_MODEL = os.environ.get("LOAM_WAKE_MODEL", loam_profile.WAKE_MODEL_DEFAULT)
 
-# What this run is on (2026-11-13): the persona's own default from its
-# agent.json (Settings > Agents > the persona's profile, "Runs on"), when it
-# is a Claude Code one; else WAKE_MODEL. One rule, lib/loam_profile.py's
-# `lane_choice`, which the profile route reads too, so the page says what a
-# wake runs on. Set by main() before anything launches.
+# The launcher and profile use the same lane selection. The initial values
+# are populated by main before a scheduled run or delivery.
 LANE_MODEL: str | None = WAKE_MODEL
 LANE_EFFORT: str | None = None
 LANE_NOTE: str | None = None
-# The provider this run is on (2026-11-13): the persona's own when a lane
-# runs there (loam_profile.lane_provider: Claude Code or Codex), else Claude
-# Code. The owner, 11-13: what Loam builds -- a persona's wakes and crons
-# among it -- is the same on every provider. The Codex half is
-# lib/loam_codex_wake.py; everything before the launch (the lock, the lane
-# file, its size, the identity gate, the vault diff, the prompt) and after
-# it (the log line, the marker, the schedule's record) is this file's, the
-# same for both.
-LANE_PROVIDER: str = "claude-code"
+LANE_PROVIDER: str | None = "claude-code"
 
 # No round-trip cap and no wall clock on a wake or a cron since 2026-11-10
 # (the owner, 13:14 PT: "Please remove any limitations on how long a turn or
@@ -510,9 +499,10 @@ def _main() -> int:
     lane = f"cron:{cron}" if cron else "reflection"
     CRASH["vault"] = vault
     global LANE_MODEL, LANE_EFFORT, LANE_NOTE, LANE_PROVIDER
-    LANE_MODEL, LANE_EFFORT, LANE_NOTE = loam_profile.lane_choice(
+    choice = loam_profile.lane_choice(
         config, WAKE_MODEL, pinned=bool(os.environ.get("LOAM_WAKE_MODEL")))
-    LANE_PROVIDER = loam_profile.lane_provider(config)
+    LANE_PROVIDER, LANE_MODEL = choice["provider"], choice["model"]
+    LANE_EFFORT, LANE_NOTE = choice["effort"], choice["note"]
 
     # LOAM_WAKE outlived the memory layer that introduced it. It used to
     # select which file a SessionStart hook injected; that hook is gone and
@@ -539,6 +529,11 @@ def _main() -> int:
     # run() is still a fire that failed.
     record = cron or loam_cron.REFLECTION
     fire = {"outcome": "failed", "stage": None}
+    if LANE_PROVIDER is None:
+        print(f"wake: {LANE_NOTE}", file=sys.stderr)
+        loam_schedule.record_fire(agent, record, "skipped", lane=lane,
+                                  started=started, finished=now_iso(), stage=LANE_NOTE)
+        return 0
     try:
         with loam_lock.hold(agent, lane, info={"engine": LANE_PROVIDER,
                                                "model": LANE_MODEL}):
@@ -1105,10 +1100,14 @@ def results_main(project: Path) -> int:
     vault = Path(config["vault"])
     CRASH["vault"] = vault
     global LANE_MODEL, LANE_EFFORT, LANE_NOTE, LANE_PROVIDER
-    LANE_MODEL, LANE_EFFORT, LANE_NOTE = loam_profile.lane_choice(
+    choice = loam_profile.lane_choice(
         config, WAKE_MODEL, pinned=bool(os.environ.get("LOAM_WAKE_MODEL")))
-    LANE_PROVIDER = loam_profile.lane_provider(config)
+    LANE_PROVIDER, LANE_MODEL = choice["provider"], choice["model"]
+    LANE_EFFORT, LANE_NOTE = choice["effort"], choice["note"]
     os.environ["CLAUDE_PROJECT_DIR"] = str(project)
+    if LANE_PROVIDER is None:
+        print(f"wake: {LANE_NOTE} Results remain queued.", file=sys.stderr)
+        return 0
     tried: set[str] = set()
     while True:
         pending = [r for r in loam_waiters.owed(by="run", persona=agent)

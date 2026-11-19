@@ -169,7 +169,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     : h('div', { class: 'setrow profile-file-unavailable' }, h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: title }), h('div', { class: 'setrow-sub', text: ref?.exists === false ? 'Not available' : unavailable })))
   function select(label, value, choices, choose, { fixed = false, hint = null, hintId = null } = {}) {
     if (fixed) return h('div', { class: 'profile-choice', key: label }, h('span', { class: 'setrow-title', text: label }), h('span', { class: 'profile-fixed', text: choices.find(o => o.id === value)?.name || value }))
-    return h('label', { class: `profile-choice${hint ? ' profile-choice-hinted' : ''}`, key: label }, h('span', { class: 'setrow-title', text: label }),
+    return h('label', { class: `profile-choice${label === 'Provider' ? ' profile-choice-provider' : ''}${hint ? ' profile-choice-hinted' : ''}`, key: label }, h('span', { class: 'setrow-title', text: label }),
       h('span', { class: 'settings-select' }, h('select', { 'aria-label': label, 'aria-describedby': hintId, disabled: st.busy || fixed, onchange: e => choose(e.target.value || null) },
         choices.map(o => h('option', { value: o.id ?? '', selected: (o.id ?? '') === (value ?? ''), disabled: o.disabled, text: o.name || o.label || o.id }))), icon.chevronDown(14)),
       hint ? h('span', { class: 'setrow-sub profile-choice-hint', id: hintId, text: hint }) : null)
@@ -178,7 +178,13 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     const defaults = kind === 'agent' ? data.defaults : data
     const effective = defaults.effective || {}, provider = host.state.providers.find(p => p.id === effective.provider)
     const own = kind === 'agent' ? defaults : kind === 'engineer' ? data.own || {} : data
-    const allowed = kind === 'agent' ? ['claude-code', 'codex', 'antigravity'] : data.providers || ['claude-code']
+    const allowed = kind === 'agent' ? ['claude-code', 'codex', 'antigravity'] : data.providers || [effective.provider].filter(Boolean)
+    const configured = own.provider ?? (effective.source === 'record' ? effective.provider : null)
+    const inherited = effective.source === 'default' ? 'Default' : 'Automatic'
+    const providerOptions = [
+      { id: '', name: effective.provider ? `${inherited} · ${providerName(effective.provider)}` : 'No provider connected' },
+      ...allowed.map(id => ({ id, name: providerName(id), disabled: !host.state.providers.find(p => p.id === id)?.connected })),
+    ]
     const models = modelsOf(provider), efforts = effortsOf(provider, effective.model)
     const automatic = [{ id: '', name: `Default${!own.model && effective.model ? ` · ${models.find(m => m.id === effective.model)?.name || effective.model}` : ''}` }]
     const choices = [...automatic, ...models]
@@ -188,9 +194,9 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     const applies = kind === 'agent' ? 'The default for new threads, wakes and scheduled runs. Any thread can still choose its own.'
       : kind === 'engineer' ? 'Applies to the next job. Running jobs keep their settings.' : 'Applies to the next run.'
     return group('Runs on', [
-      select('Provider', effective.provider, allowed.map(id => ({ id, name: providerName(id), disabled: !host.state.providers.find(p => p.id === id)?.connected })), value => c.patch({ provider: value }), { fixed: allowed.length === 1 }),
-      select('Model', own.model, choices, value => c.patch({ model: value, ...(!effortFits(provider, value, own.effort) ? { effort: null } : {}) })),
-      kind === 'engineer' ? ['quick', 'standard', 'hard'].map(tier => {
+      select('Provider', configured, providerOptions, value => c.patch({ provider: value })),
+      effective.provider ? select('Model', own.model, choices, value => c.patch({ model: value, ...(!effortFits(provider, value, own.effort) ? { effort: null } : {}) })) : null,
+      kind === 'engineer' && effective.provider ? ['quick', 'standard', 'hard'].map(tier => {
         const setting = effective.tiers?.[tier], value = setting?.from === 'tier' ? setting.model : null
         const options = [{ id: '', name: `Default${setting?.from === 'model' && setting.model ? ` · ${models.find(m => m.id === setting.model)?.name || setting.model}` : ''}` }, ...models]
         if (value && !models.some(m => m.id === value)) options.push({ id: value, name: value, disabled: true })
@@ -198,9 +204,9 @@ export function mountProfile(host, { controller = host.profiles, activity = host
           hint: { quick: 'Small mechanical jobs', standard: 'Most work', hard: 'Design-heavy and subtle work' }[tier], hintId: `engineer-tier-${tier}-hint`,
         })
       }) : null,
-      select('Thinking', own.effort, levels, value => c.patch({ effort: value })),
+      effective.provider && (kind === 'agent' || effective.provider !== 'antigravity') ? select('Thinking', own.effort, levels, value => c.patch({ effort: value })) : null,
       kind === 'engineer' && data.own && data.project !== 'default' ? settingsRow({ title: data.platform ? 'Use the built-in settings' : 'Use the default engineer settings', onclick: () => c.patch({ provider: null }) }) : null,
-    ], applies, defaults.not_honoured?.length ? 'Wakes and scheduled runs stay on Claude Code for now.' : null)
+    ], applies, defaults.not_honoured?.[0] ?? null)
   }
   function switchRow(title, sub, value, choose) {
     return h('div', { class: 'setrow profile-switch' }, h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: title }), sub ? h('div', { class: 'setrow-sub', text: sub }) : null),

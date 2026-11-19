@@ -31,14 +31,18 @@ An agent is made in a conversation, on the owner's yes, as a character and
 not a job (see `loam-making-an-agent`). Its face is drawn by the theme until
 the owner uploads a picture.
 
-**Providers.** An agent runs on Claude Code, Codex or Antigravity; the owner
-picks its default and can change it for one thread. Its model and thinking
-level are set the same way, in Settings › Agents: every run of the agent (a
-thread turn, a wake, a cron, a notice, a chat) uses that model unless a
-thread chose another for itself. Each provider is given
-the same files in its own shape. Each Loam release carries the version of
-each provider's CLI it was tested with, and installs exactly that one; a
-newer CLI arrives with a later Loam release, never by itself overnight.
+**Providers.** Connect an account in Settings › Connections. A provider
+is ready when its CLI is installed and its sign-in is usable. One
+connected provider is enough for the first hello and any agent that uses
+automatic selection. With several, conversations prefer Claude Code,
+then Codex, then Antigravity. An explicit choice in Settings › Agents or
+a thread's Providers & models stays selected if its sign-in stops working.
+A thread using the agent's default inherits it on the next turn. An
+automatic choice stays empty until a provider connects. Models and
+thinking levels belong to their provider. Loam uses the selected provider's
+defaults when a different provider's settings do not apply. Each CLI gets
+the same agent files in its own format and stays on the version pinned by
+the Loam release.
 
 **Threads.** The owner talks with agents in threads. Loam writes each
 thread's record into the vault as it happens (never edit one). A message
@@ -67,7 +71,11 @@ archiving an agent stops it. Its other schedules are crons. A file is live
 while it says `enabled: true`, and a change to it takes effect within a
 minute: the agent writes its own, giving a `reason:` for each change, and
 the owner can open and edit any of them in the app. A run starts when the
-box has memory for it; nothing caps how long it runs.
+box has memory for it; nothing caps how long it runs. Wakes, crons and background
+deliveries can use Claude Code or Codex. An automatic choice uses the first
+connected provider those runs support. An explicit unsupported provider
+pauses those runs. The nightly reviewer can use Claude Code or Antigravity
+and waits if neither is connected and automatic selection is on.
 
 **When something needs attention.** Loam itself posts nothing in a thread
 or on General's board: a thread's record holds only what the owner and the
@@ -122,9 +130,11 @@ is a brief to `Loam` with `scope: "app"`, which any agent may send: the
 engineer then changes only the `app/` folder, without the server's admin
 rights, runs the app's tests, and a deploy restarts the app alone; work
 that also touches the server is a `Loam` brief with no scope. Each engineer, Loam's
-included, runs on the provider, model and tiers set for it in Settings ›
-Agents (Loam's is Claude Code until someone changes it), from its next
-job; a job already running keeps what it started on. Its role and what it owns are in
+included, runs its next job on the provider, model and tiers set in
+Settings › Agents. An unset engineer uses the connected providers, with
+project engineers preferring Codex when it is connected. An existing
+project record can pin a runtime. A running job or a continuation keeps
+its provider. The engineer's role and scope are in
 the vault's projects folder, under `Loam/engineer/` (`role.md`,
 `projects/loam.md`): the owner's to read and change, and an update never
 overwrites a change of theirs. A job that changes how Loam works updates

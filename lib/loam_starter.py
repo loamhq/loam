@@ -90,6 +90,37 @@ def status() -> dict | None:
         return None
 
 
+def inherit_legacy_hello() -> bool:
+    """Clear the engine preselected by seeding an untouched legacy hello.
+
+    Old records did not label their generated engines. The completed seed
+    marker was written after the preset. A later thread write could have
+    chosen an engine, so leave those records alone.
+    """
+    import loam_threads as threads  # noqa: PLC0415
+
+    seeded = status()
+    if not isinstance(seeded, dict) or not seeded.get("thread") or not seeded.get("agent"):
+        return False
+    agent, tid = seeded["agent"], seeded["thread"]
+    with threads.locked(threads.VAULT):
+        try:
+            meta, messages, path = threads.read(tid)
+            if path.stat().st_mtime_ns >= marker_path().stat().st_mtime_ns:
+                return False
+        except (OSError, threads.ThreadError):
+            return False
+        if (meta.get("hello") is not True or meta.get("default") != agent
+                or meta["engines"] != {agent: "claude-code"} or meta["models"]
+                or threads.provider_card(agent).get("provider")
+                or len(messages) != 1 or messages[0].get("preset") is not True
+                or messages[0].get("id") != seeded.get("message")):
+            return False
+        meta["engines"].clear()
+        threads._rewrite(path, meta)
+        return True
+
+
 def _hello_thread(agent: str) -> str | None:
     """The id of a hello thread with this agent already on disk, if any."""
     import loam_threads as threads  # noqa: PLC0415
