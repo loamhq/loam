@@ -44,7 +44,10 @@ newer CLI arrives with a later Loam release, never by itself overnight.
 thread's record into the vault as it happens (never edit one). A message
 that tags nobody goes to the thread's default agent; `@Name` gives that
 agent a turn. Each thread has a board, a Markdown file of items for the
-owner in the vault's inbox.
+owner in the vault's inbox. The session host runs the provider and records its
+output as it arrives. The thread worker turns that output into the reply the
+app shows. Both currently run in the service that answers the app, so a
+planned service restart waits for conversations to go idle.
 
 **Wakes and crons.** An agent also runs by itself on a schedule, and each
 schedule is a file under its `crons/` saying when it runs (or once, at a set
