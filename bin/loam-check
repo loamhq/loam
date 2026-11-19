@@ -33,7 +33,14 @@ def main(argv: list[str]) -> int:
         if __import__("os").environ.get("LOAM_CHECK_CRASH"):
             # A crash on purpose, for proving the state file says one.
             raise RuntimeError("LOAM_CHECK_CRASH is set: a crash on purpose")
-        state = loam_check.tick(daily=True if "--daily" in argv else None)
+        # One tick at a time: a tick by hand beside the timer's would read
+        # the state the other is about to replace (found 2026-11-19).
+        import fcntl  # noqa: PLC0415
+        lock_path = loam_check.STATE_FILE.with_name(".check.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            state = loam_check.tick(daily=True if "--daily" in argv else None)
     except Exception as exc:  # noqa: BLE001 -- the crash is said, not swallowed
         try:
             import loam_check  # noqa: PLC0415
