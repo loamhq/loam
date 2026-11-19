@@ -1488,3 +1488,35 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   default). Merge listings one at a time and wait for each push run, or the
   runs race to push. `raw.githubusercontent.com` serves the old list for
   about five minutes after; read it through the API to check.
+
+## 2026-11-18 — Settings in seven (0.2.6)
+
+- **A Settings section is three things that must agree:** its entry in
+  `SETTINGS_SECTIONS` (`app/public/app-shape.js`), its registration in
+  `page/registrations.js` (id, title, icon, view), and its row in
+  `app/docs/settings-sections.registry.json` (`app-shape.test.js` compares
+  the ids). The phone's first page and the desktop nav both read the
+  registry, so order is set there.
+- **Old ids are kept by `settingsHome(page, provider)`**, which every way in
+  goes through (`goSettings`, `openSheet` for a `?modal=settings&section=`
+  address, `settingsBody`). `accounts` with a provider is the `api-key` page;
+  `CONNECTIONS_GROUP` says which group of Connections an old id named, and
+  the page scrolls there once (`sheet.group`, `groupShown`).
+- **Who is signed in is a header, not a route of the login's.** The gate's
+  `forward_auth` copies `Remote-User`/`Remote-Name`/`Remote-Email` onto every
+  request it passes, the app included, and the browser's subnet has them
+  taken off (`SIGHT_IDENTITY_HEADERS`). `GET /api/account` answers them; on
+  the loopback port there are none, and the page falls back to `/owner`'s
+  name. An app-answered read still needs its line in `PAGE_RELAY`.
+- **Many browser-free tests navigate Settings by row title** (`=== 'Providers'`
+  in github, acme, codex tests). Renaming a section breaks them by the dozen;
+  grep the old title in `app/test/` first.
+- **`tools/capture-settings.mjs`** walks every new surface on the fixture app
+  at 390/1440 light/dark and fails on overflow (the page and `.setmain`), a
+  page error, or the word "Accounts". `extraHTTPHeaders` stands in for the
+  gate's identity headers. In a thread, scroll a card with
+  `element.scrollIntoView` after a short wait: Playwright's
+  `scrollIntoViewIfNeeded` never finds it stable while the thread settles.
+- **A listed plugin's copy changes only on publishing.** Editing
+  `plugins/_listed/<id>/` changes nothing on an install until a new tag is in
+  the public plugins repository and the person updates it from the Market.
