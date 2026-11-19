@@ -257,7 +257,7 @@ ck.tick(AT, daily=True, tell=tell)
 CREDS.unlink()
 status = ck.current_run_status()
 check("availability: current login loss overrides the previous tick",
-      status["agents_can_run"] is False and status["action"]["provider"] == "claude-code", status)
+      status["agents_can_run"] is False and status["action"]["kind"] == "providers", status)
 ada_card = LABS / "ada" / "agent.json"
 original = json.loads(ada_card.read_text())
 ada_card.write_text(json.dumps({**original, "provider": "codex"}))

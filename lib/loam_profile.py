@@ -34,17 +34,9 @@ broker/README.md, "Agent profiles, engineers and the reviewer".
   tracked unit (``loam-reviewer.timer.d/schedule.conf``), and
   check-drift holds the drop-in to the setting.
 
-**Where the defaults apply** (said by ``defaults()``, which the page shows):
-an agent's provider is the engine a member starts on when it joins a
-thread (new threads, a member brought in); its model and thinking level
-are what a turn runs on whenever the thread has not chosen a model for it
-and the member is on that provider, existing threads included. A wake and
-a cron run on the persona's provider too (2026-11-13, bin/wake): Claude Code
-or Codex, on the persona's model and thinking level. Antigravity's lanes are
-not built (it has never run a turn on this box: no sign-in, so its event
-shapes are unmeasured), so an Antigravity persona's wakes run on Claude Code
-on the wake's own model, and the run's log says so
-(``provider_not_honoured``).
+**Where the defaults apply.** An agent can inherit a connected provider or
+name one explicitly. A thread member can override it. Wakes and crons have
+their own supported providers, and a lane with no eligible choice pauses.
 """
 
 from __future__ import annotations
@@ -56,6 +48,7 @@ import unicodedata
 from pathlib import Path
 
 import loam_config as lc
+import loam_provider_defaults as providers
 
 PROVIDERS = ("claude-code", "codex", "antigravity")
 PROVIDER_NAMES = {"claude-code": "Claude Code", "codex": "Codex",
@@ -113,36 +106,21 @@ class ProfileError(Exception):
 # What a lane runs on. Light on purpose: bin/wake and bin/review import it.
 # ---------------------------------------------------------------------------
 
-def lane_provider(config: dict) -> str:
-    """The provider a wake or a cron of this persona runs on: its own when a
-    lane can run there (``LANE_PROVIDERS``), else Claude Code."""
-    provider = config.get("provider") or "claude-code"
-    return provider if provider in LANE_PROVIDERS else "claude-code"
-
-
-def lane_choice(config: dict, wake_model: str, pinned: bool = False
-                ) -> tuple[str | None, str | None, str | None]:
-    """(model, effort, note) a wake or a cron of this persona runs on.
-
-    Its own model and thinking level on its own provider when a lane runs
-    there (Claude Code, and Codex since 2026-11-13). On Claude Code an unset
-    model is the wake's (``wake_model``); on Codex it is None, Codex's own
-    default, as a Codex conversation with no model chosen runs on. On a
-    provider no lane runs on (Antigravity) it is the wake's model on Claude
-    Code, with a sentence saying why. ``pinned`` (the environment named a
-    model, for a probe) keeps ``wake_model`` on Claude Code."""
-    provider = config.get("provider") or "claude-code"
-    effort = config.get("effort") if isinstance(config.get("effort"), str) else None
-    model = config.get("model") if isinstance(config.get("model"), str) else None
-    if provider == "codex":
-        return (model or None), (effort or None), None
-    if provider != "claude-code":
-        return (wake_model, None,
-                f"this persona's provider is {PROVIDER_NAMES.get(provider, provider)}; "
-                f"wakes and crons run on Claude Code ({wake_model}), because "
-                f"Antigravity has never run a turn on this box (no sign-in), so "
-                f"a lane on it could not be built against what it really sends")
-    return (wake_model if pinned or not model else model), (effort or None), None
+def lane_choice(config: dict, wake_model: str, pinned: bool = False) -> dict:
+    """The next wake, cron, or background delivery's provider and choices."""
+    explicit = providers.configured(config)
+    provider = (explicit if explicit in LANE_PROVIDERS else None) if explicit else (
+        providers.automatic(LANE_PROVIDERS))
+    choice = providers.agent_choice(config, provider)
+    if provider == "claude-code":
+        choice["model"] = wake_model if pinned else choice["model"] or wake_model
+    if provider is None:
+        choice["note"] = (f"Wakes and scheduled runs do not support {PROVIDER_NAMES[explicit]}."
+                          if explicit else
+                          "Connect Claude Code or Codex to run wakes and scheduled runs.")
+    else:
+        choice["note"] = None
+    return choice
 
 
 def claude_model(config: dict | None) -> str:
@@ -161,7 +139,7 @@ def claude_model(config: dict | None) -> str:
     config = config if isinstance(config, dict) else {}
     if (config.get("provider") or "claude-code") != "claude-code":
         return WAKE_MODEL_DEFAULT
-    return lane_choice(config, WAKE_MODEL_DEFAULT)[0] or WAKE_MODEL_DEFAULT
+    return providers.agent_choice(config, "claude-code")["model"] or WAKE_MODEL_DEFAULT
 
 
 def sync_settings_model(workspace: Path, config: dict) -> bool:
@@ -199,31 +177,30 @@ def reviewer_stored() -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def reviewer_provider() -> str:
-    """The provider the nightly reviewer runs on: the owner's setting, else
-    Claude Code. ``LOAM_REVIEWER_PROVIDER`` names one for a probe or a
-    one-off run, as ``LOAM_REVIEWER_MODEL`` names a model."""
+def reviewer_provider() -> str | None:
+    """The reviewer's explicit setting, or the first connected eligible CLI."""
     pinned = os.environ.get("LOAM_REVIEWER_PROVIDER")
     if pinned in REVIEWER_PROVIDERS:
         return pinned
     value = reviewer_stored().get("provider")
-    return value if value in REVIEWER_PROVIDERS else "claude-code"
+    return value if value in REVIEWER_PROVIDERS else providers.automatic(REVIEWER_PROVIDERS)
 
 
 def reviewer_choice(model: str, pinned: bool = False,
-                    provider: str | None = None) -> tuple[str, str | None]:
-    """(model, effort) the nightly reviewer runs on: the owner's setting over
-    ``model`` (bin/review's), unless the environment pinned one. On
-    Antigravity the fallback is ``REVIEWER_AGY_MODEL`` and there is no
-    effort; a model stored for one provider is never run on the other."""
+                    provider: str | None = None) -> tuple[str | None, str | None]:
+    """The reviewer's model and effort for the selected provider."""
     provider = provider or reviewer_provider()
+    if not provider:
+        return None, None
     stored = reviewer_stored()
-    same = (stored.get("provider") or "claude-code") == provider
-    chosen = stored.get("model") if same and isinstance(stored.get("model"), str) else None
-    effort = stored.get("effort") if same and isinstance(stored.get("effort"), str) else None
+    choice = providers.agent_choice(stored, provider)
     if provider == "antigravity":
-        return (model if pinned else chosen or REVIEWER_AGY_MODEL), None
-    return (model if pinned or not chosen else chosen), effort
+        if pinned or choice["model"]:
+            return (model if pinned else choice["model"]), None
+        if stored.get("provider") == provider or os.environ.get("LOAM_REVIEWER_PROVIDER") == provider:
+            return REVIEWER_AGY_MODEL, None
+        return providers.compatible_defaults(provider, REVIEWER_AGY_MODEL, None)
+    return (model if pinned else choice["model"] or model), choice["effort"]
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +305,7 @@ def update_agent(agent: str, patch: dict, check) -> dict:
     """Write the named fields of an agent's agent.json in one write.
 
     ``patch`` takes ``display``, ``provider``, ``model`` and
-    ``effort``; null puts a field back (the id's name, Claude Code, the provider's own model and level). A provider that
+    ``effort``; null restores the id's name, automatic provider selection, or the provider's own model and level. A provider that
     changes takes the model and level back to its own unless the same patch
     names them. ``check(provider, field, value)`` is the broker's: it
     answers the value as that provider takes it or raises. Nothing is
@@ -347,31 +324,37 @@ def update_agent(agent: str, patch: dict, check) -> dict:
         new = dict(config)
         if "display" in patch:
             new["display"] = _clean_display(agent, patch["display"])
-        before = config.get("provider") or "claude-code"
+        before = providers.configured(config)
         if "provider" in patch:
             p = patch["provider"]
             if p is not None and p not in PROVIDERS:
                 raise ProfileError(f"`provider` is one of {', '.join(PROVIDERS)}, "
-                                   f"or null for Claude Code")
-            if p in (None, "claude-code"):
+                                   f"or null to use a connected provider")
+            if p is None:
                 new.pop("provider", None)
             else:
                 new["provider"] = p
-            if (p or "claude-code") != before:
+            if p is None or p != (before or "claude-code"):
                 for k in ("model", "effort"):
                     if k not in patch:
                         new.pop(k, None)
-        provider = new.get("provider") or "claude-code"
         for field in ("model", "effort"):
             if field not in patch:
                 continue
             if patch[field] is None:
                 new.pop(field, None)
             else:
+                provider = providers.configured(new) or providers.automatic()
+                if provider is None:
+                    raise ProfileError(providers.SETUP, 409)
+                if not providers.configured(new) and provider != "claude-code":
+                    for k in ("model", "effort"):
+                        new.pop(k, None)
                 new[field] = check(provider, field, patch[field])
+                new["provider"] = provider
+        target = agent_path(agent)
         if new != config:
             text = render_agent(new)
-            target = agent_path(agent)
             tmp = target.with_name(target.name + ".tmp")
             tmp.write_text(text, encoding="utf-8")
             os.replace(tmp, target)
@@ -406,32 +389,20 @@ def identity(agent: str, config: dict) -> dict:
 def defaults(agent: str, config: dict, wake_model: str = "fable",
              persona_model=None) -> dict:
     """The agent's default provider, model and thinking level: as set
-    (null where not), as each lane will use them, and what is not honoured."""
-    provider = config.get("provider") if config.get("provider") in PROVIDERS else None
-    model = config.get("model") if isinstance(config.get("model"), str) else None
-    effort = config.get("effort") if isinstance(config.get("effort"), str) else None
-    eff_provider = provider or "claude-code"
-    own_model = None
-    if eff_provider == "claude-code" and persona_model is not None:
-        own_model = persona_model(agent)
-    lane_model, lane_effort, note = lane_choice(config, wake_model)
-    not_honoured = []
-    if note:
-        not_honoured.append(f"Wakes and crons: {note}.")
+    (null where unset), the effective choices, and any paused scheduled lane."""
+    provider = providers.configured(config)
+    effective = providers.agent_choice(config, provider or providers.automatic())
+    if effective["provider"] == "claude-code" and persona_model is not None:
+        effective["model"] = effective["model"] or persona_model(agent)
+    lane = lane_choice(config, wake_model)
+    note = lane.pop("note")
+    stored = providers.agent_choice(config, effective["provider"])
     return {
-        "provider": provider, "model": model, "effort": effort,
-        "effective": {"provider": eff_provider,
-                      "model": model or own_model,
-                      "effort": effort},
-        "threads": {"provider": eff_provider, "model": model or own_model,
-                    "effort": effort},
-        "wakes": {"provider": lane_provider(config), "model": lane_model,
-                  "effort": lane_effort},
-        "applies": ("New threads and members brought in start on the provider. "
-                    "The model and thinking level apply to every turn on that "
-                    "provider for which the thread has not chosen a model, from "
-                    "the next turn; a thread's own choice still wins."),
-        "not_honoured": not_honoured,
+        "provider": provider, "model": stored["model"], "effort": stored["effort"],
+        "effective": effective,
+        "threads": effective,
+        "wakes": lane,
+        "not_honoured": [note] if note else [],
     }
 
 
@@ -592,7 +563,7 @@ def engineers(running: dict | None = None) -> dict:
             "own": (_choice_row(own.get("provider"), own.get("model"), own.get("effort"),
                                 own.get("tiers"))
                     if own.get("provider") else None),
-            "effective": {"provider": eng.PROVIDER_OF[choice["runtime"]],
+            "effective": {"provider": eng.PROVIDER_OF.get(choice["runtime"]),
                           "model": choice["model"], "effort": choice["effort"],
                           "tiers": _effective_tiers(eng.tier_models(project, stored),
                                                     choice["model"]),
@@ -613,8 +584,7 @@ def engineers(running: dict | None = None) -> dict:
         })
     rows.sort(key=lambda r: (not r["platform"], r["project"]))
     default = stored.get("default") if isinstance(stored.get("default"), dict) else {}
-    builtin_model, builtin_effort = eng.builtin_choice(eng.DEFAULT_RUNTIME)
-    if default.get("provider"):
+    if default.get("provider") in eng.RUNTIME_OF:
         runtime = eng.RUNTIME_OF[default["provider"]]
         model, effort = eng.builtin_choice(runtime)
         eff = {"provider": default["provider"], "model": default.get("model") or model,
@@ -622,9 +592,12 @@ def engineers(running: dict | None = None) -> dict:
         tiers = default.get("tiers") if isinstance(default.get("tiers"), dict) else {}
         eff["tiers"] = _effective_tiers(tiers, eff["model"])
     else:
-        eff = {"provider": eng.PROVIDER_OF[eng.DEFAULT_RUNTIME], "model": builtin_model,
-               "effort": builtin_effort, "source": "record",
-               "tiers": _effective_tiers({}, builtin_model)}
+        runtime = eng.automatic_runtime()
+        model, effort = providers.compatible_defaults(
+            eng.PROVIDER_OF.get(runtime), *eng.builtin_choice(runtime))
+        eff = {"provider": eng.PROVIDER_OF.get(runtime), "model": model,
+               "effort": effort, "source": "automatic",
+               "tiers": _effective_tiers({}, model)}
     return {"engineers": rows,
             "default": {"own": (_choice_row(default.get("provider"), default.get("model"),
                                             default.get("effort"), default.get("tiers"))
@@ -632,8 +605,7 @@ def engineers(running: dict | None = None) -> dict:
                         "effective": eff,
                         "providers": list(ENGINEER_PROVIDERS),
                         "note": "Every project engineer without its own setting. "
-                                "Unset, each runs on its record's runtime (a new "
-                                "project's is Codex) and that CLI's built-in model."},
+                                "Unset, each uses its project record or a connected provider."},
             "applies": "From the next job; a job already running finishes on what "
                        "it started with."}
 
@@ -737,13 +709,18 @@ def update_engineer(name: str, patch: dict, check) -> dict:
                         if k not in patch:
                             row.pop(k, None)
                 row["provider"] = p
-        if ("model" in patch or "effort" in patch or "tiers" in patch) \
-                and not row.get("provider"):
-            # A model with no provider of its own: the provider it runs on now.
+        setting_choice = (patch.get("model") or patch.get("effort")
+                          or any((patch.get("tiers") or {}).values()))
+        if setting_choice and not row.get("provider"):
+            # Store the provider a deliberate model or effort belongs to.
             if is_default:
-                row["provider"] = eng.PROVIDER_OF[eng.DEFAULT_RUNTIME]
+                runtime = eng.automatic_runtime()
             else:
-                row["provider"] = eng.PROVIDER_OF[eng.engineer_choice(project)["runtime"]]
+                inherited = {**data, "projects": {k: v for k, v in projects.items() if k != name}}
+                runtime = eng.engineer_choice(project, inherited)["runtime"]
+            if runtime is None:
+                raise ProfileError(providers.SETUP, 409)
+            row["provider"] = eng.PROVIDER_OF[runtime]
         for field in ("model", "effort"):
             if field not in patch:
                 continue
@@ -854,6 +831,7 @@ def reviewer(persona_fallback: str = "fable") -> dict:
     stored = reviewer_stored()
     provider = reviewer_provider()
     model, effort = reviewer_choice(persona_fallback, provider=provider)
+    choices = providers.agent_choice(stored, provider)
     words = reviewer_schedule()
     try:
         timer = _systemd().timers([REVIEWER_TIMER])[REVIEWER_TIMER]
@@ -869,9 +847,9 @@ def reviewer(persona_fallback: str = "fable") -> dict:
         "default_schedule": REVIEWER_DEFAULT_SCHEDULE,
         "next_fire": timer.get("next"), "last_fire": timer.get("last"),
         "running_since": timer.get("running_since"),
-        "provider": stored.get("provider") or "claude-code",
+        "provider": stored.get("provider"),
         "providers": list(REVIEWER_PROVIDERS),
-        "model": stored.get("model"), "effort": stored.get("effort"),
+        "model": choices["model"], "effort": choices["effort"],
         "effective": {"provider": provider, "model": model, "effort": effort},
         "instructions": {"root": "system", "path": "Reviewer/CLAUDE.md"},
         "applies": "From the next run.",
@@ -914,15 +892,14 @@ def update_reviewer(patch: dict, check) -> dict:
         raise ProfileError("name a setting to change: schedule, provider, model, effort")
     if "provider" in patch and patch["provider"] not in (None, *REVIEWER_PROVIDERS):
         raise ProfileError(f"the reviewer's `provider` is "
-                           f"{' or '.join(REVIEWER_PROVIDERS)}, or null for claude-code")
-    stored_provider = reviewer_stored().get("provider") or "claude-code"
-    provider = (patch.get("provider") or "claude-code") if "provider" in patch \
-        else stored_provider
+                           f"{' or '.join(REVIEWER_PROVIDERS)}, or null to use a connected provider")
+    stored = reviewer_stored()
+    stored_provider = stored.get("provider")
+    provider = patch.get("provider", stored_provider)
     clean: dict = {}
     if "provider" in patch:
-        clean["provider"] = None if provider == "claude-code" else provider
-        if provider != stored_provider:
-            # A provider's models are its own (as an engineer's).
+        clean["provider"] = provider
+        if provider != stored_provider or provider is None:
             for k in ("model", "effort"):
                 if k not in patch:
                     clean[k] = None
@@ -940,6 +917,14 @@ def update_reviewer(patch: dict, check) -> dict:
             clean["schedule"] = None if words == REVIEWER_DEFAULT_SCHEDULE else words
     for field in ("model", "effort"):
         if field in patch:
+            if patch[field] is not None and provider is None:
+                provider = providers.automatic(REVIEWER_PROVIDERS)
+                if provider is None:
+                    raise ProfileError(providers.SETUP, 409)
+                clean["provider"] = provider
+                if provider != "claude-code":
+                    for k in ("model", "effort"):
+                        clean.setdefault(k, None)
             if patch[field] is not None and field == "effort" and provider == "antigravity":
                 raise ProfileError(
                     "on Antigravity the reviewer's thinking level is part of its "

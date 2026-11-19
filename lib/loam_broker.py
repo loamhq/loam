@@ -868,11 +868,14 @@ def login_state(env: dict | None = None) -> dict:
         return {"source": source, "expires_at": None, "days_left": None,
                 "connected": False,
                 "reason": f"the login could not be read ({type(exc).__name__})"}
-    oauth = data.get("claudeAiOauth") or {}
+    oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+    oauth = oauth if isinstance(oauth, dict) else {}
     if not oauth.get("accessToken"):
         return {"source": source, "expires_at": None, "days_left": None,
                 "connected": False, "reason": "the login holds no token"}
-    expiry = oauth.get("refreshTokenExpiresAt") or oauth.get("expiresAt")
+    expiry = oauth.get("refreshTokenExpiresAt")
+    if expiry is None and not oauth.get("refreshToken"):
+        expiry = oauth.get("expiresAt")
     if not isinstance(expiry, (int, float)) or isinstance(expiry, bool):
         # A login with no date on it. Connected, and honest that it cannot
         # say when that stops being true.

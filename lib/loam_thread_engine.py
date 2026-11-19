@@ -1633,18 +1633,18 @@ class ThreadEngine:
         # A watch kept on this member's session since its last turn lets
         # go: this turn reads the session from here.
         self.stop_tail(turn.thread_id, turn.persona)
-        engine = meta["engines"].get(turn.persona) or threads.default_engine(turn.persona)
-        model = turn.model or (meta.get("models") or {}).get(turn.persona) or None
-        # The persona's own defaults (2026-11-13, its profile's "Runs on"):
-        # its model when the thread chose none, and its thinking level, on
-        # the provider they were set for.
-        mine = threads.persona_defaults(turn.persona)
-        effort = None
-        if mine["provider"] == engine:
-            model = model or mine["model"]
-            effort = mine["effort"]
         if turn.dispatch:
-            engine, model = turn.dispatch["engine"], turn.dispatch["model"]
+            engine, model, effort = (turn.dispatch[key] for key in ("engine", "model", "effort"))
+        else:
+            from loam_provider_defaults import SETUP  # noqa: PLC0415
+            choice = await asyncio.to_thread(threads.persona_defaults, turn.persona,
+                                             meta["engines"].get(turn.persona))
+            engine = choice["provider"]
+            if not engine:
+                self.mark(turn.thread_id, turn.persona, SETUP)
+                return None
+            model = turn.model or (meta.get("models") or {}).get(turn.persona) or choice["model"]
+            effort = choice["effort"]
         others = [t["persona"] for t in self.live_turns(turn.thread_id)
                   if t["persona"] != turn.persona]
         if others:
@@ -2427,6 +2427,8 @@ class ThreadEngine:
             return "thread gone"
         if persona not in meta["members"]:
             return "not a member"
+        if (tid, persona) not in self.turns and threads.member_engine(meta, persona) is None:
+            return "waiting for a provider"
         why = self.system_turn_allowed(f"job:{record.get('job')}", tid, persona, None)
         if why:
             return why

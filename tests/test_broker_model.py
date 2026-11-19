@@ -325,7 +325,7 @@ async def main() -> None:
           [m["id"] for m in rows["claude-code"]["models"] if m["default"]], [])
 
     # A start on a chosen model and effort, as a thread turn starts one.
-    session = await broker.start_session("probe", model="sonnet", effort="high")
+    session = await broker.start_session("probe", provider="claude-code", model="sonnet", effort="high")
     check("a started session's record carries what it was started on",
           (session.meta()["model"], session.meta()["effort"]), ("sonnet", "high"))
     await session.stop()

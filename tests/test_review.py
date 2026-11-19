@@ -280,11 +280,12 @@ def on_antigravity(rv, tmp: Path, check) -> None:
                                                 "model": "claude-opus-5-5-high"}
         check(loam_profile.reviewer_choice("fable") == ("claude-opus-5-5-high", None),
               "Claude Opus via Antigravity, when picked")
-        loam_profile.reviewer_stored = lambda: {"model": "opus", "effort": "high"}
+        loam_profile.reviewer_stored = lambda: {
+            "provider": "claude-code", "model": "opus", "effort": "high"}
+        os.environ["LOAM_REVIEWER_PROVIDER"] = "antigravity"
         check(loam_profile.reviewer_choice("fable", provider="antigravity")
               == ("gemini-4-hydrogen-high", None),
               "a Claude Code model and effort are never run on Antigravity")
-        os.environ["LOAM_REVIEWER_PROVIDER"] = "antigravity"
         check(loam_profile.reviewer_provider() == "antigravity",
               "LOAM_REVIEWER_PROVIDER names one for a one-off run")
     finally:

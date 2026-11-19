@@ -67,7 +67,7 @@ def run(cd, configs: dict[str, str]) -> list:
 def lane_checks(cd) -> None:
     import loam_engineer as eng
     asked = []
-    eng.engineer_choice = lambda project, settings=None: {"model": "fable"}
+    eng.engineer_choice = lambda project, settings=None: {"runtime": "claude", "model": "fable"}
     eng.platform_project = lambda: None
     cd.sess.effective_model = lambda ws: (asked.append(ws.name) or
                                           ("claude-fable-5-2", "s.jsonl", None))
@@ -83,7 +83,7 @@ def lane_checks(cd) -> None:
     check("the reviewer on Antigravity is not compared with a Claude session",
           "reviewer" not in asked and not findings, repr((asked, findings)))
     check("...and the note says where it runs",
-          any("reviewer: on Antigravity (gemini-4-hydrogen-high)" in n for n in notes),
+          any("reviewer: on Antigravity" in n for n in notes),
           repr(notes))
 
     cd.loam_profile.reviewer_provider = lambda: "claude-code"

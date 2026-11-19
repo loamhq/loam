@@ -251,7 +251,7 @@ test('joins without a visible originating mention and other system messages stay
 test('addressed model recipients include newly mentioned agents and retain existing engines', () => {
   const agents=[{id:'quill',name:'Quill'},{id:'scout',name:'Scout'}]
   const thread={default:null,members:[{persona:'quill',engine:'codex',model:'one'}]}
-  assert.deepEqual(messageRecipients(thread,'@QUILL @scout Reply',agents),[thread.members[0],{persona:'scout',engine:'claude-code',model:null}])
+  assert.deepEqual(messageRecipients(thread,'@QUILL @scout Reply',agents),[thread.members[0],{persona:'scout',engine:null,model:null}])
   assert.deepEqual(messageRecipients(thread,'No mention',agents),[])
   assert.deepEqual(messageRecipients(thread,'mail@quill @quillish',agents),[])
 })

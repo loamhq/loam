@@ -299,8 +299,9 @@ def agy_argv(run_dir: Path, prompt: str) -> list[str]:
                         encoding="utf-8")
     line = [agy.AGY, f"--print={agy_job.prompt_arg(run_dir, text)}",
             "--output-format", "stream-json", "--dangerously-skip-permissions",
-            "--disable-slash-commands", "--agent", AGY_AGENT, "--model", MODEL,
-            "--settings", str(settings)]
+            "--disable-slash-commands", "--agent", AGY_AGENT, "--settings", str(settings)]
+    if MODEL:
+        line += ["--model", MODEL]
     for d in (AI_LABS, VAULT, STATE):
         line += ["--add-dir", str(d)]
     return line
@@ -800,6 +801,9 @@ def main() -> int:
         print(sheet)
         return 0
 
+    if PROVIDER is None:
+        print("review: Connect Claude Code or Antigravity to run the reviewer.", file=sys.stderr)
+        return 0
     refusal = preflight()
     if refusal:
         notice(f"{LANE} preflight refused: {refusal}")

@@ -693,11 +693,15 @@ async def broker_checks():
     server.threads._system_turns = None   # as after a broker restart: read from disk
     check("...and the record outlives the broker",
           server.threads.deliver_note(note), "already delivered")
+    from unittest.mock import patch
+
     job = {"job": "j1", "thread": threads.GENERAL_ID, "persona": "iris"}
-    check("the same guard holds for a job's delivery",
-          (server.threads.deliver_job(job, "Job one finished."),
-           server.threads.deliver_job(job, "Job one finished.")),
-          ("delivered", "already delivered"))
+    # The provider matrix tests sign-in. This fixture exercises deduplication.
+    with patch.object(threads, "member_engine", return_value="claude-code"):
+        check("the same guard holds for a job's delivery",
+              (server.threads.deliver_job(job, "Job one finished."),
+               server.threads.deliver_job(job, "Job one finished.")),
+              ("delivered", "already delivered"))
 
     # A notice whose file cannot be removed (a root run left it) is said
     # once, loudly, and never swallowed.

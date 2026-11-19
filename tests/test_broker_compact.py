@@ -137,7 +137,7 @@ async def main() -> None:
     # So an inherited variable in whatever runs this cannot pass for one the
     # broker set.
     os.environ.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
-    started = await broker.start_session("probe")
+    started = await broker.start_session("probe", provider="claude-code")
     record = started.meta()
     check("a session starts", started.state, "running")
     env = LAUNCHES[-1]["env"]

@@ -91,21 +91,24 @@ try:
     # -- the setting -------------------------------------------------------
     check("record runtime codex", project({"runtime": "codex"}).runtime, "codex")
     check("record runtime claude", project({"runtime": "claude"}).runtime, "claude")
-    check("no runtime: claude", project({}).runtime, "claude")
-    check("unknown runtime: claude", project({"runtime": "gpt"}).runtime, "claude")
+    import loam_provider_defaults as providers
+    original_available = providers.available
+    providers.available = lambda provider: (provider in ("claude-code", "codex"), None)
+    check("no runtime: automatic prefers a connected Codex", project({}).runtime, "codex")
+    check("unknown runtime: automatic", project({"runtime": "gpt"}).runtime, "codex")
     loam = eng.Project("Loam", root, root / "jobs", platform=True,
                        record={"runtime": "codex"})
     check("platform engineer: Claude Code with no setting, whatever its record says",
           loam.runtime, "claude")
-    check("new projects default to codex", eng.DEFAULT_RUNTIME, "codex")
+    providers.available = original_available
 
     models = [{"id": eng.CODEX_ENGINEER_MODEL, "efforts": ["low", "high"]}]
     check("drift: codex with a listed model is clean",
           drift.runtime_findings(project({"runtime": "codex"}), models), [])
     check("drift: claude is clean",
           drift.runtime_findings(project({"runtime": "claude"}), models), [])
-    check("drift: missing runtime is named",
-          "no `runtime`" in drift.runtime_findings(project({}), models)[0], True)
+    check("drift: missing runtime selects automatically",
+          drift.runtime_findings(project({}), models), [])
     check("drift: unknown runtime is named",
           "none of" in drift.runtime_findings(project({"runtime": "x"}), models)[0], True)
     check("drift: an unlisted model is named",

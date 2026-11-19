@@ -78,7 +78,7 @@ try:
     check("nothing set: Claude Code, its built-in model",
           eng.engineer_choice(loam, {}),
           {"runtime": "claude", "model": eng.ENGINEER_MODEL, "effort": None,
-           "source": "record"})
+           "source": "automatic"})
     for provider, runtime in (("codex", "codex"), ("antigravity", "antigravity"),
                               ("claude-code", "claude")):
         choice = eng.engineer_choice(loam, {"projects": {"Loam": {"provider": provider}}})

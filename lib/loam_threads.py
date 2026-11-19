@@ -759,34 +759,27 @@ def _rename_board(thread_id: str, old_rel: str, title: str) -> str:
 ENGINES = ("claude-code", "codex", "antigravity")
 
 
-def default_engine(persona: str) -> str:
-    """The engine a member starts on: the persona's own ``provider`` in its
-    agent.json if it names one, otherwise Claude Code."""
+def provider_card(persona: str) -> dict:
     try:
         card = json.loads((AI_LABS / persona / "agent.json").read_text("utf-8"))
-        if card.get("provider") in ENGINES:
-            return card["provider"]
-    except (OSError, json.JSONDecodeError):
-        pass
-    return "claude-code"
+    except (OSError, ValueError):
+        return {}
+    return card if isinstance(card, dict) else {}
 
 
-def persona_defaults(persona: str) -> dict:
-    """The persona's own defaults from its agent.json (2026-11-13, Settings >
-    Agents > its profile): ``{"provider", "model", "effort"}``, the provider
-    Claude Code when it names none and the others null. A turn takes the
-    model and effort when its member is on that provider and the thread has
-    chosen no model for it (lib/loam_thread_engine.py, ``run_turn``)."""
-    try:
-        card = json.loads((AI_LABS / persona / "agent.json").read_text("utf-8"))
-    except (OSError, json.JSONDecodeError):
-        card = {}
-    if not isinstance(card, dict):
-        card = {}
-    provider = card.get("provider") if card.get("provider") in ENGINES else "claude-code"
-    pick = (lambda k: card[k] if isinstance(card.get(k), str) and card[k].strip()
-            else None)
-    return {"provider": provider, "model": pick("model"), "effort": pick("effort")}
+def default_engine(persona: str) -> str | None:
+    return persona_defaults(persona)["provider"]
+
+
+def persona_defaults(persona: str, override: str | None = None) -> dict:
+    import loam_provider_defaults as providers  # noqa: PLC0415
+    card = provider_card(persona)
+    engine = override or providers.configured(card) or providers.automatic()
+    return providers.agent_choice(card, engine)
+
+
+def member_engine(meta: dict, persona: str) -> str | None:
+    return meta["engines"].get(persona) or default_engine(persona)
 
 
 def create(persona: str | None = None, title: str | None = None, *,
@@ -806,7 +799,7 @@ def create(persona: str | None = None, title: str | None = None, *,
     meta = {"id": thread_id, "title": title, "default": persona,
             "icon": None, "archived": False, "models": {},
             "members": members,
-            "engines": {m: default_engine(m) for m in members},
+            "engines": {},
             "board": board_rel(thread_id, title), "pinned": pinned,
             "created": now_iso(), **(extra or {})}
     with locked(VAULT):
@@ -1028,7 +1021,6 @@ def update(thread_id: str, *, title: str | None = None, default=_UNSET,
                 raise ThreadError(404, f"no persona named {p!r}")
             if p not in meta["members"]:
                 meta["members"].append(p)
-                meta["engines"].setdefault(p, default_engine(p))
         keep = meta["default"] if default is _UNSET else default
         for p in (remove or []):
             if p in meta["members"] and p != keep:
@@ -1041,22 +1033,31 @@ def update(thread_id: str, *, title: str | None = None, default=_UNSET,
             meta["default"] = default
             if default is not None and default not in meta["members"]:
                 meta["members"].append(default)
-                meta["engines"].setdefault(default, default_engine(default))
         for p, engine in (engines or {}).items():
-            if engine not in ENGINES:
-                raise ThreadError(400, f"engine {engine!r}: one of {', '.join(ENGINES)}")
+            if engine is not None and engine not in ENGINES:
+                raise ThreadError(400, f"engine {engine!r}: one of {', '.join(ENGINES)}, or null to inherit")
             if p not in meta["members"]:
                 raise ThreadError(400, f"{p} is not a member of this thread")
             if meta["engines"].get(p) != engine:
                 # A model is an engine's; a switch goes back to the persona's.
                 meta["models"].pop(p, None)
-            meta["engines"][p] = engine
+            if engine is None:
+                meta["engines"].pop(p, None)
+            else:
+                meta["engines"][p] = engine
         for p, model in (models or {}).items():
             if p not in meta["members"]:
                 raise ThreadError(400, f"{p} is not a member of this thread")
             if model is None:
                 meta["models"].pop(p, None)
             else:
+                # A saved model belongs to the provider it was checked on.
+                if p not in meta["engines"]:
+                    engine = default_engine(p)
+                    if engine is None:
+                        from loam_provider_defaults import SETUP  # noqa: PLC0415
+                        raise ThreadError(409, SETUP)
+                    meta["engines"][p] = engine
                 meta["models"][p] = model
         if icon is not _UNSET:
             if icon is not None and (not isinstance(icon, str) or len(icon) > 16):
@@ -1549,7 +1550,8 @@ def summary(thread_id: str, running=None) -> dict:
         # `model`: the member's own choice for this thread, null for the
         # persona's default (2026-11-09). `busy` is `running`'s other name,
         # the one the app reads.
-        "members": [{"persona": p, "engine": meta["engines"].get(p, default_engine(p)),
+        "members": [{"persona": p, "engine": member_engine(meta, p),
+                     "engine_override": meta["engines"].get(p),
                      "model": (meta.get("models") or {}).get(p),
                      "last_spoke_at": spoke.get(p), "running": p in live,
                      "busy": p in live}

@@ -349,8 +349,8 @@ ENTRIES: list[Entry] = [
            "1 to 40 characters, not another agent's id or name; null for the "
            "id's own", None, ("identity", "display")),
           ("provider", "An agent's default provider (new threads, wakes, crons)",
-           "claude-code, codex or antigravity; null for Claude Code. A change "
-           "puts the model and thinking level back to the provider's own",
+           "claude-code, codex or antigravity, or null to select a connected "
+           "provider automatically. A provider change clears its model and thinking level",
            "engines", ("defaults", "effective", "provider")),
           ("model", "An agent's default model",
            "a model its provider lists (describe lists them), or null for the "
@@ -506,7 +506,7 @@ ENTRIES: list[Entry] = [
            f'words, like "daily at 04:20 {lc.ZONE_TOKEN}" (the schedules\' grammar); null for '
            '04:20'),
           ("provider", "The reviewer's provider",
-           "claude-code or antigravity, or null for claude-code"),
+           "claude-code or antigravity, or null to select a connected provider automatically"),
           ("model", "The reviewer's model",
            "a model its provider lists, or null for its default (fable on "
            "Claude Code, gemini-4-hydrogen-high on Antigravity)"),

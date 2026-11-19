@@ -125,7 +125,7 @@ try:
           ("antigravity", eng.AGY_ENGINEER_MODEL))
     choice = eng.engineer_choice(loam, {"default": {"provider": "antigravity"}})
     check("...the default is never Loam's", (choice["runtime"], choice["source"]),
-          ("claude", "record"))
+          ("claude", "automatic"))
 
     # -- the models --------------------------------------------------------
     models = agy.parse_models(MODELS_TEXT)

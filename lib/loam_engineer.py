@@ -76,18 +76,8 @@ ENGINEER_MODEL = os.environ.get("LOAM_ENGINEER_MODEL", "claude-opus-5-5")
 MAX_TURNS = (int(os.environ["LOAM_ENGINEER_MAX_TURNS"])
              if os.environ.get("LOAM_ENGINEER_MAX_TURNS") else None)
 
-# Which CLI runs a PROJECT engineer: the record's `runtime`, one of these.
-# The owner, 2026-10-07 in chat: "make sure all of engineering agents for the
-# project, not the Loam main agent, are with Codex instead of Claude Code.
-# Their default model should be latest GPT with Sol on high effort." The
-# platform engineer's record is Claude Code. A record without the key ran on
-# Claude Code before the key existed and still does; `bin/provision` writes
-# DEFAULT_RUNTIME into every new record, and `bin/check-drift` names a
-# record without one. Flipping one project back is `"runtime": "claude"` in
-# its record and nothing else. (The platform engineer's choice is its own
-# setting since 2026-11-19; with none it is Claude Code, as before.)
-# `antigravity` since 2026-11-15 (lib/loam_agy_job.py), as a choice: the
-# owner wants to try it before any engineer moves, so nothing defaults to it.
+# Stored runtimes pin project engineers. Unset projects prefer Codex among
+# connected providers. The platform engineer uses the conversation order.
 RUNTIMES = ("claude", "codex", "antigravity")
 DEFAULT_RUNTIME = "codex"
 
@@ -454,21 +444,14 @@ class Project:
         return not self.platform and self.record.get("landing") == "pull_request"
 
     @property
-    def record_runtime(self) -> str:
-        """The record's own `runtime`: `claude` for the platform engineer
-        and for a record that predates the key."""
-        if self.platform:
-            return "claude"
+    def record_runtime(self) -> str | None:
+        """A runtime explicitly stored on the project record."""
         value = self.record.get("runtime")
-        return value if value in RUNTIMES else "claude"
+        return value if not self.platform and value in RUNTIMES else None
 
     @property
-    def runtime(self) -> str:
-        """`claude`, `codex` or `antigravity`: which CLI a job of this engineer runs. Since
-        2026-11-13 the engineer's setting (Settings > Agents > Engineers,
-        `engineer_choice`) when one is made, else the record's `runtime`.
-        The platform engineer's own setting too since 2026-11-19; with none
-        it is Claude Code, and it never follows the default."""
+    def runtime(self) -> str | None:
+        """The CLI a new job will run on."""
         return engineer_choice(self)["runtime"]
 
     def receipts_dir(self, vault: Path) -> Path:
@@ -502,14 +485,8 @@ class Project:
 #
 # Precedence: the engineer's own setting, else (project engineers only) the
 # default for every other project, else the record's `runtime` and the
-# built-in model and effort above. The platform engineer's own provider is
-# a setting like any other since 2026-11-19 (the owner, in chat: "Please make
-# the Loam engineer's provider editable by me and other users." "It should be
-# like the others."); until then it was Claude Code whatever was set. It does
-# not follow the default, so an install whose default is Codex keeps Loam's
-# engineer on Claude Code until its own provider is chosen. A setting is whole: a provider and,
-# optionally, a model and an effort for that provider; null model or effort
-# is that provider's built-in.
+# built-in model and effort above. The platform engineer has its own setting
+# and uses the connection default when unset.
 # ---------------------------------------------------------------------------
 
 HOST_SETTINGS = lc.STATE / "broker" / "settings.json"
@@ -519,8 +496,10 @@ PROVIDER_OF = {"claude": "claude-code", "codex": "codex",
 RUNTIME_OF = {v: k for k, v in PROVIDER_OF.items()}
 
 
-def builtin_choice(runtime: str) -> tuple[str, str | None]:
+def builtin_choice(runtime: str | None) -> tuple[str | None, str | None]:
     """(model, effort) a runtime runs on when nobody chose."""
+    if runtime is None:
+        return None, None
     if runtime == "codex":
         return CODEX_ENGINEER_MODEL, CODEX_ENGINEER_EFFORT
     if runtime == "antigravity":
@@ -568,12 +547,25 @@ def engineer_choice(project: "Project", settings: dict | None = None) -> dict:
           and default.get("provider") in RUNTIME_OF):
         row, source = default, "default"
     runtime = RUNTIME_OF[row["provider"]] if row else project.record_runtime
+    if runtime is None:
+        runtime, source = automatic_runtime(platform=project.platform), "automatic"
     model, effort = builtin_choice(runtime)
+    if source == "automatic":
+        from loam_provider_defaults import compatible_defaults  # noqa: PLC0415
+        model, effort = compatible_defaults(PROVIDER_OF.get(runtime), model, effort)
     if row:
         model = row.get("model") or model
         effort = row.get("effort") or effort
     return {"runtime": runtime, "model": model, "effort": effort,
             "source": source}
+
+
+def automatic_runtime(*, platform: bool = False) -> str | None:
+    from loam_provider_defaults import ORDER, automatic  # noqa: PLC0415
+    # A project engineer preferred Codex before inheritance was available.
+    preferred = PROVIDER_OF[DEFAULT_RUNTIME]
+    order = ORDER if platform else (preferred, *(p for p in ORDER if p != preferred))
+    return RUNTIME_OF.get(automatic(order))
 
 
 def choice_for(project: "Project", runtime: str) -> tuple[str, str | None]:
@@ -633,8 +625,7 @@ def tier_models(project: "Project", settings: dict | None = None) -> dict:
     """``{tier: model or None}`` as set for this engineer's next job: the
     chosen setting row's ``tiers``, None for each one nobody set."""
     stored = engineer_settings() if settings is None else settings
-    choice = engineer_choice(project, stored)
-    row = _setting_row(project, stored) if choice["source"] != "record" else None
+    row = _setting_row(project, stored)
     tiers = (row or {}).get("tiers") if row else None
     tiers = tiers if isinstance(tiers, dict) else {}
     return {t: (tiers.get(t) if isinstance(tiers.get(t), str) and tiers.get(t)
