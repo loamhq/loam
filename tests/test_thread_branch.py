@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""Branching a thread at one message into a new thread (2026-11-11).
-
-  - the window heuristic (`branch_window`): back to the last pause over 30
-    minutes, at most 12, at least 3, system lines left out, a foreign or
-    system id refused
-  - GET .../branch: the window, who (members first), the summarizer's
-    prompt and a fallback; reads only
-  - POST .../branch: the new thread (persona default and member, title,
-    `branched_*` frontmatter, the draft waiting in `summary.draft`), its
-    first line linking back, the source's line placed under the message
-    and linking forward, the source still read
-  - the draft is spent by the owner's first message, and PATCH clears it
-  - the persona's first turn in the branch gets the window and the source
-    file's path, and not the source's earlier messages
-  - `bin/thread branch`, as a persona does it
-
-Run: python3 tests/test_thread_branch.py
-"""
+"""Check branch context boundaries, preview, draft summary and the first message in the new thread."""
 
 import asyncio
 import importlib.machinery

@@ -1,43 +1,5 @@
 #!/usr/bin/env python3
-"""A message sent while a member works reaches that member (2026-11-14).
-
-The owner, 11-14 in t-153f9c43: a message sent while a persona is "in the
-middle of doing an action or a task ... gets queued up, but it doesn't
-always go to the agent once they're done". The case on the record is m6 in
-t-232b9184: sent while Ada's turn was generating after it had launched a
-background build, it was refused the hand-over (the turn was generating),
-never asked again, and sat queued until the owner re-sent it as m8 90 s
-later; then the queued turn for m6 ran with nothing new and said so (m10).
-
-Proved against the thread engine through the broker's routes with a fake
-harness whose turns the test holds open:
-
-  - Claude Code, a message during a tool call: steered into the turn in
-    flight (no second turn, no cancel), the steer text carries the message
-    id, one reply, `through` past it, `turn.steered` on the stream
-  - several rapid messages during one tool call: all delivered, in order,
-    none twice, no extra turn
-  - the end-of-turn race on Claude Code: a steer after the model's last
-    words is answered by the harness turn that opens after the `result`,
-    posted as this turn's next message
-  - Codex refusing the steer (`expectedTurnId` no longer active): the
-    message keeps its place and has an ordered turn of its own
-  - Antigravity (cannot steer): queued, `note` "will answer when this turn
-    ends", answered by its own turn
-  - the m6 regression: an engine that cannot steer, a task launched
-    mid-turn, a message while the turn generates -> delivered when the
-    turn's words are done, not when the next message comes
-  - two queued messages: the first queued turn reads both; the second does
-    not run with nothing new
-  - a turn that dies before replying: an explicit system line, and its
-    messages stay new to the next turn (`through` not advanced)
-  - `CodexSession.steer`: `turn/steer` with `expectedTurnId`; the log line
-    only once Codex accepted; a refusal logs nothing and answers None
-  - `Session.steer` (Claude): None with no turn open, else a stdin user
-    message after a `broker.user_message` with `steered: true`
-
-Run: python3 tests/test_thread_steer.py
-"""
+"""Check provider delivery and acknowledgement of a new message during an active turn."""
 
 import asyncio
 import importlib.machinery
@@ -54,8 +16,7 @@ TMP = Path(tempfile.mkdtemp())
 os.environ["LOAM_VAULT"] = str(TMP / "vault")
 os.environ["LOAM_AI_LABS"] = str(TMP / "ai-labs")
 os.environ["LOAM_THREADS_STATE"] = str(TMP / "state")
-# One member per engine: Ada on Claude Code, Iris on Codex, Cleo on
-# Antigravity.
+# Exercise each supported provider with a separate member.
 for who, provider in (("ada", "claude-code"), ("iris", "codex"),
                       ("cleo", "antigravity")):
     (TMP / "ai-labs" / who).mkdir(parents=True)

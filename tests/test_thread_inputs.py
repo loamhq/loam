@@ -1,34 +1,5 @@
 #!/usr/bin/env python3
-"""Input to a thread member is durable and ordered (2026-11-19, batch B step 2).
-
-Each (thread, member) has an ordered list of input on disk
-(lib/loam_thread_inputs.py): the owner's messages and returned results. A
-broker restart loses none of it, and a job's result can reach a turn that
-is generating about the same work. Proved against the thread engine with
-the fake harness of tests/test_thread_steer.py:
-
-  1. restart: a turn cut before a word, one owner message queued behind it
-     and one job result queued: nothing is posted at the stop, the list on
-     disk holds all three in order, and a new engine's ``resume_inputs``
-     gives each once and in order -- the first replayed turn reads both
-     messages (so the second runs no turn of its own), the result is its
-     own quiet turn after -- each prompt carries when it was queued, and
-     the list is empty after
-  2. once-only after a crash: a result left marked as given is not given
-     twice; a message left marked as given whose ``through`` the member
-     has passed runs no turn; input for a thread that is gone is dropped
-  3. a result steered into the Claude Code turn that briefed it: one
-     prompt, the steer carries the receipt note, no second turn, nothing
-     posted for it, the list empty once the turn ends
-  4. a result for a turn about something else (under way since after the
-     brief) waits behind it and has its own turn
-  5. a result for a turn parked on background work takes the session over
-     at once (the hand-over), on Claude Code
-  6. Antigravity, which cannot steer: the result waits for the turn to end
-  7. the handoff note says when the job finished
-
-Run: python3 tests/test_thread_inputs.py
-"""
+"""Check durable per-member input order and exactly-once delivery across steering and worker restarts."""
 
 import asyncio
 import importlib.machinery
@@ -45,8 +16,7 @@ TMP = Path(tempfile.mkdtemp())
 os.environ["LOAM_VAULT"] = str(TMP / "vault")
 os.environ["LOAM_AI_LABS"] = str(TMP / "ai-labs")
 os.environ["LOAM_THREADS_STATE"] = str(TMP / "state")
-# One member per engine: Ada on Claude Code, Iris on Codex, Cleo on
-# Antigravity.
+# Exercise each supported provider with a separate member.
 for who, provider in (("ada", "claude-code"), ("iris", "codex"),
                       ("cleo", "antigravity")):
     (TMP / "ai-labs" / who).mkdir(parents=True)

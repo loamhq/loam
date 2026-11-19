@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""A turn has no clock (2026-11-10).
-
-The owner, 11-10 13:14 PT, after "ada's turn ended: it ran past 30 minutes":
-"Please remove any limitations on how long a turn or session can run."
-Proved here against the thread engine with a fake harness and a clock the
-test moves (`Clock`, which stands in for the engine's `time`):
-
-  - a turn whose harness turn runs two hours (clock advanced) with no
-    `result` yet is still watched, posts no time-based system line, and its
-    reply posts when it comes;
-  - a turn parked on background work for two hours more is still watched,
-    and the reply the notification brings posts as the turn's own;
-  - `ENDED_WHY` names only real causes, and no "ran past" wording is left;
-  - an idle member session with nothing outstanding, stepped out, resumes
-    by id at the next message and answers.
-
-The broker's reaper half (a busy or waiting session kept two hours on, an
-idle one ended and resumed) is in tests/test_broker_seats.py, section 6.
-
-Run: python3 tests/test_thread_no_clock.py
-"""
+"""Advance the clock during active and background work and check that both can still finish."""
 
 import asyncio
 import importlib.machinery

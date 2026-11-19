@@ -1,29 +1,5 @@
 #!/usr/bin/env python3
-"""A background helper's result is not a persona's message (2026-11-12).
-
-Seen in thread t-6daf5a6f on 11-12: Ada launched a background subagent,
-its turn ended, and the subagent's last sentence ("The Show more fix is
-ready for Ada to check.") was drawn in the thread as Ada's words, as
-two raw engineer receipts had been before it. The readable record and the
-message's text were already right -- only top-level text is a persona's --
-but the reply's full record carried the subagent's last words under a
-``parent`` that named an ``Agent`` call made in the *previous* reply, so a
-reader that nests by parent (the page) drew them at the top level, as
-speech. ``loam_thread_steps.nest_carried`` gives such steps a ``carried``
-stub of that call. Driven through the broker's routes with a fake harness:
-
-  - a turn a task notification hands the persona, with its subagent's
-    last words ahead of it, posts only the persona's own text
-  - its full record has no top-level text but the persona's, and the
-    subagent's steps sit under a carried stub named from the task, with the
-    task's summary as its output
-  - a notification turn that writes nothing posts nothing
-  - a background shell command's completion: only the persona's text
-  - a record written before the fix is mended as it is read
-  - the readable thread file never holds the subagent's sentence
-
-Run: python3 tests/test_thread_notification_text.py
-"""
+"""Keep helper output under its parent tool call and only the member’s own words in the readable reply."""
 
 import asyncio
 import importlib.machinery

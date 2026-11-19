@@ -1,35 +1,5 @@
 #!/usr/bin/env python3
-"""What the thread stream says about order when the owner writes while a
-member works (2026-11-16).
-
-An owner sent a second message while an agent worked, and the agent's
-final reply appeared ABOVE it on the page. The record had it right (m1, then
-m2, then the agent's m3 twenty seconds later, steered [m2]). This
-proves the broker's half of the contract, through the thread stream route a
-browser reads (``Server.thread_stream``), with a fake harness whose long
-tool call the test holds open:
-
-  - several messages during one long tool call, then the reply: every
-    ``message.done`` on the stream comes in posting order with rising ids,
-    the reply last, its ``at`` after each message it took in, ``steered``
-    naming them
-  - ``turn.started`` comes before the owner's mid-turn messages: a page that
-    reserves the reply's place at ``turn.started`` must move the finished
-    reply below them (loam-ui's half; the broker cannot)
-  - the end-of-turn race, two replies in one turn around a message: a reply
-    is posted at its harness turn's ``result``, not when its words end, so
-    words streamed before the owner's message still post after it, and the
-    record and the stream both put them below it (the owner's rule, 11-16:
-    "if the final message actually gets posted after other messages, then
-    it should be ordered that way")
-  - a reload (the thread read) and a reconnect (``after=``) give the same
-    order the live stream gave
-
-Set LOAM_ORDER_DUMP to a file to keep the streams as JSON, for replaying
-through a page's reducer.
-
-Run: python3 tests/test_thread_completion_order.py
-"""
+"""Check that the event stream and stored thread order replies by completion when input arrives mid-turn."""
 
 import asyncio
 import importlib.machinery

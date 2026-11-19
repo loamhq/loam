@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""After the result, who is working, which model, and `@all` (2026-11-10).
-
-Driven through the broker's routes with a fake harness:
-
-  - a reply a background task's notification hands the session after its
-    turn's `result`, with no new request, is posted the moment it finishes:
-    its own message, its own `message.done`, not `late`, counted as
-    `late_prompt`; a broker restart still recovers one at the next turn
-  - a turn asked from outside the thread (the classic view) is not posted
-  - `background` and `working` per member and per row, and the `members`
-    event when they change, against a session that opens and closes tasks
-  - `model`: the id the engine said it ran on, on the record, the full
-    record, `message.done` and the read; absent when nothing said one
-  - the transcript marker under a Codex session's `thread_id`
-  - `@all` / `@everyone` from the owner: one turn per member, none doubled by
-    a mention beside it; from a persona, plain text; nobody to reach
-
-Run: python3 tests/test_thread_after.py
-"""
+"""Check background replies, member activity, model reporting and mention delivery after a turn ends."""
 
 import asyncio
 import importlib.machinery

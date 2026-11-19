@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""A persona's post outside a turn: its @mentions wake members (0.2.1).
-
-On 2026-11-17 one agent, from another thread, posted "@<other> ..." with
-`bin/thread post` into a thread both were members of; the other answered
-only when the owner next wrote, because a post gave nobody a turn (only a
-turn's reply ran the mention check). Now `bin/thread post` tells the broker
-(`POST /v1/threads/<id>/posted`) and `ThreadEngine.posted` wakes the members
-named, as a reply's mentions do, under the same chain cap.
-
-Checks:
-  - the route: a post naming a member gives that member a turn, and is on
-    the thread's stream;
-  - the same post told twice wakes nobody twice;
-  - a post naming nobody gives no turn; `@all` from an agent is plain text;
-  - two agents posting at each other stop at AGENT_CHAIN_CAP, with the
-    system line, until the owner writes again;
-  - a message that is not the poster's is refused;
-  - `bin/thread post` tells the broker, and says who was woken.
-
-Run: python3 tests/test_thread_posted.py
-"""
+"""Check that an out-of-turn post wakes mentioned members and respects thread membership rules."""
 
 from __future__ import annotations
 

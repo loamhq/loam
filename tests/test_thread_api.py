@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""The thread API loam-ui 7731c02 is built against (2026-11-09), through the
-broker's routes with a fake harness.
-
-  - a thread with no default: untagged messages are kept and nobody
-    answers; a tag or a default brings someone who reads the history
-  - PATCH: icon, pinned, archived, default null, per-member model (checked
-    against the engine), and General refusing rename, archive and delete
-  - GET /v1/threads?archived=1, and DELETE removing the record and board
-  - messages with a per-turn model and attachments uploaded to the thread
-  - a reply that speaks, works and speaks again kept as ordered segments
-  - an explicit waiting-on-a-background-task step
-  - the thread list's own stream
-  - `bin/thread rename` (2026-11-10): record title, file name, board file and
-    `board:` key moved together, the board's text kept, an open list told,
-    no line in the thread, General refused, a taken board name not shared
-
-Run: python3 tests/test_thread_api.py
-"""
+"""Exercise thread membership, model selection, metadata, messages and board operations through the API."""
 
 import asyncio
 import importlib.machinery
@@ -45,9 +28,7 @@ for who in ("ada", "iris", "cleo"):
 
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Supply fixture memory independently of the machine running the tests.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_threads as threads  # noqa: E402
@@ -274,7 +255,6 @@ async def main():
     got = (await call(server, "GET", f"/v1/threads/{tid}"))[1]
     check("...and the reply records it", got["messages"][-1].get("model"), "opus")
 
-    # a per-turn model, on Codex for Iris
     status, _ = await call(server, "PATCH", f"/v1/threads/{tid}", {"add": ["iris"]})
     status, body = await call(server, "POST", f"/v1/threads/{tid}/messages",
                               {"text": "@iris quick one", "model": "claude-sonnet-5"})
@@ -399,8 +379,7 @@ async def main():
           [(e.get("waiting"), e["label"]) for e in steps],
           [(True, "Waiting on a background task: count the seeds")])
     got = (await call(server, "GET", f"/v1/threads/{tid}"))[1]
-    # Each harness turn is its own message since 2026-11-10: until then the
-    # follow-up's answer replaced the first reply's text in one message.
+    # Follow-up replies are separate messages.
     check("...and the follow-up's answer is a message of its own, after the first",
           [m["text"] for m in got["messages"][-2:]],
           ["Starting a count.", "Forty seeds."])
@@ -459,7 +438,6 @@ async def main():
            if e["type"] == "thread.changed" and e.get("thread") == "general"][-1:],
           ["woke"])
 
-    # -- a persona renames a thread (2026-11-10), as the details page does ----
     def rename(tid, title, by="iris"):
         out = subprocess.run([sys.executable, str(AGENTS / "bin" / "thread"),
                               "rename", tid, title, "--by", by],

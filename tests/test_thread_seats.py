@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Thread turns at the cap, the default, the clock and who is in the room
-(2026-11-09), through the broker's thread routes with a fake harness.
-
-  1. **An untagged message goes to the default**, whoever spoke last and
-     whoever was tagged before; the default moves only on a PATCH, and the
-     thread says so when it does.
-  2. **Every turn knows the time**: the weekday, date and time in
-     America/Los_Angeles, fresh or resumed, and the transcript's stamps in
-     the same zone.
-  3. **A member's session is marked for the short idle stop**
-     (`cfg.THREAD_IDLE_S`), and the next turn resumes it by id.
-  4. **At a busy cap the thread shows the wait** in a person's words, once,
-     then answers; or fails with a plain sentence. Never the route.
-  5. **Each member carries `last_spoke_at` and `running`.**
-
-Run: python3 tests/test_thread_seats.py
-"""
+"""Check default routing, local time, idle resumption and visible status while a member waits for capacity."""
 
 import asyncio
 import importlib.machinery
@@ -42,9 +26,7 @@ for who in ("ada", "iris", "cleo"):
 
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Supply fixture memory independently of the machine running the tests.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_threads as threads  # noqa: E402

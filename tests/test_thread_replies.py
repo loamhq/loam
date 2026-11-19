@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""Every reply its own message, and every step kept (2026-11-10).
-
-A session that replies, then replies again with no new request -- a
-background task's notification handing it another turn -- left one thread
-message whose text was the last reply's; the first reply's text was gone.
-Driven here through the broker's routes with a fake harness:
-
-  - reply, then a second reply with no new request: two messages, in order,
-    each with its own id, and two `message.done` on the stream
-  - a subagent's step after the persona spoke does not wipe what it said
-  - the full record: text, tool input and untrimmed output, a permission
-    card and its answer, the end of each turn, in order, per message
-  - GET /v1/threads/:id/steps, ?steps=full on the read and the stream
-  - a reply made while nobody watched (a broker restart) is recovered at the
-    next turn, loud
-  - GET /v1/threads/writer counts all of it
-  - the session marker the transcript hook reads
-
-Run: python3 tests/test_thread_replies.py
-"""
+"""Check that each reply keeps its own text, ordered steps and completion event, including after recovery."""
 
 import asyncio
 import importlib.machinery
@@ -46,9 +27,7 @@ for who in ("ada", "iris", "cleo"):
 
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Supply fixture memory independently of the machine running the tests.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_threads as threads  # noqa: E402
@@ -209,7 +188,7 @@ async def main():
     server.threads = engine_mod.ThreadEngine(fake)
     status, row = await call(server, "POST", "/v1/threads", {"persona": "ada"})
     tid = row["id"]
-    # Ada's first turn opens the session, so the script can be set on it.
+    # Open the session before attaching its scripted responses.
     await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "hello"})
     await settle(server, tid)
     ada = next(iter(fake.sessions.values()))
@@ -293,9 +272,7 @@ async def main():
           entry["seq"][0] < entry["seq"][1], True)
     second = (await call(server, "GET", f"/v1/threads/{tid}/steps",
                          params={"message": replies[1]["id"]}))[1]["steps"][0]
-    # The Agent call t2 is the first reply's; this one carries a stub of it
-    # ahead of its subagent's steps, so they nest and are never drawn as the
-    # persona's words (2026-11-12, nest_carried).
+    # Carry the parent call into the next reply so helper steps keep their nesting.
     check("the second reply's record holds the subagent's call and the notification",
           [(s["type"], s.get("name") or (s.get("event") or {}).get("subtype"),
             s.get("parent")) for s in second["steps"]][:4],
@@ -322,10 +299,7 @@ async def main():
     check("the transcript hook's marker names this session's thread",
           (threads.STATE / "steps" / "sessions" / ada.id).read_text().strip(), tid)
 
-    # -- a reply nobody was watching ------------------------------------------
-    # A broker restart: the engine that kept watching after the result is
-    # gone (2026-11-10: a live one posts at once, test_thread_after.py), and
-    # the session takes a turn with nobody reading.
+    # Resume a session that finishes a reply while the thread worker is offline.
     server.threads.stop_all_tails()
     server.threads = engine_mod.ThreadEngine(fake)
     ada.emit(text("Live at 9da1888."))
@@ -343,7 +317,6 @@ async def main():
           (status, counts["replies"] >= 4, counts["late_recovered"],
            counts["steps_failed"]), (200, True, 1, 0))
 
-    # -- a turn that said nothing is not a reply (2026-11-10) -----------------
     def watch_stream():
         w = FakeWriter()
         return w, asyncio.create_task(server.thread_stream(tid, None, w))
@@ -437,7 +410,7 @@ async def main():
     check("...on the record or the stream",
           no_placeholder(new, w.items()), True)
 
-    # 4. the broker's waiting step ends nothing Ada said (m11's case)
+    # A waiting step can follow visible reply text.
     ada.script = [
         text("Status only: the job is landing."),
         {"type": "broker.background_tasks", "count": 1,
@@ -455,9 +428,7 @@ async def main():
           [m["text"] for m in server.threads.marks_for(tid)],
           ["Ada's turn ended: its session exited"])
 
-    # 5. the broker stopping (2026-11-19, batch B step 2): a turn it cuts
-    # after words posts them and its line; one it never starts posts nothing
-    # and keeps its input on disk, given when the broker starts again.
+    # Shutdown preserves partial replies and leaves unstarted input on disk.
     def stopping(s):
         fake.stopping = True
     ada.script = [text("Working on it."),

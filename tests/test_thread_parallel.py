@@ -1,27 +1,5 @@
 #!/usr/bin/env python3
-"""Members answer in parallel (2026-11-10).
-
-The owner, 11-10 14:06 PT: "While Ada is working, I can also send a message
-to Iris and have my conversation continue with Iris while Ada is still
-working." Proved against the thread engine through the broker's routes with
-a fake harness:
-
-  - two members, Ada's turn running long: a message to Iris starts Iris at
-    once, and Iris's reply lands before Ada's; `members` on the stream says
-    both working; the read carries `turns[]` (both, earliest first) and
-    `turn` (the earliest); the writer counts `parallel` and logs a line
-  - a second message to Ada mid-turn waits behind Ada's own turn, and that
-    next turn is told what Iris said while Ada ran (`through` is what a
-    turn read, not its own reply's id)
-  - `@all` in a three-member thread starts three turns at once; replies
-    whose `result`s land in the same tick are all recorded, in the order the
-    results arrived, with distinct ids, in the record and the full record
-  - a member whose words are done and who waits on background work reads
-    `busy` and not `working`, with `background_tasks[{id, description,
-    started_at}]`; the real Session stamps a task when the CLI first lists it
-
-Run: python3 tests/test_thread_parallel.py
-"""
+"""Check concurrent replies across members and ordered input to the same member."""
 
 import asyncio
 import importlib.machinery
@@ -255,7 +233,7 @@ async def main():
     server.threads = engine_mod.ThreadEngine(fake)
     engine = server.threads
 
-    # -- 1. Ada mid-turn; a message to Iris starts Iris at once ---------------
+    # A second member can answer while the first is busy.
     status, row = await call(server, "POST", "/v1/threads", {"persona": "iris"})
     tid = row["id"]
     stream = engine.listen(tid)
@@ -300,7 +278,7 @@ async def main():
           (said(tid)[-1], (tid, "ada") in engine.turns),
           (("iris", "Lunch is soup."), True))
 
-    # -- 2. a second message to Ada waits behind Ada's own turn -------------
+    # Input for the busy member waits behind its own turn.
     await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "@ada and also this"})
     await asyncio.sleep(0.08)
     check("a second message to Ada mid-turn does not start a second Ada turn",

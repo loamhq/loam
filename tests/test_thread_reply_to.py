@@ -1,27 +1,5 @@
 #!/usr/bin/env python3
-"""A message can reply to one earlier message (2026-11-11).
-
-Driven through the broker's routes with a fake harness:
-
-  - POST .../messages with `reply_to` stores it: the record's `loam` comment,
-    the one-line quote in the readable markdown, the parsed `text` without it
-  - served on the read, on `message.done` and in the POST's reply
-  - refused for another thread's id (404) and a malformed one (400), and
-    nothing is written or started
-  - the persona's prompt shows the referenced message, who, when, whole,
-    above the owner's words -- when it is far outside the new window, and when
-    it is inside it; a long one is cut with where the rest is
-  - a persona's `↩ m2` opening becomes `reply_to`, marker gone, also from its
-    first text segment; an id the thread lacks stays as text
-  - the full record's entry carries it; `bin/thread post --reply-to`
-  - (2026-11-17) the marker is never words on the page: the full record is
-    served without it when `reply_to` names it, the live stream holds an
-    opening that may be one and sends `reply_to` with the words, a natural
-    reply and an unknown id stream as written, and the prompt asks for words
-    rather than ids
-
-Run: python3 tests/test_thread_reply_to.py
-"""
+"""Check reply references across storage, prompt context and streaming, including invalid and foreign IDs."""
 
 import asyncio
 import importlib.machinery
@@ -203,7 +181,7 @@ async def main():
     tid = (await call(server, "POST", "/v1/threads", {"persona": "ada"}))[1]["id"]
     other = (await call(server, "POST", "/v1/threads", {"persona": "iris"}))[1]["id"]
 
-    # m1 the owner, m2 Ada's long-ago answer, then 60 more exchanges.
+    # Put the reply target outside the recent context window.
     await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "what's the plan?"})
     await settle(server, tid)
     ada = next(s for s in fake.sessions.values() if s.agent == "ada")
@@ -302,8 +280,7 @@ async def main():
     await settle(server, tid)
     check("...nothing written and no turn started",
           (len(threads.read(tid)[1]), len(ada.prompts)), (count, turns))
-    # Ids are per thread: the owner's reply above is an id only this thread
-    # holds, so naming it in Iris's thread is a foreign id.
+    # Message IDs are scoped to a thread.
     foreign = mine["id"]
     check("(the id is this thread's and not Iris's)",
           (threads.find(threads.read(other)[1], foreign) is None,
@@ -347,9 +324,7 @@ async def main():
     status, counts = await call(server, "GET", "/v1/threads/writer")
     check("the writer counts persona replies-to", counts.get("reply_to"), 2)
 
-    # -- the marker is never words on the page (2026-11-17) ----------------------
-    # The page builds a reply's words from its full record once its steps are
-    # read; before, the record's raw `↩ m111` showed under the quote.
+    # The full record supplies readable reply text without its storage marker.
     marked = [m for m in threads.read(tid)[1] if m.get("reply_to") == plan["id"]
               and m["author"] == "ada"]
     status, served = await call(server, "GET", f"/v1/threads/{tid}/steps")

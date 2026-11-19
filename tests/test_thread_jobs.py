@@ -1,41 +1,5 @@
 #!/usr/bin/env python3
-"""A thread's engineer jobs (2026-11-13): briefed from a thread, seen on it.
-
-A job briefed from a thread's turn -- by the persona or by any subagent of
-its session, which share the session's process tree -- records that thread
-in its brief's header, derived on the server (lib/loam_waiters.caller), not
-passed by the caller. The thread's record, ``GET /v1/threads/{id}``, then
-carries ``thread.jobs``: the jobs queued, running, landing, or finished in
-the last ten minutes, read from the launcher's job state
-(lib/loam_activity.job_rows), never from the persona's session.
-
-  1. `accept()`, as the brief tool calls it, from a conversation whose
-     session is a thread member's: the header says the thread. From a cron,
-     and from the shell, it says none. A `thread` argument passed by the
-     caller is not what decides it.
-  2. The caller walk from a subagent's tool call: the session id is found on
-     the CLI's own process, several levels up.
-  3. Every state through the broker's route: a running job (a real run lock
-     held), a queued one, a landing one, one finished five minutes ago and
-     landed, one finished and deployed, one cut off, one finished twenty
-     minutes ago (gone), another thread's (absent), a cron's (absent). Each
-     row has the contract's fields; the receipt is a vault path.
-  4. The same list read as a persona would: `bin/settings get thread.jobs`.
-  5. The outcome words, from the launcher's verdicts.
-  6. A brief returns at once, and its result comes back as input (batch B
-     steps 1 and 3): `--brief` from a thread, or from a cron, answers in
-     under five seconds with the job id and the receipt's path and never
-     waits; the cron's record goes by a run (tests/test_results.py). The
-     broker's own delivery pass then hands
-     two results that finished close together to the persona, each once,
-     oldest first, queued behind the persona's turn under way, which is
-     about something else (started after the briefs, so not steered into;
-     the steer into the briefing turn is tests/test_thread_inputs.py), and
-     posts nothing: a turn that reads one and says nothing
-     leaves the thread file as it was.
-
-Run: python3 tests/test_thread_jobs.py
-"""
+"""Check server-derived job ownership, live status and ordered delivery of finished jobs to their thread."""
 
 import asyncio
 import importlib.machinery

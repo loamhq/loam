@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Threads and boards (2026-11-08), through the broker's own routes.
-
-The record is a vault file, the turns run through `start_session`, and a
-thread opens from the record. A fake harness stands in for the persona
-sessions so the contract can be driven without a model: a thread made with a
-default, an untagged message answered by the default, a tag that brings a
-second persona in with its join line, an engine switch that starts fresh, a
-mention chain capped, the board swept by `until`, and `bin/thread post`.
-
-Run: python3 tests/test_threads.py
-"""
+"""Drive thread creation, routing, snapshots, mentions and board updates through the broker with a fake harness."""
 
 import asyncio
 import importlib.machinery
@@ -41,9 +31,7 @@ for who in ("ada", "iris", "juno"):
 
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Supply fixture memory independently of the machine running the tests.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_threads as threads  # noqa: E402
@@ -312,8 +300,7 @@ async def main():
     check("the bulletin is in General", (msgs[-1]["author"], msgs[-1]["kind"]),
           ("juno", "bulletin"))
 
-    # A page opened after the persona asked something (2026-11-08): the
-    # opening thread.snapshot carries the pending request, in the live shape.
+    # A new subscriber gets pending questions in its opening snapshot.
     fake.kind = AskingSession
     status, row = await call(server, "POST", "/v1/threads", {"persona": "iris"})
     asking = row["id"]
@@ -349,9 +336,7 @@ async def main():
           (snap["pending"], snap["turn"]), ([], None))
     fake.kind = FakeSession
 
-    # General leads the pinned threads by its id, whatever else is newer
-    # (2026-11-18); a plain thread titled "General" is not it, and
-    # with General unpinned or absent the order is pinned-then-newest as before.
+    # Only the pinned General board gets precedence. Its title alone confers none.
     def ordered(rows):
         saved = threads.index, threads.summary
         by_id = {r["id"]: r for r in rows}

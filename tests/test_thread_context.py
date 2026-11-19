@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""What a persona carries into a thread turn (2026-11-11).
-
-Driven through the broker's routes with a fake harness:
-
-  - the window heuristic: back to the last pause of more than 30 minutes, at
-    most 20 messages, the newest always in, an unreadable gap no pause
-  - a fresh session's first turn with no summary: told it has none and
-    where to write it, the recent exchange, the thread file's path, and
-    nothing older
-  - reply_to: a message in the window that replies to one outside it shows
-    that one whole, and nothing else from outside the window
-  - a resumed session is told only what in the window is new, and how many
-    new messages fell outside it
-  - rotation at the threshold: a session past it gets a fresh one seeded
-    with the persona's own summary; a reply the old one made unheard is
-    posted first; no system line; below it, or with work out, it resumes
-  - the broker never writes into a persona's workspace
-
-Run: python3 tests/test_thread_context.py
-"""
+"""Check recent history, summaries, quoted replies and context boundaries for fresh and resumed turns."""
 
 import asyncio
 import importlib.machinery

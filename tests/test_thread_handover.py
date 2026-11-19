@@ -1,31 +1,5 @@
 #!/usr/bin/env python3
-"""A message reaches a member who is only waiting on background work
-(2026-11-10).
-
-The owner, 11-10 15:41 PT, in t-6daf5a6f: Ada had replied and sat `busy`,
-not `working`, on one background subagent; two messages to Ada started no
-turn, because they queued behind that wait. Proved against the thread engine
-through the broker's routes with a fake harness:
-
-  - Claude Code: a member parked on a background task, a new message is
-    sent into the same live session at once (the task still out), answered
-    as its own message; the task's notification later lands as its own
-    reply; the writer counts `delivered_while_waiting` and logs a line
-  - a member that is generating still queues the message (`queued` 1,
-    `note` "will answer when this turn ends"); the moment that turn's words
-    are done and it parks on a task, the queued message is delivered
-  - Codex: the same hand-over (its root turn is over; `turn/start` is
-    accepted while subagents run)
-  - Antigravity (cannot take input while background work runs): the message
-    waits, the member reads `note` "will answer when its background task
-    returns", and is answered when the task returns
-  - older history pages: `before=<id>` is "earlier in the record than that
-    message", in record order, on an out-of-order record
-  - `GET /v1/threads/<id>?seen=0` reads without marking seen; without it
-    the newest page still marks seen
-
-Run: python3 tests/test_thread_handover.py
-"""
+"""Check immediate delivery to a member waiting on background work and preserve its outstanding task."""
 
 import asyncio
 import importlib.machinery
@@ -42,8 +16,7 @@ TMP = Path(tempfile.mkdtemp())
 os.environ["LOAM_VAULT"] = str(TMP / "vault")
 os.environ["LOAM_AI_LABS"] = str(TMP / "ai-labs")
 os.environ["LOAM_THREADS_STATE"] = str(TMP / "state")
-# One member per engine: Ada on Claude Code, Iris on Codex, Cleo on
-# Antigravity.
+# Exercise each supported provider with a separate member.
 for who, provider in (("ada", "claude-code"), ("iris", "codex"),
                       ("cleo", "antigravity")):
     (TMP / "ai-labs" / who).mkdir(parents=True)
@@ -297,10 +270,7 @@ async def main():
     await post(tid, "brief it")
     ok = await until(parked(tid, "ada"))
     ada = session_of(fake, "ada")
-    # The premise, waited for and not raced (2026-11-14): its words are in
-    # the record and the session is no longer mid-turn. Without this the
-    # check below read `working` (and the next post landed) a beat early,
-    # about 1 run in 30 on main, more on a slower box.
+    # Wait for both the recorded reply and the transition out of the active turn.
     await until(lambda: any("Briefed" in s for _, s in said(tid))
                 and not member(tid, "ada")["working"])
     m = member(tid, "ada")
@@ -330,7 +300,7 @@ async def main():
           (await call(server, "GET", "/v1/threads/writer"))[1]
           .get("delivered_while_waiting", None) is not None, True)
     await until(parked(tid, "ada"))
-    # The task returns: the CLI hands Ada a notification turn.
+    # Complete the background task with a notification turn.
     for ev in (done_tasks, init(), text("The engineer's receipt is in: done."), result(1)):
         ev(ada) if callable(ev) else ada.emit(ev)
         await asyncio.sleep(0.005)

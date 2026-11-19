@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Recovering a placeholder message from its session log (2026-11-10).
-
-``bin/backfill-thread-steps --force-placeholder THREAD:MSG`` on a record
-built here: a placeholder whose turn said two things (each becomes its own
-message at the time it was said, `late: true`, the first keeping the id),
-a placeholder whose reply is already in the thread (removed, not posted
-twice), a message that is not a placeholder (refused), and every other
-message's bytes unchanged. Full-record entries are written for each.
-
-Run: python3 tests/test_thread_recover.py
-"""
+"""Recover placeholder replies from session logs while preserving existing messages, IDs and timestamps."""
 
 import importlib.machinery
 import importlib.util
