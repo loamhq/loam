@@ -36,6 +36,7 @@ free, decided by the kernel (``renameat2`` with ``RENAME_NOREPLACE``).
 from __future__ import annotations
 
 import ctypes
+import errno
 import fnmatch
 import hashlib
 import mimetypes
@@ -43,7 +44,10 @@ import os
 import re
 import secrets
 import stat
+import struct
+import time
 import unicodedata
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -710,6 +714,260 @@ def download(root: str, raw_path: str | None) -> tuple[int, int, dict]:
         .strftime("%a, %d %b %Y %H:%M:%S GMT"),
     }
     return fd, st.st_size, headers
+
+
+# --- Archive: a folder as one zip (2026-11-18) --------------------------------
+#
+# `GET /v1/files/archive`: the owner's own export of the vault, the AI Spaces
+# or a folder in either, streamed as one ZIP while it is built. The app's own
+# fallback (list + download, file by file) cannot see dotfiles, so a vault zip
+# lacked `.obsidian/`, and could not carry a file over DOWNLOAD_MAX; this has
+# neither limit, and no SCAN_MAX either: a zip is whole or it is not a zip.
+#
+# What goes in is judged by `archive_keeps`, not `visible`: an export holds
+# everything that is the person's and nothing that is a credential, where
+# Files' browsing view also hides what is only noise to look at.
+
+# Never in an export, at any depth, in either root: git's object store (the
+# vault's `.git` was 4.9 GB of history on 2026-11-18; history is the Git
+# backup's to carry, not a copy of the files), and Syncthing's marker and its
+# versions folder (730 MB of older copies of the same files that day).
+ARCHIVE_NEVER = {".git", ".stversions", ".stfolder"}
+# Secret-shaped names the browsing rule does not already name; the app's
+# fallback left these out too.
+ARCHIVE_SECRET = re.compile(r"(?i)^secrets?\.(json|ya?ml|toml|env|txt)$")
+# In the spaces, runtime churn beyond SPACES_PRIVATE: lock files and a dotted
+# virtualenv, both in the ai-labs .gitignore.
+ARCHIVE_SPACES_CHURN = {".locks", ".venv"}
+# DEFLATE what compresses (the text types Files edits, and a few more text
+# kinds); STORE the rest: images, audio, PDFs and archives are compressed
+# already, and deflating gigabytes of them costs minutes for nothing.
+ARCHIVE_DEFLATE = set(TEXT_TYPES) | {"js", "mjs", "ts", "css", "py", "sh",
+                                     "xml", "svg", "ics", "log", "rtf", "tex"}
+# DOS time cannot say before 1980 or after 2107; the extended-timestamp field
+# beside it carries the exact second in UTC for every unzip that reads it.
+_DOS_MIN = (1980, 1, 1, 0, 0, 0)
+_DOS_MAX = (2107, 12, 31, 23, 59, 58)
+
+
+def archive_keeps(root: str, parent: list[str], name: str,
+                  agents: set[str] | None = None) -> bool:
+    """Whether ``name``, inside ``parent`` (a path from the top of ``root``),
+    goes into an archive."""
+    if (name in ARCHIVE_NEVER or SECRET_NAME.search(name)
+            or ARCHIVE_SECRET.search(name)):
+        return False
+    if root == "spaces":
+        if not parent:
+            agents = _agents() if agents is None else agents
+            return name in agents or name in ("commons", "README.md")
+        if (name in SPACES_PRIVATE or name in ARCHIVE_SPACES_CHURN
+                or name.endswith(SPACES_PRIVATE_SUFFIX)):
+            return False
+    return True
+
+
+def archive(root: str, raw_path: str | None) -> tuple[int, list[str], dict]:
+    """A descriptor on the folder to archive, its parts, and the headers the
+    answer goes with. Every refusal is raised here, before a byte is sent;
+    the caller hands the descriptor to ``archive_stream``, which closes it."""
+    if root not in ("vault", "spaces"):
+        _check_root(root)
+        raise FilesError(404, f"the {root} root is not archived; download "
+                              f"its files one by one")
+    parts = parse_path(raw_path)
+    check_visible(root, parts)
+    if not parts:
+        fd = _walk(root, parts)
+    else:
+        dfd = _walk(root, parts[:-1])
+        try:
+            st = os.stat(parts[-1], dir_fd=dfd, follow_symlinks=False)
+            if stat.S_ISREG(st.st_mode):
+                raise FilesError(400, f"{root}/{'/'.join(parts)} is a file; "
+                                      f"download it, or archive its folder")
+            if not stat.S_ISDIR(st.st_mode):
+                raise _missing(root, parts)
+            fd = os.open(parts[-1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                         | os.O_CLOEXEC, dir_fd=dfd)
+        except OSError:
+            raise _missing(root, parts) from None
+        finally:
+            os.close(dfd)
+    name = parts[-1] if parts else {"vault": "vault", "spaces": "ai-spaces"}[root]
+    headers = {
+        "Content-Type": "application/zip",
+        "Content-Disposition": "attachment; filename*=UTF-8''"
+                               + quote(name + ".zip", safe=""),
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "sandbox; default-src 'none'",
+        "Cache-Control": "no-store",
+    }
+    return fd, parts, headers
+
+
+class ArchiveError(Exception):
+    """A failure partway through an archive: the zip is abandoned unfinished."""
+
+
+class _Sink:
+    """The zip's output: bytes held until the stream takes them. It has
+    ``tell`` and no ``seek``, so zipfile writes data descriptors and never
+    goes back. Once dead it swallows writes: a failed zip's cleanup is not
+    sent."""
+
+    def __init__(self) -> None:
+        self.buf = bytearray()
+        self.pos = 0
+        self.dead = False
+
+    def write(self, data) -> int:
+        if not self.dead:
+            self.buf += data
+            self.pos += len(data)
+        return len(data)
+
+    def tell(self) -> int:
+        return self.pos
+
+    def flush(self) -> None:
+        pass
+
+    def take(self) -> bytes:
+        out = bytes(self.buf)
+        self.buf.clear()
+        return out
+
+
+def _zipinfo(arcname: str, st: os.stat_result, folder: bool) -> zipfile.ZipInfo:
+    try:
+        when = tuple(time.localtime(st.st_mtime)[:6])
+    except (OverflowError, OSError, ValueError):
+        when = _DOS_MIN
+    when = min(max(when, _DOS_MIN), _DOS_MAX)
+    info = zipfile.ZipInfo(arcname + ("/" if folder else ""), when)
+    info.create_system = 3
+    info.external_attr = (st.st_mode & 0xFFFF) << 16 | (0x10 if folder else 0)
+    secs = max(-2**31, min(int(st.st_mtime), 2**31 - 1))
+    info.extra = struct.pack("<HHBl", 0x5455, 5, 1, secs)
+    if folder:
+        info.CRC = info.compress_size = info.file_size = 0
+    else:
+        # The size zipfile judges Zip64 by: over ~4 GiB the entry is Zip64
+        # from its first byte. A file that grows past that while it is read
+        # fails the archive (zipfile refuses) rather than writing a wrong size.
+        info.file_size = st.st_size
+        info.compress_type = (zipfile.ZIP_DEFLATED
+                              if _ext(arcname.rpartition("/")[2]) in ARCHIVE_DEFLATE
+                              else zipfile.ZIP_STORED)
+    return info
+
+
+def archive_stream(root: str, parts: list[str], fd: int,
+                   stats: dict | None = None):
+    """The zip of the folder ``fd`` is open on, as chunks of bytes; it takes
+    ownership of ``fd``. Anything that cannot be read whole raises partway
+    (``ArchiveError``), and the zip's closing record is then never produced,
+    so what was sent is not a valid zip.
+
+    A symbolic link is never followed and never stored; a socket, a device
+    or a FIFO is not a file and is left out; a name that vanishes between the
+    scan and its open was not there to export. Everything else goes in or
+    fails the archive. ``stats``, when given, counts files, folders and bytes
+    as they go."""
+    stats = {} if stats is None else stats
+    stats.update(files=0, folders=0, bytes=0)
+    sink = _Sink()
+    zf = zipfile.ZipFile(sink, "w", allowZip64=True)
+    agents = _agents() if root == "spaces" else None
+    gone = (errno.ENOENT, errno.ELOOP, errno.ENOTDIR)
+
+    def where(rel: list[str]) -> str:
+        return f"{root}/{'/'.join(parts + rel)}"
+
+    def arcname(rel: list[str]) -> str:
+        name = "/".join(rel)
+        try:
+            name.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ArchiveError(f"{where(rel)!r} has a name that is not UTF-8; "
+                               f"rename it and download again") from None
+        return name
+
+    def opened(dfd: int, name: str, here: list[str], flags: int) -> int | None:
+        try:
+            return os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+                           | flags, dir_fd=dfd)
+        except OSError as exc:
+            if exc.errno in gone:
+                return None       # gone, or swapped for a link
+            raise ArchiveError(f"could not open {where(here)}: "
+                               f"{exc.strerror}") from None
+
+    def folder(dfd: int, rel: list[str]):
+        with os.scandir(dfd) as it:
+            names = sorted(item.name for item in it)
+        for name in names:
+            if not archive_keeps(root, parts + rel, name, agents):
+                continue
+            here = rel + [name]
+            try:
+                st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISDIR(st.st_mode):
+                cfd = opened(dfd, name, here, os.O_DIRECTORY)
+                if cfd is None:
+                    continue
+                try:
+                    zf.mkdir(_zipinfo(arcname(here), os.fstat(cfd), True))
+                    stats["folders"] += 1
+                    yield from folder(cfd, here)
+                finally:
+                    os.close(cfd)
+            elif stat.S_ISREG(st.st_mode):
+                ffd = opened(dfd, name, here, os.O_NONBLOCK)
+                if ffd is None:
+                    continue
+                try:
+                    fst = os.fstat(ffd)
+                    if not stat.S_ISREG(fst.st_mode):
+                        continue
+                    with zf.open(_zipinfo(arcname(here), fst, False), "w") as out:
+                        while True:
+                            try:
+                                chunk = os.read(ffd, CHUNK)
+                            except OSError as exc:
+                                raise ArchiveError(
+                                    f"could not read {where(here)}: "
+                                    f"{exc.strerror}") from None
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                            stats["bytes"] += len(chunk)
+                            if len(sink.buf) >= CHUNK:
+                                yield sink.take()
+                    stats["files"] += 1
+                finally:
+                    os.close(ffd)
+            # links, sockets, devices, FIFOs: not files, never followed
+            if len(sink.buf) >= CHUNK:
+                yield sink.take()
+
+    try:
+        yield from folder(fd, [])
+        zf.close()
+        if sink.buf:
+            yield sink.take()
+    except BaseException:
+        # Abandon the zip: nothing more reaches the stream, and zipfile's own
+        # cleanup (an open entry's close, the central directory) has nowhere
+        # to write.
+        sink.dead = True
+        zf.fp = None
+        raise
+    finally:
+        os.close(fd)
 
 
 # --- Writing -----------------------------------------------------------------

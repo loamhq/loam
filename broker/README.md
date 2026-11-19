@@ -141,7 +141,7 @@ on everything but `/up`.
 | `GET /v1/sessions/live` | what is in RAM now, thread members and any classic session still resident from before 2026-11-12, and the box's totals → `{sessions, box, at}` — "Live sessions" below |
 | `GET /v1/sessions/live/events` | SSE: `sessions.live`, the whole answer above, on open, within a second of any record change, and every 10 s when the numbers moved |
 | `POST /v1/sessions/end-idle` | ends every live session that is idle → `{ended: [{id, agent}], kept: [{id, agent, why}]}`. Never one that is working, asking, waiting on background work or carrying a thread's turn, nor one active in the last 15 s |
-| `GET /v1/files/roots`, `list`, `stat`, `read`, `download`, `resolve` | the vault, the agents' spaces and the runtime's documents, by root and path -- "Files" below |
+| `GET /v1/files/roots`, `list`, `stat`, `read`, `download`, `archive`, `resolve` | the vault, the agents' spaces and the runtime's documents, by root and path -- "Files" below |
 | `PUT /v1/files/text`, `POST /v1/files/file`, `POST /v1/files/folder`, `POST /v1/files/rename` | The owner's saves, creations and renames, revision-conditional, never deleting or replacing -- "Files" below |
 | `GET /v1/apps` | the Apps section's list: every agent site, every project's deployed container and every app plugin, each with its URL, owner, access, expiry, what it serves and whether the page may frame it → `{apps, sources}`, `Cache-Control: no-store`; **`503`** naming the record when one cannot be read; **`405`** to anything but `GET` -- "Apps" below |
 
@@ -3209,6 +3209,82 @@ Every JSON answer is `Cache-Control: no-store`. Errors are
 parameter, `401` no token, `403` read-only (with `authority`), `404` absent or
 not visible, `405` no such route (there is no delete), `409` a conflict, `413`
 too big, `415` not text / not a type Files creates or uploads.
+
+#### Archiving a folder as one zip (2026-11-18)
+
+`GET /v1/files/archive?root=<vault|spaces>&path=<folder>` is the owner's own
+export: the vault, the AI Spaces, or one folder in either, as one ZIP built
+while it is sent. The app's *Download* calls it and keeps its own
+list-and-download zip only as the fallback for a broker without the route
+(`405`). Code: `archive` and `archive_stream` in `lib/loam_files.py`,
+`files_archive` in `bin/session-broker`; tests in `tests/test_broker_files.py`
+(`test_archive`).
+
+**Request.** The bearer token, as everywhere (`401` without it); any other
+method `405`. The query is decoded once and `path` follows the other routes'
+rules (absent, empty or `/` is the top of the root). `system` or an unknown
+root `404`. `path` must be a folder Files can see: absent, hidden,
+secret-shaped or reached through a link `404 {"error": "nothing at …"}`; a
+file `400`. Every refusal is answered before a byte of zip, as JSON with
+`Cache-Control: no-store`.
+
+**Answer `200`.** `Content-Type: application/zip`, `Content-Disposition:
+attachment; filename*=UTF-8''<vault|ai-spaces|folder>.zip`,
+`X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox;
+default-src 'none'`, `Cache-Control: no-store`, `Connection: close`, and
+`Transfer-Encoding: chunked` with no `Content-Length`. The body is one ZIP:
+
+- entry names relative to the requested folder, `/`-joined; a name that is
+  not ASCII is UTF-8 with general-purpose bit 11 set (an ASCII name needs no
+  flag; it reads the same either way);
+- every folder is a `name/` entry, empty ones included, and every entry keeps
+  its modified time: the DOS field in local time, clamped to 1980–2107, and
+  an extended-timestamp field (`0x5455`) with the exact second in UTC;
+- DEFLATE for text (`loam_files.ARCHIVE_DEFLATE`: the types Files edits and a
+  few more text kinds), STORE for everything else, which is compressed
+  already; data descriptors throughout, since the output is never seeked;
+- Zip64 where it is needed: an entry over 4 GiB from its first byte, and the
+  Zip64 end records for an archive over 4 GiB or 65,535 entries.
+
+Memory is flat: the walk and the reads run on a worker thread one 64 KiB
+read at a time, and the loop sends each chunk and waits on `drain()` before
+the next. No temp file, no size cap per file, no 50,000-name cutoff.
+
+**Never a quietly incomplete zip.** Each entry goes in whole or the archive
+fails. A file that cannot be opened or read (other than one gone, or swapped
+for a link, between the scan and its open), a name that is not UTF-8, or a
+file that grows past what its entry was opened for: the broker logs
+`files: archive of <root>/<path> failed after <n> bytes …` and resets the
+connection, with neither the zip's central directory nor HTTP's last chunk
+sent. A client sees a failed download, and what it holds is not a valid zip.
+A finished archive logs its file, folder and byte counts and its time.
+
+**What goes in** (`archive_keeps`, not `visible`: an export holds everything
+that is the person's and nothing that is a credential, where browsing also
+hides what is only noise to look at):
+
+- Never a symbolic link (not followed, not stored), a socket, device or FIFO.
+- Left out at any depth, in both roots: `.git` (history is the Git backup's
+  to carry; the vault's was 4.9 GB on 2026-11-18), `.stversions` and
+  `.stfolder` (Syncthing's old copies and marker), every `SECRET_NAME` match,
+  and `secret.*`/`secrets.*` in `.json`, `.yaml`/`.yml`, `.toml`, `.env`,
+  `.txt` (`ARCHIVE_SECRET`).
+- In `spaces`: only agents, `commons` and `README.md` at the top, as
+  `visible` has it; `SPACES_PRIVATE` folders, `SPACES_PRIVATE_SUFFIX` files,
+  and `.locks` and `.venv` (`ARCHIVE_SPACES_CHURN`) left out.
+- Every other dotfile is kept: the vault's `.obsidian/` (so the zip opens in
+  Obsidian with its settings), `.trash/`, `.gitignore`, `.stignore`; a
+  workspace's `.claude/`, `.codex/`, `.agents/`, `.mcp.json` and
+  `skills/.usage.jsonl`. The rendered configurations name key files and
+  secret names, never their values.
+
+Names are judged, not contents: a credential pasted into a note or a
+transcript goes into the export as it is in the vault.
+
+On this box, 2026-11-18, through a scratch broker: the whole vault, 5.0 GB
+(5,003,261,181 bytes), 8,861 entries (8,427 files, 434 folders), 36 s, the
+broker's peak resident memory 53 MB (36 MB idle); the AI Spaces, 507 MB and
+1,263 entries in 4 s.
 
 #### Writing: the owner's, conditional, atomic
 

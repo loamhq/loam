@@ -15,7 +15,10 @@ plain and encoded; symlinks refused at every position, and a directory
 swapped for a link between a listing and a read; large, missing, binary and
 folder-as-file answers; read-only denial per authority; revision-conditional
 saves with a stale revision refused and the file untouched; creation that
-never overwrites; the owner's provenance on vault notes; and the link resolver.
+never overwrites; the owner's provenance on vault notes; and the link resolver; and
+`archive` (2026-11-18): a folder as one streamed Zip64 zip, with its
+refusals, exclusions, dotfiles kept, links never followed, a file over the
+download cap, and a failure partway leaving no valid zip.
 (A picked resource attached to a classic chat's message, within the session
 agent's read scope, retired with the classic chat view on 2026-11-12.)
 
@@ -32,6 +35,9 @@ import shutil
 import sys
 import tempfile
 import threading
+import io
+import time
+import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -1416,6 +1422,191 @@ def test_rename(c: Client, t: dict) -> None:
           ["Renamed folder", "dangling.md", "link.md", "taken.md"])
 
 
+def fetch_archive(c: Client, query: str, token=None):
+    """GET /v1/files/archive, read as far as the broker sends it. Returns the
+    status, the headers, the bytes received, and whether the body ended as
+    HTTP says a body ends (False: reset, or cut short)."""
+    conn = http.client.HTTPConnection("127.0.0.1", c.port, timeout=60)
+    tok = c.token if token is None else token
+    conn.request("GET", "/v1/files/archive" + query,
+                 headers={"Authorization": f"Bearer {tok}"} if tok else {})
+    resp = conn.getresponse()
+    got = bytearray()
+    whole = True
+    try:
+        while True:
+            chunk = resp.read(1 << 16)
+            if not chunk:
+                break
+            got += chunk
+    except http.client.IncompleteRead as exc:
+        got += exc.partial
+        whole = False
+    except (ConnectionError, OSError):
+        whole = False
+    conn.close()
+    return (resp.status, {k.lower(): v for k, v in resp.getheaders()},
+            bytes(got), whole)
+
+
+def unzip(data: bytes):
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+        return z if z.testzip() is None else None
+    except zipfile.BadZipFile:
+        return None
+
+
+def test_archive(c: Client, t: dict) -> None:
+    v, labs = t["vault"], t["labs"]
+    # The fixture's additions: an empty folder, a name that is not ASCII, the
+    # secret-shaped names only the archive rule names, a file over the 50 MiB
+    # download cap (sparse: its 51 MiB cost no disk), and a known mtime.
+    (v / "Empty").mkdir()
+    (v / "Café notes.md").write_text("# accents\n")
+    (v / "secrets.yaml").write_text(SECRET)
+    (v / "20_ATLAS" / "secret.json").write_text(SECRET)
+    (v / ".stversions").mkdir()
+    (v / ".stversions" / "old.md").write_text(SECRET)
+    (v / ".stfolder").mkdir()
+    (v / "Big").mkdir()
+    with open(v / "Big" / "huge.bin", "wb") as fh:
+        fh.truncate(files.DOWNLOAD_MAX + (1 << 20))
+    os.utime(v / "20_ATLAS" / "Unique note.md", (1700000000, 1700000000))
+    for agent in ("alpha", "beta"):
+        (labs / agent / ".agents").mkdir()
+        (labs / agent / ".agents" / "mcp_config.json").write_text("{}\n")
+        (labs / agent / ".locks" / "wake.lock").write_text("")
+        (labs / agent / "secrets.toml").write_text(SECRET)
+        (labs / agent / "memory" / "notes.pyc").write_bytes(b"\x00")
+
+    # Auth, method, roots and paths: refused before a byte of zip.
+    for tok in ("", "wrong"):
+        status, _, _, _ = fetch_archive(c, "?root=vault", token=tok)
+        check(f"archive: token {tok!r} is 401", status, 401)
+    status, _, _ = c.json("POST", "/v1/files/archive?root=vault", {})
+    check("archive: POST is 405", status, 405)
+    for query, want in (("?root=system", 404), ("?root=nowhere", 404),
+                        ("?root=vault&path=nothing-here", 404),
+                        ("?root=vault&path=.obsidian", 404),
+                        ("?root=vault&path=.git", 404),
+                        ("?root=vault&path=40_PROJECTS/archive.key", 404),
+                        ("?root=vault&path=inner-link", 404),
+                        ("?root=vault&path=link-dir", 404),
+                        ("?root=vault&path=..", 400),
+                        ("?root=vault&path=%2e%2e%2f40_PROJECTS", 400),
+                        ("?root=vault&path=tmp.md", 404),
+                        ("?root=vault&path=Many/n01.md", 400),
+                        ("?root=spaces&path=stray", 404),
+                        ("?root=spaces&path=alpha/logs", 404)):
+        status, headers, body, _ = fetch_archive(c, query)
+        check(f"archive {query}: {want}, a JSON sentence, no-store",
+              (status, "error" in json.loads(body), headers.get("cache-control")),
+              (want, True, "no-store"))
+        no_secret(f"archive refusal {query}", body.decode("utf-8", "replace"))
+
+    # The whole vault.
+    status, headers, body, whole = fetch_archive(c, "?root=vault")
+    check("vault archive: 200, a zip, ended as HTTP ends a body",
+          (status, headers.get("content-type"), whole),
+          (200, "application/zip", True))
+    check("vault archive: chunked, no length",
+          (headers.get("transfer-encoding"), headers.get("content-length")),
+          ("chunked", None))
+    check("vault archive: headers",
+          (headers.get("content-disposition"), headers.get("x-content-type-options"),
+           headers.get("cache-control")),
+          ("attachment; filename*=UTF-8''vault.zip", "nosniff", "no-store"))
+    z = unzip(body)
+    check("vault archive: a valid zip, every CRC right", z is not None, True)
+    names = set(z.namelist()) if z else set()
+    for name in (".obsidian/", ".obsidian/app.json", ".trash/40_PROJECTS/Loam/state.md",
+                 "15_CONVERSATIONS/2026-10-02 chat.md", "%2e%2e/literal.md",
+                 "Empty/", "Café notes.md", "Big/huge.bin", "image.png",
+                 "40_PROJECTS/Loam/state.md"):
+        check(f"vault archive holds {name}", name in names, True)
+    for name in (".git/config", "deploy.env", "server.pem", "40_PROJECTS/Loam/creds.env",
+                 "40_PROJECTS/archive.key/x.md", "secrets.yaml", "20_ATLAS/secret.json",
+                 ".stversions/old.md", ".stfolder/", "link-to-passwd.md",
+                 "link-dir/", "inner-link/", "inner-link/Loam/state.md"):
+        check(f"vault archive leaves out {name}", name in names, False)
+    check("vault archive: nothing reached through a link",
+          [n for n in names if n.startswith(("link-dir", "inner-link"))], [])
+    if z:
+        check("vault archive: a file over 50 MiB, whole",
+              z.getinfo("Big/huge.bin").file_size, files.DOWNLOAD_MAX + (1 << 20))
+        check("vault archive: bytes as on disk",
+              z.read("image.png"), (v / "image.png").read_bytes())
+        info = z.getinfo("Café notes.md")
+        check("vault archive: a UTF-8 name says so (bit 11)",
+              bool(info.flag_bits & 0x800), True)
+        info = z.getinfo("20_ATLAS/Unique note.md")
+        check("vault archive: a file keeps its modified time",
+              info.date_time, time.localtime(1700000000)[:6])
+        check("vault archive: text deflated, binary stored",
+              (info.compress_type, z.getinfo("image.png").compress_type),
+              (zipfile.ZIP_DEFLATED, zipfile.ZIP_STORED))
+
+    # A folder: names relative to it, its name on the file.
+    status, headers, body, _ = fetch_archive(
+        c, "?root=vault&path=" + quote("40_PROJECTS/Loam", safe=""))
+    z = unzip(body)
+    check("folder archive: named for the folder",
+          headers.get("content-disposition"), "attachment; filename*=UTF-8''Loam.zip")
+    check("folder archive: entries relative to it",
+          sorted(n for n in (z.namelist() if z else []) if not n.endswith("/")),
+          ["Loam.md", "Plan.md", "engineer/role.md", "notes.md", "state.md"])
+
+    # The spaces.
+    status, headers, body, whole = fetch_archive(c, "?root=spaces")
+    z = unzip(body)
+    check("spaces archive: 200, a valid zip, ai-spaces.zip",
+          (status, z is not None, whole, headers.get("content-disposition")),
+          (200, True, True, "attachment; filename*=UTF-8''ai-spaces.zip"))
+    names = set(z.namelist()) if z else set()
+    for name in ("alpha/soul.md", "alpha/.claude/settings.json", "alpha/.mcp.json",
+                 "alpha/.agents/mcp_config.json", "alpha/memory/MEMORY.md",
+                 "commons/alpha/note.md", "README.md", "beta/config.md"):
+        check(f"spaces archive holds {name}", name in names, True)
+    for name in ("alpha/logs/wake.log", "alpha/scratch/", "alpha/.locks/wake.lock",
+                 "alpha/wake.env", "alpha/.env", "alpha/secrets.toml",
+                 "alpha/memory/notes.pyc", "alpha/.claude/skills", "stray/", ".git/"):
+        check(f"spaces archive leaves out {name}", name in names, False)
+    check("spaces archive: nothing secret in it", SECRET.encode() in body, False)
+
+    # A failure partway: the zip is never finished, the HTTP body never ends.
+    broken = v / "Broken"
+    broken.mkdir()
+    (broken / "a.bin").write_bytes(os.urandom(2 << 20))
+    (broken / "z.md").write_text("unreadable\n")
+    keep = files._zipinfo
+
+    def failing(arcname, st, folder):
+        if arcname == "z.md":
+            raise OSError(5, "Input/output error")
+        return keep(arcname, st, folder)
+    files._zipinfo = failing
+    try:
+        status, _, body, whole = fetch_archive(c, "?root=vault&path=Broken")
+    finally:
+        files._zipinfo = keep
+    check("failure partway: 200 begun, then reset, not ended",
+          (status, whole), (200, False))
+    check("failure partway: some of the zip was sent", len(body) > (1 << 20), True)
+    check("failure partway: what arrived is not a valid zip", unzip(body), None)
+    if os.geteuid() != 0:
+        os.chmod(broken / "z.md", 0)
+        try:
+            status, _, body, whole = fetch_archive(c, "?root=vault&path=Broken")
+        finally:
+            os.chmod(broken / "z.md", 0o644)
+        check("an unreadable file fails the archive, never left out quietly",
+              (status, whole, unzip(body)), (200, False, None))
+    status, _, body, whole = fetch_archive(c, "?root=vault&path=Broken")
+    check("...and the same folder readable again is a whole zip",
+          (status, whole, sorted(unzip(body).namelist())), (200, True, ["a.bin", "z.md"]))
+
+
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="broker-files-test-"))
     keep = (cfg.STATE_DIR, cfg.SESSION_DIR, cfg.USAGE_PATH, cfg.TOKEN_PATH,
@@ -1451,6 +1642,7 @@ def main() -> int:
             test_system_pointers(c)
             test_upload(c, t)
             test_rename(c, t)
+            test_archive(c, t)
         finally:
             ready["loop"].call_soon_threadsafe(ready["stop"].set_result, None)
             thread.join(10)
