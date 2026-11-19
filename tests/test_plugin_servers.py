@@ -206,7 +206,10 @@ class FakeSystemd:
         out, rc = "", 0
         if args[0] == "systemd-run":
             name = next(a.split("=", 1)[1] for a in args if a.startswith("--unit="))
-            self.units[name] = {"LoadState": "loaded", "ActiveState": "active",
+            folder = next((a.split("=", 2)[2] for a in args
+                           if a.startswith("--property=WorkingDirectory=")), "")
+            self.units[name] = {"WorkingDirectory": folder,
+                                "LoadState": "loaded", "ActiveState": "active",
                                 "SubState": "running", "MainPID": "4242", "NRestarts": "0",
                                 "Result": "success", "ActiveEnterTimestamp": "now",
                                 "ExecMainStatus": "0"}
@@ -352,6 +355,17 @@ check("...leaves a failed one alone", "other" not in out["started"]
       and fake.units["loam-plugin-other.service"]["ActiveState"] == "failed")
 check("...and stops one no longer wanted", out["stopped"] == ["gone"]
       and "loam-plugin-gone.service" not in fake.units, out)
+
+# a unit running from another folder (a test's scratch copy under the real
+# unit name, 2026-11-19) is started afresh from the plugin's own
+fake.units["loam-plugin-echo.service"]["WorkingDirectory"] = "/tmp/a-test/plugins/echo"
+fake.calls.clear()
+out = S.reconcile()
+check("reconcile restarts a unit running from another folder than its plugin's",
+      (out["moved"], fake.units["loam-plugin-echo.service"]["WorkingDirectory"])
+      == (["echo"], str(YOURS / "echo")), (out, fake.units.get("loam-plugin-echo.service")))
+fake.calls.clear()
+check("...and leaves one in its own folder alone", S.reconcile()["moved"] == [] and not fake.started())
 
 # an update restarts only that unit
 fake.calls.clear()
