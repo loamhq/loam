@@ -2515,9 +2515,8 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
   .railtab:not(.on):hover,.railround:not(.on):hover,.navpill .navbtn:not(.on):hover { background:transparent; color:var(--paper-pane-ink); text-decoration:underline; text-underline-offset:4px; }
 }
 /* Plugin catalog uses the shared Settings rhythm and native controls. */
-.plugin-group,.plugin-install { margin:0; }
-.plugin-preview { margin:0; }
-.plugin-group > .kicker,.plugin-install > .kicker { margin:0 0 var(--space-lg); }
+.plugin-group { margin:0; }
+.plugin-group > .kicker { margin:0 0 var(--space-lg); }
 .plugin-list-row { display:flex; align-items:center; gap:8px; padding-right:14px; }
 .plugin-list-row + .plugin-list-row { border-top:1px solid var(--paper-rule); }
 .plugin-list-item + .plugin-list-item { border-top:1px solid var(--paper-rule); }
@@ -2633,17 +2632,8 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-declaration > .kicker { margin-bottom:10px; }
 .plugin-declaration ul { padding-left:20px; margin:0; }
 .plugin-declaration li { font-size:15px; line-height:1.5; margin:8px 0; }
-.plugin-install form,.plugin-install-options { display:flex; flex-direction:column; gap:10px; }
-.plugin-install label { display:block; font-size:13px; color:var(--paper-ink-2); }
-.plugin-install input { width:100%; min-width:0; }
-.plugin-install summary,.plugin-guide summary { padding:12px 0; cursor:pointer; color:var(--paper-ink-2); }
-.plugin-install-options > summary { display:flex; align-items:center; justify-content:space-between; gap:14px; list-style:none; }
-.plugin-install-options > summary::-webkit-details-marker { display:none; }
-.plugin-install-options > summary > svg { flex:none; }
-.plugin-install-options[open] > summary > svg { transform:rotate(90deg); }
-.plugin-preview { padding:18px; border:1px solid var(--paper-rule); border-radius:var(--radius-md); }
-.plugin-preview > .display { font-size:24px; margin:0; }
-.plugin-preview-actions,.plugin-remove-question { display:flex; flex-wrap:wrap; gap:10px; }
+.plugin-guide summary { padding:12px 0; cursor:pointer; color:var(--paper-ink-2); }
+.plugin-remove-question { display:flex; flex-wrap:wrap; gap:10px; }
 .plugin-remove-question > p { flex-basis:100%; }
 .plugin-source { display:inline-flex; align-items:center; min-height:44px; }
 .plugin-byline { display:flex; flex-wrap:wrap; align-items:center; column-gap:14px; margin:0; }
@@ -2900,3 +2890,7 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
 /* A heading the page focuses when a sheet opens (tabindex -1, for screen
    readers) draws no box: nobody can tab to it, so there is nothing to show. */
 :is(.sheet-title, [role="heading"], h1, h2, h3)[tabindex="-1"]:focus { outline:none; box-shadow:none; }
+/* A plugin installed from a link someone shared (2026-11-18). */
+.plugin-mark-link { display:inline-flex; align-items:center; gap:4px; }
+.plugin-from-link { display:flex; align-items:flex-start; gap:8px; }
+.plugin-from-link svg { flex:none; margin-top:3px; color:var(--paper-ink-3); }

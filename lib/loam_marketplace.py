@@ -141,6 +141,9 @@ def check_entry(entry) -> tuple[dict | None, str | None]:
         src = loam_plugins.parse_source({"url": link})
     except loam_plugins.PluginError as exc:
         return None, f"{pid}: {exc.message}"
+    if not src["ref"]:
+        # A listing is pinned: its readers see what its link names, always.
+        return None, f"{pid}: `link` is the plugin's GitHub link at a tag or a commit"
     out.update(link=link.strip(), repo=src["repo"], ref=src["ref"], path=src["path"])
     home = entry.get("homepage")
     if isinstance(home, str) and home.startswith("https://") and len(home) < 300:
@@ -834,6 +837,37 @@ def listing_address(pid: str, origin: str | None = None) -> str:
     return f"{origin.rstrip('/')}/?modal=market&listing={pid}"
 
 
+def link_address(link: str, origin: str | None = None) -> str:
+    """The app's address that opens the install-from-link sheet with a link
+    (public/market-card.js, ``linkAddress``)."""
+    return (f"{(origin or app_origin() or '').rstrip('/')}/?modal=market&install="
+            f"{urllib.parse.quote(link, safe='')}")
+
+
+def link_card(name: str, link: str, origin: str | None = None) -> str:
+    """The line that is a card for a plugin by its link, in a reply."""
+    name = " ".join(str(name).replace("[", "(").replace("]", ")").split())[:120] or "A plugin"
+    return f"[{name}]({link_address(link, origin)})"
+
+
+def read_link(link: str, by: str | None = None) -> dict:
+    """``loam market link``: what a link someone pasted holds, read as the
+    install sheet reads it (lib/loam_plugins.install's first call: nothing
+    is installed), with the card line that offers it in a reply. A
+    repository of several plugins answers each one, with its own card."""
+    import loam_plugins  # noqa: PLC0415
+    out = loam_plugins.install({"url": link}, by)
+    if out.get("choose"):
+        return {"repo": out["repo"], "choose": [
+            {**{k: v for k, v in c.items() if k != "icon"},
+             **({"card": link_card(c["name"], c["link"])} if c.get("link") and not c.get("broken") else {})}
+            for c in out["choose"]]}
+    keep = ("id", "name", "version", "author", "kind", "description", "declaration",
+            "note", "link", "installable", "why", "replaces", "warnings")
+    return {**{k: out.get(k) for k in keep}, "repo": out["source"]["repo"],
+            "source": out["source"], "card": link_card(out["name"], out["link"])}
+
+
 def card_line(entry: dict, origin: str | None = None) -> str:
     """The line an agent puts in its reply to show a listing's card: the
     name, linked to its page. Plain Markdown, so the thread record reads it
@@ -938,7 +972,13 @@ def listing_request(link: str, description: str | None = None, by: str | None = 
     preview = loam_plugins.install({"url": link}, by)
     if preview.get("installed"):
         raise ValueError("the link was installed, not read; this is a bug")
-    entry = entry_for(preview, link.strip(), description)
+    if preview.get("choose"):
+        raise ValueError("that repository holds several plugins: "
+                         + ", ".join(c["path"] for c in preview["choose"])
+                         + "; give the link to one of them (its folder)")
+    # Any link a person would paste is read; the listing carries the one it
+    # is pinned at (its tag, or its whole commit), which never moves.
+    entry = entry_for(preview, preview.get("link") or link.strip(), description)
     return {"entry": entry, "url": request_url(entry), "repo": repo(),
             "declaration": preview.get("declaration"),
             "commit": (preview.get("source") or {}).get("commit")}

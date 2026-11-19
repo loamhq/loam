@@ -67,7 +67,7 @@ any it does not know. It shows in Settings › Appearance to be chosen; look
 at it at a phone width and a desktop width, light and dark, before calling
 it done.
 
-**Sharing it** with someone, by link or in the marketplace, is
+**Sharing it** with someone, by link (the repository's address is enough: Loam finds the newest release and the folder) or in the marketplace, is
 `loam-publishing-to-the-marketplace`.
 
 If a change needs Loam itself to change, because no plugin can reach it, it

@@ -1,8 +1,10 @@
 // The path remains the document behind the desktop modal. Only these query
 // keys belong to the overlay; opening adds one history entry, drill-ins replace
 // it, and Back/Forward never reopen or unmount the underlying document.
-// The Market (2026-11-18) is an overlay of its own: `listing`, `kind`, `q`.
-const keys = ['modal', 'section', 'provider', 'account', 'profile', 'profile_id', 'listing', 'kind', 'q']
+// The Market (2026-11-18) is an overlay of its own: `listing`, `kind`, `q`,
+// and `install` (a GitHub link: the install-from-link sheet opens over it,
+// read and shown, never installed without the person's yes).
+const keys = ['modal', 'section', 'provider', 'account', 'profile', 'profile_id', 'listing', 'kind', 'q', 'install']
 function baseURL(url) {
   const base = new URL(url)
   for (const key of keys) base.searchParams.delete(key)
@@ -15,7 +17,8 @@ export function modalFromURL(url) {
     const listing = /^[a-z][a-z0-9-]*$/.test(q.get('listing') ?? '') ? q.get('listing') : null
     const k = ['theme', 'extension', 'app', 'agent', 'skill'].includes(q.get('kind')) ? q.get('kind') : 'all'
     const query = (q.get('q') ?? '').slice(0, 200)
-    return { kind, view: listing ? 'listing' : query ? 'results' : k !== 'all' ? 'kind' : 'front', id: listing, k, q: query }
+    const install = /^(?:https:\/\/github\.com\/|[\w-][\w.-]*\/)[^\s]{1,400}$/.test(q.get('install') ?? '') ? q.get('install') : null
+    return { kind, view: listing ? 'listing' : query ? 'results' : k !== 'all' ? 'kind' : 'front', id: listing, k, q: query, ...(install ? { install } : {}) }
   }
   if (kind !== 'settings') return null
   return { kind, page: q.get('section') || 'root', provider: q.get('provider'), account: q.get('account'),

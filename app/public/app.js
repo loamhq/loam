@@ -238,7 +238,7 @@ const moved = Object.fromEntries(Object.entries({
   settings: "settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsApiKey settingsAccount settingsConnections settingsAbout apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks",
   layout: "nav profileScreen profileBody desk rail filesList listColumn browseSection setCollapsed mainPane profilePane backToChat filesPane",
   sheets: "openSheet closeSheet sheetTop SHEET_SETTLE_MS pickerNodes filesSheetNodes sheetNodes",
-  market: "marketCards marketState openMarket openMarketInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore loadMarket"
+  market: "marketCards marketState openMarket openMarketInstall openLinkInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore marketLinkDoor loadMarket"
 }).flatMap(([group, names]) => names.split(' ').map(name => [name, group])))
 const shell = Object.defineProperties({}, {
   routePanels: { get: () => routePanels },
@@ -906,7 +906,7 @@ function fitViewport() {
 // never reach the thread opener and replace its in-memory conversation.
 const appModalHistory = createAppModalHistory({ wide: isWide, sheet: () => state.sheet,
   changed: schedule, close: () => page.closeSheet(), restore: sheet => {
-    if (sheet.kind === 'market') { modules.market.openMarket({ kind: sheet.k, q: sheet.q, id: sheet.id }); return }
+    if (sheet.kind === 'market') { modules.market.openMarket({ kind: sheet.k, q: sheet.q, id: sheet.id }); if (sheet.install) modules.market.openLinkInstall({ link: sheet.install }); return }
     page.openSheet(sheet)
     if (sheet.kind === 'activity') activity.load()
     if (sheet.detail) modules.settings.goSettingsDetail(sheet.detail.kind, sheet.detail.id)

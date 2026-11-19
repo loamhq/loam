@@ -568,10 +568,13 @@ ENTRIES: list[Entry] = [
           pick=lambda a, m: a["plugin"]["on"]),
     Entry("plugin.install", "action", "Install a plugin from a GitHub link",
           "POST /api/plugins", route="POST /v1/plugins", unattended=False,
-          values='a link to a folder at a tag or a commit (".../tree/v1.0.0/'
-                 'my-plugin"): first alone, which answers what it declares and a '
-                 '`confirm` token; then {"url": <the link>, "confirm": <the token>}'
-                 ' to install',
+          values='any GitHub link to it (the repository\'s address or owner/repo '
+                 'is enough: the newest release and the plugin\'s folder are '
+                 'found): first alone, which answers what it declares, a '
+                 '`request` naming exactly that and a `confirm` token (or '
+                 '`choose`, the plugins of a repository that holds several, each '
+                 'with its own `link`); then {**request, "confirm": <the token>} '
+                 'to install',
           body=lambda v, m: dict(v) if isinstance(v, dict) else {"url": v},
           timeout=420,
           note="Nothing is refused for what a linked plugin declares; the "

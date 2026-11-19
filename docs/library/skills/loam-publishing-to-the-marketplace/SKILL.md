@@ -6,9 +6,11 @@ description: How to share a Loam plugin, theme or skill with other people - by l
 # Sharing a plugin, and the marketplace
 
 A plugin is shared by **link**: its folder in a GitHub repository, at a
-tag. Anyone installs it from that link (Settings › Plugins › Install from a
-link). The **marketplace** is a list of such links that every Loam shows in
-Settings › Plugins; being on it is asking, not publishing.
+tag. Anyone installs it by pasting a link to it into **Install from a link**
+(in Settings › Plugins, and at the foot of the Market); the repository's
+address is enough, because Loam finds the newest release and the plugin's
+folder itself. The **marketplace** is a list of such links that every Loam
+shows in Settings › Market; being on it is asking, not publishing.
 
 What the owner needs: a GitHub account, connected in Settings › Connections
 (that is how you push for them), and a repository they made for it.
@@ -33,7 +35,9 @@ What the owner needs: a GitHub account, connected in Settings › Connections
    instead, so a tag names its plugin; Loam's own first-party plugins are
    published that way, in `loamhq/plugins`.
 4. **Give the owner the link.** It works for others once the repository is
-   public. Whoever installs it is shown what it declares under `touches`
+   public. Nobody has to build a link by hand: `https://github.com/<owner>/<repository>`
+   installs the newest version, and a repository of several plugins asks
+   which one. Whoever installs it is shown what it declares under `touches`
    before anything is installed, and every later version is confirmed again.
 
 A **skill** is shared the same way, as a plugin of `kind: skill` (a folder
@@ -47,15 +51,18 @@ The list lives in the public repository `loamhq/marketplace`; a listing is a
 pull request there, merged when it meets the rules its README sets out. To ask:
 
 ```
-loam market request https://github.com/<owner>/<repository>/tree/v1.0.0/<id> --description "One sentence on what it does."
+loam market request <a link to it> --description "One sentence on what it does."
 ```
 
+Any link to it works (the repository's address, or the one `share` answered).
 It reads the plugin from the link (nothing is installed) and answers the
-listing as it would be filed, and a link. Show the owner the listing. On
+listing as it would be filed, pinned at the release it found, and a link. Show the owner the listing. On
 their yes, give them the link: it opens GitHub's new-file page in the
 marketplace with the listing filled in. Signed in, they press **Propose new
 file**, then **Create pull request**; GitHub makes the fork on their account.
-The repository must be public, and the link at a tag, never a branch.
+The repository must be public, and the plugin released at a tag (`share`
+does that): a listing is pinned, so a branch's link is filed at the commit
+it is on now and never follows it.
 
 A listing can carry more, and is worth it (the marketplace's README has the
 fields): a `cover`, a wide picture (at least 1500 pixels across, 3:2) in the
@@ -74,5 +81,8 @@ owner, search it as they would (`mcp__engineer__market`, or `loam market
 search <words>`), and show what fits as a card in your reply: each result's
 `card` line, on a line of its own. They install it from the card, through
 the same sheet as the Market's, and say yes there; you never install it for
-them. Nothing listed yet is the normal state for a new marketplace, not an
+them. When someone hands you a link to a plugin that is not listed, read it
+with `mcp__engineer__market` and `link` (or `loam market link <link>`): any
+shape works, nothing is installed, and the answer's `card` line offers it the
+same way. Nothing listed yet is the normal state for a new marketplace, not an
 error: offer to build it instead.

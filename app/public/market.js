@@ -292,3 +292,26 @@ export function reachOf(declaration, kind = null) {
   if (t.server) return { tone: 'server', text: 'Stays on your server' }
   return { tone: 'safe', text: kind === 'theme' ? 'Only colours and type' : 'Stays on your Loam' }
 }
+
+// What a pasted link is, before the host reads it (2026-11-18, install from
+// a link): `{ ok: true, repo }` for any shape the host accepts as GitHub
+// (lib/loam_plugins.parse_source: a repository's address, owner/repo, a
+// .git or git@ address, a /tree/, /blob/, /commit/ or release link, with or
+// without a trailing slash or query), `{ ok: false }` for what plainly is
+// not one, and null while there is too little to tell (still typing).
+export function linkShape(text) {
+  const s = String(text ?? '').trim().replace(/^<|>$/g, '').trim()
+  if (!s) return null
+  const repo = (owner, name) => ({ ok: true, repo: `${owner}/${name.replace(/\.git$/, '')}` })
+  let m = /^(?:ssh:\/\/)?git@github\.com[:/]([\w.-]+)\/([\w.-]+?)\/?$/i.exec(s)
+  if (m) return repo(m[1], m[2])
+  m = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+)(?:[/?#].*)?$/i.exec(s)
+  if (m) return repo(m[1], m[2])
+  m = /^(?:https?:\/\/)?raw\.githubusercontent\.com\/([\w.-]+)\/([\w.-]+)\/.+$/i.exec(s)
+  if (m) return repo(m[1], m[2])
+  m = /^([\w-][\w.-]*)\/([\w.-]+)(?:\/(?:tree|blob|commit|releases)\/.*)?$/.exec(s)
+  if (m && !/\.[a-z]{2,}$/i.test(m[1])) return repo(m[1], m[2])
+  if (/^(?:https?:\/\/)?(?:www\.)?(?:g|gi|git|gith|githu|github|github\.(?:c|co|com)?)(?:\/[\w.-]*)?$/i.test(s) || /^https?:?\/?\/?$/i.test(s)) return null
+  if (/\s/.test(s) || /^https?:\/\//i.test(s) || /^[\w-]+(?:\.[\w-]+)+(?:\/|$)/.test(s)) return { ok: false }
+  return null
+}

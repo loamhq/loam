@@ -71,6 +71,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -1720,44 +1721,100 @@ def _staging() -> Path:
 # ---------------------------------------------------------------------------
 # Install from a link
 # ---------------------------------------------------------------------------
+#
+# A person pastes what they have (2026-11-18, "if someone wants to sideload
+# something, they should be able to do it fairly easily"): a repository's
+# address, `owner/repo`, a `.git` or `git@` address, a `/tree/<ref>[/<folder>]`,
+# a `/blob/…/PLUGIN.md`, a `/commit/<sha>`, a release page, with or without a
+# trailing slash, query or fragment. What the link leaves out is worked out:
+# with no tag, the newest release tag for that plugin (`<id>-v1.2.0`, else a
+# plain `v1.2.0`), else the commit the default branch is on; with no folder,
+# the one plugin in the repository, or the ones to pick from. A branch is
+# installed at the commit it points at now, and the answer says so in `note`.
+# Every refusal is a sentence a person can act on, with a `reason`
+# (empty, not-github, unreachable, timeout, no-folder, no-plugin, manifest,
+# short-commit, no-ref) for a page to draw by.
+#
+# What is installed stays pinned: the source records the tag or the commit,
+# and the confirm token is the commit's, so nothing here moves the wall.
 
 GITHUB = re.compile(
     r"^(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)"
-    r"(?:\.git)?(?:/(tree|blob|commit|releases/tag)/([^/?#]+)(/[^?#]*)?)?/?(?:[?#].*)?$")
+    r"(?:\.git)?(?:/(.*?))?/?$")
+RAW = re.compile(r"^(?:https?://)?raw\.githubusercontent\.com/([A-Za-z0-9_.-]+)/"
+                 r"([A-Za-z0-9_.-]+)/(.+)$")
+SSH = re.compile(r"^(?:ssh://)?git@github\.com[:/]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)"
+                 r"(?:\.git)?/?$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
+# A release tag: a version, alone or after the plugin's name (`v1.2.0`,
+# `1.2`, `foundry-v1.0.1`, `foundry@1.0.1`). A pre-release is never newest.
+RELEASE = re.compile(r"^(?:(?P<name>.+?)[-_@/])?v?(?P<ver>\d+(?:\.\d+){0,3})$")
+FIND_DEPTH = 3
+CHOICES_MAX = 24
+LINK_PICTURE_MAX = 600 * 1024
+
+
+def _not_github(what: str) -> PluginError:
+    return PluginError("That isn’t a GitHub link. Paste the address of the plugin’s "
+                       "repository on GitHub, like github.com/owner/repo.",
+                       400, {"reason": "not-github"})
 
 
 def parse_source(body: dict) -> dict:
     """``{"url"}`` (and optionally ``ref``, ``path``) into a repository, a ref
-    and a folder in it. The URL may be the repository's, a ``/tree/<ref>/<path>``
-    of it, a ``/commit/<sha>``, or a ``/releases/tag/<tag>``; ``owner/repo``
-    with ``ref`` beside it is the same."""
+    and a folder in it. ``ref`` is None when the link names none (``fetch``
+    finds the newest release) and ``path`` is "" when it names no folder
+    (``fetch`` finds the plugin's). A ``/tree/<ref>/<path>`` whose ref has a
+    slash in it is split at its first one here and rejoined by ``fetch``,
+    which knows the repository's refs."""
     url = body.get("url") if isinstance(body.get("url"), str) else body.get("repo")
     if not isinstance(url, str) or not url.strip():
-        raise PluginError('name the plugin: {"url": "https://github.com/owner/repo/'
-                          'tree/<tag or commit>/<folder>"}')
-    url = url.strip()
-    if re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", url):
-        url = "https://github.com/" + url
-    m = GITHUB.match(url)
-    if not m:
-        raise PluginError(f"{url!r} is not a GitHub repository's link")
-    owner, repo, how, ref, path = m.groups()
+        raise PluginError("Paste a GitHub link to the plugin: its repository, like "
+                          "github.com/owner/repo, is enough.", 400, {"reason": "empty"})
+    url = url.strip().strip("<>\"'").strip()
+    url = re.split(r"[?#]", url, maxsplit=1)[0]
+    if re.match(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+/(?:tree|blob|commit|releases)/", url):
+        url = "https://github.com/" + url      # a link with its address left off
+    owner = repo = None
+    how, ref, path = None, None, ""
+    if re.match(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$", url):
+        owner, repo = url.split("/")
+        repo = repo.removesuffix(".git")
+    elif m := SSH.match(url):
+        owner, repo = m.groups()
+    elif m := RAW.match(url):
+        owner, repo, rest = m.groups()
+        parts = [p for p in rest.split("/") if p]
+        how, ref = "blob", parts[0]
+        path = "/".join(parts[1:])
+    elif m := GITHUB.match(url):
+        owner, repo, rest = m.groups()
+        parts = [p for p in (rest or "").split("/") if p]
+        if parts[:1] in (["tree"], ["blob"]) and len(parts) > 1:
+            how, ref, path = parts[0], parts[1], "/".join(parts[2:])
+        elif parts[:1] == ["commit"] and len(parts) > 1:
+            how, ref = "commit", parts[1]
+        elif parts[:2] == ["releases", "tag"] and len(parts) > 2:
+            how, ref = "release", "/".join(parts[2:])
+        # Anything else of the repository's own pages (its releases list,
+        # `/releases/latest`, tags, issues) is the repository.
+    else:
+        raise _not_github(url)
+    if not owner or owner in (".", "..") or repo in (".", "..", ""):
+        raise _not_github(url)
     if how == "blob":
-        raise PluginError("that link is a file; link the plugin's folder "
-                          "(…/tree/<tag or commit>/<folder>)")
-    ref = body.get("ref") if isinstance(body.get("ref"), str) and body["ref"].strip() \
-        else ref
+        # A file's link: the folder it is in (PLUGIN.md's is the plugin's).
+        path = path.rsplit("/", 1)[0] if "/" in path else ""
+    if isinstance(body.get("ref"), str) and body["ref"].strip():
+        ref = body["ref"].strip()
     if isinstance(body.get("path"), str):
         path = body["path"]
-    path = (path or "").strip("/")
+    path = (path or "").strip().strip("/")
     parts = [p for p in path.split("/") if p]
     if any(p in (".", "..") for p in parts):
-        raise PluginError("the folder is a path inside the repository")
-    if not ref:
-        raise PluginError("name a tag or a commit to install at: a link to "
-                          ".../tree/<tag>/<folder>, or `ref` beside the link")
-    return {"repo": f"{owner}/{repo}", "ref": ref.strip(), "path": "/".join(parts)}
+        raise PluginError("The folder in that link isn’t a path inside the repository.",
+                          400, {"reason": "not-github"})
+    return {"repo": f"{owner}/{repo}", "ref": ref, "path": "/".join(parts)}
 
 
 def _git_base() -> str:
@@ -1783,88 +1840,309 @@ def _git(args: list[str], cwd: Path | None, env: dict) -> subprocess.CompletedPr
         return subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True,
                               text=True, timeout=GIT_TIMEOUT)
     except subprocess.TimeoutExpired:
-        raise PluginError(f"GitHub did not answer within {GIT_TIMEOUT} s", 504) from None
+        raise PluginError("GitHub didn’t answer in time. Try again in a moment.",
+                          504, {"reason": "timeout"}) from None
+
+
+def _github_connected() -> bool:
+    try:
+        import loam_github_app  # noqa: PLC0415
+        return loam_github_app.status() in ("installed", "authorized", "unhealthy")
+    except Exception:  # noqa: BLE001 -- no integration here
+        return False
 
 
 def _remote(src: dict) -> tuple[str, dict]:
     """The repository's address and a git environment that can read it:
-    anonymous first, then the GitHub App's read token for a private repo the
-    app is installed on."""
+    anonymous first, then the owner's GitHub connection (the App's read
+    token) for a private repository it is installed on."""
     url = _git_base() + src["repo"]
     env = _git_env()
-    probe = _git(["ls-remote", url], None, env)
+    probe = _git(["ls-remote", "--symref", url], None, env)
     if probe.returncode == 0:
         return url, env | {"_refs": probe.stdout}
+    connected = False
     if _git_base() == "https://github.com/":
         try:
             import loam_github_app  # noqa: PLC0415
             token = loam_github_app.read_token(src["repo"])["token"]
         except Exception:  # noqa: BLE001 -- no app, or not installed there
             token = None
+        connected = token is not None or _github_connected()
         if token:
             env = _git_env(token)
-            probe = _git(["ls-remote", url], None, env)
+            probe = _git(["ls-remote", "--symref", url], None, env)
             if probe.returncode == 0:
                 return url, env | {"_refs": probe.stdout}
     said = (probe.stderr or "").strip().splitlines()
-    raise PluginError(f"{src['repo']} cannot be read from GitHub: "
-                      f"{said[-1] if said else 'no answer'}"
-                      " (a private repository needs the GitHub App installed on it)",
-                      502)
+    print(f"plugins: {src['repo']} cannot be read: {said[-1] if said else 'no answer'}",
+          file=sys.stderr, flush=True)
+    raise PluginError(
+        f"Nothing could be read at github.com/{src['repo']}. Check the link. If the "
+        "repository is private, " + (
+            "your GitHub connection can’t see it yet: add it to the Loam app’s "
+            "repositories in Settings › Connections › GitHub, then try again."
+            if connected else
+            "connect GitHub in Settings › Connections first, then try again."),
+        404, {"reason": "unreachable", "repo": src["repo"], "github": connected})
 
 
-def _resolve(src: dict, refs: str) -> tuple[str, str]:
-    """The ref as a commit, and whether it was a tag or a commit. A branch is
-    refused: it moves, and an install is pinned."""
-    table: dict[str, str] = {}
-    for line in refs.splitlines():
+def _refs(text: str) -> dict:
+    """``ls-remote --symref`` as tags (peeled), heads and the default branch."""
+    tags: dict[str, str] = {}
+    heads: dict[str, str] = {}
+    default = head = None
+    for line in text.splitlines():
+        if line.startswith("ref: "):
+            target, _, name = line[5:].partition("\t")
+            if name.strip() == "HEAD":
+                default = target.strip().removeprefix("refs/heads/")
+            continue
         sha, _, name = line.partition("\t")
-        table[name.strip()] = sha.strip()
+        name, sha = name.strip(), sha.strip()
+        if name.startswith("refs/tags/"):
+            tag = name[len("refs/tags/"):]
+            if tag.endswith("^{}"):
+                tags[tag[:-3]] = sha
+            else:
+                tags.setdefault(tag, sha)
+        elif name.startswith("refs/heads/"):
+            heads[name[len("refs/heads/"):]] = sha
+        elif name == "HEAD":
+            head = sha
+    if default not in heads:
+        default = next((b for b, s in heads.items() if s == head), None) \
+            or ("main" if "main" in heads else next(iter(heads), None))
+    return {"tags": tags, "heads": heads, "default": default}
+
+
+def newest_tag(tags, names=()) -> str | None:
+    """The newest release tag: of one of ``names`` (`<name>-v1.2.0`) if any
+    is, else a plain version (`v1.2.0`); None when there is neither."""
+    named, plain = [], []
+    wanted = {n.lower() for n in names if n}
+    for tag in tags:
+        m = RELEASE.match(tag)
+        if not m:
+            continue
+        key = tuple(int(x) for x in m.group("ver").split("."))
+        key = key + (0,) * (4 - len(key))
+        name = (m.group("name") or "").lower()
+        if not name:
+            plain.append((key, tag))
+        elif name in wanted:
+            named.append((key, tag))
+    pick = named or plain
+    return max(pick)[1] if pick else None
+
+
+def _ref_of(src: dict, refs: dict) -> tuple[str, str, str, str, str | None]:
+    """A named ref as (ref, commit, kind, path, note). A `/tree/` ref with a
+    slash in it is the longest prefix the repository has. A branch is its
+    commit now, and the note says so; the install is pinned to that commit."""
+    segs = [src["ref"], *[p for p in src["path"].split("/") if p]]
+    for i in range(len(segs), 0, -1):
+        name, rest = "/".join(segs[:i]), "/".join(segs[i:])
+        if name in refs["tags"]:
+            return name, refs["tags"][name], "tag", rest, None
+        if name in refs["heads"]:
+            sha = refs["heads"][name]
+            return sha, sha, "commit", rest, (
+                f"{name} is a branch, so this installs the commit it is on now "
+                f"({sha[:7]}). It stays at that commit until you install it again.")
     ref = src["ref"]
-    tag = table.get(f"refs/tags/{ref}^{{}}") or table.get(f"refs/tags/{ref}")
-    if tag:
-        return tag, "tag"
     if SHA.match(ref.lower()):
-        return ref.lower(), "commit"
-    branch = table.get(f"refs/heads/{ref}")
-    if branch:
-        raise PluginError(f"{ref!r} is a branch, and a branch moves: install at a "
-                          f"tag, or at the commit it is on now ({branch})")
+        return ref.lower(), ref.lower(), "commit", src["path"], None
     if re.match(r"^[0-9a-f]{7,39}$", ref.lower()):
-        raise PluginError(f"{ref!r} looks like a short commit; name the whole "
-                          f"commit (40 characters)")
-    raise PluginError(f"{src['repo']} has no tag {ref!r}", 404)
+        raise PluginError(f"That link names a short commit ({ref}). Use the link to "
+                          "the whole commit, or to a release.", 400,
+                          {"reason": "short-commit"})
+    raise PluginError(f"github.com/{src['repo']} has no release or branch called "
+                      f"{ref}. Paste the repository’s own address and Loam finds "
+                      "its newest release.", 404, {"reason": "no-ref"})
+
+
+def _checkout(url: str, env: dict, what: str, into: Path) -> str:
+    """The repository at one tag or commit, under ``into``; its commit."""
+    into.mkdir(parents=True)
+    for args in (["init", "-q"],
+                 ["fetch", "-q", "--depth", "1", "--no-tags", url, what],
+                 ["-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD"]):
+        done = _git(args, into, env)
+        if done.returncode != 0:
+            said = (done.stderr or "").strip().splitlines()
+            print(f"plugins: fetching {url} {what}: "
+                  f"{said[-1] if said else done.returncode}", file=sys.stderr, flush=True)
+            raise PluginError("GitHub couldn’t send the plugin just now. Try again "
+                              "in a moment.", 502, {"reason": "unreachable"})
+    return _git(["rev-parse", "HEAD"], into, env).stdout.strip()
+
+
+def plugin_folders(root: Path, depth: int = FIND_DEPTH) -> list[str]:
+    """The folders under ``root`` (itself first) holding a PLUGIN.md, as paths
+    relative to it ("" for itself); dot-folders and node_modules are skipped,
+    and a plugin's own folder is not looked in further."""
+    found: list[str] = []
+
+    def walk(d: Path, rel: str, left: int) -> None:
+        if (d / "PLUGIN.md").is_file():
+            found.append(rel)
+            return
+        if left == 0:
+            return
+        try:
+            kids = sorted(p for p in d.iterdir() if p.is_dir() and not p.is_symlink())
+        except OSError:
+            return
+        for k in kids:
+            if k.name.startswith(".") or k.name in ("node_modules", "__pycache__"):
+                continue
+            walk(k, f"{rel}/{k.name}".lstrip("/"), left - 1)
+
+    walk(root, "", depth)
+    return found
+
+
+def _data_uri(folder: Path, rel, pattern, limit: int) -> str | None:
+    """A picture in the plugin's folder as a data: address, for a page to
+    show before anything is installed; None when it is not one."""
+    if not isinstance(rel, str) or not pattern.match(rel):
+        return None
+    f = folder / rel
+    try:
+        if f.is_symlink() or not f.is_file() or f.stat().st_size > limit \
+                or folder.resolve() not in f.resolve().parents:
+            return None
+        data = f.read_bytes()
+    except OSError:
+        return None
+    import base64  # noqa: PLC0415
+    ext = rel.rsplit(".", 1)[-1].lower()
+    mime = {"svg": "image/svg+xml", "jpg": "image/jpeg"}.get(ext, f"image/{ext}")
+    return f"data:{mime};base64,{base64.b64encode(data).decode()}"
+
+
+def pictures_of(folder: Path, manifest: dict) -> dict:
+    """Its icon and cover (a theme's `image`, `image_dark`), as data: addresses."""
+    out = {}
+    icon = _data_uri(folder, manifest.get("icon"), ICON, 256 * 1024)
+    if icon:
+        out["icon"] = icon
+    for key, field in (("cover", "image"), ("cover_dark", "image_dark")):
+        got = _data_uri(folder, manifest.get(field), IMAGE, LINK_PICTURE_MAX)
+        if got:
+            out[key] = got
+    return out
+
+
+def _choice(folder: Path, rel: str) -> dict:
+    try:
+        m = read_folder(folder, None)["manifest"]
+    except ManifestError:
+        return {"path": rel, "id": None, "name": rel.rsplit("/", 1)[-1] or rel,
+                "broken": True}
+    icon = pictures_of(folder, m).get("icon")
+    return {"path": rel, "id": m["id"], "name": m["name"], "version": m["version"],
+            "author": m["author"], "kind": m["kind"],
+            "description": m.get("description"), **({"icon": icon} if icon else {})}
 
 
 def fetch(src: dict, into: Path) -> dict:
-    """The repository at its commit, checked out under ``into``; the plugin's
-    folder in it and the source as the installed list records it."""
+    """The plugin a link names, checked out under ``into``: ``{"folder",
+    "source", "note"}``; or, when the repository holds several plugins and
+    the link names none of them, ``{"choose": [...], "repo", "ref"}``."""
     url, env = _remote(src)
-    commit, ref_kind = _resolve(src, env.pop("_refs"))
+    refs = _refs(env.pop("_refs"))
+    note = None
+    path = src["path"]
+    if src["ref"]:
+        ref, commit, ref_kind, path, note = _ref_of(src, refs)
+        head = _checkout(url, env, f"refs/tags/{ref}" if ref_kind == "tag" else commit,
+                         into / "repo")
+        if ref_kind == "commit" and head != commit:
+            raise PluginError("GitHub sent a different commit than the link names. "
+                              "Try again in a moment.", 502, {"reason": "unreachable"})
+    else:
+        # No ref: read the default branch to see what is there, then go to
+        # the newest release of the plugin found.
+        branch = refs["default"]
+        if not branch:
+            raise PluginError(f"github.com/{src['repo']} is empty: there’s nothing in "
+                              "it to install yet.", 404, {"reason": "no-plugin"})
+        look = into / "look"
+        head = _checkout(url, env, refs["heads"][branch], look)
+        if path and not (look / path).is_dir():
+            raise PluginError(f"github.com/{src['repo']} has no folder {path}.", 404,
+                              {"reason": "no-folder"})
+        found = [f"{path}/{f}".strip("/") for f in plugin_folders(look / path)]
+        if len(found) > 1:
+            choices = [_choice(look / f, f) for f in found[:CHOICES_MAX]]
+            for c in choices:
+                # Each one's own newest release, as a link that names it.
+                tag = newest_tag(refs["tags"], [c["path"].rsplit("/", 1)[-1], c.get("id")])
+                c["link"] = f"https://github.com/{src['repo']}/tree/{tag or head}/{c['path']}"
+            return {"choose": choices, "repo": src["repo"], "ref": None}
+        if found:
+            path = found[0]
+        names = [src["repo"].split("/")[1], path.rsplit("/", 1)[-1]]
+        if found:
+            try:
+                names.append(read_folder(look / path, None)["manifest"]["id"])
+            except ManifestError:
+                pass
+        tag = newest_tag(refs["tags"], names)
+        if tag:
+            ref, ref_kind = tag, "tag"
+            if refs["tags"][tag] == head:
+                os.replace(look, into / "repo")
+            else:
+                head = _checkout(url, env, f"refs/tags/{tag}", into / "repo")
+                shutil.rmtree(look, ignore_errors=True)
+        else:
+            ref, ref_kind = head, "commit"
+            os.replace(look, into / "repo")
+            note = (f"It has no release yet, so this installs the newest commit on "
+                    f"{branch} ({head[:7]}). It stays at that commit until you "
+                    "install it again.")
     repo_dir = into / "repo"
-    repo_dir.mkdir(parents=True)
-    for args in (["init", "-q"],
-                 ["fetch", "-q", "--depth", "1", "--no-tags", url,
-                  f"refs/tags/{src['ref']}" if ref_kind == "tag" else commit],
-                 ["-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD"]):
-        done = _git(args, repo_dir, env)
-        if done.returncode != 0:
-            said = (done.stderr or "").strip().splitlines()
-            raise PluginError(f"fetching {src['repo']} at {src['ref']} failed: "
-                              f"{said[-1] if said else done.returncode}", 502)
-    head = _git(["rev-parse", "HEAD"], repo_dir, env).stdout.strip()
-    if ref_kind == "commit" and head != commit:
-        raise PluginError(f"GitHub gave {head} for {commit}", 502)
-    folder = repo_dir / src["path"] if src["path"] else repo_dir
-    if not folder.is_dir():
-        raise PluginError(f"{src['repo']} at {src['ref']} has no folder "
-                          f"{src['path']!r}", 404)
-    web = f"https://github.com/{src['repo']}/tree/{head}" + (
-        f"/{src['path']}" if src["path"] else "")
-    return {"folder": folder,
-            "source": {"kind": "link", "repo": src["repo"], "path": src["path"],
-                       "ref": src["ref"], "ref_kind": ref_kind, "commit": head,
-                       "url": web}}
+    if path and not (repo_dir / path).is_dir():
+        raise PluginError(f"github.com/{src['repo']} has no folder {path} at "
+                          f"{ref if ref_kind == 'tag' else ref[:7]}.", 404,
+                          {"reason": "no-folder"})
+    if not (repo_dir / path / "PLUGIN.md").is_file() \
+            and not (repo_dir / path / "manifest.json").is_file():
+        found = [f"{path}/{f}".strip("/") for f in plugin_folders(repo_dir / path) if f]
+        # A tag named for one of them (`foundry-v1.0.1`) is that one's.
+        named = RELEASE.match(ref) if ref_kind == "tag" else None
+        mine = [f for f in found if named and named.group("name")
+                and named.group("name").lower() == f.rsplit("/", 1)[-1].lower()]
+        if len(mine) == 1:
+            found = mine
+        if len(found) > 1:
+            choices = [_choice(repo_dir / f, f) for f in found[:CHOICES_MAX]]
+            for c in choices:
+                c["link"] = f"https://github.com/{src['repo']}/tree/{ref}/{c['path']}"
+            return {"choose": choices, "repo": src["repo"], "ref": ref}
+        if not found:
+            where = f"{path} in github.com/{src['repo']}" if path \
+                else f"github.com/{src['repo']}"
+            raise PluginError(f"There’s no Loam plugin in {where}. A Loam plugin is a "
+                              "folder with a PLUGIN.md in it; check the link with "
+                              "whoever shared it.", 422,
+                              {"reason": "no-plugin", "repo": src["repo"]})
+        path = found[0]
+    folder = repo_dir / path if path else repo_dir
+    web = f"https://github.com/{src['repo']}/tree/{head}" + (f"/{path}" if path else "")
+    return {"folder": folder, "note": note,
+            "source": {"kind": "link", "repo": src["repo"], "path": path,
+                       "ref": ref, "ref_kind": ref_kind, "commit": head, "url": web}}
+
+
+def pinned_link(source: dict) -> str:
+    """The link a source is pinned at: its tag, or its whole commit."""
+    return (f"https://github.com/{source['repo']}/tree/"
+            f"{source['ref'] if source.get('ref_kind') == 'tag' else source['commit']}"
+            + (f"/{source['path']}" if source.get("path") else ""))
 
 
 def _token(pid: str, version: str, source: dict, decl: dict, replaces) -> str:
@@ -1893,13 +2171,23 @@ def install(body: dict, by: str | None = None) -> dict:
     work = Path(tempfile.mkdtemp(prefix="install-", dir=_staging()))
     try:
         got = fetch(src, work)
+        if "choose" in got:
+            # Several plugins and the link names none: the ones to pick
+            # from, each a request of its own (`url`, `path`, `ref`).
+            if confirm is not None:
+                raise PluginError("That repository holds several plugins; pick one "
+                                  "first.", 409, {"reason": "choose", **got})
+            return {"installed": False, **got}
         folder, source = got["folder"], got["source"]
         try:
             found = read_folder(folder, None)
         except ManifestError as exc:
-            raise PluginError(f"{src['repo']}"
-                              f"{'/' + src['path'] if src['path'] else ''} at "
-                              f"{src['ref']} is not a plugin: {exc}", 422) from None
+            where = f"{source['path'] or source['repo'].split('/')[1]}"
+            raise PluginError(f"The plugin in {where} has a PLUGIN.md Loam can’t read, "
+                              f"so it can’t be installed until its maker fixes it: "
+                              f"{exc}.", 422,
+                              {"reason": "no-plugin" if "no PLUGIN.md" in str(exc)
+                               else "manifest", "repo": source["repo"]}) from None
         manifest = found["manifest"]
         pid = manifest["id"]
         decl = declaration(manifest, found["has"])
@@ -1926,6 +2214,15 @@ def install(body: dict, by: str | None = None) -> dict:
                 "shadows": ({"layer": "shipped", "version": shipped.get("version")}
                             if shipped else None),
                 "warnings": found["warnings"],
+                "description": manifest.get("description"),
+                # What was worked out from the link, said in a line (a branch
+                # is its commit now), and the request that names exactly this
+                # one, for the yes to send back.
+                "note": got.get("note"),
+                "request": {"url": source["repo"], "path": source["path"],
+                            "ref": source["ref"]},
+                "link": pinned_link(source),
+                "pictures": pictures_of(folder, manifest),
                 "confirm": _token(pid, manifest["version"], source, decl, replaces)}
             listed_only = [k for k in manifest["kind"] if k in LISTED_ONLY]
             if listed_only:
@@ -1954,8 +2251,12 @@ def install(body: dict, by: str | None = None) -> dict:
                 trash = work / "replaced"
                 os.replace(target, trash)
             os.replace(folder, target)
+            # Where the yes was given (2026-11-18): `market` or `link`, so the
+            # page can mark a plugin installed from a link someone shared.
+            via = body.get("via") if body.get("via") in ("market", "link") else None
             listed["plugins"][pid] = {
-                "source": source, "version": manifest["version"],
+                "source": {**source, **({"via": via} if via else {})},
+                "version": manifest["version"],
                 "declaration": decl, "confirmed": preview["confirm"],
                 "installed_at": _now(), "installed_by": by or lc.OWNER_ID,
                 "files": files}

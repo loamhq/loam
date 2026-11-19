@@ -494,10 +494,18 @@ MARKET = str(lc.ROOT / "bin" / "loam-market")
         "it fits. The card is an offer: installing is always "
         f"{lc.OWNER_NAME}'s tap on it, never yours. When nothing fits, or the "
         "Market lists nothing (`say` tells you), offer to build it as their own "
-        "plugin instead."
+        "plugin instead.\n"
+        "`link`: instead of searching, read a plugin someone shared by its GitHub "
+        "link (any shape: the repository's address, owner/repo, a /tree/ or release "
+        "link). It finds the newest release and the plugin's folder, installs "
+        "nothing, and answers what it is and touches with a `card` line to put in "
+        "your reply the same way (a repository of several plugins answers each, "
+        "with its own card). Its Install opens the app's install-from-link sheet."
     ),
 )
-async def market(query: str = "", kind: str = "", limit: int = 8) -> str:
+async def market(query: str = "", kind: str = "", limit: int = 8, link: str = "") -> str:
+    if link.strip():
+        return await _hand_off([MARKET, "link", "--json", "--", link.strip()])
     argv = [MARKET, "search", "--json", "--limit", str(limit or 8)]
     if kind:
         argv += ["--kind", kind]
