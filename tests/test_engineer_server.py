@@ -285,11 +285,14 @@ def main() -> int:
             check("its parameters are unchanged",
                   sorted(schema.get("properties", {})),
                   # `tier` since 2026-11-15: which of the engineer's three
-                  # models, optional.
+                  # models, optional. `scope` since 2026-11-19: `app` for the
+                  # Loam engineer's app-only work, optional.
                   ["brief", "continue_job", "deploy", "involvement",
-                   "max_minutes", "project", "tier", "title"])
+                   "max_minutes", "project", "scope", "tier", "title"])
             check("`tier` is optional",
                   "tier" in (schema.get("required") or []), False)
+            check("`scope` is optional",
+                  "scope" in (schema.get("required") or []), False)
             check("max_minutes, continue_job and deploy are the optional ones",
                   sorted(schema.get("required", [])),
                   ["brief", "involvement", "project", "title"])
