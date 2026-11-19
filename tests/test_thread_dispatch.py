@@ -68,6 +68,51 @@ def steer_provider():
             emit("result", num_turns=1)
 
 
+async def notification_during_ack(host, cli, folder):
+    """A notification arriving while a final steer settles stays subscribed."""
+    from loam_thread_engine import ThreadEngine
+    import loam_threads as threads
+
+    cli.write_text("#!/usr/bin/env python3\n" + """
+import json, os, sys, time
+from pathlib import Path
+folder = Path(os.environ['TMPDIR'])
+for line in sys.stdin:
+    if json.loads(line)['type'] == 'user':
+        for n, text in enumerate(['first reply', 'background reply']):
+            while not (folder / f'reply-{n}').exists():
+                time.sleep(.01)
+            print(json.dumps({'type':'assistant','message':{'content':[{'type':'text','text':text}]}}), flush=True)
+            print(json.dumps({'type':'result','num_turns':n+1}), flush=True)
+""")
+    tid = threads.create("iris", "late acknowledgement")["id"]
+    key = tid, "iris"
+    engine = ThreadEngine(host)
+    engine._memory_pins = AsyncMock()
+    lock = engine.steer_locks[key] = asyncio.Lock()
+
+    async def until(check):
+        async with asyncio.timeout(5):
+            while not check():
+                await asyncio.sleep(.01)
+
+    engine.post_person(tid, "probe")
+    await until(lambda: key in engine.turn_watch)
+    session = engine.turn_sessions[key]
+    try:
+        async with lock:
+            (folder / "reply-0").touch()
+            await until(lambda: key not in engine.turn_watch)
+            (folder / "reply-1").touch()
+            await until(lambda: len(session.turns) == 2)
+        await until(lambda: len(threads.read(tid)[1]) == 3)
+        assert [r["text"] for r in threads.read(tid)[1]] == ["probe", "first reply", "background reply"]
+        print("PASS background reply received while a final acknowledgement held the worker")
+    finally:
+        engine.stop_all_tails()
+        await session.stop()
+
+
 async def steering(host, cli, folder):
     """The reader goes away before the third steer's acknowledgement."""
     from loam_thread_engine import ThreadEngine, Turn
@@ -263,6 +308,7 @@ async def host():
             session.proc.kill()
             await session.proc.wait()
     await steering(host, cli, folder)
+    await notification_during_ack(host, cli, folder)
 
 
 if __name__ == "__main__":
