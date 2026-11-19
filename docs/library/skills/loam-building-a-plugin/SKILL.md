@@ -50,6 +50,17 @@ through `contributes:`. The whole interface, field by field, is
 `docs/examples/plugins/echo/`, and a real one with keys, an agent tool and
 settings is Images, built into Loam at `plugins/images/`.
 
+**How it introduces itself.** `description:` is its promise, one plain line
+about what someone gets from it; `screenshots:` are up to six pictures of it
+at work in its folder (`{src, src_dark, caption}`); a theme's `palette:`
+names its main colours (`{token, name, name_dark}`). Write the guide plain
+first: what you can do, how to use it in at most three steps, what leaves
+the server; then a `---` rule and `## Technical details`. Settings › Plugins
+and its Market page show it in that order. Mark the settings that mean "set
+up" with `setup: true` (an address it needs before it can work): once one
+has a value, its page leads with its controls. `docs/plugins.md` has each
+field; Loam's demo world for screenshots is `app/tools/capture-plugin-shots.mjs`.
+
 **When it needs the owner to know something** (a check failed, a spend
 passed a mark, a credential is about to expire), a plugin never posts in a
 thread or on a board. It tells the agent the owner chose to hear when
