@@ -27,7 +27,7 @@ import { once } from 'node:events'
 import { fakeBroker, appAgainst, closing, until } from './harness.js'
 import { browser, find, all, text } from './browser.js'
 import { storage } from './browser.js'
-import { createPreferences } from '../public/plugins/dictation/page/settings.js'
+import { createPreferences } from '../../plugins/_listed/dictation/page/settings.js'
 import { pluginSettings } from '../public/plugin-loader.js'
 const createStore = storage => createPreferences(pluginSettings('dictation', storage))
 import { readFileSync } from 'node:fs'
@@ -53,7 +53,7 @@ import {
   properNouns,
   dictationVocabulary,
   mergeAt,
-} from '../public/plugins/dictation/page/dictate.js'
+} from '../../plugins/_listed/dictation/page/dictate.js'
 
 // ------------------------------------------------------------ the arithmetic
 

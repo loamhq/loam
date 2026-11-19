@@ -89,10 +89,10 @@ async function day(vault) {
   r['GET /v1/plugins'] = (req, res) => json(res, { plugins })
   r['GET /v1/plugins/dictation'] = (req, res) => json(res, { plugin: plugins.find((p) => p.id === 'dictation'), rows: plugins })
   r['GET /v1/plugins/dictation/secrets'] = (req, res) => json(res, { secrets: [{ name: 'GEMINI_API_KEY', label: 'Gemini API key', set: false }] })
-  for (const file of await readdir(path.resolve('public/plugins/dictation/page'))) {
+  for (const file of await readdir(path.resolve('../plugins/_listed/dictation/page'))) {
     r[`GET /v1/plugins/dictation/files/page/${file}`] = async (req, res) => {
       res.writeHead(200, { 'content-type': file.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8' })
-      res.end(await readFile(path.resolve('public/plugins/dictation/page', file)))
+      res.end(await readFile(path.resolve('../plugins/_listed/dictation/page', file)))
     }
   }
   r['GET /v1/update'] = (req, res) => json(res, { current: { version: '0.1.1', kind: 'stock' }, check: { available: false, latest: { version: '0.1.1' } }, run: updateRun })

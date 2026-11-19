@@ -1,10 +1,11 @@
 ---
 id: images
 name: Images
-version: 1.1.1
+version: 1.2.0
 author: Loam contributors
 api: 0
 kind: [extension]
+default_on: false
 icon: assets/icon.svg
 keys:
   - provider: openai

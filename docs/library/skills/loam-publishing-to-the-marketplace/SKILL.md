@@ -10,6 +10,16 @@ tag. Anyone installs it from that link (Settings › Plugins › Install from a
 link). The **marketplace** is a list of such links that every Loam shows in
 Settings › Plugins; being on it is asking, not publishing.
 
+**Built in, or in the Market.** Loam has two kinds of plugin, as Obsidian
+does. *Built-in* ones ship inside Loam (Images, Daily notes, Comments, the
+reviewer, Latte and Plain): they come with every release, most start off,
+and the owner turns them on in Settings › Plugins. *Market* ones each live
+in their maker's own repository and are listed in their maker's name.
+Something new, whoever makes it, goes to the Market in its maker's name;
+one that proves itself can later become part of Loam, and then the Market
+copy steps aside for the built-in one on the update that brings it, and its
+listing is withdrawn.
+
 What the owner needs: a GitHub account, connected in Settings › Connections
 (that is how you push for them), and a repository they made for it.
 
@@ -29,9 +39,10 @@ What the owner needs: a GitHub account, connected in Settings › Connections
    It puts the folder in the repository as `<id>/`, tags it `v<version>`,
    and answers the link: `https://github.com/<owner>/<repository>/tree/v1.0.0/<id>`.
    A new version is a higher `version` in `PLUGIN.md` and the same command.
-   A repository that holds several plugins tags each `<id>-v<version>`
-   instead, so a tag names its plugin; Loam's own first-party plugins are
-   published that way, in `loamhq/plugins`.
+   One repository per plugin, on its maker's account, is how everything in
+   the Market is kept, Loam's own makers' plugins included. (A repository
+   that holds several tags each `<id>-v<version>`, so a tag names its
+   plugin; for the Market, keep one each.)
 4. **Give the owner the link.** It works for others once the repository is
    public. Whoever installs it is shown what it declares under `touches`
    before anything is installed, and every later version is confirmed again.
