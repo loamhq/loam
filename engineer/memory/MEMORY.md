@@ -2048,6 +2048,42 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Seen, not fixed:** a turn model change (`set_choices`) posts the CLI's
   "Set model to … for this session only" text as a persona message.
 
+## 2026-11-19 — plugin pages that explain themselves
+
+- **A theme is previewed in a frame of its own** (`app/public/theme-scene.html`,
+  served with `frame-ancestors 'self'`, the one page the app frames). Looks are
+  written against the root (`:root[data-look][data-theme][data-option-*]`), so
+  scoping a look's rules to an element would mean rewriting materials.css,
+  face-paints and the signature faces; a frame wears the real rules unchanged.
+  The scene re-dresses on a hash change (`look`, `mode`, `from`, `o.<option>`),
+  never reloads, and the page reads its colours back through
+  `loamScene.colours()` (a probe painted with `var(--token)`, so mixes resolve).
+- **A listed theme's fonts reach the preview** through the listing: the broker
+  keeps `fonts.css` and `font/<file>`, and the app holds the sheet to
+  @font-face rules over `/api/marketplace/<id>/font/` (`themeFontsCSS`'s new
+  `base`). Before this, a listed theme's preview and Try it wore the fallback.
+- **New PLUGIN.md fields cost an old Loam only a warning** (`extra`), never the
+  listing: `description`, `screenshots`, `palette` (`words_of`). The JS reader
+  (`shipped-plugins.js`) reads only line-shaped YAML: write `screenshots` and
+  `palette` as block lists of one-line flow maps, and quote a caption with a
+  comma. An apostrophe inside a flow map opens a quote for the Python reader
+  ("a `{` that never closes"): use ’.
+- **Markdown's single newline is a break in chat and a space in a document**
+  (`markdown(text, { soft: true })`): READMEs and guides are hard-wrapped.
+- **The design system marks a selection with a paper thumb and an underline**
+  (button-tiers.css), not the espresso fill; a segmented control on a tinted
+  group hides its thumb. Leave the group untinted.
+- **The colour guard (themes.test.js) reads `rgb(` in a regex as a literal
+  colour**; build such a pattern from parts.
+- **The demo world for screenshots** is `app/tools/capture-plugin-shots.mjs`:
+  the fixture app's invented agents, a thread retitled by PATCH and its record
+  replaced by route, a plugin installed from its folder (rows by the real
+  Python reader), its server stood in for by Playwright routes at `/x/<id>/`,
+  a speech-like WAV as the fake microphone
+  (`--use-file-for-fake-audio-capture`), and one frame for every picture
+  (`tools/frame-shot.py`). Do not freeze the page clock there: a recording's
+  timer and levels need time to run. The image tool writes only inside the
+  reach: generate into the job's tree and move it to scratch.
 ## 2026-11-19 — a run with no thread gets its result back (batch B step 3)
 
 - **Every brief returns at once**, every lane. `wait_for`, its four-hour
@@ -2212,3 +2248,63 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   the landing failed with FileNotFoundError, though every test passed in the
   job tree. It is now `docs/releases/signers`. Put a new file inside an
   existing top-level folder, or expect the first landing to fail.
+
+## 2026-11-19 — the daily reflection is an ordinary record (batch B step 4)
+
+- **`loam-wake-<agent>.service` is the reconciler's now**, rendered from
+  `crons/reflection.md` beside its timer (`loam_cron.reflection_service`).
+  The timer text was kept byte-identical on purpose: a changed timer is only
+  re-cut by daemon-reload, but an unchanged one is no risk at all to the
+  night's grid. The old provision service carried `[Install]
+  WantedBy=default.target`; it was never enabled (checked `is-enabled` on all
+  seven), so dropping it left no stray wants link.
+- **The record's body is the instruction.** `loam_cron.reflection_default()`
+  is Loam's text, rendered with `lc.OWNER_NAME`; a body that is empty or one
+  of `REFLECTION_PLACEHOLDERS` is told the default, and `bin/provision`
+  replaces a placeholder body (`loam_schedule.adopt_default`), so every
+  install moves on its next update. Unmapped agents still get
+  `_reflection.md` appended as their lane file (what loads is batch A's).
+- **A refused direct pause must not stop the wake.** `enabled_now` read the
+  workspace file, so a persona writing `enabled: false` (refused by the
+  reconciler) would still have kept bin/wake from running. The reflection's
+  switch and instruction are read from the accepted copy
+  (`loam_schedule.reflection_text`) when the workspace is the box's own.
+- **The owner's word through the settings route** is `thread` + `yes`
+  (an owner message in a thread the persona is in, < 1 h, from a
+  conversation, each taken once), reusing `loam_agents.check_yes`. It cannot
+  tell whether the message asked for this; the event names it
+  (`relayed_by`, `yes`).
+- **`wake_schedule` is gone from agent.json.** Its time is
+  `loam_schedule.wake_time(agent)`; `bin/provision <agent>` takes the time
+  only for a new agent (and checks it agrees if given). Live agent.json files
+  lose the key on their next provision.
+- **`test_boundary_guard.py`'s engineer cases fail in any job tree run by
+  hand under `tests/run-all`** (on untouched main too, once
+  `engineer/agent.json` is present: the sealed config's roots are not the
+  tree). A /tmp checkout without `engineer/agent.json` skips them, which
+  looks like a pass. Trust the landing's run for that file.
+- **A test's leak outlives its fix by the trees that copied it.** Four
+  job trees had merged the leaky test in the seven minutes before the fix
+  landed, and a hijacked unit stays *loaded* (a scratch folder, port
+  9100), which the reconcile never touched. The runtime side now heals it:
+  `reconcile` restarts a wanted unit whose `WorkingDirectory` is not its
+  plugin's folder (`moved` in its answer). Fix the runtime, not only the
+  test, when a test can reach live state.
+
+## 2026-11-19 — the library is the one description of Loam
+
+- **`docs/library/` is how Loam describes itself**, to agents and the owner
+  (`loam-how-it-works` first). The Loam project file now says a job that
+  changes what it describes updates it in the same job and names the page
+  in the receipt; nothing checks this, by design.
+- **A sentence added to the source role reaches project engineers** through
+  `render_craft`: it must avoid `CRAFT_FORBIDDEN` words (Loam, vault,
+  persona, the owner's name) or every project render fails, and it makes
+  `check-drift` ask for `bin/provision --project <name> --rerender` on each
+  project. A Loam-only rule belongs in the project file, which renders to
+  nobody else.
+- **Crons are `enabled: true` plus `reason:`**, live within a minute
+  (`lib/loam_schedule.py`); `approved:` was retired 2026-10-14 and only
+  still reads as enabled for an unmigrated file.
+- **Plugin `touches.record` takes `bypass`** as well as none/read/write
+  (`lib/loam_plugins.RECORD`); the plugin skill had left it out.

@@ -1107,7 +1107,7 @@ def apply(reason: str = "") -> dict:
             continue
         try:
             data = json.loads(cfg.read_text(encoding="utf-8"))
-            res = subprocess.run([str(prov), data["name"], data["wake_schedule"]],
+            res = subprocess.run([str(prov), data["name"]],
                                  capture_output=True, text=True, check=False, timeout=120)
             (out["rendered"] if res.returncode == 0 else out["errors"]).append(
                 data["name"] if res.returncode == 0

@@ -1048,5 +1048,19 @@ async def main():
 
 
 asyncio.run(main())
+
+# The daily reflection is turned off only on the owner's word (2026-11-19):
+# schedule.enabled carries the cited message to the route, and a plain
+# true/false as before.
+_on = settings.entry("schedule.enabled")
+check("schedule.enabled: a plain value is the switch",
+      _on.body(False, "") == {"enabled": False})
+check("schedule.enabled: the owner's word rides through as thread and yes",
+      _on.body({"enabled": False, "thread": "t-1", "yes": "m4", "x": 1}, "")
+      == {"enabled": False, "thread": "t-1", "yes": "m4"})
+check("schedule.enabled says the reflection is the owner's to turn off",
+      "owner's to turn off" in _on.values)
+check("schedule.body no longer refuses the reflection",
+      "not the reflection's" not in settings.entry("schedule.body").values)
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if results and all(results) else 1)

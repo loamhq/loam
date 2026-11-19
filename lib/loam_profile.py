@@ -60,8 +60,9 @@ import loam_config as lc
 PROVIDERS = ("claude-code", "codex", "antigravity")
 PROVIDER_NAMES = {"claude-code": "Claude Code", "codex": "Codex",
                   "antigravity": "Antigravity"}
-BASE_KEYS = ("name", "display", "emoji", "workspace", "vault", "wake_schedule",
-             "wake_timezone")
+# `wake_schedule` and `wake_timezone` left 2026-11-19: the daily wake's time
+# is its reflection record's alone (lib/loam_schedule.wake_time).
+BASE_KEYS = ("name", "display", "emoji", "workspace", "vault")
 DEFAULT_KEYS = ("provider", "model", "effort")
 SETTABLE = ("display", *DEFAULT_KEYS)
 # Kept over a provision besides the settable ones: an uploaded face and the

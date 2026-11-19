@@ -54,7 +54,8 @@ try {
     await until(() => all(root, 'sheet-title').some(node => text(node) === label))
     if (label === 'Plugins') {
       assert.equal(all(root, 'plugin-row').length, (await loadThemes()).themes.length + 2)
-      assert.ok(all(root, 'plugin-row').some(node => /Latte[\s\S]*Theme/.test(text(node))))
+      // A theme's row says its promise (2026-11-19), not the word Theme.
+      assert.ok(all(root, 'plugin-row').some(node => /Latte[\s\S]*Loam's own look/.test(text(node))))
       assert.ok(all(root, 'plugin-row').every(node => !text(node).includes('1.0.0')))
       assert.ok(all(root, 'plugin-state').some(node => text(node) === 'In use'))
       assert.equal(all(root, 'plugin-switch').length, 2)

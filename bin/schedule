@@ -6,7 +6,7 @@ exactly like theirs.
 
 Usage:
   schedule reconcile                        what loam-schedules.timer runs
-  schedule migrate                          approved: -> enabled:, reflection records
+  schedule migrate                          approved: -> enabled:
   schedule set <agent> <name> <file>        write a record from a file
   schedule pause|resume|delete <agent> <name>
   schedule log [<n>]                        the last n events (default 20)

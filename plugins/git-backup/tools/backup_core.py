@@ -926,15 +926,12 @@ def restore(tree: str, remote: str | None = None, replace: bool = False) -> dict
 
 def reprovision() -> list[str]:
     """Each restored agent is made runnable on this machine again, as an
-    update does it (bin/provision with its own wake time)."""
+    update does it (bin/provision by its name; its wake time is its record's)."""
     import loam_agents  # noqa: PLC0415
     root = Path(lc.ROOT)
     done = []
     for name in loam_agents.live(loam_agents.every()):
-        wake = loam_agents.card(name).get("wake_schedule")
-        if not isinstance(wake, str):
-            continue
-        r = subprocess.run([sys.executable, str(root / "bin" / "provision"), name, wake],
+        r = subprocess.run([sys.executable, str(root / "bin" / "provision"), name],
                            capture_output=True, text=True, check=False, timeout=600)
         done.append(name if r.returncode == 0 else f"{name} (provision failed: "
                     f"{(r.stderr or r.stdout).strip()[-200:]})")

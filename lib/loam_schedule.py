@@ -47,6 +47,18 @@ same. A file that does not parse is refused as theirs, logged once, and the
 version accepted before it keeps running (decided 2026-10-15: a schedule's
 detail and editing are its file, opened in Files).
 
+**The daily reflection** (2026-11-19, the owner's decision of 11-18) is an
+ordinary record, ``crons/reflection.md``: its time, its switch and its
+instruction, from which the reconciler renders ``loam-wake-<agent>.service``
+and ``.timer`` as it renders any cron's pair. It differs in two rules, both
+here: it is never deleted, and **only the owner turns it off** -- a persona's
+own pause, by any route, is refused with the sentence REFLECTION_OWNERS, and
+the accepted copy keeps the wake running (``enabled_now``). The owner does it
+from the app (the switch, or the file in Files) and through the settings
+route, where a persona acting on the owner's word cites that message
+(lib/loam_activity.py, ``edit``). A persona moves its time and edits its
+instruction like any record of its own.
+
 One run of a persona at a time is unchanged: that is bin/wake's run lock, and
 a fire that finds it held waits, skips, and logs ``fire`` / ``skipped``.
 """
@@ -97,12 +109,12 @@ ONE_OFF_MAX_AHEAD = timedelta(days=30)
 # above the longest a run can take (lock wait plus the briefing lane's clock).
 ONE_OFF_STALE_AFTER = timedelta(hours=3)
 
-# Shape-neutral since 2026-11-18: an agent with a map has no
-# `_reflection.md` to load, and its wake's instruction is Loam's default.
-REFLECTION_BODY = (
-    "The nightly reflection wake. Its instruction is `_reflection.md`, or "
-    "Loam's default once there is a `map.md`; this record holds only when it "
-    "runs and whether it is on.\n")
+# What a persona is told when it tries to turn its own daily wake off.
+REFLECTION_OWNERS = (
+    f"The daily reflection is {lc.OWNER_NAME}'s to turn off, not yours: every "
+    f"persona wakes once a day until {lc.OWNER_NAME} turns it off or the "
+    f"persona is archived. You can move its time, change what it says, and "
+    f"make other schedules of your own.")
 
 
 class Refused(Exception):
@@ -290,7 +302,8 @@ def validate(agent: str, name: str, text: str | None, *, actor: str,
       - the actor is the owner, the engineer, the runtime, or the persona whose
         record it is; a persona's or the engineer's change carries a reason
       - the lane is one of LANES
-      - the reflection's record is never deleted (pause it instead)
+      - the reflection's record is never deleted, and only the owner turns
+        it off (REFLECTION_OWNERS)
       - the record parses (loam_cron.parse_record: shape, keys, size cap)
       - a one-off newly set or moved is 10 min to 30 days ahead, and the
         persona has at most five pending
@@ -313,11 +326,16 @@ def validate(agent: str, name: str, text: str | None, *, actor: str,
         if previous is None:
             raise Refused(f"there is no record {agent}/{name} to delete")
         if name == REFLECTION:
-            raise Refused("the nightly reflection's record is not deleted; "
-                          "pause it with `enabled: false`")
+            raise Refused(REFLECTION_OWNERS if not lc.is_owner(actor) else
+                          "the daily reflection's record is not deleted; "
+                          "turn it off with `enabled: false`")
         return None
 
     cron = parse(agent, name, text)
+    if name == REFLECTION and not cron.enabled and not lc.is_owner(actor):
+        was_on = previous is None or _enabled(previous)
+        if was_on:
+            raise Refused(REFLECTION_OWNERS)
     if cron.kind == "one-off" and not cron.done:
         before = header_of(previous)
         moved = (previous is None or before.get("at") != header_of(text)["at"]
@@ -338,6 +356,13 @@ def validate(agent: str, name: str, text: str | None, *, actor: str,
                 f"{agent} has {len(others)} one-offs pending "
                 f"({', '.join(others)}); the cap is {ONE_OFF_MAX_PENDING}")
     return cron
+
+
+def _enabled(text: str) -> bool:
+    try:
+        return loam_cron.parse_enabled(header_of(text))
+    except CronError:
+        return True
 
 
 def _minutes(delta: timedelta) -> str:
@@ -450,8 +475,11 @@ def enabled_now(workspace: Path, name: str) -> tuple[bool, str]:
     """Should a launch of this lane run? bin/wake asks at launch, so a timer
     standing a minute after its record was paused does not fire the lane.
     A reflection with no record runs: its record is the switch, not the
-    permission. Read from the workspace the wake was given."""
-    text = read_text(loam_cron.cron_path(Path(workspace), name))
+    permission. Read from the workspace the wake was given -- except the
+    reflection's switch, which is the copy last accepted, so a persona's own
+    pause, refused, does not stop the wake by sitting in the file."""
+    text = (reflection_text(Path(workspace)) if name == REFLECTION
+            else read_text(loam_cron.cron_path(Path(workspace), name)))
     if text is None:
         return (name == REFLECTION, f"no record crons/{name}.md")
     head = header_of(text)
@@ -463,6 +491,30 @@ def enabled_now(workspace: Path, name: str) -> tuple[bool, str]:
     if head.get("done"):
         return False, f"crons/{name}.md is a one-off already done ({head['done']})"
     return True, ""
+
+
+def reflection_text(workspace: Path) -> str | None:
+    """The reflection record a wake of this workspace goes by: the copy last
+    accepted, else the file (a record not yet reconciled), else None."""
+    workspace = Path(workspace)
+    accepted = read_text(applied_path(workspace.name, REFLECTION))
+    if accepted is not None and workspace.resolve() == (
+            loam_cron.AI_LABS / workspace.name).resolve():
+        return accepted
+    return read_text(loam_cron.cron_path(workspace, REFLECTION))
+
+
+def wake_time(agent: str) -> str | None:
+    """The HH:MM an agent's daily reflection runs at, read off its record
+    (since 2026-11-19 the one place it is; agent.json's `wake_schedule` was
+    a copy). None for an agent without a readable daily one."""
+    text = reflection_text(loam_cron.AI_LABS / agent)
+    if text is None:
+        return None
+    try:
+        return loam_cron.reflection_hhmm(header_of(text).get("schedule", ""))
+    except (CronError, IndexError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -721,13 +773,7 @@ def desired_units(agent: str, name: str, text: str) -> dict[str, str | None]:
     cron = loam_cron.parse_record(agent, name, text, check_systemd=False)
     import loam_agents  # noqa: PLC0415
     if loam_agents.is_archived(agent, loam_cron.AI_LABS):
-        if cron.kind == "reflection":
-            return {f"{cron.unit}.timer": None}
         return {f"{cron.unit}.service": None, f"{cron.unit}.timer": None}
-    if cron.kind == "reflection":
-        # The service is bin/provision's; only the clock is the record's.
-        return {f"{cron.unit}.timer": loam_cron.reflection_timer(
-            agent, cron.schedule_text) if cron.live else None}
     if not cron.live:
         return {f"{cron.unit}.service": None, f"{cron.unit}.timer": None}
     service, timer = loam_cron.render_units(cron)
@@ -770,9 +816,6 @@ def _reconcile(names: list[str] | None, now: datetime | None,
             if cron.kind == "one-off" and cron.live and \
                     now - cron.at > ONE_OFF_STALE_AFTER:
                 stale.append((agent, name, cron.unit))
-            if cron.kind == "reflection" and cron.live:
-                _sync_agent_json(agent, loam_cron.reflection_hhmm(
-                    cron.schedule_text))
 
         # Orphans: a cron unit of this agent's that no accepted record wants.
         for unit in unit_dir.glob(f"{loam_cron.UNIT_PREFIX}{agent}-*"):
@@ -859,27 +902,33 @@ def _apply(agent: str, wanted: dict[str, str | None],
     return list(merged.values())
 
 
-def _sync_agent_json(agent: str, hhmm: str) -> None:
-    """agent.json's `wake_schedule` follows the reflection record. It is read
-    by the broker and the page; the record is the one place it is set."""
-    path = loam_cron.AI_LABS / agent / "agent.json"
-    try:
-        config = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-    if config.get("wake_schedule") == hhmm:
-        return
-    config["wake_schedule"] = hhmm
-    write_atomic(path, json.dumps(config, indent=2, ensure_ascii=False) + "\n")
-
-
 # ---------------------------------------------------------------------------
 # The migration from `approved:` (2026-10-14), idempotent.
 # ---------------------------------------------------------------------------
 
 def reflection_record(hhmm: str) -> str:
+    """A new persona's daily reflection: its time, on, and Loam's default."""
     return (f"---\nlane: {REFLECTION}\nschedule: daily at {hhmm} {lc.ZONE_TOKEN}\n"
-            f"enabled: true\n---\n{REFLECTION_BODY}")
+            f"enabled: true\n---\n{loam_cron.reflection_default()}")
+
+
+def adopt_default(agent: str, systemd: "Systemd | None" = None) -> dict | None:
+    """A reflection record whose body is still a placeholder from when the
+    record held only a time and a switch is given Loam's default as its body,
+    the rest of it byte for byte as it was; through change(), as the runtime.
+    None when there is nothing to do. bin/provision runs it, so every install
+    has it on its next update."""
+    text = read_text(record_path(agent, REFLECTION))
+    if text is None:
+        return None
+    body = loam_cron.strip_frontmatter(text).strip()
+    if body not in loam_cron.REFLECTION_PLACEHOLDERS:
+        return None
+    head = text[:len(text) - len(loam_cron.strip_frontmatter(text))]
+    return change(agent, REFLECTION, head + loam_cron.reflection_default(),
+                  actor="loam", lane="engineer", systemd=systemd,
+                  reason="the daily reflection's instruction is Loam's default "
+                         "(2026-11-19)")
 
 
 def migrate(names: list[str] | None = None, systemd: Systemd | None = None,
@@ -887,21 +936,14 @@ def migrate(names: list[str] | None = None, systemd: Systemd | None = None,
     """Every record onto the path, each through change() as the engineer.
 
     An `approved:` record becomes `enabled: true` (the approval date stays in
-    the log's `before`); a record already enabled is adopted as it stands;
-    each agent gains `crons/reflection.md` at agent.json's current time, which
-    renders the reflection timer byte-identical to the one standing.
+    the log's `before`); a record already enabled is adopted as it stands.
+    Until 2026-11-19 it also gave each agent `crons/reflection.md` at
+    agent.json's `wake_schedule`; every agent has had one since 2026-10-14,
+    bin/provision makes a new agent's, and that copy of the time is gone.
     """
     out = []
     names = names if names is not None else loam_cron.roster()
     for agent in names:
-        reflection = record_path(agent, REFLECTION)
-        if not reflection.exists():
-            config = json.loads((loam_cron.AI_LABS / agent / "agent.json")
-                                .read_text(encoding="utf-8"))
-            out.append(change(agent, REFLECTION,
-                              reflection_record(config["wake_schedule"]),
-                              actor="engineer", lane="engineer",
-                              reason=reason, reconcile_now=False))
         folder = loam_cron.AI_LABS / agent / CRON_LANE_DIR
         for path in sorted(folder.glob("*.md")):
             if path.stem == REFLECTION or applied_path(agent, path.stem).exists():

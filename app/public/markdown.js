@@ -56,8 +56,10 @@ import { SIDE_MIN } from './panels.js'
 // (`onTask(n, checked)`, the nth task in the note) and an embed drawn
 // (`embed(target)`, a node). In a chat none of that is asked for and a task is
 // a box nobody can tick.
-export function markdown(text, { copy = null, from = null, onLink = null, anchors = false, vault = false, onTask = null, embed = null, images = null } = {}) {
+export function markdown(text, { copy = null, from = null, onLink = null, anchors = false, vault = false, onTask = null, embed = null, images = null, soft = false } = {}) {
   const before = linking
+  const beforeSoft = softening
+  softening = soft
   const beforeAnchors = anchoring
   const beforeVault = vaulting
   const beforeImages = imaging
@@ -76,10 +78,18 @@ export function markdown(text, { copy = null, from = null, onLink = null, anchor
     anchoring = beforeAnchors
     vaulting = beforeVault
     imaging = beforeImages
+    softening = beforeSoft
   }
 }
 
 let vaulting = null
+
+// A document's soft line breaks (2026-11-19). A chat reply's single newline is
+// a break, because that is how people type in a chat; a README is written
+// hard-wrapped at about 76 columns, and there a single newline is a space, as
+// every Markdown reader draws it (`soft: true`, the Market's and a plugin's
+// page). Lines are trimmed before this, so a README has no hard break.
+let softening = false
 
 // Images drawn where they were written (2026-11-18), for a caller that knows
 // which pictures a text may show: an agent's reply, whose images the host
@@ -1181,7 +1191,7 @@ function renderInline(nodes) {
         out.push(document.createTextNode(node.text))
         break
       case 'break':
-        out.push(h('br', {}))
+        out.push(softening ? document.createTextNode(' ') : h('br', {}))
         break
       case 'code':
         out.push(h('code', { text: node.text }))

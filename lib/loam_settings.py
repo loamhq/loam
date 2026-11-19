@@ -214,9 +214,14 @@ ENTRIES: list[Entry] = [
     Entry("schedule.enabled", "setting", "A schedule on or paused",
           "PATCH /api/schedules/{agent}/{name}",
           route="PATCH /v1/schedules/{agent}/{name}", target="agent/name",
-          values="true or false; your own schedules only, with a reason",
-          body=lambda v, m: {"enabled": v}, read=SCHEDULE_READ,
-          pick=lambda a, m: a.get("enabled")),
+          values="true or false; your own schedules only, with a reason. Your "
+                 "daily reflection is the owner's to turn off: only on their "
+                 'word, as {"enabled": false, "thread": <the thread they asked '
+                 'in>, "yes": <the id of their message asking>}',
+          body=lambda v, m: (
+              {k: v[k] for k in ("enabled", "thread", "yes") if k in v}
+              if isinstance(v, dict) else {"enabled": v}),
+          read=SCHEDULE_READ, pick=lambda a, m: a.get("enabled")),
     Entry("schedule.schedule", "setting", "When a recurring schedule runs",
           "PATCH /api/schedules/{agent}/{name}",
           route="PATCH /v1/schedules/{agent}/{name}", target="agent/name",
@@ -237,7 +242,7 @@ ENTRIES: list[Entry] = [
     Entry("schedule.body", "setting", "A schedule's instruction",
           "PATCH /api/schedules/{agent}/{name}",
           route="PATCH /v1/schedules/{agent}/{name}", target="agent/name",
-          values="text; not the reflection's (that is _reflection.md, or Loam's default once the agent has a map.md)",
+          values="text; the daily reflection's too, which starts as Loam's default",
           body=lambda v, m: {"body": v}, read=SCHEDULE_READ,
           pick=lambda a, m: a.get("body")),
     Entry("schedule.create", "action", "Make a schedule",
@@ -847,8 +852,9 @@ PAGE_RELAY_AHEAD: dict[str, list[str] | str] = {
     "rest === '/marketplace'": "a read: the marketplace's list, each entry marked installed or not",
     # A listing's own page (2026-11-18, Settings › Market): its declaration,
     # icon, cover and theme, read from its link before anything is installed.
-    "/^\\/marketplace\\/([a-z][a-z0-9-]*)(?:\\/(icon|image|cover|cover-dark|theme\\.css|readme\\/(?:[A-Za-z0-9_-]+\\/)*[A-Za-z0-9_-]+\\.(?:webp|avif|jpe?g|png)))?$/":
-        "a read: one listing's declaration, README, icon, covers and theme, before it is installed",
+    # Its screenshots and a theme's fonts came on 2026-11-19.
+    "/^\\/marketplace\\/([a-z][a-z0-9-]*)(?:\\/(icon|image|cover|cover-dark|theme\\.css|fonts\\.css|shot\\/[0-5](?:-dark)?|font\\/[A-Za-z0-9_-]+\\.woff2?|readme\\/(?:[A-Za-z0-9_-]+\\/)*[A-Za-z0-9_-]+\\.(?:webp|avif|jpe?g|png)))?$/":
+        "a read: one listing's declaration, README, icon, covers, screenshots, theme and its fonts, before it is installed",
     # Shared keys (2026-11-18): Settings › Connections › API keys. Never a value.
     "/^\\/keys(?:\\/([^/]+))?$/": ["keys.set", "keys.forget"],
     "/^\\/keys\\/([^/]+)\\/check$/": ["keys.check"],

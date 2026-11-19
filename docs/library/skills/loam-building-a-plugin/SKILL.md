@@ -33,7 +33,7 @@ api: 0                 # the plugin interface version
 kind: [extension]      # theme, extension, app, agent or skill
 touches:               # what it reaches, shown before install
   network: []
-  record: none         # none, read, write
+  record: none         # none, read, write, bypass
   memory: none
 ---
 What it does and how to use it.

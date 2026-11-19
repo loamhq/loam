@@ -153,7 +153,8 @@ def seed(*, root: Path | None = None, provision=None) -> dict:
                 if not (ws / name).exists():
                     (ws / name).write_text(text, encoding="utf-8")
         else:
-            wake = (done or {}).get("wake") or loam_agents.card(agent).get("wake_schedule")
+            import loam_schedule  # noqa: PLC0415
+            wake = (done or {}).get("wake") or loam_schedule.wake_time(agent)
             resumed = resumed or "the agent was made by an earlier run; finishing its thread"
         title, text = read_hello(root)
         tid = _hello_thread(agent)

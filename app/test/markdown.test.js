@@ -168,6 +168,13 @@ test('paragraphs are paragraphs and a line break inside one is a break', () => {
   assert.equal(draw('one\ntwo\n\nthree'), 'p("one",br(),"two") p("three")')
 })
 
+test('a document (soft) joins hard-wrapped lines with a space', () => {
+  const soft = (src) => markdown(src, { soft: true }).map(shape).join(' ')
+  assert.equal(soft('in light and in dark, with\nFraunces for its headings.'), 'p("in light and in dark, with"," ","Fraunces for its headings.")')
+  // A chat reply keeps its newline as a break.
+  assert.equal(draw('one\ntwo'), 'p("one",br(),"two")')
+})
+
 test('headings come out at their level', () => {
   assert.equal(draw('# One\n\n## Two\n\n###### Six'), 'h1("One") h2("Two") h6("Six")')
   // A hash with no space is a hash.

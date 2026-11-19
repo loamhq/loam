@@ -58,6 +58,13 @@ keys:                       # the providers whose API keys it uses (2026-11-18)
   - provider: openai          # a provider Loam knows: openai, google, hetzner, cloudflare, modal
     why: makes the pet's portrait   # shown before install, beside touches
     optional: true            # it works without this one (another key will do)
+description: Listen to your agents instead of reading them.   # its promise, one line (2026-11-19)
+screenshots:                # pictures of it in use, in its folder (2026-11-19)
+  - src: assets/shots/listen.webp
+    src_dark: assets/shots/listen-dark.webp
+    caption: Press Listen under any reply
+palette:                    # a theme's named colours, by token (kind theme only; 2026-11-19)
+  - {token: --paper-page, name: Lichen, name_dark: Night floor}
 agent_settings:             # what it keeps for each agent, on the agent's profile
   - id: voice
     label: Voice
@@ -77,7 +84,35 @@ profile (`GET /v1/agents/<agent>`) lists each such plugin with the agent's
 values. Contract: `broker/README.md`, "Agent profiles, engineers and the
 reviewer". Any plugin may; first-party ones get nothing more.
 
+**What a plugin says about itself** (2026-11-19). `description` is its
+promise: one plain line of at most 160 characters, about what someone gets
+from it, not how it works; Settings › Plugins shows it under the name and at
+the top of its page. `screenshots` are at most six pictures in its folder
+(`.webp`, `.avif`, `.jpg`, `.png`), each `{src, src_dark?, caption}`; its
+page and its Market listing show them as a gallery that opens larger, the
+dark one when Loam is dark, and the files route serves exactly those.
+`palette` (a theme only) is at most eight of its colours by token, each with
+a name of at most 24 characters from the theme's story and an optional
+`name_dark`; the theme's preview names its swatches with them, and a theme
+without one shows six roles by plain names. Each wrong entry is left out
+with a warning. A Loam before 0.2.12 keeps them as `extra` with a warning
+and installs and lists the plugin as before.
+
 The body after the closing `---` is the guide, for a person and an agent.
+**Write it plain first** (2026-11-19): a few sentences on what it is for,
+`## What you can do`, `## How to use it` in at most three steps, and what it
+needs and what leaves the server, all in words a person who does not build
+software reads easily. Then a rule (`---`) or a `## Technical details`
+heading, and below it everything exact: hosts, files, permissions,
+settings. A plugin's page shows the plain part at the top and the technical
+part under Details at its foot.
+
+**A README read by the Market** (2026-11-19) may mark what its listing's page
+already shows: its one-line promise between `<!-- loam:hero -->` and
+`<!-- /loam:hero -->`, and its pictures between `<!-- loam:gallery -->` and
+`<!-- /loam:gallery -->`. The listing's page leaves both out of the README it
+draws (the description and the gallery or a theme's live preview are above
+it); GitHub and a Loam before 0.2.12 show them as written.
 
 **One package shape for everything shared** (2026-11-13; the owner, m261 and
 m263): the marketplace shares themes, extensions, apps and later agents and

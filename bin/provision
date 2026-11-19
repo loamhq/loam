@@ -8,7 +8,7 @@ four agents that does not scale, so nothing here is ever edited from another
 agent's copy: every per-agent value is read from that agent's own files at
 build time, and the only input is the name.
 
-Usage: provision <agent> <wake HH:MM> [--dry-run]
+Usage: provision <agent> [<wake HH:MM>] [--dry-run]
        provision --engineer [--dry-run]
        provision --reviewer [--dry-run]
        provision --codex [<agent>...] [--dry-run]
@@ -37,7 +37,6 @@ VAULT = lc.VAULT
 # Code loads only with the project's external includes approved (ensure_trust).
 REACH = lc.WORKSPACES / "_shared" / "reach.md"
 AGENTS = lc.ROOT
-SYSTEMD = lc.USER_UNIT_DIR
 CLAUDE_JSON = lc.HOME / ".claude.json"
 # This file's own tree first (2026-11-09): run from a job's worktree, as
 # its tests do, it must use the branch's lib, not main's. Live, the two
@@ -812,75 +811,6 @@ def provision_antigravity(names: list[str], dry: bool = False) -> None:
         print(f"  {name}: .agents/ {'written' if changed else 'unchanged'}")
 
 
-
-
-def wake_units(name: str, workspace: Path, wake: str) -> tuple[str, str]:
-    from loam_cron import unit_timeout_s  # noqa: PLC0415
-    service = f"""[Unit]
-Description=Loam reflection wake for {name.capitalize()} (Claude Code runtime)
-# A wake that dies before it can record itself is reported from outside the
-# dying process. bin/wake's own failure paths all run inside it, and on
-# 2026-08-30 the kernel killed it mid-run: nothing reached the log or the
-# vault inbox, and the night reads as one the timer never fired.
-OnFailure=loam-wake-failed@%N.service
-
-[Service]
-Type=oneshot
-# No memory ceiling (2026-11-16, the owner: "remove all of these limits on
-# the different agents, whether personas or engineers"). A wake is an agent
-# run and sits at the agents' place in the kernel's OOM order
-# (lib/loam_config.py), so if the box truly runs out it goes before the
-# broker, Caddy, the login and the app. Until then MemoryHigh=1G /
-# MemoryMax=1536M, added after two global OOM kills of a wake on the 8 GB
-# box (2026-08-30 and 08-31, at 370 and 387 MB) to make a wake an attributed
-# contributor rather than a bystander; the order does that now.
-OOMScoreAdjust={lc.AGENT_OOM_SCORE_ADJ}
-# Pinned, not drifting. The CLI auto-updated itself from 2.1.245 to 2.1.259 on
-# 2026-09-03 with nobody choosing it. Upgrades are an operator decision taken
-# with the changelog open, which is what this makes true.
-#
-# The reason first written here -- that the release moved the SessionStart hook
-# cap from 10,000 to ~33.8 KB -- is WRONG and was retracted on 2026-09-04. One
-# harness against all three binaries in one sitting: 2.1.245, 2.1.259 and
-# 2.1.260 all deliver inline at 9,990 characters and all spill to a file at
-# 10,010. The original bracket table had measured whether the MODEL could
-# produce the tail token, and at 33 KB the model had simply read the spill file
-# the notice pointed it at. Same cap, different reading.
-#
-# The pin never needed that number, which is the point worth keeping: it stands
-# on nobody having chosen the upgrade.
-#
-# DISABLE_AUTOUPDATER is the only seam that works, and that was read off the
-# binary rather than the docs. `autoUpdates: false` in ~/.claude.json is
-# deliberately ignored on a native install -- the gate is
-#   autoUpdates === false && (installMethod !== "native"
-#                             || autoUpdatesProtectedForNative !== true)
-# and the native installer sets both of those itself, so the config flag
-# cancels its own effect. `autoUpdatesChannel` only chooses latest/stable/rc;
-# it has no "off". This box had autoUpdates:false set the whole time and
-# updated anyway.
-Environment=DISABLE_AUTOUPDATER=1
-# And Antigravity's own updater off (lib/loam_pins.py: the CLIs stay at
-# the release's pin; the variable is read only as `true`).
-Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
-Environment=PATH={lc.UNIT_PATH}
-EnvironmentFile=-{lc.WAKE_ENV}
-WorkingDirectory={workspace}
-ExecStart={AGENTS}/bin/wake {workspace}
-# No clock (since 2026-11-10, lib/loam_cron.lane_timeout_s): a wake goes
-# until it is done, an engineer job it briefs and waits on included, and
-# systemd never times it out.
-TimeoutStartSec={unit_timeout_s(name, "reflection")}
-
-[Install]
-WantedBy=default.target
-"""
-    # The timer half is the reflection record's since 2026-10-14
-    # (`crons/reflection.md`): the schedule reconciler writes it, and this
-    # returns the same text for a daily `wake` so check-drift and a first
-    # provision render one thing.
-    from loam_cron import reflection_timer  # noqa: PLC0415
-    return service, reflection_timer(name, f"daily at {wake} {lc.ZONE_TOKEN}")
 
 
 def write_if_changed(path: Path, content: str) -> bool:
@@ -2894,13 +2824,13 @@ def main() -> None:
             die("usage: provision --reviewer [--dry-run]")
         provision_reviewer(dry)
         return
-    if len(args) != 2:
-        die("usage: provision <agent> <wake HH:MM> [--dry-run]\n"
+    if len(args) not in (1, 2):
+        die("usage: provision <agent> [<wake HH:MM>] [--dry-run]\n"
             "       provision --engineer [--dry-run]\n"
             "       provision --reviewer [--dry-run]\n"
             "       provision --managed-settings [--dry-run]")
-    name, wake = args[0].lower(), args[1]
-    if not re.match(r"^\d{2}:\d{2}$", wake):
+    name, wake = args[0].lower(), (args[1] if len(args) == 2 else None)
+    if wake is not None and not re.match(r"^\d{2}:\d{2}$", wake):
         die(f"wake must be HH:MM; got {wake!r}")
 
     workspace = AI_LABS / name
@@ -2910,16 +2840,23 @@ def main() -> None:
         if not (workspace / required).is_file():
             die(f"{workspace}/{required} is missing; refusing to provision")
 
-    # The reflection's time is its record's once it has one. Checked before
-    # anything is written, so a mismatch leaves agent.json as it was.
+    # The reflection's time is its record's, and only its record's
+    # (2026-11-19: agent.json's `wake_schedule` copy is gone). `wake` is the
+    # time a new agent's record starts at; given for an agent that has one,
+    # it must agree. Checked before anything is written.
     reflection_record = workspace / "crons" / "reflection.md"
     if reflection_record.exists():
         import loam_cron  # noqa: PLC0415
         cron = loam_cron.read_cron(name, "reflection")
-        if loam_cron.reflection_hhmm(cron.schedule_text) != wake:
+        hhmm = loam_cron.reflection_hhmm(cron.schedule_text)
+        if wake is not None and hhmm != wake:
             die(f"{reflection_record} says {cron.schedule_text}, not {wake}. "
                 f"The record is the reflection's time; change it there "
                 f"(bin/schedule).")
+        wake = hhmm
+    elif wake is None:
+        die(f"{name} has no daily reflection record yet; give its time: "
+            f"provision {name} <HH:MM>")
 
     display = name.capitalize()
     try:
@@ -2959,8 +2896,6 @@ def main() -> None:
         "display": display,
         "workspace": str(workspace),
         "vault": str(VAULT),
-        "wake_schedule": wake,
-        "wake_timezone": lc.TIMEZONE,
         **(loam_profile.kept(existing) if isinstance(existing, dict) else {}),
     }), encoding="utf-8")
 
@@ -3007,12 +2942,13 @@ def main() -> None:
     provision_antigravity([name])
     ensure_engineer()
 
-    SYSTEMD.mkdir(parents=True, exist_ok=True)
-    svc, _ = wake_units(name, workspace, wake)
-    write_if_changed(SYSTEMD / f"loam-wake-{name}.service", svc)
-    # The timer is the reflection record's. A new agent gets the record at
-    # `wake`, through the schedule path, which installs the timer; an agent
-    # that has one keeps it, and moving it is a change to the record.
+    # The daily reflection is a schedule record like any other (2026-11-19):
+    # its service and timer are the reconciler's, rendered from
+    # `crons/reflection.md`. A new agent gets the record at `wake`, through
+    # the schedule path, which installs both; an agent that has one keeps it,
+    # its body moved off a placeholder onto Loam's default if it is still
+    # one, and its units brought to the record now rather than within the
+    # reconciler's minute.
     import loam_schedule  # noqa: PLC0415
     record = loam_schedule.record_path(name, "reflection")
     if not record.exists():
@@ -3020,7 +2956,11 @@ def main() -> None:
                              loam_schedule.reflection_record(wake),
                              actor="engineer", lane="engineer",
                              reason=f"provisioned with its reflection at {wake}")
-        print(f"  wrote {record} (the timer follows it)")
+        print(f"  wrote {record} (its wake units follow it)")
+    else:
+        if loam_schedule.adopt_default(name):
+            print(f"  {record}: its instruction is now Loam's default")
+        loam_schedule.reconcile([name])
 
     # The vault's schedule page carries both lanes in one table, and this is
     # one generator of it; the schedule reconciler is the other and
@@ -3030,10 +2970,8 @@ def main() -> None:
     if write_schedule_page(VAULT):
         print(f"  rewrote {VAULT}/{lc.vault_folder('projects')}/Loam/infrastructure/schedule.md")
 
-    print(f"  provisioned {name}: project files, wake units")
+    print(f"  provisioned {name}: project files; its daily wake is its record's")
     report_readiness(name, workspace)
-    print(f"  next: systemctl --user daemon-reload && "
-          f"systemctl --user enable --now loam-wake-{name}.timer")
 
 
 if __name__ == "__main__":

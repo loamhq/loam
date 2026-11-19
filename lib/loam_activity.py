@@ -36,7 +36,7 @@ import fcntl
 import importlib.machinery
 import importlib.util
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import loam_config as lc
@@ -750,9 +750,8 @@ def _row(agent: str, name: str, text: str | None, log: list[dict],
         "enabled": enabled,
         "done": cron.done if cron else None,
         "body": strip_frontmatter(text).strip(),
-        # The reflection's instruction is the agent's `_reflection.md`, or
-        # Loam's default prompt once it has a map (2026-11-18), which is no
-        # file: None, as a cron's.
+        # The reflection's instruction is its body (2026-11-19); an agent
+        # without a map also has its own `_reflection.md` loaded with it.
         "instruction": ("_reflection.md" if kind == "reflection"
                         and not (_ai_labs_ws(agent) / "map.md").is_file() else None),
         "timer": _timer(agent, name, kind),
@@ -785,7 +784,8 @@ def compose(fields: dict, previous: str | None) -> str:
     the page does not send are left byte for byte; `schedule` and `at` are
     exclusive, so setting one clears the other (and a one-off set again is
     no longer done)."""
-    unknown = sorted(set(fields) - set(FIELDS) - {"name", "reason", "by", "lane"})
+    unknown = sorted(set(fields) - set(FIELDS)
+                     - {"name", "reason", "by", "lane", "thread", "yes"})
     if unknown:
         raise ls.Refused(f"a schedule has no field {', '.join(unknown)}; the "
                          f"fields are {', '.join(FIELDS)}")
@@ -840,8 +840,9 @@ def _actor(fields: dict | None) -> tuple[str, str]:
 
 
 def _write(agent: str, name: str, text: str | None, reason: str | None,
-           fields: dict | None = None, **extra) -> dict:
-    actor, lane = _actor(fields)
+           fields: dict | None = None, *, as_owner: bool = False,
+           **extra) -> dict:
+    actor, lane = (ACTOR, "conversation") if as_owner else _actor(fields)
     event = ls.change(agent, name, text, actor=actor, lane=lane, reason=reason,
                       systemd=_systemd(), extra=extra or None)
     return {"event": _change_item(event),
@@ -864,16 +865,67 @@ def edit(agent: str, name: str, fields: dict) -> dict:
     previous = ls.read_text(ls.record_path(agent, name))
     if previous is None:
         raise NotFound(f"there is no schedule {agent}/{name}")
-    if name == loam_cron.REFLECTION and "body" in fields:
-        where = ("Loam's default wake prompt, since it has a map"
-                 if (_ai_labs_ws(agent) / "map.md").is_file()
-                 else f"{agent}'s own _reflection.md")
-        raise ls.Refused(f"the reflection's instruction is {where}; this "
-                         f"record holds only when it runs and whether it is on")
     text = compose(fields, previous)
     if text == previous:
         raise ls.Refused("that changes nothing in the schedule")
-    return _write(agent, name, text, _reason(fields), fields)
+    word = owners_word(agent, name, fields, previous, text)
+    if word:
+        return _write(agent, name, text, _reason(fields), fields,
+                      as_owner=True, **word)
+    try:
+        return _write(agent, name, text, _reason(fields), fields)
+    except ls.Refused as exc:
+        if str(exc) == ls.REFLECTION_OWNERS:
+            raise ls.Refused(
+                f"{exc} If {lc.OWNER_NAME} asked you to turn it off, pass "
+                f"`thread` (the thread he asked in) and `yes` (the id of his "
+                f"message asking, like m12) with `enabled: false`.") from None
+        raise
+
+
+# How long the owner's message stays good for turning a reflection off.
+OWNERS_WORD_WINDOW = timedelta(hours=1)
+
+
+def owners_word(agent: str, name: str, fields: dict, previous: str,
+                text: str) -> dict | None:
+    """The settings route's one way for a persona to turn its daily
+    reflection off (2026-11-19): on the owner's word, cited. The persona
+    passes ``thread`` and ``yes``, the id of the owner's message asking; it
+    must be the owner's own message (the broker writes those only from his
+    signed-in app), in a thread the persona is in, under an hour old, from a
+    conversation, and not already taken for another change. The change is
+    then the owner's, logged with who relayed it and the message.
+
+    What it cannot tell: whether that message asked for this. A persona can
+    cite an unrelated message of the owner's from the last hour; the check
+    is that he spoke to it, recently, in a conversation, and the event names
+    the message so it can be read back. Without ``yes`` the call is the
+    persona's own, and the pause is refused (loam_schedule.REFLECTION_OWNERS).
+    None when the fields carry no owner's word."""
+    if not (fields.get("yes") or fields.get("thread")):
+        return None
+    by, lane = _actor(fields)
+    if lc.is_owner(by):
+        return None
+    if name != loam_cron.REFLECTION or fields.get("enabled") is not False \
+            or set(fields) - {"enabled", "reason", "by", "lane", "thread", "yes"}:
+        raise ls.Refused("`thread` and `yes` are for one change only: turning "
+                         "your daily reflection off on the owner's word "
+                         "(`enabled: false` and nothing else)")
+    if lane != "conversation":
+        raise ls.Refused(f"the owner's word is taken only in a conversation; "
+                         f"this is an unattended run ({lane})")
+    import loam_agents  # noqa: PLC0415
+    used = loam_agents._used_yeses() | {
+        (e["yes"]["thread"], e["yes"]["message"]) for e in ls.events()
+        if isinstance(e.get("yes"), dict) and e["yes"].get("thread")}
+    try:
+        yes = loam_agents.check_yes(by, fields.get("thread"), fields.get("yes"),
+                                    window=OWNERS_WORD_WINDOW, used=used)
+    except loam_agents.AgentsError as exc:
+        raise ls.Refused(exc.message) from None
+    return {"relayed_by": by, "yes": yes}
 
 
 def delete(agent: str, name: str, fields: dict | None = None) -> dict:
