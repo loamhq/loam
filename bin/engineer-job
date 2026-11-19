@@ -676,7 +676,7 @@ def preflight(project: eng.Project, p: dict[str, Path], brief_meta: dict) -> str
         # A folder project's harness is in its folder (2026-11-16).
         assert_imports_resolve(project.root / project.subdir if project.subdir else project.root)
     except (IdentityError, OSError) as exc:
-        fix = ("`agents/bin/provision --engineer`" if project.platform
+        fix = ("`agents/bin/provision --engineer`" if project.platform or project.lane_of
                else "re-rendering it from `agents/engineer-template/`")
         return (
             f"Refused before starting: the engineer's own composition is "
@@ -1899,7 +1899,11 @@ def job_label(project: eng.Project | None, job_id: str) -> dict:
             pass
         out.update(job_engine(p))
         out["thread_title"] = thread_title(out["thread"])
-    return {"job": job_id, "project": project.name if project else "?",
+    # The Loam engineer's app-only scope (2026-11-19) reads as Loam's, with
+    # its scope beside it: one engineer in Activity, its tasks and here.
+    return {"job": job_id,
+            "project": (project.lane_of or project.name) if project else "?",
+            "scope": eng.APP_SCOPE if project is not None and project.lane_of else None,
             "title": title, "briefed_by": briefed_by, "run_kind": "job", **out}
 
 
@@ -2044,7 +2048,9 @@ def status_text(status: dict | None = None) -> str:
     """`box_status`, as a person reads it."""
     status = status or box_status()
     def job(row: dict) -> str:
-        return (f"{row['job']} ({row['project']}, briefed by "
+        return (f"{row['job']} ({row['project']}"
+                + (f", {row['scope']} only" if row.get("scope") else "")
+                + ", briefed by "
                 f"{row['briefed_by']}): {row['title']}")
     mem = status.get("memory") or {}
     lines = [f"As of {status['at']}.",
@@ -3510,7 +3516,10 @@ def run_inner(project: eng.Project, job_id: str) -> int:
 def unknown_project(name: str) -> str:
     return (
         f"No engineer for project {name!r}. Known: "
-        f"{', '.join(sorted(eng.projects()))}. A new project's engineer is "
+        f"{', '.join(sorted(eng.engineers()))}"
+        + (f" (and Loam's app-only work: `Loam` with `scope: {eng.APP_SCOPE}`)"
+           if eng.app_lane() is not None else "")
+        + ". A new project's engineer is "
         f"provisioned by the platform engineer, on a brief to project "
         f"'Loam' that names the project and its repo."
     )
@@ -3568,7 +3577,15 @@ def accept(args: dict, briefed_by: str):
     if not isinstance(args, dict):
         return "The tool handed the launcher something that is not an object of arguments."
     project_name = str(args.get("project") or "")
-    project = eng.projects().get(project_name)
+    # The Loam engineer's app-only scope (2026-11-19): `Loam` with `scope:
+    # app`, or `loam-ui` by its name from before, or `Loam` continuing one of
+    # its jobs. lib/loam_engineer.py `brief_target` says which and refuses a
+    # scope that means nothing.
+    project, refusal = eng.brief_target(
+        project_name, one_line(args.get("scope")),
+        one_line(args.get("continue_job")))
+    if refusal:
+        return refusal
     if project is None:
         return unknown_project(project_name)
     defect = platform_defect(project)
@@ -3638,6 +3655,11 @@ def accept(args: dict, briefed_by: str):
                 f"refactors). Name one of those, or leave it out.")
     if tier:
         extra = {**(extra or {}), "tier": tier}
+    if project.lane_of:
+        # Whose job it is and what it may touch, for the receipt, Activity
+        # and the reader of the brief; the folder is the landing's to hold.
+        extra = {**(extra or {}), "engineer": project.lane_of,
+                 "scope": eng.APP_SCOPE}
     # A title naming the pull request the job updates: open, on this
     # project's repository, or refused here (lib/loam_pr_target.py).
     refusal = pr_target_refusal(project, title)

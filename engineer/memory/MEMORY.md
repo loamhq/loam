@@ -2381,3 +2381,35 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   only. Closing the Market ends Try it, so the real app wearing a listed
   theme is photographed on the fixture app with the theme installed from its
   repository, not on staging.
+
+## 2026-11-19 — one Loam engineer; the app is its `scope: app`
+
+- **The app's engineer is a scope, not an engineer.** `lib/loam_engineer.py`
+  `app_lane()` is the folder project the app engineer was (`subdir` `app`,
+  root the checkout), registered record or built in from `app/package.json`;
+  `projects()` has it (so its jobs, continuations and landings are found),
+  `engineers()` does not (Settings, refusals). `brief_target` routes `Loam` +
+  `scope: app`, the old name `loam-ui`, and a Loam brief continuing one of its
+  jobs. Every safeguard is the folder project's code, unchanged: session in
+  `app/`, `outside_scope` at landing, `cd app && npm test`, NoNewPrivileges,
+  no deploy key, Loam's live lock, `loam_autodeploy` on `loam-ui` only.
+- **Keep the internal name.** `loam-ui` is the deploy record, the unit, the
+  jobs folder, the worktrees and the receipts folder; renaming any of it
+  breaks history, continuations or rollback for nothing a person sees.
+  What a person sees goes through `job_label` (`project: Loam`, `scope:
+  app`) and `profile.engineers()` (one row).
+- **Settings follow the engineer, not the scope.** `settings_project()` maps
+  the scope to the platform project for provider, model, tiers; the old
+  `projects.loam-ui` row stays in the file, read by nothing except
+  `deploy_default`'s fallback until Loam's own toggle is said. A PATCH of a
+  provider for `loam-ui` is a 409 naming Loam, so a persona cannot move the
+  whole platform engineer while meaning the app.
+- **A scope job on a non-Claude provider is still not a platform job**: it
+  takes the project sandbox (Codex workspace-write, Antigravity's wall),
+  never the platform's sudo route from 5884aae1.
+- **`app/`'s harness is rendered by `provision --engineer`**: the Loam
+  role verbatim plus `engineer/install/app-project.md`; `check-drift`'s
+  `check_app_scope` holds it. A release install has it from its first
+  provision.
+- **`test_thread_no_clock.py` flakes about one run in ten under load**, on
+  main too (measured side by side 2026-11-19); rerun before blaming a change.

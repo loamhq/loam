@@ -95,8 +95,19 @@ mcp = MCPServer("loam-engineer")
         f"a model: {lc.OWNER_NAME} sets each engineer's three in Settings. On "
         "`continue_job` it is left out to keep the job's own model.\n"
         "\n"
+        "**`scope: \"app\"` — work on Loam's app alone.** Loam's web app is "
+        "the `app/` folder of Loam's repository, and its engineer is the Loam "
+        "engineer. A brief to project `Loam` with `scope: \"app\"` is open to "
+        "every persona and runs as the app-only workflow: the engineer works "
+        "in `app/`, without sudo, a landing refuses any change outside "
+        "`app/` and runs the app's own tests, and `deploy` restarts the app "
+        "and never the broker. Work that also touches the runtime (a broker "
+        "route, a deploy value) is a `Loam` brief with scope left out: the "
+        "full tests, and the engineer deploys it itself. The old project "
+        "name `loam-ui` still reaches the same workflow.\n"
+        "\n"
         "**`deploy` — land and go live in one job.** For a project whose app "
-        f"runs on this box (loam-ui today), set `deploy: true` when {lc.OWNER_NAME}'s "
+        f"runs on this box (Loam's app, with `scope: \"app\"`), set `deploy: true` when {lc.OWNER_NAME}'s "
         "word for the job is to deploy it ('land and deploy', 'go and do it "
         "... after it is live'). After the branch has merged, passed the "
         "tests and been pushed, the launcher deploys that commit with "
@@ -188,6 +199,8 @@ mcp = MCPServer("loam-engineer")
     # (lib/loam_autodeploy.py). `tier` (2026-11-15) defaults to "", which
     # the launcher reads as `standard` on a fresh job and as "the job's own
     # model" on a continuation (lib/loam_engineer.py, "Three tiers").
+    # `scope` (2026-11-19) defaults to "", the whole project; "app" on Loam
+    # is its app-only workflow (lib/loam_engineer.py, `brief_target`).
 )
 async def brief(
     project: str,
@@ -198,6 +211,7 @@ async def brief(
     continue_job: str = "",
     deploy: bool | None = None,
     tier: str = "",
+    scope: str = "",
 ) -> dict[str, Any]:
     # Awaited, never blocked on: see the docstring. The launcher returns
     # once the job is launched or queued.
@@ -212,6 +226,7 @@ async def brief(
             "continue_job": continue_job,
             "deploy": deploy,
             "tier": tier,
+            "scope": scope,
         }).encode("utf-8"),
         check=False,
     )
