@@ -78,7 +78,8 @@ test('the page attaches after the newest loaded ID; history and snapshots cannot
   }
   const field = { value: '' }
   const row = { id: 'one', members: [{ persona: 'sprout' }, { persona: 'quill' }], unread: 2 }
-  const threads = createThreads({ api: async (method, route) => { reads.push(route); return { thread: { ...row, unread: 0 }, messages, has_more: false, turn: null, board: { path: 'board.md', markdown: '' } } },
+  let opening = messages
+  const threads = createThreads({ api: async (method, route) => { reads.push(route); return { thread: { ...row, unread: 0 }, messages: opening, has_more: false, turn: null, board: { path: 'board.md', markdown: '' } } },
     redraw() {}, enter() {}, agents: () => agents,
     compose: { field: () => field, restore() {}, files: () => [], leave() {} } })
   threads.st.checked = true; threads.st.threads = [row]
@@ -90,6 +91,9 @@ test('the page attaches after the newest loaded ID; history and snapshots cannot
     assert.equal(threads.st.open.landAt, 'm20')
     assert.equal(threads.st.open.atEnd, false)
     assert.equal(threads.st.open.after, 'm21')
+    opening = []
+    await threads.open('one')
+    assert.equal(streams.at(-1), '/api/threads/one/events?after=m0', 'an empty page can recover the first message')
   } finally { threads.close(); globalThis.fetch = originalFetch }
 })
 test('thread addresses survive reload without making the root address reopen a remembered chat', () => {

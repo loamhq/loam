@@ -486,10 +486,11 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   function connect(id, ticket, deliver) {
     controller = new AbortController()
     const abort = controller
-    if (fixtureStream) { const stop = fixtureStream(id, deliver, st.open?.after); abort.signal.addEventListener('abort', stop); return }
+    const after = st.open?.after ?? 'm0'
+    if (fixtureStream) { const stop = fixtureStream(id, deliver, after); abort.signal.addEventListener('abort', stop); return }
     ;(async () => {
       try {
-        const res = await fetch(`/api${path(id)}/events${st.open?.after ? `?after=${encodeURIComponent(st.open.after)}` : ''}`, { signal: abort.signal })
+        const res = await fetch(`/api${path(id)}/events?after=${encodeURIComponent(after)}`, { signal: abort.signal })
         if (!res.ok) {
           if (res.status === 404) confirmRemoval(id)
           const body = await res.json().catch(() => null)

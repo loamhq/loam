@@ -351,6 +351,30 @@ async def main():
     check("the record stays readable: the last thing it said is the body",
           "\n\nBooked it for the beans.\n" in threads.read(tid)[2].read_text(), True)
 
+    # Reconnect to a thread last seen empty. Its branch line is displayed
+    # under m1, but m2 must reach the app before it can acknowledge m3.
+    replay_tid = threads.create(None, "Replay order")["id"]
+    threads.append(replay_tid, OWNER, "first")
+    threads.append(replay_tid, OWNER, "second")
+    threads.insert_after(replay_tid, "m1", "system", "branched")
+    replay_writer = FakeWriter()
+    replay_stream = asyncio.create_task(server.thread_stream(replay_tid, "m0", replay_writer))
+    try:
+        await asyncio.sleep(0)
+        threads.append(replay_tid, "ada", "written outside the API")
+        last = threads.append(replay_tid, OWNER, "written through the API")
+        server.threads.publish(replay_tid, {"type": "message.done", "message": last})
+        async with asyncio.timeout(5):
+            while not any(e.get("message", {}).get("id") == last["id"]
+                          for e in replay_writer.items()):
+                await asyncio.sleep(0.01)
+        check("replay and live delivery advance one cursor past file-only posts",
+              [e["message"]["id"] for e in replay_writer.items() if e["type"] == "message.done"],
+              ["m1", "m2", "m3", "m4", "m5"])
+    finally:
+        replay_stream.cancel()
+        await asyncio.gather(replay_stream, return_exceptions=True)
+
     # -- waiting on a background task ----------------------------------------
     thread_w = FakeWriter()
     stream = asyncio.create_task(server.thread_stream(tid, None, thread_w))

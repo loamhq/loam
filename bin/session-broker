@@ -3692,8 +3692,11 @@ class Server:
         Obsidian are seen by watching the two files, every two seconds."""
         meta, msgs, path = threads_rec.read(thread_id)
         board = threads_rec.VAULT / meta["board"]
-        sent = threads_rec._num(after) if after else (
-            threads_rec._num(msgs[-1]["id"]) if msgs else 0)
+
+        def number(message):
+            return threads_rec._num(message["id"])
+
+        sent = threads_rec._num(after) if after else max(map(number, msgs), default=0)
 
         def stamp(p: Path):
             try:
@@ -3702,7 +3705,7 @@ class Server:
             except OSError:
                 return None
 
-        record_at, board_at = stamp(path), stamp(board)
+        record_at, board_at = None, stamp(board)
         queue = self.threads.listen(thread_id)
         self._open_stream(writer)
         try:
@@ -3711,6 +3714,17 @@ class Server:
                     event = {**event, "message": with_steps(
                         thread_id, [event["message"]])[0]}
                 await self._send_event(writer, event)
+
+            async def catch_up(messages, before=None) -> None:
+                nonlocal sent
+                # A branch line can sit earlier in the Markdown. Send in ID
+                # order so a disconnect after any item leaves a valid cursor.
+                newer = (m for m in messages if number(m) > sent
+                         and (before is None or number(m) < before))
+                for message in sorted(newer, key=number):
+                    await send({"type": "message.done", "thread": thread_id,
+                                "message": message})
+                    sent = number(message)
 
             await self._send_event(writer, {"type": "thread.snapshot",
                                             "thread": thread_id,
@@ -3721,10 +3735,7 @@ class Server:
                                             "members": self.threads.summary(
                                                 thread_id)["members"]})
             if after:
-                for m in msgs:
-                    if threads_rec._num(m.get("id")) > threads_rec._num(after):
-                        await send({"type": "message.done",
-                                    "thread": thread_id, "message": m})
+                await catch_up(msgs)
             quiet = 0.0
             while True:
                 try:
@@ -3735,7 +3746,10 @@ class Server:
                 if event is not None:
                     quiet = 0.0
                     if event.get("type") == "message.done":
-                        n = threads_rec._num(event["message"].get("id"))
+                        n = number(event["message"])
+                        if n > sent + 1:
+                            # A file-only post can precede this notification.
+                            await catch_up(threads_rec.read(thread_id)[1], before=n)
                         if n <= sent:
                             continue
                         sent = n
@@ -3752,12 +3766,7 @@ class Server:
                     # A rename moves the board with the record (2026-11-10);
                     # watch it where it went, not where it was.
                     board = threads_rec.VAULT / meta["board"]
-                    for m in fresh:
-                        if threads_rec._num(m.get("id")) > sent:
-                            sent = threads_rec._num(m["id"])
-                            await send({
-                                "type": "message.done", "thread": thread_id,
-                                "message": m})
+                    await catch_up(fresh)
                 if now_board != board_at:
                     board_at = now_board
                     try:
