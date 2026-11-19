@@ -124,20 +124,25 @@ def as_user(cfg: dict, argv: list[str], **kw) -> subprocess.CompletedProcess:
 
 
 def ask(question: str, default: str = "", *, check=None) -> str:
-    """One question, from the terminal even when the script came down a pipe."""
+    """One question, from the terminal even when the script came down a pipe.
+    The terminal is opened twice, to read and to write: a text file opened
+    "r+" on /dev/tty raises "not seekable", so until 0.2.8 every question
+    stopped the install as if there were no terminal (found walking 0.2.8;
+    every earlier rehearsal gave all its answers as options)."""
     try:
-        tty = open("/dev/tty", "r+", encoding="utf-8")
+        tty_in = open("/dev/tty", "r", encoding="utf-8")
+        tty = open("/dev/tty", "w", encoding="utf-8")
     except OSError:
         if default:
             return default
         raise Stop(f"The installer needs an answer and has no way to ask: {question}",
                    "run it again with the answer given as an option (see --help)")
-    with tty:
+    with tty_in, tty:
         while True:
             hint = f" [{default}]" if default else ""
             tty.write(f"\n{question}{hint}: ")
             tty.flush()
-            answer = tty.readline().strip() or default
+            answer = tty_in.readline().strip() or default
             why = check(answer) if check else (None if answer else "an answer is needed")
             if not why:
                 logline(f"ASKED {question} -> {answer}")
