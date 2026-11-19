@@ -417,3 +417,54 @@ will be, in a git bundle tagged `0.1.0`: `install.sh --source <bundle>`.
   --ignored` in the checkout 0 lines; L13's `loam update check` read the
   install as stock 0.1.0, the newest; `loam status` all ok.
 - **Ubuntu 24.04**: the same install in one run, and the same proof.
+
+## How an own domain was proved (2026-11-18, 0.2.8)
+
+On a throwaway Debian 12 VM (Modal `runtime="vm"`, systemd in a PID
+namespace, as above), with nothing reachable from the internet: the domain
+was `loam.example.test`, public DNS was stood in for by **dnsmasq** on the
+VM's loopback (`/etc/resolv.conf` pointed at it, so `--resolver system`
+asks it), and the certificates were Caddy's own authority
+(`--local-certs`). The release was this branch tagged `0.2.8` in a bare
+repository served by `git daemon` on 127.0.0.1.
+
+- **The question**: run with neither `--domain` nor `--name`, on a pty, step
+  1 asked "Type 1 or 2", then the domain, and wrote `own_domain = true`.
+  (Before this, the installer could ask nothing at all; see the release
+  notes.)
+- **No records yet**: step 2 said both were missing and printed the two
+  records; steps 3 to 9 went on.
+- **Making them while it waits**: at step 10 the installer waited. A script
+  standing in for the owner added the apex record 25 seconds in (the wait
+  then said only `*.loam.example.test` was missing) and the wildcard 40
+  seconds later (dnsmasq `address=/loam.example.test/…`, a true wildcard);
+  within 15 seconds it said both were right, rendered the hosts, had the
+  certificate and printed the claim link. About 3 minutes in all.
+- **The claim, sign-in and passkeys**: `/` 302 to `/claim`; the claim 200;
+  Loam's sign-in page with the claimed password; the app (its welcome
+  screen); `vault.` and `files.` listings; an agent's site made with
+  `bin/site up walk --by iris` answered at `walk.loam.example.test` behind
+  the login. A passkey was added in the sign-in settings with a CDP virtual
+  authenticator, the one-time code read through `/_loam/login-code`, and a
+  fresh session signed in with the passkey alone.
+- **`loam status`** with a stray AAAA on the apex and the wildcard pointing
+  elsewhere showed both sentences under *Name*; restored, all ok.
+- **`loam update`**: a walk-only `0.2.9` tag in the VM's repository was
+  seen, applied, and the hosts answered after.
+- **The private feedback route**: with `feedback.url` pointed at a stand-in
+  receiver on the VM's loopback (the real `loam_feedback.Inbox`), `loam
+  report idea` drafted a report with the domain and the owner's name taken
+  out, `loam report send` posted it (`install: "loam.example.test"`,
+  `User-Agent: loam/0.2.8`), and the receiver wrote the note. The sandbox
+  has no public address and the receiver refuses a private caller, so the
+  caller was a stand-in public address that the receiver's resolver gave
+  for a name exactly when the VM's DNS said that name was this VM; a report
+  naming a domain that was not the install was refused (403).
+- **The name path**, on a second VM: `--name sam --base loam-proof.test`
+  with the owner and the time zone asked at the terminal, as the README's
+  command does; installed as before, no `own_domain` key.
+
+What this does not prove: Let's Encrypt itself on a real domain. The
+certificate route is the one every install on a name already uses (one
+certificate per host, HTTP-01 / TLS-ALPN-01), and nothing in it depends on
+which domain it is.
