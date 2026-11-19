@@ -1642,6 +1642,7 @@ class ThreadEngine:
         self.publish(turn.thread_id, {"type": "turn.started", "persona": turn.persona,
                                       "engine": engine, "model": model})
         recovering = turn.dispatch is not None
+        same_host = False
         if recovering:
             intent = turn.dispatch
             session = self.broker.load(intent["session_id"])
@@ -1649,9 +1650,10 @@ class ThreadEngine:
                 raise ValueError("dispatch belongs to another provider session")
             kept, prompt, through = intent["previous"], intent["prompt"], intent["through"]
             history = session.replay(intent["since"])
-            accepted = any(e.get("dispatch_id") == turn.input_id for e in history)
+            receipt = next((e["seq"] for e in history if e.get("type") == "broker.user_message"
+                            and e.get("dispatch_id") == turn.input_id), None)
             same_host = session.incarnation == intent["incarnation"]
-            if not accepted and not same_host:
+            if receipt is None and not same_host:
                 # The old host exited before its journalled write. A new
                 # process can take this intent with its original binding.
                 session = await self.broker.start_session(
@@ -1667,7 +1669,7 @@ class ThreadEngine:
         else:
             session, kept, prompt, through = await self._prepare_turn(
                 turn, meta, engine, model, effort)
-            accepted = False
+            receipt = None
             if hasattr(session, "dispatch"):
                 if turn.input_id is None:
                     raise OSError("turn must have a durable input before dispatch")
@@ -1685,7 +1687,7 @@ class ThreadEngine:
         if recovering:
             for event in history:
                 queue.put_nowait(event)
-            if accepted and (not same_host or session.state != "running"):
+            if receipt is not None and (not same_host or session.state != "running"):
                 queue.put_nowait(None)
         session.watch(queue)
         self.turn_sessions[turn.key] = session
@@ -1696,7 +1698,7 @@ class ThreadEngine:
         # hook stops filing a second copy of its turns (2026-11-10).
         mark(session, turn.thread_id)
         # Replies the last turn's watcher never saw, posted before this one.
-        if kept and not recovering:
+        if kept and not turn.dispatch:
             self.recover_late(turn, session, kept, engine, model)
 
         reply = Reply()
@@ -1762,8 +1764,10 @@ class ThreadEngine:
                 await self._restore_steers(turn, session, history)
                 restored_steers = {s["id"]: s for s in turn.dispatch["steers"]}
             if turn.dispatch:
-                if not accepted or (same_host and session.state == "running"):
-                    await session.dispatch(turn.input_id, prompt, turn.attachments)
+                if receipt is None or (same_host and session.state == "running"):
+                    receipt = await session.dispatch(turn.input_id, prompt, turn.attachments)
+                if kept:
+                    self.recover_late(turn, session, kept, engine, model, before=receipt)
             elif turn.attachments:
                 await session.send_message(prompt, turn.attachments)
             else:
@@ -1822,6 +1826,10 @@ class ThreadEngine:
                     # again, and the message waits for this turn's next
                     # park or its end.
                     active["handing"] = False
+                    continue
+                if receipt is not None and event.get("seq", receipt) < receipt:
+                    # A previous background reply can arrive between saving
+                    # the intent and the host accepting this prompt.
                     continue
                 turn.cursor = event.get("seq", turn.cursor)
                 reply.keep(event)
@@ -2501,7 +2509,7 @@ class ThreadEngine:
         return text, {**extra, "reply_to": target}
 
     def recover_late(self, turn: Turn, session, kept: dict, engine: str,
-                     model: str | None) -> None:
+                     model: str | None, before: int | None = None) -> None:
         """Replies the session made after the last turn's watcher let go: a
         harness turn nobody was reading (a notification after a `result`
         that `working_behind` called final). Each is posted as its own
@@ -2512,7 +2520,8 @@ class ThreadEngine:
         if not isinstance(since, int) or not callable(replay):
             return
         try:
-            events = [e for e in replay(since) if isinstance(e, dict)]
+            events = [e for e in replay(since) if isinstance(e, dict)
+                      and (before is None or e.get("seq", before) < before)]
         except Exception as exc:  # noqa: BLE001 - recovery must not stop a turn
             steps.log(f"{turn.thread_id} {turn.persona}: late-reply check failed ({exc})")
             return

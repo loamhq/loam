@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from unittest.mock import AsyncMock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +36,100 @@ def provider():
         print(json.dumps({"type": "assistant", "message": {
             "content": [{"type": "text", "text": "first second"}]}}), flush=True)
         print(json.dumps({"type": "result", "num_turns": 1}), flush=True)
+
+
+def steer_provider():
+    folder = Path(os.environ["TMPDIR"])
+    def emit(kind, **fields):
+        print(json.dumps({"type": kind, **fields}), flush=True)
+    count = 0
+    for line in sys.stdin:
+        event = json.loads(line)
+        if event["type"] != "user":
+            continue
+        text = json.dumps(event["message"]["content"])
+        label = next(word for word in ("fourth-input", "job-note", "second-input", "first-input")
+                     if word in text)
+        with (folder / "steer-reads").open("a") as f:
+            print(label, file=f)
+        count += 1
+        if count == 1:
+            emit("system", subtype="init")
+        if count == 4:
+            while not (folder / "finish-steers").exists():
+                time.sleep(.01)
+            emit("system", subtype="background_tasks_changed", tasks=[{"task_id": "bg"}])
+            emit("assistant", message={"content": [{"type": "text", "text": "First reply"}]})
+            emit("result", num_turns=1)
+            emit("system", subtype="background_tasks_changed", tasks=[])
+            emit("system", subtype="task_notification", task_id="bg", status="completed")
+            emit("system", subtype="init")
+            emit("assistant", message={"content": [{"type": "text", "text": "Second reply"}]})
+            emit("result", num_turns=1)
+
+
+async def steering(host, cli, folder):
+    """The reader goes away before the third steer's acknowledgement."""
+    from loam_thread_engine import ThreadEngine, Turn
+    import loam_thread_inputs as inputs
+    import loam_threads as threads
+
+    cli.write_text(f"#!/bin/sh\nexec '{sys.executable}' '{__file__}' steers\n")
+    tid = threads.create("iris", "carried inputs", members=["iris"])["id"]
+    key = tid, "iris"
+    engine = ThreadEngine(host)
+    engine._memory_pins = AsyncMock()
+    tasks = []
+    engine.steer_soon = lambda key: tasks.append(asyncio.create_task(engine._steer(key)))
+    engine.post_person(tid, "first-input")
+    async def until(check):
+        async with asyncio.timeout(10):
+            while not check():
+                await asyncio.sleep(.01)
+    await until(lambda: key in engine.turn_watch)
+    session = engine.turn_sessions[key]
+    session._titled = True
+    hold = asyncio.Event()
+    original = session.steer
+    async def delayed(text, *args, **kwargs):
+        seq = await original(text, *args, **kwargs)
+        if "fourth-input" in text:
+            await hold.wait()
+        return seq
+    session.steer = delayed
+    try:
+        engine.post_person(tid, "second-input")
+        await until(lambda: len(engine.turn_live[key].carried) == 1)
+        engine.schedule(Turn(*key, 0, "job:probe", note="job-note", briefed_at=time.time()))
+        await until(lambda: len(engine.turn_live[key].carried) == 2)
+        engine.post_person(tid, "fourth-input")
+        await until(lambda: (folder / "steer-reads").exists() and
+                    len((folder / "steer-reads").read_text().splitlines()) == 4)
+        entries = inputs.items(*key)
+        assert [e["reason"] for e in entries] == ["m1", "m2", "job:probe", "m3"]
+        assert entries[-1].get("sent") is None
+        for task in [engine.workers[key], *tasks]:
+            task.cancel()
+        await asyncio.gather(engine.workers[key], *tasks, return_exceptions=True)
+        hold.set()
+        (folder / "finish-steers").touch()
+        await until(lambda: len(session.turns) == 2)
+        replacement = ThreadEngine(host)
+        assert replacement.resume_inputs()["scheduled"] == 1
+        await asyncio.wait_for(replacement.workers[key], 8)
+        rows = [m for m in threads.read(tid)[1] if m["author"] == "iris"]
+        assert [m["text"] for m in rows] == ["First reply", "Second reply"], rows
+        assert rows[0]["steered"] == ["m2", "m3"]
+        assert threads.session_for(*key)["through"] == "m3"
+        assert inputs.items(*key) == []
+        assert (folder / "steer-reads").read_text().splitlines() == [
+            "first-input", "second-input", "job-note", "fourth-input"]
+        replacement.stop_all_tails()
+        print(f"PASS child={session.proc.pid} root/m2/job/m3 in FIFO order, third steer "
+              "acknowledgement lost, both background replies filed once, inputs=0")
+    finally:
+        hold.set()
+        await session.stop()
 
 
 async def worker(mode, thread_id, session_id, path):
@@ -97,6 +192,11 @@ async def host():
     send = session.send_message
 
     async def hold_ack(*args, **kwargs):
+        # Output already in flight at the provider when the worker saved
+        # its cursor precedes this dispatch. It cannot answer the new input.
+        await session.emit({"type": "assistant", "message": {
+            "content": [{"type": "text", "text": "another turn's reply"}]}})
+        await session.emit({"type": "result", "num_turns": 1})
         seq = await send(*args, **kwargs)
         await release_ack.wait()
         return seq
@@ -162,11 +262,14 @@ async def host():
         if session.proc.returncode is None:
             session.proc.kill()
             await session.proc.wait()
+    await steering(host, cli, folder)
 
 
 if __name__ == "__main__":
     if sys.argv[1:2] == ["provider"]:
         provider()
+    elif sys.argv[1:2] == ["steers"]:
+        steer_provider()
     elif sys.argv[1:2] == ["worker"]:
         asyncio.run(worker(*sys.argv[2:]))
     elif sys.argv[1:2] == ["host"]:
