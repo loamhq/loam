@@ -5,6 +5,7 @@ version: 1.0.0
 author: Loam contributors
 api: 0
 kind: [extension]
+description: "A copy of your notes and your agents' memory, kept safe off this machine."
 default_on: false
 icon: assets/icon.svg
 places: [settings.section]
@@ -46,37 +47,52 @@ contributes:
       default: 15m
 ---
 
-# Git backup
-
-Your vault and your agents' AI Spaces, copied every few minutes to private
-git repositories of your own: on GitHub, GitLab, Codeberg or any git host.
-If this machine is ever lost, a new Loam pointed at the two repositories has
-everything back, every note, every conversation and every agent's memory,
+Every few minutes, your vault and your agents' AI Spaces are copied to
+private repositories of your own, on GitHub, GitLab, Codeberg or any git
+host. If this machine is ever lost, a new Loam pointed at them has
+everything back: every note, every conversation and every agent's memory,
 with its whole history.
 
-**Connecting takes a minute and no terminal.** Make an empty private
-repository for each, paste its address here, and Loam makes a key for that
-one repository. Add the key to the repository as a deploy key with write
-access (three clicks; the page shows where), then test it. The key reaches
-that repository and nothing else in your account, and it never leaves this
-machine.
+## What you can do
 
-**It will not push to a public repository.** Before every backup Loam asks
-the host, signed out, whether anyone can read the repository; if anyone can,
-nothing is sent and you are told.
+- **Set it up in a minute, no terminal.** Paste the address of an empty
+  private repository; Loam makes a key for that one repository and shows
+  you where to add it.
+- **Know it is working.** This page shows when each was last backed up. If
+  backups stop, a plain line saying why reaches your General board, and
+  another when they work again.
+- **Choose how often.** Every 15 minutes, every hour, every 6 hours or once a
+  day.
+- **Get everything back.** On a new Loam, connect the same two repositories
+  and ask an agent to restore them.
 
-**You will know if it stops.** The page shows when each was last backed up.
-When backups fail (a removed key, a full account, a repository changed
-elsewhere) a line saying so in plain words reaches your General board, the
-way Loam's other warnings do, and another when it works again.
+## How to use it
 
-**Large files.** A file over 100 MB is kept out of Loam's history (git
-hosts refuse them) and stays on disk as it is; the page names each one.
+1. Make two empty **private** repositories on your git host: one for your
+   vault, one for your AI Spaces.
+2. Paste each address below and add the key Loam makes as a deploy key with
+   write access (the page shows where).
+3. Press **Test**. That's it.
 
-**Without this plugin** Loam still commits both every fifteen minutes on
-this machine, so a change can always be undone; this adds the copy that
-survives the machine.
+## Private by design
 
-**Getting everything back** on a new install: turn this on there, connect
-the same two repositories, and ask an agent to restore them
-(`backup_restore`). docs/backup.md in Loam has the steps.
+It only ever sends to the repositories you connect, with a key that reaches
+nothing else in your account and never leaves this machine. It refuses to
+send anything to a repository anyone can read.
+
+---
+
+## Technical details
+
+Before every backup Loam asks the host, signed out, whether the repository
+is public; if it is, nothing is sent and you are told. Pushes are over SSH
+with a deploy key per repository, kept in the plugin's private folder.
+Pushes are never forced: a repository that another machine has written to
+reports "diverged". A file over 100 MB is kept out of the history (git hosts
+refuse them), stays on disk, and is named on this page.
+
+Without this plugin Loam still commits both every fifteen minutes on this
+machine, so a change can always be undone; this adds the copy that survives
+the machine. Agents have `backup_status`, `backup_connect`, `backup_test`
+and, on your word only, `backup_restore`. The schedule is the `every`
+setting; `docs/backup.md` in Loam has the restore steps.

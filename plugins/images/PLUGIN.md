@@ -5,6 +5,10 @@ version: 1.2.0
 author: Loam contributors
 api: 0
 kind: [extension]
+description: "Your agents make and change pictures for you, right in the conversation."
+screenshots:
+  - {src: assets/shots/images-reply.webp, src_dark: assets/shots/images-reply-dark.webp, caption: "Ask for a picture, and it arrives in the reply."}
+  - {src: assets/shots/images-full.webp, src_dark: assets/shots/images-full-dark.webp, caption: "Tap it to see it full size. It’s saved in your vault too."}
 default_on: false
 icon: assets/icon.svg
 keys:
@@ -54,22 +58,42 @@ contributes:
     - setting: folder
 ---
 
-# Images
+Ask any agent for a picture (a cover for an essay, an illustration for a
+story, a mock-up, a photo with the sky changed) and it appears in its reply.
+Each one is also saved in your vault as an ordinary image file, so it is
+yours like any other.
 
-Your agents make and change pictures: a cover, a diagram's illustration, a
-mock-up, a photo with the sky changed. Each is saved in your vault as an
-ordinary PNG, JPEG or WebP file, in the **Images** folder unless the agent
-names another place, so it is yours like any other file.
+## What you can do
 
-**It needs a key.** Add an OpenAI key or a Google (Gemini) key in
-Settings › Connections › API keys. With both, OpenAI makes your images unless you choose
-Google under **Made with** in this plugin's settings. The images are billed to you by the
-service that makes them; a high-quality OpenAI image costs roughly 35 times
-a low-quality one, and each call's cost is in the agent's answer.
+- **Make a picture from words.** Describe it; your agent draws it.
+- **Change a picture you have.** Give it a photo or an image from your
+  vault and say what to change.
+- **See it where it was made.** Up to three pictures show in the reply; tap
+  one to see it full size.
+- **Keep them tidy.** New pictures go to your *Images* folder, or wherever
+  you ask.
 
-**In a conversation**, an agent shows an image by writing
-`![a few words](path)` on a line of its own: up to three appear in its
-message, and a tap opens one full size.
+## How to use it
 
-Every engine that speaks MCP gets the same tool, `generate_image`. An agent
-whose engine has image making of its own may use either.
+1. Add an OpenAI key or a Google (Gemini) key in **Settings › Connections ›
+   API keys**.
+2. Turn Images on here.
+3. Ask an agent: "Draw me a watercolour of the garden in spring."
+
+## What you need, and what leaves your server
+
+A key from OpenAI or Google. Your description, and any picture you ask it
+to change, go to that service from your own server, and the pictures are
+billed to you by it. Nothing else does.
+
+---
+
+## Technical details
+
+With both keys, OpenAI makes the pictures unless *Made with* says Google.
+The models are `gpt-image-2` and `gemini-3-pro-image-preview` unless set under
+Advanced. A high-quality OpenAI image costs roughly 35 times a low-quality
+one; each call's cost is in the agent's answer. Pictures are saved as PNG,
+JPEG or WebP. An agent shows one by writing `![a few words](path)` on a line
+of its own. Every engine that speaks MCP gets the same tool,
+`generate_image`; an engine with image making of its own may use either.

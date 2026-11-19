@@ -188,15 +188,14 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       notice(st.done, false))
   }
   // What a plugin looks like: a theme worn (its preview, from its installed
-  // tokens), else its screenshots, else its icon on a plate of the page's own
-  // colours, so a plugin with nothing on screen still has a face.
+  // tokens), else its screenshots, else nothing: its icon is already beside
+  // its name.
   function picture(row) {
     if (row.kind?.includes?.('theme')) return showcase.view({ key: `plugin-${row.id}`, look: row.id, name: row.name || row.id, options: row.options ?? [], palette: row.palette ?? [], from: 'installed' })
     const file = rel => `/api/plugins/${encodeURIComponent(row.id)}/files/${String(rel).split('/').map(encodeURIComponent).join('/')}`
     const shots = (row.screenshots ?? []).map(sh => ({ caption: sh.caption, src: file(sh.src), src_dark: sh.src_dark ? file(sh.src_dark) : null }))
     const gallery = pluginGallery({ shots, dark: theme.current === 'dark', name: row.name || row.id, key: `gallery:${row.id}`, failed: failedShots, redraw: changed })
-    if (gallery) return gallery
-    return row.icon ? h('div', { class: 'plugin-plate', 'aria-hidden': 'true' }, h('span', { class: 'plugin-plate-ring' }), h('span', { class: 'plugin-plate-ring two' }), pluginIcon(row)) : null
+    return gallery
   }
   function details(row, declaration, technical, url) {
     const who = row.author || (row.source?.kind === 'loam' ? 'Loam' : null)

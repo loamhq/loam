@@ -2660,11 +2660,6 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .setmain .plugin-gallery, .app-modal-body .plugin-gallery { padding:16px 0 4px; }
 .setmain .plugin-gallery-row, .app-modal-body .plugin-gallery-row { grid-auto-columns:minmax(240px, 78%); }
 .plugin-gallery-one .plugin-gallery-row { grid-auto-columns:minmax(0, 100%); }
-.plugin-plate { position:relative; display:flex; align-items:center; justify-content:center; height:168px; margin:16px 0 8px; border-radius:var(--radius-xl); overflow:hidden;
-  background:radial-gradient(ellipse at 30% 20%, var(--paper-raised), transparent 70%), var(--paper-card); }
-.plugin-plate .plugin-icon { width:72px; height:72px; border-radius:20px; position:relative; box-shadow:var(--shadow-float); }
-.plugin-plate-ring { position:absolute; width:150px; height:150px; border-radius:50%; box-shadow:inset 0 0 0 1px var(--paper-rule); }
-.plugin-plate-ring.two { width:240px; height:240px; opacity:.6; }
 .plugin-details { margin:32px 0 8px; padding-top:20px; border-top:1px solid var(--paper-rule); color:var(--paper-ink-2); }
 .plugin-details-title { margin-bottom:4px; }
 .plugin-details .plugin-declaration { margin:12px 0 16px; }
