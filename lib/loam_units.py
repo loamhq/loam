@@ -57,6 +57,26 @@ def templates(root: Path | None = None) -> list[Path]:
                   if p.suffix in (".service", ".timer", ".path") and p.is_file())
 
 
+# Units a release has taken out (2026-11-19). An update runs the new
+# gen-units, which stops, disables and removes any of these still installed,
+# so an older install does not keep running what its release no longer
+# ships (Remote Control, retired 2026-11-19: its recycle timer would fire a
+# script that is gone, and each agent's `loam-rc-<agent>.service` would keep
+# a server no one talks to). A name or an fnmatch pattern.
+RETIRED = ("loam-recycle-rc.service", "loam-recycle-rc.timer", "loam-rc-*.service")
+
+
+def retired(unit_dir: Path | None = None) -> list[str]:
+    """The retired units still installed, by name."""
+    import fnmatch  # noqa: PLC0415
+    unit_dir = unit_dir or lc.USER_UNIT_DIR
+    try:
+        names = sorted(p.name for p in unit_dir.iterdir() if p.is_file() or p.is_symlink())
+    except OSError:
+        return []
+    return [n for n in names if any(fnmatch.fnmatchcase(n, pat) for pat in RETIRED)]
+
+
 def rendered(root: Path | None = None) -> dict[str, str]:
     return {p.name: render(p.read_text(encoding="utf-8"))
             for p in templates(root)}

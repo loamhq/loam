@@ -87,6 +87,19 @@ try:
           (units / "loam-autocommit.timer").exists() and "loam-autocommit.timer" not in started
           and "not armed" in res.stdout)
     check("...the other new timers still armed", len(started) == len(timers) - 1)
+    # A release took Remote Control out: its units go, others stay.
+    calls.write_text("")
+    for n in ("loam-recycle-rc.timer", "loam-recycle-rc.service", "loam-rc-iris.service"):
+        (units / n).write_text("[Unit]\n")
+    (units / "loam-reviewer.service.d").mkdir(exist_ok=True)
+    res = gen()
+    check("retired units stopped, disabled and removed",
+          not any((units / n).exists() for n in ("loam-recycle-rc.timer", "loam-recycle-rc.service",
+                                                   "loam-rc-iris.service"))
+          and "--user disable --now loam-rc-iris.service" in calls.read_text()
+          and res.stdout.count("retired ") == 3, res.stdout.strip()[-160:])
+    check("...and nothing shipped is touched", (units / "loam-autocommit.timer").exists()
+          and (units / "loam-reviewer.service.d").exists())
     shutil.rmtree(units)
     calls.write_text("")
     res = gen("--dry-run")

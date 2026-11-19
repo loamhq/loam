@@ -16,6 +16,8 @@ renders and an update must leave a box with what a fresh install has; an
 update run by an older release's code knows nothing of the new timer. The
 routine local commit is the one exception: on a box whose crontab already
 commits a tree by hand (lib/loam_autocommit.py) it is written and not armed.
+A unit a release has taken out (``loam_units.RETIRED``) and that is still
+installed is stopped, disabled and removed.
 bin/check-drift compares the installed units against the same rendering.
 """
 
@@ -69,6 +71,18 @@ def main(argv: list[str]) -> int:
     print(f"gen-units: {verb} {len(changed)} of {len(units)}"
           + (f": {', '.join(changed)}" if changed else ""))
     if changed and not dry:
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+    # What a release took out: stopped, disabled and removed (loam_units.RETIRED).
+    gone = loam_units.retired()
+    for name in gone:
+        if dry:
+            print(f"gen-units: would retire {name}")
+            continue
+        subprocess.run(["systemctl", "--user", "disable", "--now", name], check=False,
+                       capture_output=True)
+        (lc.USER_UNIT_DIR / name).unlink(missing_ok=True)
+        print(f"gen-units: retired {name} (no longer shipped)")
+    if gone and not dry:
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
     for timer in new_timers:
         if timer == "loam-autocommit.timer" and hand_routine():

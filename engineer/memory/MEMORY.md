@@ -68,10 +68,11 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   the units are regenerated (`gen-units`, each agent's wake
   unit, `provision --reviewer`) and `loam-check-drift.service` is run once.
   Comment-only unit changes need a `daemon-reload` and no restart.
-- **Nor has `gen-deploy`** (caused 2026-11-17): `gen-deploy --help` is a
-  live render. It wrote the Caddyfile, reloaded Caddy and ran `compose up`
-  on the login and the browser. Read a generator's docstring, never its
-  `--help`.
+- **`gen-deploy --help` was a live render until 2026-11-19** (caused
+  2026-11-17: it wrote the Caddyfile, reloaded Caddy and ran `compose up`).
+  `gen-deploy` and `gen-units` now print help and refuse an unknown flag;
+  an older release's copy does not. Read a generator's docstring before
+  trusting its `--help`.
 
 ## 2026-11-16 — a correct record can still draw in the wrong order
 
@@ -1917,7 +1918,7 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   app's light/dark comes from the boot script `/appearance-state.js` as
   well as the GET, so set `documentElement.dataset.theme` after load (DOM
   only, nothing saved), and abort every non-GET so viewing writes nothing.
-- **`bin/gen-units` takes no flags:** `gen-units --help` runs it and writes.
+- **`bin/gen-units` took no flags** until 2026-11-19: `gen-units --help` ran it and wrote.
 - **`$TMPDIR` can be empty in a Bash call**; spell the scratch path out
   before anything that writes to it (`crontab "$TMPDIR/x"` read `/x`).
 - **Git backup pushes to the address, not to `origin`**, so the trees'
