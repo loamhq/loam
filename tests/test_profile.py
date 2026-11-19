@@ -74,6 +74,12 @@ for who, emoji in (("ada", "🧱"), ("iris", "🪻"), ("cleo", "🪐")):
         "workspace": str(ws), "vault": str(TMP / "vault"),
         "wake_schedule": "03:20", "wake_timezone": "America/Los_Angeles"},
         indent=2, ensure_ascii=False) + "\n")
+    # What provision writes beside it: the conversational model a chat with
+    # none chosen reads (2026-11-19, follows the profile's).
+    (ws / ".claude").mkdir()
+    (ws / ".claude" / "settings.json").write_text(json.dumps(
+        {"model": "fable", "permissions": {"defaultMode": "acceptEdits"}},
+        indent=2) + "\n")
     (ws / "crons" / "reflection.md").write_text(
         "---\nlane: reflection\nschedule: daily at 03:20 PT\nenabled: true\n"
         "reason: the test's fixture\n---\n"
@@ -351,6 +357,12 @@ async def main():
         check("a wake runs on them (lane_choice), a pinned probe on its own",
               profile.lane_choice(card("ada"), "fable") == ("opus", "high", None)
               and profile.lane_choice(card("ada"), "haiku", pinned=True)[0] == "haiku")
+        settings_ada = json.loads((LABS / "ada" / ".claude" / "settings.json").read_text())
+        check("a chat with no model chosen runs on it too: settings.json follows "
+              "(claude_model), its other keys kept",
+              settings_ada == {"model": "opus",
+                               "permissions": {"defaultMode": "acceptEdits"}}
+              and profile.claude_model(card("ada")) == "opus", settings_ada)
         check("a thread turn reads them (persona_defaults)",
               threads.persona_defaults("ada") == {"provider": "claude-code",
                                                    "model": "opus", "effort": "high"})
@@ -368,6 +380,9 @@ async def main():
               and "model" not in card("ada") and "effort" not in card("ada")
               and d["wakes"] == {"provider": "codex", "model": None, "effort": None}
               and d["not_honoured"] == [], d)
+        check("on Codex, a Claude Code chat's default is the wake's model again",
+              json.loads((LABS / "ada" / ".claude" / "settings.json").read_text())["model"]
+              == "fable" and profile.claude_model(card("ada")) == "fable")
         check("a thread member on codex starts on Codex (default_engine)",
               threads.default_engine("ada") == "codex")
         check("a Codex wake takes the persona's Codex model and level (lane_choice)",

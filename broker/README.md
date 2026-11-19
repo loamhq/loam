@@ -30,7 +30,7 @@ everything that makes the session that persona comes from the persona's own
 | what | where it comes from | proved by |
 |---|---|---|
 | `CLAUDE.md` and its `@` imports | the working directory | canary from `soul.md` answered YES, a sibling's decoy NO |
-| the model | `settings.json` → `"model": "fable"` | result envelopes report `claude-fable-5-1` |
+| the model | `settings.json` → `"model"`, which provision writes from the persona's profile (`agent.json`, Settings › Agents; `loam_profile.claude_model`, 2026-11-19) and a profile change rewrites: `fable` when it names none | result envelopes report `claude-fable-5-1` |
 | `_active.md` in context, `_reflection.md` not | `outputStyle: conversation` | a phrase from each, answered YES and NO |
 | the transcript record | `Stop`/`SessionEnd` hooks | three files appeared under the vault's `15_CONVERSATIONS/` |
 | the write boundary | `PreToolUse` → `boundary_guard.py` | a write into a sibling's workspace was refused, with the guard's own words |

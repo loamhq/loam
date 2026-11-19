@@ -186,12 +186,18 @@ def model_problem(workspace: Path) -> tuple[str, dict] | None:
     again; check-drift, run by hand, still shows it for as long as it is the
     lane's latest.
     """
+    # The model is the persona's profile's (agent.json, Settings > Agents),
+    # by the rule every launch path takes (loam_profile.claude_model,
+    # 2026-11-19). Until then this read settings.json, which said `fable`
+    # for every persona whatever the profile said: a persona set to Opus
+    # was told its own Opus wakes were drift, and a chat that fell back to
+    # settings.json's Fable looked right.
+    import loam_profile  # noqa: PLC0415
     try:
-        configured = json.loads(
-            (workspace / ".claude" / "settings.json").read_text(encoding="utf-8")
-        ).get("model")
+        card = json.loads((workspace / "agent.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        configured = None
+        card = {}
+    configured = loam_profile.claude_model(card)
     if not configured or configured in ("best", "opusplan"):
         return None
     seen = sess.effective_model(workspace)

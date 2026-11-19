@@ -145,6 +145,46 @@ def lane_choice(config: dict, wake_model: str, pinned: bool = False
     return (wake_model if pinned or not model else model), (effort or None), None
 
 
+def claude_model(config: dict | None) -> str:
+    """The model a Claude Code session of this persona runs on when nothing
+    chose one: its own default when that is a Claude Code one (Settings >
+    Agents > its profile, "Runs on"), else ``WAKE_MODEL_DEFAULT``.
+
+    The one rule (2026-11-19). bin/provision writes it as the ``model`` of
+    the persona's ``.claude/settings.json``, which is what a chat the broker
+    starts with no model and a bare ``claude`` in the workspace read;
+    ``update_agent`` rewrites that key when the profile changes; bin/wake
+    reaches the same value through ``lane_choice``; bin/lane-check compares
+    sessions against it. Before, settings.json said ``fable`` for every
+    persona whatever the profile said, so a persona set to Opus ran its wakes
+    and thread turns on Opus and its other chats on Fable."""
+    config = config if isinstance(config, dict) else {}
+    if (config.get("provider") or "claude-code") != "claude-code":
+        return WAKE_MODEL_DEFAULT
+    return lane_choice(config, WAKE_MODEL_DEFAULT)[0] or WAKE_MODEL_DEFAULT
+
+
+def sync_settings_model(workspace: Path, config: dict) -> bool:
+    """Set the ``model`` of ``workspace/.claude/settings.json`` to
+    ``claude_model(config)``, keeping every other byte as bin/provision
+    renders it (``json.dumps(indent=2)`` and a newline; a dict keeps its key
+    order). True when it wrote. A file that is missing or unreadable is left
+    for the next provision: this never creates one."""
+    path = Path(workspace) / ".claude" / "settings.json"
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    want = claude_model(config)
+    if not isinstance(settings, dict) or settings.get("model") == want:
+        return False
+    settings["model"] = want
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    return True
+
+
 def _host() -> dict:
     import loam_engineer  # noqa: PLC0415 -- stdlib-only, and the path's home
     try:
@@ -335,6 +375,10 @@ def update_agent(agent: str, patch: dict, check) -> dict:
             tmp = target.with_name(target.name + ".tmp")
             tmp.write_text(text, encoding="utf-8")
             os.replace(tmp, target)
+        # The conversational default follows the profile (2026-11-19): a
+        # chat started with no model reads settings.json, so the profile's
+        # model is written there too, or that chat runs on another model.
+        sync_settings_model(target.parent, new)
     return new
 
 

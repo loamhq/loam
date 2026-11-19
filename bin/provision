@@ -264,15 +264,23 @@ def _plugin_words(workspace: Path) -> str:
 def settings(workspace: Path) -> dict:
     ws = str(workspace)
     plugin_tools = [f"mcp__{s}" for s in contributions.lane_servers("persona", workspace.name)]
+    import loam_profile  # noqa: PLC0415
+    try:
+        card = json.loads((workspace / "agent.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        card = {}
     return {
         # The persona model for a conversation. The broker passes a model
         # only when a chat picked one, so without this an agent the owner
         # talks to runs on whatever the CLI defaults to that week while its
         # wake runs on what bin/wake pins -- the same persona on two models.
-        # This and WAKE_MODEL in bin/wake move together. (Until 2026-11-19
-        # Remote Control, which took no --model flag at all, was the other
-        # reason.)
-        "model": "fable",
+        # (Until 2026-11-19 Remote Control, which took no --model flag at
+        # all, was the other reason.) Since 2026-11-19 it is the persona's
+        # own model from its profile (agent.json, Settings > Agents), the
+        # value its wakes and thread turns run on, by
+        # loam_profile.claude_model; before, it was "fable" whatever the
+        # profile said, and one persona set to Opus ran on both.
+        "model": loam_profile.claude_model(card),
         "permissions": {
             "defaultMode": "acceptEdits",
             "additionalDirectories": [str(VAULT), str(AI_LABS)],

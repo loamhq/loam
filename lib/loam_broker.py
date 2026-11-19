@@ -1248,15 +1248,18 @@ def workspace(agent: str) -> Path:
 
 
 def persona_model(agent: str | None = None) -> str | None:
-    """The model a session runs on when nobody picks one, read off the
-    persona's own ``.claude/settings.json``.
+    """The model a session runs on when nobody picks one: the persona's own
+    from its profile (agent.json, Settings > Agents) when that is a Claude
+    Code one, else the wake's default -- ``loam_profile.claude_model``, the
+    one rule (2026-11-19).
 
-    That file is the ONE place the conversational model is named -- see
-    bin/provision, which writes it -- so a session started with no ``model``
-    is not defaulted here at all: no ``--model`` goes on the launch line and
-    the CLI reads the setting itself. This function exists so the providers
-    route can say which row of the menu is already ticked, and it reads the
-    same file rather than restating its value.
+    bin/provision writes the same value into the persona's
+    ``.claude/settings.json`` and a profile change rewrites it there, so a
+    session started with no ``model`` is not defaulted here at all: no
+    ``--model`` goes on the launch line and the CLI reads the setting
+    itself. This function exists so the providers route can say which row
+    of the menu is already ticked. (Until 2026-11-19 it read settings.json,
+    which said ``fable`` for every persona whatever its profile said.)
 
     With no agent named, the fleet's answer: the value every persona shares,
     or ``None`` when they disagree, because "the default" is then a question
@@ -1266,14 +1269,12 @@ def persona_model(agent: str | None = None) -> str | None:
         found = {persona_model(name) for name in roster()}
         found.discard(None)
         return found.pop() if len(found) == 1 else None
+    import loam_profile  # noqa: PLC0415
     try:
-        settings = json.loads(
-            (workspace(agent) / ".claude" / "settings.json")
-            .read_text(encoding="utf-8"))
+        card = json.loads((workspace(agent) / "agent.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    model = settings.get("model")
-    return model if isinstance(model, str) and model.strip() else None
+    return loam_profile.claude_model(card)
 
 
 def model_ok(value: str) -> bool:
