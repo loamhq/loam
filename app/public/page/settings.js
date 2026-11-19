@@ -370,6 +370,21 @@ function goSettingsDetail(kind, id) {
   host.schedule()
 }
 
+// One quiet row (2026-11-19): the agent Loam tells when something that is
+// no one agent's needs attention. It decides whether you hear of it.
+function attentionRow(st) {
+  const agents = host.state.agents.list, value = st.attention?.persona
+  if (!st.attention || !agents.length) return null
+  const hintId = 'attention-hint'
+  return h('section', { class: 'profile-group attention-group', 'aria-label': 'When Loam needs attention' }, h('div', { class: 'rows' },
+    h('label', { class: 'profile-choice profile-choice-hinted' }, h('span', { class: 'setrow-title', text: 'Hears when Loam needs attention' }),
+      h('span', { class: 'settings-select' }, h('select', { 'aria-label': 'Hears when Loam needs attention', 'aria-describedby': hintId, disabled: st.attentionBusy,
+        onchange: e => host.settingsProfiles.hears(e.target.value === st.attention.default ? null : e.target.value) },
+        agents.map(agent => h('option', { value: agent.id, selected: agent.id === value, text: agent.name }))), icon.chevronDown(14)),
+      h('span', { class: 'setrow-sub profile-choice-hint', id: hintId, text: 'They hear of problems no one agent owns, and tell you if you need to know.' }))),
+    st.attentionError ? h('p', { class: 'schedule-error', role: 'alert', text: st.attentionError }) : null)
+}
+
 function settingsAgents({ back = true } = {}) {
   const st = host.settingsProfiles.st
   // Settings can also open directly rather than through goSettings().
@@ -399,6 +414,7 @@ function settingsAgents({ back = true } = {}) {
     group('Agents', host.state.agents.list.length ? host.state.agents.list.map(agent => settingsRow({ key: agent.id,
       lead: blob(agentLook(agent.id, host.state.agents), { size: 40, font: 18 }), title: agent.name,
       onclick: () => { if (host.state.wide) detail('agent', agent.id); else { host.closeSheet(); host.goProfile(agent.id) } } })) : h('p', { class: 'note profile-empty', text: host.state.agentsReady ? 'No agents are available yet.' : 'Agents could not be loaded.' })),
+    attentionRow(st),
     st.directoryLoading ? h('p', { class: 'note', role: 'status', text: 'Loading system…' }) : null,
     st.directoryError ? h('div', {}, h('p', { class: 'schedule-error', role: 'alert', text: st.directoryError }), h('button', { class: 'pillbtn', text: 'Try again', onclick: () => host.settingsProfiles.directory() })) : null,
     systemRows.length ? h('section', { class: 'profile-group profile-group-system', 'aria-label': 'System' },

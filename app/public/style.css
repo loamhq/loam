@@ -2715,6 +2715,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .profile-choice .field-input { min-width:0; width:100%; }
 .profile-choice-hinted { row-gap:0; padding-block:10px; }
 .profile-choice-hint { grid-column:1 / -1; margin-top:0; }
+.attention-group .profile-choice { grid-template-columns:minmax(0, 1fr) auto; }
 .profile-face,.profile-name { background:transparent; border:0; color:inherit; padding:0; min-height:44px; cursor:pointer; }
 .profile-face { border-radius:50%; }
 @media (hover: hover) { .profile-face:hover { transform:rotate(-4deg); } }

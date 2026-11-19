@@ -420,7 +420,7 @@ export function createApp({
       if (!out.stream || method === 'HEAD') { out.stream?.destroy(); return res.end() }
       return await new Promise((resolve, reject) => { out.stream.on('error', reject); res.on('close', () => { out.stream.destroy(); resolve() }); out.stream.pipe(res); res.on('finish', resolve) })
     }
-    const profileRoute = /^\/agents\/([^/]+)$/.test(rest) || /^\/engineers(?:\/([^/]+))?$/.test(rest) || rest === '/system/reviewer' || /^\/plugins\/([^/]+)\/agents(?:\/([^/]+))?$/.test(rest)
+    const profileRoute = /^\/agents\/([^/]+)$/.test(rest) || /^\/engineers(?:\/([^/]+))?$/.test(rest) || rest === '/system/reviewer' || rest === '/system/persona' || /^\/plugins\/([^/]+)\/agents(?:\/([^/]+))?$/.test(rest)
     if (profileRoute) {
       if (!['GET', 'PATCH'].includes(method)) return sendJson(res, 405, { error: 'Use GET or PATCH for profile settings.' })
       // Re-encode each id independently, preserving the broker's route shape.

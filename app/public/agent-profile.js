@@ -33,15 +33,16 @@ const agentRow = agent => agent && typeof agent === 'object' ? agent : {}
 
 export function createProfiles({ api, redraw, changedAgent = () => {} }) {
   const st = { target: null, data: null, loading: false, busy: false, error: '', edit: null, activity: false, tab: 'Threads', page: 1, soul: '', soulError: '', archived: null, directoryBusy: false,
-    engineers: null, reviewer: null, directoryError: '', directoryLoading: false }
+    engineers: null, reviewer: null, attention: null, attentionBusy: false, attentionError: '', directoryError: '', directoryLoading: false }
   let ticket = 0, mutation = 0
   const path = target => target.kind === 'agent' ? `/agents/${enc(target.id)}` : target.kind === 'engineer' ? `/engineers/${enc(target.id)}` : '/system/reviewer'
   async function directory() {
     if (st.directoryLoading) return
     st.directoryLoading = true; st.directoryError = ''; redraw()
-    const results = await Promise.allSettled([api('GET', '/engineers'), api('GET', '/system/reviewer')])
+    const results = await Promise.allSettled([api('GET', '/engineers'), api('GET', '/system/reviewer'), api('GET', '/system/persona')])
     if (results[0].status === 'fulfilled') st.engineers = results[0].value
     if (results[1].status === 'fulfilled') st.reviewer = results[1].value
+    if (results[2].status === 'fulfilled') st.attention = results[2].value
     st.directoryError = results.filter(r => r.status === 'rejected').map(r => r.reason.message).join(' ')
     st.directoryLoading = false; redraw()
   }
@@ -146,7 +147,16 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
     catch (e) { st.directoryError = e.message }
     finally { st.directoryBusy = false; redraw() }
   }
-  return { st, load, directory, patch, refresh, face, archive, archived, restore }
+  // Which agent hears when something in Loam needs attention (2026-11-19):
+  // one host setting, `system.persona`; null puts the first agent back.
+  async function hears(persona) {
+    if (st.attentionBusy) return
+    st.attentionBusy = true; st.attentionError = ''; redraw()
+    try { st.attention = await api('PATCH', '/system/persona', { persona: persona || null }) }
+    catch (e) { st.attentionError = e.message }
+    finally { st.attentionBusy = false; redraw() }
+  }
+  return { st, load, directory, patch, refresh, face, archive, archived, restore, hears }
 }
 
 export function mountProfile(host, { controller = host.profiles, activity = host.profileActivity } = {}) {

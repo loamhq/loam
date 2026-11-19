@@ -477,6 +477,21 @@ ENTRIES: list[Entry] = [
           ("hard", "An engineer's hard-tier model (design-heavy work, subtle "
                    "bugs, wide refactors)"))],
 
+    # -- Settings > Agents: who hears when something in Loam needs
+    # attention (2026-11-19, batch B step 5; lib/loam_attention.py) --------
+    Entry("system.persona", "setting",
+          "Which agent hears when something in Loam needs attention",
+          "PATCH /api/system/persona", route="PATCH /v1/system/persona",
+          values="an agent's id, or null for the first agent",
+          body=lambda v, m: {"persona": v}, read="GET /v1/system/persona",
+          pick=lambda a, m: a.get("persona"), options="personas",
+          note="Loam hands this agent each problem that is no one agent's "
+               "(drift, memory pressure, the account refusing runs, a "
+               "plugin's event, an update) as the input of a run, told once; "
+               "it decides what to do and whether to tell the owner, in "
+               "General, in its own words. A persona's own failed run is "
+               "still told to that persona at its next turn."),
+
     # -- Settings > Agents > System: the nightly reviewer (2026-11-13) ------
     *[Entry(f"reviewer.{field}", "setting", label,
             "PATCH /api/system/reviewer", route="PATCH /v1/system/reviewer",
@@ -797,6 +812,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     # carried them (loam-ui 8e8f98a and earlier). The relay spells the
     # account route's refresh group as a capturing one, `(\/refresh)?`.
     "rest === '/files/rename'": ["files.write"],
+    "rest === '/system/persona'": ["system.persona"],
     "rest === '/system/reviewer'": ["reviewer.schedule", "reviewer.provider",
                                     "reviewer.model", "reviewer.effort"],
     "rest === '/integrations/github/accounts'": ["integration.github"],

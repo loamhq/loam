@@ -5803,6 +5803,42 @@ class Server:
                                     raw, content_type)
             return
 
+        # Which agent hears when something in Loam needs attention
+        # (2026-11-19, batch B step 5; lib/loam_attention.py): GET the
+        # choice, PATCH {"persona": id | null}. Settings › Agents, or a
+        # persona through bin/settings (`system.persona`). Nothing is said
+        # anywhere when it changes; the journal has the line.
+        if parts == ["v1", "system", "persona"]:
+            import loam_attention  # noqa: PLC0415
+            import loam_appearance  # noqa: PLC0415
+            nocache = "Cache-Control: no-store\r\n"
+            if method == "GET":
+                body, status = await asyncio.to_thread(loam_attention.state), 200
+            elif method == "PATCH":
+                if not isinstance(payload, dict) or "persona" not in payload:
+                    body, status = {"error": "send {\"persona\": an agent's id, "
+                                             "or null for the first agent}"}, 400
+                else:
+                    try:
+                        value = await asyncio.to_thread(
+                            loam_attention.validate, payload.get("persona"))
+                    except ValueError as exc:
+                        body, status = {"error": str(exc)}, 400
+                    else:
+                        await asyncio.to_thread(
+                            loam_appearance.mutate, loam_attention.SETTING,
+                            lambda cur, v=value: ({**(cur if isinstance(cur, dict) else {}),
+                                                   "persona": v} if v else None))
+                        body, status = await asyncio.to_thread(loam_attention.state), 200
+                        print(f"settings: system.persona -> {body['persona']} "
+                              f"by {author(payload) or lc.OWNER_ID}",
+                              file=sys.stderr, flush=True)
+            else:
+                body, status = {"error": "use GET or PATCH"}, 405
+            writer.write(response(status, body, nocache))
+            await writer.drain()
+            return
+
         # An agent's profile, the engineers and the reviewer (2026-11-13):
         # lib/loam_profile.py holds every rule; broker/README.md, "Agent
         # profiles, engineers and the reviewer", is the contract.
