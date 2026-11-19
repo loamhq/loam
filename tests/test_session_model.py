@@ -199,6 +199,22 @@ try:
     check("a choice on an adopted record is found by its fork's id",
           flagged(), False)
     (root / "broker" / "adopted.json").unlink()
+
+    # The model is the persona's profile's (2026-11-19, agent.json, Settings
+    # > Agents), not settings.json's: one persona set to Opus had every Opus
+    # wake reported as drift because settings.json said `fable` for all.
+    (lane / "agent.json").write_text(json.dumps({"name": "lane", "model": "opus"}))
+    ran("claude-opus-5-5")
+    check("profile opus, a session on Opus nobody asked for is not a finding",
+          flagged(), False)
+    ran("claude-fable-5-2")
+    check("profile opus, a session on Fable nobody asked for IS a finding",
+          flagged(), True)
+    asked_for("fable")
+    check("profile opus, a thread that chose Fable is not a finding",
+          flagged(), False)
+    (root / "broker" / "s.json").unlink()
+    (lane / "agent.json").unlink()
     loam_broker.SESSION_DIR = saved_broker
 
     (ld / "s.jsonl").write_text("\n".join([

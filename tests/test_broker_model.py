@@ -248,7 +248,7 @@ async def main() -> None:
           "ultracode" in wired["efforts"], False)
     check("the persona's own model is the one marked default",
           [m["id"] for m in wired["models"] if m["default"]], ["fable"])
-    check("...read off that persona's settings, not stated here",
+    check("...read off that persona's profile, not stated here",
           cfg.persona_model("probe"), "fable")
 
     # `resolves_to` (2026-11-10): what each alias runs on with the installed
@@ -343,14 +343,16 @@ try:
     cfg.AI_LABS = root / "agents"
     cfg.CREDENTIALS_PATH = root / "credentials.json"
     # Two personas, on two models, because "the default" is a fact about a
-    # persona's own settings.json and the fleet's answer is only the one they
-    # share. The real fleet shares "fable"; a test that could not tell the
-    # two apart would pass on a hardcoded default.
-    for name, model in (("probe", "fable"), ("other", "sonnet")):
+    # persona's own profile (agent.json, 2026-11-19; settings.json before,
+    # which provision now writes from it) and the fleet's answer is only the
+    # one they share. "probe" names none, so it is the wake's default; a test
+    # that could not tell the two apart would pass on a hardcoded default.
+    for name, model in (("probe", None), ("other", "sonnet")):
         (cfg.AI_LABS / name / ".claude").mkdir(parents=True)
-        (cfg.AI_LABS / name / "agent.json").write_text("{}", encoding="utf-8")
+        (cfg.AI_LABS / name / "agent.json").write_text(
+            json.dumps({"model": model} if model else {}), encoding="utf-8")
         (cfg.AI_LABS / name / ".claude" / "settings.json").write_text(
-            json.dumps({"model": model}), encoding="utf-8")
+            json.dumps({"model": model or "fable"}), encoding="utf-8")
 
     # The launch itself is never made: what this test proves is the argv and
     # the stdin, and a real `claude` here would cost a model call per case.

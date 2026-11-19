@@ -32,7 +32,10 @@ not a job (see `loam-making-an-agent`). Its face is drawn by the theme until
 the owner uploads a picture.
 
 **Providers.** An agent runs on Claude Code, Codex or Antigravity; the owner
-picks its default and can change it for one thread. Each provider is given
+picks its default and can change it for one thread. Its model and thinking
+level are set the same way, in Settings › Agents: every run of the agent (a
+thread turn, a wake, a cron, a notice, a chat) uses that model unless a
+thread chose another for itself. Each provider is given
 the same files in its own shape. Each Loam release carries the version of
 each provider's CLI it was tested with, and installs exactly that one; a
 newer CLI arrives with a later Loam release, never by itself overnight.
