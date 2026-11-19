@@ -31,14 +31,15 @@ import { h, icon, kept, blob, on as onNode } from '../ui.js'
 import { agentLook } from '../sessions.js'
 import { menuSurface } from '../menu-surface.js'
 import { sheetHandle } from '../chat-ui.js'
-import { KIND_ONE, KIND_MANY, KIND_ABOUT, KIND_HOME, search, highlight, leadOf, sectionsOf, kindsListed, dateline, buildRequest, actionOf, plainTouches, reachOf, kindOf, byLoam, listedOnly } from '../market.js'
-import { coverArt, hueOf } from '../market-art.js'
+import { KIND_ONE, KIND_MANY, KIND_ABOUT, KIND_HOME, search, highlight, leadOf, sectionsOf, kindsListed, dateline, buildRequest, actionOf, plainTouches, reachOf, kindOf, byLoam, listedOnly, hueOf } from '../market.js'
+import { themePreview } from '../theme-preview.js'
+import { creatorLinks } from '../creator-links.js'
 import { emptyState } from '../empty-state.js'
 
 const SUGGEST = 5
 
 export function mount(host) {
-  const st = { list: null, loading: false, details: new Map(), sel: 0, drop: false, picking: false, install: null, focus: null, themes: new Map(), listRequest: 0 }
+  const st = { list: null, loading: false, details: new Map(), sel: 0, drop: false, picking: false, install: null, focus: null, themes: new Map(), listRequest: 0, failed: new Set() }
   const events = host.registry?.scope?.({ id: '@core' })?.events
   const sheet = () => host.state.sheet?.kind === 'market' ? host.state.sheet : null
   const entries = () => st.list?.plugins ?? []
@@ -197,11 +198,29 @@ export function mount(host) {
   // ------------------------------------------------------------ pieces
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, onclick, ...props }, ...(Array.isArray(text) ? text : [text]))
   const marked = (text, q) => highlight(text, q).map(part => part.hit ? h('mark', { class: 'market-hit', text: part.text }) : part.text)
-  function tile(entry, size = 'md') {
+  const fileURL = (id, name) => `/api/marketplace/${encodeURIComponent(id)}/${name}`
+  // A listing's cover, once its details say it has one (the listing's own
+  // `cover`, else the plugin's own picture, a theme's `image`), in the
+  // current mode: the dark one when Loam is dark and there is one.
+  function coverOf(entry) {
+    const body = st.details.get(entry.id)?.body
+    if (!body?.cover) return null
+    const dark = host.theme.current === 'dark' && body.cover_dark
+    const src = fileURL(entry.id, dark ? 'cover-dark' : 'cover')
+    if (st.failed.has(src)) return null
+    return { src, position: (dark ? body.cover_position_dark : null) ?? body.cover_position ?? '50% 50%' }
+  }
+  function coverImg(entry, cover, cls = 'market-cover-img') {
+    return h('img', { class: cls, src: cover.src, alt: '', loading: 'lazy', decoding: 'async', key: `cover:${cover.src}`, style: { objectPosition: cover.position },
+      onerror: () => { st.failed.add(cover.src); host.schedule() } })
+  }
+  function tile(entry, size = 'md', { cover: withCover = false } = {}) {
     const d = st.details.get(entry.id)
+    const cover = withCover ? coverOf(entry) : null
+    if (cover) return h('span', { class: `market-tile market-tile-${size} market-tile-cover`, 'aria-hidden': 'true' }, coverImg(entry, cover, 'market-tile-img'))
     if (kindOf(entry) === 'theme' && themeState(entry.id) === 'ready') return h('span', { class: `theme-preview market-tile market-tile-${size} market-tile-theme`, 'data-look': entry.id, 'aria-hidden': 'true' },
       h('span', { class: 'market-tile-dot espresso' }), h('span', { class: 'market-tile-dot foam' }))
-    if (d?.body?.icon) return h('img', { class: `market-tile market-tile-${size} market-tile-img`, src: `/api/marketplace/${encodeURIComponent(entry.id)}/icon`, alt: '', loading: 'lazy', key: `icon:${entry.id}` })
+    if (d?.body?.icon) return h('img', { class: `market-tile market-tile-${size} market-tile-img`, src: fileURL(entry.id, 'icon'), alt: '', loading: 'lazy', key: `icon:${entry.id}` })
     const hue = hueOf(entry.id)
     return h('span', { class: `market-tile market-tile-${size}`, 'aria-hidden': 'true', style: { '--tile': `var(${hue})` }, text: (entry.name || entry.id).trim().charAt(0).toUpperCase() })
   }
@@ -235,35 +254,21 @@ export function mount(host) {
       { 'aria-pressed': String(on), disabled: !ready, 'aria-label': `${on ? 'Stop trying' : 'Try'} ${entry.name}` })
   }
   const themeState = id => themeInstalled(id) ? 'ready' : st.themes.get(id)?.state ?? (st.details.get(id)?.state === 'error' ? 'error' : 'loading')
-  // A theme's swatch: Appearance's own miniature, in the theme's own tokens
-  // (`.theme-preview[data-look=<id>]` carries them, from its theme.css).
-  function swatch(entry, big = false) {
-    const id = entry.id, state = themeState(id)
-    if (state === 'error') return h('span', { class: 'market-swatch market-swatch-art' }, coverArt(entry, 'theme'))
-    if (big) return scene(entry, state)
-    return h('span', { class: `theme-preview market-swatch${state !== 'ready' ? ' is-loading' : ''}`, 'data-look': state === 'ready' ? id : null, 'aria-hidden': 'true' },
-      h('span', { class: 'theme-miniature' },
-        h('span', { class: 'say user', text: 'Room to think' }),
-        h('span', { class: 'theme-mini-controls' },
-          blob({ color: `var(${hueOf(id)})`, ink: 'var(--text-on-avatar)', shape: '34%', initial: (entry.name || id).charAt(0).toUpperCase() }, { size: 26, font: 13, inline: true }),
-          h('span', { class: 'pillbtn primary', text: 'Send' })),
-        h('span', { class: 'theme-mini-body', text: 'A little space for ideas.' })))
+  // What fills a listing's picture frame (2026-11-18): its cover; else, for
+  // a theme, Loam wearing it (Appearance's own preview, in the theme's own
+  // tokens from its theme.css); else its icon, large, on a quiet field.
+  function picture(entry, { large = false } = {}) {
+    const cover = coverOf(entry)
+    if (cover) return coverImg(entry, cover)
+    if (kindOf(entry) === 'theme' && themeState(entry.id) !== 'error') return livePreview(entry, large)
+    return h('span', { class: 'market-icon-field', 'aria-hidden': 'true' }, tile(entry, large ? 'xl' : 'lg'))
   }
-  // The big one: Loam itself in miniature, wearing the theme: a list of
-  // threads, a conversation and the composer.
-  function scene(entry, state) {
-    const id = entry.id, line = (w, cls = '') => h('span', { class: `market-scene-line ${cls}`.trim(), style: { width: w } })
-    const face = (hue, letter) => blob({ color: `var(${hue})`, ink: 'var(--text-on-avatar)', shape: '50%', initial: letter }, { size: 22, font: 11, inline: true })
-    return h('span', { class: `theme-preview market-scene${state !== 'ready' ? ' is-loading' : ''}`, 'data-look': state === 'ready' ? id : null, 'aria-hidden': 'true' },
-      h('span', { class: 'market-scene-list' },
-        h('span', { class: 'market-scene-title', text: 'Chats' }),
-        ...[['--persona-teal', 'I', '72%'], ['--persona-rust', 'S', '58%'], ['--persona-plum', 'A', '64%']].map(([hue, l, w], i) =>
-          h('span', { class: `market-scene-row${i === 0 ? ' on' : ''}` }, face(hue, l), h('span', { class: 'market-scene-lines' }, line(w), line('40%', 'faint'))))),
-      h('span', { class: 'market-scene-pane' },
-        h('span', { class: 'market-scene-say', text: 'Room to think' }),
-        h('span', { class: 'market-scene-reply' }, face('--persona-teal', 'I'), h('span', { class: 'market-scene-lines' }, line('92%'), line('80%'), line('56%'))),
-        h('span', { class: 'market-scene-compose' }, h('span', { class: 'market-scene-placeholder', text: 'Message' }), h('span', { class: 'pillbtn primary', text: 'Send' }))))
+  function livePreview(entry, large) {
+    const ready = themeState(entry.id) === 'ready'
+    return themePreview(ready ? entry.id : null, { cls: `market-preview${large ? ' market-preview-large' : ''}${ready ? '' : ' is-loading'}`, initial: (entry.name || entry.id).charAt(0).toUpperCase() })
   }
+  // A theme's card picture on the front page and in results.
+  const swatch = entry => h('span', { class: 'market-swatch', 'aria-hidden': 'true' }, picture(entry))
   function themeCard(entry, q = '') {
     return h('div', { class: `market-theme${host.theme.trying === entry.id ? ' trying' : ''}`, key: `theme:${entry.id}` },
       h('button', { type: 'button', class: 'market-theme-open', 'aria-label': `About ${entry.name}`, onclick: () => openListing(entry.id) }, swatch(entry)),
@@ -345,12 +350,8 @@ export function mount(host) {
       h('p', { class: 'market-dateline', text: st.list ? dateline(n) : 'Reading the list…' }))
   }
   function leadStory(entry) {
-    const d = st.details.get(entry.id), image = d?.body?.image
-    const kind = kindOf(entry)
     return h('article', { class: 'market-lead', 'aria-labelledby': 'market-lead-title', key: `lead:${entry.id}` },
-      h('button', { type: 'button', class: 'market-lead-cover', 'aria-label': `About ${entry.name}`, onclick: () => openListing(entry.id) },
-        image ? h('img', { src: `/api/marketplace/${encodeURIComponent(entry.id)}/image`, alt: '', loading: 'lazy' })
-          : kind === 'theme' && (themeInstalled(entry.id) || st.themes.get(entry.id)?.state === 'ready') ? swatch(entry, true) : coverArt(entry, kind)),
+      h('button', { type: 'button', class: 'market-lead-cover', 'aria-label': `About ${entry.name}`, onclick: () => openListing(entry.id) }, picture(entry, { large: true })),
       h('div', { class: 'market-lead-words' },
         h('p', { class: 'kicker market-kicker', text: entry.featured ? 'Featured' : byLoam(entry) ? 'From Loam' : 'New' }),
         h('h2', { class: 'display', id: 'market-lead-title', text: entry.name }),
@@ -404,8 +405,9 @@ export function mount(host) {
   function listing(id) {
     const entry = entryOf(id), d = detailsOf(id)
     if (!entry) return [h('div', { class: 'market-note', role: 'status' }, st.list ? h('p', { text: 'This listing is no longer in the Market.' }) : h('p', { text: 'Reading the Market…' }))]
-    const kind = kindOf(entry), body = d.body, image = body?.image
+    const kind = kindOf(entry), body = d.body
     const touches = body ? plainTouches(body.declaration, kind) : []
+    const creator = entry.creator ?? { name: entry.author, links: [] }
     const src = body?.source?.url ?? entry.link
     return [h('div', { class: 'market-listing', key: `listing:${id}` },
       h('header', { class: 'market-listing-head' }, tile(entry, 'xl'),
@@ -414,7 +416,7 @@ export function mount(host) {
           h('p', { class: 'market-by', text: byline(entry) })),
         h('div', { class: 'market-listing-acts' }, tryButton(entry), action(entry, { from: 'listing' }))),
       entry.description ? h('p', { class: 'market-listing-desc', text: entry.description }) : null,
-      h('div', { class: 'market-listing-cover' }, kind === 'theme' && !image ? swatch(entry, true) : image ? h('img', { src: `/api/marketplace/${encodeURIComponent(id)}/image`, alt: '', loading: 'lazy' }) : coverArt(entry, kind)),
+      h('div', { class: 'market-listing-cover' }, picture(entry, { large: true })),
       h('div', { class: 'market-facts' },
         h('section', { class: 'market-touches', 'aria-labelledby': 'market-touches-title' },
           h('h2', { class: 'market-facts-title', id: 'market-touches-title', text: 'What it touches' }),
@@ -422,14 +424,32 @@ export function mount(host) {
             : d.state === 'error' ? h('p', { class: 'note', role: 'status', text: `Its declaration could not be read just now (${d.error}). Installing shows it before you say yes.` })
             : touchList(touches),
           body?.why ? h('p', { class: 'note market-why', text: `${body.why}: it is listed so you can see it, and it installs once Loam can.` }) : null),
+        h('section', { class: 'market-creator', 'aria-labelledby': 'market-creator-title' },
+          h('h2', { class: 'market-facts-title', id: 'market-creator-title', text: 'Made by' }),
+          h('p', { class: 'market-creator-name', text: creator.name || body?.author }),
+          creatorLinks(creator)),
         h('dl', { class: 'market-kv' },
-          h('div', {}, h('dt', { text: 'Made by' }), h('dd', { text: body?.author || entry.author })),
           h('div', {}, h('dt', { text: 'Version' }), h('dd', { text: body?.version || entry.version || '—' })),
           h('div', {}, h('dt', { text: 'Kind' }), h('dd', { text: (entry.kind ?? []).map(k => KIND_ONE[k]).join(', ') })),
           h('div', {}, h('dt', { text: 'Source' }), h('dd', {}, h('a', { class: 'quietlink', href: src, target: '_blank', rel: 'noopener noreferrer' }, `${entry.repo}`, icon.external(12)))),
-          entry.homepage ? h('div', {}, h('dt', { text: 'More' }), h('dd', {}, h('a', { class: 'quietlink', href: entry.homepage, target: '_blank', rel: 'noopener noreferrer' }, 'Homepage', icon.external(12)))) : null,
-          h('div', {}, h('dt', { text: 'Listed' }), h('dd', { text: 'Read by hand before it was listed' })))),
-      body?.guide ? h('details', { class: 'market-guide' }, h('summary', { text: 'About it, in its maker’s words' }), h('div', { class: 'md' }, host.markdown?.(body.guide) ?? h('p', { text: body.guide }))) : null)]
+          entry.homepage ? h('div', {}, h('dt', { text: 'More' }), h('dd', {}, h('a', { class: 'quietlink', href: entry.homepage, target: '_blank', rel: 'noopener noreferrer' }, 'Homepage', icon.external(12)))) : null)),
+      readme(entry, body))]
+  }
+  // The maker's README (2026-11-18), read at the listing's tag by the
+  // broker with every HTML tag taken out and relative links pointed at
+  // GitHub; drawn by the app's own Markdown renderer, which builds nodes
+  // (never markup) and follows only http, https and mailto, in a new tab.
+  // Its pictures are the ones in the plugin's folder the broker kept; any
+  // other stays as its words. Without a README, the plugin's own guide.
+  function readme(entry, body) {
+    const text = body?.readme || body?.guide
+    if (!text) return null
+    const kept = new Set(body.readme ? body.readme_images ?? [] : [])
+    const images = { draw: (alt, dest) => kept.has(dest) ? h('img', { class: 'market-readme-img', src: fileURL(entry.id, `readme/${dest}`), alt: alt || '', loading: 'lazy', decoding: 'async' }) : null,
+      group: nodes => h('div', { class: 'market-readme-figures' }, ...nodes) }
+    return h('section', { class: 'market-readme', 'aria-labelledby': 'market-readme-title', key: `readme:${entry.id}` },
+      h('h2', { class: 'market-facts-title', id: 'market-readme-title', text: body.readme ? 'About it' : 'About it, in its maker’s words' }),
+      h('div', { class: 'md market-readme-body' }, ...[host.markdown?.(text, { images }) ?? h('p', { text })].flat()))
   }
   const GLYPH = { out: icon.external, server: icon.code, page: icon.apps, record: icon.chat, memory: icon.brief, tool: icon.puzzle, key: icon.key, clock: icon.clock, safe: icon.check }
   const touchList = lines => h('ul', { class: 'market-touch-list' }, ...lines.map((l, i) => h('li', { key: `t:${i}`, class: `market-touch market-touch-${l.glyph}` },
@@ -550,7 +570,7 @@ export function mount(host) {
         h('div', { class: 'market-install-acts' }, button('Close', closeInstall, 'pillbtn primary'))] : [
       h('div', { class: 'market-install-head' }, entry ? tile(entry, 'md') : null,
         h('div', {}, h('h2', { class: 'display sheet-title', tabindex: '-1', text: done ? (theme ? `${name} is yours` : `${name} is installed`) : `${verb} ${name}?` }),
-          h('p', { class: 'market-install-src', text: [p?.author ?? entry?.author, p?.version ? `version ${p.version}` : entry?.version ? `version ${entry.version}` : null, entry && byLoam(entry) ? 'made by Loam' : 'read by hand for the Market'].filter(Boolean).join(' · ') }))),
+          h('p', { class: 'market-install-src', text: [p?.author ?? entry?.author, p?.version ? `version ${p.version}` : entry?.version ? `version ${entry.version}` : null, entry && byLoam(entry) ? 'made by Loam' : null].filter(Boolean).join(' · ') }))),
       done ? h('p', { class: 'market-install-done', role: 'status', text: theme ? `It’s in Appearance with your other themes.${host.theme.value.theme === job.id ? ' You’re wearing it.' : ''}` : kind === 'app' ? 'It’s in Apps, and runs on your server.' : `It’s on, and in Settings › ${home}.` })
         : entry?.description ? h('p', { class: 'market-install-desc', text: entry.description }) : null,
       !done ? h('section', { class: 'market-install-touches', 'aria-label': update ? 'Added in this version' : 'Before you say yes' },
@@ -592,7 +612,7 @@ export function mount(host) {
   function findMore(kind, title) {
     return h('div', { class: 'rows market-find-more', key: `find-more:${kind}` }, h('button', { type: 'button', class: 'setrow', onclick: () => openMarket({ kind }) },
       h('div', { class: 'icon-tile' }, icon.spark(16)),
-      h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: title }), h('div', { class: 'setrow-sub', text: `${KIND_MANY[kind]} in the Market, each read by hand` })),
+      h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: title }), h('div', { class: 'setrow-sub', text: `${KIND_MANY[kind]} in the Market` })),
       icon.chevronRight(10)))
   }
 
@@ -632,7 +652,7 @@ export function mount(host) {
         onclick: () => a.action === 'install' ? openInstall(entry.id) : a.action === 'view' ? openIt()
           : a.action === 'use' ? (host.theme.set({ theme: entry.id }), host.schedule()) : host.goApps() }, a.label)
     return h('article', { class: `market-card market-card-${kind}${a.action === 'none' || a.action === 'use' || a.action === 'open' ? ' is-here' : ''}`, key: `card:${entry.id}`, role: 'listitem', 'aria-label': `${entry.name}, ${KIND_ONE[kind].toLowerCase()} in the Market` },
-      tile(entry, 'md'),
+      tile(entry, 'md', { cover: true }),
       h('div', { class: 'market-card-words' },
         h('p', { class: 'market-card-kicker' }, icon.spark(11), `Market · ${KIND_ONE[kind]}`),
         h('button', { type: 'button', class: 'market-card-name', onclick: openIt, 'aria-label': `About ${entry.name}` }, entry.name),

@@ -75,7 +75,8 @@ test('an empty list draws no lead, no section and no kinds', () => {
   assert.deepEqual(sectionsOf([], null), [])
   assert.deepEqual(kindsListed([]), [])
   assert.match(dateline(0, new Date('2026-11-18T20:00:00Z')), /Nothing listed yet$/)
-  assert.match(dateline(11, new Date('2026-11-18T20:00:00Z')), /11 things listed, each read by hand$/)
+  assert.match(dateline(11, new Date('2026-11-18T20:00:00Z')), /11 things listed$/)
+  assert.doesNotMatch(dateline(11), /by hand/)
 })
 
 test('a listing’s button follows what is installed', () => {

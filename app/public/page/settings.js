@@ -14,6 +14,7 @@ import { integrationCatalog } from '../integration-catalog.js'
 import { createGithubAccounts } from '../github-accounts.js'
 import { formatDate } from '../time.js'
 import { themeImageURL, themeImagePosition } from '../theme-image.js'
+import { themePreview } from '../theme-preview.js'
 import { fileShortcuts, toggleFileShortcut } from '../store.js'
 import { createApiKeys } from '../api-keys.js'
 
@@ -162,13 +163,7 @@ function settingsAppearance({ back = true } = {}) {
         const image = themeImageURL(option, host.theme.current), showImage = image && !failedThemeImages.has(image)
         return h('button', { key: option.id, type: 'button', class: `theme-choice${look === option.id ? ' on' : ''}`, 'aria-pressed': String(look === option.id), 'aria-label': option.name,
           onclick: () => host.theme.set({ theme: option.id }) },
-          h('span', { class: `theme-preview${showImage ? ' has-image' : ''}`, 'data-look': option.id, 'aria-hidden': 'true' },
-            h('span', { class: 'theme-miniature' },
-              h('span', { class: 'say user', text: 'Room to think' }),
-              h('span', { class: 'theme-mini-controls' },
-                blob({ color: 'var(--persona-gold)', ink: 'var(--persona-gold-ink)', shape: '34%', initial: 'A' }, { size: 26, font: 13, inline: true }),
-                h('span', { class: 'pillbtn primary', text: 'Send' })),
-              h('span', { class: 'theme-mini-body', text: 'A little space for ideas.' })),
+          themePreview(option.id, { cls: showImage ? 'has-image' : '' },
             showImage ? h('img', { class: 'theme-cover', src: image, alt: '', loading: 'lazy', decoding: 'async', width: 640, height: 427,
               style: { objectPosition: themeImagePosition(option, host.theme.current) },
               onerror: e => { failedThemeImages.add(image); e.currentTarget.hidden = true; e.currentTarget.parentElement.classList.remove('has-image'); host.schedule() } }) : null,

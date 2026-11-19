@@ -24,24 +24,38 @@ are in `docs/plugins.md` at the repository's root, "The marketplace".
 
 ## The pages
 
-- **The front page:** the masthead "Market" and a quiet line (the date, how
-  many things are listed, each read by hand); one search field; the kinds
+- **The front page:** the masthead "Market" and a quiet line (the date and how
+  many things are listed); one search field; the kinds
   that have listings (Everything, Themes, Extensions, Apps, Agents, Skills);
   the lead story; a section per kind with listings, each with See all; and,
   last, "Nothing quite right?".
 - **The lead story** is the listing marked `featured`, else one made by Loam
   (author "Loam…"; the list has no dates, so the highest version of Loam's
-  own leads). Its cover is the listing's `image`, else a drawn one. It is not
-  repeated in its kind's section.
-- **Themes** are swatch cards drawn from the theme's own tokens: Appearance's
-  miniature inside `.theme-preview[data-look=<id>]`, which the theme's CSS
-  scopes (`/api/marketplace/<id>/theme.css`). Each has **Get** and **Try it**.
+  own leads; "by Loam" is a listing from the `loamhq` organisation, or an
+  author starting "Loam"). Its picture is the listing's cover (below). It is
+  not repeated in its kind's section.
+- **A listing's picture** (2026-11-18, `picture` in `page/market.js`): its
+  cover (the listing's `cover`, else the plugin's own `image`; the dark one,
+  `cover_dark` or `image_dark`, while Loam is dark), at the plugin's
+  `image_position`. Without one, a theme shows itself: Appearance's own
+  preview (`public/theme-preview.js`, the same component the theme picker
+  draws) inside `.theme-preview[data-look=<id>]`, which the theme's CSS
+  scopes (`/api/marketplace/<id>/theme.css`), larger in the big frames. Any
+  other kind shows its icon (else its letter tile), large, on a quiet
+  `--paper-card` field. Nothing is drawn as clip-art.
+- **Themes** are cards with that picture, the name and line, **Get** and
+  **Try it**.
 - **A kind's page** lists every listing of that kind and ends with
   "Nothing quite right?".
-- **A listing's page:** what it is, a cover (a theme's is Loam in miniature,
-  wearing it), what it touches in plain words (`plainTouches`, from the
-  declaration the broker read at its link), who made it, version, source,
-  the maker's own words, and the action.
+- **A listing's page:** what it is, its picture (above), what it touches in
+  plain words (`plainTouches`, from the declaration the broker read at its
+  link), **Made by**: the creator's name and the links they chose to show,
+  each with its own mark (`public/creator-links.js`; the kind comes from the
+  host, `link_kind`), version, kind, source, then **About it**: the
+  plugin's README at the tag, drawn by the app's Markdown renderer with its
+  folder's pictures (the plugin's `PLUGIN.md` guide when it has no README),
+  and the action. There is no review claim anywhere: being listed is a
+  merged pull request, not an audit.
 - **Search is ask-first.** As a person types, the best five drop down under
   the field: arrows move, Enter opens the one chosen, Escape closes; the last
   row is "See all results". Enter with nothing chosen is the results page:
@@ -95,8 +109,8 @@ its reply, on a line of its own:
   with `marketCards` (`page/market.js`) in its place, between the words
   before and after. The words stay in the cached prose; the cards are drawn
   on every redraw, so a card reads Installed the moment it is.
-- **The card:** the listing's tile (its icon, a theme's own colours, else
-  its letter), a quiet "Market · Kind" kicker with the spark, the name in
+- **The card:** the listing's tile (its cover, else its icon, a theme's own
+  colours, else its letter), a quiet "Market · Kind" kicker with the spark, the name in
   the display face, one line (two at most), the maker, how far it reaches
   (`reachOf`, from the declaration the broker reads at the listing's link:
   only colours and type, stays on your Loam, stays on your server, talks to
@@ -128,10 +142,12 @@ installed, so its display face falls back to the serif.
 
 ## How it looks in every theme
 
-Every colour, face, radius and motion in `public/market.css` is a token, and
-the covers (`public/market-art.js`) are SVG painted with tokens through the
-CSSOM, so the Market is at home in every theme, light and dark, and under
-Sun. The covers' twinkles and the sprout's growing stop under reduced motion.
+Every colour, face, radius and motion in `public/market.css` is a token, so
+the Market is at home in every theme, light and dark, and under Sun; a
+cover is the maker's photograph, and a theme without one is drawn in its own
+tokens. The drawn covers (a puzzle piece under twinkles, `market-art.js`)
+went on 2026-11-18. A preview's loading breath and the sprout's growing stop
+under reduced motion.
 
 ## What checks it
 

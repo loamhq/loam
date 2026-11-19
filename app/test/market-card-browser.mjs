@@ -75,7 +75,11 @@ try {
       assert.deepEqual(await quill.locator('.market-card-name').allTextContents(), ['Moss', 'Tide'])
       assert.deepEqual(await quill.locator('.market-card-act').allTextContents(), ['Get', 'Get'])
       assert.deepEqual(await quill.locator('.market-reach').allTextContents(), ['Only colours and type', 'Only colours and type'])
-      await page.waitForFunction(() => [...document.querySelectorAll('.tt-message[data-message-id="m8"] .market-tile')].every(n => n.dataset.look))
+      // A listing with a cover shows it in the tile (Moss); one without, a
+      // theme's own colours (Tide).
+      await page.waitForFunction(() => [...document.querySelectorAll('.tt-message[data-message-id="m8"] .market-card > .market-tile')].every(n => n.dataset.look || n.querySelector('img')?.complete))
+      assert.deepEqual(await quill.locator('.market-card > .market-tile').evaluateAll(ns => ns.map(n => n.querySelector('img') ? new URL(n.querySelector('img').src).pathname : n.dataset.look)),
+        ['/api/marketplace/moss/cover', 'tide'])
       await shot('card-two', quill.locator('.market-cards'))
 
       if (!out) {

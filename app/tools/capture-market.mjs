@@ -1,8 +1,9 @@
 // Captures of Settings › Market at 390 and 1440, light and dark, in Latte and
 // in Autumn, against the fixture app (test/market-fixture.mjs: an invented
 // list, no person's data): Settings with the Market row, the front page,
-// the typeahead open, a results page, a listing page, the install sheet,
-// the empty Market, and a theme being tried.
+// the typeahead open, a results page, a listing page, a theme's page with
+// its cover, README and maker's links, a theme with no cover wearing itself,
+// the install sheet, the empty Market, and a theme being tried.
 //
 //   MARKET_EVIDENCE=<folder> LOAM_PLAYWRIGHT=<playwright/index.mjs> LOAM_CHROME=<chromium> node tools/capture-market.mjs
 //
@@ -48,7 +49,7 @@ try {
         await shot('settings-market-row')
         await page.locator('.market-door').click()
         await page.locator('.market-lead').waitFor()
-        await page.waitForFunction(() => [...document.querySelectorAll('.market-swatch')].every(n => n.dataset.look))
+        await page.waitForFunction(() => [...document.querySelectorAll('.market-swatch')].every(n => n.querySelector('.theme-preview[data-look]') || n.querySelector('img')?.complete))
         await page.evaluate(() => document.activeElement?.blur())
         await shot('market-front')
         const field = page.locator('.market-q')
@@ -65,6 +66,20 @@ try {
         await page.locator('.market-touch').first().waitFor()
         await page.waitForFunction(() => document.querySelector('.market-listing-head img')?.complete)
         await shot('market-listing')
+        // A theme's page with its cover, README and maker's links, its
+        // README scrolled into view; and a theme with no cover, wearing itself.
+        await page.evaluate(() => __cap.page.openMarket({ id: 'moss' }))
+        await page.locator('.market-readme').waitFor()
+        await page.waitForFunction(() => [...document.querySelectorAll('.market-listing-cover img, .market-readme-img')].every(i => i.complete && i.naturalWidth))
+        await shot('market-listing-theme')
+        await page.evaluate(() => document.querySelector('.market-creator').scrollIntoView({ block: 'start' }))
+        await page.waitForFunction(() => [...document.querySelectorAll('.market-readme-img')].every(i => i.complete && i.naturalWidth))
+        await shot('market-listing-theme-readme')
+        await page.evaluate(() => __cap.page.openMarket({ id: 'tide' }))
+        await page.locator('.market-listing-cover .market-preview-large[data-look="tide"]').waitFor()
+        await shot('market-listing-no-cover')
+        await page.evaluate(() => __cap.page.openMarket({ id: 'images' }))
+        await page.locator('.market-touch').first().waitFor()
         await page.locator('.market-listing-acts .pillbtn.primary').click()
         await page.locator('.market-install .market-touch').first().waitFor()
         await shot('market-install-sheet')
