@@ -44,6 +44,7 @@ import time
 from pathlib import Path
 
 import loam_codex
+import loam_config as lc
 import loam_engineer as eng
 import loam_stuck
 import loam_provider_memory as pm
@@ -80,7 +81,7 @@ PLATFORM_LINE = (
 # such list): the transcripts and the list of public apps. The harness in
 # its tree is ``HARNESS`` plus ``agent.json``.
 def platform_protect() -> list[Path]:
-    return [eng.VAULT / "15_CONVERSATIONS", Path("/etc/loam/public")]
+    return [eng.VAULT / lc.vault_folder("conversations"), Path("/etc/loam/public")]
 
 
 PLATFORM_HARNESS = ("CLAUDE.md", "role.md", "project.md", "agent.json", ".claude")
