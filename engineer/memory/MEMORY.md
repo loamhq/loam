@@ -2573,3 +2573,15 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **`test_boundary_guard`'s "Write under agents/" fails when the suite runs
   from a job worktree** (the guard roots are the canonical checkout); it
   passes from a clean checkout of main, and landings are unaffected.
+- **A percentage inside `minmax()` never grows in a column-flow grid**
+  (`grid-auto-flow: column; grid-auto-columns: minmax(280px, 50%)` sat at
+  280px; found by measuring the live page, not by reading the CSS). `max()`
+  does what was meant; the gallery now wraps two to a row instead.
+- **A screenshot is one moment** (second pass, same day): whole-window shots
+  shrunk to gallery size could not be read. `capture-plugin-shots.mjs` clips a
+  640×400 box at 2x around the feature (`shot(label, around, {align, pad, x})`),
+  scrolling the thread first when the box would leave the window.
+- **"Set up" is declared, not guessed.** A blank text setting is not "not set
+  up" (Comments' optional share-page link is blank by design); a
+  `settings.entry` marked `setup: true` (Git backup's repositories) and the
+  plugin's declared keys decide whether its page leads with its controls.
