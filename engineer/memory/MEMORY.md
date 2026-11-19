@@ -1751,3 +1751,40 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `textContent` of `tt-stream` never returns in the fake DOM (on base main
   too). Prove an absence at the loader and registry level instead
   (`test/installation.test.js`).
+
+## 2026-11-18 — a brief from a thread returns at once (batch B step 1)
+
+- **`engineer-job --brief` from a thread returns once the job is launched
+  or queued**: `{ok, job_id, queued, receipt_path}` (the job dir's
+  `receipt.md`; the vault path is only known at the end). The record in
+  `state/engineer-waiters/` is written at accept with `returned: true` and
+  no pid, and is owed the moment the job has a verdict. A caller with no
+  thread (wake, cron, Remote Control, a job) still blocks; Step 3 ends that.
+- **Gated on the broker, not on the launcher's own version.** The launcher
+  returns at once only while `loam_waiters.route_live()`: the running
+  broker wrote `state/engineer-waiters/route` (pid + start ticks) when its
+  delivery pass started. A broker older than this code writes no route, so
+  between a landing and the broker's restart every brief still blocks and
+  is delivered the old way. Any install updating gets the same safe order.
+- **Delivery posts nothing.** `deliver_job(record, note)`: a turn whose
+  input is `handoff_text` (receipt path, `verdict_line`, the landing), once
+  per job (`system_turn_allowed` with `line=None`, no repeat-line rule). A
+  `job:` turn that ends with no words posts no "turn ended without a reply"
+  line (`quiet_turn`); a message turn still does. Results are ordered by
+  their verdict's `finished`.
+- **A result waits behind a turn under way.** `_claim` already took only
+  message turns (no steer); `hand_over` now fires only when a message is
+  queued, so a result never ends a turn parked on background work. Joining
+  one is Step 2's.
+- **`delivery_follows`/`pending_for` are gone**: a turn the restart cuts
+  says so again, job or no job.
+- **A live probe of the route needs no broker restart**: a scratch thread
+  state (`LOAM_THREADS_STATE`, `LOAM_WAITERS_DIR`, `LOAM_VAULT`) and the
+  branch's `session-broker` module loaded in a process of its own, a fake
+  session whose turn runs the branch's real `engineer-job --brief` with
+  `LOAM_ENGINEER_PROBE_SECONDS`, then a second process running the real
+  `Server.deliver_owed`. Run it outside the job's wall (`sudo -n nsenter
+  --mount=/proc/1/ns/mnt -- setpriv --reuid … --init-groups`, as `--land`
+  does): the jobs dir is read-only inside it, which is also why
+  `tests/test_engineer.py` fails inside a job and passes outside. A probe
+  job lands "nothing" and removes its own tree and branch.
