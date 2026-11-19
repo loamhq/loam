@@ -4,16 +4,19 @@ The host-side half of a web front end for the personas. It starts a persona
 session on this box — the same session a conversation is today — and hands an
 app a narrow, authenticated interface to it. Built 2026-09-16.
 
-The HTTP server in `bin/session-broker` runs the registry from
-`lib/loam_session_host.py` in the same process. At startup it takes an
-exclusive lock on the session directory before reading records or accepting
-work. Two listeners pointed at the same directory cannot start competing
-writers.
-The three provider session implementations and the numbered journal they share
-live in `lib/loam_provider_session.py`. The configuration is `lib/loam_broker.py`,
-its proof is `bin/broker-probe`, and its units are
-`systemd/loam-session-broker.service` (user) and
-`systemd/system/loam-broker-firewall.service` (system).
+The HTTP server and thread worker run in `loam-session-broker.service`.
+`loam-session-host.service` owns the provider processes, pending approvals,
+admission and journals. The API uses an owner-only Unix socket to start,
+resume, configure, send, answer, stop and subscribe. Each turn saves its
+dispatch identity and journal cursor before sending. A replacement API can
+attach to the same child and finish the reply. Each service locks its own
+store before taking work.
+
+The entry points are `bin/session-broker` and `bin/session-host`. The
+provider implementations live in `lib/loam_provider_session.py`. The two
+user unit templates are in `systemd/session/`. The bridge firewall stays
+in `systemd/system/loam-broker-firewall.service`. The previous combined
+entry point and unit remain available for migration and rollback.
 
 ## Why it is here and not in the app
 
@@ -263,7 +266,18 @@ no "(no reply)" is written, a mention in it starts no turn, and one system
 line says "Sam ended Iris's turn". `POST /v1/sessions/end-idle` ends every
 `idle` one and lists the rest in `kept` with why.
 
-**Restarting when idle (2026-11-12; its rule replaced 2026-11-17).**
+**Restarting the split services.** Landings and release updates run
+`bin/session-services reconcile`. It checks the running revision and the
+target for each service. An API-only change replaces the HTTP process while
+provider children keep generating. A host change takes the exclusive
+admission lock, verifies both services see it closed, checks sessions and
+thread turns, and keeps the lock through replacement and health checks.
+An active turn or failed read defers the restart. Run the same command again
+when the host is idle. `bin/session-services host` requests a planned host
+restart. A failed replacement restores the saved executable, imports and
+unit. Re-running the controller recovers an interrupted replacement.
+
+**Restarting a combined installation before migration.**
 `bin/restart-broker --when-idle` restarts only on positive evidence that
 nothing would be cut: every row of this list reads `idle`, and the body's
 `turns` (every thread turn in flight or queued, `{"thread_id", "persona",

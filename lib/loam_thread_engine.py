@@ -1958,6 +1958,14 @@ class ThreadEngine:
                         park(False)          # the follow-up turn has begun
                 elif kind == "broker.exit":
                     ended = "exit"
+            lock = self.steer_locks.get(turn.key)
+            if lock is not None and lock.locked():
+                # Close this turn to new steers, but keep reading while the
+                # last write is acknowledged. Events arriving in that gap
+                # belong in the queue inherited by the after-result watch.
+                self.turn_watch.pop(turn.key, None)
+                async with lock:
+                    pass
         finally:
             session.unwatch(queue)
             if self.turn_watch.get(turn.key) is queue:
@@ -1966,12 +1974,6 @@ class ThreadEngine:
         # steered into it -- unless it died before a word came back: then
         # what it was shown is still news to the next turn, and nothing reads
         # as answered that was not (2026-11-14).
-        lock = self.steer_locks.get(turn.key)
-        if lock is not None and lock.locked():
-            # A provider may acknowledge a steer after its result arrived.
-            # Its inputs must settle with this turn, in their original order.
-            async with lock:
-                pass
         through = turn.read_through or through
         seen = through
         if ended in ("exit", "closed") and not posted and not reply.spoken() \
