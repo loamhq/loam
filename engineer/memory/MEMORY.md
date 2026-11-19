@@ -1788,3 +1788,24 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   job's next session loads them (its CLAUDE.md imported the scratch
   install's `reach.md`). Copy the canonical checkout's seeded files back
   after such a rehearsal, or point `paths.root` at a throwaway clone.
+
+## 2026-11-18 — a folder as one zip (`/v1/files/archive`)
+
+- **`zipfile` streams to an object with `write` and `tell` and no `seek`**:
+  it writes data descriptors and never goes back, and it picks Zip64 for an
+  entry from `ZipInfo.file_size` (set it from `fstat`). `ZipFile.mkdir` with
+  a hand-made `ZipInfo` needs `CRC`, `compress_size` and `file_size` set to
+  0 first (`'ZipInfo' object has no attribute 'CRC'` otherwise).
+- **To abandon a zip, starve it**: set the sink dead and `zf.fp = None`, so
+  neither an open entry's close nor `ZipFile.__del__` writes a central
+  directory anywhere. The broker then `transport.abort()`s a chunked body:
+  no central directory and no last chunk is a failed download to every
+  client, where a plain close after `Connection: close` could read as whole.
+- **The real vault zipped in 36 s through one route** (5.0 GB, 8,861
+  entries; broker peak 53 MB) against 4 min for the app's file-by-file
+  fallback: the cost was the 8,400 round trips, not the bytes. STORE for
+  non-text keeps it disk-bound.
+- **An export judges names, not contents.** A thread transcript can hold a
+  pasted credential (one did on 11-18: a private key in a sandbox tool
+  call); no name rule catches that, and `15_CONVERSATIONS/` is not ours to
+  edit. Report it; do not scan-and-drop silently.
