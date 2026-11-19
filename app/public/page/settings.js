@@ -16,6 +16,7 @@ import { createGitIdentity } from '../git-identity.js'
 import { formatDate } from '../time.js'
 import { themeImageURL, themeImagePosition } from '../theme-image.js'
 import { themePreview } from '../theme-preview.js'
+import { shownOptions } from '../theme-options.js'
 import { fileShortcuts, toggleFileShortcut } from '../store.js'
 import { createApiKeys } from '../api-keys.js'
 
@@ -148,8 +149,7 @@ function settingsAppearance({ back = true } = {}) {
   const chosen = host.theme.installed.find(t => t.id === look)
   const latte = host.theme.value.options?.[look]?.['agent-shapes'] === 'latte-art'
   const signature = host.theme.value.options?.[look]?.['agent-shapes'] === 'signature'
-  const themeOptions = chosen?.options?.filter(option =>
-    option.id === 'agent-colours' ? !latte : option.id === 'face-content' ? signature : ['latte-mug', 'latte-inside'].includes(option.id) ? latte : true)
+  const themeOptions = chosen?.options ? shownOptions(chosen.options, host.theme.value.options?.[look] ?? {}) : undefined
   const options = [{ id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }, { id: 'sun', label: 'Sun' }, { id: 'system', label: 'System' }]
   const transitions = [{ id: 'fast', label: 'Fast · 3 s' }, { id: 'normal', label: 'Normal · 10 s' }, { id: 'long', label: 'Long · 20 s' }]
   const solar = mode === 'sun' ? host.theme.solar : null

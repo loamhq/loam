@@ -1,5 +1,7 @@
 import { h, icon } from './ui.js'
 import { createSecretSettings } from './plugin-secrets.js'
+import { pluginGallery } from './plugin-gallery.js'
+import { createThemeShowcase } from './theme-showcase.js'
 const label = id => ({ 'core.message': 'the message bubble', 'core.thread-list': 'the thread list', 'core.composer': 'the composer', 'core.files.viewer': 'the Files viewer', 'core.files.editor': 'the Files editor', 'core.rail': 'the navigation rail', 'core.activity': 'Activity', 'core.apps': 'Apps', 'core.settings': 'Settings' }[id] ?? id)
 export const sourceLine = source => source?.kind === 'loam' ? 'Loam' : source?.kind === 'link' ? `From github.com/${source.repo}` : 'Built here'
 // Installed from a link someone shared, not from the Market (2026-11-18): the
@@ -20,25 +22,38 @@ export function touchSentences(declaration = {}) {
   for (const id of declaration.overrides ?? []) lines.push(`Replaces ${label(id)}.`)
   return lines
 }
+// A plugin's guide (the body of its PLUGIN.md) in two parts (2026-11-19):
+// the plain words a person reads first, and, after a rule (`---`) or a
+// `## Technical details` heading, what a builder wants, kept at the foot of
+// the page under Details. The owner, 11-19: "at the beginning, it should be
+// more non-technical, with more technical details at the bottom."
+export function guideParts(text) {
+  const src = String(text ?? '').replace(/\r\n/g, '\n').trim()
+  if (!src) return { plain: '', technical: '' }
+  const lines = src.split('\n')
+  let fence = false, at = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) fence = !fence
+    if (fence) continue
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i]) || /^#{1,3}\s+technical details\s*$/i.test(lines[i])) { at = i; break }
+  }
+  if (at < 0) return { plain: src, technical: '' }
+  const technical = lines.slice(at + 1).join('\n').replace(/^\s*#{1,3}\s+technical details\s*\n/i, '').trim()
+  return { plain: lines.slice(0, at).join('\n').trim(), technical }
+}
+// A guide's first heading that only repeats the plugin's name is not drawn.
+const withoutTitle = (text, name) => text.replace(/^#\s+(.+)\n+/, (all, title) => title.trim().toLowerCase() === String(name ?? '').trim().toLowerCase() ? '' : all)
+const SERVICE = { running: 'Running', starting: 'Starting', failing: 'Failing', stopping: 'Stopping', stopped: 'Stopped' }
 const external = source => { try { const u = new URL(source?.url); return u.protocol === 'https:' ? u.href : null } catch { return null } }
 export function createPluginSettings({ loader, theme, host, changed = () => {} }) {
   const st = { selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', guide: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set(), advanced: null }
   let hostSettings = null, secretSettings = null
+  const showcase = createThemeShowcase({ schedule: () => changed(), mode: () => theme.current === 'dark' ? 'dark' : 'light' })
+  const failedShots = new Set()
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, text, onclick, ...props })
   const notice = (text, bad = true) => text ? h('p', { class: `plugin-notice${bad ? ' err' : ''}`, role: bad ? 'alert' : 'status', text }) : null
   const linked = row => fromLink(row, host.marketState?.list?.plugins ?? [])
   const meta = row => [row.author || 'Unknown author', row.version || 'Version unknown', sourceLine(row.source)].join(' · ')
-  // A plugin's page says who made it, its version and where to read it
-  // (2026-11-18): the repository, ref and commit are the link's, behind View
-  // source (a link's `url` is the tree at the commit it was installed from).
-  const byline = row => {
-    const url = external(row.source)
-    const who = row.author ? `By ${row.author}` : row.source?.kind === 'loam' ? 'By Loam' : 'Unknown author'
-    return h('p', { class: 'plugin-meta plugin-byline' },
-      h('span', { text: `${who} · ${row.version ? `Version ${row.version}` : 'Version unknown'}` }),
-      url ? h('a', { class: 'quietlink plugin-source', href: url, target: '_blank', rel: 'noopener noreferrer', text: 'View source' }) : null)
-  }
-
   const declarations = (declaration, title = 'What it touches') => h('section', { class: 'plugin-declaration', 'aria-label': title }, h('h3', { class: 'kicker', text: title }),
     touchSentences(declaration).length ? h('ul', {}, ...touchSentences(declaration).map(text => h('li', { text }))) : h('p', { class: 'note', text: 'Declares no network, record or memory access.' }))
   function opened() {
@@ -101,7 +116,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     if (!service) return null
     const log = service.log ?? row.log
     return h('div', { class: 'plugin-service' },
-      h('p', { class: 'note plugin-service-state', text: `Server · ${{ running: 'Running', starting: 'Starting', failing: 'Failing', stopping: 'Stopping', stopped: 'Stopped' }[service.state] ?? service.state}` }),
+      h('p', { class: 'note plugin-service-state', text: `Server · ${SERVICE[service.state] ?? service.state}` }),
       service.state === 'failing' ? h('div', { class: 'plugin-service-failure' },
         h('details', { key: `log:${row.key}`, open: st.logs.has(row.key), ontoggle: event => { if (event.currentTarget.isConnected) event.currentTarget.open ? st.logs.add(row.key) : st.logs.delete(row.key) } },
           h('summary', { text: 'Recent log' }), h('pre', { text: Array.isArray(log) ? log.join('\n') : log || 'No log lines available.' })),
@@ -129,12 +144,15 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     return h('div', { class: 'plugin-list-item', key: row.key }, h('div', { class: 'plugin-list-row' },
       h('button', { type: 'button', class: 'setrow plugin-row', onclick: () => open(row), 'aria-label': `About ${row.name || row.id}`, 'aria-description': row.switch === 'appearance' ? `${meta(row)} · ${themeState}` : meta(row) },
         pluginIcon(row),
-        h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: row.name || row.id }), h('div', { class: 'setrow-sub', text: row.description || (row.switch === 'appearance' ? 'Theme' : row.on ? 'Enabled' : 'Disabled') }),
+        h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: row.name || row.id }), h('div', { class: 'setrow-sub', text: row.description || (row.switch === 'appearance' ? 'Theme' : row.on ? 'On' : 'Off') }),
           linked(row) ? h('span', { class: 'plugin-mark plugin-mark-link' }, icon.link(11), 'From a link') : null,
           row.shadows ? h('span', { class: 'plugin-mark', text: 'Changes a shipped plugin' }) : null,
           row.overrides?.length ? h('span', { class: 'plugin-mark', text: `Replaces ${row.overrides.map(label).join(', ')}` }) : null,
           broken ? h('div', { class: 'plugin-row-error', text: broken }) : row.warnings?.length ? h('div', { class: 'plugin-row-warning', text: `${row.warnings.length} ${row.warnings.length === 1 ? 'warning' : 'warnings'}` }) : null),
-        row.switch === 'appearance' ? control : null, icon.chevronRight(12)), row.switch === 'appearance' ? null : control), serviceView(row))
+        row.switch === 'appearance' ? control : null, icon.chevronRight(12)), row.switch === 'appearance' ? null : control),
+      // In the list, the server says something only when it is not running
+      // as it should (2026-11-19); its page always says, under Details.
+      row.service && row.service.state !== 'running' ? serviceView(row) : null)
   }
   // Each `settings.entry` of a plugin that is on: a choice as a menu, text as
   // a field, each saved by itself (PATCH /plugins/<id>/settings).
@@ -169,17 +187,53 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         h('summary', { text: 'Advanced' }), ...advanced.map(entry => entryRow(row, entry))) : null,
       notice(st.done, false))
   }
+  // What a plugin looks like: a theme worn (its preview, from its installed
+  // tokens), else its screenshots, else its icon on a plate of the page's own
+  // colours, so a plugin with nothing on screen still has a face.
+  function picture(row) {
+    if (row.kind?.includes?.('theme')) return showcase.view({ key: `plugin-${row.id}`, look: row.id, name: row.name || row.id, options: row.options ?? [], palette: row.palette ?? [], from: 'installed' })
+    const file = rel => `/api/plugins/${encodeURIComponent(row.id)}/files/${String(rel).split('/').map(encodeURIComponent).join('/')}`
+    const shots = (row.screenshots ?? []).map(sh => ({ caption: sh.caption, src: file(sh.src), src_dark: sh.src_dark ? file(sh.src_dark) : null }))
+    const gallery = pluginGallery({ shots, dark: theme.current === 'dark', name: row.name || row.id, key: `gallery:${row.id}`, failed: failedShots, redraw: changed })
+    if (gallery) return gallery
+    return row.icon ? h('div', { class: 'plugin-plate', 'aria-hidden': 'true' }, h('span', { class: 'plugin-plate-ring' }), h('span', { class: 'plugin-plate-ring two' }), pluginIcon(row)) : null
+  }
+  function details(row, declaration, technical, url) {
+    const who = row.author || (row.source?.kind === 'loam' ? 'Loam' : null)
+    const fact = (label, value) => value ? h('div', {}, h('dt', { text: label }), h('dd', {}, value)) : null
+    return h('section', { class: 'plugin-details', 'aria-labelledby': `plugin-details-${row.id}` },
+      h('h3', { class: 'kicker plugin-details-title', id: `plugin-details-${row.id}`, text: 'Details' }),
+      declarations(declaration),
+      h('dl', { class: 'plugin-facts' },
+        fact('Version', row.version || 'Unknown'),
+        fact('Made by', who),
+        fact('Comes from', row.source?.kind === 'loam' ? 'Built into Loam' : row.source?.kind === 'link' ? `github.com/${row.source.repo}` : 'Made on this server'),
+        row.service ? fact('Its server', `${SERVICE[row.service.state] ?? row.service.state}`) : null,
+        url ? fact('Source', h('a', { class: 'quietlink plugin-source', href: url, target: '_blank', rel: 'noopener noreferrer' }, 'View source', icon.external(12))) : null),
+      technical ? h('details', { class: 'plugin-guide', open: st.guide, ontoggle: event => { st.guide = event.currentTarget.open } }, h('summary', { text: 'Technical details' }),
+        h('div', { class: 'md' }, ...[host.markdown?.(technical, { soft: true }) ?? h('p', { text: technical })].flat())) : null)
+  }
   function detail() {
     const original = st.selected, current = loader.st.rows.find(row => row.key === original.key) ?? original
     const row = current
     const declaration = row.declaration ?? { touches: row.touches, overrides: row.overrides, page_code: row.has?.page_main }
     const url = external(row.source)
+    const guide = guideParts(st.detail?.plugin?.guide), plain = withoutTitle(guide.plain, row.name || row.id)
+    // A plugin's page (2026-11-19), plain first: what it is for, a picture,
+    // its own words (what it does, how to use it), its switch and controls,
+    // and at the foot, quietly, the details: what it touches, version,
+    // maker, its server, its source and the technical part of its guide.
     return [h('button', { class: 'backbtn plugin-back', 'aria-label': 'Back to Plugins', onclick: () => { st.selected = null; st.detail = null; st.error = ''; changed() } }, icon.chevronLeft(18), 'Plugins'),
-      host.settingsHead(row.name || row.id), pluginIcon(row), byline(row), serviceView(row),
+      h('header', { class: 'plugin-hero' }, pluginIcon(row),
+        h('div', { class: 'plugin-hero-words' }, host.settingsHead(row.name || row.id), row.description ? h('p', { class: 'plugin-promise', text: row.description }) : null)),
+      notice(row.broken), notice(loader.st.failures.get(row.id)),
+      row.service && row.on && row.service.state !== 'running' ? serviceView(row) : null,
+      picture(row),
+      plain ? h('div', { class: 'md plugin-about' }, ...[host.markdown?.(plain, { soft: true }) ?? h('p', { text: plain })].flat()) : null,
       row.shadows ? h('p', { class: 'plugin-mark', text: 'Changes a shipped plugin.' }) : null,
       linked(row) ? h('p', { class: 'note plugin-from-link' }, icon.link(13), h('span', { text: `Installed from a link: github.com/${row.source.repo}${row.source.path ? `/${row.source.path}` : ''}, at ${row.source.ref_kind === 'tag' ? row.source.ref : `commit ${String(row.source.commit ?? row.source.ref).slice(0, 7)}`}. To update it, install from its link again.` })) : null,
       row.edited ? h('p', { class: 'note', text: 'Edited here since it was installed.' }) : null,
-      notice(row.broken), notice(loader.st.failures.get(row.id)), notice(st.error), notice(st.detailError),
+      notice(st.error), notice(st.detailError),
       st.opening ? h('p', { class: 'note', role: 'status', text: 'Reading plugin details…' }) : null,
       row.switch === 'plugin' && row.id !== 'daily-notes' && !row.broken ? h('div', { class: 'rows plugin-enable' }, h('div', { class: 'setrow' },
         h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: row.on ? 'On' : 'Off' }), h('div', { class: 'setrow-sub', text: row.on ? 'Settings are kept when you turn this off.' : 'Turn on to use this plugin and its settings.' })),
@@ -203,9 +257,8 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           ? `Uses your ${row.keys.map(k => k.name).join(' or ')} key, whichever you have. Keys are saved under API keys, in Connections.`
           : `Uses your ${row.keys.map(k => k.name).join(' and ')} ${row.keys.length > 1 ? 'keys' : 'key'}, saved under API keys in Connections.` }),
         host.goSettings ? button('Open API keys', () => row.keys.length === 1 ? host.goSettings('api-key', row.keys[0].provider) : host.goSettings('api-keys'), 'pillbtn content-mark') : null) : null,
-      declarations(declaration), ...(row.warnings ?? []).map(warning => notice(typeof warning === 'string' ? warning : JSON.stringify(warning), false)),
-      st.detail?.plugin?.guide ? h('details', { class: 'plugin-guide', open: st.guide, ontoggle: event => { st.guide = event.currentTarget.open } }, h('summary', { text: 'About this plugin' }), h('div', { class: 'md' }, host.markdown?.(st.detail.plugin.guide) ?? h('p', { text: st.detail.plugin.guide }))) : null,
       loader.st.failures.has(row.id) ? button('Try again', () => loader.refresh(), 'pillbtn content-mark') : null,
+      details(row, declaration, guide.technical, url),
       row.layer === 'yours' ? (st.remove ? h('div', { class: 'plugin-remove-question' }, h('p', { text: `Remove ${row.name || row.id}?${row.shadows ? ' The shipped copy will take over.' : ''}` }),
         button('Keep plugin', () => { st.remove = false; changed() }, 'pillbtn content-mark'), button('Remove', () => remove(row), 'pillbtn primary danger', { disabled: loader.st.writing.has(`/plugins/${row.id}`) })) : button('Remove plugin', () => { st.remove = true; changed() }, 'pillbtn content-mark danger')) : null]
   }

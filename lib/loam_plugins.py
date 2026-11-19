@@ -127,7 +127,12 @@ FIELDS = ("id", "name", "version", "author", "api", "kind", "places",
           "image", "image_position", "image_dark", "image_position_dark",
           "agent_settings", "server", "icon", "contributes", "default_on",
           # 2026-11-18: the providers whose keys it uses (lib/loam_keys.py).
-          "keys")
+          "keys",
+          # 2026-11-19: its one-line promise, its pictures, and a theme's
+          # named colours (`words_of`), for its Market page and its page in
+          # Settings > Plugins. A Loam before them keeps them as `extra`
+          # with a warning, and the plugin still installs and shows.
+          "description", "screenshots", "palette")
 LIST_FILE = "installed.json"
 STAGING = ".staging"
 # The Yours layer's default: its own folder and git repository, beside the
@@ -173,6 +178,12 @@ IMAGE_POSITION_MAX = 32
 # falling back to its light counterpart when absent. Same rules as the light
 # pair, and neither without a usable `image` (themeImage throws).
 COVER_FIELDS = ("image", "image_position", "image_dark", "image_position_dark")
+DESCRIPTION_MAX = 160
+SCREENSHOTS_MAX = 6
+CAPTION_MAX = 140
+PALETTE_MAX = 8
+PALETTE_NAME_MAX = 24
+TOKEN = re.compile(r"^--[a-z][a-z0-9-]{0,47}$")
 # What the files route serves of a plugin's folder: its page code, its
 # assets, its theme and its guide. Never `server/`, never anything else.
 SERVED_DIRS = ("page", "assets")
@@ -905,6 +916,92 @@ def cover_of(data: dict, kind: list[str], folder: Path | None,
     return out
 
 
+def _in_folder(image, folder: Path | None) -> bool:
+    if not isinstance(image, str) or not IMAGE.match(image):
+        return False
+    if folder is None:
+        return True
+    try:
+        real = (folder / image).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+    return real.is_file() and real.is_relative_to(folder.resolve())
+
+
+def words_of(data: dict, kind: list[str], folder: Path | None,
+             warnings: list[str]) -> dict:
+    """What a plugin says about itself to a person (2026-11-19): its
+    ``description``, one plain line of at most 160 characters, what someone
+    gets from it; its ``screenshots``, at most six pictures in its folder,
+    each ``{src, src_dark?, caption}``; and, for a theme, its ``palette``,
+    at most eight of its colours by token, each with a name from the theme's
+    story (``{token, name, name_dark?}``). Each wrong one is left out with a
+    warning; none of them ever breaks the plugin."""
+    out: dict = {}
+    desc = data.get("description")
+    if desc is not None:
+        if isinstance(desc, str) and desc.strip() and len(desc.strip()) <= DESCRIPTION_MAX \
+                and "\n" not in desc.strip():
+            out["description"] = desc.strip()
+        else:
+            warnings.append(f"description is one line of at most {DESCRIPTION_MAX} "
+                            "characters; it is left out")
+    shots = data.get("screenshots")
+    if shots is not None:
+        kept = []
+        if not isinstance(shots, list):
+            warnings.append("screenshots is a list of {src, src_dark, caption}; "
+                            "they are left out")
+            shots = []
+        for i, shot in enumerate(shots):
+            if len(kept) >= SCREENSHOTS_MAX:
+                warnings.append(f"screenshots: at most {SCREENSHOTS_MAX}; the rest "
+                                "are left out")
+                break
+            if not isinstance(shot, dict) or not _in_folder(shot.get("src"), folder):
+                warnings.append(f"screenshots[{i}] names no picture in its folder "
+                                "(.webp, .avif, .jpg or .png); it is left out")
+                continue
+            one = {"src": shot["src"]}
+            if shot.get("src_dark") is not None:
+                if _in_folder(shot.get("src_dark"), folder):
+                    one["src_dark"] = shot["src_dark"]
+                else:
+                    warnings.append(f"screenshots[{i}].src_dark names no picture in "
+                                    "its folder; the light one is shown in dark")
+            cap = shot.get("caption")
+            if isinstance(cap, str) and cap.strip():
+                one["caption"] = cap.strip()[:CAPTION_MAX]
+            kept.append(one)
+        if kept:
+            out["screenshots"] = kept
+    palette = data.get("palette")
+    if palette is not None:
+        if "theme" not in kind:
+            warnings.append("palette is a theme's colours; this plugin's kind has no "
+                            "theme, so it is left out")
+        elif not isinstance(palette, list):
+            warnings.append("palette is a list of {token, name}; it is left out")
+        else:
+            kept = []
+            for i, sw in enumerate(palette[:PALETTE_MAX]):
+                ok = (isinstance(sw, dict) and isinstance(sw.get("token"), str)
+                      and TOKEN.match(sw["token"]) and isinstance(sw.get("name"), str)
+                      and 0 < len(sw["name"].strip()) <= PALETTE_NAME_MAX)
+                if not ok:
+                    warnings.append(f"palette[{i}] is {{token: --a-token, name: a few "
+                                    f"words}}; it is left out")
+                    continue
+                one = {"token": sw["token"], "name": sw["name"].strip()}
+                dark = sw.get("name_dark")
+                if isinstance(dark, str) and 0 < len(dark.strip()) <= PALETTE_NAME_MAX:
+                    one["name_dark"] = dark.strip()
+                kept.append(one)
+            if kept:
+                out["palette"] = kept
+    return out
+
+
 def server_of(value, warnings: list[str]) -> dict | None:
     """The manifest's ``server``: ``{run: "<command>"}``, the one way a
     plugin says how its server starts. ``None`` when absent."""
@@ -1048,6 +1145,7 @@ def manifest_of(data: dict, folder_name: str | None,
                                 "no theme")
         out["options"] = opts
     out.update(cover_of(data, kind, folder, warnings))
+    out.update(words_of(data, kind, folder, warnings))
     fields = agent_settings_of(data.get("agent_settings"))
     if fields:
         out["agent_settings"] = fields
@@ -2291,15 +2389,17 @@ def file_for(pid: str, rel: list[str]) -> tuple[Path, str]:
                       for p in rel):
         raise PluginError("no such file", 404)
     row = next((r for r in _rows() if r["id"] == pid and r["effective"]), None)
-    cover = "/".join(rel) in {(row or {}).get(k)
-                              for k in ("image", "image_dark", "icon")} - {None}
+    shots = {s.get(k) for s in ((row or {}).get("screenshots") or [])
+             for k in ("src", "src_dark")}
+    cover = "/".join(rel) in ({(row or {}).get(k)
+                               for k in ("image", "image_dark", "icon")} | shots) - {None}
     font = (len(rel) == 1 and "theme" in ((row or {}).get("kind") or [])
             and (rel[0] in THEME_FILES or rel[0].lower().endswith(FONT_SUFFIXES)))
     if not ((len(rel) > 1 and rel[0] in SERVED_DIRS)
             or (len(rel) == 1 and rel[0] in SERVED_FILES) or cover or font):
         raise PluginError("a plugin serves its page/ and assets/ files, theme.css, "
-                          "PLUGIN.md, its icon, a theme's cover image and its "
-                          "fonts, nothing else", 404)
+                          "PLUGIN.md, its icon, its screenshots, a theme's cover "
+                          "image and its fonts, nothing else", 404)
     if row is None:
         raise PluginError(f"no plugin {pid!r} is in force", 404)
     base = Path(row["folder"]).resolve()
