@@ -2363,3 +2363,21 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   (rows are buttons named `Loam Engineer Claude Code`). The older
   `*-browser.mjs` checks that select `section[aria-label="Engineers"]`
   still fail on that; `loam-engineer-provider-browser.mjs` does not.
+- **A README may hide from the Market what its listing already shows**:
+  `<!-- loam:hero -->…<!-- /loam:hero -->` (the promise) and
+  `<!-- loam:gallery -->…<!-- /loam:gallery -->` (its pictures), cut by
+  `loam_marketplace.GALLERY_BLOCK` before the README reaches the page. Use no
+  Markdown tables for pictures: a gallery block of image + italic caption
+  reads on GitHub and in an old Loam alike.
+- **Landing under load (2026-11-19, load average 40 on 16 CPUs)** failed three
+  times on tests that pass alone: `test_land_outside_lock.py`'s "both done in
+  under 15 s" (16.1 s), `activity.test.js` "schedule reading changes…", and
+  `github.test.js`'s connected/Refresh cases. Each passed three times alone on
+  the branch and the merge; the fourth landing went through. Rerun alone
+  before touching code.
+- **Live captures from the loopback port need `/x/` routed to the gateway**
+  (`127.0.0.1:8933`): the app does not serve plugin servers, so a plugin's
+  own settings section says "The plugin answered 404" in a loopback capture
+  only. Closing the Market ends Try it, so the real app wearing a listed
+  theme is photographed on the fixture app with the theme installed from its
+  repository, not on staging.
