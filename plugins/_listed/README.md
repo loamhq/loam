@@ -1,31 +1,25 @@
-# First-party plugins that are listed, not shipped
+# The core's copies of Market plugins
 
-Each folder here is a plugin made with Loam and published from its own
-folder at a tag, then listed in the marketplace. None is installed by being
-here: a folder whose name begins with `_` is never read as a plugin
-(`lib/loam_plugins.py`), so `_listed/` holds them without putting them in
-force. A person installs one from Settings › Plugins like any other.
+Autumn, Deep Forest, Foundry, Mist Trail and Yosemite were built into Loam
+until 0.2.5. They are Market plugins now, each in its maker's own repository
+(linked from its Market page) since 0.2.10; the source of each is there, and a
+new version is made and tagged there.
 
-| Plugin | What |
-|---|---|
-| `images/` | Make and change images with OpenAI or Google, saved in the vault (2026-11-18) |
-| `syncthing/` | Your vault syncs with your own devices over Syncthing; agents pair a device and say how syncing is going (2026-11-18) |
-| `autumn/`, `deep-forest/`, `foundry/`, `mist-trail/`, `yosemite/` | The first-party themes beyond Latte and Plain, built in until 0.2.5 (2026-11-18) |
+The core still styles them by id (`materials.css`, `face-paints.css`,
+`signature-avatar.js` in `app/public/`), so it keeps a copy of each here to
+hold that styling to its rules: the app's tests read these folders
+(`app/test/listed-themes.mjs`), and so do the theme tools in `app/tools/`.
+They are also the release's own copy that `lib/loam_listed_themes.py` falls
+back on when an install that was wearing one updates past 0.2.5 without
+reaching GitHub.
 
-**Where they are published.** Each folder is copied as it is into the public
-repository `loamhq/plugins`, as `<id>/`, and tagged there `<id>-v<version>`
-(one repository holds them all, so a tag names its plugin). Its listing in
-`loamhq/marketplace` links `https://github.com/loamhq/plugins/tree/<id>-v<version>/<id>`.
-A new version is a higher `version` in its `PLUGIN.md`, a commit there that
-changes only that folder, its new tag, and a pull request to the listing.
-The source of truth is this folder; `loamhq/plugins` is what was published.
-
-**Themes moved from the shipped set** are kept for an install that chose one
-(`lib/loam_listed_themes.py`, whose `MOVED` names each and the version its
-link is at).
-
-A plugin here takes nothing from Loam's own `lib/`; it reads what it needs
-from the environment every plugin process is given (docs/plugins.md).
+None is installed by being here: a folder whose name begins with `_` is never
+read as a plugin (`lib/loam_plugins.py`). These copies are at 1.0.1, the last
+version published from this repository (to `loamhq/plugins`, now archived,
+at `<id>-v1.0.1`); the makers' repositories went on from 1.0.2, which added
+only the README, the licence and the maker's name. When a maker changes a
+theme's look, bring its `theme.css`, `fonts.css` and fonts here, so the core
+is tested against what people wear.
 
 **Dictation and Read aloud** (`dictation/`, `read-aloud/`) were built into
 Loam until 0.2.9, as page plugins in the app's `public/plugins/`. They are

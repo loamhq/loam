@@ -20,7 +20,7 @@ const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME,
 const source = await readFile('public/app.js', 'utf8')
 const json = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 const KEYS = JSON.parse(await readFile(new URL('./fake-keys.json', import.meta.url), 'utf8'))
-const ICON = await readFile(new URL('../../plugins/_listed/images/assets/icon.svg', import.meta.url))
+const ICON = await readFile(new URL('../../plugins/images/assets/icon.svg', import.meta.url))
 
 const at = '2026-11-18T19:30:00Z', thread = 'a-quieter-week'
 const commit = '79b1459e4264b4715f016b935ca8903367ff3c4d'

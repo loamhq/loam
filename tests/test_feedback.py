@@ -18,7 +18,7 @@ checkout has a release tag and one commit of its own. Checks:
   - the command: `loam report bug` prints what would go and the link, and
     sends nothing; `--json` is the same as data; a missing title is exit 2;
     `loam report idea` is a kind of its own with the same link; there is
-    no `send` (the private route of 0.2.7 was taken out in 0.2.10).
+    no `send` (the private route of 0.2.7 was taken out in 0.2.11).
 
 Run: python3 tests/test_feedback.py
 """

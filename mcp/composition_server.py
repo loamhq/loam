@@ -50,7 +50,7 @@ COMMONS = AI_LABS / "commons"
 CONVERSATIONS = VAULT / "15_CONVERSATIONS"
 
 # Images left this server on 2026-11-18: core ships no image tool (the
-# owner's decision, m444). The Images plugin (plugins/_listed/images/) has
+# owner's decision, m444). The Images plugin (plugins/images/, built in since 0.2.10) has
 # generate_image, from this server's own, for every engine.
 
 TYPST_BIN_FALLBACK = "/usr/local/bin/typst"

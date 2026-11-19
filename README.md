@@ -101,7 +101,7 @@ and [SECURITY.md](SECURITY.md) how to report a vulnerability.
 | `app/` | the web app: Node's standard library, no dependencies |
 | `mcp/`, `hooks/` | the agents' MCP servers and Claude Code hooks |
 | `deploy/`, `systemd/` | the edge (Caddy, Authelia, the sign-in page) and the unit templates |
-| `plugins/` | first-party plugins: the reviewer, daily notes, comments & suggestions |
+| `plugins/` | the built-in plugins: the reviewer, daily notes, comments & suggestions, Images |
 | `docs/` | how each part works and why; `docs/library/` becomes every install's `System/Loam/` |
 | `engineer/memory/` | what building Loam has taught |
 
