@@ -26,7 +26,7 @@ const ROOT = new URL('../../', import.meta.url).pathname
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright')
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', ...(process.env.DEMO_SPEECH ? [`--use-file-for-fake-audio-capture=${process.env.DEMO_SPEECH}`] : []), '--autoplay-policy=no-user-gesture-required'] })
 const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8')
-const W = 1120, H = 700, AT = '2026-11-19T16:40:00Z', THREAD = 'a-quieter-week'
+const W = 1120, H = 700, CLIP = 640, CLIP_H = 400, AT = '2026-11-19T16:40:00Z', THREAD = 'a-quieter-week'
 const json = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 const TYPES = { js: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', webp: 'image/webp', png: 'image/png', json: 'application/json', md: 'text/markdown', mp3: 'audio/mpeg', wav: 'audio/wav' }
 
@@ -79,11 +79,23 @@ async function scene(name, { plugins = [], title, messages = [], files = null, r
     const page = await ctx.newPage(); page.setDefaultTimeout(15000)
     page.on('pageerror', e => errors.push(e.message))
     await page.goto(app.url); await page.locator('.tt-row').first().waitFor()
-    const shot = async (label) => {
+    // One moment, not the whole window (2026-11-19, second pass): a CLIP×CLIP_H
+    // box around the element `around` finds (a function's source, run in the
+    // page), placed by `align` (center, top or bottom, `pad` from its edge),
+    // kept inside the window. At 2x its words read at gallery size.
+    const shot = async (label, around = null, { align = 'center', pad = 24, x = 'center' } = {}) => {
       await page.evaluate(async () => { await document.fonts.ready; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame) })
       await page.waitForTimeout(400)
       const raw = path.join(out, `.${name}-${label}-${mode}.png`)
-      await page.screenshot({ path: raw, animations: 'disabled' })
+      let clip
+      if (around) {
+        const r = await page.evaluate(`(() => { const n = (${around})(); if (!n) return null; const b = n.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height } })()`)
+        if (!r) throw new Error(`${name} ${label}: nothing to frame`)
+        const fit = (v, max) => Math.round(Math.max(0, Math.min(v, max)))
+        const cy = align === 'top' ? r.y - pad : align === 'bottom' ? r.y + r.h + pad - CLIP_H : r.y + r.h / 2 - CLIP_H / 2
+        clip = { x: fit(x === 'left' ? r.x - 16 : r.x + r.w / 2 - CLIP / 2, W - CLIP), y: fit(cy, H - CLIP_H), width: CLIP, height: CLIP_H }
+      }
+      await page.screenshot({ path: raw, animations: 'disabled', ...(clip ? { clip } : {}) })
       execFileSync('python3', [new URL('frame-shot.py', import.meta.url).pathname, raw, path.join(out, `${name}-${label}${mode === 'dark' ? '-dark' : ''}.webp`)], { stdio: 'inherit' })
       execFileSync('rm', ['-f', raw])
     }
@@ -119,11 +131,11 @@ if (picture) {
     await open()
     await page.waitForFunction(() => { const f = document.querySelector('.reply-figure'); const pane = f?.closest('.tt-stream'); if (pane) pane.scrollTop = pane.scrollHeight; return f && /\bloaded\b/.test(f.className) }, null, { polling: 250 })
     await showFrom('m2', 92, '.reply-figure')
-    await shot('reply')
+    await shot('reply', "() => document.querySelector('.reply-figure')", { align: 'top', pad: 56 })
     await page.locator('.reply-image').first().click()
     await page.locator('.image-view img').waitFor()
     await page.waitForFunction(() => document.querySelector('.image-view-img')?.complete)
-    await shot('full')
+    await shot('full', "() => document.querySelector('.image-view-img')")
   })
 }
 
@@ -137,10 +149,10 @@ await run('syncthing', { plugins: ['syncthing'], title: 'Notes on my phone', mes
     text: 'All in step: your laptop and your phone are both up to date, and the last change arrived a minute ago.' },
 ] }, async ({ page, shot, open, showFrom }) => {
   await open()
-  await showFrom('m1', 70)
-  await shot('pair')
+  await showFrom('m2', 140)
+  await shot('pair', "() => document.querySelector('[data-message-id=\"m2\"]')", { align: 'top', pad: 70 })
   await showFrom('m3', 70)
-  await shot('status')
+  await shot('status', "() => document.querySelector('[data-message-id=\"m3\"]')", { align: 'top', pad: 16 })
 })
 
 // ---------------------------------------------------------------- Dictation
@@ -160,12 +172,12 @@ await run('dictation', { plugins: ['dictation'], title: 'Spring garden', message
   await page.locator('.take-bars').first().waitFor()
   await page.waitForTimeout(6500)
   await page.mouse.move(0, 0)
-  await shot('recording')
+  await shot('recording', "() => document.querySelector('.roundmic').closest('.composer, form, [class*=compos]') ?? document.querySelector('.roundmic').parentElement.parentElement", { align: 'bottom', pad: 36 })
   await page.locator('.takebtn.keep').first().click()
   await page.waitForFunction(said => [...document.querySelectorAll('textarea, [contenteditable="true"]')].some(n => (n.value ?? n.textContent).includes(said.slice(0, 30))), SAID, { timeout: 15000 })
   await page.waitForTimeout(500)
   await page.mouse.move(0, 0)
-  await shot('landed')
+  await shot('landed', "() => document.querySelector('.roundmic').closest('.composer, form, [class*=compos]') ?? document.querySelector('.roundmic').parentElement.parentElement", { align: 'bottom', pad: 36 })
   await page.evaluate(() => __cap.page.goSettings('plugins'))
   await page.locator('.plugin-row[aria-label="About Dictation"]').click()
   await page.locator('.plugin-preferences').first().waitFor()
@@ -173,7 +185,7 @@ await run('dictation', { plugins: ['dictation'], title: 'Spring garden', message
   await page.evaluate(() => { const n = document.querySelector('.plugin-preferences'); const sc = n.closest('.app-modal-body') ?? n.closest('.setmain'); sc.scrollTop += n.getBoundingClientRect().top - sc.getBoundingClientRect().top - 24 })
   await page.waitForTimeout(400)
   await page.mouse.move(0, 0)
-  await shot('polish')
+  await shot('polish', "() => document.querySelector('.plugin-preferences')", { align: 'top', pad: 16, x: 'left' })
 })
 
 // ---------------------------------------------------------------- Read aloud
@@ -208,7 +220,7 @@ if (speechFile) await run('read-aloud', { setup: profileRoutes, plugins: ['read-
   await glyph.click()
   await page.locator('.speakmenu').waitFor()
   await page.waitForTimeout(300)
-  await shot('menu')
+  await shot('menu', "() => document.querySelector('.speakmenu')", { align: 'bottom', pad: 70 })
   await page.locator('.speakmenu button', { hasText: 'Brief' }).first().click()
   await page.locator('.playerline').first().waitFor()
   await page.waitForTimeout(2500)
@@ -219,7 +231,7 @@ if (speechFile) await run('read-aloud', { setup: profileRoutes, plugins: ['read-
   await page.evaluate(() => { const n = document.querySelector('.playerline'), pane = n?.closest('.tt-stream'); if (pane) pane.scrollTop = pane.scrollHeight })
   await page.waitForTimeout(400)
   await page.mouse.move(0, 0)
-  await shot('playing')
+  await shot('playing', "() => document.querySelector('.playerline')", { align: 'bottom', pad: 110 })
   // An agent's own voice, on its profile.
   await page.evaluate(() => __cap.page.goProfile('sprout'))
   await page.locator('.profile-tab', { hasText: 'Settings' }).click()
@@ -227,7 +239,7 @@ if (speechFile) await run('read-aloud', { setup: profileRoutes, plugins: ['read-
   await page.locator('.agent-voice-picker').waitFor()
   await page.waitForTimeout(500)
   await page.mouse.move(0, 0)
-  await shot('voice')
+  await shot('voice', "() => document.querySelector('.agent-voice-picker')", { align: 'top', pad: 70 })
 })
 
 await browser.close()

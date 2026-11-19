@@ -10,7 +10,7 @@ switch on); turning it off takes every entry away. The places:
 | `agent.tool` | `{name, run, lanes?, agents?}`: a stdio MCP server, `run` by `/bin/sh -c` in the plugin's folder | the lanes' MCP servers |
 | `agent.prompt` | `{text \\| file, lanes?, agents?}`: what the plugin lets an agent do, in words | the lanes' instructions |
 | `schedule.kind` | `{name, schedule, run}`: a run on Loam's schedule grammar (`daily at 05:00 PT`) | a timer, `loam-plugin-<id>-<name>` |
-| `settings.entry` | `{key, label, choices?, default?, labels?, note?, advanced?}`: a value an agent may read and set | the settings registry, `plugin.<id>.<key>` |
+| `settings.entry` | `{key, label, choices?, default?, labels?, note?, advanced?, setup?}`: a value an agent may read and set | the settings registry, `plugin.<id>.<key>` |
 | `engineer.env` | `{name, value \\| setting \\| secret, projects?}` | an engineer job's environment |
 | `engineer.job` | `{run, projects?, timeout?}`: a command run at each job's launch, in the plugin's folder; each `NAME=value` line it prints is the job's environment | an engineer job's environment, and files in its folder |
 | `drift.check` | `{run, timeout?}`: exit 0 is "nothing wrong", else each line of its output is a finding | `check-drift` |
@@ -274,6 +274,15 @@ def contributes_of(value, folder: Path | None, warnings: list[str]) -> dict:
                     if not isinstance(advanced, bool):
                         raise ContributionError(f"{where}: `advanced` is true or false")
                     item["advanced"] = advanced
+                # What setting it up means (2026-11-19): the plugin is set up
+                # once one entry marked `setup` has a value (Git backup's
+                # repositories). Its page leads with its controls from then
+                # on. Older hosts drop the key, as they drop any they don't know.
+                setup = e.get("setup")
+                if setup is not None:
+                    if not isinstance(setup, bool):
+                        raise ContributionError(f"{where}: `setup` is true or false")
+                    item["setup"] = setup
                 items.append(item)
             elif place == "engineer.env":
                 name = e.get("name")

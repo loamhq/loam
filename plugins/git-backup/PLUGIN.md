@@ -36,10 +36,12 @@ contributes:
       label: Vault's repository
       note: The SSH address of a private repository, or a folder on this machine. Connect it on this page, so it is checked and tested.
       default: ""
+      setup: true
     - key: spaces_remote
       label: AI Spaces' repository
       note: The SSH address of a private repository, or a folder on this machine. Connect it on this page, so it is checked and tested.
       default: ""
+      setup: true
     - key: every
       label: Back up
       choices: [15m, 1h, 6h, 1d]

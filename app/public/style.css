@@ -2660,6 +2660,15 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .setmain .plugin-gallery, .app-modal-body .plugin-gallery { padding:16px 0 4px; }
 .setmain .plugin-gallery-row, .app-modal-body .plugin-gallery-row { grid-auto-columns:minmax(240px, 78%); }
 .plugin-gallery-one .plugin-gallery-row { grid-auto-columns:minmax(0, 100%); }
+.plugin-how { margin:16px 0 8px; border-top:1px solid var(--paper-rule); }
+.plugin-how > summary.plugin-how-summary { list-style:none; text-align:left; display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:48px; cursor:pointer; font-size:15px; font-weight:600; color:var(--paper-ink); }
+.plugin-how > summary.plugin-how-summary::-webkit-details-marker { display:none; }
+.plugin-how > summary.plugin-how-summary::marker { content:''; }
+.plugin-how > summary.plugin-how-summary::before { content:none; }
+.plugin-how-summary svg { color:var(--paper-ink-3); transition:transform var(--motion-fast) var(--ease-standard); }
+.plugin-how[open] > .plugin-how-summary svg { transform:rotate(180deg); }
+.plugin-how > .plugin-gallery { padding-top:4px; }
+.plugin-how > .plugin-about { margin-top:4px; }
 .plugin-details { margin:32px 0 8px; padding-top:20px; border-top:1px solid var(--paper-rule); color:var(--paper-ink-2); }
 .plugin-details-title { margin-bottom:4px; }
 .plugin-details .plugin-declaration { margin:12px 0 16px; }
