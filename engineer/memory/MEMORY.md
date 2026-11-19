@@ -1557,3 +1557,32 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   is not in it (taken out at the vendor's request); it wears the globe.
 - **`pkill -f <name>` kills the shell that ran it** when the name is in
   that shell's own command line. Use the pid.
+
+## 2026-11-18 — feedback to Loam's makers without a GitHub account (0.2.7)
+
+- **The claim service is per install, not central.** `loam-claim.service`
+  runs on every install and knows only its own claim; no service on the
+  makers' box has ever heard of another install. What the makers' box can
+  check is DNS: installs' names under `BASE_DOMAIN` are made by Loam's
+  makers, so "the install's domain resolves to the caller" is the proof a
+  report came from an install. The claim state itself is checked on the
+  sender (`private_route` refuses while `/etc/loam/claimed` is absent).
+- **The push gate's deny list holds the product's domain and the owner's
+  name**, with one `allow` (lib/loam_install.py for the domain). A URL to
+  the makers' box cannot be written in the code: it is built from
+  `loam_install.BASE_DOMAIN`, and the receiving host is `feedback.host`
+  (default that same domain) in the receiving box's own loam.toml. The
+  gate reads every commit of the branch, so amend, don't add a fixing one.
+- **Caddy without `trusted_proxies` overwrites `X-Forwarded-For`** with
+  the real peer, so the claim service's `client()` is the caller's
+  address for anything that came through Caddy. A process on the box can
+  still reach 127.0.0.1:8934 and forge the header.
+- **A `[[landing]]` block can carry a `handle` before its `file_server`**:
+  `reverse_proxy` is terminal, so the landing's files never see the path.
+- **`/etc/loam/claim` on an install is JSON** (`{"token", "made"}`), not
+  the bare token; a rehearsal posting the file's text gets "not the right
+  link".
+- **Rehearsing a receiver from a Modal VM**: the VM's egress address is not
+  its install's DNS. The test name was put in the makers' box's
+  `/etc/hosts` for the length of the test (getaddrinfo reads it), the same
+  check a public record would pass, and taken out after.
