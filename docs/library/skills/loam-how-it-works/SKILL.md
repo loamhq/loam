@@ -48,8 +48,11 @@ owner in the vault's inbox. The session host runs the provider and records its
 output as it arrives. The thread worker turns that output into the reply the
 app shows. Before sending a turn, the worker saves the input, the bound
 session and where to read its output. A returning worker can use that
-record to finish filing the same reply. Both currently run in the service that answers the app, so a
-planned service restart waits for conversations to go idle. During a brief
+record to finish filing the same reply. The provider runs in its own service.
+When only the API changes, it reconnects to that service and reads from its
+saved position while the provider continues. A planned change to the host
+closes admission and proceeds only when sessions and queued turns are idle.
+During a brief
 outage the app keeps submitted messages in this browser and delivers them
 in order when the service returns.
 

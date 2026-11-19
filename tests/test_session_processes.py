@@ -141,6 +141,15 @@ def check(d):
         assert reads.read_text().splitlines() == [str(child)]
         request('/v1/sessions/'+sid, 'DELETE', {})
         wait(lambda: not Path('/proc',str(child)).exists())
+        host.terminate()
+        assert host.wait(timeout=8) == 0
+        for stream in ('/v1/sessions/events', '/v1/sessions/live/events'):
+            try:
+                request(stream)
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 503, (stream, exc.code)
+            else:
+                raise AssertionError(f"{stream} committed HTTP success with its host offline")
         print(f'PASS host {host.pid}, child {child}, API SIGTERM {first.pid} -> {second.pid}, '
               'permission answered after reconnect, one input and reply, '
               f'background reply across second SIGTERM -> {third.pid}, explicit stop reaped child')

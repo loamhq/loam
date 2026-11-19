@@ -2216,7 +2216,6 @@ class Server:
         few rows, so the whole view each time is slimmer than a diff."""
         queue: asyncio.Queue = asyncio.Queue()
         self.broker.record_subscribers.add(queue)
-        self._open_stream(writer)
         last = None
         try:
             while True:
@@ -2224,6 +2223,8 @@ class Server:
                     await self.broker.synchronize()
                 view = self.live_view()
                 same = {k: v for k, v in view.items() if k != "at"}
+                if last is None:
+                    self._open_stream(writer)
                 if same != last:
                     last = same
                     await self._send_event(writer, {"type": "sessions.live", **view})
@@ -2240,6 +2241,10 @@ class Server:
                 while not queue.empty():
                     if queue.get_nowait() is None:
                         return
+        except BrokerError:
+            # After headers, EOF lets EventSource reconnect on host recovery.
+            if last is None:
+                raise
         except (ConnectionResetError, BrokenPipeError):
             pass
         finally:
@@ -3734,13 +3739,13 @@ class Server:
         """
         queue: asyncio.Queue = asyncio.Queue()
         self.broker.record_subscribers.add(queue)
-        self._open_stream(writer)
         try:
             # The opening burst IS a read of the list, so it scans for app
             # sessions nobody has adopted yet on the same terms as the route:
             # a client that only ever opens this stream must not be the one
             # client that never sees a new conversation appear.
             rows, residency = await self.catalog()
+            self._open_stream(writer)
             # Rows as the listing answers them (`list_row`), here and for
             # every change after: the whole `turns` is the session's own
             # stream's, unless `?turns=all` asked for it (2026-11-09).
