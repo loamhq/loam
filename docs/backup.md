@@ -38,8 +38,9 @@ any backup is set up.
   before it (`lib/loam_update.py`, `units`).
 
 **The host's own setup** (the web server's config, Loam's units, its
-config and settings) has a history of its own, root's alone and kept on the
-machine: `loam host`, docs/host-history.md.
+config and settings, and the login's accounts and passkeys) has a history
+of its own, root's alone and kept on the machine: `loam host`,
+docs/host-history.md.
 
 ## The copy off the machine: the Git backup plugin
 

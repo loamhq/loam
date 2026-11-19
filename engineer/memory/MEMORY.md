@@ -2363,3 +2363,29 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   (rows are buttons named `Loam Engineer Claude Code`). The older
   `*-browser.mjs` checks that select `section[aria-label="Engineers"]`
   still fail on that; `loam-engineer-provider-browser.mjs` does not.
+
+## 2026-11-19 — the login's accounts and passkeys are in the host history
+
+- **Copy a live SQLite database as its owner, into memory.** `sqlite_copy`
+  in `lib/loam_host.py` runs `Connection.backup` in a child with
+  `user=`/`group=` set to the file's owner, opening it `mode=ro`, and
+  `serialize()`s the in-memory copy to stdout. Root opening a WAL database
+  in a container's volume would leave a root-owned `-shm` the container
+  cannot open. The backup bytes of an unchanged database are identical run
+  to run (they differ from the file's own header), so it is the backup that
+  is compared.
+- **Authelia rejects a passkey whose counter goes backwards** ("authenticator
+  sign count indicates that it is cloned") and sets `clone_warning`. A
+  CDP virtual authenticator re-imported from an exported credential replays
+  its old count: bump `signCount` on import, or a proof fails for the
+  harness's reason, not the code's. Authelia's elevation one-time codes are
+  rate-limited after a few in a minute ("Failed to generate the One-Time
+  Code"); `authelia storage user webauthn delete <user> --all --config …`
+  inside the container removes a passkey without a session.
+- **A scratch login** for proofs: the same image, a config with
+  `server.tls` on a self-signed cert for `auth.scratch.test`, published on
+  127.0.0.1 only, and Chromium launched with `--host-resolver-rules=MAP
+  *.scratch.test 127.0.0.1:<port>` and `--ignore-certificate-errors-spki-list`
+  (WebAuthn then works; a plain certificate error would refuse it).
+  Authelia refuses `regulation.find_time` > `ban_time`, and an empty
+  `users:` on reload (it keeps the old users).

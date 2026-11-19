@@ -102,22 +102,145 @@ class Rule:
     pattern: str
     why: str
     untracked: str = ""
+    # "sqlite": a live SQLite database, kept as an online backup of it
+    # (``sqlite_copy``) rather than its bytes on disk. ``pattern`` is then
+    # one file's name.
+    kind: str = ""
+    secret: bool = False         # a secret whatever its mode or name
 
     def as_dict(self) -> dict:
         d = {"root": self.root, "pattern": self.pattern, "why": self.why}
-        if self.untracked:
-            d["untracked"] = self.untracked
+        for k in ("untracked", "kind", "secret"):
+            if getattr(self, k):
+                d[k] = getattr(self, k)
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Rule":
-        return cls(d["root"], d["pattern"], d.get("why", ""), d.get("untracked", ""))
+        return cls(d["root"], d["pattern"], d.get("why", ""), d.get("untracked", ""),
+                   d.get("kind", ""), bool(d.get("secret", False)))
 
 
-def rules(cfg=None) -> tuple[list[Rule], dict]:
+# -- the login's accounts and passkeys ----------------------------------------------------
+#
+# The login (Authelia, lib/loam_deploy.py) keeps its users file (the accounts
+# and their password hashes) and its SQLite store (passkeys, one-time-password
+# secrets, its own records) in the Docker volume ``authelia-data``, at
+# ``/data``. Where that volume is on the host is Docker's to say (with user
+# namespaces remapped it is under /var/lib/docker/<uid>.<gid>/), so it is
+# asked, never assumed. An install without Docker, or without the login,
+# has nothing here and says so in ``loam host covered``.
+#
+# The database is copied with SQLite's online backup, taken in a child
+# process running as the database file's own owner: it reads under SQLite's
+# own shared lock, so the copy is one consistent moment however Authelia is
+# writing, and it never creates a file in the volume as root that the
+# container could then not open (a WAL index or a journal). The copy goes to
+# memory and comes back as bytes, which are the same bytes from one run to
+# the next while the database is unchanged, so an unchanged login makes no
+# new state. Putting it back stops the login's container, removes any
+# journal or WAL beside the database (they belong to the copy being
+# replaced), writes it, and starts the container again.
+LOGIN_VOLUME = "authelia-data"         # loam_deploy.authelia_compose()
+LOGIN_CONTAINER = "loam-authelia"      # loam_deploy.AUTHELIA_PROJECT
+LOGIN_USERS = "users_database.yml"     # authentication_backend.file.path, under /data
+LOGIN_DB = "db.sqlite3"                # storage.local.path, under /data
+SQLITE_SIDECARS = ("-journal", "-wal", "-shm")
+# The database is kept whatever its size up to this; the 2 MB limit is for
+# setup files, and this is the one file whose loss locks the owner out.
+SQLITE_MAX_BYTES = 256 * 1024 * 1024
+
+_SQLITE_COPY = r"""
+import sqlite3, sys
+src = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True, timeout=30)
+dst = sqlite3.connect(":memory:")
+src.backup(dst)
+src.close()
+sys.stdout.buffer.write(dst.serialize())
+"""
+
+
+class CopyError(Exception):
+    """A live database that could not be copied this time."""
+
+
+def sqlite_copy(path: str, uid: int, gid: int) -> bytes:
+    """A consistent copy of the SQLite database at ``path``: SQLite's online
+    backup, run as ``uid``:``gid`` (the file's owner), into memory."""
+    kw = {}
+    if os.geteuid() == 0 and (uid, gid) != (0, 0):
+        kw = {"user": uid, "group": gid, "extra_groups": []}
+    elif uid != os.geteuid() and os.geteuid() != 0:
+        raise CopyError(f"{path} is another user's and this is not root")
+    try:
+        done = subprocess.run([sys.executable or "python3", "-I", "-c", _SQLITE_COPY, path],
+                              capture_output=True, check=False, env=ENV, cwd="/",
+                              timeout=120, **kw)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise CopyError(f"{path}: {exc}") from exc
+    if done.returncode or not done.stdout.startswith(b"SQLite format 3\0"):
+        err = done.stderr.decode(errors="replace").strip().splitlines()
+        raise CopyError(f"{path}: {(err or ['no copy'])[-1][-300:]}")
+    return done.stdout
+
+
+def find_login(previous: dict | None = None) -> tuple[str | None, str]:
+    """The host folder of the login's volume, and a sentence saying what was
+    found. ``previous`` is the last state's ``about``: when Docker is there
+    but does not answer, the folder it named last time is used if it is
+    still there, so a Docker restart does not drop the login from a state."""
+    docker = shutil.which("docker", path=ENV["PATH"])
+    if not docker:
+        return None, "no Docker on this machine, so no login database to keep"
+    try:
+        done = subprocess.run([docker, "volume", "inspect", "--format", "{{.Mountpoint}}",
+                               LOGIN_VOLUME], capture_output=True, text=True, env=ENV,
+                              check=False, timeout=30)
+        out, err, code = done.stdout.strip(), done.stderr.strip(), done.returncode
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        out, err, code = "", str(exc), 1
+    err = (err.splitlines() or [""])[-1]
+    if code:
+        if "no such volume" in err.lower():
+            return None, (f"Docker has no {LOGIN_VOLUME} volume, so this install has no "
+                          f"login database to keep")
+        last = ((previous or {}).get("login") or {}).get("dir", "")
+        if last and os.path.isdir(last):
+            return last, (f"Docker did not answer ({err[-160:]}); the login's volume "
+                          f"folder the last state found, {last}, is used")
+        if os.geteuid() != 0:
+            return None, ("Docker could not be asked as this user, so the login was not "
+                          "looked for: `sudo loam host covered` looks")
+        return None, f"Docker did not answer ({err[-160:]}), so the login could not be found"
+    if not os.path.isdir(out):
+        return None, (f"the {LOGIN_VOLUME} volume's folder {out!r} is not reachable from "
+                      f"this machine (Docker keeps it elsewhere), so it is not kept")
+    return out, f"the login's accounts and passkeys, in Docker's {LOGIN_VOLUME} volume at {out}"
+
+
+def login_rules(folder: str) -> list[Rule]:
+    return [Rule(folder, LOGIN_USERS, "the login's accounts and their password hashes",
+                 secret=True),
+            Rule(folder, LOGIN_DB, "the login's passkeys and one-time-password secrets "
+                 "(an online SQLite backup)", kind="sqlite", secret=True)]
+
+
+def specials(rule_list: list[Rule]) -> dict[str, Rule]:
+    """The paths a rule marks as a database or a secret, by path."""
+    return {os.path.join(r.root, r.pattern): r for r in rule_list if r.kind or r.secret}
+
+
+def login_dir(about: dict) -> str:
+    return ((about or {}).get("login") or {}).get("dir", "")
+
+
+def rules(cfg=None, previous: dict | None = None) -> tuple[list[Rule], dict]:
     """The covered rules for this install, and what else a restore needs to
-    know about it (the install's user and its user unit folder). ``cfg`` is
-    ``loam_config`` (imported here when not given)."""
+    know about it (the install's user, its user unit folder, the login's
+    folder and container). ``cfg`` is ``loam_config`` (imported here when not
+    given); ``previous`` is the last state's ``about`` (``find_login``).
+    ``about["_login_note"]`` says what was found of the login; keys starting
+    with ``_`` are not kept in a state."""
     if cfg is None:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import loam_config as cfg  # noqa: PLC0415
@@ -166,6 +289,12 @@ def rules(cfg=None) -> tuple[list[Rule], dict]:
         Rule(f"{home}/.ssh", "config", "which key reaches which git host"),
     ]
     about = {"user": user, "user_units": units, "config_dir": str(config_file.parent)}
+    folder, note = find_login(previous)
+    if folder:
+        out += login_rules(folder)
+        about["login"] = {"dir": folder, "container": LOGIN_CONTAINER,
+                          "volume": LOGIN_VOLUME}
+    about["_login_note"] = note
     return out, about
 
 
@@ -266,7 +395,9 @@ def _name(fn, ident: int) -> str:
         return str(ident)
 
 
-def read_live(path: str) -> Entry | None:
+def read_live(path: str, rule: Rule | None = None) -> Entry | None:
+    """The file as it is now; for a database rule, its online backup (a
+    ``CopyError`` when that cannot be taken)."""
     try:
         st = os.lstat(path)
     except FileNotFoundError:
@@ -277,7 +408,13 @@ def read_live(path: str) -> Entry | None:
     if not stat.S_ISREG(st.st_mode):
         return None
     mode = stat.S_IMODE(st.st_mode)
-    secret = not (mode & 0o004) or bool(SECRET_NAME.search(os.path.basename(path)))
+    secret = (not (mode & 0o004) or bool(SECRET_NAME.search(os.path.basename(path)))
+              or bool(rule and rule.secret))
+    if rule and rule.kind == "sqlite":
+        if st.st_size > SQLITE_MAX_BYTES:
+            return Entry(path, "big", mode, owner, group, secret, b"")
+        return Entry(path, "file", mode, owner, group, secret,
+                     sqlite_copy(path, st.st_uid, st.st_gid))
     if st.st_size > MAX_BYTES:
         return Entry(path, "big", mode, owner, group, secret, b"")
     with open(path, "rb") as fh:
@@ -421,9 +558,15 @@ def checks(entries: dict[str, Entry], root: Path | None = None) -> list[str]:
     return bad
 
 
+def _last_about(h: Path) -> dict:
+    with contextlib.suppress(OSError, ValueError, KeyError):
+        return json.loads((h / SCOPE).read_text())["about"]
+    return {}
+
+
 def _scope_for_snapshot(h: Path) -> tuple[list[Rule], dict, str]:
     try:
-        rule_list, about = rules()
+        rule_list, about = rules(previous=_last_about(h))
         return rule_list, about, ""
     except Exception as exc:  # noqa: BLE001
         scope = h / SCOPE
@@ -442,10 +585,23 @@ def snapshot(reason: str = "", h: Path | None = None, scope: tuple | None = None
     with locked(h):
         ensure_repo(h)
         rule_list, about, note = (*scope, "") if scope else _scope_for_snapshot(h)
-        live = {p: e for p in matched(rule_list) if (e := read_live(p)) is not None}
         last = read_mirror(h)
-        scope_text = json.dumps({"rules": [r.as_dict() for r in rule_list], "about": about},
-                                indent=1) + "\n"
+        special = specials(rule_list)
+        live: dict[str, Entry] = {}
+        for p in matched(rule_list):
+            try:
+                e = read_live(p, special.get(p))
+            except CopyError as exc:
+                # keep the last copy rather than record the database as gone
+                e = last.get(p)
+                note = "; ".join(filter(None, [note, f"the login's database could not be "
+                                               f"copied this time ({exc}); the last copy "
+                                               f"is kept"]))
+            if e is not None:
+                live[p] = e
+        kept_about = {k: v for k, v in about.items() if not k.startswith("_")}
+        scope_text = json.dumps({"rules": [r.as_dict() for r in rule_list],
+                                 "about": kept_about}, indent=1) + "\n"
         scope_file = h / SCOPE
         scope_same = scope_file.exists() and scope_file.read_text() == scope_text
         has_head = git(h, "rev-parse", "-q", "--verify", "HEAD", check=False).returncode == 0
@@ -572,14 +728,31 @@ class Step:
     how: list[str]
 
 
-def plan(target: dict[str, Entry], rule_list: list[Rule], only: list[str]) -> list[Step]:
+def _under(path: str, places: list[str]) -> bool:
+    return any(path == o or path.startswith(o.rstrip("/") + "/") for o in places)
+
+
+def plan(target: dict[str, Entry], rule_list: list[Rule], only: list[str],
+         leave: list[str] | None = None) -> list[Step]:
+    """What a restore of ``target`` writes: within ``only`` when given, and
+    never within ``leave`` (``--except``)."""
     live_paths = set(matched(rule_list)) | set(target)
+    special = specials(rule_list)
     steps = []
     for path in sorted(live_paths):
-        if only and not any(path == o or path.startswith(o.rstrip("/") + "/") for o in only):
+        if only and not _under(path, only):
             continue
-        have = read_live(path)
+        if leave and _under(path, leave):
+            continue
         want = target.get(path)
+        try:
+            have = read_live(path, special.get(path))
+        except CopyError as exc:
+            # it is there but cannot be read: write it back if the state has it
+            if want is not None:
+                steps.append(Step("change", path, want, None,
+                                  [f"the live copy could not be read: {exc}"]))
+            continue
         if have is not None and have.kind == "big":
             continue        # never kept: left as it is
         if want is None and have is not None:
@@ -606,6 +779,9 @@ class After:
     compose: list = None
     other: list = None
     user: str = ""
+    login: str = ""          # the login's container, when its files are written
+    login_db: list = None    # databases written there, whose journals go
+    login_dir: str = ""
 
 
 COMPOSE = ("compose.yaml", "compose.yml", "docker-compose.yml")
@@ -622,9 +798,17 @@ def _compose_beside(path: str) -> str:
 def consequences(steps: list[Step], about: dict) -> After:
     """What has to follow the writes for them to take effect."""
     user_units = about.get("user_units", "")
-    a = After(start=[], stop=[], restart=[], compose=[], other=[], user=about.get("user", ""))
+    a = After(start=[], stop=[], restart=[], compose=[], other=[], user=about.get("user", ""),
+              login_db=[])
+    folder = login_dir(about)
     for s in steps:
         p = s.path
+        if folder and p.startswith(folder.rstrip("/") + "/"):
+            a.login = (about.get("login") or {}).get("container", LOGIN_CONTAINER)
+            a.login_dir = folder
+            if os.path.basename(p) == LOGIN_DB or p.endswith((".sqlite3", ".sqlite", ".db")):
+                a.login_db.append(p)
+            continue
         scope = ("user" if user_units and p.startswith(user_units + "/") else
                  "system" if p.startswith("/etc/systemd/system/") else None)
         if scope:
@@ -663,7 +847,26 @@ def consequences(steps: list[Step], about: dict) -> After:
     return a
 
 
-def describe(steps: list[Step], after: After, how: str, sha: str, dry: bool = False) -> str:
+def login_warning(after: After, when: str) -> str:
+    """The block a restore that includes the login's accounts prints last,
+    just before it asks: impossible to miss, and it says how to leave them."""
+    if not after.login:
+        return ""
+    bar = "!" * 76
+    return "\n".join([
+        "", bar,
+        "!! THIS PUTS BACK THE LOGIN'S ACCOUNTS AND PASSKEYS as they were",
+        f"!! at {when}.",
+        "!! Any passkey, account, password or one-time-password app added or",
+        "!! changed since then is REMOVED. If that is how you sign in, you will",
+        "!! be locked out of Loam.",
+        "!! To put back everything else and leave the login as it is now, add:",
+        f"!!   --except {after.login_dir}",
+        bar])
+
+
+def describe(steps: list[Step], after: After, how: str, sha: str, dry: bool = False,
+             when: str = "") -> str:
     out = [f"{'Compared with' if dry else 'Putting back'} {how}: {sha[:10]}.", ""]
     if not steps:
         return "\n".join(out[:1] + ["", "Nothing differs from it."])
@@ -674,6 +877,10 @@ def describe(steps: list[Step], after: After, how: str, sha: str, dry: bool = Fa
         out.append(f"  {words[s.action]:<7} {s.path}{detail}{tag}")
     out.append("")
     then = []
+    if after.login:
+        then.append(f"stop the login ({after.login}), "
+                    + (f"remove its database's journal and WAL, " if after.login_db else "")
+                    + "write its files, start it again")
     if after.stop:
         then.append("stop " + ", ".join(f"{u} ({sc})" for sc, u in after.stop))
     if after.system_reload:
@@ -695,6 +902,9 @@ def describe(steps: list[Step], after: After, how: str, sha: str, dry: bool = Fa
     if after.other:
         out.append("Written and read by their programs when they next read them: "
                    + ", ".join(after.other) + ".")
+    warn = login_warning(after, when or f"state {sha[:10]}")
+    if warn:
+        out.append(warn)
     return "\n".join(out)
 
 
@@ -767,6 +977,14 @@ def _run(argv: list[str], said: list[str]) -> bool:
     return True
 
 
+def _container_running(name: str) -> bool:
+    if not shutil.which("docker", path=ENV["PATH"]):
+        return False
+    done = subprocess.run(["docker", "inspect", "--format", "{{.State.Running}}", name],
+                          capture_output=True, text=True, env=ENV, check=False, timeout=60)
+    return done.returncode == 0 and done.stdout.strip() == "true"
+
+
 def _is_active(unit: str) -> bool:
     return subprocess.run(["systemctl", "is-active", "--quiet", unit], env=ENV,
                           check=False).returncode == 0
@@ -784,6 +1002,16 @@ def apply(steps: list[Step], after: After, about: dict) -> list[str]:
     if have_systemctl:
         for scope, unit in after.stop:
             _run(_systemctl(scope, user) + ["stop", unit], said)
+    login_was_running = False
+    if after.login:
+        login_was_running = _container_running(after.login)
+        if login_was_running:
+            _run(["docker", "stop", after.login], said)
+        for db in after.login_db:
+            for side in SQLITE_SIDECARS:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(db + side)
+                    said.append(f"  removed: {db}{side}")
     for s in steps:
         try:
             if s.action == "remove":
@@ -807,13 +1035,18 @@ def apply(steps: list[Step], after: After, about: dict) -> list[str]:
             _run(["systemctl", "reload" if _is_active("caddy") else "restart", "caddy"], said)
     if after.sysctl and shutil.which("sysctl", path=ENV["PATH"]):
         _run(["sysctl", "--system", "-q"], said)
+    if login_was_running:
+        _run(["docker", "start", after.login], said)
+    elif after.login:
+        said.append(f"  the login ({after.login}) was not running, so it was not started")
     if after.compose and shutil.which("docker", path=ENV["PATH"]):
         for f in after.compose:
             _run(["docker", "compose", "-f", f, "up", "-d"], said)
     return said
 
 
-def restore(name: str | None, *, only: list[str] | None = None, yes: bool = False,
+def restore(name: str | None, *, only: list[str] | None = None,
+            leave: list[str] | None = None, yes: bool = False,
             force: bool = False, show_diff: bool = False, dry: bool = False,
             h: Path | None = None, confirm=None, out=print, scope: tuple | None = None) -> int:
     """The one command. Returns an exit code; says everything through ``out``."""
@@ -824,9 +1057,12 @@ def restore(name: str | None, *, only: list[str] | None = None, yes: bool = Fals
     with tempfile.TemporaryDirectory(prefix="loam-host-") as tmp:
         os.chmod(tmp, 0o700)
         target, rule_list, about = unpack(h, sha, Path(tmp))
-        steps = plan(target, rule_list, only or [])
+        steps = plan(target, rule_list, only or [], leave or [])
         after = consequences(steps, about)
-        out(describe(steps, after, how, sha, dry))
+        ct = git(h, "log", "-1", "--format=%ct", sha).stdout.strip()
+        when = (f"{datetime.fromtimestamp(int(ct)).astimezone():%Y-%m-%d %H:%M %Z} "
+                f"(state {sha[:10]})" if ct.isdigit() else f"state {sha[:10]}")
+        out(describe(steps, after, how, sha, dry, when))
         if not steps:
             recent = states(h, 6)
             if recent:
@@ -837,10 +1073,12 @@ def restore(name: str | None, *, only: list[str] | None = None, yes: bool = Fals
                         f"{', '.join(c[2:] for c in s.changed[:3])}"
                         f"{' …' if len(s.changed) > 3 else ''}")
             return 0
+        said_more = False
         if show_diff:
             d = diff(steps)
             if d:
                 out("\n" + d)
+                said_more = True
         bad = checks({s.path: s.want for s in steps if s.want}, root=Path(tmp) / FILES)
         if bad:
             out("\nThe state named does not pass its own checks:")
@@ -848,9 +1086,14 @@ def restore(name: str | None, *, only: list[str] | None = None, yes: bool = Fals
             if not force:
                 out("Nothing was changed. Name another state, or add --force to write it anyway.")
                 return 3
+            said_more = True
         if dry:
             out("\n--dry-run: nothing was changed.")
             return 0
+        if said_more:      # said again, so it is just above the question
+            warn = login_warning(after, when)
+            if warn:
+                out(warn)
         if not yes:
             if confirm is None:
                 if not sys.stdin.isatty():
