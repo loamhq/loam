@@ -1604,6 +1604,61 @@ def onto_branch(tree: Path, branch: str, result: dict) -> None:
         git(tree, "checkout", "--quiet", branch)
 
 
+
+# Commits made while a landing runs (2026-11-19). A mid-job `--land` merges
+# and tests in the job's own tree, on a detached HEAD at the merge, for as
+# long as the tests take; the session goes on meanwhile, and a commit it
+# made then went onto that detached HEAD. Putting the tree back on its
+# branch left it behind, so it never landed (caused 2026-11-16, `9d381d7`,
+# and 2026-11-17, `1147e7d`, each recovered by hand). ``back_to_branch``
+# carries such commits onto the branch, and ``carry_onto`` moves commits
+# made on the branch itself during a locked landing onto what landed. The
+# landing that made the merge still lands only what it tested; the carried
+# commits are on the branch for the next landing (the session's end or
+# another `--land`), and the receipt names them (``result["carried"]``).
+
+def carry_onto(tree: Path, branch: str, commits: list[str], onto: str,
+               result: dict) -> bool:
+    """Put ``commits`` (oldest first) on top of ``onto`` as ``branch``, by
+    cherry-pick in a detached HEAD. True when done; on a conflict nothing
+    moves, the newest of them is kept under ``refs/loam/kept/``, and the
+    result says so."""
+    if not commits:
+        return True
+    start = branch_tip(tree, branch)
+    git(tree, "checkout", "--quiet", "--detach", onto)
+    for sha in commits:
+        out = git(tree, "cherry-pick", "--allow-empty", "--keep-redundant-commits",
+                  sha, check=False, timeout=600)
+        if out.returncode != 0:
+            git(tree, "cherry-pick", "--abort", check=False)
+            git(tree, "update-ref", f"refs/loam/kept/{commits[-1][:12]}", commits[-1])
+            git(tree, "checkout", "--quiet", "-f", branch, check=False)
+            result.setdefault("kept", []).append(commits[-1])
+            return False
+    new = rev(tree, "HEAD")
+    git(tree, "update-ref", f"refs/heads/{branch}", new, start or "")
+    git(tree, "checkout", "--quiet", branch)
+    result.setdefault("carried", []).extend(commits)
+    return True
+
+
+def back_to_branch(tree: Path, branch: str, left_at: str | None, result: dict,
+                   *, force: bool = False) -> None:
+    """Put the tree back on ``branch`` from where the landing left HEAD
+    (``left_at``), keeping any commit made on top of it meanwhile."""
+    on = git(tree, "symbolic-ref", "-q", "HEAD", check=False).stdout.strip()
+    head = rev(tree, "HEAD")
+    extra: list[str] = []
+    if on != f"refs/heads/{branch}" and head and left_at and head != left_at \
+            and is_ancestor(tree, left_at, head):
+        extra = git(tree, "rev-list", "--reverse", "--no-merges", head,
+                    f"^{left_at}", check=False).stdout.split()
+    git(tree, "checkout", "--quiet", *(["-f"] if force else []), branch, check=False)
+    if extra:
+        carry_onto(tree, branch, extra, branch_tip(tree, branch) or head, result)
+
+
 def landed_earlier(project: eng.Project, record: dict) -> str | None:
     """The branch tip, when the branch has commits of its own (it moved from
     where the tree began) and every one of them is already on `main`. None
@@ -2296,7 +2351,7 @@ def _prepare(project, repo, tree, branch, message, result, say, record,
             conflicts = git(tree, "diff", "--name-only", "--diff-filter=U",
                             check=False).stdout.split()
             git(tree, "merge", "--abort", check=False)
-            git(tree, "checkout", "--quiet", "-f", branch, check=False)
+            back_to_branch(tree, branch, main_sha, result, force=True)
             # A merge that failed with nothing unmerged is not a conflict
             # (caused: a repository with no committer identity), and calling
             # it one would send a continuation to resolve nothing.
@@ -2312,7 +2367,7 @@ def _prepare(project, repo, tree, branch, message, result, say, record,
         # already on `main` is the push's to report, not this job's.
         held = push_gate(repo, main_sha, head=merged, objects=tree)
         if held:
-            git(tree, "checkout", "--quiet", "-f", branch, check=False)
+            back_to_branch(tree, branch, merged, result, force=True)
             result.update(reason="gate", gate=held, main=main_sha, detail=(
                 "; ".join(held[:5])
                 + (f"; and {len(held) - 5} more" if len(held) > 5 else "")))
@@ -2325,11 +2380,11 @@ def _prepare(project, repo, tree, branch, message, result, say, record,
     result["test"] = {"command": command, "passed": passed, "tail": out_text,
                       "tree": which}
     if passed is None:
-        git(tree, "checkout", "--quiet", "-f", branch, check=False)
+        back_to_branch(tree, branch, merged, result, force=True)
         result.update(reason="no_tests")
         return None
     if not passed:
-        git(tree, "checkout", "--quiet", "-f", branch, check=False)
+        back_to_branch(tree, branch, merged, result, force=True)
         if which == "branch":
             result.update(reason="branch_tests")
             return None
@@ -2346,7 +2401,7 @@ def _prepare(project, repo, tree, branch, message, result, say, record,
             result.update(reason="merged_tests", main=main_sha)
         return None
     git(tree, "update-ref", TESTED_REF, merged)
-    git(tree, "checkout", "--quiet", branch)
+    back_to_branch(tree, branch, merged, result)
     return main_sha, tip, merged
 
 
@@ -2369,8 +2424,20 @@ def _finish_nothing(project, record, keep_tree, result, main_sha) -> None:
 def _finish_landed(project, repo, tree, branch, keep_tree, result, say,
                    record, cancelled, tip, merged) -> None:
     """Under the lock, with `main` where the tested merge was made: move the
-    branch and then `main` to the tested commit, merge the memory, push."""
-    if merged != tip:
+    branch and then `main` to the tested commit, merge the memory, push.
+    A commit made on the branch since ``tip`` was tested is carried onto
+    the merge (``carry_onto``) instead of stopping the fast-forward."""
+    now_tip = branch_tip(tree, branch)
+    if now_tip and now_tip != tip and is_ancestor(tree, tip, now_tip) \
+            and not is_ancestor(tree, now_tip, merged):
+        since = git(tree, "rev-list", "--reverse", "--no-merges", now_tip,
+                    f"^{tip}", check=False).stdout.split()
+        if not carry_onto(tree, branch, since, merged, result):
+            # Kept under refs/loam/kept/; the branch takes what landed.
+            git(tree, "checkout", "--quiet", "--detach", merged)
+            git(tree, "update-ref", f"refs/heads/{branch}", merged)
+            git(tree, "checkout", "--quiet", branch)
+    elif merged != tip:
         git(tree, "merge", "--quiet", "--ff-only", merged)
     git(tree, "update-ref", "-d", TESTED_REF, check=False)
     if stop_for_cancel(cancelled, result, say):
