@@ -9,7 +9,7 @@ the list of what changed in the vault, a cron's body.
 
 **Config has two parts that load together.**
 
-- *Loam's text* (``LOAM_TEXT``, ``persona/loam.md`` in the checkout): short,
+- *Loam's text* (``LOAM_TEXT``, ``docs/persona/loam.md`` in the checkout): short,
   the same on every install, replaced by an update. No agent edits it.
 - *The owner's words*: the owner's rules, verbatim and dated. One shared
   page every agent on the install loads (``OWNER_PAGE``,
@@ -64,7 +64,7 @@ MAP = MAP_LAYER
 # From this file's own tree, as bin/provision finds its lib (2026-11-09):
 # live, that is the checkout; in a job's tree or a landing's, that tree, so
 # a test there renders and resolves the text the tree carries.
-LOAM_TEXT = Path(__file__).resolve().parent.parent / "persona" / "loam.md"
+LOAM_TEXT = Path(__file__).resolve().parent.parent / "docs" / "persona" / "loam.md"
 OWNER_PAGE = lc.WORKSPACES / "_shared" / "owner.md"
 
 

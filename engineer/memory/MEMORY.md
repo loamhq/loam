@@ -1600,7 +1600,7 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   each Codex/Antigravity instruction build) and from the persona's
   PostToolUse hook after *every* tool call, because a map made with `echo >`
   names no path the hook can see. A session already running keeps its shape.
-- **Loam's text resolves from the code's own tree** (`persona/loam.md` beside
+- **Loam's text resolves from the code's own tree** (`docs/persona/loam.md` beside
   `lib/`), not from `paths.root`: a landing tests a merged tree while the
   live checkout is still the old `main`, so a `paths.root` import of a new
   file fails every test that resolves it.

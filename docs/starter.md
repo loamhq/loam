@@ -15,7 +15,7 @@ runs, in order, `bin/library seed-vault` (docs/skills.md) and
 **About me.** `seed-vault` also writes `About me.md` at the top of the
 vault: a heading and one line saying it is what the person's agents know
 about them, theirs to read and edit (the owner, 2026-11-16). Every agent in
-the map's shape is told of it by Loam's text (`persona/loam.md`, loaded on
+the map's shape is told of it by Loam's text (`docs/persona/loam.md`, loaded on
 every run): read it, add what lasts about the owner, tell them when you do.
 Until 2026-11-18 a new agent was given an `_always.md` with that line
 instead; an agent made then keeps it. After that the note is

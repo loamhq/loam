@@ -61,7 +61,7 @@ SIBLING_FILES = ("config.md", "_always.md", "_active.md", "_reflection.md",
 # absolute imports of an agent with a map (lib/loam_loading.py).
 SHARED_IMPORTS = (
     AI_LABS / "_shared" / "reach.md",
-    Path(__file__).resolve().parent.parent / "persona" / "loam.md",
+    Path(__file__).resolve().parent.parent / "docs" / "persona" / "loam.md",
     AI_LABS / "_shared" / "owner.md",
 )
 
