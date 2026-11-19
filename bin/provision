@@ -1864,6 +1864,19 @@ CRAFT_SUBSTITUTIONS = tuple((a.replace("@OWNER@", lc.OWNER_NAME), b) for a, b in
      "with its date; a yes for one thing is not a yes for the next. A repo's "
      "visibility is exposure: you create private, and make one public only "
      "on that same yes."),
+    # The standing yes (2026-11-18) is about Loam's own public plugin and
+    # marketplace repositories, which only the platform engineer publishes
+    # to; a project engineer's render drops it whole.
+    (" @OWNER@'s standing yes (2026-11-18 17:20 PT): a new version of a "
+     "plugin that is already public in `loamhq/plugins` and already listed "
+     "in the marketplace may be tagged and its listing moved to it without "
+     "asking him again, when the brief says it is such a version. It does "
+     "not cover anything new to the public: a new plugin, repo or listing, "
+     "or a new version that widens what the plugin touches or reaches (its "
+     "declared permissions, network, files or keys). Those still wait for "
+     "his direct yes, quoted with its date. *(@OWNER@, 2026-11-18 17:20 PT, "
+     "in thread t-6daf5a6f, answering whether to give it: \"Agreed. yes\".)*",
+     ""),
     ("Write a credential into an image, a repo, or the vault.",
      "Write a credential into an image, a repo, or the project's documentation."),
     ("Nothing in the project depends on the vault, on Loam, or on a persona "
