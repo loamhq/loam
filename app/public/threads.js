@@ -1,3 +1,4 @@
+import { threadOutbox } from './thread-outbox.js'
 import { createAgentDrafts } from './agent-drafts.js'
 import { owner, isOwner } from './owner.js'
 import { createCoreRegistry } from './core-registrations.js'
@@ -44,6 +45,23 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   const st = { available: false, checked: false, threads: [], open: null, error: '', loading: false, creating: false, query: '', fixture, manage: false,
     drafts: new Map(), boardDrafts: new Map(), quickDrafts: new Map(), refreshed: 0 }
   let transport = api, fixtureStream = null, fixtureAgents = null, fixtureProviders = null, runtimeAgents = null
+  let outbox
+  function connectOutbox() {
+    if (outbox || st.fixture) return
+    outbox = threadOutbox(api)
+    outbox.listen((message, id) => {
+      if (st.fixture) return
+      if (message && st.open?.thread.id === id) applyThreadEvent(st.open, { type: 'message.done', message })
+      if (message) refreshList()
+      redraw()
+    })
+  }
+  if (!fixture && globalThis.indexedDB) connectOutbox()
+  function pendingRows(o) {
+    if (!outbox || st.fixture) return []
+    return outbox.rows(o.thread.id).filter(item =>
+      !o.messages.some(m => m.submission_id === item.body.submission_id))
+  }
   const agentDraftController = createAgentDrafts({
     api: (...args) => transport(...args),
     redraw,
@@ -342,7 +360,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   // never lingers as a chat; one with any message, draft, file or board text
   // stays.
   function unsentHere(o) {
-    return Boolean(o?.madeHere && !o.creating && !o.createFailed && !o.sending && !o.readFailed
+    return Boolean(o?.madeHere && !o.creating && !o.createFailed && !o.sending && !o.readFailed && !pendingRows(o).length
       && !o.messages.some((m) => m.kind !== 'system') && !draft.value.trim() && !compose.files().length
       && !String(o.board?.markdown ?? '').trim() && !(o.editing && String(o.editText ?? '').trim()))
   }
@@ -670,7 +688,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       const thread = readThreadSummary(body)
       // Left before it was made: nothing can have been sent, so it goes.
       if (ticket !== generation) { transport('DELETE', path(thread.id)).catch(() => {}).finally(() => refreshList()); return }
-      o.thread = thread; o.board.path = thread.board ?? ''; o.creating = false; o.madeHere = true
+      o.thread = thread; o.board.path = thread.board ?? ''; o.creating = false; o.madeHere = true; o.ordered_submissions = thread.ordered_submissions
       attachReplySteps(o)
       attachProse(o); if (!st.fixture) address(thread.id)
       attachQuotes(o)
@@ -721,6 +739,24 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     clearTimeout(o.listenerSendTimer)
     o.listenerSendTimer = setTimeout(() => { if (st.open === o) redraw() }, 260)
     const reply_to = o.replyTo?.id
+    if (o.ordered_submissions && !st.fixture) {
+      o.sending = true
+      o.error = ''
+      try {
+        connectOutbox()
+        const body = { submission_id: crypto.randomUUID(), text,
+          ...(reply_to ? { reply_to } : {}),
+          ...(attachments.length ? { attachments: attachments.map(f => f.path) } : {}) }
+        await outbox.add(o.thread.id, body, attachments, o.replyTo ?? null)
+        st.drafts.delete(o.thread.id)
+        if (st.open === o) {
+          o.replyTo = null; draft.value = ''; compose.clear(); st.mention = null
+          o.atEnd = true; o.readingPosition = null; o.openingBoundary = null; o.replyAnchor = null; o.landAt = null; o.landing = false
+        }
+      } catch (error) { o.error = `Your message is still here. ${error.message}` }
+      finally { o.sending = false; redraw() }
+      return
+    }
     o.sending = true; o.pending = { id: 'pending-send', author: owner().id, kind: 'message', text, attachments, reply_to }; o.atEnd = true; o.error = ''; st.mention = null; redraw()
     o.readingPosition = null; o.openingBoundary = null; o.replyAnchor = null; o.landAt = null; o.landing = false
     let accepted = false
@@ -739,7 +775,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       o.replyTo = null; draft.value = ''; compose.clear()
       applyThreadEvent(o, { type: 'message.done', message })
       refreshList()
-    } catch (e) { o.error = accepted ? `Message sent. ${e.message} Refresh to read the latest reply.` : `${e.message} Your message is still here; check the thread before sending again.` }
+    } catch (e) { o.error = accepted ? `Message sent. ${e.message} Refresh to read the latest reply.` : `${e.message} Your message is still here.` }
     finally { o.sending = false; o.pending = null; redraw() }
   }
   function mention() {
@@ -1163,6 +1199,17 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     finally { o.jobsReading = false }
   }
   function messageFooter(m, segments, mine) {
+    if (m.queued) {
+      if (!m.queued.error) return h('span', { class: 'muted', role: 'status', text: 'Sending…' })
+      return h('div', { role: 'alert' }, m.queued.error, button('Edit message', async () => {
+        if (draft.value.trim() || compose.files().length) return
+        const item = m.queued
+        draft.value = item.body.text; compose.restore(item.attachments); st.open.replyTo = item.reply
+        saveCompose()
+        await outbox.remove(item.order)
+        draft.focus(); redraw()
+      }, { class: 'quietlink', disabled: Boolean(draft.value.trim() || compose.files().length) }))
+    }
     if (m.streaming || m.id === 'pending-send') return null
     const stamp = replyTimestamp(m.at)
     const turns = segments.filter((part) => part.item?.kind === 'result').map((part) => part.item)
@@ -1236,7 +1283,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
         ? marketCards?.(piece.cards, { from, key: `${m.id}:${slot}:${j}` }) ?? h('p', { class: 'market-card-plain', key: `cards:${m.id}:${slot}:${j}`, text: piece.cards.map(plainWords).join(', ') })
         : prose(piece.text, `${slot}:${j}`))
     }
-    const body = mine ? h('div', { class: 'line right' }, h('div', { class: 'mine' }, userBubble({ class: `${m.id === 'pending-send' ? 'pending ' : ''}tt-bubble${files ? ' with-files' : ''}${long ? ' foldable' : ''}${long && !shown ? ' clamped' : ''}`, 'data-mine': key }, files, h('div', { class: 'user-message-body' }, messageQuote(m), prose(m.text, 'person')),
+    const body = mine ? h('div', { class: 'line right' }, h('div', { class: 'mine' }, userBubble({ class: `${(m.queued || m.id === 'pending-send') ? 'pending ' : ''}tt-bubble${files ? ' with-files' : ''}${long ? ' foldable' : ''}${long && !shown ? ' clamped' : ''}`, 'data-mine': key }, files, h('div', { class: 'user-message-body' }, messageQuote(m), prose(m.text, 'person')),
       long ? button(shown ? 'Show less' : 'Show more', () => { if (shown) openMessages.delete(key); else openMessages.add(key); redraw() }, { class: 'morebtn', 'aria-expanded': String(shown) }) : null), footer))
       : segments.map((part, index) => {
         if (part.text !== undefined) return h('div', { class: 'line left', key: `text:${index}` }, agentProse([
@@ -1619,8 +1666,13 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
         props: { 'aria-label': 'Providers & models', 'aria-haspopup': 'dialog', 'aria-expanded': String(Boolean(o.configuration)) } }),
       mentionButton: round(st.mention ? 'Remove mention' : 'Mention an agent', '@', toggleMention, { class: `plusbtn tt-mention-button${st.mention ? ' on' : ''}`, onpointerdown: (e) => e.preventDefault(), disabled: o.sending || Boolean(compose.dictating?.()), 'aria-expanded': String(Boolean(st.mention)) }) })
     // Place player rows before asking for the bar: visible rows own playback.
+    const pending = pendingRows(o).map(item => ({
+      id: `pending-${item.body.submission_id}`, author: owner().id, kind: 'message',
+      text: item.body.text, reply_to: item.body.reply_to, attachments: item.attachments, queued: item,
+    }))
+    const messages = pending.length ? withPending(o.messages, pending) : withPending(o.messages, o.pending)
     const messageRows = [
-      ...messageRuns(groupJoinNotices(withMarks(withPending(o.messages, o.pending), o.marks), catalog())), ...unmatched.map(permission),
+      ...messageRuns(groupJoinNotices(withMarks(messages, o.marks), catalog())), ...unmatched.map(permission),
     ]
     const listeners = listeningFaces()
     o.listeningInset = listeningInset(o.listeners.size > 0, o.listeningInset, o.atEnd)

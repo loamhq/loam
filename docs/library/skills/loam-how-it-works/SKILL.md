@@ -49,7 +49,9 @@ output as it arrives. The thread worker turns that output into the reply the
 app shows. Before sending a turn, the worker saves the input, the bound
 session and where to read its output. A returning worker can use that
 record to finish filing the same reply. Both currently run in the service that answers the app, so a
-planned service restart waits for conversations to go idle.
+planned service restart waits for conversations to go idle. During a brief
+outage the app keeps submitted messages in this browser and delivers them
+in order when the service returns.
 
 **Wakes and crons.** An agent also runs by itself on a schedule, and each
 schedule is a file under its `crons/` saying when it runs (or once, at a set

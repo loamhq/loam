@@ -517,6 +517,41 @@ async def main():
     nobody = rename(tid, "x", by="")
     check("...nor by nobody", nobody["ok"], False)
 
+    # A process can disappear between writing two members' inputs. The
+    # original audience and message survive even a changed thread default.
+    tid = threads.create("iris", "Owner retry", members=["iris", "ada"])["id"]
+    url = f"/v1/threads/{tid}/messages"
+    body = {"text": "@all one delivery", "submission_id": "probe-1"}
+    real = server.threads.message_input
+    def interrupt(turn, message_id):
+        if turn.persona == "ada":
+            raise OSError("stop before second member")
+        return real(turn, message_id)
+    server.threads.message_input = interrupt
+    try:
+        await call(server, "PUT", url, body)
+        raise AssertionError("no interruption")
+    except OSError:
+        pass
+    assert not server.threads.workers.get((tid, "iris"))
+    threads.update(tid, add=["cleo"])
+    server.threads = engine_mod.ThreadEngine(fake)
+    start = len(fake.starts)
+    resumed = server.threads.resume_inputs()
+    status, ack = await call(server, "PUT", url, body)
+    await settle(server, tid)
+    check("retry across partial fan-out returns the original owner message",
+          (status, ack["message"]["id"], resumed["scheduled"]), (200, "m1", 2))
+    check("only the original members get one input each",
+          sorted(row[0] for row in fake.starts[start:]), ["ada", "iris"])
+    status, again = await call(server, "PUT", url, body)
+    check("a lost acknowledgement after completion still names m1",
+          (status, again["message"]["id"], len(fake.starts) - start), (200, "m1", 2))
+    status, _ = await call(server, "PUT", url, {**body, "text": "different input"})
+    check("a reused key with changed content is refused", status, 409)
+    check("one durable owner message",
+          [m["id"] for m in threads.read(tid)[1] if m.get("submission_id")], ["m1"])
+
 
 asyncio.run(main())
 print(f"\n{sum(results)}/{len(results)} passed")

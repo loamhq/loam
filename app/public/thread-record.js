@@ -357,7 +357,7 @@ export function withPending(messages, pending) {
   if (!pending) return messages
   let at = messages.length
   while (at > 0 && messages[at - 1].streaming) at--
-  return [...messages.slice(0, at), pending, ...messages.slice(at)]
+  return [...messages.slice(0, at), ...[].concat(pending), ...messages.slice(at)]
 }
 // A turn's mark (2026-11-19): "waiting for room", "X is archived", "X's turn
 // failed: ...". Host state on the member's turn, never a message in the

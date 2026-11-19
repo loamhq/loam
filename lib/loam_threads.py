@@ -579,7 +579,7 @@ def render_message(msg: dict, quoted: dict | None = None) -> str:
     # an agent's name -- the hello thread's first message -- not a model's
     # turn (docs/starter.md).
     for key in ("persona", "engine", "model", "segments", "attachments", "late",
-                "link", "after", "steered", "preset", "journal_reply"):
+                "link", "after", "steered", "preset", "journal_reply", "submission_id", "submission_hash"):
         if msg.get(key):
             meta[key] = msg[key]
     text = (msg.get("text") or "").strip()
@@ -937,11 +937,12 @@ def append_once(thread_id: str, author: str, text: str, kind: str = "message",
         extra.pop("reply_to", None)
     with locked(VAULT):
         meta, msgs, path = read(thread_id)
-        if extra.get("journal_reply"):
-            existing = next((m for m in msgs if m["author"] == author
-                             and m.get("journal_reply") == extra["journal_reply"]), None)
-            if existing is not None:
-                return existing, False
+        for field in ("journal_reply", "submission_id"):
+            if extra.get(field):
+                existing = next((m for m in msgs if m["author"] == author
+                                 and m.get(field) == extra[field]), None)
+                if existing is not None:
+                    return existing, False
         # Checked under the lock, against the record as written: a reply to
         # a message of another thread, or to none, is refused (2026-11-11).
         quoted = (check_reply_to(msgs, extra["reply_to"], thread_id)

@@ -60,8 +60,10 @@ fails with a plain sentence -- never the broker's route-level 429 text.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import re
 import time
 
 import loam_agents
@@ -824,7 +826,8 @@ class ThreadEngine:
     def post_person(self, thread_id: str, text: str,
                     attachments: list[dict] | None = None,
                     model: str | None = None,
-                    reply_to: str | None = None) -> dict:
+                    reply_to: str | None = None, submission_id: str | None = None,
+                    signature: str | None = None) -> dict:
         """The owner's message: written, mentions joined, turns scheduled.
 
         Tagged personas answer; untagged, the default does, and a thread
@@ -839,12 +842,69 @@ class ThreadEngine:
         attachments = attachments or []
         if not text and not attachments:
             raise threads.ThreadError(400, "a `text` is required")
+        self.finish_pending_submission(thread_id)
         meta, msgs, _ = threads.read(thread_id)
-        first = not any(threads.is_owner(m.get("author")) for m in msgs)
+        named = threads.mentions(text)
+        recipients = named or ([meta["default"]] if meta.get("default") else [])
+        fanout = threads.mentions_all(text)
+        if fanout:
+            pool = dict.fromkeys([*named, *meta["members"], meta.get("default")])
+            recipients = [p for p in pool if p and not threads.is_owner(p)]
+        request = {"thread": thread_id, "text": text, "model": model, "reply_to": reply_to,
+                   "attachments": attachments, "submission_id": submission_id, "named": named,
+                   "recipients": recipients, "fanout": fanout,
+                   "first": not any(threads.is_owner(m.get("author")) for m in msgs)}
+        if submission_id:
+            request["submission_hash"] = signature or self.submission_hash(
+                text, [f["path"] for f in attachments], reply_to, model)
+            prior = self.accepted_submission(msgs, submission_id, request["submission_hash"])
+            if prior:
+                return prior
+            if request["first"] and meta["title"] == "New thread" and text.startswith("@"):
+                clean = re.sub(r"^(?:@[\w-]+\s*)+", "", text).strip()
+                request["opening_title"] = (clean[:59].rstrip() + "…" if len(clean) > 60
+                                            else clean or "New thread")
+            if reply_to:
+                threads.check_reply_to(msgs, reply_to, thread_id)
+            threads._write_atomic(self._submission_path(thread_id), json.dumps(request))
+        return self._finish_submission(request)
+
+    @staticmethod
+    def _submission_path(thread_id):
+        name = hashlib.sha256(thread_id.encode()).hexdigest()
+        return threads.STATE / "submissions" / f"{name}.json"
+
+    def finish_pending_submission(self, thread_id):
+        pending = self._submission_path(thread_id)
+        if pending.exists():
+            self._finish_submission(json.loads(pending.read_text()))
+
+    @staticmethod
+    def submission_hash(text, paths, reply_to, model):
+        data = json.dumps([text.strip(), paths, reply_to or None, model],
+                          separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    @staticmethod
+    def accepted_submission(messages, key, signature):
+        for msg in messages:
+            if msg.get("submission_id") == key and threads.is_owner(msg.get("author")):
+                if msg.get("submission_hash") != signature:
+                    raise threads.ThreadError(409, "This message ID was used for different input.")
+                return msg
+        return None
+
+    def _finish_submission(self, request, *, enqueue=True):
+        thread_id, text = request["thread"], request["text"]
+        attachments = request["attachments"]
+        key = request["submission_id"]
         extra = {"attachments": attachments} if attachments else {}
-        if reply_to:
-            extra["reply_to"] = reply_to
+        if request["reply_to"]:
+            extra["reply_to"] = request["reply_to"]
+        if key:
+            extra.update(submission_id=key, submission_hash=request["submission_hash"])
         msg = threads.append(thread_id, threads.OWNER, text, **extra)
+        meta = threads.read(thread_id)[0]
         self.publish(thread_id, {"type": "message.done", "message": msg})
         self.clear_mark(thread_id, "")
         # A branch's prepared opening (2026-11-11) is spent once he writes.
@@ -859,35 +919,40 @@ class ThreadEngine:
                                      "summary": self.summary(thread_id)})
             steps.log(f"{thread_id}: imported chat {meta['imported_from'][:8]} "
                       f"continued by {lc.OWNER_NAME}; out of the archive")
-        named = threads.mentions(text)
+        named, answer = request["named"], request["recipients"]
         self._join(thread_id, meta, named, by=threads.OWNER)
-        answer = named or ([meta["default"]] if meta.get("default") else [])
-        if threads.mentions_all(text):
-            # `@all` (2026-11-10): every member a turn, as if each were
-            # named; the default too, should it not be a member. A persona's
-            # `@all` is plain text (`agent_mentions`).
-            now = threads.read(thread_id)[0]
-            pool = list(now["members"])
-            if now.get("default") and now["default"] not in pool:
-                pool.append(now["default"])
-            fan = [p for p in pool if p not in named and not threads.is_owner(p)]
-            answer = named + fan
+        if request["fanout"]:
             if not answer:
                 self.mark(thread_id, "", "Nobody to reach: bring someone in first")
-            steps.COUNTS["fanout"] += len(fan)
+            steps.COUNTS["fanout"] += len([p for p in answer if p not in named])
             steps.log(f"{thread_id}: @all from {lc.OWNER_NAME}, {len(answer)} turn(s) "
                       f"({', '.join(answer) or 'nobody'})")
+        deliveries = []
         for persona in answer:
-            self.schedule(Turn(thread_id, persona, 0, msg["id"], model=model,
-                               attachments=attachments))
-        if first:
+            turn = Turn(thread_id, persona, 0, msg["id"], model=request["model"],
+                        attachments=attachments)
+            if key:
+                delivery = self.message_input(turn, msg["id"])
+                if delivery:
+                    deliveries.append(delivery)
+            else:
+                self.schedule(turn)
+        if request["first"]:
             before = meta["title"]
-            threads.title_from_first(thread_id, text)
+            if request.get("opening_title") and before == "New thread":
+                threads.update(thread_id, title=request["opening_title"])
+            else:
+                threads.title_from_first(thread_id, text)
             after = threads.read(thread_id)[0]
             if after["title"] != before:
                 self.publish(thread_id, {"type": "thread.changed",
                                          "thread": thread_id,
                                          "summary": self.summary(thread_id)})
+        if key:
+            self._submission_path(thread_id).unlink()
+            if enqueue:
+                for turn in deliveries:
+                    self.schedule(turn, persist=False)
         return msg
 
     def _join(self, thread_id: str, meta: dict, named: list[str], by: str) -> None:
@@ -930,18 +995,18 @@ class ThreadEngine:
                 self.steer_soon(turn.key)
             self.members_changed(turn.thread_id)
 
-    def schedule_message(self, turn, message_id, *, enqueue=True):
-        """Persist a message's delivery before waking its worker. A replay
-        can meet an already queued input or one the member already read."""
+    def message_input(self, turn, message_id):
+        """Durable, stable delivery for this message and member."""
         turn.input_id = f"{turn.thread_id}-{message_id}-{turn.persona}"
+        prior = next((item for item in inputs.items(*turn.key) if item["id"] == turn.input_id), None)
+        if prior:
+            return Turn.of_entry(*turn.key, prior)
         through = (threads.session_for(*turn.key) or {}).get("through")
-        if threads._num(through) >= threads._num(message_id) or any(
-                item["id"] == turn.input_id for item in inputs.items(*turn.key)):
-            return
+        if threads._num(through) >= threads._num(message_id):
+            return None
         turn.queued_at = threads.now_iso()
         inputs.add(*turn.key, {**turn.entry(), "id": turn.input_id, "at": turn.queued_at})
-        if enqueue:
-            self.schedule(turn, persist=False)
+        return turn
 
     def _ensure_worker(self, key: tuple[str, str]) -> bool:
         """Start the member's worker when none is running; True when this
@@ -1203,6 +1268,14 @@ class ThreadEngine:
         message (a result, a notice) is not given twice; a message's is,
         unless the member's ``through`` has passed it (``already_heard``).
         Input for a thread that is gone is dropped. Returns the counts."""
+        for pending in (threads.STATE / "submissions").glob("*.json"):
+            request = json.loads(pending.read_text())
+            try:
+                self._finish_submission(request, enqueue=False)
+            except threads.ThreadError as exc:
+                if exc.status != 404:
+                    raise
+                pending.unlink(missing_ok=True)
         counts = {"members": 0, "scheduled": 0, "dropped": 0}
         for tid, persona, items in inputs.pending():
             try:
@@ -2533,6 +2606,8 @@ class ThreadEngine:
         for persona in named:
             mention = Turn(turn.thread_id, persona, chain, "mention")
             if message_id:
-                self.schedule_message(mention, message_id)
+                delivery = self.message_input(mention, message_id)
+                if delivery and not delivery.held:
+                    self.schedule(delivery, persist=False)
             else:
                 self.schedule(mention)

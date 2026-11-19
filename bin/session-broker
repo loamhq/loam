@@ -2918,7 +2918,7 @@ class Server:
                 if payload.get("text"):
                     engine.post_person(meta["id"], payload["text"])
                 engine.publish_row(meta["id"])
-                writer.write(response(201, engine.summary(meta["id"])))
+                writer.write(response(201, {**engine.summary(meta["id"]), "ordered_submissions": True}))
                 await writer.drain()
                 return
             raise BrokerError(405, f"no route for {method} /v1/threads")
@@ -2977,6 +2977,7 @@ class Server:
             writer.write(response(200, {
                 "thread": summary,
                 "messages": messages, "has_more": got["has_more"],
+                "ordered_submissions": True,
                 # `turns` (2026-11-10): every member's turn in flight, earliest
                 # first; `turn` is the earliest, for the clients that read one.
                 "turn": engine.active.get(thread_id),
@@ -3152,10 +3153,26 @@ class Server:
             writer.write(response(201, {"attachments": stored}))
             await writer.drain()
             return
-        if rest == ["messages"] and method == "POST":
+        if rest == ["messages"] and method in ("POST", "PUT"):
+            key = signature = None
             attachments = payload.get("attachments") or []
             if not isinstance(attachments, list):
                 raise BrokerError(400, "`attachments` is a list of paths")
+            if method == "PUT":
+                key = payload.get("submission_id")
+                if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", key):
+                    raise BrokerError(400, "A stable submission_id is required.")
+                text = payload.get("text") or ""
+                if not isinstance(text, str):
+                    raise BrokerError(400, "Message text must be a string.")
+                signature = engine.submission_hash(text, attachments, payload.get("reply_to"),
+                                                   payload.get("model"))
+                engine.finish_pending_submission(thread_id)
+                prior = engine.accepted_submission(threads_rec.read(thread_id)[1], key, signature)
+                if prior:
+                    writer.write(response(200, {"accepted": True, "message": prior}))
+                    await writer.drain()
+                    return
             carried = [self._attachment(p) for p in attachments]
             model = payload.get("model")
             if model is not None:
@@ -3172,7 +3189,7 @@ class Server:
             reply_to = payload.get("reply_to") or None
             msg = engine.post_person(thread_id, payload.get("text") or "",
                                      attachments=carried, model=model,
-                                     reply_to=reply_to)
+                                     reply_to=reply_to, submission_id=key, signature=signature)
             writer.write(response(200, {"accepted": True, "message": msg}))
             await writer.drain()
             return

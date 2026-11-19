@@ -1,6 +1,6 @@
 import { messageSegments } from './thread-record.js'
 
-export const canReply = (message) => Boolean(message?.id && message.kind !== 'system' && !message.streaming && message.id !== 'pending-send')
+export const canReply = (message) => Boolean(message?.id && message.kind !== 'system' && !message.streaming && !message.queued && message.id !== 'pending-send')
 // A quote is a glimpse of the words, read as words: its first line with the
 // markdown's marks taken off (2026-11-17: `**Yes to rough edges.**` showed
 // its asterisks). Nothing else of the line changes.

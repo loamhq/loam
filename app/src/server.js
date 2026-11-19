@@ -352,7 +352,8 @@ export function createApp({
       const [, id, action] = threadRoute
       const allowed = !id ? ['GET', 'POST'].includes(method)
         : ['events', 'steps'].includes(action) ? method === 'GET'
-        : ['messages', 'attachments'].includes(action) ? method === 'POST'
+        : action === 'messages' ? ['POST', 'PUT'].includes(method)
+        : action === 'attachments' ? method === 'POST'
         : action === 'board' ? ['GET', 'PUT'].includes(method)
         : ['GET', 'PATCH', 'DELETE'].includes(method)
       if (!allowed) return sendJson(res, 405, { error: 'This operation is not available for threads.' })
