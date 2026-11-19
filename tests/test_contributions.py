@@ -311,12 +311,18 @@ check("labels, note and advanced are kept",
       and nice[1].get("advanced") is True and "labels" not in nice[1], nice)
 for bad in ({"labels": {"other": "x"}, "choices": ["a"]}, {"labels": {"a": ""}, "choices": ["a"]},
             {"labels": {"a": "x"}}, {"labels": ["a"], "choices": ["a"]},
-            {"note": ""}, {"note": "x" * 301}, {"advanced": "yes"}):
+            {"note": ""}, {"note": "x" * 301}, {"advanced": "yes"}, {"setup": "yes"}):
     try:
         c.contributes_of({"settings.entry": [{"key": "k", "label": "K", **bad}]}, None, [])
         check(f"settings.entry {bad} is refused", False)
     except c.ContributionError:
         check(f"settings.entry {sorted(bad)} is refused", True)
+
+# `setup` (2026-11-19): what setting the plugin up means; the page leads with
+# its controls once one such entry has a value.
+marked = c.contributes_of({"settings.entry": [{"key": "remote", "label": "Repository", "default": "", "setup": True},
+                                              {"key": "every", "label": "Every", "default": "1h"}]}, None, [])["settings.entry"]
+check("setup is kept where given, absent elsewhere", (marked[0].get("setup"), "setup" in marked[1]), (True, False))
 
 failed = results.count(False)
 print(f"\n{len(results) - failed}/{len(results)} passed")

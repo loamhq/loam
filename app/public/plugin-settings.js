@@ -46,7 +46,7 @@ const withoutTitle = (text, name) => text.replace(/^#\s+(.+)\n+/, (all, title) =
 const SERVICE = { running: 'Running', starting: 'Starting', failing: 'Failing', stopping: 'Stopping', stopped: 'Stopped' }
 const external = source => { try { const u = new URL(source?.url); return u.protocol === 'https:' ? u.href : null } catch { return null } }
 export function createPluginSettings({ loader, theme, host, changed = () => {} }) {
-  const st = { selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', guide: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set(), advanced: null }
+  const st = { keys: null, how: {}, selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', guide: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set(), advanced: null }
   let hostSettings = null, secretSettings = null
   const showcase = createThemeShowcase({ schedule: () => changed(), mode: () => theme.current === 'dark' ? 'dark' : 'light' })
   const failedShots = new Set()
@@ -64,6 +64,8 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     hostSettings = null; secretSettings = null
     st.selected = row; st.detail = null; st.detailError = ''; st.opening = true; st.guide = false; st.remove = false; st.error = ''; st.focusDetail = true; changed()
     opened()
+    // Whether its keys are saved, for whether it is set up (below).
+    if (row.keys?.length) host.api('GET', '/keys').then(out => { st.keys = out?.providers ?? null; changed() }).catch(() => {})
     try {
       const out = await host.api('GET', `/plugins/${encodeURIComponent(row.id)}`)
       if (st.selected?.key === row.key) {
@@ -214,23 +216,46 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       technical ? h('details', { class: 'plugin-guide', open: st.guide, ontoggle: event => { st.guide = event.currentTarget.open } }, h('summary', { text: 'Technical details' }),
         h('div', { class: 'md' }, ...[host.markdown?.(technical, { soft: true }) ?? h('p', { text: technical })].flat())) : null)
   }
+  // Set up: on, its keys saved (every one it needs, or any one of keys it
+  // can choose between), and, when entries are marked `setup` (Git backup's
+  // repositories), at least one of them given. Until its own answers arrive,
+  // a plugin is taken as set up.
+  function setUp(row) {
+    if (!row.on) return false
+    if (row.keys?.length && Array.isArray(st.keys)) {
+      const saved = k => st.keys.some(p => p.id === k.provider && p.set)
+      const needed = row.keys.filter(k => !k.optional)
+      if (needed.length ? !needed.every(saved) : !row.keys.some(saved)) return false
+    }
+    const setup = (hostSettings?.entries ?? []).filter(e => e.setup)
+    if (setup.length && setup.every(e => !String(hostSettings.values?.[e.key] ?? '').trim())) return false
+    return true
+  }
   function detail() {
     const original = st.selected, current = loader.st.rows.find(row => row.key === original.key) ?? original
     const row = current
     const declaration = row.declaration ?? { touches: row.touches, overrides: row.overrides, page_code: row.has?.page_main }
     const url = external(row.source)
     const guide = guideParts(st.detail?.plugin?.guide), plain = withoutTitle(guide.plain, row.name || row.id)
-    // A plugin's page (2026-11-19), plain first: what it is for, a picture,
-    // its own words (what it does, how to use it), its switch and controls,
-    // and at the foot, quietly, the details: what it touches, version,
-    // maker, its server, its source and the technical part of its guide.
+    // A plugin's page (2026-11-19): its promise first. A plugin that is on
+    // and set up leads with its controls, since that is what one comes back
+    // for (Git backup's status and Back up now), and its pictures and plain
+    // words wait in a closed "How it works" under them; one that is off or
+    // not yet set up opens with them, above its switch. Details, quietly, at
+    // the foot. A theme leads with its preview, which is the point of it.
+    const theme = Boolean(row.kind?.includes?.('theme')), ready = theme || setUp(row)
+    const shots = theme ? null : picture(row)
+    const how = shots || plain ? h('details', { class: 'plugin-how', key: `how:${row.id}`, open: st.how[row.id] ?? !ready,
+      ontoggle: event => { if (event.currentTarget.isConnected) st.how[row.id] = event.currentTarget.open } },
+      h('summary', { class: 'plugin-how-summary' }, h('span', { text: 'How it works' }), icon.chevronDown(14)),
+      shots, plain ? h('div', { class: 'md plugin-about' }, ...[host.markdown?.(plain, { soft: true }) ?? h('p', { text: plain })].flat()) : null) : null
     return [h('button', { class: 'backbtn plugin-back', 'aria-label': 'Back to Plugins', onclick: () => { st.selected = null; st.detail = null; st.error = ''; changed() } }, icon.chevronLeft(18), 'Plugins'),
       h('header', { class: 'plugin-hero' }, pluginIcon(row),
         h('div', { class: 'plugin-hero-words' }, host.settingsHead(row.name || row.id), row.description ? h('p', { class: 'plugin-promise', text: row.description }) : null)),
       notice(row.broken), notice(loader.st.failures.get(row.id)),
       row.service && row.on && row.service.state !== 'running' ? serviceView(row) : null,
-      picture(row),
-      plain ? h('div', { class: 'md plugin-about' }, ...[host.markdown?.(plain, { soft: true }) ?? h('p', { text: plain })].flat()) : null,
+      theme ? picture(row) : null,
+      ready ? null : how,
       row.shadows ? h('p', { class: 'plugin-mark', text: 'Changes a shipped plugin.' }) : null,
       linked(row) ? h('p', { class: 'note plugin-from-link' }, icon.link(13), h('span', { text: `Installed from a link: github.com/${row.source.repo}${row.source.path ? `/${row.source.path}` : ''}, at ${row.source.ref_kind === 'tag' ? row.source.ref : `commit ${String(row.source.commit ?? row.source.ref).slice(0, 7)}`}. To update it, install from its link again.` })) : null,
       row.edited ? h('p', { class: 'note', text: 'Edited here since it was installed.' }) : null,
@@ -261,6 +286,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           : `Uses your ${row.keys.map(k => k.name).join(' and ')} ${row.keys.length > 1 ? 'keys' : 'key'}, saved under API keys in Connections.` }),
         host.goSettings ? button('Open API keys', () => row.keys.length === 1 ? host.goSettings('api-key', row.keys[0].provider) : host.goSettings('api-keys'), 'pillbtn content-mark') : null) : null,
       loader.st.failures.has(row.id) ? button('Try again', () => loader.refresh(), 'pillbtn content-mark') : null,
+      ready ? how : null,
       details(row, declaration, guide.technical, url),
       row.layer === 'yours' ? (st.remove ? h('div', { class: 'plugin-remove-question' }, h('p', { text: `Remove ${row.name || row.id}?${row.shadows ? ' The shipped copy will take over.' : ''}` }),
         button('Keep plugin', () => { st.remove = false; changed() }, 'pillbtn content-mark'), button('Remove', () => remove(row), 'pillbtn primary danger', { disabled: loader.st.writing.has(`/plugins/${row.id}`) })) : button('Remove plugin', () => { st.remove = true; changed() }, 'pillbtn content-mark danger')) : null]
