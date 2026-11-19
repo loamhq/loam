@@ -241,6 +241,7 @@ import loam_clock  # noqa: E402
 import loam_live  # noqa: E402
 import loam_settings  # noqa: E402
 import loam_appearance  # noqa: E402
+import loam_git_identity  # noqa: E402
 import loam_apps  # noqa: E402
 import loam_plugins  # noqa: E402
 import loam_marketplace  # noqa: E402
@@ -5748,6 +5749,55 @@ class Server:
                 await writer.drain()
                 return
             writer.write(response(200, value, nocache))
+            await writer.drain()
+            return
+
+        # Whose name agents' commits carry (2026-11-18, lib/loam_git_identity.py):
+        # the owner's GitHub account (its name and no-reply address, read once
+        # from GitHub with the connection's own token) or a typed name and
+        # address. GET answers it and, unset, the prompt; PATCH takes
+        # {"identity": "github" | {"name", "email"} | null}. The address is
+        # never logged.
+        if parts == ["v1", "settings", "git"]:
+            nocache = "Cache-Control: no-store\r\n"
+            if method not in ("GET", "PATCH"):
+                writer.write(response(405, {"error": "use GET or PATCH for the git identity"},
+                                      nocache))
+                await writer.drain()
+                return
+            try:
+                if method == "GET":
+                    value = await asyncio.to_thread(loam_git_identity.stored)
+                else:
+                    by = author(payload)
+                    patch = {k: v for k, v in payload.items() if k != "by"}
+
+                    def github_user():
+                        import loam_github_app  # noqa: PLC0415
+                        try:
+                            _, user = loam_github_app.api(
+                                "GET", "/user", loam_github_app.user_token())
+                        except loam_github_app.IntegrationError as exc:
+                            raise loam_git_identity.IdentityError(
+                                f"GitHub could not be asked: {exc}", 409) from None
+                        return user
+
+                    def write():
+                        value = loam_git_identity.validate(patch, github_user)
+                        loam_appearance.mutate(loam_git_identity.KEY, lambda _old: value)
+                        return value
+                    value = await asyncio.to_thread(write)
+                    print(f"git identity: {value['source'] if value else 'cleared'} by "
+                          f"{by or lc.OWNER_ID}", file=sys.stderr, flush=True)
+            except loam_git_identity.IdentityError as exc:
+                writer.write(response(exc.status, {"error": exc.message}, nocache))
+                await writer.drain()
+                return
+            except loam_appearance.AppearanceError as exc:
+                writer.write(response(exc.status, {"error": exc.message}, nocache))
+                await writer.drain()
+                return
+            writer.write(response(200, loam_git_identity.public(value), nocache))
             await writer.drain()
             return
 

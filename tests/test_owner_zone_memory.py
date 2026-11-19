@@ -107,7 +107,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("...the env lock beside what the env held",
           live["env"] == {"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}, live["env"])
     check("...and the rest untouched", live["theme"] == "dark")
-    check("...said what it wrote", len(wrote) == 3, wrote)
+    check("...said what it wrote", len(wrote) == 5, wrote)
     check("a second pin writes nothing", pm.pin_claude(settings) == [])
     # A fresh install pins before any sign-in: no ~/.claude/ yet (L12).
     fresh = Path(tmp) / "no-claude-yet" / "settings.json"

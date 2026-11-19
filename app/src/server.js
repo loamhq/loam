@@ -290,6 +290,11 @@ export function createApp({
       return await relayJson(res, method, `/v1/sessions/${encodeURIComponent(dec(permission[1]))}/permissions/${encodeURIComponent(dec(permission[2]))}`, await readBody(req))
     }
 
+    if (rest === '/settings/git') {
+      if (!['GET', 'PATCH'].includes(method)) return sendJson(res, 405, { error: 'Use GET or PATCH for the git identity.' })
+      return await relayJson(res, method, '/v1/settings/git', method === 'PATCH' ? await readBody(req) : undefined)
+    }
+
     if (rest === '/settings/appearance') {
       if (!['GET', 'PATCH'].includes(method)) return sendJson(res, 405, { error: 'Use GET or PATCH for appearance.' })
       return await relayJson(res, method, '/v1/settings/appearance', method === 'PATCH' ? await readBody(req) : undefined)

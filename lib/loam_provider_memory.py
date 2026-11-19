@@ -69,7 +69,12 @@ import loam_config as lc
 
 # -- the pins ---------------------------------------------------------------------
 
-CLAUDE_SETTINGS = {"autoMemoryEnabled": False, "autoDreamEnabled": False}
+CLAUDE_SETTINGS = {"autoMemoryEnabled": False, "autoDreamEnabled": False,
+                   # No "Co-Authored-By: Claude" or "Generated with Claude
+                   # Code" on anything a persona commits or opens (2026-11-18,
+                   # lib/loam_git_identity.py): the same value a job is handed.
+                   "attribution": {"commit": "", "pr": "", "sessionUrl": False},
+                   "includeCoAuthoredBy": False}
 CLAUDE_ENV = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
 
 # Lines of CODEX_HOME/config.toml, after its top-level keys.
