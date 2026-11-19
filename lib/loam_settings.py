@@ -765,6 +765,8 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "rest === '/files/live'": "a read",
     "rest === '/files/preview'": "a read",
     "rest === '/files/download'": "a read",
+    "rest === '/files/archive'": ("a read: a Vault or AI Spaces folder as one zip, "
+                                  "the signed-in owner's only (loam-ui, 2026-11-18)"),
     "rest === '/files/text'": ["files.write"],
     "rest === '/files/upload'": ["files.write"],
     "/^\\/files\\/(file|folder)$/": ["files.write"],
