@@ -1,29 +1,5 @@
 #!/usr/bin/env python3
-"""`/v1/files/...`: the Files API, over real HTTP, against temp trees.
-
-Added 2026-10-02. The broker's real `Server.handle` is served on a loopback
-port and every request is a real HTTP request from `http.client`, so the
-request parser, the bearer check, the query decoding and the streaming of a
-download are all the shipped code. The vault, the spaces and the System base
-are temp directories (`cfg.VAULT`, `cfg.AI_LABS`, `loam_files.SYSTEM_BASE`);
-the real ones are never read or written.
-
-Proved: authentication on every route; listing, reading, paging and
-downloading each root; secrets and runtime-private files absent from listings
-AND answered 404 when named, with nothing of them in any body; traversal
-plain and encoded; symlinks refused at every position, and a directory
-swapped for a link between a listing and a read; large, missing, binary and
-folder-as-file answers; read-only denial per authority; revision-conditional
-saves with a stale revision refused and the file untouched; creation that
-never overwrites; the owner's provenance on vault notes; and the link resolver; and
-`archive` (2026-11-18): a folder as one streamed Zip64 zip, with its
-refusals, exclusions, dotfiles kept, links never followed, a file over the
-download cap, and a failure partway leaving no valid zip.
-(A picked resource attached to a classic chat's message, within the session
-agent's read scope, retired with the classic chat view on 2026-11-12.)
-
-Run: python3 tests/test_broker_files.py
-"""
+"""Exercise the Files API through real HTTP against temporary roots."""
 
 import asyncio
 import http.client
@@ -44,9 +20,7 @@ from urllib.parse import quote
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_files as files  # noqa: E402
@@ -168,7 +142,7 @@ def build(tmp: Path) -> dict:
     os.symlink(vault / "40_PROJECTS", vault / "inner-link")
     (vault / "%2e%2e").mkdir()
     (vault / "%2e%2e" / "literal.md").write_text("a folder literally named %2e%2e\n")
-    # Partial and relative paths (2026-10-02, second pass)
+    # Partial and relative paths.
     (vault / "40_PROJECTS" / "loam-ui" / "research").mkdir(parents=True)
     (vault / "40_PROJECTS" / "loam-ui" / "loam-ui.md").write_text("# loam-ui\n")
     (vault / "40_PROJECTS" / "loam-ui" / "research" / "deep.md").write_text("# deep\n")
@@ -190,12 +164,10 @@ def build(tmp: Path) -> dict:
     (vault / "15_CONVERSATIONS" / "shown.html").write_text("<p>a page</p>\n")
     (vault / "latin1.html").write_bytes(b"<p>caf\xe9</p>\n")
     (vault / "big.html").write_bytes(b"<p>" + b"x" * files.TEXT_READ_MAX + b"</p>")
-    # Folders as link targets (2026-10-02, third pass): a folder with a space,
-    # a note and a folder of one name side by side, a note elsewhere named
-    # like the top-level `Many` folder, and a secret-shaped folder name.
+    # Exercise links to folders, ambiguous names and paths with spaces.
     (vault / "40_PROJECTS" / "Half Year").mkdir()
     (vault / "40_PROJECTS" / "Half Year" / "agenda.md").write_text("# h\n")
-    # The live vault's own collision: a folder note inside its folder.
+    # A folder and its folder note share a name.
     (vault / "40_PROJECTS" / "Loam" / "Loam.md").write_text("# Loam\n")
     (vault / "20_ATLAS" / "Topics").mkdir()
     (vault / "20_ATLAS" / "Topics" / "one.md").write_text("# one\n")
@@ -1185,8 +1157,7 @@ def test_upload(c: Client, t: dict) -> None:
     check("multipart with no boundary: 400", status, 400)
     status, _, _ = c.raw("PUT", "/v1/files/upload?root=vault&path=Uploads")
     check("PUT upload: 405 (no replace route)", status, 405)
-    # Rename has its own route since 2026-11-13 (test_rename); there is
-    # still no delete and no `move` route.
+    # Rename is a separate route.
     for method, route in (("DELETE", "file"), ("POST", "move"),
                           ("DELETE", "upload")):
         status, _, _ = c.raw(method, f"/v1/files/{route}?root=vault&path=Uploads/top.png")

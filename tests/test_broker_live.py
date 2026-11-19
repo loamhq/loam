@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""The live sessions the app lists and ends (2026-11-10), through the
-broker's routes with a fake broker and a fake harness.
-
-  1. **`GET /v1/sessions/live`** answers every live session, thread member
-     and classic chat alike, with its kind, thread, state, times, memory and
-     what ending it loses; and the box's totals beside them.
-  2. **`POST /v1/sessions/end-idle`** ends the idle ones and never one that
-     is working, asking, waiting on background work, or carrying a thread's
-     turn, or that was active in the last seconds.
-  3. **`DELETE /v1/sessions/:id` mid-turn on a thread member** stops the turn
-     with one quiet system line ("Sam ended Iris's turn"), keeps what it
-     had said, writes no "(no reply)", and the next mention resumes the same
-     session by id. The thread survives.
-  4. **The stream** opens with `sessions.live` and sends again after a
-     record change.
-  5. **lib/loam_live.py** reads a process tree's RSS, a unit slice and the
-     admission count from fake roots.
-
-Run: python3 tests/test_broker_live.py
-"""
+"""Check the live-session listing, work states and explicit stop routes."""
 
 import asyncio
 import importlib.machinery
@@ -244,7 +225,7 @@ async def main():
     server.broker = fake
     server.threads = engine_mod.ThreadEngine(fake)
 
-    # A thread with Iris in it, who answers once and goes idle.
+    # A thread member answers once and goes idle.
     status, row = await call(server, "POST", "/v1/threads", {"persona": "iris",
                                                               "title": "Garden plan"})
     tid = row["id"]

@@ -1,45 +1,5 @@
 #!/usr/bin/env python3
-"""An adopted session kept in step with the app's own file.
-
-A record adopted from the Claude Code app is a *reading* of a file this broker
-does not write, and the owner goes on talking to the persona in that app. Until
-2026-09-21 the reading was taken at the broker's last start, so Loam UI drew a
-conversation as it had been hours before -- which is how this job started.
-Two readings keep it current and both are tested here:
-
-  1. **A read of the record refreshes it.** `GET /v1/sessions` and `GET
-     /v1/sessions/<id>` stat the file behind every adopted record and re-read
-     the one that has grown. The stat is the cost and the parse is the
-     exception: 27 adopted records on this box are 0.36 ms of stats and 0.69 s
-     of parsing, so a refresh that parsed unconditionally would be 2,000 times
-     the price of one that asks first. The parse is COUNTED here rather than
-     asserted about in prose -- that is the whole property.
-
-  (A second reading, an open classic chat polling the file while a client
-  held its events stream, retired with the classic chat view on
-  2026-11-12.)
-
-  2. **The scan for unknown app sessions runs on a read of the list**, at most
-     once a minute, so a conversation started on the owner's phone becomes a row
-     without waiting for a restart.
-
-And the three ways this would do harm, each of them a test below: refreshing a
-record that has been FORKED (the branches diverged by design and the app's
-file is history), refreshing one with a log of this broker's own (the
-numbering above `replayed` belongs to events a client already holds), and
-re-reading a file whose mtime moved on its own (something on this box stamps
-old session files -- `loam_adopt.last_timestamp` has the measurements).
-
-The file that grows is `fixtures/app-session.jsonl`, a real Iris session from
-2026-09-11 with every id in it replaced, and on 2026-11-15 every word a person
-or an agent wrote in it replaced with neutral text (the entry shapes are the
-CLI's own), cut at its last human turn: the first 18 events are written, the
-conversation is then "continued in the app" by appending the rest of the real
-file. A hand-written continuation would only prove that the follow matches the
-shape I imagined the CLI writes.
-
-Run: python3 tests/test_broker_follow.py
-"""
+"""Check incremental synchronization of adopted sessions from the provider log."""
 
 import asyncio
 import importlib.machinery
@@ -56,9 +16,7 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_adopt as adoption  # noqa: E402
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -194,9 +152,7 @@ async def main() -> None:
     check("a read of an unchanged record parses nothing",
           (status, parses), (200, []))
 
-    # An mtime that moved on its own. Something on this box stamps old session
-    # files -- dozens of them share one 01:30 minute -- so a touch must not be
-    # read as a turn. The new mtime is written down; the file is not read.
+    # An mtime change alone does not establish a new turn.
     touched = int(source.stat().st_mtime) + 90
     os.utime(source, (touched, touched))
     _, record = await route(server, "GET", f"/v1/sessions/{APP_ID}")
@@ -324,10 +280,7 @@ try:
 
     adoption.summarise = summarise
 
-    # The scan's clock, stood an hour after the fixture's last line. The scan
-    # passes over a file last spoken to more than WINDOW_DAYS ago, and this
-    # one was last spoken to on 2026-09-11: on the wall clock the test stopped
-    # adopting it on 09-25 and failed on a record that was never written.
+    # Keep the scan clock inside the fixture’s discovery window.
     scanned = adoption.candidates
     fixture_now = adoption.epoch_of(adoption.last_timestamp(FIXTURE)) + 3600
 

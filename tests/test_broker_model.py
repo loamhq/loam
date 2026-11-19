@@ -1,29 +1,5 @@
 #!/usr/bin/env python3
-"""A session's own model and effort: chosen at the start, changed mid-turn,
-and listed by the providers route.
-
-A session runs on the persona's own setting until something picks: a thread
-member's model (PATCH /v1/threads/<id> `model`), which starts and changes the
-member's session through the code below. (The classic chat's + menu and its
-PATCH /v1/sessions/<id> retired on 2026-11-12.) Four things:
-
-  1. a start carries `model` and `effort` onto the launch line and onto the
-     record, and a session that asked for neither launches with neither flag
-     -- which is what makes the persona's settings.json still the answer
-  2. `Session.set_choices` on a RUNNING session sends the CLI `/model <value>`
-     and `/effort <value>` on its own stdin, and on an ENDED one writes the
-     record for the next launch
-  3. what `choices()` refuses
-  4. GET /v1/providers: models with display names and the persona's default
-     ticked, efforts, and empty lists on the providers nobody has wired
-
-**No model call is spent here.** The process is a stand-in, so what is proved
-is the argv and the bytes written to stdin, not the answer that would come
-back. The answer that comes back was proved by causing, on the live broker:
-see broker/README.md.
-
-Run: python3 tests/test_broker_model.py
-"""
+"""Check session model and effort choices at creation, during a turn and on resume."""
 
 import asyncio
 import importlib.machinery
@@ -39,16 +15,11 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 os.environ["LOAM_USAGE_READS"] = "off"  # no real CLI reads; see loam_provider_usage
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
-# Admission reads the box's real memory since 2026-11-09, so on a full box a
-# start here was refused and this test failed for a reason it is not about
-# (two landings refused on 11-09 at ~2.8 GB free). The box always has room
-# here; test_broker_seats is the test of admission.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -181,10 +152,7 @@ async def main() -> None:
     check("...which is what puts them on the resumed launch line",
           "--model" in again.argv(resume=True), True)
 
-    # -- 2. changing a session's model mid-conversation -------------------
-    # Through `Session.set_choices`, which is what a thread member's model
-    # change runs (lib/loam_thread_engine.py). The classic PATCH route that
-    # also called it retired with the classic view on 2026-11-12.
+    # Change the active session through its model-choice API.
     live = running(broker, model="sonnet")
     sent = await live.set_choices({"model": "opus"})
     check("a running session takes a model change", live.model, "opus")
@@ -251,9 +219,7 @@ async def main() -> None:
     check("...read off that persona's profile, not stated here",
           cfg.persona_model("probe"), "fable")
 
-    # `resolves_to` (2026-11-10): what each alias runs on with the installed
-    # CLI, read out of the build the symlink points at, and read again when
-    # the symlink is moved to another build.
+    # Model aliases resolve using the installed CLI build.
     builds = root / "cli-versions"
     builds.mkdir(exist_ok=True)
 
@@ -342,11 +308,7 @@ try:
     cfg.USAGE_PATH = cfg.STATE_DIR / "provider-usage.json"
     cfg.AI_LABS = root / "agents"
     cfg.CREDENTIALS_PATH = root / "credentials.json"
-    # Two personas, on two models, because "the default" is a fact about a
-    # persona's own profile (agent.json, 2026-11-19; settings.json before,
-    # which provision now writes from it) and the fleet's answer is only the
-    # one they share. "probe" names none, so it is the wake's default; a test
-    # that could not tell the two apart would pass on a hardcoded default.
+    # Resolve each member’s model from its own profile.
     for name, model in (("probe", None), ("other", "sonnet")):
         (cfg.AI_LABS / name / ".claude").mkdir(parents=True)
         (cfg.AI_LABS / name / "agent.json").write_text(

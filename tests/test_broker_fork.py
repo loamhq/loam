@@ -1,46 +1,5 @@
 #!/usr/bin/env python3
-"""Sending into a session the owner had in the app, without touching their file.
-
-An adopted record's id is the app's session id, and that id names a file the
-Remote Control server may still be appending to. So the first message into
-one does not resume it -- it forks it: `claude -p --resume <the app's id>
---fork-session`, which reads that conversation and continues it in a new
-session file of the CLI's own. Four things have to hold, and each is a way
-the conversation gets damaged or lost:
-
-  1. **The app's file is never written to.** The launch line carries
-     `--fork-session` the first time and every later launch resumes the
-     fork, not the app. A launch line that resumed the app's id in place is
-     two processes on one file, which is a corrupted conversation of
-     the owner's and not a bug that shows up as an error.
-  2. **The record keeps its own identity.** The row, the log, the URL and
-     the replayed history stay under the app's id; the CLI's new id is
-     stored beside it as `cli_session_id`, with `forked_from` saying where
-     it came from. A record that re-identified itself as the fork would be a
-     new row on the home screen and the history would be under the old one.
-  3. **The fork's id survives a restart.** It is read back off the record,
-     because a broker that forgot it would fork the app's session a second
-     time and the turns taken here would be in a file nothing points at.
-  4. **One stream, continuing numbering.** The replayed history is
-     1..`replayed` and what happens after the fork is numbered from there,
-     and every event on it names the record -- the CLI states its own id on
-     each envelope, and a client keying by `session_id` would otherwise read
-     one conversation as two.
-
-No route reaches this since the classic chat view retired (2026-11-12):
-`POST /v1/sessions` with `resume: true` was the only way an adopted record
-was sent into, and a thread starts sessions of its own. The launch path stays
-in the broker, so it is driven here as `Broker.start_session(resume=True)`
-and `Session.send_message`, the calls that route made.
-
-The CLI is faked here, which is what makes this a test of the broker and not
-of Claude Code: a real one costs money, takes a minute and would prove the
-same lines. What a real one does was caused once, by hand, and is in the
-receipt for 2026-09-20; what cannot be faked is that `--fork-session` leaves
-the original file alone, so the file's size and mtime are asserted anyway.
-
-Run: python3 tests/test_broker_fork.py
-"""
+"""Check that sending to an adopted session forks it and preserves the source session file."""
 
 import asyncio
 import importlib.machinery
@@ -56,17 +15,12 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_adopt as adoption  # noqa: E402
 import loam_broker as cfg
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_clock  # noqa: E402
 
-# Admission reads the box's real memory since 2026-11-09, so on a full box a
-# start here was refused and this test failed for a reason it is not about
-# (two landings refused on 11-09 at ~2.8 GB free). The box always has room
-# here; test_broker_seats is the test of admission.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -233,7 +187,7 @@ async def main(root: Path) -> None:
     check("a message into the forked session is logged after the history",
           seq, 5)
     line = proc.stdin.lines[-1]
-    # The clock line opens the text since 2026-11-09 (lib/loam_clock.py).
+    # Skip the injected clock.
     check("...and reaches the CLI's stdin as a user message",
           {**line, "message": {**line["message"],
                                "content": loam_clock.strip(line["message"]["content"])}},

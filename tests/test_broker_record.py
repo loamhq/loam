@@ -1,33 +1,5 @@
 #!/usr/bin/env python3
-"""What the designed screens read off a session record, and off the box.
-
-The home screen draws a row per session: a title, one word for what it is
-doing, the last thing the agent said, how long ago anything happened, a pin
-and an archive. None of those existed on the record before 2026-09-18 -- the
-record said `state: running | exited` and nothing else -- so the page had a
-spinner and no way to say what it was spinning about.
-
-Proved here against real Session objects with a stand-in process and the real
-``Server.route``, because the point is what goes out on the wire and not what
-a method returns. Seven things, in the brief's order:
-
-  1. a title, from the titler the transcript writer uses, standing in on the
-     first message's opening words until it answers
-  2. status, last_message and last_event_at
-  3. archived records are listed (the classic list's archive filter and
-     the pin/archive/rename PATCH retired with the classic view, 2026-11-12)
-  4. the live list: one stream of every record that changes
-  5. `provider` on the record and on start, and a 400 that says why
-  6. GET /v1/providers, including the usage read off a real rate_limit_event
-  7. a record whose broker restarted mid-turn does not still say `working`
-
-**No model call is spent here.** The titler is the real one, pointed at a
-stub binary through ``LOAM_TITLER_BIN``'s own override point -- which is what
-that override exists for -- so the argv, the timeout, the validation and the
-fail-soft paths are all exercised and the quota is not.
-
-Run: python3 tests/test_broker_record.py
-"""
+"""Check session record fields, title precedence, process state and accounting."""
 
 import asyncio
 import importlib.machinery
@@ -44,9 +16,7 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 os.environ["LOAM_USAGE_READS"] = "off"  # no real CLI reads; see loam_provider_usage
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_adopt as adoption  # noqa: E402
@@ -146,10 +116,7 @@ def permission_request(request_id="req-1") -> dict:
                         "input": {"file_path": "/etc/hostname"}}}
 
 
-# A rate_limit_event copied verbatim off this box's own session log
-# (state/broker/sessions/9bea9b02-….jsonl, seq 41, 2026-09-18). Read, not
-# guessed -- including the fourth window, which was absent from the same
-# session's earlier events and appeared mid-session.
+# Provider rate-limit event fixture.
 REAL_RATE_LIMIT_EVENT = {
     "type": "rate_limit_event",
     "rate_limit_info": {
@@ -265,16 +232,11 @@ async def main() -> None:
           json.loads(session.meta_path.read_text())["title"],
           "Attachment check")
 
-    # -- 2b. the one-time sync of records the broker's own titler named -----
-    #
-    # Every record on the box was named by a second model call until
-    # 2026-09-22, so the home screen and the vault disagreed. The sync is what
-    # those records get, and a rename is what it must never touch.
+    # Sync generated titles on older records.
     renamed = running(broker)
     await renamed.send_message("a conversation somebody named themselves")
     file_transcript(renamed.id, "What the vault calls it")
-    # A person's rename, as PATCH /v1/sessions/<id> wrote it until the
-    # classic view retired (2026-11-12); records carrying one remain.
+    # An explicit rename takes precedence over generated titles.
     renamed.title, renamed.title_source = "What the owner calls it", "person"
     renamed.save()
     stale = running(broker)
@@ -336,13 +298,7 @@ async def main() -> None:
     await asked.stop()
     check("ended by request after a good turn: done", asked.status(), "done")
 
-    # A process that ends from outside while the session is idle with a good
-    # answer on it is NOT a failure. It was until 2026-09-22, and that is the
-    # red ring the owner found on Juno's "Course registration approval":
-    # the answer was complete at 19:27Z, the broker was restarted at 19:49Z,
-    # and systemd's SIGTERM reached the CLI child before `stop()` had recorded
-    # that the end was asked for. The session has an answer to read and its id
-    # resumes, which is the definition of `done`.
+    # An external stop after an idle session’s good reply preserves its completed state.
     crashed = running(broker)
     await crashed.send_message("hello")
     await crashed._handle(envelope(0.01))
@@ -364,10 +320,7 @@ async def main() -> None:
     check("a turn that never produced a result is not done",
           cut.status(), "failed")
 
-    # -- 4. archived records are listed -----------------------------------
-    # The list's archive filter retired with the classic view (2026-11-12):
-    # every record is listed, with or without ?archived=1, which is what
-    # Running now always asked for.
+    # Include archived records when requested.
     pinned = running(broker, session_id="pinned-one")
     await pinned.send_message("pin me")
     pinned.archived = True
@@ -414,10 +367,7 @@ async def main() -> None:
           [r["session_id"] for r in records][:len(expected)], expected)
     check("...every row of it the snapshot, so there is one shape to read",
           {r["type"] for r in records}, {"broker.session"})
-    # And one item that is not a row: the count against the cap (2026-09-25),
-    # last, so a client has applied the rows before it is told the total. It
-    # is here as well as on the list route because reopening this stream is
-    # meant to re-send the whole screen.
+    # Expose the session count separately from the listing rows.
     check("...and the resident count and the cap, once, at the end",
           opening[-1], {"type": "broker.residency", "live_count": resident,
                         "cap": cfg.MAX_SESSIONS})
@@ -521,9 +471,7 @@ async def main() -> None:
           broker_mod.recovered_status("working", [{}]), "failed")
     check("...nor is one caught waiting on a permission",
           broker_mod.recovered_status("needs_input", [{}]), "failed")
-    # `waiting` is the other side of that rule (2026-09-25): its turn ENDED
-    # with a good result and the only thing outstanding was a background child
-    # of a process that no longer exists. Nothing more is coming, so `done`.
+    # A completed turn cannot receive more background results after its process exits.
     check("a record caught waiting on background work is not a failure",
           broker_mod.recovered_status("waiting", [{}]), "done")
     check("a record that had finished keeps its answer",

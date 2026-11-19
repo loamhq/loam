@@ -1,35 +1,5 @@
 #!/usr/bin/env python3
-"""Which sessions are in RAM right now, and how many may be.
-
-The owner, 2026-09-25: "since we have a ram limit on number of running
-sessions, we need a filter in search on active sessions that are active in
-Ram atm." One session's process costs the box a few hundred megabytes (see
-"The turn shape" in broker/README.md for the cgroup measurements), the box
-allows four, and the broker is the only party that knows which four -- so the
-app has to be able to ask, and a page has to be able to say "2 of 4 live".
-
-Three things are proved here:
-
-  1. **`live` is residency and not turn state.** It is read off the process
-     table (`Session.is_live`): a `done` session with a warm idle process is
-     live, a session whose process has died is not, and a record read off
-     disk never is, whatever the file says.
-  2. **`live_count` and `cap` are on the listing**, and `live` -- the older
-     spelling of that count, from before each session carried a `live` of
-     its own -- still agrees with it.
-  3. **The count moves by itself.** Starting processes to the cap and past
-     it, and ending one, with the live list watched throughout: every
-     arrival and departure reaches it as `broker.residency`, and a record
-     write that changed no residency does not.
-
-Point 3 runs real processes against a stub binary -- a pid, a returncode, a
-line in `ps` -- because four sessions of the real CLI is 1.8 GB and the
-question is whether a process is behind a session, not what it is running.
-The real CLI is in the causing this was written from
-(`engineer/jobs/20260925-141117-600e0f16/`).
-
-Run: python3 tests/test_broker_residency.py
-"""
+"""Check resident session counts, resource reporting and admission at the configured limit."""
 
 import asyncio
 import importlib.machinery
@@ -314,9 +284,7 @@ saved = {name: getattr(cfg, name) for name in
          ("STATE_DIR", "SESSION_DIR", "TOKEN_PATH", "AI_LABS", "CLAUDE",
           "MAX_SESSIONS", "memory")}
 try:
-    # The count is what is proved here, so memory is plentiful and the
-    # backstop is the four this file was written against; admission by
-    # memory is tests/test_broker_seats.py's (2026-11-09).
+    # Provide enough memory to isolate the count limit.
     cfg.MAX_SESSIONS = 4
     cfg.memory = lambda: {"available": 10 ** 6, "cgroup_room": None,
                           "reserve": cfg.MEMORY_RESERVE_MB}

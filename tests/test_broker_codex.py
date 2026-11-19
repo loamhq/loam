@@ -1,28 +1,8 @@
 #!/usr/bin/env python3
-"""Codex as a provider: the translation, the login reading, the device-code
-text, the model choices, the permission answers -- and, with ``--live``, the
-real ``codex app-server`` and ``codex login --device-auth``.
+"""Check translation, login, model choices and approval responses against offline fixtures.
 
-What is proved offline:
-
-  1. ``loam_codex.Translator``: each app-server notification becomes the
-     Claude CLI event the page already draws (see the table in
-     lib/loam_codex.py), and the ``result`` carries the context figures
-  2. ``login_state`` from an ``auth.json``: absent, a ChatGPT login (email
-     and plan out of the id token, no token answered), and an unreadable one
-  3. the URL and the one-time code out of what the CLI prints
-  4. ``choices`` for a Codex chat refuses what ``model/list`` did not offer
-  5. a Codex approval becomes a ``broker.permission_request`` and the
-     existing route answers it as JSON-RPC
-
-``--live`` starts real processes against a throwaway ``CODEX_HOME`` and a
-throwaway agent directory, and spends nothing: with no login, a turn fails at
-OpenAI with a 401 and that failure is what is checked. It also mints one
-device code and cancels it, which is a request to OpenAI and why it is not
-the default.
-
-Run: python3 tests/test_broker_codex.py [--live]
-"""
+With --live, start a signed-out app-server in a temporary home, request a
+device code and cancel it. This mode contacts the provider."""
 
 import asyncio
 import base64
@@ -40,9 +20,7 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 os.environ["LOAM_USAGE_READS"] = "off"  # no real CLI reads; see loam_provider_usage
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_codex as codex  # noqa: E402
@@ -151,8 +129,7 @@ def translator_cases() -> None:
     check("...and answered with its content blocks",
           out[0]["message"]["content"][0]["content"],
           [{"type": "text", "text": "found"}])
-    # A web search fills in at completion: the real one from 2026-10-02,
-    # which the page drew as `webSearch {"query":"","action":null,...}`.
+    # The search query arrives on completion.
     search = json.loads((AGENTS / "fixtures" / "codex-websearch.json")
                         .read_text(encoding="utf-8"))
     sid = search["item/started"]["item"]["id"]
@@ -277,7 +254,7 @@ def login_cases(root: Path) -> None:
           False)
 
 
-# What 0.159.3 printed on this box on 2026-10-01, with the code replaced.
+# Device-login terminal output with a fixture code.
 DEVICE_TEXT = (
     "\nWelcome to Codex [v\x1b[90m0.159.3\x1b[0m]\n\x1b[90mOpenAI's "
     "command-line coding agent\x1b[0m\n\nFollow these steps to sign in with "
@@ -348,9 +325,7 @@ async def offline_broker_cases(root: Path) -> None:
     check("a permissions request allowed grants what it asked, for the turn",
           sent[-1]["result"], {"permissions": {"network": {"enabled": True}},
                                "scope": "turn"})
-    # The MCP approval, as a persona's thread 01a0f8a0 met it four times on
-    # 2026-10-01: refused by this client then, and read by the model as
-    # "user rejected MCP tool call". Now a card, and only the page answers.
+    # An MCP approval uses the same client permission route.
     elicit = {"serverName": "engineer", "threadId": "th", "turnId": "tu",
               "mode": "form", "message": "Allow the engineer server to run brief?",
               "requestedSchema": {"type": "object", "properties": {}},
@@ -384,8 +359,7 @@ async def offline_broker_cases(root: Path) -> None:
           (session.pending["codex-11"]["tool_name"],
            session.pending["codex-11"]["input"]),
           ("request_user_input", {"questions": question["questions"]}))
-    # Answered in the one shape since 2026-10-01 (tests/test_broker_questions.py
-    # holds the rest); the broker puts it back in Codex's.
+    # Translate the client answer back to the provider schema.
     await session.answer_permission(
         "codex-11", "allow", answers={"pick": ["the first"]})
     check("...answered with the page's answers",
@@ -405,8 +379,7 @@ async def offline_broker_cases(root: Path) -> None:
     check("a request that asks no person is refused, not left waiting",
           (sent[-1]["error"]["code"], list(session.pending)), (-32601, []))
 
-    # The order a signed-in turn really sends (2026-10-01, thread 01a0f895):
-    # a request's tokenUsage arrives AFTER the message it produced closed.
+    # Usage can arrive after the final message.
     def usage(n: int) -> dict:
         last = {"inputTokens": n, "cachedInputTokens": n - 100,
                 "outputTokens": 9}
@@ -429,9 +402,7 @@ async def offline_broker_cases(root: Path) -> None:
     check("a Codex turn's context is its last request's, from the result",
           session.turns[-1]["context"], {"used": 22394, "window": 258400})
 
-    # A subagent is a background task (2026-10-02). The shape of a persona's chat
-    # 7bcccd28: the root spawns one, the subagent opens an engineer call, the
-    # root ends its turn, and the subagent is still on the call.
+    # Track a spawned agent as background work.
     session.thread_id = "th"
     queue: asyncio.Queue = asyncio.Queue()
     session.watch(queue)
@@ -464,11 +435,7 @@ async def offline_broker_cases(root: Path) -> None:
     check("...its tool call closes and the session still waits",
           session.status(), "waiting")
 
-    # A subagent ending after the root's turn wakes the root (2026-10-09),
-    # as a Claude task notification wakes a Claude persona. Before, its
-    # report sat unread until the person's next message (proved 10-02). The
-    # order is the one measured on 0.159.3: its message, its idle, then its
-    # `turn/completed`.
+    # A child finishing after the parent turn can wake it.
     session.WAKE_GATHER_S = 0
 
     async def settle():
@@ -501,10 +468,7 @@ async def offline_broker_cases(root: Path) -> None:
     last_before = session.last_message
     await feed("item/completed", {"threadId": "sub", "turnId": "s1", "item": {
         "type": "agentMessage", "id": "m-sub", "text": "The receipt says it landed."}})
-    # The record is Loam's (2026-11-13): a subagent's words are nested under
-    # the call that spawned it, never the persona's. Until today they went
-    # out with a null parent, and the thread engine posts top-level text as
-    # the persona's reply.
+    # Keep child output nested under its spawning call.
     sub_events = []
     while not said.empty():
         sub_events.append(said.get_nowait())
@@ -559,9 +523,7 @@ async def offline_broker_cases(root: Path) -> None:
            ("broker.background_tasks", 0), ("system", "task_notification"),
            ("system", "init"), ("result", "success")])
 
-    # The earlier shape (seq 1166 of 7bcccd28): the subagent finishes while
-    # the root is still working, and the root's turn is not closed by it.
-    # Nothing new starts: Codex hands the report to the turn in flight.
+    # A child can finish while the parent is still working.
     before = len(sent)
     await feed("turn/started", {"threadId": "th", "turn": {"id": "u3"}})
     await feed("turn/started", {"threadId": "sub", "turn": {"id": "s2"}})
@@ -577,9 +539,7 @@ async def offline_broker_cases(root: Path) -> None:
           (session.status(), len(turn_starts(before))), ("done", 0))
     drawn_since()
 
-    # A root MCP call that outlives its turn (a persona's a9c8ec2c, 10-09: a
-    # `brief` left running in a code cell when the turn ended, 23 minutes of
-    # `done`/0, its receipt landing on a closed turn nobody read).
+    # An MCP call can outlive its turn.
     before = len(sent)
     await feed("turn/started", {"threadId": "th", "turn": {"id": "u4"}})
     await feed("item/started", {"threadId": "th", "turnId": "u4", "item": {
@@ -606,9 +566,7 @@ async def offline_broker_cases(root: Path) -> None:
         "id": "u5", "status": "completed", "items": []}})
     check("LATE ...and that turn ends done", session.status(), "done")
 
-    # A root command that outlives its turn (probe f35cc554, 10-09: a code
-    # cell yields after 30 s and leaves its `sleep 30` running; the row read
-    # `done`/0 and the output reached nobody).
+    # A command can keep running after its turn returns.
     before = len(sent)
     drawn_since()
     await feed("turn/started", {"threadId": "th", "turn": {"id": "u6"}})

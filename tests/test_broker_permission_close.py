@@ -1,31 +1,5 @@
 #!/usr/bin/env python3
-"""Every pending request closes on the stream, and a session that is asking
-is not idle (2026-10-05).
-
-Until that day the idle reaper counted a raised card as the session's last
-sign of life, ended the chat an hour later, and `_reap` cleared `pending`
-without a word on the stream: the log held `broker.permission_request`
-events that never closed, and a page replaying it drew them as live cards on
-every reopen, each one answering 404. What is proved here, against a Session
-with a stand-in process (the point is what reaches the CLI and the log, not
-the agent):
-
-  - a request past PERMISSION_WAIT_S is denied by the reaper with the
-    sentence, on the CLI's stdin; the process lives, the turn then finishes,
-    and the log says `expired`;
-  - a request under the limit is not reaped, however far past
-    CLASSIC_IDLE_S the session's own clock is; the same session with nothing
-    pending is;
-  - each way a request closes unanswered writes its event before
-    `broker.exit`: the reaper ending the process, DELETE, the broker's own
-    shutdown (a stop whose pipe is never read again), a crash, and the CLI's
-    `control_cancel_request`, and Codex's `serverRequest/resolved`;
-  - an answer to a closed request is a 404 with the sentence the page reads;
-  - `updatedPermissions` reaches the CLI unaltered and the event says
-    `scope: session`; a destination other than `session` is refused.
-
-Run: python3 tests/test_broker_permission_close.py
-"""
+"""Resolve pending permission requests on the stream and keep waiting sessions alive."""
 
 import asyncio
 import importlib.machinery
@@ -40,9 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 

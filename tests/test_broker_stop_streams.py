@@ -1,33 +1,5 @@
 #!/usr/bin/env python3
-"""A broker stop never waits on a stream a client still holds open.
-
-The 2026-10-14 stop hung for systemd's full 90 s and was SIGKILLed. The dump
-(``ShutdownWatch``) showed ``asyncio.run`` cancelling a ``Server.handle`` task
-that would not end. The cause: ending a live chat at the stop writes its
-record, ``record_changed`` puts it on every live-list queue, and the stream's
-``asyncio.wait_for(queue.get(), ...)`` -- which on Python 3.11 swallows a
-cancel that lands as its inner future completes (CPython gh-86296) -- returned
-the record instead of raising, so the loop sent it and waited again, pinging
-a client that was still connected.
-
-Two fixes, each enough on its own and both tested here together: the stream
-loops wait under ``asyncio.timeout`` rather than ``wait_for``, and ``amain``
-puts ``None`` on every live-list queue after the sessions stop, which
-``stream_records`` returns on, so a stop does not depend on a cancel at all.
-
-The case runs the real ``amain`` in a process of its own, as
-tests/test_broker_shutdown_dump.py does: a stand-in live session whose
-``stop()`` writes its record as its last act, exactly the 10-14 sequence, and
-a real client holding ``GET /v1/sessions/events`` open across the SIGTERM.
-
-  1. **The broker exits 0 within a few seconds** of SIGTERM, the client still
-     connected. Before the fix it hung until killed, its dump written.
-  2. **The client saw the session's last record** before the stream ended:
-     the stop still tells the live list what happened.
-  3. **The stream ended** from the broker's side, rather than being cut.
-
-Run: python3 tests/test_broker_stop_streams.py
-"""
+"""Check that open client streams cannot prevent a broker process from stopping."""
 
 import os
 import signal

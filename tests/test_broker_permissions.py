@@ -1,30 +1,5 @@
 #!/usr/bin/env python3
-"""``broker.permission_resolved``: answering a card tells every client.
-
-A permission card is a question the session is blocked on, and more than one
-client may be watching the same session. Before this event existed, only the
-client that answered knew: a second device held a card for a request that no
-longer existed until the next ``broker.session`` happened to reconcile it.
-The broker is the only party that knows the answer was accepted, so the
-broker says so.
-
-What is proved here, against a Session with a stand-in process rather than a
-real CLI (the point is the event, not the agent):
-
-  - answering emits the event, on the stream, after the control_response;
-  - it carries the request_id, the behavior and the tool_name, FLAT, the way
-    the other three broker.* events do -- a second device must be able to
-    match it to its card without having kept the original request;
-  - a deny carries the client's message and an allow carries None, so the
-    event is not a place a deny reason quietly appears on an allow;
-  - the request is no longer pending afterwards, and answering it twice is a
-    404 rather than a second resolution;
-  - it is written to the event log like every other event, so a client that
-    was disconnected at that moment gets it on replay. That is the half a
-    live subscriber test would miss.
-
-Run: python3 tests/test_broker_permissions.py
-"""
+"""Broadcast permission resolution to all subscribers and record the model that handled the turn."""
 
 import asyncio
 import importlib.machinery
@@ -38,9 +13,7 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -153,17 +126,7 @@ async def main() -> None:
           live["type"], "broker.permission_resolved")
     check("...the same one that is on disk", live["seq"], 1)
 
-    # -- which model the turn ran on --------------------------------------
-    #
-    # The result envelope's modelUsage lists every model the PROCESS billed,
-    # including the CLI's own small-model calls, so it is not an answer to
-    # "what did this turn run on". A real turn as one agent (fable) billed Haiku
-    # too; the fixture below is that envelope's shape with an Opus session,
-    # where the alphabetical pick this replaced would have said Haiku.
-    # Since 2026-09-16 the rule is exact and modelUsage is not consulted at
-    # all: the model is the turn's top-level assistant messages', or null.
-    # tests/test_broker_snapshot.py holds the rest of that rule; this is the
-    # envelope it was got wrong on.
+    # Use the top-level assistant model to identify the responding model.
     envelope = {"type": "result", "subtype": "success", "modelUsage": {
         "claude-haiku-4-5-20251001": {"costUSD": 0.001002, "outputTokens": 14},
         "claude-opus-5": {"costUSD": 0.34, "outputTokens": 136},

@@ -1,34 +1,5 @@
 #!/usr/bin/env python3
-"""Schedules and Activity through the broker's own routes.
-
-A broker's ``Server.route`` in process, over a made-up agent in a temp
-``ai-labs``, a temp schedule log and a scratch unit directory, with a
-stand-in for ``systemctl`` that records what it was asked and answers
-``show`` for the timers present (the timers' real behaviour under the user
-manager is tests/test_schedule.py's). What is asserted is what the page
-would see and what the box would hold after each request:
-
-  - the owner's create -> edit -> pause -> undo, each a change by the owner's id on
-    lane `app`, the record and the timer following each, and the undo a new
-    change naming the one it undid; an older change refused for undo;
-  - a refused change comes back as the path's own sentence and changes
-    nothing; Run now starts the service, and is refused on a paused record;
-  - seen: an agent's change is unread in Activity and marked on its row;
-    marking it seen on the row clears Activity, and marking seen in
-    Activity clears the row;
-  - a run in flight (the fake answering as systemd 252 does mid-run): the
-    row carries `running_since` and still a `next_fire`; with none,
-    `running_since` is null;
-  - a direct edit made while one of the agent's chats is live is lane
-    `conversation`; with no chat and no run, `unknown`;
-  - a killed run: bin/wake-failed, given the marker a SIGTERM leaves,
-    writes a fire line with outcome `killed`, and Activity shows it;
-  - a job cancel: a queued job of a scratch project is cancelled through
-    the route by the launcher's own `cancel`, gets its verdict, and shows
-    in Activity as a finished job; a second cancel is refused.
-
-Run: python3 tests/test_broker_schedules.py
-"""
+"""Exercise schedule and activity routes with fixture workspaces and a recording systemctl."""
 
 from __future__ import annotations
 
@@ -92,11 +63,7 @@ ls.WAKE_STATE = TMP / "wake"
 ls.BROKER_SESSIONS = TMP / "sessions"
 ls.WRITE_PAGE = False
 activity.WAKE_LOGS = TMP / "logs"
-# No project's jobs but the test's own (2026-11-17): Activity lists every
-# project's finished jobs, read from the box's real jobs folders, and a job
-# finishing there while this runs -- another test's fixture, or a real job --
-# became the newest item and failed "an agent's change" below. The cancel
-# section further down puts its own scratch project in.
+# Isolate job history from the machine running the test.
 eng.projects = lambda: {}
 
 
@@ -105,9 +72,7 @@ class FakeSystemd(ls.Systemd):
     def __init__(self) -> None:
         super().__init__(unit_dir=UNITS, runtime=True)
         self.calls: list[tuple[str, ...]] = []
-        # timer -> when its service started, for a run in flight. Answered
-        # as systemd 252 answers (measured 2026-10-23): the timer `running`,
-        # no NextElapse, TimersCalendar's next_elapse the trigger just past.
+        # Return a service start timestamp in systemd’s format.
         self.running: dict[str, str] = {}
 
     def _timer(self, unit: str) -> str:
@@ -537,7 +502,7 @@ try:
           and ls.wake_time(AGENT) == "03:30" and "wake_schedule" not in config,
           body["schedule"]["state_words"])
 
-    # -- the daily reflection through the settings route (2026-11-19) ---------
+    # Change the daily reflection through Settings.
     import loam_threads as threads  # noqa: PLC0415
     threads.AI_LABS = LABS
     reflection = f"/v1/schedules/{AGENT}/reflection"
@@ -598,11 +563,7 @@ try:
                                  "changed_since_seen", "running_since"} <= set(r)
                                 for r in body["schedules"]), body["schedules"][:1])
 
-    # -- a run in flight: running_since, and next_fire kept ------------------
-    # The 10-15 read: Ada's reflection mid-run came back next_fire null,
-    # because systemd blanks a running timer's next elapse. The active state
-    # is simulated in the fake (as systemd 252 reports it); the next elapse
-    # is the real systemd-analyze's arithmetic on the rendered OnCalendar.
+    # Report running_since while retaining the next scheduled fire.
     wake_timer = f"loam-wake-{AGENT}.timer"
     print("reflection, idle:", json.dumps({k: row_of("reflection")[k] for k in
           ("name", "running", "next_fire", "running_since", "last_fire")}))
@@ -629,7 +590,7 @@ try:
     ls.claim(AGENT, "watch", good, actor=OWNER, lane="app")
     ls.reconcile([AGENT], systemd=SYSTEMD)
 
-    # -- a persona's change through the same route (`by`, 2026-11-10) -----
+    # Attribute schedule edits to their caller.
     other = f"zzoth{os.getpid()}"
     (LABS / other / "crons").mkdir(parents=True)
     (LABS / other / "agent.json").write_text(json.dumps({"name": other}) + "\n")

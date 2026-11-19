@@ -1,35 +1,5 @@
 #!/usr/bin/env python3
-"""A tool result's pictures stay in the log and off the wire.
-
-The owner, 2026-10-15, of a new Ada chat (an evals framework research thread,
-05d262de): the list said done, and opening it showed none of
-Ada's replies. The replies were in the log (seq 698 and 2220) and in every
-stream the broker sent. What was in front of them was Ada's own `Read` of a
-course's PDFs: the CLI hands the model each page as a base64 JPEG, and seven
-`user` events of 0.6-3.2 MB put 16 MB of a 17 MB log ahead of the first
-reply. A phone opening the chat gave up on the window at 20 s with nothing
-drawn; the proxy logged four opens cut at 2.2, 2.5, 13.2 and 6.9 MB.
-
-The event below is that log's seq 372 with two of its twenty pages kept and
-each page's `data` cut to its first 24 characters -- the shape is verbatim,
-the bytes are not, because the bytes are the 3 MB this test is about.
-
-Proved here:
-
-  1. `for_the_wire` takes the `data` out of a base64 image inside a tool
-     result, keeps the block, its `media_type` and the result's text, and
-     says how many characters went
-  2. an event with nothing to cut is the same object, and the event it was
-     given is not changed; a `Read` of an image file loses the picture's
-     second copy in `tool_use_result.file.base64` too
-  3. the server's one SSE writer (`Server._send_event`, under every stream
-     the broker still answers) sends the logged event cut, read back off the
-     log by `replay` -- and the log on disk is byte-for-byte what it was. (The
-     per-session events stream, `?from=` and `?last=`, retired with the
-     classic chat view on 2026-11-12.)
-
-Run: python3 tests/test_broker_wire_images.py
-"""
+"""Keep original tool-result images in the journal while bounding the event sent to clients."""
 
 import asyncio
 import copy
@@ -44,9 +14,7 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -151,9 +119,7 @@ async def main() -> None:
           {"type": "base64", "media_type": "image/png",
            "omitted_chars": len(PAGE)})
 
-    # `Read` of a photograph, as Wren's "Dynamic systems theory overview"
-    # (819c6fee) logged it 78 times: the picture once in the result and once
-    # more in `tool_use_result.file.base64`. Bytes cut as above.
+    # Use a recorded image-result shape to check wire encoding.
     photo = {"type": "user", "seq": 7, "message": {"role": "user", "content": [
         {"type": "tool_result", "tool_use_id": "toolu_x", "content": [
             {"type": "image", "source": {"type": "base64", "data": PAGE,

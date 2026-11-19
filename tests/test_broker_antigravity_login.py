@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Signing in to Antigravity from the app, and the generic sign-in contract
-every provider row carries (2026-11-11).
-
-  1. Every wired row carries `sign_in` (kind and routes by path); an unwired
-     one carries `sign_in: null`.
-  2. `POST/GET/DELETE /v1/providers/antigravity/login`, `POST .../login/code`
-     and `POST .../logout` drive one `agy acp --login` on a pipe.
-
-**No real login is made and no real credential is read.** `agy` is a
-stand-in that prints what the real one printed on this box (1.5.6,
-2026-11-11, under a decoy HOME) and writes its "token" into a temp
-directory; TOKEN_FILE and ACCOUNT_FILE point there for the whole run. The
-real CLI driven to a link and a refused fake code is in broker/README.md
-under "Signing in to Antigravity".
-
-Run: python3 tests/test_broker_antigravity_login.py
-"""
+"""Check provider sign-in metadata, the Antigravity login flow and cancellation."""
 
 import asyncio
 import importlib.machinery

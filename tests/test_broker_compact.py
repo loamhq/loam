@@ -1,27 +1,5 @@
 #!/usr/bin/env python3
-"""Compaction: no window of the broker's own, and the divider in the log.
-
-A persona session on Fable has a 1M window and the CLI compacts it at about
-967k by default. That default is the only automatic compaction (the owner,
-2026-09-30, undoing a 400k window set the same morning). The route that asked
-for one now, `POST /v1/sessions/<id>/compact`, retired with the classic chat
-view on 2026-11-12; what the CLI's own compaction leaves is still handled.
-Proved through the real ``Session``:
-
-  1. the spawned process is launched without CLAUDE_CODE_AUTO_COMPACT_WINDOW,
-     and the record carries no `compact_window`
-  2. the CLI's `system`/`compact_boundary` is followed in the log by a
-     `broker.compaction` a page can draw as a divider, with the numbers the
-     marker carries and null for any it does not; a compaction's own turn
-     takes the marker's post_tokens as its context
-  3. the transcript writer files no turn for anything a compaction leaves in
-     the session file
-
-**No model call is spent here.** The marker's shape is the one the CLI 2.1.281
-emitted on 2026-09-30.
-
-Run: python3 tests/test_broker_compact.py
-"""
+"""Preserve provider compaction boundaries in the event log and stream."""
 
 import asyncio
 import importlib.machinery
@@ -36,17 +14,12 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_transcript  # noqa: E402
 
-# Admission reads the box's real memory since 2026-11-09, so on a full box a
-# start here was refused and this test failed for a reason it is not about
-# (two landings refused on 11-09 at ~2.8 GB free). The box always has room
-# here; test_broker_seats is the test of admission.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 

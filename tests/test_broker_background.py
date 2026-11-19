@@ -1,41 +1,5 @@
 #!/usr/bin/env python3
-"""Working means working: the tasks behind a turn, and what a turn cost in
-context.
-
-The owner, 2026-09-22: "The chat shows a done state sometimes when the model is
-still thinking or running a command and still working." They were right, and the
-cause is in this box's own logs. A persona launches a background subagent, its
-own turn ends, the CLI emits `result`, the broker writes `done` -- and twenty
-minutes later the subagent reports, the CLI opens another turn by itself, and
-text arrives under a row that says the conversation is finished.
-
-Three things are proved here, in the brief's order:
-
-  1. the turn state is held off `done` until nothing further is coming: while
-     a background task is live, while one has left the CLI's list and not yet
-     notified, from a notification until the result that answers it
-  2. `background_tasks` on the record is the count, and the stream says when
-     it changes
-  3. each turn carries `context.used` and `context.window`, and an adopted
-     record carries `history_bytes`
-
-And a fourth, added 2026-09-25: **that hold has its own word.** The owner,
-watching their own chat while its agent had ended its turn and two background
-jobs ran on: "the chat list shows as if you are fully done. Maybe we should
-have a waiting state as well as a separate state?" The record was in fact
-held -- and it said `working`, of a session generating nothing. So the hold
-is `waiting`, `working` is the CLI's turn being open, and `done` is
-unchanged. Point 1's checks below read `waiting` where they read `working`
-before; nothing about *when* the state changes has moved.
-
-**Every CLI event below is verbatim off this box.** The session ids and seq
-numbers are in the comments: 940380fd (Ada, "Loam phase six planning", the
-conversation the owner watched) and 49db688c (Juno, "Garden club
-renewal approval"). A fixture written from what the stream ought to look
-like would have proved the fixture.
-
-Run: python3 tests/test_broker_background.py
-"""
+"""Check the ordering of turn completion, background-task notifications and context accounting."""
 
 import asyncio
 import importlib.machinery
@@ -49,9 +13,7 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_adopt as adoption  # noqa: E402
@@ -106,11 +68,7 @@ def running(session_id: str | None = None):
     return session
 
 
-# -- the CLI's own events, verbatim ----------------------------------------
-#
-# Session 940380fd-0d52-5ae4-a399-9dc7d059b650, 2026-09-22. The whole shape of
-# the defect is in seqs 1371-1379 (a task launched) and 10152-10158 (one
-# reporting after its turn had already been called done).
+# Provider events for a task that outlives its parent turn.
 
 TASKS_ONE = {                                              # seq 1376
     "type": "system", "subtype": "background_tasks_changed",
@@ -164,9 +122,7 @@ INIT = {                                                   # seq 10158
     "session_id": "940380fd-0d52-5ae4-a399-9dc7d059b650",
     "uuid": "c0a1b2c3-0000-4000-8000-000000000000"}
 
-# Session 49db688c-3111-4b67-b512-804c5ef7e34c, Juno, 2026-09-22 19:27Z: the
-# last top-level assistant message of a turn (seq 317) and the result that
-# closed it (seq 321). The two numbers this job is about are in them.
+# Usage belongs to the top-level assistant message.
 ASSISTANT = {
     "type": "assistant", "parent_tool_use_id": None,
     "message": {"model": "claude-fable-5-1",
@@ -223,9 +179,7 @@ async def main(root: Path) -> None:
     await session._handle(TASKS_TWO)
     check("two of them", session.meta()["background_tasks"], 2)
 
-    # The defect, exactly: the CLI closes the turn while the subagents run.
-    # Held off `done`, as of 2026-09-22 -- and since 2026-09-25 held on its own
-    # word, because nothing is being generated here. See `waiting`, below.
+    # The turn result can arrive while its subagents are running.
     await session._handle(envelope())
     check("the CLI's turn is over and the tasks are not: waiting",
           session.status(), "waiting")
@@ -268,14 +222,7 @@ async def main(root: Path) -> None:
     check("...and nothing is left behind it",
           (session.meta()["background_tasks"], session._resuming), (0, False))
 
-    # -- 1a. the three-way, read in order ----------------------------------
-    #
-    # The owner, 2026-09-25, watching their own chat with two background jobs
-    # running behind an agent that had stopped: "the chat list shows as if you
-    # are fully done. Maybe we should have a waiting state as well as a
-    # separate state?" The row was in fact held -- it said `working` -- and
-    # that was the untruth: nothing was being generated. Three words now, and
-    # the whole of the change is which one comes out when.
+    # Distinguish generating, waiting on background tasks and done.
     three = running()
     seen = []
     await three.send_message("launch a background job and finish your turn")
@@ -295,13 +242,7 @@ async def main(root: Path) -> None:
           seen,
           ["working", "working", "waiting", "waiting", "working", "done"])
 
-    # -- 1b. the notification BEFORE the list empties (2026-11-10) ---------
-    #
-    # Session 31166dae, a probe turn: `task_notification` at seq 37, the
-    # emptied list at 38 -- the order of 396 of the 684 tasks in this box's
-    # logs. The task notified first was put in `_awaiting` anyway and held
-    # `working_behind` for the settle window after the answer's own result,
-    # so a thread turn read that result as "more to come".
+    # A completion notification can precede the empty task list.
     first = running()
     await first.send_message("launch a background sleep and finish your turn")
     await first._handle(TASKS_ONE)
@@ -329,12 +270,7 @@ async def main(root: Path) -> None:
     check("...and it is parked again once answered",
           outranked.status(), "waiting")
 
-    # -- 1b. an init reopens a turn the CLI closed under it ----------------
-    #
-    # Session 940380fd, seqs 1576-2517: a message, a notification for a task
-    # from the process before it, an init, a result at 1579 -- and then a
-    # SECOND init at 1580 opening the real turn, whose result was 900 events
-    # later. The row said `done` for the whole of it.
+    # An init after a result opens another turn.
     reopened = running()
     await reopened.send_message("what happened to the four briefs?")
     await reopened._handle(NOTIFICATION)
@@ -402,15 +338,7 @@ async def main(root: Path) -> None:
            broker_mod.normalise(dict(parked))["status"]),
           (0, "done"))
 
-    # -- 1e. the red ring on a conversation that was fine ------------------
-    #
-    # Juno, "Garden club renewal approval" (49db688c), 2026-09-22:
-    # answered at 19:27:13Z, sat idle, and its process was killed at 19:49:02Z
-    # with exit 143 when systemd restarted the broker. The unit sets no
-    # KillMode, so SIGTERM goes to every process in the cgroup and the CLI
-    # child gets it at the same instant the broker does -- and `_reap` can run
-    # before `stop()` has recorded that the end was asked for. What the row
-    # said was Failed, on a complete answer.
+    # The child can receive SIGTERM before the parent records an idle shutdown.
     killed = running()
     await killed.send_message("what do I owe on the garden club renewal?")
     await killed._handle(envelope())

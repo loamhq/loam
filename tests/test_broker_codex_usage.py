@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""Codex's quota on the providers row: ``account/rateLimits/updated`` kept on
-disk and served as the ``codex`` row's ``usage``, in the Claude row's shape.
-
-What is proved, offline:
-
-  1. the notification mapped into the row's shape: ``usedPercent`` as a
-     fraction, the windows named by length, ``credits`` and ``planType``
-     beside them; a sparse update merged over the last reading; a reading for
-     another ``limitId`` kept in its own bucket
-  2. ``usage`` is null before the first reading, with ``usage_reason``
-  3. a reading taken through a Codex session survives the broker object's
-     re-creation, because the row reads the file and not the process
-  4. the same reading reaches the chat's stream as a ``rate_limit_event``
-     the page already reads, and does not touch Claude's reading
-  5. a reading taken on another login is not served
-
-Run: python3 tests/test_broker_codex_usage.py
-"""
+"""Persist provider rate-limit notifications and serve both quota windows on the provider row."""
 
 import asyncio
 import base64
@@ -33,9 +16,7 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 os.environ["LOAM_USAGE_READS"] = "off"  # no real CLI reads; see loam_provider_usage
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_codex as codex  # noqa: E402
@@ -57,8 +38,7 @@ def check(label: str, got, want) -> None:
         print(f"      wanted {want!r}")
 
 
-# The shape 0.159.3's schema states, with the numbers a real turn's rollout
-# carried on 2026-10-01 (thread 01a0f8a0, `rate_limits` on a token_count).
+# Use the provider rate-limit schema for both windows.
 NOTE = {"rateLimits": {
     "limitId": "codex", "limitName": None,
     "primary": {"usedPercent": 2, "windowDurationMins": 300,

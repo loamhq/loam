@@ -1,37 +1,5 @@
 #!/usr/bin/env python3
-"""A stop that hangs writes what the broker is doing; one that does not, nothing.
-
-A persona's brief, 2026-10-13: four broker stops between 10-07 and 10-09 ignored
-SIGTERM for systemd's full 90 s and were SIGKILLed with no stack captured.
-``ShutdownWatch`` in bin/session-broker writes one line per live session and
-every thread's stack, by name, ``cfg.SHUTDOWN_DUMP_S`` after the signal, and
-the stop then goes on as before.
-
-Each case runs the real ``amain`` in a process of its own -- a real signal to
-a real pid, read back off that process's stderr -- with the state directory
-in a temp dir, the start-up passes that read the box's records stubbed out,
-and the bounds shortened to seconds:
-
-  1. **A hang writes the dump.** The broker is held the way the 10-09 lead
-     says it may be: a ``to_thread`` call still outstanding when shutdown
-     begins, which ``asyncio.run`` joins with no timeout on 3.11. A live
-     session stands beside it. After SIGTERM the dump names the session and
-     its state, names ``MainThread`` and the worker ``asyncio_0`` with the
-     frame the worker is stuck in, and the process is still running after it,
-     because the dump is an instrument and not a stop.
-  2. **The GIL-free fallback is cancelled** by that dump: no faulthandler
-     block follows it, past the fallback's own bound.
-  3. **A hang ends itself** (2026-11-10): the held task is cancelled with a
-     bound and, when it will not end, named in the journal and the broker
-     exits 0 -- before systemd's SIGKILL, which the 11-10 stop needed.
-  4. **The backstop**: a worker thread still busy after the loop is done is
-     named and the broker exits at ``SHUTDOWN_EXIT_S``.
-  5. **No start once the stop has begun**: ``start_session`` answers 503.
-  6. **A clean stop writes nothing new**: same broker, no hold, exit 0 inside
-     the bound, and no ``shutdown:`` line at all.
-
-Run: python3 tests/test_broker_shutdown_dump.py
-"""
+"""Check shutdown diagnostics and bounded exit for stuck tasks and worker threads."""
 
 import os
 import shutil
@@ -289,8 +257,7 @@ def test_hang(tmp: Path) -> None:
         check("hang: the faulthandler fallback did not write a second dump",
               "most recent call first" not in b.text()
               and b.text().count("shutdown: end of dump") == 1, b.text())
-        # The stop's own bound (9 s here): the broker ends it, before any
-        # SIGKILL, and names the task that would not end (2026-11-10).
+        # The broker must exit on its own and identify the stuck task.
         try:
             code = b.proc.wait(timeout=8)
         except subprocess.TimeoutExpired:

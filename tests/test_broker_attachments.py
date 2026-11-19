@@ -1,36 +1,5 @@
 #!/usr/bin/env python3
-"""A file attached to a chat: where it lands, and what the model is shown.
-
-The app's composer can carry files since 2026-09-21. The half proved here is
-the broker's: `POST /v1/threads/<id>/attachments` takes a `multipart/form-data`
-upload, writes the bytes into the vault, and answers with the path; a later
-message names each path (`Server._attachment`, the check the thread message
-route makes) so the persona can Read it, and an image is also base64'd into
-the turn (`Session.send_message`) so the persona can see it. Until the classic
-chat view retired (2026-11-12) the same upload was also a session's route,
-`POST /v1/sessions/<id>/attachments`; the code under both was one.
-
-Six things, in the brief's order:
-
-  1. the cap -- refused on the wire before the body is kept, and refused again
-     per file, with the type allow-list in the same place
-  2. the sanitising: a name is a name, never a path, and never a dotfile
-  3. the stored path: `98_ATTACHMENTS/<app>/YYYY-MM-DD/<name>`, the bytes
-     unchanged (the multipart parser is hand-rolled -- a PNG that survives it
-     byte for byte is the reason this check exists), and a second file of the
-     same name beside the first rather than over it
-  4. the message shape: content blocks, the paths named in the text, one image
-     block per image, and a plain string still when nothing is attached
-  5. `broker.user_message` carries the attachments
-  6. a path the broker did not write is refused, so a message cannot make a
-     persona read an arbitrary file on the box
-
-**No model call is spent here.** The CLI is a stand-in that records what was
-written to its stdin, which is the thing under test: the exact bytes of the
-user message.
-
-Run: python3 tests/test_broker_attachments.py
-"""
+"""Exercise multipart uploads, stored filenames and presentation of attachments to a session."""
 
 import asyncio
 import importlib.machinery
@@ -50,9 +19,7 @@ root = Path(tempfile.mkdtemp(prefix="loam-attachments-"))
 os.environ["LOAM_VAULT"] = str(root / "vault")
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_clock  # noqa: E402
@@ -297,7 +264,7 @@ async def main() -> None:
 
     await session.send_message("and nothing attached")
     sent = session.proc.stdin.lines[-1]["message"]["content"]
-    # Since 2026-11-09 the text opens with the clock line (lib/loam_clock.py).
+    # Skip the injected clock to compare attachment text.
     check("a message with nothing attached is still a plain string",
           (isinstance(sent, str), sent.startswith("<loam-clock>"),
            loam_clock.strip(sent)), (True, True, "and nothing attached"))

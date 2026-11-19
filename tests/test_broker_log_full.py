@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""A write the log cannot take never strands a chat.
-
-On 2026-10-22 `/` filled while session f3069d8e was streaming. The event
-write in `emit` raised ENOSPC, the exception killed that session's
-`_pump_stdout`, and the chat sat on `working` while the persona went on
-answering into a pipe nobody read. The failed write had also left half a line
-in the log, and the next event appended onto it was lost to every replay.
-
-Proved here with a simulated ENOSPC against a Session with a stand-in process:
-
-  - the reader goes on reading, and every event still reaches a live page;
-  - the turn the lost event belonged to is `failed`, with a sentence a page
-    can show, and the next good turn is `done` again;
-  - a partial line is followed by a fresh line, so the next event replays --
-    including a log a previous broker left torn;
-  - a record that cannot be saved does not end the reader either.
-
-Run: python3 tests/test_broker_log_full.py
-"""
+"""Keep sessions usable after failed journal writes and recover a journal ending in a partial line."""
 
 import asyncio
 import errno
@@ -32,9 +14,7 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -235,9 +215,7 @@ async def main() -> None:
           saw, ["failed"])
     check("...and says why", session.turns[0].get("not_saved"), FULL)
 
-    # -- a log an earlier broker left torn ---------------------------------
-    #
-    # The exact shape found on session f3069d8e: a fragment with no newline.
+    # Recover a torn trailing journal entry.
     session = broker_mod.Session("probe")
     session.log_path.parent.mkdir(parents=True, exist_ok=True)
     session.log_path.write_text(

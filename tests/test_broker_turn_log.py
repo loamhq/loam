@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""The two things a reopened session needs: both sides of it, and a real cost.
-
-A session's durable log is the whole of what a client that was not watching
-live can be shown. Two defects made a reopened session read wrongly, and both
-are the broker's because the app has no durable state of its own by design:
-
-  - the CLI does not echo a message a person sent (``--replay-user-messages``
-    is deliberately not passed) and a ``user`` event on this stream is a tool
-    result, so the log held answers and no questions. ``broker.user_message``
-    is the missing half, and it must be written BEFORE the CLI's own events
-    for the turn or the replay reads out of order;
-  - ``total_cost_usd`` is the PROCESS's running total and it resets at a
-    resume, so a page printing it per turn shows a number that climbs wrongly
-    and then falls off a cliff. Only the broker knows where a process began,
-    so the broker computes ``cost_delta_usd``.
-
-Proved here against a Session with a stand-in process rather than a real CLI:
-the point is the record and the log, not the agent.
-
-Run: python3 tests/test_broker_turn_log.py
-"""
+"""Check that replay keeps both sides of a turn and charges only its incremental cost."""
 
 import asyncio
 import importlib.machinery
@@ -33,9 +13,7 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_clock  # noqa: E402
@@ -104,7 +82,7 @@ async def main() -> None:
     session = running()
     sent_seq = await session.send_message("what did you do yesterday?")
 
-    # After the clock line, which opens it since 2026-11-09.
+    # Skip the injected clock.
     check("the text reached the CLI",
           loam_clock.strip(session.proc.stdin.lines[0]["message"]["content"]),
           "what did you do yesterday?")
@@ -172,9 +150,7 @@ async def main() -> None:
         check("sending to an ended session is a 409", exc.status, 409)
     check("and nothing was logged as sent", log_of(session), [])
 
-    # -- cost_delta_usd, within one process --------------------------------
-    #
-    # The real numbers, measured 2026-09-16 on a session as one agent.
+    # Compute the cost delta inside one provider process.
     session = running()
     await session._handle(envelope(0.34253275))
     await session._handle(envelope(0.35690825))
@@ -212,12 +188,7 @@ async def main() -> None:
     check("a turn says whether it was its process's first",
           [t["process_start"] for t in resumed.turns], [True, False, True, False])
 
-    # -- a resume that RESTORES the running total (2026-10-13) --------------
-    #
-    # The CLI now carries a resumed session's saved total into the new
-    # process, most of the time: f3069d8e went $81.57, then $82.79 on the
-    # first turn after a resume. Booking $82.79 as that turn's cost is how a
-    # week's deltas summed to about 7x the spend.
+    # A resumed process can restore the cumulative total.
     session = running()
     for total in (1.25, 2.0):
         await session._handle(envelope(total))
@@ -234,11 +205,7 @@ async def main() -> None:
     check("restored resume: the deltas sum to the final total",
           round(sum(deltas), 10), 3.6)
 
-    # -- a restore from an OLDER saved total, after a process that reset ---
-    #
-    # 940380fd: one process ended at $15.76; the next reset to zero and ran
-    # to $28.41 without its total being saved; the one after that reported
-    # $16.46, the first process's $15.76 plus the turn.
+    # A stale restored total can predate a process that reset its counter.
     session = running()
     await session._handle(envelope(15.76))
     session.save()

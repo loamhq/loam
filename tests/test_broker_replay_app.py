@@ -1,38 +1,5 @@
 #!/usr/bin/env python3
-"""A conversation the owner had in the Claude Code app, replayed by the broker.
-
-The translation (`loam_adopt.iter_events`) is a pure function of the CLI's
-own session file, so it is tested against a real one:
-`fixtures/app-session.jsonl` is an Iris session from 2026-09-11 copied off
-this box with every id in it replaced -- session id, entry uuids, prompt and
-request ids, tool-use ids -- and, on 2026-11-15, every word a person or an
-agent wrote in it replaced with neutral text of the same shape. The entries,
-their order and their fields are the CLI's own. A hand-written file would
-only ever prove that the translation matches the shape I imagined the
-CLI writes, and the schema is internal and version-unstable upstream; this
-fixture is what will tell us when it moves, the way
-`fixtures/golden-session.jsonl` does for the transcript writer.
-
-What has to hold, and each of these is a way a replayed chat goes wrong:
-
-  1. **Both sides of the conversation.** The CLI does not echo what a person
-     typed, so a replay built only out of what the file calls messages shows
-     answers with no questions -- the 2026-09-16 defect, in a new place.
-  2. **One event per content block.** It is what the CLI streams and what the
-     page reads: a sentence said before the tools and each tool call are
-     separate events sharing a message.
-  3. **Nothing private, nothing machine.** Thinking blocks and subagent
-     traffic never reach the stream.
-  4. **A turn boundary per turn**, carrying what the file knows and null
-     where it knows nothing -- a cost the box never saw is not one to invent.
-  5. **The numbering is continuous with what comes next.** The replayed
-     events are 1..N and the broker's own log begins at N+1, so a turn taken
-     in an adopted session tomorrow appends to its history rather than
-     renumbering on top of it. That is the whole reason `record_seq` is set
-     from the same count.
-
-Run: python3 tests/test_broker_replay_app.py
-"""
+"""Reconstruct visible conversation events and usage from an adopted provider session."""
 
 import asyncio
 import importlib.machinery
@@ -47,9 +14,7 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_adopt as adoption  # noqa: E402
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -164,11 +129,7 @@ check("a photograph a person sent is in the file and not in the replay",
                        if b["type"] == "image"]), (1, []))
 
 
-# -- the shapes the real file does not hold --------------------------------
-#
-# Each was read off this box's session files on 2026-09-20 and each is rare:
-# a `fallback` block (3 across 27 files), an assistant message the CLI wrote
-# itself when the spend limit was reached, and the CLI's own self-talk.
+# Include provider records that do not represent conversation turns.
 
 def write(entries: list, folder: Path, session_id: str) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
@@ -246,9 +207,7 @@ async def main(root: Path) -> None:
     check("the scan adopts the session the fixture is",
           [r["session_id"] for r in report["adopted"]], [APP_ID])
 
-    # What the record says and what its replay reads (a session's events
-    # stream, which carried both to a page, retired with the classic chat
-    # view on 2026-11-12; `replay` is still the one reading of its history).
+    # Compare the persisted event count with the complete replay.
     record = broker.load(APP_ID).meta()
     check("the record counts the conversation it adopted",
           (record["record_seq"], record["replayed"]), (21, 21))
@@ -302,9 +261,7 @@ saved = {name: getattr(cfg, name)
 saved_adopt = {name: getattr(adoption, name)
                for name in ("PROJECTS", "TRANSCRIPT_STATE", "candidates")}
 try:
-    # The scan's clock, stood an hour after the fixture's last line: the
-    # fixture was last spoken to on 2026-09-11, and on the wall clock the scan
-    # has passed it over as older than WINDOW_DAYS since 09-25.
+    # Scan within an hour of the last fixture entry.
     scanned = adoption.candidates
     fixture_now = adoption.epoch_of(adoption.last_timestamp(FIXTURE)) + 3600
 

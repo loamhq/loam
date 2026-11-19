@@ -1,27 +1,5 @@
 #!/usr/bin/env python3
-"""The Claude Code login: what the app can see of it, and making it again.
-
-Two capabilities, both added 2026-09-22 because the refresh token on this box
-was 34 hours from expiring and every loam-ui session authenticates with it.
-
-  1. `GET /v1/providers` carries `login` on the wired row -- when the login
-     expires, how many whole days that is, and which credential the sessions
-     are actually running on. Proved both ways the brief asked for (a file
-     with a date, no file at all) and the three between them: expired, a file
-     with no date, a file that will not parse.
-  2. `POST/GET/DELETE /v1/providers/claude-code/login` and
-     `POST .../login/code` drive one `claude auth login` on a pty.
-
-**No real login is made here and no real credential is read.** The CLI is a
-stand-in script that prints what the real one prints -- captured off a pty on
-this box, 2.1.270, 2026-09-22 -- and `CREDENTIALS_PATH` points into a temp
-directory for the whole run. What the REAL CLI does, and the real flow driven
-to the point where a human must act, is in broker/README.md under "Making the
-login again"; it was proved by causing and cannot be proved here without a
-person and a browser.
-
-Run: python3 tests/test_broker_login.py
-"""
+"""Check Claude Code sign-in state and interactive login handling."""
 
 import asyncio
 import importlib.machinery
@@ -38,9 +16,7 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 os.environ["LOAM_USAGE_READS"] = "off"  # no real CLI reads; see loam_provider_usage
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -61,9 +37,7 @@ def check(label: str, got, want) -> None:
         print(f"      wanted {want!r}")
 
 
-# What the real CLI drew on a pty, verbatim, on 2026-09-22 -- escapes and all.
-# The URL is in it twice: once as an OSC-8 hyperlink target and once as
-# visible coloured text. This is the byte string the parser has to survive.
+# Preserve terminal escapes and both occurrences of the login URL.
 REAL_DRAWING = (
     b"Opening browser to sign in\xe2\x80\xa6\r\n"
     b"If the browser didn't open, visit: \x1b]8;;"

@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
-"""A question a provider asks, in one shape out and the vendor's shape back.
-
-Three formats ask the person something (lib/loam_questions.py): Claude
-Code's ``AskUserQuestion`` (CLI 2.1.281), Codex's ``item/tool/requestUserInput``
-and a Codex form ``mcpServer/elicitation/request`` (app-server 0.159.3). Each
-reaches the page as ``broker.permission_request`` with ``kind: "question"``
-and the questions in one shape, and the page's ``answers`` go back as the
-vendor's own message. What is asserted is the exact message put on the wire,
-against a session with a stand-in process, not that a mapper exists:
-
-  - each format in: the event's ``kind``, ``message`` and ``questions``;
-  - each format out: the control_response / JSON-RPC result, byte for byte,
-    including a multi-select with a typed value, a secret, an elicitation
-    with an enum, a titled oneOf, a boolean, a number and an integer;
-  - the deny path of each, in that format's words;
-  - an allow with no ``answers`` is a 400 through the route, nothing is sent,
-    and the card is still answerable;
-  - ``broker.permission_resolved`` carries ``kind`` and the answers;
-  - Codex's own MCP tool-call approval (an empty form) stays an approval.
-
-Run: python3 tests/test_broker_questions.py
-"""
+"""Normalize provider questions for clients and translate answers back to the provider protocol."""
 
 import asyncio
 import importlib.machinery
@@ -34,9 +13,7 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -138,8 +115,7 @@ async def claude_cases() -> None:
     session = claude_session()
     event = await ask(session)
     check("AskUserQuestion is a question, not an approval", event["kind"], "question")
-    # A thread's opening snapshot reads these (2026-11-08): the event exactly
-    # as it went out, seq and all.
+    # The opening snapshot includes the outstanding request as sent.
     check("...kept as pending_events(), the event as the log has it",
           session.pending_events(), [event])
     check("...its questions in the one shape", event["questions"], [

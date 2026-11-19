@@ -1,29 +1,5 @@
 #!/usr/bin/env python3
-"""What an older record can be told by its own log, and who the agents are.
-
-Two things, both found in a real browser at the deployed app on 2026-09-18:
-
-  1. **Every row read "New chat" and none had a status box.** A record
-     written before that morning never had `title` or `last_message`
-     written, and `normalise` fills the keys without filling the content.
-     The conversation is on disk -- the durable event log is the whole point
-     of the log -- so the three fields are derived from it once, at start,
-     and written back. Proved here against real logs in a real state
-     directory, through the real `Server.route`.
-
-  2. **`GET /v1/agents` answered bare strings**, so a page drawing an
-     agent's name and mark had to invent both. It answers objects now:
-     `{"id", "name", "face"}`, the name read from the persona's own
-     `agent.json`, which is where the runtime states it. (`emoji` left the
-     rows 2026-11-16, when the emoji face was retired.) A breaking change to that
-     route's shape, and the one route on this interface that has had one.
-
-No model call is spent: the titler does not run here. A backfilled title is
-the opening words of the first message by rule -- the titler names a session
-after a turn it watched, and nothing can watch a turn that ended on Tuesday.
-
-Run: python3 tests/test_broker_backfill.py
-"""
+"""Recover missing record fields from session events without inventing absent user input."""
 
 import asyncio
 import importlib.machinery
@@ -37,9 +13,7 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -154,9 +128,7 @@ async def main() -> None:
         asked("do the thing"), said("trying"),
         result(is_error=True, subtype="error_during_execution"),
     ])
-    # A probe session from 2026-09-16, before broker.user_message existed:
-    # the log holds the agent's side and tool results, and nothing a person
-    # said. Its title stays null rather than becoming a file the agent read.
+    # A log without user-message events supplies no prompt.
     write_session("older", {"turns": [{}]}, [
         {"type": "system", "subtype": "init"},
         tool_result("1\tTHISTLE\n2\t"),
@@ -174,10 +146,7 @@ async def main() -> None:
     # the row says "nothing said yet" rather than inventing a name for it.
     write_session("silent", {"exit_code": 143},
                   [{"type": "broker.exit", "exit_code": 143}])
-    # A record whose position is behind its own log: the duplicate-numbering
-    # defect of 2026-09-16, still on this box as a probe session that says
-    # `seq: 1` over a log ending at 4. Resumed as it stands, it renumbers
-    # from 1 and the client's whole reconnect mechanism is a lie.
+    # The stored sequence can lag behind the last event in the log.
     write_session("behind", {"seq": 1}, [
         asked("hello"), said("hi"), result(), {"type": "broker.exit"},
     ])
@@ -276,8 +245,7 @@ async def main() -> None:
     check("an agent.json's retired emoji is not served",
           [a for a in answer["agents"] if a["id"] == "plain"][0],
           {"id": "plain", "name": "Plain", "face": None})
-    # `face` (2026-11-14) is an uploaded image's route and digest, null
-    # without one: never the workspace's path.
+    # An uploaded face is identified by its route and digest.
     check("nothing else from agent.json leaves the box",
           sorted(answer["agents"][0]), ["face", "id", "name"])
     check("the roster of ids is unchanged, and is what a session starts by",

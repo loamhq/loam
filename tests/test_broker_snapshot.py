@@ -1,31 +1,5 @@
 #!/usr/bin/env python3
-"""``broker.session`` is a snapshot, and a snapshot must not wear an event's
-number.
-
-The record used to be sent first on every stream carrying ``seq``, which is by
-definition the number of the last event already in the log. A client treats
-``seq`` as an event's identity and applies each one once -- correctly, and as
-the README instructs -- so the real event bearing that number was discarded on
-arrival, and every session a page opened lost its last event. Worse: a client
-keeping the highest ``seq`` it has seen had the end of the log at its FIRST
-line, so a stream that dropped five events into a replay reconnected at the
-end and the transcript in between became unreachable. Found by counterfactual
-on a real 144-event log, 2026-09-16.
-
-So the snapshot carries no ``seq``. Its position field is ``record_seq``, the
-same number under a name no client can mistake for an identity, and it is
-re-sent -- not logged, not numbered -- whenever a turn record is written, so a
-live client is told the turn's real cost and model instead of re-fetching the
-record and matching it to an event by hand.
-
-Proved here against a Session with a stand-in process, its own snapshot and
-a listener on it (what a thread turn holds). The per-session stream that
-first carried it, ``GET /v1/sessions/<id>/events``, retired with the classic
-chat view on 2026-11-12; the snapshot still goes to every listener and on the
-live list (``GET /v1/sessions/events``).
-
-Run: python3 tests/test_broker_snapshot.py
-"""
+"""Keep the opening session snapshot separate from numbered journal events."""
 
 import asyncio
 import importlib.machinery
@@ -40,9 +14,7 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -205,8 +177,7 @@ async def main() -> None:
     # -- the model on a turn record ----------------------------------------
     session = running()
     await session._handle(assistant("thinking", model="claude-fable-5-1"))
-    # A subagent's message. Its model is the subagent's, not the turn's, and
-    # on this box a Task often runs on a smaller one.
+    # A child session can use a different model.
     await session._handle(assistant("from a subagent",
                                     model="claude-haiku-4-5-20251001",
                                     parent="toolu_01"))

@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""The sign-in card's words and whose login it is, and signing out of
-Claude Code and Codex from the app (2026-11-11).
-
-  1. Every wired row's `sign_in` carries `label` (the button's words) and
-     `account` (the row's `login.account` while connected, else null).
-  2. Claude Code's account is `oauthAccount.emailAddress` out of the CLI's
-     settings file, named only when the sessions run on the login file and
-     it is connected -- never under a token in the environment.
-  3. `POST /v1/providers/claude-code/logout` and `.../codex/logout` run the
-     CLI's own logout and answer `{removed, login}`; a failure carries the
-     CLI's words; any provider's sign-out is a 409 while one of its chats is
-     mid-turn or asking.
-
-**No real login is read or removed.** `claude` and `codex` are stand-ins
-that delete a file in a temp directory, and every path the broker reads a
-login from points there for the whole run.
-
-Run: python3 tests/test_broker_sign_in_account.py
-"""
+"""Report the signed-in account and verify Claude Code and Codex sign-out flows."""
 
 import asyncio
 import base64

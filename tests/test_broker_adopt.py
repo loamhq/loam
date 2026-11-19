@@ -1,41 +1,5 @@
 #!/usr/bin/env python3
-"""Adopting the sessions the owner had in the Claude Code app, as records.
-
-Those conversations are Claude Code sessions on this box -- the Remote
-Control servers run them as the same login in the same persona workspace --
-so adopting one is reading a file that is already here, and the three things
-that can go wrong are all things this proves cannot:
-
-  1. **Adopting something that was never a conversation.** A wake, a cron, a
-     probe and a broker-driven turn all leave a session file in the same
-     folder. What separates them is the session file's own word for it:
-     `origin: {"kind": "human"}` on a prompt a person typed, and nothing at
-     all on the rest.
-
-  2. **Adopting a conversation that is two weeks stale and putting it at the
-     top of the home screen.** The filesystem's mtime is not when a session
-     was last spoken to: measured on this box 2026-09-20, three sessions
-     whose last entry is from 09-04, 09-05 and 08-28 carry mtimes of 09-20
-     01:31, 09-08 01:30 and 09-09 01:30. The window is judged on the last
-     entry's own timestamp, and mtime is only a cheap first cut because it
-     always runs late.
-
-  3. **Adopting a session twice**, which is what would make the route unsafe
-     to run at every broker start. A session the broker already holds is
-     left as it is or refreshed in place, and never made a second time.
-
-The scan, which is what this file is about. What the record then replays out
-of that session file is `test_broker_replay_app.py`, beside it; the two meet
-in one place only, and it is asserted here: the count the scan writes into
-`record_seq` is the number of events the replay produces. The fourth thing
-that can go wrong -- resuming an app session in place, on top of a Remote
-Control server that may still be running -- is `test_broker_fork.py`, which
-is where the code that forks is; the launch line is checked here too,
-because a scan that produced a record something would resume in place is a
-scan that did harm.
-
-Run: python3 tests/test_broker_adopt.py
-"""
+"""Check which local provider sessions can be adopted, titled and merged with existing records."""
 
 import asyncio
 import importlib.machinery
@@ -51,9 +15,7 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_adopt as adoption  # noqa: E402
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture memory to isolate the broker from machine load.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 
@@ -109,13 +71,7 @@ async def route(server, method, path, params=None, payload=None):
     return status, writer, body
 
 
-# -- session files, in the shapes this box's own really carry -------------
-#
-# Read off real files on 2026-09-20 and not invented: a person's prompt has
-# `promptSource` and `origin: {"kind": "human"}`, a wake's has
-# `promptSource: "sdk"` and no origin at all, a tool result is a `user`
-# entry with no prompt source, and the bookkeeping entries (`ai-title`,
-# `last-prompt`, `attachment`) carry no timestamp worth reading.
+# Provider fixtures distinguish human input from automated sessions.
 
 def person(text, ts):
     return {"type": "user", "promptSource": "sdk", "origin": {"kind": "human"},
@@ -303,10 +259,7 @@ async def main() -> None:
           (cfg.SESSION_DIR / f"{app_id}.json").read_text(encoding="utf-8"),
           before)
 
-    # -- a person's rename outranks the scan ------------------------------
-    # The rename route (PATCH /v1/sessions/<id>) retired with the classic
-    # view on 2026-11-12, but records renamed before then carry
-    # `title_source: person`, and the scan must still leave them alone.
+    # Preserve an explicit rename across rescans.
     renaming = broker.load(app_id)
     renaming.title, renaming.title_source = "The owner's own name for it", "person"
     renaming._titled = True
@@ -327,13 +280,7 @@ async def main() -> None:
     check("...and the listing answers `loam-ui` for a record with no origin",
           {r["session_id"]: r["origin"] for r in broker.known()}[held_id],
           "loam-ui")
-    # -- the fork of an adopted session is not a second conversation ------
-    #
-    # Replying to an adopted session forks it: the CLI copies the
-    # conversation into a session file of its own, in this same folder, with
-    # a person in it and today's date on it. Every test above passes, so
-    # until 2026-09-22 the next scan adopted it -- and the home screen drew
-    # "Loam phase six planning" twice, once pinned and once in Recent.
+    # A fork shares its parent’s first turn and must resolve to one conversation.
     fork_id = "55555555-5555-4555-8555-555555555555"
     fork_file = write_file(folder, fork_id, stamped(CONVERSATION, "market"))
     record_path = cfg.SESSION_DIR / f"{app_id}.json"
@@ -373,11 +320,7 @@ async def main() -> None:
     check("a conversation that is nobody's copy is still adopted",
           [r["session_id"] for r in fresh["adopted"]], [other_id])
 
-    # -- and the duplicates already made are removed, once -----------------
-    #
-    # Four of them on this box on 2026-09-22, made between the fork landing
-    # on 09-20 and the scan learning about it. `prune_fork_duplicates` runs
-    # at broker start, before the scan above.
+    # Prune duplicate records left by older writers.
     duplicate = cfg.SESSION_DIR / f"{fork_id}.json"
     duplicate.write_text(json.dumps({
         "session_id": fork_id, "agent": "ada", "state": "exited",

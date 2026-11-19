@@ -1,34 +1,5 @@
 #!/usr/bin/env python3
-"""Admission by memory (2026-11-09), seats, idle stops, and the light list.
-
-The owner, 11-09: "I want to make sure that I can have as many sessions as I
-need ... and I'm not bottlenecked by the number of sessions or anything
-else." Proved here, against the broker's own objects and a simulated box
-(`Box`: a RAM size, what the rest of the box uses, and each live session's
-own size, so ending one really frees what it held and one can grow):
-
-  1. **Its own live session is reused before admission is asked.**
-  2. **No count cap**: on a roomy box starts go far past the old four, and
-     nothing is ended to make them.
-  3. **Short of memory the least recently used idle session is ended**,
-     thread or classic; one mid-turn, asking, waiting on its children or
-     active within `cfg.EVICT_GRACE_S` never is.
-  4. **Only an all-busy, short box refuses**, in a person's sentence, with
-     the route text in `hint` and the box's numbers in `memory`; the count
-     backstop refuses the same way.
-  5. **Pressure**: a box whose sessions grew under the reserve gets one idle
-     session ended per reaper pass.
-  6. **Idle stops**: a thread session after `THREAD_IDLE_S`, a classic chat
-     after `CLASSIC_IDLE_S`, never while busy, however long (no clock).
-  7. **OOM order**: a chat runs at `CHILD_OOM_SCORE_ADJ`, read off its pid.
-  8. **The admission measured** on simulated 8 GB and 32 GB boxes.
-  9. **The list is light** (`list_row`).
-
-Real processes against a stub binary, as tests/test_broker_residency.py
-does: what is counted is a process.
-
-Run: python3 tests/test_broker_seats.py
-"""
+"""Check memory admission, the session cap, idle resumption and live resource reporting."""
 
 import asyncio
 import importlib.machinery
@@ -387,8 +358,7 @@ async def main() -> None:
     check("...one idle past CLASSIC_IDLE_S leaves memory",
           classic_old.is_live(), False)
     check("...unless it is mid-turn", classic_busy.is_live(), True)
-    # A turn has no clock (2026-11-10): two hours on, the busy ones are
-    # still alive; only the idle one with nothing outstanding has gone.
+    # Elapsed time alone does not end active work.
     classic_waiting = running(broker, "probe7", "classic-waiting", 7200)
     classic_waiting.background_tasks = [{"task_id": "b1", "description": "long"}]
     await broker.reap_once(time.time() + 7200)
@@ -422,9 +392,7 @@ async def main() -> None:
             await asyncio.sleep(0.01)
         check("a chat's process runs at CHILD_OOM_SCORE_ADJ, first to go",
               adj, str(cfg.CHILD_OOM_SCORE_ADJ))
-        # The broker's unit runs at CORE_OOM_SCORE_ADJ; this test's own
-        # process may not (inside an engineer job or a landing it runs at
-        # AGENT_OOM_SCORE_ADJ since 2026-11-16, equal to the child's).
+        # Use the configured broker OOM priority independently of the runner’s priority.
         check("...above the broker's own",
               int(adj) > cfg.lc.CORE_OOM_SCORE_ADJ, True)
     check("first_to_go keeps the command line whole behind choom",
