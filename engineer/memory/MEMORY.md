@@ -2197,3 +2197,54 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Seen, not fixed:** `github-orgs.test.js` fails a test or more now and
   then while `tests/run-all` loads the CPU beside it; 0 of 8 on a quiet box,
   on `main` and on the branch alike.
+- **A test with the fixture config manages the box's real plugin units.**
+  `loam_plugin_servers.managed()` is true when Yours is its config's
+  default, and under `tests/run-all`'s fixture config a scratch Yours is.
+  `test_to_market` installs and removes Dictation and Read aloud; once the
+  listed copies had servers, every run of it (this job's, and every other
+  job's landing after it reached `main`) stopped the live
+  `loam-plugin-dictation`/`read-aloud` units until the five-minute
+  reconcile restarted them (2026-11-19, 08:56 to 10:24 PT, repeatedly).
+  `run-all` now sets `LOAM_PLUGIN_UNITS=0` unless a test says otherwise.
+  Find such a leak with `journalctl --user | grep "Stopped loam-plugin-"`
+  against the landing log's test windows.
+- **A page plugin's listener on `health.changed` runs on every health
+  read**; one that always called `host.schedule()` after a fetch made other
+  page tests (GitHub's cards) fail under a loaded landing and never alone.
+  Redraw only when the answer changed.
+- **`pgrep -f "engineer-job --land"` matches the job's own session** (the
+  prompt names it). Wait on a pid, or on the landing log.
+
+## 2026-11-19 — Signed releases (docs/signing.md)
+
+- **Releases are SSH-signed git tags**, checked with `ssh-keygen -Y
+  find-principals` then `-Y verify -n git` over the tag object cut at its
+  `-----BEGIN SSH SIGNATURE-----` line (what git signs). That needs git and
+  OpenSSH only, and agrees with `git verify-tag` (the test proves it). The
+  verifier also checks the tag object's own `tag` header, because a signed
+  object can be pushed under another release's ref.
+- **The trusted keys are HEAD's committed `docs/releases/signers`**, never the
+  incoming tree's. The move goes to the verified object's commit, because a
+  page `check` during an apply force-fetches the tag ref again.
+- **No key ships yet.** With an empty file nothing is checked and every side
+  says so. Where the private key lives is the maintainers' call: the options
+  table is in docs/signing.md. Until a key is in the file, `cut_release`
+  tags lightweight as before.
+- **`install.sh` cannot import the verifier** (it lives in the unverified
+  clone), so it carries a shell copy and its own key block, which
+  `tests/test_signing.py` keeps equal to the file. Run install.sh in tests
+  with `unshare -r` (uid 0 without root) plus `LOAM_INSTALL_STATE` and
+  `LOAM_INSTALL_LOG`. To stop at the handover, put a `python3` shim first in
+  PATH that catches `*/bin/loam-install`.
+- **A tampered-but-signed tag for tests**: `git cat-file tag <signed> | sed
+  '1s/.*/object <other>/' | git hash-object -t tag -w --stdin`, then
+  `update-ref`. git accepts the object; the signature then fails.
+- **Installs use `--no-install-recommends`**, so git's recommended
+  openssh-client is not guaranteed. It is now in APT and in install.sh's
+  first needs. Any box reached over SSH has it anyway.
+- **A new top-level entry is missing from a landing's test run**
+  (`platform_argv` binds only the top-level entries that already exist in the
+  canonical checkout). The signers file was first `keys/release-signers`, and
+  the landing failed with FileNotFoundError, though every test passed in the
+  job tree. It is now `docs/releases/signers`. Put a new file inside an
+  existing top-level folder, or expect the first landing to fail.

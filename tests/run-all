@@ -185,6 +185,13 @@ def sealed_env(scratch: Path) -> dict[str, str]:
         env[var] = str(scratch / rel)
     env["LOAM_HOST_SETTINGS"] = str(scratch / "settings.json")
     env["LOAM_VAULT"] = str(scratch / "vault")
+    # No test drives the box's real plugin units unless it says so
+    # (LOAM_PLUGIN_UNITS=1 with its own stub). With the fixture config a
+    # scratch Yours is its config's default, which reads as managed, so
+    # test_to_market's installs and removals of Dictation and Read aloud
+    # stopped the live `loam-plugin-<id>` servers on every run once those
+    # plugins had servers (2026-11-19, until the five-minute reconcile).
+    env.setdefault("LOAM_PLUGIN_UNITS", "0")
     env.pop("LOAM_LIVE_LOCKS", None)
     if not os.environ.get("LOAM_TEST_INSTALL_CONFIG"):
         env["LOAM_CONFIG"] = fixture_config(scratch)
