@@ -663,8 +663,8 @@ def consequences(steps: list[Step], about: dict) -> After:
     return a
 
 
-def describe(steps: list[Step], after: After, how: str, sha: str) -> str:
-    out = [f"Putting back {how}: {sha[:10]}.", ""]
+def describe(steps: list[Step], after: After, how: str, sha: str, dry: bool = False) -> str:
+    out = [f"{'Compared with' if dry else 'Putting back'} {how}: {sha[:10]}.", ""]
     if not steps:
         return "\n".join(out[:1] + ["", "Nothing differs from it."])
     words = {"create": "create", "change": "change", "remove": "remove"}
@@ -826,7 +826,7 @@ def restore(name: str | None, *, only: list[str] | None = None, yes: bool = Fals
         target, rule_list, about = unpack(h, sha, Path(tmp))
         steps = plan(target, rule_list, only or [])
         after = consequences(steps, about)
-        out(describe(steps, after, how, sha))
+        out(describe(steps, after, how, sha, dry))
         if not steps:
             recent = states(h, 6)
             if recent:

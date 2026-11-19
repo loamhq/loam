@@ -1946,3 +1946,30 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Adopted sessions stay** (`lib/loam_adopt.py`): the conversations held
   in the Claude Code app before the retirement still open in Loam, read
   from the CLI's own files.
+
+## 2026-11-19 — the host's own setup, kept and put back
+
+- **`loam host` (lib/loam_host.py) is the undo for the box around Loam**:
+  root's git history at `paths.host_history` (`/var/lib/loam/host-history`,
+  0700), a mirror under `files/<absolute path>`, `meta.tsv` for modes and
+  owners by name, `scope.json` for the rules as resolved. A restore reads
+  everything it needs from the state itself, so it works with
+  `/etc/loam/loam.toml` broken; keep it stdlib-only and never import
+  `loam_config` at module level there.
+- **Enablement is links, and links are files**: a disabled unit is a
+  missing `*.wants/<unit>` symlink, so covering the links makes "disabled"
+  something a restore can put back (and it then starts the unit). Walk with
+  `os.walk(followlinks=False)` and list symlinks to folders by hand: they
+  are in `dirs`, not `names`.
+- **The state after a break is saved too**, within 15 minutes, so "the
+  newest state" can be the broken one. The default is the newest whose
+  checks passed (Caddyfile validates, sudoers parses, TOML/JSON read); a
+  valid-but-wrong break needs `restore 2h` or a named state.
+- **Root reaches the install user's manager with `systemctl --user -M
+  <user>@`** (systemd 252 here); it goes over unix sockets, so it works
+  inside `unshare -n`, which is how "no network, no broker, no app" is
+  proved.
+- **A Loam landing can time out at 900 s** when several jobs land at once
+  (load 26 on 16 CPUs, 15 suites): the record says "tests fail" and the
+  log says only `(timed out after 900 s)`. Read the log before the verdict,
+  and land again when the box is quieter.
