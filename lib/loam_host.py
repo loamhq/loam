@@ -879,7 +879,7 @@ def describe(steps: list[Step], after: After, how: str, sha: str, dry: bool = Fa
     then = []
     if after.login:
         then.append(f"stop the login ({after.login}), "
-                    + (f"remove its database's journal and WAL, " if after.login_db else "")
+                    + ("remove its database's journal and WAL, " if after.login_db else "")
                     + "write its files, start it again")
     if after.stop:
         then.append("stop " + ", ".join(f"{u} ({sc})" for sc, u in after.stop))
