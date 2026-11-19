@@ -199,6 +199,13 @@ install, 154 files). It never wakes an agent and never posts. A state is a
 commit only when something changed; the first state of the first install,
 154 files, was 1.6 MB on disk.
 
+The login's database adds a copy (an online backup in a child process) to
+each run. On the first install, with its 320 KB database, an unchanged run
+took 0.29 s wall time and made no commit. The history went from 1.7 to
+1.9 MB across the state that first took the login's two files and one
+other state just before it, and on a scratch login each change to the
+311 KB database added about 55 KB.
+
 The installer installs and enables it (step 9) and takes the first state;
 `loam update` installs it on an install made before it (the `host` step),
 and `sudo loam host install` does it by hand. `check-drift` reports the
