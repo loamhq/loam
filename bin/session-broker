@@ -7033,12 +7033,67 @@ class Server:
                         await writer.drain()
                 finally:
                     os.close(fd)
+            elif tail == ["archive"] and method == "GET":
+                await self.files_archive(q.get("root", ""), q.get("path"), writer)
+                return
             else:
                 raise BrokerError(405, f"no route for {method} /v1/files/"
                                        f"{'/'.join(tail)}")
         except files_api.FilesError as exc:
             writer.write(response(exc.status, exc.body(), nocache))
         await writer.drain()
+
+    async def files_archive(self, root: str, path: str | None,
+                            writer: asyncio.StreamWriter) -> None:
+        """``GET /v1/files/archive``: a folder as one zip, streamed while it
+        is built (broker/README.md, "Files", "Archive").
+
+        The body is chunked, so its end is said by the last chunk and not by
+        the connection closing: a failure partway resets the connection with
+        neither the zip's closing record nor HTTP's last chunk sent, and every
+        client sees a failed download, never a short zip that looks whole.
+        The walk and the reads run on a worker thread, one chunk at a time,
+        so memory holds one chunk and the loop is never blocked on the disk."""
+        nocache = "Cache-Control: no-store\r\n"
+        try:
+            fd, parts, headers = await asyncio.to_thread(files_api.archive,
+                                                         root, path)
+        except files_api.FilesError as exc:
+            writer.write(response(exc.status, exc.body(), nocache))
+            await writer.drain()
+            return
+        where = f"{root}/{'/'.join(parts)}"
+        stats: dict = {}
+        chunks = files_api.archive_stream(root, parts, fd, stats)
+        started = time.monotonic()
+        try:
+            head = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
+            writer.write((f"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n"
+                          f"Connection: close\r\n{head}\r\n").encode())
+            while True:
+                chunk = await asyncio.to_thread(next, chunks, None)
+                if chunk is None:
+                    break
+                writer.write(b"%x\r\n%b\r\n" % (len(chunk), chunk))
+                await writer.drain()
+            writer.write(b"0\r\n\r\n")
+            await writer.drain()
+            print(f"files: archive of {where}: {stats['files']} files, "
+                  f"{stats['folders']} folders, {stats['bytes']} bytes in "
+                  f"{time.monotonic() - started:.1f}s", file=sys.stderr, flush=True)
+        except (ConnectionResetError, BrokenPipeError):
+            print(f"files: archive of {where}: the client went away after "
+                  f"{stats.get('bytes', 0)} bytes", file=sys.stderr, flush=True)
+        except Exception as exc:  # noqa: BLE001 -- the zip is abandoned, said once
+            print(f"files: archive of {where} failed after "
+                  f"{stats.get('bytes', 0)} bytes, the download is reset: "
+                  f"{exc}", file=sys.stderr, flush=True)
+            writer.transport.abort()
+        finally:
+            try:
+                chunks.close()
+            except ValueError:
+                pass      # still running on its thread (a cancelled task)
 
     # -- Agent profiles, engineers, the reviewer (2026-11-13) -----------------
 
