@@ -64,11 +64,7 @@ cfg.SESSION_DIR = state / "sessions"
 cfg.TOKEN_PATH = state / "token"
 cfg.SHUTDOWN_DUMP_S = 3
 cfg.SHUTDOWN_FALLBACK_S = 30
-mod.backfill_records = lambda: (0, 0)
-mod.sync_titles = lambda: (0, [])
-mod.prune_fork_duplicates = lambda: []
-mod.Broker.adopt_app_sessions = lambda self: {"adopted": [], "refreshed": [],
-                                               "agents": {}}
+mod.Broker.prepare_records = lambda self: None
 mod.Broker.scan_for_new = lambda self: None
 
 async def no_models():

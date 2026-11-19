@@ -75,11 +75,7 @@ cfg.SHUTDOWN_FALLBACK_S = 4
 cfg.SHUTDOWN_SESSIONS_S = 3
 cfg.SHUTDOWN_TASKS_S = 9
 cfg.SHUTDOWN_EXIT_S = 4 if mode == "thread" else 30
-mod.backfill_records = lambda: (0, 0)
-mod.sync_titles = lambda: (0, [])
-mod.prune_fork_duplicates = lambda: []
-mod.Broker.adopt_app_sessions = lambda self: {"adopted": [], "refreshed": [],
-                                               "agents": {}}
+mod.Broker.prepare_records = lambda self: None
 
 async def no_models():
     return None

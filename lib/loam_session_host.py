@@ -10,9 +10,12 @@ import sys
 import time
 import uuid
 from contextlib import contextmanager
+from pathlib import Path
 
+import loam_adopt as adoption
 import loam_broker as cfg
-from loam_provider_session import BrokerError, Session, session_class
+from loam_provider_session import BrokerError, Session, first_words, parse_iso, session_class
+from loam_session_records import backfill_records, normalise, prune_fork_duplicates, sync_titles
 
 
 @contextmanager
@@ -83,6 +86,10 @@ def cap_sentence(agent: str, busy: list[dict], reason: str = "memory") -> str:
 class SessionHost:
     def __init__(self) -> None:
         self.sessions: dict[str, Session] = {}
+        # When a scan for app sessions last ran, so that a read of the list can
+        # trigger one without paying for it on every read. Set by the scan
+        # itself, which is also what makes the start-up scan count.
+        self._scanned = 0.0
         # Starts that have been admitted and whose process is not up yet:
         # each counts SESSION_START_MB against the memory it was admitted to,
         # and one against the backstop, so two starts that arrive together
@@ -431,3 +438,367 @@ class SessionHost:
               file=sys.stderr, flush=True)
         await idle[0].stop()
         return idle[0]
+
+    def prepare_records(self) -> None:
+        """Repair and adopt the catalog once at host startup, before serving."""
+        # Before a byte is served: every record the box has, filled from its own
+        # log. A record written before 2026-09-18 has no title and no last
+        # message, and a home screen drawn from those records is a list of rows
+        # all reading "New chat" with no status box -- which is what it was.
+        seen, changed = backfill_records()
+        print(f"backfill: {changed} of {seen} records filled from their logs",
+              file=sys.stderr, flush=True)
+        # And every record's title made the vault's title, for the records the
+        # broker's own titler named before it was taken out (2026-09-22). Once,
+        # here, because a name is not something that keeps changing.
+        try:
+            seen, renamed = sync_titles()
+            print(f"titles: {len(renamed)} of {seen} records took the vault's title",
+                  file=sys.stderr, flush=True)
+            for session_id, was, now in renamed:
+                print(f"titles: {session_id[:8]} {was!r} -> {now!r}",
+                      file=sys.stderr, flush=True)
+        except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
+            print(f"titles: the sync failed ({exc!r})", file=sys.stderr, flush=True)
+        # And the records a scan made of this broker's own forks, before the scan
+        # below runs: between 09-20 and 09-22 a reply into an adopted session left
+        # a second record of the same conversation, and the home screen drew both.
+        try:
+            gone = prune_fork_duplicates()
+            print(f"prune: {len(gone)} duplicate records of a fork removed",
+                  file=sys.stderr, flush=True)
+            for session_id, title in gone:
+                print(f"prune: {session_id} {title!r}",
+                      file=sys.stderr, flush=True)
+        except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
+            print(f"prune: the pass failed ({exc!r})", file=sys.stderr, flush=True)
+        # And every session the owner had in the Claude Code app, which are Claude
+        # Code sessions on this box that the broker simply did not know about.
+        # At start as well as on the route, because the app is still where some
+        # of his conversations happen and a restart is the cheapest moment to
+        # catch up. Fail-soft: a scan that goes wrong is reported and the broker
+        # still serves, because everything it already holds is unaffected.
+        try:
+            report = self.adopt_app_sessions()
+            per_agent = ", ".join(f"{agent} {n}"
+                                  for agent, n in report["agents"].items())
+            print(f"adopt: {len(report['adopted'])} app sessions adopted "
+                  f"({per_agent or 'none new'}), "
+                  f"{len(report['refreshed'])} refreshed",
+                  file=sys.stderr, flush=True)
+        except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
+            print(f"adopt: the scan failed ({exc!r})", file=sys.stderr, flush=True)
+
+    def _settled(self) -> set[str]:
+        """Ids the adoption scan must leave exactly as they are.
+
+        Everything the broker started itself, and every adopted session that
+        has somehow been written into since -- a record with a log of this
+        broker's own has numbering that is load-bearing, and a rescan that
+        re-counted the file under it would renumber events a client has
+        already seen. Since the fork landed (2026-09-20) that is no longer
+        hypothetical: the first message into an adopted session gives it a
+        log of this broker's own, and from that moment the app's file is its
+        history and nothing else.
+
+        **The log, not the position field.** `record_seq` was what this asked
+        until the replay landed on 2026-09-20; since then an adopted record
+        carries the translated count there from the moment it is made, so
+        asking `record_seq` would have settled every adopted session at its
+        first scan and frozen it. The existence of a log of our own is the
+        question that was always meant.
+
+        An adopted record nobody has written into is deliberately NOT here:
+        rescanning it is how a conversation the owner is still having in the
+        app keeps its last message, its place on the home screen and the
+        turns he has taken since.
+        """
+        settled = set()
+        for path in sorted(cfg.SESSION_DIR.glob("*.json")):
+            try:
+                meta = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                settled.add(path.stem)      # unreadable: touch nothing
+                continue
+            session_id = meta.get("session_id") or path.stem
+            log = cfg.SESSION_DIR / f"{session_id}.jsonl"
+            if meta.get("origin") != adoption.ORIGIN_APP:
+                settled.add(session_id)
+            elif log.exists() and log.stat().st_size:
+                settled.add(session_id)
+        return settled
+
+    def _forks_and_heads(self) -> tuple[set[str], dict[str, str]]:
+        """The two things a scan needs so it does not adopt a fork of its own.
+
+        Added 2026-09-22, after the home screen drew one conversation twice.
+        A reply into an adopted session forks it, the CLI writes the fork into
+        a session file of its own in the same folder, and that file has a
+        person in it and today's date on it -- so the scan adopted it as a
+        second conversation wearing the first one's title and history.
+
+        - **the fork ids**: every record's ``cli_session_id``. Free, read out
+          of records the scan is opening anyway.
+        - **the heads**: the first uuid of the file behind each record with a
+          source (``loam_adopt.first_uuid``), against the id of the record it
+          belongs to, because a fork copies its parent's entries verbatim,
+          uuids and all. This is the net under a fork whose id no record
+          carries -- one the CLI minted for a turn that died before the broker
+          read the id back. The id is kept beside the uuid so that a record's
+          own file, which a full rescan re-reads on purpose, is not read as a
+          copy of itself.
+
+        Measured on this box 2026-09-22: 49 records, 30 of them with a source,
+        **24 ms** warm and 41 ms cold, against the 240 ms of the cheapest scan
+        it runs inside. The heads it built collided on exactly four pairs, and
+        those four were the four duplicate records this landed to remove.
+        """
+        forks: set[str] = set()
+        heads: dict[str, str] = {}
+        for path in sorted(cfg.SESSION_DIR.glob("*.json")):
+            try:
+                meta = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            fork = meta.get("cli_session_id")
+            if fork:
+                forks.add(fork)
+            session_id = meta.get("session_id") or path.stem
+            source = meta.get("source")
+            if source:
+                head = adoption.first_uuid(Path(source))
+                if head:
+                    heads.setdefault(head, session_id)
+        return forks, heads
+
+    def _recorded(self) -> set[str]:
+        """Every id the broker has a record of at all.
+
+        What a scan that is only looking for conversations it has never seen
+        passes as `held`: the records it already has are kept current by the
+        refresh on read, one stat each, so re-reading all 27 of their files
+        would be 0.69 s spent to learn what 0.36 ms of stats already said.
+        """
+        return {path.stem for path in cfg.SESSION_DIR.glob("*.json")}
+
+    def _source_moved(self, meta: dict) -> bool:
+        """Has the file behind this record been touched since it was read.
+
+        The cheap question the listing asks of a record it has not loaded: one
+        stat, and only for a record whose history is in somebody else's file.
+        A record with a log of this broker's own, a forked one and everything
+        the broker started itself answer False without a syscall.
+
+        True for a touch as well as for growth, because the two are told apart
+        by `Session.refresh_from_source` -- which is the one place that rule
+        lives -- and a touch is answered there without a parse.
+        """
+        if meta.get("origin") != adoption.ORIGIN_APP or meta.get("cli_session_id"):
+            return False
+        source = meta.get("source")
+        session_id = meta.get("session_id")
+        if not source or not session_id:
+            return False
+        log = cfg.SESSION_DIR / f"{session_id}.jsonl"
+        try:
+            if log.stat().st_size:
+                return False
+        except OSError:
+            pass
+        size, mtime = adoption.source_stat(Path(source))
+        if size is None:
+            return False
+        return (size, mtime) != (meta.get("source_size"),
+                                 meta.get("source_mtime"))
+
+    def scan_for_new(self) -> dict | None:
+        """Look for app sessions the broker has never seen, on a read of the
+        list, at most once a minute. None if it was not due.
+
+        The owner started a conversation on their phone (Remote Control, until
+        2026-11-19) and expected to find it in Loam UI; before this it appeared at the next broker restart, which
+        could be days (2026-09-21). A read of the list is the moment to look,
+        because it is the moment somebody is looking.
+
+        **Only what is unknown**, which is what makes it affordable on a read:
+        `_recorded` holds every id back, so nothing already adopted is
+        re-parsed -- the refresh on read does that job now, and better, per
+        record and only when its file moved. Measured on this box 2026-09-21:
+        0.24 s over 576 session files, against 0.93 s for the full rescan the
+        route and the restart still run.
+
+        Fail-soft and on the loop. A scan that goes wrong is reported and the
+        list is answered anyway; 0.24 s once a minute is a pause every open
+        stream pays and no reader can see, and a thread would buy that back at
+        the price of writing records from one.
+        """
+        if time.time() - self._scanned < cfg.SCAN_INTERVAL_S:
+            return None
+        try:
+            return self.adopt_app_sessions(new_only=True)
+        except Exception as exc:  # noqa: BLE001 - never the reason a list fails
+            self._scanned = time.time()
+            print(f"scan: the read-triggered scan failed ({exc!r})",
+                  file=sys.stderr, flush=True)
+            return None
+
+    def adopt_app_sessions(self, new_only: bool = False) -> dict:
+        """Every persona's Claude Code app sessions, as records of this box.
+
+        Idempotent, which is what makes it safe both at start and on the
+        route: a session already held is either settled (left alone) or
+        refreshed from its file, and nothing is ever adopted twice.
+
+        **A fork of an adopted session is never adopted**, which is the other
+        half of "nothing is adopted twice" and was missing until 2026-09-22:
+        the fork is a session file like any other, and the conversation in it
+        is one this broker already holds. `_forks_and_heads` is the two nets.
+
+        `new_only` narrows it to files no record exists for, which is what a
+        read of the list triggers (`scan_for_new`): the records that do exist
+        are kept in step by the refresh on read. Without it this is the full
+        rescan -- every adopted record nobody has written into re-read from its
+        file -- which is what the route and every broker start still do.
+
+        The records are written through `Session.save()` rather than straight
+        to disk, so the live list hears about them the moment they exist --
+        a page open while this runs gains the rows without reloading.
+        """
+        self._scanned = time.time()
+        settled = self._recorded() if new_only else self._settled()
+        forks, heads = self._forks_and_heads()
+        report: dict = {"adopted": [], "refreshed": [], "agents": {},
+                        "skipped": [], "window_days": adoption.WINDOW_DAYS,
+                        "new_only": new_only}
+        for agent in cfg.roster():
+            workspace = cfg.workspace(agent)
+            found, passed = adoption.candidates(agent, workspace, settled,
+                                                forks=forks, heads=heads)
+            for note in passed:
+                report["skipped"].append({"agent": agent, **note})
+            adopted = 0
+            for path in found:
+                try:
+                    row = self._adopt_one(agent, path)
+                except OSError as exc:
+                    report["skipped"].append(
+                        {"agent": agent, "session_id": path.stem,
+                         "why": f"unreadable ({exc})"})
+                    continue
+                if row is None:
+                    report["skipped"].append(
+                        {"agent": agent, "session_id": path.stem,
+                         "why": "no thread in the file"})
+                    continue
+                new, record = row
+                report["adopted" if new else "refreshed"].append(record)
+                adopted += new
+            if adopted:
+                report["agents"][agent] = adopted
+        return report
+
+    def _adopt_one(self, agent: str, path: Path) -> tuple[bool, dict] | None:
+        """One app session as a record. None if the file holds no thread."""
+        session_id = path.stem
+        # Stat'ed BEFORE the file is read, and the direction matters: if the
+        # app appends during the read, the record understates the size and the
+        # next read of it sees growth and reads again. Stat'ing afterwards
+        # would have the record claim a size it never counted, and the turn
+        # that landed in between would be invisible until the next one.
+        stat = adoption.source_stat(path)
+        summary = adoption.summarise(path, session_id, agent)
+        if not summary["messages"]:
+            return None
+        new = not (cfg.SESSION_DIR / f"{session_id}.json").exists()
+        session = self.adopt(Session(agent, session_id))
+        session.origin = adoption.ORIGIN_APP
+        session.source = str(path)
+        # What the file will replay, and the number the next process numbers
+        # from. Set together and from one count, because a record that
+        # promised a different number than the stream delivers is a record
+        # whose next turn overwrites the end of its own history.
+        session.replayed = summary["events"]
+        session.seq = summary["events"]
+        # The reading this record is, with its two numbers on it, so that the
+        # next read of the record can tell whether the conversation has moved
+        # on since. See `Session.refresh_from_source`.
+        session.source_size, session.source_mtime = stat
+        session.created = summary["created"] or session.created
+        session.last_event_at = summary["last_event_at"]
+        session.last_activity = parse_iso(summary["last_event_at"],
+                                          session.last_activity)
+        if summary["last_message"]:
+            session.last_message = summary["last_message"][
+                :cfg.LAST_MESSAGE_CHARS]
+        # The transcript writer's title if it filed one, else the opening
+        # words -- the same stand-in every other session wears. A title
+        # already on the record (a person's rename) outranks both.
+        if not session.title:
+            filed = adoption.transcript_title(session_id)
+            session.title = filed or first_words(summary["opening"] or "") or None
+            session.title_source = "vault" if filed else None
+        # Done looking only if the name came from somewhere that outranks the
+        # stand-in. One still wearing the opening words is looked at again the
+        # next time its file is read, because the writer may file it later.
+        session._titled = session.title_source in ("vault", "person")
+        # No process of this broker's is behind it. It is a conversation that
+        # happened, and `done` is what that is.
+        session.state = "exited"
+        session._restored_status = "done"
+        session.save()
+        return new, {"session_id": session_id, "agent": agent,
+                     "title": session.title,
+                     "messages": summary["messages"],
+                     "created": session.created,
+                     "last_event_at": session.last_event_at}
+
+    def known(self, agent: str | None = None) -> list[dict]:
+        """Every session this broker has a record of, live or not, archived
+        or not (the classic list's archive filter retired with it on
+        2026-11-12; Running now always asked for the archive too), newest
+        activity first. Read off disk so a restarted broker still lists what
+        it started before it restarted -- those processes are gone, but their
+        ids resume, and a client that cannot see them cannot resume them.
+
+        **An adopted record is stat'ed here and re-read if it has grown**
+        (2026-09-21). The rows the owner is still talking to in the Claude Code
+        app are exactly the rows whose last message goes stale, and the home
+        screen is where he reads them. Measured on this box: 27 adopted
+        records, 0.36 ms of stats for the lot of them, against 0.69 s to
+        re-read all 27 files -- which is why the stat decides and the parse
+        happens only for the file that moved. See
+        `Session.refresh_from_source`.
+        """
+        out: dict[str, dict] = {}
+        for path in sorted(cfg.SESSION_DIR.glob("*.json")):
+            try:
+                meta = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if meta.get("session_id") in self.sessions:
+                meta = self.sessions[meta["session_id"]].meta()
+            elif self._source_moved(meta):
+                try:
+                    meta = self.load(meta["session_id"]).meta()
+                except BrokerError:
+                    # The record went away between the glob and the read; it is
+                    # not on the list, which is the truth about it.
+                    continue
+            else:
+                if meta.get("state") == "running":
+                    # This broker did not start it, so it is not running now.
+                    meta["state"] = "exited"
+                if "seq" in meta:
+                    # A record written before 2026-09-16 calls the position
+                    # `seq`; a file is only rewritten when its session is
+                    # resumed, so the listing answers under one name rather
+                    # than handing a client two spellings of one field and
+                    # a None for the sessions it has not touched since.
+                    meta["record_seq"] = meta.pop("seq")
+                meta = normalise(meta)
+            out[meta["session_id"]] = meta
+        records = list(out.values())
+        if agent:
+            records = [r for r in records if r.get("agent") == agent]
+        records.sort(key=lambda r: r.get("last_activity", ""), reverse=True)
+        return records
