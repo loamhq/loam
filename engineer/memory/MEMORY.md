@@ -1910,3 +1910,23 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   makes `default()` treat the box as unconnected with no global git identity
   unless a test sets `PROFILE_SOURCE`/`GLOBAL_GIT_SOURCE`; otherwise every
   worktree test on an unset box would read the live store and its tokens.
+
+## 2026-11-18 — this box moved onto Git backup
+
+- **A live plugin page on loopback needs the gateway too.** `127.0.0.1:8081`
+  answers without the login, but Caddy sends `/x/*` to the plugin gateway
+  (`127.0.0.1:8933`); without that route the page says "The plugin answered
+  404". In Playwright, `route.continue({ url })` to 8933 for `/x/*`. The
+  app's light/dark comes from the boot script `/appearance-state.js` as
+  well as the GET, so set `documentElement.dataset.theme` after load (DOM
+  only, nothing saved), and abort every non-GET so viewing writes nothing.
+- **`bin/gen-units` takes no flags:** `gen-units --help` runs it and writes.
+- **`$TMPDIR` can be empty in a Bash call**; spell the scratch path out
+  before anything that writes to it (`crontab "$TMPDIR/x"` read `/x`).
+- **Git backup pushes to the address, not to `origin`**, so the trees'
+  `origin/main` goes stale and `git status` says "ahead". Check GitHub with
+  `git ls-remote <alias address> refs/heads/main`, never the local ref.
+  `gh` here answered 401 (2026-11-18).
+- **The plugin's push commits first** (core's commit, on every push tick
+  that is due), so after a switch the first commit may be the push's, not
+  the timer's; wait for a timer run to see the timer's own.
