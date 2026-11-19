@@ -11,7 +11,7 @@ description: The essentials of handing work to the engineer - whether to, at whi
 
 3. **Say what must be true, not how to build it:** the problem and its evidence; what must be true afterwards, including what must keep working; the owner's decisions, quoted; your suggestion, which the engineer may improve on.
 
-4. **Decide the proof up front.** Name what "done" has to come with: a test, a quoted line, a before and after, a screenshot of the real page.
+4. **Decide the proof up front.** Name what "done" has to come with: a test, a quoted line, a before and after, a screenshot of the real page. Two come without asking: a job that changes a screen returns screenshots of it on a phone and a desktop, light and dark, and a job that changes how Loam works says which page of Loam's library it updated.
 
 5. **Check before trusting it.** Read what actually changed, not just the summary, and look at it yourself before it goes live.
 
