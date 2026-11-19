@@ -21,7 +21,7 @@ independence from any runtime, same "recoverable from git until the next
 autocommit" floor. Its unit pair is `loam-inbox-expiry.{service,timer}` at
 08:17 UTC -- the same daily cadence as the commons sweep at 08:07, offset ten
 minutes so two sweeps' journal entries never interleave, and both well clear
-of the 01:30 PT recycle and the wake grid.
+of the wake grid.
 
 **Why `archive/` ages on ctime and the commons ages on mtime.** A commons
 note is written in place, so its mtime *is* its age. An archived file is not:

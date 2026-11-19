@@ -216,10 +216,9 @@ def pure_checks():
         (sl / name).mkdir(parents=True)
         (sl / name / "memory.current").write_text(str(mb * 1024 * 1024))
     u = loam_live.units(sl)
-    check("units by kind, the broker itself not among them",
+    check("units by kind, the broker and a leftover RC unit not among them",
           {k: (v["count"], v["mb"]) for k, v in u.items()},
-          {"engineer_jobs": (1, 900), "wakes": (1, 300), "crons": (1, 120),
-           "rc_servers": (1, 380)})
+          {"engineer_jobs": (1, 900), "wakes": (1, 300), "crons": (1, 120)})
     # 32 GB box: MemTotal ~31,600, reserve 12% = 3,792, a start 450.
     check("admission at 32 GB with 20 GB available: (20000-3792)//450",
           loam_live.can_start(20_000, 3_792, 450, 0, None, 100), 36)
@@ -283,7 +282,7 @@ async def main():
           (3_792, 450, min(36, cfg.MAX_SESSIONS - 5)))
     check("...RAM used/total, the sessions' count, and the units by kind",
           (isinstance(box["ram_total_mb"], int), box["sessions"]["live"], sorted(box["units"])),
-          (True, 5, ["crons", "engineer_jobs", "rc_servers", "wakes"]))
+          (True, 5, ["crons", "engineer_jobs", "wakes"]))
     check("no thread turn in flight: `turns` is empty (2026-11-17)", view["turns"], [])
 
     # -- 2. end-idle ---------------------------------------------------------

@@ -1,17 +1,17 @@
 [Unit]
-Description=Loam — report memory headroom and Remote Control session count
-# bin/check-memory measures the one term that caused every global OOM kill on
-# this box and that nothing else watches: how many Remote Control sessions are
-# alive at once. Four kills (08-26, 08-30, 08-31, 09-01) were all GLOBAL, so no
-# per-unit MemoryMax could see them coming; the largest term was ten sessions
-# for five agents. The script holds the thresholds and the reasoning behind
-# them -- this unit only decides when it runs and where the report lands.
+Description=Loam — report memory headroom before the wake grid
+# bin/check-memory reads the box's headroom just before the wake grid. Four
+# OOM kills (08-26, 08-30, 08-31, 09-01) were all GLOBAL, so no per-unit
+# MemoryMax could see them coming. The script holds the thresholds and the
+# reasoning behind them -- this unit only decides when it runs and where the
+# report lands.
 
 [Service]
 Type=oneshot
 # The report goes to a file, not the journal, and the reason is the change made
-# in the same session as this unit: the RC servers were burying the user journal
-# under 1.9 million status-line redraws a day. A nightly reading that has to be
+# in the same session as this unit: the Remote Control servers (retired
+# 2026-11-19) were burying the user journal under 1.9 million status-line
+# redraws a day. A nightly reading that has to be
 # dug out of that is a reading nobody takes. This sits beside wake-*.jsonl,
 # where the morning check already looks.
 #
@@ -19,9 +19,7 @@ Type=oneshot
 # append log of untimestamped tables is unreadable by the second night. The
 # braces keep the exit status of check-memory rather than of date.
 ExecStart=/bin/sh -c '{ echo; date -Is; @ROOT@/bin/check-memory; } >> @LOGS@/memory-check.log 2>&1'
-# Exit 1 is a warning, 2 is critical. Only critical marks the unit failed:
-# warnings include "3+ sessions above baseline", which is ordinary use of the
-# app and would leave this unit permanently red. A red state that is always red
-# reports nothing -- the same reason the recycler was renamed rather than
-# excluded from its own glob.
+# Exit 1 is a warning, 2 is critical. Only critical marks the unit failed: a
+# warning is ordinary use of the box and would leave this unit permanently
+# red, and a red state that is always red reports nothing.
 SuccessExitStatus=1

@@ -17,16 +17,16 @@ which a running part reads one place and writes the other:
      built from mcp/requirements.txt (a venv cannot be moved).
   2. Wait until the box is quiet: no engineer job, wake, cron or review
      running, no broker session working or asking (lib/loam_live's rule,
-     the one `restart-broker --when-idle` uses), no Remote Control server
-     holding a call on a job. Never a cut: a run that is not quiet waits.
-  3. Stop what holds the old paths open: every loam timer, the broker, the
-     Remote Control servers, the plugin gateway and plugin servers.
+     the one `restart-broker --when-idle` uses). Never a cut: a run that is
+     not quiet waits.
+  3. Stop what holds the old paths open: every loam timer, the broker,
+     the plugin gateway and plugin servers.
   4. Rename each old place to its new one (one filesystem, so each is a
      rename, not a copy), carry what records the old paths (Codex's thread
      table, Claude Code's per-directory session folders for job trees), and
      rewrite /etc/loam/loam.toml.
-  5. Regenerate what names those paths: the static units (gen-units), the
-     Remote Control units, every agent's provisioned files, the reconciled
+  5. Regenerate what names those paths: the static units (gen-units),
+     every agent's provisioned files, the reconciled
      cron units, and the Caddyfile (sudo gen-deploy).
   6. Start everything that was running, then verify (`move-state verify`)
      and write the report.
@@ -140,29 +140,7 @@ def blockers() -> list[str]:
         why += loam_follow.restart_read()
     except Exception as exc:  # noqa: BLE001 -- a broker we cannot read is busy
         why.append(f"the broker's live list could not be read ({exc})")
-    why += rc_calls()
     return why
-
-
-def rc_calls() -> list[str]:
-    """Remote Control servers holding an engineer call (bin/recycle-rc's rule)."""
-    held = []
-    for unit in units("loam-rc-*.service"):
-        cg = sh(["systemctl", "--user", "show", "-p", "ControlGroup", "--value",
-                 unit]).stdout.strip()
-        procs = Path("/sys/fs/cgroup") / cg.lstrip("/") / "cgroup.procs"
-        try:
-            pids = procs.read_text().split()
-        except OSError:
-            continue
-        for pid in pids:
-            try:
-                cmd = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ")
-            except OSError:
-                continue
-            if b"bin/engineer-job" in cmd:
-                held.append(f"{unit} holds an engineer call (pid {pid})")
-    return held
 
 
 # -- the steps -----------------------------------------------------------------
@@ -230,7 +208,7 @@ def stop_all(log: list[str]) -> dict:
     # changed timer is moved by daemon-reload alone.
     stopped = {"timers": [],
                "services": [u for u in units("loam-*.service")
-                            if u.startswith(("loam-session-broker", "loam-rc-",
+                            if u.startswith(("loam-session-broker",
                                              "loam-plugins-gateway",
                                              "loam-plugin-"))]}
     if stopped["timers"]:
@@ -311,7 +289,7 @@ def carry_claude(old: Path, new: Path, log: list[str], back: bool = False) -> in
 
 def regenerate(log: list[str]) -> None:
     bin_ = ROOT / "bin"
-    steps = [[str(bin_ / "gen-units")], [str(bin_ / "gen-rc-units")]]
+    steps = [[str(bin_ / "gen-units")]]
     for ws in sorted(lc.WORKSPACES.iterdir()):
         cfg = ws / "agent.json"
         if cfg.is_file():
@@ -500,14 +478,12 @@ def verify(log: list[str]) -> bool:
         state = sh(["systemctl", "--user", "is-active", unit]).stdout.strip()
         ok = ok and state == "active"
         say(f"{'ok ' if state == 'active' else 'BAD'} {unit}: {state}", log)
-    rcs = units("loam-rc-*.service", "active")
-    say(f"ok  Remote Control servers active: {len(rcs)}", log)
     # One dry check per lane type.
     check("lanes, dry (every persona's imports, reflection and cron lane "
           "files, MCP commands and wake unit paths; the engineer's and the "
           "reviewer's MCP commands)", [sys.executable, __file__, "lanes"], show=12)
-    check(f"conversation lane (rc-preflight {lc.LEAD_AGENT})",
-          [sys.executable, str(bin_ / "rc-preflight"), str(lc.WORKSPACES / lc.LEAD_AGENT)], show=3)
+    check(f"lane files (lane-check {lc.LEAD_AGENT})",
+          [sys.executable, str(bin_ / "lane-check"), str(lc.WORKSPACES / lc.LEAD_AGENT)], show=3)
     check("provision persona (dry)", [str(bin_ / "provision"), lc.LEAD_AGENT, "03:20", "--dry-run"], show=2)
     check("provision engineer (dry)", [str(bin_ / "provision"), "--engineer", "--dry-run"], show=2)
     check("provision reviewer (dry)", [str(bin_ / "provision"), "--reviewer", "--dry-run"], show=2)

@@ -5,7 +5,7 @@ Until 2026-11-18 a lane file over the limit refused the wake from a date in
 lib/loam_memory.py (``OVER_LIMIT_REFUSED_FROM``, 2026-09-11); the owner's
 word of 2026-11-08 had made the limit a warning, and that refusal kept one
 persona's reflection dark two nights over 9 characters. Now an over-limit
-file is reported -- the failure log and comms, as a Remote Control start
+file is reported -- the failure log and comms, as the nightly lane check
 reports one -- the line says the lane went ahead, and it did. The calendar
 no longer matters, and the scenarios are driven on either side of the old
 date to prove it.

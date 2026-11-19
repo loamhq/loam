@@ -55,8 +55,9 @@ The cost is memory, which is what the cap is for. Measured on this box
 - four sessions, idle: 1,126 MB
 
 That is *below* the ~440 MB the 09-04 memory investigation measured for a
-Remote Control session; a Remote Control server is a supervisor plus its
-sessions, and this is one session and its three MCP servers.
+Remote Control session (retired 2026-11-19); a Remote Control server was a
+supervisor plus its sessions, and this is one session and its three MCP
+servers.
 
 Until 2026-11-09 this measurement set a count: `MAX_SESSIONS = 4` against a
 unit sized for four. Since then sessions are admitted by the box's memory and
@@ -243,7 +244,7 @@ activity first:
 admission would let start now: the free memory past the reserve, the broker
 unit's own room and the backstop, each at `start_mb`), `sessions` (`live`,
 `mb`, `idle`), and `units`: the memory outside the broker by kind,
-`engineer_jobs`, `wakes`, `crons` and `rc_servers`, each `{count, mb,
+`engineer_jobs`, `wakes` and `crons`, each `{count, mb,
 units: [{name, mb}]}`. Everything is read from `/proc` and the user
 manager's cgroups (lib/loam_live.py) on each ask.
 
@@ -796,7 +797,7 @@ stands if the box truly runs out is the kernel's OOM order
 (`lib/loam_config.py`): every chat's CLI is started under `choom -n 800`
 (`CHILD_OOM_SCORE_ADJ`, the agents' `AGENT_OOM_SCORE_ADJ`), which its MCP
 servers inherit, as is every other agent run on the box -- engineer jobs,
-wakes, crons, the reviewer, the RC servers. The broker itself runs at the
+wakes, crons, the reviewer. The broker itself runs at the
 unit's 100 (`CORE_OOM_SCORE_ADJ`, the lowest a user unit may take), the
 plugins gateway too, and Caddy, Authelia, the app and the claim service at
 the system's 0. So the kernel ends an agent run first, and reaches the
@@ -1399,9 +1400,8 @@ home so the box's logins were never touched:
 | `antigravity` | (its CLI has no headless logout) | the token file and `account.json` |
 
 What a sign-out stops: every app chat on that provider, from its next turn,
-until a sign-in from the same card. **Claude Code's** also stops the
-Remote Control servers (`gen-rc-units`), which run on the same login file;
-the wakes, crons, the reviewer and engineer jobs run on the long-lived token
+until a sign-in from the same card. For **Claude Code**, the
+wakes, crons, the reviewer and engineer jobs run on the long-lived token
 in `wake.env` and are untouched. The route answers **`409`** while any live
 chat on that provider is working, asking or waiting on its children, so a
 sign-out never lands under a turn. `removed` is whether the login was there
@@ -1781,11 +1781,14 @@ A Codex thread runs the persona Claude Code runs; only the provider differs.
 
 ### Sessions from the Claude Code app
 
-Added 2026-09-20, because the owner asked for the conversations they have been
+Added 2026-09-20, because the owner asked for the conversations they had been
 having in the Claude Code app — on claude.ai/code and on their phone — to be
-in the app the broker serves as well.
+in the app the broker serves as well. Remote Control, which served those
+conversations, was retired on 2026-11-19 (the owner: "I don't use it through
+app anymore"); the sessions it left are still adopted and shown, and no new
+ones arise.
 
-**They were never anywhere else.** A Remote Control session is a Claude Code
+**They were never anywhere else.** A Remote Control session was a Claude Code
 session *on this box*: same login, same persona workspace, same hooks, and
 the same session file under `~/.claude/projects/<slug of the workspace>/`
 that a session started at a terminal here leaves. Nothing is imported from
@@ -1795,7 +1798,7 @@ is — there is no second copy of it on this box.
 
 `lib/loam_adopt.py` is the whole of it, and it only ever **reads** a session
 file. The one thing that must never happen is resuming an app session in
-place: the Remote Control server that owns it may still be running, and two
+place: the Remote Control server that owned it could still be running, and two
 processes appending to one session file is a corrupted conversation of
 The owner's. Nothing on this interface does that — sending into an adopted
 session forks it instead, which is *Sending into one: the fork* below.
@@ -2099,8 +2102,8 @@ cost in prose.
 Added 2026-09-20, the same day as the scan and the replay. An adopted
 session is **never resumed in place**, and that is the whole shape of this.
 Its `session_id` *is* the app's session id, so `claude --resume` on it would
-point a second process at a session file the Remote Control server may still
-be writing — a corrupted conversation of the owner's, and not the kind of
+point a second process at a session file the Remote Control server could
+still have been writing — a corrupted conversation of the owner's, and not the kind of
 failure that announces itself.
 
 So the first launch of an adopted record is:
@@ -3696,10 +3699,11 @@ helper answers for the job's own repository and nothing else.
 
 **The store** is `state/github/integration.json`, mode 600, outside git and
 outside every container; `integration.lock` beside it serialises every
-read-modify-write across the broker, `bin/provision` and `bin/rc-preflight`,
+read-modify-write across the broker, `bin/provision` and `bin/lane-check`,
 because a refresh token is single-use.
 
-**Nightly**: the first `rc-preflight` of each date calls
+**Nightly**: the first `bin/lane-check` of each date (run by `bin/drift-watch`
+at 01:40) calls
 `loam_github_app.nightly_warnings()` (`state/github/checked-on` holds the
 date) and writes one Important line in `comms.md` if the refresh token is
 within 14 days of expiry or GitHub says the installation is gone. That check
@@ -4669,7 +4673,7 @@ a draft with problems, or one already made. 201:
 ```json
 {"agent": {"id": "juniper", "name": "Juniper", "face": null},
  "first_thread": "t-1a2b3c4d", "workspace": "/home/…/ai-labs/juniper",
- "wake": "01:20", "rc": "active", "fleet_clauses": ["..."],
+ "wake": "01:20", "fleet_clauses": ["..."],
  "draft": {"...": "the draft, with made, made_at and yes"}}
 ```
 
@@ -4680,8 +4684,7 @@ clauses; a clause of the draft that has a fleet clause's title gives way to
 the fleet's), `_active.md` and `_reflection.md`, `memory/`, `skills/`,
 `crons/`, `threads/`; `agent.json` with the name and face; then
 `bin/provision <id> <wake>` (Claude Code, Codex and Antigravity files, the
-reflection record and its timer, the Remote Control unit, which is turned
-on). Provision holds Loam's live lock, so a confirm made while a landing
+reflection record and its timer). Provision holds Loam's live lock, so a confirm made while a landing
 of Loam is in progress waits for it (up to 20 minutes) before it answers. It
 is on the roster at once: `GET /v1/agents`, every picker, `@` mentions,
 General's members. Its first thread has it as the default and a line saying
@@ -4693,7 +4696,7 @@ answer is a 500 that says so.
 ### `POST /v1/agents/<agent>/archive` and `/restore`
 
 Body `{}` from the page; `{"thread", "yes"}` from an agent. Archive answers
-`{"agent", "archived": {"at", "by", "rc", "yes"?}, "event"}`; 409 when
+`{"agent", "archived": {"at", "by", "yes"?}, "event"}`; 409 when
 already archived, when it is the last agent awake, or (unless an agent
 archives itself) while it is mid-turn or in a wake or cron. Restore answers
 `{"agent", "event"}`; 409 when not archived, or when its name has since been
@@ -4703,14 +4706,13 @@ Archived means `archived` in its `agent.json`: out of `GET /v1/agents`,
 every picker, `@` mentions, thread membership, `by`, the reviewer's choice,
 the Schedules list and new sessions; the schedule reconciler removes its
 wake and cron timers (its records and their accepted copies are untouched),
-its Remote Control unit is disabled, and `bin/wake` refuses it. A thread
+and `bin/wake` refuses it. A thread
 whose default or member it is stays readable; a turn that would be its
 gets the line "Juniper is archived, so it won't answer. Tag another agent,
 or restore Juniper in Settings › Agents › Archived." Its profile
 (`GET /v1/agents/<agent>`, `identity.archived`) and its files (Files'
 `spaces` root) stay. Restore removes the mark; the reconciler puts back the
-same timers from the same records, armed without firing; the Remote
-Control unit comes back if it was on.
+same timers from the same records, armed without firing.
 
 `GET /v1/agents?archived=1` — Settings › Agents › Archived:
 `{"agents": [{"id", "name", "face", "archived": {"at", "by", ...}}]}`.

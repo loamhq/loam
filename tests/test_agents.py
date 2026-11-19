@@ -123,8 +123,8 @@ for who in ("ada", "iris"):
     ls.reconcile([who], systemd=SYSTEMD)
 
 # The box's seams: provision writes what bin/provision would that the routes
-# read (the reflection record, through the schedule path), the units record.
-PROVISIONED, UNIT_CALLS = [], []
+# read (the reflection record, through the schedule path).
+PROVISIONED = []
 
 
 def fake_provision(agent, wake):
@@ -138,9 +138,6 @@ def fake_provision(agent, wake):
 
 
 loam_agents._provision = fake_provision
-loam_agents._units = lambda agent, on: (UNIT_CALLS.append((agent, on)) or
-                                        ("active" if on else "inactive"))
-loam_agents._systemctl = lambda *a: subprocess.CompletedProcess(a, 0, "enabled\n", "")
 loam_agents._reconcile = lambda agent: ls.reconcile([agent], systemd=SYSTEMD)
 
 loader = importlib.machinery.SourceFileLoader(
@@ -374,10 +371,9 @@ async def main():
         check("agent.json carries its name and no emoji, in the one order",
               card("juniper")["display"] == "Juniper" and "emoji" not in card("juniper")
               and list(card("juniper"))[:3] == ["name", "display", "workspace"], card("juniper"))
-        check("provisioned at a free wake, its unit turned on",
+        check("provisioned at a free wake",
               PROVISIONED == [("juniper", card("juniper")["wake_schedule"])]
-              and card("juniper")["wake_schedule"] != "03:20"
-              and ("juniper", True) in UNIT_CALLS, (PROVISIONED, UNIT_CALLS))
+              and card("juniper")["wake_schedule"] != "03:20", PROVISIONED)
         status, body = await http(port, "GET", "/v1/agents")
         check("it is in /v1/agents (Chats and every picker)",
               {"id": "juniper", "name": "Juniper", "face": None}
@@ -482,7 +478,6 @@ async def main():
         check("its records are untouched",
               (LABS / "ada" / "crons" / "infra-watch.md").is_file()
               and ls.read_text(ls.applied_path("ada", "infra-watch")) is not None)
-        check("its unit is turned off", ("ada", False) in UNIT_CALLS, UNIT_CALLS)
         status, body = await http(port, "GET", "/v1/agents/ada")
         check("its profile still opens, saying it is archived",
               status == 200 and body["identity"]["archived"], body.get("identity"))

@@ -6,7 +6,7 @@ install) is the pull-only outlet decided 2026-09-04
 owns both of the machinery's writes into them:
 
   loam-wake-failures.md   the detector. One appended line per failed wake or
-                          failed Remote Control start. It is a log: every
+                          broken layer the nightly lane check finds. It is a log: every
                           occurrence lands, including a repeat.
   comms.md                the loop. One line under ``## Urgent`` so the log
                           has a reader. It is NOT a log -- a line per item,
@@ -36,10 +36,10 @@ Important (see lib/loam_usage.py).
 
 **One owner.** ``bin/wake`` records its own failures, ``bin/wake-failed``
 records the ones that killed the wrapper before it could, and
-``bin/rc-preflight`` records what is wrong at a Remote Control start. Three
+``bin/lane-check`` records what is wrong with a lane's files, nightly. Three
 callers, three very different lifetimes -- and until this module they were
 two different implementations of "how a failure is written", which is the
-same defect as the second copy of the RC units. Everything here is stdlib (and
+same defect as a second copy of a generated unit. Everything here is stdlib (and
 loam_config, for the folder's name) and takes the vault as an argument, so a test can point it at a temp tree
 and nothing in it can fail a wake: every write is best-effort and swallows
 OSError, exactly as the code it replaces did.
@@ -54,7 +54,7 @@ from pathlib import Path, PurePosixPath
 import loam_config as lc
 
 # Relative to the vault root. The machinery never hardcodes an absolute
-# vault: bin/wake and bin/rc-preflight both read it out of agent.json, so a
+# vault: bin/wake and bin/lane-check both read it out of agent.json, so a
 # test tree and the live tree take the same path through here.
 #
 # The folder is the install's, not the first install's (2026-11-16, the
@@ -84,8 +84,8 @@ FAILURE_LOG_HEADER = """\
 # Loam wake failures
 
 Appended by `agents/bin/wake`, `agents/bin/wake-failed` and
-`agents/bin/rc-preflight` when a scheduled wake does not complete or a Remote
-Control server starts with a broken layer. A run of these starting on the same
+`agents/bin/lane-check` when a scheduled wake does not complete or the
+nightly lane check finds a broken layer. A run of these starting on the same
 night across agents means the OAuth token expired. Each one also leaves a line
 under **Urgent** in `comms.md`, which is where they get read -- except a run
 the account refused (`account_refused`), which shares one line a night with
@@ -287,8 +287,8 @@ def record_notice(agent: str, vault: Path, reason: str, key: str) -> bool:
     file being warned about, in practice. The count in the text changes from
     night to night, so the text itself cannot be the identity. "Once a night"
     is once per UTC date of the stamp, which the wake grid (09:00-12:00 UTC)
-    and the 01:30 PT recycle (08:30 UTC) both fall inside; a second Remote
-    Control start the same night is exactly the repeat this suppresses.
+    and the 01:40 PT lane check (09:40 UTC) both fall inside; a second
+    check the same night is exactly the repeat this suppresses.
 
     Returns True if a line was written. Best-effort like everything here: an
     unreadable log is treated as empty and an unwritable one is ignored,

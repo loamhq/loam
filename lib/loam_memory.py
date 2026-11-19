@@ -22,7 +22,7 @@ the three transports announces itself when a file grows. So one constant,
 here, is the authority -- ``bin/provision`` renders it into every CLAUDE.md so
 the agent can read the number, ``hooks/boundary_guard.py`` enforces it at edit
 time (on the engineer and reviewer lanes; a persona's hook only reports),
-and ``bin/wake`` and ``bin/rc-preflight`` report one -- neither refuses a run
+and ``bin/wake`` and ``bin/lane-check`` report one -- neither refuses a run
 over it (since 2026-11-18 for the wake). Since 2026-09-07 a second, lower number sits beside it:
 ``NEAR_LIMIT_CHARS``, at which the same two reporters write a warning line
 and change nothing else.
@@ -73,7 +73,7 @@ import re
 from pathlib import Path
 
 # ONE authority for the limit. bin/provision renders it into CLAUDE.md,
-# boundary_guard.py refuses past it, bin/wake and bin/rc-preflight report it
+# boundary_guard.py refuses past it, bin/wake and bin/lane-check report it
 # and never refuse a run.
 # Characters, not bytes: it is what an agent can reason about, and what the
 # CLAUDE.md sentence promises.
@@ -192,7 +192,7 @@ def near_limit(size: int) -> bool:
 
 def near_limit_reason(name: str, size: int, path: Path) -> str:
     """The one sentence both reporters write, so the log reads the same from
-    a wake and from a Remote Control start."""
+    a wake and from the nightly lane check."""
     return (
         f"`{name}` is {size:,} characters, within "
         f"{LIMIT_CHARS - NEAR_LIMIT_CHARS:,} characters of the "

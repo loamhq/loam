@@ -13,8 +13,8 @@ peak or what grew the disk ~2 GB. This one is a standing record.
 
 Every sample carries:
   mem     box RAM and swap, MB
-  units   every loam-* service under app.slice -- the broker, each
-          loam-rc-*, and whichever wake, cron, engineer job or reviewer is
+  units   every loam-* service under app.slice -- the broker, and
+          whichever wake, cron, engineer job or reviewer is
           running -- by its cgroup: current, peak, swap, and its MemoryHigh /
           MemoryMax (null when unset). Globbed, never listed: a unit that
           exists is sampled, and rosters drift where patterns don't.

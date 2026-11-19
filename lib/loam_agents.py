@@ -11,8 +11,7 @@ Decided 2026-11-14 (first release, decisions 6 and 7; job L10):
 - **Archive, never delete.** Archiving puts an agent to sleep: ``archived`` in
   its ``agent.json`` takes it out of Chats, every picker and every mention;
   the schedule reconciler takes its wake and cron timers down (its records
-  are untouched); its Remote Control unit is stopped; a turn that would be
-  its is refused with a line in the thread. Its threads stay readable and its
+  are untouched); a turn that would be its is refused with a line in the thread. Its threads stay readable and its
   files stay where they are. Restore removes the key, and the reconciler puts
   the same timers back from the same records. Nothing here deletes an agent.
 - **A face** is an uploaded image (PNG, JPEG, WebP or GIF) kept in the
@@ -729,20 +728,11 @@ def _runtime_bin(name: str) -> Path:
     return Path(__file__).resolve().parent.parent / "bin" / name
 
 
-def _systemctl(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["systemctl", "--user", *args], capture_output=True,
-                          text=True, check=False, timeout=60)
-
-
-def rc_unit(agent: str) -> str:
-    return f"loam-rc-{agent}.service"
-
-
 def confirm(draft_id: str, payload: dict, by: str | None, *,
-            provision=None, units=None) -> dict:
+            provision=None) -> dict:
     """Make the agent a draft describes, on the person's yes to its current
-    revision. ``provision(agent, wake)`` and ``units(agent, on)`` are seams
-    for the tests; the box's are bin/provision and systemctl."""
+    revision. ``provision(agent, wake)`` is a seam for the tests; the box's
+    is bin/provision."""
     payload = payload or {}
     rev = payload.get("rev")
     with locked():
@@ -766,7 +756,7 @@ def confirm(draft_id: str, payload: dict, by: str | None, *,
                                        if "after_message" in draft else None))
         agent = draft["id"]
         wake = draft.get("wake") or free_wake()
-        made = make(agent, draft, wake, provision=provision, units=units)
+        made = make(agent, draft, wake, provision=provision)
         draft["made"] = agent
         draft["made_at"] = now_iso()
         draft["yes"] = yes
@@ -777,7 +767,7 @@ def confirm(draft_id: str, payload: dict, by: str | None, *,
     return {"agent": agent, "draft": shown(draft), **made}
 
 
-def make(agent: str, draft: dict, wake: str, *, provision=None, units=None) -> dict:
+def make(agent: str, draft: dict, wake: str, *, provision=None) -> dict:
     ws = ai_labs() / agent
     ws.mkdir(parents=True)
     for sub in ("memory", "skills", "crons", "threads"):
@@ -813,8 +803,7 @@ def make(agent: str, draft: dict, wake: str, *, provision=None, units=None) -> d
             f"{agent} could not be provisioned, so it is not on the roster "
             f"(its agent.json is now {aside.name}; its files are in {ws}): {exc}",
             500) from None
-    rc = (units or _units)(agent, True)
-    return {"workspace": str(ws), "wake": wake, "provision": output, "rc": rc,
+    return {"workspace": str(ws), "wake": wake, "provision": output,
             "fleet_clauses": fleet}
 
 
@@ -833,26 +822,6 @@ def _provision(agent: str, wake: str) -> str:
     return done.stdout.strip()[-4000:]
 
 
-def _units(agent: str, on: bool) -> str:
-    """The agent's Remote Control unit on or off; the wake and cron timers
-    are the reconciler's. Answers what the unit now is."""
-    unit = rc_unit(agent)
-    if not (lc.USER_UNIT_DIR / unit).is_file():
-        return "none"
-    if on:
-        _systemctl("daemon-reload")
-        _systemctl("enable", "--now", unit)
-    else:
-        _systemctl("disable", "--now", unit)
-    now = _systemctl("is-active", unit).stdout.strip() or "unknown"
-    # Enabled and skipped: no Claude Code sign-in on the box yet. The sign-in
-    # starts it (bin/rc-arm, loam-claude-signin.path); nothing restarts it before.
-    if on and now == "inactive" and _systemctl(
-            "show", unit, "-p", "ConditionResult", "--value").stdout.strip() == "no":
-        return "waiting for a Claude Code sign-in"
-    return now
-
-
 # ---------------------------------------------------------------------------
 # Archive and restore.
 # ---------------------------------------------------------------------------
@@ -863,7 +832,7 @@ def _reconcile(agent: str) -> list[dict]:
 
 
 def archive(agent: str, payload: dict, by: str | None, *, busy=None,
-            units=None, reconcile=None) -> dict:
+            reconcile=None) -> dict:
     """Put an agent to sleep. ``busy(agent)`` is the broker's: a sentence when
     the agent is mid-turn or mid-run, else None."""
     payload = payload or {}
@@ -882,24 +851,19 @@ def archive(agent: str, payload: dict, by: str | None, *, busy=None,
         sentence = busy(agent) if busy else None
         if sentence and by != agent:
             raise AgentsError(f"{agent} is {sentence}; archive it once that ends", 409)
-        rc_before = _systemctl("is-enabled", rc_unit(agent)).stdout.strip() \
-            if units is None else "enabled"
         import loam_schedule  # noqa: PLC0415 -- the agent.json writers' lock
         with loam_schedule.locked():
             config = card(agent)
             config[ARCHIVE_KEY] = {"at": now_iso(), "by": by or lc.OWNER_ID,
-                                   "rc": rc_before or "unknown",
                                    **({"yes": yes} if yes else {})}
             _write_agent(agent, config)
         timers = (reconcile or _reconcile)(agent)
-        rc = (units or _units)(agent, False)
         event = log({"kind": "archived", "agent": agent, "by": by or lc.OWNER_ID,
-                     "yes": yes, "timers": [t.get("unit") for t in timers],
-                     "rc": rc})
+                     "yes": yes, "timers": [t.get("unit") for t in timers]})
     return {"agent": agent, "archived": config[ARCHIVE_KEY], "event": event}
 
 
-def restore(agent: str, payload: dict, by: str | None, *, units=None,
+def restore(agent: str, payload: dict, by: str | None, *,
             reconcile=None) -> dict:
     payload = payload or {}
     if agent not in every():
@@ -922,12 +886,9 @@ def restore(agent: str, payload: dict, by: str | None, *, units=None,
             config.pop(ARCHIVE_KEY, None)
             _write_agent(agent, config)
         timers = (reconcile or _reconcile)(agent)
-        rc = "left off (it was off when archived)"
-        if was.get("rc") in ("enabled", "unknown", None) or units is not None:
-            rc = (units or _units)(agent, True)
         event = log({"kind": "restored", "agent": agent, "by": by or lc.OWNER_ID,
                      "yes": yes, "archived_at": was.get("at"),
-                     "timers": [t.get("unit") for t in timers], "rc": rc})
+                     "timers": [t.get("unit") for t in timers]})
     return {"agent": agent, "event": event}
 
 

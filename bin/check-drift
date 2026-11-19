@@ -359,11 +359,10 @@ def check_engineer(findings: list, prov) -> None:
     does the reverse, which would be the engineer having rewritten its own
     role.
 
-    **The absence of units.** A persona is checked against a wake service, a
-    timer and an RC unit. The engineer must have NONE of those: it is
-    reachable only in conversation (decision 7), and a timer or a Remote
-    Control server would be exactly the thing that makes it reachable
-    otherwise. So the check is inverted -- any unit bearing its name is a
+    **The absence of units.** A persona is checked against a wake service
+    and a timer. The engineer must have NONE of those: it is reachable only
+    in conversation (decision 7), and a timer would be exactly the thing
+    that makes it reachable otherwise. So the check is inverted -- any unit bearing its name is a
     finding, not a comparison.
     """
     engineer = prov.ENGINEER
@@ -411,8 +410,7 @@ def check_engineer(findings: list, prov) -> None:
     # "a job started in conversation may outlive it" -- never a new one.
     strays = sorted(
         u.name for u in UNIT_DIR.iterdir()
-        if u.name.startswith(("loam-engineer-", "loam-wake-engineer",
-                              "loam-rc-engineer"))
+        if u.name.startswith(("loam-engineer-", "loam-wake-engineer"))
         and not u.name.startswith("loam-engineer-2")   # a live job's own unit
     )
     if strays:
@@ -991,7 +989,7 @@ def check_lane_models(findings: list, names: list[str], prov) -> list[str]:
     rather than a thing someone notices.
 
     The comparison rule and the transcript read live in loam_session, not
-    here, because bin/rc-preflight asks the same question once a night per
+    here, because bin/lane-check asks the same question once a night per
     agent and the two must not be able to answer it differently.
     """
     notes = []
@@ -1045,7 +1043,7 @@ def check_lane_models(findings: list, names: list[str], prov) -> list[str]:
         # drifting -- on the broker's record, or by a `/model` in the session
         # itself (the Claude Code app's model menu sends one). Noted, never a
         # finding: an alarm that fires on a deliberate pick is an alarm that
-        # gets ignored. The rule is loam_session's, shared with rc-preflight.
+        # gets ignored. The rule is loam_session's, shared with lane-check.
         verdict, why = sess.model_verdict(
             configured, seen, brk.chosen_model(Path(session).stem))
         if verdict == "ok":
@@ -1088,7 +1086,6 @@ def report(findings: list, quiet: bool) -> int:
 def main() -> int:
     quiet = "--quiet" in sys.argv
     prov = load("provision", AGENTS / "bin" / "provision")
-    genrc = load("gen_rc_units", AGENTS / "bin" / "gen-rc-units")
 
     names = roster()
     findings: list = []
@@ -1222,11 +1219,6 @@ def main() -> int:
             compare(findings, f"{name} wake.timer",
                     UNIT_DIR / f"loam-wake-{name}.timer", tmr)
 
-        compare(findings, f"{name} rc.service",
-                UNIT_DIR / f"loam-rc-{name}.service",
-                genrc.TEMPLATE.format(
-                    display=display, name=name, workspace=str(ws)))
-
     check_config_clauses(findings, names)
     check_user_settings(findings, prov)
     check_managed_settings(findings, prov)
@@ -1259,46 +1251,45 @@ def main() -> int:
                 and not (UNIT_DIR / name).exists()):
             continue
         compare(findings, f"static {name}", UNIT_DIR / name, text)
-    # The sign-in arms the Remote Control servers (bin/rc-arm, 2026-11-14):
-    # with the watch off, a sign-in starts none of them.
+    # The sign-in watch (bin/claude-signin): with it off, a sign-in or a
+    # sign-out is noticed by nothing that runs on its own.
     armed = user_systemctl("is-active", "loam-claude-signin.path")
     if armed != "active":
         findings.append((
-            "Remote Control arming", "systemctl --user is-active loam-claude-signin.path",
-            f"{armed or 'unknown'}: a Claude Code sign-in starts no Remote Control "
-            f"server while this is off. `systemctl --user enable --now "
+            "Claude Code sign-in watch", "systemctl --user is-active loam-claude-signin.path",
+            f"{armed or 'unknown'}: a Claude Code sign-in or sign-out is not "
+            f"noticed while this is off. `systemctl --user enable --now "
             f"loam-claude-signin.path`"))
 
-    # agents/systemd/ held a second copy of the five loam-rc-*.service files
-    # until 2026-09-02. gen-rc-units writes only to the user unit dir, so
-    # nothing kept them current and nothing compared them -- they were four
-    # days stale and still read as the source of truth. Deleted; this keeps
-    # them deleted. Same defect as provision.rc_unit(), same remedy.
-    #
-    # loam-cron-* joined the rule on 2026-09-05 for the identical reason: they
-    # are generated per-cron by the schedule reconciler (lib/loam_schedule.py) straight into the user unit
-    # dir, and a copy parked here would be a second, unrefreshed home for a
-    # definition that lives in the agent's own file.
+    # Remote Control was retired on 2026-11-19 (the owner: "I don't use it
+    # through app anymore"). A unit of it left on the box -- a per-agent
+    # server or the nightly recycle -- has no generator and no owner, and
+    # a server of it would put an agent back on a surface nobody uses.
+    leftovers = sorted(
+        u.name for u in UNIT_DIR.iterdir()
+        if u.name.startswith(("loam-rc-", "loam-recycle-rc."))
+    )
+    if leftovers:
+        findings.append((
+            "Remote Control leftovers", str(UNIT_DIR),
+            f"{', '.join(leftovers)}: Remote Control is retired and nothing "
+            f"generates these. Stop, disable and remove them.",
+        ))
+
+    # loam-cron-* are generated per-cron by the schedule reconciler
+    # (lib/loam_schedule.py) straight into the user unit dir (since
+    # 2026-09-05), so a copy parked in agents/systemd/ would be a second,
+    # unrefreshed home for a definition that lives in the agent's own file.
     strays = sorted(
         u.name for u in STATIC_UNITS.iterdir()
-        if u.name.startswith(("loam-rc-", "loam-cron-"))
+        if u.name.startswith("loam-cron-")
     )
     if strays:
         findings.append((
             "agents/systemd strays", "agents/systemd",
-            f"{', '.join(strays)} duplicate generated units. gen-rc-units and "
-            f"the reconciler write only to {UNIT_DIR}; a copy here is never "
-            f"refreshed and never checked, and reads as authoritative anyway.",
-        ))
-
-    # The generator must not itself hold a second copy of an artifact someone
-    # else owns. This is the exact shape of the rc_unit() trap.
-    if hasattr(prov, "rc_unit"):
-        findings.append((
-            "provision.rc_unit", "bin/provision",
-            "provision still defines rc_unit(); gen-rc-units is the owner of "
-            "loam-rc-*.service. Two generators for one artifact is what "
-            "re-introduced the shared-cgroup crash.",
+            f"{', '.join(strays)} duplicate generated units. The reconciler "
+            f"writes only to {UNIT_DIR}; a copy here is never refreshed and "
+            f"never checked, and reads as authoritative anyway.",
         ))
 
     print(f"check-drift: {len(names)} agents ({', '.join(names)})")

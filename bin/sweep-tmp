@@ -63,7 +63,7 @@ DEFAULT_HOURS = 48
 
 # Names that belong to the system or to a program's long-lived per-user
 # directory, never swept at any age. `claude-<uid>` is Claude Code's own
-# scratch for every session on the box, broker and Remote Control included.
+# scratch for every session on the box, the broker's included.
 KEEP_RE = re.compile(
     r"^(systemd-private-|snap-private-tmp|tmux-|claude-\d+$|"
     r"\.(X11|ICE|XIM|font|Test)-unix$)")

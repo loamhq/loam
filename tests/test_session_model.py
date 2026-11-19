@@ -8,7 +8,7 @@ keeps the session there; nothing on this box compared what a lane was
 configured for against what it actually ran.
 
 Two readers ask this question -- `bin/check-drift` by hand and
-`bin/rc-preflight` at every Remote Control start -- and both get it from
+`bin/lane-check` every night -- and both get it from
 lib/loam_session.py, so what is proved here is proved for both.
 
 The two strictnesses are the point and each has a case below: a family
@@ -120,10 +120,10 @@ try:
           loam_session.model_family("claude-opus-4-8")
           == loam_session.model_family("claude-opus-5"), True)
 
-    # The comms line rc-preflight writes for this finding, through the real
+    # The comms line lane-check writes for this finding, through the real
     # `snippet()`. Regression: the first version put the cause in a SECOND
     # sentence, snippet() keeps only the first, and the surviving line --
-    # behind record_failure()'s fixed "Remote Control start:" prefix -- read
+    # behind record_failure()'s prefix (then "Remote Control start:") -- read
     # as though a Remote Control start had passed the model. Its first reader
     # concluded exactly that and briefed a fix for the wrong thing. What is
     # asserted here is the property that failed: the sentence that SURVIVES
@@ -134,7 +134,7 @@ try:
     from loam_inbox import SNIPPET_CHARS, snippet  # noqa: PLC0415
 
     ldr = importlib.machinery.SourceFileLoader(
-        "rcp", str(Path(__file__).resolve().parent.parent / "bin" / "rc-preflight"))
+        "rcp", str(Path(__file__).resolve().parent.parent / "bin" / "lane-check"))
     spc = importlib.util.spec_from_loader("rcp", ldr)
     rcp = importlib.util.module_from_spec(spc)
     ldr.exec_module(rcp)
@@ -203,14 +203,14 @@ try:
         assistant("claude-opus-4-8", "2026-09-25T18:16:24Z"),
     ]) + "\n", encoding="utf-8")
     model_problem = (rcp.model_problem(lane) or ("",))[0]
-    line = snippet("Remote Control start: " + model_problem)
+    line = snippet("Nightly lane check: " + model_problem)
     check("a model finding is raised at all", bool(model_problem), True)
     check("the comms line is not truncated", len(line) <= SNIPPET_CHARS
           and not line.endswith("…"), True)
     check("the surviving sentence names the refusal",
           "refusal" in line, True)
-    check("it clears the Remote Control start",
-          "not this start" in line, True)
+    check("it clears the run that found it",
+          "not this run" in line, True)
     check("it clears the launch path",
           "no launch path chose it" in line, True)
     check("it names both models",
@@ -327,7 +327,7 @@ try:
           "drift")
     (rd / "ada.jsonl").unlink()
 
-    # 3. ONCE, AND LABELLED RIGHT, through rc-preflight's real main().
+    # 3. ONCE, AND LABELLED RIGHT, through lane-check's real main().
     vault = root / "vault"
     (vault / "00_INBOX" / "from-agents").mkdir(parents=True)
     lane_cfg = root / "lane-project"
@@ -346,7 +346,7 @@ try:
     def start() -> None:
         import io
         from contextlib import redirect_stderr, redirect_stdout
-        sys.argv = ["rc-preflight", str(lane_cfg)]
+        sys.argv = ["lane-check", str(lane_cfg)]
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             rcp.main()
 

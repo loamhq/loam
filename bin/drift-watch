@@ -2,13 +2,14 @@
 """Run bin/check-drift once a night and say so only when something is new.
 
 check-drift was built to be run "from cron or by hand", and until 2026-10-14
-it was only ever run by hand. The one part of it that ran unattended was the
-lane-model check, because `bin/rc-preflight` carries a copy of it into every
-Remote Control start at the 01:30 recycle; the other checks -- generators
-against the live files, the static units, the crons, the deployment layer --
-waited for someone to remember them. loam-check-drift.timer runs this at
-01:40 Pacific, after the recycle has restarted every RC server and before
-the first wake at 02:00.
+it was only ever run by hand. loam-check-drift.timer runs this at 01:40
+Pacific, before the first wake at 02:00.
+
+After check-drift it runs `bin/lane-check` once for every persona that is
+not archived: the auto-loaded files' hygiene, the lane-model alarm and the
+GitHub integration's nightly check, which until 2026-11-19 ran as the
+preflight of each Remote Control start. Each is its own process with its own
+timeout, says what it found itself, and cannot change what this exits.
 
 What it says, and where:
 
@@ -121,5 +122,36 @@ def watch(check: list[str] = CHECK, vault: Path = VAULT, log_path: Path = LOG,
     return 0
 
 
+LANE_CHECK = AGENTS / "bin" / "lane-check"
+LANE_TIMEOUT_S = 120
+
+
+def lane_checks(names: list[str] | None = None, run=subprocess.run) -> dict[str, str]:
+    """``bin/lane-check`` for each live persona; ``{name: outcome}``. Never
+    raises: a check that cannot run is a line in the log, not a failed
+    night (lane-check reports its own findings)."""
+    if names is None:
+        import loam_broker  # noqa: PLC0415
+        names = loam_broker.roster()
+    out = {}
+    for name in names:
+        try:
+            done = run([sys.executable, str(LANE_CHECK), str(lc.WORKSPACES / name)],
+                       capture_output=True, text=True, timeout=LANE_TIMEOUT_S,
+                       check=False)
+            out[name] = f"exit {done.returncode}"
+            for line in (done.stdout + done.stderr).splitlines():
+                print(line)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            out[name] = f"did not run: {exc}"
+            print(f"drift-watch: lane-check {name} did not run: {exc}", file=sys.stderr)
+    return out
+
+
 if __name__ == "__main__":
-    sys.exit(watch())
+    code = watch()
+    try:
+        lane_checks()
+    except Exception as exc:  # noqa: BLE001 - the drift result stands
+        print(f"drift-watch: lane checks could not run: {exc}", file=sys.stderr)
+    sys.exit(code)

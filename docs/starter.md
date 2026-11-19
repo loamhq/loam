@@ -24,9 +24,8 @@ and keeps it accurate on her nightly wake.
 
 `seed-starter` makes Iris from `docs/starter/iris/` through
 `loam_agents.make`, the same step L10's create route ends in: her workspace,
-her soul and config, the two loading files, `agent.json`, provisioning on
-every provider and her Remote Control unit, which waits, enabled, for the
-first Claude Code sign-in and starts then (`bin/rc-arm`). On a box with other agents her
+her soul and config, the two loading files, `agent.json`, and provisioning on
+every provider. On a box with other agents her
 config takes the fleet's clauses as any new agent's does; on a blank one
 there are none, and the starter's config is what she has. From then on she
 is an ordinary agent: the person can change her, rename her or archive her.

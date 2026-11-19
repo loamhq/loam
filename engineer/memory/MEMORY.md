@@ -65,12 +65,9 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **A change to the generators must be re-rendered, not just compared.**
   `drift-watch` compares against the previous night's state, so a
   comment-only change to every rendered unit is posted as new drift unless
-  the units are regenerated (`gen-units`, `gen-rc-units`, each agent's wake
+  the units are regenerated (`gen-units`, each agent's wake
   unit, `provision --reviewer`) and `loam-check-drift.service` is run once.
   Comment-only unit changes need a `daemon-reload` and no restart.
-- **`gen-rc-units` has no `--help`.** Any argument starting with `-` is
-  ignored and the run is live: `gen-rc-units --help` writes every rc unit.
-  Use `--dry-run`.
 - **Nor has `gen-deploy`** (caused 2026-11-17): `gen-deploy --help` is a
   live render. It wrote the Caddyfile, reloaded Caddy and ran `compose up`
   on the login and the browser. Read a generator's docstring, never its
@@ -1971,3 +1968,21 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   aside into the staging folder first.
 - **`pkill -f "node server/main.js"` killed the shell again** (2026-11-18's
   lesson). Kill by pid from `ss -ltnp`.
+## 2026-11-19 — Remote Control retired
+
+- **Remote Control is gone** (the owner: "I don't use it through app
+  anymore"): no `loam-rc-*` servers, no `gen-rc-units`, no `recycle-rc` or
+  its 01:30 timer. Every conversation is the broker's. `check-drift` reports
+  any `loam-rc-*` or `loam-recycle-rc.*` unit left on a box as a leftover.
+- **What Remote Control carried that was not Remote Control** kept a home:
+  rc-preflight's file-hygiene, lane-model and GitHub nightly checks are
+  `bin/lane-check`, run for every live persona by `bin/drift-watch` at
+  01:40 (the GitHub check is what keeps the user token's refresh token
+  rolling; dropping it would expire GitHub in six months, silently). The
+  sign-in watch (`loam-claude-signin.path`) runs `bin/claude-signin`, which
+  only records the state in `<state>/claude-signin.json` -- the seam for
+  deciding whether agents can run. The persona `settings.json` keeps
+  `model` and `outputStyle`: the broker passes neither by flag.
+- **Adopted sessions stay** (`lib/loam_adopt.py`): the conversations held
+  in the Claude Code app before the retirement still open in Loam, read
+  from the CLI's own files.

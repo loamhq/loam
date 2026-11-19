@@ -56,7 +56,7 @@ broker_mod = importlib.util.module_from_spec(spec)
 loader.exec_module(broker_mod)
 
 pf_loader = importlib.machinery.SourceFileLoader(
-    "rc_preflight_github", str(AGENTS / "bin" / "rc-preflight"))
+    "lane_check_github", str(AGENTS / "bin" / "lane-check"))
 pf_spec = importlib.util.spec_from_loader(pf_loader.name, pf_loader)
 preflight = importlib.util.module_from_spec(pf_spec)
 pf_loader.exec_module(preflight)

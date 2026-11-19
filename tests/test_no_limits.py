@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""No clock, no round-trip cap, and a recycle that yields (since 2026-11-10).
+"""No clock and no round-trip cap (since 2026-11-10).
 
 The owner, 2026-11-10: "Please remove any limitations on how long a turn or
 session can run. I don't want any limitations at all." Asserted here, by
@@ -15,11 +15,8 @@ calling the shipped functions:
   the waiter      with no ceiling, a running job is waited for past any
                   old clock, and the call still ends at its own ceiling with
                   "Still running", never killing the job.
-  the recycle     bin/recycle-rc restarts every server holding no waiting
-                  call, waits for one that holds a call and restarts it when
-                  the call ends, and skips -- and says so -- one whose call
-                  outlasts the wait. A job's own inner (`--in-unit`) is not
-                  a waiting call.
+  the recycle     there is none (Remote Control, which it restarted, was
+                  retired 2026-11-19): no recycle-rc, and no recycle timer.
 
 Nothing outside a temporary directory is written; no unit is launched.
 
@@ -68,7 +65,6 @@ def load(name: str, path: Path):
 job = load("engineer_job_no_limits", AGENTS / "bin" / "engineer-job")
 wake = load("wake_no_limits", AGENTS / "bin" / "wake")
 review = load("review_no_limits", AGENTS / "bin" / "review")
-rc = load("recycle_rc_no_limits", AGENTS / "bin" / "recycle-rc")
 
 # The job's clock.
 for sent in (None, "", 0, -5, "none", "soon"):
@@ -145,42 +141,11 @@ try:
 finally:
     shutil.rmtree(root, ignore_errors=True)
 
-# The recycle.
-check("recycle: the outer of a brief is a waiting call",
-      rc.is_waiter(["python3", "/home/loam/agents/bin/engineer-job", "--brief"]), True)
-check("recycle: a job's own inner is not",
-      rc.is_waiter(["python3", "/home/loam/agents/bin/engineer-job",
-                    "Loam", "x", "--in-unit"]), False)
-check("recycle: an unrelated process is not",
-      rc.is_waiter(["/home/loam/.local/bin/claude", "-p", "engineer-job"]), False)
-
-holding = {"loam-rc-juno.service": [[101], [101], []],      # ends after two looks
-           "loam-rc-iris.service": [[202]] * 50}            # never ends
-restarts: list[list[str]] = []
-
-
-def find(unit):
-    plan = holding.get(unit)
-    return plan.pop(0) if plan and len(plan) > 1 else (plan[0] if plan else [])
-
-
-record = rc.recycle(
-    units=lambda: ["loam-rc-cleo.service", "loam-rc-iris.service",
-                   "loam-rc-juno.service", "loam-rc-pax.service"],
-    find=find, do_restart=lambda units, dry: restarts.append(list(units)) or None,
-    wait_s=0.6, poll_s=0.1, sleep=time.sleep)
-check("recycle: the free servers restart at once, together",
-      restarts[0], ["loam-rc-cleo.service", "loam-rc-pax.service"])
-check("recycle: a held server restarts when its call ends",
-      ["loam-rc-juno.service"] in restarts[1:] and "loam-rc-juno.service" in record["waited"],
-      True)
-check("recycle: one whose call outlasts the wait is skipped, with its pids",
-      record["skipped"], {"loam-rc-iris.service": [202]})
-check("recycle: the skipped one was never restarted",
-      any("loam-rc-iris.service" in r for r in restarts), False)
-check("recycle: the record lists every restart",
-      sorted(record["restarted"]),
-      ["loam-rc-cleo.service", "loam-rc-juno.service", "loam-rc-pax.service"])
+# The recycle is gone with what it restarted.
+check("no recycle-rc, and no recycle timer",
+      ((AGENTS / "bin" / "recycle-rc").exists(),
+       sorted(p.name for p in (AGENTS / "systemd").glob("loam-recycle-rc.*"))),
+      (False, []))
 
 print(f"\n{'all passed' if not fails else f'{fails} failed'}")
 sys.exit(1 if fails else 0)

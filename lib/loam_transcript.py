@@ -631,8 +631,8 @@ def _title_debug(message: str) -> None:
 def generate_title(turns: list[Turn], agent: str) -> str | None:
     """A short human title for a conversation, or None if anything goes wrong.
 
-    Remote Control sessions never produce an ``ai-title`` entry (measured
-    2026-08-25: 0 of the agent's sessions against 413 chassis-era ones), so
+    Sessions outside the broker never produced an ``ai-title`` entry (measured
+    2026-08-25, on Remote Control: 0 of the agent's sessions against 413 chassis-era ones), so
     without this every transcript keeps a truncated first prompt as its
     filename -- the one remaining tell that a file came from this runtime.
 

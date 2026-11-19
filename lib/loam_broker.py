@@ -74,7 +74,7 @@ def chosen_model(session_id: str) -> str | None:
     the owner choosing a model for one conversation, which is the one
     legitimate way a lane runs something its config does not name.
 
-    The model check in ``bin/check-drift`` and ``bin/rc-preflight`` reads this
+    The model check in ``bin/check-drift`` reads this
     to tell a choice from a drift. It has to: one agent already has a session
     recorded with ``model: "opus"``, so without this the check would report a
     deliberate pick as an unintended switch. An alarm that cries wolf is the
@@ -153,7 +153,7 @@ SERVICE = "loam-session-broker.service"
 # it has none, and that term is None), each less what the starts in flight
 # will take. A start is admitted while that leaves `MEMORY_RESERVE_MB`
 # for everything that is not a chat -- the system, sshd, Caddy, Authelia,
-# docker, the RC servers, the persona browser, the engineer jobs and wakes
+# docker, the persona browser, the engineer jobs and wakes
 # yet to start -- plus `SESSION_START_MB` for the new process. Short, the
 # broker ends the least recently used idle session and asks again; only when
 # every session is busy is a start refused (`Broker.make_room`). An idle
@@ -179,8 +179,8 @@ BOX_MB = _box_mb()
 SESSION_START_MB = 450
 
 # Kept free for everything that is not a chat: 2 GB, or 12% of RAM on a
-# bigger box. 2,048 MB on the 7,750 MB CX33 (where ~2.6 GB of RC servers and
-# ~1.2 GB of docker are already counted out of MemAvailable, and this is the
+# bigger box. 2,048 MB on the 7,750 MB CX33 (where ~2.6 GB of Remote Control servers,
+# retired 2026-11-19, and ~1.2 GB of docker are already counted out of MemAvailable, and this is the
 # room for a wake, an engineer job at its 1 GiB High and the browser to
 # start), 3,870 MB on the 32 GB CX53.
 MEMORY_RESERVE_MB = max(2048, BOX_MB * 12 // 100)
@@ -1183,7 +1183,7 @@ def read_token() -> str:
 
 def roster(archived: bool = False) -> list[str]:
     """Every persona with an agent.json, derived from disk the way
-    bin/gen-rc-units derives it. Rosters drift, patterns don't.
+    bin/gen-units derives it. Rosters drift, patterns don't.
 
     An archived agent (lib/loam_agents.py, 2026-11-14) is left out: it is
     not in Chats, any picker, a ``by`` or a new session. ``archived=True``

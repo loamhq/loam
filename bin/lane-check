@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """Report what is wrong with an agent's auto-loaded files. Never refuse.
 
-Runs as ``ExecStartPre=`` on each ``loam-rc-<agent>.service``, so it fires at
-every Remote Control start and therefore at every 01:30 recycle -- once a
-night, in the dead half hour before the wake grid opens.
+Run once a night for every persona by ``bin/drift-watch`` (01:40, before the
+wake grid opens). Until 2026-11-19 this was ``bin/rc-preflight``, the
+``ExecStartPre=`` of each Remote Control server, and fired at the 01:30
+recycle; Remote Control was retired that day (the owner: "I don't use it
+through app anymore") and the checks, which are about the files every lane
+loads and not about Remote Control, kept their nightly run here.
 
-**It exits 0 whatever it finds, and that is the whole design.** When a Remote
-Control server is not running, its sessions show as `offline` in the app and
-the browser: listed, with their history, and untypeable, with no reason
-given. A hygiene check that refused to start would take an agent silently off
-the owner's phone, and the only process that could repair the workspace is the
-wake -- which is the trap that took Iris offline for days on 2026-08-31. The
-layer that refuses should be the one that can also repair, and this one
-cannot. So it writes a line where he already looks -- the failure log and one
-line under Urgent in `comms.md` -- and gets out of the way.
+**It exits 0 whatever it finds.** It is a report, not a gate: the layer that
+refuses should be the one that can also repair, and this one cannot. So it
+writes a line where the owner already looks -- the failure log and one line
+under Urgent in `comms.md` -- and gets out of the way.
 
 For an agent with a map (2026-11-18, lib/loam_loading.py) it sizes the map
 and nothing else: the map loads as a CLAUDE.md import, with no style to lose.
@@ -43,7 +41,7 @@ convention is a check the artifact performs on itself by being read, so it is
 structurally blind to the artifact being ABSENT. This one runs from outside
 the session and sees absence, which is the worse of the two failures.
 
-Usage: rc-preflight <agent-project-dir>
+Usage: lane-check <agent-project-dir>
 """
 
 from __future__ import annotations
@@ -101,7 +99,7 @@ def findings(workspace: Path) -> tuple[list[str], list[tuple[str, str]]]:
             return [f"`{loam_loading.MAP}` is unreadable: {exc}"], []
         if size > LIMIT_CHARS:
             out.append(over_limit_reason(loam_loading.MAP, size, path,
-                                         "the server starts as always"))
+                                         "every lane loads it as always"))
         elif near_limit(size):
             warnings.append((f"`{loam_loading.MAP}`",
                              near_limit_reason(loam_loading.MAP, size, path)))
@@ -122,7 +120,7 @@ def findings(workspace: Path) -> tuple[list[str], list[tuple[str, str]]]:
             continue
         if len(text) > LIMIT_CHARS:
             out.append(over_limit_reason(name, len(text), path,
-                                         "the server starts as always"))
+                                         "every lane loads it as always"))
         elif near_limit(len(text)):
             warnings.append((f"`{name}`", near_limit_reason(name, len(text), path)))
 
@@ -174,16 +172,14 @@ def model_problem(workspace: Path) -> tuple[str, dict] | None:
     scroll. The owner caught that line by chance, and three earlier switches
     on two lanes since 2026-09-03 nobody caught at all.
 
-    This belongs here and not only in check-drift for the reason the rest
-    of this file does: check-drift is run by hand, and a check nobody runs
-    is not an alarm. This fires at every Remote Control start -- so once a
-    night per agent at the 01:30 recycle -- and writes where the owner
-    already looks. The comparison itself is loam_session's, shared with
+    check-drift reports the same finding under Important, once, while it is
+    new; this writes it to the failure log and under Urgent, once per
+    session, where the owner already looks. The comparison itself is loam_session's, shared with
     check-drift so the two cannot disagree.
 
     **Once per session** (2026-09-28). comms dedupes on a line's text only
     while that line is still in the file, so once a reader tidied it away
-    the next start wrote it back: the same four stale sessions reached Urgent
+    the next run wrote it back: the same four stale sessions reached Urgent
     on 09-26, 09-27 and 09-28, and the failure log took them every night. A drifted session is a fact about the past by the
     time a start reads it; saying it again the next night tells nobody
     anything. So a lane's last report is kept in ``MODEL_MEMORY/<lane>.json``
@@ -205,9 +201,8 @@ def model_problem(workspace: Path) -> tuple[str, dict] | None:
     if seen is None:
         return None
     # A chat that asked for a model is a choice, not a drift. Imported
-    # here rather than at module load: this runs as ExecStartPre on every
-    # Remote Control unit, and the fewer modules that can fail before
-    # findings() is even reached, the better.
+    # here rather than at module load, so the fewer modules that can fail
+    # before findings() is even reached, the better.
     from loam_broker import chosen_model  # noqa: PLC0415
     verdict, _ = sess.model_verdict(
         configured, seen, chosen_model(Path(seen.session).stem))
@@ -222,12 +217,13 @@ def model_problem(workspace: Path) -> tuple[str, dict] | None:
         return None
     # THE CAUSE GOES IN THE FIRST SENTENCE. `loam_inbox.snippet()` keeps the
     # first sentence and drops the rest, and record_failure() below prefixes
-    # every problem with what ran the check ("Remote Control start:" at a
-    # start; see `origin`) -- which names when it ran, not what went wrong. The first version of this finding put
-    # the cause in a second sentence, so the comms line read "Remote Control
-    # start: the last session on this lane ran on `claude-opus-4-8`, but this
-    # agent's config names `fable`." and its first reader reasonably
-    # concluded that a Remote Control start had passed the model. It had not:
+    # every problem with what ran the check (see `origin`) -- which names
+    # when it ran, not what went wrong. The first version of this finding
+    # put the cause in a second sentence, so the comms line read "Remote
+    # Control start: the last session on this lane ran on `claude-opus-4-8`,
+    # but this agent's config names `fable`." (2026-09-26, when this ran at
+    # each Remote Control start) and its first reader reasonably concluded
+    # that the start had passed the model. It had not:
     # the switch happens mid-session on a refused turn, and no launch path on
     # this box passes a model at all. A line that invites the wrong repair is
     # worse than a quiet one, so the sentence that survives truncation has to
@@ -243,7 +239,7 @@ def model_problem(workspace: Path) -> tuple[str, dict] | None:
     if seen.refusal and seen.refusal_to == seen.model:
         head = (
             f"a refusal mid-conversation moved an EARLIER session off "
-            f"`{configured}` onto `{seen.model}`; not this start, and no "
+            f"`{configured}` onto `{seen.model}`; not this run, and no "
             f"launch path chose it"
         )
         tail = (
@@ -270,40 +266,37 @@ def remember(lane: str, memory: dict) -> None:
         (MODEL_MEMORY / f"{lane}.json").write_text(
             json.dumps(memory, indent=2) + "\n", encoding="utf-8")
     except OSError as exc:
-        print(f"rc-preflight: could not remember the model finding ({exc})",
+        print(f"lane-check: could not remember the model finding ({exc})",
               file=sys.stderr)
 
 
 def origin(cgroup: str | None = None) -> str:
-    """What ran this check, as the failure log's prefix.
-
-    "Remote Control start" only when it is: the process sits in a
-    `loam-rc-<agent>.service` cgroup, which is where ExecStartPre= runs it.
-    Run by hand or from another unit, the line used to say "Remote Control
-    start" all the same, and a reader went looking for a restart that never
-    happened (named 2026-09-30). The cgroup is read rather than a flag passed,
-    because a flag would be a change to every generated RC unit.
-    """
+    """What ran this check, as the failure log's prefix: "Nightly lane
+    check" when drift-watch's unit ran it, else who did. The cgroup is
+    read rather than a flag passed (named 2026-09-30, when a line that
+    claimed the wrong origin sent a reader looking for a run that never
+    happened)."""
     if cgroup is None:
         try:
             cgroup = Path("/proc/self/cgroup").read_text(encoding="utf-8")
         except OSError:
             cgroup = ""
     unit = cgroup.strip().rsplit("/", 1)[-1] if cgroup.strip() else ""
-    if unit.startswith("loam-rc-") and unit.endswith(".service"):
-        return "Remote Control start"
+    if unit == NIGHTLY_UNIT:
+        return "Nightly lane check"
     if unit.endswith(".service"):
-        return f"rc-preflight run from {unit.removesuffix('.service')}"
-    return "rc-preflight run by hand"
+        return f"lane-check run from {unit.removesuffix('.service')}"
+    return "lane-check run by hand"
 
 
+NIGHTLY_UNIT = "loam-check-drift.service"
 GITHUB_LINK = "the app's Integrations screen, GitHub"
 
 
 def github_check(vault: Path, today: str | None = None) -> list[str]:
     """The GitHub integration's nightly check (2026-09-30), once a night.
 
-    Every RC unit runs this preflight at the 01:30 recycle, so the first one
+    drift-watch runs this for every persona each night, so the first one
     of the date calls GitHub and writes the date to ``CHECKED_PATH``; the
     others read the date and return. The check itself is
     ``loam_github_app.nightly_warnings``: the installation and the user token
@@ -325,17 +318,17 @@ def github_check(vault: Path, today: str | None = None) -> list[str]:
         github.CHECKED_PATH.write_text(today + "\n", encoding="utf-8")
         warnings = github.nightly_warnings()
     except Exception as exc:  # noqa: BLE001 - this preflight never refuses
-        print(f"rc-preflight: github check could not run ({exc})", file=sys.stderr)
+        print(f"lane-check: github check could not run ({exc})", file=sys.stderr)
         return []
     for warning in warnings:
-        print(f"rc-preflight: github: {warning}", file=sys.stderr)
+        print(f"lane-check: github: {warning}", file=sys.stderr)
         append_comms(vault, "github", warning, GITHUB_LINK, section="Important")
     return warnings
 
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print("usage: rc-preflight <agent-project-dir>", file=sys.stderr)
+        print("usage: lane-check <agent-project-dir>", file=sys.stderr)
         return 0
 
     try:
@@ -344,16 +337,16 @@ def main() -> int:
         agent = config["name"]
         workspace = Path(config["workspace"])
         vault = Path(config["vault"])
-        # The shape on disk, rendered before the server starts (2026-11-18).
+        # The shape on disk, rendered before it is read (2026-11-18).
         import loam_loading  # noqa: PLC0415
         loam_loading.quiet_refresh(workspace)
         problems, warnings = findings(workspace)
         model = model_problem(workspace)
         ran_as = origin()
     except (LayerError, KeyError, OSError) as exc:
-        # Even a broken check must not stop a server. Say so on stderr, which
-        # is the one stream the RC units keep.
-        print(f"rc-preflight: could not run ({exc})", file=sys.stderr)
+        # A broken check is a line on stderr, which drift-watch keeps, and
+        # never a failure of the night's run.
+        print(f"lane-check: could not run ({exc})", file=sys.stderr)
         return 0
 
     github_check(vault)
@@ -362,7 +355,7 @@ def main() -> int:
     # night inside record_notice, nothing in comms. A file at 9,900 is not
     # a broken layer and must not read as one.
     for key, warning in warnings:
-        print(f"rc-preflight: {agent}: warning: {warning}", file=sys.stderr)
+        print(f"lane-check: {agent}: warning: {warning}", file=sys.stderr)
         record_notice(agent, vault, f"{ran_as}: {warning}", key=key)
 
     if model:
@@ -370,14 +363,13 @@ def main() -> int:
         remember(workspace.name, model[1])
 
     if not problems:
-        print(f"rc-preflight: {sys.argv[1]} OK")
+        print(f"lane-check: {sys.argv[1]} OK")
         return 0
 
     for problem in problems:
-        print(f"rc-preflight: {agent}: {problem}", file=sys.stderr)
+        print(f"lane-check: {agent}: {problem}", file=sys.stderr)
         # Both files, one call. The comms line is deduplicated on its text,
-        # which matters most here: this runs at every RC start and therefore
-        # at every 01:30 recycle, so a finding that persists for a week would
+        # which matters most here: this runs every night, so a finding that persists for a week would
         # otherwise write seven identical lines into an outlet that is not a
         # log. The log beside it still gets all seven.
         record_failure(agent, vault, f"{ran_as}: {problem}")

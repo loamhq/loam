@@ -6,7 +6,7 @@
   holders      the du runs on the first sample of a day at or after 01:45
                and on no other.
   history      check-memory's 24 h peak per unit (sampled current for the
-               broker and loam-rc-*, the cgroup's own peak for a per-run
+               broker, the cgroup's own peak for a per-run
                unit), the disk delta per mount against the newest sample a
                day older, the holders against the day before, and the two
                warnings: a broker near its MemoryHigh and a stopped sampler.
@@ -74,11 +74,10 @@ check("du again the next day", ms.holders_due(NOON + dt.timedelta(days=1), log))
 # --- check-memory's history report ------------------------------------------
 
 
-def row(at: dt.datetime, broker: int, rc: int, root: int, wake: dict | None = None,
+def row(at: dt.datetime, broker: int, root: int, wake: dict | None = None,
         holders: dict | None = None) -> dict:
     units = {
         "loam-session-broker": {"cur": broker, "peak": 1801, "high": 1800},
-        "loam-rc-juno": {"cur": rc, "peak": 1300, "high": 1024},
     }
     if wake:
         units["loam-wake-loom"] = wake
@@ -90,17 +89,17 @@ def row(at: dt.datetime, broker: int, rc: int, root: int, wake: dict | None = No
 
 
 rows = [
-    row(NOON - dt.timedelta(hours=26), 900, 400, 40000, holders={"vault": 8000, "runroot-4a": 6100}),
-    row(NOON - dt.timedelta(hours=25, minutes=10), 950, 400, 40100),
-    row(NOON - dt.timedelta(hours=10), 1700, 470, 40300,
+    row(NOON - dt.timedelta(hours=26), 1790, 40000, holders={"vault": 8000, "runroot-4a": 6100}),
+    row(NOON - dt.timedelta(hours=25, minutes=10), 1795, 40100),
+    row(NOON - dt.timedelta(hours=10), 1700, 40300,
         wake={"cur": 300, "peak": 712, "high": 1024}, holders={"vault": 8050, "runroot-4a": 8301}),
-    row(NOON - dt.timedelta(minutes=5), 1650, 430, 40402),
+    row(NOON - dt.timedelta(minutes=5), 1650, 40402),
 ]
 lines, warnings = cm.history_report(rows, NOON)
 text = "\n".join(lines)
 check("broker peak is the sampled current, with its High",
       "session-broker    1700 MB of 1800 high (94%)" in text, text)
-check("a sample older than 24 h is outside the peak", "rc-juno           470 MB" in text, text)
+check("a sample older than 24 h is outside the peak", "1795 MB" not in text, text)
 check("a per-run unit reports its cgroup's own peak", "wake max          712 MB" in text, text)
 check("disk delta is against the newest sample a day older",
       "since 2026-10-12T10:50" in text and "40402 MB used of 76600 MB (+302 MB)" in text, text)

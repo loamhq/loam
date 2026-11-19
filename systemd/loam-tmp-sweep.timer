@@ -3,7 +3,7 @@ Description=Daily /tmp sweep
 
 [Timer]
 # 08:27 UTC = 01:27 Pacific: ten minutes after the inbox sweep, the third of
-# the daily sweeps, clear of the 01:30 RC recycle and the wake grid.
+# the daily sweeps, clear of the wake grid.
 OnCalendar=*-*-* 08:27:00 UTC
 Persistent=true
 Unit=loam-tmp-sweep.service
