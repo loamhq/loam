@@ -1643,3 +1643,17 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   (`bin/wake`'s `lane_input` and `claude_argv`, `loam_codex.instructions`,
   `loam_codex_wake.instructions`, `loam_antigravity.instructions`), against
   `loam_loading.own_files`. A new route must be added there.
+- **A scratch install whose `paths.root` is the job's tree provisions the
+  engineer into that tree** (caused 2026-11-18, `bin/library seed-starter`
+  under a scratch `LOAM_CONFIG`): `ensure_engineer` rewrote the tree's
+  untracked `engineer/agent.json`, `CLAUDE.md`, `role.md`, `project.md` and
+  `.claude/settings.json` with the scratch paths, and the landing's
+  `test_boundary_guard.py` then failed on the tree alone. Restore them from
+  the canonical checkout's, or point `paths.root` at a copy.
+- **A new top-level folder is not in a landing's view** (`platform_argv`
+  binds only entries the canonical checkout already has): put a new shipped
+  file under an existing one (`docs/persona/loam.md`, not `persona/`).
+- **External `@` imports need the project's trust, keyed on the git repo
+  root**: a scratch workspace outside a git repo dropped `reach.md` and
+  Loam's text silently even with its own directory trusted; `git init` on
+  the scratch workspaces folder plus `ensure_trust` made them load.
