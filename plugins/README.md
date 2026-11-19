@@ -11,6 +11,7 @@ third folder of the Shipped layer, after loam-ui's `public/themes` and
 | `daily-notes/` | the daily note's folder and the page's button | off |
 | `doc-comments/` | comments and suggestions on Markdown docs: the calm editor, its server, the agents' `doc_*` tools (`docs/doc-comments.md`) | off |
 | `images/` | your agents make and change pictures with OpenAI or Google, saved in the vault: the agents' `generate_image` tool, its keys and settings (built in since 0.2.10; in the Market before) | off |
+| `git-backup/` | the vault and AI Spaces pushed to private git repositories of the owner's, with a deploy key per repository; health, warnings and restore (`docs/backup.md`) | off |
 
 These are Loam's **built-in** plugins: they come with each release and are
 turned on and off in Settings › Plugins. Everything in the Market lives in

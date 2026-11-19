@@ -342,6 +342,12 @@ settings, for what a person rarely needs (a model's name). Hosts before
 0.2.5 ignore all three, so a plugin that uses them still installs there and
 shows its plain labels.
 
+**A plugin may draw its own settings** (2026-11-18, Git backup): page
+code that adds a `settings.section` with `group: 'plugin'` and
+`entries: 'own'` is drawn in the plugin's page in place of the plain form of
+its `settings.entry` values (`app/public/plugin-settings.js`). The values,
+the route (`plugin.<id>.<key>`) and what an agent can set are unchanged.
+
 **`schedule.kind` may name `setting:`**, one of its own `settings.entry`
 keys: the timer follows that value whenever it is a valid schedule in the
 grammar, and its `schedule` is the default (the reviewer's schedule is a

@@ -211,6 +211,10 @@ GIT_NAME = get("git.identity.name")
 GIT_EMAIL = get("git.identity.email")
 AUTOCOMMIT_NAME = get("git.autocommit.name", "loam")
 AUTOCOMMIT_EMAIL = get("git.autocommit.email", f"loam@{USER}")
+# A file over this many megabytes (10^6 bytes) is kept out of those commits
+# and named instead (lib/loam_autocommit.py): GitHub refuses a file over
+# 100 MiB, and one refused file would stop every later backup push.
+AUTOCOMMIT_MAX_FILE_MB = int(get("git.autocommit.max_file_mb", 100))
 
 # Who may brief the platform engineer (2026-11-14, first release L6): the
 # personas named, lower-cased; empty means every persona
@@ -273,6 +277,7 @@ def as_dict() -> dict:
         "git.identity.name": GIT_NAME or "", "git.identity.email": GIT_EMAIL or "",
         "git.autocommit.name": AUTOCOMMIT_NAME,
         "git.autocommit.email": AUTOCOMMIT_EMAIL,
+        "git.autocommit.max_file_mb": str(AUTOCOMMIT_MAX_FILE_MB),
         "engineer.briefers": ",".join(ENGINEER_BRIEFERS),
         **{f"vault.{k}": v for k, v in VAULT_FOLDERS.items()},
     }
