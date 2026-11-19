@@ -280,10 +280,19 @@ test('5. a finished update shows the outcome and the versions; its steps, paths 
 
 // ---------------------------------------------------------------- 6
 test('6. Sign-in: Sign out on the portal’s real route, and the passkeys shown with a way to remove them', async () => {
-  assert.equal(authLogoutURL('https://sam.example.com/threads/t-1'), 'https://auth.sam.example.com/logout')
-  assert.equal(authSettingsURL('https://sam.example.com:8443/'), 'https://auth.sam.example.com/settings')
-  assert.equal(authSettingsURL('https://auth.sam.example.com/x'), 'https://auth.sam.example.com/settings')
+  assert.equal(authLogoutURL('https://sam.example.com/threads/t-1', 'sam.example.com'), 'https://auth.sam.example.com/logout')
+  assert.equal(authSettingsURL('https://sam.example.com:8443/', 'sam.example.com'), 'https://auth.sam.example.com/settings')
+  // A host outside the install's domain (the design preview): `auth.` in front of it.
+  assert.equal(authSettingsURL('https://preview.test:8443/', 'sam.example.com'), 'https://auth.preview.test/settings')
+  assert.equal(authSettingsURL('https://auth.preview.test/x', ''), 'https://auth.preview.test/settings')
+  // On the install's domain the portal is `auth.<domain>` from the apex and
+  // from staging alike (staging's link said `auth.next.*`, 2026-11-19).
+  assert.equal(authSettingsURL('https://sam.example.org/', 'sam.example.org'), 'https://auth.sam.example.org/settings')
+  assert.equal(authSettingsURL('https://next.sam.example.org/threads', 'sam.example.org'), 'https://auth.sam.example.org/settings')
+  assert.equal(authLogoutURL('https://next.sam.example.org/', 'sam.example.org'), 'https://auth.sam.example.org/logout')
+  assert.equal(authSettingsURL('https://auth.sam.example.org/x', 'sam.example.org'), 'https://auth.sam.example.org/settings')
   globalThis.location = { href: 'https://sam.example.com/' }
+  globalThis.LOAM_INSTALLATION = { appsDomain: 'sam.example.com' }
 
   // Today: the app's host does not relay the portal's list.
   const calls = []
