@@ -624,17 +624,24 @@ def check_projects(findings: list, prov) -> list[str]:
         # project engineers to commit a new mark and nothing else is churn.
         # Caused 2026-10-06 by the per-cron grant edit to "Run unattended".
         live_text = live_role.read_text(encoding="utf-8") if live_role.is_file() else None
+        # One finding, not two (2026-11-19): a moved source that renders
+        # differently is also a content mismatch, so the comparison below
+        # folds its diff into this finding rather than printing the same
+        # heading twice.
+        role_moved = None
         if mark and mark[0] != prov.craft_source_rev() \
                 and (expected is None or live_text != expected["role.md"]):
-            findings.append((
-                f"project {project.name} role.md", str(live_role),
+            role_moved = (
                 f"rendered from role.md @ {mark[0]}; the source is now @ "
                 f"{prov.craft_source_rev()}. Re-render so the change reaches "
                 f"this project"
                 + (": its repository commits the harness, so that is a commit "
-                   "in it, its engineer's." if tracked else
-                   f": `bin/provision --project {project.name} --rerender`."),
-            ))
+                   "in it by its engineer; `provision --rerender` refuses it, so "
+                   "brief that project's engineer to commit the current render." if tracked else
+                   f": `bin/provision --project {project.name} --rerender`."))
+            if expected is None:
+                findings.append((f"project {project.name} role.md",
+                                 str(live_role), role_moved))
         if not tracked:
             exclude = root / ".git" / "info" / "exclude"
             have = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.is_file() else set()
@@ -651,7 +658,14 @@ def check_projects(findings: list, prov) -> list[str]:
         if expected is None:
             continue
         for rel in ("CLAUDE.md", "role.md", ".claude/settings.json"):
-            compare(findings, f"project {project.name} {rel}", home / rel, expected[rel])
+            label = f"project {project.name} {rel}"
+            if rel == "role.md" and role_moved:
+                diffs: list = []
+                compare(diffs, label, live_role, expected[rel])
+                findings.append((label, str(live_role), "\n".join(
+                    [role_moved] + [d[2] for d in diffs if d[2]])))
+                continue
+            compare(findings, label, home / rel, expected[rel])
         for rel in ("project.md", "memory/MEMORY.md"):
             live = home / rel
             if not live.is_file() or not live.read_text(encoding="utf-8").strip():
@@ -1117,10 +1131,34 @@ def report(findings: list, quiet: bool) -> int:
     print(f"check-drift: DRIFT -- {len(findings)} mismatch(es)\n")
     for label, where, diff in findings:
         print(f"### {label}  [{where}]")
-        if diff and not quiet:
-            print(diff)
+        if diff:
+            print(one_line(diff) if quiet else diff)
         print()
     return 1
+
+
+def one_line(detail: str, width: int = 240) -> str:
+    """What `--quiet` prints under a heading: one line saying what differs,
+    never nothing (2026-11-19: the clock's log showed two bare headings).
+    A unified diff becomes its counts and its first changed line, after the
+    first sentence of any message above it; anything else, its first
+    non-blank line."""
+    lines = detail.splitlines()
+    head = next((i for i, ln in enumerate(lines) if ln.startswith("--- ")), None)
+    lead = next((ln.strip() for ln in lines[:head] if ln.strip()), "")
+    if head is None:
+        text = lead
+    else:
+        body = [ln for ln in lines[head:] if not ln.startswith(("---", "+++", "@@"))]
+        added = sum(ln.startswith("+") for ln in body)
+        removed = sum(ln.startswith("-") for ln in body)
+        first = next((ln for ln in body if ln[:1] in "+-"), "").strip()
+        at = next((m.group(1) for ln in lines[head:]
+                   if (m := re.match(r"@@ -(\d+)", ln))), "?")
+        text = (f"{lead.split('. ')[0]}: " if lead else "") + (
+            f"+{added}/-{removed} line(s) against the generator from line "
+            f"{at}, first {first}")
+    return text if len(text) <= width else text[:width - 1] + "…"
 
 
 def main() -> int:

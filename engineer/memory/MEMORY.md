@@ -2625,3 +2625,20 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   the box's (an assert caught it). Rename the starter `iris` to `probe`:
   `loam-results-<agent>` is the unit name, and a scratch `iris` would
   collide with the box's real drain.
+
+## 2026-11-19 — a role-source change misses projects that commit their harness
+
+When the shared engineer role changes, `provision --project <name> --rerender`
+reaches only projects whose harness is excluded from their repo (loam-dictate,
+the app). A project that commits its harness (one site project, today) is refused by
+design: the render is a commit in that repo, which only its own engineer may
+make. So every role change leaves that project drifting until a persona briefs
+its engineer to commit the platform's current render. It happened on 11-16
+(`4fba59d5`, landed as 0995d78) and again on 11-19 (`7c29a017`, the
+screenshots line). Whoever re-renders after a role change should list the
+tracked projects in the receipt so the persona briefs them.
+
+check-drift reported that one cause as two findings, the "source moved" note
+and the content diff, under the same heading. They are now one finding. Since
+`loam-check` runs `check-drift --quiet`, a finding printed a bare heading;
+`--quiet` now prints one line per finding (`one_line`).
