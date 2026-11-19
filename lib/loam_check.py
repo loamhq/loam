@@ -575,6 +575,14 @@ def current_run_status() -> dict:
     """The session host's answer. An old check can't vouch for this install."""
     at = now()
     state = load_state()
+    if not state and not STATE_FILE.exists():
+        # Step 8 seeds the hello thread before step 9 arms the check timer.
+        # Until its first tick is due there is no observation of availability.
+        import loam_starter
+        starter = loam_starter.status()
+        born = parse_iso(starter.get("at")) if isinstance(starter, dict) and starter.get("thread") else None
+        if born is not None and 0 <= at - born < PERIOD_S:
+            return {"agents_can_run": None, "why": [], "action": None}
     stale_after = parse_iso(state.get("stale_after"))
     if stale_after is None or at >= stale_after or state.get("crashed"):
         return {"agents_can_run": False, "why": ["Loam's own check has stopped."],

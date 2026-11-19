@@ -95,7 +95,7 @@ later, never dropped. The file (`check.json` in Loam's state, `bin/loam-check
 --status`) says each fact with where to look, whether agents can run and
 why not, and if the check itself crashed. When no agent can run or Loam's
 check has stopped, the app shows one status line with the reason and a next
-step where there is one, and clears it when agents can run again.
+step where there is one, and clears it when agents can run again. A fresh install gets one check period after its welcome thread is created for the first reading to arrive.
 
 **The vault** is the owner's notes and the record, plain Markdown. Its
 `README.md` says what each folder is for. `About me.md`, at its top, is what

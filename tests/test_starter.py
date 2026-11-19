@@ -168,6 +168,20 @@ def main() -> int:
           {k: st.status()[k] for k in ("agent", "thread", "message")},
           {"agent": "iris", "thread": out["thread"], "message": "m1"})
 
+    import loam_check as check_runtime
+    from unittest.mock import patch
+    born = check_runtime.parse_iso(st.status()["at"])
+    with patch.object(check_runtime, "now", return_value=born + 1):
+        check("before the first tick is due, availability is pending",
+              check_runtime.current_run_status(), {"agents_can_run": None, "why": [], "action": None})
+        check_runtime.STATE_FILE.write_text("broken")
+        check("an unreadable first check still raises the stopped warning",
+              check_runtime.current_run_status()["agents_can_run"], False)
+        check_runtime.STATE_FILE.unlink()
+    with patch.object(check_runtime, "now", return_value=born + check_runtime.PERIOD_S):
+        check("a first tick missing for a full period raises the stopped warning",
+              check_runtime.current_run_status()["why"], ["Loam's own check has stopped."])
+
     again = st.seed(provision=fake_provision)
     check("a second seed does nothing", ("skipped" in again, len(provisioned)), (True, 1))
 
