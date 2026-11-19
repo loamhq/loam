@@ -372,7 +372,9 @@ def say_records(edge: dict) -> None:
 
 def say_problems(found: dict) -> None:
     for line in found.get("problems") or []:
-        say(f"- {line}", 4)
+        print(textwrap.fill(f"- {line}", WIDTH, initial_indent="    ",
+                            subsequent_indent="      "), flush=True)
+        logline(f"SAY - {line}")
 
 
 def step_name_own(edge: dict, ans: dict) -> None:
