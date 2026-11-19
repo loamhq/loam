@@ -1617,3 +1617,20 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   own domain" or `BASE_DOMAIN` in prose; a prompt that shows the domain
   builds it from `li.BASE_DOMAIN` at run time.
 
+
+## 2026-11-18 — the private feedback route taken out again (0.2.9)
+
+- 0.2.7's private route lived one evening. Taking it out was a targeted
+  reverse of commit 62969a0, not `git revert`: `idea` (KINDS, the article in
+  `show`, the CLI choice) and the draft's `id` (which predates 0.2.7) stay.
+  `bin/loam-claim` and `deploy/README.md` came back byte-identical to
+  a124846; `lib/loam_deploy.py` differs from it only by 0.2.8's
+  `own_domain` comment. Check that way next time: `git diff <before> -- f`.
+- Box state it left: `/var/lib/loam/feedback.json` (the HMAC key and
+  limits, root 0600), the `[feedback]` table and its comment in
+  `/etc/loam/loam.toml`, a `.bak` beside it, and a sentence in
+  `/etc/loam/deploy.toml`'s landing comment. No reports had arrived (no
+  `40_PROJECTS/Loam/feedback/`) and no install had kept a draft here.
+- Asking for a name under the base domain now points at
+  `ASK_FOR_A_NAME` (lib/loam_install.py), an issue on loamhq/loam: the one
+  public channel to the makers.
