@@ -66,6 +66,7 @@ broker_mod = importlib.util.module_from_spec(spec)
 loader.exec_module(broker_mod)
 engine_mod = broker_mod.loam_thread_engine
 steps_mod = broker_mod.thread_steps
+inputs_mod = engine_mod.inputs
 broker_mod.codex.model_ok = lambda value: value in ("gpt-6", "gpt-6-luna")
 
 results = []
@@ -448,7 +449,9 @@ async def main():
           [("ada", "Status only: the job is landing."),
            ("system", "Ada's turn ended: its session exited")])
 
-    # 5. the broker stopping: a turn it ends, and one it never starts
+    # 5. the broker stopping (2026-11-19, batch B step 2): a turn it cuts
+    # after words posts them and its line; one it never starts posts nothing
+    # and keeps its input on disk, given when the broker starts again.
     def stopping(s):
         fake.stopping = True
     ada.script = [text("Working on it."),
@@ -460,14 +463,36 @@ async def main():
     await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "still there?"})
     await settle(server, tid)
     new = threads.read(tid)[1][before:]
-    check("a turn the broker's stop ends, and one it never starts: system lines",
+    check("a turn the broker's stop cuts after words, and one it never starts",
           [(m["author"], m["text"]) for m in new],
           [(OWNER, "go"), ("ada", "Working on it."),
            ("system", "Ada's turn ended: the broker restarted"),
-           (OWNER, "still there?"),
-           ("system", "Ada's turn didn't start: the broker restarted. "
-                      "Tag @Ada to ask again.")])
+           (OWNER, "still there?")])
+    kept = inputs_mod.items(tid, "ada")
+    check("...the cut turn's input is settled; the unstarted one is kept, unsent",
+          [(i["reason"], "sent" in i) for i in kept], [(new[-1]["id"], False)])
+    # The broker starts again: a new engine reads the list.
     fake.stopping = False
+    server.threads = engine_mod.ThreadEngine(fake)
+    prompts = []
+    real_send = ada.send_message
+
+    async def spy(prompt, attachments=None):
+        prompts.append(prompt)
+        return await real_send(prompt, attachments)
+    ada.send_message = spy
+    ada.script = [text("Yes, here."), result(1)]
+    counts = server.threads.resume_inputs()
+    await settle(server, tid)
+    await asyncio.sleep(0.05)
+    new = threads.read(tid)[1][before:]
+    check("...at the next start it is scheduled once and answered, no line",
+          (counts["scheduled"], [(m["author"], m["text"]) for m in new][-2:]),
+          (1, [(OWNER, "still there?"), ("ada", "Yes, here.")]))
+    check("...its prompt says when it was queued",
+          len(prompts) == 1 and "was queued for you at" in prompts[0], True)
+    check("...and the list is empty after", inputs_mod.items(tid, "ada"), [])
+    del ada.send_message
 
     # -- a failed write is loud ---------------------------------------------
     real = steps_mod.steps_path

@@ -1978,3 +1978,88 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `bin/clear-agy-files`, run by the nightly drift-watch after lane-check.
 - **`loam_live.restart_read`** is the broker's live-list reader now (was
   `loam_follow.restart_read`); `restart-broker` and `move-state` use it.
+## 2026-11-19 — input to a thread member is durable (batch B step 2)
+
+- **Every queued turn's input is on disk first**:
+  `state/threads/inputs/<thread>/<persona>.json` (`lib/loam_thread_inputs.py`),
+  written in `ThreadEngine.schedule`, marked `sent` right after the prompt
+  or steer goes in, removed when the turn settles (`_settle_inputs`). The
+  memory queue is a cache of it; `resume_inputs()` in `amain` rebuilds it.
+- **The stop rule:** while `broker.stopping`, an input whose turn neither
+  posted words nor finished is kept with `sent` cleared; everything else is
+  removed. No "didn't start" line, and no "turn ended: the broker restarted"
+  for a turn cut before a word (one cut after words still gets it).
+- **After a crash** (no orderly settle), a `sent` message is replayed and
+  `already_heard` (the member's `through`) decides; a `sent` result or
+  notice is dropped as given. That is the once-only key's on-disk half.
+- **"Same work" is decided by time, not topic**: a result `joins` the turn
+  in flight only if that turn started before the brief was accepted
+  (`since_ts`, added to the waiter record for this; `since` + 1 s for old
+  records). A later turn is about something newer; the result waits.
+- **A real broker on a scratch config works for live proof** with
+  `paths.home` left real (the CLI's credentials) and every other path
+  scratch, `--addr 127.0.0.1 --port 18932`, `env -i`, its stderr to a file
+  as the journal. Claude Code refuses a bare `sleep N` in Bash and
+  backgrounds long ones; `python3 -c 'import time; time.sleep(N)'` in the
+  foreground holds a turn mid-tool. A per-message model different from the
+  turn's stays queued (not steered), which is how to queue a message
+  behind a Claude turn on purpose. A waiter record's job id must match
+  `JOB_ID_RE` (hex suffix) or `owed()` ignores it silently.
+- **Seen, not fixed:** a turn model change (`set_choices`) posts the CLI's
+  "Set model to … for this session only" text as a persona message.
+
+## 2026-11-19 — Loam's text, the owner's short version
+
+- **`engineer-job --land` outlives a foreground call**: it runs the whole
+  suite (about 11 minutes), past the 10-minute foreground limit, and a killed
+  landing lands nothing. Run it in the background with a long timeout and
+  wait on its log.
+- **Inside the job's wall, `tests/run-all` fails two tests by environment**:
+  `test_engineer.py` (the jobs directory is read-only) and
+  `test_wake_failed.py` (its log line). The landing's run, outside the wall,
+  passes them; read the landing's verdict, not the job tree's.
+- **Loam's text changes reach agents with no render**: every mapped
+  `CLAUDE.md` imports `docs/persona/loam.md` by absolute path in the live
+  checkout, and Codex and Antigravity inline it from that import at each build,
+  so landing is enough. `loam_codex.instructions(<workspace>)` is the quickest
+  assembled-prompt proof, and it leaves the workspace as it found it.
+## 2026-11-19 — the landing's tests are sealed and parallel
+
+- **What a sealed test sees.** `tests/run-all` writes each file its own
+  config (`FIXTURE`, never the install's file) with every data path in a
+  per-file scratch folder, plus a starter agent `iris` with a soul,
+  `_shared/reach.md` and `commons/`. A landing's `platform_argv` adds the
+  wall: `unshare -Urmn` with only loopback up, and an empty read-only tmpfs
+  over each of `sealed_paths()` (vault, workspaces, projects, plugins,
+  state, secrets folder, `/run/user/<uid>`), mounted after the tree's binds.
+  A bind survives a tmpfs over its source's parent, so the tree still
+  shows at the checkout's path.
+- **What the seal found** (each one passed before only because the box had
+  it): a broker test read the live broker token; the identity gate's decoy
+  came from the box's agents' real souls; the guard and the plugin gateway
+  needed the box's starter agent; a test read an agent's live provisioned
+  Codex config (now rendered by `provision.codex_config`); `test_engineer`
+  wrote into the live jobs folder. A test that needs the box is a
+  `tests/live_*.py`, run by hand with `run-all --live`.
+- **Wall time on a 16-CPU box**: 750 s one file at a time; about 100 s eight
+  at a time. The floor is `test_schedule` (40-80 s), which waits for a real
+  timer at the next minute boundary. `test_doc_comments` was 119 s until
+  its plugin suites ran at once and `test_places` ran as four processes by
+  unittest class name.
+- **The memory note never blocks a landing** (`land` wraps `_land_once`).
+  A note-only remainder that fails is retried once on a test failure, then
+  reported as what landed before it, with the note kept as
+  `memory-note.patch` in the job's folder and no continuation. A gate hold
+  on only the note or a commit message lands the change as one commit
+  without them (`without_memory`, a temporary index and `commit-tree`).
+- **A names check at release time protects only a private `main`.** If
+  every landing pushes `main` to a public remote, the public copy is cut on
+  every landing, and a check moved to the release tag would let every
+  landing between two releases go out unchecked. Read the remote's
+  visibility (`curl -s https://api.github.com/repos/<owner>/<repo>`,
+  `"private"`) before moving such a check.
+- **A load-only flake in the app's suite** was a test asserting on the
+  first drawing of a card the page redraws when its own answer arrives (one
+  app instance across a file's tests). Wait for what this test's answer
+  draws (`until(() => ...)`), never for the node alone. Reproduce with a
+  dozen busy loops beside `node --test <file>`.
