@@ -87,6 +87,9 @@ export function createApp({
 
   const server = http.createServer(async (req, res) => {
     for (const [k, v] of Object.entries(securityHeaders)) res.setHeader(k, v)
+    // The one page this app frames itself (2026-11-19): a theme's preview
+    // scene (public/theme-scene.html), drawn in the Market and Settings.
+    if (req.url.split('?')[0] === '/theme-scene.html') res.setHeader('content-security-policy', securityHeaders['content-security-policy'].replace("frame-ancestors 'none'", "frame-ancestors 'self'"))
     const url = new URL(req.url, 'http://placeholder')
     const pathname = url.pathname
     const note = track(req, res, url, log)
@@ -217,14 +220,29 @@ export function createApp({
     // read by the broker
     // from the link before anything is installed. A theme's CSS is held to
     // the installed themes' rules here, so nothing but tokens reaches the page.
-    const listing = /^\/marketplace\/([a-z][a-z0-9-]*)(?:\/(icon|image|cover|cover-dark|theme\.css|readme\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.(?:webp|avif|jpe?g|png)))?$/.exec(rest)
+    // Its screenshots (`shot/<n>`, `shot/<n>-dark`) and a theme's own faces
+    // (`fonts.css`, held to @font-face rules over its `font/<file>`s) came
+    // on 2026-11-19, for the gallery and the theme's live preview.
+    const listing = /^\/marketplace\/([a-z][a-z0-9-]*)(?:\/(icon|image|cover|cover-dark|theme\.css|fonts\.css|shot\/[0-5](?:-dark)?|font\/[A-Za-z0-9_-]+\.woff2?|readme\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.(?:webp|avif|jpe?g|png)))?$/.exec(rest)
     if (listing) {
       if (!['GET', 'HEAD'].includes(method)) return sendJson(res, 405, { error: 'Use GET for a listing.' })
       const [, id, file] = listing
       if (!file) return await relayJson(res, 'GET', `/v1/marketplace/${id}${url.searchParams.get('refresh') === '1' ? '?refresh=1' : ''}`, undefined, { signal: AbortSignal.timeout(200000) })
+      if (file === 'fonts.css') {
+        let css = ''
+        try {
+          const out = await broker.file(`/v1/marketplace/${id}/fonts.css`, { signal: AbortSignal.timeout(30000) })
+          const chunks = []; let size = 0
+          if (out.stream) for await (const chunk of out.stream) { size += chunk.length; if (size > MAX_BODY) { out.stream.destroy(); throw new Error('too large') } chunks.push(chunk) }
+          if (out.status === 200) css = themeFontsCSS(id, Buffer.concat(chunks).toString('utf8'), `/api/marketplace/${id}/font/`)
+        } catch { css = '' }
+        res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'private, max-age=600', 'x-content-type-options': 'nosniff' })
+        return res.end(method === 'HEAD' ? '' : css)
+      }
       if (file !== 'theme.css') {
         const out = await broker.file(`/v1/marketplace/${id}/${file}`, { method, signal: AbortSignal.timeout(200000) })
-        const type = out.status === 200 && /^image\//.test(out.contentType ?? '') ? out.contentType : 'application/json'
+        const font = file.startsWith('font/')
+        const type = out.status === 200 && (font ? /^font\/woff2?$/ : /^image\//).test(out.contentType ?? '') ? out.contentType : 'application/json'
         res.writeHead(out.status, { 'content-type': type, 'cache-control': out.status === 200 ? 'private, max-age=600' : 'no-store', 'x-content-type-options': 'nosniff',
           ...(type === 'image/svg+xml' ? { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } : {}) })
         if (method === 'HEAD' || !out.stream) { out.stream?.destroy(); return res.end() }

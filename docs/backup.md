@@ -40,6 +40,10 @@ any backup is set up.
   (since 2026-11-19), which is what reaches an install whose older release
   runs the update, and `lib/loam_update.py`'s `units` step arms it too.
 
+**The host's own setup** (the web server's config, Loam's units, its
+config and settings) has a history of its own, root's alone and kept on the
+machine: `loam host`, docs/host-history.md.
+
 ## The copy off the machine: the Git backup plugin
 
 Turned on in Settings › Plugins › Git backup. The person connects one

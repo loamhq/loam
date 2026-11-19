@@ -2644,8 +2644,34 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-remove-question { display:flex; flex-wrap:wrap; gap:10px; }
 .plugin-remove-question > p { flex-basis:100%; }
 .plugin-source { display:inline-flex; align-items:center; min-height:44px; }
-.plugin-byline { display:flex; flex-wrap:wrap; align-items:center; column-gap:14px; margin:0; }
-.plugin-byline > .plugin-source { margin-block:-10px; }
+/* A plugin's own page, plain first (2026-11-19, plugin-settings.js): its
+ * icon beside its name and promise, a picture, its own words, its controls,
+ * and Details at the foot in a quieter voice. */
+.plugin-hero { display:flex; align-items:center; gap:16px; margin:4px 0 4px; }
+.plugin-hero .plugin-icon { width:56px; height:56px; border-radius:16px; }
+.plugin-hero .plugin-icon-letter { font-size:26px; }
+.plugin-hero-words { min-width:0; display:flex; flex-direction:column; gap:4px; }
+.plugin-hero-words .sheet-head { margin:0; padding:0; }
+.plugin-promise { margin:0; font-size:16px; line-height:1.45; color:var(--paper-ink-2); }
+.plugin-about { margin:8px 0 20px; font-size:15.5px; line-height:1.55; }
+.plugin-about h2, .plugin-about h3 { font-size:17px; margin:22px 0 8px; }
+.plugin-about ul, .plugin-about ol { padding-left:22px; }
+.plugin-about li { margin:6px 0; }
+.setmain .plugin-gallery, .app-modal-body .plugin-gallery { padding:16px 0 4px; }
+.setmain .plugin-gallery-row, .app-modal-body .plugin-gallery-row { grid-auto-columns:minmax(240px, 78%); }
+.plugin-gallery-one .plugin-gallery-row { grid-auto-columns:minmax(0, 100%); }
+.plugin-details { margin:32px 0 8px; padding-top:20px; border-top:1px solid var(--paper-rule); color:var(--paper-ink-2); }
+.plugin-details-title { margin-bottom:4px; }
+.plugin-details .plugin-declaration { margin:12px 0 16px; }
+.plugin-details .plugin-declaration > .kicker { font-size:11px; }
+.plugin-details .plugin-declaration li { font-size:14px; color:var(--paper-ink-2); }
+.plugin-facts { margin:0; display:grid; grid-template-columns:minmax(0,1fr); }
+.plugin-facts > div { display:flex; justify-content:space-between; align-items:center; gap:16px; min-height:40px; border-bottom:1px solid var(--paper-rule); font-size:14px; }
+.plugin-facts dt { color:var(--paper-ink-3); }
+.plugin-facts dd { margin:0; color:var(--paper-ink); text-align:right; overflow-wrap:anywhere; min-width:0; }
+.plugin-facts .plugin-source { min-height:40px; gap:4px; }
+.plugin-details .plugin-guide { margin-top:8px; }
+.plugin-details .plugin-guide .md { font-size:14px; line-height:1.55; }
 
 /* A utility beside the tab group has its own matching paper surface. */
 .nav > .settings-utility,.nav > .settings-utility.on { background:var(--paper-pane-glass); color:var(--paper-pane-ink); border:0; }

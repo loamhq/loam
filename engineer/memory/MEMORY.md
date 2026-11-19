@@ -2014,6 +2014,32 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   in the Claude Code app before the retirement still open in Loam, read
   from the CLI's own files.
 
+## 2026-11-19 — the host's own setup, kept and put back
+
+- **`loam host` (lib/loam_host.py) is the undo for the box around Loam**:
+  root's git history at `paths.host_history` (`/var/lib/loam/host-history`,
+  0700), a mirror under `files/<absolute path>`, `meta.tsv` for modes and
+  owners by name, `scope.json` for the rules as resolved. A restore reads
+  everything it needs from the state itself, so it works with
+  `/etc/loam/loam.toml` broken; keep it stdlib-only and never import
+  `loam_config` at module level there.
+- **Enablement is links, and links are files**: a disabled unit is a
+  missing `*.wants/<unit>` symlink, so covering the links makes "disabled"
+  something a restore can put back (and it then starts the unit). Walk with
+  `os.walk(followlinks=False)` and list symlinks to folders by hand: they
+  are in `dirs`, not `names`.
+- **The state after a break is saved too**, within 15 minutes, so "the
+  newest state" can be the broken one. The default is the newest whose
+  checks passed (Caddyfile validates, sudoers parses, TOML/JSON read); a
+  valid-but-wrong break needs `restore 2h` or a named state.
+- **Root reaches the install user's manager with `systemctl --user -M
+  <user>@`** (systemd 252 here); it goes over unix sockets, so it works
+  inside `unshare -n`, which is how "no network, no broker, no app" is
+  proved.
+- **A Loam landing can time out at 900 s** when several jobs land at once
+  (load 26 on 16 CPUs, 15 suites): the record says "tests fail" and the
+  log says only `(timed out after 900 s)`. Read the log before the verdict,
+  and land again when the box is quieter.
 ## 2026-11-19 — the provider CLIs pinned to each release
 
 - **The CLIs are pinned, not followed** (the owner, 2026-11-19: "Sgtm" to
@@ -2124,6 +2150,42 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Two jobs may cut the same version.** A job that writes `release-tag`
   early is visible in its job folder; read the other running jobs'
   `release-tag` before choosing a number.
+## 2026-11-19 — plugin pages that explain themselves
+
+- **A theme is previewed in a frame of its own** (`app/public/theme-scene.html`,
+  served with `frame-ancestors 'self'`, the one page the app frames). Looks are
+  written against the root (`:root[data-look][data-theme][data-option-*]`), so
+  scoping a look's rules to an element would mean rewriting materials.css,
+  face-paints and the signature faces; a frame wears the real rules unchanged.
+  The scene re-dresses on a hash change (`look`, `mode`, `from`, `o.<option>`),
+  never reloads, and the page reads its colours back through
+  `loamScene.colours()` (a probe painted with `var(--token)`, so mixes resolve).
+- **A listed theme's fonts reach the preview** through the listing: the broker
+  keeps `fonts.css` and `font/<file>`, and the app holds the sheet to
+  @font-face rules over `/api/marketplace/<id>/font/` (`themeFontsCSS`'s new
+  `base`). Before this, a listed theme's preview and Try it wore the fallback.
+- **New PLUGIN.md fields cost an old Loam only a warning** (`extra`), never the
+  listing: `description`, `screenshots`, `palette` (`words_of`). The JS reader
+  (`shipped-plugins.js`) reads only line-shaped YAML: write `screenshots` and
+  `palette` as block lists of one-line flow maps, and quote a caption with a
+  comma. An apostrophe inside a flow map opens a quote for the Python reader
+  ("a `{` that never closes"): use ’.
+- **Markdown's single newline is a break in chat and a space in a document**
+  (`markdown(text, { soft: true })`): READMEs and guides are hard-wrapped.
+- **The design system marks a selection with a paper thumb and an underline**
+  (button-tiers.css), not the espresso fill; a segmented control on a tinted
+  group hides its thumb. Leave the group untinted.
+- **The colour guard (themes.test.js) reads `rgb(` in a regex as a literal
+  colour**; build such a pattern from parts.
+- **The demo world for screenshots** is `app/tools/capture-plugin-shots.mjs`:
+  the fixture app's invented agents, a thread retitled by PATCH and its record
+  replaced by route, a plugin installed from its folder (rows by the real
+  Python reader), its server stood in for by Playwright routes at `/x/<id>/`,
+  a speech-like WAV as the fake microphone
+  (`--use-file-for-fake-audio-capture`), and one frame for every picture
+  (`tools/frame-shot.py`). Do not freeze the page clock there: a recording's
+  timer and levels need time to run. The image tool writes only inside the
+  reach: generate into the job's tree and move it to scratch.
 ## 2026-11-19 — a run with no thread gets its result back (batch B step 3)
 
 - **Every brief returns at once**, every lane. `wait_for`, its four-hour

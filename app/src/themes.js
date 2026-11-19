@@ -73,7 +73,7 @@ export async function marketThemeCSS(id, css, options = []) {
 // never from another host. Anything else in the file refuses the whole file.
 const FONT_DESCRIPTORS = new Set(['font-family', 'font-style', 'font-weight', 'font-display', 'font-stretch', 'unicode-range', 'src'])
 const FONT_SRC = /^url\(\s*(['"]?)([A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:woff2|woff))\1\s*\)(?:\s+format\(\s*(['"])(woff2|woff)\3\s*\))?$/
-export function themeFontsCSS(id, css) {
+export function themeFontsCSS(id, css, base = `/api/plugins/${id}/files/`) {
   if (!slug.test(id)) throw new Error(`Invalid theme id: ${id}`)
   if (typeof css !== 'string' || css.length > 64 * 1024) throw new Error('A theme’s fonts.css is at most 64 KB.')
   const text = css.replace(/\/\*[\s\S]*?\*\//g, '')
@@ -92,7 +92,7 @@ export function themeFontsCSS(id, css) {
           const m = FONT_SRC.exec(source)
           if (!m) throw new Error('A theme’s font is a .woff2 or .woff file in its own folder.')
           const file = m[2].split('/').map(encodeURIComponent).join('/')
-          return `url(/api/plugins/${id}/files/${file})${m[4] ? ` format('${m[4]}')` : ''}`
+          return `url(${base}${file})${m[4] ? ` format('${m[4]}')` : ''}`
         })
         lines.push(`  src: ${sources.join(', ')};`)
       } else {

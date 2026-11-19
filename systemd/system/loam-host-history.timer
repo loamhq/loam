@@ -1,0 +1,11 @@
+[Unit]
+Description=Loam: save the host's own setup every 15 minutes, if it changed
+
+[Timer]
+OnCalendar=*:04/15
+OnBootSec=2min
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

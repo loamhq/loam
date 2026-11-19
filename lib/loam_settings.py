@@ -852,8 +852,9 @@ PAGE_RELAY_AHEAD: dict[str, list[str] | str] = {
     "rest === '/marketplace'": "a read: the marketplace's list, each entry marked installed or not",
     # A listing's own page (2026-11-18, Settings › Market): its declaration,
     # icon, cover and theme, read from its link before anything is installed.
-    "/^\\/marketplace\\/([a-z][a-z0-9-]*)(?:\\/(icon|image|cover|cover-dark|theme\\.css|readme\\/(?:[A-Za-z0-9_-]+\\/)*[A-Za-z0-9_-]+\\.(?:webp|avif|jpe?g|png)))?$/":
-        "a read: one listing's declaration, README, icon, covers and theme, before it is installed",
+    # Its screenshots and a theme's fonts came on 2026-11-19.
+    "/^\\/marketplace\\/([a-z][a-z0-9-]*)(?:\\/(icon|image|cover|cover-dark|theme\\.css|fonts\\.css|shot\\/[0-5](?:-dark)?|font\\/[A-Za-z0-9_-]+\\.woff2?|readme\\/(?:[A-Za-z0-9_-]+\\/)*[A-Za-z0-9_-]+\\.(?:webp|avif|jpe?g|png)))?$/":
+        "a read: one listing's declaration, README, icon, covers, screenshots, theme and its fonts, before it is installed",
     # Shared keys (2026-11-18): Settings › Connections › API keys. Never a value.
     "/^\\/keys(?:\\/([^/]+))?$/": ["keys.set", "keys.forget"],
     "/^\\/keys\\/([^/]+)\\/check$/": ["keys.check"],

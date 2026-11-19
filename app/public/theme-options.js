@@ -22,3 +22,12 @@ export function applyOptions(root, values, themes, theme) {
     root.setAttribute(`data-option-${option.id}`, values?.[theme]?.[option.id] || option.default)
   }
 }
+
+// Which of a theme's options mean something with the others as chosen
+// (2026-11-19, from Appearance's own rule): Latte's mug and pour only with
+// latte-art faces, its colours only without them, and what is inside a face
+// only for signature faces. Appearance and a theme's preview both ask here.
+export function shownOptions(options = [], values = {}) {
+  const latte = values['agent-shapes'] === 'latte-art', signature = values['agent-shapes'] === 'signature'
+  return options.filter(option => option.id === 'agent-colours' ? !latte : option.id === 'face-content' ? signature : ['latte-mug', 'latte-inside'].includes(option.id) ? latte : true)
+}
