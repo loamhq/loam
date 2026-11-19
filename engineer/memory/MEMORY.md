@@ -1617,3 +1617,39 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   own domain" or `BASE_DOMAIN` in prose; a prompt that shows the domain
   builds it from `li.BASE_DOMAIN` at run time.
 
+
+## 2026-11-18 — Dictation and Read aloud leave core for the Market (0.2.9)
+
+- **A shipped page plugin leaves core by four moves**: its folder goes to
+  `plugins/_listed/<id>/` (never read as a plugin; the tests' copy and the
+  release's fallback), the app tests that drove it get it from
+  `app/test/audio-plugins.mjs` (catalog rows whose `local` is the listed
+  file's `file://` URL, which the test page's importer loads as is), an
+  install that had it **on** gets it from the Market at the broker's first
+  start (`lib/loam_to_market.py`), and anything core imported from the
+  plugin's files gets core's own copy (`app/src/speakable.js`,
+  `document-speech.js`), held byte-equal by a test. The app deploys only
+  `app/`, so `app/src` can never import from `plugins/`.
+- **The migration reads the link from the marketplace listing** rather than
+  naming it: the push gate denies the owner's GitHub handle and display
+  name in Loam's repository, so a maker's repository URL cannot appear in
+  Loam's code. The listing is also the right source: it follows the maker's
+  version.
+- **Who sees the shipped layer on this box**: the broker reads
+  the canonical checkout's `app/public/plugins` (projects/loam-ui.json's
+  checkout), so a landing removes a shipped plugin before any app deploy.
+  For no gap, install the Market copy first: a Yours copy shadows the
+  shipped one, and the migration then finds it present.
+- **Preferences that live in a browser are kept by their storage keys**,
+  not by layer: `loam.settings.device(key)` is the raw localStorage key, so
+  a plugin keeps its device settings across shipped → Market as long as its
+  code keeps the key. Switch, agent values (`_settings/<id>/`) and keys
+  (shared, or `<private>/secrets.env`) are all kept by id.
+- **`bin/settings do … --by` must name a persona**; an engineer acting on a
+  brief names the persona who briefed it, with `--reason` saying the job.
+- **`gh` needs `env -u GITHUB_TOKEN`** in a job: the environment's
+  `GITHUB_TOKEN` was stale (401) while `gh`'s own login was good.
+- **The app page harness hangs, not fails, on a `threadPage` thread**:
+  `textContent` of `tt-stream` never returns in the fake DOM (on base main
+  too). Prove an absence at the loader and registry level instead
+  (`test/installation.test.js`).
