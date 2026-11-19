@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { profileHost } from './agent-profile-host.mjs'
-import { PREBUILT_VOICES } from '../public/plugins/read-aloud/page/document-speech.js'
+import { PREBUILT_VOICES } from '../../plugins/_listed/read-aloud/page/document-speech.js'
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright')
 const out = process.env.VOICE_EVIDENCE || `${process.env.TMPDIR}/voice-picker`
 await mkdir(out, { recursive: true })

@@ -200,6 +200,25 @@ default: its folder; the page's button). `default_on` is a shipped plugin's
 default and nothing more: any saved choice in `installed.json` wins, on or
 off.
 
+**Dictation and Read aloud left for the Market** (0.2.9, 2026-11-18; the
+owner: "make Dictation and Read Aloud a marketplace plugin that is mine").
+Until then they were loam-ui's `public/plugins/`, shipped off. Now each is a
+Market plugin in its maker's own repository, listed in the marketplace in
+their name, and a fresh install has neither until it installs them from
+Settings › Market; nothing draws a mic or a read-aloud control until one is
+installed and on. An install that had one **on** has it installed from its
+Market listing at the broker's first start on 0.2.9, or from the release's
+own copy in `plugins/_listed/<id>/` when the list or GitHub cannot be
+reached (`lib/loam_to_market.py`, once per id, recorded in
+`<state>/plugins/to-market.json`). The link is read from the listing, so
+Loam's code names no maker's repository. Nothing the person set moves: the
+switch, each agent's voice (`_settings/read-aloud/`), the plugin's own key
+and the shared keys are kept by id, and the browser's preferences by the page
+code's storage keys (`loam-ui.dictation`, `loam-ui.speech`,
+`loam-ui.read-aloud`), which the Market copies keep. Their server halves
+stay in Loam: the app's `/api/transcribe` and `/api/speech` and the broker's
+`/v1/dictation-terms`, each using the key of the plugin of that id.
+
 **A plugin in Yours with the id of a shipped one wins**, and its row says what
 it shadows; the shipped row says `shadowed_by: "yours"`. A broken copy never
 wins, so a bad copy in Yours cannot take a shipped plugin away. Two shipped

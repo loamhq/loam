@@ -9,7 +9,7 @@ import { createAgentDrafts } from '../public/agent-drafts.js'
 import { createDailyNotes } from '../public/daily-notes.js'
 import { createAgents, agentLook } from '../public/sessions.js'
 import { createSecretSettings } from '../public/plugin-secrets.js'
-import { shippedPlugins } from '../src/shipped-plugins.js'
+import { listedManifest, AUDIO_PLUGINS } from './audio-plugins.mjs'
 import { installDom } from './fakedom.js'
 import { text, all, find } from './browser.js'
 
@@ -100,8 +100,8 @@ test('plugin key metadata renders broker sentences; refuses never replace the sa
   assert.ok(text(c.view()).includes(why)); assert.ok(!JSON.stringify(c.st).includes('synthetic'))
 })
 
-test('both shipped voice plugins declare the shared Google key', async () => {
-  const voice = (await shippedPlugins('public')).filter(p => ['dictation', 'read-aloud'].includes(p.id))
+test('both voice plugins (Market plugins since 0.2.9) declare the shared Google key', async () => {
+  const voice = await Promise.all(AUDIO_PLUGINS.map(listedManifest))
   assert.equal(voice.length, 2)
   // The settings.secret stays for one release, for a broker from before 0.2.3.
   for (const p of voice) { assert.deepEqual(p.keys.map(k => k.provider), ['google']); assert.deepEqual(p.contributes['settings.secret'].map(s => s.name), ['GEMINI_API_KEY']) }

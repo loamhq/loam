@@ -39,9 +39,9 @@ try {
     const plugins = await shippedPlugins(path.resolve('public'))
     for (const p of plugins) if (p.id === 'read-aloud') p.on = true
     app.routes['GET /v1/plugins'] = (req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ plugins })) }
-    for (const file of await readdir('public/plugins/read-aloud/page')) app.routes[`GET /v1/plugins/read-aloud/files/page/${file}`] = async (req, res) => {
+    for (const file of await readdir('../plugins/_listed/read-aloud/page')) app.routes[`GET /v1/plugins/read-aloud/files/page/${file}`] = async (req, res) => {
       res.writeHead(200, { 'content-type': file.endsWith('.css') ? 'text/css' : 'text/javascript' })
-      res.end(before && file === 'style.css' ? execFileSync('git', ['show', '6a816704:public/plugins/read-aloud/page/style.css']) : await readFile(`public/plugins/read-aloud/page/${file}`))
+      res.end(before && file === 'style.css' ? execFileSync('git', ['show', '6a816704:public/plugins/read-aloud/page/style.css']) : await readFile(`../plugins/_listed/read-aloud/page/${file}`))
     }
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: mode, isMobile: width === 390, hasTouch: width === 390, reducedMotion: 'reduce', serviceWorkers: 'block' })
     await observeAudio(context)

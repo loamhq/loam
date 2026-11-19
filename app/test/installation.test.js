@@ -15,6 +15,7 @@ import { formatTime } from '../public/time.js'
 import { createPluginLoader } from '../public/plugin-loader.js'
 import { createCoreRegistry } from '../public/core-registrations.js'
 import { shippedPlugins } from '../src/shipped-plugins.js'
+import { audioRows, AUDIO_PLUGINS } from './audio-plugins.mjs'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
 import { installDom } from './fakedom.js'
 import { h } from '../public/ui.js'
@@ -114,10 +115,10 @@ test('configured domain, folders and zone govern frames, note names and attachme
   assert.equal(addBoardItem('', 'A note', 0, now, 'Inbox/team.md'), '- 2026-11-14 · A note <!-- Alex -->\n')
 })
 
-test('fresh shipped catalog follows explicit manifest defaults: audio off, themes including Latte on', async () => {
+test('fresh shipped catalog follows explicit manifest defaults: no extension ships on, themes including Latte on', async () => {
   const rows = await shippedPlugins('public')
   for (const row of rows) assert.equal(row.on, row.default_on)
-  assert.deepEqual(rows.filter(row => row.switch === 'plugin').map(row => [row.id, row.on]).sort(), [['dictation', false], ['read-aloud', false]])
+  assert.deepEqual(rows.filter(row => row.switch === 'plugin' && row.on), [])
   assert.ok(rows.filter(row => row.kind.includes('theme')).every(row => row.on))
   assert.equal(rows.find(row => row.id === 'latte').on, true)
   const imports = [], loader = createPluginLoader({ registry: createCoreRegistry(), ui: {}, request: async () => { throw Object.assign(new Error('Old host'), { status: 404 }) }, fallback: rows, importer: async url => { imports.push(url); return { activate() {} } } })
@@ -126,9 +127,38 @@ test('fresh shipped catalog follows explicit manifest defaults: audio off, theme
   await loader.dispose()
 })
 
+// Dictation and Read aloud left Loam's core for the Market in 0.2.9: a fresh
+// install has neither, so nothing draws a mic or a read-aloud control until
+// they are installed and on. The control is the same page with the Market
+// copies installed (test/audio-plugins.mjs): then both load and draw.
+test('a fresh install has neither audio plugin and draws no mic or read-aloud control; installed and on, both do', async () => {
+  const rows = await shippedPlugins('public')
+  assert.deepEqual(rows.filter(row => AUDIO_PLUGINS.includes(row.id)), [])
+  async function page(catalog) {
+    const registry = createCoreRegistry(), imports = []
+    const loader = createPluginLoader({ registry, ui: {}, request: async () => ({ plugins: catalog }), importer: async url => {
+      imports.push(url)
+      return { activate(loam) {
+        if (url.includes('/dictation/')) loam.places.composer.tool.add({ id: 'dictation.microphone', slot: 'microphone', render: () => 'mic' })
+        if (url.includes('/read-aloud/')) loam.places.message.footer.action.add({ id: 'read-aloud.footer', slot: 'row', render: () => 'listen' })
+      } }
+    } })
+    await loader.refresh()
+    const out = { imports: imports.map(url => AUDIO_PLUGINS.find(id => url.includes(`/${id}/`))).sort(), mic: registry.draw('composer.tool', { slot: 'microphone', target: 'draft' }).includes('mic'),
+      listen: registry.draw('message.footer.action', { slot: 'row', thread: {}, message: {}, defaultView: () => 'core' }).includes('listen') }
+    await loader.dispose()
+    return out
+  }
+  assert.deepEqual(await page(rows), { imports: [], mic: false, listen: false })
+  assert.deepEqual(await page([...rows, ...await audioRows()]), { imports: ['dictation', 'read-aloud'], mic: true, listen: true })
+  const off = (await audioRows()).map(row => ({ ...row, on: false }))
+  assert.deepEqual(await page([...rows, ...off]), { imports: [], mic: false, listen: false })
+})
+
 test('existing runtime plugin state overrides changed shipped defaults across refresh, outage and reload without writes', async () => {
   const rows = await shippedPlugins('public')
-  const saved = rows.map(row => ({ ...row, on: row.id === 'read-aloud' || row.id === 'dictation' ? true : false }))
+  // What a host that has the Market's audio plugins on answers (0.2.9).
+  const saved = [...rows.map(row => ({ ...row, on: row.switch === 'appearance' ? row.on : false })), ...await audioRows()]
   const calls = []
   let offline = false
   const request = async (method, route) => { calls.push([method, route]); if (offline) throw new Error('Offline'); return { plugins: structuredClone(saved) } }

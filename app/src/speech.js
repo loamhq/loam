@@ -29,7 +29,7 @@ import path from 'node:path'
 import { speakable, speakableBlocks } from './speakable.js'
 import { createBlockDescriber } from './speech-descriptions.js'
 import { spokenWords } from './spoken-length.js'
-import { documentSpeakable, documentSpeechBlocks, documentWords, documentStops, withoutFrontmatter, DOCUMENT_VOICE, DOCUMENT_STYLE, PREBUILT_VOICES as VOICES } from '../public/plugins/read-aloud/page/document-speech.js'
+import { documentSpeakable, documentSpeechBlocks, documentWords, documentStops, withoutFrontmatter, DOCUMENT_VOICE, DOCUMENT_STYLE, PREBUILT_VOICES as VOICES } from './document-speech.js'
 
 // The thirty prebuilt voices, as the speech-generation docs list them on
 // 2026-10-02. A voice not on this list is refused by the API, so a
