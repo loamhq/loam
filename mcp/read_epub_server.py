@@ -58,7 +58,7 @@ WORKSPACE = Path(os.environ.get("LOAM_AGENT_WORKSPACE", "/nonexistent")).resolve
 VAULT = Path(os.environ.get("LOAM_VAULT") or lc.VAULT).resolve()
 AI_LABS = Path(os.environ.get("LOAM_AI_LABS") or lc.WORKSPACES).resolve()
 COMMONS = AI_LABS / "commons"
-CONVERSATIONS = VAULT / "15_CONVERSATIONS"
+CONVERSATIONS = VAULT / lc.vault_folder("conversations")
 
 # Illegal on Android at the filesystem layer: a file carrying one of
 # these never syncs to the phone. Checked on names this server creates,

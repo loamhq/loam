@@ -3,7 +3,8 @@
 *Since 2026-11-18. Two halves: the routine local commit, in core
 (`lib/loam_autocommit.py`, `bin/autocommit`, `systemd/loam-autocommit.*`),
 and the **Git backup** plugin, built in and off by default
-(`plugins/git-backup/`). Tests: `tests/test_git_backup.py`.*
+(`plugins/git-backup/`). Tests: `tests/test_git_backup.py`. A copy taken by
+hand, as one zip, is Files' Download as zip: docs/download.md.*
 
 ## The floor: every change, committed on this machine
 
@@ -35,7 +36,9 @@ any backup is set up.
   record, and `check-drift` does not count the timer as missing. Taking the
   line out hands the tree over at the next quarter hour.
 - `loam update` installs the timer and arms it once on an install made
-  before it (`lib/loam_update.py`, `units`).
+  before it: `gen-units` arms any timer it installs for the first time
+  (since 2026-11-19), which is what reaches an install whose older release
+  runs the update, and `lib/loam_update.py`'s `units` step arms it too.
 
 **The host's own setup** (the web server's config, Loam's units, its
 config and settings) has a history of its own, root's alone and kept on the
@@ -182,7 +185,10 @@ without new keys or repositories:
    (`bin/settings set plugin.git-backup.vault_remote git@github-vault:owner/vault.git`).
    With no key of its own for that tree, the push uses the alias's
    `IdentityFile` from `~/.ssh/config`, as the old script did. Nothing is
-   pushed twice: the remote already has the history.
+   pushed twice: the remote already has the history. The push goes to the
+   address, not to `origin` by name; after each one the plugin moves
+   `origin/main` (any remote whose address is the same repository) to what
+   it sent, so `git status` does not read "ahead" (since 2026-11-19).
 2. Take the autocommit lines out of the crontab. The core timer commits the
    trees from the next quarter hour; `gen-units` and arming
    `loam-autocommit.timer` once makes it run (`check-drift` then expects it).

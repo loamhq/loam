@@ -47,7 +47,7 @@ WORKSPACE = Path(os.environ.get("LOAM_AGENT_WORKSPACE", "/nonexistent")).resolve
 VAULT = Path(os.environ.get("LOAM_VAULT") or lc.VAULT).resolve()
 AI_LABS = Path(os.environ.get("LOAM_AI_LABS") or lc.WORKSPACES).resolve()
 COMMONS = AI_LABS / "commons"
-CONVERSATIONS = VAULT / "15_CONVERSATIONS"
+CONVERSATIONS = VAULT / lc.vault_folder("conversations")
 
 # Images left this server on 2026-11-18: core ships no image tool (the
 # owner's decision, m444). The Images plugin (plugins/images/, built in since 0.2.10) has

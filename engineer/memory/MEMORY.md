@@ -68,10 +68,11 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   the units are regenerated (`gen-units`, each agent's wake
   unit, `provision --reviewer`) and `loam-check-drift.service` is run once.
   Comment-only unit changes need a `daemon-reload` and no restart.
-- **Nor has `gen-deploy`** (caused 2026-11-17): `gen-deploy --help` is a
-  live render. It wrote the Caddyfile, reloaded Caddy and ran `compose up`
-  on the login and the browser. Read a generator's docstring, never its
-  `--help`.
+- **`gen-deploy --help` was a live render until 2026-11-19** (caused
+  2026-11-17: it wrote the Caddyfile, reloaded Caddy and ran `compose up`).
+  `gen-deploy` and `gen-units` now print help and refuse an unknown flag;
+  an older release's copy does not. Read a generator's docstring before
+  trusting its `--help`.
 
 ## 2026-11-16 — a correct record can still draw in the wrong order
 
@@ -1917,7 +1918,7 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   app's light/dark comes from the boot script `/appearance-state.js` as
   well as the GET, so set `documentElement.dataset.theme` after load (DOM
   only, nothing saved), and abort every non-GET so viewing writes nothing.
-- **`bin/gen-units` takes no flags:** `gen-units --help` runs it and writes.
+- **`bin/gen-units` took no flags** until 2026-11-19: `gen-units --help` ran it and wrote.
 - **`$TMPDIR` can be empty in a Bash call**; spell the scratch path out
   before anything that writes to it (`crontab "$TMPDIR/x"` read `/x`).
 - **Git backup pushes to the address, not to `origin`**, so the trees'
@@ -1928,6 +1929,32 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   that is due), so after a switch the first commit may be the push's, not
   the timer's; wait for a timer run to see the timer's own.
 
+## 2026-11-19 — the small fixes before friends install
+
+- **A mid-job `--land` tests in the job's own tree, on a detached HEAD at
+  the merge**, for as long as the suite takes. A commit made then went onto
+  that HEAD and was left behind; `back_to_branch` and `carry_onto`
+  (`lib/loam_worktree.py`) now keep it, and `result["carried"]` names it.
+  Uncommitted edits made during a landing are still at risk from its
+  `checkout -f`: commit before `--land`, and not while it runs.
+- **Antigravity reports a whole run ERROR for a side call's failure**: its
+  "implicit" conversations run on its default model whatever `--model`
+  says, and a 503 there ended a finished Claude-model job. A transient
+  error naming another model is the side call's
+  (`loam_agy_job.side_call_failure`); with a receipt written, the job lands.
+- **A fixed sleep in a test is a flake in a landing.** Several jobs land at
+  once; wait for the condition (`until`) instead. In the app's fake-DOM
+  tests the card shows the previous answer while it reloads: assert with
+  `eventually`, as `app/test/github-orgs.test.js` does. A 400 ms delay
+  in the fake route reproduces the old failure every time.
+- **Bare `python3 tests/test_engineer_codex.py` fails 4 checks on a box
+  whose default runtime is not Claude**: it reads the box's settings. Run it
+  through `tests/run-all <file>`, which empties `LOAM_HOST_SETTINGS`.
+- **`app/test/plugin-host-browser.mjs` runs with a Playwright in scratch**:
+  `npm i playwright@1.65.1` with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, then
+  `LOAM_PLAYWRIGHT=<scratch>/node_modules/playwright/index.mjs
+  LOAM_CHROME=/usr/bin/chromium-headless-shell` (`PLUGIN_CASE=1440-latte-light`
+  for one variant).
 ## 2026-11-19 — Dictation and Read aloud carry their own server halves (0.2.12)
 
 - **The plugin server surface needed nothing new to take a core route.**
@@ -2074,6 +2101,55 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Seen, not fixed:** a turn model change (`set_choices`) posts the CLI's
   "Set model to … for this session only" text as a persona message.
 
+## 2026-11-19 — a fresh install as safe as a long-running one; the upgrade walked
+
+- **An update runs the OLD release's `lib/loam_update.py`.** Its step list
+  and `Box` methods are the running release's; only the scripts each step
+  runs (`gen-units`, `provision`, `gen-deploy`, `deploy`) are the new
+  release's. So anything a release adds to the box must ride on one of
+  those scripts, never on a new update step: the 15-minute history timer
+  added in `Box.units` on 11-18 never reached a box updated from 0.2.0-0.2.11
+  (their `Box.units` has no such line). `gen-units` now arms any timer it
+  installs for the first time and retires what `loam_units.RETIRED` names;
+  the inbound wall rides on `gen-deploy` (the `deploy` step, by sudo).
+- **A release that removes a unit template leaves the unit installed** on
+  every older box unless something removes it: Remote Control's
+  `loam-recycle-rc.timer` stayed armed after 0.2.0 -> 0.2.12, firing a
+  script that was gone. Add a retired unit to `loam_units.RETIRED`.
+- **The inbound wall is iptables, not nft**, appended last in INPUT
+  (`LOAM-INBOUND`), because Docker guarantees iptables and the broker's and
+  the sight's walls are iptables jumps inserted at the top: a separate nft
+  table would drop what their chains accept. It stands aside per family
+  where ufw/firewalld is active or INPUT's policy is DROP (the first box).
+  Prove it in `sudo unshare -n` (a network namespace of its own, nothing on
+  the host touched): `tests/test_inbound_firewall.py`. On a walk VM, a
+  container on `docker0` stands in for the outside: its `curl` to an
+  agent's `http.server` on 0.0.0.0 times out, to 443 answers.
+- **Fixed literals of the first box's folders fail open.** `15_CONVERSATIONS`
+  in the files tree, the reviewer, two MCP servers and the transcript
+  writer meant fences on nothing and transcripts in a folder of their own on
+  a fresh vault. `tests/test_no_box_folder_literals.py` refuses them.
+- **The upgrade walk** (Modal VM, as in "How it was proved"): install the
+  old tag with `--source git://127.0.0.1/loam.git --version 0.2.0`, the
+  candidate added to the VM's bare repository as a lightweight tag
+  (release tags are lightweight), `loam update apply --yes --foreground` as
+  the install's user. Notes for next time:
+  - workspaces are `paths.workspaces` (`~/agents` on a fresh install, not
+    `~/ai-labs`);
+  - Docker is userns-remapped, so Authelia's data is under
+    `/var/lib/docker/100000.100000/volumes/authelia-data/_data/`
+    (`db.sqlite3`: `webauthn_credentials`);
+  - the claim token is the link's fragment, not `/etc/loam/claim`;
+  - a wildcard needs dnsmasq (`/etc/hosts` gives the apex only and the
+    name never goes ready);
+  - the welcome screen needs a placeholder Claude login, written again
+    before each browser run (a failed turn blanks it);
+  - a passkey survives a browser: `WebAuthn.getCredentials` after adding
+    it, `WebAuthn.addCredential` into a new virtual authenticator after the
+    update, then the sign-in page's passkey button.
+- **Two jobs may cut the same version.** A job that writes `release-tag`
+  early is visible in its job folder; read the other running jobs'
+  `release-tag` before choosing a number.
 ## 2026-11-19 — plugin pages that explain themselves
 
 - **A theme is previewed in a frame of its own** (`app/public/theme-scene.html`,

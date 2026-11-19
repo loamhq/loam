@@ -199,7 +199,7 @@ AGY_PROVIDER_LINE = (
     "would do; the `history` MCP server's `log`, `diff`, `blame` and "
     "`file_at`, as described. You have no shell, no web, no browser and no "
     "subagents. A write outside your state directory, or a read of the "
-    "vault's 15_CONVERSATIONS/, is refused by a deny rule before it runs; a "
+    f"vault's {lc.vault_folder('conversations')}/, is refused by a deny rule before it runs; a "
     "refusal is the design working, so do not route around one.")
 
 
@@ -228,7 +228,7 @@ def agy_servers() -> dict:
         "command": str(Path(__file__).resolve().parent / "mcp-python"),
         "args": [str(FILES_SERVER)],
         "env": {"LOAM_FILES_ROOTS": ":".join(str(p) for p in (AI_LABS, VAULT, STATE)),
-                "LOAM_FILES_EXCLUDE": str(VAULT / "15_CONVERSATIONS")},
+                "LOAM_FILES_EXCLUDE": str(VAULT / lc.vault_folder("conversations"))},
     }
     return servers
 
@@ -257,7 +257,7 @@ def agy_settings(run_dir: Path) -> dict:
     """The session's permission rules (``agy --settings``, never saved):
     the Claude reviewer's settings.json deny list in Antigravity's words."""
     deny = ["command(*)", "read_url(*)", "execute_url(*)",
-            f"read_file({VAULT / '15_CONVERSATIONS'})"]
+            f"read_file({VAULT / lc.vault_folder('conversations')})"]
     deny += [f"write_file({p})" for p in write_denials(STATE)]
     # Inside the writable state: the session's own agent and server files.
     deny.append(f"write_file({run_dir / AGY_DIR})")

@@ -268,6 +268,22 @@ try:
         + "exit 1\n")
     rc, run, _ = aj.run([str(quota)], str(ws), 30, jd, jd / "err")
     check("a quota error is named as one", run.quota, True)
+    # A side call's 503 on another model (2026-11-19, the job that ran on a
+    # Claude model and was reported ERROR for Gemini's capacity).
+    side = ("API error (attempt 1): UNAVAILABLE (code 503): No capacity available "
+            "for model gemini-4-hydrogen-high on the server")
+    check("side call: a 503 naming another model is the side call's",
+          aj.side_call_failure(side, "claude-opus-5-5-high"), "gemini-4-hydrogen-high")
+    check("side call: a 503 naming the job's own model is the job's",
+          aj.side_call_failure(side, "gemini-4-hydrogen-high"), None)
+    check("side call: the same model without its level is the job's",
+          aj.side_call_failure(side.replace("-high on", " on"), "gemini-4-hydrogen-high"),
+          None)
+    check("side call: a 503 naming no model is the job's",
+          aj.side_call_failure("UNAVAILABLE (code 503)", "claude-opus-5-5-high"), None)
+    check("side call: a non-transient error is the job's",
+          aj.side_call_failure("invalid model selection for model gemini-x",
+                               "claude-opus-5-5-high"), None)
     silent = stub(event({"event": "init", "conversation_id": "C-2", "init": {}}))
     rc, run, _ = aj.run([str(silent)], str(ws), 30, jd, jd / "err")
     check("no result event: a failure even on exit 0",

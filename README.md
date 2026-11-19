@@ -22,8 +22,9 @@ can move an agent from one to another without it forgetting who it is.
 - **Open source, under the AGPL.** Nobody can lock you out of your agents,
   and that includes Loam.
 
-Loam needs a Linux server of your own for now. The install below takes a few
-minutes.
+Loam needs a Linux server of your own for now, and one you use for nothing
+else: your agents have full control of it, as root, which is how they can
+change anything for you. The install below takes a few minutes.
 
 <p align="center">
   <img src="docs/images/thread-desktop.png" alt="A thread with two agents in Loam's web app, on a desktop" width="72%">
@@ -43,7 +44,9 @@ curl -fsSL https://raw.githubusercontent.com/loamhq/loam/main/install.sh | sudo 
 
 It asks where your Loam will live on the web (below), your first name and
 your time zone. It can be run again at any time, and ends with a one-time
-link that makes you the owner. It installs the newest release.
+link that makes you the owner. It installs the newest release, and a
+firewall that lets in only SSH and the web (a firewall the server already
+has is left as it is).
 
 **What it checks.** Before anything from the release runs, the installer
 checks that the release is signed by a Loam maintainer key it carries, and

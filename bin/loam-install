@@ -851,9 +851,12 @@ def step_edge(a, ans: dict) -> None:
     run([py, f"{root}/bin/deploy", edge.get("app", "loam-ui"), "up", commit], timeout=3600)
     install_system_units(cfg)
     run(["systemctl", "enable", "--now", "loam-claim.service"])
-    res = run([py, f"{root}/bin/loam-await-dns"], timeout=1800, check=False)
     sys.path.insert(0, f"{root}/lib")
     import loam_deploy as dep  # noqa: PLC0415
+    # gen-deploy raised the inbound wall (lib/loam_deploy.py, "The inbound
+    # wall"); one line says what guards this server now.
+    say(dep.inbound_wall_words(dep.inbound_wall_status()), 2)
+    res = run([py, f"{root}/bin/loam-await-dns"], timeout=1800, check=False)
     state = dep.edge_state()
     if state.get("ready_at"):
         say(f"Loam is on the web at https://{edge['domain']}/ with its certificate.", 2)
@@ -978,6 +981,21 @@ def finale(elapsed: float | None = None) -> None:
         say(f"Open https://{domain}/ and sign in.")
         print()
         say("To see how everything is doing, type:  loam status")
+    print()
+    backup_step()
+
+
+def backup_step() -> None:
+    """The last step, offered and not taken: the history is already kept on
+    this machine (loam-autocommit.timer, every 15 minutes, from step 6's
+    first commit); the copy off it is the Git backup plugin, which needs the
+    person's own private repository and so cannot be made for them here."""
+    say("Your vault and your agents' files keep their own history on this server "
+        "from now on: every change is committed every 15 minutes, nothing sent "
+        "anywhere.")
+    say("Recommended next: back them up to a private GitHub repository (or any git "
+        "host), so a lost server loses nothing. Loam offers it when you first sign "
+        "in; later it is in Settings › Plugins › Git backup, or ask Iris.")
 
 
 def main() -> int:

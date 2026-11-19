@@ -73,18 +73,13 @@ try {
       assert.equal(await page.evaluate(() => __plugins.coreScope.commands.run('proof.greet')), 'Hello 2')
       await page.evaluate(() => __plugins.coreScope.commands.run('core.chats')); await proofTab.waitFor(); await proofTab.click()
       await plugins(); await page.getByRole('switch', { name: 'Enable Proof plugin', exact: true }).click()
-      await page.waitForFunction(() => __plugins.state.screen === 'home' && !__plugins.state.sheet)
+      // The section's screen gives way to the chats behind Settings, which
+      // stays open where the switch was (it closed until Settings changed).
+      await page.waitForFunction(() => ['home', 'threads'].includes(__plugins.state.screen))
+      await close(); await proofTab.waitFor({ state: 'hidden' })
       await capture('section-disabled')
-      await page.locator('.tt-row').first().click(); await page.locator('#draft').waitFor(); await plugins()
-      for (const name of ['Read aloud', 'Dictation']) await page.getByRole('switch', { name: `Enable ${name}`, exact: true }).click()
-      await page.waitForFunction(() => ['read-aloud','dictation'].every(id => !__plugins.pluginLoader.st.rows.find(row => row.id === id).on))
-      await close(); assert.equal(await page.locator('.micbtn,.turnlisten,.fs-read-aloud').count(), 0)
-      await page.evaluate(() => __plugins.goSettings('voice')); await capture('voice-disabled')
-      assert.equal(await page.locator('.settings-section[aria-label="Dictation"],.settings-section[aria-label="Read aloud"]').count(), 0)
-      await plugins()
-      for (const name of ['Read aloud', 'Dictation']) await page.getByRole('switch', { name: `Enable ${name}`, exact: true }).click()
-      await page.waitForFunction(() => ['read-aloud','dictation'].every(id => __plugins.pluginLoader.st.rows.find(row => row.id === id).on))
-      await page.evaluate(() => __plugins.goSettings('voice')); await page.getByText('Read aloud', { exact: true }).first().waitFor(); await capture('voice-enabled')
+      // Read aloud and Dictation left core for the Market in 0.2.9: their
+      // switches are not Loam's own any more, and their checks are theirs.
       await plugins()
       await page.getByRole('button', { name: 'About A broken folder', exact: true }).click()
       await page.getByText('The folder and manifest id do not match.', { exact: true }).waitFor(); await capture('broken-plugin')
@@ -118,7 +113,7 @@ try {
       app.setCSS('.plugin-meta { letter-spacing: 2px; }')
       await page.evaluate(() => window.dispatchEvent(new Event('focus')))
       await page.getByRole('button', { name: 'About Latte & Newspaper', exact: true }).click()
-      await page.waitForFunction(() => getComputedStyle(document.querySelector('.plugin-meta')).letterSpacing === '2px')
+      await page.waitForFunction(() => { const meta = document.querySelector('.plugin-meta'); return meta && getComputedStyle(meta).letterSpacing === '2px' })
       assert.equal(await page.evaluate(() => __plugins.pluginLoader.st.failures.has('latte')), false)
       await capture('personal-css')
       await page.getByRole('button', { name: 'Back to Plugins', exact: true }).click()

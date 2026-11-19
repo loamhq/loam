@@ -183,7 +183,7 @@ def text(ci: dict | None) -> str:
                 f"{(ci.get('repo') or 'the repository').split('/')[0]} read "
                 f"access to Checks (the app's settings, Permissions → "
                 f"Repository permissions → Checks: Read-only, and Actions: "
-                f"Read-only for the run's link; then he accepts the change on "
+                f"Read-only for the run's link; then they accept the change on "
                 f"the installation); "
                 f"nothing was read another way{link}")
     if state == "error":
