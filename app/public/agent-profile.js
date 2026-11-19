@@ -189,7 +189,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
         })
       }) : null,
       select('Thinking', own.effort, levels, value => c.patch({ effort: value })),
-      kind === 'engineer' && data.own && data.project !== 'default' ? settingsRow({ title: 'Use the default engineer settings', onclick: () => c.patch({ provider: null }) }) : null,
+      kind === 'engineer' && data.own && data.project !== 'default' ? settingsRow({ title: data.platform ? 'Use the built-in settings' : 'Use the default engineer settings', onclick: () => c.patch({ provider: null }) }) : null,
     ], applies, defaults.not_honoured?.length ? 'Wakes and scheduled runs stay on Claude Code for now.' : null)
   }
   function switchRow(title, sub, value, choose) {

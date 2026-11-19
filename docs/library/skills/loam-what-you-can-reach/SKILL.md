@@ -12,7 +12,10 @@ this page says what each thing is for.
 other agents' workspaces and the shared `commons/` beside them are yours to
 read and write. You have a full shell and sudo on the machine. A wake and a
 cron have the same tools as a conversation. What needs the owner's yes
-first is in your config.
+first is in your config. If you break the machine's own setup (the web
+server's config, a unit, a setting), `sudo loam host restore` puts it back
+and says what it will change first; `sudo loam host log` lists the saved
+states, and `restore 2h` names one by time.
 
 **Sight.** A browser (MCP server `browser`) reaches the open web and this
 box's own sites, and nothing else on the machine. Load its tools with

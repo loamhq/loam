@@ -17,7 +17,9 @@ listener on loopback and through `bin/settings` as a persona.
     the wake's rule
   - a persona's change through `bin/settings` reads back and is said in
     General; from an unattended lane it is refused before any call
-  - engineers: Loam first and Claude Code only; a project's own setting, the
+  - engineers: Loam first, Claude Code until its own provider is set (since
+    2026-11-19 a provider like the others', never the default's, and back
+    with null); a project's own setting, the
     default for every other, and back; what the launcher reads
     (engineer_choice, choice_for, deploy_default); deploy_on_land refused
     where there is nothing to deploy
@@ -416,9 +418,13 @@ async def main():
         # -- engineers --------------------------------------------------------
         status, body = await http(port, "GET", "/v1/engineers")
         rows = {r["project"]: r for r in body.get("engineers", [])}
-        check("GET /v1/engineers: Loam first, Claude Code only, built-in model",
+        check("GET /v1/engineers: Loam first, the same choices as the others, "
+              "Claude Code and its built-in model by default",
               status == 200 and body["engineers"][0]["project"] == "Loam"
-              and rows["Loam"]["providers"] == ["claude-code"]
+              and rows["Loam"]["providers"] == rows["webapp"]["providers"]
+              == ["claude-code", "codex", "antigravity"]
+              and rows["Loam"]["effective"]["provider"] == "claude-code"
+              and rows["Loam"]["effective"]["source"] == "record"
               and rows["Loam"]["effective"]["model"] == eng.ENGINEER_MODEL, body)
         check("a project on its record: Codex, its built-in model and level",
               rows["webapp"]["effective"] == {"provider": "codex",
@@ -433,9 +439,43 @@ async def main():
               and rows["webapp"]["deploy_on_land"] is False
               and rows["prproj"]["deploy_on_land"] is None
               and rows["webapp"]["jobs_running"] == 1, rows.get("webapp"))
+        # Loam's engineer's provider is its owner's to set (2026-11-19).
         status, body = await http(port, "PATCH", "/v1/engineers/Loam",
                                   {"provider": "codex"})
-        check("Loam's engineer on Codex is a 400", status == 400, body)
+        loam = eng.engineer_choice(eng.platform_project())
+        row = next((r for r in body.get("engineers", []) if r["project"] == "Loam"), {})
+        check("Loam's engineer on Codex: its next job runs codex, Codex's built-in",
+              status == 200 and eng.platform_project().runtime == "codex"
+              and loam == {"runtime": "codex", "model": eng.CODEX_ENGINEER_MODEL,
+                           "effort": eng.CODEX_ENGINEER_EFFORT, "source": "own"}
+              and row.get("effective", {}).get("provider") == "codex", body)
+        status, body = await http(port, "PATCH", "/v1/engineers/Loam",
+                                  {"tiers": {"hard": eng.CODEX_ENGINEER_MODEL}})
+        check("...its tiers are Codex's",
+              status == 200 and eng.tier_models(eng.platform_project())["hard"]
+              == eng.CODEX_ENGINEER_MODEL, body)
+        status, body = await http(port, "PATCH", "/v1/engineers/Loam",
+                                  {"provider": "antigravity"})
+        loam = eng.engineer_choice(eng.platform_project())
+        check("...Antigravity: Codex's tiers go with Codex",
+              status == 200 and loam["runtime"] == "antigravity"
+              and loam["model"] == eng.AGY_ENGINEER_MODEL
+              and eng.tier_models(eng.platform_project())["hard"] is None, loam)
+        status, body = await http(port, "PATCH", "/v1/engineers/Loam",
+                                  {"effort": "high"})
+        check("...its effort refused as the others' is: the level is in the model id",
+              status == 400 and "model id" in json.dumps(body), body)
+        status, body = await http(port, "PATCH", "/v1/engineers/Loam",
+                                  {"provider": "gemini-cli"})
+        check("...a provider there is none of: refused in the others' words",
+              status == 400 and "`provider` for an engineer is" in json.dumps(body)
+              and eng.platform_project().runtime == "antigravity", body)
+        status, body = await http(port, "PATCH", "/v1/engineers/Loam",
+                                  {"provider": None})
+        loam = eng.engineer_choice(eng.platform_project())
+        check("...null: back on its built-in Claude Code",
+              status == 200 and loam == {"runtime": "claude", "model": eng.ENGINEER_MODEL,
+                                         "effort": None, "source": "record"}, loam)
         status, body = await http(port, "PATCH", "/v1/engineers/Loam",
                                   {"model": "claude-opus-5-5", "effort": "max"})
         loam = eng.engineer_choice(eng.platform_project())
@@ -468,7 +508,7 @@ async def main():
         check("deploy_on_land on a project with an app: what the launcher reads",
               status == 200 and eng.deploy_default(eng.projects()["webapp"]), body)
         # Antigravity (2026-11-15): a choice for a project engineer and the
-        # default, its level in its model id; never Loam's.
+        # default, its level in its model id (Loam's own too since 2026-11-19).
         status, body = await http(port, "PATCH", "/v1/engineers/webapp",
                                   {"provider": "antigravity"})
         web = eng.projects()["webapp"]
@@ -492,7 +532,6 @@ async def main():
                    {"provider": "claude-code", "model": "opus", "effort": "high"})
         for name, patch, label in (("prproj", {"deploy_on_land": True}, "landing by PR"),
                                    ("default", {"deploy_on_land": True}, "the default"),
-                                   ("Loam", {"provider": "antigravity"}, "Antigravity for Loam"),
                                    ("webapp", {"speed": 1}, "a setting there is none of")):
             status, body = await http(port, "PATCH", f"/v1/engineers/{name}", patch)
             check(f"refused: {label}", status == 400, body)
@@ -512,6 +551,18 @@ async def main():
               out.get("ok") and out.get("value") == "medium"
               and "Ada changed the prproj engineer's effort to medium" in general_lines(),
               out)
+        # A persona sets Loam's engineer's provider through the same route
+        # (2026-11-19), and it reads back as the others' does.
+        out = await cli(port, "set", "engineer.provider", "codex", "--target", "Loam")
+        check("bin/settings set engineer.provider for Loam: read back, its next job codex",
+              out.get("ok") and out.get("value") == "codex"
+              and eng.platform_project().runtime == "codex", out)
+        out = await cli(port, "set", "engineer.provider", "nope", "--target", "Loam")
+        check("...an unknown provider refused, nothing changed",
+              not out.get("ok") and eng.platform_project().runtime == "codex", out)
+        out = await cli(port, "set", "engineer.provider", "null", "--target", "Loam")
+        check("...null puts it back on Claude Code",
+              out.get("ok") and eng.platform_project().runtime == "claude", out)
 
         # -- the reviewer -----------------------------------------------------
         status, body = await http(port, "GET", "/v1/system/reviewer")

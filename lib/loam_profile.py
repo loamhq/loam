@@ -553,7 +553,8 @@ def engineers(running: dict | None = None) -> dict:
                           "tiers": _effective_tiers(eng.tier_models(project, stored),
                                                     choice["model"]),
                           "source": choice["source"]},
-            "providers": ["claude-code"] if project.platform else list(ENGINEER_PROVIDERS),
+            # Loam's own too since 2026-11-19: "It should be like the others."
+            "providers": list(ENGINEER_PROVIDERS),
             "deploy_on_land": deploy_on if app else None,
             "deploy_app": app,
             # What the toggle does, as the page says it: Loam's deploys the
@@ -658,8 +659,7 @@ def update_engineer(name: str, patch: dict, check) -> dict:
     if not is_default and project is None:
         raise ProfileError(f"no engineer for a project named {name!r}; GET "
                            f"/v1/engineers lists them", 404)
-    allowed = ("claude-code",) if project is not None and project.platform \
-        else ENGINEER_PROVIDERS
+    allowed = ENGINEER_PROVIDERS
     if "deploy_on_land" in patch:
         if not isinstance(patch["deploy_on_land"], bool):
             raise ProfileError("`deploy_on_land` is true or false")
@@ -685,11 +685,7 @@ def update_engineer(name: str, patch: dict, check) -> dict:
                     row.pop(k, None)
             elif p not in allowed:
                 raise ProfileError(
-                    f"`provider` for {'Loam' if project is not None and project.platform else 'an engineer'}"
-                    f" is {' or '.join(allowed)}"
-                    + ("; the platform engineer runs on Claude Code only"
-                       if project is not None and project.platform else
-                       "") + ", or null")
+                    f"`provider` for an engineer is {' or '.join(allowed)}, or null")
             else:
                 if row.get("provider") != p:
                     # A provider's models are its own: its tiers go too.

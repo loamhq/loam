@@ -1268,6 +1268,20 @@ def main() -> int:
                 and not (UNIT_DIR / name).exists()):
             continue
         compare(findings, f"static {name}", UNIT_DIR / name, text)
+    # The host history (2026-11-19, lib/loam_host.py): root's timer, rendered
+    # from systemd/system/ by `loam host install`. Off or stale, the host's
+    # setup stops being kept and nothing else says so.
+    import loam_host  # noqa: PLC0415
+    for name, text in loam_host.render_units(AGENTS).items():
+        compare(findings, f"system {name}", loam_host.SYSTEM_UNIT_DIR / name, text)
+    timer_on = subprocess.run(["systemctl", "is-enabled", loam_host.TIMER],
+                              capture_output=True, text=True).stdout.strip()
+    if timer_on != "enabled":
+        findings.append((
+            "host history timer", f"systemctl is-enabled {loam_host.TIMER}",
+            f"{timer_on or 'unknown'}: the host's setup is not being kept, so "
+            f"`loam host restore` has nothing newer to put back. "
+            f"`sudo loam host install`"))
     # The sign-in watch (bin/claude-signin): with it off, a sign-in or a
     # sign-out is noticed by nothing that runs on its own.
     armed = user_systemctl("is-active", "loam-claude-signin.path")

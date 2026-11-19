@@ -37,6 +37,10 @@ any backup is set up.
 - `loam update` installs the timer and arms it once on an install made
   before it (`lib/loam_update.py`, `units`).
 
+**The host's own setup** (the web server's config, Loam's units, its
+config and settings) has a history of its own, root's alone and kept on the
+machine: `loam host`, docs/host-history.md.
+
 ## The copy off the machine: the Git backup plugin
 
 Turned on in Settings › Plugins › Git backup. The person connects one
