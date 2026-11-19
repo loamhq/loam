@@ -3,6 +3,10 @@
 Each release's notes are written for the people who run Loam, in
 `docs/releases/<version>.md`. The app shows them when it offers an update.
 
+- [0.2.12](docs/releases/0.2.12.md), 2026-11-19: a firewall on every
+  server and history kept from the first minute; Git backup to a private
+  repository, a folder as one zip, a plugin from any GitHub link, and
+  plain words that agents and plugins have full control of the server.
 - [0.2.11](docs/releases/0.2.11.md), 2026-11-18: the private route to
   Loam's makers from 0.2.7 is gone; a bug, a wish or an idea goes to them as
   an issue on Loam's GitHub, which is also where to ask for a name.
