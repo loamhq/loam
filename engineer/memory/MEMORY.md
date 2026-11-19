@@ -2062,3 +2062,30 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   app instance across a file's tests). Wait for what this test's answer
   draws (`until(() => ...)`), never for the node alone. Reproduce with a
   dozen busy loops beside `node --test <file>`.
+
+## 2026-11-19 — backup offered once on every fresh install; Git backup assumes no host
+
+- **A plugin row's `chosen` says whether its switch was ever set**
+  (`installed.json`'s `on` map holds an id only once someone set it). First
+  setup's backup offer reads it: shown while Git backup is off and
+  unchosen, on both first-visit paths; *Skip for now* PATCHes it off, which
+  is the "shown, answered" mark: server-side, every device, no new setting.
+- **The installer signs in to no provider** (`docs/install.md`, "What an
+  install leaves to others"), so a provider is connected before the first
+  visit only when the owner signed the CLI in from a shell first, as on a
+  machine where Claude Code or Codex was already in use.
+- **The shared release browser fixtures are stale**: `agent-profile-host.mjs`
+  (under `release-u3/u4-fixture.mjs`) expects `read-aloud` in
+  `app/public/plugins`, which left core in `e45f685`, so
+  `release-u4-entry-browser.mjs` cannot start. Build a walk on
+  `oneProductFixture` directly (`app/test/onboarding-backup-entry-browser.mjs`).
+- **`$TMPDIR` is empty in this job's Bash shell**: set it from the job's
+  scratch path before `> $TMPDIR/x.log`, or the redirect is to `/` and the
+  command never runs.
+- **A plugin page's real flow can be walked off-box**: start its
+  `server/main.py` on a scratch `Install` (from `tests/test_git_backup.py`)
+  with `PORT`, serve `/api/plugins/<id>/files/*` from the tree and proxy
+  `/x/<id>/*` to the port with `route.fetch` in Playwright.
+- **Seen, not fixed:** `github-orgs.test.js` fails a test or more now and
+  then while `tests/run-all` loads the CPU beside it; 0 of 8 on a quiet box,
+  on `main` and on the branch alike.

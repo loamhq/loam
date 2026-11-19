@@ -804,7 +804,7 @@ const onboardingBackup = createOnboardingBackup({
 async function continueWelcome() {
   if (!state.providers.some(p => ['claude-code', 'codex', 'antigravity'].includes(p.id) && p.connected)) return
   page.providerSignIn.cancel()
-  if (onboarding.step === 'providers' && onboardingBackup.available()) {
+  if (onboarding.step === 'providers' && onboardingBackup.offered()) {
     onboarding.step = 'backup'
     onboardingBackup.refresh()
     schedule()
@@ -1213,9 +1213,16 @@ else {
       const record = await api('GET', `/threads/${encodeURIComponent(hello.id)}`)
       if (untouchedHello(record)) {
         onboarding.hello = hello.id
+        await pluginsReady.catch(() => {})
         onboarding.needed = !state.providers.some(p => ['claude-code', 'codex', 'antigravity'].includes(p.id) && p.connected)
-        if (onboarding.needed) await pluginsReady.catch(() => {})
-        else await threads.open(hello.id)
+        // A provider signed in before the first visit (a machine where Claude
+        // Code or Codex already was) skips the welcome, not the backup offer.
+        if (!onboarding.needed && onboardingBackup.offered()) {
+          onboarding.needed = true
+          onboarding.step = 'backup'
+          onboardingBackup.refresh()
+        }
+        if (!onboarding.needed) await threads.open(hello.id)
       }
     } catch { /* An unavailable starter leaves ordinary Chats accessible. */ }
   }

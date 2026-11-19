@@ -32,6 +32,9 @@ export function createOnboardingBackup({ api, request = globalThis.fetch, plugin
 
   const row = () => pluginLoader?.st?.rows?.find(r => r.id === 'git-backup' && r.effective !== false && !r.broken) ?? null
   const available = () => Boolean(row())
+  // Offered once (2026-11-19): while Git backup is off and nobody has ever set
+  // its switch. Turning it on or skipping sets it, so neither path asks again.
+  const offered = () => { const r = row(); return Boolean(r) && !r.on && r.chosen !== true }
   const trees = () => st.status?.trees?.length ? st.status.trees : DEFAULT_TREES
   const anyConnected = () => trees().some(t => Boolean(t.remote) && (Boolean(t.test?.ok) || t.level === 'ok' || Boolean(t.pushing)))
   const anyRemote = () => trees().some(t => Boolean(t.remote))
@@ -172,7 +175,9 @@ export function createOnboardingBackup({ api, request = globalThis.fetch, plugin
   }
 
   function skipCleanup() {
-    if (st.enabledHere && !anyRemote()) {
+    // Off, said in so many words: the switch is now chosen, so the offer is
+    // not made again on this install, on any device.
+    if (row() && !anyRemote()) {
       api('PATCH', '/plugins/git-backup', { on: false }).catch(() => {})
     }
     stop()
@@ -184,7 +189,7 @@ export function createOnboardingBackup({ api, request = globalThis.fetch, plugin
     clearTimeout(copyTimer)
   }
 
-  return { st, available, trees, anyConnected, anyRemote, refresh, connect, test, copy, openForm, closeForm, setInput, skipCleanup, stop }
+  return { st, available, offered, trees, anyConnected, anyRemote, refresh, connect, test, copy, openForm, closeForm, setInput, skipCleanup, stop }
 }
 
 function backupPill(t) {
@@ -341,7 +346,7 @@ export function welcomeScreen({ providers, signIn, continueWith, retry, error = 
   }
   const choices = providers.filter(p => ['claude-code', 'codex', 'antigravity'].includes(p.id))
   const connected = choices.some(p => p.connected)
-  const hasBackupStep = Boolean(backup?.available())
+  const hasBackupStep = Boolean(backup?.offered?.() ?? backup?.available())
   return h('main', { class: 'welcome', key: 'welcome' }, h('div', { class: 'welcome-inner' },
     h('div', { class: 'welcome-mark', 'aria-hidden': 'true', text: '✳' }),
     h('p', { class: 'kicker', text: 'A little room for possibility' }),

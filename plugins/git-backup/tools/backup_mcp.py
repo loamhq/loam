@@ -24,10 +24,12 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "backup_connect",
      "description": ("Connect a tree to an empty private repository the owner made, on their "
-                     "word, with the address they gave (SSH or the repository's web address). "
-                     "Refuses a public repository. Makes a deploy key for that one repository "
-                     "and answers with the public key and the steps for the owner to add it "
-                     "with write access; then call backup_test."),
+                     "word, with the address they gave: SSH or the repository's web address "
+                     "on any git host or a server of theirs, or the path of a folder on this "
+                     "machine. Refuses a public repository. For an SSH remote, makes a key for "
+                     "that one repository and answers with the public key and the steps for "
+                     "the owner to add it with write access; a folder needs no key (a new or "
+                     "empty one is made a repository). Then call backup_test."),
      "inputSchema": {"type": "object", "properties": {
          "tree": TREE, "remote": {"type": "string", "description": "The repository's address."}},
          "required": ["tree", "remote"]}},
