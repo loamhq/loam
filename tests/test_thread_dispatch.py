@@ -2,8 +2,7 @@
 """Kill the thread worker on either side of dispatch and after reply append.
 
 The session host and its stream-json child are real processes throughout.
-A test-only socket carries the dispatch; for the final two workers the
-entire reply is already available on the real session journal.
+The private host socket carries the dispatch, the live reply and journal replay.
 """
 import asyncio
 import json
@@ -38,29 +37,19 @@ def provider():
         print(json.dumps({"type": "result", "num_turns": 1}), flush=True)
 
 
-async def worker(mode, thread_id, session_id, incarnation, port):
-    from loam_provider_session import Session
+async def worker(mode, thread_id, session_id, path):
+    from session_socket_reader import BoundReader
     from loam_thread_engine import ThreadEngine
     import loam_threads as threads
 
-    class Remote(Session):
-        def save(self):
-            pass  # the host alone owns the session record
-
+    class Remote(BoundReader):
         async def dispatch(self, key, text, attachments=None, **options):
             if mode == "before-write":
                 os._exit(80)
-            reader, writer = await asyncio.open_connection("127.0.0.1", int(port))
-            writer.write((json.dumps([key, text, attachments, mode]) + "\n").encode())
-            await writer.drain()
-            try:
-                return int(await reader.readline())
-            finally:
-                writer.close()
+            return await super().dispatch(key, text, attachments, **options)
 
-    session = Remote("iris", session_id, provider="claude-code")
-    session.incarnation = incarnation
-    session.state = "running"
+    session = Remote(path, session_id)
+    await session.connect()
 
     class Adapter:
         sessions = {session_id: session}
@@ -105,31 +94,31 @@ async def host():
     input_id = inputs.add(thread_id, "iris", {"reason": message["id"], "chain": 0})
     release_ack = asyncio.Event()
 
-    async def serve(reader, writer):
-        try:
-            key, text, attachments, mode = json.loads(await reader.readline())
-            assert key == input_id
-            seq = await session.dispatch(key, text, attachments)
-            if mode == "lose-ack":
-                await release_ack.wait()
-            writer.write(f"{seq}\n".encode())
-            await writer.drain()
-        finally:
-            writer.close()
+    send = session.send_message
+
+    async def hold_ack(*args, **kwargs):
+        seq = await send(*args, **kwargs)
+        await release_ack.wait()
+        return seq
+
+    session.send_message = hold_ack
 
     async def until(predicate):
         async with asyncio.timeout(15):
             while not predicate():
                 await asyncio.sleep(.01)
 
-    server = await asyncio.start_server(serve, "127.0.0.1", 0)
-    port = str(server.sockets[0].getsockname()[1])
+    from loam_session_socket import listen
+    os.chdir(folder)
+    path = Path("private") / "host.sock"
+    endpoint = listen(host, path)
+    await endpoint.__aenter__()
     workers = []
     try:
         async def launch(mode):
             proc = await asyncio.create_subprocess_exec(
                 sys.executable, __file__, "worker", mode, thread_id, session.id,
-                session.incarnation, port)
+                str(path))
             workers.append(proc)
             return proc
 
@@ -144,9 +133,9 @@ async def host():
         assert await lost.wait() == -signal.SIGKILL
         assert not inputs.items(thread_id, "iris")[0].get("sent")
         release_ack.set()
-        (folder / "finish").touch()
-        await until(lambda: any(e["type"] == "result" for e in session.replay(0)))
         crash = await launch("after-append")
+        await until(lambda: len(session.subscribers) == 1)
+        (folder / "finish").touch()
         assert await crash.wait() == 82
         assert threads.session_for(thread_id, "iris") is None
         final = await launch("recover")
@@ -165,8 +154,7 @@ async def host():
               f"prompt_seqs={receipts} child_reads=1 reply=m2 'first second' inputs=0")
     finally:
         release_ack.set()
-        server.close()
-        await server.wait_closed()
+        await endpoint.__aexit__(None, None, None)
         for proc in workers:
             if proc.returncode is None:
                 proc.kill()

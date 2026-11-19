@@ -2118,6 +2118,9 @@ class Session:
         self.subscribers.discard(queue)
 
     def replay(self, since: int) -> list[dict]:
+        return list(self.iter_replay(since))
+
+    def iter_replay(self, since: int):
         """Everything numbered above `since`; 0 is the session from the
         beginning. Since the classic chat view retired (2026-11-12) nothing
         on the wire streams a session -- a thread is what is read -- but this
@@ -2147,7 +2150,6 @@ class Session:
         file is the first `replayed` events and nothing more, and anything
         said in the app after that is a branch this record does not follow.
         """
-        out = []
         if self.origin == adoption.ORIGIN_APP and self.source:
             limit = self.replayed
             seq = 0
@@ -2158,7 +2160,7 @@ class Session:
                         break
                     event["seq"] = seq
                     if seq > since:
-                        out.append(event)
+                        yield event
             except OSError as exc:
                 # The file moved or the login was cleared out. The record and
                 # the broker's own log are still readable, and a thread that
@@ -2166,7 +2168,7 @@ class Session:
                 print(f"replay: {self.id[:8]}: {self.source}: {exc}",
                       file=sys.stderr, flush=True)
         if not self.log_path.exists():
-            return out
+            return
         with self.log_path.open(encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
@@ -2177,8 +2179,8 @@ class Session:
                 except json.JSONDecodeError:
                     continue
                 if event.get("seq", 0) > since:
-                    out.append(event)
-        return out
+                    yield event
+        return
 
 
 def wake_envelope(task: dict) -> str:
