@@ -8206,9 +8206,10 @@ async def shutdown(broker: "Broker", server: "Server") -> None:
             s = stops[fut]
             say(f"session {s.agent}/{s.id} did not stop within "
                 f"{cfg.SHUTDOWN_SESSIONS_S}s; going on without it")
-    # Each thread's turn in flight ends on its session's exit and writes its
-    # last line ("Ada's turn ended: the broker restarted"); a queued one
-    # writes that it never started.
+    # Each thread's turn in flight ends on its session's exit. One that had
+    # said something posts it and its last line ("Ada's turn ended: the
+    # broker restarted"); one cut before a word, and every queued one, keeps
+    # its input on disk for the next start and posts nothing (2026-11-19).
     engine = getattr(server, "threads", None)
     workers = {t: tid for tid, t in getattr(engine, "workers", {}).items()
                if not t.done()}
@@ -8290,7 +8291,17 @@ async def amain(addr: str, port: int) -> int:
     except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
         print(f"adopt: the scan failed ({exc!r})", file=sys.stderr, flush=True)
     asyncio.create_task(broker.reap_idle())
-    # Receipts a waiting call could not carry, posted into their threads.
+    # Each thread member's input still on disk from before this start (the
+    # owner's messages, job results; 2026-11-19, batch B step 2,
+    # lib/loam_thread_inputs.py), scheduled again once each and in order.
+    try:
+        counts = server.threads.resume_inputs()
+        print(f"inputs: {counts['scheduled']} scheduled again for "
+              f"{counts['members']} thread member(s), {counts['dropped']} "
+              f"dropped", file=sys.stderr, flush=True)
+    except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
+        print(f"inputs: resuming failed ({exc!r})", file=sys.stderr, flush=True)
+    # Results owed to a thread, given to its persona as input.
     asyncio.create_task(server.deliver_owed())
     # Usage reads while anything is live, and once as each job ends.
     asyncio.create_task(broker.refresh_usage())

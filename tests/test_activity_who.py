@@ -373,8 +373,9 @@ async def broker_checks():
     check("...delivered once: the same job again is not",
           server.threads.deliver_job(record, "x"), "already delivered")
 
-    # A turn the restart cuts says so, job or no job (`delivery_follows`
-    # went with the blocking call, 2026-11-18).
+    # A turn the restart cuts before a word posts nothing, job or no job
+    # (`delivery_follows` went with the blocking call, 2026-11-18), and its
+    # input is kept on disk for the next start (2026-11-19, batch B step 2).
     async def boom(t):
         fake.stopping = True      # the restart lands mid-turn
         raise RuntimeError("cut")
@@ -387,8 +388,10 @@ async def broker_checks():
             break
     fake.stopping = False
     lines = [m["text"] for m in threads.read(tid)[1][before:]]
-    check("...a turn the restart ends posts its line", lines,
-          ["Ada's turn ended: the broker restarted"])
+    check("...a turn the restart cuts before a word posts no line", lines, [])
+    check("...and its input is kept for the next start",
+          [i["reason"] for i in engine_mod.inputs.items(tid, "ada")], ["y"])
+    engine_mod.inputs.drop_member(tid, "ada")
     server.threads.run_turn = real
     check("...a persona not in the thread is not given a turn",
           server.threads.deliver_job({**record, "persona": "iris"}, "x"), "not a member")
