@@ -5,6 +5,14 @@ version: 1.0.1
 author: Loam contributors
 api: 0
 kind: [theme]
+description: "Golden leaves by day and a red maple at dusk: a warm, cosy Loam in light and in dark."
+palette:
+  - {token: --paper-page, name: Wheat paper, name_dark: Hearth smoke}
+  - {token: --paper-card, name: Oat, name_dark: Cellar}
+  - {token: --paper-ink, name: Walnut ink, name_dark: Candlelight}
+  - {token: --latte-espresso, name: Copper leaf, name_dark: Apricot}
+  - {token: --signal-crema, name: Maple red, name_dark: Harvest gold}
+  - {token: --latte-foam, name: Straw, name_dark: Mulled wine}
 image: cover.webp
 image_position: 50% 48%
 image_dark: cover-dark.webp
