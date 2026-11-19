@@ -2047,6 +2047,16 @@ def _choice(folder: Path, rel: str) -> dict:
             "description": m.get("description"), **({"icon": icon} if icon else {})}
 
 
+def _folder_of(base: Path, path: str) -> str:
+    """The folder a link's path names: a file's own folder when the path is
+    a file. GitHub serves a file under `/tree/` as well as `/blob/`
+    (`/tree/main/README.md`), and until 2026-11-19 that read as a folder
+    named README.md that the repository did not have."""
+    if path and (base / path).is_file():
+        return path.rsplit("/", 1)[0] if "/" in path else ""
+    return path
+
+
 def fetch(src: dict, into: Path) -> dict:
     """The plugin a link names, checked out under ``into``: ``{"folder",
     "source", "note"}``; or, when the repository holds several plugins and
@@ -2071,6 +2081,7 @@ def fetch(src: dict, into: Path) -> dict:
                               "it to install yet.", 404, {"reason": "no-plugin"})
         look = into / "look"
         head = _checkout(url, env, refs["heads"][branch], look)
+        path = _folder_of(look, path)
         if path and not (look / path).is_dir():
             raise PluginError(f"github.com/{src['repo']} has no folder {path}.", 404,
                               {"reason": "no-folder"})
@@ -2105,6 +2116,7 @@ def fetch(src: dict, into: Path) -> dict:
                     f"{branch} ({head[:7]}). It stays at that commit until you "
                     "install it again.")
     repo_dir = into / "repo"
+    path = _folder_of(repo_dir, path)
     if path and not (repo_dir / path).is_dir():
         raise PluginError(f"github.com/{src['repo']} has no folder {path} at "
                           f"{ref if ref_kind == 'tag' else ref[:7]}.", 404,

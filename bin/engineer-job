@@ -3359,6 +3359,18 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                    f"{ceiling['oom_kill']} OOM kill(s) in the unit)")
     elif codex_run and (returncode != 0 or codex_run.failed):
         outcome = f"exited {returncode} (codex: {codex_run.failed or 'no error event'})"
+    elif agy_run and returncode == 0 and p["receipt"].is_file() \
+            and agy_job.side_call_failure(agy_run.failed, job_model):
+        # The job's work is done and its receipt written; the error is one
+        # of Antigravity's own side calls on another model (lib/loam_agy_job.py
+        # side_call_failure). The job lands, and the receipt says so.
+        outcome = "completed"
+        body += ("\n\n*Antigravity reported an error after the work was done, on "
+                 f"one of its own side calls to "
+                 f"`{agy_job.side_call_failure(agy_run.failed, job_model)}` "
+                 f"(not this job's model, `{job_model}`): `{agy_run.failed[:300]}`. "
+                 "The job's receipt was written, so it is counted as finished "
+                 "and lands.*")
     elif agy_run and (returncode != 0 or agy_run.failed):
         outcome = (f"exited {returncode} (antigravity: "
                    f"{'out of quota: ' if agy_run.quota else ''}"

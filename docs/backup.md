@@ -3,7 +3,8 @@
 *Since 2026-11-18. Two halves: the routine local commit, in core
 (`lib/loam_autocommit.py`, `bin/autocommit`, `systemd/loam-autocommit.*`),
 and the **Git backup** plugin, built in and off by default
-(`plugins/git-backup/`). Tests: `tests/test_git_backup.py`.*
+(`plugins/git-backup/`). Tests: `tests/test_git_backup.py`. A copy taken by
+hand, as one zip, is Files' Download as zip: docs/download.md.*
 
 ## The floor: every change, committed on this machine
 
@@ -162,7 +163,10 @@ without new keys or repositories:
    (`bin/settings set plugin.git-backup.vault_remote git@github-vault:owner/vault.git`).
    With no key of its own for that tree, the push uses the alias's
    `IdentityFile` from `~/.ssh/config`, as the old script did. Nothing is
-   pushed twice: the remote already has the history.
+   pushed twice: the remote already has the history. The push goes to the
+   address, not to `origin` by name; after each one the plugin moves
+   `origin/main` (any remote whose address is the same repository) to what
+   it sent, so `git status` does not read "ahead" (since 2026-11-19).
 2. Take the autocommit lines out of the crontab. The core timer commits the
    trees from the next quarter hour; `gen-units` and arming
    `loam-autocommit.timer` once makes it run (`check-drift` then expects it).

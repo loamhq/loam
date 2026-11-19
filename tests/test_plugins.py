@@ -515,6 +515,7 @@ def mono(work):
 
 def solo(work):
     plugin(work.parent, work.name, {"id": "lantern", "name": "Lantern"})
+    (work / "README.md").write_text("# Lantern\n")
     git("add", "-A", cwd=work); git("commit", "-q", "-m", "1", cwd=work)
 
 
@@ -586,6 +587,11 @@ for url, want, test in (
          ("autumn", "1.0.1", "autumn-v1.0.1", "autumn"), at),
         ("https://github.com/friend/kite", ("kite", "1.10.0", "v1.10.0", "src/kite"), at),
         ("friend/solo", ("lantern", "1.0.0", SOLO_HEAD, ""), at),
+        # A file's link under /tree/ (GitHub serves both): its folder.
+        ("https://github.com/friend/solo/tree/main/README.md",
+         ("lantern", "1.0.0", SOLO_HEAD, ""), at),
+        ("https://github.com/friend/loam-pet/tree/v1.0.0/plugins/pet-folder/PLUGIN.md",
+         ("pet", "1.0.0", "v1.0.0", "plugins/pet-folder"), at),
         ("friend/loam-pet/tree/v1.0.0/plugins/pet-folder",
          ("pet", "1.0.0", "v1.0.0", "plugins/pet-folder"), at)):
     out = shape(url)
