@@ -240,14 +240,15 @@ try:
         return wt.setup(project(), job_id, job_dir), job_dir
 
     def commit(rec: dict, rel: str, text: str, message: str = "Fix the reminder",
-               who: tuple[str, str] | None = None) -> str:
+               who: tuple[str, str] | None = None, verify: bool = True) -> str:
         tree = Path(rec["path"])
         (tree / rel).write_text(text)
         args = ["-C", str(tree)]
         if who:
             args += ["-c", f"user.name={who[0]}", "-c", f"user.email={who[1]}"]
         subprocess.run(["git", *args, "add", "-f", rel], check=True)
-        subprocess.run(["git", *args, "commit", "-qm", message], check=True)
+        subprocess.run(["git", *args, "commit", "-q",
+                        *([] if verify else ["--no-verify"]), "-m", message], check=True)
         return git(tree, "rev-parse", "HEAD")
 
     def on_remote(branch: str) -> bool:
@@ -291,8 +292,17 @@ try:
            "\"Claude\"", "\"Codex\"", "\"loam\"",
            "a job id (20261006-180000-aaaaaaaa)"])
 
-    commit(rec, "app.py", "print('again')\n",
+    # The clone's commit-msg hook (since 2026-11-18, lib/loam_git_identity.py)
+    # takes the trailer out as the commit is made...
+    commit(rec, "app.py", "print('hooked')\n",
            message="Tidy\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
+    check("test_hook_strips_the_trailer_at_commit",
+          git(tree, "log", "-1", "--format=%B").strip(), "Tidy")
+    git(tree, "reset", "-q", "--hard", "HEAD~1")
+    # ...so the refusal behind it is reached by a commit that skipped the hook.
+    commit(rec, "app.py", "print('again')\n",
+           message="Tidy\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+           verify=False)
     (job_dir / ident.PR_BODY_FILE).write_text("# Fix the reminder\n\nA plain body.\n")
     result = wt.land(project(), rec, "Land", title="t", summary="A plain body.")
     check("test_coauthor_trailer_refused_before_push",

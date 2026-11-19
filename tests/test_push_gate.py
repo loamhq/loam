@@ -176,7 +176,7 @@ try:
     check("old tree: same tree and author date, a new hash; the receipt says so",
           (git(proj.root, "rev-parse", "main^{tree}") == first_tree,
            git(proj.root, "log", "-1", "--format=%ad", "main") == first_date,
-           git(proj.root, "rev-parse", "main") != first, "re-authored" in text),
+           git(proj.root, "rev-parse", "main") != first, "made again" in text),
           (True, True, True, True))
 
     # A commit a landing already put on main under another identity (the
