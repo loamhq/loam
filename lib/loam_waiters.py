@@ -52,6 +52,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -231,7 +232,11 @@ def register(job_id: str, project: str, job_dir: Path, persona: str,
     returned at once and is owed the result as input in its thread.
     Fail-soft: a record that cannot be written costs only the delivery."""
     record = {"job": job_id, "project": project, "job_dir": str(job_dir),
-              "persona": persona, "since": now_iso(), **caller_info}
+              "persona": persona, "since": now_iso(),
+              # To the fraction (2026-11-19): what tells the turn that
+              # briefed a job from one that started after (the broker's
+              # ThreadEngine.joins).
+              "since_ts": time.time(), **caller_info}
     if returned:
         record["returned"] = True
     else:
@@ -412,8 +417,14 @@ def handoff_text(record: dict, title: str | None = None) -> str:
     a word. Never shown in the thread (batch B, 2026-11-18)."""
     result = record.get("result") or {}
     named = f" (\"{title.strip()}\")" if title and title.strip() else ""
+    # When it finished (2026-11-19): a result given after a long outage says
+    # how old it is.
+    when = ""
+    if result.get("finished"):
+        import loam_clock  # noqa: PLC0415
+        when = f" at {loam_clock.local_stamp(str(result['finished']))}"
     return (f"[Loam: the engineer job {record.get('job')}{named} you briefed "
-            f"from this thread has finished. Nothing was posted in the thread. "
+            f"from this thread has finished{when}. Nothing was posted in the thread. "
             f"Receipt: {receipt_path(record)}. Launcher's verdict: "
             f"{verdict_line(result)}. Landing: {status_words(result)}. "
             f"Read the receipt if you need it. Tell {lc.OWNER_NAME} only what he "

@@ -4833,8 +4833,9 @@ stop was SIGKILLed at 90 s; its dump showed no live session and one task,
 `ThreadEngine._work`, cancelled inside `create_subprocess_exec` while starting
 a session it had begun *after* SIGTERM, and `asyncio.run`'s cancel of it never
 returned. Now the first SIGTERM sets `Broker.stopping`: `start_session`
-answers 503 and a queued thread turn writes "Ada's turn didn't start: the
-broker restarted" instead of starting. `shutdown()` then stops the live
+answers 503 and a queued thread turn does not start (its input stays on
+disk for the next start since 2026-11-19; until then it wrote "Ada's turn
+didn't start: the broker restarted"). `shutdown()` then stops the live
 sessions together (`SHUTDOWN_SESSIONS_S`, 15 s), gives each thread's turn
 `SHUTDOWN_TASKS_S` (10 s) to write its last line, cancels every other task
 and waits `SHUTDOWN_TASKS_S` for them; a task that will not end is named
@@ -5090,11 +5091,57 @@ reply"). Three changes, in `lib/loam_thread_engine.py`:
   longer moves `through`: the system line says it ended, and the next turn
   is shown those messages again rather than reading them as answered.
 
-What is not durable: a turn still queued when the broker stops writes
-"…'s turn didn't start: the broker restarted. Tag @… to ask again."
-(unchanged), an explicit line rather than a re-delivery after the restart.
 Proved by `tests/test_thread_steer.py` (each case above; the m6 and m10
-shapes fail on the code before it).
+shapes fail on the code before it). What was not durable then -- a turn
+still queued when the broker stopped wrote "…'s turn didn't start: the
+broker restarted. Tag @… to ask again." -- is since 2026-11-19, below.
+
+#### Input to a member is durable and ordered (2026-11-19, batch B step 2)
+
+Each (thread, member) has an ordered list of input on disk,
+`state/threads/inputs/<thread id>/<persona>.json`
+(`lib/loam_thread_inputs.py`): the owner's messages, a job's result, another
+agent's mention, an update's notice -- whatever `ThreadEngine.schedule`
+queues. An input is written before it is queued, marked `sent` the moment
+its turn's prompt goes into the session (or it is steered into a turn in
+flight), and removed once its turn has dealt with it.
+
+- **The stop posts nothing for input it did not answer.** A queued turn does
+  not start and its input stays; a turn cut before it said a word posts no
+  line and its input is kept, unmarked, to be given again. A cut turn that
+  had said something posts its words and `Ada's turn ended: the broker
+  restarted`, as before, and its input is settled. The line "didn't start:
+  the broker restarted. Tag @Ada to ask again." is gone.
+- **The start gives it again** (`ThreadEngine.resume_inputs`, called in
+  `amain` before the delivery pass; the journal says `inputs: N scheduled
+  again for M thread member(s), K dropped`): every list in order, once each.
+  Each replayed turn's prompt ends with when the input was queued ("this
+  input was queued for you at Thu 2026-11-19 08:12 PST and was still
+  waiting when Loam's session host restarted …") so the persona can judge
+  whether it still matters; a job's handoff note also says when the job
+  finished.
+- **Once only.** A message is given again only while the member's `through`
+  has not passed it (`already_heard`), so a crash after the turn and before
+  its mark runs no second turn. A result or notice a crash left marked
+  `sent` was in front of the session already and is dropped, logged ("not
+  given twice"); a job is also delivered once by its key
+  (`system_turn_allowed`). Input for a thread that is gone is dropped.
+- **A result can reach a turn generating about the same work.** `joins`
+  lets a job's result into the member's turn in flight when that turn was
+  under way before the brief was accepted (the waiter record's `since`,
+  to the second): the turn that briefed it. It is steered in on Claude Code
+  and Codex (`result_steer_text`: "a result for work you briefed in this
+  turn …, not from the owner, nothing is posted for it") and settled with
+  that turn. A result for a turn about something else -- one started after
+  the brief, typically an answer to a newer message -- waits behind it and
+  has its own quiet turn, so an answer does not jump topic; every turn of a
+  member is of the same thread by key, so a result never goes into another
+  thread's turn. A turn parked on background work hands the session over to
+  a result as it does to a message (`hand_over`). Antigravity cannot steer:
+  the result waits for the turn to end.
+
+Proved by `tests/test_thread_inputs.py` and the stop case of
+`tests/test_thread_replies.py`.
 
 **A turn has no clock.** (2026-11-10; the owner, after `Ada's turn ended: it
 ran past 30 minutes` at 13:09 PT while Ada's session worked on: "Please
@@ -5244,8 +5291,9 @@ gets one quiet system line, `Ada's turn ended: the broker restarted`
 (`…: its session exited`, `…: its session closed`; the time-based `…: it ran
 past 30 minutes` went 2026-11-10), and a turn that finished saying nothing at all gets `Ada's
 turn ended without a reply`. A turn queued while the broker is stopping
-never starts: `Ada's turn didn't start: the broker restarted. Tag @Ada to
-ask again.` Two causes found in `t-6daf5a6f`: a resumed Claude Code session
+never starts and posts nothing; its input is given at the next start
+(2026-11-19; it wrote `Ada's turn didn't start: …` before), and a turn cut
+before any word posts no line either, for the same reason. Two causes found in `t-6daf5a6f`: a resumed Claude Code session
 can open with an empty `result` (`num_turns: 0`, nothing asked of the model,
 closing the background tasks the last process left), which was taken for the
 end of the turn (`m13`, "(no reply)", and the real answer went unwatched);
