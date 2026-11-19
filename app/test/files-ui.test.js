@@ -497,7 +497,7 @@ test('several files go one by one; each failure is drawn as its own, a retry sen
 
 test('a folder the host does not let you add to has no Upload anywhere', async () => {
   popTo('/files/spaces')
-  await until(() => text(find(root, 'fs-title')) === 'AI Spaces' && text(root).includes('Nothing here yet.'))
+  await until(() => text(find(root, 'fs-title')) === 'AI Spaces' && text(root).includes('Nothing here yet'))
   assert.equal(find(root, 'fs-add'), null)
   assert.equal(find(root, 'fs-upload'), null)
   popTo('/files/vault/Notes')

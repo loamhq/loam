@@ -54,9 +54,10 @@ are in `docs/plugins.md` at the repository's root, "The marketplace".
 ## Nothing quite right? Ask one of your agents to build it
 
 It ends every results page and kind page, and is the whole of an empty
-Market. It is the friendliest moment in the Market, not an error: a drawn
-picture (an agent at a bench, a new piece growing from the soil, a gap where
-it will go), a line, and **Ask an agent to build it**, which shows the
+Market. It is the friendliest moment in the Market, not an error. It is the
+app's one empty state (`docs/empty-states.md`): a sprout in Loam's blob,
+whose stem draws in once (a lens with the sprout's leaf in it when a search
+found nothing), a line, and **Ask an agent to build it**, which shows the
 agents' faces to choose from (one agent: its name is on the button). The
 choice opens a new thread with that agent, the search words already in the
 composer as a request to build it as the person's own plugin
@@ -128,9 +129,9 @@ installed, so its display face falls back to the serif.
 ## How it looks in every theme
 
 Every colour, face, radius and motion in `public/market.css` is a token, and
-the pictures (`public/market-art.js`) are SVG painted with tokens through the
+the covers (`public/market-art.js`) are SVG painted with tokens through the
 CSSOM, so the Market is at home in every theme, light and dark, and under
-Sun. Twinkles and the agent's bob stop under reduced motion.
+Sun. The covers' twinkles and the sprout's growing stop under reduced motion.
 
 ## What checks it
 

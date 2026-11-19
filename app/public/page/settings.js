@@ -4,6 +4,7 @@ import { settingsHome, settingsSection, CONNECTIONS_GROUP } from "../app-shape.j
 import { owner, ownerInitial } from "../owner.js"
 import { h, icon, kept, blob } from "../ui.js"
 import { settingsNav, segmentedControl, settingsRow } from "../chat-ui.js"
+import { emptyState } from "../empty-state.js"
 import { connectedCount, providerRows, providerDetail, loginView } from "../providers.js"
 import { nameOf as fileNameOf, ROOT_LOOK } from "../files.js"
 import { agentLook, createAgents, providerGlyph } from "../sessions.js"
@@ -367,7 +368,7 @@ function settingsAgents({ back = true } = {}) {
     st.directoryError ? h('p', { role: 'alert', class: 'schedule-error', text: st.directoryError }) : null,
     st.archived === null ? h('p', { role: 'status', text: 'Loading archived agents…' }) : st.archived.length ? group('Archived agents', st.archived.map(agent => h('div', { class: 'setrow', key: agent.id },
       blob(agentLook(agent.id, createAgents(st.archived)), { size: 40, font: 18 }), h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: agent.name })),
-      h('button', { class: 'pillbtn', disabled: st.directoryBusy, text: 'Restore', 'aria-label': `Restore ${agent.name}`, onclick: () => host.settingsProfiles.restore(agent.id) })))) : h('p', { class: 'note profile-empty', text: 'No archived agents.' })]
+      h('button', { class: 'pillbtn', disabled: st.directoryBusy, text: 'Restore', 'aria-label': `Restore ${agent.name}`, onclick: () => host.settingsProfiles.restore(agent.id) })))) : emptyState({ object: 'archive', title: 'No archived agents', body: 'Agents you archive wait here, ready to restore.' })]
   const systemRows = [
     ...(st.engineers ? [
       ...[...st.engineers.engineers].sort((a, b) => Number(b.platform) - Number(a.platform) || a.project.localeCompare(b.project)).map(row => settingsRow({ title: row.project, sub: 'Engineer', lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(row) }), onclick: () => detail('engineer', row.project) })),

@@ -251,7 +251,7 @@
 .tt-board-head .sheet-title { font-size:26px; margin:0; }
 .tt-board-head .headspace { min-width:0; }
 .tt-board-items { flex:1; min-height:0; overflow:auto; padding:0 16px 16px; overscroll-behavior:contain; }
-.tt-board-caption { color:var(--paper-ink-3); font-size:14px; line-height:1.6; }
+
 .tt-board-prose { display:flow-root; font-size:14px; }
 .tt-board-prose h1 { display:none; }
 .tt-board-prose h2, .tt-board-prose h2:first-child, .tt-board-prose h2:last-child { font-size:12px; font-weight:700; margin:16px 0; color:var(--paper-ink); }

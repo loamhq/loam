@@ -21,6 +21,7 @@ import { h, kept, blob, avatarLook, icon, dress } from './ui.js'
 import { markdown } from './markdown.js'
 import { splitCards, plainWords } from './market-card.js'
 import { copyText } from './clipboard.js'
+import { emptyState } from './empty-state.js'
 import { agentLook, createAgents, when, providerGlyph } from './sessions.js'
 import { modelsOf, modelLabel, modelTooltip } from './providers.js'
 import { providerMark } from './marks.js'
@@ -986,7 +987,10 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
         h('div', { class: 'tt-rows', key: 'thread-rows' }, selection.view(),
           !st.archived && visible.some((t) => t.pinned) ? [h('h2', { class: 'group-kicker kicker tt-section-heading', text: 'Pinned' }), h('div', { class: 'tt-section', key: 'pinned' }, ...visible.filter((t) => t.pinned).map(threadRow))] : null,
           visible.some((t) => st.archived || !t.pinned) ? [h('h2', { class: 'group-kicker kicker tt-section-heading', text: st.archived ? 'Archived threads' : 'Recent' }), h('div', { class: 'tt-section', key: 'recent' }, ...visible.filter((t) => st.archived || !t.pinned).map(threadRow))] : null),
-        !rows.length ? emptyConversation({ title: st.loading ? 'Opening chats…' : st.query ? 'No threads match' : st.archived ? 'No archived threads' : 'Room for a new thought', body: st.loading ? null : st.query ? 'Try another word.' : st.archived ? 'Threads you archive will appear here.' : 'Pick an agent above or start a thread.' }) : null,
+        // With no threads at all, the wide layout's pane already says so; the
+        // list column does not say it twice.
+        !rows.length && !(st.wide && !st.query && !st.archived && !st.loading) ? (st.loading ? emptyConversation({ title: 'Opening chats…', body: null })
+          : emptyState({ object: st.query ? 'search' : st.archived ? 'archive' : 'speech', title: st.query ? 'No threads match' : st.archived ? 'No archived threads' : 'Room for a new thought', body: st.query ? 'Try another word.' : st.archived ? 'Threads you archive will appear here.' : 'Pick an agent above or start a thread.' })) : null,
         st.archived && visible.length < rows.length ? button('Load more archived threads', moreArchived, { class: 'quietlink tt-archive-more' }) : null))
   }
   function waitingLine(id, props = {}) {
@@ -1568,17 +1572,17 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       o.boardError ? h('div', { class: 'banner', role: 'alert', text: o.boardError }) : null,
       o.boardChanged ? h('div', { class: 'banner' }, 'The board changed while you were editing. Copy your changes, then cancel to load the latest version.', button(o.copied ? 'Copied' : 'Copy draft', async () => { o.copied = await copyText(o.editText); redraw() })) : null,
       o.editing ? h('div', { class: 'tt-board-edit' }, h('code', { class: 'tt-board-path', text: o.board.path }), kept(editor)) :
-        h('div', { class: 'tt-board-items' }, ...sections.map((section) => h('section', { class: 'tt-board-list', key: section.key, 'data-board-section': section.key !== 'top' || sections.length === 1 || section.lines.some((l) => l.item) ? section.key : null, 'aria-label': boardListName(section) },
+        h('div', { class: 'tt-board-items' }, !lines.some((l) => l.item) && !o.board.markdown.replace(/^#+.*$/gm, '').trim() ? emptyState({ object: 'page', size: 'small', level: 'h3', title: 'Nothing on this board yet', body: 'A short list for this thread. You and the agents can edit it.', bodyClass: 'tt-board-caption', props: { key: 'board-empty' } }) : null,
+          ...sections.map((section) => h('section', { class: 'tt-board-list', key: section.key, 'data-board-section': section.key !== 'top' || sections.length === 1 || section.lines.some((l) => l.item) ? section.key : null, 'aria-label': boardListName(section) },
           section.key !== 'top' ? h('div', { class: 'tt-board-list-head' },
             h(section.level === 3 ? 'h3' : 'h2', { class: 'kicker tt-board-list-title', text: boardListName(section) }),
             h('span', { class: 'tt-board-list-count', text: String(section.lines.filter((l) => l.item).length), 'aria-label': `${section.lines.filter((l) => l.item).length} items` })) : null,
           ...section.blocks.map((l, i) => [l.item ? item(l) : l.text.trim() ? h('div', { class: 'tt-board-prose md', key: l.key }, ...renderText(reflowBoardQuotes(l.text))) : null,
             l.item && !section.blocks.slice(i + 1).some((b) => b.item) ? listEnd(section) : null]),
-          !section.lines.some((l) => l.item) && (section.key !== 'top' || sections.length === 1) ? listEnd(section) : null)),
-          !lines.some((l) => l.item) && !o.board.markdown.replace(/^#+.*$/gm, '').trim() ? h('p', { class: 'tt-board-caption', text: 'A short list for this thread. You and the agents can edit it.' }) : null))
+          !section.lines.some((l) => l.item) && (section.key !== 'top' || sections.length === 1) ? listEnd(section) : null))))
   }
   function emptyThread() {
-    return h('div', { class: 'pane-body' }, registry.draw('app.overlay', { slot: 'player' }), emptyConversation({ title: 'Good things start here.', body: 'Choose a conversation or start a new thread.', face: icon.chat(38) }))
+    return h('div', { class: 'pane-body' }, registry.draw('app.overlay', { slot: 'player' }), emptyState({ object: 'speech', title: 'Good things start here.', body: 'Choose a conversation or start a new thread.' }))
   }
   function thread() {
     const o = st.open

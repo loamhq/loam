@@ -3,6 +3,7 @@ import { isOwner } from './owner.js'
 import { formatDate, formatTime } from './time.js'
 import { segmentedControl } from './chat-ui.js'
 import { h } from './ui.js'
+import { emptyState } from './empty-state.js'
 
 const encode = encodeURIComponent
 const pathOf = (agent, name) => `/schedules/${encode(agent)}${name === undefined ? '' : `/${encode(name)}`}`
@@ -168,7 +169,7 @@ export function schedulePanel(controller, agentName) {
           h('button', { class: 'schedule-switch', role: 'switch', 'aria-checked': row.enabled === null ? 'mixed' : String(row.enabled), 'aria-label': `${row.name} on`, 'aria-disabled': String(!!row.busy), onclick: () => controller.toggle(row) }, h('span'))),
         ...notice({ error: row.uiError, message: row.uiMessage }))
     })),
-    !st.loading && !st.error && !rows.length ? h('p', { class: 'schedule-empty muted', text: 'No schedules yet. Schedule a task to get started.' }) : null,
+    !st.loading && !st.error && !rows.length ? emptyState({ object: 'clock', size: 'small', level: 'h3', title: 'No schedules yet', body: 'Schedule a task to get started.', props: { class: 'schedule-empty' } }) : null,
     st.editor ? scheduleEditor(controller, st.editor) : h('button', { class: 'schedule-add content-mark', text: '+ Schedule a task', onclick: controller.add }))
 }
 function scheduleEditor(controller, editor) {

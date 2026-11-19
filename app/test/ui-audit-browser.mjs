@@ -788,7 +788,7 @@ try {
           __audit.files.st.file.error = ''
           __audit.goFiles('spaces', '')
         })
-        await page.getByText('Nothing here yet.', { exact: true }).waitFor()
+        await page.getByText('Nothing here yet', { exact: true }).waitFor()
         await shot('files-folder-empty')
         await mutate(() => {
           __audit.files.st.listing.error = 'This folder could not be read. Try again.'

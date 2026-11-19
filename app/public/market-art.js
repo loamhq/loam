@@ -1,11 +1,8 @@
-// The Market's pictures (2026-11-18), drawn rather than loaded, and only in
+// The Market's covers (2026-11-18), drawn rather than loaded, and only in
 // the theme's own tokens: every fill and stroke is a `var(--…)`, set through
 // the CSSOM (the page's policy refuses a style attribute), so a picture is
 // at home in every theme, light and dark, and under Sun as it shifts.
 //
-//   buildArt()        "Nothing quite right? Ask one of your agents to build
-//                     it": an agent at a small bench, a new piece taking
-//                     shape from the soil, and a gap where it will go.
 //   coverArt(entry)   the lead story's cover when a listing has no picture of
 //                     its own: soil strata under a sky, and the kind's shape.
 import { dress } from './ui.js'
@@ -24,9 +21,8 @@ function el(tag, attrs = {}, paint = {}, ...children) {
 const fill = (token, extra = {}) => ({ fill: `var(${token})`, ...extra })
 const line = (token, width = 2, extra = {}) => ({ fill: 'none', stroke: `var(${token})`, 'stroke-width': String(width), 'stroke-linecap': 'round', 'stroke-linejoin': 'round', ...extra })
 
-function svg(viewBox, cls, label, fit, ...children) {
-  const root = el('svg', { viewBox, class: cls, role: label ? 'img' : null, 'aria-hidden': label ? null : 'true', focusable: 'false', preserveAspectRatio: fit })
-  if (label) root.append(el('title', {}, {}, label))
+function svg(viewBox, cls, fit, ...children) {
+  const root = el('svg', { viewBox, class: cls, 'aria-hidden': 'true', focusable: 'false', preserveAspectRatio: fit })
   root.append(...children)
   return root
 }
@@ -37,40 +33,6 @@ const PIECE = 'M8 10h8a4 4 0 1 1 8 0h8v8a4 4 0 1 1 0 8v8h-8a4 4 0 1 0-8 0H8v-8a4
 function sparkle(x, y, r, token, delay) {
   const d = `M${x} ${y - r} L${x + r * 0.28} ${y - r * 0.28} L${x + r} ${y} L${x + r * 0.28} ${y + r * 0.28} L${x} ${y + r} L${x - r * 0.28} ${y + r * 0.28} L${x - r} ${y} L${x - r * 0.28} ${y - r * 0.28} Z`
   return el('path', { d, class: 'market-art-twinkle', 'data-delay': String(delay) }, fill(token, { 'animation-delay': `${delay}ms` }))
-}
-
-export function buildArt({ label = null } = {}) {
-  return svg('0 0 320 200', 'market-art market-build-art', label, 'xMidYMid meet',
-    // Sky and sun.
-    el('circle', { cx: 232, cy: 66, r: 30 }, fill('--latte-foam')),
-    el('circle', { cx: 232, cy: 66, r: 18 }, fill('--latte-track')),
-    // Soil, in three strata.
-    el('path', { d: 'M0 150 C40 138 80 156 128 146 S220 134 262 146 S306 150 320 144 V200 H0Z' }, fill('--paper-card')),
-    el('path', { d: 'M0 168 C46 160 92 174 140 166 S232 158 276 168 S310 170 320 166 V200 H0Z' }, fill('--latte-track')),
-    el('path', { d: 'M0 186 C52 180 100 190 152 184 S248 178 292 186 S314 188 320 186 V200 H0Z' }, fill('--latte-coffee-2', { opacity: '.35' })),
-    // The gap where the new piece will go: dashed, waiting.
-    el('g', { transform: 'translate(176 86) scale(1.5)' }, {},
-      el('path', { d: PIECE }, line('--paper-rule-strong', 1.6, { 'stroke-dasharray': '3 3.4' }))),
-    // The new piece, growing from the soil on a little stem.
-    el('path', { d: 'M110 146 C110 132 112 122 116 112' }, line('--success', 3)),
-    el('path', { d: 'M112 132 C100 128 96 120 98 112 C108 114 113 121 112 132Z' }, fill('--success')),
-    el('g', { transform: 'translate(92 52) scale(1.45) rotate(-8 20 20)' }, {},
-      el('path', { d: PIECE }, fill('--latte-espresso')),
-      el('path', { d: 'M13 15h6M13 19h10' }, line('--latte-espresso-ink', 1.6, { opacity: '.7' }))),
-    // An agent at the bench: a round face, two eyes, a pleased mouth.
-    el('g', { class: 'market-art-agent' }, {},
-      el('circle', { cx: 52, cy: 116, r: 22 }, fill('--persona-teal')),
-      el('circle', { cx: 45, cy: 112, r: 2.6 }, fill('--text-on-avatar')),
-      el('circle', { cx: 58, cy: 112, r: 2.6 }, fill('--text-on-avatar')),
-      el('path', { d: 'M45 121 Q51.5 126 58 121' }, line('--text-on-avatar', 2.2)),
-      // A pencil, held towards the piece.
-      el('path', { d: 'M70 124 L92 102' }, line('--signal-crema', 4)),
-      el('path', { d: 'M92 102 L96 98' }, line('--paper-ink', 4))),
-    // Delight: a few sparkles that twinkle (still under reduced motion).
-    sparkle(150, 46, 7, '--signal-crema', 0),
-    sparkle(80, 34, 5, '--latte-espresso', 400),
-    sparkle(268, 120, 6, '--signal-crema', 800),
-    sparkle(204, 28, 4, '--latte-coffee-2', 1200))
 }
 
 const HUES = ['--persona-teal', '--persona-rust', '--persona-olive', '--persona-plum', '--persona-gold', '--persona-blue', '--persona-sage', '--persona-rose', '--persona-taupe', '--persona-slate']
@@ -106,7 +68,7 @@ export function coverArt(entry, kind = 'extension') {
   const hue = hueOf(entry?.id)
   // Wider than any frame it fills, and cut to fit (slice): the shape sits
   // in the middle third, which every frame keeps.
-  return svg('0 0 480 220', 'market-art market-cover-art', null, 'xMidYMid slice',
+  return svg('0 0 480 220', 'market-art market-cover-art', 'xMidYMid slice',
     el('rect', { x: 0, y: 0, width: 480, height: 220 }, fill('--latte-foam')),
     el('circle', { cx: 340, cy: 64, r: 30 }, fill('--latte-track')),
     el('path', { d: 'M0 160 C80 146 160 168 250 156 S400 142 480 154 V220 H0Z' }, fill('--paper-card')),

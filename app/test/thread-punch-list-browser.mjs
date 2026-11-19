@@ -118,9 +118,9 @@ try {
       await shot('empty-board')
       if (phase === 'current') {
         assert.equal(await caption.evaluate((n) => getComputedStyle(n).color), await caption.evaluate((n) => {
-          const probe = document.createElement('span'); probe.style.color = 'var(--paper-ink-3)'; n.append(probe)
+          const probe = document.createElement('span'); probe.style.color = 'var(--paper-ink-2)'; n.append(probe)
           const color = getComputedStyle(probe).color; probe.remove(); return color
-        }), 'the explanation uses the house muted text colour')
+        }), 'the explanation is the empty state’s body, in the second ink')
         await app.f.api('PUT', `/threads/${empty.id}/board`, { markdown: '# Board\n\n' })
         await page.reload()
         await page.locator('.tt-board-button').click()

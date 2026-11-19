@@ -101,7 +101,7 @@ try {
   click(section('Files')); await until(() => all(root, 'fs-rootcard').length === 2)
   assert.deepEqual(all(root, 'fs-rootname').map(text), ['Vault', 'AI Spaces'])
   assert.equal(all(root, 'fs-shortcuts').length, 1)
-  click(all(root, 'fs-rootcard')[1]); await until(() => text(root).includes('Nothing here yet.'))
+  click(all(root, 'fs-rootcard')[1]); await until(() => text(root).includes('Nothing here yet'))
   assert.equal(find(root, 'fs-host-records'), null)
 
   click(section('Apps')); await until(() => all(root, 'apps-row').length === 2)

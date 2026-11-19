@@ -26,6 +26,7 @@ import { authenticatedFetch as fetch } from './auth.js'
 // there); nothing here unwraps a `row` key or invents a count.
 
 import { h, icon, on, kept } from './ui.js'
+import { emptyState } from './empty-state.js'
 import { copyText } from './clipboard.js'
 import { markdown, safeHref, anchorOf, toggleTask } from './markdown.js'
 
@@ -1657,7 +1658,7 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
   } else if (st.listing.loading && st.listing.rows.length === 0) {
     body.push(h('div', { class: 'fs-quiet', text: 'Loading…' }))
   } else {
-    if (st.listing.rows.length === 0) body.push(h('div', { class: 'fs-quiet', text: 'Nothing here yet.' }))
+    if (st.listing.rows.length === 0) body.push(emptyState({ object: 'folder', size: 'small', title: 'Nothing here yet', body: 'What you or your agents put in this folder shows up here.', props: { class: 'fs-quiet' } }))
     else if (st.listing.rows.length > 0) {
       const marksFor = openFileMarks(files, go)
       body.push(

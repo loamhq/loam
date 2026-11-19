@@ -2,6 +2,7 @@ import { installation } from './installation.js'
 import { createCoreRegistry } from './core-registrations.js'
 import { formatCalendarDate } from './time.js'
 import { h, icon } from './ui.js'
+import { emptyState } from './empty-state.js'
 import { menuSurface } from './menu-surface.js'
 import { AGENT_COLOURS } from './avatar-colours.js'
 
@@ -217,7 +218,12 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
         h('span', { class: 'apps-copy-status', role: 'status', text: st.copyError || (st.copied ? 'Copied' : '') })),
       appUnavailable(app) ? h('div', { class: 'apps-empty', role: 'status' }, h('p', { text: `${app.name} · ${appUnavailable(app)}` }), h('p', { class: 'note', text: 'Manage this plugin in Settings › Plugins.' }))
         : h('iframe', { class: 'apps-embed', key: app.url, src: appURL(app.url), title: app.name, referrerpolicy: 'strict-origin-when-cross-origin', sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads' }))
-    if (!list && wide()) return h('div', { class: 'pane-body', key: 'pane:apps:empty' },
+    // No apps at all: on a wide screen the pane says so, with its one action,
+    // and the list column beside it does not say it twice.
+    const none = st.loaded && !st.apps.length && !st.error
+    const noApps = () => emptyState({ object: 'window', title: 'No apps yet', body: 'An agent can build an app for you.',
+      action: h('button', { class: 'pillbtn primary', text: 'Build an app', onclick: newThread }), props: { class: 'apps-empty' } })
+    if (!list && wide()) return h('div', { class: 'pane-body', key: 'pane:apps:empty' }, none ? noApps() :
       h('div', { class: 'pane-nothing apps-rest' },
         h('div', { class: 'apps-rest-icons', 'aria-hidden': 'true' }, ...st.apps.slice(0, 3).map(appPicture)),
         h('div', { class: 'display', text: 'Pick an app' }),
@@ -232,10 +238,7 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
         return apps.length ? h('section', { key: source, class: 'apps-group', 'aria-label': title },
           new Set(st.apps.map(app => app.source)).size > 1 ? h('h2', { class: 'kicker', text: title }) : null, h('div', { class: 'apps-group-list' }, ...apps.map(row))) : null
       } }),
-      st.loaded && !st.apps.length && !st.error ? h('div', { class: 'apps-empty' },
-        h('div', { class: 'icon-tile' }, icon.code(24)),
-        h('p', { text: 'An agent can build an app for you.' }),
-        h('button', { class: 'pillbtn primary', text: 'Build an app', onclick: newThread })) : null), detailsView())
+      none && !(list && wide()) ? noApps() : null), detailsView())
   }
   return { st, load, open, back, copyLink, view }
 }
