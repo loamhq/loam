@@ -116,35 +116,28 @@
 .market-theme { display: flex; flex-direction: column; border-radius: var(--radius-lg); background: var(--paper-raised); box-shadow: 0 0 0 1px var(--paper-rule); overflow: hidden; transition: box-shadow var(--motion-fast) ease; }
 .market-theme.trying { box-shadow: 0 0 0 2px var(--paper-ink); }
 .market-theme-open { display: block; padding: 6px 6px 0; border: 0; background: transparent; cursor: pointer; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
-.market-swatch { height: 132px; border-radius: 12px; }
+/* A listing's picture (2026-11-18): its cover; else, for a theme, Loam
+ * wearing it (theme-preview.js, Appearance's own preview); else its icon,
+ * large, on a quiet field. The frame sets the size; the picture fills it. */
+.market-swatch { position: relative; display: block; height: 132px; border-radius: 12px; overflow: hidden; background: var(--paper-card); }
+.market-cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.market-swatch > .theme-preview { height: 100%; border-radius: 0; }
 .market-swatch .theme-miniature { padding-bottom: 12px; }
-/* Loam in miniature, in a theme's own tokens: the listing page's cover. */
-.market-scene { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(150px, 34%) 1fr; height: auto; border-radius: 0; background: var(--paper-page); color: var(--paper-ink); font-family: var(--font-body); }
-.market-scene-list { display: flex; flex-direction: column; gap: 6px; padding: 18px 12px; overflow: hidden; }
-.market-scene-title { font: 20px/1 var(--font-display); color: var(--paper-ink); padding: 0 6px 8px; }
-.market-scene-row { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 12px; }
-.market-scene-row.on { background: var(--paper-hover); }
-.market-scene-lines { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
-.market-scene-line { display: block; height: 6px; border-radius: 3px; background: var(--paper-ink-2); opacity: .55; }
-.market-scene-line.faint { background: var(--paper-ink-3); opacity: .3; }
-.market-scene-pane { position: relative; display: flex; flex-direction: column; gap: 14px; margin: 10px 10px 10px 0; padding: 20px 22px 70px; border-radius: 18px; background: var(--paper-pane); overflow: hidden; }
-.market-scene-say { align-self: flex-end; padding: 9px 13px; border-radius: 16px 16px 4px 16px; background: var(--latte-foam); color: var(--latte-foam-ink); font-size: 13px; }
-.market-scene-reply { display: flex; gap: 10px; align-items: flex-start; }
-.market-scene-compose { position: absolute; left: 18px; right: 18px; bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 6px 6px 14px; border-radius: 999px; background: var(--paper-raised); box-shadow: 0 0 0 1px var(--paper-rule); }
-.market-scene-placeholder { font-size: 12px; color: var(--paper-ink-3); }
-.market-scene .pillbtn { display: inline-flex; align-items: center; height: 28px; min-height: 0; min-width: 0; padding: 0 12px; font-size: 12px; }
-.market-scene.is-loading > * { opacity: .35; animation: market-breathe 1.6s ease-in-out infinite; }
-.market-phone .market-scene { grid-template-columns: 1fr; }
-.market-phone .market-scene-list { display: none; }
-.market-phone .market-scene-pane { margin: 10px; }
+.market-preview.is-loading { background: var(--paper-card); }
+.market-preview.is-loading .theme-miniature { opacity: .35; animation: market-breathe 1.6s ease-in-out infinite; }
+/* In a large frame the preview is the same miniature, larger, in the
+ * middle of the theme's own page colour. */
+.market-preview-large { position: absolute; inset: 0; height: auto; display: grid; place-items: center; border-radius: 0; }
+.market-preview-large .theme-miniature { width: min(360px, 78%); padding: 18px 18px 22px; border-radius: 18px; background: var(--paper-pane); box-shadow: 0 0 0 1px var(--paper-rule); zoom: 1.5; }
+.market-phone .market-preview-large .theme-miniature { zoom: 1.15; }
+.market-icon-field { position: absolute; inset: 0; display: grid; place-items: center; background: var(--paper-card); }
+.market-icon-field .market-tile-xl { width: 112px; height: 112px; border-radius: 28px; font-size: 48px; }
+.market-tile-cover { position: relative; display: inline-block; overflow: hidden; padding: 0; background: var(--paper-card); }
+.market-tile-cover .market-tile-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0; padding: 0; }
 .market-tile-theme { position: relative; display: inline-block; background: var(--paper-page); box-shadow: inset 0 0 0 1px var(--paper-rule); overflow: hidden; }
 .market-tile-dot { position: absolute; border-radius: 50%; width: 58%; height: 58%; }
 .market-tile-dot.espresso { left: 10%; top: 12%; background: var(--latte-espresso); }
 .market-tile-dot.foam { right: 8%; bottom: 8%; background: var(--latte-foam); box-shadow: 0 0 0 2px var(--paper-page); }
-.market-swatch.is-loading { background: var(--paper-card); }
-.market-swatch.is-loading .theme-miniature { opacity: .35; animation: market-breathe 1.6s ease-in-out infinite; }
-.market-swatch-art { display: block; overflow: hidden; }
-.market-swatch-art svg { width: 100%; height: 100%; }
 .market-theme-words { display: flex; flex-direction: column; gap: 2px; padding: var(--space-md) var(--space-md) var(--space-md); flex: 1; }
 .market-theme-words .market-desc { font-size: var(--type-small); }
 .market-theme-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: var(--space-md); }
@@ -152,8 +145,7 @@
 /* ------------------------------------------------------------- lead story */
 .market-lead { display: grid; grid-template-columns: 1.3fr 1fr; gap: var(--space-xl); align-items: center; padding-bottom: var(--space-xl); border-bottom: 1px solid var(--paper-rule-strong); }
 .market-phone .market-lead { grid-template-columns: 1fr; gap: var(--space-lg); }
-.market-lead-cover { display: block; position: relative; aspect-ratio: 16 / 10; width: 100%; padding: 0; border: 0; overflow: hidden; border-radius: var(--radius-lg); background: var(--latte-foam); cursor: pointer; }
-.market-lead-cover img, .market-lead-cover svg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.market-lead-cover { display: block; position: relative; aspect-ratio: 16 / 10; width: 100%; padding: 0; border: 0; overflow: hidden; border-radius: var(--radius-lg); background: var(--paper-card); cursor: pointer; }
 .market-lead-words { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; }
 .market-lead-words h2 { margin: 0; font-size: 38px; line-height: 1.06; }
 .market-phone .market-lead-words h2 { font-size: 30px; }
@@ -193,9 +185,8 @@
 .market-phone .market-listing-acts { width: 100%; }
 .market-phone .market-listing-acts > * { flex: 1; }
 .market-listing-desc { margin: 0; max-width: 640px; font-size: 19px; line-height: 1.5; color: var(--paper-ink-2); }
-.market-listing-cover { position: relative; height: 260px; border-radius: var(--radius-xl); overflow: hidden; background: var(--latte-foam); }
-.market-phone .market-listing-cover { height: 190px; }
-.market-listing-cover img, .market-listing-cover > svg { width: 100%; height: 100%; object-fit: cover; display: block; }
+.market-listing-cover { position: relative; aspect-ratio: 2.2 / 1; max-height: 480px; width: 100%; border-radius: var(--radius-xl); overflow: hidden; background: var(--paper-card); }
+.market-phone .market-listing-cover { aspect-ratio: 3 / 2; }
 .market-facts { display: grid; grid-template-columns: 1.4fr 1fr; gap: var(--space-xl); align-items: start; }
 .market-phone .market-facts { grid-template-columns: 1fr; }
 .market-touches { padding: var(--space-lg) var(--space-xl); border-radius: var(--radius-lg); background: var(--paper-raised); box-shadow: 0 0 0 1px var(--paper-rule); }
@@ -213,8 +204,25 @@
 .market-kv dt { color: var(--paper-ink-3); }
 .market-kv dd { margin: 0; text-align: right; min-width: 0; overflow-wrap: anywhere; }
 .market-kv a { display: inline-flex; align-items: center; gap: 4px; }
-.market-guide { border-radius: var(--radius-lg); background: var(--paper-raised); box-shadow: 0 0 0 1px var(--paper-rule); padding: var(--space-md) var(--space-xl); }
-.market-guide summary { min-height: 44px; display: flex; align-items: center; font-weight: 600; cursor: pointer; }
+/* Who made it (2026-11-18): the name and the links they chose to show. */
+.market-facts > .market-creator { grid-column: 2; grid-row: 1; }
+.market-facts > .market-kv { grid-column: 2; }
+.market-facts > .market-touches { grid-row: 1 / span 2; }
+.market-phone .market-facts > * { grid-column: auto; grid-row: auto; }
+.market-creator { display: flex; flex-direction: column; gap: var(--space-xs); }
+.market-creator .market-facts-title { margin: 0; color: var(--paper-ink-3); font-weight: 500; font-size: 14px; }
+.market-creator-name { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 1.15; color: var(--paper-ink); }
+.creator-links { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--space-xs) 0 0; padding: 0; list-style: none; }
+.creator-link { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border-radius: 999px; background: var(--paper-card); color: var(--paper-card-ink, var(--paper-ink)); font-size: 14px; font-weight: 500; text-decoration: none; }
+@media (hover: hover) { .creator-link:hover { background: var(--paper-hover); color: var(--paper-hover-ink, var(--paper-ink)); } }
+.creator-link:focus-visible { outline: 2px solid var(--paper-ink-3); outline-offset: 2px; }
+/* The maker's README, drawn by the app's Markdown renderer. */
+.market-readme { padding: var(--space-lg) var(--space-xl) var(--space-xl); border-radius: var(--radius-lg); background: var(--paper-raised); box-shadow: 0 0 0 1px var(--paper-rule); }
+.market-phone .market-readme { padding: var(--space-md) var(--space-lg) var(--space-lg); }
+.market-readme-body { max-width: 72ch; font-size: 15.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.market-readme-body > :first-child { margin-top: 0; }
+.market-readme-figures { display: flex; flex-wrap: wrap; gap: var(--space-sm); margin: var(--space-md) 0; }
+.market-readme-img { display: block; max-width: 100%; height: auto; border-radius: var(--radius-md); box-shadow: 0 0 0 1px var(--paper-rule); }
 .market-why { margin: var(--space-md) 0 0; }
 .market-reading { display: flex; align-items: center; gap: var(--space-sm); margin: 0; }
 
@@ -236,9 +244,7 @@
 }
 @media (hover: hover) { .market-face:hover { background: var(--paper-hover); color: var(--paper-hover-ink, var(--paper-ink)); transform: translateY(-2px); } }
 .market-face:focus-visible { outline: 2px solid var(--paper-ink-3); outline-offset: 2px; }
-.market-art .market-art-twinkle { transform-box: fill-box; transform-origin: center; animation: market-twinkle 2.4s ease-in-out infinite; }
-@keyframes market-twinkle { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.6); } }
-@media (prefers-reduced-motion: reduce) { .market-art .market-art-twinkle, .market-swatch.is-loading .theme-miniature, .market-scene.is-loading > * { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .market-preview.is-loading .theme-miniature { animation: none; } }
 
 /* ------------------------------------------------------- notes and waiting */
 .market-note { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-md); padding: var(--space-lg) var(--space-xl); border-radius: var(--radius-lg); background: var(--paper-card); color: var(--paper-card-ink); }
@@ -288,8 +294,6 @@
 
 /* A heading that takes focus on arrival (for screen readers) draws no box. */
 .market :is(.market-title, .market-listing-title):focus { outline: none; }
-/* A cover stands on latte foam, so anything inked in it takes foam's ink. */
-.market-lead-cover, .market-listing-cover, .market-swatch-art { color: var(--latte-foam-ink); }
 /* On a phone the try bar floats at the foot, so the close keeps its corner. */
 .market-phone .market-trybar + .market-close { margin-left: auto; }
 /* A swatch's pill is a picture of a button, not a target: no finger room. */

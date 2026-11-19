@@ -21,9 +21,21 @@ export const LISTINGS = [
     description: 'A small animal that sleeps in the corner of the page and stretches when an agent starts working.', ...at('sam-rivera/loam-pet', 'a-pet'),
     declaration: { touches: { network: [], record: 'none', memory: 'none', server: false }, overrides: [], page_code: true } },
   { id: 'ember', name: 'Ember', author: 'Loam contributors', kind: ['theme'], version: '1.0.0', from: 'autumn',
-    description: 'Rust, amber and paper. Warm without being loud.', ...at('loamhq/themes', 'ember') },
+    description: 'Rust, amber and paper. Warm without being loud.', ...at('loamhq/themes', 'ember'),
+    cover: 'cover-large.webp', cover_dark: 'cover-large-dark.webp', coverFile: 'autumn/cover-large.webp', coverDarkFile: 'autumn/cover-large-dark.webp', coverPosition: '50% 48%', coverPositionDark: '50% 42%' },
   { id: 'moss', name: 'Moss', author: 'Ada Park', kind: ['theme'], version: '1.1.0', from: 'deep-forest',
-    description: 'Moss, bark and low light. Calm for long evenings.', ...at('ada-park/moss', 'moss', 'v1.1.0') },
+    description: 'Moss, bark and low light. Calm for long evenings.', ...at('ada-park/moss', 'moss', 'v1.1.0'),
+    cover: 'cover.webp', coverFile: 'deep-forest/cover-large.webp',
+    creator: { name: 'Ada Park', links: [
+      { label: 'adapark.example', url: 'https://adapark.example', kind: 'website' },
+      { label: 'GitHub', url: 'https://github.com/ada-park', kind: 'github' },
+      { label: 'Bluesky', url: 'https://bsky.app/profile/adapark.bsky.social', kind: 'bluesky' },
+      { label: 'Mastodon', url: 'https://social.example/@ada', kind: 'mastodon' },
+      { label: 'Patreon', url: 'https://www.patreon.com/adapark', kind: 'patreon' },
+      { label: 'Ko-fi', url: 'https://ko-fi.com/adapark', kind: 'kofi' },
+      { label: 'Email', url: 'mailto:ada@adapark.example', kind: 'email' }] },
+    readme: '# Moss\n\nA theme for **long evenings**: the colours of moss, bark and the last of the light, low enough to read by for hours.\n\n![Moss in the evening](shots/evening.webp)\n\n## What changes\n\n- The page is a deep bark brown, the cards a soft moss.\n- Replies sit in a lighter green, so a long thread still reads at a glance.\n- Type stays in Loam’s own faces; only colour and light move.\n\n## Made with\n\nPhotographs of an old forest floor, sampled one colour at a time. See [the palette notes](https://github.com/ada-park/moss/blob/v1.1.0/moss/PALETTE.md) for every value.\n\n> Calm is a colour too.',
+    readmeImages: { 'shots/evening.webp': 'deep-forest/cover.webp' } },
   { id: 'tide', name: 'Tide', author: 'Sam Rivera', kind: ['theme'], version: '1.0.0', from: 'yosemite',
     description: 'Granite and sky. Clear, cool and bright.', ...at('sam-rivera/tide', 'tide') },
   { id: 'story-desk', name: 'Story desk', author: 'Ada Park', kind: ['app'], version: '0.9.0',
@@ -42,6 +54,7 @@ export const LISTINGS = [
     description: 'Turns a transcript into decisions, owners and dates, filed beside the meeting.', ...at('ada-park/meeting-notes', 'meeting-notes', 'v0.3.0'),
     declaration: { touches: { network: [], record: 'write', memory: 'none', server: false }, overrides: [], page_code: false }, installable: false, why: 'Loam reads and lists skill packages and installs none yet' },
 ]
+const LISTED_FILES = new URL('../../plugins/_listed/', import.meta.url)
 const ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="#B4733A"/><circle cx="33" cy="15" r="6" fill="#F6EDDF"/><path d="M6 40 L19 22 L28 33 L33 27 L42 40Z" fill="#2F2017"/></svg>'
 
 // A thread where agents offer listings from the Market (2026-11-18): one
@@ -94,7 +107,7 @@ export async function marketFixture({ mode = 'light', look = 'latte', listings =
   const rows = () => [...base, ...installed.values()]
   app.routes['GET /v1/plugins'] = (req, res) => json(res, 200, { api: 0, layers: { shipped: [], yours: 'fixture' }, plugins: rows() })
   const list = () => ({ url: 'https://example.invalid/list.json', state: listings.length ? 'listed' : 'empty', checked_at: '2026-11-18T19:30:00Z', skipped: [], message: null, repo: 'loamhq/marketplace',
-    plugins: listings.map(({ declaration, guide, icon, from, installable, why, ...entry }) => ({ ...entry, installed: installed.has(entry.id), installed_version: installed.get(entry.id)?.version ?? null, installed_from: installed.has(entry.id) ? entry.repo : null })) })
+    plugins: listings.map(({ declaration, guide, icon, from, installable, why, coverFile, coverDarkFile, coverPosition, coverPositionDark, readme, readmeImages, ...entry }) => ({ ...entry, creator: entry.creator ?? { name: entry.author, links: [] }, installed: installed.has(entry.id), installed_version: installed.get(entry.id)?.version ?? null, installed_from: installed.has(entry.id) ? entry.repo : null })) })
   app.routes['GET /v1/marketplace'] = async (req, res) => { writes.push({ method: 'GET', path: '/v1/marketplace' }); if (slow) await wait(); json(res, 200, list()) }
   for (const entry of listings) {
     const theme = css.has(entry.id)
@@ -102,8 +115,15 @@ export async function marketFixture({ mode = 'light', look = 'latte', listings =
       if (slow) await wait()
       json(res, 200, { id: entry.id, listing: list().plugins.find(e => e.id === entry.id), name: entry.name, version: entry.version, author: entry.author, kind: entry.kind,
         declaration: declarationOf(entry), guide: entry.guide ?? null, warnings: [], installable: entry.installable !== false, why: entry.why ?? null,
-        source: { kind: 'link', repo: entry.repo, path: entry.path, ref: entry.ref, ref_kind: 'tag', commit: 'c'.repeat(40), url: entry.link }, icon: Boolean(entry.icon), image: false, theme: theme ? { options: [] } : null })
+        source: { kind: 'link', repo: entry.repo, path: entry.path, ref: entry.ref, ref_kind: 'tag', commit: 'c'.repeat(40), url: entry.link }, icon: Boolean(entry.icon),
+        cover: Boolean(entry.coverFile), cover_dark: Boolean(entry.coverDarkFile),
+        ...(entry.coverPosition ? { cover_position: entry.coverPosition } : {}), ...(entry.coverPositionDark ? { cover_position_dark: entry.coverPositionDark } : {}),
+        readme: entry.readme ?? null, readme_images: Object.keys(entry.readmeImages ?? {}), theme: theme ? { options: [] } : null })
     }
+    const picture = file => async (req, res) => { res.writeHead(200, { 'content-type': 'image/webp' }); res.end(await readFile(new URL(file, LISTED_FILES))) }
+    if (entry.coverFile) app.routes[`GET /v1/marketplace/${entry.id}/cover`] = picture(entry.coverFile)
+    if (entry.coverDarkFile) app.routes[`GET /v1/marketplace/${entry.id}/cover-dark`] = picture(entry.coverDarkFile)
+    for (const [name, file] of Object.entries(entry.readmeImages ?? {})) app.routes[`GET /v1/marketplace/${entry.id}/readme/${name}`] = picture(file)
     if (entry.icon) app.routes[`GET /v1/marketplace/${entry.id}/icon`] = (req, res) => { res.writeHead(200, { 'content-type': 'image/svg+xml' }); res.end(ICON) }
     if (theme) {
       app.routes[`GET /v1/marketplace/${entry.id}/theme.css`] = (req, res) => { res.writeHead(200, { 'content-type': 'text/css; charset=utf-8' }); res.end(css.get(entry.id)) }

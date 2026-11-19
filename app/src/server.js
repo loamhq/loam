@@ -217,10 +217,11 @@ export function createApp({
       return await relayJson(res, 'GET', `/v1/marketplace${url.searchParams.get('refresh') === '1' ? '?refresh=1' : ''}`, undefined, { signal: AbortSignal.timeout(20000) })
     }
     // A listing's own page (2026-11-18, Settings › Market): what the plugin
-    // at its link declares, and its icon, cover and theme, read by the broker
+    // at its link declares, and its icon, covers, README pictures and theme,
+    // read by the broker
     // from the link before anything is installed. A theme's CSS is held to
     // the installed themes' rules here, so nothing but tokens reaches the page.
-    const listing = /^\/marketplace\/([a-z][a-z0-9-]*)(?:\/(icon|image|theme\.css))?$/.exec(rest)
+    const listing = /^\/marketplace\/([a-z][a-z0-9-]*)(?:\/(icon|image|cover|cover-dark|theme\.css|readme\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.(?:webp|avif|jpe?g|png)))?$/.exec(rest)
     if (listing) {
       if (!['GET', 'HEAD'].includes(method)) return sendJson(res, 405, { error: 'Use GET for a listing.' })
       const [, id, file] = listing

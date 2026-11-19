@@ -1085,8 +1085,8 @@ answers 404 for everything; to take the path itself away, drop the
 
 Decided 2026-11-13: **one public GitHub repository holds a list file.**
 Builders host their own work in their own repositories; they ask to be
-listed by pull request; a maintainer reviews every listing by hand; every
-Loam reads the list in Settings › Market (Settings › Plugins until
+listed by pull request (merged when it meets the rules in the repository's
+README; being listed is not a security audit); every Loam reads the list in Settings › Market (Settings › Plugins until
 2026-11-18) and installs from it by the
 listed link, through the same two calls as any link (above). Installing from
 any link still works, listed or not. The code is `lib/loam_marketplace.py`
@@ -1116,13 +1116,17 @@ and `bin/loam-market`; the tests are `tests/test_marketplace.py`.
 |---|---|
 | `version` (top) | the format, `1`. A list of another format is not read (`unreachable`, with why) |
 | `id` | the plugin's id, lower case, digits and dashes; once per list |
-| `name`, `author` | a line of text, at most 60 characters |
+| `name` | a line of text, at most 60 characters |
+| `author` | the maker's name, a line of text, at most 60 characters. A listing file may give `{"name", "links": [{"label", "url"}]}`; build.py writes that as the name here and the whole as `creator` (2026-11-18) |
+| `creator` | optional (written by build.py): `{"name", "links"}`, up to 8 links, each an https link or `mailto:` with a label of at most 40 characters. A Loam reads it before `author`, gives each link its `kind` from its address (`website`, `github`, `gitlab`, `codeberg`, `x`, `bluesky`, `instagram`, `threads`, `youtube`, `tiktok`, `twitch`, `linkedin`, `patreon`, `kofi`, `buymeacoffee`, `substack`, `discord`, `mastodon`, `email`; any other host whose path is `/@name` is `mastodon`), fills an empty label with the kind's name, and leaves out a link that is not one, never the listing |
 | `description` | one sentence, at most 200 characters (required in the repository; optional to a reader) |
 | `kind` | one or more of `theme`, `extension`, `app`, `agent`, `skill` |
 | `link` | the plugin's folder at a tag or a full commit, as an install link takes it; a branch is refused when it is installed |
 | `version`, `homepage` | optional: the version at the link; an https link about it |
 | `featured` | optional, `true`: the Market's lead story (2026-11-18). Without one, a listing by Loam leads |
-| `image` | optional: a picture inside the plugin's folder (`.webp`, `.avif`, `.jpg`, `.png`, the theme-cover rule), the lead story's cover (2026-11-18) |
+| `cover`, `cover_dark` | optional: the listing's picture on its page and cards, and the one for dark: a file inside the plugin's folder at the link (`.webp`, `.avif`, `.jpg`, `.png`, the theme-cover rule) or an https link to one (2026-11-18). A reader adds `cover_url` / `cover_dark_url`, where anyone can see it (the file on raw.githubusercontent.com at the tag, or the link). Without `cover`, the plugin's own `image` (a theme's cover, with its `image_dark`) is used |
+| `readme` | optional: the Markdown file inside the plugin's folder that its page shows; `README.md` when left out (2026-11-18) |
+| `image` | the older name of `cover`, still read |
 
 A Loam leaves out an entry that breaks a rule, says why in `skipped`, and
 draws the rest, sorted by name.
@@ -1172,11 +1176,35 @@ the answer an hour per link (`DETAILS_TTL`; `?refresh=1` reads again).
  "author": "Sam", "kind": ["theme"], "declaration": {"touches": {…}, "overrides": [], "page_code": false},
  "guide": "A warm dark theme, for evenings.", "warnings": [], "installable": true, "why": null,
  "source": {"kind": "link", "repo": "friend/loam-dusk", "ref": "v1.2.0", "commit": "…", "url": "…"},
- "icon": true, "image": true, "theme": {"options": []}}
+ "icon": true, "cover": true, "cover_dark": false, "cover_position": "50% 48%",
+ "readme": "# Dusk\n\n![Dusk at work](shots/one.png)\n…", "readme_images": ["shots/one.png"],
+ "theme": {"options": []}}
 ```
 
-`/api/marketplace/<id>/icon` and `/image` are the plugin's `icon` and the
-listing's `image` (else a theme's own cover); `/api/marketplace/<id>/theme.css`
+`/api/marketplace/<id>/icon`, `/cover` and `/cover-dark` are the plugin's
+`icon` and the listing's covers (else the plugin's own `image` and
+`image_dark`; `/image` is `/cover`'s older name). A cover at an https link is
+fetched by the broker, never by the page, so no other host learns who is
+looking: only https, only to a host whose every address is public (never
+this box or its network, redirects checked the same way), at most 3 MiB, and
+only if its own first bytes are a PNG, JPEG, WebP or AVIF.
+`cover_position` (and `_dark`) is the plugin's own `image_position`, where it
+has one.
+
+**The README** (`readme`) is the plugin folder's README.md at the tag (or
+the file the listing's `readme` names), at most 100 kB, handed to the page
+as Markdown with no HTML in it: comments and tags are taken out (an `<img>`
+or `<a>` first becomes its Markdown form, `<br>` a line break, entities
+their characters), relative links point at the file on GitHub at the tag,
+and relative pictures inside the folder (up to 16, 12 MiB together) are
+kept and served at `/api/marketplace/<id>/readme/<path>`; a picture outside
+the folder becomes a link to it on GitHub, and a remote one stays as
+written. Code, fenced or inline, is left as it is. The page draws it with
+the app's own renderer (`app/public/markdown.js`), which builds nodes and
+never markup, and follows only http, https and mailto, in a new tab. A
+plugin with no README shows its `PLUGIN.md` guide instead.
+
+`/api/marketplace/<id>/theme.css`
 is a theme's CSS, held by the app to the installed themes' rules
 (`marketThemeCSS`, `app/src/themes.js`: tokens only, nothing fetched) with its
 swatch scope added. A listing the list does not have, or a file it lacks, is

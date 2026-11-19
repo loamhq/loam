@@ -73,11 +73,12 @@ test('the drawing is theme-true: its stylesheet paints only with tokens, and onl
 })
 
 test('the Market’s old drawing is gone, and nothing draws a face, sparkle or confetti in an empty state', async () => {
-  const art = await readFile(new URL('../public/market-art.js', import.meta.url), 'utf8')
-  assert.doesNotMatch(art, /buildArt|market-art-agent|market-build-art/)
+  // The Market's drawn covers (a puzzle piece under twinkles) went on
+  // 2026-11-18: a listing shows its cover, a theme itself, or its icon.
+  await assert.rejects(readFile(new URL('../public/market-art.js', import.meta.url), 'utf8'), { code: 'ENOENT' })
   const market = await readFile(new URL('../public/page/market.js', import.meta.url), 'utf8')
-  assert.doesNotMatch(market, /buildArt/)
+  assert.doesNotMatch(market, /buildArt|coverArt|market-art|scene\(/)
   assert.match(market, /emptyState\(\{ object: none \? 'search' : 'sprout'/)
   const css = await readFile(new URL('../public/market.css', import.meta.url), 'utf8')
-  assert.doesNotMatch(css, /market-build-art|market-bob|market-build-words/)
+  assert.doesNotMatch(css, /market-build-art|market-bob|market-build-words|market-art|twinkle|market-scene/)
 })

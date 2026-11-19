@@ -1520,3 +1520,40 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **A listed plugin's copy changes only on publishing.** Editing
   `plugins/_listed/<id>/` changes nothing on an install until a new tag is in
   the public plugins repository and the person updates it from the Market.
+
+## 2026-11-18 — the Market's listings: covers, the README, the creator
+
+- **A list format change must keep every older reader's rules.** A Loam
+  before this one refuses a listing whose `author` is not a string, so the
+  listing file takes `author: {name, links}` but build.py writes list.json
+  with `author` as the name and the whole as `creator`. Unknown fields
+  (`cover`, `readme`, `creator`) are ignored by old readers, so they are
+  safe; a changed type is not. Check any list change against the *released*
+  `check_entry`, not this tree's.
+- **"By Loam" read the author string**, so renaming the first-party
+  listings' author emptied the lead story. `byLoam` now also counts a
+  listing from the `loamhq` organisation; a Loam before it still reads the
+  author alone and shows no lead story until it updates.
+- **The first-party theme covers' sources are 1536×1024 images** kept
+  outside this repository (the 640px `cover.webp`s are whole-frame
+  downscales of them; `cover-large.webp` is the source at full size, so
+  2000px is not reachable without upscaling). Find a source by comparing
+  the 640px cover with candidates directly (a true match differs by under
+  2/255 on average); photographs that merely look alike score far worse.
+- **A new file in a listed plugin's folder is a new tag**, since a listing
+  is read at its tag: the large covers made the five themes 1.0.1.
+  `loam_listed_themes.MOVED` stays at 1.0.0 (its tags still exist; the
+  Market updates them).
+- **A remote cover is fetched by the broker**, never the page: https only,
+  every resolved address public (`ipaddress.is_global`), redirects checked
+  the same way, at most 3 MiB, typed by its first bytes. Tests stand in for
+  `remote_allowed`, since their host is loopback.
+- **The README is cleaned at the broker, drawn by markdown.js**: HTML out
+  (an `<img>`/`<a>` first becomes Markdown), relative links to GitHub at
+  the tag, the folder's pictures kept as `readme/<path>` files. markdown.js
+  never makes markup and follows only http/https/mailto, so the page needs
+  no sanitiser of its own; pictures draw through its `images` option.
+- **Brand marks come from simple-icons (CC0)**, as marks.js does. LinkedIn
+  is not in it (taken out at the vendor's request); it wears the globe.
+- **`pkill -f <name>` kills the shell that ran it** when the name is in
+  that shell's own command line. Use the pid.

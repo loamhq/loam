@@ -147,7 +147,20 @@ export function highlight(text, q) {
 }
 
 export const kindOf = entry => KINDS.find(k => (entry?.kind ?? []).includes(k)) ?? 'extension'
-export const byLoam = entry => /^loam\b/i.test(String(entry?.author ?? '').trim())
+// Made by Loam: published from Loam's own GitHub organisation, or signed
+// "Loam …" (2026-11-18: the first-party listings now name their creator, so
+// the author alone no longer says it).
+export const LOAM_ORG = 'loamhq'
+export const byLoam = entry => String(entry?.repo ?? '').split('/')[0].toLowerCase() === LOAM_ORG || /^loam\b/i.test(String(entry?.author ?? '').trim())
+
+// A listing's colour when it has nothing else to show: one of the persona
+// hues, the same for the same id everywhere (its letter tile, a theme's face).
+const HUES = ['--persona-teal', '--persona-rust', '--persona-olive', '--persona-plum', '--persona-gold', '--persona-blue', '--persona-sage', '--persona-rose', '--persona-taupe', '--persona-slate']
+export function hueOf(id) {
+  let n = 0
+  for (const ch of String(id ?? '')) n = (n * 31 + ch.codePointAt(0)) >>> 0
+  return HUES[n % HUES.length]
+}
 
 // The lead story: the listing marked `featured`, else one Loam made. The
 // list carries no dates, so "newest" cannot be read from it; of Loam's own,
@@ -179,7 +192,7 @@ export const kindsListed = entries => KINDS.filter(k => (entries ?? []).some(e =
 export function dateline(count, now = new Date()) {
   const day = formatDate(now, { weekday: 'long', day: 'numeric', month: 'long' })
   if (!count) return `${day} · Nothing listed yet`
-  return `${day} · ${count} ${count === 1 ? 'thing' : 'things'} listed, each read by hand`
+  return `${day} · ${count} ${count === 1 ? 'thing' : 'things'} listed`
 }
 
 // The request an agent finds in the composer: the person's own words, as

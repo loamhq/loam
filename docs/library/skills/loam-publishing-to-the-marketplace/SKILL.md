@@ -1,6 +1,6 @@
 ---
 name: loam-publishing-to-the-marketplace
-description: How to share a Loam plugin, theme or skill with other people - by link (pushed to a GitHub repository of the owner's at a tag) and by asking for a listing in the marketplace (a pull request from the owner's own GitHub account, reviewed by hand). Use when the owner wants to share, publish or list something they or an agent built, or to find plugins others made.
+description: How to share a Loam plugin, theme or skill with other people - by link (pushed to a GitHub repository of the owner's at a tag) and by asking for a listing in the marketplace (a pull request from the owner's own GitHub account). Use when the owner wants to share, publish or list something they or an agent built, or to find plugins others made.
 ---
 
 # Sharing a plugin, and the marketplace
@@ -43,8 +43,8 @@ their shared shelf (`skills/` in the vault's system folder).
 
 ## Ask for a listing in the marketplace
 
-The list lives in the public repository `loamhq/marketplace`; a person reads
-every listing before it is merged (its README says what they check). To ask:
+The list lives in the public repository `loamhq/marketplace`; a listing is a
+pull request there, merged when it meets the rules its README sets out. To ask:
 
 ```
 loam market request https://github.com/<owner>/<repository>/tree/v1.0.0/<id> --description "One sentence on what it does."
@@ -56,6 +56,15 @@ their yes, give them the link: it opens GitHub's new-file page in the
 marketplace with the listing filled in. Signed in, they press **Propose new
 file**, then **Create pull request**; GitHub makes the fork on their account.
 The repository must be public, and the link at a tag, never a branch.
+
+A listing can carry more, and is worth it (the marketplace's README has the
+fields): a `cover`, a wide picture (at least 1500 pixels across, 3:2) in the
+plugin's folder or at an https link, shown on its page and its cards; a
+README.md in the folder, which its page shows (pictures in the folder show
+too; HTML does not); and an `author` with the maker's own links
+(`{"name": …, "links": [{"label": …, "url": …}]}`: their site, GitHub,
+Patreon, email…), each shown with its own small mark. Ask the owner which
+links they want shown; never add one they did not give.
 
 ## Find what others made
 

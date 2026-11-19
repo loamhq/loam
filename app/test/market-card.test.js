@@ -112,7 +112,7 @@ test('the agent’s search and the Market page rank the same query the same', { 
       assert.equal(got.count, want.length)
     }
     const one = market('search', '--json', '--', 'sync', 'with', 'my', 'phone').results[0]
-    assert.deepEqual(Object.keys(one).sort(), ['author', 'card', 'description', 'id', 'installable', 'installed', 'kind', 'name'])
+    assert.deepEqual(Object.keys(one).sort(), ['author', 'card', 'creator', 'description', 'id', 'installable', 'installed', 'kind', 'name'])
     assert.deepEqual(cardRef(one.card), { id: 'pocket-sync', label: 'Pocket Sync' }, 'its card line is a card')
     const coach = market('search', '--json', '--', 'coach').results[0]
     assert.equal(coach.installable, false)

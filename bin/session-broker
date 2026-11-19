@@ -5634,9 +5634,9 @@ class Server:
             return
         # A listing's own page (2026-11-18, Settings › Market): what the
         # plugin at its link declares, read as an install's first call reads
-        # it (nothing written), and its icon, cover and theme.css for the
-        # Market to draw. Reads only; installing is the plugins route's.
-        if parts[:2] == ["v1", "marketplace"] and len(parts) in (3, 4):
+        # it (nothing written), and its icon, covers, README pictures and
+        # theme.css for the Market to draw. Reads only; installing is the plugins route's.
+        if parts[:2] == ["v1", "marketplace"] and len(parts) >= 3:
             nocache = "Cache-Control: no-store\r\n"
             try:
                 if method not in ("GET", "HEAD"):
@@ -5646,8 +5646,9 @@ class Server:
                                                    params.get("refresh") == "1")
                     writer.write(response(200, body, nocache))
                 else:
+                    # A README's picture is `readme/<path>`, any depth.
                     data, ctype = await asyncio.to_thread(loam_marketplace.file,
-                                                          parts[2], parts[3])
+                                                          parts[2], "/".join(parts[3:]))
                     head = (f"HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\n"
                             f"Content-Length: {len(data)}\r\n"
                             f"Cache-Control: private, max-age=600\r\n"

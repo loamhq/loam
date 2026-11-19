@@ -56,7 +56,17 @@ try {
       assert.deepEqual(await page.locator('.market-section h2').allTextContents(), ['Themes', 'Extensions', 'Apps', 'Agents', 'Skills'])
       assert.equal(await page.locator('#market-lead-title').textContent(), 'Images')
       assert.deepEqual((await page.locator('.market-chips .chip').allTextContents()), ['Everything', 'Themes', 'Extensions', 'Apps', 'Agents', 'Skills'])
-      await page.waitForFunction(() => [...document.querySelectorAll('.market-swatch')].every(n => n.dataset.look))
+      await page.waitForFunction(() => [...document.querySelectorAll('.market-swatch')].every(n => n.querySelector('.theme-preview[data-look]') || n.querySelector('img')?.complete))
+      // Covers (2026-11-18): a theme with one shows it, in the mode's own
+      // picture; one without shows itself, Appearance's preview in its tokens.
+      const swatchOf = name => page.locator('.market-theme', { has: page.locator('.market-name', { hasText: name }) }).locator('.market-swatch')
+      assert.match(await swatchOf('Ember').locator('img.market-cover-img').getAttribute('src'), mode === 'dark' ? /\/ember\/cover-dark$/ : /\/ember\/cover$/)
+      assert.equal(await swatchOf('Moss').locator('img.market-cover-img').count(), 1)
+      assert.equal(await swatchOf('Tide').locator('.theme-preview.market-preview[data-look="tide"] .theme-miniature').count(), 1, `${label}: a theme with no cover wears itself`)
+      assert.equal(await page.evaluate(() => document.querySelector('.market-theme .market-cover-img')?.naturalWidth), 1536)
+      assert.equal(await page.locator('.market-lead-cover .market-icon-field img.market-tile-img').count(), 1, `${label}: no cover and not a theme: its icon, large`)
+      assert.equal(await page.locator('.market svg.market-art, .market-art-twinkle, .market-scene').count(), 0, `${label}: no drawn covers`)
+      assert.doesNotMatch(await page.locator('.market').innerText(), /by hand/i, `${label}: no "by hand"`)
       await families(page, `${label} front`)
       assert.equal(await sideways(page), false, `${label}: front page, no sideways scroll`)
       // A swatch's own pill is drawn in its theme's colours, on purpose.
@@ -119,6 +129,31 @@ try {
       assert.equal(posts().at(-1).body.confirm, 'ok-pocket-sync', `${label}: the second call is the yes`)
       await page.locator('.market-install .pillbtn.primary', { hasText: 'Done' }).click()
       await page.locator('.market-listing-acts .market-state', { hasText: 'Installed' }).waitFor()
+
+      // A theme's own page: its cover, the maker with their links, the
+      // README (made safe at the broker, drawn as nodes here), and no
+      // "Listed" row; a theme with no cover wears itself, large.
+      await page.evaluate(() => __cap.page.openMarket({ id: 'moss' }))
+      await page.locator('.market-listing-title', { hasText: 'Moss' }).waitFor()
+      await page.locator('.market-readme').waitFor()
+      assert.match(await page.locator('.market-listing-cover img.market-cover-img').getAttribute('src'), /\/moss\/cover$/)
+      assert.equal(await page.locator('.market-creator-name').textContent(), 'Ada Park')
+      assert.deepEqual(await page.locator('.creator-link').evaluateAll(ns => ns.map(n => [n.className.replace('creator-link creator-link-', ''), n.textContent, n.getAttribute('target'), n.querySelector('svg') ? 'mark' : ''])),
+        [['website', 'adapark.example', '_blank', 'mark'], ['github', 'GitHub', '_blank', 'mark'], ['bluesky', 'Bluesky', '_blank', 'mark'], ['mastodon', 'Mastodon', '_blank', 'mark'],
+         ['patreon', 'Patreon', '_blank', 'mark'], ['kofi', 'Ko-fi', '_blank', 'mark'], ['email', 'Email', '_blank', 'mark']])
+      assert.equal(await page.locator('.market-readme-body h1').textContent(), 'Moss')
+      assert.equal(await page.locator('.market-readme-body li').count(), 3)
+      await page.waitForFunction(() => document.querySelector('.market-readme-img')?.complete && document.querySelector('.market-readme-img').naturalWidth > 0)
+      assert.equal(await page.locator('.market-readme-img').getAttribute('src'), '/api/marketplace/moss/readme/shots/evening.webp')
+      assert.equal(await page.locator('.market-readme-body a[href^="https://github.com/ada-park/moss"]').getAttribute('rel'), 'noopener noreferrer')
+      assert.deepEqual(await page.locator('.market-kv dt').allTextContents(), ['Version', 'Kind', 'Source'], `${label}: no Listed row`)
+      assert.doesNotMatch(await page.locator('.market').innerText(), /by hand/i)
+      assert.equal(await sideways(page), false, `${label}: listing, no sideways scroll`)
+      await families(page, `${label} theme listing`)
+      await page.evaluate(() => __cap.page.openMarket({ id: 'tide' }))
+      await page.locator('.market-listing-title', { hasText: 'Tide' }).waitFor()
+      await page.locator('.market-listing-cover .market-preview-large[data-look="tide"] .theme-miniature').waitFor()
+      assert.equal(await page.locator('.market-listing-cover img').count(), 0)
 
       // An agent package is listed and not installable yet.
       await page.evaluate(() => __cap.page.openMarket({ id: 'running-coach' }))
