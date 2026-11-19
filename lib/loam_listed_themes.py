@@ -4,7 +4,7 @@ Since 0.2.5 (2026-11-18) Loam ships two themes, Latte and Plain. The five
 other looks that were first-party until then (Autumn, Deep Forest, Foundry,
 Mist Trail, Yosemite) are plugins from the Market. They were published from
 ``plugins/_listed/<id>/`` in this repository to ``loamhq/plugins`` at the tag
-``<id>-v<version>``; since 0.2.9 each lives in its maker's own repository,
+``<id>-v<version>``; since 0.2.10 each lives in its maker's own repository,
 and ``loamhq/plugins`` is archived with its tags. The link here stays the
 first published one: an archived repository still answers a fetch, and an
 install that keeps a look this way runs it from its own folder.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Images plugin (2026-11-18): built into Loam since 0.2.9, in
+"""The Images plugin (2026-11-18): built into Loam since 0.2.10, in
 plugins/images/ (it was listed in the Market from plugins/_listed/ before).
 
   - its own tests pass (a fake OpenAI and a fake Google)

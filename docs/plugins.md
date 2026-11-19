@@ -192,7 +192,7 @@ repository per plugin, versioned by its own tags, and is listed in the
 marketplace in its maker's name. Something new goes to the Market in its
 maker's name; one that proves itself can **graduate** into Loam, and then:
 
-- its folder moves into this repository's `plugins/` (Images did, in 0.2.9);
+- its folder moves into this repository's `plugins/` (Images did, in 0.2.10);
 - its listing is withdrawn from the marketplace;
 - on the update, at the broker's first start, a copy the Market installed
   steps aside for the built-in one, once (`lib/loam_built_in.py`,
@@ -206,7 +206,7 @@ maker's name; one that proves itself can **graduate** into Loam, and then:
 **Two themes ship, Latte and Plain** (since 0.2.5, 2026-11-18). The other
 looks that were first-party until then (Autumn, Deep Forest, Foundry, Mist
 Trail, Yosemite) are Market plugins, each in its maker's own repository
-since 0.2.9; the core keeps their per-look CSS and holds copies of them in
+since 0.2.10; the core keeps their per-look CSS and holds copies of them in
 `plugins/_listed/` for its tests (`plugins/_listed/README.md`). An install
 that was using one, or had saved choices for one, has it installed at the
 broker's first start on 0.2.5 from its first published link (the archived
@@ -222,7 +222,7 @@ runtime's own `plugins/` (2026-11-14, first release L9), the third shipped
 folder after loam-ui's two: `reviewer` (on by default: its timer, its
 instructions, what every agent is told about it) and `daily-notes` (off by
 default: its folder; the page's button), then `doc-comments` (off) and,
-since 0.2.9, `images` (off: its agents' `generate_image` tool, its keys and
+since 0.2.10, `images` (off: its agents' `generate_image` tool, its keys and
 settings). `default_on` is a shipped plugin's
 default and nothing more: any saved choice in `installed.json` wins, on or
 off.

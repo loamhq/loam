@@ -1617,7 +1617,7 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   own domain" or `BASE_DOMAIN` in prose; a prompt that shows the domain
   builds it from `li.BASE_DOMAIN` at run time.
 
-## 2026-11-18 — built in or from the Market; Images graduates (0.2.9)
+## 2026-11-18 — built in or from the Market; Images graduates (0.2.10)
 
 - **Two kinds of plugin, Obsidian's model.** Built-in ones ship in
   `plugins/` (Shipped layer, `default_on` for their default). Market ones

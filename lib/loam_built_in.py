@@ -1,6 +1,6 @@
 """Market plugins that became part of Loam: the installed copy steps aside.
 
-Since 0.2.9 (2026-11-18) Images ships inside Loam (``plugins/images/``),
+Since 0.2.10 (2026-11-18) Images ships inside Loam (``plugins/images/``),
 off until it is turned on in Settings › Plugins, and is no longer listed in
 the Market. An install that had it from the Market has a copy in Yours, and a
 copy in Yours wins over a shipped one: left alone, it would go on running the
@@ -32,7 +32,7 @@ from pathlib import Path
 
 # id -> where its Market copies came from, and the release it came in.
 GRADUATED = {
-    "images": {"repos": ("loamhq/plugins",), "since": "0.2.9"},
+    "images": {"repos": ("loamhq/plugins",), "since": "0.2.10"},
 }
 BY = "loam-update"
 

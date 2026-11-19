@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Images built into Loam (2026-11-18, 0.2.9), and lib/loam_built_in.py.
+"""Images built into Loam (2026-11-18, 0.2.10), and lib/loam_built_in.py.
 
 Images ships in this runtime's ``plugins/images/``, no longer in the Market.
 Checks:
@@ -77,7 +77,7 @@ def in_force(pid: str = "images") -> dict:
 
 
 def market_copy(repo: str = "loamhq/plugins", on: bool = True) -> Path:
-    """Images as the Market installed it before 0.2.9: its folder in Yours
+    """Images as the Market installed it before 0.2.10: its folder in Yours
     and its line in installed.json, at its tag in ``repo``."""
     yours = loam_plugins.yours_root()
     folder = yours / "images"
@@ -119,7 +119,7 @@ try:
     check("a fresh install has nothing to take over", built_in.take_over()["images"]["how"], "absent")
     check("and it is settled once", built_in.take_over(), {})
 
-    # -- Installed from the Market before 0.2.9 -------------------------------
+    # -- Installed from the Market before 0.2.10 -------------------------------
     reset()
     market_copy()
     settings_dir = loam_plugins.yours_root() / "_settings" / "images"

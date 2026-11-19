@@ -252,7 +252,7 @@ def cases() -> int:
         here = "203.0.113.7"
         answers.update({"sam": {here}, "loam-check": {here}, "nobody": {"198.51.100.1"}})
         check("both names here: here", li.name_check("sam", here)["state"], "here")
-        answers.update({"sam": {"192.0.2.9"}, "loam-check": {"192.0.2.9"}})
+        answers.update({"sam": {"192.0.2.10"}, "loam-check": {"192.0.2.10"}})
         check("pointing elsewhere: taken", li.name_check("sam", here)["state"], "taken")
         answers.update({"sam": {"198.51.100.1"}, "loam-check": {"198.51.100.1"}})
         check("answering only as the base's wildcard does: unset, not taken",
@@ -310,7 +310,7 @@ def cases() -> int:
         check("own domain, the wildcard missing: waiting, and it says which",
               (got["state"], [p.split(" ", 1)[0] for p in got["problems"]]),
               ("waiting", ["*.loam.example.com"]))
-        four.update({dom: {"192.0.2.9"}, probe: {"192.0.2.9"}})
+        four.update({dom: {"192.0.2.10"}, probe: {"192.0.2.10"}})
         got = own()
         check("own domain pointing elsewhere: waiting (never 'taken': it is theirs), both named",
               (got["state"], len(got["problems"]), "change its A record to 203.0.113.7" in got["problems"][0]),

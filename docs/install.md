@@ -89,7 +89,7 @@ loam.example.com     A  <the server's IPv4>
 or `waiting` with one sentence per thing still wrong, saying what to do:
 
 - a record that is missing ("has no A record yet: make one pointing to …");
-- a record pointing elsewhere ("points to 192.0.2.9, not to this server:
+- a record pointing elsewhere ("points to 192.0.2.10, not to this server:
   change its A record to …"). There is no "taken" on an own domain: the
   name is the person's, so another address is an old server or a parking
   page for them to change, and the install never stops for it;
@@ -449,7 +449,7 @@ repository served by `git daemon` on 127.0.0.1.
   fresh session signed in with the passkey alone.
 - **`loam status`** with a stray AAAA on the apex and the wildcard pointing
   elsewhere showed both sentences under *Name*; restored, all ok.
-- **`loam update`**: a walk-only `0.2.9` tag in the VM's repository was
+- **`loam update`**: a walk-only `0.2.10` tag in the VM's repository was
   seen, applied, and the hosts answered after.
 - **The private feedback route**: with `feedback.url` pointed at a stand-in
   receiver on the VM's loopback (the real `loam_feedback.Inbox`), `loam

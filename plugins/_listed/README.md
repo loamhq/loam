@@ -2,7 +2,7 @@
 
 Autumn, Deep Forest, Foundry, Mist Trail and Yosemite were built into Loam
 until 0.2.5. They are Market plugins now, each in its maker's own repository
-(linked from its Market page) since 0.2.9; the source of each is there, and a
+(linked from its Market page) since 0.2.10; the source of each is there, and a
 new version is made and tagged there.
 
 The core still styles them by id (`materials.css`, `face-paints.css`,
