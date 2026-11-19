@@ -2,19 +2,27 @@ import { h } from './ui.js'
 import { authenticatedFetch } from './auth.js'
 import { copyText } from './clipboard.js'
 import { formatDate } from './time.js'
+import { installation } from './installation.js'
 
-// The login portal is `auth.` in front of the app's own host
+// The login portal is `auth.` in front of the install's domain
 // (deploy/login/README.md): its `/settings` lists, adds and removes passkeys
 // (asking the person to confirm who they are first), and its `/logout` signs
-// this browser out and says so.
-function portal(address, pathname) {
+// this browser out and says so. The domain, not the app's own host: the app
+// is at the apex, but staging is `next.<domain>`, whose portal is still
+// `auth.<domain>` (`auth.next.<domain>` has no record and no certificate).
+// A page whose host is not under the install's domain (the design preview)
+// puts `auth.` in front of its own host, as it always did.
+function portal(address, pathname, domain = installation().appsDomain) {
   const url = new URL(address)
-  url.protocol = 'https:'; url.hostname = url.hostname.startsWith('auth.') ? url.hostname : `auth.${url.hostname}`
+  const host = url.hostname
+  const under = domain && (host === domain || host.endsWith(`.${domain}`))
+  url.protocol = 'https:'
+  url.hostname = under ? `auth.${domain}` : host.startsWith('auth.') ? host : `auth.${host}`
   url.port = ''; url.pathname = pathname; url.search = ''; url.hash = ''
   return url.href
 }
-export const authSettingsURL = (address = location.href) => portal(address, '/settings')
-export const authLogoutURL = (address = location.href) => portal(address, '/logout')
+export const authSettingsURL = (address = location.href, domain) => portal(address, '/settings', domain)
+export const authLogoutURL = (address = location.href, domain) => portal(address, '/logout', domain)
 
 // The passkeys themselves are the portal's (Authelia's
 // `/api/secondfactor/webauthn/credentials`, on its own origin, which the page

@@ -408,6 +408,23 @@ class Plugin(unittest.TestCase):
         self.assertEqual([t["level"] for t in status["trees"]], ["ok", "ok"])
         self.assertEqual(status["trees"][0]["last_pushed_ago"], "just now")
 
+    def test_a_push_moves_origin_main_when_origin_is_that_repository(self):
+        # The push goes to the address, so a tree whose `origin` is the same
+        # repository read "ahead N" for ever (2026-11-19). Another remote is
+        # left alone.
+        git(self.i.vault, "remote", "add", "origin", str(self.rv))
+        git(self.i.vault, "remote", "add", "elsewhere", str(self.rs))
+        self.connect_both()
+        (self.i.vault / "groceries.md").write_text("- oat milk\n")
+        self.i.rewind()
+        out = self.i.backup("push")
+        self.assertTrue(all(r["ok"] for r in out), out)
+        head = git(self.i.vault, "rev-parse", "HEAD")
+        self.assertEqual(git(self.i.vault, "rev-parse", "refs/remotes/origin/main"), head)
+        git(self.i.vault, "branch", "--set-upstream-to=origin/main", "main")
+        self.assertNotIn("ahead", git(self.i.vault, "status", "-sb"))
+        self.assertEqual(git(self.i.vault, "for-each-ref", "refs/remotes/elsewhere"), "")
+
     def test_a_diverged_remote_is_never_overwritten_and_the_owner_hears(self):
         self.connect_both()
         other = self.base / "other"

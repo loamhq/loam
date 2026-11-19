@@ -141,9 +141,11 @@ test.after(async () => {
 const root = page.root
 const click = (node) => node.fire('click', { preventDefault() {}, stopPropagation() {}, target: node, currentTarget: node })
 const card = () => find(root, 'integration')
-const pills = () => all(card(), 'ghpill').map(text)
-const pill = (label) => all(card(), 'ghpill').find((n) => text(n) === label)
-const lines = () => all(card(), 'ghline').map(text)
+// Null-safe: the card is briefly gone while a redraw replaces it, and a
+// wait that read it then threw instead of waiting (under load, 2026-11-19).
+const pills = () => (card() ? all(card(), 'ghpill').map(text) : [])
+const pill = (label) => (card() ? all(card(), 'ghpill').find((n) => text(n) === label) : undefined)
+const lines = () => (card() ? all(card(), 'ghline').map(text) : [])
 
 // The card as markup, for the receipt and for the reader: tag, class, text and
 // href, children indented. Everything else is this page's business.
@@ -221,7 +223,7 @@ test('unregistered: Not set up, and Set up on GitHub', async () => {
 test('a refusal from GitHub on the manifest is its sentence, and no form is built', async () => {
   manifestAnswer = { status: 502, body: { error: 'GitHub refused: the name Loam is taken.' } }
   click(pill('Set up on GitHub'))
-  await until(() => find(card(), 'gherror'))
+  await until(() => card() && find(card(), 'gherror'))
   assert.equal(text(find(card(), 'gherror')), 'GitHub refused: the name Loam is taken.')
   assert.equal(submitted.length, 0)
   await until(() => pill('Set up on GitHub') && !pill('Set up on GitHub').hasAttribute('disabled'))
@@ -259,7 +261,11 @@ test('registered: the slug, linked to the app, and Install', async () => {
 test('connected: every fact in order, the quiet date, Refresh and Disconnect', async () => {
   gh = SHAPES.authorized
   await openIntegrations()
-  await until(() => lines().length === 3)
+  // The card is drawn first from the state the test before left, then from
+  // this test's answer; wait for the whole of this one (under load the quiet
+  // date and the pills came a drawing after the lines, 2026-11-19).
+  await until(() => lines().join('|') === 'all repositories|Signed in as octo-owner|GitHub App: loam'
+    && card() && find(card(), 'ghquiet') && pills().join('|') === 'Refresh|Disconnect')
   assert.deepEqual(lines(), ['all repositories', 'Signed in as octo-owner', 'GitHub App: loam'])
   assert.equal(text(find(card(), 'ghquiet')), `Sign in again by ${formatDate('2027-04-02T21:37:31Z', { year: 'numeric', month: 'short', day: 'numeric' })}`)
   assert.equal(find(card(), 'ghquiet').getAttribute('class'), 'note ghquiet')
@@ -270,7 +276,7 @@ test('connected: every fact in order, the quiet date, Refresh and Disconnect', a
 
 test('Refresh calls the broker’s refresh route and redraws from its answer', async () => {
   click(pill('Refresh'))
-  await until(() => find(card(), 'ghdone'))
+  await until(() => card() && find(card(), 'ghdone'))
   assert.equal(asked.at(-1).route, 'refresh')
   assert.equal(text(find(card(), 'ghdone')), 'Checked with GitHub just now.')
 })
@@ -278,7 +284,7 @@ test('Refresh calls the broker’s refresh route and redraws from its answer', a
 test('unhealthy: the host’s error in the warning ink, Reconnect, and a dot on the tab', async () => {
   gh = SHAPES.unhealthy
   await openIntegrations()
-  await until(() => find(card(), 'ghquiet')?.getAttribute('class') === 'note ghquiet warn')
+  await until(() => card() && find(card(), 'ghquiet')?.getAttribute('class') === 'note ghquiet warn')
   assert.equal(text(find(card(), 'ghquiet')), SHAPES.unhealthy.health.last_error)
   assert.deepEqual(pills(), ['Reconnect', 'Refresh', 'Disconnect'])
   printed('unhealthy')
@@ -293,10 +299,10 @@ test('unhealthy: the host’s error in the warning ink, Reconnect, and a dot on 
 test('Disconnect asks once, calls the delete route, and ends on the three GitHub links', async () => {
   await openIntegrations()
   click(pill('Disconnect'))
-  await until(() => find(card(), 'ghconfirm'))
+  await until(() => card() && find(card(), 'ghconfirm'))
   assert.equal(asked.filter((a) => a.method === 'DELETE').length, 0, 'it did not ask first')
   click(all(find(card(), 'ghconfirm'), 'ghpill').find((n) => text(n) === 'Disconnect'))
-  const links = await until(() => find(card(), 'ghlinks'))
+  const links = await until(() => card() && find(card(), 'ghlinks'))
   assert.equal(asked.at(-1).method, 'DELETE')
   assert.deepEqual(
     all(links, 'loginlink').map((a) => [text(a), a.getAttribute('href')]),

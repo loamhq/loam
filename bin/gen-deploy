@@ -9,6 +9,7 @@ containers up on their compose files. bin/check-drift diffs the same renders
 against the same live paths, so a hand edit to any of them is reported.
 
 Usage:
+  gen-deploy -h | --help            print this and do nothing else
   gen-deploy [--dry-run]            render, show what changes, write, apply
   gen-deploy --show <name>          print one render: caddyfile | daemon |
                                     authelia | authelia-compose | browser |
@@ -276,6 +277,18 @@ def generate(dry: bool) -> int:
     missing = dep.sight_wall_missing()
     print("  wall: every rule present" if not missing else
           "  wall: MISSING\n" + "\n".join("    " + m for m in missing))
+    # The inbound wall (2026-11-19): default-deny on this server's own ports,
+    # standing aside for a firewall the server already has. Restarted when
+    # its script or unit changed, else made sure of; its line is what it did.
+    if dep.INBOUND_FIREWALL_UNIT in changed or dep.INBOUND_FIREWALL_SCRIPT in changed:
+        run(["systemctl", "daemon-reload"])
+        run(["systemctl", "enable", dep.INBOUND_WALL_SERVICE])
+        res = run(["systemctl", "restart", dep.INBOUND_WALL_SERVICE])
+    else:
+        res = run(["systemctl", "enable", "--now", dep.INBOUND_WALL_SERVICE])
+    status = dep.inbound_wall_status()
+    print(f"  inbound wall: {status or 'not raised'} (exit {res.returncode})"
+          f"{': ' + res.stderr.strip() if res.returncode and res.stderr.strip() else ''}")
     for app in dep.records():
         if app.exposure == "shared" and app.share_active(dt.date.today()) is None:
             print(f"  note: {app.name} is recorded as shared but has no live "
@@ -289,6 +302,8 @@ def show(name: str) -> int:
         "authelia": dep.authelia_config, "authelia-compose": dep.authelia_compose,
         "browser": dep.browser_compose, "sudoers": dep.sudoers,
         "firewall": dep.sight_firewall_script, "firewall-unit": dep.sight_firewall_unit,
+        "inbound-firewall": dep.inbound_firewall_script,
+        "inbound-firewall-unit": dep.inbound_firewall_unit,
         "preview-sysctl": dep.preview_sysctl,
     }
     if name not in renders:
@@ -478,8 +493,41 @@ def unshare(app_name: str) -> int:
     return generate(dry=False)
 
 
+# Every flag and whether it takes a value. Anything else is refused before
+# anything runs: until 2026-11-19 an unknown flag (`--help` among them) fell
+# through to a live render, which wrote the Caddyfile, reloaded Caddy and ran
+# `compose up` (caused 2026-11-17).
+FLAGS = {"--dry-run": False, "--show": True, "--init-login": True,
+         "--init-secrets": False, "--share": True, "--unshare": True, "--link": True}
+
+
+def check_args(argv: list[str]) -> int | None:
+    """None when ``argv`` is a known form; else the exit code, having said
+    why (0 for -h/--help, which prints the usage and does nothing else)."""
+    if any(a in ("-h", "--help") for a in argv):
+        print(__doc__.strip())
+        return 0
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a not in FLAGS:
+            print(f"gen-deploy: unknown argument {a!r}; nothing was done. "
+                  f"`gen-deploy --help` says the forms.", file=sys.stderr)
+            return 2
+        if FLAGS[a]:
+            if i + 1 >= len(argv) or argv[i + 1].startswith("-"):
+                print(f"gen-deploy: {a} needs a value; nothing was done.", file=sys.stderr)
+                return 2
+            i += 1
+        i += 1
+    return None
+
+
 def main() -> int:
     argv = sys.argv[1:]
+    refused = check_args(argv)
+    if refused is not None:
+        return refused
     if "--show" in argv:
         return show(argv[argv.index("--show") + 1])
     as_root()
@@ -497,6 +545,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    early = check_args(sys.argv[1:])
+    if early is not None:
+        sys.exit(early)
     try:
         # The live lock (since 2026-10-02): rendering and reloading the
         # deployment layer is Loam's live state. Reading it takes nothing.

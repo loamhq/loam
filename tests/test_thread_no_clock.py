@@ -223,6 +223,26 @@ def session_of(fake, persona):
     return next(s for s in fake.sessions.values() if s.agent == persona)
 
 
+async def until(predicate, timeout=20.0):
+    """Wait for what the engine does next, however loaded the box is: the
+    fixed sleeps this test had (50 ms for a turn to start, 20 ms for an exit
+    to land) failed it in landings while other jobs ran (2026-11-18). True
+    once it holds; False at the deadline, which the check then reports."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if predicate():
+                return True
+        except StopIteration:
+            pass
+        await asyncio.sleep(0.01)
+    return False
+
+
+def texts(tid):
+    return [(m["author"], m["text"]) for m in threads.read(tid)[1]]
+
+
 
 class Clock:
     """The engine's `time`, with `monotonic` moved on by `skip`."""
@@ -262,7 +282,8 @@ async def main():
     # -- a harness turn that runs two hours before its result -----------------
     Session.first = [init(), text("Starting the long one.")]   # and no result
     await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "go long"})
-    await asyncio.sleep(0.05)
+    # The script played (init, then the words) and the engine is watching.
+    await until(lambda: len(session_of(fake, "ada").log) >= 2 and tid in server.threads.active)
     ada = session_of(fake, "ada")
     for _ in range(8):           # two hours in quarter-hour steps
         clock.skip(900)
@@ -274,7 +295,8 @@ async def main():
     # -- then parked on background work for two hours more --------------------
     ada.tasks("a two-hour build")
     ada.emit(result(1))
-    await asyncio.sleep(0.05)
+    await until(lambda: ("ada", "Starting the long one.") in texts(tid)
+                and server.threads.active.get(tid, {}).get("on_background"))
     for _ in range(8):
         clock.skip(900)
         await asyncio.sleep(0.03)
@@ -290,6 +312,8 @@ async def main():
     ada.emit(text("The build finished after two hours."))
     ada.emit(result(2))
     await settle(server, tid)
+    await until(lambda: ("ada", "The build finished after two hours.") in texts(tid)
+                and tid not in server.threads.active)
     check("the reply the notification brings posts as the turn's own",
           [(m["author"], m["text"]) for m in threads.read(tid)[1]],
           [(OWNER, "go long"), ("ada", "Starting the long one."),
@@ -306,6 +330,7 @@ async def main():
     await asyncio.sleep(0.02)
     await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "still there?"})
     await settle(server, tid)
+    await until(lambda: fake.sessions[ada.id] is not ada and texts(tid)[-1] == ("ada", "hi"))
     again = fake.sessions[ada.id]
     check("the next message resumes the same id and answers",
           (again is not ada, again.id, getattr(again, "resumed", None),

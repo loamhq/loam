@@ -182,12 +182,14 @@ commits), plus the folders listed:
 | Step | Script | Also |
 |---|---|---|
 | `library` | always: `bin/library install` (System/Loam, then the skill views) | |
-| `units` | `bin/gen-units` | `systemd/`, except `systemd/system/` (still installed by hand) |
+| `units` | `bin/gen-units` (a timer it installs for the first time it also arms, so a release's new timer runs after an update the older release's code ran) | `systemd/`, except `systemd/system/` (still installed by hand) |
 | `agents` | `bin/provision`, once for each live agent, then `bin/provision --engineer` | `engineer-template/`, `engineer/install/` |
 | `providers` | `bin/provider-pin apply --no-restart` | |
 | `provider-memory` | `bin/provider-memory pin` | `lib/loam_pins.py` |
 | `broker` | `bin/session-broker` | `broker/`, `plugins/`, `lib/loam_pins.py` |
 | `gateway` | `bin/plugin-gateway` | |
+| `deploy` | `sudo bin/gen-deploy` (the web front, the login, the walls: the inbound wall reaches an install that lacks it this way) | `deploy/` |
+| `app` | `sudo bin/deploy <app> up <commit>` | `app/`, `deploy/` |
 
 - **The broker** is restarted by `restart-broker --when-idle`. That waits
   until every session is idle and no thread turn is in flight; after half

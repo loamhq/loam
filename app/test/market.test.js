@@ -131,3 +131,11 @@ test('how many things a maker has in the Market', () => {
   assert.equal(madeBy(LISTINGS, ' ada park '), 4)
   assert.equal(madeBy(LISTINGS, ''), 0)
 })
+
+test('the install sheet says plainly that a plugin has the run of the server (2026-11-19)', async () => {
+  const { ROOT_LINE } = await import('../public/market.js')
+  assert.match(ROOT_LINE, /full control of this server/)
+  assert.match(ROOT_LINE, /a server you use for nothing else/)
+  const page = (await import('node:fs')).readFileSync(new URL('../public/page/market.js', import.meta.url), 'utf8')
+  assert.match(page, /class: 'note market-root', text: ROOT_LINE/)
+})
