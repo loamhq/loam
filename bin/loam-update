@@ -77,6 +77,8 @@ def show_status(st: dict) -> None:
             f"({cur.get('kind')}, {cur.get('commit', '')[:12]}"
             + (f", {cur['local_commits']} local commit(s)" if cur.get("local_commits") else "")
             + ")")
+    if (cur.get("signing") or {}).get("message"):
+        say(cur["signing"]["message"])
     chk = st.get("check")
     if chk:
         latest = (chk.get("latest") or {}).get("version")

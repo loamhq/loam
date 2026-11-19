@@ -85,6 +85,7 @@ import loam_ci
 import loam_commit_identity
 import loam_git_identity
 import loam_lock
+import loam_signing
 
 WORKTREES = lc.STATE / "worktrees"
 MAIN = "main"
@@ -2057,7 +2058,12 @@ def cut_release(repo: Path, result: dict, tag: str) -> dict:
             return release_refused(tag, "the tag already exists on origin, "
                                         "at another commit", sha)
     made = False
-    if not local:
+    signed = sign_release(repo, tag, sha, local)
+    if signed["state"] != "unsigned":
+        if signed["state"] != "signed":
+            return signed
+        made = signed["made"]
+    elif not local:
         git(repo, "tag", tag, sha)
         made = True
     push = git(repo, "push", "--quiet", "origin", f"refs/tags/{tag}",
@@ -2069,7 +2075,57 @@ def cut_release(repo: Path, result: dict, tag: str) -> dict:
                 "detail": (push.stderr or push.stdout).strip()[:400]}
     return {"tag": tag, "state": "pushed", "sha": sha,
             "detail": ("matches " + ", ".join(sorted(versions))
-                       if versions else "no version file in the tree")}
+                       if versions else "no version file in the tree")
+                      + (f"; {signed['detail']}" if signed.get("detail") else "")}
+
+
+# ---------------------------------------------------------------------------
+# A signed release (2026-11-19, docs/signing.md). A project whose tree carries
+# `keys/release-signers` with a key in it -- Loam does -- is installed by
+# boxes that check every release against those keys, so its tag is signed
+# here, as the same step, and checked before it is pushed. With a signing key
+# in the checkout's git config (`user.signingKey`, an SSH key) the landing
+# signs; without one the release waits, `main` landed and pushed, for
+# `bin/sign-release <tag>` on the machine that holds the key, and the receipt
+# says so. A project with no keys file tags as it always did.
+# ---------------------------------------------------------------------------
+
+def sign_release(repo: Path, tag: str, sha: str, local: str | None) -> dict:
+    """Sign ``tag`` at ``sha`` when the release must be signed.
+
+        state  unsigned   no keys anywhere: tag as before
+               signed     made (``made``) or already here, and verified
+               to-sign    no signing key on this checkout; nothing tagged
+               refused / failed, with ``detail``
+    """
+    need = loam_signing.required_signers(repo, tag, sha)
+    if not need:
+        return {"state": "unsigned"}
+    made = False
+    if not local:
+        key = git(repo, "config", "user.signingKey", check=False).stdout.strip()
+        if not key:
+            return {"tag": tag, "state": "to-sign", "sha": sha, "detail": (
+                f"this release must be signed and this checkout holds no "
+                f"signing key; on the machine that holds it, run "
+                f"`bin/sign-release {tag} {sha[:12]}` (docs/signing.md)")}
+        done = git(repo, "-c", "gpg.format=ssh", "tag", "-s", "-m", f"Loam {tag}",
+                   tag, sha, check=False, timeout=300)
+        if done.returncode != 0:
+            git(repo, "tag", "-d", tag, check=False)
+            return {"tag": tag, "state": "failed", "sha": sha, "detail": (
+                "signing the tag failed: "
+                + (done.stderr or done.stdout).strip()[:300])}
+        made = True
+    for where, text in need:
+        res = loam_signing.verify_tag(repo, tag, text)
+        if not res["ok"]:
+            if made:
+                git(repo, "tag", "-d", tag, check=False)
+            return release_refused(tag, f"the tag does not verify against the "
+                                        f"keys in {where}: {res['message']}", sha)
+    return {"state": "signed", "made": made,
+            "detail": f"signed by {res.get('principal')} ({res.get('fingerprint')})"}
 
 
 def release_section(release: dict | None) -> str:
@@ -2080,6 +2136,10 @@ def release_section(release: dict | None) -> str:
     if release["state"] == "pushed":
         return (f" **Release tag `{tag}` pushed** at `{sha}` "
                 f"({release.get('detail')}).")
+    if release["state"] == "to-sign":
+        return (f" **Release `{tag}` is waiting to be signed** at `{sha}`: "
+                f"{release.get('detail')}. No tag was pushed; the landing "
+                f"above is unaffected.")
     word = "refused" if release["state"] == "refused" else "failed to push"
     return (f" **Release tag `{tag}` {word}**: {release.get('detail')}. "
             f"No tag was pushed; the landing above is unaffected.")
