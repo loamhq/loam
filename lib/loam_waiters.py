@@ -416,7 +416,7 @@ def handoff_text(record: dict, title: str | None = None) -> str:
             f"from this thread has finished. Nothing was posted in the thread. "
             f"Receipt: {receipt_path(record)}. Launcher's verdict: "
             f"{verdict_line(result)}. Landing: {status_words(result)}. "
-            f"Read the receipt if you need it. Tell {lc.OWNER_NAME} only what he "
-            f"needs to hear, in your own words and without the receipt's ids or "
+            f"Read the receipt if you need it. Tell {lc.OWNER_NAME} only what they "
+            f"need to hear, in your own words and without the receipt's ids or "
             f"paths; if nothing, end your turn without writing anything and "
             f"nothing is posted.]")

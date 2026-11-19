@@ -37,6 +37,9 @@ a minute: `up` with a `name` and `by`, then write files into the folder it
 names, or give the `port` of a container on 127.0.0.1. It is behind the
 owner's login. A `duration` makes it remove itself; `down` removes it now.
 Making it public (`publish`) waits for the owner's direct yes, each time.
+A server you start on a port of your own is not reachable from outside:
+the server's firewall lets in only SSH, 80 and 443, so a site is the way
+to show it to someone.
 
 **Threads and boards.** To post from a wake or a cron, use
 `mcp__engineer__thread` (`post`, the thread `general` or an id, `by` your

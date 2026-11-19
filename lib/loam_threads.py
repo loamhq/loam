@@ -1195,16 +1195,16 @@ def branch_prompt(meta: dict, window: list[dict], persona: str | None) -> dict:
     instruction = "\n".join([
         f"{lc.OWNER_NAME} is branching part of a conversation off into a new thread of "
         f"its own, with {to}. You write the opening message of that new "
-        f"thread, in {lc.OWNER_NAME}'s own voice: first person, plain, the way he "
-        "types to a colleague.",
+        f"thread, in {lc.OWNER_NAME}'s own voice: first person, plain, the way they "
+        "type to a colleague.",
         "The excerpt is the stretch of the old thread that led up to the "
-        "message he branched from, which is the last one. That last message "
+        "message they branched from, which is the last one. That last message "
         "is what the new thread is about.",
         "Write one line saying what this thread is about. Then the essential "
         "context from the excerpt in a few short sentences: what was found "
         "or decided, and the specific names, files, errors and numbers it "
         "needs. Leave out anything the new thread does not need.",
-        "End with a final line that is left open for him to finish in his "
+        "End with a final line that is left open for them to finish in their "
         "own words, for example one ending with a colon. Do not answer it.",
         f"At most {BRANCH_DRAFT_WORDS} words. No greeting, no sign-off, no "
         "@mentions, and nothing the excerpt does not say.",

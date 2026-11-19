@@ -3697,7 +3697,7 @@ def accept(args: dict, briefed_by: str):
     if not involvement:
         return (
             f"involvement is empty. It is {lc.OWNER_NAME}'s words for this job and it "
-            "goes into the receipt as written; if he has said nothing in "
+            "goes into the receipt as written; if they have said nothing in "
             f"particular, the default is 'go and do it, {lc.OWNER_NAME} reviews after "
             "it is running'."
         )
