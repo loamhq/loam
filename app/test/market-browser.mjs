@@ -13,6 +13,11 @@
 //     button reads Installed;
 //   - Try it wears a theme, and leaving the Market takes it off;
 //   - build-it opens a thread with the agent picked and the words unsent;
+//   - the store (2026-11-18): kinds as text tabs, themes as photographs in
+//     rows (two wide, then three tall; none alone), calm cards for the rest
+//     (one alone takes the row), a lead story over its photograph, a
+//     listing's page with the maker's row, the README beside a column of
+//     facts, and on a phone the buttons docked at the foot once scrolled;
 //   - no page error, no sideways scroll, colours in their families (Latte).
 //
 //   LOAM_PLAYWRIGHT=…/playwright/index.mjs LOAM_CHROME=/usr/bin/chromium-headless-shell node test/market-browser.mjs
@@ -21,6 +26,7 @@ import { readFile } from 'node:fs/promises'
 import { marketFixture } from './market-fixture.mjs'
 import { inspectColourFamilies } from '../tools/colour-families.mjs'
 import { auditControls, assertControls } from './control-style-guard.mjs'
+import { TAGLINE } from '../public/market.js'
 
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright')
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox'] })
@@ -55,7 +61,14 @@ try {
       await page.locator('.market-lead').waitFor()
       assert.deepEqual(await page.locator('.market-section h2').allTextContents(), ['Themes', 'Extensions', 'Apps', 'Agents', 'Skills'])
       assert.equal(await page.locator('#market-lead-title').textContent(), 'Images')
-      assert.deepEqual((await page.locator('.market-chips .chip').allTextContents()), ['Everything', 'Themes', 'Extensions', 'Apps', 'Agents', 'Skills'])
+      assert.deepEqual((await page.locator('.market-kinds .market-kind').allTextContents()), ['Everything', 'Themes', 'Extensions', 'Apps', 'Agents', 'Skills'])
+      assert.equal(await page.locator('.market-kind.on').textContent(), 'Everything')
+      assert.equal(await page.locator('.market-tagline').textContent(), TAGLINE)
+      assert.deepEqual(await page.locator('.market-section-sub').allTextContents(), ['Rooms to work in', 'New things your agents can do', 'Programs on your own server', 'New characters to talk with', 'Ways of working, for every agent'])
+      // Three themes are one row of three; the lone agent is one wide card.
+      assert.deepEqual(await page.locator('.market-section-theme .market-theme-row').evaluateAll(rs => rs.map(r => r.children.length)), [3])
+      assert.equal(await page.locator('.market-section-agent .market-items-one .market-item').count(), 1)
+      assert.ok((await page.locator('.market-section-agent .market-item').boundingBox()).width > (await page.locator('.market-section-extension .market-item').first().boundingBox()).width * 1.5 || width < 600, `${label}: one alone takes the row`)
       await page.waitForFunction(() => [...document.querySelectorAll('.market-swatch')].every(n => n.querySelector('.theme-preview[data-look]') || n.querySelector('img')?.complete))
       // Covers (2026-11-18): a theme with one shows it, in the mode's own
       // picture; one without shows itself, Appearance's preview in its tokens.
@@ -64,13 +77,14 @@ try {
       assert.equal(await swatchOf('Moss').locator('img.market-cover-img').count(), 1)
       assert.equal(await swatchOf('Tide').locator('.theme-preview.market-preview[data-look="tide"] .theme-miniature').count(), 1, `${label}: a theme with no cover wears itself`)
       assert.equal(await page.evaluate(() => document.querySelector('.market-theme .market-cover-img')?.naturalWidth), 1536)
-      assert.equal(await page.locator('.market-lead-cover .market-icon-field img.market-tile-img').count(), 1, `${label}: no cover and not a theme: its icon, large`)
+      assert.equal(await page.locator('.market-lead-plate .market-lead-cover .market-blob img.market-blob-img').count(), 1, `${label}: no cover and not a theme: a plate with its icon, large`)
       assert.equal(await page.locator('.market svg.market-art, .market-art-twinkle, .market-scene').count(), 0, `${label}: no drawn covers`)
       assert.doesNotMatch(await page.locator('.market').innerText(), /by hand/i, `${label}: no "by hand"`)
       await families(page, `${label} front`)
       assert.equal(await sideways(page), false, `${label}: front page, no sideways scroll`)
       // A swatch's own pill is drawn in its theme's colours, on purpose.
-      assertControls(await auditControls(page, '.market .pillbtn:not(.theme-preview *), .market .chip'))
+      // Glass over a photograph is the one paint outside the tokens.
+      assertControls(await auditControls(page, '.market .pillbtn:not(.theme-preview *):not(.market-glass), .market .market-kind'))
 
       // The typeahead: the best few, arrows, Enter on the selection.
       const field = page.locator('.market-q')
@@ -104,7 +118,7 @@ try {
       await families(page, `${label} build-it`)
 
       // A kind's page, from a chip; it ends with build-it too.
-      await page.locator('.market-chips .chip', { hasText: 'Apps' }).click()
+      await page.locator('.market-kinds .market-kind', { hasText: 'Apps' }).click()
       await page.locator('.market-page-head h2', { hasText: 'Apps' }).waitFor()
       assert.deepEqual(await page.locator('.market-item .market-name').allTextContents(), ['Story desk', 'Habit wall'])
       assert.equal(await page.locator('.market-build').count(), 1)
@@ -120,7 +134,7 @@ try {
       assert.deepEqual(await page.locator('.market-touch-text').allTextContents(), ['Talks to your own devices', 'Runs a small program on your server'])
       await families(page, `${label} listing`)
       const posts = () => app.writes.filter(w => w.method === 'POST')
-      await page.locator('.market-listing-acts .pillbtn', { hasText: 'Install' }).click()
+      await page.locator('.market-listing-head .market-listing-acts .pillbtn', { hasText: 'Install' }).click()
       await page.locator('.market-install .market-touch').first().waitFor()
       assert.equal(await page.locator('.market-yes-once').textContent(), 'You say yes once, here. A later version asks again only if it reaches further.')
       assert.deepEqual(posts().map(p => p.body), [{ url: 'https://github.com/ada-park/pocket-sync/tree/v0.4.0/pocket-sync' }], `${label}: the first call reads, it does not install`)
@@ -128,7 +142,7 @@ try {
       await page.locator('.market-install-done').waitFor()
       assert.equal(posts().at(-1).body.confirm, 'ok-pocket-sync', `${label}: the second call is the yes`)
       await page.locator('.market-install .pillbtn.primary', { hasText: 'Done' }).click()
-      await page.locator('.market-listing-acts .market-state', { hasText: 'Installed' }).waitFor()
+      await page.locator('.market-listing-head .market-listing-acts .market-state', { hasText: 'Installed' }).waitFor()
 
       // A theme's own page: its cover, the maker with their links, the
       // README (made safe at the broker, drawn as nodes here), and no
@@ -141,12 +155,28 @@ try {
       assert.deepEqual(await page.locator('.creator-link').evaluateAll(ns => ns.map(n => [n.className.replace('creator-link creator-link-', ''), n.textContent, n.getAttribute('target'), n.querySelector('svg') ? 'mark' : ''])),
         [['website', 'adapark.example', '_blank', 'mark'], ['github', 'GitHub', '_blank', 'mark'], ['bluesky', 'Bluesky', '_blank', 'mark'], ['mastodon', 'Mastodon', '_blank', 'mark'],
          ['patreon', 'Patreon', '_blank', 'mark'], ['kofi', 'Ko-fi', '_blank', 'mark'], ['email', 'Email', '_blank', 'mark']])
-      assert.equal(await page.locator('.market-readme-body h1').textContent(), 'Moss')
+      // Its first heading only repeated the name: not drawn twice.
+      assert.equal(await page.locator('.market-readme-body h1').count(), 0)
+      assert.equal(await page.locator('.market-readme-body h2').first().textContent(), 'What changes')
+      assert.equal(await page.locator('.market-readme-src').textContent(), 'From the maker’s README')
+      assert.equal(await page.locator('.market-maker-count').textContent(), 'Made 4 things in the Market')
+      assert.equal(await page.locator('.market-fine').textContent(), 'Free · changes only how Loam looks')
+      assert.deepEqual(await page.locator('.market-option-list li').allTextContents(), ['Agent faces', 'Inside the face'])
+      assert.equal(await page.locator('.market-listing-head .market-try').textContent(), 'Try it first')
       assert.equal(await page.locator('.market-readme-body li').count(), 3)
       await page.waitForFunction(() => document.querySelector('.market-readme-img')?.complete && document.querySelector('.market-readme-img').naturalWidth > 0)
       assert.equal(await page.locator('.market-readme-img').getAttribute('src'), '/api/marketplace/moss/readme/shots/evening.webp')
       assert.equal(await page.locator('.market-readme-body a[href^="https://github.com/ada-park/moss"]').getAttribute('rel'), 'noopener noreferrer')
-      assert.deepEqual(await page.locator('.market-kv dt').allTextContents(), ['Version', 'Kind', 'Source'], `${label}: no Listed row`)
+      assert.deepEqual(await page.locator('.market-kv dt').allTextContents(), ['Version', 'Kind', 'Light and dark', 'Source'], `${label}: no Listed row`)
+      if (width === 390) {
+        // A phone: the buttons sit under the words, and dock at the foot once
+        // they have scrolled away.
+        assert.equal(await page.locator('.market-dock.on').count(), 0)
+        await page.evaluate(() => { const b = document.querySelector('.market-body'); b.scrollTop = b.scrollHeight; b.dispatchEvent(new Event('scroll')) })
+        await page.locator('.market-dock.on .pillbtn', { hasText: 'Get' }).waitFor()
+        await page.evaluate(() => { const b = document.querySelector('.market-body'); b.scrollTop = 0; b.dispatchEvent(new Event('scroll')) })
+        await page.waitForFunction(() => !document.querySelector('.market-dock.on'))
+      } else assert.equal(await page.locator('.market-dock').count(), 0, `${label}: no dock on a wide screen`)
       assert.doesNotMatch(await page.locator('.market').innerText(), /by hand/i)
       assert.equal(await sideways(page), false, `${label}: listing, no sideways scroll`)
       await families(page, `${label} theme listing`)
@@ -156,8 +186,16 @@ try {
       assert.equal(await page.locator('.market-listing-cover img').count(), 0)
 
       // An agent package is listed and not installable yet.
+      // An extension without a cover: no wide frame; its mark beside its name.
+      await page.evaluate(() => __cap.page.openMarket({ id: 'images' }))
+      await page.locator('.market-listing.no-cover .market-listing-head .market-blob img.market-blob-img').waitFor()
+      assert.equal(await page.locator('.market-listing-cover').count(), 0)
+      assert.equal(await page.locator('.market-readme-src').textContent(), 'In its maker’s words')
+      assert.equal(await page.locator('.market-fine').textContent(), 'Free · talks to one service')
+      assert.equal(await page.locator('.market-maker-count').count(), 0, `${label}: no links, only the name`)
+      assert.equal(await page.locator('.market-creator-name').textContent(), 'Loam contributors')
       await page.evaluate(() => __cap.page.openMarket({ id: 'running-coach' }))
-      await page.locator('.market-listing-acts .market-state', { hasText: 'Not installable yet' }).waitFor()
+      await page.locator('.market-listing-head .market-listing-acts .market-state', { hasText: 'Not installable yet' }).waitFor()
 
       // Try a theme; leaving the Market takes it off.
       await page.evaluate(() => __cap.page.openMarket({ kind: 'theme' }))
@@ -195,13 +233,33 @@ try {
       await empty.page.evaluate(() => __cap.page.openMarket({}))
       await empty.page.locator('.market-build-whole').waitFor()
       assert.equal(await empty.page.locator('#market-build-title').textContent(), 'The Market is just opening')
-      for (const absent of ['.market-chips', '.market-lead', '.market-section', '.market-note']) assert.equal(await empty.page.locator(absent).count(), 0, `${label} empty: no ${absent}`)
-      assert.match(await empty.page.locator('.market-dateline').textContent(), /Nothing listed yet$/)
+      for (const absent of ['.market-kinds', '.market-lead', '.market-section', '.market-note']) assert.equal(await empty.page.locator(absent).count(), 0, `${label} empty: no ${absent}`)
+      assert.equal(await empty.page.locator('.market-tagline').textContent(), TAGLINE)
       await families(empty.page, `${label} empty`)
       assert.equal(await sideways(empty.page), false)
       assert.deepEqual(empty.errors, [])
       console.log(`PASS ${label} empty`)
     } finally { await empty.close() }
+
+    // A lead story with a cover is its photograph, the words in white over
+    // it, Try it as glass; and a theme section of one is one wide tile.
+    const { LISTINGS } = await import('./market-fixture.mjs')
+    const photo = await open(width, mode, { listings: LISTINGS.filter(e => e.id !== 'tide').map(e => ({ ...e, featured: e.id === 'ember' })) })
+    try {
+      await photo.page.evaluate(() => __cap.page.openMarket({}))
+      await photo.page.locator('.market-lead-photo img.market-cover-img').waitFor()
+      assert.equal(await photo.page.locator('#market-lead-title').textContent(), 'Ember')
+      assert.equal(await photo.page.locator('.market-lead-photo .market-kicker').textContent(), 'Featured theme')
+      assert.equal(await photo.page.locator('.market-lead-by').textContent(), 'by Loam contributors')
+      assert.equal(await photo.page.evaluate(() => getComputedStyle(document.querySelector('#market-lead-title')).color), 'rgb(255, 255, 255)')
+      await photo.page.waitForFunction(() => document.querySelector('.market-lead-acts .market-try.market-glass:not(:disabled)'))
+      assert.deepEqual(await photo.page.locator('.market-section-theme .market-theme-row').evaluateAll(rs => rs.map(r => r.children.length)), [1])
+      assert.equal(await photo.page.locator('.market-theme-wide').count(), 1)
+      await families(photo.page, `${label} photo lead`)
+      assert.equal(await sideways(photo.page), false)
+      assert.deepEqual(photo.errors, [])
+      console.log(`PASS ${label} photo lead`)
+    } finally { await photo.close() }
   }
 } finally { await browser.close() }
 console.log('market-browser: ok')

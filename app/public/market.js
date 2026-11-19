@@ -23,6 +23,16 @@ export const KIND_ABOUT = {
   agent: 'New characters to talk with, each starting fresh with you.',
   skill: 'Ways of working, for every agent.',
 }
+// A section's quiet subtitle on the front page, beside its name.
+export const KIND_LINE = {
+  theme: 'Rooms to work in',
+  extension: 'New things your agents can do',
+  app: 'Programs on your own server',
+  agent: 'New characters to talk with',
+  skill: 'Ways of working, for every agent',
+}
+// The Market's one line under its name, on the right of the masthead.
+export const TAGLINE = 'Themes, extensions and apps for your Loam, made by people who use it.'
 // Where a thing lives once it is installed: what the install sheet says.
 export const KIND_HOME = { theme: 'Appearance', extension: 'Plugins', app: 'Apps', agent: 'Agents', skill: 'Plugins' }
 
@@ -193,6 +203,29 @@ export function dateline(count, now = new Date()) {
   const day = formatDate(now, { weekday: 'long', day: 'numeric', month: 'long' })
   if (!count) return `${day} · Nothing listed yet`
   return `${day} · ${count} ${count === 1 ? 'thing' : 'things'} listed`
+}
+
+// How a section's tiles fall into rows (2026-11-18, the store): two wide,
+// then three tall, again; one alone is one wide tile, and no row is left
+// with a single small tile at its end (a lone last one joins the row before).
+export function tileRows(count) {
+  const rows = []
+  for (let left = count, next = 2; left > 0; next = next === 2 ? 3 : 2) { const take = Math.min(next, left); rows.push(take); left -= take }
+  if (rows.length > 1 && rows.at(-1) === 1) { rows.pop(); rows.push(...(rows.pop() === 3 ? [2, 2] : [3])) }
+  return rows
+}
+// The fine line under a listing's Install: what it costs (nothing) and how
+// far it reaches, from its own declaration.
+export function fineLine(declaration, kind = null) {
+  if (kind === 'theme' && !declaration?.page_code) return 'Free · changes only how Loam looks'
+  const r = reachOf(declaration, kind)
+  return `Free · ${r.text.charAt(0).toLowerCase()}${r.text.slice(1)}`
+}
+// How many listings their maker has in the Market (by the creator's name).
+export function madeBy(entries, name) {
+  const who = String(name ?? '').trim().toLowerCase()
+  if (!who) return 0
+  return (entries ?? []).filter(e => String(e.creator?.name ?? e.author ?? '').trim().toLowerCase() === who).length
 }
 
 // The request an agent finds in the composer: the person's own words, as

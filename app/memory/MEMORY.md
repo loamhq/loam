@@ -110,3 +110,34 @@ have never met.
   wrapper that changes between redraws would replay it. On a wide screen,
   where the list column and the pane would both be empty (no threads, no
   apps), the pane says it and the list stays quiet.
+
+## 2026-11-18 — the Market as a store
+
+- **`button-tiers.css` ties a plain `.market .pillbtn.x:not(.primary):not(.secondary)`
+  and wins by coming later.** Its `:is(...)` list takes the specificity of
+  its strongest member (`.approve .allow`, two classes), so the tier rule is
+  (0,6,0). A Market button with its own paint (glass over a photograph, the
+  hairline "Try it first") needs one more class than that, e.g.
+  `:root .market .pillbtn.market-glass.market-try:not(.primary):not(.secondary)`.
+  Read the computed style in a browser; a screenshot of dark text on a
+  photo was the only sign.
+- **Literal colours live only in `tokens.css`** (`test/themes.test.js`
+  greps every other file for `#hex` and `rgba(`). Paint over a photograph
+  from the core caption pair `--theme-cover-ink` / `--theme-cover-shade`,
+  with `color-mix(in srgb, var(--theme-cover-ink) 16%, transparent)` for
+  glass and gradients.
+- **`control-style-guard.mjs` wants every audited control at least 40px
+  tall and painted in tokens**; small Market pills are 40px, and the glass
+  buttons (the photo exception) are left out of its selector by name.
+- **The colour-family check walks up to the first opaque background.** A
+  photo frame painted `--theme-cover-shade` is outside the families it
+  judges, so white words over it are not read as low contrast against the
+  page, and they stay legible while the picture loads.
+- **A sticky element cannot outlive its parent.** The phone listing's
+  buttons dock at the foot as a second copy (`dock`) in the Market's frame,
+  shown once the copy under the title has scrolled above the scroller
+  (`watchDock`, on the body's scroll), not as `position: sticky` inside the
+  header.
+- **In a dock that is always drawn but hidden, selectors find two.**
+  `.market-listing-acts` matches the dock's copy on a phone too; tests and
+  captures use `.market-listing-head .market-listing-acts`.
