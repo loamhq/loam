@@ -2,9 +2,10 @@
 release, L11; the owner's decision 4, 2026-11-14).
 
 ``seed()`` makes the starter agent from ``docs/starter/iris/`` through the
-same ``loam_agents.make`` that L10's create route uses (the workspace, the
-fleet's clauses when the box has agents to take them from, the two loading
-files, provisioning on every provider, the Remote Control unit), and then
+same ``loam_agents.make`` that L10's create route uses (the workspace,
+born in the map's shape since 2026-11-18: soul, config and map; provisioning
+on every provider, the Remote Control unit), then the files her map points
+at (``OWN_FILES``, copied in once she is made), and then
 the hello thread: a thread with that agent, pinned and marked ``hello:
 true``, whose first message is ``docs/starter/hello.md``'s body, posted as
 the agent and marked ``"preset": true`` in its record.
@@ -34,6 +35,10 @@ import loam_config as lc
 
 STARTER_DIR = Path(__file__).resolve().parent.parent / "docs" / "starter"
 MARKER = "starter.json"
+# The starter's own files beside the three that load: what her map points at
+# (2026-11-18). They were her `_active.md` and `_reflection.md`, word for
+# word; she reads them when her map says to.
+OWN_FILES = ("how-i-am-here.md", "nights.md")
 
 
 def marker_path() -> Path:
@@ -66,9 +71,16 @@ def draft(root: Path | None = None) -> dict:
     card = json.loads((src / "agent.json").read_text(encoding="utf-8"))
     out = {"id": card["id"], "name": card["name"], "provider": card.get("provider")}
     for field, name in (("soul", "soul.md"), ("config", "config.md"),
-                        ("active", "_active.md"), ("reflection", "_reflection.md")):
+                        ("map", "map.md")):
         out[field] = fill((src / name).read_text(encoding="utf-8"))
     return out
+
+
+def own_files(root: Path | None = None) -> dict[str, str]:
+    """{name: text} of the starter's files beside soul, config and map."""
+    src = (root or STARTER_DIR) / "iris"
+    return {name: fill((src / name).read_text(encoding="utf-8"))
+            for name in OWN_FILES if (src / name).is_file()}
 
 
 def status() -> dict | None:
@@ -138,6 +150,9 @@ def seed(*, root: Path | None = None, provision=None, units=None) -> dict:
             loam_agents._write_json(marker_path(), {"state": "making", "agent": agent,
                                                     "wake": wake, "at": loam_agents.now_iso()})
             made = loam_agents.make(agent, d, wake, provision=provision, units=units)
+            for name, text in own_files(root).items():
+                if not (ws / name).exists():
+                    (ws / name).write_text(text, encoding="utf-8")
         else:
             wake = (done or {}).get("wake") or loam_agents.card(agent).get("wake_schedule")
             resumed = resumed or "the agent was made by an earlier run; finishing its thread"

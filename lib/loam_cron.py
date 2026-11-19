@@ -611,6 +611,9 @@ left in that persona's commons inbox.
   the same way. No run has a wall clock or a round-trip cap.
 - A cron loads `_always.md` and its own file. It does not load
   `_reflection.md`, and reflection does not load any cron's file.
+- An agent with a `map.md` loads its soul, config and map on every run;
+  its reflection's instruction is Loam's default and a cron adds its own
+  file.
 """
 
 
@@ -633,7 +636,9 @@ def schedule_page(vault: Path = VAULT, names: list[str] | None = None,
                     config["display"], "reflection",
                     f"daily at {config['wake_schedule']} {lc.ZONE_TOKEN}",
                     f"`loam-wake-{agent}.timer`",
-                    f"`ai-labs/{agent}/_reflection.md`"))
+                    ("Loam's default (it has a map)"
+                     if (AI_LABS / agent / "map.md").is_file()
+                     else f"`ai-labs/{agent}/_reflection.md`")))
         for cron_agent, cron_name, path in proposals([agent]):
             rel = f"`ai-labs/{cron_agent}/crons/{cron_name}.md`"
             try:

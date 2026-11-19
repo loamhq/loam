@@ -15,7 +15,10 @@ layer that refuses should be the one that can also repair, and this one
 cannot. So it writes a line where he already looks -- the failure log and one
 line under Urgent in `comms.md` -- and gets out of the way.
 
-The three things it can see, all of which fail by SILENCE at runtime:
+For an agent with a map (2026-11-18, lib/loam_loading.py) it sizes the map
+and nothing else: the map loads as a CLAUDE.md import, with no style to lose.
+For one without, the three things it can see, all of which fail by SILENCE
+at runtime:
 
   over the limit     `_always.md` or `_active.md` past the character limit.
                      Nothing at runtime says so; the cost is just paid.
@@ -83,6 +86,26 @@ def findings(workspace: Path) -> tuple[list[str], list[tuple[str, str]]]:
     """
     out: list[str] = []
     warnings: list[tuple[str, str]] = []
+
+    # An agent with a map (2026-11-18, lib/loam_loading.py) loads its map
+    # and none of the old files, and has no conversation style to lose. Its
+    # one loading file is sized; an empty map is a real map, and nothing it
+    # loads fails by silence (each is a CLAUDE.md import the wake's
+    # identity gate checks).
+    import loam_loading  # noqa: PLC0415
+    if loam_loading.mapped(workspace):
+        path = workspace / loam_loading.MAP
+        try:
+            size = len(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            return [f"`{loam_loading.MAP}` is unreadable: {exc}"], []
+        if size > LIMIT_CHARS:
+            out.append(over_limit_reason(loam_loading.MAP, size, path,
+                                         "the server starts as always"))
+        elif near_limit(size):
+            warnings.append((f"`{loam_loading.MAP}`",
+                             near_limit_reason(loam_loading.MAP, size, path)))
+        return out, warnings
 
     for name in CHECKED:
         path = workspace / name
@@ -321,6 +344,9 @@ def main() -> int:
         agent = config["name"]
         workspace = Path(config["workspace"])
         vault = Path(config["vault"])
+        # The shape on disk, rendered before the server starts (2026-11-18).
+        import loam_loading  # noqa: PLC0415
+        loam_loading.quiet_refresh(workspace)
         problems, warnings = findings(workspace)
         model = model_problem(workspace)
         ran_as = origin()

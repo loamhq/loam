@@ -11,6 +11,12 @@ somewhere to be.
     reflection   `wake <project>`               appends `_reflection.md`
     cron         `wake <project> --cron <name>` appends `crons/<name>.md`
 
+**An agent with a map** (2026-11-18, lib/loam_loading.py) loads its soul,
+its config and its map through CLAUDE.md on both lanes, as in a
+conversation. Its reflection appends no file (its instruction is Loam's
+default prompt, MAPPED_PROMPT_TEMPLATE, with the vault's changes), and its
+cron appends the cron's own file, as before. The map is what its wake sizes.
+
 Four differences and no more. Three are the lane: the file appended, the
 prompt (which names the cron, so the session knows which of its jobs this
 is), and the failure record. The fourth is the vault diff, which reflection
@@ -178,6 +184,28 @@ You're waking. It's {timestamp}. This is cron `{cron}` — a task lane, not a re
 The job is in the instructions appended to this prompt. That file and `_always.md` are what loaded; `_reflection.md` did not, and reflection is not this lane's work. You have what a conversation has: the shell, sudo, subagents, and every engineer tool, `brief` included. When the job is done, stop.
 """
 
+# The wake of an agent with a map (2026-11-18, lib/loam_loading.py). Its
+# instruction is this, Loam's short default, and no file of the agent's: the
+# owner, 2026-11-18 15:45, the agent "is given all the changes in the Vault
+# that has happened over the past day and for them to use their judgment on
+# what changes they want to look into and keep track of or act on". An agent
+# that keeps its own checklist for these nights points to it from its map.
+MAPPED_PROMPT_TEMPLATE = """\
+You're waking. It's {timestamp}. Nobody is in a conversation with you.
+
+Here's what's changed in the vault since you were last here:
+
+{diff_block}
+
+Use your judgment on what to look into, what to keep track of and what to act on; doing nothing is a real use of the time. If you keep your own way of spending these nights, your map says where. You have what a conversation has: the whole box, subagents and the engineer included.
+"""
+
+MAPPED_CRON_PROMPT_TEMPLATE = """\
+You're waking. It's {timestamp}. This is cron `{cron}`: a task lane, not a reflection wake. You're up for one job.
+
+The job is in the instructions appended to this prompt, the cron's own file; your soul, your config and your map loaded as on every run. You have what a conversation has: the shell, sudo, subagents, and every engineer tool, `brief` included. When the job is done, stop.
+"""
+
 NO_CHANGES = "No changes since last wake."
 
 # No tool is withheld from an unattended lane (2026-11-09). The owner, that
@@ -198,13 +226,16 @@ NO_CHANGES = "No changes since last wake."
 LANE_SETTINGS = {"outputStyle": "none"}
 
 
-def claude_argv(agent: str, lane: str, prompt: str, lane_file: Path,
+def claude_argv(agent: str, lane: str, prompt: str, lane_file: Path | None,
                 model: str | None = None,
                 max_turns: int | None = MAX_TURNS,
                 effort: str | None = None) -> list[str]:
     """The lane's command line. One function so a probe of a lane's reach
     runs the same flags the lane does, with only the prompt its own. The
-    model and effort default to this run's (LANE_MODEL, LANE_EFFORT)."""
+    model and effort default to this run's (LANE_MODEL, LANE_EFFORT).
+
+    ``lane_file`` is None for the reflection wake of an agent with a map
+    (2026-11-18): it appends nothing, and loads what its conversations load."""
     model = model or LANE_MODEL
     effort = effort if effort is not None else LANE_EFFORT
     return [
@@ -213,7 +244,7 @@ def claude_argv(agent: str, lane: str, prompt: str, lane_file: Path,
         "--permission-mode", PERMISSION_MODE,
         *(["--max-turns", str(max_turns)] if max_turns else []),
         "--output-format", "json",
-        "--append-system-prompt-file", str(lane_file),
+        *(["--append-system-prompt-file", str(lane_file)] if lane_file else []),
         "--settings", json.dumps(LANE_SETTINGS),
     ]
 
@@ -594,23 +625,26 @@ def main() -> int:
         return record_crash(exc)
 
 
-def lane_prompt(agent: str, vault: Path, started: str, cron: str | None
-                ) -> tuple[str, str | None, Path]:
+def lane_prompt(agent: str, vault: Path, started: str, cron: str | None,
+                mapped: bool = False) -> tuple[str, str | None, Path]:
     """(prompt, vault head to advance to or None, the marker's path).
 
     The vault diff, and the marker it advances, are reflection's alone. See
     the module docstring: a cron sharing the marker would eat the interval
-    the next reflection wake is owed."""
+    the next reflection wake is owed. ``mapped``: the agent has a map, and
+    the prompt is the map's shape's (MAPPED_PROMPT_TEMPLATE)."""
     state_path = STATE_DIR / f"{agent}.json"
     if cron:
-        return CRON_PROMPT_TEMPLATE.format(timestamp=started, cron=cron), None, state_path
+        template = MAPPED_CRON_PROMPT_TEMPLATE if mapped else CRON_PROMPT_TEMPLATE
+        return template.format(timestamp=started, cron=cron), None, state_path
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         state = {}
     diff_block, head = vault_diff(vault, state.get("last_vault_ref"), agent,
                                   state.get("last_wake"))
-    return PROMPT_TEMPLATE.format(timestamp=started, diff_block=diff_block), head, state_path
+    template = MAPPED_PROMPT_TEMPLATE if mapped else PROMPT_TEMPLATE
+    return template.format(timestamp=started, diff_block=diff_block), head, state_path
 
 
 def advance_marker(state_path: Path, head: str | None, finished: str) -> None:
@@ -622,8 +656,8 @@ def advance_marker(state_path: Path, head: str | None, finished: str) -> None:
 
 
 def run_codex(project: Path, agent: str, vault: Path, started: str,
-              cron: str | None, lane: str, lane_text: str,
-              lane_path: Path) -> int:
+              cron: str | None, lane: str, lane_text: str | None,
+              lane_path: Path | None, mapped: bool = False) -> int:
     """The lane on Codex (2026-11-13), from the identity gate on. Everything
     before it ran above, unchanged; the failures are recorded the way the
     Claude half records them, with the same stages and exit codes.
@@ -660,7 +694,7 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
         return 5
 
     step("prompt")
-    prompt, head, state_path = lane_prompt(agent, vault, started, cron)
+    prompt, head, state_path = lane_prompt(agent, vault, started, cron, mapped)
     step("launch")
     try:
         out = cw.run(project, text, prompt, model=LANE_MODEL, effort=LANE_EFFORT,
@@ -709,10 +743,31 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
         **common, "ok": True, "vault_ref": head,
         "num_turns": None, "max_turns": None, "hit_turn_cap": False,
         "identity_canary": canary, "identity_decoy_from": decoy_owner,
-        "lane_chars": len(lane_text),
+        "lane_chars": len(lane_text or ""), "mapped": mapped,
     })
     print(out.reply)
     return 0
+
+
+def lane_input(project: Path, cron: str | None
+               ) -> tuple[str, str | None, Path]:
+    """``(file name, text to append or None, the file it is sized by)``.
+
+    Reflection appends `_reflection.md` and a cron its own file. The
+    reflection of an agent with a map (2026-11-18, lib/loam_loading.py)
+    appends nothing: its instruction is the prompt (MAPPED_PROMPT_TEMPLATE),
+    and the file it is sized by is the map. Raises LayerError when a lane
+    file it needs is missing or empty."""
+    import loam_loading  # noqa: PLC0415
+    from loam_memory import CRON_LANE_DIR, REFLECTION_LAYER, resolve_lane  # noqa: PLC0415
+    if cron:
+        name = f"{CRON_LANE_DIR}/{cron}.md"
+    elif loam_loading.mapped(project):
+        return loam_loading.MAP, None, project / loam_loading.MAP
+    else:
+        name = REFLECTION_LAYER
+    _, text, path = resolve_lane(project, name)
+    return name, text, path
 
 
 def run(project: Path, agent: str, vault: Path, started: str,
@@ -731,12 +786,19 @@ def run(project: Path, agent: str, vault: Path, started: str,
         resolve_lane,
     )
 
+    import loam_loading  # noqa: PLC0415
+
     lane = f"cron:{cron}" if cron else "reflection"
     lane_file = f"{CRON_LANE_DIR}/{cron}.md" if cron else REFLECTION_LAYER
 
     step("preflight")
+    # The shape first (2026-11-18): an agent that wrote its map since its
+    # CLAUDE.md was rendered is re-rendered now, so this run loads soul,
+    # config and map, and the identity gate below checks those imports.
+    loam_loading.quiet_refresh(project)
+    mapped = loam_loading.mapped(project)
     try:
-        _, lane_text, lane_path = resolve_lane(project, lane_file)
+        lane_file, lane_text, lane_path = lane_input(project, cron)
     except LayerError as exc:
         reason = f"{lane} preflight refused: {exc}"
         print(reason, file=sys.stderr)
@@ -803,7 +865,8 @@ def run(project: Path, agent: str, vault: Path, started: str,
     # that was read six times as a missing soul.
     if LANE_PROVIDER == "codex":
         return run_codex(project, agent, vault, started, cron, lane,
-                         lane_text, lane_path)
+                         lane_text, lane_path if lane_text is not None else None,
+                         mapped)
 
     step("identity")
     try:
@@ -819,7 +882,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
         return 5
 
     step("prompt")
-    prompt, head, state_path = lane_prompt(agent, vault, started, cron)
+    prompt, head, state_path = lane_prompt(agent, vault, started, cron, mapped)
 
     # The shared skills, current for this run (first release L7): the Claude
     # shelf above the workspaces and this persona's view. Never fails a wake.
@@ -843,11 +906,13 @@ def run(project: Path, agent: str, vault: Path, started: str,
     # --settings is what makes the exclusion hold in the other direction. The
     # project settings name the conversation style; this overrides it to an
     # empty operator-owned one, so a wake carries its own lane and no other.
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", suffix=f"-{agent}-lane.md", delete=False
-    ) as handle:
-        handle.write(lane_text)
-        lane_temp = Path(handle.name)
+    lane_temp = None
+    if lane_text is not None:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=f"-{agent}-lane.md", delete=False
+        ) as handle:
+            handle.write(lane_text)
+            lane_temp = Path(handle.name)
 
     step("launch")
     try:
@@ -858,7 +923,8 @@ def run(project: Path, agent: str, vault: Path, started: str,
             stdin=subprocess.DEVNULL,
         )
     finally:
-        lane_temp.unlink(missing_ok=True)
+        if lane_temp is not None:
+            lane_temp.unlink(missing_ok=True)
     CRASH["launched"] = True
     step("record")
     finished = now_iso()
@@ -964,7 +1030,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
         "total_cost_usd": cost,
         "identity_canary": canary,
         "identity_decoy_from": decoy_owner,
-        "lane_chars": len(lane_text),
+        "lane_chars": len(lane_text or ""), "mapped": mapped,
         **spent,
         **memory,
     })

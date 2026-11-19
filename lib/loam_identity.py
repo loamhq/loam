@@ -46,14 +46,43 @@ AI_LABS = lc.WORKSPACES
 # soul.md. `_always.md` joined this list on 2026-09-04 when it became a second
 # CLAUDE.md import: a phrase present in both would have let a dropped soul
 # import pass the gate, which is the exact failure this file exists to catch.
-SIBLING_FILES = ("config.md", "_always.md", "_active.md", "_reflection.md")
+# `map.md` joined it on 2026-11-18, with the map's shape (lib/loam_loading.py),
+# and Loam's text and the shared owner's page load beside it there, so a
+# phrase in any of them is not unique to the soul either (SHARED_TEXTS).
+SIBLING_FILES = ("config.md", "_always.md", "_active.md", "_reflection.md",
+                 "map.md")
 
 
 # Imports allowed from outside the project root: the shared reach.md
 # (2026-11-10), which Claude Code loads because provision and the launcher
 # approve external includes on the project's key. Anything else outside is
 # still dropped silently, so it is still refused here.
-SHARED_IMPORTS = (AI_LABS / "_shared" / "reach.md",)
+# Since 2026-11-18 also Loam's text and the shared owner's page, the two
+# absolute imports of an agent with a map (lib/loam_loading.py).
+SHARED_IMPORTS = (
+    AI_LABS / "_shared" / "reach.md",
+    Path(__file__).resolve().parent.parent / "persona" / "loam.md",
+    AI_LABS / "_shared" / "owner.md",
+)
+
+
+def _shared_imports() -> tuple[Path, ...]:
+    """SHARED_IMPORTS, with the owner's page where a test has put the
+    workspaces (lib/loam_loading.owner_page)."""
+    import loam_loading  # noqa: PLC0415
+    return SHARED_IMPORTS + (loam_loading.owner_page().resolve(),)
+
+
+def _shared_texts() -> str:
+    """Loam's text and the shared owner's page: loaded beside the soul in the
+    map's shape, so a phrase in either does not prove the soul arrived."""
+    out = ""
+    for path in dict.fromkeys(_shared_imports()[1:]):
+        try:
+            out += path.read_text(encoding="utf-8")
+        except OSError:
+            pass
+    return out
 
 
 class IdentityError(Exception):
@@ -73,7 +102,7 @@ def assert_imports_resolve(project: Path) -> list[Path]:
     for path in paths:
         if not path.is_file():
             raise IdentityError(f"CLAUDE.md imports {path}, which does not exist")
-        if not path.is_relative_to(project) and path not in SHARED_IMPORTS:
+        if not path.is_relative_to(project) and path not in _shared_imports():
             raise IdentityError(
                 f"CLAUDE.md imports {path}, which is outside the project root "
                 f"{project} — Claude Code drops such imports silently"
@@ -138,7 +167,7 @@ def pick_decoy(
     ``identity_decoy_from``, so a sampled decoy stays diagnosable.
     """
     rng = rng if rng is not None else random.SystemRandom()
-    mine = ""
+    mine = _shared_texts()
     for name in ("soul.md",) + SIBLING_FILES:
         try:
             mine += (project / name).read_text(encoding="utf-8")
@@ -167,7 +196,7 @@ def pick_canary(project: Path) -> str:
     one arrived.
     """
     soul = (project / "soul.md").read_text(encoding="utf-8")
-    others = "".join(sibling_souls(project).values())
+    others = "".join(sibling_souls(project).values()) + _shared_texts()
     for name in SIBLING_FILES:
         try:
             others += (project / name).read_text(encoding="utf-8")
