@@ -72,6 +72,6 @@ two touch the same lines.
 
 **Loam's makers** hear a bug, a wish or any feedback ("tell the people who
 make Loam…") when the owner sends it: an agent writes it with personal
-details taken out, shows every word, and on the owner's yes sends it to a
-private inbox only the makers read, no account needed, or as a GitHub issue
-they can follow (`loam-filing-a-bug-or-feature`).
+details taken out, shows every word, and on the owner's yes gives them a
+link that files it as an issue on Loam's GitHub from their own account
+(`loam-filing-a-bug-or-feature`).

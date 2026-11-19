@@ -5,8 +5,8 @@ import { createProfiles, profileStatus } from '../public/agent-profile.js'
 import { createApp } from '../src/server.js'
 import { readConfig } from '../src/config.js'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
-import { shippedPlugins } from '../src/shipped-plugins.js'
-import { PREBUILT_VOICES } from '../public/plugins/read-aloud/page/document-speech.js'
+import { listedManifest } from './audio-plugins.mjs'
+import { PREBUILT_VOICES } from '../../plugins/_listed/read-aloud/page/document-speech.js'
 import { createActivity } from '../public/activity.js'
 import { installDom } from './fakedom.js'
 import { h } from '../public/ui.js'
@@ -90,7 +90,7 @@ test('speech requests and lookups use stored plugin voice, with legacy and docum
 })
 
 test('read-aloud manifest declares precisely the supported voices through the ordinary profile place', async () => {
-  const p=(await shippedPlugins('public')).find(p=>p.id==='read-aloud')
+  const p=await listedManifest('read-aloud')
   assert.ok(p.places.includes('agent.profile'))
   assert.deepEqual(p.agent_settings[0].choices.map(c=>c.id),PREBUILT_VOICES)
   assert.equal(p.agent_settings[0].default,'Charon')

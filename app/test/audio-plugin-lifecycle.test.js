@@ -2,10 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createCoreRegistry } from '../public/core-registrations.js'
 import { createPluginLoader } from '../public/plugin-loader.js'
-import { activate } from '../public/plugins/read-aloud/page/main.js'
+import { activate } from '../../plugins/_listed/read-aloud/page/main.js'
 
 test('panel dictation resets and disable keep captures isolated without publishing audio state to core', async t => {
-  const { activate: dictate } = await import('../public/plugins/dictation/page/main.js')
+  const { activate: dictate } = await import('../../plugins/_listed/dictation/page/main.js')
   const waiting = [], services = new Map(), listeners = new Set()
   let stopped = 0
   const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
@@ -79,7 +79,7 @@ test('turning Read aloud off invalidates a pending play response before it can s
 })
 
 test('disabling Dictation while microphone permission waits stops a late stream and removes device listeners', async t => {
-  const { activate: dictate } = await import('../public/plugins/dictation/page/main.js')
+  const { activate: dictate } = await import('../../plugins/_listed/dictation/page/main.js')
   let finish, service, stopped = 0
   const listeners = new Set(), previousNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: {

@@ -32,9 +32,9 @@ try {
       const plugins = await shippedPlugins(path.resolve('public'))
       for (const plugin of plugins.filter(p => ['dictation', 'read-aloud'].includes(p.id))) plugin.on = true
       app.routes['GET /v1/plugins'] = (req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ plugins })) }
-      for (const plugin of ['dictation', 'read-aloud']) for (const file of await readdir(`public/plugins/${plugin}/page`)) {
+      for (const plugin of ['dictation', 'read-aloud']) for (const file of await readdir(`../plugins/_listed/${plugin}/page`)) {
         app.routes[`GET /v1/plugins/${plugin}/files/page/${file}`] = async (req, res) => {
-          res.writeHead(200, { 'content-type': file.endsWith('.css') ? 'text/css' : 'text/javascript' }); res.end(await readFile(`public/plugins/${plugin}/page/${file}`))
+          res.writeHead(200, { 'content-type': file.endsWith('.css') ? 'text/css' : 'text/javascript' }); res.end(await readFile(`../plugins/_listed/${plugin}/page/${file}`))
         }
       }
       const settings = { mode, theme: look, size: 100 }

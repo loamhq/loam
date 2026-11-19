@@ -1,4 +1,4 @@
-import { numberWords } from '../public/plugins/read-aloud/page/speakable.js'
+import { numberWords } from './speakable.js'
 
 // Word equivalents for the text handed to TTS, not the source markdown.
 // This estimates pronunciation; it never rewrites the transcript or learns

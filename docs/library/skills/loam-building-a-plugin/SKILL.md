@@ -47,7 +47,8 @@ hands the plugin the keys it declared, in the file `$LOAM_PLUGIN_KEYS`
 names. A plugin can also add tools for agents, timers and settings
 through `contributes:`. The whole interface, field by field, is
 `docs/plugins.md` in Loam's repository; a small working example is
-`docs/examples/plugins/echo/`.
+`docs/examples/plugins/echo/`, and a real one with keys, an agent tool and
+settings is Images, built into Loam at `plugins/images/`.
 
 **Where it goes.** The owner's plugins live in their own plugins folder
 (`paths.plugins` in `bin/loam-config show`), a git repository committed
@@ -58,8 +59,9 @@ listed as broken with its reason, line by line, and breaks nothing else.
 
 **A theme** is the quickest plugin to make. Copy one Loam ships (in
 `app/public/themes/` of the checkout, `paths.root`; `plain` is the
-simplest, `latte` a full one; a first-party theme from the Market, such as
-`autumn` in `plugins/_listed/`, also carries its own display font) into the plugins folder under a new id,
+simplest, `latte` a full one; a theme from the Market, such as Autumn,
+whose repository its Market page links, also carries its own display font)
+into the plugins folder under a new id,
 change `id` and `name` in its `PLUGIN.md`, rename the id in every
 `:root[data-look="…"]` selector of its `theme.css`, and change the token
 values, light and dark. Keep to the tokens the original sets: the page drops

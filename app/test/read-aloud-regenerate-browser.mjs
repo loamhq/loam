@@ -33,8 +33,8 @@ try {
       const plugins = await shippedPlugins(path.resolve('public'))
       for (const p of plugins) if (p.id === 'read-aloud') p.on = true
       app.routes['GET /v1/plugins'] = (req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ plugins })) }
-      for (const file of await readdir('public/plugins/read-aloud/page')) app.routes[`GET /v1/plugins/read-aloud/files/page/${file}`] = async (req, res) => {
-        res.writeHead(200, { 'content-type': file.endsWith('.css') ? 'text/css' : 'text/javascript' }); res.end(await readFile(`public/plugins/read-aloud/page/${file}`))
+      for (const file of await readdir('../plugins/_listed/read-aloud/page')) app.routes[`GET /v1/plugins/read-aloud/files/page/${file}`] = async (req, res) => {
+        res.writeHead(200, { 'content-type': file.endsWith('.css') ? 'text/css' : 'text/javascript' }); res.end(await readFile(`../plugins/_listed/read-aloud/page/${file}`))
       }
       app.routes['GET /v1/settings/appearance'] = (req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ phone: settings, desktop: settings })) }
       app.routes['GET /v1/threads/a-quieter-week'] = async (req, res) => {

@@ -211,8 +211,8 @@ test('4. dictation without a key says a Gemini key is needed and goes to where i
   // What this app's own server answers a take when there is no key.
   const answer = await createTranscriber(readConfig({ LOG_LEVEL: 'off' }), { getKey: async () => '' }).transcribe({ audio: Buffer.from('take'), contentType: 'audio/webm' })
   assert.equal(answer.status, 503)
-  const { mount } = await import('../public/plugins/dictation/page/engine.js')
-  const helpers = await import('../public/plugins/dictation/page/dictate.js')
+  const { mount } = await import('../../plugins/_listed/dictation/page/engine.js')
+  const helpers = await import('../../plugins/_listed/dictation/page/dictate.js')
   const went = [], realRecorder = globalThis.MediaRecorder, realNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
   globalThis.MediaRecorder = class {
     static isTypeSupported() { return true }

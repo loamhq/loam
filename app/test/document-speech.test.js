@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { documentSpeakable, documentWords, documentStops, readAloudSettings } from '../public/plugins/read-aloud/page/document-speech.js'
-import { createPreferences } from '../public/plugins/read-aloud/page/settings.js'
+import { documentSpeakable, documentWords, documentStops, readAloudSettings } from '../../plugins/_listed/read-aloud/page/document-speech.js'
+import { createPreferences } from '../../plugins/_listed/read-aloud/page/settings.js'
 import { pluginSettings } from '../public/plugin-loader.js'
 const createStore = storage => createPreferences(pluginSettings('read-aloud', storage))
 import { storage } from './browser.js'

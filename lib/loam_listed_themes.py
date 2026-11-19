@@ -1,9 +1,13 @@
 """The first-party looks that left the shipped set, kept for whoever chose one.
 
 Since 0.2.5 (2026-11-18) Loam ships two themes, Latte and Plain. The five
-other first-party looks (Autumn, Deep Forest, Foundry, Mist Trail, Yosemite)
-are plugins from the Market, published from ``plugins/_listed/<id>/`` in this
-repository to ``loamhq/plugins`` at the tag ``<id>-v<version>``.
+other looks that were first-party until then (Autumn, Deep Forest, Foundry,
+Mist Trail, Yosemite) are plugins from the Market. They were published from
+``plugins/_listed/<id>/`` in this repository to ``loamhq/plugins`` at the tag
+``<id>-v<version>``; since 0.2.10 each lives in its maker's own repository,
+and ``loamhq/plugins`` is archived with its tags. The link here stays the
+first published one: an archived repository still answers a fetch, and an
+install that keeps a look this way runs it from its own folder.
 
 An install that had chosen one of them must not lose it on the update. So
 once, at the broker's first start on this code, :func:`keep` installs each

@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { responseSets, speechSettings, nextRate, clock, wordCount, wordsLabel, listenEstimate } from '../public/plugins/read-aloud/page/speech.js'
+import { responseSets, speechSettings, nextRate, clock, wordCount, wordsLabel, listenEstimate } from '../../plugins/_listed/read-aloud/page/speech.js'
 
 const user = (text) => ({ what: 'user', item: { kind: 'user', text } })
 const say = (text) => ({ what: 'text', block: { type: 'text', text } })

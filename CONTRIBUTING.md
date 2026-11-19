@@ -20,11 +20,9 @@ install, not pushed (`push_gate` in `lib/loam_worktree.py`).
 ## Reports from installs
 
 An agent on any Loam install can write up a bug, a feature request or an
-idea for its owner and, on their yes, send it privately to an inbox the
-maintainers read (no account needed; good ones become issues here), or hand
-them a link that files it here as an issue from their own GitHub account
-(`loam report`, lib/loam_feedback.py). Before
-it is shown to the owner, the report has their name, their agents' names,
+idea for its owner and, on their yes, hand them a link that files it here
+as an issue from their own GitHub account (`loam report`,
+lib/loam_feedback.py). Before it is shown to the owner, the report has their name, their agents' names,
 paths, their install's address, keys, and e-mail and IP addresses taken out.
 A fix that install's engineer made can come with it as a patch
 (`loam report bug --patch`). The templates in `.github/ISSUE_TEMPLATE/`

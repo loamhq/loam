@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto'
 import { createApp } from '../src/server.js'
 import { readConfig, fixtureBroker } from './key-fixture.js'
 import { speakable, numberWords } from '../src/speakable.js'
-import { documentSpeakable, documentSpeechBlocks } from '../public/plugins/read-aloud/page/document-speech.js'
+import { documentSpeakable, documentSpeechBlocks } from '../../plugins/_listed/read-aloud/page/document-speech.js'
 import { spokenWords } from '../src/spoken-length.js'
 import {
   createSpeech, createFfmpegEncoder, chunkText, cleanBrief, parseVoices, pcmOfWav, joinPcm, PREBUILT_VOICES,

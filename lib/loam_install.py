@@ -38,6 +38,9 @@ TESTED = {"claude-code": "2.1.325", "codex": "0.169.0", "antigravity": "1.5.9"}
 # The base domain every person's name lives under (decision 1, 11-14). The one
 # place the product's domain is written; every other file reads `edge.domain`.
 BASE_DOMAIN = "myloam.space"
+# Where a name under BASE_DOMAIN is asked for: an issue on Loam's own
+# repository, the one public way to reach Loam's makers.
+ASK_FOR_A_NAME = "https://github.com/loamhq/loam/issues/new"
 
 USER = "loam"                                  # the Unix user an install runs as
 STATE_DIR = Path("/var/lib/loam")              # root's: the installer's own record
@@ -345,7 +348,8 @@ def valid_domain(domain: str) -> str | None:
         return "that is not a domain name (for example loam.example.com)"
     if d == BASE_DOMAIN or d.endswith("." + BASE_DOMAIN):
         return (f"names under {BASE_DOMAIN} are Loam's makers' to give: ask them for "
-                f"one and run the install with --name instead")
+                f"one in an issue at {ASK_FOR_A_NAME} and run the install with --name "
+                f"instead")
     return None
 
 

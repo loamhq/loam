@@ -59,7 +59,8 @@ link that makes you the owner. It installs the newest release.
   made by Let's Encrypt for each address by themselves; nothing else to
   set up.
 - **On a name we give you** under Loam's own domain, like `sam.<Loam's
-  domain>`. Ask Loam's makers for a name first; they make its records.
+  domain>`. Ask Loam's makers for a name first, in an issue at
+  https://github.com/loamhq/loam/issues/new; they make its records.
   Then choose it when asked, or end the command with `-s -- --name sam`
   instead. Loam waits for the records and goes on the web by itself.
 
@@ -100,7 +101,7 @@ and [SECURITY.md](SECURITY.md) how to report a vulnerability.
 | `app/` | the web app: Node's standard library, no dependencies |
 | `mcp/`, `hooks/` | the agents' MCP servers and Claude Code hooks |
 | `deploy/`, `systemd/` | the edge (Caddy, Authelia, the sign-in page) and the unit templates |
-| `plugins/` | first-party plugins: the reviewer, daily notes, comments & suggestions |
+| `plugins/` | the built-in plugins: the reviewer, daily notes, comments & suggestions, Images |
 | `docs/` | how each part works and why; `docs/library/` becomes every install's `System/Loam/` |
 | `engineer/memory/` | what building Loam has taught |
 

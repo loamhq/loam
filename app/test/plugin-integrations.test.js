@@ -58,6 +58,6 @@ test('core page and relay contain no integration-specific plugin code', async ()
   // A removed integration must stay outside core, including future subfolders.
   const files = async folder => (await Promise.all((await readdir(folder, { withFileTypes: true })).map(entry => entry.isDirectory()
     ? files(`${folder}/${entry.name}`) : [`${folder}/${entry.name}`]))).flat()
-  const paths = [...await files('src'), ...(await files('public')).filter(file => /\.(js|css)$/.test(file) && !file.startsWith('public/plugins/'))]
+  const paths = [...await files('src'), ...(await files('public')).filter(file => /\.(js|css)$/.test(file) )]
   for (const file of paths) assert.doesNotMatch(await readFile(file, 'utf8'), /acme/i, file)
 })

@@ -16,7 +16,9 @@ checkout has a release tag and one commit of its own. Checks:
   - a patch: the diff of the checkout's own commits since the release,
     scrubbed too; none to send is refused;
   - the command: `loam report bug` prints what would go and the link, and
-    sends nothing; `--json` is the same as data; a missing title is exit 2.
+    sends nothing; `--json` is the same as data; a missing title is exit 2;
+    `loam report idea` is a kind of its own with the same link; there is
+    no `send` (the private route of 0.2.7 was taken out in 0.2.11).
 
 Run: python3 tests/test_feedback.py
 """
@@ -179,6 +181,16 @@ try:
     js = report("feature", "--title", "Calendar", "--body", "A calendar.", "--json")
     check("--json is the draft as data", json.loads(js.stdout)["label"], "enhancement")
     check("no title: exit 2", report("bug", "--body", "x").returncode, 2)
+    idea = report("idea", "--title", "A calmer morning", "--body", "I wish it said less.",
+                  "--json")
+    d = json.loads(idea.stdout)
+    check("an idea is a kind of its own, to GitHub like the others",
+          (idea.returncode, d["kind"], d["label"],
+           d["url"].startswith("https://github.com/loamhq/loam/issues/new?")),
+          (0, "idea", "idea", True))
+    check("and is shown as an idea", "To Loam's makers, as an idea:" in fb.show(d), True)
+    check("there is no other way to send it: `send` is not a command",
+          report("send", "0123456789ab").returncode, 2)
     sc = report("scrub", "--json", stdin="Wren at sam.example.test\n")
     check("loam report scrub", json.loads(sc.stdout)["text"], "<agent> at <domain>\n")
 finally:

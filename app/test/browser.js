@@ -11,6 +11,7 @@
 // faked.
 
 import { installDom } from './fakedom.js'
+import { audioRows } from './audio-plugins.mjs'
 
 export function browser(appUrl, { innerWidth = 430, audioEnabled = true } = {}) {
   const document = installDom()
@@ -112,11 +113,13 @@ export function browser(appUrl, { innerWidth = 430, audioEnabled = true } = {}) 
   }
   // Audio workflow fixtures explicitly opt in. Their synthetic old host has no
   // catalog; the production fresh catalog/defaults are checked separately in
-  // installation.test.js. This keeps those tests exercising their feature.
+  // installation.test.js. This keeps those tests exercising their feature:
+  // Dictation and Read aloud, from the Market since 0.2.9, are added as an
+  // install that has them on (test/audio-plugins.mjs).
   globalThis.fetch = (url, options) => realFetch(String(url).startsWith('/') ? `${appUrl}${url}` : url, options).then(async res => {
     if (audioEnabled && String(url) === '/shipped-plugins.json') {
       const body = await res.json()
-      return Response.json({ ...body, plugins: body.plugins.map(row => row.switch === 'plugin' ? { ...row, on: true } : row) })
+      return Response.json({ ...body, plugins: [...body.plugins.map(row => row.switch === 'plugin' ? { ...row, on: true } : row), ...await audioRows()] })
     }
     return tee(res)
   })

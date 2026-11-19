@@ -1617,6 +1617,64 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   own domain" or `BASE_DOMAIN` in prose; a prompt that shows the domain
   builds it from `li.BASE_DOMAIN` at run time.
 
+
+## 2026-11-18 — the private feedback route taken out again (0.2.11)
+
+- 0.2.7's private route lived one evening. Taking it out was a targeted
+  reverse of commit 62969a0, not `git revert`: `idea` (KINDS, the article in
+  `show`, the CLI choice) and the draft's `id` (which predates 0.2.7) stay.
+  `bin/loam-claim` and `deploy/README.md` came back byte-identical to
+  a124846; `lib/loam_deploy.py` differs from it only by 0.2.8's
+  `own_domain` comment. Check that way next time: `git diff <before> -- f`.
+- Box state it left: `/var/lib/loam/feedback.json` (the HMAC key and
+  limits, root 0600), the `[feedback]` table and its comment in
+  `/etc/loam/loam.toml`, a `.bak` beside it, and a sentence in
+  `/etc/loam/deploy.toml`'s landing comment. No reports had arrived (no
+  `40_PROJECTS/Loam/feedback/`) and no install had kept a draft here.
+- Asking for a name under the base domain now points at
+  `ASK_FOR_A_NAME` (lib/loam_install.py), an issue on loamhq/loam: the one
+  public channel to the makers.
+## 2026-11-18 — built in or from the Market; Images graduates (0.2.10)
+
+- **Two kinds of plugin, Obsidian's model.** Built-in ones ship in
+  `plugins/` (Shipped layer, `default_on` for their default). Market ones
+  live one per repository on their maker's account, at `v<version>` tags,
+  with the plugin at the repository's root: a link `…/tree/<tag>` with no
+  folder parses on every release since 0.2.3 (`GITHUB` is unchanged), and
+  `public_url` drops the empty path, so covers resolve at the root.
+- **A Yours copy wins over a shipped one forever**, so graduating a Market
+  plugin into Loam needs a take-over step, like the themes' keep step in
+  reverse: `lib/loam_built_in.py` (`GRADUATED`) at the broker's first start
+  removes a Yours copy that is exactly what the Market installed (link from
+  a listed repository, not `edited`) through `loam_plugins.remove`, which
+  keeps the id's switch when a shipped copy exists. Settings
+  (`_settings/<id>/`), data, the private folder (keys, `checks.json`) and
+  shared keys are all keyed by id, so nothing has to move. It waits,
+  unsettled, while the release has no shipped copy.
+- **The push gate's deny list holds the owner's surname**, so the owner's
+  GitHub handle can never be written in this repository: code that must
+  follow a plugin to its maker's repository reads the marketplace list, or
+  keeps the first published link. `loam_listed_themes.LINK` stays at the
+  archived `loamhq/plugins` (an archived repository still answers fetches,
+  and its tags were kept).
+- **The five themes' folders stay in `plugins/_listed/`** as the core's test
+  copies: about eighteen app tests and tools read them, and the core still
+  styles them by id. The makers' repositories are the source.
+- **`gh auth setup-git` writes a credential helper into `~/.gitconfig`.**
+  Don't: push with `git -c credential.helper= -c
+  'credential.helper=!/usr/bin/gh auth git-credential' push`, and
+  `env -u GITHUB_TOKEN` (the box's `GITHUB_TOKEN` is stale; `gh`'s own
+  login is the owner's). Loam's own fetches ignore the global config anyway
+  (`_git_env` sets `GIT_CONFIG_GLOBAL=/dev/null`).
+- **The guard refuses the Write tool outside the reach** (job scratch in
+  `/tmp` included); write scratch scripts with a shell heredoc.
+- **Two broker tests start the real broker against the box's own config**
+  (`test_broker_stop_streams.py`, `test_broker_shutdown_dump.py`: their
+  drivers load `bin/session-broker` and run `amain`, stubbing each start
+  task by name). A new start task that writes anything is run against the
+  live install by the landing's test run: on 11-18 the built-in take-over
+  removed the box's own Images copy mid-landing (restored from the plugins
+  folder's git within minutes). Stub every new start task in both drivers.
 ## 2026-11-18 — three files load on every run: soul, config, map
 
 - **The shape is rendered, not chosen at launch.** Every conversation route
@@ -1666,3 +1724,53 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `.plugin-meta`: stale since Settings changed. Its install section was
   checked by running a copy without the stale parts.
   `app/test/link-install-browser.mjs` is the browser proof of the link sheet.
+- **A scratch install whose `paths.root` is the job's tree provisions the
+  engineer into that tree** (caused 2026-11-18, `bin/library seed-starter`
+  under a scratch `LOAM_CONFIG`): `ensure_engineer` rewrote the tree's
+  untracked `engineer/agent.json`, `CLAUDE.md`, `role.md`, `project.md` and
+  `.claude/settings.json` with the scratch paths, and the landing's
+  `test_boundary_guard.py` then failed on the tree alone. Restore them from
+  the canonical checkout's, or point `paths.root` at a copy.
+- **A new top-level folder is not in a landing's view** (`platform_argv`
+  binds only entries the canonical checkout already has): put a new shipped
+  file under an existing one (`docs/persona/loam.md`, not `persona/`).
+- **External `@` imports need the project's trust, keyed on the git repo
+  root**: a scratch workspace outside a git repo dropped `reach.md` and
+  Loam's text silently even with its own directory trusted; `git init` on
+  the scratch workspaces folder plus `ensure_trust` made them load.
+
+## 2026-11-18 — Dictation and Read aloud leave core for the Market (0.2.9)
+
+- **A shipped page plugin leaves core by four moves**: its folder goes to
+  `plugins/_listed/<id>/` (never read as a plugin; the tests' copy and the
+  release's fallback), the app tests that drove it get it from
+  `app/test/audio-plugins.mjs` (catalog rows whose `local` is the listed
+  file's `file://` URL, which the test page's importer loads as is), an
+  install that had it **on** gets it from the Market at the broker's first
+  start (`lib/loam_to_market.py`), and anything core imported from the
+  plugin's files gets core's own copy (`app/src/speakable.js`,
+  `document-speech.js`), held byte-equal by a test. The app deploys only
+  `app/`, so `app/src` can never import from `plugins/`.
+- **The migration reads the link from the marketplace listing** rather than
+  naming it: the push gate denies the owner's GitHub handle and display
+  name in Loam's repository, so a maker's repository URL cannot appear in
+  Loam's code. The listing is also the right source: it follows the maker's
+  version.
+- **Who sees the shipped layer on this box**: the broker reads
+  the canonical checkout's `app/public/plugins` (projects/loam-ui.json's
+  checkout), so a landing removes a shipped plugin before any app deploy.
+  For no gap, install the Market copy first: a Yours copy shadows the
+  shipped one, and the migration then finds it present.
+- **Preferences that live in a browser are kept by their storage keys**,
+  not by layer: `loam.settings.device(key)` is the raw localStorage key, so
+  a plugin keeps its device settings across shipped → Market as long as its
+  code keeps the key. Switch, agent values (`_settings/<id>/`) and keys
+  (shared, or `<private>/secrets.env`) are all kept by id.
+- **`bin/settings do … --by` must name a persona**; an engineer acting on a
+  brief names the persona who briefed it, with `--reason` saying the job.
+- **`gh` needs `env -u GITHUB_TOKEN`** in a job: the environment's
+  `GITHUB_TOKEN` was stale (401) while `gh`'s own login was good.
+- **The app page harness hangs, not fails, on a `threadPage` thread**:
+  `textContent` of `tt-stream` never returns in the fake DOM (on base main
+  too). Prove an absence at the loader and registry level instead
+  (`test/installation.test.js`).

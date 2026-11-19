@@ -50,8 +50,9 @@ defaults. The before/after inventory is in the evidence directory.
 ## Fresh plugins and existing state
 
 Each shipped `PLUGIN.md` now explicitly declares `default_on: true|false`.
-Read aloud and Dictation declare false; all themes, including Latte, declare
-true. `src/shipped-plugins.js` reads the declaration for the local fallback
+All themes, including Latte, declare true. Read aloud and Dictation declared
+false until 0.2.9, when they left the shipped set for the Market: a fresh
+install has neither (`test/installation.test.js`). `src/shipped-plugins.js` reads the declaration for the local fallback
 catalog. Theme availability remains controlled by Appearance, without a
 second enable switch.
 

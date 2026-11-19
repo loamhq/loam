@@ -45,10 +45,10 @@ try {
     const plugins = await shippedPlugins(path.resolve('public'))
     for (const p of plugins) if (p.id === 'read-aloud') p.on = true
     app.routes['GET /v1/plugins'] = (req, res) => json(res, { plugins })
-    for (const file of await readdir('public/plugins/read-aloud/page')) {
+    for (const file of await readdir('../plugins/_listed/read-aloud/page')) {
       app.routes[`GET /v1/plugins/read-aloud/files/page/${file}`] = async (req, res) => {
         res.writeHead(200, { 'content-type': file.endsWith('.css') ? 'text/css' : 'text/javascript' })
-        res.end(await readFile(`public/plugins/read-aloud/page/${file}`))
+        res.end(await readFile(`../plugins/_listed/read-aloud/page/${file}`))
       }
     }
     app.routes['GET /v1/threads'] = (req, res) => json(res, { threads: [summary()], agents: app.f.agents })

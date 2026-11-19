@@ -310,7 +310,8 @@ def ask_where(base: str) -> tuple[str, str]:
         "itself). You add two DNS records where you bought the domain; the "
         "installer says which, and checks them.", 4)
     say(f"2. On a name under {base}, like sam.{base}. Loam's makers add its "
-        "records, so ask them for a name first.", 4)
+        "records, so ask them for a name first, in an issue at "
+        f"{li.ASK_FOR_A_NAME}", 4)
     choice = ask("Type 1 or 2", check=lambda x: None if x.strip() in ("1", "2")
                  else "type 1 for your own domain, or 2 for a name we give you")
     if choice.strip() == "1":
@@ -988,7 +989,8 @@ def main() -> int:
     p.add_argument("--domain", help="your own domain, for example loam.example.com: "
                    "you make two DNS records there, and the installer says which")
     p.add_argument("--name", help=f"or a name under {li.BASE_DOMAIN} (<name>.{li.BASE_DOMAIN}), "
-                   "whose records Loam's makers make: ask them first")
+                   "whose records Loam's makers make: ask them first, in an "
+                   f"issue at {li.ASK_FOR_A_NAME}")
     p.add_argument("--owner", help="your first name, as Loam should call you")
     p.add_argument("--timezone", help="for example Europe/Berlin")
     p.add_argument("--yes", action="store_true", help="take the defaults; ask nothing")

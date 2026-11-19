@@ -4,23 +4,19 @@
   loam report bug --title "…" [--body "…" | --body-file F | stdin] [--patch [RANGE]] [--json]
   loam report feature --title "…" [--body …] [--json]
   loam report idea --title "…" [--body …] [--json]     anything else: I wish, I love, this confused me
-  loam report send ID [--json]           send drafted report ID privately, on the owner's yes
   loam report scrub [--json] < text      what would be taken out of a text
 
-Drafting sends nothing. The report comes back as it would go: its title and
-body with personal details taken out (the owner's name, agents' names,
-paths, the install's address, keys, e-mail and IP addresses), a list of what
-was taken out, its id, and two ways to send it. Show the owner every word;
-on their yes, either `loam report send ID` (private, no account needed: it
-goes to an inbox only Loam's makers read) or give them the link to GitHub's
-new-issue page with all of it filled in, which they open signed in to their
-own GitHub account and Submit, to follow it in public.
+Nothing is sent. The report comes back as it would go: its title and body
+with personal details taken out (the owner's name, agents' names, paths,
+the install's address, keys, e-mail and IP addresses), a list of what was
+taken out, and a link to GitHub's new-issue page for Loam with all of it
+filled in. Show the owner every word; on their yes, give them the link. They
+open it signed in to their own GitHub account and press Submit.
 
 `--patch` adds the diff of this checkout's own commits since the running
 release (or of RANGE), for a bug this install's engineer has fixed already.
 The rules are lib/loam_feedback.py; the skill is loam-filing-a-bug-or-feature.
-Exit 0 with the report (or the makers' answer), 2 when it cannot be made
-or did not go (the reason on stderr).
+Exit 0 with the report, 2 when it cannot be made (the reason on stderr).
 """
 
 from __future__ import annotations
@@ -37,8 +33,7 @@ import loam_feedback as fb  # noqa: E402
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="loam report", description=__doc__.split("\n\n")[0])
-    ap.add_argument("kind", choices=["bug", "feature", "idea", "send", "scrub"])
-    ap.add_argument("id", nargs="?", help="for send: the report's id from its draft")
+    ap.add_argument("kind", choices=["bug", "feature", "idea", "scrub"])
     ap.add_argument("--title")
     ap.add_argument("--body")
     ap.add_argument("--body-file")
@@ -57,15 +52,6 @@ def main(argv: list[str]) -> int:
                                      or "nothing"), file=sys.stderr)
         return 0
 
-    if args.kind == "send":
-        try:
-            answer = fb.send(args.id or "")
-        except ValueError as exc:
-            print(f"loam report: not sent: {exc}", file=sys.stderr)
-            return 2
-        print(json.dumps(answer, indent=2) if args.json else answer.get("message") or "Sent.")
-        return 0
-
     body = args.body
     if args.body_file:
         body = Path(args.body_file).read_text(encoding="utf-8")
@@ -76,12 +62,6 @@ def main(argv: list[str]) -> int:
     except ValueError as exc:
         print(f"loam report: {exc}", file=sys.stderr)
         return 2
-    report["private"] = fb.private_route()
-    if report["private"]["ok"]:
-        try:
-            fb.keep(report)
-        except OSError as exc:
-            report["private"] = {"ok": False, "reason": f"the draft could not be kept ({exc})"}
     print(json.dumps(report, indent=2) if args.json else fb.show(report))
     return 0
 
