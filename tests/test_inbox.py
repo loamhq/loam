@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """The inbox outlet and its sweep, both halves proven against a temp vault.
 
-Two things here can destroy something the owner wanted: the archive sweep
-deletes files, and the comms sweep rewrites a file line by line. Both are
+Since 2026-11-19 nothing of Loam's writes on General's board: a failure is
+the log's line, and a fault that is no one persona's is a fact for the
+system persona (lib/loam_attention.py). The sweeps stay, because the
+personas still post on the board. Two things here can destroy something the
+owner wanted: the archive sweep deletes files, and the comms sweep rewrites
+a file line by line. Both are
 bounded by a date, and a date boundary is exactly the kind of thing that is
 off by one and looks fine. So both are tested at the boundary from both
 sides, plus the cases where the sweep must do nothing at all.
@@ -25,7 +29,29 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 
+ATTENTION = Path(tempfile.mkdtemp(prefix="loam-inbox-attention-"))
+import os  # noqa: E402
+os.environ["LOAM_ATTENTION_DIR"] = str(ATTENTION)
+os.environ.setdefault("LOAM_WAITERS_DIR", str(ATTENTION / "waiters"))
+
+import json  # noqa: E402
 import loam_inbox  # noqa: E402
+
+# General's board as the personas keep it; the sweep still sweeps it, and
+# nothing of Loam's writes on it since 2026-11-19.
+SECTIONS = ("Urgent", "Important", "Other")
+COMMS_HEADER = """\
+# From the agents
+
+> One line per item. Nothing pings me. I come and look. Lines older than 14
+> days are swept.
+
+## Urgent
+
+## Important
+
+## Other
+"""
 
 fails = 0
 
@@ -114,7 +140,7 @@ try:
     today = date(2026, 9, 5)
     old, young = today - timedelta(days=15), today - timedelta(days=13)
     comms.write_text(
-        loam_inbox.COMMS_HEADER
+        COMMS_HEADER
         .replace("## Urgent\n",
                  f"## Urgent\n\n- {old} · **a** · fifteen days · [[x]]\n"
                  f"- {young} · **a** · thirteen days · [[x]]\n")
@@ -128,7 +154,7 @@ try:
     check("comms: 13-day line survives", "thirteen days" in after)
     check("comms: undated line untouched", "a hand-written line with no date" in after)
     check("comms: all three headings stand, empty or not",
-          all(f"## {s}" in after for s in loam_inbox.SECTIONS), after)
+          all(f"## {s}" in after for s in SECTIONS), after)
     check("comms: register note stands", "Nothing pings me" in after)
     check("comms: reported exactly the one it dropped", dropped == 1, str(dropped))
 
@@ -136,43 +162,50 @@ try:
     dropped = sweep.sweep_comms(comms, timedelta(days=0), today, False)
     after = comms.read_text(encoding="utf-8")
     check("comms: sections stay when every line expires",
-          all(f"## {s}" in after for s in loam_inbox.SECTIONS)
+          all(f"## {s}" in after for s in SECTIONS)
           and "thirteen days" not in after, after)
 finally:
     shutil.rmtree(root, ignore_errors=True)
 
-# -------------------------------------------------------- the failure pair --
+# ------------------------------------------- the log, and nothing posted --
 root = Path(tempfile.mkdtemp(prefix="loam-inbox-test-"))
 try:
+    def facts():
+        return [json.loads(p.read_text()) for p in sorted(ATTENTION.glob("2*.json"))]
+
     loam_inbox.record_failure("testagent", root, "it broke. And here is the long tail.")
     log = (root / loam_inbox.FAILURE_LOG).read_text(encoding="utf-8")
-    comms = (root / loam_inbox.COMMS).read_text(encoding="utf-8")
-
     check("failure: the log carries the whole reason",
           "it broke. And here is the long tail." in log, log)
-    check("failure: comms carries the first sentence only",
-          "· it broke ·" in comms.replace("it broke.", "it broke"), comms)
-    check("failure: comms line is dated first, so the sweep can read it",
-          any(sweep.DATED_LINE.match(l) and "testagent" in l
-              for l in comms.splitlines()), comms)
-    check("failure: comms line links to the log",
-          loam_inbox.FAILURE_LOG_LINK in comms, comms)
-    check("failure: it lands under Urgent",
-          comms.index("## Urgent") < comms.index("**testagent**")
-          < comms.index("## Important"), comms)
+    check("failure: nothing is written on the board (2026-11-19)",
+          not (root / loam_inbox.COMMS).exists())
+    check("failure: a persona's own failure is told to nobody else",
+          facts() == [], str(facts()))
 
     loam_inbox.record_failure("testagent", root, "it broke. And here is the long tail.")
     log2 = (root / loam_inbox.FAILURE_LOG).read_text(encoding="utf-8")
-    comms2 = (root / loam_inbox.COMMS).read_text(encoding="utf-8")
     check("failure: the log records the repeat, it is a log",
           log2.count("it broke.") == 2, log2)
-    check("failure: comms does NOT, it is not a log",
-          comms2.count("**testagent**") == 1, comms2)
 
-    loam_inbox.record_failure("testagent", root, "a different thing broke.")
-    comms3 = (root / loam_inbox.COMMS).read_text(encoding="utf-8")
-    check("failure: a different item is a new line, newest first",
-          comms3.index("a different thing") < comms3.index("it broke"), comms3)
+    # A fault that is no one persona's: logged, and one fact.
+    loam_inbox.record_fault("lane-check", root, "ada: `_active.md` is 10,001 characters.")
+    loam_inbox.record_fault("lane-check", root, "ada: `_active.md` is 10,240 characters.")
+    told = facts()
+    check("fault: told once though it happened twice (numbers are not the fact)",
+          len(told) == 1 and "10,001" in told[0]["fact"], str(told))
+    check("fault: its evidence is the failure log",
+          told and told[0]["evidence"] == str(root / loam_inbox.FAILURE_LOG), str(told))
+    check("fault: both occurrences are in the log",
+          (root / loam_inbox.FAILURE_LOG).read_text().count("_active.md") == 2)
+    loam_inbox.record_fault("lane-check", root, "ada: a different thing broke.")
+    check("fault: a different fact is told", len(facts()) == 2)
+
+    # An older plugin's call writes nothing on the board.
+    loam_inbox.append_comms(root, "someplugin", "a plugin's line", "[[x]]")
+    check("append_comms: kept for old plugins, it tells and posts nothing",
+          not (root / loam_inbox.COMMS).exists()
+          and any(f["fact"] == "a plugin's line" and f["by"] == "someplugin"
+                  for f in facts()), str(facts()))
 finally:
     shutil.rmtree(root, ignore_errors=True)
 
@@ -192,7 +225,7 @@ try:
     doomed = inbox / "archive" / "genuinely archived.md"
     doomed.write_text("x\n")
     (inbox / "from-agents" / "comms.md").write_text(
-        loam_inbox.COMMS_HEADER.replace(
+        COMMS_HEADER.replace(
             "## Urgent\n", "## Urgent\n\n- 2020-01-01 · **a** · ancient · [[x]]\n"))
 
     # A clock far enough forward that EVERY file in the tree is past every
@@ -211,5 +244,6 @@ try:
 finally:
     shutil.rmtree(root, ignore_errors=True)
 
+shutil.rmtree(ATTENTION, ignore_errors=True)
 print(f"\n{'ALL PASS' if not fails else str(fails) + ' FAILED'}")
 sys.exit(1 if fails else 0)

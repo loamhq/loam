@@ -12,12 +12,14 @@ Three layers, each against the shipped code:
   matcher   lib/loam_account.py over the 09-15 strings, the structured
             category (transcript entry and stream-json api_retry event),
             and answers that must NOT match.
-  inbox     lib/loam_inbox.record_account_refusal: one comms line a night,
-            the count raised in place, a new line on a new date.
+  inbox     lib/loam_inbox.record_account_refusal: one fact a day for the
+            system persona (lib/loam_attention.py; nothing on the board
+            since 2026-11-19), every lane in the log, a new fact on a new
+            date.
   wake      bin/wake end to end, with only the CLI stubbed: two preflight
-            refusals and one mid-run refusal on one night make one comms
-            line counting three; a genuine "NO NO" is still the identity's
-            failure; a genuine non-zero exit is still the CLI's.
+            refusals and one mid-run refusal on one night are one fact; a
+            genuine "NO NO" is still the identity's failure, logged and told
+            to nobody; a genuine non-zero exit is still the CLI's.
 
 Run: python3 tests/test_wake_account.py
 """
@@ -31,8 +33,14 @@ import re
 import shutil
 import subprocess
 import sys
+import os
 import tempfile
 from pathlib import Path
+
+# The system persona's facts land in a scratch folder, never the box's.
+ATTENTION = Path(tempfile.mkdtemp(prefix="loam-account-attention-"))
+os.environ["LOAM_ATTENTION_DIR"] = str(ATTENTION)
+os.environ.setdefault("LOAM_WAITERS_DIR", str(ATTENTION / "waiters"))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_account  # noqa: E402
@@ -149,8 +157,20 @@ def test_matcher_leaves_real_answers_alone():
 # --- inbox -----------------------------------------------------------------
 
 def comms_of(vault: Path) -> str:
+    """The board: it must stay as it was (2026-11-19)."""
     path = vault / loam_inbox.COMMS
     return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def facts() -> list[str]:
+    """What the system persona was told, oldest first."""
+    return [json.loads(p.read_text())["fact"]
+            for p in sorted(ATTENTION.glob("2*.json"))]
+
+
+def reset_facts() -> None:
+    for p in ATTENTION.glob("*.json"):
+        p.unlink()
 
 
 def log_of(vault: Path) -> str:
@@ -160,6 +180,7 @@ def log_of(vault: Path) -> str:
 
 def test_inbox_one_line_a_night():
     root = Path(tempfile.mkdtemp(prefix="loam-account-inbox-"))
+    reset_facts()
     try:
         vault = root / "vault"
         said = loam_account.refusal(PREFLIGHT_ANSWER_0915)
@@ -171,29 +192,25 @@ def test_inbox_one_line_a_night():
             loam_inbox.record_account_refusal(
                 agent, vault, f"reflection account_refused (identity): {said}",
                 said, stamp=stamp)
-        comms = comms_of(vault)
-        lines = [l for l in comms.splitlines() if loam_inbox.ACCOUNT_PREFIX in l]
-        want = ("- 2026-09-15 · **loam** · the account refused runs from 09:22Z "
-                "(YOU'VE HIT YOUR MONTHLY SPEND LIMIT.); 7 lanes skipped · "
-                "[[loam-wake-failures]]")
-        print(f"      the 09-15 night's comms line: {lines[0] if lines else None}")
-        check("inbox: seven refusals in one night are one comms line",
-              len(lines) == 1, comms)
-        check("inbox: that line is the one the brief asked for",
-              lines == [want], repr(lines))
-        check("inbox: no agent's own name is posted for a refusal",
-              not any(f"**{a}**" in comms for a, _ in night))
+        told = [f for f in facts() if loam_inbox.ACCOUNT_PREFIX in f]
+        want = ("The provider account refused runs from 09:22Z (YOU'VE HIT YOUR "
+                "MONTHLY SPEND LIMIT.); every lane it refuses that day is a line "
+                "in the failure log.")
+        print(f"      the 09-15 night's fact: {told[0] if told else None}")
+        check("inbox: seven refusals in one night are one fact", len(told) == 1, told)
+        check("inbox: that fact says what happened", told == [want], repr(told))
+        check("inbox: no agent's own name is in it",
+              not any(a in told[0] for a, _ in night))
+        check("inbox: nothing on the board", comms_of(vault) == "")
         check("inbox: each lane still has its own log entry",
               sum(1 for l in log_of(vault).splitlines()
                   if l.startswith("- `") and "account_refused" in l) == 7)
         loam_inbox.record_account_refusal(
             "pax", vault, "reflection account_refused (identity): x", said,
             stamp="2026-09-16T09:40:50Z")
-        lines = [l for l in comms_of(vault).splitlines()
-                 if loam_inbox.ACCOUNT_PREFIX in l]
-        check("inbox: the next night posts its own line, from 1",
-              len(lines) == 2 and lines[0].startswith("- 2026-09-16")
-              and "; 1 lane skipped" in lines[0], repr(lines))
+        told = [f for f in facts() if loam_inbox.ACCOUNT_PREFIX in f]
+        check("inbox: the next day is a fact of its own",
+              len(told) == 2 and "09:40Z" in told[1], repr(told))
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -254,6 +271,7 @@ def wake_once(root: Path, agent: str, preflight_answer: str,
 
 def test_wake_names_the_night():
     root = Path(tempfile.mkdtemp(prefix="loam-account-wake-"))
+    reset_facts()
     try:
         vault = root / "vault"
         (vault / "00_INBOX" / "from-agents").mkdir(parents=True)
@@ -281,13 +299,13 @@ def test_wake_names_the_night():
               "**pax** — reflection account_refused (identity): YOU'VE HIT "
               "YOUR MONTHLY SPEND LIMIT." in log
               and "soul.md content is not in the composed context" not in log, log)
-        lines = [l for l in comms.splitlines() if loam_inbox.ACCOUNT_PREFIX in l]
-        check("wake: three refused lanes are one comms line counting three",
-              len(lines) == 1 and re.search(
-                  r"^- \d{4}-\d\d-\d\d · \*\*loam\*\* · the account refused runs "
-                  r"from \d\d:\d\dZ \(rate_limit: You've hit your monthly spend "
-                  r"limit\.\); 3 lanes skipped · \[\[loam-wake-failures\]\]$",
-                  lines[0]) is not None, repr(lines))
+        told = [f for f in facts() if loam_inbox.ACCOUNT_PREFIX in f]
+        check("wake: three refused lanes are one fact",
+              len(told) == 1 and re.search(
+                  r"^The provider account refused runs from \d\d:\d\dZ "
+                  r"\(rate_limit: You've hit your monthly spend limit\.\)",
+                  told[0]) is not None, repr(told))
+        check("wake: and nothing on the board", comms == "", comms)
         records = [json.loads(l) for l in
                    (root / "logs" / "wake-pax.jsonl").read_text().splitlines()]
         check("wake: the jsonl stage is account_refused",
@@ -301,14 +319,14 @@ def test_wake_names_the_night():
               otto == 5 and "**otto** — reflection identity preflight "
               "refused: soul.md content is not in the composed context "
               "(expected 'YES NO' for real/decoy, got 'NO NO')" in log, log)
-        check("wake: and it still posts under the agent's own name",
-              "**otto** · reflection identity preflight refused" in comms, comms)
+        check("wake: a persona's own failure is told to nobody but it (its next turn)",
+              comms == "" and not any("otto" in f for f in facts()), facts())
         iris = wake_once(root, "iris", "YES NO", Done(
             1, json.dumps({"subtype": "error_during_execution"}), "boom"))
         check("wake: a genuine non-zero exit is still the CLI's failure",
               iris == 4 and "**iris** — reflection: claude exited 1" in log_of(vault))
-        check("wake: the account line still counts three",
-              "; 3 lanes skipped" in comms_of(vault))
+        check("wake: the account is still one fact",
+              len([f for f in facts() if loam_inbox.ACCOUNT_PREFIX in f]) == 1)
     finally:
         loam_session.SESSIONS_DIR = REAL_SESSIONS
         shutil.rmtree(root, ignore_errors=True)
@@ -321,4 +339,5 @@ test_inbox_one_line_a_night()
 test_wake_names_the_night()
 
 print(f"\n{sum(results)}/{len(results)} passed")
+shutil.rmtree(ATTENTION, ignore_errors=True)
 sys.exit(0 if all(results) else 1)

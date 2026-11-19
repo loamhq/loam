@@ -146,7 +146,7 @@ def record_fault(by: str, vault: Path, reason: str, key: str | None = None) -> s
 # runtime's, not any agent's: the lane that happened to be refused first is
 # not the subject of it.
 ACCOUNT_POSTER = "loam"
-ACCOUNT_PREFIX = "the account refused runs from"
+ACCOUNT_PREFIX = "account refused runs from"
 
 
 def account_text(since: str, reason: str) -> str:
@@ -169,8 +169,8 @@ def record_account_refusal(
     stamp = stamp or now_iso()
     _append_log(vault, agent, reason, stamp)
     loam_attention.tell(
-        f"The provider account {account_text(stamp, provider)}; every lane "
-        f"it refuses that day is a line in the failure log.",
+        f"The provider {account_text(stamp, provider)}; every lane it "
+        f"refuses that day is a line in the failure log.",
         by=ACCOUNT_POSTER, key=f"account-refused:{stamp[:10]}",
         evidence=str(vault / FAILURE_LOG))
 

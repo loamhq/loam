@@ -119,8 +119,8 @@ def main() -> int:
         "Engineer/Platform project.md": "40_PROJECTS/Loam/engineer/projects/loam.md"})
     check("first install: the inbox sweep's paths as they were", first["sweep"],
           ["00_INBOX/archive", "00_INBOX/from-agents/comms.md"])
-    check("first install: a failure lands in from-agents", first["written"],
-          ["00_INBOX/from-agents/comms.md", "00_INBOX/from-agents/loam-wake-failures.md"])
+    check("first install: a failure lands in from-agents, and not on the board",
+          first["written"], ["00_INBOX/from-agents/loam-wake-failures.md"])
 
     inst = probe("an-install", AN_INSTALL)
     flat = json.dumps(inst)
@@ -137,8 +137,8 @@ def main() -> int:
                                "Projects/*/receipts"])
     check("an install: the inbox sweep reads the install's folders", inst["sweep"],
           ["Inbox/archive", "Inbox/boards/general.md"])
-    check("an install: a failure lands there", inst["written"],
-          ["Inbox/boards/general.md", "Inbox/loam-wake-failures.md"])
+    check("an install: a failure lands there, and not on the board", inst["written"],
+          ["Inbox/loam-wake-failures.md"])
 
     print(f"\n{'OK' if not FAILURES else f'{FAILURES} FAILED'}")
     return 1 if FAILURES else 0

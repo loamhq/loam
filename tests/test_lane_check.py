@@ -6,8 +6,9 @@ docstring), so everything it finds is a write into the vault inbox and an
 exit of 0. Two kinds of write since 2026-09-07, and this proves the line
 between them:
 
-  over the limit    the log AND a line under Urgent in comms.md.
-  near the limit    the log alone, once a night, comms untouched.
+  over the limit    the log AND one fact for the system persona
+                    (lib/loam_attention.py); nothing on the board.
+  near the limit    the log alone, once a night, nobody told.
 
 Driven on both sides of ``NEAR_LIMIT_CHARS`` and both sides of ``LIMIT_CHARS``
 by running ``main()`` of the shipped script against a throwaway workspace
@@ -18,6 +19,15 @@ Run: python3 tests/test_lane_check.py
 """
 
 from __future__ import annotations
+
+import json
+import os
+import tempfile as _tempfile
+from pathlib import Path as _Path
+
+ATTENTION = _Path(_tempfile.mkdtemp(prefix="loam-lane-check-attention-"))
+os.environ["LOAM_ATTENTION_DIR"] = str(ATTENTION)
+os.environ.setdefault("LOAM_WAITERS_DIR", str(ATTENTION / "waiters"))
 
 import importlib.machinery
 import importlib.util
@@ -87,11 +97,16 @@ def run(ws: Path) -> tuple[int, str, str]:
 
 
 def inbox(vault: Path) -> tuple[str, str]:
-    texts = []
-    for name in ("loam-wake-failures.md", "comms.md"):
-        path = vault / "00_INBOX" / "from-agents" / name
-        texts.append(path.read_text(encoding="utf-8") if path.exists() else "")
-    return texts[0], texts[1]
+    """The failure log, and what the system persona was told with
+    ``**agent**`` marking an agent's finding. The board must stay empty."""
+    path = vault / "00_INBOX" / "from-agents" / "loam-wake-failures.md"
+    log = path.read_text(encoding="utf-8") if path.exists() else ""
+    assert not (vault / "00_INBOX" / "from-agents" / "comms.md").exists(), "nothing on the board"
+    told = "".join(f"**{r['fact'].split(':')[0]}** {r['fact']}\n" for r in
+                   (json.loads(p.read_text()) for p in sorted(ATTENTION.glob("2*.json"))))
+    for p in ATTENTION.glob("*.json"):
+        p.unlink()
+    return log, told
 
 
 def scenario(label: str, always: int, active: int, *, expect_log: str | None,
@@ -127,7 +142,7 @@ try:
         NEAR_LIMIT_CHARS - 1, LIMIT_CHARS - 1,
         expect_log=WARNING, expect_comms=False, expect_file="_active.md"))
     roots.append(scenario(
-        "_active.md just over the limit: log AND comms",
+        "_active.md just over the limit: log AND one fact",
         NEAR_LIMIT_CHARS - 1, LIMIT_CHARS + 1,
         expect_log="over the", expect_comms=True, expect_file="_active.md"))
 
@@ -165,7 +180,7 @@ try:
           == "lane-check run by hand")
     check("a warned run still reports OK on stdout", "OK" in out, out.strip())
     check("a warned run still exits 0", code == 0, str(code))
-    check("still nothing in comms", f"**{AGENT}**" not in comms)
+    check("still nobody told", f"**{AGENT}**" not in comms)
 finally:
     for root in roots:
         shutil.rmtree(root, ignore_errors=True)

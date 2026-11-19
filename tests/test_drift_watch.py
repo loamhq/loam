@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """bin/drift-watch: what the nightly check-drift says, and where.
 
-  clean        no comms line, no failure, the run in the log.
-  new          one Important comms line per finding the last run lacked.
-  repeat       the same finding the next night posts nothing.
-  clear+back   a finding that cleared and returns is new again.
+  clean        nothing told, no failure, the run in the log.
+  new          one fact for the system persona per finding the last run
+               lacked (lib/loam_attention.py); nothing on the board.
+  repeat       the same finding the next night tells nothing.
+  clear+back   a finding that cleared and returns, once its fact has been
+               quiet, is new again.
   broken       exit 2, a traceback (exit 1 with no finding) and a timeout
-               each land in the failure log, and none posts a drift line.
+               each land in the failure log and are told, and none is a
+               drift fact.
   format       the parser reads check-drift's own report(), not a copy of it.
 
 A fake check-drift is a shell one-liner; the vault, log and state are
@@ -21,9 +24,15 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import io
+import json
+import os
 import sys
 import tempfile
 from pathlib import Path
+
+ATTENTION = Path(tempfile.mkdtemp(prefix="loam-drift-watch-attention-"))
+os.environ["LOAM_ATTENTION_DIR"] = str(ATTENTION)
+os.environ.setdefault("LOAM_WAITERS_DIR", str(ATTENTION / "waiters"))
 
 BIN = Path(__file__).resolve().parent.parent / "bin"
 results: list[bool] = []
@@ -62,38 +71,47 @@ def read(p: Path) -> str:
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
+def told() -> str:
+    """The facts, with each finding's double space back as drift-watch
+    reads it (a fact's whitespace is folded)."""
+    return "\n".join(json.loads(f.read_text())["fact"].replace("] ", "]  ")
+                     .replace(".json [", ".json  [").replace(".timer [", ".timer  [")
+                     for f in sorted(ATTENTION.glob("2*.json")))
+
+
 check("clean exits 0", run(fake(0)) == 0)
-check("clean writes no comms and no failure", not comms.exists() and not failures.exists())
+check("clean tells nothing and fails nothing", told() == "" and not failures.exists())
 check("clean is in the log", "[exit 0]" in read(logf))
 
 A = "ada settings.json  [/home/loam/ai-labs/ada/.claude/settings.json]"
 B = "static loam-x.timer  [/home/loam/.config/systemd/user/loam-x.timer]"
 check("drift exits 0", run(fake(1, A)) == 0)
-check("a new finding is one Important line",
-      read(comms).count("new drift") == 1 and A in read(comms)
-      and read(comms).index("## Important") < read(comms).index(A), read(comms))
+check("a new finding is one fact", told().count("new drift") == 1 and A in told(), told())
+check("and nothing on the board", not comms.exists())
 run(fake(1, A))
-check("the same finding the next night posts nothing", read(comms).count("new drift") == 1)
+check("the same finding the next night tells nothing", told().count("new drift") == 1)
 run(fake(1, A, B))
-check("a second finding beside it posts only itself",
-      read(comms).count("new drift") == 2 and B in read(comms))
+check("a second finding beside it tells only itself",
+      told().count("new drift") == 2 and B in told())
 
-# comms dedupes on its own text, so to see a returning finding post again the
-# first line has to be gone -- as the inbox sweep removes it in life.
+# A returning finding is new to drift-watch; the fact is told again once its
+# key has been quiet (QUIET_DAYS), here by forgetting what was seen.
 run(fake(0))
-comms.write_text(read(comms).replace(A, "swept"), encoding="utf-8")
+(ATTENTION / "seen.json").unlink()
 run(fake(1, A))
-check("a finding that cleared and came back is new again", A in read(comms))
+check("a finding that cleared and came back is new again", told().count(A) == 2, told())
 
-before = read(comms)
+before = told()
 check("exit 2 is a failure", run(fake(2, stderr="boom")) == 2)
 check("the failure log names the exit and stderr",
       "exit 2" in read(failures) and "boom" in read(failures), read(failures))
-check("a broken check posts no drift line", read(comms).count("new drift") == before.count("new drift"))
+check("a broken check is told, and is no drift fact",
+      told().count("new drift") == before.count("new drift") and "check-drift failed" in told())
 check("exit 1 with no finding (a traceback) is a failure",
       run(fake(1, stderr="Traceback ...")) == 2 and "exit 1" in read(failures))
 check("a timeout is a failure",
       run(["sh", "-c", "sleep 5"], timeout=0.5) == 2 and "did not run" in read(failures))
+check("still nothing on the board", not comms.exists())
 
 cd = load("check-drift")
 out = io.StringIO()
