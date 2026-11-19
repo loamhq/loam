@@ -45,10 +45,10 @@ import loam_config as lc
 import loam_broker as cfg
 import loam_provider_usage as usage_store
 
-# The official binary, as Google's installer puts it
-# (``curl -fsSL https://antigravity.google/cli/install.sh | bash``, 1.5.3 on
-# 2026-11-09). It updates itself in the background during runs; there is no
-# pin, unlike Claude Code's and Codex's.
+# The official binary: since 2026-11-19 a link to the build this release pins
+# (lib/loam_pins.py), fetched by its recorded address and SHA-512 rather than
+# by Google's installer (which takes the latest). Its own background updater
+# is off in every child (``env``, the units).
 AGY = str(lc.AGY_BIN)
 
 # Antigravity's own home. There is no documented override (no CODEX_HOME
@@ -93,6 +93,9 @@ def env(base: dict | None = None) -> dict:
     out = dict(os.environ if base is None else base)
     for name in STRIPPED_ENV:
         out.pop(name, None)
+    # The CLI stays at the release's pin (lib/loam_pins.py): its own
+    # background updater is off in every child, read only as `true`.
+    out["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true"
     return out
 
 

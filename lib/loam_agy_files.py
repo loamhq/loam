@@ -19,8 +19,9 @@ Tested by the lead persona 11-15: the CLI has no memory tools and nothing
 carries across conversations, so these are transcripts and an index, not a
 memory. An engineer job's are cleared ``KEEP_DAYS`` after the last job that
 names its conversation finished (a continuation appends to its parent's
-conversation, so a chain keeps it until a week after its last job), by the
-nightly ``provider-follow`` pass (``clear``). A conversation no job names
+conversation, so a chain keeps it until a week after its last job), by
+``bin/clear-agy-files``, which the nightly drift-watch runs (``clear``;
+until 2026-11-19 the provider follower's last step). A conversation no job names
 (a persona's thread session, a probe, the owner's) was never cleared until
 2026-11-16; since then it is cleared once nothing has touched it for a week,
 and a thread that comes back to it starts a fresh session (see

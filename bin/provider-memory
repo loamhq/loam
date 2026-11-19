@@ -7,7 +7,7 @@
 
 What is pinned, and why Antigravity's "pinned off" means "checked empty",
 is lib/loam_provider_memory.py's docstring. The installer runs `pin` after
-installing the CLIs; provider-follow re-pins after each switch; the thread
+installing the CLIs; provider-pin apply re-pins after moving one; the thread
 engine re-pins Claude Code and checks at every session start.
 """
 

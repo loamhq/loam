@@ -67,8 +67,8 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 
 def claude_half(ws: Path, binary: str = CLAUDE) -> tuple[list[str], str]:
-    """The Claude half, on ``binary`` (the pinned link by default; the
-    provider follower passes a candidate build's own path)."""
+    """The Claude half, on ``binary`` (``bin.claude`` by default:
+    ``bin/provider-pin test`` points it at the pinned build)."""
     env = {k: v for k, v in os.environ.items() if k != "LOAM_WAKE"}
     env.update({"CLAUDE_PROJECT_DIR": str(ws), "LOAM_PROBE": "1",
                 "DISABLE_AUTOUPDATER": "1"})
@@ -101,8 +101,8 @@ def codex_mcp_tools(ws: Path, binary: str | None = None) -> list[str]:
 def codex_mcp_status(ws: Path, binary: str | None = None) -> tuple[dict, list[dict]]:
     """``thread/start``'s answer and ``mcpServerStatus/list``'s servers for
     a thread in this workspace, from an app-server started the way the
-    broker starts one, on ``binary`` (the pinned link by default; the
-    provider follower passes a candidate build's own path)."""
+    broker starts one, on ``binary`` (``bin.codex`` by default:
+    ``bin/provider-pin test`` points it at the pinned build)."""
     codex.write_instructions(ws.name, ws)
     codex.write_trust(codex.persona_workspaces(), codex.read_trusted_hooks())
     proc = subprocess.Popen([binary or codex.CODEX, *codex.APP_SERVER_ARGV],

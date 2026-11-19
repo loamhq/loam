@@ -19,7 +19,11 @@ job L13). The rules are all in `lib/loam_update.py`; the command is
 
 What the new code then regenerates is the generators' own output, as on any
 install: the user units (`gen-units`), each live agent's provisioned files
-(`provision`), the providers' memory pins (`provider-memory pin`).
+(`provision`), the provider CLIs at the versions the release was tested
+with (`provider-pin apply`, `lib/loam_pins.py`: each build installed beside
+the others under `~/.local/share/<cli>/versions/` and the link in
+`~/.local/bin/` moved; sign-ins and provider homes untouched), the
+providers' memory pins (`provider-memory pin`).
 
 ## The two kinds of install
 
@@ -166,8 +170,9 @@ commits), plus the folders listed:
 | `library` | always: `bin/library install` (System/Loam, then the skill views) | |
 | `units` | `bin/gen-units` | `systemd/`, except `systemd/system/` (still installed by hand) |
 | `agents` | `bin/provision`, once for each live agent, then `bin/provision --engineer` | `engineer-template/`, `engineer/install/` |
-| `provider-memory` | `bin/provider-memory pin` | |
-| `broker` | `bin/session-broker` | `broker/`, `plugins/` |
+| `providers` | `bin/provider-pin apply --no-restart` | |
+| `provider-memory` | `bin/provider-memory pin` | `lib/loam_pins.py` |
+| `broker` | `bin/session-broker` | `broker/`, `plugins/`, `lib/loam_pins.py` |
 | `gateway` | `bin/plugin-gateway` | |
 
 - **The broker** is restarted by `restart-broker --when-idle`. That waits

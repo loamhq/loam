@@ -871,6 +871,9 @@ OOMScoreAdjust={lc.AGENT_OOM_SCORE_ADJ}
 # it has no "off". This box had autoUpdates:false set the whole time and
 # updated anyway.
 Environment=DISABLE_AUTOUPDATER=1
+# And Antigravity's own updater off (lib/loam_pins.py: the CLIs stay at
+# the release's pin; the variable is read only as `true`).
+Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
 Environment=PATH={lc.UNIT_PATH}
 EnvironmentFile=-{lc.WAKE_ENV}
 WorkingDirectory={workspace}

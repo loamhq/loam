@@ -1006,6 +1006,8 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
         f"--property=SuccessExitStatus={TIMEOUT_EXIT}",
         f"--property=EnvironmentFile=-{lc.WAKE_ENV}",
         "--setenv=DISABLE_AUTOUPDATER=1",
+        # Antigravity's own updater off too (lib/loam_pins.py).
+        "--setenv=AGY_CLI_DISABLE_AUTO_UPDATE=true",
         f"--setenv=PATH={lc.UNIT_PATH}",
     ]
     if project.platform:

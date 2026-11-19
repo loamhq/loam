@@ -59,8 +59,7 @@ UNIT_KINDS = (("engineer_jobs", "loam-engineer-"), ("wakes", "loam-wake-"),
 # planned restart now defers instead (bin/restart-broker); an explicit
 # restart, without `--when-idle`, is the operator's and unchanged.
 RESTART_IDLE = "idle"
-# Kept for readers that name the holding states (lib/loam_follow.py): the
-# known ones. An unknown state holds a restart too; see `restart_blockers`.
+# The known holding states, for readers that name them.  An unknown state holds a restart too; see `restart_blockers`.
 RESTART_HOLDS = ("working", "asking", "background")
 # How long a planned restart waits for idle before it defers: no restart,
 # exit 75, and the caller tries again later. Never a restart at the ceiling.
@@ -100,6 +99,37 @@ def restart_blockers(rows: list[dict] | None,
         held.append(f"{who}'s turn in {tid} "
                     f"{'queued' if isinstance(t, dict) and t.get('queued') else 'in flight'}")
     return held
+
+
+def broker_live(timeout: float = 10) -> dict | None:
+    """`GET /v1/sessions/live`'s body, or None when the read failed."""
+    import http.client  # noqa: PLC0415
+    import json  # noqa: PLC0415
+
+    import loam_broker as cfg  # noqa: PLC0415
+    try:
+        conn = http.client.HTTPConnection(cfg.BIND_ADDR, cfg.PORT, timeout=timeout)
+        conn.request("GET", "/v1/sessions/live",
+                     headers={"Authorization": f"Bearer {cfg.read_token()}"})
+        resp = conn.getresponse()
+        body = resp.read()
+        if resp.status != 200:
+            return None
+        live = json.loads(body)
+        return live if isinstance(live, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def restart_read(timeout: float = 10) -> list[str]:
+    """One fresh read of what holds a planned restart (`restart_blockers`
+    over the rows and the thread turns in flight). Empty means idle; a
+    failed read is busy. (Moved here from the provider follower, retired
+    2026-11-19.)"""
+    live = broker_live(timeout)
+    if live is None:
+        return restart_blockers(None)
+    return restart_blockers(live.get("sessions"), live.get("turns"))
 
 
 def state_of(busy: str | None) -> str:

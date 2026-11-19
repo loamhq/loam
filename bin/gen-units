@@ -10,6 +10,10 @@ The templates' tokens are filled from lib/loam_config.py (lib/loam_units.py
 says which). It never enables or starts anything: a timer is enabled by hand,
 with the `.timer` suffix, as it always was. bin/check-drift compares the
 installed units against the same rendering.
+
+A unit this repository has retired (`loam_units.RETIRED`) and that is still
+installed is stopped, disabled and removed by a full run (not one naming
+units), so an update to a release without it leaves nothing behind.
 """
 
 from __future__ import annotations
@@ -53,6 +57,10 @@ def main(argv: list[str]) -> int:
           + (f": {', '.join(changed)}" if changed else ""))
     if changed and not dry:
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+    if not names:
+        gone = loam_units.retire(dry=dry)
+        if gone:
+            print(f"gen-units: {'would retire' if dry else 'retired'} {', '.join(gone)}")
     return 0
 
 
