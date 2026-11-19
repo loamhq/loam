@@ -131,13 +131,14 @@ finally:
 # -- 4: the follower's units are retired -------------------------------------------------
 check("no follower unit in systemd/",
       sorted(p.name for p in (AGENTS / "systemd").glob("loam-provider-follow.*")), [])
-check("...and both listed as retired", sorted(loam_units.RETIRED),
-      ["loam-provider-follow.service", "loam-provider-follow.timer"])
+FOLLOWER = ["loam-provider-follow.service", "loam-provider-follow.timer"]
+check("...and both listed as retired", sorted(u for u in loam_units.RETIRED if u in FOLLOWER),
+      FOLLOWER)
 check("no follower code left", [p for p in ("bin/provider-follow", "lib/loam_follow.py")
                                 if (AGENTS / p).exists()], [])
 units = TMP / "units"
 (units / "timers.target.wants").mkdir(parents=True)
-for u in loam_units.RETIRED:
+for u in FOLLOWER:
     (units / u).write_text("[Unit]\n")
 os.symlink(units / "loam-provider-follow.timer",
            units / "timers.target.wants" / "loam-provider-follow.timer")

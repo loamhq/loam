@@ -3,6 +3,10 @@
 Each release's notes are written for the people who run Loam, in
 `docs/releases/<version>.md`. The app shows them when it offers an update.
 
+- [0.2.13](docs/releases/0.2.13.md), 2026-11-19: a firewall on every
+  server and history kept from the first minute, plain words that agents
+  and plugins have full control of the server, and an update from an
+  older Loam that starts what a release adds and stops what it retired.
 - [0.2.12](docs/releases/0.2.12.md), 2026-11-19: the Market, in Settings ›
   Market, where your agents find things too and post an install card in any
   thread; Dictation and Read aloud bring their own server, so Loam carries

@@ -72,7 +72,7 @@ def destination_dir(vault: Path) -> tuple[Path, bool]:
     """
     if is_probe():
         return QUARANTINE_DIR, True
-    return vault / "15_CONVERSATIONS", False
+    return vault / lc.vault_folder("conversations"), False
 
 
 @dataclass(frozen=True)

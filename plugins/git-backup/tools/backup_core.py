@@ -673,6 +673,38 @@ def due(tree: str, state: dict, every: str) -> bool:
     return last is None or (now() - last).total_seconds() >= EVERY[every] - 60
 
 
+def same_repository(a: str, b: str) -> bool:
+    """Whether two addresses name one repository: the same text, the same
+    web page (an SSH alias and the host it stands for), or one folder."""
+    if a == b:
+        return True
+    wa, wb = web_address(a), web_address(b)
+    if wa and wb:
+        return wa.lower().removesuffix(".git") == wb.lower().removesuffix(".git")
+    if not parts(a) and not parts(b):
+        try:
+            return Path(a).resolve() == Path(b).resolve()
+        except OSError:
+            return False
+    return False
+
+
+def track(tree: str, url: str, head: str) -> list[str]:
+    """After a push to ``url``, move each remote-tracking `main` of a remote
+    with that same repository to ``head``, as `git push <remote>` would
+    have. The push goes to the address, not to a remote by name, so until
+    2026-11-19 a tree whose `origin` is that repository read "ahead N" in
+    `git status` for ever. Returns the remotes moved."""
+    moved = []
+    names = git(tree, "remote").stdout.split()
+    for name in names:
+        have = git(tree, "remote", "get-url", name).stdout.strip()
+        if have and same_repository(have, url):
+            if git(tree, "update-ref", f"refs/remotes/{name}/{BRANCH}", head).returncode == 0:
+                moved.append(name)
+    return moved
+
+
 def push(tree: str, force: bool = False) -> dict:
     """One backup of one tree: commit what is new (Loam's own routine), then
     send `main` to the repository. Never forced, never to a public one."""
@@ -715,6 +747,8 @@ def push(tree: str, force: bool = False) -> dict:
                            timeout=PUSH_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 done = subprocess.CompletedProcess([], 1, "", "push timed out")
+            if done.returncode == 0:
+                track(tree, url, head)
     except TimeoutError:
         return {"ok": True, "tree": tree, "skipped": "busy: Loam's commit is running"}
     if done.returncode != 0:

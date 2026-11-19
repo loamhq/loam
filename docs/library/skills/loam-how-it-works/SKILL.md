@@ -73,11 +73,26 @@ they need to know. The failure log and Activity keep the quiet record.
 the owner's agents know about them: the agents add to it, and it is the
 owner's to read and edit.
 
+**History and backup.** Every fifteen minutes the vault and AI Spaces are
+each committed to their own git history on the server, so a change anyone
+regrets can be got back from it; nothing leaves the machine. The Git backup
+plugin (Settings › Plugins, off until the owner turns it on) sends that
+history to a private repository of the owner's own. In Files, **Download as
+zip** on the vault, AI Spaces or any folder gives the owner a copy of it as
+it is now, without git's history or anything secret-shaped.
+
 **The engineer** builds and changes Loam itself and the owner's projects.
 An agent hands it a job as a brief, which returns at once; the engineer
 works in its own copy of the repository, and when it is done its receipt,
 with the evidence, comes back to that agent as its next input. Every
-install has one for Loam (project `Loam`). Its role and what it owns are in
+install has one for Loam (project `Loam`). Work on Loam's web app alone
+is a brief to `Loam` with `scope: "app"`, which any agent may send: the
+engineer then changes only the `app/` folder, without the server's admin
+rights, runs the app's tests, and a deploy restarts the app alone; work
+that also touches the server is a `Loam` brief with no scope. Each engineer, Loam's
+included, runs on the provider, model and tiers set for it in Settings ›
+Agents (Loam's is Claude Code until someone changes it), from its next
+job; a job already running keeps what it started on. Its role and what it owns are in
 the vault's projects folder, under `Loam/engineer/` (`role.md`,
 `projects/loam.md`): the owner's to read and change, and an update never
 overwrites a change of theirs. A job that changes how Loam works updates

@@ -207,6 +207,9 @@ class FakeBox(up.Box):
     def app(self):
         return self._do("app")
 
+    def host(self):
+        return self._do("host")
+
 
 def notices() -> list[dict]:
     return up.owed_notices()
@@ -283,7 +286,7 @@ check("...only what reads what changed ran: the library and the units (systemd/)
       box.calls, ["library", "units"])
 check("...the others recorded as skipped, with why",
       [s["name"] for s in rec["steps"] if s["status"] == "skipped"],
-      ["agents", "providers", "provider-memory", "broker", "gateway", "deploy", "app"])
+      ["agents", "providers", "provider-memory", "broker", "gateway", "deploy", "app", "host"])
 check("...the tree is clean after it", git(INSTALL, "status", "--porcelain", "--ignored"), "")
 told = notices()
 check("...a notice that it applied, naming the notes and the kept copy",
@@ -494,16 +497,19 @@ check("the closure: bin/session-broker reads lib/loam_threads.py through its imp
 check("...so 1.0.0 → 1.2.0 needs the broker and the units, not the agents",
       {s: up.needs(s, old, new, changed) for s in up.REGEN},
       {"units": True, "agents": False, "providers": False, "provider-memory": False,
-       "broker": True, "gateway": False, "deploy": False, "app": False})
+       "broker": True, "gateway": False, "deploy": False, "app": False, "host": False})
 check("...a change to the app's folder needs the app redeployed, and nothing else",
       {s: up.needs(s, old, new, ["app/src/server.js"]) for s in up.REGEN},
       {"units": False, "agents": False, "providers": False, "provider-memory": False,
-       "broker": False, "gateway": False, "deploy": False, "app": True})
+       "broker": False, "gateway": False, "deploy": False, "app": True, "host": False})
 check("...a release that moves a CLI pin (lib/loam_pins.py) puts the CLIs at it, "
       "re-pins their memory and restarts the broker, and nothing else",
       {s: up.needs(s, old, new, ["lib/loam_pins.py"]) for s in up.REGEN},
       {"units": False, "agents": False, "providers": True, "provider-memory": True,
-       "broker": True, "gateway": False, "deploy": False, "app": False})
+       "broker": True, "gateway": False, "deploy": False, "app": False, "host": False})
+check("...and the host history's timer needs `loam host install`, not gen-units",
+      (up.needs("host", old, new, ["systemd/system/loam-host-history.timer"]),
+       up.needs("units", old, new, ["systemd/system/loam-host-history.timer"])), (True, False))
 check("...and a change under systemd/system/ alone needs no gen-units",
       up.needs("units", old, new, ["systemd/system/loam-y.service"]), False)
 

@@ -36,12 +36,15 @@ place on a particular machine. Added 2026-11-14 (first release, job L1).
 | `paths.reviewer_state` | the reviewer's notes and memory (its own key: `reviewer/`'s committed config names it) | `<state>/reviewer` |
 | `paths.secrets_env`, `paths.wake_env` | the key files (wake.env: the agents' OAuth token) | `~/.config/loam/` |
 | `paths.mcp_venv` | the MCP servers' Python | `~/.local/share/loam/mcp-venv` |
+| `paths.host_history` | the host's own setup, kept (root's alone; docs/host-history.md) | `/var/lib/loam/host-history` |
 | `paths.pycache` | Python's bytecode cache (`PYTHONPYCACHEPREFIX`) | `~/.cache/loam/pycache` |
 | `bin.claude`, `bin.codex`, `bin.agy`, `bin.uv` | the CLIs | `~/.local/bin/<name>` |
 | `vault.inbox`, `vault.boards`, `vault.general_board`, `vault.conversations`, `vault.projects`, `vault.attachments`, `vault.system` | the vault's own folders, relative to it | `Inbox`, `Inbox/boards`, `Inbox/boards/general.md`, `Conversations`, `Projects`, `Attachments`, `System` |
 | `git.autocommit.name`, `.email` | the identity of the 15-minute vault, workspace and plugin commits (`bin/autocommit`, docs/backup.md) | `loam`, `loam@<user>` |
 | `git.autocommit.max_file_mb` | a file larger than this many megabytes is kept out of those commits and named instead, so a git host's size limit never stops a backup (docs/backup.md) | `100` |
 | `git.identity.name`, `.email` | the Loam HQ bot that makes releases and the `loam` repository's root commit. Never a person's address. | unset until that bot exists |
+| `firewall.open` | ports the inbound wall lets in beside SSH, 80 and 443, as `"22000/tcp"`, `"21027/udp"` or a bare number for TCP (deploy/README.md, "The inbound wall") | absent: none |
+| `firewall.manage` | `false` takes Loam's inbound wall out, for a server whose provider's firewall does the job; a firewall the server already has (ufw, firewalld) is left alone either way | absent: `true` |
 | `engineer.briefers` | the personas who may brief the platform engineer, a list of names (`["ada"]`); a project engineer is open to every persona whatever this says (lib/loam_engineer.py, "Who may brief which project") | absent: every persona |
 | `owner.legacy_ids` | ids an install used for its owner before `owner.id` existed; records that carry one still read as the owner's | absent: none |
 | `deploy.config` | the deployment configuration (domain, `[moved]`, `[[forward]]`) of a box set up by hand, kept outside the checkout so an update never replaces it; same format as `deploy/loam.toml` | absent: `deploy/loam.toml` |

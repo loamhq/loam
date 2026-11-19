@@ -676,7 +676,7 @@ def preflight(project: eng.Project, p: dict[str, Path], brief_meta: dict) -> str
         # A folder project's harness is in its folder (2026-11-16).
         assert_imports_resolve(project.root / project.subdir if project.subdir else project.root)
     except (IdentityError, OSError) as exc:
-        fix = ("`agents/bin/provision --engineer`" if project.platform
+        fix = ("`agents/bin/provision --engineer`" if project.platform or project.lane_of
                else "re-rendering it from `agents/engineer-template/`")
         return (
             f"Refused before starting: the engineer's own composition is "
@@ -989,7 +989,7 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
     argv = [
         "systemd-run", "--user", "--collect",
         f"--unit={unit_name(job_id)}",
-        f"--description=Loam engineer job {job_id} ({project.name})",
+        f"--description=Loam engineer job {job_id} ({eng.display_name(project)})",
         f"--property=OOMScoreAdjust={lc.AGENT_OOM_SCORE_ADJ}",
         "--property=OOMPolicy=continue",
         "--property=StandardOutput=null",
@@ -1048,6 +1048,12 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
         # A scratch registry (lib/loam_engineer.py, PROJECTS_DIR): the inner
         # must find the project the outer did.
         argv.append(f"--setenv=LOAM_PROJECTS_DIR={eng.PROJECTS_DIR}")
+    if os.environ.get("LOAM_HOST_SETTINGS"):
+        # Fixture settings (2026-11-19, lib/loam_engineer.py
+        # host_settings_path): the inner must choose the provider the outer
+        # was asked about, so a probe proves a setting without the box's
+        # own being changed. Nothing in a unit or generator sets it.
+        argv.append(f"--setenv=LOAM_HOST_SETTINGS={os.environ['LOAM_HOST_SETTINGS']}")
     if os.environ.get("LOAM_CONFIG"):
         # A scratch install (2026-11-19): the inner reads the config the
         # outer did, so its records, logs and the result's run are that
@@ -1895,7 +1901,11 @@ def job_label(project: eng.Project | None, job_id: str) -> dict:
             pass
         out.update(job_engine(p))
         out["thread_title"] = thread_title(out["thread"])
-    return {"job": job_id, "project": project.name if project else "?",
+    # The Loam engineer's app-only scope (2026-11-19) reads as Loam's, with
+    # its scope beside it: one engineer in Activity, its tasks and here.
+    return {"job": job_id,
+            "project": (project.lane_of or project.name) if project else "?",
+            "scope": eng.APP_SCOPE if project is not None and project.lane_of else None,
             "title": title, "briefed_by": briefed_by, "run_kind": "job", **out}
 
 
@@ -2040,7 +2050,9 @@ def status_text(status: dict | None = None) -> str:
     """`box_status`, as a person reads it."""
     status = status or box_status()
     def job(row: dict) -> str:
-        return (f"{row['job']} ({row['project']}, briefed by "
+        return (f"{row['job']} ({row['project']}"
+                + (f", {row['scope']} only" if row.get("scope") else "")
+                + ", briefed by "
                 f"{row['briefed_by']}): {row['title']}")
     mem = status.get("memory") or {}
     lines = [f"As of {status['at']}.",
@@ -3035,6 +3047,11 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     # L4): their MCP servers and their words, at launch, so the committed
     # harness in the tree never names a plugin.
     plugin_words = contributions.lane_prompt("engineer")
+    # The platform engineer on Codex or Antigravity (since 2026-11-19, its
+    # provider its owner's to set): no Claude settings hold its harness or
+    # what they deny it, so the wall holds them read-only (lib/loam_codex_job.py,
+    # PLATFORM_LINE), and it is given the directories its Claude settings add.
+    protect, platform_dirs = platform_walls(project, runtime, tree, workdir)
     if runtime == "claude":
         plugin_mcp = contributions.lane_mcp_file("engineer")
         if plugin_mcp:
@@ -3042,7 +3059,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         if plugin_words:
             argv += ["--append-system-prompt", plugin_words]
     if codex:
-        instructions = codex_job.instructions(workdir)
+        instructions = codex_job.instructions(workdir, platform=project.platform)
         if plugin_words:
             instructions = f"{instructions.rstrip()}\n\n{plugin_words}\n"
         p["dir"].joinpath(codex_job.INSTRUCTIONS).write_text(
@@ -3053,6 +3070,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             instructions_text=instructions,
             model=job_model, effort=job_effort,
             mcp_servers=contributions.lane_servers("engineer"),
+            platform=project.platform,
             # Read-only where the repository does not track the harness. A
             # project that commits its harness re-renders it by its own
             # engineer's commit (check-drift says so), so there it stays
@@ -3060,18 +3078,18 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             protected=[tree / name for name in codex_job.HARNESS
                        if (tree / name).exists()
                        and not wt.tracked(tree, name)])
-    protect: list[Path] = []
     agy_argv = None
     if antigravity:
-        instructions = agy_job.instructions(workdir)
+        instructions = agy_job.instructions(workdir, platform=project.platform)
         if plugin_words:
             instructions = f"{instructions.rstrip()}\n\n{plugin_words}\n"
         p["dir"].joinpath(agy_job.INSTRUCTIONS).write_text(
             instructions, encoding="utf-8")
         # Antigravity has no write sandbox to name the harness in, so the
         # wall holds it, where the tree does not track it (as for Codex).
-        protect = [tree / name for name in agy_job.HARNESS
-                   if (tree / name).exists() and not wt.tracked(tree, name)]
+        if not project.platform:
+            protect = [tree / name for name in agy_job.HARNESS
+                       if (tree / name).exists() and not wt.tracked(tree, name)]
 
         def agy_argv(model: str, effort, text: str = prompt) -> list[str]:
             """The walled command line for one Antigravity attempt: the
@@ -3080,11 +3098,15 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                 prompt=agy_job.prompt_arg(p["dir"], agy_job.compose(instructions, text)),
                 job_dir=p["dir"], conversation=resume_from,
                 model=model, effort=effort,
-                extra_dirs=[paths(project, continue_job)["dir"]] if resume_from else [])
+                extra_dirs=[*platform_dirs,
+                            *([paths(project, continue_job)["dir"]] if resume_from else [])])
             return wt.walled(project, record, p["dir"], line, protect=protect)
         argv = agy_argv(job_model, job_effort)
     else:
-        argv = wt.walled(project, record, p["dir"], argv)
+        # `protect` only when a platform job on another CLI has some: every
+        # other job's wall is raised by the call it always was.
+        argv = (wt.walled(project, record, p["dir"], argv, protect=protect)
+                if protect else wt.walled(project, record, p["dir"], argv))
     os.environ.update(wt.wall_env())
     # What this session is started on, read off the command line it is
     # started with (since 2026-11-12), so Activity says the engine and model
@@ -3227,6 +3249,18 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                    f"{ceiling['oom_kill']} OOM kill(s) in the unit)")
     elif codex_run and (returncode != 0 or codex_run.failed):
         outcome = f"exited {returncode} (codex: {codex_run.failed or 'no error event'})"
+    elif agy_run and returncode == 0 and p["receipt"].is_file() \
+            and agy_job.side_call_failure(agy_run.failed, job_model):
+        # The job's work is done and its receipt written; the error is one
+        # of Antigravity's own side calls on another model (lib/loam_agy_job.py
+        # side_call_failure). The job lands, and the receipt says so.
+        outcome = "completed"
+        body += ("\n\n*Antigravity reported an error after the work was done, on "
+                 f"one of its own side calls to "
+                 f"`{agy_job.side_call_failure(agy_run.failed, job_model)}` "
+                 f"(not this job's model, `{job_model}`): `{agy_run.failed[:300]}`. "
+                 "The job's receipt was written, so it is counted as finished "
+                 "and lands.*")
     elif agy_run and (returncode != 0 or agy_run.failed):
         outcome = (f"exited {returncode} (antigravity: "
                    f"{'out of quota: ' if agy_run.quota else ''}"
@@ -3496,10 +3530,31 @@ def run_inner(project: eng.Project, job_id: str) -> int:
 def unknown_project(name: str) -> str:
     return (
         f"No engineer for project {name!r}. Known: "
-        f"{', '.join(sorted(eng.projects()))}. A new project's engineer is "
+        f"{', '.join(sorted(eng.engineers()))}"
+        + (f" (and Loam's app-only work: `Loam` with `scope: {eng.APP_SCOPE}`)"
+           if eng.app_lane() is not None else "")
+        + ". A new project's engineer is "
         f"provisioned by the platform engineer, on a brief to project "
         f"'Loam' that names the project and its repo."
     )
+
+
+def platform_walls(project: eng.Project, runtime: str, tree: Path,
+                   workdir: Path) -> tuple[list[Path], list[Path]]:
+    """(protect, dirs) for the platform engineer on a CLI other than Claude
+    Code (since 2026-11-19): what the wall holds read-only that its Claude
+    settings deny it -- the harness in its tree where the tree does not
+    track it, the transcripts, the list of public apps -- and the directories
+    those settings add (bin/provision, `additionalDirectories`). Empty for a
+    Claude job and for a project engineer, whose own rules are unchanged."""
+    if not project.platform or runtime == "claude":
+        return [], []
+    protect = [workdir / name for name in codex_job.PLATFORM_HARNESS
+               if (workdir / name).exists()
+               and not wt.tracked(tree, str((workdir / name).relative_to(tree)))]
+    protect += codex_job.platform_protect()
+    dirs = [d for d in (eng.AGENTS, eng.VAULT, eng.AI_LABS, lc.PLUGINS) if d.is_dir()]
+    return protect, dirs
 
 
 def platform_defect(project: eng.Project) -> str | None:
@@ -3536,7 +3591,15 @@ def accept(args: dict, briefed_by: str):
     if not isinstance(args, dict):
         return "The tool handed the launcher something that is not an object of arguments."
     project_name = str(args.get("project") or "")
-    project = eng.projects().get(project_name)
+    # The Loam engineer's app-only scope (2026-11-19): `Loam` with `scope:
+    # app`, or `loam-ui` by its name from before, or `Loam` continuing one of
+    # its jobs. lib/loam_engineer.py `brief_target` says which and refuses a
+    # scope that means nothing.
+    project, refusal = eng.brief_target(
+        project_name, one_line(args.get("scope")),
+        one_line(args.get("continue_job")))
+    if refusal:
+        return refusal
     if project is None:
         return unknown_project(project_name)
     defect = platform_defect(project)
@@ -3565,7 +3628,7 @@ def accept(args: dict, briefed_by: str):
     if not involvement:
         return (
             f"involvement is empty. It is {lc.OWNER_NAME}'s words for this job and it "
-            "goes into the receipt as written; if he has said nothing in "
+            "goes into the receipt as written; if they have said nothing in "
             f"particular, the default is 'go and do it, {lc.OWNER_NAME} reviews after "
             "it is running'."
         )
@@ -3606,6 +3669,11 @@ def accept(args: dict, briefed_by: str):
                 f"refactors). Name one of those, or leave it out.")
     if tier:
         extra = {**(extra or {}), "tier": tier}
+    if project.lane_of:
+        # Whose job it is and what it may touch, for the receipt, Activity
+        # and the reader of the brief; the folder is the landing's to hold.
+        extra = {**(extra or {}), "engineer": project.lane_of,
+                 "scope": eng.APP_SCOPE}
     # A title naming the pull request the job updates: open, on this
     # project's repository, or refused here (lib/loam_pr_target.py).
     refusal = pr_target_refusal(project, title)

@@ -4,7 +4,8 @@
 What the launcher promises a Codex job, held here without a model:
 
   the setting       `runtime` in the record picks the CLI, per project; the
-                    platform engineer is Claude Code whatever its record says;
+                    platform engineer is Claude Code whatever its record says
+                    until its own setting names another (2026-11-19);
                     a record without one, or with an unknown one, is Claude
                     Code, and check-drift names both.
   the command line  the model and effort from their one home, the sandbox
@@ -94,7 +95,8 @@ try:
     check("unknown runtime: claude", project({"runtime": "gpt"}).runtime, "claude")
     loam = eng.Project("Loam", root, root / "jobs", platform=True,
                        record={"runtime": "codex"})
-    check("platform engineer: claude always", loam.runtime, "claude")
+    check("platform engineer: Claude Code with no setting, whatever its record says",
+          loam.runtime, "claude")
     check("new projects default to codex", eng.DEFAULT_RUNTIME, "codex")
 
     models = [{"id": eng.CODEX_ENGINEER_MODEL, "efforts": ["low", "high"]}]

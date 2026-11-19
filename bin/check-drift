@@ -571,6 +571,8 @@ def check_projects(findings: list, prov) -> list[str]:
                              f"unreadable: {exc}"))
             continue
         names.append(project.name)
+        if project.lane_of:
+            continue   # the Loam engineer's app-only scope: check_app_scope
         for finding in runtime_findings(project):
             findings.append((f"project {project.name} runtime", str(path), finding))
         root = project.root
@@ -578,6 +580,13 @@ def check_projects(findings: list, prov) -> list[str]:
             findings.append((f"project {project.name} checkout", str(root),
                              "registered but not on disk. Retire it or re-provision."))
             continue
+        # What its test command names is there (2026-11-19, lib/loam_testcmd.py).
+        import loam_testcmd  # noqa: PLC0415
+        import loam_worktree as wt  # noqa: PLC0415
+        # Loam's own record is rooted in engineer/; its suite runs at the top.
+        for finding in loam_testcmd.findings(wt.test_command(project),
+                                             AGENTS if project.platform else root):
+            findings.append((f"project {project.name} test command", str(path), finding))
         if project.pull_request:
             for finding in adopted_harness(root, prov.ADOPT_CLASHES):
                 findings.append((f"project {project.name} history", str(root), finding))
@@ -657,6 +666,34 @@ def check_projects(findings: list, prov) -> list[str]:
                 "it owns.",
             ))
     return names
+
+
+def check_app_scope(findings: list, prov) -> None:
+    """The Loam engineer's app-only scope (2026-11-19): its harness in
+    `app/` against what `bin/provision --engineer` renders there (the Loam
+    engineer's role, the app's shipped project file, the template's CLAUDE.md
+    and settings), and excluded from the repository. Nothing when the
+    checkout has no app."""
+    import loam_engineer as eng  # noqa: PLC0415
+    if eng.app_lane() is None or not prov.APP_PROJECT_SHIPPED.is_file():
+        return
+    if not prov.ENGINEER_ROLE_SRC.is_file():
+        return   # check_engineer reports the missing source
+    home = prov.AGENTS / eng.APP_SCOPE
+    if prov.harness_tracked(prov.AGENTS, eng.APP_SCOPE):
+        return
+    expected = prov.app_scope_render(prov.ENGINEER_ROLE_SRC.read_text(encoding="utf-8"))
+    for rel, text in expected.items():
+        compare(findings, f"app-only scope {rel}", home / rel, text)
+    exclude = prov.AGENTS / ".git" / "info" / "exclude"
+    have = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.is_file() else set()
+    missing = [f"/{eng.APP_SCOPE}/{p}" for p in prov.HARNESS_PATHS
+               if p != "memory/" and f"/{eng.APP_SCOPE}/{p}" not in have]
+    if missing:
+        findings.append((
+            "app-only scope exclude", str(exclude),
+            f"{', '.join(missing)} not excluded, so a `git add -A` puts the "
+            f"harness in the repository. `bin/provision --engineer` adds them."))
 
 
 def check_broker(findings: list) -> list[str]:
@@ -900,6 +937,16 @@ def check_deploy(findings: list) -> list[str]:
                              f"kernel. `sudo systemctl restart {dep.SIGHT_WALL_SERVICE}` "
                              f"raises it (after `systemctl restart docker` if a ufw reload "
                              f"took Docker's chains too):\n" + "\n".join("  " + m for m in missing)))
+    # The inbound wall (2026-11-19): a family nobody guards is a finding,
+    # unless the owner turned it off (`firewall.manage = false`).
+    inbound = dep.inbound_wall_status()
+    if dep.inbound_managed() and dep.INBOUND_FIREWALL_SCRIPT.exists() and (
+            not inbound or ":open" in inbound):
+        findings.append(("deploy inbound wall", f"{dep.INBOUND_FIREWALL_SCRIPT} status",
+                         f"inbound is not guarded ({inbound or 'no answer'}): "
+                         f"`sudo systemctl restart {dep.INBOUND_WALL_SERVICE}` raises it"))
+    elif inbound:
+        notes.append(f"  {inbound}")
     members = dep.docker_group_members()
     if lc.USER in members:
         findings.append(("deploy docker group", "/etc/group",
@@ -1212,6 +1259,7 @@ def main() -> int:
     check_engineer(findings, prov)
     check_reviewer(findings, prov)
     project_names = check_projects(findings, prov)
+    check_app_scope(findings, prov)
     cron_notes = check_crons(findings, names)
     broker_notes = check_broker(findings)
     deploy_notes = check_deploy(findings)
@@ -1237,6 +1285,20 @@ def main() -> int:
                 and not (UNIT_DIR / name).exists()):
             continue
         compare(findings, f"static {name}", UNIT_DIR / name, text)
+    # The host history (2026-11-19, lib/loam_host.py): root's timer, rendered
+    # from systemd/system/ by `loam host install`. Off or stale, the host's
+    # setup stops being kept and nothing else says so.
+    import loam_host  # noqa: PLC0415
+    for name, text in loam_host.render_units(AGENTS).items():
+        compare(findings, f"system {name}", loam_host.SYSTEM_UNIT_DIR / name, text)
+    timer_on = subprocess.run(["systemctl", "is-enabled", loam_host.TIMER],
+                              capture_output=True, text=True).stdout.strip()
+    if timer_on != "enabled":
+        findings.append((
+            "host history timer", f"systemctl is-enabled {loam_host.TIMER}",
+            f"{timer_on or 'unknown'}: the host's setup is not being kept, so "
+            f"`loam host restore` has nothing newer to put back. "
+            f"`sudo loam host install`"))
     # The sign-in watch (bin/claude-signin): with it off, a sign-in or a
     # sign-out is noticed by nothing that runs on its own.
     armed = user_systemctl("is-active", "loam-claude-signin.path")

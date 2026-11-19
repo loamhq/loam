@@ -139,6 +139,9 @@ TRIGGERS = {
     # old release if the new one does not answer.
     "deploy": {"script": "bin/gen-deploy", "dirs": ["deploy/"]},
     "app": {"script": "bin/deploy", "dirs": ["app/", "deploy/"]},
+    # The host history's timer (2026-11-19, lib/loam_host.py): root's, so
+    # gen-units does not install it; `loam host install` does.
+    "host": {"script": "bin/loam-host", "dirs": ["systemd/system/loam-host-history."]},
 }
 STEP_WORDS = {
     "preflight": "Checking the install",
@@ -156,6 +159,7 @@ STEP_WORDS = {
     "gateway": "Restarting the plugin gateway",
     "deploy": "Regenerating the web front and the app's unit",
     "app": "Starting the app on the release now in place",
+    "host": "Installing the host history's timer",
     "views": "Refreshing the agents' skill views",
     "undo-move": "Putting the previous release's code back",
     "undo-library": "Putting System/Loam back",
@@ -168,6 +172,7 @@ STEP_WORDS = {
     "undo-gateway": "Restarting the plugin gateway on the previous release",
     "undo-deploy": "Regenerating the web front from the previous release",
     "undo-app": "Starting the app on the previous release",
+    "undo-host": "Putting the host history's timer back as the previous release had it",
 }
 
 
@@ -1140,6 +1145,18 @@ class Box:
             said.append(f"{name} on {commit[:7]}")
         return ", ".join(said) or "no app runs from this checkout"
 
+    def host(self) -> str:
+        """The host history's timer, as the release now in place has it; a
+        release from before it (an undo) has none, so the timer is stopped
+        rather than left firing a script that is not there."""
+        if (runtime() / "bin" / "loam-host").is_file():
+            return self._root(self.bin("loam-host"), "install")
+        done = subprocess.run(["sudo", "-n", "systemctl", "disable", "--now",
+                               "loam-host-history.timer"], capture_output=True, text=True,
+                              check=False)
+        return "the host history's timer is off: this release has none" + (
+            "" if done.returncode == 0 else f" ({done.stderr.strip()[-200:]})")
+
 
 # Root's Python bytecode, outside the checkout (bin/loam-install's too).
 ROOT_PYCACHE = "/var/cache/loam/pycache"
@@ -1311,7 +1328,7 @@ def verify(version: str) -> str:
 
 
 REGEN = ("units", "agents", "providers", "provider-memory", "broker", "gateway",
-         "deploy", "app")
+         "deploy", "app", "host")
 
 
 def _regenerate(run: Run, box: Box, old: str, new: str, changed: list[str],

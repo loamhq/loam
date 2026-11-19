@@ -3,11 +3,12 @@
 # (install.sh puts it there). Each verb is bin/loam-<verb> beside this file
 # and is listed in VERBS: first release L12 `status`, L13 `update`;
 # 2026-11-17 `report` (to Loam's makers) and `market` (the plugin list);
-# 2026-11-19 `tell` (a fact for the agent that hears of Loam's problems). The
+# 2026-11-19 `host` (keep and put back the host's own setup) and `tell` (a
+# fact for the agent that hears of Loam's problems). The
 # other bin/loam-* files are the runtime's own (the installer, the claim
 # service, the DNS timer) and are not verbs.
 set -eu
-VERBS="status update report market tell"
+VERBS="status update report market host tell"
 here=$(dirname "$(readlink -f "$0")")
 # Python's bytecode never lands in the checkout, however `loam` was reached
 # (a root shell over ssh reads no profile): an update refuses a tree with

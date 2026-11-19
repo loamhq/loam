@@ -283,15 +283,15 @@ ENTRIES: list[Entry] = [
     Entry("provider.login", "action", "Sign a provider in again, or out",
           "POST /api/providers/{provider}/login, .../logout", reach=OWNER,
           why=f"a provider sign-in finishes only in {lc.OWNER_NAME}'s browser, with the "
-              "code the provider's page gives him, and a sign-out ends every "
+              "code the provider's page gives them, and a sign-out ends every "
               "chat's login on that provider"),
     # A plugin's key (2026-11-14, first release L9): a key that belongs to
     # one plugin and no provider, pasted by the owner in the plugin's
     # settings and checked on entry. lib/loam_contributions.py, `settings.secret`.
     Entry("plugin.secret", "action", "Paste a plugin's API key (checked on entry)",
           "PUT/DELETE /api/plugins/{plugin}/secrets/{name}", reach=OWNER,
-          why=f"a key is a credential {lc.OWNER_NAME} pastes himself, and it is "
-              "billed to him"),
+          why=f"a key is a credential {lc.OWNER_NAME} pastes themselves, and it is "
+              "billed to them"),
     # Shared keys (2026-11-18): Settings › Connections › API keys, API keys by provider,
     # each checked on entry and handed only to the plugins that declared the
     # provider (lib/loam_keys.py). A persona's to change too (the owner,
@@ -445,8 +445,8 @@ ENTRIES: list[Entry] = [
                   else (a.get("effective") or {}).get(field)))
       for field, label, values in (
           ("provider", "An engineer's provider",
-           "claude-code, codex or antigravity (Loam's: claude-code only); null "
-           "to follow the default (or the project's record)"),
+           "claude-code, codex or antigravity; null to follow the default "
+           "(or the project's record; for Loam, its built-in Claude Code)"),
           ("model", "An engineer's model",
            "a model its provider lists, or null for the built-in "
            "(Antigravity's: gemini-4-hydrogen-high; its ids carry the level)"),

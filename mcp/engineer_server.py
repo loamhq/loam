@@ -69,8 +69,8 @@ mcp = MCPServer("loam-engineer")
         "1. `title` — a short noun phrase naming the job. It becomes the "
         f"receipt's filename in the vault, which is how {lc.OWNER_NAME} finds it in a "
         "folder listing.\n"
-        f"2. `involvement` is {lc.OWNER_NAME}'s words for this job, quoted. When he "
-        "has said nothing in particular, the default is *go and do it, "
+        f"2. `involvement` is {lc.OWNER_NAME}'s words for this job, quoted. When they "
+        "have said nothing in particular, the default is *go and do it, "
         f"{lc.OWNER_NAME} reviews after it is running*. A job that must change "
         "nothing opens it with `Read-only` (`Read-only. Change nothing, "
         "commit nothing, open no PR.`): the launcher then lands nothing, "
@@ -95,8 +95,19 @@ mcp = MCPServer("loam-engineer")
         f"a model: {lc.OWNER_NAME} sets each engineer's three in Settings. On "
         "`continue_job` it is left out to keep the job's own model.\n"
         "\n"
+        "**`scope: \"app\"` — work on Loam's app alone.** Loam's web app is "
+        "the `app/` folder of Loam's repository, and its engineer is the Loam "
+        "engineer. A brief to project `Loam` with `scope: \"app\"` is open to "
+        "every persona and runs as the app-only workflow: the engineer works "
+        "in `app/`, without sudo, a landing refuses any change outside "
+        "`app/` and runs the app's own tests, and `deploy` restarts the app "
+        "and never the broker. Work that also touches the runtime (a broker "
+        "route, a deploy value) is a `Loam` brief with scope left out: the "
+        "full tests, and the engineer deploys it itself. The old project "
+        "name `loam-ui` still reaches the same workflow.\n"
+        "\n"
         "**`deploy` — land and go live in one job.** For a project whose app "
-        f"runs on this box (loam-ui today), set `deploy: true` when {lc.OWNER_NAME}'s "
+        f"runs on this box (Loam's app, with `scope: \"app\"`), set `deploy: true` when {lc.OWNER_NAME}'s "
         "word for the job is to deploy it ('land and deploy', 'go and do it "
         "... after it is live'). After the branch has merged, passed the "
         "tests and been pushed, the launcher deploys that commit with "
@@ -114,8 +125,8 @@ mcp = MCPServer("loam-engineer")
         "\n"
         f"**The involvement dial, in full.** Tighten it when {lc.OWNER_NAME} has asked "
         "to see something before it lands ('show me the plan before changing "
-        "anything'), loosen it when he has said to just get it done. It is "
-        "per job, not per project, and it is his to set, not yours. It goes "
+        "anything'), loosen it when they have said to just get it done. It is "
+        "per job, not per project, and it is theirs to set, not yours. It goes "
         "into the receipt as written.\n"
         "\n"
         "**A job has no clock and no round-trip cap.** It runs until it is "
@@ -156,10 +167,10 @@ mcp = MCPServer("loam-engineer")
         "\n"
         "The result names the receipt — the vault file at "
         f"`{lc.vault_folder('projects')}/<project>/receipts/`, which is where {lc.OWNER_NAME} reads it. "
-        "Pass that path on when you tell him.\n"
+        "Pass that path on when you tell them.\n"
         "\n"
         f"**What the engineer will not do.** It never talks to {lc.OWNER_NAME} — you "
-        "are its only interlocutor, so anything marked as needing him comes "
+        "are its only interlocutor, so anything marked as needing them comes "
         "back to you to ask. It never makes anything public. It never writes "
         "into an agent's own files. If a brief is ambiguous in a way that "
         "would change the work, it returns the brief instead of guessing.\n"
@@ -188,6 +199,8 @@ mcp = MCPServer("loam-engineer")
     # (lib/loam_autodeploy.py). `tier` (2026-11-15) defaults to "", which
     # the launcher reads as `standard` on a fresh job and as "the job's own
     # model" on a continuation (lib/loam_engineer.py, "Three tiers").
+    # `scope` (2026-11-19) defaults to "", the whole project; "app" on Loam
+    # is its app-only workflow (lib/loam_engineer.py, `brief_target`).
 )
 async def brief(
     project: str,
@@ -198,6 +211,7 @@ async def brief(
     continue_job: str = "",
     deploy: bool | None = None,
     tier: str = "",
+    scope: str = "",
 ) -> dict[str, Any]:
     # Awaited, never blocked on: see the docstring. The launcher returns
     # once the job is launched or queued.
@@ -212,6 +226,7 @@ async def brief(
             "continue_job": continue_job,
             "deploy": deploy,
             "tier": tier,
+            "scope": scope,
         }).encode("utf-8"),
         check=False,
     )
@@ -310,7 +325,7 @@ async def _hand_off(argv: list[str]) -> str:
         "the login. Calling `up` again on your site updates it.\n"
         "- action `down` with `name`: the name goes; your files stay.\n"
         f"- action `publish` with `name` and `yes` ({lc.OWNER_NAME}'s own words and "
-        "the date, quoted): takes the login off. Only on his direct yes, each "
+        "the date, quoted): takes the login off. Only on their direct yes, each "
         "time; the vault is behind the same login. Action `private` puts it "
         "back.\n"
         "- action `list`: every site, its owner, access and expiry."
@@ -359,7 +374,7 @@ async def site(action: str = "list", name: str = "", by: str = "", root: str = "
         "Branch into a new thread does. A new thread with that persona, whose "
         "first line links back to the message and with a line under the "
         "message linking forward; `text` is the opening waiting, unsent, in "
-        f"{lc.OWNER_NAME}'s composer there (write it in his voice: what the branch is "
+        f"{lc.OWNER_NAME}'s composer there (write it in their voice: what the branch is "
         "about and the context it needs, ending open). The persona's first "
         "turn there gets the stretch of the old thread leading to the "
         f"message. For when {lc.OWNER_NAME} asks for a branch.\n"
@@ -450,7 +465,7 @@ SETTINGS = str(lc.ROOT / "bin" / "settings")
     description=(
         f"Change any setting {lc.OWNER_NAME} can change in the Loam app, through the "
         "same route the app's page uses, so it is checked and drawn live "
-        "exactly as his click is, with your name on it (a thread gets a line "
+        "exactly as their click is, with your name on it (a thread gets a line "
         f"saying you did it). For when {lc.OWNER_NAME} asks you to change one.\n"
         "- action `describe`: every setting and action, the page route it "
         "is, and its reach: `persona` is yours; `owner` (sign-ins, "

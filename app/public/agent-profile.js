@@ -199,7 +199,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
         })
       }) : null,
       select('Thinking', own.effort, levels, value => c.patch({ effort: value })),
-      kind === 'engineer' && data.own && data.project !== 'default' ? settingsRow({ title: 'Use the default engineer settings', onclick: () => c.patch({ provider: null }) }) : null,
+      kind === 'engineer' && data.own && data.project !== 'default' ? settingsRow({ title: data.platform ? 'Use the built-in settings' : 'Use the default engineer settings', onclick: () => c.patch({ provider: null }) }) : null,
     ], applies, defaults.not_honoured?.length ? 'Wakes and scheduled runs stay on Claude Code for now.' : null)
   }
   function switchRow(title, sub, value, choose) {
@@ -299,7 +299,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     return [h('button', { class: 'backbtn', onclick: () => { host.state.sheet = { kind: 'settings', page: 'agents' }; c.directory(); host.schedule() } }, icon.chevronLeft(18), 'Agents'),
       ...(!data ? loading() : [host.settingsHead(target.kind === 'engineer' ? data.project === 'default' ? 'Every other project' : `${data.project} engineer` : data.name), ...notices(),
         ...(target.kind === 'engineer' ? [runs(data, 'engineer'), data.project === 'default' ? h('p', { class: 'footnote', text: 'Used by projects without their own settings.' }) : null,
-          data.deploy_on_land != null ? group('When a job lands', switchRow('Deploy when a job lands', null, data.deploy_on_land, value => c.patch({ deploy_on_land: value }))) : null,
+          data.deploy_on_land != null ? group('When a job lands', switchRow(data.deploy_label || 'Deploy when a job lands', null, data.deploy_on_land, value => c.patch({ deploy_on_land: value }))) : null,
           data.project !== 'default' ? group('Instructions', file('Project instructions', data.instructions, null, null, { unavailable: "Kept in the project's code, outside Files" })) : null,
           data.project !== 'default' ? recent(null, data.project) : null] : [
           group('Schedule', [settingsRow({ title: data.plain || data.schedule, sub: data.next_fire ? `Next ${when(data.next_fire)}` : 'No next run', onclick: () => edit('reviewer-time', /at (\d\d:\d\d)/.exec(data.schedule)?.[1] || '04:20') }),

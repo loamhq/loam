@@ -519,12 +519,19 @@ def engineers(running: dict | None = None) -> dict:
     stored = eng.engineer_settings()
     own_rows = stored.get("projects") or {}
     rows = []
-    for name, project in eng.projects().items():
+    # One row per engineer: the Loam engineer's app-only scope (2026-11-19)
+    # is not a second one. Its deploy toggle is on Loam's row.
+    lane = eng.app_lane()
+    for name, project in eng.engineers().items():
         own = own_rows.get(name) if isinstance(own_rows.get(name), dict) else {}
         choice = eng.engineer_choice(project, stored)
         app = None
+        deploy_on = own.get("deploy_on_land") is True
         if not project.platform and not project.pull_request:
             app, _ = loam_autodeploy.app_for(project)
+        elif project.platform and lane is not None:
+            app, _ = loam_autodeploy.app_for(lane)
+            deploy_on = eng.deploy_default(lane)
         if project.platform:
             instructions = {"root": "vault",
                             "path": "40_PROJECTS/Loam/engineer/projects/loam.md",
@@ -546,9 +553,16 @@ def engineers(running: dict | None = None) -> dict:
                           "tiers": _effective_tiers(eng.tier_models(project, stored),
                                                     choice["model"]),
                           "source": choice["source"]},
-            "providers": ["claude-code"] if project.platform else list(ENGINEER_PROVIDERS),
-            "deploy_on_land": (own.get("deploy_on_land") is True) if app else None,
+            # Loam's own too since 2026-11-19: "It should be like the others."
+            "providers": list(ENGINEER_PROVIDERS),
+            "deploy_on_land": deploy_on if app else None,
             "deploy_app": app,
+            # What the toggle does, as the page says it: Loam's deploys the
+            # app after an app-only job; a full Loam job deploys itself.
+            "deploy_label": ("Deploy the app when an app-only job lands"
+                             if project.platform else "Deploy when a job lands")
+                            if app else None,
+            "scopes": [eng.APP_SCOPE] if project.platform and lane is not None else [],
             "lands_by": "pull_request" if project.pull_request else "main",
             "instructions": instructions,
             "jobs_running": (running or {}).get(name, 0),
@@ -585,6 +599,10 @@ def engineer(name: str, running: dict | None = None) -> dict:
     view = engineers(running)
     if name == "default":
         return {"project": "default", **view["default"], "applies": view["applies"]}
+    import loam_engineer as eng  # noqa: PLC0415
+    if name == eng.APP_LANE and eng.app_lane() is not None:
+        # The old name of the app's engineer reads the engineer it now is.
+        name = "Loam"
     row = next((r for r in view["engineers"] if r["project"] == name), None)
     if row is None:
         raise ProfileError(f"no engineer for a project named {name!r}; GET "
@@ -624,23 +642,35 @@ def update_engineer(name: str, patch: dict, check) -> dict:
             raise ProfileError(f"there is no tier {', '.join(bad)}; the tiers are "
                                f"quick, standard and hard")
     is_default = name == "default"
-    project = None if is_default else eng.projects().get(name)
+    lane = eng.app_lane()
+    if lane is not None and name == lane.name:
+        # The Loam engineer's app-only scope (2026-11-19) has no setting of
+        # its own: its jobs run on Loam's provider and tiers, and its deploy
+        # toggle is Loam's. A provider for it alone would be a second
+        # engineer again, so that is refused with where it is set now; the
+        # toggle, which only ever meant app jobs, is Loam's.
+        if fields - {"deploy_on_land"}:
+            raise ProfileError(
+                f"{name} is the Loam engineer's app-only scope since 2026-11-19, "
+                f"and runs on the Loam engineer's provider, model and tiers: set "
+                f"them on Loam (they apply to every Loam job, app-only or not)", 409)
+        name = "Loam"
+    project = None if is_default else eng.engineers().get(name)
     if not is_default and project is None:
         raise ProfileError(f"no engineer for a project named {name!r}; GET "
                            f"/v1/engineers lists them", 404)
-    allowed = ("claude-code",) if project is not None and project.platform \
-        else ENGINEER_PROVIDERS
+    allowed = ENGINEER_PROVIDERS
     if "deploy_on_land" in patch:
         if not isinstance(patch["deploy_on_land"], bool):
             raise ProfileError("`deploy_on_land` is true or false")
-        if is_default or project.platform:
+        if is_default or (project.platform and lane is None):
             raise ProfileError("deploy_on_land is a project's own: "
                                + ("the default has none" if is_default else
                                   "Loam's engineer deploys by running bin/deploy itself"))
         if project.pull_request:
             raise ProfileError(f"{name} lands by pull request, so a landing does not "
                                f"put a job on main; there is nothing to deploy then")
-        app, why = loam_autodeploy.app_for(project)
+        app, why = loam_autodeploy.app_for(lane if project.platform else project)
         if not app and patch["deploy_on_land"]:
             raise ProfileError(why or f"{name} has no app to deploy", 409)
 
@@ -655,11 +685,7 @@ def update_engineer(name: str, patch: dict, check) -> dict:
                     row.pop(k, None)
             elif p not in allowed:
                 raise ProfileError(
-                    f"`provider` for {'Loam' if project is not None and project.platform else 'an engineer'}"
-                    f" is {' or '.join(allowed)}"
-                    + ("; the platform engineer runs on Claude Code only"
-                       if project is not None and project.platform else
-                       "") + ", or null")
+                    f"`provider` for an engineer is {' or '.join(allowed)}, or null")
             else:
                 if row.get("provider") != p:
                     # A provider's models are its own: its tiers go too.
@@ -704,6 +730,10 @@ def update_engineer(name: str, patch: dict, check) -> dict:
         if "deploy_on_land" in patch:
             if patch["deploy_on_land"]:
                 row["deploy_on_land"] = True
+            elif project is not None and project.platform:
+                # Said, not absent: absent reads the app's old row
+                # (lib/loam_engineer.py, `deploy_default`).
+                row["deploy_on_land"] = False
             else:
                 row.pop("deploy_on_land", None)
         if is_default:

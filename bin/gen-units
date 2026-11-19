@@ -5,11 +5,18 @@
                        then `systemctl --user daemon-reload` if any changed
   gen-units --dry-run  say which would change, write nothing
   gen-units NAME...    only these units (`loam-reviewer.service`, ...)
+  gen-units --help     this text, and nothing else
 
 The templates' tokens are filled from lib/loam_config.py (lib/loam_units.py
-says which). It never enables or starts anything: a timer is enabled by hand,
-with the `.timer` suffix, as it always was. bin/check-drift compares the
-installed units against the same rendering.
+says which). It enables nothing it rewrites: a timer that was already
+installed is left as it stands, armed or not. A timer it writes for the
+first time, one a release has just added, it arms (``loam_units.arm_timer``,
+so it does not fire on the spot), because the installer arms every timer it
+renders and an update must leave a box with what a fresh install has; an
+update run by an older release's code knows nothing of the new timer. The
+routine local commit is the one exception: on a box whose crontab already
+commits a tree by hand (lib/loam_autocommit.py) it is written and not armed.
+bin/check-drift compares the installed units against the same rendering.
 
 A unit this repository has retired (`loam_units.RETIRED`) and that is still
 installed is stopped, disabled and removed by a full run (not one naming
@@ -28,6 +35,14 @@ import loam_units  # noqa: E402
 
 
 def main(argv: list[str]) -> int:
+    if "-h" in argv or "--help" in argv:
+        print(__doc__.strip())
+        return 0
+    unknown_flags = [a for a in argv if a.startswith("-") and a != "--dry-run"]
+    if unknown_flags:
+        print(f"gen-units: unknown option {unknown_flags[0]} (--help says what it takes)",
+              file=sys.stderr)
+        return 2
     dry = "--dry-run" in argv
     names = [a for a in argv if not a.startswith("-")]
     units = loam_units.rendered()
@@ -35,7 +50,7 @@ def main(argv: list[str]) -> int:
     if unknown:
         print(f"gen-units: no template for {', '.join(unknown)}", file=sys.stderr)
         return 2
-    changed = []
+    changed, new_timers = [], []
     for name, text in units.items():
         if names and name not in names:
             continue
@@ -44,6 +59,8 @@ def main(argv: list[str]) -> int:
             same = path.read_text(encoding="utf-8") == text
         except FileNotFoundError:
             same = False
+            if name.endswith(".timer"):
+                new_timers.append(name)
         if same:
             continue
         changed.append(name)
@@ -61,7 +78,20 @@ def main(argv: list[str]) -> int:
         gone = loam_units.retire(dry=dry)
         if gone:
             print(f"gen-units: {'would retire' if dry else 'retired'} {', '.join(gone)}")
+    for timer in new_timers:
+        if timer == "loam-autocommit.timer" and hand_routine():
+            print(f"gen-units: {timer} not armed: this box's crontab commits by hand")
+            continue
+        if dry:
+            print(f"gen-units: would arm {timer} (new)")
+            continue
+        print(f"gen-units: armed {timer} (new): {loam_units.arm_timer(timer)}")
     return 0
+
+
+def hand_routine() -> bool:
+    import loam_autocommit  # noqa: PLC0415
+    return any(loam_autocommit.hand_routine(t) for t in loam_autocommit.ORDER)
 
 
 if __name__ == "__main__":
