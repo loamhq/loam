@@ -211,20 +211,6 @@ def model_problem(workspace: Path) -> tuple[str, dict] | None:
         configured, seen, chosen_model(Path(seen.session).stem))
     if verdict != "drift":
         return None
-    # A scheduled lane (a wake, a cron, a fact or a result heard) runs on the
-    # agent's own model in agent.json (loam_profile.lane_choice), which the
-    # owner sets in Settings; a conversation runs on settings.json's. Both
-    # are configured, so a session on either is not drift (2026-11-19: the lead agent's
-    # attention runs on `opus` read as drift against settings.json's `fable`,
-    # a new "drift" for every scheduled session).
-    try:
-        import loam_profile  # noqa: PLC0415
-        agent = json.loads((workspace / "agent.json").read_text(encoding="utf-8"))
-        lane_model = loam_profile.lane_choice(agent, loam_profile.WAKE_MODEL_DEFAULT)[0]
-    except (OSError, ValueError, ImportError):
-        lane_model = None
-    if lane_model and sess.model_matches(lane_model, seen.model):
-        return None
     try:
         last = json.loads((MODEL_MEMORY / f"{workspace.name}.json")
                           .read_text(encoding="utf-8"))

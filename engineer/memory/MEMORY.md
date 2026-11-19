@@ -2666,13 +2666,13 @@ and the content diff, under the same heading. They are now one finding. Since
 - `tests/test_boundary_guard.py`'s "Write under agents/" fails when the suite
   is run from a job tree under `~/.local/state/loam/worktrees/`, and passes
   from the same commit checked out under `$TMPDIR` and in the landing's wall.
-- **The model alarm knew only conversations' model.** Scheduled lanes run
-  on `agent.json`'s `model` (Settings), conversations on
-  `.claude/settings.json`'s; lane-check compared against the second only, so
-  every scheduled session of an agent with its own model was a new "drift",
-  and with a key per session it would have been a new fact every day. Since
-  11-19 a session on either is configured. Found by the check's first live
-  day: the lead agent's attention run on `opus` against `fable`.
+- **The model alarm's first live finding was a real mismatch:** a persona
+  whose profile model was `opus` had `.claude/settings.json` at `fable`, so
+  each scheduled session read as a new drift, keyed per session, a new fact
+  every day. Told once by the check at 12:17 on 11-19; the lead agent
+  briefed the fix the same hour (`d9a2884`, one model per persona). A
+  stop-gap in this job's branch (`c8ca7de`) became redundant and was taken
+  out; its test stays.
 - **A daily fact stays as read until the next daily read**, even once fixed
   (11-19: the project role.md drift was fixed at 12:02 and still carried at
   the 12:10 tick, told as `repeat`, no run). `bin/loam-check --daily`
