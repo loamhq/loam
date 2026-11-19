@@ -113,7 +113,11 @@ USER_AUTHORED = {"soul.md", "config.md"}
 # opened here). A save is attributed through lib/loam_schedule.py's claim.
 SCHEDULES_DIR = "crons"
 
-TRANSCRIPTS = "15_CONVERSATIONS"
+# The vault's conversations folder, as this install names it (`[vault]
+# conversations` in loam.toml: `Conversations` on a fresh install). Until
+# 2026-11-19 a literal of the first box's name, which fenced nothing on a
+# fresh vault.
+TRANSCRIPTS = lc.vault_folder("conversations").strip("/")
 
 # The System root: the runtime's own Markdown, read from the live checkout.
 # Each entry is a virtual path and the one file it is; nothing under the
@@ -324,7 +328,8 @@ def authority(root: str, parts: list[str]) -> str:
     if root == "system":
         return "runtime"
     if root == "vault":
-        return "transcripts" if parts[:1] == [TRANSCRIPTS] else "user"
+        return ("transcripts" if list(parts[:len(Path(TRANSCRIPTS).parts)])
+                == list(Path(TRANSCRIPTS).parts) else "user")
     if len(parts) < 2 or parts[0] == "commons":
         return "runtime" if not parts or parts == ["README.md"] else "persona"
     if parts[1] in RUNTIME_RENDERED:

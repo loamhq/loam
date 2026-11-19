@@ -1786,7 +1786,7 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
                      f"to you {'are' if unshown != 1 else 'is'} not shown here: "
                      f"{'they are' if unshown != 1 else 'it is'} in the thread "
                      f"file.]\n\n")
-    where = record_file or "the thread's file in 15_CONVERSATIONS"
+    where = record_file or f"the thread's file in {lc.vault_folder('conversations')}"
     pointer = (f"\n\n[Earlier history is in the thread file, {where}: every "
                f"message under its id. Read it when you need something from "
                f"before what is shown here.]")
