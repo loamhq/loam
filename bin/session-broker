@@ -1579,8 +1579,8 @@ class Session:
         way, and reading it back is the one answer that cannot be wrong. See
         ``_handle``.
         """
-        # The flags are cfg.CLAUDE_STREAM_FLAGS, one authority shared with the
-        # provider follower's smoke test (2026-11-11). Among them,
+        # The flags are cfg.CLAUDE_STREAM_FLAGS, their one authority
+        # (2026-11-11). Among them,
         # --permission-prompt-tool stdio routes a permission prompt onto the
         # control channel instead of auto-denying it. Without it the CLI
         # denies anything that would prompt and reports it in
@@ -5555,19 +5555,6 @@ class Server:
             await writer.drain()
             return
 
-        # The dictation terms note, read fresh on every ask (2026-09-30). The
-        # file is cfg's one constant; `params` is never read here and a longer
-        # path is not this route, so nothing a client sends can name a file.
-        if parts == ["v1", "dictation-terms"] and method == "GET":
-            note = cfg.dictation_terms()
-            nocache = "Cache-Control: no-store\r\n"
-            if note is None:
-                writer.write(response(404, {"error": "no dictation terms note on this box"},
-                                      nocache))
-            else:
-                writer.write(response(200, note, nocache))
-            await writer.drain()
-            return
 
         # Files (2026-10-02): the vault, the agents' spaces and the runtime's
         # documents, by root and relative path only. lib/loam_files.py holds
@@ -8385,6 +8372,18 @@ async def keep_moved_to_market() -> None:
             print(f"to-market: {pid} {entry['how']}"
                   + (f" ({entry.get('link_error') or entry.get('error')})"
                      if entry["how"] != "link" and (entry.get("link_error") or entry.get("error")) else ""),
+                  file=sys.stderr, flush=True)
+        # Since 0.2.12 each carries its own server half: a copy older than
+        # that gets the listing's version, once, and Read aloud's voices
+        # setting is seeded from the install's old `app.speech_voices`.
+        seeded = await asyncio.to_thread(loam_to_market.seed_voices)
+        if seeded:
+            print(f"to-market: read-aloud voices {seeded['how']}", file=sys.stderr, flush=True)
+        brought = await asyncio.to_thread(loam_to_market.bring_up)
+        for pid, entry in brought.items():
+            print(f"to-market: {pid} server half {entry['how']}"
+                  + (f" ({entry.get('why') or entry.get('error')})"
+                     if entry.get("why") or entry.get("error") else ""),
                   file=sys.stderr, flush=True)
     except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
         print(f"to-market: keeping the moved plugins failed ({exc!r})", file=sys.stderr, flush=True)

@@ -32,7 +32,9 @@ the owner uploads a picture.
 
 **Providers.** An agent runs on Claude Code, Codex or Antigravity; the owner
 picks its default and can change it for one thread. Each provider is given
-the same files in its own shape.
+the same files in its own shape. Each Loam release carries the version of
+each provider's CLI it was tested with, and installs exactly that one; a
+newer CLI arrives with a later Loam release, never by itself overnight.
 
 **Threads.** The owner talks with agents in threads. Loam writes each
 thread's record into the vault as it happens (never edit one). A message
@@ -69,7 +71,8 @@ it. Plugins are shared by link, and the Market (Settings › Market)
 lists what others made (`loam-publishing-to-the-marketplace`).
 
 **Updates** replace Loam's code and this library (`System/Loam/` in the
-vault) and nothing else: agents, the vault, settings and plugins stay. A
+vault), and put the providers' CLIs at the release's versions, and nothing
+else: agents, the vault, settings, sign-ins and plugins stay. A
 change the engineer made to Loam's own code on this install is kept: each
 update merges the release around it, and stops, changing nothing, if the
 two touch the same lines.

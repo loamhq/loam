@@ -127,7 +127,7 @@ try {
     const sent = broker.seen.filter((r) => r.path === `/v1/threads/${id}/messages`).at(-1)
     assert.equal(Object.hasOwn(JSON.parse(sent.body), 'model'), false)
     // Genuine MediaRecorder with synthetic audio, the existing take UI, and a fake transcription reply.
-    await page.route('**/api/transcribe', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ text: 'A clear thought from dictation.' }) }))
+    await page.route('**/x/dictation/transcribe', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ text: 'A clear thought from dictation.' }) }))
     await page.getByRole('button', { name: 'Dictate', exact: true }).click()
     await page.getByRole('group', { name: 'Dictating', exact: true }).waitFor()
     await page.waitForTimeout(400)
@@ -216,8 +216,8 @@ try {
   await redirectPage.goto(app.url)
   await redirectPage.locator('.tt-row').first().waitFor()
   let lookups = 0
-  await redirectPage.route('**/api/speech/lookup', (route) => { lookups++; return route.fulfill({ status: 303, headers: { location: '/login' } }) })
-  await redirectPage.evaluate(async () => { const { authenticatedFetch } = await import('/auth.js'); await authenticatedFetch('/api/speech/lookup', { method: 'POST' }).catch(() => {}); for (let i = 0; i < 10; i++) await authenticatedFetch('/api/speech/lookup', { method: 'POST' }).catch(() => {}) })
+  await redirectPage.route('**/x/read-aloud/speech/lookup', (route) => { lookups++; return route.fulfill({ status: 303, headers: { location: '/login' } }) })
+  await redirectPage.evaluate(async () => { const { authenticatedFetch } = await import('/auth.js'); await authenticatedFetch('/x/read-aloud/speech/lookup', { method: 'POST' }).catch(() => {}); for (let i = 0; i < 10; i++) await authenticatedFetch('/x/read-aloud/speech/lookup', { method: 'POST' }).catch(() => {}) })
   await redirectPage.getByRole('link', { name: 'Sign in again', exact: true }).waitFor()
   assert.equal(lookups, 1, 'a redirect cannot start a speech-lookup storm')
   await redirectPage.screenshot({ path: path.join(out, 'sign-in-again-1440-light.png') })

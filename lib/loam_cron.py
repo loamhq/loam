@@ -541,6 +541,9 @@ OOMScoreAdjust={lc.AGENT_OOM_SCORE_ADJ}
 # Pinned, not drifting. The CLI updated itself once with nobody choosing it;
 # upgrades are an operator decision taken with the changelog open.
 Environment=DISABLE_AUTOUPDATER=1
+# And Antigravity's own updater off (lib/loam_pins.py: the CLIs stay at
+# the release's pin; the variable is read only as `true`).
+Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
 Environment=PATH={lc.UNIT_PATH}
 EnvironmentFile=-{lc.WAKE_ENV}
 WorkingDirectory={cron.workspace}
@@ -597,8 +600,10 @@ Type=oneshot
 # No memory ceiling (2026-11-16), and the agents' place in the kernel's OOM
 # order (lib/loam_config.py), so a runaway run goes before Loam's core.
 OOMScoreAdjust={lc.AGENT_OOM_SCORE_ADJ}
-# Pinned, not drifting: upgrades are an operator decision.
+# Pinned, not drifting: upgrades are an operator decision. Antigravity's own
+# updater off too (lib/loam_pins.py; the variable is read only as `true`).
 Environment=DISABLE_AUTOUPDATER=1
+Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
 Environment=PATH={lc.UNIT_PATH}
 EnvironmentFile=-{lc.WAKE_ENV}
 WorkingDirectory={cron.workspace}

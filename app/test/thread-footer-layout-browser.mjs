@@ -31,7 +31,8 @@ try {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme,
       timezoneId: 'America/Los_Angeles', reducedMotion: 'reduce', isMobile: width === 390, hasTouch: width === 390 })
     await context.route('**/api/health', (route) => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
-    await context.route('**/api/speech/lookup', (route) => route.fulfill({ json: { status: 'none' } }))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+    await context.route('**/x/read-aloud/speech/lookup', (route) => route.fulfill({ json: { status: 'none' } }))
     if (baseline) for (const file of ['threads.js', 'threads.css']) await context.route(`**/${file}`, (route) => route.fulfill({ contentType: file.endsWith('.css') ? 'text/css' : 'text/javascript', body: execFileSync('git', ['show', `${baseline}:public/${file}`], { encoding: 'utf8' }) }))
     await context.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__layout = { threads, schedule };' }))
     const page = await context.newPage(); page.setDefaultTimeout(12000)

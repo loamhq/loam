@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { speakable, speakableBlocks } from '../src/speakable.js'
-import { createBlockDescriber } from '../src/speech-descriptions.js'
+import { speakable, speakableBlocks } from '../../plugins/_listed/read-aloud/page/speakable.js'
+import { createBlockDescriber } from '../../plugins/_listed/read-aloud/server/speech-descriptions.js'
 
 const table = '| Plan | Price |\n| --- | --- |\n| Pro | 20 |'
 const controller = () => new AbortController().signal

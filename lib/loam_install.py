@@ -29,11 +29,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-# The provider builds this release was tested on. The installer installs
-# these exactly (Claude Code and Codex by the same code provider-follow uses);
-# Antigravity's own script installs its latest and the CLI updates itself, so
-# its number is the one the release was tested with, not a pin.
-TESTED = {"claude-code": "2.1.325", "codex": "0.169.0", "antigravity": "1.5.9"}
+# The provider builds this release was tested on are lib/loam_pins.py's
+# PINS, the one place (2026-11-19); step 7 installs exactly those.
 
 # The base domain every person's name lives under (decision 1, 11-14). The one
 # place the product's domain is written; every other file reads `edge.domain`.

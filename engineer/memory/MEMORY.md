@@ -1928,6 +1928,46 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   that is due), so after a switch the first commit may be the push's, not
   the timer's; wait for a timer run to see the timer's own.
 
+## 2026-11-19 — Dictation and Read aloud carry their own server halves (0.2.12)
+
+- **The plugin server surface needed nothing new to take a core route.**
+  `/x/<id>/` (gateway, `Connection: close`, no body cap), the supervised
+  unit, `LOAM_PLUGIN_KEYS` (re-read on every ask, so a key change needs no
+  restart), the broker's `GET /v1/plugins/<id>/agents/<agent>` with
+  `LOAM_BROKER_TOKEN_FILE`, and `LOAM_VAULT_DATA`/`_DIR` (the vault and its
+  system folder are read off the two) covered every route. Node and ffmpeg
+  are on every install (the app runs on the host), so `run: node
+  server/main.js` with the standard library is portable.
+- **A server that used to be core's had three hidden couplings**: the
+  install's `app.speech_voices` (each agent's voice *and character*, which is
+  part of a take's id, so a different spec misses the cache), the page's
+  `speech` flag on the app's `/api/health`, and the thread-branch drafter
+  borrowing Read aloud's Gemini key and its brief model. The voices became a
+  plugin `settings.entry` (seeded once by `loam_to_market.seed_voices`), the
+  flag the plugin's own `/status`, and the drafter got `BRANCH_MODEL`; it
+  still asks the broker for read-aloud's key (left as it was, said in the
+  0.2.12 receipt).
+- **The app's `shippedManifest` reads `contributes:` only as inline JSON**
+  (a YAML block there throws in `listedManifest`, and every audio-plugin
+  test with it). Keep a listed plugin's `contributes` on one line.
+- **A Market plugin moving to a server must be updated before core drops
+  the routes.** On this box: tag, list, install 1.1.0 over the Yours copies
+  (`bin/settings do plugin.install <link>` then `{url, confirm}`; the live
+  broker predates `request`), seed the setting, copy the audio cache
+  (`/var/lib/loam-app/loam-ui/speech`, loam-app 0700, so sudo) into
+  `<private>/read-aloud/speech`, then land. Other installs get `bring_up`.
+- **A listing showed "Uses your Google Gemini key" and "Asks for a key of
+  its own" for one key** because `touches.secrets` counted a
+  `settings.secret` named as the provider's field. `declaration` drops such
+  a name now; a plugin's own unrelated secret still shows.
+- **The page harness (`test/browser.js`) sends `/x/<id>/…` to the app**
+  unless `plugin(id, rest)` names a server; the app then answers 404, which
+  is a Loam with no such plugin.
+- **`_from_release` could not replace a folder that was there**
+  (`os.replace` onto a non-empty directory is ENOTEMPTY): step the old one
+  aside into the staging folder first.
+- **`pkill -f "node server/main.js"` killed the shell again** (2026-11-18's
+  lesson). Kill by pid from `ss -ltnp`.
 ## 2026-11-19 — Remote Control retired
 
 - **Remote Control is gone** (the owner: "I don't use it through app
@@ -1946,6 +1986,38 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Adopted sessions stay** (`lib/loam_adopt.py`): the conversations held
   in the Claude Code app before the retirement still open in Loam, read
   from the CLI's own files.
+
+## 2026-11-19 — the provider CLIs pinned to each release
+
+- **The CLIs are pinned, not followed** (the owner, 2026-11-19: "Sgtm" to
+  each release carrying the versions it was tested with). `PINS` in
+  `lib/loam_pins.py` is the one place. The installer (step 7) and `loam
+  update` (the `providers` step, which also triggers `provider-memory` and
+  `broker`) run `bin/provider-pin apply`; nothing else moves a link. The
+  daily follower (`provider-follow`, its timer, rollback watch, comms lines
+  and tests, ~1,880 lines) is gone; `gen-units` removes its units from a box
+  (`loam_units.RETIRED`) and `check-drift` reports them and any link off
+  its pin.
+- **Moving a pin**: edit `PINS`, `bin/provider-pin test` (installs the
+  builds beside and runs both live parity tests with a `[bin]` config
+  pointing at them; the links stay), land, `bin/provider-pin apply` here
+  (moves the links, re-pins memory, `restart-broker --when-idle`).
+- **Antigravity can be pinned after all**, with two seams found by causing:
+  its updater stops for `AGY_CLI_DISABLE_AUTO_UPDATE=true` (`1` and `TRUE`
+  are ignored; the log line is `Auto-update disabled via environment
+  variable`), and its release server
+  (`.../manifests/linux_amd64.json`, underscore) names only the latest
+  build, whose file URL carries a build id. So its pin is the URL and
+  SHA-512 per platform, and an old pin installs only while Google keeps the
+  file. `agy install` only copies the binary to `~/.local/bin/agy`; Loam
+  links it instead. An `agy` run by hand without the variable can still
+  update itself; check-drift sees it.
+- **A pre-pin release has no `bin/provider-pin`**: an undo back to it
+  leaves the CLIs where they are (`Box.providers`).
+- **The Antigravity file sweep** moved from the follower's last step to
+  `bin/clear-agy-files`, run by the nightly drift-watch after lane-check.
+- **`loam_live.restart_read`** is the broker's live-list reader now (was
+  `loam_follow.restart_read`); `restart-broker` and `move-state` use it.
 ## 2026-11-19 — input to a thread member is durable (batch B step 2)
 
 - **Every queued turn's input is on disk first**:
@@ -2089,3 +2161,54 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Seen, not fixed:** `github-orgs.test.js` fails a test or more now and
   then while `tests/run-all` loads the CPU beside it; 0 of 8 on a quiet box,
   on `main` and on the branch alike.
+- **A test with the fixture config manages the box's real plugin units.**
+  `loam_plugin_servers.managed()` is true when Yours is its config's
+  default, and under `tests/run-all`'s fixture config a scratch Yours is.
+  `test_to_market` installs and removes Dictation and Read aloud; once the
+  listed copies had servers, every run of it (this job's, and every other
+  job's landing after it reached `main`) stopped the live
+  `loam-plugin-dictation`/`read-aloud` units until the five-minute
+  reconcile restarted them (2026-11-19, 08:56 to 10:24 PT, repeatedly).
+  `run-all` now sets `LOAM_PLUGIN_UNITS=0` unless a test says otherwise.
+  Find such a leak with `journalctl --user | grep "Stopped loam-plugin-"`
+  against the landing log's test windows.
+- **A page plugin's listener on `health.changed` runs on every health
+  read**; one that always called `host.schedule()` after a fetch made other
+  page tests (GitHub's cards) fail under a loaded landing and never alone.
+  Redraw only when the answer changed.
+- **`pgrep -f "engineer-job --land"` matches the job's own session** (the
+  prompt names it). Wait on a pid, or on the landing log.
+
+## 2026-11-19 — Signed releases (docs/signing.md)
+
+- **Releases are SSH-signed git tags**, checked with `ssh-keygen -Y
+  find-principals` then `-Y verify -n git` over the tag object cut at its
+  `-----BEGIN SSH SIGNATURE-----` line (what git signs). That needs git and
+  OpenSSH only, and agrees with `git verify-tag` (the test proves it). The
+  verifier also checks the tag object's own `tag` header, because a signed
+  object can be pushed under another release's ref.
+- **The trusted keys are HEAD's committed `docs/releases/signers`**, never the
+  incoming tree's. The move goes to the verified object's commit, because a
+  page `check` during an apply force-fetches the tag ref again.
+- **No key ships yet.** With an empty file nothing is checked and every side
+  says so. Where the private key lives is the maintainers' call: the options
+  table is in docs/signing.md. Until a key is in the file, `cut_release`
+  tags lightweight as before.
+- **`install.sh` cannot import the verifier** (it lives in the unverified
+  clone), so it carries a shell copy and its own key block, which
+  `tests/test_signing.py` keeps equal to the file. Run install.sh in tests
+  with `unshare -r` (uid 0 without root) plus `LOAM_INSTALL_STATE` and
+  `LOAM_INSTALL_LOG`. To stop at the handover, put a `python3` shim first in
+  PATH that catches `*/bin/loam-install`.
+- **A tampered-but-signed tag for tests**: `git cat-file tag <signed> | sed
+  '1s/.*/object <other>/' | git hash-object -t tag -w --stdin`, then
+  `update-ref`. git accepts the object; the signature then fails.
+- **Installs use `--no-install-recommends`**, so git's recommended
+  openssh-client is not guaranteed. It is now in APT and in install.sh's
+  first needs. Any box reached over SSH has it anyway.
+- **A new top-level entry is missing from a landing's test run**
+  (`platform_argv` binds only the top-level entries that already exist in the
+  canonical checkout). The signers file was first `keys/release-signers`, and
+  the landing failed with FileNotFoundError, though every test passed in the
+  job tree. It is now `docs/releases/signers`. Put a new file inside an
+  existing top-level folder, or expect the first landing to fail.

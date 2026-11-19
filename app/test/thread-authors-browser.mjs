@@ -61,12 +61,13 @@ try {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, isMobile: width === 390, hasTouch: width === 390 })
     await context.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__authors = { threads, schedule };' }))
     await context.route('**/api/health', (route) => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
     const posts = []
-    await context.route(/\/api\/speech(?:\/.*)?$/, (route) => {
+    await context.route(/\/x\/read-aloud\/speech(?:\/.*)?$/, (route) => {
       const request = route.request(), url = new URL(request.url())
       if (url.pathname.endsWith('/lookup')) return route.fulfill({ json: { status: 'none' } })
-      if (url.pathname === '/api/speech') posts.push(request.postDataJSON())
-      return route.fulfill({ json: { id: 'a'.repeat(32), status: 'ready', duration_s: 90, url: '/api/speech/' + 'a'.repeat(32) + '/audio.mp3' } })
+      if (url.pathname === '/x/read-aloud/speech') posts.push(request.postDataJSON())
+      return route.fulfill({ json: { id: 'a'.repeat(32), status: 'ready', duration_s: 90, url: '/x/read-aloud/speech/' + 'a'.repeat(32) + '/audio.mp3' } })
     })
     await context.addInitScript(() => {
       globalThis.Audio = class {

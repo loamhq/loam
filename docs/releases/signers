@@ -1,0 +1,11 @@
+# The keys whose signature a Loam release must carry (docs/signing.md).
+#
+# OpenSSH's allowed_signers format, one key a line:
+#   loam-release namespaces="git" ssh-ed25519 AAAA... a comment
+#
+# An install checks a newer release against this file as it is in the
+# release it already runs, so a key added here is trusted from the release
+# after the one that adds it. While this file holds no key line, releases
+# are not checked, and the updater says so. install.sh carries a copy of the
+# key lines between its RELEASE-SIGNERS markers; tests/test_signing.py keeps
+# the two equal.

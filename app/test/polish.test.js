@@ -35,10 +35,10 @@ import {
   whyNewName,
   whyUnknownModel,
   whyWords,
-} from '../src/polish.js'
-import { createApp } from '../src/server.js'
-import { readConfig, fixtureBroker } from './key-fixture.js'
-import { VOCABULARY_MAX_TERMS } from '../src/transcribe.js'
+} from '../../plugins/_listed/dictation/server/polish.js'
+import { dictationConfig as readConfig } from './key-fixture.js'
+import { dictationApp } from './audio-servers.mjs'
+import { VOCABULARY_MAX_TERMS } from '../../plugins/_listed/dictation/server/transcribe.js'
 import { shut, logInto } from './harness.js'
 
 const KEY = 'test-gemini-key-not-a-real-one'
@@ -121,7 +121,7 @@ test('the prompt is Spoken’s, word for word, at both levels', () => {
   assert.equal(polishPrompt('light'), spokenPrompt('light'))
   assert.equal(polishPrompt('full'), spokenPrompt('full'))
   // And the source names the commit the copy is of.
-  assert.match(readFileSync(new URL('../src/polish.js', import.meta.url), 'utf8'), /20117399ed8e2c1c19878650c8a95c6e21f71ae4/)
+  assert.match(readFileSync(new URL('../../plugins/_listed/dictation/server/polish.js', import.meta.url), 'utf8'), /20117399ed8e2c1c19878650c8a95c6e21f71ae4/)
 })
 
 test('the model, the wait, the thresholds and the reasons are Spoken’s', () => {
@@ -307,13 +307,9 @@ test('Off sends nothing and hands back the transcript', async () => {
 
 // ---------------------------------------------------------------- through the route
 
+// Dictation's own server (plugins/_listed/dictation/server/).
 async function appWith(env) {
-  const lines = []
-  const config = readConfig(env)
-  const { server } = createApp({ config, broker: fixtureBroker(config), log: logInto(lines) })
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  return { server, lines, url: `http://127.0.0.1:${server.address().port}` }
+  return dictationApp(env)
 }
 
 function take(app, polish, terms = TERMS) {
@@ -321,10 +317,10 @@ function take(app, polish, terms = TERMS) {
   form.append('audio', new Blob([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3])], { type: 'audio/webm;codecs=opus' }), 'take')
   form.append('terms', JSON.stringify(terms))
   if (polish !== undefined) form.append('polish', polish)
-  return fetch(`${app.url}/api/transcribe`, { method: 'POST', body: form })
+  return fetch(`${app.url}/transcribe`, { method: 'POST', body: form })
 }
 
-test('through /api/transcribe: the transcriber keeps its cap, polish reads every term, and the answer says it ran', async (t) => {
+test('through Dictation’s /transcribe: the transcriber keeps its cap, polish reads every term, and the answer says it ran', async (t) => {
   const app = await appWith({ GEMINI_API_KEY: KEY, GEMINI_API_URL: GEMINI_URL })
   t.after(() => shut(app.server))
   const before = requests.length
@@ -342,7 +338,7 @@ test('through /api/transcribe: the transcriber keeps its cap, polish reads every
   assert.equal(typeof line.polish_ms, 'number')
 })
 
-test('through /api/transcribe: a polish that falls back still answers 200 with the words as heard and why, and logs no word of the answer', async (t) => {
+test('through Dictation’s /transcribe: a polish that falls back still answers 200 with the words as heard and why, and logs no word of the answer', async (t) => {
   const app = await appWith({ GEMINI_API_KEY: KEY, GEMINI_API_URL: GEMINI_URL })
   t.after(() => shut(app.server))
   queued.push({ status: 200, answer: completed(TRAP_RAW) }, { status: 200, answer: completed(TRAP_LIGHT.replace('France?', 'France? Paris.')) })
@@ -360,7 +356,7 @@ test('through /api/transcribe: a polish that falls back still answers 200 with t
   assert.equal(line.polish_ran, false)
 })
 
-test('through /api/transcribe: a take that names no level is not polished, and its answer is as it always was', async (t) => {
+test('through Dictation’s /transcribe: a take that names no level is not polished, and its answer is as it always was', async (t) => {
   const app = await appWith({ GEMINI_API_KEY: KEY, GEMINI_API_URL: GEMINI_URL })
   t.after(() => shut(app.server))
   const before = requests.length

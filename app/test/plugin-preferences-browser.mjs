@@ -30,6 +30,7 @@ try {
     }, before)
     await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__preferences={pluginLoader,pluginSettingsUI,registry,goSettings,state};' }))
     await context.route('**/api/health', route => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
     const page = await context.newPage(), errors = [], captures = [], requests = []
     page.on('pageerror', error => errors.push(error.message))
     page.on('request', request => requests.push(new URL(request.url()).pathname))

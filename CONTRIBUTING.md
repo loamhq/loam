@@ -56,3 +56,9 @@ A release is a tag on `main` equal to the version in `manifest.json`, made
 by a landing that asks for one (`release-tag` in the job's directory). An
 install updates by moving its checkout to the newest release tag on its
 `origin` (`docs/update.md`).
+
+Once `docs/releases/signers` holds a key, a release must be an SSH-signed
+tag, and installs refuse one that does not verify against the keys they
+already hold. The landing signs it when the checkout has a signing key, and
+otherwise leaves it for `bin/sign-release` on the machine that holds the
+key (`docs/signing.md`).

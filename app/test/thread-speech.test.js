@@ -19,15 +19,15 @@ const fixture = await oneProductFixture(), page = browser(fixture.url)
 globalThis.Audio = Audio
 const posts = [], lookups = [], known = new Map()
 let fail = false, pending = false
-const ready = { id: 'a'.repeat(32), status: 'ready', duration_s: 90, url: '/api/speech/' + 'a'.repeat(32) + '/audio.mp3' }
+const ready = { id: 'a'.repeat(32), status: 'ready', duration_s: 90, url: '/x/read-aloud/speech/' + 'a'.repeat(32) + '/audio.mp3' }
 const reply = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 const pass = globalThis.fetch
 const key = (body) => JSON.stringify([body.chat_id, body.mode, body.text])
 globalThis.fetch = async (url, options = {}) => {
-  if (url === '/api/health') return reply({ configured: true, ok: true, speech: true })
-  if (url === '/api/speech/lookup') { const body = JSON.parse(options.body); lookups.push(body); return reply(known.get(key(body)) ?? { status: 'none' }) }
-  if (url === '/api/speech') { const body = JSON.parse(options.body); posts.push(body); if (fail) return reply({ error: 'Could not make this take.' }, 500); pending = true; return reply({ id: ready.id, status: 'preparing', stage: 'voicing' }, 202) }
-  if (String(url) === `/api/speech/${ready.id}`) { if (pending) return reply({ id: ready.id, status: 'preparing' }, 202); known.set(key(posts.at(-1)), ready); return reply(ready) }
+  if (url === '/x/read-aloud/status') return reply({ speech: true })
+  if (url === '/x/read-aloud/speech/lookup') { const body = JSON.parse(options.body); lookups.push(body); return reply(known.get(key(body)) ?? { status: 'none' }) }
+  if (url === '/x/read-aloud/speech') { const body = JSON.parse(options.body); posts.push(body); if (fail) return reply({ error: 'Could not make this take.' }, 500); pending = true; return reply({ id: ready.id, status: 'preparing', stage: 'voicing' }, 202) }
+  if (String(url) === `/x/read-aloud/speech/${ready.id}`) { if (pending) return reply({ id: ready.id, status: 'preparing' }, 202); known.set(key(posts.at(-1)), ready); return reply(ready) }
   return pass(url, options)
 }
 page.watch(); await import('../public/app.js'); page.unwatch()

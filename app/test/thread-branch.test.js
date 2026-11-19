@@ -42,7 +42,7 @@ test('without a vendor key a record-based opening creates an editable branch wit
 })
 
 test('branch writer uses the broker prompt and configured brief model; only title/draft and picker facts reach the page', async () => {
-  const calls = [], config = readConfig({ GEMINI_API_KEY: 'synthetic-key', SPEECH_BRIEF_MODEL: 'configured-brief-model' })
+  const calls = [], config = readConfig({ GEMINI_API_KEY: 'synthetic-key', BRANCH_MODEL: 'configured-brief-model' })
   const draft = createBranchDrafter(config, { fetchImpl: async (url, init) => {
     calls.push({ url, ...init }); return Response.json(model('```json\n{"title":"Make room for Friday","draft":"Let’s keep Friday open. What could move?"}\n```'))
   } })

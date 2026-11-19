@@ -285,9 +285,9 @@ ENTRIES: list[Entry] = [
           why=f"a provider sign-in finishes only in {lc.OWNER_NAME}'s browser, with the "
               "code the provider's page gives him, and a sign-out ends every "
               "chat's login on that provider"),
-    # A plugin's key (2026-11-14, first release L9): read aloud's and
-    # dictation's API key, pasted by the owner in the plugin's settings and
-    # checked on entry. lib/loam_contributions.py, `settings.secret`.
+    # A plugin's key (2026-11-14, first release L9): a key that belongs to
+    # one plugin and no provider, pasted by the owner in the plugin's
+    # settings and checked on entry. lib/loam_contributions.py, `settings.secret`.
     Entry("plugin.secret", "action", "Paste a plugin's API key (checked on entry)",
           "PUT/DELETE /api/plugins/{plugin}/secrets/{name}", reach=OWNER,
           why=f"a key is a credential {lc.OWNER_NAME} pastes himself, and it is "
@@ -782,12 +782,6 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "rest === '/agents'": "a read",
     "rest === '/health'": "a read",
     "rest === '/limits'": "a read",
-    "rest === '/dictation-terms'": "a read (the terms note is a vault file)",
-    "rest === '/transcribe'": "dictation itself, not a setting",
-    "rest === '/speech'": "reading a reply aloud, not a setting",
-    "rest === '/speech/lookup'": "a read",
-    "/^\\/speech\\/([^/]+)$/": "a read",
-    "/^\\/speech\\/([^/]+)\\/audio\\.mp3$/": "a read",
     "/^\\/files\\/(roots|list|stat|read|resolve)$/": "a read",
     "rest === '/files/config'": "a read",
     "rest === '/files/link'": "a read",

@@ -33,6 +33,7 @@ try {
   const ctx = await browser.newContext({ viewport: { width: 390, height }, isMobile: true, hasTouch: true, colorScheme: theme })
   await ctx.route('**/app.js', r => r.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__sheets = { threads, state, files, picker, schedule, openSheet, goSettings };' }))
   await ctx.route('**/api/health', r => r.fulfill({ json: { configured: true, ok: true, speech: true } }))
+  await ctx.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
   await ctx.route('**/api/files/roots', r => r.fulfill({ json: { roots: [{ root: 'vault', name: 'Vault', writable: true }] } }))
   const page = await ctx.newPage(), errors = []
   page.setDefaultTimeout(10000)

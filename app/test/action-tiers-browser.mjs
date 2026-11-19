@@ -45,7 +45,8 @@ try {
     const context = await browser.newContext({viewport:{width,height:width<1100?844:1000},colorScheme:mode,isMobile:width<1100,hasTouch:width<1100,reducedMotion:'reduce'})
     await context.route('**/app.js', route => route.fulfill({contentType:'text/javascript',body:source+'\nglobalThis.__tiers={threads,state,draft,growDraft,schedule};'}))
     await context.route('**/api/health', route => route.fulfill({json:{configured:true,ok:true,speech:true}}))
-    await context.route('**/api/speech/lookup', route => route.fulfill({json:{status:'none'}}))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+    await context.route('**/x/read-aloud/speech/lookup', route => route.fulfill({json:{status:'none'}}))
     const page=await context.newPage(); page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message))
     const settle=async()=>{await page.evaluate(()=>document.fonts.ready);await page.waitForTimeout(100)}
     const bring=async locator=>{await locator.evaluate(n=>{const pane=n.closest('.tt-stream');pane.scrollTop+=n.getBoundingClientRect().top-pane.getBoundingClientRect().top-80;pane.dispatchEvent(new Event('scroll'))});await settle()}
