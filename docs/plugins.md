@@ -105,7 +105,11 @@ needs and what leaves the server, all in words a person who does not build
 software reads easily. Then a rule (`---`) or a `## Technical details`
 heading, and below it everything exact: hosts, files, permissions,
 settings. A plugin's page shows the plain part at the top and the technical
-part under Details at its foot.
+part under Details at its foot. Once the plugin is on and set up (its
+declared keys saved, and a value in any `settings.entry` marked
+`setup: true`, as Git backup's repositories are), its page leads with its
+controls and keeps the pictures and plain words in a closed "How it works"
+under them; off or not yet set up, they open above its switch.
 
 **A README read by the Market** (2026-11-19) may mark what its listing's page
 already shows: its one-line promise between `<!-- loam:hero -->` and
