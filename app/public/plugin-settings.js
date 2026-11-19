@@ -144,7 +144,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     return h('div', { class: 'plugin-list-item', key: row.key }, h('div', { class: 'plugin-list-row' },
       h('button', { type: 'button', class: 'setrow plugin-row', onclick: () => open(row), 'aria-label': `About ${row.name || row.id}`, 'aria-description': row.switch === 'appearance' ? `${meta(row)} · ${themeState}` : meta(row) },
         pluginIcon(row),
-        h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: row.name || row.id }), h('div', { class: 'setrow-sub', text: row.description || (row.switch === 'appearance' ? 'Theme' : row.on ? 'On' : row.id === 'git-backup' ? 'Off-box backup is off' : 'Off') }),
+        h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: row.name || row.id }), h('div', { class: 'setrow-sub', text: row.description || (row.switch === 'appearance' ? 'Theme' : row.on ? 'Enabled' : row.id === 'git-backup' ? 'Off-box backup is off' : 'Disabled') }),
           // Backup off is a state worth saying under its promise (f8d860d).
           row.description && row.id === 'git-backup' && !row.on ? h('span', { class: 'plugin-mark plugin-mark-warn', text: 'Off-box backup is off' }) : null,
           linked(row) ? h('span', { class: 'plugin-mark plugin-mark-link' }, icon.link(11), 'From a link') : null,
