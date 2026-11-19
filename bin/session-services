@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Reconcile the running session services to the landed checkout."""
+import argparse
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import loam_lock
+from loam_session_services import Deferred, replace
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mode", choices=["reconcile", "api", "host", "split", "combined"])
+    args = parser.parse_args()
+    try:
+        with loam_lock.live("Loam", "session-services"):
+            print(replace(args.mode), flush=True)
+    except Deferred as exc:
+        print(f"session restart deferred: {exc}", file=sys.stderr)
+        sys.exit(75)

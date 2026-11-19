@@ -130,8 +130,9 @@ TRIGGERS = {
     # then the memory pins and the broker follow, so new sessions run them.
     "providers": {"script": "bin/provider-pin", "dirs": []},
     "provider-memory": {"script": "bin/provider-memory", "dirs": ["lib/loam_pins.py"]},
-    "broker": {"script": "bin/session-broker",
-               "dirs": ["broker/", "plugins/", "lib/loam_pins.py"]},
+    "broker": {"script": "bin/session-broker", "also": ["bin/session-host"],
+               "dirs": ["broker/", "plugins/", "lib/loam_pins.py", "systemd/session/",
+                        "systemd/loam-session-broker.service"]},
     "gateway": {"script": "bin/plugin-gateway", "dirs": []},
     # Loam's own app runs from a release of this checkout (2026-11-16): the
     # deployment layer is re-rendered (its unit template among it), then the
@@ -436,6 +437,8 @@ def needs(step: str, old: str, new: str, changed: list[str]) -> bool:
     spec = TRIGGERS[step]
     pre = prefix()
     reads = import_closure(new, spec["script"]) | import_closure(old, spec["script"])
+    for entry in spec.get("also", []):
+        reads |= import_closure(new, entry) | import_closure(old, entry)
     if not reads and not spec["dirs"]:
         return False
     for path in changed:
@@ -1089,6 +1092,15 @@ class Box:
             if done.returncode:
                 raise RuntimeError(done.stderr.strip() or f"exit {done.returncode}")
             return done.stdout.strip() or "restarted (seam)"
+        import loam_units
+        if loam_units.split_marker().exists():
+            proc = subprocess.run([sys.executable, self.bin("session-services"), "reconcile"],
+                                  capture_output=True, text=True, env=self.env)
+            if proc.returncode == 75:
+                raise BrokerDeferred(proc.stderr.strip())
+            if proc.returncode:
+                raise RuntimeError(proc.stderr.strip() or f"exit {proc.returncode}")
+            return proc.stdout.strip()
         before = _main_pid(BROKER_UNIT)
         proc = subprocess.Popen([sys.executable, self.bin("restart-broker"), "--when-idle"],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1290,11 +1302,24 @@ def refresh_views() -> str:
     return f"{len(changed)} skill view(s) changed" if changed else "views current"
 
 
+def combine_if_older(target):
+    # Called under the live lock, before moving away from the code that can
+    # safely drain a separate host. Older releases install the combined unit.
+    import loam_units
+    if loam_units.split_marker().exists() and show(target, prefix() + "bin/session-services") is None:
+        from loam_session_services import Deferred, replace
+        try:
+            replace("combined")
+        except Deferred as exc:
+            raise Refusal("busy", str(exc)) from exc
+
+
 def move_to(tag: str, kind: str, commit: str | None = None) -> str:
     """Move the checkout to release ``tag``: to ``commit``, the one its
     signature check verified, when given."""
     target = commit or f"refs/tags/{tag}"
     with loam_lock.live("Loam", "update"):
+        combine_if_older(target)
         if kind == "development":
             who = [] if git("config", "user.email", check=False).stdout.strip() else [
                 "-c", f"user.name={lc.AUTOCOMMIT_NAME}",
@@ -1315,6 +1340,7 @@ def move_to(tag: str, kind: str, commit: str | None = None) -> str:
 
 def reset_to(commit: str) -> str:
     with loam_lock.live("Loam", "update"):
+        combine_if_older(commit)
         git("merge", "--abort", check=False)
         git("reset", "--quiet", "--hard", commit)
     return f"the checkout is at {commit[:12]} again"

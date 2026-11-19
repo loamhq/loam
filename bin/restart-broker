@@ -97,6 +97,12 @@ def main(argv=None, *, wait=wait_idle, lock=None, restart=None,
     ap.add_argument("--max-wait", type=float, default=None)
     ap.add_argument("--ceiling", type=float, default=None)
     args = ap.parse_args(argv)
+    # Provider pin changes use this planned host restart too. Each attempt
+    # tests and holds the same fence as a release while actually restarting.
+    import loam_units
+    if loam_units.split_marker().exists() and args.when_idle:
+        return subprocess.run([sys.executable, str(Path(__file__).with_name("session-services")),
+                               "host"], check=False).returncode
     if args.ceiling is None:
         import loam_live  # noqa: PLC0415
         args.ceiling = loam_live.RESTART_CEILING_S

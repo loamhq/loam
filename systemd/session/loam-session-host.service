@@ -1,0 +1,15 @@
+[Unit]
+Description=Loam provider sessions
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5s
+OOMScoreAdjust=@CORE_OOM@
+Environment=PATH=@UNIT_PATH@
+Environment=DISABLE_AUTOUPDATER=1
+Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
+WorkingDirectory=@ROOT@
+RuntimeDirectory=loam-session
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/python3 @ROOT@/bin/session-host --socket %t/loam-session/host.sock

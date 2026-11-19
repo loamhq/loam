@@ -1323,6 +1323,9 @@ def main() -> int:
                 and not (UNIT_DIR / name).exists()):
             continue
         compare(findings, f"static {name}", UNIT_DIR / name, text)
+    if not loam_units.split_marker().exists() and (UNIT_DIR / loam_units.HOST_UNIT).exists():
+        findings.append(("session host topology", str(UNIT_DIR / loam_units.HOST_UNIT),
+                         "A separate provider host unit remains on a combined install."))
     # The host history (2026-11-19, lib/loam_host.py): root's timer, rendered
     # from systemd/system/ by `loam host install`. Off or stale, the host's
     # setup stops being kept and nothing else says so.

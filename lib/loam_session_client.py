@@ -193,12 +193,16 @@ class RemoteRegistry:
         self.stopping = False
         self._room = {}
         self._seats = 0
+        self.host_fenced = False
         super().__init__()
 
     async def synchronize(self):
         data = await self.client.call("registry")
         self.sessions = {v["record"]["session_id"]: RemoteSession(self.client, v)
                          for v in data["sessions"]}
+        self.host_fenced = data["admission_closed"]
+        self.host_pid = data["pid"]
+        self.host_revision = data["revision"]
         self._room, self._seats = data["room"], data["seats"]
 
     async def listen_registry(self, ready):

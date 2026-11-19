@@ -810,7 +810,7 @@ def step_units(a, ans: dict) -> None:
     run(["systemctl", "enable", "loam-user-manager.service"])
     # The user's units, rendered from the templates; services started and
     # timers armed so that none fires on the spot (lib/loam_units.py).
-    as_user(cfg, ["python3", f"{root}/bin/gen-units"])
+    as_user(cfg, ["python3", f"{root}/bin/gen-units", "--fresh-install"])
     as_user(cfg, ["systemctl", "--user", "daemon-reload"])
     for svc in (brk.SERVICE, "loam-plugins-gateway.service"):
         as_user(cfg, ["systemctl", "--user", "enable", "--now", svc])

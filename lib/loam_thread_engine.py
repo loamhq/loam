@@ -74,6 +74,7 @@ import loam_provider_memory as provider_memory
 import loam_broker as cfg
 from loam_provider_session import configure_thread
 import loam_thread_steps as steps
+import loam_session_fence as fence
 import loam_thread_inputs as inputs
 import loam_threads as threads
 import loam_waiters
@@ -1324,70 +1325,76 @@ class ThreadEngine:
         return counts
 
     async def _work(self, key: tuple[str, str]) -> None:
-        thread_id = key[0]
         queue = self.queues[key]
         while not queue.empty():
-            turn = queue.get_nowait()
-            try:
-                if getattr(self.broker, "stopping", False):
-                    # No session starts once the broker is stopping
-                    # (2026-11-10): the 11-10 stop hung on a start it began
-                    # after SIGTERM. The input stays on disk and is given
-                    # when the broker starts again (2026-11-19); nothing is
-                    # posted.
-                    continue
-                if loam_agents.is_archived(turn.persona, threads.AI_LABS):
-                    # Asleep (2026-11-14): a thread's default or member that
-                    # was archived answers nothing; its threads stay readable
-                    # and go on with another agent.
-                    self.mark(thread_id, turn.persona, (
-                        f"{threads.display(turn.persona)} is archived, so it "
-                        f"won't answer. Tag another agent, or restore "
-                        f"{threads.display(turn.persona)} in Settings › Agents › "
-                        f"Archived."))
-                    continue
-                if not turn.dispatch and self.already_heard(turn):
-                    continue
-                await self.run_turn(turn)
-            except OSError as exc:
-                if not turn.dispatch and not getattr(self.broker, "remote", False):
-                    self.mark(thread_id, turn.persona,
-                              f"{threads.display(turn.persona)}'s turn failed: {exc}")
-                    continue
-                # A failed cursor or markdown write is retryable. Keep the
-                # same intent at the head, even if a shutdown interrupts us.
-                turn.settle = False
-                steps.log(f"{thread_id} {turn.persona}: retrying dispatch "
-                          f"{turn.input_id} after IO failure ({exc})")
-                await asyncio.sleep(1)
-                entries = inputs.items(*key)
-                item = next((entry for entry in entries if entry["id"] == turn.input_id), None)
-                if item and not getattr(self.broker, "stopping", False):
-                    self._unclaim(key, [Turn.of_entry(*key, item)])
-            except asyncio.CancelledError:
-                turn.settle = False
-                raise
-            except Exception as exc:  # noqa: BLE001 - one turn must not end the queue
-                if getattr(self.broker, "stopping", False):
-                    # Its input is kept for the next start, unless the turn
-                    # had already posted words.
-                    text = (ended_sentence(turn.persona, "stopping")
-                            if turn.posted else None)
-                else:
-                    text = (str(exc) if isinstance(exc, NoSeat) else
-                            f"{threads.display(turn.persona)}'s turn failed: "
-                            f"{getattr(exc, 'message', None) or exc}")
-                if text:
-                    self.mark(thread_id, turn.persona, text)
-            finally:
-                if turn.settle:
-                    self._settle_inputs(key, [turn])
-                self.turns.pop(key, None)
-                self.turn_sessions.pop(key, None)
-                self.turn_live.pop(key, None)
-                # The row's `running` went false; the list hears it.
-                self.publish(thread_id, {"type": "turn.finished",
-                                         "persona": turn.persona})
+            with fence.admission() as admitted:
+                if admitted:
+                    await self._work_one(key, queue.get_nowait())
+            if not admitted:
+                await asyncio.sleep(.25)
+
+    async def _work_one(self, key, turn):
+        thread_id = key[0]
+        try:
+            if getattr(self.broker, "stopping", False):
+                # No session starts once the broker is stopping
+                # (2026-11-10): the 11-10 stop hung on a start it began
+                # after SIGTERM. The input stays on disk and is given
+                # when the broker starts again (2026-11-19); nothing is
+                # posted.
+                return
+            if loam_agents.is_archived(turn.persona, threads.AI_LABS):
+                # Asleep (2026-11-14): a thread's default or member that
+                # was archived answers nothing; its threads stay readable
+                # and go on with another agent.
+                self.mark(thread_id, turn.persona, (
+                    f"{threads.display(turn.persona)} is archived, so it "
+                    f"won't answer. Tag another agent, or restore "
+                    f"{threads.display(turn.persona)} in Settings › Agents › "
+                    f"Archived."))
+                return
+            if not turn.dispatch and self.already_heard(turn):
+                return
+            await self.run_turn(turn)
+        except OSError as exc:
+            if not turn.dispatch and not getattr(self.broker, "remote", False):
+                self.mark(thread_id, turn.persona,
+                          f"{threads.display(turn.persona)}'s turn failed: {exc}")
+                return
+            # A failed cursor or markdown write is retryable. Keep the
+            # same intent at the head, even if a shutdown interrupts us.
+            turn.settle = False
+            steps.log(f"{thread_id} {turn.persona}: retrying dispatch "
+                      f"{turn.input_id} after IO failure ({exc})")
+            await asyncio.sleep(1)
+            entries = inputs.items(*key)
+            item = next((entry for entry in entries if entry["id"] == turn.input_id), None)
+            if item and not getattr(self.broker, "stopping", False):
+                self._unclaim(key, [Turn.of_entry(*key, item)])
+        except asyncio.CancelledError:
+            turn.settle = False
+            raise
+        except Exception as exc:  # noqa: BLE001 - one turn must not end the queue
+            if getattr(self.broker, "stopping", False):
+                # Its input is kept for the next start, unless the turn
+                # had already posted words.
+                text = (ended_sentence(turn.persona, "stopping")
+                        if turn.posted else None)
+            else:
+                text = (str(exc) if isinstance(exc, NoSeat) else
+                        f"{threads.display(turn.persona)}'s turn failed: "
+                        f"{getattr(exc, 'message', None) or exc}")
+            if text:
+                self.mark(thread_id, turn.persona, text)
+        finally:
+            if turn.settle:
+                self._settle_inputs(key, [turn])
+            self.turns.pop(key, None)
+            self.turn_sessions.pop(key, None)
+            self.turn_live.pop(key, None)
+            # The row's `running` went false; the list hears it.
+            self.publish(thread_id, {"type": "turn.finished",
+                                     "persona": turn.persona})
 
     # -- ending a turn from the app (2026-11-10) -------------------------------
 

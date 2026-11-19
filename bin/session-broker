@@ -239,6 +239,8 @@ import loam_profile  # noqa: E402
 import loam_agents  # noqa: E402
 import loam_update  # noqa: E402
 
+import loam_session_fence as fence
+from contextlib import nullcontext
 from loam_session_client import RemoteRegistry
 from loam_shutdown import LOADED_SOURCE, ShutdownWatch, loaded_source, shutdown
 from loam_session_host import SessionHost, own_session_store, own_store  # noqa: E402
@@ -1412,8 +1414,12 @@ class Server:
                 return
 
         try:
-            await self.route(method, path, params, payload, writer,
-                             raw=body, content_type=ctype)
+            guard = nullcontext(True) if method in ("GET", "HEAD") else fence.admission()
+            with guard as admitted:
+                if not admitted:
+                    raise BrokerError(503, "session maintenance in progress; retry shortly")
+                await self.route(method, path, params, payload, writer,
+                                 raw=body, content_type=ctype)
         except (BrokerError, threads_rec.ThreadError) as exc:
             writer.write(response(exc.status, {"error": exc.message,
                                                **getattr(exc, "detail", {})}))
@@ -2071,48 +2077,53 @@ class Server:
         Fail-soft: never the reason a broker is down."""
         await asyncio.sleep(DELIVER_FIRST_S)
         while not self.broker.stopping:
-            try:
-                for record in await asyncio.to_thread(loam_waiters.owed):
-                    try:
-                        brief = (Path(record["job_dir"]) / "brief.md").read_text(
-                            encoding="utf-8")
-                        title = loam_memory.front_matter(brief).get("title")
-                    except (OSError, KeyError):
-                        title = None
-                    outcome = self.threads.deliver_job(
-                        record, loam_waiters.handoff_text(record, title))
-                    loam_waiters.done(record, outcome)
-                    if outcome in ("no thread", "thread gone", "not a member"):
-                        # Logged and removed as a thread's, then written
-                        # again as a run's.
-                        kicked = await asyncio.to_thread(
-                            loam_results.to_headless, record, outcome)
-                        outcome = f"{outcome}; handed to a run ({kicked})"
-                    if outcome == "already delivered":
-                        continue  # said when it was; a record that would not go
-                    print(f"deliver: job {record.get('job')} -> "
-                          f"{record.get('thread') or 'no thread'} "
-                          f"{record.get('persona')}: {outcome}",
-                          file=sys.stderr, flush=True)
-            except Exception as exc:  # noqa: BLE001
-                print(f"deliver: the pass failed ({exc!r})", file=sys.stderr,
-                      flush=True)
-            # What an update left for the person's agent (2026-11-14, first
-            # release L13, lib/loam_update.py): one line in General and a
-            # turn for General's default agent, to say it in its own words.
-            try:
-                for note in await asyncio.to_thread(loam_update.owed_notices):
-                    outcome = self.threads.deliver_note(note)  # on the loop, as deliver_job
-                    loam_update.notice_done(note, outcome)  # says a stuck one once
-                    if outcome == "already delivered":
-                        continue
-                    print(f"deliver: update notice {note.get('id')} "
-                          f"({note.get('kind')}): {outcome}", file=sys.stderr,
-                          flush=True)
-            except Exception as exc:  # noqa: BLE001
-                print(f"deliver: the update notices failed ({exc!r})",
-                      file=sys.stderr, flush=True)
+            with fence.admission() as admitted:
+                if admitted:
+                    await self.deliver_once()
             await asyncio.sleep(DELIVER_EVERY_S)
+
+    async def deliver_once(self):
+        try:
+            for record in await asyncio.to_thread(loam_waiters.owed):
+                try:
+                    brief = (Path(record["job_dir"]) / "brief.md").read_text(
+                        encoding="utf-8")
+                    title = loam_memory.front_matter(brief).get("title")
+                except (OSError, KeyError):
+                    title = None
+                outcome = self.threads.deliver_job(
+                    record, loam_waiters.handoff_text(record, title))
+                loam_waiters.done(record, outcome)
+                if outcome in ("no thread", "thread gone", "not a member"):
+                    # Logged and removed as a thread's, then written
+                    # again as a run's.
+                    kicked = await asyncio.to_thread(
+                        loam_results.to_headless, record, outcome)
+                    outcome = f"{outcome}; handed to a run ({kicked})"
+                if outcome == "already delivered":
+                    continue  # said when it was; a record that would not go
+                print(f"deliver: job {record.get('job')} -> "
+                      f"{record.get('thread') or 'no thread'} "
+                      f"{record.get('persona')}: {outcome}",
+                      file=sys.stderr, flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"deliver: the pass failed ({exc!r})", file=sys.stderr,
+                  flush=True)
+        # What an update left for the person's agent (2026-11-14, first
+        # release L13, lib/loam_update.py): one line in General and a
+        # turn for General's default agent, to say it in its own words.
+        try:
+            for note in await asyncio.to_thread(loam_update.owed_notices):
+                outcome = self.threads.deliver_note(note)  # on the loop, as deliver_job
+                loam_update.notice_done(note, outcome)  # says a stuck one once
+                if outcome == "already delivered":
+                    continue
+                print(f"deliver: update notice {note.get('id')} "
+                      f"({note.get('kind')}): {outcome}", file=sys.stderr,
+                      flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"deliver: the update notices failed ({exc!r})",
+                  file=sys.stderr, flush=True)
 
     def live_view(self) -> dict:
         """`GET /v1/sessions/live`: every session with a process behind it,
@@ -2155,6 +2166,14 @@ class Server:
                       *(k for k, q in list(engine.queues.items()) if not q.empty())])
                  for (tid, persona) in [key]]
         return {"sessions": rows, "box": box, "turns": turns,
+                "api_pid": os.getpid(), "api_revision": getattr(broker, "revision", None),
+                "host_pid": getattr(broker, "host_pid", os.getpid()),
+                "host_revision": getattr(broker, "host_revision", getattr(broker, "revision", None)),
+                "admission_closed": fence.closed(),
+                "host_admission_closed": (broker.host_fenced if getattr(broker, "remote", False)
+                                          else fence.closed()),
+                "opening": (room.get("starting", 0) if getattr(broker, "remote", False)
+                            else len(getattr(broker, "_opening", {}))),
                 "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
     async def end_idle(self) -> dict:
@@ -3954,6 +3973,7 @@ async def amain(addr: str, port: int) -> int:
 
 async def serve(addr: str, port: int, remote_path=None) -> int:
     broker = SocketBroker(remote_path) if remote_path else Broker()
+    broker.revision = fence.revision()
     server = Server(broker)
     if remote_path:
         ready = asyncio.Event()

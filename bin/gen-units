@@ -38,14 +38,21 @@ def main(argv: list[str]) -> int:
     if "-h" in argv or "--help" in argv:
         print(__doc__.strip())
         return 0
-    unknown_flags = [a for a in argv if a.startswith("-") and a != "--dry-run"]
+    unknown_flags = [a for a in argv if a.startswith("-") and a not in ("--dry-run", "--fresh-install")]
     if unknown_flags:
         print(f"gen-units: unknown option {unknown_flags[0]} (--help says what it takes)",
               file=sys.stderr)
         return 2
     dry = "--dry-run" in argv
     names = [a for a in argv if not a.startswith("-")]
-    units = loam_units.rendered()
+    if "--fresh-install" in argv and not (lc.USER_UNIT_DIR / loam_units.API_UNIT).exists():
+        marker = loam_units.split_marker()
+        if not dry:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch()
+        units = loam_units.rendered(split=True)
+    else:
+        units = loam_units.rendered()
     unknown = [n for n in names if n not in units]
     if unknown:
         print(f"gen-units: no template for {', '.join(unknown)}", file=sys.stderr)

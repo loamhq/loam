@@ -57,9 +57,21 @@ def templates(root: Path | None = None) -> list[Path]:
                   if p.suffix in (".service", ".timer", ".path") and p.is_file())
 
 
-def rendered(root: Path | None = None) -> dict[str, str]:
-    return {p.name: render(p.read_text(encoding="utf-8"))
-            for p in templates(root)}
+API_UNIT = "loam-session-broker.service"
+HOST_UNIT = "loam-session-host.service"
+
+
+def split_marker():
+    return lc.STATE / "broker" / "separate-host"
+
+
+def rendered(root: Path | None = None, *, split: bool | None = None) -> dict[str, str]:
+    base = root or TEMPLATES
+    units = templates(base)
+    separate = split_marker().exists() if split is None else split
+    if separate:
+        units.extend(templates(base / "session"))
+    return {p.name: render(p.read_text(encoding="utf-8")) for p in units}
 
 
 # ---------------------------------------------------------------------------

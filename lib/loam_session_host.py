@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import loam_adopt as adoption
+import loam_session_fence as fence
 import loam_broker as cfg
 from loam_provider_session import BrokerError, Session, first_words, parse_iso, session_class
 from loam_session_records import backfill_records, normalise, prune_fork_duplicates, sync_titles
@@ -413,7 +414,9 @@ class SessionHost:
     async def reap_idle(self) -> None:
         while True:
             await asyncio.sleep(60)
-            await self.reap_once(time.time())
+            with fence.admission() as admitted:
+                if admitted:
+                    await self.reap_once(time.time())
 
     async def reap_once(self, now: float) -> None:
         """One pass of the reaper. **A session that is asking is not idle**

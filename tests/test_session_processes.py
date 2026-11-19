@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Drive both production entry points on a throwaway install with a stream-json CLI."""
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import urllib.error
 
 ROOT = Path(__file__).resolve().parents[1]
 STUB = """#!/usr/bin/env python3
@@ -87,6 +89,16 @@ def check(d):
     try:
         host = launch('session-host', '--socket', 'socket/host')
         first = api()
+        with (d / 'state/broker/admission.lock').open('a') as gate:
+            fcntl.flock(gate, fcntl.LOCK_EX)
+            status = request('/v1/sessions/live')
+            assert status['admission_closed'] and status['host_admission_closed']
+            try:
+                request('/v1/threads', 'POST', {'persona':'iris'})
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 503
+            else:
+                raise AssertionError("a write crossed the closed admission fence")
         tid = request('/v1/threads', 'POST', {'persona':'iris'})['id']
         path = '/v1/threads/' + tid
         request(path + '/messages', 'PUT', {'text':'probe', 'submission_id':'probe-once'})
@@ -95,6 +107,13 @@ def check(d):
         row = wait(lambda: next((r for r in request('/v1/sessions/live')['sessions']
                                  if r['agent'] == 'iris'), None))
         sid = row['id']
+        with (d / 'state/broker/admission.lock').open('a') as gate:
+            try:
+                fcntl.flock(gate, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                pass
+            else:
+                raise AssertionError("a host restart was admitted during a turn")
         first.terminate()
         assert first.wait(timeout=8) == 0
         os.kill(child, 0)

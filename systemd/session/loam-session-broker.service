@@ -1,0 +1,18 @@
+[Unit]
+Description=Loam thread API
+Wants=loam-session-host.service network-online.target
+After=loam-session-host.service network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5s
+OOMScoreAdjust=@CORE_OOM@
+Environment=PATH=@UNIT_PATH@
+Environment=DISABLE_AUTOUPDATER=1
+Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
+WorkingDirectory=@ROOT@
+ExecStart=/usr/bin/python3 @ROOT@/bin/session-broker --session-socket %t/loam-session/host.sock
+
+[Install]
+WantedBy=default.target

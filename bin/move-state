@@ -206,7 +206,7 @@ def stop_all(log: list[str]) -> dict:
     # changed timer is moved by daemon-reload alone.
     stopped = {"timers": [],
                "services": [u for u in units("loam-*.service")
-                            if u.startswith(("loam-session-broker",
+                            if u.startswith(("loam-session-broker", "loam-session-host",
                                              "loam-plugins-gateway",
                                              "loam-plugin-"))]}
     if stopped["timers"]:

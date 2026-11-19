@@ -3167,6 +3167,7 @@ def receipt_section(project: eng.Project, job_id: str, result: dict | None) -> s
                 if result.get("head") else "")
         return (f"**Landing: landed at `{result['sha'][:7]}`** — `{branch}` "
                 f"merged into `main`.{head}{tested} {push} {kept}{memory}"
+                + (f" Session services: {result['session_services']}" if result.get("session_services") else "")
                 + note_section(result) + release_section(result.get("release")))
     if state == "landed_earlier":
         where = ("The worktree stays." if Path(result["tree"]).is_dir()

@@ -16,6 +16,7 @@ import socket
 import stat
 import time
 import loam_broker as cfg
+import loam_session_fence as fence
 
 from loam_provider_session import BrokerError, configure_thread, permission_decision
 
@@ -153,6 +154,7 @@ class SessionSocket:
     def __init__(self, host):
         self.host = host
         self.connections = set()
+        self.revision = fence.revision()
 
     async def handle(self, reader, writer):
         task = asyncio.current_task()
@@ -181,55 +183,20 @@ class SessionSocket:
                 await write_frame(writer, {"ok": {
                     "sessions": [snapshot(s) for s in self.host.sessions.values()
                                  if s.state == "running"],
+                    "admission_closed": fence.closed(), "pid": os.getpid(),
+                    "revision": self.revision,
                     "room": self.host.room(), "seats": self.host.seats_taken()}})
                 return
             sid = req.get("session_id")
             if not isinstance(sid, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,128}", sid):
                 raise BrokerError(400, "invalid session id")
-            if op == "start":
-                # A fresh call always names its id. A replacement API can
-                # join an in-flight launch under that same binding.
-                agent = req["agent"]
-                if type(req["resume"]) is not bool or not isinstance(agent, str):
-                    raise BrokerError(400, "invalid start request")
-                session = await self.host.start_session(agent, sid, req["resume"],
-                                                        req.get("provider"), req.get("model"),
-                                                        req.get("effort"))
-                await write_frame(writer, {"ok": snapshot(session)})
-                return
-            session = self.host.load(sid)
-            if op == "watch":
-                await until_disconnect(reader, stream(session, req["since"], writer))
-                return
-            if op != "inspect" and req.get("incarnation") != session.incarnation:
-                raise BrokerError(409, "session binding changed; inspect its journal")
-            if op == "inspect":
-                answer = snapshot(session)
-            elif op == "configure":
-                await configure_thread(session, req["title"], req.get("model"), req.get("effort"))
-                answer = snapshot(session)
-            elif op == "answer":
-                decision = req["decision"]
-                behavior, updates = permission_decision(decision)
-                await session.answer_permission(req["request_id"], behavior, decision.get("message"),
-                                                decision.get("updatedInput"), decision.get("answers"),
-                                                updates or None)
-                answer = snapshot(session)
-            elif op == "stop":
-                if req.get("idle") and (session.busy() or
-                                        time.time() - session.last_activity < cfg.EVICT_GRACE_S):
-                    raise BrokerError(409, "session became busy")
-                await session.stop()
-                answer = snapshot(session)
-            elif op == "dispatch":
-                key, text = req.get("id"), req.get("text")
-                if not isinstance(key, str) or not key or not isinstance(text, str):
-                    raise BrokerError(400, "a dispatch id and text are required")
-                answer = await session.dispatch(key, text, req.get("attachments"),
-                                                steer=bool(req.get("steer")))
+            if op in ("watch", "inspect"):
+                await self.session_request(op, req, sid, reader, writer)
             else:
-                raise BrokerError(400, "unknown session host operation")
-            await write_frame(writer, {"ok": answer})
+                with fence.admission() as admitted:
+                    if not admitted:
+                        raise BrokerError(503, "session maintenance in progress")
+                    await self.session_request(op, req, sid, reader, writer)
         except (ConnectionError, BrokenPipeError):
             pass
         except (BrokerError, KeyError, TypeError, ValueError, OSError) as exc:
@@ -241,6 +208,53 @@ class SessionSocket:
             writer.close()
             with suppress(ConnectionError):
                 await writer.wait_closed()
+
+
+    async def session_request(self, op, req, sid, reader, writer):
+        if op == "start":
+            # A fresh call always names its id. A replacement API can
+            # join an in-flight launch under that same binding.
+            agent = req["agent"]
+            if type(req["resume"]) is not bool or not isinstance(agent, str):
+                raise BrokerError(400, "invalid start request")
+            session = await self.host.start_session(agent, sid, req["resume"],
+                                                    req.get("provider"), req.get("model"),
+                                                    req.get("effort"))
+            await write_frame(writer, {"ok": snapshot(session)})
+            return
+        session = self.host.load(sid)
+        if op == "watch":
+            await until_disconnect(reader, stream(session, req["since"], writer))
+            return
+        if op != "inspect" and req.get("incarnation") != session.incarnation:
+            raise BrokerError(409, "session binding changed; inspect its journal")
+        if op == "inspect":
+            answer = snapshot(session)
+        elif op == "configure":
+            await configure_thread(session, req["title"], req.get("model"), req.get("effort"))
+            answer = snapshot(session)
+        elif op == "answer":
+            decision = req["decision"]
+            behavior, updates = permission_decision(decision)
+            await session.answer_permission(req["request_id"], behavior, decision.get("message"),
+                                            decision.get("updatedInput"), decision.get("answers"),
+                                            updates or None)
+            answer = snapshot(session)
+        elif op == "stop":
+            if req.get("idle") and (session.busy() or
+                                    time.time() - session.last_activity < cfg.EVICT_GRACE_S):
+                raise BrokerError(409, "session became busy")
+            await session.stop()
+            answer = snapshot(session)
+        elif op == "dispatch":
+            key, text = req.get("id"), req.get("text")
+            if not isinstance(key, str) or not key or not isinstance(text, str):
+                raise BrokerError(400, "a dispatch id and text are required")
+            answer = await session.dispatch(key, text, req.get("attachments"),
+                                            steer=bool(req.get("steer")))
+        else:
+            raise BrokerError(400, "unknown session host operation")
+        await write_frame(writer, {"ok": answer})
 
 
 @asynccontextmanager
