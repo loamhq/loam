@@ -72,6 +72,7 @@ import loam_config as lc
 import loam_lane_notice as lane_notice
 import loam_provider_memory as provider_memory
 import loam_broker as cfg
+from loam_provider_session import configure_thread
 import loam_thread_steps as steps
 import loam_thread_inputs as inputs
 import loam_threads as threads
@@ -1155,8 +1156,11 @@ class ThreadEngine:
                     seq = await session.steer(text, attachments or None)
             except Exception as exc:  # noqa: BLE001 - a refused steer is a queued message
                 steps.log(f"{thread_id} {persona}: steer failed ({exc!r})")
-                seq = next((e["seq"] for e in session.replay(live.dispatch["since"])
-                            if e.get("dispatch_id") == descriptor["id"]), None) if descriptor else None
+                seq = None
+                if descriptor:
+                    since = live.dispatch["since"]
+                    events = await session.history(since) if hasattr(session, "history") else session.replay(since)
+                    seq = next((e["seq"] for e in events if e.get("dispatch_id") == descriptor["id"]), None)
             finally:
                 turn.pop("steering", None)
             if seq is None:
@@ -1346,7 +1350,7 @@ class ThreadEngine:
                     continue
                 await self.run_turn(turn)
             except OSError as exc:
-                if not turn.dispatch:
+                if not turn.dispatch and not getattr(self.broker, "remote", False):
                     self.mark(thread_id, turn.persona,
                               f"{threads.display(turn.persona)}'s turn failed: {exc}")
                     continue
@@ -1479,6 +1483,8 @@ class ThreadEngine:
                 session = await self.broker.start_session(
                     turn.persona, kept["session_id"] if resume else None,
                     resume=resume, provider=engine,
+                    **({"start_key": f"{turn.thread_id}/{turn.persona}/{turn.input_id}/{engine}"}
+                       if getattr(self.broker, "remote", False) else {}),
                     **({"model": model} if model else {}),
                     **({"effort": effort} if effort else {}))
                 # In the background: the check never holds a turn up.
@@ -1513,28 +1519,13 @@ class ThreadEngine:
         active = self.turns.get(turn.key)
         if active is not None:
             active.pop("waiting", None)
-        # Ended by the reaper soon after this turn, not after the hour a
-        # classic chat keeps (2026-11-09); the next turn resumes it by id.
-        session.idle_timeout_s = cfg.THREAD_IDLE_S
-        # The prompt opens with its own clock line; the broker's would be a
-        # second copy of the same sentence.
-        session.tell_time = False
-        # The model this turn runs on: the turn's, else the member's, else
-        # the persona's own (null). A running process is told by
-        # `set_choices`, as a classic chat's PATCH tells it; clearing goes
-        # back to the persona's at the next launch (2026-11-09).
-        if getattr(session, "model", None) != model and hasattr(session, "set_choices"):
-            await session.set_choices({"model": model})
-        # The persona's thinking level (2026-11-13) the same way; a level
-        # cleared since stays on a running process until its next launch.
-        if effort and getattr(session, "effort", None) != effort \
-                and hasattr(session, "set_choices"):
-            await session.set_choices({"effort": effort})
-        # Out of the Classic chats list, which stays the list it was.
-        session.archived = True
-        session.title = f"Thread · {meta['title']}"
-        session.title_source = "person"
-        session.save()
+        title = f"Thread · {meta['title']}"
+        configure = getattr(session, "configure_thread", None)
+        if configure is None:
+            await configure_thread(session, title, model, effort)
+        else:
+            await configure(title, model, effort)
+            await session.attach(session.seq)
         return session, (kept if resume else None)
 
     async def _prepare_turn(self, turn, meta, engine, model, effort):
@@ -1546,7 +1537,7 @@ class ThreadEngine:
             prior = self.live_session(turn.thread_id, turn.persona) or \
                 (getattr(self.broker, "sessions", None) or {}).get(old.get("session_id"))
             if prior is not None:
-                self.recover_late(turn, prior, old, engine, model)
+                await self.recover_late(turn, prior, old, engine, model)
             steps.COUNTS["rotated"] += 1
             steps.log(f"{turn.thread_id} {turn.persona}: session "
                       f"{str(old.get('session_id'))[:8]} holds {rotated['used']} "
@@ -1656,7 +1647,12 @@ class ThreadEngine:
         same_host = False
         if recovering:
             intent = turn.dispatch
-            session = self.broker.load(intent["session_id"])
+            remote = getattr(self.broker, "remote", False)
+            if remote:
+                session = await self.broker.inspect(intent["session_id"])
+                await session.attach(intent["since"])
+            else:
+                session = self.broker.load(intent["session_id"])
             if session.agent != turn.persona or session.provider != engine:
                 raise ValueError("dispatch belongs to another provider session")
             kept, prompt, through = intent["previous"], intent["prompt"], intent["through"]
@@ -1670,8 +1666,12 @@ class ThreadEngine:
                 session = await self.broker.start_session(
                     turn.persona, session.id, resume=bool(kept), provider=engine,
                     model=model, effort=intent["effort"])
-                session.tell_time = False
-                session.idle_timeout_s = cfg.THREAD_IDLE_S
+                if remote:
+                    await session.configure_thread(f"Thread · {meta['title']}", model, intent["effort"])
+                    await session.attach(intent["since"])
+                else:
+                    session.tell_time = False
+                    session.idle_timeout_s = cfg.THREAD_IDLE_S
                 history = session.replay(intent["since"])
                 intent["incarnation"] = session.incarnation
                 inputs.bind(*turn.key, turn.input_id, intent)
@@ -1710,7 +1710,7 @@ class ThreadEngine:
         mark(session, turn.thread_id)
         # Replies the last turn's watcher never saw, posted before this one.
         if kept and not turn.dispatch:
-            self.recover_late(turn, session, kept, engine, model)
+            await self.recover_late(turn, session, kept, engine, model)
 
         reply = Reply()
         posted: list[dict] = []
@@ -1778,7 +1778,7 @@ class ThreadEngine:
                 if receipt is None or (same_host and session.state == "running"):
                     receipt = await session.dispatch(turn.input_id, prompt, turn.attachments)
                 if kept:
-                    self.recover_late(turn, session, kept, engine, model, before=receipt)
+                    await self.recover_late(turn, session, kept, engine, model, before=receipt)
             elif turn.attachments:
                 await session.send_message(prompt, turn.attachments)
             else:
@@ -1825,6 +1825,8 @@ class ThreadEngine:
                         # t-232b9184 waited 90 s for the owner's next message.
                         self.hand_over(turn.key)
                     continue
+                if isinstance(event, Exception):
+                    raise OSError(str(event)) from event
                 if event is None:
                     ended = "closed"
                     break
@@ -2035,6 +2037,33 @@ class ThreadEngine:
 
     # -- after the result (2026-11-10) -----------------------------------------
 
+    async def restore_tails(self):
+        """Resume after-result watches, including results journaled during an API outage."""
+        bindings = threads.load_state("sessions.json")
+        if not bindings:
+            return
+        pending = {(tid, persona) for tid, persona, items in inputs.pending() if items}
+        rows, _ = await self.broker.catalog()
+        records = {row["session_id"]: row for row in rows}
+        for tid, members in bindings.items():
+            for persona, kept in members.items():
+                if (tid, persona) in pending:
+                    continue
+                row = records.get(kept.get("session_id"))
+                since = kept.get("seq")
+                if row is None or not isinstance(since, int):
+                    continue
+                if not row.get("live") and row.get("record_seq", 0) <= since:
+                    continue
+                turn = Turn(tid, persona, 0, "notification")
+                turn.read_through = kept.get("through")
+                session = await self.broker.inspect(row["session_id"])
+                await session.attach(since)
+                queue = asyncio.Queue()
+                for event in session.replay(since):
+                    queue.put_nowait(event)
+                self.keep_watching(turn, session, kept["engine"], row.get("model"), backlog=queue)
+
     def keep_watching(self, turn: Turn, session, engine: str, model: str | None,
                       backlog: asyncio.Queue | None = None) -> None:
         """Keep a light watch on the member's session after its turn's
@@ -2050,7 +2079,7 @@ class ThreadEngine:
         if getattr(self.broker, "stopping", False):
             return
         live = getattr(session, "is_live", None)
-        if callable(live) and not live():
+        if callable(live) and not live() and (backlog is None or backlog.empty()):
             return
         key = (turn.thread_id, turn.persona)
         self.stop_tail(*key)
@@ -2085,6 +2114,8 @@ class ThreadEngine:
                 event = await queue.get()
                 if event is None:
                     break
+                if isinstance(event, Exception):
+                    raise event
                 kind = event.get("type")
                 if kind == "broker.exit":
                     break
@@ -2519,7 +2550,7 @@ class ThreadEngine:
         steps.COUNTS["reply_to"] += 1
         return text, {**extra, "reply_to": target}
 
-    def recover_late(self, turn: Turn, session, kept: dict, engine: str,
+    async def recover_late(self, turn: Turn, session, kept: dict, engine: str,
                      model: str | None, before: int | None = None) -> None:
         """Replies the session made after the last turn's watcher let go: a
         harness turn nobody was reading (a notification after a `result`
@@ -2531,7 +2562,8 @@ class ThreadEngine:
         if not isinstance(since, int) or not callable(replay):
             return
         try:
-            events = [e for e in replay(since) if isinstance(e, dict)
+            events = await session.history(since) if hasattr(session, "history") else replay(since)
+            events = [e for e in events if isinstance(e, dict)
                       and (before is None or e.get("seq", before) < before)]
         except Exception as exc:  # noqa: BLE001 - recovery must not stop a turn
             steps.log(f"{turn.thread_id} {turn.persona}: late-reply check failed ({exc})")

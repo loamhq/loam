@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""Own the provider children and their journal independently of the HTTP API."""
+from __future__ import annotations
+
+import argparse
+import asyncio
+from pathlib import Path
+import signal
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+from loam_session_host import SessionHost, own_session_store
+from loam_session_socket import listen
+from loam_shutdown import LOADED_SOURCE, ShutdownWatch, loaded_source, shutdown
+
+
+LOADED_SOURCE.update(loaded_source(__file__))
+
+
+async def serve(path):
+    with own_session_store():
+        host = SessionHost()
+        host.prepare_records()
+        loop = asyncio.get_running_loop()
+        watch = ShutdownWatch(host, loop)
+        done = asyncio.Event()
+
+        def stopping(sig):
+            host.stopping = True
+            watch.arm(sig.name)
+            done.set()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, stopping, sig)
+        asyncio.create_task(host.reap_idle())
+        async with listen(host, path):
+            print(f"session host listening on {path}", flush=True)
+            await done.wait()
+        await shutdown(host, None)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--socket", type=Path, required=True)
+    asyncio.run(serve(parser.parse_args().socket))

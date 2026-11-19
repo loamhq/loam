@@ -239,6 +239,56 @@ class BrokerError(Exception):
 # carries them, with the provider's sentence as `message`. The rest of the
 # event is unchanged, so a page that predates `kind` still draws a card.
 
+async def configure_thread(session, title, model, effort):
+    # Ended by the reaper soon after this turn, not after the hour a
+    # classic chat keeps (2026-11-09); the next turn resumes it by id.
+    session.idle_timeout_s = cfg.THREAD_IDLE_S
+    # The prompt opens with its own clock line; the broker's would be a
+    # second copy of the same sentence.
+    session.tell_time = False
+    # The model this turn runs on: the turn's, else the member's, else
+    # the persona's own (null). A running process is told by
+    # `set_choices`, as a classic chat's PATCH tells it; clearing goes
+    # back to the persona's at the next launch (2026-11-09).
+    if getattr(session, "model", None) != model and hasattr(session, "set_choices"):
+        await session.set_choices({"model": model})
+    # The persona's thinking level (2026-11-13) the same way; a level
+    # cleared since stays on a running process until its next launch.
+    if effort and getattr(session, "effort", None) != effort \
+            and hasattr(session, "set_choices"):
+        await session.set_choices({"effort": effort})
+    # Out of the Classic chats list, which stays the list it was.
+    session.archived = True
+    session.title = title
+    session.title_source = "person"
+    session.save()
+
+
+def permission_decision(payload: dict) -> tuple[str, list | None]:
+    behavior = payload.get("behavior")
+    if behavior not in ("allow", "deny"):
+        raise BrokerError(400, "`behavior` is 'allow' or 'deny'")
+    updates = payload.get("updatedPermissions")
+    if updates is not None:
+        # The CLI's own suggestions, echoed back: a list of its
+        # `PermissionUpdate` objects, each for this process only.
+        # A suggestion can name `localSettings`, which would have
+        # the CLI write the persona's own settings file from a
+        # tap on a card; persona configs are operator-authored,
+        # so only `session` is accepted and nothing is trimmed.
+        if (behavior != "allow" or not isinstance(updates, list)
+                or not all(isinstance(u, dict) for u in updates)):
+            raise BrokerError(
+                400, "`updatedPermissions` is a list of the "
+                     "request's own permission_suggestions, "
+                     "on an allow")
+        if any(u.get("destination") != "session" for u in updates):
+            raise BrokerError(
+                400, "`updatedPermissions` may only carry "
+                     "suggestions whose destination is 'session'")
+    return behavior, updates
+
+
 def _questions_of(req: dict) -> list[dict] | None:
     asked = req.get("questions")
     return asked if isinstance(asked, list) and asked else None

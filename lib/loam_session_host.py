@@ -19,18 +19,22 @@ from loam_session_records import backfill_records, normalise, prune_fork_duplica
 
 
 @contextmanager
-def own_session_store():
+def own_store(path, owner):
     """Only one process can admit sessions or write their journals in a store."""
-    cfg.SESSION_DIR.mkdir(parents=True, exist_ok=True)
-    fd = os.open(cfg.SESSION_DIR, os.O_RDONLY | os.O_DIRECTORY)
+    path.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise RuntimeError(f"another session host owns {cfg.SESSION_DIR}") from exc
+            raise RuntimeError(f"another {owner} owns {path}") from exc
         yield
     finally:
         os.close(fd)
+
+
+def own_session_store():
+    return own_store(cfg.SESSION_DIR, "session host")
 
 
 NUMBER_WORDS = ("no", "one", "two", "three", "four", "five", "six", "seven",
@@ -252,8 +256,10 @@ class SessionHost:
             raise BrokerError(409, "the session is still starting")
         if session_id:
             try:
-                stored = json.loads((cfg.SESSION_DIR / f"{session_id}.json")
-                                    .read_text(encoding="utf-8")).get("provider")
+                record = json.loads((cfg.SESSION_DIR / f"{session_id}.json").read_text(encoding="utf-8"))
+                if record.get("agent") and record["agent"] != agent:
+                    raise BrokerError(409, "session belongs to another agent")
+                stored = record.get("provider")
             except (OSError, json.JSONDecodeError):
                 stored = None
         if provider and stored and provider != stored:

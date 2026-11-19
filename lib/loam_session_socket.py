@@ -14,10 +14,12 @@ from pathlib import Path
 import re
 import socket
 import stat
+import time
+import loam_broker as cfg
 
-from loam_provider_session import BrokerError
+from loam_provider_session import BrokerError, configure_thread, permission_decision
 
-VERSION = 1
+VERSION = 2
 # The provider reader accepts 16 MiB envelopes. Leave space for JSON framing.
 FRAME_LIMIT = 32 * 1024 * 1024
 OVERFLOW = object()
@@ -57,7 +59,11 @@ class Mailbox(asyncio.Queue):
 
 def snapshot(session):
     return {"record": session.meta(), "incarnation": session.incarnation,
-            "permissions": session.pending_events(), "background": session.background_event()}
+            "permissions": session.pending_events(), "background": session.background_event(),
+            "behind": session.working_behind(), "busy": session.busy(),
+            "pid": getattr(session.proc, "pid", None), "last_activity": session.last_activity,
+            "running_model": session._init_model, "steers": session.STEERS,
+            "task_times": dict(getattr(session, "_task_seen", {}))}
 
 
 async def stream(session, since, writer):
@@ -81,7 +87,10 @@ async def stream(session, since, writer):
                 if seq != sequence + 1:
                     raise BrokerError(409, f"journal missing sequence {sequence + 1}")
                 sequence = seq
-            await write_frame(writer, {"event": event})
+            frame = {"event": event}
+            if seq is None or event.get("type") == "result":
+                frame["behind"] = session.working_behind()
+            await write_frame(writer, frame)
 
         if since < cut:
             old = session.iter_replay(since)
@@ -106,6 +115,40 @@ async def stream(session, since, writer):
         session.unwatch(queue)
 
 
+async def until_disconnect(reader, operation):
+    watching = asyncio.create_task(operation)
+    eof = asyncio.create_task(reader.read(1))
+    try:
+        await asyncio.wait((watching, eof), return_when=asyncio.FIRST_COMPLETED)
+        if watching.done():
+            await watching
+    finally:
+        for child in (watching, eof):
+            child.cancel()
+        await asyncio.gather(watching, eof, return_exceptions=True)
+
+
+async def records(host, writer):
+    queue = Mailbox()
+    host.record_subscribers.add(queue)
+    try:
+        initial = [snapshot(s) for s in host.sessions.values() if s.state == "running"]
+        for view in initial:
+            await write_frame(writer, {"resident": view})
+        await write_frame(writer, {"ready": True})
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            if event is OVERFLOW:
+                raise BrokerError(503, "registry reader fell behind")
+            session = host.sessions.get(event.get("session_id"))
+            await write_frame(writer, {"record": event,
+                                       "resident": snapshot(session) if session else None})
+    finally:
+        host.record_subscribers.discard(queue)
+
+
 class SessionSocket:
     def __init__(self, host):
         self.host = host
@@ -122,29 +165,63 @@ class SessionSocket:
             if op == "health":
                 await write_frame(writer, {"ok": {"version": VERSION, "pid": os.getpid()}})
                 return
+            if op == "records":
+                await until_disconnect(reader, records(self.host, writer))
+                return
+            if op == "catalog":
+                self.host.scan_for_new()
+                for record in self.host.known(req.get("agent")):
+                    await write_frame(writer, {"record": record})
+                await write_frame(writer, {"ok": self.host.residency()})
+                return
+            if op == "adopt":
+                await write_frame(writer, {"ok": self.host.adopt_app_sessions()})
+                return
+            if op == "registry":
+                await write_frame(writer, {"ok": {
+                    "sessions": [snapshot(s) for s in self.host.sessions.values()
+                                 if s.state == "running"],
+                    "room": self.host.room(), "seats": self.host.seats_taken()}})
+                return
             sid = req.get("session_id")
             if not isinstance(sid, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,128}", sid):
                 raise BrokerError(400, "invalid session id")
+            if op == "start":
+                # A fresh call always names its id. A replacement API can
+                # join an in-flight launch under that same binding.
+                agent = req["agent"]
+                if type(req["resume"]) is not bool or not isinstance(agent, str):
+                    raise BrokerError(400, "invalid start request")
+                session = await self.host.start_session(agent, sid, req["resume"],
+                                                        req.get("provider"), req.get("model"),
+                                                        req.get("effort"))
+                await write_frame(writer, {"ok": snapshot(session)})
+                return
             session = self.host.load(sid)
             if op == "watch":
-                # A quiet session may never write again. Notice EOF from a
-                # dead API immediately so its queue and file descriptor go.
-                watching = asyncio.create_task(stream(session, req["since"], writer))
-                eof = asyncio.create_task(reader.read(1))
-                try:
-                    await asyncio.wait((watching, eof), return_when=asyncio.FIRST_COMPLETED)
-                    if watching.done():
-                        await watching
-                finally:
-                    for child in (watching, eof):
-                        child.cancel()
-                    await asyncio.gather(watching, eof, return_exceptions=True)
+                await until_disconnect(reader, stream(session, req["since"], writer))
                 return
+            if op != "inspect" and req.get("incarnation") != session.incarnation:
+                raise BrokerError(409, "session binding changed; inspect its journal")
             if op == "inspect":
                 answer = snapshot(session)
+            elif op == "configure":
+                await configure_thread(session, req["title"], req.get("model"), req.get("effort"))
+                answer = snapshot(session)
+            elif op == "answer":
+                decision = req["decision"]
+                behavior, updates = permission_decision(decision)
+                await session.answer_permission(req["request_id"], behavior, decision.get("message"),
+                                                decision.get("updatedInput"), decision.get("answers"),
+                                                updates or None)
+                answer = snapshot(session)
+            elif op == "stop":
+                if req.get("idle") and (session.busy() or
+                                        time.time() - session.last_activity < cfg.EVICT_GRACE_S):
+                    raise BrokerError(409, "session became busy")
+                await session.stop()
+                answer = snapshot(session)
             elif op == "dispatch":
-                if req.get("incarnation") != session.incarnation:
-                    raise BrokerError(409, "session binding changed; inspect its journal")
                 key, text = req.get("id"), req.get("text")
                 if not isinstance(key, str) or not key or not isinstance(text, str):
                     raise BrokerError(400, "a dispatch id and text are required")
@@ -157,7 +234,8 @@ class SessionSocket:
             pass
         except (BrokerError, KeyError, TypeError, ValueError, OSError) as exc:
             with suppress(ConnectionError):
-                await write_frame(writer, {"error": str(exc), "status": getattr(exc, "status", 400)})
+                await write_frame(writer, {"error": str(exc), "status": getattr(exc, "status", 400),
+                                           "detail": getattr(exc, "detail", {})})
         finally:
             self.connections.discard(task)
             writer.close()
@@ -206,16 +284,38 @@ async def listen(host, path: Path):
         os.close(lock)
 
 
+class HostUnavailable(BrokerError, OSError):
+    """A transient transport failure can be retried under the same input id."""
+
+
 class HostClient:
     def __init__(self, path: Path):
         self.path = path
+        self.readers = set()
+
+    def reader_task(self, coro):
+        task = asyncio.create_task(coro)
+        self.readers.add(task)
+        task.add_done_callback(self.readers.discard)
+        return task
+
+    async def close_readers(self):
+        readers = list(self.readers)
+        for task in readers:
+            task.cancel()
+        await asyncio.gather(*readers, return_exceptions=True)
 
     @asynccontextmanager
     async def request(self, op, **fields):
-        reader, writer = await asyncio.open_unix_connection(self.path, limit=FRAME_LIMIT)
+        try:
+            reader, writer = await asyncio.open_unix_connection(self.path, limit=FRAME_LIMIT)
+        except OSError as exc:
+            raise HostUnavailable(503, "the session host is unavailable") from exc
         try:
             await write_frame(writer, {"version": VERSION, "op": op, **fields})
             yield reader
+        except ConnectionError as exc:
+            raise HostUnavailable(503, "the session host disconnected") from exc
         finally:
             writer.close()
             with suppress(ConnectionError):
@@ -225,7 +325,7 @@ class HostClient:
     async def receive(reader):
         frame = await read_frame(reader)
         if "error" in frame:
-            raise BrokerError(frame["status"], frame["error"])
+            raise BrokerError(frame["status"], frame["error"], frame.get("detail"))
         return frame
 
     async def call(self, op, **fields):
