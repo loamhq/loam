@@ -237,7 +237,7 @@ ENTRIES: list[Entry] = [
     Entry("schedule.body", "setting", "A schedule's instruction",
           "PATCH /api/schedules/{agent}/{name}",
           route="PATCH /v1/schedules/{agent}/{name}", target="agent/name",
-          values="text; not the reflection's (that is _reflection.md)",
+          values="text; not the reflection's (that is _reflection.md, or Loam's default once the agent has a map.md)",
           body=lambda v, m: {"body": v}, read=SCHEDULE_READ,
           pick=lambda a, m: a.get("body")),
     Entry("schedule.create", "action", "Make a schedule",

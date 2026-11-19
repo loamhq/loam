@@ -14,12 +14,11 @@ runs, in order, `bin/library seed-vault` (docs/skills.md) and
 
 **About me.** `seed-vault` also writes `About me.md` at the top of the
 vault: a heading and one line saying it is what the person's agents know
-about them, theirs to read and edit (the owner, 2026-11-16). Every agent made
-on an install whose vault has it (Iris, and any made by `agent.draft` and
-`agent.confirm`) is given an `_always.md` with one line pointing there: read
-it, add what lasts about the owner, tell them when you do
-(`loam_agents.ABOUT_LINE`). A vault without the file, like the first
-install's, gets no line, so its agents are untouched. After that the note is
+about them, theirs to read and edit (the owner, 2026-11-16). Every agent in
+the map's shape is told of it by Loam's text (`docs/persona/loam.md`, loaded on
+every run): read it, add what lasts about the owner, tell them when you do.
+Until 2026-11-18 a new agent was given an `_always.md` with that line
+instead; an agent made then keeps it. After that the note is
 the person's and the agents': Iris fills it in during the hello conversation
 and keeps it accurate on her nightly wake.
 
@@ -59,7 +58,8 @@ first turn does, and the recent exchange it is handed shows her opening
 with `(preset: Loam posted this opening in your name before your first
 turn; carry on from it as yours)` after her name (`loam_threads.transcript`).
 From that reply on, the conversation is the model's. What she does in it is
-in her `_active.md`, "The hello conversation": aims and leans, not a script.
+in her `how-i-am-here.md`, "The hello conversation", which her map tells her
+to read before her first reply: aims and leans, not a script.
 By the end she knows who the person is (their name, where they live, their
 age, and whatever they choose to tell her, kept in `About me.md`); they know
 they can come to her or any agent about Loam; they have a rough sense of

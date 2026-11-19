@@ -391,7 +391,7 @@ ENGINEER_WRITABLE_IN_WORKSPACE = frozenset({
 # The rule itself is the inverse of the set above, so a file an agent invents
 # tomorrow is covered today.
 ENGINEER_SELF_AUTHORED = (
-    "_always.md", "_active.md", "_reflection.md", "soul.md",
+    "_always.md", "_active.md", "_reflection.md", "soul.md", "map.md",
 )
 
 
@@ -472,7 +472,7 @@ def engineer_boundary(
             f"write only {', '.join(sorted(ENGINEER_WRITABLE_IN_WORKSPACE))} "
             f"at a workspace root -- what bin/provision renders, plus "
             f"config.md for an approved fleet-wide clause. Souls, "
-            f"`_always.md`, `_active.md`, `_reflection.md`, `crons/`, skills "
+            f"`map.md`, `_always.md`, `_active.md`, `_reflection.md`, `crons/`, skills "
             f"and memory belong to the agent. Ask the persona who briefed you "
             f"to ask its owner."
         )

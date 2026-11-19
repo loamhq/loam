@@ -92,6 +92,7 @@ import loam_schedule as ls  # noqa: E402
 import loam_activity as activity  # noqa: E402
 import loam_profile as profile  # noqa: E402
 import loam_agents  # noqa: E402
+import loam_loading  # noqa: E402
 
 UNITS = TMP / "units"
 UNITS.mkdir()
@@ -356,15 +357,20 @@ async def main():
         check("the soul is the draft's, verbatim",
               (ws / "soul.md").read_text() == "# Juniper\n\nI am Juniper. I tend things.\n")
         made_config = (ws / "config.md").read_text()
-        check("the config is the fleet's clauses with its name, then its own",
-              made_config.startswith("juniper config.md")
-              and made_config.endswith("## Its own rules\n\nJuniper's own config.\n"),
-              made_config)
-        check("a vault with no About me.md: no _always.md from the make",
-              not (ws / "_always.md").exists())
-        check("the loading files exist (structural starters)",
-              all((ws / f).read_text().strip() for f in ("_active.md", "_reflection.md"))
-              and "END OF ACTIVE" in (ws / "_active.md").read_text())
+        # Born in the map's shape (2026-11-18): the config is the draft's
+        # own, as written (the owner's words for this agent; Loam's text and
+        # the shared page load beside it), and a map, and none of the three
+        # old loading files.
+        check("the config is the draft's own, verbatim (no fleet clauses)",
+              made_config == "Juniper's own config.\n", made_config)
+        check("a map, seeded with its one line",
+              (ws / "map.md").read_text() == loam_loading.MAP_SEED)
+        check("none of _always.md, _active.md, _reflection.md",
+              not any((ws / f).exists() for f in
+                      ("_always.md", "_active.md", "_reflection.md")))
+        check("the owner's shared page exists for its import",
+              loam_loading.owner_page().is_file()
+              and loam_loading.owner_page().is_relative_to(LABS))
         check("agent.json carries its name and no emoji, in the one order",
               card("juniper")["display"] == "Juniper" and "emoji" not in card("juniper")
               and list(card("juniper"))[:3] == ["name", "display", "workspace"], card("juniper"))

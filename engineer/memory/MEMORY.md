@@ -1617,3 +1617,29 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   own domain" or `BASE_DOMAIN` in prose; a prompt that shows the domain
   builds it from `li.BASE_DOMAIN` at run time.
 
+## 2026-11-18 — three files load on every run: soul, config, map
+
+- **The shape is rendered, not chosen at launch.** Every conversation route
+  (the broker, Remote Control, the Claude Code app) reads the project's
+  `CLAUDE.md` and `.claude/settings.json` at start with no flag of Loam's,
+  and Codex and Antigravity compose from `CLAUDE.md`'s imports. So the
+  map's shape is rendered into those two files (`bin/provision`'s
+  `claude_md`/`settings`, branching on `map.md`), and `lib/loam_loading.py`'s
+  `refresh` re-renders them when the shape on disk and the one rendered
+  differ. It runs from every launcher (wake, broker start, rc-preflight,
+  each Codex/Antigravity instruction build) and from the persona's
+  PostToolUse hook after *every* tool call, because a map made with `echo >`
+  names no path the hook can see. A session already running keeps its shape.
+- **Loam's text resolves from the code's own tree** (`docs/persona/loam.md` beside
+  `lib/`), not from `paths.root`: a landing tests a merged tree while the
+  live checkout is still the old `main`, so a `paths.root` import of a new
+  file fails every test that resolves it.
+- **A path made at import time from `lc.WORKSPACES` writes the live box from
+  a test** that only sets `LOAM_AI_LABS` (caused: `test_agents.py` made
+  `ai-labs/_shared/owner.md` on the real install). `loam_loading.owner_page()`
+  reads the override as `loam_agents.ai_labs()` does.
+- **`tests/test_loading_shapes.py`** is the statement of what loads: every
+  run kind on every provider, assembled by the launchers' own functions
+  (`bin/wake`'s `lane_input` and `claude_argv`, `loam_codex.instructions`,
+  `loam_codex_wake.instructions`, `loam_antigravity.instructions`), against
+  `loam_loading.own_files`. A new route must be added there.
