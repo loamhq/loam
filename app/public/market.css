@@ -644,13 +644,13 @@
 .market-phone .theme-show-choices { width: 100%; }
 .market-phone .theme-show-choices button { flex: 1 1 auto; min-height: 44px; }
 
-/* A plugin's screenshots (plugin-gallery.js): one row, each a framed picture
- * with its line under it, sliding sideways when there are more than fit. */
+/* A plugin's screenshots (plugin-gallery.js): two to a row on a desktop and
+ * one on a phone, each a framed picture of one moment with its line under it,
+ * large enough that its words read; a tap opens it full size. */
 .plugin-gallery { padding: 36px 0 8px; }
-.plugin-gallery-row { list-style: none; margin: 0; padding: 4px 4px 18px; display: grid; grid-auto-flow: column; grid-auto-columns: max(280px, calc((100% - var(--space-xl)) / 2)); gap: var(--space-xl);
-  overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: thin; }
-.plugin-gallery-one .plugin-gallery-row { grid-auto-columns: minmax(0, 720px); }
-.plugin-shot { scroll-snap-align: start; display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; }
+.plugin-gallery-row { list-style: none; margin: 0; padding: 4px 4px 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xl) var(--space-xl); }
+.plugin-gallery-one .plugin-gallery-row { grid-template-columns: minmax(0, 720px); }
+.plugin-shot { display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; }
 /* Each picture carries its own frame (rounded corners and a soft shadow on a
  * transparent margin, tools/frame-shot.py), so the button adds none. */
 .plugin-shot-open { display: block; padding: 0; border: 0; background: none; border-radius: var(--radius-lg); cursor: zoom-in; aspect-ratio: 17 / 11;
@@ -660,4 +660,4 @@
 @media (prefers-reduced-motion: reduce) { .plugin-shot-open { transition: none; } .plugin-shot-open:hover { transform: none; } }
 .plugin-shot-caption { margin: 0 0 0 4px; font-size: 14.5px; line-height: 1.45; color: var(--paper-ink-2); }
 .market-phone .plugin-gallery { padding-top: var(--space-xl); }
-.market-phone .plugin-gallery-row { grid-auto-columns: 84%; gap: var(--space-lg); margin: 0 calc(-1 * var(--space-lg)); padding: 4px var(--space-lg) 14px; scroll-padding: 0 var(--space-lg); }
+.market-phone .plugin-gallery-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-lg); }
