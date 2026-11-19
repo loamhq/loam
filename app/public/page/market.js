@@ -31,7 +31,7 @@ import { h, icon, kept, blob, on as onNode } from '../ui.js'
 import { agentLook } from '../sessions.js'
 import { menuSurface } from '../menu-surface.js'
 import { sheetHandle } from '../chat-ui.js'
-import { KIND_ONE, KIND_MANY, KIND_ABOUT, KIND_HOME, KIND_LINE, TAGLINE, search, highlight, leadOf, sectionsOf, kindsListed, buildRequest, actionOf, plainTouches, reachOf, kindOf, byLoam, hueOf, tileRows, fineLine, madeBy, linkShape } from '../market.js'
+import { KIND_ONE, KIND_MANY, KIND_ABOUT, KIND_HOME, KIND_LINE, TAGLINE, search, highlight, leadOf, sectionsOf, kindsListed, buildRequest, actionOf, plainTouches, ROOT_LINE, reachOf, kindOf, byLoam, hueOf, tileRows, fineLine, madeBy, linkShape } from '../market.js'
 import { themePreview } from '../theme-preview.js'
 import { creatorLinks } from '../creator-links.js'
 import { emptyState } from '../empty-state.js'
@@ -821,6 +821,7 @@ export function mount(host) {
           : p ? touchList(lines) : null) : null,
       p?.installable === false ? h('p', { class: 'note market-why', text: `${p.why}. It is listed so you can see it.` }) : null,
       job.error ? h('p', { class: 'plugin-notice err', role: 'alert', text: job.error }) : null,
+      !done && p && p.installable !== false && !(theme && !p.declaration?.page_code) ? h('p', { class: 'note market-root', text: ROOT_LINE }) : null,
       !done && p && p.installable !== false ? h('p', { class: 'note market-yes-once', text: update ? 'You said yes to it once. A new version asks again only for what it adds.' : 'You say yes once, here. A later version asks again only if it reaches further.' }) : null,
       job.phase === 'installing' || job.phase === 'reading' ? h('div', { class: 'market-progress', role: 'progressbar', 'aria-label': job.phase === 'installing' ? `Installing ${name}` : 'Reading' }, h('span')) : null,
       h('div', { class: 'market-install-acts' }, ...(done ? [
