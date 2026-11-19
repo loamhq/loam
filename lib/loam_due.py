@@ -4,7 +4,7 @@ Added 2026-11-14 (first release, with L3) after the state move restarted the
 timers at 18:51:47Z and every persona's reflection wake, the reviewer,
 the Remote Control recycle (retired 2026-11-19), a persona's infra-watch (a
 Wednesdays cron, on a Saturday) and
-provider-follow all ran on the spot. The cause, read in systemd 252's
+the provider follower (retired 2026-11-19) all ran on the spot. The cause, read in systemd 252's
 src/core/timer.c and reproduced on a live every-minute timer at 22:55Z: starting a
 timer clears its last trigger (`timer_start`, line 638); a timer without a
 stamp file (every `Persistent=false` one) then dates its next elapse from

@@ -124,7 +124,6 @@ on everything but `/up`.
 |---|---|
 | `GET /up` | `{"ok": true}`. No token. |
 | `GET /v1/limits` | the numbers a client must know before it does something this interface would refuse: `attachment_max_bytes`, `inline_image_max_bytes`, `attachment_types` — "Attachments" below |
-| `GET /v1/dictation-terms` | the dictation terms note, read fresh → `{path, obsidian_url, modified, text}`, `Cache-Control: no-store`; **`404`** when there is no note. No parameter names a file — "The dictation terms note" below |
 | `GET /v1/agents` | the personas, derived from disk, each with its name and uploaded face |
 | `GET /v1/providers[?agent=<name>]` | the four providers, which are connected, the quota, when the login expires (`login`), and what each offers a chat: its `models` and its `efforts`. `?agent=` only decides whose default is ticked. |
 | `POST /v1/providers/claude-code/login` | begins a fresh Claude Code sign-in → **`201`** with `{state: "pending", url, code: null, instructions, login}`. Idempotent: a second POST while one is pending answers `200` with the same URL. "Making the login again" below. |
@@ -267,7 +266,7 @@ holds it: `working` (a silent turn in a long tool call or a call waiting on
 an engineer job included), `asking`, `background` (a subagent ends with the
 session's process tree, and a waiting call is cut), a state the rule does
 not know, and a failed read. The rule is `lib/loam_live.restart_blockers`,
-which `lib/loam_follow.py` and `bin/move-state` use too. At its ceiling
+which `bin/move-state` uses too (`loam_live.restart_read`). At its ceiling
 (`loam_live.RESTART_CEILING_S`, 30 min) or `--max-wait` it **defers**:
 exit 75, nothing restarted, and the caller tries again later. On 11-16 the
 ceiling used to let it go past silent turns, and it cut four, three of them
@@ -3083,39 +3082,13 @@ is `""` and the session's stand-in title is `Attached <name>`.
 (**`404`**). Making a persona read an arbitrary file on the box is a
 capability the app has never had, and it does not gain it here.
 
-### The dictation terms note
+### The dictation terms note (retired 0.2.12)
 
-The names and terms that bias dictation live in one vault note,
-`99_SYSTEM/Dictation terms.md`. The Obsidian plugin reads it from the vault;
-an app's container cannot see the vault, so it asks here. Added 2026-09-30.
-
-```
-GET /v1/dictation-terms
-  → 200 {"path": "99_SYSTEM/Dictation terms.md",
-         "obsidian_url": "obsidian://open?vault=vault&file=99_SYSTEM%2FDictation%20terms",
-         "modified": "2026-09-30T18:13:57Z",
-         "text": "---\ncreated_by: ...\n# Dictation terms\n..."}
-  → 404 {"error": "no dictation terms note on this box"}
-```
-
-- **One file, and no client can name another.** The path is
-  `DICTATION_TERMS_PATH` in `lib/loam_broker.py`, overridable only by
-  `LOAM_DICTATION_TERMS` in the broker's own environment (the unit, or a
-  test). The route reads no query parameter, and any longer path is not this
-  route (`405`, "no route").
-- **The text is sent whole, frontmatter and headings included.** Turning it
-  into terms is the reader's job, by the note's own rule: one term per line,
-  headings, blank lines and frontmatter ignored, a line with commas is several
-  terms. One rule in two readers (the plugin and the page) is kept honest by
-  the note saying it, not by this route parsing it a third way.
-- **`modified` is the file's mtime**, UTC, to the second. **`no-store`** on
-  both answers, because the note is edited by hand and the next take must see
-  the edit.
-- **`obsidian_url`'s vault name is the vault's directory name, `vault`.**
-  Obsidian keeps a vault's name nowhere in `.obsidian/`; it is the folder's
-  name on the device that opened it. If the phone's copy is named otherwise
-  the link opens nothing, and this is the line to change. A path pointed
-  outside the vault answers its absolute path and `obsidian_url: null`.
+Until 0.2.12 the broker answered `GET /v1/dictation-terms`, the one vault
+note of names and terms that biases dictation. Since Dictation 1.1.0 the
+plugin's own server reads that note (`<system>/Dictation terms.md`) and
+answers it at `/x/dictation/terms`, in the same shape; the broker has no
+such route.
 
 ### Files
 
@@ -4833,8 +4806,9 @@ stop was SIGKILLed at 90 s; its dump showed no live session and one task,
 `ThreadEngine._work`, cancelled inside `create_subprocess_exec` while starting
 a session it had begun *after* SIGTERM, and `asyncio.run`'s cancel of it never
 returned. Now the first SIGTERM sets `Broker.stopping`: `start_session`
-answers 503 and a queued thread turn writes "Ada's turn didn't start: the
-broker restarted" instead of starting. `shutdown()` then stops the live
+answers 503 and a queued thread turn does not start (its input stays on
+disk for the next start since 2026-11-19; until then it wrote "Ada's turn
+didn't start: the broker restarted"). `shutdown()` then stops the live
 sessions together (`SHUTDOWN_SESSIONS_S`, 15 s), gives each thread's turn
 `SHUTDOWN_TASKS_S` (10 s) to write its last line, cancels every other task
 and waits `SHUTDOWN_TASKS_S` for them; a task that will not end is named
@@ -5090,11 +5064,57 @@ reply"). Three changes, in `lib/loam_thread_engine.py`:
   longer moves `through`: the system line says it ended, and the next turn
   is shown those messages again rather than reading them as answered.
 
-What is not durable: a turn still queued when the broker stops writes
-"…'s turn didn't start: the broker restarted. Tag @… to ask again."
-(unchanged), an explicit line rather than a re-delivery after the restart.
 Proved by `tests/test_thread_steer.py` (each case above; the m6 and m10
-shapes fail on the code before it).
+shapes fail on the code before it). What was not durable then -- a turn
+still queued when the broker stopped wrote "…'s turn didn't start: the
+broker restarted. Tag @… to ask again." -- is since 2026-11-19, below.
+
+#### Input to a member is durable and ordered (2026-11-19, batch B step 2)
+
+Each (thread, member) has an ordered list of input on disk,
+`state/threads/inputs/<thread id>/<persona>.json`
+(`lib/loam_thread_inputs.py`): the owner's messages, a job's result, another
+agent's mention, an update's notice -- whatever `ThreadEngine.schedule`
+queues. An input is written before it is queued, marked `sent` the moment
+its turn's prompt goes into the session (or it is steered into a turn in
+flight), and removed once its turn has dealt with it.
+
+- **The stop posts nothing for input it did not answer.** A queued turn does
+  not start and its input stays; a turn cut before it said a word posts no
+  line and its input is kept, unmarked, to be given again. A cut turn that
+  had said something posts its words and `Ada's turn ended: the broker
+  restarted`, as before, and its input is settled. The line "didn't start:
+  the broker restarted. Tag @Ada to ask again." is gone.
+- **The start gives it again** (`ThreadEngine.resume_inputs`, called in
+  `amain` before the delivery pass; the journal says `inputs: N scheduled
+  again for M thread member(s), K dropped`): every list in order, once each.
+  Each replayed turn's prompt ends with when the input was queued ("this
+  input was queued for you at Thu 2026-11-19 08:12 PST and was still
+  waiting when Loam's session host restarted …") so the persona can judge
+  whether it still matters; a job's handoff note also says when the job
+  finished.
+- **Once only.** A message is given again only while the member's `through`
+  has not passed it (`already_heard`), so a crash after the turn and before
+  its mark runs no second turn. A result or notice a crash left marked
+  `sent` was in front of the session already and is dropped, logged ("not
+  given twice"); a job is also delivered once by its key
+  (`system_turn_allowed`). Input for a thread that is gone is dropped.
+- **A result can reach a turn generating about the same work.** `joins`
+  lets a job's result into the member's turn in flight when that turn was
+  under way before the brief was accepted (the waiter record's `since`,
+  to the second): the turn that briefed it. It is steered in on Claude Code
+  and Codex (`result_steer_text`: "a result for work you briefed in this
+  turn …, not from the owner, nothing is posted for it") and settled with
+  that turn. A result for a turn about something else -- one started after
+  the brief, typically an answer to a newer message -- waits behind it and
+  has its own quiet turn, so an answer does not jump topic; every turn of a
+  member is of the same thread by key, so a result never goes into another
+  thread's turn. A turn parked on background work hands the session over to
+  a result as it does to a message (`hand_over`). Antigravity cannot steer:
+  the result waits for the turn to end.
+
+Proved by `tests/test_thread_inputs.py` and the stop case of
+`tests/test_thread_replies.py`.
 
 **A turn has no clock.** (2026-11-10; the owner, after `Ada's turn ended: it
 ran past 30 minutes` at 13:09 PT while Ada's session worked on: "Please
@@ -5244,8 +5264,9 @@ gets one quiet system line, `Ada's turn ended: the broker restarted`
 (`…: its session exited`, `…: its session closed`; the time-based `…: it ran
 past 30 minutes` went 2026-11-10), and a turn that finished saying nothing at all gets `Ada's
 turn ended without a reply`. A turn queued while the broker is stopping
-never starts: `Ada's turn didn't start: the broker restarted. Tag @Ada to
-ask again.` Two causes found in `t-6daf5a6f`: a resumed Claude Code session
+never starts and posts nothing; its input is given at the next start
+(2026-11-19; it wrote `Ada's turn didn't start: …` before), and a turn cut
+before any word posts no line either, for the same reason. Two causes found in `t-6daf5a6f`: a resumed Claude Code session
 can open with an empty `result` (`num_turns: 0`, nothing asked of the model,
 closing the background tasks the last process left), which was taken for the
 end of the turn (`m13`, "(no reply)", and the real answer went unwatched);

@@ -23,13 +23,15 @@ the last ten minutes, read from the launcher's job state
   4. The same list read as a persona would: `bin/settings get thread.jobs`.
   5. The outcome words, from the launcher's verdicts.
   6. A brief returns at once, and its result comes back as input (batch B
-     step 1, 2026-11-18): `--brief` from a thread, with the broker's quiet
-     route live, answers in under five seconds with the job id and the
-     receipt's path and never waits; with the route not live, or from a
-     cron, it waits as before. The broker's own delivery pass then hands
+     steps 1 and 3): `--brief` from a thread, or from a cron, answers in
+     under five seconds with the job id and the receipt's path and never
+     waits; the cron's record goes by a run (tests/test_results.py). The
+     broker's own delivery pass then hands
      two results that finished close together to the persona, each once,
-     oldest first, queued behind the persona's turn under way (not steered
-     into it), and posts nothing: a turn that reads one and says nothing
+     oldest first, queued behind the persona's turn under way, which is
+     about something else (started after the briefs, so not steered into;
+     the steer into the briefing turn is tests/test_thread_inputs.py), and
+     posts nothing: a turn that reads one and says nothing
      leaves the thread file as it was.
 
 Run: python3 tests/test_thread_jobs.py
@@ -400,18 +402,10 @@ check("...each one of OUTCOMES", set(got) <= set(activity.OUTCOMES))
 import io  # noqa: E402
 import time  # noqa: E402
 
-launched, waited = [], []
+launched = []
 job.launch = lambda project, jid, p, minutes: launched.append(jid)
 job.resume_queued = lambda: []
 job.preflight = lambda project, p, meta: None   # the composition is not this test's
-
-
-def fake_wait(p, jid, minutes, return_if_queued=False):
-    waited.append(jid)
-    return {"ok": True, "stage": "done", "receipt_text": "done", "vault_receipt": "/v/x.md"}
-
-
-job.wait_for = fake_wait
 
 
 def tool(env, title):
@@ -438,13 +432,12 @@ def tool(env, title):
 
 
 THREAD_ENV = {"LOAM_AGENT": LEAD, w.SESSION_ENV: "sess-lead"}
-w.mark_route()   # this process stands in for a broker with the quiet route
 code, out, took = tool(THREAD_ENV, "Returns at once")
 fast_id = out.get("job_id")
 check("--brief from a thread returns in under 5 s, with the job id",
       code == 0 and out.get("ok") and fast_id and took < 5, (round(took, 2), out))
-check("...launched and never waited on",
-      launched[-1:] == [fast_id] and fast_id not in waited, (launched, waited))
+check("...launched, nothing waited on",
+      launched[-1:] == [fast_id], launched)
 check("...the receipt's path and a sentence saying the result comes back as input",
       out.get("receipt_path") == str(job.paths(PROJECT, fast_id)["receipt"])
       and "next input" in out.get("receipt", "") and out.get("queued") is False, out)
@@ -453,15 +446,20 @@ check("...its record names the thread and has no waiter",
       rec.get("thread") == home and rec.get("returned") is True and "pid" not in rec, rec)
 w.settle(fast_id)
 
-code, out, _ = tool({"LOAM_AGENT": LEAD, "LOAM_WAKE": "cron:infra-watch",
-                     w.SESSION_ENV: "sess-lead"}, "From a cron, blocking")
-check("a brief with no thread (a cron) still waits for its verdict",
-      out.get("job_id") in waited and out.get("receipt_path") == "/v/x.md", out)
-w.ROUTE.unlink()
-code, out, _ = tool(THREAD_ENV, "Before the broker restarts")
-check("from a thread while the broker's quiet route is not live, it waits as before",
-      out.get("job_id") in waited, out)
-check("...and a waiting call settled leaves no record", w.records() == [], w.records())
+code, out, took = tool({"LOAM_AGENT": LEAD, "LOAM_WAKE": "cron:infra-watch",
+                        w.SESSION_ENV: "sess-cron"}, "From a cron, at once")
+cron_id = out.get("job_id")
+rec = json.loads(w._path(cron_id).read_text())
+check("a brief with no thread (a cron) returns at once too",
+      code == 0 and out.get("ok") and took < 5 and launched[-1:] == [cron_id],
+      (round(took, 2), out))
+check("...saying its result comes back as a run resuming this session",
+      "resumes this session" in out.get("receipt", ""), out)
+check("...its record names its session and lane, and goes by a run",
+      (rec.get("caller"), rec.get("caller_session"), rec.get("caller_lane"),
+       w.route(rec)) == ("cron", "sess-cron", "cron:infra-watch", "run"), rec)
+w.settle(cron_id)
+check("...and a settled record leaves nothing", w.records() == [], w.records())
 
 
 class TurnSession:
@@ -567,7 +565,7 @@ async def deliveries():
             "landing_state": "landed", "landing": "**Landing: landed at `abc1234`**",
             "finished": iso(finished_at)}))
         w.register(jid, "Loam", p["dir"], LEAD,
-                   {"caller": "conversation", "thread": quiet}, returned=True)
+                   {"caller": "conversation", "thread": quiet})
         ids.append(jid)
     second, first = ids
     # The persona is mid-answer to a message when they arrive.
@@ -638,7 +636,7 @@ asyncio.run(deliveries())
 # delivery pass then carries it like any verdict.
 job.unit_state = lambda unit: "inactive"
 dead_id, dead_p = brief("Died before it started", THREAD_ENV)
-w.register(dead_id, "Loam", dead_p["dir"], LEAD, {"thread": home}, returned=True)
+w.register(dead_id, "Loam", dead_p["dir"], LEAD, {"thread": home})
 check("recovery leaves a just-launched job alone for its startup grace",
       not job.died_unheard(PROJECT, dead_id, dead_p) and not dead_p["result"].is_file())
 rec = json.loads(w._path(dead_id).read_text())

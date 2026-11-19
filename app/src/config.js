@@ -29,43 +29,19 @@ export function readConfig(env = process.env) {
   const brokerUrl = (env.BROKER_URL ?? '').trim().replace(/\/+$/, '')
   const brokerToken = (env.BROKER_TOKEN ?? '').trim()
   // Credentials belong to the broker's plugin secret store. This URL lets
-  // tests point synthesis and transcription at a loopback provider.
+  // tests point the thread-branch drafter at a loopback provider.
   const geminiUrl = (env.GEMINI_API_URL ?? 'https://generativelanguage.googleapis.com').trim().replace(/\/+$/, '')
-  // The text model that polishes a take (`src/polish.js`), on the same key.
-  const polishModel = (env.DICTATION_POLISH_MODEL ?? '').trim() || 'gemini-3.5-flash-lite'
+  // The text model that drafts a branched thread's opening (`src/thread-branch.js`).
+  const branchModel = (env.BRANCH_MODEL ?? '').trim() || 'gemini-flash-latest'
   // How much the app says on stdout: `debug` adds a line per static file,
-  // `info` (the default) is every other request and every transcription,
+  // `info` (the default) is every other request,
   // `off` is silence. Anything else reads as `info`.
   const logLevel = (env.LOG_LEVEL ?? '').trim().toLowerCase() || 'info'
   // The biggest file a chat will carry is deliberately *not* here. It is the
   // host's number, the broker answers it on `GET /v1/limits`, and this app
   // relays that route rather than keeping a copy of it in an environment
   // variable that could disagree with the cap actually enforced.
-  //
-  // Speech — a reply read aloud, or a spoken brief of it — on the same key.
-  // Every number has its default here and nowhere else; see `src/speech.js`.
-  const speechTtsModelSet = (env.SPEECH_TTS_MODEL ?? '').trim()
-  const speech = {
-    ttsModel: speechTtsModelSet || 'gemini-3.8-flash-tts',
-    // Whether the TTS model was named, or is the default: a tracking alias
-    // found in the models list is used only when it was not named.
-    ttsModelNamed: speechTtsModelSet !== '',
-    briefModel: (env.SPEECH_BRIEF_MODEL ?? '').trim() || 'gemini-flash-latest',
-    dir: (env.SPEECH_DIR ?? '').trim() || '/storage/speech',
-    ttlHours: positive(env.SPEECH_TTL_HOURS, 48),
-    maxChars: positiveInt(env.SPEECH_MAX_CHARS, 60_000),
-    documentMaxChars: positiveInt(env.SPEECH_DOCUMENT_MAX_CHARS, 250_000),
-    chunkChars: positiveInt(env.SPEECH_CHUNK_CHARS, 1_000),
-    concurrency: positiveInt(env.SPEECH_CONCURRENCY, 4),
-    briefMaxWords: positiveInt(env.SPEECH_BRIEF_MAX_WORDS, 300),
-    ffmpeg: (env.SPEECH_FFMPEG ?? '').trim() || 'ffmpeg',
-    // Which voice each agent speaks in. Agents are this installation's, so
-    // their names are configuration and never a literal in the repo:
-    // `agent=Voice:character;agent=Voice:character`. Unlisted agents get the
-    // default in `src/speech.js`.
-    voices: (env.SPEECH_VOICES ?? '').trim(),
-    paces: (env.SPEECH_PACES ?? '').trim(),
-  }
+
   // Published vault URLs (`https://…`, comma-separated) whose links open in
   // Files instead of leaving the app. This installation's hostnames are
   // configuration and never a literal in the repo.
@@ -92,9 +68,8 @@ export function readConfig(env = process.env) {
     brokerUrl,
     brokerToken,
     geminiUrl,
-    polishModel,
+    branchModel,
     logLevel,
-    speech,
     appMedia: {
       dir: (env.APP_MEDIA_DIR ?? '').trim() || '/storage/app-media',
       chrome: (env.APP_PREVIEW_CHROME ?? '').trim() || 'chromium',

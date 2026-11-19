@@ -14,9 +14,10 @@ runs, in order, `bin/library seed-vault` (docs/skills.md) and
 
 **About me.** `seed-vault` also writes `About me.md` at the top of the
 vault: a heading and one line saying it is what the person's agents know
-about them, theirs to read and edit (the owner, 2026-11-16). Every agent in
-the map's shape is told of it by Loam's text (`docs/persona/loam.md`, loaded on
-every run): read it, add what lasts about the owner, tell them when you do.
+about them, theirs to read and edit (the owner, 2026-11-16). From 2026-11-18
+to 2026-11-19 every agent in the map's shape was told of it by Loam's text
+(`docs/persona/loam.md`); the owner's shorter text of 2026-11-19 does not
+name it, and the library's `loam-how-it-works` does. Iris's `nights.md` keeps it.
 Until 2026-11-18 a new agent was given an `_always.md` with that line
 instead; an agent made then keeps it. After that the note is
 the person's and the agents': Iris fills it in during the hello conversation

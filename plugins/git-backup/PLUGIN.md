@@ -33,11 +33,11 @@ contributes:
   settings.entry:
     - key: vault_remote
       label: Vault's repository
-      note: The SSH address of a private repository. Connect it on this page, so the key is made and tested.
+      note: The SSH address of a private repository, or a folder on this machine. Connect it on this page, so it is checked and tested.
       default: ""
     - key: spaces_remote
       label: AI Spaces' repository
-      note: The SSH address of a private repository. Connect it on this page, so the key is made and tested.
+      note: The SSH address of a private repository, or a folder on this machine. Connect it on this page, so it is checked and tested.
       default: ""
     - key: every
       label: Back up
@@ -49,7 +49,9 @@ contributes:
 # Git backup
 
 Your vault and your agents' AI Spaces, copied every few minutes to private
-git repositories of your own: on GitHub, GitLab, Codeberg or any git host.
+git repositories of your own: on GitHub, GitLab, Codeberg or any git host,
+on a server of your own, or in a folder on this machine or a drive attached
+to it.
 If this machine is ever lost, a new Loam pointed at the two repositories has
 everything back, every note, every conversation and every agent's memory,
 with its whole history.
@@ -59,7 +61,10 @@ repository for each, paste its address here, and Loam makes a key for that
 one repository. Add the key to the repository as a deploy key with write
 access (three clicks; the page shows where), then test it. The key reaches
 that repository and nothing else in your account, and it never leaves this
-machine.
+machine. On a server of your own, add the key the same way if it runs a git
+host, or to the account's `~/.ssh/authorized_keys` if it is plain SSH. A
+folder on this machine needs no key: paste its path (Loam makes the folder
+a repository when it is new or empty) and test it.
 
 **It will not push to a public repository.** Before every backup Loam asks
 the host, signed out, whether anyone can read the repository; if anyone can,

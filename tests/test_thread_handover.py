@@ -324,7 +324,7 @@ async def main():
     check("...the writer counts `delivered_while_waiting`",
           steps_mod.COUNTS["delivered_while_waiting"] - count, 1)
     check("...and logs a line naming the task",
-          [l for l in logged if "a message arrived while its turn waited on "
+          [l for l in logged if "input arrived while its turn waited on "
            "background work (Brief engineer: 15 minutes)" in l] != [], True)
     check("...`delivered_while_waiting` is on GET /v1/threads/writer",
           (await call(server, "GET", "/v1/threads/writer"))[1]

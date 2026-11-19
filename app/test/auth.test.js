@@ -22,12 +22,12 @@ test('an expired portal latches: queued background calls send no more requests',
     assert.equal(options.redirect, 'manual', 'the login page must not be fetched as API JSON')
     return new Response('', { status: 401 })
   }
-  await assert.rejects(auth.authenticatedFetch('/api/speech/lookup'), { status: 401 })
+  await assert.rejects(auth.authenticatedFetch('/x/read-aloud/speech/lookup'), { status: 401 })
   assert.equal(auth.authExpired(), true)
-  for (const url of ['/api/speech/lookup', '/api/threads', '/api/sessions/events']) {
+  for (const url of ['/x/read-aloud/speech/lookup', '/api/threads', '/api/sessions/events']) {
     await assert.rejects(auth.authenticatedFetch(url), { status: 401 })
   }
-  assert.deepEqual(calls, ['/api/speech/lookup', auth.PROBE, auth.PROBE, auth.PROBE], 'one request, the probes that confirm it, then nothing')
+  assert.deepEqual(calls, ['/x/read-aloud/speech/lookup', auth.PROBE, auth.PROBE, auth.PROBE], 'one request, the probes that confirm it, then nothing')
 })
 
 // The 0.2.0 walk: adding a passkey renews the login's session, and the one poll

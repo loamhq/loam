@@ -48,7 +48,8 @@ try {
       }
       await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__buttons={threads,state,theme,draft,growDraft,schedule,goHome,goFiles,goApps,goSettings,goActivity,closeSheet};' }))
       await context.route('**/api/health', route => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
-      await context.route('**/api/speech/lookup', route => route.fulfill({ json: { status: 'none' } }))
+      await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+      await context.route('**/x/read-aloud/speech/lookup', route => route.fulfill({ json: { status: 'none' } }))
       const page = await context.newPage(); page.setDefaultTimeout(10000)
       await page.clock.setFixedTime(new Date('2026-11-15T17:47:20Z'))
       page.on('pageerror', e => errors.push(e.message))

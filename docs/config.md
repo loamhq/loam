@@ -142,7 +142,7 @@ move restarted the timers, and it was reproduced on `loam-headroom.timer`.
   reconciler, `move-state` and the installer and updater to come all follow
   this rule.
 - **A lane checks for itself.** The wake (reflection and cron), the
-  reviewer and provider-follow call `loam_due.not_due()` first.
+  reviewer call `loam_due.not_due()` first.
   A run its timer started when none of the timer's calendar times fell in
   the ten minutes before goes no further, with a line in its journal and
   in `logs/not-due.jsonl`. A run started by hand or by "Run now" is never
@@ -166,13 +166,13 @@ is what the installer runs.
   state (2026-11-16): counted for the log, never said. What is said is an
   entry under its tree of a kind not known on 2026-11-16
   (`AGY_KNOWN`), which is what a store of its own would look like.
-  Those files are cleared after a week by the nightly `provider-follow`
-  pass (`lib/loam_agy_files.py`): an engineer job's or reviewer run's a week
+  Those files are cleared after a week by `bin/clear-agy-files`, which
+  the nightly drift-watch runs (`lib/loam_agy_files.py`): an engineer job's or reviewer run's a week
   after its last job, and every other conversation, a persona's included,
   once nothing has touched it for a week (2026-11-16). A thread whose
   member's conversation was cleared starts that member on a fresh session,
   given the thread's recent exchange and its summary.
 
-The checks run at every session start, after each provider-follow switch,
-and on `bin/provider-memory check`. A store that grew is said once, in
+The checks run at every session start, after `provider-pin apply` moves a
+CLI, and on `bin/provider-memory check`. A store that grew is said once, in
 comms.md under Important; never in a conversation's thread (2026-11-16).

@@ -25,7 +25,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import loam_config as lc
-from urllib.parse import quote
 
 import loam_provider_usage as usage_store
 from loam_permissions import PERMISSION_MODE
@@ -35,8 +34,8 @@ AI_LABS = lc.WORKSPACES
 CLAUDE = str(lc.CLAUDE_BIN)
 # The flags every broker session's launch line opens with, after the binary
 # (``Session.argv`` in bin/session-broker says why each is load-bearing).
-# Here so the provider follower's smoke test starts a candidate build with
-# exactly the broker's line (lib/loam_follow.py, 2026-11-11).
+# Here so one authority holds them (the retired provider follower's smoke
+# test shared it, 2026-11-11 to 11-19).
 CLAUDE_STREAM_FLAGS = (
     "-p",
     "--input-format", "stream-json",
@@ -810,49 +809,6 @@ def epoch_iso(seconds) -> str | None:
         "%Y-%m-%dT%H:%M:%SZ")
 
 
-# The one note of names and terms that biases dictation, read by the Obsidian
-# plugin from the vault and by the app through `GET /v1/dictation-terms`
-# (2026-09-30). One file, named here, and no route parameter can name another:
-# the route serves this path and nothing else. The environment variable is
-# the broker's own environment -- the same one `login_source` reads -- so a
-# test or a second box can point it elsewhere without an edit here.
-DICTATION_TERMS_PATH = VAULT / lc.vault_folder("system") / "Dictation terms.md"
-DICTATION_TERMS_ENV = "LOAM_DICTATION_TERMS"
-
-
-def dictation_terms(env: dict | None = None) -> dict | None:
-    """The note as ``GET /v1/dictation-terms`` answers it, or None when there
-    is no note. The text is sent whole: parsing it into terms is the reader's
-    job, as it is in the plugin, so the two cannot disagree about a line.
-
-    ``path`` is vault-relative and ``obsidian_url`` opens the note in Obsidian,
-    whose vault name is the vault's directory name (the ``.obsidian/`` config
-    on this box records no other). A path pointed outside the vault has
-    neither a vault-relative name nor a link, so both say so with the
-    absolute path and a null.
-    """
-    env = os.environ if env is None else env
-    path = Path(env.get(DICTATION_TERMS_ENV) or DICTATION_TERMS_PATH)
-    try:
-        text = path.read_text(encoding="utf-8")
-        mtime = path.stat().st_mtime
-    except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
-        return None
-    try:
-        rel = path.relative_to(VAULT)
-    except ValueError:
-        return {"path": str(path), "obsidian_url": None,
-                "modified": epoch_iso(mtime), "text": text}
-    target = rel.with_suffix("") if rel.suffix == ".md" else rel
-    return {
-        "path": rel.as_posix(),
-        "obsidian_url": (f"obsidian://open?vault={quote(VAULT.name, safe='')}"
-                         f"&file={quote(target.as_posix(), safe='')}"),
-        "modified": epoch_iso(mtime),
-        "text": text,
-    }
-
-
 def login_source(env: dict | None = None) -> str:
     """Which credential a session this broker starts would actually
     authenticate with -- read off the broker's OWN environment, because that
@@ -1219,6 +1175,7 @@ def read_token() -> str:
     as an environment variable, the way every other credential on this box is
     mounted at job time rather than baked in."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not TOKEN_PATH.exists():
         TOKEN_PATH.write_text(secrets.token_urlsafe(32), encoding="utf-8")
     os.chmod(TOKEN_PATH, stat.S_IRUSR | stat.S_IWUSR)

@@ -50,13 +50,14 @@ try {
       ? r.fulfill({ contentType: 'text/css', body: execFileSync('git', ['show', '6a816704:public/style.css'], { encoding: 'utf8' }) }) : r.fallback())
     await context.route('**/app.js', r => r.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__sticky = { threads, panels, schedule, goChats };' }))
     await context.route('**/api/health', r => r.fulfill({ json: { configured: true, ok: true, speech: true } }))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
     let made = false
-    const posts = [], ready = { id: 'fixture-audio', status: 'ready', duration_s: 120, url: '/api/speech/fixture-audio/audio.mp3' }
-    await context.route(/\/api\/speech(?:\/.*)?$/, route => {
+    const posts = [], ready = { id: 'fixture-audio', status: 'ready', duration_s: 120, url: '/x/read-aloud/speech/fixture-audio/audio.mp3' }
+    await context.route(/\/x\/read-aloud\/speech(?:\/.*)?$/, route => {
       const req = route.request(), pathname = new URL(req.url()).pathname
       if (pathname.endsWith('/audio.mp3')) return route.fulfill({ contentType: 'audio/wav', body: wav })
       if (pathname.endsWith('/lookup')) return route.fulfill({ json: made && req.postDataJSON().mode === 'verbatim' ? ready : { status: 'none' } })
-      assert.equal(pathname, '/api/speech')
+      assert.equal(pathname, '/x/read-aloud/speech')
       posts.push(req.postDataJSON()); made = true
       return route.fulfill({ status: 202, json: ready })
     })

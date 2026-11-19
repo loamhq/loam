@@ -52,7 +52,8 @@ try {
     await context.route('**/app.js', r => r.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__edge = { threads, schedule, pluginLoader };' }))
     if (process.env.EDGE_BASELINE) for (const file of ['threads.css']) await context.route(`**/${file}`, r => r.fulfill({ contentType: 'text/css', body: execFileSync('git', ['show', `${process.env.EDGE_BASELINE}:public/${file}`]) }))
     await context.route('**/api/health', r => r.fulfill({ json: { configured: true, ok: true, speech: true } }))
-    await context.route(/\/api\/speech(?:\/.*)?$/, r => {
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+    await context.route(/\/x\/read-aloud\/speech(?:\/.*)?$/, r => {
       const url = new URL(r.request().url())
       if (url.pathname.endsWith('/audio.mp3')) {
         const range = /^bytes=(\d+)-(\d*)$/.exec(r.request().headers().range ?? '')
@@ -61,7 +62,7 @@ try {
       }
       if (url.pathname.endsWith('/lookup')) return r.fulfill({ json: { status: 'none' } })
       if (r.request().method() === 'POST') return r.fulfill({ status: 202, json: { id: 'a'.repeat(32), status: 'preparing', stage: 'voicing' } })
-      return r.fulfill({ json: { id: 'a'.repeat(32), status: 'ready', duration_s: 120, url: '/api/speech/' + 'a'.repeat(32) + '/audio.mp3' } })
+      return r.fulfill({ json: { id: 'a'.repeat(32), status: 'ready', duration_s: 120, url: '/x/read-aloud/speech/' + 'a'.repeat(32) + '/audio.mp3' } })
     })
     let releaseUpload, uploadStarted = false
     const uploadHeld = new Promise(resolve => { releaseUpload = resolve })

@@ -29,8 +29,9 @@ Decided 2026-11-14 (first release, decisions 6 and 7; job L10):
   line), and a ``map.md`` (the draft's, or ``loam_loading.MAP_SEED``), and
   never ``_always.md``, ``_active.md`` or ``_reflection.md``. Loam's text and
   the owner's shared page load beside its config without being copied into
-  it, so nothing of the fleet's configs is composed in any more. ``About
-  me.md`` is named by Loam's text, so no line about it is written either.
+  it, so nothing of the fleet's configs is composed in any more. No line
+  about ``About me.md`` is written either (Loam's text named it from
+  2026-11-18 to 2026-11-19; the library's ``loam-how-it-works`` does).
 
 **The yes.** A person's own call (the page, which sends no ``by``) is the
 person's yes. An agent's call (``by``) must name the thread it is talking to
@@ -105,7 +106,8 @@ PROVIDERS = ("claude-code", "codex", "antigravity")
 # A new agent's loading files were seeded here until 2026-11-18
 # (`_active.md`, `_reflection.md`, and `_always.md` with a line about
 # `About me.md`). A new agent now has a map (lib/loam_loading.MAP_SEED when
-# the draft brings none), and `About me.md` is named by Loam's text.
+# the draft brings none); `About me.md` is named by the library's
+# loam-how-it-works (by Loam's text from 2026-11-18 to 2026-11-19).
 
 
 class AgentsError(Exception):

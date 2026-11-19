@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Who, what and where for every job and session (2026-11-12), and the
-receipt a waiting call could not carry.
+record of a result owed to whoever asked.
 
   1. **lib/loam_waiters.py**: a lane as a run kind; the calling session from
      the environment, an ancestor's environment, or an ancestor Claude CLI's
      argv (fake /proc); its thread from the session marker or sessions.json;
-     a waiter's record registered, settled, and owed once its waiter is gone
-     and its job has a verdict, or at once for a brief that returned; the
-     persona's input; the quiet route's mark.
+     a brief's record registered, settled, and owed once its job has a
+     verdict, by the thread's route or by a run's; the persona's input.
   2. **bin/engineer-job**: the model read off a Claude and a Codex command
      line; a job's label carries engine, model, caller, thread and title,
      and the job it continues with the chain's first job; an older job
@@ -130,27 +129,23 @@ check("...for that persona only", w.thread_of("sess-old", "iris", state), None)
 check("caller() in a conversation: kind, session, thread",
       w.caller({"LOAM_AGENT": "ada", w.SESSION_ENV: "sess-codex"}, 30, proc, state),
       {"caller": "conversation", "caller_session": "sess-codex", "thread": "t-marked"})
-check("caller() in a cron: the kind alone",
+check("caller() in a cron: the kind, its lane and its own session, no thread",
       w.caller({"LOAM_WAKE": "cron:infra-watch", w.SESSION_ENV: "x"}, 30, proc, state),
-      {"caller": "cron"})
+      {"caller": "cron", "caller_lane": "cron:infra-watch", "caller_session": "x"})
 
 jobdir = TMP / "jobs" / "20261112-120000-aaaaaaaa"
 jobdir.mkdir(parents=True)
 w.register("20261112-120000-aaaaaaaa", "Loam", jobdir, "ada",
            {"caller": "conversation", "thread": "t-x"})
-check("a waiting call's record is written", [r["job"] for r in w.records()],
-      ["20261112-120000-aaaaaaaa"])
-check("...not owed while its waiter lives", w.owed(), [])
-dead = w._path("20261112-120000-aaaaaaaa")
-rec = json.loads(dead.read_text())
-rec["pid"] = 999_999_99
-dead.write_text(json.dumps(rec))
+check("a brief's record is written at accept, with no waiter in it",
+      ([r["job"] for r in w.records()], "pid" in w.records()[0]),
+      (["20261112-120000-aaaaaaaa"], False))
 check("...not owed while its job has no verdict", w.owed(), [])
 (jobdir / "result.json").write_text(json.dumps({
     "ok": True, "stage": "done", "outcome": "completed", "landing_state": "landed",
     "vault_receipt": "/v/r.md", "receipt_text": "Did the thing."}))
 owed = w.owed()
-check("...owed once the waiter is gone and the job has a verdict",
+check("...owed once the job has a verdict",
       [(r["job"], r["thread"], r["persona"]) for r in owed],
       [("20261112-120000-aaaaaaaa", "t-x", "ada")])
 note = w.handoff_text(owed[0], "Fix it")
@@ -179,25 +174,13 @@ w.register("20261112-120000-bbbbbbbb", "Loam", jobdir, "ada", {})
 w.settle("20261112-120000-bbbbbbbb")
 check("a settled call leaves nothing", w.records(), [])
 w.register("20261112-120000-aaaaaaaa", "Loam", jobdir, "ada",
-           {"caller": "conversation", "thread": "t-x"}, returned=True)
-check("a brief that returned at once: no waiter in its record, owed at its verdict",
-      ("pid" in w.records()[0], [r["job"] for r in w.owed()]),
-      (False, ["20261112-120000-aaaaaaaa"]))
+           {"caller": "cron", "caller_lane": "cron:infra-watch",
+            "caller_session": "sess-cron"})
+check("a cron's result goes by a run, not by the broker",
+      ([r["job"] for r in w.owed()], [r["job"] for r in w.owed(by="run")],
+       [r["job"] for r in w.owed(by="run", persona="iris")]),
+      ([], ["20261112-120000-aaaaaaaa"], []))
 w.settle("20261112-120000-aaaaaaaa")
-check("the quiet route is not live until a broker marks it",
-      w.route_live(), False)
-w.mark_route()
-check("...live while the process that marked it runs",
-      w.route_live(), True)
-w.ROUTE.write_text(json.dumps({"pid": os.getpid(), "start": "1"}))
-check("...and not once that pid is another process (its start differs)",
-      w.route_live(), False)
-w.ROUTE.unlink()
-_kept = os.environ.pop("LOAM_WAITERS_DIR")
-w.mark_route()
-os.environ["LOAM_WAITERS_DIR"] = _kept
-check("...and the install's own route is marked only from the broker's unit",
-      (w.ROUTE.exists(), w.in_broker_unit(os.getpid())), (False, False))
 
 
 # -- 2. bin/engineer-job ------------------------------------------------------
@@ -373,8 +356,9 @@ async def broker_checks():
     check("...delivered once: the same job again is not",
           server.threads.deliver_job(record, "x"), "already delivered")
 
-    # A turn the restart cuts says so, job or no job (`delivery_follows`
-    # went with the blocking call, 2026-11-18).
+    # A turn the restart cuts before a word posts nothing, job or no job
+    # (`delivery_follows` went with the blocking call, 2026-11-18), and its
+    # input is kept on disk for the next start (2026-11-19, batch B step 2).
     async def boom(t):
         fake.stopping = True      # the restart lands mid-turn
         raise RuntimeError("cut")
@@ -387,8 +371,10 @@ async def broker_checks():
             break
     fake.stopping = False
     lines = [m["text"] for m in threads.read(tid)[1][before:]]
-    check("...a turn the restart ends posts its line", lines,
-          ["Ada's turn ended: the broker restarted"])
+    check("...a turn the restart cuts before a word posts no line", lines, [])
+    check("...and its input is kept for the next start",
+          [i["reason"] for i in engine_mod.inputs.items(tid, "ada")], ["y"])
+    engine_mod.inputs.drop_member(tid, "ada")
     server.threads.run_turn = real
     check("...a persona not in the thread is not given a turn",
           server.threads.deliver_job({**record, "persona": "iris"}, "x"), "not a member")

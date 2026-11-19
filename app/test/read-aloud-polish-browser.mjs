@@ -39,11 +39,11 @@ const speech = {
   async peek() { return { status: 200, body: { status: 'none' } } },
   async request(body) {
     requests.push(body)
-    if (cached) return { status: 200, body: { id: 'fixture-audio', status: 'ready', duration_s: 2, url: '/api/speech/fixture-audio/audio.mp3' } }
+    if (cached) return { status: 200, body: { id: 'fixture-audio', status: 'ready', duration_s: 2, url: '/x/read-aloud/speech/fixture-audio/audio.mp3' } }
     phase = 'preparing'
     return { status: 202, body: { id: 'fixture-audio', status: phase, stage: 'voicing', progress: 0 } }
   },
-  async lookup() { return fail ? { id: 'fixture-audio', status: 'failed', error: "Couldn't prepare this cleanly — try again." } : { id: 'fixture-audio', status: phase, duration_s: 180, url: '/api/speech/fixture-audio/audio.mp3' } },
+  async lookup() { return fail ? { id: 'fixture-audio', status: 'failed', error: "Couldn't prepare this cleanly — try again." } : { id: 'fixture-audio', status: phase, duration_s: 180, url: '/x/read-aloud/speech/fixture-audio/audio.mp3' } },
   async audio() { return null },
   stop() {},
 }
@@ -178,7 +178,7 @@ try {
     await page.keyboard.press('ArrowRight')
     await page.waitForFunction(() => document.querySelector('.file-speech-value:not(.previous)').textContent.startsWith('3 min'))
     const buttonBefore = await button.boundingBox()
-    const prepare = () => Promise.all([page.waitForResponse((r) => r.url() === `${url}/api/speech` && r.request().method() === 'POST'), button.click()])
+    const prepare = () => Promise.all([page.waitForResponse((r) => r.url() === `${url}/x/read-aloud/speech` && r.request().method() === 'POST'), button.click()])
     await prepare()
     await page.locator('.file-speech-action[data-phase=making]').waitFor()
     await page.waitForTimeout(250)
@@ -281,7 +281,7 @@ try {
     await page.keyboard.press('Enter')
     assert.equal(await voice.inputValue(), 'Sulafat', `native keyboard selection at ${width}`)
     assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('loam-ui.read-aloud'))), { voice: 'Sulafat' })
-    await Promise.all([page.waitForResponse((r) => r.url() === `${url}/api/speech` && r.request().method() === 'POST'), page.locator('.read-aloud-preview').click()])
+    await Promise.all([page.waitForResponse((r) => r.url() === `${url}/x/read-aloud/speech` && r.request().method() === 'POST'), page.locator('.read-aloud-preview').click()])
     phase = 'ready'
     await page.locator('.read-aloud-sample .player-play').waitFor()
     assert.equal(requests.at(-1).voice, 'Sulafat')

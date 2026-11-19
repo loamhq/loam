@@ -38,12 +38,13 @@ try {
     const page = await context.newPage(), errors = [], captures = [], posts = [], lookups = [], known = new Map()
     let pending = false, serial = 0
     const key = (b) => JSON.stringify([b.chat_id, b.mode, b.text]), ids = new Map()
-    const ready = (id) => ({ id, status: 'ready', duration_s: 90, url: `/api/speech/${id}/audio.mp3` })
+    const ready = (id) => ({ id, status: 'ready', duration_s: 90, url: `/x/read-aloud/speech/${id}/audio.mp3` })
     await page.route('**/api/health', (r) => r.fulfill({ json: { configured: true, ok: true, speech: true } }))
-    await page.route(/\/api\/speech(?:\/.*)?$/, async (route) => {
+    await page.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+    await page.route(/\/x\/read-aloud\/speech(?:\/.*)?$/, async (route) => {
       const req = route.request(), url = new URL(req.url())
       if (url.pathname.endsWith('/lookup')) { const body = req.postDataJSON(); lookups.push(body); return route.fulfill({ json: known.get(key(body)) ?? { status: 'none' } }) }
-      if (url.pathname === '/api/speech') {
+      if (url.pathname === '/x/read-aloud/speech') {
         const body = req.postDataJSON(); posts.push(body); const id = (++serial).toString(16).padStart(32, '0'); ids.set(id, body)
         return route.fulfill({ status: 202, json: { id, status: 'preparing', stage: 'voicing' } })
       }

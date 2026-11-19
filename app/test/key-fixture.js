@@ -10,3 +10,11 @@ export function fixtureBroker(config) {
     return json(method, path, ...args)
   } }
 }
+
+// The two audio plugins' own servers (Dictation and Read aloud carry their
+// server halves since 1.1.0), configured from the same kind of environment,
+// with the synthetic key the pipeline tests inject.
+import { readConfig as dictationRuntime } from '../../plugins/_listed/dictation/server/config.js'
+import { readConfig as readAloudRuntime } from '../../plugins/_listed/read-aloud/server/config.js'
+export const dictationConfig = (env = {}) => ({ ...dictationRuntime(env), geminiApiKey: env.GEMINI_API_KEY || '' })
+export const readAloudConfig = (env = {}) => ({ ...readAloudRuntime({ SPEECH_PACES: 'Aoede=147', ...env }), geminiApiKey: env.GEMINI_API_KEY || '' })

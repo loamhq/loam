@@ -3,19 +3,21 @@
 // Reports counts and checks, never document contents or credentials.
 import fs from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { readConfig } from '../src/config.js'
+import { readConfig as appConfig } from '../src/config.js'
+import { readConfig as readAloudConfig } from '../../plugins/_listed/read-aloud/server/config.js'
 import { createBroker } from '../src/broker.js'
 import { brokerSecret } from '../src/plugin-secrets.js'
-import { chunkText, chunkBlocks, createSpeech, jobTimeoutMs } from '../src/speech.js'
-import { documentSpeakable, documentSpeechBlocks } from '../src/document-speech.js'
-import { spokenWords } from '../src/spoken-length.js'
+import { chunkText, chunkBlocks, createSpeech, jobTimeoutMs } from '../../plugins/_listed/read-aloud/server/speech.js'
+import { documentSpeakable, documentSpeechBlocks } from '../../plugins/_listed/read-aloud/page/document-speech.js'
+import { spokenWords } from '../../plugins/_listed/read-aloud/server/spoken-length.js'
 
 const [file, time = 'full', flag] = process.argv.slice(2)
 if (!file || !/^(full|\d+(?:\.\d+)?)$/.test(time) || (flag && flag !== '--synthesise') || process.argv.length > 5) {
   throw new Error('Usage: node tools/measure-speech.mjs <document.md> [full|minutes] [--synthesise]')
 }
 const text = await fs.readFile(file, 'utf8')
-const config = readConfig()
+// The broker's address from the app's config; speech's own from Read aloud's.
+const config = { ...appConfig(), speech: readAloudConfig().speech }
 const spoken = documentSpeakable(text)
 const before = chunkText(spoken, config.speech.chunkChars)
 const after = chunkBlocks(documentSpeechBlocks(text), config.speech.chunkChars)
