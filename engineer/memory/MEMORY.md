@@ -2212,3 +2212,10 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   the landing failed with FileNotFoundError, though every test passed in the
   job tree. It is now `docs/releases/signers`. Put a new file inside an
   existing top-level folder, or expect the first landing to fail.
+- **A test's leak outlives its fix by the trees that copied it.** Four
+  job trees had merged the leaky test in the seven minutes before the fix
+  landed, and a hijacked unit stays *loaded* (a scratch folder, port
+  9100), which the reconcile never touched. The runtime side now heals it:
+  `reconcile` restarts a wanted unit whose `WorkingDirectory` is not its
+  plugin's folder (`moved` in its answer). Fix the runtime, not only the
+  test, when a test can reach live state.
