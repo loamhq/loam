@@ -24,7 +24,8 @@ try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: theme, isMobile: true, hasTouch: true })
     await context.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__native = { threads, schedule };' }))
     await context.route('**/api/health', (route) => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
-    await context.route('**/api/speech/lookup', (route) => route.fulfill({ json: { status: 'none' } }))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+    await context.route('**/x/read-aloud/speech/lookup', (route) => route.fulfill({ json: { status: 'none' } }))
     const page = await context.newPage(); page.on('pageerror', (e) => errors.push(e.message))
     const settle = async () => { await page.waitForTimeout(100); await page.evaluate(async () => { await document.fonts.ready; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame) }) }
     const shot = async (name) => { await settle(); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false); await page.screenshot({ path: path.join(out, `${name}-390-${theme}.png`), animations: 'disabled' }) }

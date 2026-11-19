@@ -69,7 +69,7 @@ test('turning Read aloud off invalidates a pending play response before it can s
   service.takes.set(take.tkey, take)
   const request = service.requestSpeech(take, { play: true })
   cleanup(); scope.dispose()
-  finish(Response.json({ id: 'ready', status: 'ready', url: '/api/speech/ready/audio.mp3', duration_s: 10 }))
+  finish(Response.json({ id: 'ready', status: 'ready', url: '/x/read-aloud/speech/ready/audio.mp3', duration_s: 10 }))
   const error = await request.then(() => null, error => error)
   assert.equal(take.phase, 'making', 'late response must not enter a playable state after disable')
   assert.equal(created, 0, 'disabled speech must not create an audio element for a late response')

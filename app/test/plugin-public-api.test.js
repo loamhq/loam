@@ -43,8 +43,12 @@ test('core imports no audio package, and audio packages import only their own fi
     }
   }
   await graph('public/app.js')
-  for (const file of ['src/server.js', 'src/speech.js', 'src/spoken-length.js']) await graph(file)
-  for (const id of ['dictation', 'read-aloud']) await graph(`../plugins/_listed/${id}/page/main.js`, path.resolve(`../plugins/_listed/${id}`))
+  await graph('src/server.js')
+  for (const id of ['dictation', 'read-aloud']) {
+    await graph(`../plugins/_listed/${id}/page/main.js`, path.resolve(`../plugins/_listed/${id}`))
+    // Each carries its own server half (1.1.0), which imports only its own files.
+    await graph(`../plugins/_listed/${id}/server/main.js`, path.resolve(`../plugins/_listed/${id}`))
+  }
   const store = await readFile('public/store.js', 'utf8')
   assert.doesNotMatch(store, /dictation|readAloud|speechSettings/)
 })

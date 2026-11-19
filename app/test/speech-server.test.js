@@ -16,15 +16,15 @@ import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 
-import { createApp } from '../src/server.js'
-import { readConfig, fixtureBroker } from './key-fixture.js'
-import { speakable, numberWords } from '../src/speakable.js'
+import { readAloudConfig as readConfig } from './key-fixture.js'
+import { readAloudApp } from './audio-servers.mjs'
+import { speakable, numberWords } from '../../plugins/_listed/read-aloud/page/speakable.js'
 import { documentSpeakable, documentSpeechBlocks } from '../../plugins/_listed/read-aloud/page/document-speech.js'
-import { spokenWords } from '../src/spoken-length.js'
+import { spokenWords } from '../../plugins/_listed/read-aloud/server/spoken-length.js'
 import {
   createSpeech, createFfmpegEncoder, chunkText, cleanBrief, parseVoices, pcmOfWav, joinPcm, PREBUILT_VOICES,
   durationCheck, parsePaces, chunkBlocks, CLEAN_SPEECH_ERROR, briefInstruction, documentBriefInstruction, speechId,
-} from '../src/speech.js'
+} from '../../plugins/_listed/read-aloud/server/speech.js'
 import { fakeBroker, shut, logInto, until } from './harness.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -162,14 +162,14 @@ async function rig(t, { env = {}, gemini: geminiOpts, encoder = fakeEncoder(), w
     GEMINI_API_URL: gemini.url,
     SPEECH_DIR: dir,
     SPEECH_VOICES: VOICES,
+    // The server's own address, as the gateway hands it requests: `/`.
+    LOAM_PLUGIN_BASE: '/',
     ...env,
   })
   const lines = []
   const log = logInto(lines)
   const speech = createSpeech(config, { log, encoder, retryBaseMs: 5, descriptionTimeoutMs, descriptionBudgetSignal })
-  const { server } = createApp({ config, log, speech })
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
+  const { server } = await readAloudApp({ config, speech, log })
   // Every job let go of before the directory goes, so a take still being
   // written cannot race the removal.
   t.after(async () => {
@@ -185,12 +185,12 @@ async function rig(t, { env = {}, gemini: geminiOpts, encoder = fakeEncoder(), w
 }
 
 const ask = (app, body) =>
-  fetch(`${app.url}/api/speech`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  fetch(`${app.url}/speech`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
 
 const reply = (over = {}) => ({ chat_id: 'chat-1', agent: 'scout', mode: 'verbatim', title: 'Deploy', text: FIXTURE, describe_tables_and_diagrams: false, ...over })
 
 async function poll(app, id) {
-  const res = await fetch(`${app.url}/api/speech/${id}`)
+  const res = await fetch(`${app.url}/speech/${id}`)
   return { status: res.status, body: await res.json() }
 }
 
@@ -351,7 +351,7 @@ test('verbatim: 202 while voicing, then 200 with the audio; the voice, the style
   const done = await settled(app, preparing.id)
   assert.equal(done.status, 200)
   assert.deepEqual(done.body, {
-    id: preparing.id, status: 'ready', duration_s: secondsFor(speakable(FIXTURE)), url: `/api/speech/${preparing.id}/audio.mp3`, brief_text: null,
+    id: preparing.id, status: 'ready', duration_s: secondsFor(speakable(FIXTURE)), url: `/speech/${preparing.id}/audio.mp3`, brief_text: null,
   })
 
   const tts = app.gemini.seen.filter((c) => c.kind === 'tts')
@@ -690,9 +690,9 @@ test('the audio: whole with its length, a Range is a 206 with the right bytes, a
 test('an unknown id is a 404 on both routes, and the page re-POSTs', async (t) => {
   const app = await rig(t)
   const unknown = 'f'.repeat(32)
-  assert.equal((await fetch(`${app.url}/api/speech/${unknown}`)).status, 404)
-  assert.equal((await fetch(`${app.url}/api/speech/${unknown}/audio.mp3`)).status, 404)
-  assert.equal((await fetch(`${app.url}/api/speech/not-an-id`)).status, 404)
+  assert.equal((await fetch(`${app.url}/speech/${unknown}`)).status, 404)
+  assert.equal((await fetch(`${app.url}/speech/${unknown}/audio.mp3`)).status, 404)
+  assert.equal((await fetch(`${app.url}/speech/not-an-id`)).status, 404)
 })
 
 test('a play bumps the last-played time, and the sweep removes only what has gone unplayed past the TTL', async (t) => {
@@ -708,7 +708,7 @@ test('a play bumps the last-played time, and the sweep removes only what has gon
   const old = new Date(Date.now() - 49 * 3_600_000)
   for (const id of [played, stale]) await fsp.utimes(path.join(app.dir, `${id}.mp3`), old, old)
 
-  const play = await fetch(`${app.url}/api/speech/${played}/audio.mp3`, { headers: { range: 'bytes=0-1' } })
+  const play = await fetch(`${app.url}/speech/${played}/audio.mp3`, { headers: { range: 'bytes=0-1' } })
   assert.equal(play.status, 206)
   await play.arrayBuffer()
   const bumped = (await fsp.stat(path.join(app.dir, `${played}.mp3`))).mtimeMs
@@ -729,28 +729,25 @@ test('audio made before a restart is still there after it; a job running at the 
   app.gemini.hold('tts')
   const { id: running } = await (await ask(app, reply({ text: 'Being voiced when the app restarts.' }))).json()
 
-  const config = readConfig({ GEMINI_API_KEY: KEY, GEMINI_API_URL: app.gemini.url, SPEECH_DIR: app.dir, SPEECH_VOICES: VOICES })
-  const after = createApp({ config, log: logInto([]), speech: createSpeech(config, { encoder: fakeEncoder() }) })
-  after.server.listen(0, '127.0.0.1')
-  await once(after.server, 'listening')
+  const config = readConfig({ GEMINI_API_KEY: KEY, GEMINI_API_URL: app.gemini.url, SPEECH_DIR: app.dir, SPEECH_VOICES: VOICES, LOAM_PLUGIN_BASE: '/' })
+  const speech = createSpeech(config, { encoder: fakeEncoder() })
+  const after = await readAloudApp({ config, log: logInto([]), speech })
   t.after(async () => {
-    await after.speech.stop()
+    await speech.stop()
     await shut(after.server)
   })
   const url = `http://127.0.0.1:${after.server.address().port}`
-  assert.equal((await (await fetch(`${url}/api/speech/${id}`)).json()).status, 'ready')
-  assert.equal((await fetch(`${url}/api/speech/${running}`)).status, 404)
+  assert.equal((await (await fetch(`${url}/speech/${id}`)).json()).status, 'ready')
+  assert.equal((await fetch(`${url}/speech/${running}`)).status, 404)
 })
 
 // ------------------------------------------------------------- unavailable
 
-test('no key: speech is false on the health read and a POST is 503 "no key"', async (t) => {
-  const broker = await fakeBroker()
-  t.after(() => shut(broker.server))
-  const app = await rig(t, { withKey: false, env: { BROKER_URL: broker.url } })
-  const health = await (await fetch(`${app.url}/api/health`)).json()
+test('no key: speech is false on the plugin’s status read and a POST is 503 "no key"', async (t) => {
+  const app = await rig(t, { withKey: false })
+  const health = await (await fetch(`${app.url}/status`)).json()
   assert.equal(health.speech, false)
-  assert.equal(health.configured, true, 'the broker’s own health is still there beside it')
+  assert.equal(health.reason, 'no key')
   const res = await ask(app, reply())
   assert.equal(res.status, 503)
   assert.deepEqual(await res.json(), { error: 'speech unavailable', reason: 'no key' })
@@ -759,7 +756,7 @@ test('no key: speech is false on the health read and a POST is 503 "no key"', as
 
 test('no encoder: an ffmpeg that is not there makes speech false and a POST 503 "no encoder", and one line says so', async (t) => {
   const app = await rig(t, { encoder: createFfmpegEncoder('/nonexistent/ffmpeg-is-not-here') })
-  const health = await (await fetch(`${app.url}/api/health`)).json()
+  const health = await (await fetch(`${app.url}/status`)).json()
   assert.equal(health.speech, false)
   const res = await ask(app, reply())
   assert.equal(res.status, 503)
@@ -774,7 +771,7 @@ test('no storage: a SPEECH_DIR that cannot be made makes speech false and a POST
   const file = path.join(dir, 'a-file')
   await fsp.writeFile(file, '')
   const app = await rig(t, { env: { SPEECH_DIR: path.join(file, 'speech') } })
-  const health = await (await fetch(`${app.url}/api/health`)).json()
+  const health = await (await fetch(`${app.url}/status`)).json()
   assert.equal(health.speech, false)
   const res = await ask(app, reply())
   assert.equal(res.status, 503)
@@ -783,7 +780,7 @@ test('no storage: a SPEECH_DIR that cannot be made makes speech false and a POST
 
 test('with key, encoder and storage, speech is true on the health read', async (t) => {
   const app = await rig(t)
-  assert.equal((await (await fetch(`${app.url}/api/health`)).json()).speech, true)
+  assert.equal((await (await fetch(`${app.url}/status`)).json()).speech, true)
 })
 
 // ------------------------------------------------------------- failures
@@ -929,7 +926,7 @@ for (const [label, input] of [
     assert.equal(app.gemini.seen.filter((c) => c.kind === 'tts').length, 2)
     assert.equal(app.encoder.calls.length, 0)
     assert.deepEqual(await fsp.readdir(app.dir), [])
-    assert.equal((await fetch(`${app.url}/api/speech/${id}/audio.mp3`)).status, 404)
+    assert.equal((await fetch(`${app.url}/speech/${id}/audio.mp3`)).status, 404)
     const line = app.lines.find((l) => l.event === 'speech' && l.id === id)
     assert.equal(line.outcome, 'error')
     assert.deepEqual(line.chunk_checks.map((c) => [c.chunk, c.attempt, c.accepted]), [[1, 1, false], [1, 2, false]])
@@ -964,7 +961,7 @@ test('concurrent synthesis still fails as a whole when one chunk remains over-lo
   assert.deepEqual((await settled(app, id)).body, { id, status: 'failed', error: CLEAN_SPEECH_ERROR })
   assert.equal(app.encoder.calls.length, 0)
   assert.deepEqual(await fsp.readdir(app.dir), [])
-  assert.equal((await fetch(`${app.url}/api/speech/${id}/audio.mp3`)).status, 404)
+  assert.equal((await fetch(`${app.url}/speech/${id}/audio.mp3`)).status, 404)
   const badChecks = app.lines.find((l) => l.event === 'speech').chunk_checks.filter((c) => c.chunk === 2)
   assert.deepEqual(badChecks.map((c) => [c.attempt, c.accepted]), [[1, false], [2, false]])
 })
@@ -1039,7 +1036,7 @@ test('cache serving rechecks each chunk, its stored total, and missing validatio
     const meta = JSON.parse(await fsp.readFile(path.join(app.dir, `${id}.json`), 'utf8'))
     corrupt(meta)
     await fsp.writeFile(path.join(app.dir, `${id}.json`), JSON.stringify(meta))
-    assert.equal((await fetch(`${app.url}/api/speech/${id}/audio.mp3`)).status, 404)
+    assert.equal((await fetch(`${app.url}/speech/${id}/audio.mp3`)).status, 404)
     assert.equal((await app.speech.peek(input)).body.status, 'none')
     assert.deepEqual(await fsp.readdir(app.dir), [])
   }
@@ -1163,7 +1160,7 @@ test('real ffmpeg: the joined chunks become one mono MP3, and the duration is th
 
 test('real ffmpeg: the probe finds it and speech is available', { skip: NO_FFMPEG }, async (t) => {
   const app = await rig(t, { encoder: createFfmpegEncoder(FFMPEG) })
-  assert.equal((await (await fetch(`${app.url}/api/health`)).json()).speech, true)
+  assert.equal((await (await fetch(`${app.url}/status`)).json()).speech, true)
 })
 
 function id3Size(buf) {
@@ -1190,7 +1187,7 @@ test('force regenerates only its variant, deduplicates concurrent requests and p
   await until(() => app.gemini.seen.filter(c => c.kind === 'tts').length === before + 1)
   assert.equal((await app.speech.peek(input)).body.previous.id, old)
   assert.deepEqual(await fsp.readFile(path.join(app.dir, `${old}.mp3`)), bytes)
-  assert.equal((await fetch(`${app.url}/api/speech/${old}/audio.mp3`, { headers: { range: 'bytes=0-7' } })).status, 206)
+  assert.equal((await fetch(`${app.url}/speech/${old}/audio.mp3`, { headers: { range: 'bytes=0-7' } })).status, 206)
   assert.equal((await ask(app, briefInput)).status, 200)
   assert.equal((await (await ask(app, briefInput)).json()).id, brief)
   app.gemini.release('tts')
@@ -1224,7 +1221,7 @@ test('failed forced generation or encoding preserves cached audio and permits re
     assert.equal((await settled(app, next)).body.status, 'failed')
     assert.equal((await (await ask(app, input)).json()).id, old)
     assert.equal((await app.speech.peek(input)).body.id, old)
-    assert.equal((await fetch(`${app.url}/api/speech/${old}/audio.mp3`)).status, 200)
+    assert.equal((await fetch(`${app.url}/speech/${old}/audio.mp3`)).status, 200)
   }
   fail = false; encoder.encode = encode
   const next = (await (await ask(app, { ...input, force: true })).json()).id
@@ -1269,7 +1266,7 @@ test('force supports chat Brief and Files Full/Brief without invalidating anothe
 test('lookup: none, preparing, ready under the POST’s id, and none again after the sweep; it never starts a take', async (t) => {
   const app = await rig(t, { env: { SPEECH_TTL_HOURS: '48' } })
   const look = async (body) => {
-    const res = await fetch(`${app.url}/api/speech/lookup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const res = await fetch(`${app.url}/speech/lookup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
     return { status: res.status, cache: res.headers.get('cache-control'), body: await res.json() }
   }
   const none = await look(reply())

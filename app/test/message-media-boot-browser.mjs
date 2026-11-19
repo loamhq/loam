@@ -59,7 +59,8 @@ try {
       // Slow both the blocking stylesheet and the plugin refresh independently.
       await context.route('**/themes.css*', async route => { await new Promise(resolve => setTimeout(resolve, 700)); await route.continue() })
       await context.route('**/api/health', route => route.fulfill({ json: { configured: true, ok: true, speech: false } }))
-      await context.route('**/api/speech/lookup', route => route.fulfill({ json: { status: 'none' } }))
+      await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: false } }))
+      await context.route('**/x/read-aloud/speech/lookup', route => route.fulfill({ json: { status: 'none' } }))
       await context.addInitScript(() => {
         globalThis.__frames = []
         const frame = () => {

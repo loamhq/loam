@@ -1,4 +1,4 @@
-import { numberWords } from './speakable.js'
+import { numberWords } from '../page/speakable.js'
 
 // Word equivalents for the text handed to TTS, not the source markdown.
 // This estimates pronunciation; it never rewrites the transcript or learns
