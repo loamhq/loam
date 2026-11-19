@@ -1,37 +1,9 @@
-"""Files: the vault, the agents' spaces and the runtime's own documents, to an app.
+"""Serve the app's vault, workspace and runtime document roots. See Files in broker/README.md.
 
-Added 2026-10-02. The app runs in Docker and cannot see the host's trees; the
-broker can, so this module is the bounded way an app reads them and, for the
-files the owner owns, writes them. The routes are in ``bin/session-broker``
-(``/v1/files/...``); the contract is ``broker/README.md``, "Files".
-
-Three named roots and nothing else -- no route here takes a host path:
-
-  ``vault``   the vault, whole, transcripts included (read-only there)
-  ``spaces``  every persona's workspace and the commons
-  ``system``  a curated list of the runtime's Markdown documents (read-only)
-
-What keeps a request inside them is enforced here on the host, not in the
-page:
-
-- a path is names joined by ``/``; ``.``, ``..``, an empty part, a backslash
-  or a NUL is refused before the disk is touched, and the query is decoded
-  exactly once, so ``%2e%2e`` is ``..`` and refused and ``%252e%252e`` is a
-  file literally named ``%2e%2e``;
-- the walk is ``openat`` one component at a time with ``O_NOFOLLOW``, from a
-  descriptor on the root, so a symlink anywhere on the way -- including one
-  swapped in between a listing and a read -- is refused by the kernel, not by
-  a string comparison done earlier;
-- secrets and runtime-private files are not merely unlisted: every component
-  of every path is judged, so naming one directly answers the same ``404`` as
-  a file that does not exist.
-
-Writes are the owner's, never a persona's: the app is their surface, and a
-persona writes through its own tools under its own guard. Nothing here
-deletes, an upload never replaces a file, and a rename (added 2026-11-13)
-never replaces one either: it moves a vault file or folder to a name that is
-free, decided by the kernel (``renameat2`` with ``RENAME_NOREPLACE``).
-"""
+Validate each decoded path component, then walk from an open root directory
+without following symlinks. Private entries must look absent on direct
+access as well as in listings. Uploads and renames cannot overwrite an
+existing destination."""
 
 from __future__ import annotations
 
@@ -59,8 +31,7 @@ import loam_inbox  # the failure log's place, for RENAME_PINNED
 
 LIST_DEFAULT = 200
 LIST_MAX = 1000
-# A folder this big is answered as far as this and says so; 15_CONVERSATIONS
-# held ~3,000 files on 2026-10-02.
+# Report truncation when a directory exceeds the scan limit.
 SCAN_MAX = 50_000
 TEXT_READ_MAX = 2 * 1024 * 1024
 # The JSON body carrying it is capped at 4 MiB by the broker, and JSON escaping
@@ -69,15 +40,9 @@ TEXT_WRITE_MAX = 1024 * 1024
 DOWNLOAD_MAX = 50 * 1024 * 1024
 CHUNK = 64 * 1024
 
-# The owner's vault identity, as the provenance convention spells it
-# (99_SYSTEM/conventions/provenance.md) and as their own files already carry it.
 USER_LINK = lc.OWNER_LINK
 
-# The files a person edits as text, by extension. Creating any other kind is
-# refused; saving one in place is too, because a save is a text body. HTML is
-# here as stored text: the broker only reads and writes its bytes, never
-# serves it as a page (a download is `CSP: sandbox`, `attachment`), and
-# rendering it is the app's, in an isolated origin.
+# HTML is editable text. Downloads use attachment headers and sandboxing.
 TEXT_TYPES = {
     "md": "text/markdown", "markdown": "text/markdown", "txt": "text/plain",
     "csv": "text/csv", "tsv": "text/tab-separated-values",
@@ -88,15 +53,12 @@ TEXT_TYPES = {
     "html": "text/html", "htm": "text/html",
 }
 
-# Never shown, never read, whatever root they are found in. The secrets on this
-# box live outside the three roots (agents/wake.env, secrets.env, state/,
-# ~/.claude); these are defence in depth against one landing inside.
+# Hide credentials at every depth in every root.
 SECRET_NAME = re.compile(
     r"(?i)(^\.env|\.env$|\.pem$|\.key$|\.p12$|\.pfx$|\.keystore$"
     r"|^id_(rsa|dsa|ecdsa|ed25519)|^(auth|credentials|\.credentials)\.json$"
     r"|^token$|\.token$|^\.netrc$|^\.git-credentials$)")
-# Runtime churn in a workspace: the ai-labs .gitignore's list of what is not
-# state (logs, caches, lock files, scratch, interpreter leftovers).
+# Omit generated workspace files from resource listings.
 SPACES_PRIVATE = {"logs", "cache", "scratch", "__pycache__", "venv",
                   "node_modules"}
 SPACES_PRIVATE_SUFFIX = (".pyc", ".log", ".swp", ".swo")
@@ -108,15 +70,10 @@ SPACES_DOTTED = {".claude", ".codex", ".mcp.json"}
 RUNTIME_RENDERED = {"CLAUDE.md", "agent.json", ".mcp.json", ".claude", ".codex"}
 # Operator-authored, per the role file: the owner's to edit, never the persona's.
 USER_AUTHORED = {"soul.md", "config.md"}
-# A persona's schedule records, `<agent>/crons/<name>.md`: its own and
-# the owner's alike (2026-10-15: a schedule's detail and editing are its file,
-# opened here). A save is attributed through lib/loam_schedule.py's claim.
+# Schedule saves record their author through loam_schedule.
 SCHEDULES_DIR = "crons"
 
-# The vault's conversations folder, as this install names it (`[vault]
-# conversations` in loam.toml: `Conversations` on a fresh install). Until
-# 2026-11-19 a literal of the first box's name, which fenced nothing on a
-# fresh vault.
+# Use the configured folder for the transcript writer’s read-only records.
 TRANSCRIPTS = lc.vault_folder("conversations").strip("/")
 
 # The System root: the runtime's own Markdown, read from the live checkout.
@@ -137,23 +94,14 @@ SYSTEM_FILES = {
         "engineer-template/repo/memory/MEMORY.md",
     "Reviewer/CLAUDE.md": "reviewer/CLAUDE.md",
 }
-# System files that are verbatim copies of a vault note (bin/provision's
-# ENGINEER_ROLE_SRC and ENGINEER_PROJECT_SRC; check-drift holds them equal).
-# Their rows name the note as `source`: the vault note is the one to edit,
-# and the System copy follows it on the next provision.
-# Under the install's projects folder (`vault.projects`), like every other
-# path below that names one (2026-11-16, the first-day walk).
+# Generated System documents link back to the editable vault sources copied by provision.
 SYSTEM_VAULT_SOURCES = {
     "Engineer/Role.md": f"{lc.vault_folder('projects')}/Loam/engineer/role.md",
     "Engineer/Platform project.md":
         f"{lc.vault_folder('projects')}/Loam/engineer/projects/loam.md",
 }
 
-# Where the vault keeps the system's own documents: its conventions and
-# schemas, and the platform's design, architecture and decisions.
-# The folder names are the install's (`vault.system`, `vault.projects`); on
-# the first install they are 99_SYSTEM and 40_PROJECTS, as before. Only the
-# ones that exist are offered (``shortcuts``).
+# Offer shortcuts only for folders present on this install.
 _SYS, _PROJ = lc.vault_folder("system"), lc.vault_folder("projects")
 VAULT_SHORTCUTS = (
     ("Vault system", _SYS),
@@ -220,7 +168,7 @@ def parse_path(raw: str | None) -> list[str]:
 
 def _agents() -> set[str]:
     try:
-        # Every agent, archived ones too (2026-11-14): their files stay.
+        # Archived workspaces still own their files.
         import loam_agents  # noqa: PLC0415
         return set(loam_agents.every(cfg.AI_LABS))
     except OSError:
@@ -370,18 +318,8 @@ def capabilities(root: str, parts: list[str], kind: str) -> dict:
             "create": False, "rename": False}
 
 
-# What a rename may not move (2026-11-13): vault paths the runtime reads or
-# writes by name, so that renaming one would quietly break it -- a thread's
-# board, the comms board, the receipts an engineer job files, the notes
-# `bin/provision` copies, the attachments folder chat records name. A path is
-# pinned when it matches one of these (``*`` is one whole name), or when it
-# is a folder holding one that exists. Every top-level vault folder is pinned
-# too: they are the vault's structure. Not exhaustive of every note a persona
-# cites by path; a persona's link to a renamed note breaks as it would in
-# Obsidian with link-updating off, and is mended the same way.
-# The folders are the install's (`vault.*`): on the first install these are
-# 00_INBOX, 40_PROJECTS and 99_SYSTEM, as they were written until 2026-11-16;
-# on an install made by install.sh, Inbox, Projects and System.
+# Pin paths the runtime addresses by name, the folders containing them and all top-level folders.
+# A wildcard matches one whole path component.
 _INBOX, _BOARDS = lc.vault_folder("inbox"), lc.vault_folder("boards")
 _GENERAL = lc.vault_folder("general_board")
 _PROJECTS, _SYSTEM = lc.vault_folder("projects"), lc.vault_folder("system")
@@ -721,28 +659,15 @@ def download(root: str, raw_path: str | None) -> tuple[int, int, dict]:
     return fd, st.st_size, headers
 
 
-# --- Archive: a folder as one zip (2026-11-18) --------------------------------
-#
-# `GET /v1/files/archive`: the owner's own export of the vault, the AI Spaces
-# or a folder in either, streamed as one ZIP while it is built. The app's own
-# fallback (list + download, file by file) cannot see dotfiles, so a vault zip
-# lacked `.obsidian/`, and could not carry a file over DOWNLOAD_MAX; this has
-# neither limit, and no SCAN_MAX either: a zip is whole or it is not a zip.
-#
-# What goes in is judged by `archive_keeps`, not `visible`: an export holds
-# everything that is the person's and nothing that is a credential, where
-# Files' browsing view also hides what is only noise to look at.
+# Stream complete exports directly from the filesystem. Listing and download size limits do not apply.
+# Include user dotfiles in exports while excluding credentials and runtime-private files.
 
-# Never in an export, at any depth, in either root: git's object store (the
-# vault's `.git` was 4.9 GB of history on 2026-11-18; history is the Git
-# backup's to carry, not a copy of the files), and Syncthing's marker and its
-# versions folder (730 MB of older copies of the same files that day).
+# Exclude repository history and synchronization metadata at any depth.
 ARCHIVE_NEVER = {".git", ".stversions", ".stfolder"}
 # Secret-shaped names the browsing rule does not already name; the app's
 # fallback left these out too.
 ARCHIVE_SECRET = re.compile(r"(?i)^secrets?\.(json|ya?ml|toml|env|txt)$")
-# In the spaces, runtime churn beyond SPACES_PRIVATE: lock files and a dotted
-# virtualenv, both in the ai-labs .gitignore.
+# Also omit workspace lock files and virtual environments.
 ARCHIVE_SPACES_CHURN = {".locks", ".venv"}
 # DEFLATE what compresses (the text types Files edits, and a few more text
 # kinds); STORE the rest: images, audio, PDFs and archives are compressed
@@ -1001,10 +926,7 @@ def _frontmatter_set(text: str, fields: dict[str, str]) -> str:
 
 
 def author_link(by) -> str:
-    """The provenance link a save is stamped with: the owner's, or, when a
-    save names a live persona as ``by`` (2026-11-16, for a plugin acting for
-    one: doc-comments), that persona's, as its transcripts spell it. Anything
-    else ``by`` might say is refused rather than stamped."""
+    """Return the provenance link for the owner or a known persona. Reject unknown authors."""
     if by is None or lc.is_owner(by):
         return USER_LINK
     if not isinstance(by, str) or by not in cfg.roster():
@@ -1246,10 +1168,7 @@ def create_folder(payload: dict) -> dict:
 
 # --- Renaming and moving ------------------------------------------------------
 
-# Added 2026-11-13 (the owner: "I couldn't find a way to easily edit the name of
-# the file"). A vault file or folder, to a new name in its folder or a new
-# path in the vault. The content is not touched: no provenance is stamped,
-# because a rename is not an edit, and the mtime is the file's own.
+# A rename preserves file contents, provenance and modification time.
 RENAME_NOREPLACE = 1
 _libc = None
 
@@ -1328,9 +1247,7 @@ def rename(payload: dict) -> dict:
             st = os.stat(parts[-1], dir_fd=dfd, follow_symlinks=False)
         except OSError:
             raise _missing(root, parts) from None
-        # A link is absent to Files, here as everywhere: never listed, never
-        # followed, never renamed (move_file and delete_file refuse links
-        # since 2026-10-13; on 10-02 a link's target was deleted through one).
+        # Treat links as absent for renames as for reads.
         if stat.S_ISDIR(st.st_mode):
             kind = "folder"
         elif stat.S_ISREG(st.st_mode):
@@ -1381,11 +1298,7 @@ def rename(payload: dict) -> dict:
 
 # --- Uploading ---------------------------------------------------------------
 
-# A file from the owner's device into a vault folder (added 2026-10-02, the
-# design's fourth Add action). The cap and the types are a chat attachment's
-# (cfg.ATTACHMENT_MAX_BYTES, cfg.ATTACHMENT_TYPES) -- one convention for "a
-# file this box accepts from a browser" -- plus the text types Files already
-# edits and the two formats a phone's camera writes.
+# Uploads share attachment limits and also accept editable text and phone-camera formats.
 UPLOAD_MAX = cfg.ATTACHMENT_MAX_BYTES
 UPLOAD_TYPES = {**cfg.ATTACHMENT_TYPES, **TEXT_TYPES,
                 "heic": "image/heic", "heif": "image/heif"}
@@ -1544,9 +1457,7 @@ def _from_host(raw: str) -> tuple[str, list[str]] | None:
     return None
 
 
-# How far a by-name or partial-path lookup reads the vault before it stops and
-# says so (``truncated``), and how many candidates an ambiguous answer carries.
-# The vault held ~3,600 visible files on 2026-10-02; a lookup took 0.04 s.
+# Bound suffix searches and report truncation when the walk stops early.
 RESOLVE_SCAN_MAX = 50_000
 RESOLVE_CANDIDATES_MAX = 50
 
@@ -1575,9 +1486,7 @@ def _vault_tree() -> tuple[list[list[str]], list[list[str]], bool]:
 
 
 def _ends_with(paths: list[list[str]], tries: list[list[str]]) -> list[list[str]]:
-    """The paths that end with one of ``tries``, whole names only and
-    case-insensitively: Obsidian's shortest-path linking, where ``[[state]]``
-    and ``[[Loam/state]]`` both name ``40_PROJECTS/Loam/state.md``."""
+    """Find vault paths by case-insensitive whole-component suffix for shortest-path links."""
     wanted = [[p.casefold() for p in t] for t in tries if t]
     hits = []
     for parts in paths:
@@ -1596,9 +1505,7 @@ def _exists(root: str, parts: list[str]) -> dict | None:
 
 
 def _is_app_host(netloc: str) -> bool:
-    """Whether a link's host is Loam's page: the app's own name today (the
-    domain itself since 2026-11-15, first release L14), or any `loam-ui.`
-    name, which is what every link written before that day carries."""
+    """Recognize configured app hosts and links using the legacy loam-ui prefix."""
     host = netloc.lower().partition(":")[0]
     if host.startswith("loam-ui."):
         return True
@@ -1686,14 +1593,9 @@ def resolve(ref: str | None, from_root: str | None = None,
 
 def _wiki(target: str, from_root: str | None, from_path: str | None,
           fragment: str | None) -> dict:
-    """A wiki-link's target or a relative Markdown link's path, as Obsidian
-    reads it: relative to the linking note when it says so (``./``, ``../``);
-    otherwise from the linking note's folder, then from the root's top, then
-    by the one vault path that ends with it.
-
-    A folder is an answer only where no note is: every step looks for a file
-    first, and a folder is looked for only once no file was found anywhere.
-    A trailing ``/`` (``[[40_PROJECTS/Loam/]]``) asks for a folder alone."""
+    """Resolve explicit relative links from their note. Otherwise try the note’s
+    directory, the root and then a unique vault suffix. Prefer notes to folders
+    unless the target ends in a slash."""
     root = from_root if from_root in ("vault", "spaces") else "vault"
     # The linking note's folder counts only in its own root: a System
     # document's folder is not a vault folder.
