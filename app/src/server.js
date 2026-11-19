@@ -29,6 +29,7 @@ import { createBranchDrafter } from './thread-branch.js'
 import { INSTALLATION_DEFAULTS } from '../public/installation.js'
 import { createAppMedia } from './app-media.js'
 import { serverFacts, signedIn } from './about.js'
+import { archiveFilename, shouldExclude, streamZipArchive } from './archive.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MAX_BODY = 1 << 20 // a message from a phone; not a file upload
@@ -671,6 +672,75 @@ export function createApp({
       const query = filesQuery(url, FILES_PARAMS.download)
       if (query.error) return sendJson(res, 400, { error: query.error })
       return await relayDownload(res, `/v1/files/download${query.search}`)
+    }
+    if (rest === '/files/archive') {
+      if (!['GET', 'HEAD'].includes(method)) return sendJson(res, 405, { error: 'Use GET or HEAD to download an archive.' })
+      if (!signedIn(req.headers).username) return sendJson(res, 403, { error: 'Sign in as the owner to download an archive.' })
+      const query = filesQuery(url, FILES_PARAMS.download)
+      if (query.error) return sendJson(res, 400, { error: query.error })
+      const root = url.searchParams.get('root') ?? ''
+      const relPath = (url.searchParams.get('path') ?? '').replace(/^\/+|\/+$/g, '')
+      if (!['vault', 'spaces'].includes(root)) return sendJson(res, 400, { error: 'Archives can be downloaded for Vault or AI Spaces.' })
+      if (relPath && shouldExclude(root, relPath.split('/').filter(Boolean), 'folder')) {
+        return sendJson(res, 404, { error: `nothing at ${root}/${relPath}` })
+      }
+      const filename = archiveFilename(root, relPath)
+      const checkOnly = url.searchParams.get('check') === '1'
+      if (!checkOnly && method === 'GET') {
+        const direct = await broker.download(`/v1/files/archive${query.search}`)
+        if (direct.ok) {
+          const headers = {
+            'content-type': 'application/zip',
+            'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+            'content-security-policy': "sandbox; default-src 'none'",
+            'x-content-type-options': 'nosniff',
+            'cache-control': 'private, no-store',
+          }
+          if (direct.length) headers['content-length'] = direct.length
+          res.writeHead(200, headers)
+          if (!direct.stream) return res.end()
+          direct.stream.on('error', () => res.destroy())
+          res.on('close', () => direct.stream.destroy())
+          return direct.stream.pipe(res)
+        }
+        // 405 / 501 (or 404 "no route" / "no such route") means the host broker does not
+        // implement `/v1/files/archive` yet; stream over list + download instead. Any
+        // other refusal (e.g. 401/403/404 missing path/503) is handed back whole.
+        const noRoute = direct.status === 405 || direct.status === 501 || (direct.status === 404 && /no (?:such )?route/i.test(direct.body || ''))
+        if (!noRoute) {
+          noteBrokerError(res, direct)
+          res.writeHead(direct.status, { 'content-type': direct.contentType, 'cache-control': 'no-store' })
+          return res.end(direct.body)
+        }
+      }
+      const probe = relPath
+        ? await broker.json('GET', `/v1/files/stat?${new URLSearchParams({ root, path: relPath })}`)
+        : await broker.json('GET', `/v1/files/list?${new URLSearchParams({ root, limit: '1' })}`)
+      if (probe.status !== 200) {
+        noteBrokerError(res, probe)
+        res.writeHead(probe.status, { 'content-type': probe.contentType, 'cache-control': 'no-store' })
+        return res.end(probe.body)
+      }
+      if (relPath) {
+        const row = safeJson(probe.body)
+        if (row?.kind !== 'folder') return sendJson(res, 400, { error: 'Only folders can be downloaded as a zip.' })
+      }
+      if (checkOnly) return sendJson(res, 200, { ok: true, filename })
+      res.writeHead(200, {
+        'content-type': 'application/zip',
+        'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'content-security-policy': "sandbox; default-src 'none'",
+        'x-content-type-options': 'nosniff',
+        'cache-control': 'private, no-store',
+      })
+      if (method === 'HEAD') return res.end()
+      try {
+        await streamZipArchive({ root, path: relPath, broker, req, res })
+      } catch (err) {
+        noteError(res, 502, err?.message ?? 'Archive stream failed.')
+        res.destroy()
+      }
+      return
     }
     if (rest === '/files/text' && method === 'PUT') {
       const body = await readBody(req, FILES_TEXT_BODY).catch((err) => err)

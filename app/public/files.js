@@ -491,6 +491,18 @@ export function downloadHref(root, path) {
   return `/api/files/download?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`
 }
 
+export function archiveHref(root, path = '') {
+  const qs = new URLSearchParams({ root })
+  if (path) qs.set('path', path)
+  return `/api/files/archive?${qs}`
+}
+
+function archiveFilename(root, path = '') {
+  const clean = String(path ?? '').replace(/^\/+|\/+$/g, '')
+  const base = clean ? clean.split('/').pop() : (root === 'spaces' ? 'ai-spaces' : 'vault')
+  return `${base || 'archive'}.zip`
+}
+
 // ------------------------------------------------------------ the module
 
 // How long typing has to pause before the editor saves itself.
@@ -507,6 +519,7 @@ export function createFiles({
   fetchBytes = (href) => fetch(href, { credentials: 'same-origin' }),
   urls = globalThis.URL,
   sendForm = fetchForm,
+  triggerDownload = triggerBrowserDownload,
 }) {
   let uploads = 0
   let copyNoticeTimer = null
@@ -526,6 +539,7 @@ export function createFiles({
     // Where Back-to-chat goes.
     returnTo: null,
     notice: '',
+    archive: null,
     turn: 0,
   }
 
@@ -947,6 +961,7 @@ export function createFiles({
     }
     prepareLink(resource)
     st.notice = ''
+    if (!st.archive?.busy) st.archive = null
     st.sheet = { kind: 'resource', resource, name: resource.name ?? nameOf(resource.path), on: home?.isShortcut(resource.root, resource.path), viewSource: st.file?.view === 'html' && st.file.root === resource.root && st.file.path === resource.path ? () => setMode('edit') : null, toggle: () => home?.toggleShortcut(resource.root, resource.path, resource.kind ?? 'file') }
     st.sheet.openFolder = openFolder
     schedule()
@@ -955,6 +970,7 @@ export function createFiles({
   // A shortcut stores an address, not capabilities. Ask before offering Rename;
   // even a missing shortcut must still be removable through its menu.
   async function shortcutMenu(shortcut, home) {
+    if (!st.archive?.busy) st.archive = null
     const sheet = { kind: 'folder', name: shortcut.label || nameOf(shortcut.path), on: true, toggle: () => home?.toggleShortcut(shortcut.root, shortcut.path, shortcut.kind), renameSlot: 'shortcut' }
     st.sheet = sheet
     schedule()
@@ -1384,7 +1400,53 @@ export function createFiles({
     row.scrollIntoView?.({ block: 'nearest' })
   }
 
-  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  async function downloadArchive(root, path = '') {
+    if (st.archive?.busy) return { ok: false, error: 'A download is already being prepared.' }
+    const cleanPath = String(path ?? '').replace(/^\/+|\/+$/g, '')
+    const key = `${root}:${cleanPath}`
+    st.archive = { key, root, path: cleanPath, busy: true, error: '', status: '' }
+    schedule()
+    const href = archiveHref(root, cleanPath)
+    try {
+      const res = await fetchBytes(`${href}&check=1`)
+      let parsed = null
+      try { parsed = await res.json() } catch {}
+      if (!res.ok) {
+        const message = typeof parsed?.error === 'string' && parsed.error
+          ? parsed.error
+          : res.status === 401 || res.status === 403
+            ? 'Sign in as the owner to download an archive.'
+            : 'Couldn’t prepare the download. Try again.'
+        st.archive = { key, root, path: cleanPath, busy: false, error: message, status: '' }
+        schedule()
+        return { ok: false, error: message }
+      }
+      const filename = typeof parsed?.filename === 'string' && parsed.filename ? parsed.filename : archiveFilename(root, cleanPath)
+      triggerDownload(href, filename)
+      st.archive = { key, root, path: cleanPath, busy: false, error: '', status: `Download started (${filename}).` }
+      schedule()
+      return { ok: true, filename }
+    } catch {
+      const message = 'Couldn’t reach the server to prepare the download. Try again.'
+      st.archive = { key, root, path: cleanPath, busy: false, error: message, status: '' }
+      schedule()
+      return { ok: false, error: message }
+    }
+  }
+
+  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+}
+
+function triggerBrowserDownload(href, filename) {
+  const doc = globalThis.document
+  if (!doc?.createElement) return
+  const link = doc.createElement('a')
+  link.href = href
+  link.download = filename
+  link.style.display = 'none'
+  doc.body?.append(link)
+  link.click()
+  globalThis.setTimeout?.(() => link.remove(), 1000)
 }
 
 function extWord(e) {
@@ -1528,17 +1590,7 @@ function homeShortcuts(files, home, go) {
     { class: 'fs-shortcuts', key: 'fs:myshortcuts' },
     h('div', { class: 'kicker fs-kicker', text: 'Shortcuts' }),
     list.length === 0
-      ? h(
-          'div',
-          { class: 'card card-group fs-noshort' },
-          h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18)),
-          h(
-            'div',
-            { class: 'fs-words' },
-            h('div', { class: 'fs-name', text: 'No shortcuts yet' }),
-            h('div', { class: 'fs-meta fs-noshort-how', text: 'Open a file or folder, tap ⋯ and choose Add to shortcuts. It will wait for you here.' }),
-          ),
-        )
+      ? h('p', { class: 'fs-noshort', text: 'Nothing pinned yet. Add any file or folder from its ⋯ menu.' })
       : h(
           'div',
           { class: 'card card-group' },
@@ -1580,7 +1632,7 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
   const own = files.pluginRoot?.() ?? null
   const rootRow = st.roots.items.find((r) => r.root === st.root) ?? null
   const rootName = rootRow?.name ?? ROOT_LOOK[st.root]?.name ?? st.root
-  const folderRow = st.listing.folder ?? (st.path === '' && rootRow ? { capabilities: rootRow.capabilities } : null)
+  const folderRow = st.listing.folder ?? (st.path === '' && rootRow ? { root: st.root, path: '', kind: 'folder', name: rootName, capabilities: rootRow.capabilities } : !atRoot && !own && !st.listing.error ? { root: st.root, path: st.path, kind: 'folder', name: st.path === '' ? rootName : nameOf(st.path) } : null)
   const folderCaps = capsOf(folderRow)
   const canAdd = !atRoot && folderCaps.create
   // A plugin's root opened cold, before its plugin has registered: no
@@ -1609,7 +1661,7 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
       : null,
     h('div', { class: 'headspace' }),
     home?.toggleShortcut && !own
-      ? h('button', { class: 'iconbtn fs-menu', title: 'This folder', 'aria-label': 'This folder', onclick: () => { st.sheet = { kind: 'folder', resource: folderRow, renameSlot: 'folder', name: title, on: pinned, toggle: () => home.toggleShortcut(st.root, st.path) }; go.redraw() } }, icon.dots(18))
+      ? h('button', { class: 'iconbtn fs-menu', title: 'This folder', 'aria-label': 'This folder', onclick: () => { if (!st.archive?.busy) st.archive = null; st.sheet = { kind: 'folder', resource: folderRow, renameSlot: 'folder', name: title, on: pinned, toggle: () => home.toggleShortcut(st.root, st.path) }; go.redraw?.() } }, icon.dots(18))
       : null,
     canAdd
       ? h('button', { class: 'roundbtn fs-add', title: 'Add to this folder', onclick: () => { st.sheet = { kind: 'add' }; go.redraw() } }, icon.plus(20))
@@ -2014,6 +2066,9 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
     ]
   }
   if (s.kind === 'folder' || s.kind === 'resource') {
+    const folderArchive = s.resource && isFolder(s.resource) && ['vault', 'spaces'].includes(s.resource.root) ? s.resource : null
+    const archiveKey = folderArchive ? `${folderArchive.root}:${String(folderArchive.path ?? '').replace(/^\/+|\/+$/g, '')}` : null
+    const archiveMatch = archiveKey && files.st.archive?.key === archiveKey ? files.st.archive : null
     return [
       h('div', { class: 'display sheettitle', text: s.name }),
       ...(s.resource ? menuItems(files, s.resource, close) : []),
@@ -2022,7 +2077,12 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
       s.openFolder ? h('button', { class: 'sheetrow fs-menu-folder', onclick: () => { files.st.sheet = null; s.openFolder() } }, icon.folder(18), h('span', { text: 'Open folder' })) : null,
       s.viewSource ? h('button', { class: 'sheetrow fs-menu-source', onclick: () => { files.st.sheet = null; s.viewSource() } }, icon.code(18), h('span', { text: 'View source' })) : null,
       s.resource?.capabilities?.download ? h('a', { class: 'sheetrow fs-menu-download', href: downloadHref(s.resource.root, s.resource.path), download: s.name }, icon.send(18), h('span', { text: 'Download' })) : null,
+      folderArchive ? h('button', { class: 'sheetrow fs-menu-download fs-menu-archive', type: 'button', disabled: Boolean(files.st.archive?.busy), onclick: async () => {
+        const out = await files.downloadArchive(folderArchive.root, folderArchive.path ?? '')
+        if (out.ok && files.st.sheet === s) { files.st.sheet = null; close.redraw?.() }
+      } }, icon.send(18), h('span', { text: archiveMatch?.busy ? 'Preparing zip…' : 'Download as zip' })) : null,
       s.resource ? h('button', { class: 'sheetrow fs-menu-copy', disabled: !s.resource.shareLink, onclick: () => files.copyLink(s.resource) }, icon.link(18), h('span', { text: copyLinkLabel(s.resource) })) : null,
+      archiveMatch?.error ? h('div', { class: 'listnotice inline', role: 'alert', text: archiveMatch.error }) : null,
       s.resource && files.st.notice ? h('div', { class: 'listnotice inline', role: 'status', text: files.st.notice }) : null,
       h(
         'button',

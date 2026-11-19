@@ -316,6 +316,7 @@ for (const [which, label] of [['inbox', 'Inbox folder']]) {
 function settingsFiles({ back = true } = {}) {
   const held = host.store.files
   const shortcuts = fileShortcuts(held, host.files.st.roots.shortcuts)
+  const archive = host.files?.st?.archive ?? null
   for (const [which, field] of Object.entries(filesFolderFields)) {
     if (globalThis.document?.activeElement !== field) field.value = held[which]
   }
@@ -335,6 +336,20 @@ function settingsFiles({ back = true } = {}) {
             host.store.files = toggleFileShortcut(host.store.files, host.files.st.roots.shortcuts, shortcut.root, shortcut.path, shortcut.kind); host.schedule()
           } }, icon.close(12)))))
         : h('p', { class: 'note', text: 'Add shortcuts from a file or folder’s menu.' })),
+    h('section', { class: 'settings-section', 'aria-label': 'Your data' },
+      h('h3', { class: 'kicker', text: 'Your data' }),
+      h('div', { class: 'rows' },
+        h('div', { class: 'setrow fs-export-row' },
+          h('div', { class: 'setrow-who' },
+            h('div', { class: 'setrow-title', text: 'Download as zip' }),
+            h('div', { class: 'setrow-sub', text: 'Your files in open formats, ready to take with you.' })),
+          h('div', { class: 'fs-export-actions' },
+            h('button', { class: 'pillbtn content-mark fs-export-btn', type: 'button', disabled: Boolean(archive?.busy), text: archive?.busy && archive.key === 'vault:' ? 'Preparing Vault…' : 'Download the Vault', onclick: () => host.files.downloadArchive('vault', '') }),
+            h('button', { class: 'pillbtn content-mark fs-export-btn', type: 'button', disabled: Boolean(archive?.busy), text: archive?.busy && archive.key === 'spaces:' ? 'Preparing AI Spaces…' : 'Download AI Spaces', onclick: () => host.files.downloadArchive('spaces', '') }))),
+        archive && ['vault:', 'spaces:'].includes(archive.key) && (archive.error || archive.status)
+          ? h('div', { class: `setrow fs-export-feedback${archive.error ? ' warn' : ''}`, role: archive.error ? 'alert' : 'status' },
+              h('span', { class: 'note', text: archive.error || archive.status }))
+          : null)),
   ]
 }
 

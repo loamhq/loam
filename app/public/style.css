@@ -2238,9 +2238,17 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: pointer; }
 .fs-kicker { color: var(--paper-ink-3); padding: 6px 10px 2px; }
 .fs-shortcuts { display: flex; flex-direction: column; gap: 4px; }
-.fs-noshort { display: flex; flex-direction: row; align-items: center; gap: 12px; padding: 14px; }
-.fs-noshort .fs-foldertile { opacity: .55; }
-.fs-noshort-how { white-space: normal; line-height: 1.4; }
+.fs-noshort { margin: 0; padding: 2px 10px 6px; font-size: 13px; line-height: 1.45; color: var(--paper-ink-3); text-wrap: pretty; }
+.fs-export-row { flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; cursor: default; }
+.fs-export-row:active, .fs-export-feedback:active { background: transparent; }
+@media (hover: hover) { .fs-export-row:hover, .fs-export-feedback:hover { background: transparent; } }
+.fs-export-row .setrow-who { min-width: min(220px, 100%); }
+.fs-export-row .setrow-sub { white-space: normal; }
+.fs-export-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
+.fs-export-btn { min-height: 44px; padding: 0 14px; font-size: 13px; }
+.fs-export-feedback { padding-top: 4px; padding-bottom: 12px; cursor: default; }
+.fs-export-feedback.warn .note { color: var(--danger); }
+.fs-menu-archive:disabled { opacity: .6; cursor: default; }
 .fs-actions-home { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .fs-action { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; border: 0; border-radius: 22px; background: var(--paper-card); color: inherit; text-align: left; min-width: 0; cursor: pointer; }
 .fs-action:active { background: var(--latte-disabled); }

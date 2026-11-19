@@ -16,9 +16,9 @@ test('Files waits for a successful roots answer before declaring shortcuts empty
   files.st.roots = { loaded: true, error: 'Unavailable', items: [], shortcuts: [] }
   assert.equal(find(view(), 'fs-shortcuts'), null)
   files.st.roots.error = ''
-  assert.match(text(view()), /No shortcuts yet/)
+  assert.match(text(view()), /Nothing pinned yet/)
   files.st.roots.shortcuts = [{ label: 'Notes', resource: { root: 'vault', path: 'Notes', kind: 'folder' } }]
-  assert.doesNotMatch(text(view()), /No shortcuts yet/)
+  assert.doesNotMatch(text(view()), /Nothing pinned yet/)
   assert.equal(all(view(), 'fs-host-shortcut').length, 1)
 })
 
