@@ -2,7 +2,7 @@
 
 `python3 tests/run-all` runs every `tests/test_*.py`, each as the script it
 is, several at a time, and exits non-zero if any fails. It is the command a
-landing runs on a job's branch and on the merge (`lib/loam_worktree.py`),
+landing runs on the candidate commit (`lib/loam_worktree.py`),
 and the one to run before you ask for review (`CONTRIBUTING.md`).
 
 ```

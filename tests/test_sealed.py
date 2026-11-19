@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""The suite is sealed from the install it runs on (since 2026-11-19;
-tests/run-all `sealed_env`, lib/loam_worktree.py `platform_argv`).
-
-Asserted from inside a test, the way every test sees it:
-
-  - the configuration is the suite's own, never /etc/loam/loam.toml, and
-    every data path in it (vault, workspaces, projects, plugins, state,
-    jobs, the secrets files) is inside this test's own scratch folder,
-    which is also its TMPDIR's parent; so is every store run-all names
-  - the starter agent a fresh install has is there, and only it
-  - the offline guard is on in this process
-
-and, by causing it, of the landing's wall: a command run through
-`platform_argv` finds each live folder empty (a file planted in each
-before is not there), has a network namespace whose only link is its own
-loopback, and still sees the checkout's own files and the MCP venv.
-
-Run: python3 tests/test_sealed.py
-"""
+"""Check scratch configuration, offline operation and isolation from live data in the landing suite."""
 
 import os
 import subprocess

@@ -1,28 +1,5 @@
 #!/usr/bin/env python3
-"""A job that updates an open pull request instead of opening one (since 2026-10-09).
-
-lib/loam_pr_target.py. Against a fake GitHub and a fake broker on loopback,
-and a bare git repository in a temp directory standing in for the remote,
-each check reads what happened there, not what was called:
-
-  fast-forward  a brief titled `Updates #7` lands by pushing the job's branch
-                to #7's head branch on the remote: the head moves from the
-                PR's commit to the job's, no pull request is opened, the
-                default branch never moves; the reply in
-                `pull-request-reply.md` is posted on #7 with the person's
-                token after the push; the receipt names the PR, the branch
-                and its head before and after, and the reply's URL.
-  refusal       a head that is not an ancestor of the job's commit is
-                refused: the remote branch is where it was, nothing is
-                posted, and the receipt says why and how to continue.
-  403           GitHub refusing the reply leaves the push done and nothing
-                posted, and the receipt names the permission and the app.
-  brief time    a title naming a pull request that is closed or missing is
-                refused before a job directory exists; an open one is
-                accepted; a title naming none asks GitHub nothing.
-
-Run: python3 tests/test_pr_update.py
-"""
+"""Exercise fast-forward updates and replies to an existing pull request against a local remote."""
 
 from __future__ import annotations
 

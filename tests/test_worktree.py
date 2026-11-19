@@ -1,27 +1,4 @@
-"""Every job in its own worktree, landed by a tested merge (since 2026-10-02).
-
-Asserted against real git repositories in a temp directory -- a bare
-`origin`, a canonical clone with `main` checked out, and worktrees made by
-lib/loam_worktree.py exactly as bin/engineer-job makes them -- and every check
-reads the observable result: where `main` points here and on the remote,
-whether the tree is still on disk, and the words the receipt carries. Nothing
-here asserts that a function was called.
-
-Three parts:
-
-  landing    each outcome: a fast-forward, a merge on top of a main that
-             moved, a conflict (kept, reported, its continuation resolving it
-             and landing), tests failing on the branch, tests failing only on
-             the merge, uncommitted work, nothing to land, no test command,
-             and two jobs that both append to the memory.
-  guard      hooks/boundary_guard.py fed real PreToolUse payloads with a job's
-             environment: its own tree and job directory pass, the canonical
-             checkout and another job's tree are refused.
-  lock       bin/deploy, the real script, waiting on an app's live lock that
-             another process holds, saying so, and going on when it is freed.
-
-Run: python3 tests/test_worktree.py
-"""
+"""Exercise job isolation, landing outcomes, recovery and live locks against temporary repositories."""
 
 import json
 import os
@@ -339,8 +316,7 @@ try:
           (untested["state"], untested["reason"], main_of(bare) != git(Path(n["path"]), "rev-parse", "HEAD")),
           ("not_landed", "no_tests", True))
 
-    # Untracked harness memory (a project created since 2026-10-01): copied
-    # in, and merged back into the canonical copy at landing.
+    # Merge local harness memory back even when Git does not track it.
     lone = make_project("harness")
     git(lone.root, "rm", "-q", "-r", "--cached", "memory")
     (lone.root / ".git" / "info" / "exclude").write_text("/memory/\n")
@@ -365,10 +341,7 @@ try:
            "From tree two." in canonical_memory, r2["memory"]),
           ("landed", "landed", True, True, ["memory/MEMORY.md"]))
 
-    # The landing reads the branch ref, never HEAD (since 2026-10-13). Caused
-    # 2026-10-12: a read-only job checked a commit out detached and committed
-    # nothing; its landing read HEAD and asked for a pull request from a
-    # branch still at the base.
+    # A detached checkout must not change the job branch that lands.
     hp = make_project("detached")
     base = main_of(hp)
     dj = start(hp, "20261013-100000-dddddddd")

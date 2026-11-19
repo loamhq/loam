@@ -1,68 +1,8 @@
-"""Every engineer job edits its own git worktree, and lands by a tested merge.
+"""Prepare isolated job clones and land their branch tips. See CONTRIBUTING.md.
 
-Since 2026-10-02. Until then a project had one checkout and every job of that
-project edited it, so the launcher ran one job per project and refused the
-second ("two sessions writing the same trees is two writers with no merge").
-That rule met the owner three times in one evening. The checkout was what made
-the rule necessary, so the checkout stopped being anybody's working tree:
-
-    canonical   the project's checkout on the box (`agents/` itself for the
-                Loam lane). `main` is checked out there and it moves only by a
-                fast-forward to a merge this module tested. For Loam it is also
-                the live runtime, which is why nothing else may write it.
-    worktree    `state/worktrees/<project>/<job id>/`, on branch `job/<id>`
-                from `main` as it stood when the job began. The session runs
-                here, commits here, and never sees another job's tree. Since
-                the git isolation of 2026-10-02 it is a clone with a git
-                directory of its own, not a `git worktree` (see below).
-
-**Where the worktrees live, and why not in the job directory.** Claude Code
-loads every CLAUDE.md from the working directory UP to `/`. The Loam lane's
-job directories are under `agents/engineer/jobs/`, so a worktree there would
-load the canonical `agents/engineer/CLAUDE.md` -- the live role, not the
-tree's -- on top of its own. Nothing above `state/worktrees/` carries one.
-
-**Landing** (`land`) merges the branch into `main` at its current head -- a
-fast-forward when `main` has not moved, a merge commit when it has, never a
-rebase of `main` and never a force-push -- in the job's own tree, and tests
-that merged tree OUTSIDE the project's live lock (lib/loam_lock.live, since
-2026-11-16; ``_land_tested``). The lock is then held only to confirm `main`
-has not moved since, fast-forward the canonical `main` to that tested commit
-and push; a `main` that moved means merging and testing again, and after
-``OUTSIDE_TRIES`` lost races the landing tests under the lock as it did
-before. Then the worktree's removal. Any failure leaves `main`, `origin` and
-the worktree exactly as they were and says why; the next stage hands that to
-a continuation automatically, this one writes the brief for it.
-What lands is the job branch's ref, never HEAD: a tree whose HEAD was
-detached elsewhere lands its branch, or nothing (``branch_tip``, 2026-10-13).
-A read-only brief -- its `involvement` opens with "Read-only" (bin/engineer-job
-``is_read_only``) -- lands nothing at all and its tree is removed
-(``read_only_result``).
-
-**The harness that is not in the repository.** Since 2026-10-01 a project's
-CLAUDE.md, role.md, project.md, memory/ and .claude/ are excluded from its
-repository (bin/provision HARNESS_PATHS). `git worktree add` brings only
-tracked files, so those are copied in from the canonical checkout; the memory
-is merged back into it at landing, three-way against the copy the job began
-from, with git's union driver. A tracked memory file gets the same driver
-through `info/attributes`, because two jobs that each append a paragraph to
-MEMORY.md is the normal case and must not be a conflict.
-
-**A project that lands by pull request** (``Project.pull_request``, since
-2026-10-06: a repository Loam does not own) lands differently. Its canonical
-`main` is a local mirror of the remote's default branch, fast-forwarded from
-it when a job starts (``sync_adopted``), because the remote moves without us.
-The landing tests the branch when there is a test command and says it is
-untested when there is none; it never merges into `main` and never pushes it.
-It refuses a branch whose commits touch the harness, puts the branch in the
-canonical repository, and asks the broker to push that branch and open a pull
-request against the default branch (lib/loam_github_app.open_pull_request).
-The job's own token cannot push at all; see ``job_permissions`` there. On a
-person-authored project the remote branch is a plain name from the pull
-request's title, not `job/<id>` (``pr_head`` there). A brief titled `Updates #<n>`
-updates that open pull request instead, fast-forward only, and posts the
-job's reply on it (lib/loam_pr_target.py).
-"""
+A job runs outside the canonical checkout so its harness loads only the job's
+instructions. The canonical checkout owns the project's refs and remotes.
+A failed landing keeps the clone for recovery."""
 
 from __future__ import annotations
 
@@ -94,8 +34,6 @@ RECORD = "worktree.json"
 # What bin/provision puts in a checkout that may not be in the repository.
 HARNESS = ("CLAUDE.md", "role.md", "project.md", ".claude", "memory")
 
-# How long a landing's test command may run. The agents suite takes about a
-# hundred seconds; this is a ceiling, not an estimate.
 TEST_TIMEOUT = 900
 
 # How much of a failing test run a receipt quotes.
@@ -107,9 +45,7 @@ class WorktreeError(Exception):
 
 
 def canonical(project: eng.Project) -> Path:
-    """The checkout `main` lives in. Loam's engineer is `agents/engineer/`,
-    so its repository is the directory above -- derived from the project, not
-    from a constant, so a test's Loam is never the live one."""
+    """Resolve the checkout from the project so fixtures use their own repositories."""
     return project.root.parent if project.platform else project.root
 
 
@@ -122,9 +58,7 @@ def path_for(project: eng.Project, job_id: str) -> Path:
 
 
 def session_dir(project: eng.Project, tree: Path) -> Path:
-    """Where the session runs: the tree's `engineer/` for Loam, whose engineer
-    project is a subdirectory of the repository, and the tree itself for a
-    project engineer."""
+    """Return the job's working directory within the clone."""
     if project.platform:
         return tree / "engineer"
     return tree / project.subdir if project.subdir else tree
@@ -151,10 +85,7 @@ def test_command(project: eng.Project) -> str | None:
 
 def git(repo: Path, *args: str, check: bool = True,
         timeout: int = 300) -> subprocess.CompletedProcess:
-    # errors="replace": the push gate reads diffs with --text, and a binary
-    # file in a commit (a font, 2026-11-16) is not UTF-8; undecodable bytes
-    # become U+FFFD instead of crashing the landing. A name the gate looks
-    # for is text, so nothing it must see is lost.
+    # Forced text diffs can contain binary bytes. Keep scanning beyond them.
     result = subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True,
         errors="replace", check=False, timeout=timeout)
@@ -171,15 +102,7 @@ def rev(repo: Path, ref: str) -> str | None:
     return out.stdout.strip() or None
 
 
-# A canonical checkout's remotes (2026-11-16). `origin` is where `main` is
-# pushed and, on an install from a release, where its updates come from
-# (lib/loam_update.py reads release tags there). `backup` is an off-box copy
-# and nothing else: every landing pushes `main` to it, mapped by its own
-# `remote.backup.push` refspec when it has one, and nothing ever fetches from
-# it, so it can never be mistaken for the release source. A checkout with no
-# `origin` of its own names an off-box copy `backup`, never `origin`, and
-# its refspec can put `main` on a branch of a repository whose own `main`
-# is something else.
+# The backup remote receives commits through its push refspec. Only origin supplies releases.
 BACKUP = "backup"
 # The last `main` the backup push took, so the recovery sweep can tell
 # without the network whether one is pending. Local only; nothing fetches it.
@@ -209,35 +132,7 @@ def backup_pending(repo: Path) -> bool:
     return has_remote(repo, BACKUP) and rev(repo, MAIN) != rev(repo, BACKUP_MARK)
 
 
-# The gate in front of `origin` (2026-11-16), for a checkout whose `origin`
-# is shared beyond its owner -- Loam's own, pushing to the project's public
-# home. A commit once pushed there is expensive to take back. A checkout
-# turns it on in its own git config, `git config loam.pushGate true`; then
-# before every push of `main` to `origin` (a landing's, and the recovery
-# sweep's), each commit `origin` does not have yet is checked:
-#
-#   - its author and committer are the checkout's own `user.name` and
-#     `user.email`: the identity a job's clone is given (``configure_clone``),
-#     so a commit made any other way -- by hand, as a person, before the
-#     identity was set -- is held rather than published under that name;
-#   - when `loam.pushDeny` names a deny list (a file in bin/scrub-check's
-#     format, kept outside the repository because the list is itself the
-#     names it guards), no line the commit adds, no path it touches and
-#     nothing in its message matches it.
-#
-# A project's own repository is its owner's, private, and full of its own
-# names, so it has no gate unless its checkout asks for one. A held push
-# leaves `main` landed here and says why; nothing is rewritten, and the
-# recovery sweep tries again.
-#
-# The landing asks the same question first (since 2026-11-16, in
-# ``_prepare``), of the commits it would add to `main` only, before testing
-# them: a branch the gate would hold is not landed (reason `gate`), and the
-# automatic continuation rewrites it in the job's tree. Until then the gate
-# ran at the push alone, so a held commit was already on `main` and every
-# later landing was held behind it until someone rewrote `main` by hand
-# (de809e8, a persona's name in a test, 2026-11-16). A brief's title that
-# trips the deny list is dropped from the landing's merge message.
+# Preflight outgoing changes before merging. Recheck every unpublished commit before push.
 GATE_COMMITS = 200
 
 
@@ -343,25 +238,7 @@ def push_gate(repo: Path, since: str | None, deny: Path | None = None,
     return problems
 
 
-# Re-authoring (2026-11-16). The gate was turned on while jobs were running
-# in trees cloned before the checkout's identity was set, so their commits
-# carried the box's old one and were held: `93df8bc` landed on `main` and
-# never reached `origin`. A job's commits are the engineer's work whatever
-# its tree's config said, so two places re-author them as the checkout's
-# identity -- same trees, messages, dates and parents, only the names:
-#
-#   - the landing, in the job's tree, before it merges (``settle_commits``,
-#     since 2026-11-18 also the owner's identity on an ungated checkout),
-#     which also gives an old tree the checkout's identity for what it
-#     commits next;
-#   - the push, for commits already on `main` that `origin` lacks
-#     (``reauthor_landed``), but only when `main`'s reflog says nothing but a
-#     landing's fast-forward moved it since `origin`'s head. A commit made
-#     on `main` by hand, a reset or a rebase there leaves the push held, as
-#     the gate says.
-#
-# Running jobs whose base was a re-authored commit are replayed by
-# ``replay_if_rewritten``, the path a rewritten `main` already takes.
+# Re-author eligible unpublished commits. Reflog checks distinguish landings from manual changes.
 
 REAUTHOR_NOTE = "loam: re-author landed commits"
 
@@ -470,15 +347,9 @@ def remote_tips(repo: Path) -> list[str]:
 
 def settle_commits(project: eng.Project, repo: Path, tree: Path, branch: str,
                    main_sha: str, say, result: dict | None = None) -> str | None:
-    """Before a landing merges: give the job's tree the identity it commits
-    as (``job_identity``) and re-make the job's own commits -- in
-    `main..branch` and on no remote -- that an agent made under another name
-    or with a provider's attribution in the message
-    (lib/loam_git_identity: ``agent_made``, ``strip_provider``). On a gated
-    checkout every such commit is the checkout's identity, whoever made it,
-    as the gate requires (2026-11-16). A commit a person made, and a signed
-    commit, are kept as they are. Returns the old tip when it moved, else
-    None."""
+    """Set the clone's identity and normalize unpublished commits before merging.
+    Preserve signatures. An ungated checkout also preserves human attribution.
+    Return the previous tip if the branch moves."""
     if not is_clone(tree):
         return None
     want = job_identity(project, repo)
@@ -587,30 +458,8 @@ def push_origin(repo: Path) -> bool | str:
         (push.stderr or push.stdout).strip()[:400] or f"exit {push.returncode}")
 
 
-# A job whose `main` was rewritten under it (2026-11-16). A history that is
-# rewritten before it is first published (to take an install's own notes or
-# names out of it) leaves every running job's branch on the old commits, and a
-# plain merge would bring all of them back. When the branch carries a commit
-# that was once `main` and no longer is in it, the landing replays only the
-# job's own commits -- those after the newest such commit -- onto `main`, as
-# the checkout's identity, and lands those. A replay that conflicts is not
-# landed (reason `rewritten`).
-#
-# Which commits were once `main` is read from the canonical checkout's reflog
-# of `main`, not from the job's recorded base alone. Caused 2026-11-16, job
-# 20261116-111835-e406819c: it was cut at a8fdeb8; a re-authoring of `main`
-# moved that commit, and its first mid-job landing replayed the branch onto
-# the new `main` (record["base"] was set in memory, never written). It then
-# landed mid-job five more times, so its branch was `main`, commit for
-# commit. A filter-branch over `main` (to scrub two commits the push gate
-# held) followed, and the final landing asked only: is the recorded base
-# a8fdeb8 in the branch? It was not -- the first replay had moved the branch
-# off it -- so nothing was replayed, the merge brought both scrubbed commits
-# back, and the push was held again. Every position `main` has been in is in
-# the reflog (a landing's fast-forward, a re-authoring, a filter-branch, a
-# reset), and a branch only ever gets `main`'s commits by starting from one,
-# merging one or landing at one, so the reflog says it whatever the record
-# says. The record's base is still asked too, for a reflog that has expired.
+# The canonical reflog identifies superseded main commits even after a previous mid-job replay.
+# Include the recorded base in case its reflog entry has expired.
 
 def former_mains(repo: Path) -> list[str]:
     """Every commit `main` has pointed at in the canonical checkout, newest
@@ -664,19 +513,8 @@ def replay_plan(repo: Path, tree: Path, record: dict, main_sha: str,
 
 def replay_if_rewritten(repo: Path, tree: Path, branch: str, record: dict,
                         main_sha: str, say) -> str | None:
-    """Replay the branch onto `main` if it carries commits a rewrite of
-    `main` left behind (``replay_plan``). Returns None (nothing to do, or
-    done) or why it could not.
-
-    Each commit of the plan is cherry-picked in turn onto `main` in a
-    detached HEAD; one that comes out empty (its change is already there
-    by another route than its patch id says) is skipped, not committed.
-    The branch is moved to the result, and the landing's ``settle_commits``
-    then gives it the job's identity. Until 2026-11-16 this was `git rebase --onto
-    ... --exec 'commit --amend --reset-author'`: a pick that came out empty
-    stopped the rebase ("would make it empty"), and one that rebase dropped
-    left the exec amending the commit before it -- `main`'s own tip, when
-    it was the first."""
+    """Replay only the job's changes onto rewritten main. Skip patches already present.
+    Leave the branch ref in place until all picks succeed. Return a reason on failure."""
     tip = branch_tip(tree, branch)
     if not tip:
         return None
@@ -765,11 +603,7 @@ def write_record(job_dir: Path, record: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def ensure_union(project: eng.Project) -> None:
-    """The memory file merges by union in every worktree of this repository.
-
-    `info/attributes` is in the common git directory, so it holds for every
-    worktree and is local to this box -- the repository's own files are not
-    touched, the way `info/exclude` already carries the harness."""
+    """Keep the union merge attribute for project memory in the local Git attributes file."""
     repo = canonical(project)
     common = Path(git(repo, "rev-parse", "--git-common-dir").stdout.strip())
     if not common.is_absolute():
@@ -791,12 +625,7 @@ def memory_base(record: dict) -> Path:
     return Path(record["path"]).parent / f"{Path(record['path']).name}.memory-base"
 
 
-# Loam's own engineer is `engineer/` in the repository, and its harness is
-# there: provision renders the role, the project file, CLAUDE.md, agent.json
-# and .claude/ from the install's operator-authored sources, so a release
-# ships none of them and an install's checkout carries them untracked (in
-# `info/exclude`). A tree gets them the way a project's tree gets its own.
-# Its memory is the repository's, tracked, so it is never seeded.
+# The platform harness is generated locally under engineer/ and must be available in the clone.
 PLATFORM_HARNESS = lc.ENGINEER_HARNESS
 
 
@@ -828,26 +657,7 @@ def seed_harness(project: eng.Project, record: dict) -> list[str]:
     return copied
 
 
-# ---------------------------------------------------------------------------
-# The job's own repository (since 2026-10-02, git isolation). Until then a
-# job's tree was a `git worktree` of the canonical checkout, so every job
-# shared one git directory: the wall could make the canonical files read-only
-# but had to leave `.git/objects` and `.git/refs/heads/job/` writable for a
-# commit to work, and with them every OTHER job's branch and reflog, the
-# object store a `git prune` empties, and -- one `git update-ref` away -- the
-# packed refs. Masking one loose ref is not isolation.
-#
-# So a job's tree is now a clone of its own: `git clone --shared`, which reads
-# the canonical object store through `objects/info/alternates` and writes
-# every object, ref, index, config and hook into the tree's own `.git`. The
-# wall makes the WHOLE canonical repository read-only, `.git` included, and
-# binds back nothing of it. A clone's `git gc`/`prune` touches only its own
-# store (git never prunes an alternate). The canonical checkout is changed by
-# one writer, the landing, which fetches the job's branch out of the tree.
-#
-# `--shared` is safe here because the alternate is only ever read and its
-# objects are reachable from canonical `main`, which only moves forward.
-# ---------------------------------------------------------------------------
+# A shared clone reads canonical objects through an alternate but owns its refs, index and writes.
 
 def is_clone(tree: Path) -> bool:
     return (tree / ".git").is_dir()
@@ -859,14 +669,8 @@ def common_dir(repo: Path) -> Path:
 
 
 def configure_clone(repo: Path, tree: Path, identity: dict | None = None) -> None:
-    """What a commit and a merge in the clone need from the canonical repo's
-    LOCAL config and info/ -- the committer identity (there is no global one
-    on this box), the harness exclusion and the memory's union driver -- and
-    nothing else: no hooks of the project's, no remotes but the canonical
-    one. ``identity`` is the one ``job_identity`` resolved (the project's
-    person, the repository's own, the owner's) when there is one. One hook of
-    Loam's own: `commit-msg` takes a provider's attribution out of each
-    message (``install_hook``)."""
+    """Configure commit identity, harness exclusions and memory merge attributes.
+    Use the canonical repository as the clone's remote."""
     configure_identity(repo, tree)
     apply_identity(tree, identity)
     install_hook(tree)
@@ -923,38 +727,8 @@ def refresh_main(repo: Path, tree: Path) -> None:
         git(tree, "fetch", "--quiet", "origin", *specs)
 
 
-# ---------------------------------------------------------------------------
-# The mirror (since 2026-10-13). A project's canonical checkout is the local
-# mirror of its GitHub repository, and a job's clone has the canonical as its
-# `origin` -- so a job sees GitHub only as the mirror last fetched it. Until
-# this, nothing fetched the mirror's other branches: a pull-request project's
-# `sync_adopted` fetched its default branch alone, a Loam-owned project's
-# landing fetched `main` alone, and a clone's default refspec reads the
-# canonical's `refs/heads/*`, which are `main` and job branches -- never the
-# `refs/remotes/origin/*` GitHub's branches live in there. Caused 2026-10-09:
-# an adopted project's job asked to read a branch pushed to GitHub that
-# afternoon reported it did not exist; `git fetch --all` in the job fetched
-# the mirror, not GitHub (job 20261009-132136-6d5239b2, and
-# 20261009-134034-a41d47a0, which found it by asking GitHub directly).
-#
-# So a job's setup (``setup``) on a project whose record sets
-# ``"mirror_refresh": true`` first refreshes the mirror from its `origin` --
-# every branch, pruned, and every tag -- and then points the clone's
-# `origin/*` at the mirror's copy of the remote's branches, so the job's own
-# `git fetch` keeps reading them. A refresh that fails does not refuse the
-# job: the job runs on the mirror as it was, which is what `sync_adopted`
-# already did with a failed fetch, and the receipt's `mirror` row says the
-# refresh failed and when the last one succeeded. A project's own setting,
-# never a default, on the owner's word the same day: "each project might have
-# its own requirements and needs". A project without the key gets none of this: git's
-# default view of the canonical, no fetch from GitHub, no `mirror` row.
-#
-# Tags are fetched with `--tags`, which `--prune` does not prune: a release
-# tag `cut_release` has made and not yet pushed is never deleted by a job
-# starting beside it. A branch deleted on GitHub leaves the mirror on the
-# next job's start; its objects stay until a `git gc` there expires them
-# (two weeks by default), longer than any clone that fetched the ref lives.
-# ---------------------------------------------------------------------------
+# With mirror refresh enabled, expose upstream branches through the local mirror.
+# Prune deleted branches but retain unpublished release tags.
 
 MIRROR_REFSPEC = "+refs/remotes/origin/*:refs/remotes/origin/*"
 MIRROR_SKIP = "^refs/remotes/origin/HEAD"
@@ -1031,12 +805,7 @@ def sees_mirror(tree: Path) -> bool:
 
 
 def mirror_view(tree: Path) -> None:
-    """Point the clone's `origin/*` at the remote's branches as the mirror
-    holds them, and fetch them now: `git branch -r` in the job lists GitHub's
-    branches, `git checkout --track origin/<branch>` checks one out (the
-    bare-name guess does not: git makes it only from `refs/heads/*` sources),
-    and the job's own `git fetch` re-reads the mirror's copy. The canonical's
-    job branches drop out of the view, which no job needed."""
+    """Expose upstream branches as origin/* through the canonical mirror. Track them explicitly."""
     git(tree, "config", "--replace-all", "remote.origin.fetch", MIRROR_REFSPEC)
     git(tree, "config", "--add", "remote.origin.fetch", MIRROR_SKIP)
     git(tree, "fetch", "--quiet", "--prune", "origin")
@@ -1112,23 +881,15 @@ TRUST_FLAGS = ("hasTrustDialogAccepted", "hasClaudeMdExternalIncludesApproved",
 
 
 def ensure_trust(tree: Path) -> bool:
-    """Trust the clone in ~/.claude.json. The CLI keys trust on the git root:
-    a worktree's was the canonical checkout, which provision trusts, but a
-    clone is a root of its own, and an untrusted one has its settings'
-    permissions ignored (every Bash call would wait for an approval nobody
-    gives). Same discipline as bin/provision.ensure_trust: write only when
-    missing, re-read if a live session wrote meanwhile, replace atomically.
-    Only for a tree under the live worktrees root, so a test never edits the
-    real file. True when the entry is (now) there."""
+    """Each clone has its own Git root and CLI trust entry. For a live clone,
+    update missing trust flags atomically and retry concurrent writes."""
     if not tree.is_relative_to(LIVE_WORKTREES) or not CLAUDE_JSON.is_file():
         return False
     for _attempt in range(5):
         before = CLAUDE_JSON.stat()
         cfg = json.loads(CLAUDE_JSON.read_text(encoding="utf-8"))
         entry = cfg.setdefault("projects", {}).setdefault(str(tree), {})
-        # Trust, and the approval to load CLAUDE.md's one import from
-        # outside the tree, the shared reach.md (2026-11-10; without it the
-        # import is dropped silently: bin/provision TRUST_FLAGS).
+        # Trust includes the shared instructions imported from outside the tree.
         if all(entry.get(flag) for flag in TRUST_FLAGS):
             return True
         entry.update({flag: True for flag in TRUST_FLAGS})
@@ -1168,12 +929,7 @@ def sync_adopted(project: eng.Project) -> str:
 
 
 def current_place(path: Path) -> Path:
-    """A recorded tree path, where trees are kept now. A job recorded before
-    the state moved out of the checkout (2026-11-14) names
-    `<checkout>/state/worktrees/<project>/<job>`; continued, it reopens at
-    `<paths.state>/worktrees/<project>/<job>` instead of recreating a
-    `state/` inside the checkout. The session still resumes: the CLI finds it
-    by id, and bin/move-state carried its folder to the new name."""
+    """Resolve a recorded worktree path under the configured state directory."""
     if path.is_relative_to(WORKTREES) or path.parent.parent.name != "worktrees":
         return path
     return WORKTREES / path.parent.name / path.name
@@ -1270,33 +1026,7 @@ def tree_lock(record: dict):
     return loam_lock.LOCK_DIR / f"tree-{path.parent.name}-{path.name}.lock"
 
 
-# ---------------------------------------------------------------------------
-# The wall (since 2026-10-02, stage two). The guard refuses a job's Write and
-# Edit outside its tree; this does the same for everything the session runs,
-# Bash included, by running the CLI in a private mount namespace where the
-# canonical checkout, every job's tree and the jobs root are READ-ONLY, and
-# only this job's tree, its job directory and the parts of the shared git
-# directory a commit writes are bound back read-write.
-#
-# Two ways in, because the two kinds of engineer differ in one property:
-#
-#   Loam      `sudo unshare -m`, then `setpriv` back to this user. A real
-#             mount namespace in the host's user namespace, so the engineer's
-#             sudo still works inside it -- full sudo is its project file's
-#             grant, and a user namespace would have taken it away (sudo
-#             refuses to run when /usr/bin/sudo is not owned by uid 0, which
-#             is how it looks from inside one). Root inside sees the same
-#             read-only mounts; only a deliberate remount gets past them.
-#   project   `unshare -Urm`, then `unshare -U` mapping back to this uid. The
-#             unit carries NoNewPrivileges, so sudo is out; an unprivileged
-#             user namespace needs none. Mount flags made read-only in a user
-#             namespace are LOCKED: a bind taken later from inside a
-#             read-only mount stays read-only (caused, 2026-10-02). So every
-#             read-write path is bound to a staging point first, while it is
-#             still writable, and moved into place after the read-only binds.
-#
-# Both use the staging order, so one script serves both.
-# ---------------------------------------------------------------------------
+# Stage writable mounts before read-only parents. User namespaces lock inherited read-only flags.
 
 def gitdir_of(tree: Path) -> Path | None:
     try:
@@ -1322,9 +1052,7 @@ def wall_paths(project: eng.Project, record: dict, job_dir: Path) -> dict:
         gitdir = gitdir_of(tree)
         if gitdir:
             rw.append(gitdir)
-    # Loam's canonical checkout holds the runtime's own state and logs, which
-    # its tools write while the engineer works (locks, markers, test scratch);
-    # they are not the repository and stay writable -- except the trees.
+    # Keep runtime state writable on installs that store it under the checkout.
     broad = ([p for p in (lc.STATE, lc.LOGS) if p.is_relative_to(repo)]
              if project.platform else [])
     ro_after = [WORKTREES, project.jobs]
@@ -1335,10 +1063,7 @@ def wall_paths(project: eng.Project, record: dict, job_dir: Path) -> dict:
 
 def wall_script(project: eng.Project, record: dict, job_dir: Path,
                 protect: list[Path] = ()) -> str:
-    """The mounts, as one shell line. ``protect`` (since 2026-11-15): paths
-    inside the tree held read-only over its writable bind, for a CLI with no
-    write sandbox of its own to hold them (an Antigravity job's harness,
-    lib/loam_agy_job.py); a path that is not there is skipped."""
+    """Build the mount sequence, including read-only overlays on protected paths."""
     paths = wall_paths(project, record, job_dir)
     stage_root = f"/tmp/loam-wall-{Path(record['path']).name}-{os.getpid()}"
     staged = paths["rw_broad"] + paths["rw"]
@@ -1368,11 +1093,7 @@ def wall_script(project: eng.Project, record: dict, job_dir: Path,
             steps += read_only(path)
     for i in range(len(staged)):
         steps.append(f"umount {_q(f'{stage_root}/{i}')}")
-    # Braced (2026-11-15): bare, its `|| true` closed the whole `&&` chain,
-    # so a mount that failed skipped every mount after it and the CLI still
-    # ran behind a partial wall (caused from inside a job, where the nested
-    # remount of the worktrees fails). Now a failed mount ends the line and
-    # the session is not started.
+    # Isolate the optional cleanup failure so it cannot mask a failed mount.
     steps.append(f"{{ rmdir {_q(stage_root)}/* {_q(stage_root)} 2>/dev/null || true; }}")
     return " && ".join(steps)
 
@@ -1427,39 +1148,12 @@ def tail(text: str, lines: int = TAIL_LINES) -> str:
 
 
 def platform_argv(tree: Path, command: str) -> list[str]:
-    """Run `command` with the tree's files at the runtime's own path.
+    """Build the sealed test command described in tests/README.md.
 
-    The runtime names itself by absolute path -- lib/ is put on sys.path as
-    `<root>/lib` by some scripts and test -- so a test run in
-    a worktree would import the LIVE code and pass for the wrong reason. A
-    private mount namespace shows the tree at the canonical path to this one
-    command and nobody else: the outer user namespace is root so it may
-    mount, the inner one maps back to this uid so every test sees the user it
-    was written for.
-
-    What is bound is each top-level entry the tree's HEAD tracks, over the
-    canonical one -- not the tree as a whole. A worktree's `.git` is a file
-    naming `<root>/.git/worktrees/<id>`, which a whole-tree
-    mount would hide, and every git call a test makes from the repository
-    would then fail (caused: test_github_app's `git credential fill`). So the
-    canonical `.git` stays, and with it everything untracked -- state/,
-    logs/, the venv -- exactly as a test run in the canonical checkout sees
-    it. The venv is bound under the tree's `mcp/` first, because that mount
-    hides the canonical one. A top-level entry the job ADDED has nothing to
-    mount over and is missing from the view; the tests say so if it matters.
-
-    **The wall** (2026-11-19). A landing's tests are sealed: what they may
-    not read is not there to read. The command runs in a network namespace
-    of its own with only its own loopback up, so no test reaches the
-    network, the live app or the box's broker on its loopback port; and
-    each of the box's live folders (`sealed_paths`) is covered by an empty
-    read-only one, after the tree is bound in, so a test that reads the
-    vault, an agent's workspace, another repository, the state and jobs
-    folders (where every other job's tree is) or the secrets files finds
-    nothing, every time, instead of whatever the box holds that minute.
-    Before the wall, 15 of 68 non-landings in 30 days were a test reading
-    the live box or a flaky test, against 6 that were the work's.
-    """
+    Bind tracked top-level entries over their canonical paths. Tests need the
+    configured runtime paths and working git metadata. Bind the MCP virtual
+    environment before covering its parent. A new top-level entry without a
+    canonical mount target is absent from this view."""
     uid, gid = os.getuid(), os.getgid()
     entries = git(tree, "ls-tree", "--name-only", "HEAD").stdout.split("\n")
     mounts = []
@@ -1524,29 +1218,14 @@ def run_tests(project: eng.Project, tree: Path) -> tuple[bool | None, str, str]:
         argv, cwd = platform_argv(tree, command), str(tree)
     else:
         argv, cwd = ["sh", "-c", command], str(tree)
-    # The tests run as themselves, not as the job: a landing runs inside the
-    # job's own environment, and a test that feeds the guard a payload would
-    # otherwise be judged by the JOB's boundary (caused: test_boundary_guard
-    # failing one case on a mid-job landing, 2026-10-02).
-    #
-    # And without credentials. The launcher's unit mounts wake.env (and, for
-    # Loam, secrets.env), so a landing ran every test with the account's
-    # OAuth token in its environment -- which no developer's shell has, and
-    # which test_broker_login reads as "the session runs on a token" (4
-    # failures on the first in-unit Loam landing, 2026-10-02, while the same
-    # suite passed from a session). A project's test command is also code a
-    # job just wrote; it has no business holding the account's keys.
+    # The test command runs project code. Strip job restrictions and inherited credentials.
     env = {k: v for k, v in os.environ.items()
            if k != "CLAUDE_PROJECT_DIR"
            and not k.startswith(("LOAM_JOB_", "LOAM_WALL"))
            and not is_credential(k)}
-    # And offline: a key read from a file, not the environment, is refused
-    # too (lib/loam_offline.py; the 2026-11-10 DNS outage).
+    # Offline mode also covers credentials loaded from files.
     env["LOAM_OFFLINE"] = "1"
-    # And with a lock table of their own: the suite takes run slots and live
-    # locks and waits for them, and a landing runs while this job -- and
-    # every job beside it -- holds a real slot. With all three held the
-    # agents suite waited out its own timeout (caused, 2026-10-02).
+    # Isolate test locks from the job and other live holders.
     locks = Path(tempfile.mkdtemp(prefix="loam-test-locks-"))
     env["LOAM_LOCK_DIR"] = str(locks)
     env.pop("LOAM_LIVE_LOCKS", None)
@@ -1568,8 +1247,7 @@ def run_tests(project: eng.Project, tree: Path) -> tuple[bool | None, str, str]:
 # ---------------------------------------------------------------------------
 
 def outside_scope(project: eng.Project, tree: Path, base: str, tip: str) -> list[str]:
-    """The paths a folder project's branch changes outside its folder, since
-    it left `main` (2026-11-16). [] for a whole-repository project."""
+    """List branch changes outside the project subdirectory."""
     if not project.subdir:
         return []
     changed = git(tree, "diff", "--name-only", "--no-renames", f"{base}...{tip}",
@@ -1609,12 +1287,7 @@ def merge_memory_back(project: eng.Project, record: dict) -> list[str]:
 
 
 def branch_tip(tree: Path, branch: str) -> str | None:
-    """What a landing lands: the job branch's ref, never HEAD. Caused
-    2026-10-12: a read-only job of an adopted project checked out a pull request's
-    commit detached (`git checkout --detach 27928e66`) and committed nothing;
-    the landing read HEAD as the branch tip, saw work that `main` lacked, and
-    asked the broker to push `job/<id>` -- still at the base -- as a pull
-    request GitHub refused ("No commits between main and ...")."""
+    """Read the job branch by ref even when the working tree has a detached HEAD."""
     return rev(tree, f"refs/heads/{branch}")
 
 
@@ -1642,17 +1315,7 @@ def onto_branch(tree: Path, branch: str, result: dict) -> None:
 
 
 
-# Commits made while a landing runs (2026-11-19). A mid-job `--land` merges
-# and tests in the job's own tree, on a detached HEAD at the merge, for as
-# long as the tests take; the session goes on meanwhile, and a commit it
-# made then went onto that detached HEAD. Putting the tree back on its
-# branch left it behind, so it never landed (caused 2026-11-16, `9d381d7`,
-# and 2026-11-17, `1147e7d`, each recovered by hand). ``back_to_branch``
-# carries such commits onto the branch, and ``carry_onto`` moves commits
-# made on the branch itself during a locked landing onto what landed. The
-# landing that made the merge still lands only what it tested; the carried
-# commits are on the branch for the next landing (the session's end or
-# another `--land`), and the receipt names them (``result["carried"]``).
+# Commits made during testing stay on the job branch for its next landing.
 
 def carry_onto(tree: Path, branch: str, commits: list[str], onto: str,
                result: dict) -> bool:
@@ -1697,11 +1360,7 @@ def back_to_branch(tree: Path, branch: str, left_at: str | None, result: dict,
 
 
 def landed_earlier(project: eng.Project, record: dict) -> str | None:
-    """The branch tip, when the branch has commits of its own (it moved from
-    where the tree began) and every one of them is already on `main`. None
-    otherwise. Caused 2026-10-02: job 20261001-175221-8c963ca0 landed its
-    work mid-job with `--land`, and its end-of-job record said "not landed;
-    nothing was pushed" while its own git table showed main at the tip."""
+    """Return the tip if the branch advanced from its base and main already contains it."""
     repo, tree = canonical(project), Path(record["path"])
     if not tree.is_dir():
         return None
@@ -1736,20 +1395,7 @@ def remove_tree(project: eng.Project, record: dict, *, delete_branch: bool) -> N
         git(repo, "branch", "-D", record["branch"], check=False)
 
 
-# A release install's own `main` (2026-11-17). An install is a clone of Loam
-# checked out at a release tag, detached, with no branch at all (install.sh,
-# bin/loam-install), so the first engineer job on Loam there could not even
-# make its tree ("Remote branch main not found"). Its `origin` is Loam's
-# public repository, whose `main` is unreleased development: syncing from it
-# would move the install off its release, and pushing to it is neither
-# possible nor wanted. So the first job makes a `main` at the release it runs
-# (`ensure_local_main`, the tree unchanged) and marks it the install's own
-# (`loam.localMain` in the checkout's git config). Such a `main` is never
-# fetched up to `origin/main` and never pushed; `loam update` merges each
-# newer release into it, keeping the local commits, or refuses with the
-# conflicting files when they collide (docs/update.md, "A change to Loam's
-# own parts"). A box that develops Loam has a `main` already and never gets
-# the mark, so nothing changes there.
+# A release install keeps local changes on its own main. See docs/update.md.
 LOCAL_MAIN_KEY = "loam.localMain"
 
 
@@ -1815,8 +1461,7 @@ def update_pr(project: eng.Project, branch: str, number: int, reply: str) -> dic
     return loam_pr_target.update(project.name, branch, number, reply)
 
 
-# What a pull-request project's commits may never touch: the harness, which
-# lives on this box and never in someone else's history.
+# Keep install-local harness files out of upstream pull requests.
 HARNESS_IN_COMMITS = HARNESS + (".codex",)
 
 
@@ -1828,15 +1473,8 @@ def harness_in_commits(tree: Path, base: str, tip: str) -> list[str]:
 
 
 def refresh_remote_view(project: eng.Project, repo: Path) -> None:
-    """Fetch the remote's branches into the canonical's `refs/remotes/origin/*`
-    -- every branch for a project that refreshes its mirror, else the default
-    branch, as ``sync_adopted`` does -- under a lock the caller already
-    holds. Never raises: a failed fetch leaves the older view, which can only
-    count fewer commits as the remote's, so refuse more, never less.
-
-    `main` is then fast-forwarded to the remote's default branch, as
-    ``sync_adopted`` does at setup, so a broker still running the
-    `base..tip` check of before 2026-10-20 reads the same range."""
+    """Fetch remote branches under the caller’s lock and fast-forward the local mirror.
+    A failed fetch keeps the previous view, so a commit may still need review."""
     base = project.record.get("default_branch") or MAIN
     try:
         if refreshes_mirror(project):
@@ -1958,33 +1596,7 @@ def _land_pr_locked(project, repo, tree, branch, keep_tree, result, say,
         remove_tree(project, record, delete_branch=False)
 
 
-# ---------------------------------------------------------------------------
-# The engineer's memory note never blocks a landing (2026-11-19).
-#
-# Seven times in November the only thing a failed landing held was the
-# engineer's own note in its memory file: the work had landed mid-job with
-# `--land`, and the note committed after it met a flaky test or the push
-# gate, so the job reported "not landed" and a continuation was sent to land
-# a note. A note is not the work. So, around every non-PR landing:
-#
-#   - a tree whose only uncommitted changes are the memory file has them
-#     committed by the landing, as the job's identity, instead of being
-#     refused as `uncommitted`;
-#   - when what the branch adds to `main` is the memory file alone and it
-#     does not land, a failed test run is tried once more; if it still does
-#     not land, the result is what landed before it (`landed_earlier`, or
-#     `nothing` when the note was all there was), no continuation is sent,
-#     and the note is kept as a patch in the job's folder
-#     (``memory_held``), which the receipt names;
-#   - when the push gate holds a branch only for its memory file or its
-#     commits' messages, the work lands as one commit of the branch's
-#     change without the memory file, under the landing's own message, and
-#     the note is held the same way. A hold on anything else the work adds
-#     is the work's, and stays a hold.
-#
-# Never for a pull-request project, whose landing is a proposal, and never
-# when the landing was cancelled.
-# ---------------------------------------------------------------------------
+# If only the memory note fails to land, retain its patch with the job. See CONTRIBUTING.md.
 
 MEMORY_PATCH = "memory-note.patch"
 MEMORY_COMMIT = "Engineer memory (committed by the landing)"
@@ -2200,17 +1812,11 @@ def _land_once(project: eng.Project, record: dict, message: str, *,
     still running in the tree, so it stays, and its branch is fast-forwarded
     to what landed so the next landing starts from there.
 
-    `cancelled`, a callable (since 2026-11-10: the job's `cancelled` marker
-    exists), is asked before each test run, once the live lock is held, and
-    again immediately before `main` moves or the branch is pushed; true any
-    time, nothing lands, the tree and branch are kept, and the reason is
-    `cancelled`.
+    Check cancellation before testing and before moving refs. A cancelled
+    landing keeps the branch and tree for inspection.
 
-    A `main`-merging landing tests outside the live lock (``_land_tested``,
-    since 2026-11-16) and reports, beside ``timing``: ``retests`` (test runs
-    repeated because `main` moved under the one before) and
-    ``tested_under_lock`` (the run that decided it held the lock: the
-    fallback after ``OUTSIDE_TRIES`` lost races).
+    The result records test retries and whether contention required testing
+    the deciding merge under the lock.
     """
     say = say or (lambda _text: None)
     repo, tree, branch = canonical(project), Path(record["path"]), record["branch"]
@@ -2269,14 +1875,7 @@ def _land_once(project: eng.Project, record: dict, message: str, *,
                 release, f"the branch did not land ({result.get('reason')})")
 
 
-# ---------------------------------------------------------------------------
-# A release tag a job asks for (since 2026-10-02). A job's clone cannot push
-# a tag -- nothing in it reaches origin but the branch the landing merges --
-# so a release that a tag push cuts (Spoken's `release.yml`) had no route
-# from a job. The job writes the tag alone into `release-tag` in its job
-# directory; the landing tags the commit it landed and pushes the tag, and
-# only once the merge, the tests and the push of `main` have all happened.
-# ---------------------------------------------------------------------------
+# Tag the tested commit only after its main push succeeds.
 
 RELEASE_FILE = "release-tag"
 
@@ -2385,16 +1984,7 @@ def cut_release(repo: Path, result: dict, tag: str) -> dict:
                       + (f"; {signed['detail']}" if signed.get("detail") else "")}
 
 
-# ---------------------------------------------------------------------------
-# A signed release (2026-11-19, docs/signing.md). A project whose tree carries
-# `docs/releases/signers` with a key in it -- Loam does -- is installed by
-# boxes that check every release against those keys, so its tag is signed
-# here, as the same step, and checked before it is pushed. With a signing key
-# in the checkout's git config (`user.signingKey`, an SSH key) the landing
-# signs; without one the release waits, `main` landed and pushed, for
-# `bin/sign-release <tag>` on the machine that holds the key, and the receipt
-# says so. A project with no keys file tags as it always did.
-# ---------------------------------------------------------------------------
+# Verify signed release tags before pushing. See docs/signing.md.
 
 def sign_release(repo: Path, tag: str, sha: str, local: str | None) -> dict:
     """Sign ``tag`` at ``sha`` when the release must be signed.
@@ -2472,12 +2062,7 @@ def timed(result: dict, step: str):
                         "cpu_s": round(cpu_seconds() - cpu0, 2)}
 
 
-# In the order a landing passes them. Since 2026-11-16 the tests come before
-# the lock: ``branch_tests`` is the fast-forward's run (or, after a failed
-# merge, the branch's), ``merge_tests`` the merged tree's, each summed over
-# every attempt; ``lock_held`` is the whole time the live lock was held.
-# A landing of before kept everything after ``lock_wait`` under the lock and
-# recorded no ``lock_held``.
+# Accumulate test and lock times across retries so the receipt accounts for contention.
 TIMED_STEPS = ("merge", "branch_tests", "merge_tests", "lock_wait", "lock_held",
                "push")
 
@@ -2515,40 +2100,12 @@ def stop_for_cancel(cancelled, result: dict, say) -> bool:
     return True
 
 
-# ---------------------------------------------------------------------------
-# A `main`-merging landing (since 2026-11-16): the merged tree is tested
-# OUTSIDE the live lock, and the lock is held only to confirm `main` has not
-# moved since, fast-forward it to the tested commit and push. Until then the
-# whole landing -- the branch's tests, the merge, the merge's tests, the push
-# -- ran under the lock, and the suite takes ~7 minutes: on 11-16 one job
-# waited ~6 minutes behind another's suite and then ran its own, and with
-# three jobs finishing together the last waited 15-20 minutes on nothing but
-# the queue.
-#
-# Every attempt merges the branch into `main` as it stands, in the job's own
-# tree, and tests exactly that commit. Under the lock, a `main` (or branch)
-# that moved since is a lost race: the lock is let go and the attempt is made
-# again on the new `main`. After OUTSIDE_TRIES lost races the next attempt
-# takes the lock first and keeps it -- the order of before, which cannot
-# lose -- so a landing beside a busy queue is slow, never starved. What
-# `main` is moved to is always the commit that was tested; nothing else is
-# ever pushed.
-#
-# The branch's own tests no longer run first. On a fast-forward the branch
-# IS the merged tree, so there was only ever one run; on a real merge the
-# branch run told the continuation which tree is broken, and that is still
-# told -- the branch is tested only when the merged tree fails, so a passing
-# landing pays for one suite, not two.
-# ---------------------------------------------------------------------------
+# Test the merge before taking the lock and recheck both tips inside it. See CONTRIBUTING.md.
 
 # Attempts outside the live lock before the landing tests under it.
 OUTSIDE_TRIES = 3
 
-# How often a landing re-tries the live lock. The lock's own five seconds
-# suit a holder of minutes; a landing's hold is now its last step, a second
-# or two, and a waiter that sleeps five past it is most of its wait (seen in
-# tests/test_land_outside_lock.py: 5.0 s waited on a 0.2 s hold). An flock
-# attempt is a syscall.
+# Poll briefly because an uncontended final fast-forward holds the lock only briefly.
 LAND_POLL_S = 0.5
 
 # The tested commit is kept here in the job's tree between its test run and
@@ -2663,9 +2220,7 @@ def _prepare(project, repo, tree, branch, message, result, say, record,
                             check=False).stdout.split()
             git(tree, "merge", "--abort", check=False)
             back_to_branch(tree, branch, main_sha, result, force=True)
-            # A merge that failed with nothing unmerged is not a conflict
-            # (caused: a repository with no committer identity), and calling
-            # it one would send a continuation to resolve nothing.
+            # Only unmerged paths give a continuation a conflict to resolve.
             result.update(reason="conflict" if conflicts else "error",
                           files=conflicts,
                           detail=(out.stdout + out.stderr).strip()[-800:],
@@ -2860,12 +2415,8 @@ def _land_tested(project, repo, tree, branch, message, keep_tree, result,
 
 def read_only_result(project: eng.Project, record: dict, *,
                      keep_tree: bool = False) -> dict:
-    """A read-only brief's landing (since 2026-10-13): nothing is merged,
-    pushed or proposed, whatever the tree holds; the tree and its branch are
-    removed (kept for a mid-job `--land`, whose session is still in it). The
-    untracked memory is still merged back -- it is the engineer's, not the
-    repository's. What the branch held that `main` lacks is counted, so the
-    receipt says what was discarded."""
+    """Report discarded commits and merge back untracked memory for a read-only job.
+    Keep the tree for a mid-job landing and remove it on completion."""
     repo, tree, branch = canonical(project), Path(record["path"]), record["branch"]
     result = {"state": "read_only", "reason": None, "sha": None, "files": [],
               "test": None, "pushed": None, "memory": [], "branch": branch,

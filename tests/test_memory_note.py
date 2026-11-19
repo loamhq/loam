@@ -1,27 +1,4 @@
-"""The engineer's memory note never blocks a landing (since 2026-11-19;
-lib/loam_worktree.py `land`, "The engineer's memory note never blocks a
-landing").
-
-Asserted against real git repositories in a temp directory (a bare
-`origin`, a canonical checkout, job trees made by lib/loam_worktree.py as
-bin/engineer-job makes them), with a test command that fails when told to:
-
-  - the work landed mid-job, then a note alone meets failing tests: the run
-    is tried once more, the result is `landed_earlier` (no continuation is
-    sent for it), the note is kept as a patch in the job's folder, and the
-    receipt says so;
-  - a tree whose only uncommitted change is the memory file has it
-    committed by the landing, and lands;
-  - a failing test with work on the branch is still refused (the one hard
-    gate: `main` moves only by a merge that passed);
-  - with the push gate on: a note that names a denied word is held and the
-    work lands as one commit without it; `main` and `origin` never have the
-    word; a denied word in the work itself is still refused; a commit
-    message naming one lands as one commit under the landing's message;
-    a note alone that names one is `nothing` with the note kept.
-
-Run: python3 tests/test_memory_note.py
-"""
+"""Verify held notes remain recoverable and cannot waive a failed test or publish a denied change."""
 
 import os
 import shutil
