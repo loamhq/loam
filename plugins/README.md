@@ -13,3 +13,6 @@ third folder of the Shipped layer, after loam-ui's `public/themes` and
 
 `_listed/` holds first-party plugins that are published and listed in the
 marketplace rather than shipped (`_listed/README.md`): Images, so far.
+Dictation and Read aloud left the shipped set for the Market in 0.2.9; their
+copies are there too, for the tests and as the release's fallback
+(`lib/loam_to_market.py`).

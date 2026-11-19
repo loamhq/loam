@@ -312,13 +312,13 @@ test('a take over the size cap is an error line, refused before Gemini is asked'
 // The two dictation limits, which the page's own numbers have to fit inside.
 
 test('the server takes as many terms as the page keeps', async () => {
-  const page = await import('../public/plugins/dictation/page/dictate.js')
+  const page = await import('../../plugins/_listed/dictation/page/dictate.js')
   assert.equal(VOCABULARY_MAX_TERMS, 1000)
   assert.equal(VOCABULARY_MAX_TERMS, page.VOCABULARY_MAX_TERMS)
 })
 
 test('Gemini is given longer for a longer take, from a floor, to a cap', async () => {
-  const page = await import('../public/plugins/dictation/page/dictate.js')
+  const page = await import('../../plugins/_listed/dictation/page/dictate.js')
   assert.equal(GEMINI_TIMEOUT_FLOOR_MS, 120_000)
   assert.equal(GEMINI_TIMEOUT_PER_MINUTE_MS, 30_000)
   assert.equal(GEMINI_TIMEOUT_MAX_MS, 600_000)

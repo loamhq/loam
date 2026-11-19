@@ -11,7 +11,7 @@ import { readConfig } from '../src/config.js'
 import { fakeBroker, TOKEN, shut } from './harness.js'
 import { filesHost } from './files-host.js'
 import { row, readAnswer, listAnswer } from './fixtures/files-contract.js'
-import { documentWords, documentStops } from '../public/plugins/read-aloud/page/document-speech.js'
+import { documentWords, documentStops } from '../../plugins/_listed/read-aloud/page/document-speech.js'
 
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright-core')
 const output = process.env.FILES_SPEECH_EVIDENCE || 'docs/evidence/files-read-aloud'

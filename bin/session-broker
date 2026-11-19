@@ -8195,6 +8195,11 @@ async def amain(addr: str, port: int) -> int:
     # one the person was using or had chosen is installed from its Market
     # link, once (lib/loam_listed_themes.py). Off the loop, and fail-soft.
     asyncio.create_task(keep_listed_themes())
+    # Built-in plugins that left for the Market in 0.2.9 (Dictation, Read
+    # aloud): one that was on is installed from its Market listing, once,
+    # keeping its switch, voices, keys and preferences
+    # (lib/loam_to_market.py). Off the loop, and fail-soft.
+    asyncio.create_task(keep_moved_to_market())
     tcp = await asyncio.start_server(server.handle, addr, port)
     print(f"session-broker listening on {addr}:{port} "
           f"(admission by memory: reserve {cfg.MEMORY_RESERVE_MB} MB, "
@@ -8229,6 +8234,19 @@ async def keep_listed_themes() -> None:
                   file=sys.stderr, flush=True)
     except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
         print(f"themes: keeping the listed looks failed ({exc!r})", file=sys.stderr, flush=True)
+
+
+async def keep_moved_to_market() -> None:
+    try:
+        import loam_to_market  # noqa: PLC0415
+        kept = await asyncio.to_thread(loam_to_market.keep)
+        for pid, entry in kept.items():
+            print(f"to-market: {pid} {entry['how']}"
+                  + (f" ({entry.get('link_error') or entry.get('error')})"
+                     if entry["how"] != "link" and (entry.get("link_error") or entry.get("error")) else ""),
+                  file=sys.stderr, flush=True)
+    except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
+        print(f"to-market: keeping the moved plugins failed ({exc!r})", file=sys.stderr, flush=True)
 
 
 async def fetch_codex_models() -> None:

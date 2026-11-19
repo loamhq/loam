@@ -7,7 +7,7 @@ import { readConfig } from '../src/config.js'
 import { createBroker } from '../src/broker.js'
 import { brokerSecret } from '../src/plugin-secrets.js'
 import { chunkText, chunkBlocks, createSpeech, jobTimeoutMs } from '../src/speech.js'
-import { documentSpeakable, documentSpeechBlocks } from '../public/plugins/read-aloud/page/document-speech.js'
+import { documentSpeakable, documentSpeechBlocks } from '../src/document-speech.js'
 import { spokenWords } from '../src/spoken-length.js'
 
 const [file, time = 'full', flag] = process.argv.slice(2)

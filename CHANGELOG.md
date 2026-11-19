@@ -3,6 +3,9 @@
 Each release's notes are written for the people who run Loam, in
 `docs/releases/<version>.md`. The app shows them when it offers an update.
 
+- [0.2.9](docs/releases/0.2.9.md), 2026-11-18: Dictation and Read aloud
+  are Market plugins now, not part of Loam; if you had either on, it is
+  installed from the Market for you with your settings kept.
 - [0.2.8](docs/releases/0.2.8.md), 2026-11-18: install Loam on a domain of
   your own. The installer asks where Loam lives, says which two DNS records
   to make, checks them in plain words and waits while you make them; a name
