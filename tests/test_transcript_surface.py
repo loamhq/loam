@@ -1,32 +1,5 @@
 #!/usr/bin/env python3
-"""What the filed transcript says about where a conversation was held, and
-what a forked session does to the file its parent opened.
-
-Two questions, both asked of the real Stop hook rather than of the transform
-underneath it, because the hook is what runs on the box and the defect being
-guarded against is a whole file written wrongly.
-
-  1. **Surface.** A conversation held in the Loam interface is the same CLI,
-     in the same workspace, under the same hooks as one held in the Claude
-     Code app -- nothing in the session file tells them apart, and all 157
-     transcripts written before 2026-09-22 say `claude-code`. The broker is
-     the only party that knows, so it says so in the environment and this is
-     what reads it: `LOAM_SURFACE` present and the transcript says it,
-     absent and the transcript says `claude-code`, which is what an
-     unbrokered session is.
-
-  2. **A fork appends turns, never a header.** Sending into a session the
-     broker adopted from the app forks it, and a fork is a new CLI session id
-     with the parent's turns copied into it. A writer that treated the new id
-     as a new conversation would file a second copy of the same conversation
-     -- or, if it found the same file, write a second frontmatter block into
-     it. Neither happens: the hook matches the file by its `created_at`,
-     which a fork preserves, and appends under the header already there.
-     Checked on the box 2026-09-22 against the real fork pair
-     940380fd/330129f0, whose two sidecars point at one file of 107 turns.
-
-Run: python3 tests/test_transcript_surface.py
-"""
+"""Check launch surface, thread ownership and fork adoption through the Stop hook."""
 
 from __future__ import annotations
 
@@ -64,12 +37,7 @@ def check(label: str, got, want) -> None:
 
 def session_file(path: Path, turns: list[tuple[str, str, str]],
                  session_id: str, title: str) -> Path:
-    """A session JSONL of the shape the CLI writes, with an `ai-title` on it.
-
-    The title is in the file so the hook names it without a model call: the
-    titler's own fail-soft paths are covered in the transform's test, and
-    spending a call here would make running this cost money.
-    """
+    """Create a titled session fixture so capture needs no model call."""
     lines = [json.dumps({"type": "ai-title", "aiTitle": title})]
     for speaker, text, stamp in turns:
         if speaker == "user":
@@ -96,11 +64,7 @@ def fire(jsonl: Path, session_id: str, workspace: Path, env: dict) -> None:
         "cwd": str(workspace)}))
     os.environ.pop(lt.SURFACE_ENV_VAR, None)
     os.environ.pop(lt.ORIGIN_ENV_VAR, None)
-    # This test may itself be running inside a wake or an engineer job, and
-    # the hook refuses both -- rightly, since neither is a conversation. What
-    # is being fired here is a conversation's Stop hook, so the environment
-    # is the one a conversation has. LOAM_PROBE goes for the same reason: it
-    # would send the file to quarantine instead of the vault under test.
+    # Simulate a conversation regardless of the test runner’s lane.
     os.environ.pop(lt.PROBE_ENV_VAR, None)
     os.environ["LOAM_WAKE"] = "conversation"
     os.environ["CLAUDE_PROJECT_DIR"] = str(workspace)
@@ -126,12 +90,7 @@ def frontmatter(path: Path) -> dict:
 
 
 def headers(path: Path) -> int:
-    """Frontmatter blocks in a written transcript, outside code fences.
-
-    Fences are counted because a conversation about transcripts quotes them:
-    `Loam phase six planning.md` holds three quoted frontmatter blocks inside
-    fenced code, one header of its own, and was read as four headers.
-    """
+    """Count frontmatter outside code fences, where a conversation can quote another header."""
     fenced = False
     blocks = 0
     lines = path.read_text(encoding="utf-8").split("\n")
@@ -159,11 +118,7 @@ def main() -> None:
         hook.STATE_DIR = root / "transcripts"
         hook.LOG_PATH = root / "capture.log"
 
-        # -- 1. surface ----------------------------------------------------
-        #
-        # A conversation of its own per case, because a conversation is
-        # identified by when it began: two session files opening at the same
-        # instant are one conversation to the hook, which is section 2 below.
+        # Each independent session needs a distinct first timestamp.
         def conversation(minute: int) -> list[tuple[str, str, str]]:
             return [("user", "surface check", f"2026-09-22T19:0{minute}:00Z"),
                     ("probe", "checked.", f"2026-09-22T19:0{minute}:04Z")]
@@ -185,8 +140,7 @@ def main() -> None:
         check("LOAM_SURFACE=loam-ui: the transcript says loam-ui",
               fm.get("surface"), "loam-ui")
 
-        # A thread's session, once the full-record writer marked it
-        # (2026-11-10): the thread keeps it, so no second transcript.
+        # The thread writer owns sessions that have its marker.
         hook.THREAD_MARKERS = root / "markers"
         hook.THREAD_MARKERS.mkdir()
         (hook.THREAD_MARKERS / "sess-t").write_text("t-1\n")
@@ -225,12 +179,7 @@ def main() -> None:
               frontmatter(conversations / "Junk surface.md").get("surface"),
               "claude-code")
 
-        # -- 2. a fork appends turns, never a header -----------------------
-        #
-        # The parent, then a fork of it: a new session id, the parent's turns
-        # copied in with their own timestamps (which is what the CLI does --
-        # six fork pairs on this box share their first prompt's timestamp to
-        # the millisecond) and two more turns after them.
+        # Forks copy the parent’s timestamps and append new turns under a new session ID.
         parent = session_file(root / "p.jsonl", turns, "sess-p", "A long chat")
         fire(parent, "sess-p", workspace, {lt.SURFACE_ENV_VAR: "loam-ui"})
         filed = conversations / "A long chat.md"

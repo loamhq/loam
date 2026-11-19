@@ -1,15 +1,4 @@
-"""Regression test for the session-JSONL -> vault-transcript transform.
-
-Upstream calls the session JSONL schema internal and version-unstable.
-This test pins the transform against a real session captured from the
-CLI version recorded in ``fixtures/golden-session.cli-version`` (its words
-replaced with neutral text of the same shape on 2026-11-15; the entries and
-their fields are the CLI's own). When
-Claude Code changes the schema, this is what tells us -- before a week of
-silently malformed transcripts does.
-
-Run: python3 tests/test_transcript_transform.py
-"""
+"""Check parsing against the provider schema captured in fixtures/golden-session.cli-version."""
 
 from __future__ import annotations
 
@@ -98,10 +87,7 @@ def main() -> None:
         "session_id" not in lt.render_file("T", turns, "pax", session_id=None),
     )
 
-    # /clear opens a new session whose first entry is the assistant's own
-    # "No response requested." acknowledgement; a transcript must still begin
-    # with a person speaking. Exercised through parse_session, which is where
-    # the rule lives, not through render_file.
+    # A session after /clear can open with an assistant acknowledgement.
     import json as _json
     import tempfile
 
@@ -131,7 +117,7 @@ def main() -> None:
     )
     check("file ends with a single newline", rendered.endswith("\n") and not rendered.endswith("\n\n"))
 
-    # Filenames that cannot sync to the Pixel must never be produced.
+    # Filenames must also sync to Android filesystems.
     check(
         "android-illegal characters stripped from titles",
         lt.sanitize_title('a?b:c*d"e<f>g|h') == "abcdefgh",
@@ -139,10 +125,7 @@ def main() -> None:
     )
     check("path separators neutralised", "/" not in lt.sanitize_title("a/b"))
 
-    # A turn is every top-level text block of a reply, in order. The CLI
-    # splits one reply across several entries when tools run in the middle,
-    # and both the sentence before the tools and the answer after them are
-    # things the agent said to the person.
+    # Tools can split one reply across several top-level text entries.
     split_reply = [
         {"type": "user", "isSidechain": False, "promptSource": "user",
          "timestamp": "2026-09-17T00:00:00Z",
@@ -201,9 +184,7 @@ def main() -> None:
     )
     check("thinking stays out", "private" not in reply[1].content)
 
-    # Reconciling a filed transcript with its session. The hook is fired
-    # before the CLI has finished writing a turn, so the file can hold a
-    # truncated version of a turn it already wrote.
+    # Stop can arrive before the final text is flushed.
     filed = lt.render_file("T", reply, "iris", session_id="s-1")
     unchanged, why = lt.plan_update(filed, reply, "iris")
     check("a file that matches its session is not rewritten",
@@ -237,8 +218,7 @@ def main() -> None:
           and grown.startswith(
               lt.bump_last_activity(filed.rstrip("\n"), later[-1].timestamp)))
 
-    # The record may gain and may never lose: a file holding something the
-    # session does not is left exactly as it stands.
+    # Keep filed content if the session no longer contains it.
     hand_edited = filed.replace("The answer, at last.", "something else entirely")
     left, why = lt.plan_update(hand_edited, reply, "iris")
     check("a diverged turn is never overwritten",

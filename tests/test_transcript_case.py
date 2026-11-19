@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""A new transcript never takes a name that differs from an existing one only
-in case.
-
-The vault syncs to a Mac and a phone, and both fold case: `Smoke test.md` and
-`smoke test.md` are one name there. On 2026-09-16 the writer filed two
-smoke-test conversations under such a pair, because this box's filesystem
-told them apart and the writer only asked this box; neither device could
-hold both, and they were cleared by hand. The writer already steps an exact
-collision to `<title> 2.md`; this proves a case-only collision is stepped
-the same way, and that the exact one still is.
-
-Fired through the real Stop hook, the way tests/test_transcript_surface.py
-fires it, whose helpers this borrows.
-
-Run: python3 tests/test_transcript_case.py
-"""
+"""Check exact and case-folded filename collisions through the capture hook."""
 
 from __future__ import annotations
 
@@ -71,14 +56,12 @@ def main() -> None:
         check("the first conversation takes its title", names(),
               ["Smoke test.md"])
 
-        # The 09-16 pair: same words, different case.
         conversation(2, "smoke test", "s2")
         check("a case-only collision is stepped, not filed alongside", names(),
               ["Smoke test.md", "smoke test 2.md"])
         check("...so no two names fold to one",
               len({n.casefold() for n in names()}), len(names()))
 
-        # The exact collision the writer always handled, still handled.
         conversation(3, "Smoke test", "s3")
         check("an exact collision steps past the case-only one too", names(),
               ["Smoke test 3.md", "Smoke test.md", "smoke test 2.md"])
@@ -90,7 +73,6 @@ def main() -> None:
               ["SMOKE TEST 4.md", "Smoke test 3.md", "Smoke test.md",
                "smoke test 2.md"])
 
-        # A different title is untouched by any of this.
         conversation(5, "Something else", "s5")
         check("an unrelated title keeps its own name",
               "Something else.md" in names(), True)

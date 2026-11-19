@@ -59,6 +59,19 @@ the proof.
 "Forever" means nothing rotates it. Every file in `agents/logs/` together was
 1.4 MB on 2026-09-28, so that is a note for later, not a problem.
 
+## Transcript capture
+
+Stop and SessionEnd can both report the same exchange. The writer waits
+for the provider log to settle, then compares turn text. A later hook can
+complete a reply that was still growing when the first hook read it.
+Filenames stay stable so links survive. A fork or a lost sidecar can recover
+the original file from the timestamp of the first turn.
+
+The launcher supplies the conversation surface and adoption origin. The
+provider log alone cannot distinguish the interface the person used.
+Wake sessions are skipped, probe transcripts go to quarantine, and the
+thread writer's session marker prevents filing a duplicate conversation.
+
 ## Reading memory samples
 
 Use mount usage for disk totals. The daily directory survey counts nested

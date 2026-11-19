@@ -1,18 +1,4 @@
-"""A transcript holds what the person typed and what the agent said back.
-
-The CLI's session file uses the ``user`` role for two different things -- what
-somebody typed, and whatever the harness needed to hand the model next -- and
-until 2026-09-23 the writer filed both. This fires the rule that separates them
-in both directions: forward, on a session file, so nothing new leaks; and
-backward, on a written transcript, so the files that already leaked are
-repaired the same way.
-
-Every shape here but one is a real entry copied out of a session file on this
-box; ``fixtures/harness-session.provenance`` says which session each line came
-from and which one is synthesized, and why there was nothing to copy for it.
-
-Run: python3 tests/test_transcript_harness.py
-"""
+"""Check that live capture and repair both retain human text and filter harness envelopes."""
 
 from __future__ import annotations
 
@@ -37,13 +23,12 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 
 def forward() -> list[lt.Turn]:
-    """The rule on a session file: what gets filed at all."""
+    """Check the transcript parsed from provider events."""
     print(f"fixture: {FIXTURE}")
     turns = lt.parse_session(FIXTURE, "pax")
     joined = "\n".join(t.content for t in turns)
 
-    # 1. A typed message. Origin is null on this one -- the shape a turn sent
-    #    into a live session by the broker has -- and it is still a turn.
+    # Broker input can lack an origin.
     check(
         "a typed prompt is a turn",
         any(
@@ -52,9 +37,7 @@ def forward() -> list[lt.Turn]:
         ),
     )
 
-    # 2. A pure task notification is not a turn at all. (The literal tag can
-    #    still appear in a person's prose -- see the last pair of checks -- so
-    #    what must be absent is a notification ENVELOPE and its contents.)
+    # Match the complete notification envelope so prose may mention the tag.
     check(
         "no task notification is filed",
         "</task-notification>" not in joined
@@ -65,9 +48,7 @@ def forward() -> list[lt.Turn]:
         "Monitor event" not in joined and "bzn1yimb0" not in joined,
     )
 
-    # 3. The agent's reply after a notification is still a turn -- it is what
-    #    the person read -- and it is a SEPARATE turn from the reply before,
-    #    with its own timestamp.
+    # A harness notification separates two visible replies.
     before = [t for t in turns if "Waiting on the byte count" in t.content]
     after = [t for t in turns if t.content.startswith("Done.")]
     check("the reply before the notification is kept", len(before) == 1)
@@ -78,7 +59,6 @@ def forward() -> list[lt.Turn]:
         and before[0].timestamp != after[0].timestamp,
     )
 
-    # 4. A mixed message keeps only the typed text.
     wrapped = [t for t in turns if "keep only this sentence" in t.content]
     check("a wrapped message keeps its typed text", len(wrapped) == 1)
     check(
@@ -105,8 +85,6 @@ def forward() -> list[lt.Turn]:
         any(t.content.startswith("OUTPUTSTYLE=") for t in turns),
     )
 
-    # The rule is envelopes, not tag names: a person writing ABOUT a
-    # notification in prose, with no closing tag, keeps every word.
     prose = [t for t in turns if t.content.startswith("Report: vault/40_PROJECTS")]
     check("a typed message that mentions a notification is kept", len(prose) == 1)
     check(
@@ -125,9 +103,8 @@ def forward() -> list[lt.Turn]:
 
 
 def backward(turns: list[lt.Turn]) -> None:
-    """The same rule on a written transcript: what the repair takes out."""
-    # A transcript written the old way: every user-role entry filed, including
-    # the notification and the peer message, built from the same fixture.
+    """Check the same filtering against a filed transcript."""
+    # Include both harness deliveries and a mixed user message.
     def render(rows):
         return lt.render_file("T", rows, "pax", session_id="s-1")
 
@@ -199,9 +176,7 @@ def backward(turns: list[lt.Turn]) -> None:
     check("a file with nothing to remove is not rewritten",
           untouched.text is None and untouched.note == "clean", untouched.note)
 
-    # What the writer produces and what the repair produces must agree, or a
-    # repaired file would be rewritten differently the next time its session
-    # fires a Stop hook.
+    # Parsing, repair and reconciliation must agree on the filed text.
     written = render(turns)
     check("the writer's own output needs no repair",
           lt.repair_transcript(written).text is None)
@@ -214,7 +189,6 @@ def backward(turns: list[lt.Turn]) -> None:
     check("a file of nothing but harness content is left for a person",
           empty.text is None and "every turn" in empty.note, empty.note)
 
-    # No turn markers at all: a chassis-era file shape, or a hand-written one.
     check("a file with no turn markers is left alone",
           lt.repair_transcript("---\ntitle: x\n---\n\nprose").text is None)
 

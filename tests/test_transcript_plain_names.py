@@ -1,27 +1,5 @@
 #!/usr/bin/env python3
-"""A transcript's speaker header is the agent's plain name (2026-11-17).
-
-The emoji face was retired on 2026-11-16, but the transcript writer
-(hooks/transcript_capture.py, the Stop/SessionEnd hook every persona's
-settings run) still read an older ``agent.json``'s ``emoji`` and wrote it
-into every new header ("### 🧱 Ada"). Every persona on a box made before
-then still holds the key. Now it is not read.
-
-Asked of the real hook, on a scratch workspace whose ``agent.json`` still
-holds a legacy ``emoji``, a scratch vault and a scratch sidecar folder:
-
-  1. A new transcript: every header is "### User" or "### Ada", with no
-     emoji in any header line, while emoji in what was said (the person's
-     and the agent's) survive byte for byte.
-  2. A transcript written before, with the old emoji headers: a new turn is
-     appended under the plain name, and everything already in the file,
-     old headers included, is left byte for byte.
-  3. A firing with nothing new leaves an old file untouched.
-
-Nothing here reads or writes the box's vault, state or agents.
-
-Run: python3 tests/test_transcript_plain_names.py
-"""
+"""Check plain speaker headers on new turns and byte preservation of existing emoji headers."""
 
 from __future__ import annotations
 
@@ -123,7 +101,6 @@ def main() -> None:
         hook.LOG_PATH = root / "capture.log"
         hook.THREAD_MARKERS = root / "markers"
 
-        # -- 1. a new transcript ------------------------------------------
         turns = [("user", SAID_USER, "2026-11-17T19:00:00Z"),
                  ("ada", SAID_AGENT, "2026-11-17T19:00:05Z")]
         fire(session_file(root / "a.jsonl", turns, "sess-a", "Garden beds"),
@@ -138,7 +115,6 @@ def main() -> None:
         check("...the person's emoji survive byte for byte", SAID_USER in text, True)
         check("...and so do the agent's", SAID_AGENT in text, True)
 
-        # -- 2. a transcript written before, with emoji headers ------------
         old_turns = [lt.Turn("user", "first \N{SEEDLING}", "2026-11-10T08:00:00Z"),
                      lt.Turn("ada", "an old answer \N{SUN WITH FACE}", "2026-11-10T08:00:04Z")]
         old = (f"---\ntitle: \"Old beds\"\ncreated_at: {old_turns[0].timestamp}\n"
@@ -168,7 +144,6 @@ def main() -> None:
               ("and now? \N{EYES}" in after, "Still green \N{GREEN HEART}" in after),
               (True, True))
 
-        # -- 3. nothing new: an older file is not touched -----------------
         settled = path.read_bytes()
         fire(root / "old.jsonl", "sess-old", workspace)
         check("3. a firing with nothing new leaves the file as it was",
