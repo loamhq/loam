@@ -82,8 +82,10 @@ def show_status(st: dict) -> None:
     chk = st.get("check")
     if chk:
         latest = (chk.get("latest") or {}).get("version")
+        unverified = (chk.get("blocked") or {}).get("code") == "signature"
         say(f"Last check: {chk.get('checked_at')}: newest release "
-            f"{latest or 'none'}" + (", available" if chk.get("available") else ""))
+            f"{latest or 'none'}" + (", which could not be verified" if unverified
+                                     else ", available" if chk.get("available") else ""))
         if chk.get("error"):
             say(f"  {chk['error'].get('message')}")
         if chk.get("blocked"):
@@ -153,6 +155,11 @@ def update(a) -> int:
         if not a.json:
             say(f"Loam is up to date: {cur} is the newest release.")
         return 0
+    if (chk.get("blocked") or {}).get("code") == "signature":
+        if not a.json:
+            say(f"Loam {latest} was published, but it was not installed: "
+                f"{chk['blocked']['message']}")
+        return 3
     if chk.get("blocked"):
         if not a.json:
             say(f"Loam {latest} is available (this install runs {cur}), but it "
@@ -215,7 +222,7 @@ def main() -> int:
         else:
             show_status(st)
             chk = st.get("check") or {}
-            if chk.get("available"):
+            if chk.get("available") and (chk.get("blocked") or {}).get("code") != "signature":
                 ch = chk.get("changes") or {}
                 n = sum(len(v) for v in ch.values())
                 say(f"The release changes {n} file(s) in System/Loam.")
