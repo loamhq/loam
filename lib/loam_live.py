@@ -6,7 +6,7 @@ answers ``GET /v1/sessions/live`` (and its stream) from the rows built in
 ``bin/session-broker`` (``Server.live_view``); this module is the part that
 reads the box rather than the broker: a process tree's memory, a process's
 start time, the box's RAM, and the systemd units outside the broker that
-hold memory (engineer jobs, wakes, crons, the RC servers).
+hold memory (engineer jobs, wakes, crons).
 
 Everything here reads ``/proc`` and ``/sys/fs/cgroup`` only, no network, and
 every function takes its roots as arguments so a test can hand it a fake.
@@ -40,9 +40,10 @@ ENDING = {
 
 # The units outside the broker that hold memory, by kind: the unit name's
 # prefix. Engineer jobs are `loam-engineer-<job>`, wakes `loam-wake-<agent>`,
-# crons `loam-cron-<agent>-<name>`, the RC servers `loam-rc-<agent>`.
+# crons `loam-cron-<agent>-<name>`. (`rc_servers`, `loam-rc-<agent>`, went
+# with Remote Control on 2026-11-19.)
 UNIT_KINDS = (("engineer_jobs", "loam-engineer-"), ("wakes", "loam-wake-"),
-              ("crons", "loam-cron-"), ("rc_servers", "loam-rc-"))
+              ("crons", "loam-cron-"))
 
 
 # What lets a planned broker restart go (2026-11-17, replacing the rules of

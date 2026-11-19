@@ -1,10 +1,10 @@
 """Sessions the owner had in the Claude Code app, as sessions the broker holds.
 
-Every conversation he has had on claude.ai/code or on his phone is a Claude
-Code session **on this box**: the Remote Control servers run them as the same
-login, in the same persona workspace, and they leave the same session file
-under ``~/.claude/projects/`` that a session started at a terminal here
-leaves. So they are not somewhere else to be imported from -- they are
+Every conversation he had on claude.ai/code or on his phone, until Remote
+Control was retired on 2026-11-19, is a Claude Code session **on this box**:
+the Remote Control servers ran them as the same login, in the same persona
+workspace, and they left the same session file under ``~/.claude/projects/``
+that a session started at a terminal here leaves. So they are not somewhere else to be imported from -- they are
 already here, and the broker simply did not know about them.
 
 **A record, and the conversation behind it** (2026-09-20). It finds those
@@ -29,8 +29,8 @@ reading again on a read and stream the difference to a thread somebody has
 open. Nothing about that writes either: it is the same file, read again.
 
 **Nothing here ever writes.** Not to the session file and not near it. The
-Remote Control server that owns an app session may still be running, and two
-processes appending to one session file is a corrupted conversation of
+Remote Control server that owned an app session could still have been
+running when this was written, and two processes appending to one session file is a corrupted conversation of
 the owner's; every path in this module is a read, and the module that comes to
 resume one of these will have to fork rather than resume in place.
 

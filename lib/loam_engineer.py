@@ -12,13 +12,9 @@ them define anything twice.
 
 **A job has no clock and no round-trip cap since 2026-11-10** (the owner: "I
 don't want any limitations at all"); ``max_minutes`` is a ceiling a briefer
-may set and nothing sets by default. **The recycle boundary yields to the
-job**, the other way round from 2026-09-05 to 2026-11-10, when a brief that
-would cross 01:30 Pacific was refused. ``loam-recycle-rc.timer`` restarts the
-Remote Control servers at 01:30, and a job is its own transient unit and
-survives it; what the restart would lose is the call a persona has open on
-the job from inside one of those servers. So ``bin/recycle-rc`` restarts every
-server but one that holds a waiting call, and says which it skipped.
+may set and nothing sets by default. From 2026-09-05 to 2026-11-10 a brief
+that would cross the 01:30 Remote Control recycle was refused; the recycle
+went with Remote Control on 2026-11-19.
 """
 
 from __future__ import annotations
@@ -27,7 +23,7 @@ import json
 import os
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import loam_config as lc
@@ -125,39 +121,10 @@ HEARTBEAT_SECONDS = 30
 
 PACIFIC = ZoneInfo(lc.TIMEZONE)
 
-# 01:30 Pacific, which is when loam-recycle-rc.timer fires. Nothing refuses
-# a job for it since 2026-11-10 (bin/recycle-rc yields to the job instead);
-# `next_recycle` is still the one reading of when it is. The environment
-# override exists for probes and for nothing else -- a branch at the boundary
-# can otherwise only be caused once a day, at half past one in the morning, and a
-# branch that is never caused is a branch nobody has seen work. Same seam, same
-# reason, as LOAM_LOCK_WAIT_S in lib/loam_lock.py: the operative number is the
-# default here, nothing in any unit or generator sets the variable, and moving
-# it moves only the number -- the mechanism under test is the same one.
-#
-# It is read at call time rather than at import so a probe can move it without
-# reloading the module.
-RECYCLE_HOUR, RECYCLE_MINUTE = 1, 30
-
-
-def _recycle_at() -> tuple[int, int]:
-    raw = os.environ.get("LOAM_RECYCLE_AT")
-    if not raw:
-        return RECYCLE_HOUR, RECYCLE_MINUTE
-    try:
-        hour, minute = (int(x) for x in raw.split(":", 1))
-    except ValueError:
-        return RECYCLE_HOUR, RECYCLE_MINUTE
-    return hour, minute
-# When a job may next begin. Five minutes past the recycle, not on it: the
-# restart is not instantaneous and a job started into it would race the
-# servers coming back.
-NEXT_START_HOUR, NEXT_START_MINUTE = 1, 35
-
 # Deliberately loose in the suffix, and that looseness was bought with a
 # failed job. The launcher validates a job id it did NOT mint: the id comes
 # from the MCP server, which is a long-lived process started with the persona's
-# Remote Control session, while the launcher is a fresh process on every call.
+# conversation session, while the launcher is a fresh process on every call.
 # So the two can be different vintages of this file. On 2026-09-05 they were --
 # the suffix was widened from four hex to eight, the persona's server was still
 # minting four, and the launcher refused the id as malformed before the job
@@ -170,9 +137,7 @@ NEXT_START_HOUR, NEXT_START_MINUTE = 1, 35
 #
 # The general rule this is an instance of: **changing `lib/` or `mcp/` takes
 # effect on the launcher immediately and on a server only when its
-# conversation ends** (the server is spawned per conversation session, not
-# per RC unit; the 01:30 recycle restarts the RC processes, which hold none
-# of this code). The wake path has no such seam -- every wake is a fresh
+# conversation ends** (the server is spawned per conversation session). The wake path has no such seam -- every wake is a fresh
 # process -- which is exactly why nothing before Move 9 had to think about it.
 #
 # Since 2026-09-07 (afternoon) the server mints nothing: it hands the tool's
@@ -376,23 +341,6 @@ def slug_for(text: str, limit: int = 48) -> str:
             line = "job"
     slug = re.sub(r"[^a-z0-9]+", "-", line.lower()).strip("-")
     return (slug[:limit].rstrip("-") or "job")
-
-
-def next_recycle(moment: datetime | None = None) -> datetime:
-    """The next 01:30 Pacific, as an aware datetime."""
-    local = (moment or now_utc()).astimezone(PACIFIC)
-    hour, minute = _recycle_at()
-    boundary = local.replace(
-        hour=hour, minute=minute, second=0, microsecond=0)
-    return boundary if local < boundary else boundary + timedelta(days=1)
-
-
-def next_start(moment: datetime | None = None) -> datetime:
-    """When a job refused at the boundary may next be sent."""
-    boundary = next_recycle(moment)
-    if os.environ.get("LOAM_RECYCLE_AT"):
-        return boundary + timedelta(minutes=5)
-    return boundary.replace(hour=NEXT_START_HOUR, minute=NEXT_START_MINUTE)
 
 
 def log_line(payload: dict) -> None:
@@ -727,7 +675,7 @@ def projects() -> dict[str, Project]:
 def resolve_project(key: str) -> Project | None:
     """By name, or by root directory -- the latter so an MCP server started
     before this function existed, which still calls the launcher with a
-    path, keeps working until the next RC restart."""
+    path, keeps working until its session ends."""
     known = projects()
     if key in known:
         return known[key]

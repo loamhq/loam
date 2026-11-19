@@ -9,7 +9,7 @@ Usage:
   provider-follow run [--provider NAME]... [--force] [--dry-run]
       One whole run. --force: a provider already current has its live build
       smoked as its own candidate and the switch rehearsed (the broker
-      polled, recycle-rc --dry-run, no re-point, no restart, no comms line,
+      polled, no re-point, no restart, no comms line,
       the watch's signals read once over the last hour). --dry-run: no link
       moves and nothing restarts for any provider; a newer build is still
       installed beside the live one and smoked.
@@ -25,8 +25,8 @@ Usage:
       by the real switch, a lane failure is put in a scratch wake log after
       the switch, and the real watch must roll the scratch link back to the
       throwaway, write the Important line (into a scratch vault) and refuse
-      the build. The broker is polled for real and restarted never; the RC
-      servers are recycled --dry-run. The scratch directory is removed.
+      the build. The broker is polled for real and restarted never. The
+      scratch directory is removed.
 
 Names: claude-code, codex, antigravity. Log: logs/provider-follow.jsonl.
 """
@@ -161,7 +161,7 @@ def cmd_drill(args) -> int:
                                  "lane": "wake", "returncode": 1,
                                  "error": "drill: the CLI exited 1"}) + "\n")
         # The drill provider's own signals plus the injected wake log; the
-        # RC/unit/broker readings are the box's real ones.
+        # unit/broker readings are the box's real ones.
         f.watch([drill], hands, poll_s=5)
         state = f.read_state(drill)
         print(f"drill: after the watch, scratch link -> {drill.live()}; "

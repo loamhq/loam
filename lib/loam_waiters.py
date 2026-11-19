@@ -40,7 +40,7 @@ persona gets a turn in that thread whose input is ``handoff_text`` -- the
 receipt's path, the launcher's one-line verdict (``verdict_line``), whether
 it landed -- and it may read it and end its turn without a word. The
 owner's words, 11-18: he does not want to be "spammed in my chat section".
-A caller with no thread (a wake, a cron, a Remote Control chat, a job)
+A caller with no thread (a wake, a cron, a job)
 still blocks, as does every caller while a broker that predates the quiet
 route is running; their records keep the waiter's pid, as before.
 

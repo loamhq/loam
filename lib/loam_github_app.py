@@ -35,7 +35,7 @@ on one repository: a project engineer's push.
 by the user the broker runs as, outside git (``state/`` is ignored) and never
 mounted into the app's container. Every read-modify-write holds an ``flock``
 on ``integration.lock`` beside it, because three processes may touch it --
-the broker, ``bin/provision`` and ``bin/rc-preflight`` -- and a user refresh
+the broker, ``bin/provision`` and ``bin/lane-check`` -- and a user refresh
 token is single-use: two processes refreshing the same pair at once would
 leave one of them holding a dead token, and the store holding whichever wrote
 last. Under the lock the store is re-read before a refresh, so the second
@@ -107,7 +107,7 @@ STORE_DIR = lc.STATE / "github"
 STORE_PATH = STORE_DIR / "integration.json"
 LOCK_PATH = STORE_DIR / "integration.lock"
 # The nightly check writes the date it last ran here, so the first
-# rc-preflight of the night calls GitHub and the other six do not.
+# lane check of the night calls GitHub and the ones after it do not.
 CHECKED_PATH = STORE_DIR / "checked-on"
 
 # Module constants rather than parameters so a test can point both at a fake

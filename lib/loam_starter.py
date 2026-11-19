@@ -4,7 +4,7 @@ release, L11; the owner's decision 4, 2026-11-14).
 ``seed()`` makes the starter agent from ``docs/starter/iris/`` through the
 same ``loam_agents.make`` that L10's create route uses (the workspace,
 born in the map's shape since 2026-11-18: soul, config and map; provisioning
-on every provider, the Remote Control unit), then the files her map points
+on every provider), then the files her map points
 at (``OWN_FILES``, copied in once she is made), and then
 the hello thread: a thread with that agent, pinned and marked ``hello:
 true``, whose first message is ``docs/starter/hello.md``'s body, posted as
@@ -112,7 +112,7 @@ def _set_aside(ws: Path) -> Path:
     return aside
 
 
-def seed(*, root: Path | None = None, provision=None, units=None) -> dict:
+def seed(*, root: Path | None = None, provision=None) -> dict:
     """Make the starter agent and the hello thread, once. Returns what was
     done: ``{"skipped": why}``, or the agent, its wake and the thread.
 
@@ -144,12 +144,11 @@ def seed(*, root: Path | None = None, provision=None, units=None) -> dict:
             return {"skipped": f"{ws} exists: an agent named {agent} is already "
                                f"this install's, and its files are its own"}
     with loam_agents.locked():
-        made = {}
         if not ws.exists():
             wake = loam_agents.free_wake()
             loam_agents._write_json(marker_path(), {"state": "making", "agent": agent,
                                                     "wake": wake, "at": loam_agents.now_iso()})
-            made = loam_agents.make(agent, d, wake, provision=provision, units=units)
+            loam_agents.make(agent, d, wake, provision=provision)
             for name, text in own_files(root).items():
                 if not (ws / name).exists():
                     (ws / name).write_text(text, encoding="utf-8")
@@ -168,7 +167,7 @@ def seed(*, root: Path | None = None, provision=None, units=None) -> dict:
         loam_agents._write_json(marker_path(), record)
         loam_agents.log({"kind": "starter", "agent": agent, "thread": tid,
                          "by": "loam", "wake": wake, **({"resumed": resumed} if resumed else {})})
-    out = {**record, "wake": wake, "workspace": str(ws), "rc": made.get("rc")}
+    out = {**record, "wake": wake, "workspace": str(ws)}
     if resumed:
         out["resumed"] = resumed
     return out

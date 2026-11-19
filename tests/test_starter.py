@@ -3,7 +3,7 @@
 release L11).
 
 A throwaway install (LOAM_CONFIG names a scratch config before anything
-imports loam_config), with provisioning and the Remote Control unit faked:
+imports loam_config), with provisioning faked:
 the real ones are proved on a scratch root in the job that built this.
 
 Checks: the starter agent is made from docs/starter/ in the map's shape
@@ -96,7 +96,7 @@ def main() -> int:
         raise RuntimeError("the provider's CLI was not there yet")
     import loam_agents  # noqa: PLC0415
     try:
-        st.seed(provision=failing_provision, units=lambda a, on: "active")
+        st.seed(provision=failing_provision)
         failed = None
     except loam_agents.AgentsError as exc:
         failed = str(exc)
@@ -107,7 +107,7 @@ def main() -> int:
     check("...with the marker saying the starter is part made",
           (st.status() or {}).get("state"), "making")
 
-    out = st.seed(provision=fake_provision, units=lambda a, on: "active")
+    out = st.seed(provision=fake_provision)
     aside = sorted((loam_agents.state() / "failed-starts").iterdir())
     check("the next run sets the failed start aside, kept, out of the workspaces",
           (len(aside), aside[0].name.startswith("iris-"), (aside[0] / "agent.json.failed").exists()),
@@ -168,7 +168,7 @@ def main() -> int:
           {k: st.status()[k] for k in ("agent", "thread", "message")},
           {"agent": "iris", "thread": out["thread"], "message": "m1"})
 
-    again = st.seed(provision=fake_provision, units=lambda a, on: "active")
+    again = st.seed(provision=fake_provision)
     check("a second seed does nothing", ("skipped" in again, len(provisioned)), (True, 1))
 
     # A run that made the agent and stopped before the thread (the marker
@@ -177,7 +177,7 @@ def main() -> int:
     record = st.status()
     loam_agents._write_json(st.marker_path(), {"state": "making", "agent": "iris",
                                                "wake": out["wake"], "at": record["at"]})
-    resumed = st.seed(provision=fake_provision, units=lambda a, on: "active")
+    resumed = st.seed(provision=fake_provision)
     check("a made agent with its marker at making is finished, not remade",
           (len(provisioned), resumed.get("thread"), resumed.get("message")),
           (1, out["thread"], "m1"))
@@ -189,7 +189,7 @@ def main() -> int:
     st.marker_path().unlink()
     (ws / "soul.md").write_text("their own soul\n")
     before = sorted(threads.index())
-    third = st.seed(provision=fake_provision, units=lambda a, on: "active")
+    third = st.seed(provision=fake_provision)
     check("an existing agent of the starter's id is left alone",
           ("exists" in third.get("skipped", ""), (ws / "soul.md").read_text(), len(provisioned)),
           (True, "their own soul\n", 1))

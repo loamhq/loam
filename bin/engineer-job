@@ -9,22 +9,20 @@ receipt the owner can read in the vault without opening a terminal".
 **Two processes, and the split is the whole design.**
 
     outer   runs inside the MCP server, which is a child of the persona's
-            Remote Control session. It refuses what should not start, launches
+            session. It refuses what should not start, launches
             the inner as a TRANSIENT SYSTEMD UNIT, and then waits.
     inner   runs inside that unit, owned by systemd and by nothing else. It
             is admitted by the box's memory, ticks a heartbeat, runs the
             session, and writes the receipt to disk before anybody is told
             about it.
 
-The reason they are separate is the 01:30 recycle. ``loam-recycle-rc.timer``
-restarts every Remote Control server nightly, and the runtime is explicit
-about what that does to work the session owns: *"it does not survive exiting
-this session."* A job started at 00:50 must not die because another persona's server
-was restarted at 01:30 -- so the work is not the session's to own. What the
-recycle can still take is the WAITER, which is why the receipt lands on disk
-first and the tool's return value is a copy rather than the original -- and
-since 2026-11-10 the recycle does not take it either: ``bin/recycle-rc``
-waits for, or skips, a server that holds a call open on a job.
+The reason they are separate is that the session which asked can end before
+the job does, and the runtime is explicit about what that does to work the
+session owns: *"it does not survive exiting this session."* So the work is
+not the session's to own. What an ending session can still take is the
+WAITER, which is why the receipt lands on disk first and the tool's return
+value is a copy rather than the original. (The first such ending was the
+nightly Remote Control recycle, retired 2026-11-19 with Remote Control.)
 
 **No count, no clock, no cap (since 2026-11-10).** The owner that day: "why do
 we have limits on the number of engineering tasks?" and "Please remove any
@@ -103,8 +101,7 @@ was the reason a job ran.
 **What this does NOT do.** No identity preflight -- the engineer has no soul
 to canary, and asserting one would be asserting a property it was built not
 to have. Its preflight is that its two imports resolve and that the brief
-exists and is non-empty. (Until 2026-11-10 it also refused a job whose clock
-would cross the 01:30 recycle.)
+exists and is non-empty.
 
 **Project engineers (since 2026-09-07, Move 9 build two).** The first argument
 is a project name from ``lib/loam_engineer.projects()`` -- ``Loam`` for the
@@ -241,7 +238,7 @@ TIMEOUT_EXIT = 124
 # session: it is minted, preflighted, launched as a unit, locked, ticked and
 # recorded, and then its receipt STAYS in the job directory -- no vault copy,
 # no log line -- so a probe leaves nothing behind that is not gitignored.
-# Same rule as LOAM_LOCK_WAIT_S and LOAM_RECYCLE_AT: the operative value is
+# Same rule as LOAM_LOCK_WAIT_S: the operative value is
 # the default (unset, so no probe), nothing in a unit or generator sets it,
 # and the outer passes it into the unit by hand because systemd-run does not
 # inherit the caller's environment.
@@ -726,8 +723,7 @@ def preflight(project: eng.Project, p: dict[str, Path], brief_meta: dict) -> str
     if refusal:
         return refusal
 
-    # No refusal at the 01:30 recycle since 2026-11-10: the recycle yields to
-    # a call waiting on a job instead (bin/recycle-rc). No per-project
+    # No per-project
     # exclusivity since 2026-10-02: each job edits its own worktree and lands
     # by a tested merge (lib/loam_worktree.py), so a second brief to a busy
     # project runs beside the first. What is still rationed is the box's
@@ -948,7 +944,7 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
                        so in the receipt (`oom_kills`). The default, stop,
                        would end the launcher with it and leave a job with no
                        record but the failure log.
-      StandardOutput   null. Measured 2026-09-05: an RC server started without
+      StandardOutput   null. Measured 2026-09-05: a server started without
                        it wrote roughly a line a second to the journal and the
                        user journal reached 2.4 GB. Nothing in this job's
                        stdout is information -- the receipt is on disk.

@@ -3,7 +3,7 @@
 Nothing else describes a cron anywhere. There is no registry, no database and
 no list of crons in any generator — ``ai-labs/<agent>/crons/<name>.md`` is the
 whole of it, and everything here is derived from that file at the moment it is
-read. That is the same rule ``bin/provision`` and ``bin/gen-rc-units`` follow
+read. That is the same rule ``bin/provision`` and ``bin/gen-units`` follow
 for agents, for the same reason: a second home for a value is a value that
 goes stale, and the roster of crons will drift faster than the roster of
 agents ever has.
@@ -161,9 +161,7 @@ def _zone(match: "re.Match", raw: str) -> str:
 # hour, plus the 90-minute clock a job it briefed was held to, plus the
 # waiter's grace and a margin -- and the unit's TimeoutStartSec was that plus
 # the run-lock wait. Now the run goes until it is done, and the unit never
-# times it out. The 01:30 recycle restarts only the Remote Control servers
-# (bin/recycle-rc), never a wake's or a cron's own unit, so it cannot cross
-# a run either.
+# times it out.
 def lane_timeout_s(agent: str, lane: str) -> None:
     """`bin/wake`'s kill clock for this agent's lane: None, no clock, for
     every lane since 2026-11-10."""

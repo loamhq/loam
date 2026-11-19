@@ -827,7 +827,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
     # trimming that file -- and one persona's _reflection.md at 10,009
     # characters kept it dark two nights running. The file loads whole (the
     # append-file route has no cap near 10,000; see lib/loam_memory.py) and
-    # the failure log and comms say so, as a Remote Control start's do.
+    # the failure log and comms say so, as the nightly lane check's do.
     size = len(lane_path.read_text(encoding="utf-8"))
     if size > LIMIT_CHARS:
         reason = f"{lane}: " + over_limit_reason(

@@ -51,7 +51,7 @@ def render(text: str) -> str:
 
 def templates(root: Path | None = None) -> list[Path]:
     """The user units this repository ships (not ``system/``). A `.path`
-    since 2026-11-14 (loam-claude-signin.path, bin/rc-arm)."""
+    since 2026-11-14 (loam-claude-signin.path, bin/claude-signin)."""
     base = root or TEMPLATES
     return sorted(p for p in base.iterdir()
                   if p.suffix in (".service", ".timer", ".path") and p.is_file())

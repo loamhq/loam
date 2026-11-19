@@ -129,8 +129,7 @@ UNIT_PATH = f"{LOCAL_BIN}:/usr/local/bin:/usr/bin:/bin"
 # box more than the agent does -- that is, only if it is itself the runaway.
 #
 #   AGENT  every agent run: an engineer job, a wake, a cron, the reviewer, a
-#          Remote Control server, a chat the broker starts (`choom`), and the
-#          provider smoke runs. One number, so between agents the largest goes.
+#          chat the broker starts (`choom`), and the provider smoke runs. One number, so between agents the largest goes.
 #   CORE   the session broker's own process and the plugins gateway. 100 is
 #          the lowest a user unit can take: the user manager runs at 100
 #          (systemd 252) and an unprivileged process cannot go below the

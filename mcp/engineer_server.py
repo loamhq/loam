@@ -21,15 +21,12 @@ taught** -- see the description below. For anything past a couple of minutes
 the persona calls this from a same-identity background subagent and gets the
 receipt as a task notification while the conversation carries on. That is
 decision 6 exactly as written, and it needs no configuration change anywhere.
-(`CLAUDE_AUTO_BACKGROUND_TASKS=1` on the Remote Control units would let the
-runtime do the same thing with fewer moving parts. It is recorded as the
-later simplification and is deliberately not built here.)
 
 **Since 2026-11-18 a brief from a thread does not block** (batch B, step
 1): the launcher returns the job id at once and the broker hands the result
 to the persona as its next input in that thread, posting nothing
-(lib/loam_waiters.py). The blocking call above is still how a wake, a cron,
-a Remote Control chat or a job is answered, and the subagent routine is no
+(lib/loam_waiters.py). The blocking call above is still how a wake, a cron
+or a job is answered, and the subagent routine is no
 longer taught here.
 
 **This server decides nothing, and that is a rule rather than a tidiness
@@ -185,7 +182,7 @@ mcp = MCPServer("loam-engineer")
         "**A job has no clock and no round-trip cap.** It runs until it is "
         "done, whoever briefed it and from whichever lane. `max_minutes` is "
         "an optional ceiling for this one job: leave it out (or send 0) and "
-        "there is none. The nightly recycle never cuts a job.\n"
+        "there is none.\n"
         "\n"
         "**Jobs start by the box's memory, not by a count.** A job starts "
         "when the box has room for it (the session broker's rule: 2 GB or "

@@ -100,8 +100,8 @@ record whose position is behind its own log up to the log's end, because a
 record that says less than its log renumbers from there on a resume.
 
 **The conversations the owner had in the app are sessions on this box**
-(2026-09-20). Claude Code on claude.ai/code and on their phone is the Remote
-Control servers here: same login, same persona workspace, same hooks, same
+(2026-09-20). Claude Code on claude.ai/code and on their phone was the Remote
+Control servers here, until they were retired on 2026-11-19: same login, same persona workspace, same hooks, same
 session file under ``~/.claude/projects/``. So they are not imported, they
 are adopted -- a record is written for each and the conversation stays in
 the CLI's own file, which is read and never written to
@@ -123,7 +123,7 @@ history rather than on top of it. See ``Session.replay``.
 **And sending into one forks it** (2026-09-20, the same day again). An
 adopted session is never resumed in place: its id is the app's session id,
 and ``claude --resume`` on it would put a second process on a file the
-Remote Control server may still be writing. So the first launch of such a
+Remote Control server could still have been writing. So the first launch of such a
 record is ``claude -p --resume <the app's id> --fork-session``, which reads
 that file and writes to a new one of the CLI's own. The record keeps the
 app's id as its identity -- the row, the log, the URL and the replayed
@@ -901,7 +901,7 @@ def first_to_go(argv: list[str]) -> list[str]:
     """A chat's command line, run at `cfg.CHILD_OOM_SCORE_ADJ` (2026-11-09):
     ``choom`` sets the score and execs, so the pid is the CLI's and every MCP
     server it starts inherits it. Under a memory emergency the kernel then
-    ends a chat before the broker, an RC server, a job or the system. Without
+    ends a chat before the broker, a job or the system. Without
     ``choom`` on the box the line is unchanged and the unit's 500 holds."""
     if not os.access(CHOOM, os.X_OK):
         return list(argv)
@@ -4112,8 +4112,8 @@ class Broker:
         """Look for app sessions the broker has never seen, on a read of the
         list, at most once a minute. None if it was not due.
 
-        The owner starts a conversation on their phone and expects to find it in
-        Loam UI; before this it appeared at the next broker restart, which
+        The owner started a conversation on their phone (Remote Control, until
+        2026-11-19) and expected to find it in Loam UI; before this it appeared at the next broker restart, which
         could be days (2026-09-21). A read of the list is the moment to look,
         because it is the moment somebody is looking.
 

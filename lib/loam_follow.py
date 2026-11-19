@@ -28,14 +28,13 @@ Once a day (``loam-provider-follow.timer``, 02:50 Pacific), per provider:
    has may be missing); for Claude Code the alias table, diffed against the
    live build and recorded, never gating.
 5. **Switch** when every gating check passes: the link re-pointed, the
-   Remote Control servers recycled (Claude Code), the broker restarted only
+   broker restarted only
    once no session is ``working`` or ``asking`` (polled; a failed read counts
    as busy; a turn is never cut), and one line in ``comms.md`` under Other
    with the versions and any alias move.
 6. **Watch for an hour, and roll back by itself**: if a lane fails to start
    on the new build -- a wake or cron whose identity preflight or run exits
-   non-zero, a wake/cron/reviewer unit failed, a Remote Control server not
-   running, a broker session of that provider ending with an error exit, a
+   non-zero, a wake/cron/reviewer unit failed, a broker session of that provider ending with an error exit, a
    start failure in the broker's journal, the link's ``--version`` failing --
    the link goes back to the previous build, the same careful restarts
    follow, one Important line says what failed, and the build is refused.
@@ -386,17 +385,6 @@ def blamed(failures: list[str], log_dir: Path | None = None,
     return kept
 
 
-def inactive_units(pattern: str) -> list[str]:
-    """Every loaded unit of the pattern that is not running."""
-    out = systemctl("list-units", pattern, "--all", "--plain", "--no-legend").stdout
-    bad = []
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) >= 4 and parts[2] != "active":
-            bad.append(f"{parts[0]} is {parts[2]}/{parts[3]}")
-    return bad
-
-
 def broker_session_failures(since: float, provider_id: str,
                             sessions: Path | None = None) -> list[str]:
     out = []
@@ -464,7 +452,6 @@ class Provider:
     name = ""                 # the run log's and the state file's key
     label = ""                # what comms calls it
     broker_provider = ""      # the `provider` a broker session record names
-    recycles_rc = False       # Remote Control servers run this binary
     follows = True            # False: the binary moves itself, nothing to follow
 
     def __init__(self, link: Path, versions: Path) -> None:
@@ -561,7 +548,6 @@ class Provider:
 
 class ClaudeCode(Provider):
     name, label, broker_provider = "claude-code", "Claude Code", "claude-code"
-    recycles_rc = True
     DIST_TAGS = "https://registry.npmjs.org/-/package/@anthropic-ai/claude-code/dist-tags"
     DOWNLOADS = "https://downloads.claude.ai/claude-code-releases"
 
@@ -570,7 +556,7 @@ class ClaudeCode(Provider):
         super().__init__(link, versions)
 
     def signed_in(self) -> tuple[bool, str]:
-        # The lanes run on the operator login (broker, RC servers) and on
+        # The lanes run on the operator login (the broker) and on
         # wake.env's token (wakes, crons); either one is a provider in use.
         if cfg.CREDENTIALS_PATH.exists() or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
             return True, "the operator login"
@@ -741,7 +727,6 @@ class ClaudeCode(Provider):
                                              "loam-cron-*.service",
                                              "loam-reviewer.service")),
                         provider=self.broker_provider)
-        found += inactive_units("loam-rc-*.service")
         return found
 
     def journal_mentions(self, line: str) -> bool:
@@ -924,13 +909,6 @@ class Hands:
         log(p.name, "repoint", True, to=version, dry=not self.do_repoint,
             link=str(p.link))
 
-    def recycle_rc(self) -> bool:
-        argv = [str(AGENTS / "bin" / "recycle-rc")] + (["--dry-run"] if self.dry else [])
-        done = run(argv, timeout=3600)
-        log("box", "recycle-rc", done.returncode == 0, dry=self.dry,
-            out=done.stdout[-400:])
-        return done.returncode == 0
-
     def restart_broker(self) -> bool:
         """Once every session is idle and no thread turn is in flight.
         Polled; a failed read is busy; never past `quiet_max_s` (then the next
@@ -1100,8 +1078,8 @@ def switch_line(plan: Plan) -> str:
 
 
 def switch(plans: list[Plan], hands: Hands) -> list[Plan]:
-    """Step 5 for every plan that passed, with one recycle and one broker
-    restart between them."""
+    """Step 5 for every plan that passed, with one broker restart between
+    them."""
     went = []
     for plan in plans:
         p = plan.provider
@@ -1125,11 +1103,9 @@ def switch(plans: list[Plan], hands: Hands) -> list[Plan]:
     real = [pl for pl in went if not pl.rehearsal]
     repointed = time.time()
     # A rehearsal (the live build smoked as its own candidate) takes every
-    # decision and acts on none: the recycle is --dry-run, the broker is
-    # polled for real and not restarted. A real switch in the same run acts.
+    # decision and acts on none: the broker is polled for real and not
+    # restarted. A real switch in the same run acts.
     act = hands if real else hands.dry_copy()
-    if any(pl.provider.recycles_rc for pl in (real or went)):
-        act.recycle_rc()
     restarted = act.restart_broker()
     now = time.time()
     for plan in went:
@@ -1217,8 +1193,6 @@ def lift_refusals(p: Provider, log_dir: Path | None = None) -> dict:
 def rollback(p: Provider, hands: Hands, state: dict, reasons: list[str]) -> None:
     bad, back = state["live"], state["previous"]
     hands.repoint(p, back)
-    if p.recycles_rc:
-        hands.recycle_rc()
     hands.restart_broker()
     what = "; ".join(reasons)[:300]
     hands.comms("Important", f"{p.label} {bad} rolled back to {back} by itself: "

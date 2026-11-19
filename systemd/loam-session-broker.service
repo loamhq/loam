@@ -35,7 +35,7 @@ RestartSec=5s
 #
 # Until 11-16: MemoryHigh=80% / MemoryMax=88% as the wall around every chat
 # together, and OOMScoreAdjust=500 -- which ranked the broker ABOVE every
-# engineer job, wake and RC server (the user manager's 200), so a global OOM
+# engineer job, wake and (then) Remote Control server (the user manager's 200), so a global OOM
 # took the broker first. Before 11-09: High 28% / Max 32%, sized in 2026-10
 # for a cap of four chats.
 OOMScoreAdjust=@CORE_OOM@
@@ -45,8 +45,7 @@ WorkingDirectory=@ROOT@
 ExecStart=/usr/bin/python3 @ROOT@/bin/session-broker
 # stdout carries the listening line and the idle reaper; stderr carries a
 # session's own stderr, prefixed with which session it came from. Both are
-# worth keeping and neither redraws itself, so unlike the Remote Control
-# units this keeps both.
+# worth keeping and neither redraws itself, so this keeps both.
 StandardOutput=journal
 StandardError=journal
 
