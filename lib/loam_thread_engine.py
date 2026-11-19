@@ -330,6 +330,12 @@ def ended_sentence(persona: str, why: str) -> str:
             f"{ENDED_WHY.get(why, why)}")
 
 
+def quiet_turn(turn: "Turn") -> bool:
+    """A turn whose input is a job's result, not anyone's message: one that
+    ends with no words posts nothing at all (2026-11-18)."""
+    return str(getattr(turn, "reason", "")).startswith("job:")
+
+
 def working_now(session) -> bool:
     """A resident session mid-turn on its own: its `status()` says
     ``working``. False for none."""
@@ -976,6 +982,11 @@ class ThreadEngine:
         queue = self.queues.get(key)
         if turn is None or watch is None or queue is None or queue.empty():
             return False
+        # A job's result waits behind a parked turn rather than ending it
+        # (2026-11-18; joining one is batch B step 2's): only a message hands
+        # over, and the queue keeps its order behind it.
+        if not any(threads.is_message_id(t.reason) for t in list(queue._queue)):  # noqa: SLF001
+            return False
         if not turn.get("on_background") or turn.get("handing"):
             return False
         if working_now(self.turn_sessions.get(key)):
@@ -1021,8 +1032,7 @@ class ThreadEngine:
                 await self.run_turn(turn)
             except Exception as exc:  # noqa: BLE001 - one turn must not end the queue
                 if getattr(self.broker, "stopping", False):
-                    text = None if self.delivery_follows(turn) else \
-                        ended_sentence(turn.persona, "stopping")
+                    text = ended_sentence(turn.persona, "stopping")
                 else:
                     text = (str(exc) if isinstance(exc, NoSeat) else
                             f"{threads.display(turn.persona)}'s turn failed: "
@@ -1547,8 +1557,11 @@ class ThreadEngine:
             # record and the stream get no message (2026-11-10).
             self.keep_unspoken(turn, session, reply, posted, through,
                                ended or "result")
-        if ended == "stopping" and self.delivery_follows(turn):
-            pass
+        if ended == "result" and not posted and quiet_turn(turn):
+            # A job's result read and left unsaid (2026-11-18): the
+            # persona's choice, and nothing goes into the thread.
+            steps.log(f"{turn.thread_id} {turn.persona}: {turn.reason} taken in "
+                      f"with no words; nothing posted")
         elif ended != "result" or not posted:
             # A turn that died, or finished saying nothing: one quiet system
             # line, never a persona message (2026-11-10).
@@ -1773,7 +1786,7 @@ class ThreadEngine:
         return self._system_turns
 
     def system_turn_allowed(self, key: str, tid: str, persona: str,
-                            line: str) -> str | None:
+                            line: str | None) -> str | None:
         """None when this notice may post its line and give its turn, and
         then it is recorded as given; otherwise why not (``already
         delivered``, ``repeat``), and nothing is posted."""
@@ -1785,6 +1798,12 @@ class ThreadEngine:
         same = f"{tid} {persona} {line}"
         if key in seen["keys"]:
             return "already delivered"
+        if line is None:
+            # Nothing is posted (a job's result, 2026-11-18): once per key,
+            # and no repeat-line rule, which keys on a posted line.
+            seen["keys"][key] = now
+            self._system_save()
+            return None
         if same in seen["lines"]:
             seen["keys"][key] = now
             self._system_save()
@@ -1805,33 +1824,20 @@ class ThreadEngine:
         except OSError as exc:  # kept in memory still: once per process
             steps.log(f"system turns: the record could not be written ({exc})")
 
-    def delivery_follows(self, turn: Turn) -> bool:
-        """A turn the broker's restart cut off while its persona waited on an
-        engineer job (2026-11-12): the job's delivery line will say what
-        became of it, so "<persona>'s turn ended: the broker restarted" is
-        not posted as well. Logged, so the record still says it."""
-        try:
-            follows = loam_waiters.pending_for(turn.thread_id, turn.persona)
-        except Exception:  # noqa: BLE001 - a read for one line, never a failure
-            return False
-        if follows:
-            steps.log(f"{turn.thread_id} {turn.persona}: turn ended by the broker "
-                      f"restart while waiting on an engineer job; no line, its "
-                      f"delivery follows")
-        return follows
-
-    def deliver_job(self, record: dict, text: str, note: str | None = None) -> str:
-        """A job its waiting call could not carry (2026-11-12,
-        lib/loam_waiters.py): ``text``, one plain line saying what finished,
-        posted into the thread the brief came from as a Loam line, and the
-        persona that briefed it given a turn, as a mention would, whose
-        input ends with ``note`` -- where the receipt is, to read and tell
-        the owner in its own words. The receipt itself is never posted
-        (the owner 11-12: "stop giving me these receipts"). Re-triggering is
-        safe: the turn queues behind any the persona has running, its chain
-        is 0 like the owner's own message, and a record is delivered once.
-        Returns what happened: ``delivered``, or why not (``no thread``,
-        ``thread gone``, ``not a member``)."""
+    def deliver_job(self, record: dict, note: str) -> str:
+        """A finished engineer job's result, back to the persona that briefed
+        it from this thread (2026-11-12; quiet since 2026-11-18, batch B):
+        a turn for that persona whose input ends with ``note`` -- the
+        receipt's path, the launcher's verdict, whether it landed
+        (``loam_waiters.handoff_text``). Nothing is posted in the thread and
+        nothing is shown to the owner; the persona speaks only if it has
+        something to say, and a turn with no words stays out of the thread.
+        The turn waits behind the persona's own turn under way, never
+        steered into one (``_claim`` takes messages only) nor handed a turn
+        parked on background work (``hand_over``). Delivered once per job
+        (``system_turn_allowed``). Returns ``delivered``, or why not (``no
+        thread``, ``thread gone``, ``not a member``, ``already
+        delivered``)."""
         tid, persona = record.get("thread"), record.get("persona")
         if not tid or not persona:
             return "no thread"
@@ -1841,13 +1847,11 @@ class ThreadEngine:
             return "thread gone"
         if persona not in meta["members"]:
             return "not a member"
-        why = self.system_turn_allowed(f"job:{record.get('job')}", tid, persona, text)
+        why = self.system_turn_allowed(f"job:{record.get('job')}", tid, persona, None)
         if why:
             return why
-        line = self.system_line(tid, text)
-        steps.log(f"{tid} {persona}: job {record.get('job')} finished after its "
-                  f"waiting call ended; one line posted as {line.get('id')} and a "
-                  f"turn given to read the receipt")
+        steps.log(f"{tid} {persona}: job {record.get('job')} finished; its result "
+                  f"queued as this persona's input, nothing posted")
         self.schedule(Turn(tid, persona, 0, f"job:{record.get('job')}", note=note))
         return "delivered"
 

@@ -3776,9 +3776,13 @@ def write_brief(directory: Path, project: eng.Project, title: str,
 
 # ---------------------------------------------------------------------------
 
-def run_outer(project: eng.Project, job_id: str, p: dict[str, Path]) -> tuple[int, dict]:
+def run_outer(project: eng.Project, job_id: str, p: dict[str, Path],
+              wait: bool = True) -> tuple[int, dict]:
     """Refuse, launch, wait. (exit code, verdict) -- the verdict always has
-    `receipt_text`, and `vault_receipt` once a job has finished."""
+    `receipt_text`, and `vault_receipt` once a job has finished. With
+    `wait` False (a brief from a thread, since 2026-11-18) it returns once
+    the job is launched, `stage` `launched` or `queued` and no
+    `receipt_text`; a refusal or a failed launch is final either way."""
     p["dir"].mkdir(parents=True, exist_ok=True)
     meta = read_brief_meta(p)
     refusal = preflight(project, p, meta)
@@ -3807,6 +3811,9 @@ def run_outer(project: eng.Project, job_id: str, p: dict[str, Path]) -> tuple[in
         write_result(p, verdict)
         return 4, verdict
 
+    if not wait:
+        return 0, {"ok": True, "stage": "queued" if p["queued"].is_file()
+                   and not p["result"].is_file() else "launched"}
     settled = wait_for(p, job_id, meta["max_minutes"])
     return (0 if settled.get("ok") else 1), settled
 
@@ -3831,16 +3838,35 @@ def run_tool() -> int:
         reply({"ok": False, "error": accepted})
         return 3
     project, job_id, p = accepted
-    # The call is waiting from here (since 2026-11-12, lib/loam_waiters.py).
-    # If this process ends before it hands a verdict back -- a broker restart
-    # takes the calling session's tree, or the waiter's ceiling ends the call
-    # -- the broker posts the receipt into the caller's thread when the job
-    # finishes. Settled only once a final verdict is in hand.
     meta = read_brief_meta(p)
+    caller_info = {k: meta[k] for k in ("caller", "caller_session", "thread")
+                   if meta[k]}
+    # A brief from a thread returns at once (2026-11-18, batch B step 1):
+    # the record is written now, with no waiter, and the broker hands the
+    # result to the briefing persona as input to a turn in that thread
+    # when the job has a verdict, posting nothing. Only while the running
+    # broker is one that delivers that way (`loam_waiters.route_live`);
+    # otherwise, and for a caller with no thread, the call waits as before,
+    # and a waiter the restart cut is delivered for by the same pass.
+    returns_now = bool(meta["thread"]) and loam_waiters.route_live()
     loam_waiters.register(job_id, project.name, p["dir"], meta["briefed_by"],
-                          {k: meta[k] for k in ("caller", "caller_session", "thread")
-                           if meta[k]})
-    code, verdict = run_outer(project, job_id, p)
+                          caller_info, returned=returns_now)
+    code, verdict = run_outer(project, job_id, p, wait=not returns_now)
+    if returns_now and verdict.get("stage") in ("launched", "queued"):
+        queued = verdict["stage"] == "queued"
+        reply({
+            "ok": True,
+            "job_id": job_id,
+            "queued": queued,
+            "receipt_path": str(p["receipt"]),
+            "receipt": (
+                f"Job {job_id} is {'queued for memory' if queued else 'running'}. "
+                f"Its result comes back to you in this thread as your next input "
+                f"when it ends, nothing posted; you may read it and end your "
+                f"turn without saying anything. The engineer's receipt will be "
+                f"at {p['receipt']}, and the full one in the vault."),
+        })
+        return 0
     if verdict.get("stage") != "waiter_timeout":
         loam_waiters.settle(job_id)
     reply({

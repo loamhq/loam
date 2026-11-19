@@ -6095,12 +6095,16 @@ class Server:
         return row
 
     async def deliver_owed(self) -> None:
-        """Every `DELIVER_EVERY_S`, the receipts no waiting call carried
-        (2026-11-12, lib/loam_waiters.py): a call ended by a broker restart
-        or by its ceiling while its job ran on. Once its job has a verdict,
-        one plain line goes into the thread its brief came from, and the
-        persona that sent it gets a turn naming the receipt to read. Fail-soft: never the reason a
-        broker is down."""
+        """Every `DELIVER_EVERY_S`, the engineer results owed to a thread
+        (lib/loam_waiters.py): a brief that returned at once (since
+        2026-11-18), or a waiting call ended by a broker restart or its
+        ceiling while its job ran on. Once its job has a verdict, the
+        persona that sent it gets a turn in the thread it briefed from whose
+        input is the result; nothing is posted (`ThreadEngine.deliver_job`).
+        Oldest verdict first. Fail-soft: never the reason a broker is down.
+        It first marks the quiet route live, so the launcher knows a brief
+        from a thread may return at once."""
+        await asyncio.to_thread(loam_waiters.mark_route)
         await asyncio.sleep(DELIVER_FIRST_S)
         while not self.broker.stopping:
             try:
@@ -6112,11 +6116,7 @@ class Server:
                     except (OSError, KeyError):
                         title = None
                     outcome = self.threads.deliver_job(
-                        record,
-                        loam_waiters.delivery_text(
-                            record, title,
-                            threads_rec.display(record.get("persona") or "")),
-                        loam_waiters.handoff_text(record, title))
+                        record, loam_waiters.handoff_text(record, title))
                     loam_waiters.done(record, outcome)
                     if outcome == "already delivered":
                         continue  # said when it was; a record that would not go

@@ -25,6 +25,13 @@ decision 6 exactly as written, and it needs no configuration change anywhere.
 runtime do the same thing with fewer moving parts. It is recorded as the
 later simplification and is deliberately not built here.)
 
+**Since 2026-11-18 a brief from a thread does not block** (batch B, step
+1): the launcher returns the job id at once and the broker hands the result
+to the persona as its next input in that thread, posting nothing
+(lib/loam_waiters.py). The blocking call above is still how a wake, a cron,
+a Remote Control chat or a job is answered, and the subagent routine is no
+longer taught here.
+
 **This server decides nothing, and that is a rule rather than a tidiness
 (since 2026-09-07).** It is spawned by the persona's `claude` session once
 per conversation and lives as long as the conversation does, so whatever
@@ -115,22 +122,18 @@ mcp = MCPServer("loam-engineer")
     name="brief",
     description=(
         "Hand a job to the engineer for a project. A brief goes in, a "
-        "receipt comes back — one call, which blocks until the work is "
-        "done.\n"
+        "receipt comes back. From a thread it returns at once with the job "
+        "id; when the job ends, its result comes to you in that thread as "
+        "your next input, with nothing posted, and you may read it and end "
+        "your turn without saying anything. From any other lane (a wake, a "
+        "cron, a job) the call waits until the job is done.\n"
         "\n"
-        "**Three things first, because the rest of this may reach you "
+        "**Two things first, because the rest of this may reach you "
         "truncated.**\n"
         "1. `title` — a short noun phrase naming the job. It becomes the "
         f"receipt's filename in the vault, which is how {lc.OWNER_NAME} finds it in a "
         "folder listing.\n"
-        "2. For anything past a minute or two, **call this from a background "
-        "subagent** — one whose whole task is this single call — and keep "
-        "talking. The receipt reaches you as a task notification when the job "
-        "finishes, even with nobody attached. Calling it directly takes you "
-        "out of the room for the length of the job. If launching the subagent "
-        "is refused, say so and call it directly; that refusal is a "
-        f"permission question for {lc.OWNER_NAME}, not something to route around.\n"
-        f"3. `involvement` is {lc.OWNER_NAME}'s words for this job, quoted. When he "
+        f"2. `involvement` is {lc.OWNER_NAME}'s words for this job, quoted. When he "
         "has said nothing in particular, the default is *go and do it, "
         f"{lc.OWNER_NAME} reviews after it is running*. A job that must change "
         "nothing opens it with `Read-only` (`Read-only. Change nothing, "
@@ -182,10 +185,7 @@ mcp = MCPServer("loam-engineer")
         "**A job has no clock and no round-trip cap.** It runs until it is "
         "done, whoever briefed it and from whichever lane. `max_minutes` is "
         "an optional ceiling for this one job: leave it out (or send 0) and "
-        "there is none. The nightly recycle never cuts a job, nor the call "
-        "waiting on one. A call that waits close to four hours ends with "
-        "*still running*; the job goes on and its receipt lands in the "
-        "vault.\n"
+        "there is none. The nightly recycle never cuts a job.\n"
         "\n"
         "**Jobs start by the box's memory, not by a count.** A job starts "
         "when the box has room for it (the session broker's rule: 2 GB or "
@@ -218,7 +218,7 @@ mcp = MCPServer("loam-engineer")
         "'committed' beside a HEAD that did not move is the thing that split "
         "is there to catch.\n"
         "\n"
-        "The result carries `receipt_path` — the vault file at "
+        "The result names the receipt — the vault file at "
         f"`{lc.vault_folder('projects')}/<project>/receipts/`, which is where {lc.OWNER_NAME} reads it. "
         "Pass that path on when you tell him.\n"
         "\n"
