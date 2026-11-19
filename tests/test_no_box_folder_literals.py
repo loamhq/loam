@@ -25,8 +25,6 @@ NAMES = ("15_CONVERSATIONS", "00_INBOX", "99_SYSTEM")
 # (file, the literal's text): quoted from role.md, matched against it.
 ALLOWED = {("bin/provision", '"15_CONVERSATIONS"'),
            ("bin/provision", '"Touch `15_CONVERSATIONS/`"'),
-           # A drill's own scratch vault, laid out as the drill reads it.
-           ("bin/provider-follow", '"00_INBOX"'),
            # A fallback only: the runtime passes LOAM_VAULT_DATA, the system
            # folder as this install names it (lib/loam_plugin_servers.py).
            ("plugins/doc-comments/server/doccomments/store.py", '"99_SYSTEM/Loam/data/doc-comments"')}
