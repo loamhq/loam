@@ -548,3 +548,40 @@
 /* The listing opened from a card: its way back is the thread, by name. */
 .market-back-from { max-width: min(46vw, 360px); min-width: 0; }
 .market-back-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Install from a link (2026-11-18): the same sheet as the Market's, asking
+   first for one thing, the link. It reads by itself; what it found is then
+   the Market's install sheet. */
+.market-link { gap: var(--space-md); }
+.market-link-head { display: flex; align-items: center; gap: var(--space-md); }
+.market-link-head h2 { margin: 0; font-size: 26px; line-height: 1.12; }
+.market-link-glyph { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 13px; background: var(--paper-raised); box-shadow: inset 0 0 0 1px var(--paper-rule); color: var(--paper-ink); }
+.market-link-row { position: relative; display: flex; align-items: center; }
+.market-link-row .market-link-field { width: 100%; min-width: 0; height: 52px; padding: 0 48px 0 20px; border-radius: 999px; font-size: 16px; }
+.market-link-row.is-wrong .market-link-field { box-shadow: inset 0 0 0 1.5px var(--danger); }
+.market-link-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; color: var(--paper-ink-3); }
+.market-link-hint { margin: 0; color: var(--paper-ink-3); }
+.market-link-error { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-sm); padding: var(--space-md) var(--space-lg); border-radius: var(--radius-lg); background: var(--paper-raised); box-shadow: inset 3px 0 0 var(--danger), inset 0 0 0 1px var(--paper-rule); }
+.market-link-error p { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--paper-ink); overflow-wrap: anywhere; }
+.market-link-choose .market-facts-title { margin: 0 0 var(--space-sm); overflow-wrap: anywhere; }
+.market-link-picks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-radius: var(--radius-lg); background: var(--paper-raised); box-shadow: inset 0 0 0 1px var(--paper-rule); overflow: hidden; }
+.market-link-picks li + li { border-top: 1px solid var(--paper-rule); }
+.market-link-pick { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-md); width: 100%; min-height: 60px; padding: 10px 16px; border: 0; background: none; color: var(--paper-ink); font: inherit; text-align: left; cursor: pointer; }
+.market-link-pick:disabled { cursor: default; opacity: .6; }
+.market-link-pick > svg { color: var(--paper-ink-3); }
+@media (hover: hover) { .market-link-pick:not(:disabled):hover { background: var(--paper-card); } }
+.market-link-pick:focus-visible { outline: 2px solid var(--paper-ink-3); outline-offset: -2px; }
+.market-link-pick .market-tile-sm { width: 40px; height: 40px; border-radius: 12px; font-size: 17px; }
+.market-link-pick-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.market-link-pick-name { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-link-pick-sub { font-size: 13px; line-height: 1.4; color: var(--paper-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-install-cover { margin: 0; aspect-ratio: 16 / 7; border-radius: var(--radius-lg); overflow: hidden; background: var(--paper-raised); }
+.market-install-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.market-link-note { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--paper-ink-2); }
+.market-link-note svg { flex: none; margin-top: 3px; color: var(--paper-ink-3); }
+.market-link-back { display: inline-flex; align-items: center; gap: 4px; margin-right: auto; }
+.market-link-line { margin: var(--space-xl) 0 var(--space-md); text-align: center; font-size: var(--type-small); color: var(--paper-ink-3); }
+.market-link-line .quietlink { font-size: inherit; }
+.market-note-acts { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.market-card-name-plain { cursor: default; }
+.market-card-name-plain::after { content: none; }

@@ -633,11 +633,56 @@ says so before the yes. An unreadable `installed.json` leaves the list drawn
 
 ## Install from a link
 
-`POST /v1/plugins` with a GitHub link to a folder at a tag or a commit:
-`https://github.com/<owner>/<repo>/tree/<tag or commit>/<folder>`, a
-`/commit/<sha>` or `/releases/tag/<tag>` link, or `owner/repo`, with `ref`
-and `path` beside it if the link does not carry them. The folder may be the
-repository's root; the installed folder is named by the manifest's `id`.
+`POST /v1/plugins` with a GitHub link to it, in whatever shape a person
+has (2026-11-18, the owner: "If someone wants to sideload something, they
+should be able to do it fairly easily"):
+
+| Pasted | Read as |
+|---|---|
+| `https://github.com/<owner>/<repo>`, `github.com/<owner>/<repo>/`, `<owner>/<repo>`, a `.git` or `git@github.com:` address, any page of the repository (`/releases`, `?tab=…`) | the repository: its newest release, its plugin |
+| `/tree/<ref>` or `/tree/<ref>/<folder>` (a ref with a slash in it too) | that ref, that folder |
+| `/blob/<ref>/<folder>/PLUGIN.md`, `raw.githubusercontent.com/…` | the folder the file is in |
+| `/commit/<sha>`, `/releases/tag/<tag>` | that commit, that tag |
+
+`ref` and `path` beside the link still win over what it carries.
+
+- **No ref:** the newest release tag of that plugin, by version, not by
+  text: `<folder or id>-v1.2.0` (how `loamhq/plugins` tags each of its
+  plugins) if there is one, else a plain `v1.2.0` or `1.2.0`; pre-releases
+  are never newest. A repository with no release is read at the commit its
+  default branch is on, and the answer's `note` says so.
+- **No folder:** the folder holding `PLUGIN.md` (the root, or up to three
+  levels down). When there are several and the link names none of them (a
+  tag named `<folder>-v…` names that folder), the answer is
+  `{"installed": false, "choose": [{path, id, name, version, kind,
+  description, icon, link}], "repo", "ref"}`, and each is a request of its
+  own: `{"url": repo, "path": path, "ref": ref}`.
+- **A branch** is read at the commit it points at now, and `note` says so
+  ("main is a branch, so this installs the commit it is on now…"). The
+  install is pinned to that commit, as to a tag.
+- **The answer** carries, beside what it is and declares: `note`,
+  `description`, `pictures` (`icon`, `cover`, `cover_dark` as `data:`
+  addresses, for a page to show before anything is installed), `link` (the
+  link it is pinned at: its tag or its whole commit) and `request` (the
+  repository, folder and tag or commit it found). Send `request` back with
+  `confirm` so the yes names exactly what was shown.
+- **A refusal** is a sentence a person can act on, with `reason`: `empty`,
+  `not-github`, `unreachable` (nothing there, or private; it says whether to
+  connect GitHub or to give the GitHub App the repository), `timeout`,
+  `no-ref`, `short-commit`, `no-folder`, `no-plugin` (no `PLUGIN.md` in it),
+  `manifest` (a `PLUGIN.md` that cannot be read) and `choose` (a `confirm`
+  for a repository of several). Git's own words go to the broker's log,
+  never to the page.
+- **`via`** (`link` or `market`) beside `confirm` is recorded on the
+  installed source, so Settings › Plugins can mark what came from a link
+  someone shared.
+
+The page's one way in is the Market's install sheet: "Install from a link"
+in Settings › Plugins and at the foot of the Market (`openLinkInstall`, the
+command `market.install-link`, or `?modal=market&install=<link>`). One field,
+read a moment after typing stops (at once on a paste); then the same sheet a
+listing's Install opens. `loam market link <link>` reads a link the same way
+for an agent, with the `card` line that offers it in a reply.
 
 1. **The first call** fetches it (a shallow `git fetch` of that commit into
    `.staging/`), reads it, and answers what it is and what it declares,
@@ -654,8 +699,7 @@ first answer says under `added` exactly what it declares beyond what was
 confirmed before (new hosts, a higher `record` or `memory`, server code, new
 overrides, page code); the earlier token never installs it.
 
-- **A branch is refused**, with the commit it is on now: a branch moves, and
-  an install is pinned. A short commit is refused; name all 40 characters.
+- **A short commit is refused**: name all 40 characters, or link a release.
 - **The declaration** is the manifest's `touches` and `overrides`, with
   `touches.server` true when `server/` is there whether or not it is
   declared, and `page_code` when `page/` is there. The host shows what it
@@ -952,12 +996,17 @@ A token that is not the current answer's: 409
 `{"error": "`confirm` is not what pet answers now (its declaration, its commit and what it would replace give cd383308cd35f365). Nothing was installed; read the answer under `preview` and confirm it if it is a yes", "preview": {<a first-call answer>}}`
 — show `preview` as the new question.
 
-Other refusals are sentences: 400 for a branch (`"'main' is a branch, and a
-branch moves: install at a tag, or at the commit it is on now (7fd1a60…)"`),
-a short commit, a link that is not GitHub's or is a file; 404 for no such
-tag or folder; 422 for a folder that is not a plugin (`"… is not a plugin:
-no PLUGIN.md (a plugin is a folder with one)"`); 502 when GitHub cannot be
-read; 504 when it does not answer.
+A repository of several plugins, with no folder named: 200
+`{"installed": false, "repo": "loamhq/plugins", "ref": null, "choose": [{"path": "autumn", "id": "autumn", "name": "Autumn", "version": "1.0.1", "kind": ["theme"], "author": "…", "description": "…", "link": "https://github.com/loamhq/plugins/tree/autumn-v1.0.1/autumn"}, …]}`
+— ask again with `{"url": repo, "path": <the pick>}` (and `ref` when given).
+
+Other refusals are sentences a person can act on, each with `reason`
+("Install from a link", above): 400 `not-github`, `empty`, `short-commit`;
+404 `unreachable` (`"Nothing could be read at github.com/friend/x. Check the
+link. If the repository is private, connect GitHub in Settings › Connections
+first, then try again."`), `no-ref`, `no-folder`; 422 `no-plugin` and
+`manifest`; 409 `choose`; 502 when GitHub cannot send it; 504 when it does
+not answer. A branch is not refused: it is read at its commit, with `note`.
 
 ### `DELETE /api/plugins/<id>` — remove from Yours
 

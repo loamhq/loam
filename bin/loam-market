@@ -10,6 +10,14 @@
       page's own search. Each result carries `card`, the line that shows its
       listing card in a reply (a line of its own). Nothing listed, or nothing
       matching, says so; offer to build it then.
+  loam market link <any GitHub link> [--json]
+      What a link someone shared holds, read as the app's install sheet reads
+      it, installing nothing: a repository's address is enough (owner/repo,
+      a .git address, a /tree/, /blob/ or release link all work). It finds the
+      newest release and the plugin's folder; a branch is read at the commit
+      it is on now, and `note` says so. The answer carries `card`, the line
+      that shows an install card for it in a reply (a line of its own); a
+      repository of several plugins answers each, with its own card.
   loam market share <plugin id> <owner/name> [--json]
       Share a plugin from the owner's plugins folder by link: its folder is
       pushed to that GitHub repository (the owner makes it on github.com;
@@ -62,6 +70,9 @@ def main(argv: list[str]) -> int:
     se.add_argument("--limit", type=int, default=mk.SEARCH_LIMIT)
     se.add_argument("--refresh", action="store_true")
     se.add_argument("--json", action="store_true")
+    ln = sub.add_parser("link")
+    ln.add_argument("link")
+    ln.add_argument("--json", action="store_true")
     sh = sub.add_parser("share")
     sh.add_argument("plugin")
     sh.add_argument("repository")
@@ -119,6 +130,42 @@ def main(argv: list[str]) -> int:
             for line in extras(e):
                 print(f"  {line}")
             print(f"  card: {e['card']}")
+        return 0
+
+    if args.verb == "link":
+        try:
+            out = mk.read_link(args.link)
+        except loam_plugins.PluginError as exc:
+            if args.json:
+                print(json.dumps({"ok": False, "error": exc.message,
+                                  "reason": exc.detail.get("reason")}))
+                return 2
+            print(f"loam market: {exc.message}", file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(out, indent=2, ensure_ascii=False))
+            return 0
+        if out.get("choose"):
+            print(f"github.com/{out['repo']} holds {len(out['choose'])} plugins:")
+            for c in out["choose"]:
+                print(f"\n{c['name']} ({c.get('id') or c['path']})"
+                      + (f", version {c['version']}" if c.get("version") else "")
+                      + (" · its PLUGIN.md cannot be read" if c.get("broken") else ""))
+                if c.get("description"):
+                    print(f"  {c['description']}")
+                if c.get("card"):
+                    print(f"  card: {c['card']}")
+            return 0
+        print(f"{out['name']} ({out['id']}) {out['version']}, by {out['author']} · "
+              f"{', '.join(out['kind'] or [])}")
+        if out.get("description"):
+            print(f"  {out['description']}")
+        if out.get("note"):
+            print(f"  {out['note']}")
+        if out.get("installable") is False:
+            print(f"  {out['why']}")
+        print(f"  pinned at: {out['link']}")
+        print(f"  card: {out['card']}")
         return 0
 
     if args.verb == "share":

@@ -31,7 +31,7 @@ import { h, icon, kept, blob, on as onNode } from '../ui.js'
 import { agentLook } from '../sessions.js'
 import { menuSurface } from '../menu-surface.js'
 import { sheetHandle } from '../chat-ui.js'
-import { KIND_ONE, KIND_MANY, KIND_ABOUT, KIND_HOME, KIND_LINE, TAGLINE, search, highlight, leadOf, sectionsOf, kindsListed, buildRequest, actionOf, plainTouches, reachOf, kindOf, byLoam, hueOf, tileRows, fineLine, madeBy } from '../market.js'
+import { KIND_ONE, KIND_MANY, KIND_ABOUT, KIND_HOME, KIND_LINE, TAGLINE, search, highlight, leadOf, sectionsOf, kindsListed, buildRequest, actionOf, plainTouches, reachOf, kindOf, byLoam, hueOf, tileRows, fineLine, madeBy, linkShape } from '../market.js'
 import { themePreview } from '../theme-preview.js'
 import { creatorLinks } from '../creator-links.js'
 import { emptyState } from '../empty-state.js'
@@ -416,15 +416,15 @@ export function mount(host) {
   }
   function notice() {
     if (!st.list && st.loading) return h('div', { class: 'market-loading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading the Market…')
-    if (st.list?.state === 'unreachable') return h('div', { class: 'market-note', role: 'status' }, h('p', { text: 'The Market can’t be reached right now. What you have keeps working, and anything shared as a link still installs from Settings › Plugins.' }),
-      button(st.loading ? 'Trying…' : 'Try again', () => load(true), 'pillbtn secondary', { disabled: st.loading }))
-    if (st.list?.state === 'off') return h('div', { class: 'market-note', role: 'status' }, h('p', { text: 'This Loam has the Market turned off (marketplace.list in its config). Anything shared as a link still installs from Settings › Plugins.' }))
+    if (st.list?.state === 'unreachable') return h('div', { class: 'market-note', role: 'status' }, h('p', { text: 'The Market can’t be reached right now. What you have keeps working, and anything shared as a link still installs.' }),
+      h('div', { class: 'market-note-acts' }, button(st.loading ? 'Trying…' : 'Try again', () => load(true), 'pillbtn secondary', { disabled: st.loading }), button('Install from a link', () => openLinkInstall(), 'pillbtn')))
+    if (st.list?.state === 'off') return h('div', { class: 'market-note', role: 'status' }, h('p', { text: 'This Loam has the Market turned off (marketplace.list in its config). Anything shared as a link still installs.' }), button('Install from a link', () => openLinkInstall(), 'pillbtn'))
     return null
   }
   function front() {
     const list = entries(), lead = leadOf(list), sections = sectionsOf(list, lead)
-    if (!list.length) return [masthead(), searchBar(), notice() ?? (st.list ? buildIt({ whole: true }) : null)]
-    return [masthead(), searchBar(), kindChips('all', kindsListed(list)), notice(), lead ? leadStory(lead) : null, ...sections.map(section), buildIt()]
+    if (!list.length) return [masthead(), searchBar(), notice() ?? (st.list ? buildIt({ whole: true }) : null), st.list && st.list.state !== 'off' && st.list.state !== 'unreachable' ? linkLine() : null]
+    return [masthead(), searchBar(), kindChips('all', kindsListed(list)), notice(), lead ? leadStory(lead) : null, ...sections.map(section), buildIt(), linkLine()]
   }
   function kindPage(k) {
     const list = entries(), all = search(list, '', k)
@@ -432,7 +432,7 @@ export function mount(host) {
       h('header', { class: 'market-page-head' }, h('h2', { class: 'display', text: KIND_MANY[k] }), h('p', { class: 'market-section-sub', text: KIND_ABOUT[k] })),
       notice(),
       all.length ? (k === 'theme' ? themeRows(all) : items(all)) : null,
-      st.list ? buildIt({ k, whole: !all.length && !list.length }) : null]
+      st.list ? buildIt({ k, whole: !all.length && !list.length }) : null, st.list ? linkLine() : null]
   }
   function results(q, k) {
     const list = entries(), found = search(list, q, k), [best, ...rest] = found
@@ -449,7 +449,7 @@ export function mount(host) {
           h('div', { class: 'market-lead-acts' }, action(best, { from: 'lead' }), tryButton(best)))) : null,
       rest.length ? h('section', { class: 'market-section', 'aria-labelledby': 'market-also' }, h('div', { class: 'market-section-head' }, h('div', { class: 'market-section-titles' }, h('h2', { class: 'display', id: 'market-also', text: 'Also close' }))),
         items(rest, q, { kind: true })) : null,
-      st.list ? buildIt({ q, k, none: !found.length }) : null]
+      st.list ? buildIt({ q, k, none: !found.length }) : null, st.list ? linkLine() : null]
   }
   // A listing's page (2026-11-18, the store): a wide cover (the dark one in
   // dark mode; a theme without one wears itself at the same size), then the
@@ -616,6 +616,13 @@ export function mount(host) {
   const body = () => document.querySelector('.market .market-body')
   // After a draw: where focus and the scroll go on arriving at a view.
   function sync() {
+    // The link sheet moves focus as it changes: to what was found, or back
+    // to the field (the surface stays open between, so it does not refocus).
+    const job = st.install
+    if (job?.mode === 'link' && job.move) {
+      const target = job.move === 'field' ? linkField : document.querySelector('.market-install .sheet-title')
+      if (target?.isConnected) { job.move = null; target.focus({ preventScroll: true }) }
+    }
     if (!sheet() || !st.focus) return
     const want = st.focus
     const scroller = body()
@@ -648,15 +655,19 @@ export function mount(host) {
     }
     host.schedule()
   }
-  function closeInstall() { st.install = null; host.schedule() }
+  function closeInstall() { st.install = null; clearTimeout(linkTimer); host.schedule() }
   async function confirmInstall() {
     const job = st.install
     if (!job?.preview?.confirm || job.phase !== 'ready') return
     job.phase = 'installing'; job.error = ''; host.schedule()
+    // A link's yes names exactly what was shown (its repository, folder and
+    // tag or commit: `request`), so a newer release since is never what lands.
+    const request = job.mode === 'link' ? { ...(job.preview.request ?? { url: job.text }), via: 'link' } : { url: job.entry.link, via: 'market' }
     try {
-      const out = await host.pluginLoader.install({ url: job.entry.link, confirm: job.preview.confirm })
+      const out = await host.pluginLoader.install({ ...request, confirm: job.preview.confirm })
       if (st.install !== job) return
       job.phase = 'done'; job.result = out
+      if (job.mode === 'link') job.id = out.id ?? job.preview.id
       await load(true)
       if (job.preview.kind?.includes('theme')) await until(() => themeInstalled(job.id), 4000)
     } catch (error) {
@@ -667,10 +678,124 @@ export function mount(host) {
     host.schedule()
   }
   const until = (test, ms) => new Promise(resolve => { const end = Date.now() + ms; const tick = () => test() || Date.now() > end ? resolve() : setTimeout(tick, 120); tick() })
+
+  // ------------------------------------------------------------ install from a link
+  // (2026-11-18: "If someone wants to sideload something, they should be able
+  // to do it fairly easily.") One field in the install sheet: paste what you
+  // have and it reads by itself, a moment after the typing stops (at once on
+  // a paste or Enter). The host works out the rest (lib/loam_plugins.fetch):
+  // the newest release, the plugin's folder, or the plugins to pick from.
+  // What it found is then this same sheet, as the Market's: what it is, what
+  // it touches, one yes. Openable from Settings › Plugins, the Market's foot,
+  // a link card in a thread, and `?modal=market&install=<link>`.
+  const linkField = h('input', { class: 'field-input market-link-field', id: 'market-link-field', type: 'text', inputmode: 'url', enterkeyhint: 'go', autocomplete: 'off', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false',
+    placeholder: 'github.com/owner/plugin', 'aria-label': 'GitHub link', 'aria-describedby': 'market-link-help' })
+  let linkTimer = null, linkTicket = 0
+  onNode(linkField, 'input', () => {
+    const job = st.install
+    if (job?.mode !== 'link') return
+    job.text = linkField.value
+    clearTimeout(linkTimer)
+    if (job.read === job.text.trim()) return
+    job.error = null; job.choose = null
+    if (job.phase === 'reading' || job.phase === 'choose') job.phase = 'paste'
+    const shape = linkShape(job.text)
+    if (shape) linkTimer = setTimeout(() => readLink(), job.pasted ? 0 : 700)
+    job.pasted = false
+    host.schedule()
+  })
+  onNode(linkField, 'paste', () => { if (st.install?.mode === 'link') st.install.pasted = true })
+  onNode(linkField, 'keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(linkTimer); readLink({ now: true }) } })
+  function openLinkInstall({ link = '' } = {}) {
+    clearTimeout(linkTimer)
+    st.install = { mode: 'link', id: null, phase: 'paste', text: String(link ?? ''), preview: null, choose: null, error: null, read: null, focus: !link }
+    linkField.value = st.install.text
+    host.schedule()
+    if (link) readLink({ now: true })
+  }
+  async function readLink({ now = false, request = null } = {}) {
+    const job = st.install
+    if (job?.mode !== 'link') return
+    const text = job.text.trim(), shape = linkShape(text)
+    if (!request && !text) return
+    if (!request && !shape) { if (now) { job.error = { message: 'Paste a GitHub link to the plugin: its repository, like github.com/owner/plugin, is enough.', reason: 'empty' }; host.schedule() } return }
+    if (!request && !shape.ok) { job.error = { message: 'That isn’t a GitHub link. Paste the address of the plugin’s repository on GitHub, like github.com/owner/plugin.', reason: 'not-github' }; job.phase = 'paste'; host.schedule(); return }
+    const ticket = ++linkTicket
+    Object.assign(job, { phase: 'reading', error: null, read: text, repo: request?.url ?? shape.repo, ...(request ? {} : { choose: null }) })
+    host.schedule()
+    try {
+      const out = await host.pluginLoader.install(request ?? { url: text })
+      if (st.install !== job || ticket !== linkTicket) return
+      if (out.choose) Object.assign(job, { phase: 'choose', choose: out })
+      else Object.assign(job, { phase: 'ready', preview: out, id: out.id, error: '', move: 'heading' })
+    } catch (error) {
+      if (st.install !== job || ticket !== linkTicket) return
+      if (error.status === 409 && error.body?.preview) Object.assign(job, { phase: 'ready', preview: error.body.preview, id: error.body.preview.id, error: '' })
+      else Object.assign(job, { phase: job.choose ? 'choose' : 'paste', error: { message: error.body?.error ?? error.message, reason: error.body?.reason ?? null } })
+    }
+    host.schedule()
+  }
+  const pick = c => readLink({ request: { url: st.install.choose.repo, path: c.path, ...(st.install.choose.ref ? { ref: st.install.choose.ref } : {}) } })
+  function backToLink() {
+    const job = st.install
+    if (job?.mode !== 'link' || job.phase === 'installing') return
+    Object.assign(job, { phase: job.choose ? 'choose' : 'paste', preview: null, error: null, move: job.choose ? 'heading' : 'field' })
+    host.schedule()
+  }
+  // A plugin's picture before it is installed: its icon (a data: address
+  // the host read from the link), else its letter on a calm tile.
+  function linkTile(p, size = 'md') {
+    if (p?.pictures?.icon ?? p?.icon) return h('img', { class: `market-tile market-tile-${size} market-tile-img`, src: p.pictures?.icon ?? p.icon, alt: '', key: `link-icon:${p.id ?? p.path}` })
+    const name = p?.name || p?.id || '?'
+    return h('span', { class: `market-tile market-tile-${size}`, 'aria-hidden': 'true', style: { '--tile': `var(${hueOf(p?.id || name)})` }, text: name.trim().charAt(0).toUpperCase() })
+  }
+  const linkCover = p => {
+    const dark = host.theme.current === 'dark' && p?.pictures?.cover_dark
+    const src = dark ? p.pictures.cover_dark : p?.pictures?.cover
+    return src ? h('div', { class: 'market-install-cover', 'aria-hidden': 'true' }, h('img', { src, alt: '', key: `link-cover:${p.id}:${dark ? 'd' : 'l'}` })) : null
+  }
+  const kindLine = c => [KIND_ONE[kindOf(c)], c.version ? `version ${c.version}` : null, c.author].filter(Boolean).join(' · ')
+  function linkAsk() {
+    const job = st.install, reading = job.phase === 'reading', err = job.error
+    const choose = job.phase === 'choose' || (reading && job.choose) ? job.choose : null
+    return h('div', { class: 'sheet market-install market-link', key: 'install:link' }, sheetHandle(closeInstall),
+      h('div', { class: 'market-link-head' },
+        h('span', { class: 'market-link-glyph', 'aria-hidden': 'true' }, icon.link(20)),
+        h('h2', { class: 'display sheet-title', tabindex: '-1', text: 'Install from a link' })),
+      h('p', { class: 'market-install-desc', id: 'market-link-help', text: 'Paste a GitHub link to a theme, extension or app. The repository’s address is enough: Loam finds the newest version.' }),
+      h('div', { class: `market-link-row${err ? ' is-wrong' : ''}` }, kept(linkField),
+        job.text ? h('button', { type: 'button', class: 'iconbtn ghost market-link-clear', 'aria-label': 'Clear the link', onclick: () => { linkField.value = ''; Object.assign(job, { text: '', error: null, choose: null, read: null, phase: 'paste' }); clearTimeout(linkTimer); linkField.focus(); host.schedule() } }, icon.close(14)) : null),
+      reading ? h('p', { class: 'note market-reading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), `Looking at github.com/${job.repo ?? ''}…`) : null,
+      err ? h('div', { class: 'market-link-error', role: 'alert' }, h('p', { text: err.message }),
+        err.reason === 'unreachable' && !err.message.includes('Connections › GitHub') && host.goSettings ? button('Open Connections', () => { closeInstall(); host.goSettings('connections') }, 'pillbtn small secondary') : null) : null,
+      choose ? h('section', { class: 'market-link-choose', 'aria-labelledby': 'market-link-choose-title' },
+        h('h3', { class: 'market-facts-title', id: 'market-link-choose-title', text: `github.com/${choose.repo} holds ${choose.choose.length} plugins. Which one?` }),
+        h('ul', { class: 'market-link-picks' }, ...choose.choose.map(c => h('li', { key: `pick:${c.path}` },
+          h('button', { type: 'button', class: 'market-link-pick', disabled: reading || c.broken, onclick: () => pick(c), 'aria-label': c.broken ? `${c.name}: can’t be read` : `${c.name}, ${kindLine(c)}` },
+            linkTile(c, 'sm'),
+            h('span', { class: 'market-link-pick-words' }, h('span', { class: 'market-link-pick-name', text: c.name || c.path }),
+              h('span', { class: 'market-link-pick-sub', text: c.broken ? 'Its PLUGIN.md can’t be read' : c.description || kindLine(c) })),
+            c.broken ? null : icon.chevronRight(12)))))) : null,
+      !reading && !choose && !err && !job.text ? h('p', { class: 'note market-link-hint', text: 'A link to a release, a folder or a single plugin works too.' }) : null,
+      reading ? h('div', { class: 'market-progress', role: 'progressbar', 'aria-label': 'Reading the link' }, h('span')) : null,
+      h('div', { class: 'market-install-acts' }, button('Cancel', closeInstall, 'pillbtn')))
+  }
+  function linkNodes() {
+    const job = st.install
+    const card = ['paste', 'reading', 'choose'].includes(job.phase) ? linkAsk() : null
+    if (!card) return null
+    const surface = menuSurface(card, { title: 'Install from a link', close: closeInstall, heading: false, centered: host.state.wide, width: 520, initialFocus: job.focus ? 'field' : 'heading' })
+    const node = host.state.wide ? h('div', { class: 'dialog market-install-dialog', onclick: e => { if (e.target === e.currentTarget) closeInstall() } }, surface) : surface
+    node.__key = 'sheet:market-install'
+    return [h('button', { class: 'scrim market-install-scrim', key: 'scrim:market-install', 'aria-label': 'Close', tabindex: '-1', onclick: closeInstall }), node]
+  }
+
   function installNodes() {
     const job = st.install
     if (!job) return []
-    const entry = job.entry, p = job.preview, kind = entry ? kindOf(entry) : 'extension'
+    if (job.mode === 'link') { const asked = linkNodes(); if (asked) return asked }
+    const link = job.mode === 'link'
+    const entry = job.entry, p = job.preview, kind = entry ? kindOf(entry) : p ? kindOf(p) : 'extension'
     const name = p?.name ?? entry?.name ?? job.id
     const update = p?.replaces
     const theme = kind === 'theme'
@@ -678,14 +803,18 @@ export function mount(host) {
     const done = job.phase === 'done'
     const verb = update ? 'Update' : theme ? 'Get' : 'Install'
     const lines = p ? plainTouches(update && p.added && Object.keys(p.added).length ? { touches: p.added, overrides: p.added.overrides, page_code: p.added.page_code } : p.declaration, kind) : []
-    const card = h('div', { class: 'sheet market-install', key: `install:${job.id}` }, sheetHandle(closeInstall),
+    const description = entry?.description ?? p?.description
+    const from = link && p?.source ? `from github.com/${p.source.repo}` : null
+    const card = h('div', { class: `sheet market-install${link ? ' market-link-found' : ''}`, key: `install:${job.id}` }, sheetHandle(closeInstall),
       job.phase === 'gone' ? [h('h2', { class: 'display sheet-title', tabindex: '-1', text: 'Not in the Market' }), h('p', { class: 'note', text: `The Market lists no ${job.id} now.` }),
         h('div', { class: 'market-install-acts' }, button('Close', closeInstall, 'pillbtn primary'))] : [
-      h('div', { class: 'market-install-head' }, entry ? tile(entry, 'md') : null,
+      link && !done ? linkCover(p) : null,
+      h('div', { class: 'market-install-head' }, entry ? tile(entry, 'md') : link ? linkTile(p) : null,
         h('div', {}, h('h2', { class: 'display sheet-title', tabindex: '-1', text: done ? (theme ? `${name} is yours` : `${name} is installed`) : `${verb} ${name}?` }),
-          h('p', { class: 'market-install-src', text: [p?.author ?? entry?.author, p?.version ? `version ${p.version}` : entry?.version ? `version ${entry.version}` : null, entry && byLoam(entry) ? 'made by Loam' : null].filter(Boolean).join(' · ') }))),
+          h('p', { class: 'market-install-src', text: [p?.author ?? entry?.author, p?.version ? `version ${p.version}` : entry?.version ? `version ${entry.version}` : null, entry && byLoam(entry) ? 'made by Loam' : null, from].filter(Boolean).join(' · ') }))),
       done ? h('p', { class: 'market-install-done', role: 'status', text: theme ? `It’s in Appearance with your other themes.${host.theme.value.theme === job.id ? ' You’re wearing it.' : ''}` : kind === 'app' ? 'It’s in Apps, and runs on your server.' : `It’s on, and in Settings › ${home}.` })
-        : entry?.description ? h('p', { class: 'market-install-desc', text: entry.description }) : null,
+        : description ? h('p', { class: 'market-install-desc', text: description }) : null,
+      link && !done && p?.note ? h('p', { class: 'note market-link-note' }, icon.branch(14), h('span', { text: p.note })) : null,
       !done ? h('section', { class: 'market-install-touches', 'aria-label': update ? 'Added in this version' : 'Before you say yes' },
         h('h3', { class: 'market-facts-title', text: update ? (Object.keys(p.added ?? {}).length ? 'New in this version' : 'Nothing new in what it touches') : 'Before you say yes' }),
         job.phase === 'reading' ? h('p', { class: 'note market-reading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading what it declares, from its own link…')
@@ -702,9 +831,9 @@ export function mount(host) {
         !theme && kind !== 'app' ? button(`See it in ${home}`, () => { closeInstall(); host.goSettings(home === 'Plugins' ? 'plugins' : home.toLowerCase(), job.id) }, 'pillbtn') : null,
         !theme && kind !== 'app' || theme && host.theme.value.theme === job.id ? button('Done', closeInstall, 'pillbtn primary') : null]
         : job.phase === 'error' ? [button('Close', closeInstall, 'pillbtn'), button('Try again', () => openInstall(job.id), 'pillbtn primary')]
-        : [button('Not now', closeInstall, 'pillbtn', { disabled: job.phase === 'installing' }),
+        : [link ? button([icon.chevronLeft(14), job.choose ? 'Pick another' : 'Change link'], backToLink, 'pillbtn market-link-back', { disabled: job.phase === 'installing' }) : button('Not now', closeInstall, 'pillbtn', { disabled: job.phase === 'installing' }),
           p?.installable === false ? null : button(job.phase === 'installing' ? (theme ? 'Getting…' : 'Installing…') : update ? 'Update' : theme ? 'Get it' : 'Install', confirmInstall, 'pillbtn primary', { disabled: job.phase !== 'ready' || !p?.confirm })]))])
-    const surface = menuSurface(card, { title: `${verb} ${name}`, close: () => { if (job.phase !== 'installing') closeInstall() }, heading: false, centered: host.state.wide, width: 480, initialFocus: 'heading' })
+    const surface = menuSurface(card, { title: `${verb} ${name}`, close: () => { if (job.phase !== 'installing') closeInstall() }, heading: false, centered: host.state.wide, width: link ? 520 : 480, initialFocus: 'heading' })
     const node = host.state.wide ? h('div', { class: 'dialog market-install-dialog', onclick: e => { if (e.target === e.currentTarget && job.phase !== 'installing') closeInstall() } }, surface) : surface
     node.__key = 'sheet:market-install'
     return [h('button', { class: 'scrim market-install-scrim', key: 'scrim:market-install', 'aria-label': 'Close', tabindex: '-1', onclick: () => { if (job.phase !== 'installing') closeInstall() } }), node]
@@ -721,6 +850,17 @@ export function mount(host) {
       h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: 'Market' }), h('div', { class: 'setrow-sub', text: 'Themes, extensions, apps, agents and skills' })),
       icon.chevronRight(10)))
   }
+  // Settings › Plugins' way in to installing from a link: a row beside
+  // "Find more", opening the same sheet as the Market's foot.
+  function linkDoor() {
+    return h('div', { class: 'rows market-link-door', key: 'link-door' }, h('button', { type: 'button', class: 'setrow', onclick: () => openLinkInstall() },
+      h('div', { class: 'icon-tile' }, icon.link(16)),
+      h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: 'Install from a link' }), h('div', { class: 'setrow-sub', text: 'Paste a GitHub link someone shared with you' })),
+      icon.chevronRight(10)))
+  }
+  // The Market's quiet line, at the foot of its pages.
+  const linkLine = () => h('p', { class: 'market-link-line', key: 'link-line' }, 'Have a link? ',
+    h('button', { type: 'button', class: 'quietlink', onclick: () => openLinkInstall() }, 'Install from a link'))
   // "Find more": the last row of Plugins and of Appearance's themes.
   function findMore(kind, title) {
     return h('div', { class: 'rows market-find-more', key: `find-more:${kind}` }, h('button', { type: 'button', class: 'setrow', onclick: () => openMarket({ kind }) },
@@ -737,7 +877,9 @@ export function mount(host) {
     if (!refs?.length) return null
     if (!st.list && !st.loading) load()
     const ready = Boolean(st.list)
-    const shown = refs.map(ref => ({ ref, entry: ready ? entryOf(ref.id) : null }))
+    const shown = refs.map(ref => ({ ref, entry: ready && ref.id ? entryOf(ref.id) : null }))
+    if (refs.some(ref => ref.link)) return h('div', { class: `market-cards${shown.length > 1 ? ' market-cards-many' : ''}`, role: 'list', 'aria-label': shown.length > 1 ? 'From the Market' : null, key: `cards:${key}` },
+      ...shown.map(({ ref, entry }, i) => ref.link ? linkCard(ref) : entry ? card(entry, from) : h('p', { class: 'market-card-plain', key: `plain:${ref.id}:${i}`, role: 'listitem', text: ref.label || ref.id })))
     // Not in the Market (an unknown id, or a Market that is off or out of
     // reach): the link's words, as plain text, and no error.
     if (ready && shown.every(c => !c.entry)) return h('p', { class: 'market-card-plain', key: `cards:${key}` }, shown.map(c => c.ref.label || c.ref.id).join(', '))
@@ -750,6 +892,19 @@ export function mount(host) {
             h('span', { class: 'market-card-name', text: ref.label || ref.id }),
             h('span', { class: 'market-card-line market-card-ghost-line', 'aria-hidden': 'true' })))
         : card(entry, from)))
+  }
+  // A plugin offered by its link (market-card.js): its name as the agent
+  // wrote it and where it lives; Install opens the link sheet, which reads it
+  // and shows what it touches before anything is installed.
+  function linkCard(ref) {
+    const shape = linkShape(ref.link)
+    return h('article', { class: 'market-card market-card-link', key: `link:${ref.link}`, role: 'listitem', 'aria-label': `${ref.label}, from a link` },
+      h('span', { class: 'market-tile market-tile-md market-card-tile', 'aria-hidden': 'true', style: { '--tile': `var(${hueOf(ref.label)})` }, text: ref.label.trim().charAt(0).toUpperCase() }),
+      h('div', { class: 'market-card-words' },
+        h('p', { class: 'market-card-kicker' }, icon.link(11), 'From a link'),
+        h('span', { class: 'market-card-name market-card-name-plain', text: ref.label }),
+        h('span', { class: 'market-card-line', text: shape?.ok ? `github.com/${shape.repo}` : ref.link })),
+      h('div', { class: 'market-card-acts' }, h('button', { type: 'button', class: 'pillbtn small secondary market-card-act', 'aria-label': `Install ${ref.label}`, onclick: () => openLinkInstall({ link: ref.link }) }, 'Install')))
   }
   function card(entry, from) {
     const d = detailsOf(entry.id, { queued: true })
@@ -775,5 +930,5 @@ export function mount(host) {
       h('div', { class: 'market-card-acts' }, act))
   }
 
-  return { marketCards: cardsFor, marketState: st, openMarket, openMarketInstall: openInstall, marketNodes, marketInstallNodes: installNodes, marketSync: sync, marketDoor: settingsDoor, marketFindMore: findMore, loadMarket: load }
+  return { marketCards: cardsFor, marketState: st, openMarket, openMarketInstall: openInstall, openLinkInstall, marketNodes, marketInstallNodes: installNodes, marketSync: sync, marketDoor: settingsDoor, marketFindMore: findMore, marketLinkDoor: linkDoor, loadMarket: load }
 }

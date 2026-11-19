@@ -1702,6 +1702,28 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `loam_codex_wake.instructions`, `loam_antigravity.instructions`), against
   `loam_loading.own_files`. A new route must be added there.
 
+## 2026-11-18 — install from a link, made easy
+
+- **A link is read in two steps when it names no tag:** the default branch
+  is fetched shallow to see what is there (which folders hold `PLUGIN.md`,
+  the plugin's id), then the newest release tag for that plugin. A
+  repository of several plugins tags each `<id>-v<version>` (as
+  `loamhq/plugins` does); a plain `v1.2.0` is a whole-repository release.
+  Order tags by version tuple, never by text (`v1.10.0` > `v1.9.0`).
+  `ls-remote --symref` gives the default branch in the same call.
+- **A repository of several plugins is an answer, not an error:**
+  `choose`, each a request of its own. `install()`'s `confirm` refuses one.
+- **The yes sends back `request`** (repository, folder, tag or commit the
+  first call found), not the pasted link, so a release published between the
+  two calls is never what lands; the token would catch it anyway.
+- **The boundary guard refuses the Write tool under /tmp**, the job's own
+  scratch included. Write into the tree and move it, or write through the
+  shell.
+- **`app/test/plugin-host-browser.mjs` was already failing on `main`
+  (2026-11-18)** at its Read aloud and Dictation switches and again at
+  `.plugin-meta`: stale since Settings changed. Its install section was
+  checked by running a copy without the stale parts.
+  `app/test/link-install-browser.mjs` is the browser proof of the link sheet.
 ## 2026-11-18 — backups: the local commit in core, Git backup built in
 
 - **A fresh install had repositories and no routine.** The installer made

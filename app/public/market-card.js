@@ -18,6 +18,16 @@
 // does not list is drawn as its words, plain (the page decides that, since
 // only it knows the list).
 //
+// **A plugin by its link** (2026-11-18): the same line with `install=` and a
+// GitHub link in place of `listing=`, for something the Market does not list
+// (a friend's repository, a plugin shared by link):
+//
+//   [Foundry](https://<the app>/?modal=market&install=https%3A%2F%2Fgithub.com%2Fowner%2Frepo)
+//
+// is a card whose Install opens the install-from-link sheet with that link,
+// where what it declares is read and shown before any yes. `bin/loam-market
+// link <link>` hands back that line as `card`.
+//
 // At most MARKET_CARDS_MAX in one message: a card is an offer, and a wall of
 // them is a catalogue. Lines past the limit stay in the text as links.
 
@@ -27,8 +37,11 @@ const LINE = /^\s{0,3}\[([^\[\]\n]{1,120})\]\(\s*<?(https?:\/\/[^\s()<>]+?)>?\s*
 
 // The address of a listing's page in the app, for an origin.
 export const listingAddress = (origin, id) => `${String(origin).replace(/\/+$/, '')}/?modal=market&listing=${id}`
+export const linkAddress = (origin, link) => `${String(origin).replace(/\/+$/, '')}/?modal=market&install=${encodeURIComponent(link)}`
+const GITHUB_LINK = /^(?:https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:[/?#]\S*)?|[\w-][\w.-]*\/[\w.-]+)$/
 
-// The listing a line names, `{ id, label }`, or null when it is not a card.
+// The listing a line names, `{ id, label }` (or a link's, `{ link, label }`),
+// or null when it is not a card.
 export function cardRef(line) {
   const m = LINE.exec(String(line ?? ''))
   if (!m) return null
@@ -38,6 +51,11 @@ export function cardRef(line) {
   if (url.pathname !== '/' && url.pathname !== '') return null
   const keys = [...url.searchParams.keys()]
   if (keys.length !== 2 || url.searchParams.get('modal') !== 'market') return null
+  if (keys.includes('install')) {
+    const link = url.searchParams.get('install') ?? ''
+    if (link.length > 400 || !GITHUB_LINK.test(link)) return null
+    return { link, label: m[1].trim() }
+  }
   const id = url.searchParams.get('listing')
   if (!keys.includes('listing') || !id || !ID.test(id) || id.length > 64) return null
   return { id, label: m[1].trim() }

@@ -159,7 +159,7 @@ try:
     settings({"desktop": {"theme": "mist-trail"}})
     out = kept.keep()
     check("an unreadable link falls back to the release's copy", out["mist-trail"]["how"], "release")
-    check("the reason is kept", "cannot be read" in out["mist-trail"]["link_error"], True)
+    check("the reason is kept", "could be read" in out["mist-trail"]["link_error"], True)
     row = next(r for r in loam_plugins._rows() if r["id"] == "mist-trail")
     check("it is a theme built here, in force", (row["layer"], row["source"]["kind"], row["effective"], row["broken"]),
           ("yours", "built", True, None))

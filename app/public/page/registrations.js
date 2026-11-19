@@ -29,6 +29,7 @@ export function registerPage(loam) {
   loam.places.app.overlay.add({ id: 'core.market-install', render: () => host.marketInstallNodes() })
   loam.commands.register({ id: 'market.open', title: 'Open the Market', run: ({ id = null, kind = 'all', q = '' } = {}) => host.openMarket({ id, kind, q }) })
   loam.commands.register({ id: 'market.install', title: 'Install from the Market', run: ({ id }) => host.openMarketInstall(id) })
+  loam.commands.register({ id: 'market.install-link', title: 'Install from a link', run: ({ link = '' } = {}) => host.openLinkInstall({ link }) })
   loam.places.app.overlay.add({ id: 'core.running-notices', render: () => host.registry.component('core.activity', { variant: 'notices', defaultView: () => host.running.toastNodes() }) })
   loam.places.app.overlay.add({ id: 'core.activity-dialogs', render: () => host.registry.component('core.activity', { variant: 'dialogs', defaultView: () => host.activity.dialogNodes() }) })
   loam.places.app.overlay.add({ id: 'core.profile-dialogs', render: () => host.registry.component('core.activity', { variant: 'profile-dialogs', defaultView: () => host.profileActivity.dialogNodes() }) })

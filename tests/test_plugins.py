@@ -462,26 +462,167 @@ git("config", "uploadpack.allowAnySHA1InWant", "true", cwd=BARE)
 LINK = "https://github.com/friend/loam-pet/tree/v1.0.0/plugins/pet-folder"
 
 for body, says in (
-        ({}, "name the plugin"),
-        ({"url": "https://gitlab.com/a/b"}, "not a GitHub repository's link"),
-        ({"url": "https://github.com/friend/loam-pet"}, "name a tag or a commit"),
-        ({"url": "https://github.com/friend/loam-pet/blob/v1.0.0/PLUGIN.md"},
-         "that link is a file"),
-        ({"url": "https://github.com/friend/loam-pet/tree/main/plugins/pet-folder"},
-         f"is a branch, and a branch moves: install at a tag, or at the commit it "
-         f"is on now ({C2})"),
+        ({}, "Paste a GitHub link"),
+        ({"url": "https://gitlab.com/a/b"}, "That isn’t a GitHub link"),
+        ({"url": "not a link at all"}, "That isn’t a GitHub link"),
         ({"url": f"https://github.com/friend/loam-pet/tree/{C1[:8]}/plugins"},
-         "name the whole commit"),
-        ({"url": "https://github.com/friend/loam-pet/tree/v9/plugins"}, "has no tag 'v9'"),
-        ({"url": "https://github.com/friend/nothing/tree/v1.0.0"}, "cannot be read"),
+         "names a short commit"),
+        ({"url": "https://github.com/friend/loam-pet/tree/v9/plugins"},
+         "has no release or branch called v9"),
+        ({"url": "https://github.com/friend/nothing/tree/v1.0.0"},
+         "Nothing could be read at github.com/friend/nothing"),
+        ({"url": "https://github.com/friend/nothing"}, "connect GitHub in Settings"),
         ({"url": "https://github.com/friend/loam-pet/tree/v1.0.0/plugins/nope"},
-         "has no folder 'plugins/nope'"),
+         "has no folder plugins/nope"),
         ({"url": "https://github.com/friend/loam-pet/tree/v1.0.0/not-a-plugin"},
-         "is not a plugin: no PLUGIN.md"),
+         "There’s no Loam plugin in not-a-plugin"),
         ({"url": "https://github.com/friend/loam-pet/tree/v1.0.0/../x"},
-         "a path inside the repository")):
+         "isn’t a path inside the repository")):
     ok, said = refuses(lambda b=body: P.install(b), says)
     check(f"install refused: {json.dumps(body)[23:80] or '{}'}", ok, said)
+
+# -- every shape a person pastes (2026-11-18) ---------------------------------
+# What the link leaves out is worked out: the newest release, the plugin's
+# folder, or the plugins to pick from; a branch is its commit now, said in a
+# line. Only first calls here: nothing is installed.
+git("branch", "feature/x", C1, cwd=BARE)
+
+
+def bare(name, build):
+    work = TMP / "src-shapes" / name
+    work.mkdir(parents=True)
+    git("init", "-q", "-b", "main", cwd=work)
+    tags = build(work) or []
+    out = TMP / "gh" / "friend" / name
+    subprocess.run(["git", "clone", "-q", "--bare", str(work), str(out)], check=True,
+                   env=GIT_ENV)
+    git("config", "uploadpack.allowAnySHA1InWant", "true", cwd=out)
+    return work
+
+
+def mono(work):
+    plugin(work, "autumn", {"kind": ["theme"]}, files={"theme.css": ":root{}\n"})
+    plugin(work, "foundry", {"name": "Foundry"})
+    git("add", "-A", cwd=work); git("commit", "-q", "-m", "1", cwd=work)
+    git("tag", "autumn-v1.0.0", cwd=work); git("tag", "foundry-v1.0.0", cwd=work)
+    (work / "autumn" / "PLUGIN.md").write_text(
+        (work / "autumn" / "PLUGIN.md").read_text().replace('"1.0.0"', '"1.0.1"'))
+    git("commit", "-qam", "2", cwd=work); git("tag", "-a", "autumn-v1.0.1", "-m", "x", cwd=work)
+    (work / "foundry" / "PLUGIN.md").write_text(
+        (work / "foundry" / "PLUGIN.md").read_text().replace('"1.0.0"', '"9.9.9"'))
+    git("commit", "-qam", "unreleased", cwd=work)
+
+
+def solo(work):
+    plugin(work.parent, work.name, {"id": "lantern", "name": "Lantern"})
+    git("add", "-A", cwd=work); git("commit", "-q", "-m", "1", cwd=work)
+
+
+def folder_one(work):
+    plugin(work / "src", "kite", {"version": "0.9.0"})
+    git("add", "-A", cwd=work); git("commit", "-q", "-m", "1", cwd=work)
+    git("tag", "v0.9.0", cwd=work)
+    (work / "src" / "kite" / "PLUGIN.md").write_text(
+        (work / "src" / "kite" / "PLUGIN.md").read_text().replace("0.9.0", "1.10.0"))
+    git("commit", "-qam", "2", cwd=work); git("tag", "v1.10.0", cwd=work)
+    (work / "src" / "kite" / "PLUGIN.md").write_text(
+        (work / "src" / "kite" / "PLUGIN.md").read_text().replace("1.10.0", "1.2.0"))
+    git("commit", "-qam", "3", cwd=work); git("tag", "v1.2.0", cwd=work)
+
+
+def broken(work):
+    (work / "PLUGIN.md").write_text("---\nid: [unclosed\n---\n")
+    git("add", "-A", cwd=work); git("commit", "-q", "-m", "1", cwd=work)
+
+
+bare("mono", mono)
+SOLO = bare("solo", solo)
+bare("kite", folder_one)
+bare("broken", broken)
+SOLO_HEAD = git("rev-parse", "HEAD", cwd=SOLO)
+PET = ("plugins/pet-folder", "plugins/read-aloud")
+
+
+def same(label, got, want):
+    check(label, got == want, f"{got!r} != {want!r}" if got != want else "")
+
+
+def shape(url, **more):
+    return P.install({"url": url, **more})
+
+
+def picks(out):
+    return tuple(c["path"] for c in out.get("choose", []))
+
+
+def at(out):
+    return (out.get("id"), out.get("version"), (out.get("source") or {}).get("ref"),
+            (out.get("source") or {}).get("path"))
+
+
+for url, want, test in (
+        ("friend/loam-pet", PET, picks),
+        ("https://github.com/friend/loam-pet", PET, picks),
+        ("github.com/friend/loam-pet/", PET, picks),
+        ("https://github.com/friend/loam-pet.git", PET, picks),
+        ("git@github.com:friend/loam-pet.git", PET, picks),
+        ("https://github.com/friend/loam-pet?tab=readme-ov-file#install", PET, picks),
+        ("https://github.com/friend/loam-pet/releases", PET, picks),
+        ("https://github.com/friend/loam-pet/releases/tag/v2.0.0", PET, picks),
+        ("https://github.com/friend/loam-pet/tree/v1.0.0/plugins/pet-folder/?x=1",
+         ("pet", "1.0.0", "v1.0.0", "plugins/pet-folder"), at),
+        ("https://github.com/friend/loam-pet/blob/v1.0.0/plugins/pet-folder/PLUGIN.md",
+         ("pet", "1.0.0", "v1.0.0", "plugins/pet-folder"), at),
+        ("https://raw.githubusercontent.com/friend/loam-pet/v1.0.0/plugins/pet-folder/PLUGIN.md",
+         ("pet", "1.0.0", "v1.0.0", "plugins/pet-folder"), at),
+        ("https://github.com/friend/loam-pet/tree/main/plugins/pet-folder",
+         ("pet", "2.0.0", C2, "plugins/pet-folder"), at),
+        ("https://github.com/friend/loam-pet/tree/feature/x/plugins/pet-folder",
+         ("pet", "1.0.0", C1, "plugins/pet-folder"), at),
+        ("https://github.com/friend/mono", ("autumn", "foundry"), picks),
+        ("https://github.com/friend/mono/tree/foundry-v1.0.0",
+         ("foundry", "1.0.0", "foundry-v1.0.0", "foundry"), at),
+        ("https://github.com/friend/mono/releases/tag/autumn-v1.0.1",
+         ("autumn", "1.0.1", "autumn-v1.0.1", "autumn"), at),
+        ("https://github.com/friend/kite", ("kite", "1.10.0", "v1.10.0", "src/kite"), at),
+        ("friend/solo", ("lantern", "1.0.0", SOLO_HEAD, ""), at),
+        ("friend/loam-pet/tree/v1.0.0/plugins/pet-folder",
+         ("pet", "1.0.0", "v1.0.0", "plugins/pet-folder"), at)):
+    out = shape(url)
+    same(f"a pasted link: {url[:70]}", test(out), want)
+same("a picked one is its own request: the newest release of that folder",
+      at(shape("friend/mono", path="autumn")), ("autumn", "1.0.1", "autumn-v1.0.1", "autumn"))
+same("...each folder its own release, never another's",
+      at(shape("friend/mono", path="foundry")), ("foundry", "1.0.0", "foundry-v1.0.0", "foundry"))
+out = shape("https://github.com/friend/loam-pet/tree/main/plugins/pet-folder")
+same("a branch: its commit now, said in a line, and the request names the commit",
+      ("is a branch" in (out["note"] or "") and C2[:7] in out["note"],
+       out["source"]["ref_kind"], out["request"]),
+      (True, "commit", {"url": "friend/loam-pet", "path": "plugins/pet-folder", "ref": C2}))
+out = shape("friend/solo")
+same("no release at all: the default branch's commit, said in a line",
+      ("no release yet" in (out["note"] or ""), out["source"]["ref_kind"]), (True, "commit"))
+out = shape("friend/loam-pet")
+same("a pick names each plugin with its id, name and version",
+      [(c["id"], c["version"]) for c in out["choose"]], [("pet", "2.0.0"), ("read-aloud", "1.3.0")])
+ok, said = refuses(lambda: shape("friend/loam-pet", confirm="0" * 16), "pick one first")
+check("...and a yes to a repository of several installs nothing", ok, said)
+try:
+    shape("friend/broken")
+except P.PluginError as exc:
+    same("a broken manifest: a plain sentence, reason manifest",
+          (exc.detail.get("reason"), "can’t read" in exc.message), ("manifest", True))
+for url, reason in (("https://gitlab.com/a/b", "not-github"), ("friend/nothing", "unreachable"),
+                    ("https://github.com/friend/loam-pet/tree/v1.0.0/not-a-plugin", "no-plugin")):
+    try:
+        shape(url)
+        check(f"reason {reason}", "not refused", reason)
+    except P.PluginError as exc:
+        same(f"a refusal carries its reason: {reason}", exc.detail.get("reason"), reason)
+same("the newest tag is by version, not by text",
+      (P.newest_tag(["v1.9.0", "v1.10.0", "v1.2.0", "v2.0.0-beta"]),
+       P.newest_tag(["a-v3.0.0", "b-v1.0.0", "v0.1.0"], ["b"]),
+       P.newest_tag(["a-v3.0.0"], ["b"])), ("v1.10.0", "b-v1.0.0", None))
 
 before = sorted(p.name for p in YOURS.iterdir())
 preview = P.install({"url": LINK}, "ada")

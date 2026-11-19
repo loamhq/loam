@@ -1,7 +1,12 @@
 import { h, icon } from './ui.js'
 import { createSecretSettings } from './plugin-secrets.js'
 const label = id => ({ 'core.message': 'the message bubble', 'core.thread-list': 'the thread list', 'core.composer': 'the composer', 'core.files.viewer': 'the Files viewer', 'core.files.editor': 'the Files editor', 'core.rail': 'the navigation rail', 'core.activity': 'Activity', 'core.apps': 'Apps', 'core.settings': 'Settings' }[id] ?? id)
-export const sourceLine = source => source?.kind === 'loam' ? 'Loam' : source?.kind === 'link' ? `${source.repo}@${source.ref}` : 'Built here'
+export const sourceLine = source => source?.kind === 'loam' ? 'Loam' : source?.kind === 'link' ? `From github.com/${source.repo}` : 'Built here'
+// Installed from a link someone shared, not from the Market (2026-11-18): the
+// install records `via`; one from before then is the Market's when the Market
+// lists that id from that repository.
+export const fromLink = (row, listed = []) => row?.source?.kind === 'link' && row.source.via !== 'market'
+  && (row.source.via === 'link' || !listed.some(e => e.id === row.id && e.repo === row.source.repo))
 export function touchSentences(declaration = {}) {
   const touches = declaration.touches ?? {}, lines = []
   if (declaration.page_code) lines.push('Runs code in the page.')
@@ -17,10 +22,11 @@ export function touchSentences(declaration = {}) {
 }
 const external = source => { try { const u = new URL(source?.url); return u.protocol === 'https:' ? u.href : null } catch { return null } }
 export function createPluginSettings({ loader, theme, host, changed = () => {} }) {
-  const st = { selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', url: '', ref: '', path: '', preview: null, request: null, installError: '', busy: false, guide: false, allDeclarations: false, refOptions: false, focusPreview: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set(), advanced: null }
+  const st = { selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', guide: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set(), advanced: null }
   let hostSettings = null, secretSettings = null
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, text, onclick, ...props })
   const notice = (text, bad = true) => text ? h('p', { class: `plugin-notice${bad ? ' err' : ''}`, role: bad ? 'alert' : 'status', text }) : null
+  const linked = row => fromLink(row, host.marketState?.list?.plugins ?? [])
   const meta = row => [row.author || 'Unknown author', row.version || 'Version unknown', sourceLine(row.source)].join(' · ')
   // A plugin's page says who made it, its version and where to read it
   // (2026-11-18): the repository, ref and commit are the link's, behind View
@@ -124,6 +130,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       h('button', { type: 'button', class: 'setrow plugin-row', onclick: () => open(row), 'aria-label': `About ${row.name || row.id}`, 'aria-description': row.switch === 'appearance' ? `${meta(row)} · ${themeState}` : meta(row) },
         pluginIcon(row),
         h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: row.name || row.id }), h('div', { class: 'setrow-sub', text: row.description || (row.switch === 'appearance' ? 'Theme' : row.on ? 'Enabled' : 'Disabled') }),
+          linked(row) ? h('span', { class: 'plugin-mark plugin-mark-link' }, icon.link(11), 'From a link') : null,
           row.shadows ? h('span', { class: 'plugin-mark', text: 'Changes a shipped plugin' }) : null,
           row.overrides?.length ? h('span', { class: 'plugin-mark', text: `Replaces ${row.overrides.map(label).join(', ')}` }) : null,
           broken ? h('div', { class: 'plugin-row-error', text: broken }) : row.warnings?.length ? h('div', { class: 'plugin-row-warning', text: `${row.warnings.length} ${row.warnings.length === 1 ? 'warning' : 'warnings'}` }) : null),
@@ -170,6 +177,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     return [h('button', { class: 'backbtn plugin-back', 'aria-label': 'Back to Plugins', onclick: () => { st.selected = null; st.detail = null; st.error = ''; changed() } }, icon.chevronLeft(18), 'Plugins'),
       host.settingsHead(row.name || row.id), pluginIcon(row), byline(row), serviceView(row),
       row.shadows ? h('p', { class: 'plugin-mark', text: 'Changes a shipped plugin.' }) : null,
+      linked(row) ? h('p', { class: 'note plugin-from-link' }, icon.link(13), h('span', { text: `Installed from a link: github.com/${row.source.repo}${row.source.path ? `/${row.source.path}` : ''}, at ${row.source.ref_kind === 'tag' ? row.source.ref : `commit ${String(row.source.commit ?? row.source.ref).slice(0, 7)}`}. To update it, install from its link again.` })) : null,
       row.edited ? h('p', { class: 'note', text: 'Edited here since it was installed.' }) : null,
       notice(row.broken), notice(loader.st.failures.get(row.id)), notice(st.error), notice(st.detailError),
       st.opening ? h('p', { class: 'note', role: 'status', text: 'Reading plugin details…' }) : null,
@@ -201,42 +209,6 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       row.layer === 'yours' ? (st.remove ? h('div', { class: 'plugin-remove-question' }, h('p', { text: `Remove ${row.name || row.id}?${row.shadows ? ' The shipped copy will take over.' : ''}` }),
         button('Keep plugin', () => { st.remove = false; changed() }, 'pillbtn content-mark'), button('Remove', () => remove(row), 'pillbtn primary danger', { disabled: loader.st.writing.has(`/plugins/${row.id}`) })) : button('Remove plugin', () => { st.remove = true; changed() }, 'pillbtn content-mark danger')) : null]
   }
-  async function install(confirm = false) {
-    if (st.busy) return
-    if (!confirm) st.request = { url: st.url.trim(), ...(st.ref.trim() ? { ref: st.ref.trim() } : {}), ...(st.path.trim() ? { path: st.path.trim() } : {}) }
-    st.busy = true; st.installError = ''; st.done = ''; changed()
-    try {
-      const out = await loader.install({ ...st.request, ...(confirm ? { confirm: st.preview.confirm } : {}) })
-      if (out.installed) { st.done = `${out.plugin?.name ?? out.id} installed.`; st.url = ''; st.ref = ''; st.path = ''; st.preview = null; st.request = null }
-      else { st.preview = out; st.allDeclarations = false; st.focusPreview = true }
-    } catch (error) {
-      st.installError = error.message
-      if (error.status === 409 && error.body?.preview) { st.preview = error.body.preview; st.allDeclarations = false; st.focusPreview = true }
-    } finally { st.busy = false; changed() }
-  }
-  function previewView() {
-    const p = st.preview, update = p.replaces, added = p.added && Object.keys(p.added).length
-    const full = declarations(p.declaration)
-    return h('section', { class: 'plugin-preview', id: 'plugin-install-question', 'aria-label': 'Review plugin installation' },
-      h('h3', { class: 'display', tabindex: '-1', text: `${update ? 'Update' : 'Install'} ${p.name || p.id}?` }), byline(p),
-      p.shadows ? h('p', { class: 'plugin-mark', text: 'Changes a shipped plugin.' }) : null,
-      update ? h('p', { class: 'note', text: `Replaces version ${update.version ?? 'unknown'}.${update.edited ? ' Local edits will be replaced.' : ''}` }) : null,
-      update && added ? declarations({ touches: p.added, overrides: p.added.overrides, page_code: p.added.page_code }, 'Added in this update') : null,
-      update && !added ? h('p', { class: 'note', text: 'No new declarations.' }) : null,
-      update ? h('details', { open: st.allDeclarations, ontoggle: event => { st.allDeclarations = event.currentTarget.open } }, h('summary', { text: 'All declarations' }), full) : full,
-      ...(p.warnings ?? []).map(text => notice(String(text), false)), notice(st.installError),
-      h('div', { class: 'plugin-preview-actions' }, button('Change link', () => { st.preview = null; st.installError = ''; changed() }, 'pillbtn content-mark', { disabled: st.busy }),
-        button(st.busy ? 'Installing…' : update ? 'Update plugin' : 'Install plugin', () => install(true), 'pillbtn primary', { disabled: st.busy || !p.confirm })))
-  }
-  function installView() {
-    return h('section', { class: 'plugin-install', 'aria-label': 'Install from a link' }, h('h3', { class: 'kicker', text: 'Install from a link' }),
-      st.preview ? previewView() : h('form', { onsubmit: event => { event.preventDefault(); install() } },
-        h('label', { for: 'plugin-url', text: 'GitHub link or owner/repo' }), h('input', { id: 'plugin-url', class: 'field-input', type: 'text', inputmode: 'url', autocomplete: 'off', placeholder: 'owner/repo or a tagged folder link', value: st.url, disabled: st.busy, oninput: event => { st.url = event.target.value } }),
-        h('details', { class: 'plugin-install-options', open: st.refOptions, ontoggle: event => { st.refOptions = event.currentTarget.open } }, h('summary', {}, 'Ref and folder', icon.chevronRight(12)),
-          h('label', { for: 'plugin-ref', text: 'Tag or full commit' }), h('input', { id: 'plugin-ref', class: 'field-input', value: st.ref, disabled: st.busy, oninput: event => { st.ref = event.target.value } }),
-          h('label', { for: 'plugin-path', text: 'Folder in the repository' }), h('input', { id: 'plugin-path', class: 'field-input', value: st.path, disabled: st.busy, oninput: event => { st.path = event.target.value } })),
-        notice(st.installError), h('button', { class: 'pillbtn', type: 'submit', disabled: st.busy, text: st.busy ? 'Reading declaration…' : 'Review plugin' })))
-  }
   function view({ back = true } = {}) {
     if (st.selected && loader.st.loaded && !loader.st.rows.some(row => row.key === st.selected.key)) { st.selected = null; st.detail = null; st.done = 'This copy was removed.' }
     if (st.selected) return detail()
@@ -245,8 +217,9 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       !loader.st.loaded ? h('p', { class: 'note', role: 'status', text: 'Reading plugins…' }) : null,
       ...[['Themes', true], ['Extensions', false]].map(([title, themes]) => { const group = rows.filter(row => Boolean(row.kind?.includes('theme')) === themes); return group.length ? h('section', { class: 'plugin-group', 'aria-label': title }, h('h3', { class: 'kicker', text: title }), h('div', { class: 'rows' }, ...group.map(rowView))) : null }),
       // Settings › Market (2026-11-18) holds what can be got; this page shows
-      // what is installed, and ends with the way there.
-      host.marketFindMore?.('extension', 'Find more plugins'), installView()]
+      // what is installed, and ends with the way there and the way in from a
+      // link (one row, opening the Market's own install sheet: page/market.js).
+      host.marketFindMore?.('extension', 'Find more plugins'), host.marketLinkDoor?.()]
   }
   function sync() {
     if (st.focusDetail && st.selected) {
@@ -258,11 +231,6 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         if (scroll) scroll.scrollTop = 0
       }
     }
-    const question = document.getElementById('plugin-install-question')
-    if (!st.focusPreview || !question) return
-    st.focusPreview = false
-    question.querySelector('h3')?.focus({ preventScroll: true })
-    question.scrollIntoView({ block: 'start' })
   }
   return { st, view, open, opened, sync }
 }

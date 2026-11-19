@@ -602,9 +602,10 @@ try {
           await endShot('plugin-' + plugin.toLowerCase().replace(/[^a-z0-9]+/g, '-'))
           await page.getByRole('button', { name: 'Back to Plugins', exact: true }).click()
         }
-        await page.locator('#plugin-url').fill('example/theme')
-        await page.locator('.plugin-install-options summary').click()
+        await page.locator('.market-link-door .setrow').click()
+        await page.locator('#market-link-field').waitFor()
         await shot('plugin-install')
+        await page.locator('.market-install .pillbtn', { hasText: 'Cancel' }).click()
         await close()
         await mutate(() => __audit.goActivity())
         await page.locator('.activity-job').first().waitFor()
