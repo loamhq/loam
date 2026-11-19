@@ -1930,3 +1930,44 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **The plugin's push commits first** (core's commit, on every push tick
   that is due), so after a switch the first commit may be the push's, not
   the timer's; wait for a timer run to see the timer's own.
+
+## 2026-11-19 — Dictation and Read aloud carry their own server halves (0.2.12)
+
+- **The plugin server surface needed nothing new to take a core route.**
+  `/x/<id>/` (gateway, `Connection: close`, no body cap), the supervised
+  unit, `LOAM_PLUGIN_KEYS` (re-read on every ask, so a key change needs no
+  restart), the broker's `GET /v1/plugins/<id>/agents/<agent>` with
+  `LOAM_BROKER_TOKEN_FILE`, and `LOAM_VAULT_DATA`/`_DIR` (the vault and its
+  system folder are read off the two) covered every route. Node and ffmpeg
+  are on every install (the app runs on the host), so `run: node
+  server/main.js` with the standard library is portable.
+- **A server that used to be core's had three hidden couplings**: the
+  install's `app.speech_voices` (each agent's voice *and character*, which is
+  part of a take's id, so a different spec misses the cache), the page's
+  `speech` flag on the app's `/api/health`, and the thread-branch drafter
+  borrowing Read aloud's Gemini key and its brief model. The voices became a
+  plugin `settings.entry` (seeded once by `loam_to_market.seed_voices`), the
+  flag the plugin's own `/status`, and the drafter got `BRANCH_MODEL`; it
+  still asks the broker for read-aloud's key (left as it was, said in the
+  0.2.12 receipt).
+- **The app's `shippedManifest` reads `contributes:` only as inline JSON**
+  (a YAML block there throws in `listedManifest`, and every audio-plugin
+  test with it). Keep a listed plugin's `contributes` on one line.
+- **A Market plugin moving to a server must be updated before core drops
+  the routes.** On this box: tag, list, install 1.1.0 over the Yours copies
+  (`bin/settings do plugin.install <link>` then `{url, confirm}`; the live
+  broker predates `request`), seed the setting, copy the audio cache
+  (`/var/lib/loam-app/loam-ui/speech`, loam-app 0700, so sudo) into
+  `<private>/read-aloud/speech`, then land. Other installs get `bring_up`.
+- **A listing showed "Uses your Google Gemini key" and "Asks for a key of
+  its own" for one key** because `touches.secrets` counted a
+  `settings.secret` named as the provider's field. `declaration` drops such
+  a name now; a plugin's own unrelated secret still shows.
+- **The page harness (`test/browser.js`) sends `/x/<id>/…` to the app**
+  unless `plugin(id, rest)` names a server; the app then answers 404, which
+  is a Loam with no such plugin.
+- **`_from_release` could not replace a folder that was there**
+  (`os.replace` onto a non-empty directory is ENOTEMPTY): step the old one
+  aside into the staging folder first.
+- **`pkill -f "node server/main.js"` killed the shell again** (2026-11-18's
+  lesson). Kill by pid from `ss -ltnp`.
