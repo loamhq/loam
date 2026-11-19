@@ -16,9 +16,7 @@ reminders wrapped around it -- only the typed text is kept; where it is nothing
 but harness content it is not a turn at all, and the agent's reply to it still
 is, because that reply is something the person read. The rule lives in
 ``loam_transcript.is_harness_prompt`` and ``loam_transcript.person_text``, is
-fired both ways by ``tests/test_transcript_harness.py`` against real session
-entries, and ``bin/repair_transcripts.py`` applies the same rule to the files
-written before it existed. *(the owner, 2026-09-22: "The conversation files should
+covered by ``tests/test_transcript_harness.py``. *(the owner, 2026-09-22: "The conversation files should
 be recording only the messages exchanged between the user and the agent ...
 Basically I should be able to just go through that file as a record of my
 conversation history.")*
