@@ -5809,11 +5809,11 @@ class Server:
         # persona through bin/settings (`system.persona`). Nothing is said
         # anywhere when it changes; the journal has the line.
         if parts == ["v1", "system", "persona"]:
-            import loam_attention  # noqa: PLC0415
-            import loam_appearance  # noqa: PLC0415
+            import loam_attention as attention_mod  # noqa: PLC0415
+            import loam_appearance as appearance_mod  # noqa: PLC0415
             nocache = "Cache-Control: no-store\r\n"
             if method == "GET":
-                body, status = await asyncio.to_thread(loam_attention.state), 200
+                body, status = await asyncio.to_thread(attention_mod.state), 200
             elif method == "PATCH":
                 if not isinstance(payload, dict) or "persona" not in payload:
                     body, status = {"error": "send {\"persona\": an agent's id, "
@@ -5821,15 +5821,15 @@ class Server:
                 else:
                     try:
                         value = await asyncio.to_thread(
-                            loam_attention.validate, payload.get("persona"))
+                            attention_mod.validate, payload.get("persona"))
                     except ValueError as exc:
                         body, status = {"error": str(exc)}, 400
                     else:
                         await asyncio.to_thread(
-                            loam_appearance.mutate, loam_attention.SETTING,
+                            appearance_mod.mutate, attention_mod.SETTING,
                             lambda cur, v=value: ({**(cur if isinstance(cur, dict) else {}),
                                                    "persona": v} if v else None))
-                        body, status = await asyncio.to_thread(loam_attention.state), 200
+                        body, status = await asyncio.to_thread(attention_mod.state), 200
                         print(f"settings: system.persona -> {body['persona']} "
                               f"by {author(payload) or lc.OWNER_ID}",
                               file=sys.stderr, flush=True)

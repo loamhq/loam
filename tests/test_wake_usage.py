@@ -11,10 +11,11 @@ Five groups, against the shipped code:
                  the envelope's own names; an older envelope leaves a valid
                  line without them.
   denials        one denial: a failure-log entry naming the lane and the
-                 tool and not its arguments, and nothing in comms.md. None:
+                 tool and not its arguments, and nobody told. None:
                  no entry at all.
   repeat         a denied vault Write on three consecutive nights is one
-                 Important line; on two it is nothing.
+                 fact for the system persona (lib/loam_attention.py), and
+                 nothing on the board; on two it is nothing.
   table          bin/usage-by-lane on a fixture of three lanes: one with
                  usage, one with none (older runs), one mixed.
 
@@ -26,12 +27,16 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+os.environ.setdefault("LOAM_ATTENTION_DIR", tempfile.mkdtemp(prefix="loam-wake-usage-attention-"))
+os.environ.setdefault("LOAM_WAITERS_DIR", os.environ["LOAM_ATTENTION_DIR"] + "/waiters")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_identity  # noqa: E402
@@ -191,7 +196,15 @@ def run_wake(root: Path, envelope: dict, started: str,
     box = vault / "00_INBOX" / "from-agents"
     text = [(box / n).read_text() if (box / n).exists() else ""
             for n in ("loam-wake-failures.md", "comms.md")]
-    return code, row, text[0], text[1]
+    # `comms`: the board, which must stay empty, and then each fact the
+    # system persona was told, as `FACT **agent** text` lines.
+    attention = Path(os.environ["LOAM_ATTENTION_DIR"])
+    told = ""
+    for p in sorted(attention.glob("*.json")):
+        if p.name.startswith("2"):
+            told += f"FACT **{AGENT}** {json.loads(p.read_text())['fact']}\n"
+        p.unlink()
+    return code, row, text[0], text[1] + told
 
 
 def in_temp(fn):
@@ -236,7 +249,7 @@ def test_denial_one(root: Path) -> None:
           in log, log)
     check("denial (one): the arguments stay out of the log",
           "secret-argument" not in log)
-    check("denial (one): comms.md gets nothing", f"**{AGENT}**" not in comms)
+    check("denial (one): nobody is told, nothing on the board", f"**{AGENT}**" not in comms)
 
 
 def test_denial_none(root: Path) -> None:
@@ -244,7 +257,7 @@ def test_denial_none(root: Path) -> None:
     code, row, log, comms = run_wake(root, env, "2026-09-30T09:00:00Z")
     check("denial (none): recorded as an empty list",
           row.get("permission_denials") == [])
-    check("denial (none): no failure-log entry, no comms line",
+    check("denial (none): no failure-log entry, nobody told",
           log == "" and f"**{AGENT}**" not in comms)
 
 
@@ -263,19 +276,18 @@ def test_repeat_three_nights(root: Path) -> None:
     env = {**OLD_ENVELOPE, "permission_denials": [vault_write(root)]}
     prior = [prior_night(root, "2026-09-28"), prior_night(root, "2026-09-29")]
     code, row, log, comms = run_wake(root, env, "2026-09-30T09:00:00Z", prior)
-    section = comms.split("## Important", 1)[-1].split("## Other", 1)[0]
-    check("repeat (3 nights): one Important line",
-          section.count(f"**{AGENT}**") == 1
-          and "three nights running" in section, comms)
-    check("repeat (3 nights): nothing under Urgent",
-          f"**{AGENT}**" not in comms.split("## Important", 1)[0])
+    facts = [l for l in comms.splitlines() if l.startswith("FACT ")]
+    check("repeat (3 nights): one fact for the system persona",
+          len(facts) == 1 and "three nights running" in facts[0], comms)
+    check("repeat (3 nights): nothing on the board",
+          all(l.startswith("FACT ") for l in comms.splitlines() if l.strip()), comms)
 
 
 def test_repeat_two_nights(root: Path) -> None:
     env = {**OLD_ENVELOPE, "permission_denials": [vault_write(root)]}
     prior = [prior_night(root, "2026-09-27"), prior_night(root, "2026-09-29")]
     code, row, log, comms = run_wake(root, env, "2026-09-30T09:00:00Z", prior)
-    check("repeat (a gap in the nights): log entry, no comms line",
+    check("repeat (a gap in the nights): log entry, nobody told",
           "Write" in log and f"**{AGENT}**" not in comms, comms)
 
 

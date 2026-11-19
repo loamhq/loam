@@ -256,9 +256,12 @@ async def main():
     await settle(server, tid)
     await settle(server, tid)
     msgs = (await call(server, "GET", f"/v1/threads/{tid}"))[1]["messages"]
-    tail = [m["author"] for m in msgs if threads._num(m["id"]) > 0][-6:]
-    check("the chain stops after the cap with a system line",
-          tail, [OWNER, "ada", "iris", "ada", "iris", "system"])
+    tail = [m["author"] for m in msgs if threads._num(m["id"]) > 0][-5:]
+    check("the chain stops after the cap, with no line in the record",
+          tail, [OWNER, "ada", "iris", "ada", "iris"])
+    marks = (await call(server, "GET", f"/v1/threads/{tid}"))[1]["marks"]
+    check("...and a mark on the thread saying it paused",
+          [(m["persona"], m["text"].startswith("Paused after")) for m in marks], [(None, True)])
 
     meta, _, path = threads.read(tid)
     text = path.read_text()

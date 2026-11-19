@@ -122,6 +122,7 @@ own `thread.*` rows cover the same things.
 | `engineer.tiers.quick` | An engineer's quick-tier model: small, mechanical, well-specified jobs (2026-11-15); unset runs on `engineer.model` | PATCH /api/engineers/{engineer} | persona, conversation only | no |
 | `engineer.tiers.standard` | An engineer's standard-tier model: most jobs, and a brief that names no tier | PATCH /api/engineers/{engineer} | persona, conversation only | no |
 | `engineer.tiers.hard` | An engineer's hard-tier model: design-heavy work, subtle bugs, wide refactors | PATCH /api/engineers/{engineer} | persona, conversation only | no |
+| `system.persona` | Which agent hears when something in Loam needs attention: the problems that are no one agent's, as the input of a run (2026-11-19); null is the first agent | PATCH /api/system/persona | persona, conversation only | no |
 | `reviewer.schedule` | When the nightly reviewer runs | PATCH /api/system/reviewer | persona, conversation only | no |
 | `reviewer.provider` | The reviewer's provider (Claude Code or Antigravity) | PATCH /api/system/reviewer | persona, conversation only | no |
 | `reviewer.model` | The reviewer's model | PATCH /api/system/reviewer | persona, conversation only | no |

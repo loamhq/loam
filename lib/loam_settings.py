@@ -485,6 +485,7 @@ ENTRIES: list[Entry] = [
           values="an agent's id, or null for the first agent",
           body=lambda v, m: {"persona": v}, read="GET /v1/system/persona",
           pick=lambda a, m: a.get("persona"), options="personas",
+          unattended=False,
           note="Loam hands this agent each problem that is no one agent's "
                "(drift, memory pressure, the account refusing runs, a "
                "plugin's event, an update) as the input of a run, told once; "

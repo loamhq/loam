@@ -15,7 +15,7 @@ release L10), through a real broker listener on loopback and through
     once
   - archive: out of /v1/agents, threads' roster and mentions, in
     ?archived=1; its timers are removed and its records untouched; its
-    profile and files stay readable; a turn for it is refused with a line;
+    profile and files stay readable; a turn for it is refused with a mark;
     an agent mid-turn waits; a persona's archive needs a fresh yes
   - restore: the same timers back byte for byte, back in /v1/agents
   - the face: multipart and a path, PNG/JPEG/WebP/GIF only, served back,
@@ -489,13 +489,17 @@ async def main():
               all(r["agent"] != "ada" for r in activity.schedules())
               and activity.schedules("ada"))
         server.threads.post_person(clay_thread["id"], "Anyone?")
+        def marks():
+            return [m["text"] for m in server.threads.marks_for(clay_thread["id"])]
         for _ in range(50):
-            if any("archived" in t for t in system_lines(clay_thread["id"])):
+            if any("archived" in t for t in marks()):
                 break
             await asyncio.sleep(0.05)
-        check("a turn that would be its is refused with a line",
-              any("Ada is archived" in t for t in system_lines(clay_thread["id"])),
+        check("...and nothing about it is written in the thread's record (2026-11-19)",
+              not any("archived" in t for t in system_lines(clay_thread["id"])),
               system_lines(clay_thread["id"]))
+        check("a turn that would be its is refused with a mark on the turn",
+              any("Ada is archived" in t for t in marks()), marks())
         status, body = await http(port, "POST", "/v1/agents/ada/archive", {})
         check("archiving twice is a 409", status == 409, body)
 

@@ -139,7 +139,7 @@ async def main():
     check("a post naming nobody gives no turn; @all from an agent is text",
           (body["woke"], len(turns)), ([], 1))
 
-    # Ping-pong by posts: bounded by the cap, then one system line.
+    # Ping-pong by posts: bounded by the cap, then the thread's own mark.
     turns.clear()
     who = ["cleo", "ada"]
     for i in range(6):
@@ -150,7 +150,10 @@ async def main():
     check(f"two agents posting at each other stop at the cap ({cap})",
           max(c for _, c, _ in turns) <= cap and len(turns) < 6, True)
     lines = [m["text"] for m in threads.read(tid)[1] if m.get("kind") == "system"]
-    check("...with the line that says so", any(line.startswith("Paused after") for line in lines), True)
+    check("...with no line in the record", any(line.startswith("Paused after") for line in lines), False)
+    marks = [m["text"] for m in server.threads.marks_for(tid)]
+    check("...and a mark on the thread that says so",
+          any(t.startswith("Paused after") for t in marks), True)
     threads.append(tid, OWNER, "Carry on, both of you.")
     turns.clear()
     again = threads.append(tid, "ada", "@cleo once more")

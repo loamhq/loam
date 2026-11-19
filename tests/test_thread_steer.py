@@ -517,8 +517,10 @@ async def main():
     gate.open()
     await until(lambda: engine.settled(tid))
     await asyncio.sleep(0.1)
-    check("died: an explicit system line",
-          system_lines(tid)[-1:], ["Ada's turn ended: its session exited"])
+    check("died: no line in the record",
+          "Ada's turn ended: its session exited" in system_lines(tid), False)
+    check("...a mark on Ada's turn instead",
+          [m["text"] for m in engine.marks_for(tid)], ["Ada's turn ended: its session exited"])
     check("...`through` not moved past the unanswered message",
           (before, through(tid, "ada")), (m1["id"], m1["id"]))
     ada.scripts = [[init(), text("Back: doing the thing now."), result(1)]]

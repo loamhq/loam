@@ -27,6 +27,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+# A fault's fact for the system persona lands in scratch, never the box's.
+os.environ.setdefault("LOAM_ATTENTION_DIR", tempfile.mkdtemp(prefix="loam-attention-"))
+os.environ.setdefault("LOAM_WAITERS_DIR", os.environ["LOAM_ATTENTION_DIR"] + "/waiters")
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_session  # noqa: E402
 
@@ -342,6 +346,13 @@ try:
         "../../_active.md")
     log = vault / "00_INBOX" / "from-agents" / "loam-wake-failures.md"
     comms = vault / "00_INBOX" / "from-agents" / "comms.md"
+    attention = Path(os.environ.get("LOAM_ATTENTION_DIR") or tempfile.mkdtemp())
+    os.environ["LOAM_ATTENTION_DIR"] = str(attention)
+
+    def told() -> list[str]:
+        """What the system persona was told (lib/loam_attention.py)."""
+        return [l for p in sorted(attention.glob("2*.json"))
+                for l in [json.loads(p.read_text())["fact"]] if "EARLIER" in l]
 
     def start() -> None:
         import io
@@ -371,14 +382,14 @@ try:
 
     start()
     check("once: the first start reports it", len(lines(log)), 1)
-    check("once: and puts it in comms", len(lines(comms)), 1)
+    check("once: and tells the system persona once", len(told()), 1)
+    check("once: and nothing on the board", comms.exists(), False)
     memory = json.loads((rcp.MODEL_MEMORY / "lane.json").read_text())
     check("once: the memory holds the session and its last turn",
           (memory["session"], memory["last"]), ("s.jsonl", "2026-09-25T19:00:00Z"))
-    comms.write_text("")           # a reader tidies the line away
     start()
     check("once: the next start adds nothing to the log", len(lines(log)), 1)
-    check("once: nor to comms after it was tidied", len(lines(comms)), 0)
+    check("once: nor tells it again", len(told()), 1)
     # The same session going on drifting is still the same session.
     with (ld / "s.jsonl").open("a") as fh:
         fh.write(assistant("claude-opus-5", "2026-09-26T09:00:00Z") + "\n")

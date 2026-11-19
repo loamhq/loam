@@ -47,6 +47,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+# The system persona's facts land in scratch, never the box's.
+os.environ.setdefault("LOAM_ATTENTION_DIR", tempfile.mkdtemp(prefix="loam-update-attention-"))
+os.environ.setdefault("LOAM_WAITERS_DIR", os.environ["LOAM_ATTENTION_DIR"] + "/waiters")
+
 ROOT = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="test-update-"))
 INSTALL = TMP / "install"
@@ -651,30 +655,35 @@ async def broker_checks():
     def schedule(turn):
         sent.append(turn)
     server.threads.schedule = schedule
+    attention = Path(os.environ["LOAM_ATTENTION_DIR"])
+
+    def facts():
+        return [json.loads(f.read_text()) for f in sorted(attention.glob("2*.json"))]
+    threads.ensure_general()
+    general_before = len(threads.read(threads.GENERAL_ID)[1])
     got = server.threads.deliver_note(note)
-    meta, msgs, _ = threads.read(threads.GENERAL_ID)
-    check("deliver_note: in General, one Loam line, the default agent given the turn",
-          (got, msgs[-1]["author"], msgs[-1]["text"], sent[0].persona, sent[0].thread_id,
-           sent[0].note), ("delivered", "system", "Loam updated from 1.0.0 to 1.2.0.",
-                           meta["default"], threads.GENERAL_ID, "Read /x/notes.md and say it."))
-    check("...General's default is the install's agent", meta["default"], "iris")
-    check("...a notice naming an agent not in the thread is not delivered",
-          server.threads.deliver_note({**note, "persona": "nobody"}), "not a member")
+    told = facts()
+    check("deliver_note: a fact for the system persona, the line and its note",
+          (got, [(f["fact"], f["by"], f["detail"]) for f in told]),
+          ("delivered", [("Loam updated from 1.0.0 to 1.2.0.", "loam update",
+                          "Read /x/notes.md and say it.")]))
+    check("...nothing posted in General and no turn given (2026-11-19)",
+          (len(threads.read(threads.GENERAL_ID)[1]) - general_before, len(sent)), (0, 0))
     up.notice_done(note, got)
     check("...and a delivered notice is gone", notices(), [])
 
     # The 0.2.0 walk (2026-11-17): a notice its source could not remove was
-    # posted and given a turn every 30 s. The engine gives one notice once,
-    # and the same line to the same agent not again within the hour.
-    before = len(threads.read(threads.GENERAL_ID)[1])
-    check("a notice delivered again is not posted again",
+    # posted and given a turn every 30 s. A notice is told once (its id is
+    # the fact's key), however often it is delivered.
+    check("a notice delivered again is not told again",
           server.threads.deliver_note(note), "already delivered")
     up.notice("refused", "Loam's update did not run: X.", "Fix X.")
     again = notices()[0]
-    check("...a new notice repeating a line just posted is not delivered",
-          (server.threads.deliver_note({**again, "line": note["line"]})), "repeat")
-    check("...neither posted a line nor gave a turn",
-          (len(threads.read(threads.GENERAL_ID)[1]) - before, len(sent)), (0, 1))
+    check("...a new notice is its own fact",
+          server.threads.deliver_note(again), "delivered")
+    check("...still nothing in General and no turn",
+          (len(threads.read(threads.GENERAL_ID)[1]) - general_before, len(sent), len(facts())),
+          (0, 0, 2))
     server.threads._system_turns = None   # as after a broker restart: read from disk
     check("...and the record outlives the broker",
           server.threads.deliver_note(note), "already delivered")

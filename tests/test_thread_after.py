@@ -471,10 +471,12 @@ async def main():
     nid = row["id"]
     await call(server, "POST", f"/v1/threads/{nid}/messages", {"text": "@all anyone?"})
     await settle(server, nid)
-    check("@all with no default and no members: one system line",
+    check("@all with no default and no members: the record holds only the message",
           [(m["author"], m["text"]) for m in threads.read(nid)[1]],
-          [(OWNER, "@all anyone?"),
-           ("system", "Nobody to reach: bring someone in first")])
+          [(OWNER, "@all anyone?")])
+    check("...and the thread carries its own mark saying so",
+          [(m["persona"], m["text"]) for m in server.threads.marks_for(nid)],
+          [(None, "Nobody to reach: bring someone in first")])
     server.threads.stop_all_tails()
 
 

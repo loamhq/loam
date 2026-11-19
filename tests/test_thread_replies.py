@@ -379,7 +379,7 @@ async def main():
           ([m["kind"] for m in new], no_placeholder(new, w.items())),
           (["message", "message"], True))
 
-    # 2. steps-only, then the session exits: no message, one system line
+    # 2. steps-only, then the session exits: no message, a mark on the turn
     ada.script = [
         tool("s2", "Bash", {"command": "make", "description": "Build it"}),
         output("s2", "ok"),
@@ -393,13 +393,17 @@ async def main():
     await asyncio.sleep(0.02)
     task.cancel()
     new = threads.read(tid)[1][before:]
-    check("steps-only, then the session exits: no Ada message, one system line",
-          [(m["author"], m["text"]) for m in new],
-          [(OWNER, "build"), ("system", "Ada's turn ended: its session exited")])
+    check("steps-only, then the session exits: no Ada message, nothing but his in the record",
+          [(m["author"], m["text"]) for m in new], [(OWNER, "build")])
+    check("...a mark on Ada's turn says it ended",
+          [(m["persona"], m["text"]) for m in server.threads.marks_for(tid)],
+          [("ada", "Ada's turn ended: its session exited")])
     done = [e["message"] for e in w.items() if e["type"] == "message.done"]
+    marked = [e.get("text") for e in w.items() if e["type"] == "turn.mark"]
     check("...the stream says the same, and no placeholder anywhere",
-          ([(m["author"], m["kind"]) for m in done], no_placeholder(new, w.items())),
-          ([(OWNER, "message"), ("system", "system")], True))
+          ([(m["author"], m["kind"]) for m in done], "Ada's turn ended: its session exited" in marked,
+           no_placeholder(new, w.items())),
+          ([(OWNER, "message")], True, True))
     entries = (await call(server, "GET", f"/v1/threads/{tid}/steps"))[1]["steps"]
     unspoken = [e for e in entries if e.get("unspoken")]
     check("...its steps are in the full record, on an entry with no message",
@@ -446,8 +450,10 @@ async def main():
     new = threads.read(tid)[1][before:]
     check("words, then the waiting step, then exit: the words are the message",
           [(m["author"], m["text"]) for m in new][1:],
-          [("ada", "Status only: the job is landing."),
-           ("system", "Ada's turn ended: its session exited")])
+          [("ada", "Status only: the job is landing.")])
+    check("...and the ending is a mark, not a line",
+          [m["text"] for m in server.threads.marks_for(tid)],
+          ["Ada's turn ended: its session exited"])
 
     # 5. the broker stopping (2026-11-19, batch B step 2): a turn it cuts
     # after words posts them and its line; one it never starts posts nothing
@@ -465,9 +471,10 @@ async def main():
     new = threads.read(tid)[1][before:]
     check("a turn the broker's stop cuts after words, and one it never starts",
           [(m["author"], m["text"]) for m in new],
-          [(OWNER, "go"), ("ada", "Working on it."),
-           ("system", "Ada's turn ended: the broker restarted"),
-           (OWNER, "still there?")])
+          [(OWNER, "go"), ("ada", "Working on it."), (OWNER, "still there?")])
+    check("...the cut turn's ending is a mark on it",
+          [m["text"] for m in server.threads.marks_for(tid)],
+          ["Ada's turn ended: the broker restarted"])
     kept = inputs_mod.items(tid, "ada")
     check("...the cut turn's input is settled; the unstarted one is kept, unsent",
           [(i["reason"], "sent" in i) for i in kept], [(new[-1]["id"], False)])

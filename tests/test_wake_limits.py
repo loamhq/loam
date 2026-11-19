@@ -5,13 +5,15 @@ Until 2026-11-18 a lane file over the limit refused the wake from a date in
 lib/loam_memory.py (``OVER_LIMIT_REFUSED_FROM``, 2026-09-11); the owner's
 word of 2026-11-08 had made the limit a warning, and that refusal kept one
 persona's reflection dark two nights over 9 characters. Now an over-limit
-file is reported -- the failure log and comms, as the nightly lane check
-reports one -- the line says the lane went ahead, and it did. The calendar
+file is reported in the failure log -- and, since 2026-11-19, told to
+nobody else: it is the persona's own run, which hears of it at its next
+turn (lib/loam_lane_notice.py), and nothing reaches the board -- the line
+says the lane went ahead, and it did. The calendar
 no longer matters, and the scenarios are driven on either side of the old
 date to prove it.
 
 Below the limit: a file past ``NEAR_LIMIT_CHARS`` gets one warning line in
-the log, no comms line, and the wake runs. Driven here on both sides of
+the log, nothing told, and the wake runs. Driven here on both sides of
 that number and both sides of the limit, and written twice on one day to
 prove the line is once a night. A MISSING lane file still refuses (exit 3):
 that is a layer that will not load, not a size.
@@ -28,12 +30,16 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from datetime import date, timedelta
 from pathlib import Path
+
+os.environ.setdefault("LOAM_ATTENTION_DIR", tempfile.mkdtemp(prefix="loam-wake-limits-attention-"))
+os.environ.setdefault("LOAM_WAITERS_DIR", os.environ["LOAM_ATTENTION_DIR"] + "/waiters")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
@@ -104,24 +110,28 @@ def stub(wake, launched: list, today: date) -> None:
 
 
 def inbox(vault: Path) -> tuple[str, str]:
-    """(failure log, comms) as text, empty where the file does not exist."""
+    """(failure log, the board and every fact told, as one text), empty
+    where nothing was written."""
     out = []
     for name in ("loam-wake-failures.md", "comms.md"):
         path = vault / "00_INBOX" / "from-agents" / name
         out.append(path.read_text(encoding="utf-8") if path.exists() else "")
-    return out[0], out[1]
+    attention = Path(os.environ["LOAM_ATTENTION_DIR"])
+    told = "".join(f"**{AGENT}** " + json.loads(p.read_text())["fact"] + "\n"
+                   for p in sorted(attention.glob("2*.json"))
+                   if AGENT in p.read_text())
+    return out[0], out[1] + told
 
 
 def scenario(label: str, reflection: str, today: date, expect_code,
              expect_note, expect_comms: bool | None = None):
     """One wake against one lane file.
 
-    ``expect_comms`` is whether a line must reach comms.md: a failure or an
-    over-limit report does, a near-limit warning must NOT. Defaults to
-    following ``expect_note``, which is right for every case but the warning.
+    ``expect_comms`` is whether anything reaches the board or the system
+    persona: since 2026-11-19 never, for a persona's own run.
     """
     if expect_comms is None:
-        expect_comms = expect_note is not None
+        expect_comms = False
     root = Path(tempfile.mkdtemp(prefix="loam-wake-test-"))
     launched = []
     try:
@@ -199,7 +209,7 @@ try:
          "A warning, not a refusal" in text1),
         ("both wakes ran", first == 0 and second == 0 and len(launched) == 2),
         ("one line per night, not one per wake", len(warning_lines) == 1),
-        ("nothing reached comms", f"**{AGENT}**" not in comms2),
+        ("nothing reached the board or anyone", f"**{AGENT}**" not in comms2),
     ]
     for label, ok in checks:
         results.append(ok)

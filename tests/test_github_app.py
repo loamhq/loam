@@ -35,6 +35,10 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+# A fault's fact for the system persona lands in scratch, never the box's.
+os.environ.setdefault("LOAM_ATTENTION_DIR", tempfile.mkdtemp(prefix="loam-attention-"))
+os.environ.setdefault("LOAM_WAITERS_DIR", os.environ["LOAM_ATTENTION_DIR"] + "/waiters")
+
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
@@ -508,11 +512,18 @@ async def main(root: Path, fake_url: str) -> None:
     data["user"]["token_expires_at"] = iso(time.time() + 6 * 3600)  # no refresh due
     gh.save(data)
     wrote = preflight.github_check(vault, today="2026-10-01")
-    comms = (vault / "00_INBOX" / "from-agents" / "comms.md").read_text()
+    attention = Path(os.environ["LOAM_ATTENTION_DIR"])
+
+    def told() -> str:
+        """What the system persona was told (lib/loam_attention.py)."""
+        return "\n".join(json.loads(p.read_text())["fact"]
+                         for p in sorted(attention.glob("2*.json")))
+    comms = told()
     check("test_nightly_refresh_near_expiry: one warning",
           len(wrote), 1)
-    check("...an Important line in comms",
-          "## Important\n\n- " in comms and "the GitHub authorization expires in" in comms,
+    check("...a fact for the system persona, nothing on the board",
+          "the GitHub authorization expires in" in comms
+          and not (vault / "00_INBOX" / "from-agents" / "comms.md").exists(),
           True)
     check("...once a night: the next preflight of the date does nothing",
           preflight.github_check(vault, today="2026-10-01"), [])
@@ -525,8 +536,7 @@ async def main(root: Path, fake_url: str) -> None:
     wrote = preflight.github_check(vault, today="2026-10-02")
     check("test_nightly_installation_gone: one warning, the installation",
           [("installation is gone" in w) for w in wrote], [True])
-    comms = (vault / "00_INBOX" / "from-agents" / "comms.md").read_text()
-    check("...in comms", "installation is gone" in comms, True)
+    check("...told", "installation is gone" in told(), True)
     status, sick = await request(server, "GET", base)
     SHAPES["unhealthy"] = sick
     check("...and the page sees status unhealthy",

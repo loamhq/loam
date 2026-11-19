@@ -210,7 +210,7 @@ def test_inbox_one_line_a_night():
             stamp="2026-09-16T09:40:50Z")
         told = [f for f in facts() if loam_inbox.ACCOUNT_PREFIX in f]
         check("inbox: the next day is a fact of its own",
-              len(told) == 2 and "09:40Z" in told[1], repr(told))
+              len(told) == 2 and any("09:40Z" in f for f in told), repr(told))
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

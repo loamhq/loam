@@ -247,22 +247,30 @@ async def main():
                  {"agent": "cleo", "status": "needs_input"},
                  {"agent": "ada", "status": "working"}]
     fake.full_for = 3
+    stream = server.threads.listen(tid)
     got = await say(server, tid, "@cleo how are you?")
-    texts = [(m["author"], m["text"]) for m in got["messages"]][-3:]
-    check("a turn at a busy cap says it is waiting, once, then answers",
-          texts,
-          [(OWNER, "@cleo how are you?"),
-           ("system", "Cleo is waiting for a free seat: three others are "
-                      "mid-turn and Cleo is waiting on you. I'll post as soon "
-                      "as one frees up."),
-           ("cleo", "cleo here")])
+    texts = [(m["author"], m["text"]) for m in got["messages"]][-2:]
+    check("a turn at a busy cap answers, with no waiting line in the record",
+          texts, [(OWNER, "@cleo how are you?"), ("cleo", "cleo here")])
+    waits = []
+    while not stream.empty():
+        e = stream.get_nowait()
+        if e.get("type") == "turn.waiting":
+            waits.append(e["text"])
+    check("...the wait is state on the turn, said once",
+          waits, ["Cleo is waiting for a free seat: three others are "
+                  "mid-turn and Cleo is waiting on you. I'll post as soon "
+                  "as one frees up."])
 
     engine_mod.CAP_WAIT_S = 0.05
     fake.full_for = 10 ** 6
     fake.busy = [{"agent": "iris", "status": "working"}] * 4
     got = await say(server, tid, "@cleo again?")
-    failed = got["messages"][-1]["text"]
-    check("past the wait the turn fails in a plain sentence",
+    check("past the wait nothing is added to the record but his message",
+          got["messages"][-1]["text"], "@cleo again?")
+    failed = next((m["text"] for m in server.threads.marks_for(tid)
+                   if m["persona"] == "cleo"), "")
+    check("past the wait the turn fails in a plain sentence, a mark on it",
           failed.startswith("Cleo couldn't get a seat: the box stayed full"),
           True)
     check("...naming who held the seats, with no route and no DELETE",
