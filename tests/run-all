@@ -131,6 +131,16 @@ def main() -> int:
             os.environ["LOAM_THREADS_STATE"] = os.path.join(stores, "threads")
         if not os.environ.get("LOAM_VAULT"):
             os.environ["LOAM_VAULT"] = os.path.join(stores, "vault")
+    # The engineer's delivery records and the broker's quiet-route mark
+    # (2026-11-18): every test that starts a broker runs its delivery pass,
+    # which marks the route and delivers what it finds owed. Against the
+    # owner's state that made `route_live` true for a test's lifetime (the
+    # landing of job 20261118-213751-94e2c7f7 left such a mark) and could
+    # deliver, or drop as "thread gone", a real job's result.
+    waiters = None
+    if not os.environ.get("LOAM_WAITERS_DIR"):
+        waiters = tempfile.mkdtemp(prefix="loam-test-waiters-")
+        os.environ["LOAM_WAITERS_DIR"] = waiters
     # And the layout the suite was written against (2026-11-18): the
     # install's own configuration, with the vault's folder names and the
     # time zone the tests' fixtures spell out laid over it. Found by the
@@ -166,6 +176,8 @@ def main() -> int:
             shutil.rmtree(settings, ignore_errors=True)
         if stores:
             shutil.rmtree(stores, ignore_errors=True)
+        if waiters:
+            shutil.rmtree(waiters, ignore_errors=True)
         if fixture:
             shutil.rmtree(fixture, ignore_errors=True)
 

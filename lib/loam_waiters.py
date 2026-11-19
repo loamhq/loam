@@ -310,10 +310,29 @@ def owed(proc: Path = PROC) -> list[dict]:
 ROUTE = STATE / "route"
 
 
+BROKER_UNIT = "loam-session-broker.service"
+
+
+def in_broker_unit(pid: int, proc: Path = PROC) -> bool:
+    try:
+        return BROKER_UNIT in (proc / str(pid) / "cgroup").read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
 def mark_route(pid: int | None = None) -> None:
     """The broker's word, at the start of its delivery pass, that results
-    owed to a thread go back as input with nothing posted. Fail-soft."""
+    owed to a thread go back as input with nothing posted. Fail-soft.
+
+    The install's own route is marked only from the broker's unit: a test
+    or a probe that starts a broker of its own (the suite has dozens) would
+    otherwise make every brief from a thread return at once for its
+    lifetime, while the real broker might not deliver that way. Found on
+    the landing of 2026-11-18. With ``LOAM_WAITERS_DIR`` set, the caller
+    has its own records and marks freely."""
     pid = os.getpid() if pid is None else pid
+    if not os.environ.get("LOAM_WAITERS_DIR") and not in_broker_unit(pid):
+        return
     try:
         STATE.mkdir(parents=True, exist_ok=True)
         tmp = ROUTE.with_suffix(".tmp")

@@ -193,6 +193,11 @@ w.ROUTE.write_text(json.dumps({"pid": os.getpid(), "start": "1"}))
 check("...and not once that pid is another process (its start differs)",
       w.route_live(), False)
 w.ROUTE.unlink()
+_kept = os.environ.pop("LOAM_WAITERS_DIR")
+w.mark_route()
+os.environ["LOAM_WAITERS_DIR"] = _kept
+check("...and the install's own route is marked only from the broker's unit",
+      (w.ROUTE.exists(), w.in_broker_unit(os.getpid())), (False, False))
 
 
 # -- 2. bin/engineer-job ------------------------------------------------------
