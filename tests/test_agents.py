@@ -61,8 +61,7 @@ for who, emoji in (("ada", "🧱"), ("iris", "🪻")):
         (ws / f).write_text(f"{who} {f}\n")
     (ws / "agent.json").write_text(json.dumps({
         "name": who, "display": who.capitalize(), "emoji": emoji,
-        "workspace": str(ws), "vault": str(TMP / "vault"),
-        "wake_schedule": "03:20", "wake_timezone": "America/Los_Angeles"},
+        "workspace": str(ws), "vault": str(TMP / "vault")},
         indent=2, ensure_ascii=False) + "\n")
     (ws / "crons" / "reflection.md").write_text(
         "---\nlane: reflection\nschedule: daily at 03:20 PT\nenabled: true\n"
@@ -371,9 +370,12 @@ async def main():
         check("agent.json carries its name and no emoji, in the one order",
               card("juniper")["display"] == "Juniper" and "emoji" not in card("juniper")
               and list(card("juniper"))[:3] == ["name", "display", "workspace"], card("juniper"))
-        check("provisioned at a free wake",
-              PROVISIONED == [("juniper", card("juniper")["wake_schedule"])]
-              and card("juniper")["wake_schedule"] != "03:20", PROVISIONED)
+        check("provisioned at a free wake, read off the others' records",
+              len(PROVISIONED) == 1 and PROVISIONED[0][0] == "juniper"
+              and PROVISIONED[0][1] != "03:20", PROVISIONED)
+        check("agent.json carries no copy of the wake's time",
+              "wake_schedule" not in card("juniper")
+              and "wake_timezone" not in card("juniper"), card("juniper"))
         status, body = await http(port, "GET", "/v1/agents")
         check("it is in /v1/agents (Chats and every picker)",
               {"id": "juniper", "name": "Juniper", "face": None}

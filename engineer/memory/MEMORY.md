@@ -2237,3 +2237,114 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Seen, not fixed:** `github-orgs.test.js` fails a test or more now and
   then while `tests/run-all` loads the CPU beside it; 0 of 8 on a quiet box,
   on `main` and on the branch alike.
+- **A test with the fixture config manages the box's real plugin units.**
+  `loam_plugin_servers.managed()` is true when Yours is its config's
+  default, and under `tests/run-all`'s fixture config a scratch Yours is.
+  `test_to_market` installs and removes Dictation and Read aloud; once the
+  listed copies had servers, every run of it (this job's, and every other
+  job's landing after it reached `main`) stopped the live
+  `loam-plugin-dictation`/`read-aloud` units until the five-minute
+  reconcile restarted them (2026-11-19, 08:56 to 10:24 PT, repeatedly).
+  `run-all` now sets `LOAM_PLUGIN_UNITS=0` unless a test says otherwise.
+  Find such a leak with `journalctl --user | grep "Stopped loam-plugin-"`
+  against the landing log's test windows.
+- **A page plugin's listener on `health.changed` runs on every health
+  read**; one that always called `host.schedule()` after a fetch made other
+  page tests (GitHub's cards) fail under a loaded landing and never alone.
+  Redraw only when the answer changed.
+- **`pgrep -f "engineer-job --land"` matches the job's own session** (the
+  prompt names it). Wait on a pid, or on the landing log.
+
+## 2026-11-19 — Signed releases (docs/signing.md)
+
+- **Releases are SSH-signed git tags**, checked with `ssh-keygen -Y
+  find-principals` then `-Y verify -n git` over the tag object cut at its
+  `-----BEGIN SSH SIGNATURE-----` line (what git signs). That needs git and
+  OpenSSH only, and agrees with `git verify-tag` (the test proves it). The
+  verifier also checks the tag object's own `tag` header, because a signed
+  object can be pushed under another release's ref.
+- **The trusted keys are HEAD's committed `docs/releases/signers`**, never the
+  incoming tree's. The move goes to the verified object's commit, because a
+  page `check` during an apply force-fetches the tag ref again.
+- **No key ships yet.** With an empty file nothing is checked and every side
+  says so. Where the private key lives is the maintainers' call: the options
+  table is in docs/signing.md. Until a key is in the file, `cut_release`
+  tags lightweight as before.
+- **`install.sh` cannot import the verifier** (it lives in the unverified
+  clone), so it carries a shell copy and its own key block, which
+  `tests/test_signing.py` keeps equal to the file. Run install.sh in tests
+  with `unshare -r` (uid 0 without root) plus `LOAM_INSTALL_STATE` and
+  `LOAM_INSTALL_LOG`. To stop at the handover, put a `python3` shim first in
+  PATH that catches `*/bin/loam-install`.
+- **A tampered-but-signed tag for tests**: `git cat-file tag <signed> | sed
+  '1s/.*/object <other>/' | git hash-object -t tag -w --stdin`, then
+  `update-ref`. git accepts the object; the signature then fails.
+- **Installs use `--no-install-recommends`**, so git's recommended
+  openssh-client is not guaranteed. It is now in APT and in install.sh's
+  first needs. Any box reached over SSH has it anyway.
+- **A new top-level entry is missing from a landing's test run**
+  (`platform_argv` binds only the top-level entries that already exist in the
+  canonical checkout). The signers file was first `keys/release-signers`, and
+  the landing failed with FileNotFoundError, though every test passed in the
+  job tree. It is now `docs/releases/signers`. Put a new file inside an
+  existing top-level folder, or expect the first landing to fail.
+
+## 2026-11-19 — the daily reflection is an ordinary record (batch B step 4)
+
+- **`loam-wake-<agent>.service` is the reconciler's now**, rendered from
+  `crons/reflection.md` beside its timer (`loam_cron.reflection_service`).
+  The timer text was kept byte-identical on purpose: a changed timer is only
+  re-cut by daemon-reload, but an unchanged one is no risk at all to the
+  night's grid. The old provision service carried `[Install]
+  WantedBy=default.target`; it was never enabled (checked `is-enabled` on all
+  seven), so dropping it left no stray wants link.
+- **The record's body is the instruction.** `loam_cron.reflection_default()`
+  is Loam's text, rendered with `lc.OWNER_NAME`; a body that is empty or one
+  of `REFLECTION_PLACEHOLDERS` is told the default, and `bin/provision`
+  replaces a placeholder body (`loam_schedule.adopt_default`), so every
+  install moves on its next update. Unmapped agents still get
+  `_reflection.md` appended as their lane file (what loads is batch A's).
+- **A refused direct pause must not stop the wake.** `enabled_now` read the
+  workspace file, so a persona writing `enabled: false` (refused by the
+  reconciler) would still have kept bin/wake from running. The reflection's
+  switch and instruction are read from the accepted copy
+  (`loam_schedule.reflection_text`) when the workspace is the box's own.
+- **The owner's word through the settings route** is `thread` + `yes`
+  (an owner message in a thread the persona is in, < 1 h, from a
+  conversation, each taken once), reusing `loam_agents.check_yes`. It cannot
+  tell whether the message asked for this; the event names it
+  (`relayed_by`, `yes`).
+- **`wake_schedule` is gone from agent.json.** Its time is
+  `loam_schedule.wake_time(agent)`; `bin/provision <agent>` takes the time
+  only for a new agent (and checks it agrees if given). Live agent.json files
+  lose the key on their next provision.
+- **`test_boundary_guard.py`'s engineer cases fail in any job tree run by
+  hand under `tests/run-all`** (on untouched main too, once
+  `engineer/agent.json` is present: the sealed config's roots are not the
+  tree). A /tmp checkout without `engineer/agent.json` skips them, which
+  looks like a pass. Trust the landing's run for that file.
+- **A test's leak outlives its fix by the trees that copied it.** Four
+  job trees had merged the leaky test in the seven minutes before the fix
+  landed, and a hijacked unit stays *loaded* (a scratch folder, port
+  9100), which the reconcile never touched. The runtime side now heals it:
+  `reconcile` restarts a wanted unit whose `WorkingDirectory` is not its
+  plugin's folder (`moved` in its answer). Fix the runtime, not only the
+  test, when a test can reach live state.
+
+## 2026-11-19 — the library is the one description of Loam
+
+- **`docs/library/` is how Loam describes itself**, to agents and the owner
+  (`loam-how-it-works` first). The Loam project file now says a job that
+  changes what it describes updates it in the same job and names the page
+  in the receipt; nothing checks this, by design.
+- **A sentence added to the source role reaches project engineers** through
+  `render_craft`: it must avoid `CRAFT_FORBIDDEN` words (Loam, vault,
+  persona, the owner's name) or every project render fails, and it makes
+  `check-drift` ask for `bin/provision --project <name> --rerender` on each
+  project. A Loam-only rule belongs in the project file, which renders to
+  nobody else.
+- **Crons are `enabled: true` plus `reason:`**, live within a minute
+  (`lib/loam_schedule.py`); `approved:` was retired 2026-10-14 and only
+  still reads as enabled for an unmigrated file.
+- **Plugin `touches.record` takes `bypass`** as well as none/read/write
+  (`lib/loam_plugins.RECORD`); the plugin skill had left it out.

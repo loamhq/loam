@@ -78,10 +78,12 @@ units: dict[str, str] = {}
 static = loam_units.rendered(AGENTS / "systemd")
 units["reviewer"] = static["loam-reviewer.service"]
 
-prov = load("provision_memtest", AGENTS / "bin" / "provision")
-units["wake"] = prov.wake_units("iris", Path("/w"), "03:00")[0]
-
 import loam_cron  # noqa: E402
+units["wake"] = loam_cron.render_units(loam_cron.Cron(
+    agent="iris", display="Iris", name="reflection", workspace=Path("/w"),
+    path=Path("/w/crons/reflection.md"), schedule_text="daily at 03:00 PT",
+    oncalendar="*-*-* 03:00:00 America/Los_Angeles", enabled=True,
+    body_chars=10, kind="reflection"))[0]
 cron = loam_cron.Cron(agent="iris", display="Iris", name="x", workspace=Path("/w"),
                       path=Path("/w/crons/x.md"), schedule_text="daily at 09:00 PT",
                       oncalendar="*-*-* 09:00:00 America/Los_Angeles",

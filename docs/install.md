@@ -27,6 +27,13 @@ took when it is done. Every line it prints is meant for someone
 who has never used a terminal; what it runs goes to
 `/var/log/loam-install.log` (root, 0600).
 
+**What it checks** (docs/signing.md): the release it clones must be a tag
+signed by one of the maintainer keys written into `install.sh`, checked
+with `git` and `ssh-keygen` before anything from the clone runs. If the check
+fails, the clone is removed and it stops (exit 3) with the reason. The script
+itself is trusted as it was served. While `install.sh` carries no key, it
+says the release is not checked.
+
 **Run it again at any time.** Each step writes
 `/var/lib/loam/install/<n>-<step>.done` when it has finished, and a run
 starts at the first step without one. A step that stopped says what to do,

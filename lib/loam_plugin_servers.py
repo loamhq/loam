@@ -363,9 +363,25 @@ def loaded_units() -> list[str]:
     return out
 
 
+def _folders(pids: list[str]) -> dict[str, str]:
+    """The folder each loaded unit runs in (its WorkingDirectory)."""
+    if not pids:
+        return {}
+    done = run(["systemctl", "--user", "show", "--no-pager", "-p", "WorkingDirectory",
+                *[unit(p) for p in pids]])
+    blocks = done.stdout.strip("\n").split("\n\n") if done.stdout.strip() else []
+    out = {}
+    for pid, block in zip(pids, blocks):
+        for line in block.splitlines():
+            if line.startswith("WorkingDirectory="):
+                out[pid] = line.split("=", 1)[1]
+    return out
+
+
 def reconcile() -> dict:
     """Start every wanted server whose unit is not loaded; stop every loaded
-    unit no longer wanted. A failed unit is loaded and is left alone."""
+    unit no longer wanted. A failed unit is loaded and is left alone, unless
+    it runs from another folder than its plugin's (below)."""
     if not managed():
         return {"managed": False, "started": [], "stopped": []}
     # The contributed timers too (2026-11-14, first release L4): a plugin
@@ -395,8 +411,21 @@ def reconcile() -> dict:
                 started.append(pid)
             except Exception as exc:  # noqa: BLE001 -- one plugin never stops the rest
                 errors[pid] = str(exc)
+    # A loaded unit that runs from another folder than its plugin's is not
+    # this plugin's server: a test's scratch copy started under the real
+    # unit name, then its folder removed (2026-11-19, Dictation and Read
+    # aloud, until someone restarted them by hand). Started afresh from its
+    # own folder, running or failed.
+    moved = []
+    for pid, folder in sorted(_folders(sorted(set(want) & loaded)).items()):
+        if folder and folder != str(want[pid]["folder"]):
+            try:
+                start(pid, want[pid], fresh=True)
+                moved.append(pid)
+            except Exception as exc:  # noqa: BLE001
+                errors[pid] = str(exc)
     for pid in sorted(loaded - set(want)):
         stop(pid)
         stopped.append(pid)
-    return {"managed": True, "started": started, "stopped": stopped,
+    return {"managed": True, "started": started, "stopped": stopped, "moved": moved,
             "errors": errors, "running": sorted(set(want) & (loaded | set(started)))}

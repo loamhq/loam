@@ -18,8 +18,11 @@ What it proves, each against the timer the manager actually holds:
   - the one-off caps: 10 minutes to 30 days ahead, five pending
   - a one-off fires once from its real timer, is marked done, and its timer
     is removed; a done record does not launch
-  - the migration: `approved:` becomes `enabled: true`, the reflection gains
-    a record whose timer is byte-identical to the one provision wrote
+  - the migration: `approved:` becomes `enabled: true`
+  - the daily reflection (2026-11-19): its service and timer from its record,
+    the timer byte-identical to the one that stood; Loam's default for a
+    placeholder body; a persona's pause refused by every route and the
+    owner's accepted; archiving takes both units down
 
 Run: python3 tests/test_schedule.py
 """
@@ -70,8 +73,7 @@ UNITS = MANAGER.unit_dir
 for name in (AGENT, OTHER):
     (LABS / name / "crons").mkdir(parents=True)
     (LABS / name / "agent.json").write_text(json.dumps(
-        {"name": name, "display": name.capitalize(), "wake_schedule": "02:00",
-         "wake_timezone": "America/Los_Angeles"}, indent=2) + "\n")
+        {"name": name, "display": name.capitalize()}, indent=2) + "\n")
 
 # The wake a fire launches: records the fire through the same call bin/wake
 # makes, pointed at this scratch box.
@@ -320,14 +322,13 @@ try:
                  "OnCalendar=*-*-* 02:00:00 America/Los_Angeles\nPersistent=false\n"
                  f"Unit=loam-wake-{OTHER}.service\n\n[Install]\n"
                  "WantedBy=timers.target\n")
-    # The reflection's timer names loam-wake-OTHER.service, which provision
-    # writes for a real agent. Without one, systemd logs "Failed to start
-    # loam-wake-zzother<pid>.timer" on every landing's test run (seen on
-    # every landing through 2026-11-09). A stub that is never due in the
-    # test's few minutes; the finally below removes it with the rest.
+    # The units as they stood before 2026-11-19: the timer the record
+    # rendered, the service bin/provision wrote.
+    (UNITS / f"loam-wake-{OTHER}.timer").write_text(old_timer)
     (UNITS / f"loam-wake-{OTHER}.service").write_text(
-        "[Unit]\nDescription=test stub for the reflection timer\n\n"
-        "[Service]\nType=oneshot\nExecStart=/bin/true\n")
+        "[Unit]\nDescription=provision's service, before the record had it\n\n"
+        "[Service]\nType=oneshot\nExecStart=/bin/true\n\n[Install]\n"
+        "WantedBy=default.target\n")
     SD.reload()
     ls.migrate([OTHER], systemd=SD)
     migrated = (LABS / OTHER / "crons" / "audit.md").read_text()
@@ -337,23 +338,109 @@ try:
     check("  the audit's timer is installed",
           next_elapse(f"loam-cron-{OTHER}-audit").startswith("Sun"),
           list_timer(f"loam-cron-{OTHER}-audit"))
-    check("  reflection record's timer is byte-identical to provision's",
+    check("  migrate no longer makes a reflection record",
+          not (LABS / OTHER / "crons" / "reflection.md").exists())
+
+    # -- the daily reflection: an ordinary record (2026-11-19) --------------------
+    placeholder = loam_cron.REFLECTION_PLACEHOLDERS[0]
+    head = ("---\nlane: reflection\nschedule: daily at 02:00 PT\n"
+            "enabled: true\n---\n")
+    ls.change(OTHER, "reflection", head + placeholder + "\n", actor="engineer",
+              lane="engineer", reason="as the live records stand", systemd=SD)
+    service = (UNITS / f"loam-wake-{OTHER}.service").read_text()
+    check("reflection: its timer is byte-identical to the one that stood",
           (UNITS / f"loam-wake-{OTHER}.timer").read_text() == old_timer)
+    check("  its service is the record's: bin/wake on the workspace, no [Install]",
+          f"ExecStart={STUB} {LABS / OTHER}\n" in service
+          and "[Install]" not in service and "--cron" not in service
+          and "OnFailure=loam-wake-failed@%N.service" in service, service)
+    check("  a placeholder body is told Loam's default",
+          loam_cron.reflection_instruction(head + placeholder + "\n")
+          == loam_cron.reflection_default().strip())
+    ls.adopt_default(OTHER, systemd=SD)
+    text = (LABS / OTHER / "crons" / "reflection.md").read_text()
+    check("  adopt_default: the body is Loam's default, the header as it was",
+          text == head + loam_cron.reflection_default(), text)
+    check("  ...and a second run does nothing", ls.adopt_default(OTHER, systemd=SD) is None)
+    check("  wake_time reads the record", ls.wake_time(OTHER) == "02:00",
+          ls.wake_time(OTHER))
+
+    try:
+        ls.set_key(OTHER, "reflection", "enabled", "false", actor=OTHER,
+                   lane="conversation", reason="I would rather sleep", systemd=SD)
+        check("  a persona's own pause of its reflection is refused", False)
+    except ls.Refused as exc:
+        check("  a persona's own pause of its reflection is refused",
+              str(exc) == ls.REFLECTION_OWNERS, str(exc))
+    check("  ...the record and its timer stand",
+          "enabled: true" in (LABS / OTHER / "crons" / "reflection.md").read_text()
+          and (UNITS / f"loam-wake-{OTHER}.timer").exists())
+    try:
+        ls.set_key(OTHER, "reflection", "enabled", "false", actor="engineer",
+                   lane="engineer", reason="asked by a persona", systemd=SD)
+        check("  nor may the engineer turn it off", False)
+    except ls.Refused as exc:
+        check("  nor may the engineer turn it off", True, str(exc)[:60])
+    try:
+        ls.change(OTHER, "reflection", None, actor=OTHER, lane="conversation",
+                  reason="no more", systemd=SD)
+        check("  a persona's delete of its reflection is refused", False)
+    except ls.Refused as exc:
+        check("  a persona's delete of its reflection is refused",
+              str(exc) == ls.REFLECTION_OWNERS, str(exc))
+
+    # A direct edit of the file, as an agent's own Write would make it.
+    accepted = (LABS / OTHER / "crons" / "reflection.md").read_text()
+    (LABS / OTHER / "crons" / "reflection.md").write_text(
+        accepted.replace("enabled: true", "enabled: false\nreason: quiet week"))
+    ls.reconcile([OTHER], systemd=SD)
+    refused = last_event(kind="refused", agent=OTHER, record="reflection")
+    check("  a persona's direct pause in the file is refused by the reconciler",
+          refused.get("direct") and refused.get("why") == ls.REFLECTION_OWNERS,
+          show(refused))
+    check("  ...the timer stands and the wake still runs",
+          (UNITS / f"loam-wake-{OTHER}.timer").exists()
+          and ls.enabled_now(LABS / OTHER, "reflection")[0])
+    (LABS / OTHER / "crons" / "reflection.md").write_text(accepted)
+
     ls.set_key(OTHER, "reflection", "schedule", "daily at 01:40 PT",
                actor=OTHER, lane="conversation", reason="earlier", systemd=SD)
-    check("  moving the reflection moves its timer and agent.json",
+    check("  the persona moves its time, and the timer moves",
           "OnCalendar=*-*-* 01:40:00" in (UNITS / f"loam-wake-{OTHER}.timer").read_text()
-          and json.loads((LABS / OTHER / "agent.json").read_text())["wake_schedule"] == "01:40")
+          and ls.wake_time(OTHER) == "01:40"
+          and "wake_schedule" not in json.loads((LABS / OTHER / "agent.json").read_text()))
     try:
         ls.change(OTHER, "reflection", None, actor=OWNER, lane="conversation",
                   systemd=SD)
-        check("  the reflection's record cannot be deleted", False)
+        check("  the reflection's record is not deleted, even by the owner", False)
     except ls.Refused as exc:
-        check("  the reflection's record cannot be deleted", True, str(exc)[:50])
+        check("  the reflection's record is not deleted, even by the owner",
+              "enabled: false" in str(exc), str(exc)[:60])
+
+    # Archived: both units down; restored: both back, from the same record.
+    card = json.loads((LABS / OTHER / "agent.json").read_text())
+    (LABS / OTHER / "agent.json").write_text(json.dumps(
+        {**card, "archived": {"at": "2026-11-19T00:00:00Z"}}) + "\n")
+    ls.reconcile([OTHER], systemd=SD)
+    check("  archiving takes its service and timer down",
+          not (UNITS / f"loam-wake-{OTHER}.timer").exists()
+          and not (UNITS / f"loam-wake-{OTHER}.service").exists())
+    (LABS / OTHER / "agent.json").write_text(json.dumps(card) + "\n")
+    ls.reconcile([OTHER], systemd=SD)
+    check("  ...and restoring brings both back",
+          (UNITS / f"loam-wake-{OTHER}.timer").exists()
+          and (UNITS / f"loam-wake-{OTHER}.service").exists())
+
     ls.set_key(OTHER, "reflection", "enabled", "false", actor=OWNER,
-               lane="conversation", systemd=SD)
-    check("  pausing the reflection removes its timer",
-          not (UNITS / f"loam-wake-{OTHER}.timer").exists())
+               lane="app", systemd=SD)
+    check("  the owner's pause is accepted, and takes service and timer down",
+          not (UNITS / f"loam-wake-{OTHER}.timer").exists()
+          and not (UNITS / f"loam-wake-{OTHER}.service").exists()
+          and not ls.enabled_now(LABS / OTHER, "reflection")[0])
+    ls.set_key(OTHER, "reflection", "enabled", "true", actor=OTHER,
+               lane="conversation", reason="back on", systemd=SD)
+    check("  a persona may turn it back on",
+          (UNITS / f"loam-wake-{OTHER}.timer").exists())
 
     # -- the box's own manager ---------------------------------------------------
     live = subprocess.run(

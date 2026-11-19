@@ -162,10 +162,18 @@ for unit in ("loam-session-broker.service", "loam-reviewer.service"):
     check(f"{unit}: both updaters off",
           "Environment=DISABLE_AUTOUPDATER=1" in static[unit]
           and f"Environment={AGY_OFF}" in static[unit])
-for path in ("bin/provision", "lib/loam_cron.py"):
-    text = (AGENTS / path).read_text()
-    check(f"{path}: the units it renders turn both off",
-          "Environment=DISABLE_AUTOUPDATER=1" in text and f"Environment={AGY_OFF}" in text)
+# A wake's and a cron's service are both the reconciler's (lib/loam_cron.py)
+# since 2026-11-19; bin/provision renders no unit of a persona's.
+import loam_cron  # noqa: E402
+for kind, name in (("reflection", "reflection"), ("recurring", "digest")):
+    service = loam_cron.render_units(loam_cron.Cron(
+        agent="ada", display="Ada", name=name, workspace=Path("/w"),
+        path=Path(f"/w/crons/{name}.md"), schedule_text="daily at 03:00 PT",
+        oncalendar="*-*-* 03:00:00 America/Los_Angeles", enabled=True,
+        body_chars=10, kind=kind))[0]
+    check(f"lib/loam_cron.py: the {kind} service turns both off",
+          "Environment=DISABLE_AUTOUPDATER=1" in service
+          and f"Environment={AGY_OFF}" in service)
 check("bin/engineer-job: a job's unit turns Antigravity's off",
       f'"--setenv={AGY_OFF}"' in (AGENTS / "bin" / "engineer-job").read_text())
 import loam_antigravity  # noqa: E402

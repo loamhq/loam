@@ -48,6 +48,15 @@ link that makes you the owner. It installs the newest release, and a
 firewall that lets in only SSH and the web (a firewall the server already
 has is left as it is).
 
+**What it checks.** Before anything from the release runs, the installer
+checks that the release is signed by a Loam maintainer key it carries, and
+every later update is checked against the keys the install already holds.
+The script itself cannot be checked that way: it is trusted as GitHub
+serves it from this repository. Until the first signed release, releases
+carry no key, and the installer and `loam update` say they are not checked.
+`docs/signing.md` says exactly what is checked, and how to check the script
+too.
+
 **Where your Loam lives.** One of two ways:
 
 - **On a domain you have**, for example `loam.example.com`, or `example.com`

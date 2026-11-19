@@ -60,6 +60,10 @@ SHIPPED = [ROOT / "app" / "public" / "themes", ROOT / "app" / "public" / "plugin
 os.environ["LOAM_PLUGIN_SHIPPED"] = ":".join(str(p) for p in SHIPPED)
 os.environ["LOAM_PLUGIN_GIT_BASE"] = f"file://{TMP}/git/"
 os.environ["LOAM_UI_CORE_OPTIONS"] = f"{ROOT}/app/public/theme-css.js"
+# Never the box's own plugin units: the listed copies have servers since
+# 1.1.0, and this scratch Yours is its config's default (managed). Run by
+# hand, outside tests/run-all, this was what stopped the live servers.
+os.environ["LOAM_PLUGIN_UNITS"] = "0"
 
 sys.path.insert(0, str(ROOT / "lib"))
 import loam_marketplace  # noqa: E402

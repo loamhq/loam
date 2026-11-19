@@ -49,6 +49,14 @@ code, the broker restarted again if it had been. The record says which step
 failed and that the old release is running. ``rollback`` does the same for
 the last successful apply, in one command.
 
+**A release must be signed** (2026-11-19, lib/loam_signing.py): before
+anything moves, the tag is checked against the maintainer keys in
+``docs/releases/signers`` of the release running now, and a release that
+does not verify is refused (``signature``) and never half-applied. The move
+goes to the commit the verified tag object names, not to the tag's name
+again. While the running release carries no key, nothing is checked and the
+status says so.
+
 **Release notes go to the person's agent**, never to the person as a
 changelog. A notice (``<state>/update/notices/``) is left for the broker,
 which posts one plain line in General and gives the person's default agent
@@ -89,6 +97,7 @@ import loam_agents
 import loam_broker as cfg
 import loam_config as lc
 import loam_lock
+import loam_signing
 import loam_skills as sk
 
 STATE = Path(os.environ.get("LOAM_UPDATE_STATE") or lc.STATE / "update")
@@ -307,6 +316,35 @@ def fetch_tag(tag: str) -> None:
     working tree is untouched)."""
     git("fetch", "--quiet", "--no-tags", REMOTE,
         f"+refs/tags/{tag}:refs/tags/{tag}")
+
+
+def trusted_signers() -> str | None:
+    """The maintainer keys this install trusts: ``docs/releases/signers`` as
+    the running release committed it (HEAD's, never the working tree's and
+    never the incoming release's)."""
+    return show("HEAD", f"{prefix()}{loam_signing.SIGNERS_FILE}")
+
+
+def signing() -> dict:
+    """How this install checks releases, for the status."""
+    keys = loam_signing.key_lines(trusted_signers())
+    return {"keys": len(keys), "checked": bool(keys),
+            "message": (f"Releases are checked against {len(keys)} maintainer "
+                        f"key(s) before they run." if keys else
+                        "Releases are not checked: the running release carries "
+                        "no maintainer key.")}
+
+
+def check_signature(tag: str) -> dict:
+    """Verify the fetched ``tag`` against the keys this install trusts.
+    Returns the verifier's result; raises Refusal(``signature``) when the
+    release does not verify."""
+    res = loam_signing.verify_tag(repo_top(), tag, trusted_signers())
+    if not res["ok"]:
+        raise Refusal("signature", res["message"] + " It may have been tampered "
+                      "with, so nothing was changed and it will not be applied.",
+                      reason=res["reason"], to=bare(tag))
+    return res
 
 
 def tag_of(version: str | None) -> str | None:
@@ -540,7 +578,9 @@ def notes_for(tag: str, old: str | None) -> str:
         body = git("for-each-ref", f"refs/tags/{tag}",
                    "--format=%(contents)").stdout.strip()
         body = re.sub(r"-----BEGIN [A-Z ]*SIGNATURE-----.*", "", body, flags=re.S).strip()
-        if body:
+        # A signed release's tag carries a message by necessity; the one the
+        # release step writes ("Loam <version>") is not notes.
+        if body and body != f"Loam {bare(tag)}":
             return body
     spec = f"{old}..refs/tags/{tag}" if old else f"refs/tags/{tag}"
     subjects = git("log", "--no-merges", "--format=- %s", "-n", "200", spec,
@@ -703,8 +743,29 @@ OWN_CHANGE = {
 }
 
 
+SIGNATURE_NOTE = (
+    "Loam refused the update to {to}: {message}\n\nThe release that is "
+    "running is untouched and nothing was changed. This is not a fault of "
+    "this install and not something to work around: do not move the checkout "
+    "by hand, fetch the release another way, or edit `docs/releases/signers`. "
+    "A release that does not verify against the maintainer keys this install "
+    "already holds may have been tampered with on its way here, or signed by a "
+    "key this install was never given. Tell {owner} plainly, in a sentence or "
+    "two, that Loam would not install an update it could not verify and that "
+    "nothing changed. If they want, report it to Loam's makers with their yes "
+    "(`loam report bug`). {root}/docs/signing.md says what the check is.")
+
+
 def tell_refused(tag: str | None, refusal: Refusal) -> None:
     tag = tag or refusal.detail.get("to")
+    if refusal.code == "signature":
+        notice("refused",
+               f"Loam refused the update to {bare(tag or '?')}: it could not "
+               f"verify the release's signature. Nothing was changed.",
+               SIGNATURE_NOTE.format(to=bare(tag or "?"), message=refusal.message,
+                                     owner=_owner(), root=runtime()),
+               key=f"refused:{tag}:signature:{refusal.detail.get('reason')}")
+        return
     files = refusal.detail.get("files") or []
     listing = "".join(f"\n  {f}" for f in files[:40])
     if refusal.code in OWN_CHANGE:
@@ -760,7 +821,7 @@ def current() -> dict:
     commits = local_commits(version)
     return {"version": version, "commit": head(), "branch": branch(),
             "kind": "development" if commits else "stock",
-            "local_commits": len(commits)}
+            "local_commits": len(commits), "signing": signing()}
 
 
 def blockers(kind: str, tag: str) -> Refusal | None:
@@ -810,11 +871,22 @@ def check(tell: bool = True) -> dict:
                     f"is not a release install and is not updated this way.")}
             elif newer:
                 fetch_tag(tag)
-                block = blockers(cur["kind"], tag)
-                out["blocked"] = block.as_dict() if block else None
-                out["changes"] = library_changes("HEAD", f"refs/tags/{tag}")
-                if tell:
-                    tell_available(tag, cur["version"])
+                try:
+                    out["signature"] = check_signature(tag)
+                except Refusal as bad:
+                    # A release that does not verify is never offered: the
+                    # page shows the refusal, and the person's agent is told
+                    # it was refused, not that it is available.
+                    out["signature"] = {"ok": False, **bad.detail}
+                    out["blocked"] = bad.as_dict()
+                    if tell:
+                        tell_refused(tag, bad)
+                else:
+                    block = blockers(cur["kind"], tag)
+                    out["blocked"] = block.as_dict() if block else None
+                    out["changes"] = library_changes("HEAD", f"refs/tags/{tag}")
+                    if tell:
+                        tell_available(tag, cur["version"])
         out["library"] = library_edits("HEAD")
     except Refusal as r:
         out["error"] = r.as_dict()
@@ -906,7 +978,13 @@ def preflight(target: str | None = None, accept_library_edits: bool = False) -> 
                       + ("" if bare(tag) == cur["version"]
                          else f", newer than {bare(tag)}") + ".")
     fetch_tag(tag)
-    said = version_at(f"refs/tags/{tag}")
+    # Before anything else is read from the release: its signature, against
+    # the keys of the release running now. From here on the release is the
+    # commit that verified, never the tag's name, which a later fetch (a
+    # check from the page while this runs) could re-point.
+    sig = check_signature(tag)
+    commit = sig["commit"]
+    said = version_at(commit)
     if said != bare(tag):
         raise Refusal("bad-release", f"Release {tag} says it is version {said!r} "
                       f"in its {VERSION_FILE}, so it is not a release this can "
@@ -920,8 +998,9 @@ def preflight(target: str | None = None, accept_library_edits: bool = False) -> 
         raise Refusal("library-edits", "System/Loam has edits that this update "
                       "would replace. Look at them first; a copy is kept when "
                       "you go ahead.", library=edits)
-    return {"current": cur, "tag": tag, "version": bare(tag),
-            "commit": git("rev-parse", f"refs/tags/{tag}^{{commit}}").stdout.strip(),
+    return {"current": cur, "tag": tag, "version": bare(tag), "commit": commit,
+            "signature": {k: sig.get(k) for k in ("checked", "principal",
+                                                   "fingerprint", "message")},
             "library_edits": edits}
 
 
@@ -968,11 +1047,10 @@ class Box:
 
     def agents(self) -> str:
         said = []
+        # Each by its name alone: its wake time is its reflection record's
+        # (2026-11-19), and an agent.json `wake_schedule` was only a copy.
         for name in loam_agents.live(loam_agents.every()):
-            wake = loam_agents.card(name).get("wake_schedule")
-            if not isinstance(wake, str):
-                continue
-            self._run(self.bin("provision"), name, wake)
+            self._run(self.bin("provision"), name)
             said.append(name)
         # The engineer too (2026-11-18): its role and project file come from
         # the vault, seeded from this release's and never over the owner's
@@ -1192,23 +1270,26 @@ def refresh_views() -> str:
     return f"{len(changed)} skill view(s) changed" if changed else "views current"
 
 
-def move_to(tag: str, kind: str) -> str:
+def move_to(tag: str, kind: str, commit: str | None = None) -> str:
+    """Move the checkout to release ``tag``: to ``commit``, the one its
+    signature check verified, when given."""
+    target = commit or f"refs/tags/{tag}"
     with loam_lock.live("Loam", "update"):
         if kind == "development":
             who = [] if git("config", "user.email", check=False).stdout.strip() else [
                 "-c", f"user.name={lc.AUTOCOMMIT_NAME}",
                 "-c", f"user.email={lc.AUTOCOMMIT_EMAIL}"]
             done = git(*who, "merge", "--no-edit", "-m", f"Merge Loam release {bare(tag)}",
-                       f"refs/tags/{tag}", check=False)
+                       target, check=False)
             if done.returncode:
                 git("merge", "--abort", check=False)
                 raise Refusal("conflict", f"Merging release {bare(tag)} stopped: "
                               + (done.stdout + done.stderr).strip()[-500:])
             return f"merged {tag} into {branch() or 'HEAD'}"
         if branch():
-            git("merge", "--ff-only", "--quiet", f"refs/tags/{tag}")
+            git("merge", "--ff-only", "--quiet", target)
             return f"{branch()} fast-forwarded to {tag}"
-        git("checkout", "--quiet", "--detach", f"refs/tags/{tag}")
+        git("checkout", "--quiet", "--detach", target)
         return f"checked out {tag}"
 
 
@@ -1273,6 +1354,7 @@ def _apply(target, accept_library_edits, box, run_id, by) -> dict:
     run.rec.update(from_version=cur["version"], from_commit=cur["commit"],
                    from_tag=tag_of(cur["version"]), to_version=plan["version"],
                    to_tag=tag, to_commit=plan["commit"], kind=cur["kind"],
+                   signature=plan.get("signature"),
                    library_edits={k: plan["library_edits"][k]
                                   for k in ("any", "edited", "added", "deleted")})
     run.save()
@@ -1291,7 +1373,7 @@ def _apply(target, accept_library_edits, box, run_id, by) -> dict:
         run.rec["backup"] = pending["backup"] = backup
         write_json("pending.json", pending)
         try:
-            run.step("move", move_to, tag, cur["kind"])
+            run.step("move", move_to, tag, cur["kind"], plan["commit"])
         except Refusal as r:
             run.rec["refusal"] = r.as_dict()
             _path("pending.json").unlink(missing_ok=True)
