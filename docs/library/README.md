@@ -1,10 +1,12 @@
 # Loam's library
 
 This folder is Loam's own: its skills and docs, shipped with Loam and
-**replaced whole by every update**. An edit made here is shown as a
-difference at the next update and then lost, so change a copy instead:
-copy a skill into an agent's own `skills/` (it wins for that agent) or onto
-the shared shelf beside this folder, `../skills/` (it wins for every agent).
+**replaced by every update**, all but its `data/` folder, where plugins
+keep their data and which updates leave alone. An edit made anywhere else
+here is shown as a difference at the next update and then lost, so change a
+copy instead: copy a skill into an agent's own `skills/` (it wins for that
+agent) or onto the shared shelf beside this folder, `../skills/` (it wins
+for every agent).
 
 Every page is a skill, a folder with a `SKILL.md`, so every agent on every
 provider lists it and reads it when its subject comes up:
