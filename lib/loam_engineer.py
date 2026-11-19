@@ -423,6 +423,20 @@ class Project:
         return value
 
     @property
+    def lane_of(self) -> str | None:
+        """The engineer this project is a scope of, or None for an engineer
+        of its own (2026-11-19). The app is the Loam engineer's app-only
+        scope: a folder of Loam's own checkout, so its jobs keep every
+        safeguard of a folder project (the folder, its tests, no sudo, the
+        app's deploy at landing) but are the Loam engineer's work, on its
+        provider, listed under it, and not a second engineer in Settings."""
+        if self.platform or not self.subdir:
+            return None
+        if self.root.resolve() != lc.ROOT.resolve():
+            return None
+        return "Loam"
+
+    @property
     def live_lock(self) -> str:
         """The live lock a landing of this project takes: its own name, or,
         for a folder of Loam's own checkout, Loam's, because the two land on
@@ -523,9 +537,20 @@ def engineer_settings() -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def settings_project(project: "Project") -> "Project":
+    """The engineer whose setting a job of ``project`` runs on: the Loam
+    engineer for its app-only scope (2026-11-19: one engineer, one provider
+    setting, set by the owner on its page and by a persona through the same
+    settings route), the project itself otherwise. The scope's own row from
+    before, `projects.loam-ui`, is kept in the file and read by nothing, so
+    putting the scope back is the record's and this function's to undo."""
+    return platform_project() if project.lane_of == "Loam" else project
+
+
 def engineer_choice(project: "Project", settings: dict | None = None) -> dict:
     """``{"runtime", "model", "effort", "source"}`` a new job of this
     engineer runs on. ``source`` is ``own``, ``default`` or ``record``."""
+    project = settings_project(project)
     stored = engineer_settings() if settings is None else settings
     own = (stored.get("projects") or {}).get(project.name)
     default = stored.get("default")
@@ -588,6 +613,7 @@ def tier_below(tier: str | None) -> str | None:
 def _setting_row(project: "Project", stored: dict) -> dict | None:
     """The setting row ``engineer_choice`` chose for this engineer, or
     None when it runs on its record."""
+    project = settings_project(project)
     own = (stored.get("projects") or {}).get(project.name)
     default = stored.get("default")
     if isinstance(own, dict) and own.get("provider") in RUNTIME_OF:
@@ -633,9 +659,19 @@ def tier_choice(project: "Project", runtime: str, tier: str | None,
 
 def deploy_default(project: "Project") -> bool:
     """Whether a brief that does not say `deploy` deploys at landing: the
-    engineer's "Deploy when a job lands" (2026-11-13), off unless set."""
-    own = (engineer_settings().get("projects") or {}).get(project.name)
-    return bool(isinstance(own, dict) and own.get("deploy_on_land") is True)
+    engineer's "Deploy when a job lands" (2026-11-13), off unless set. For
+    the Loam engineer's app-only scope it is Loam's own row's (since
+    2026-11-19: "Deploy the app when an app-only job lands"), and, until
+    that row says either way, the scope's old row's, so an install that had
+    turned it on for the separate app engineer keeps it on."""
+    rows = engineer_settings().get("projects") or {}
+    names = ([settings_project(project).name, project.name]
+             if project.lane_of else [project.name])
+    for name in names:
+        own = rows.get(name)
+        if isinstance(own, dict) and isinstance(own.get("deploy_on_land"), bool):
+            return own["deploy_on_land"]
+    return False
 
 
 def platform_project() -> Project:
@@ -657,9 +693,65 @@ def load_project_record(path: Path) -> Project:
     )
 
 
+# ---------------------------------------------------------------------------
+# The Loam engineer's app-only scope (2026-11-19).
+#
+# Until then the app (`app/` of Loam's checkout since 2026-11-16) had an
+# engineer of its own, `loam-ui`, registered in `projects/loam-ui.json`. The
+# owner, 2026-11-19, asked why it was separate and approved one engineer,
+# "after app-only safeguards carry over". So a brief to `Loam` with
+# `scope: app` is the app-only workflow, and the folder project is how it
+# runs: the job's session in `app/` of its tree, a landing that refuses any
+# path outside `app/`, `cd app && npm test` as its tests, no sudo
+# (NoNewPrivileges) and no account token, open to every persona as the app
+# engineer was, and `deploy` putting the landed commit on `loam-ui` alone,
+# which restarts the app's unit and never the broker. What changed is whose
+# it is: the Loam engineer's provider and tiers, its row in Settings (one
+# engineer, with the app's deploy toggle on it), its name in Activity.
+#
+# Its internal name stays `loam-ui` on purpose: it is the app's deployment
+# record, its unit, its jobs folder (`state/projects/loam-ui/jobs/`), its
+# worktrees and its receipts folder, so every job, receipt, continuation and
+# release from before is where it was and rolls back the way it did. A
+# registered record of that name is still read when it exists (the first
+# install's, with its history), and an install without one gets the same
+# scope built in, from the checkout's `app/`.
+# ---------------------------------------------------------------------------
+
+APP_LANE = "loam-ui"
+APP_SCOPE = "app"
+APP_TEST_COMMAND = "cd app && npm test"
+SCOPES = ("", "all", APP_SCOPE)
+
+
+def app_lane(registered: "dict[str, Project] | None" = None) -> "Project | None":
+    """The Loam engineer's app-only scope as a project, or None when the
+    checkout has no app. The registered record when there is one (the
+    scope's history lives under its name), else built in."""
+    if registered is None:
+        try:
+            found = load_project_record(project_record_path(APP_LANE))
+        except (OSError, ValueError, KeyError):
+            found = None
+    else:
+        found = registered.get(APP_LANE)
+    if found is not None:
+        # A project of that name that is not the app's folder (a separate
+        # repository, as it was before 2026-11-16) keeps its name, and the
+        # scope stands aside rather than take it.
+        return found if found.lane_of == "Loam" else None
+    if not (lc.ROOT / APP_SCOPE / "package.json").is_file():
+        return None
+    record = {"name": APP_LANE, "checkout": str(lc.ROOT), "subdir": APP_SCOPE,
+              "test_command": APP_TEST_COMMAND, "built_in": True}
+    return Project(APP_LANE, lc.ROOT, PROJECT_STATE / APP_LANE / "jobs",
+                   platform=False, record=record)
+
+
 def projects() -> dict[str, Project]:
-    """Every engineer this box can brief, by project name. Read from disk
-    each time, never cached, for the reason above."""
+    """Every engineer this box can brief, and the Loam engineer's app-only
+    scope, by project name. Read from disk each time, never cached, for the
+    reason above. ``engineers()`` is the same without the scope."""
     found = {"Loam": platform_project()}
     if PROJECTS_DIR.is_dir():
         for path in sorted(PROJECTS_DIR.glob("*.json")):
@@ -668,7 +760,69 @@ def projects() -> dict[str, Project]:
             except (OSError, ValueError, KeyError):
                 continue   # a half-written record is check-drift's finding
             found[project.name] = project
+    lane = app_lane(found)
+    if lane is not None:
+        found[lane.name] = lane
     return found
+
+
+def engineers() -> dict[str, Project]:
+    """The engineers, one row each: ``projects()`` without a scope of one
+    of them. What Settings lists and what a refusal names."""
+    return {n: p for n, p in projects().items() if not p.lane_of}
+
+
+def display_name(project: "Project | None") -> str:
+    """How a person reads whose job it is: `Loam (app)` for the app-only
+    scope, the project's name otherwise."""
+    if project is None:
+        return ""
+    return f"{project.lane_of} ({APP_SCOPE})" if project.lane_of else project.name
+
+
+def brief_target(name: str, scope: str = "",
+                 continue_job: str = "") -> "tuple[Project | None, str | None]":
+    """(project, None) a brief to ``name`` with ``scope`` runs as, or
+    (None, the sentence refusing it).
+
+    `Loam` with `scope: app` is the app-only scope. `loam-ui` by name is
+    the same (a persona, a cron or a thread written before 2026-11-19 still
+    says it), as is `Loam` continuing one of the scope's jobs, because a job
+    continues in the tree it ran in. A scope on any other engineer is
+    refused rather than ignored: it would read as a safeguard that is not
+    there."""
+    scope = (scope or "").strip().lower()
+    if scope not in SCOPES:
+        return None, (f"scope {scope!r} is not one the Loam engineer has: "
+                      f"`app` (the app-only workflow: `{APP_SCOPE}/` and "
+                      f"nothing else) or left out (the whole of Loam).")
+    known = projects()
+    project = known.get(name)
+    if project is None:
+        return None, None
+    lane = app_lane(known)
+    if scope == APP_SCOPE:
+        if project.platform or project.lane_of:
+            if lane is None:
+                return None, ("scope `app`: this install's checkout has no "
+                              f"`{APP_SCOPE}/`, so there is no app-only workflow "
+                              "to run. Leave scope out.")
+            return lane, None
+        return None, (f"scope `app` is the Loam engineer's app-only workflow; "
+                      f"{name} is an engineer of its own and has no scope. "
+                      f"Leave it out.")
+    if project.lane_of and scope == "all":
+        return None, (f"{name} is the Loam engineer's app-only scope, and "
+                      f"`scope: all` asks for the whole of Loam: brief `Loam` "
+                      f"with scope left out for that.")
+    if project.platform and continue_job and lane is not None \
+            and scope != "all":
+        try:
+            if job_dir(lane, continue_job).is_dir():
+                return lane, None
+        except BriefError:
+            pass
+    return project, None
 
 
 def resolve_project(key: str) -> Project | None:
@@ -800,7 +954,10 @@ def brief_refusal(project: "Project", briefed_by: str, title: str,
         f"\n"
         f"{lane} This brief's title is {title.strip()!r}.\n"
         f"\n"
-        f"Anything else for {project.name} goes to "
+        + (f"Work on the app alone is open to every persona: the same brief "
+           f"with `scope: app` changes `{APP_SCOPE}/` and nothing else, without "
+           f"sudo.\n\n" if app_lane() is not None else "")
+        + f"Anything else for {project.name} goes to "
         f"{briefers[0].capitalize()}, who asks {lc.OWNER_NAME} when it needs to."
     )
 

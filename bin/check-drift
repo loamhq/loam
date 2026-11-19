@@ -578,6 +578,8 @@ def check_projects(findings: list, prov) -> list[str]:
                              f"unreadable: {exc}"))
             continue
         names.append(project.name)
+        if project.lane_of:
+            continue   # the Loam engineer's app-only scope: check_app_scope
         for finding in runtime_findings(project):
             findings.append((f"project {project.name} runtime", str(path), finding))
         root = project.root
@@ -664,6 +666,34 @@ def check_projects(findings: list, prov) -> list[str]:
                 "it owns.",
             ))
     return names
+
+
+def check_app_scope(findings: list, prov) -> None:
+    """The Loam engineer's app-only scope (2026-11-19): its harness in
+    `app/` against what `bin/provision --engineer` renders there (the Loam
+    engineer's role, the app's shipped project file, the template's CLAUDE.md
+    and settings), and excluded from the repository. Nothing when the
+    checkout has no app."""
+    import loam_engineer as eng  # noqa: PLC0415
+    if eng.app_lane() is None or not prov.APP_PROJECT_SHIPPED.is_file():
+        return
+    if not prov.ENGINEER_ROLE_SRC.is_file():
+        return   # check_engineer reports the missing source
+    home = prov.AGENTS / eng.APP_SCOPE
+    if prov.harness_tracked(prov.AGENTS, eng.APP_SCOPE):
+        return
+    expected = prov.app_scope_render(prov.ENGINEER_ROLE_SRC.read_text(encoding="utf-8"))
+    for rel, text in expected.items():
+        compare(findings, f"app-only scope {rel}", home / rel, text)
+    exclude = prov.AGENTS / ".git" / "info" / "exclude"
+    have = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.is_file() else set()
+    missing = [f"/{eng.APP_SCOPE}/{p}" for p in prov.HARNESS_PATHS
+               if p != "memory/" and f"/{eng.APP_SCOPE}/{p}" not in have]
+    if missing:
+        findings.append((
+            "app-only scope exclude", str(exclude),
+            f"{', '.join(missing)} not excluded, so a `git add -A` puts the "
+            f"harness in the repository. `bin/provision --engineer` adds them."))
 
 
 def check_broker(findings: list) -> list[str]:
@@ -1226,6 +1256,7 @@ def main() -> int:
     check_engineer(findings, prov)
     check_reviewer(findings, prov)
     project_names = check_projects(findings, prov)
+    check_app_scope(findings, prov)
     cron_notes = check_crons(findings, names)
     broker_notes = check_broker(findings)
     deploy_notes = check_deploy(findings)

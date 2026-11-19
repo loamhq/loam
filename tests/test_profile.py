@@ -491,12 +491,15 @@ async def main():
         await http(port, "PATCH", "/v1/engineers/webapp",
                    {"provider": "claude-code", "model": "opus", "effort": "high"})
         for name, patch, label in (("prproj", {"deploy_on_land": True}, "landing by PR"),
-                                   ("Loam", {"deploy_on_land": True}, "Loam"),
                                    ("default", {"deploy_on_land": True}, "the default"),
                                    ("Loam", {"provider": "antigravity"}, "Antigravity for Loam"),
                                    ("webapp", {"speed": 1}, "a setting there is none of")):
             status, body = await http(port, "PATCH", f"/v1/engineers/{name}", patch)
             check(f"refused: {label}", status == 400, body)
+        # Loam's deploy toggle is its app-only scope's (2026-11-19): refused
+        # only where the scope has no app to deploy, as here.
+        status, body = await http(port, "PATCH", "/v1/engineers/Loam", {"deploy_on_land": True})
+        check("refused: Loam's deploy toggle with no app to deploy", status == 409, body)
         status, body = await http(port, "PATCH", "/v1/engineers/nope", {"provider": None})
         check("an engineer nobody has is a 404", status == 404, body)
         status, body = await http(port, "PATCH", "/v1/engineers/webapp", {"provider": None})

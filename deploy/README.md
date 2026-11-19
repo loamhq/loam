@@ -185,7 +185,11 @@ port = 8081                 # instead of a compose.yaml; see "Loam's own app"
 *Since 2026-11-16. Until then the app was a project of its own (the
 `loam-ui` repository, with its own engineer) deployed as a container like
 any other, with a compose file here; its code is now Loam's `app/` folder,
-and Loam runs it.*
+and Loam runs it. Since 2026-11-19 it has no engineer of its own either: app
+work is the Loam engineer's `scope: app` (lib/loam_engineer.py, "The Loam
+engineer's app-only scope"), whose `deploy` at landing runs `bin/deploy
+loam-ui up <sha> --forward-only` below — the app's unit, never the broker.
+The record, the unit and the releases keep the name `loam-ui`.*
 
 The app is Node's standard library with no dependency and no build step, so
 the container gave it a wall and little else, and the wall had a cost: held

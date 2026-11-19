@@ -1680,6 +1680,8 @@ def provision_engineer(dry: bool = False) -> None:
         index.write_text(ENGINEER_MEMORY_HEADER, encoding="utf-8")
         print(f"  seeded {index}")
 
+    provision_app_scope(role)
+
     # Trust is keyed on the GIT REPO ROOT, not the project dir
     # (measured 2026-08-25: additionalDirectories is ignored in an
     # untrusted workspace). The engineer's repo root is `agents/`,
@@ -1693,6 +1695,43 @@ def provision_engineer(dry: bool = False) -> None:
     print(f"  provisioned the engineer: project files, no units")
     print(f"  it has no timer and no unit of its own — "
           f"bin/engineer-job creates a transient one per job.")
+
+
+# The Loam engineer's app-only scope (2026-11-19; lib/loam_engineer.py,
+# `app_lane`). A job briefed `scope: app` runs its session in `app/` of its
+# tree, so the harness it reads is there: the Loam engineer's own role,
+# verbatim (it is the same engineer), the app's project file Loam ships, the
+# template's CLAUDE.md and a project engineer's settings. Rendered on every
+# install with an app, never committed (`info/exclude`, as the folder
+# project's was); `app/memory/` is the app's own, tracked, and never written.
+APP_PROJECT_SHIPPED = ENGINEER_SHIPPED / "app-project.md"
+
+
+def app_scope_render(role: str) -> dict[str, str]:
+    """What `app/` gets, path -> content. One function so provision writes
+    it and check-drift compares against it."""
+    return {
+        "CLAUDE.md": (TEMPLATE / "CLAUDE.md").read_text(encoding="utf-8"),
+        "role.md": role,
+        "project.md": APP_PROJECT_SHIPPED.read_text(encoding="utf-8"),
+        ".claude/settings.json": json.dumps(project_settings(), indent=2) + "\n",
+    }
+
+
+def provision_app_scope(role: str) -> None:
+    import loam_engineer as eng  # noqa: PLC0415
+    home = AGENTS / eng.APP_SCOPE
+    if not (home / "package.json").is_file() or not APP_PROJECT_SHIPPED.is_file():
+        return
+    if harness_tracked(AGENTS, eng.APP_SCOPE):
+        print(f"  {home} commits its harness; left alone")
+        return
+    for rel, content in app_scope_render(role).items():
+        target = home / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write_if_changed(target, content)
+    if exclude_harness(AGENTS, eng.APP_SCOPE):
+        print(f"  excluded the app-only scope's harness in {AGENTS / '.git/info/exclude'}")
 
 
 # ---------------------------------------------------------------------------

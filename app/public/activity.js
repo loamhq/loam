@@ -177,7 +177,7 @@ export function createActivity({ registry = createCoreRegistry(), api, redraw, a
         onclick: event => { event.stopPropagation(); openThread(thread) } }) : null)
   }
   function engineerMeta(job, timing) {
-    return [job.project, engineLabel(job.engine), modelLabel(providers().find(p => p.id === job.engine), job.model).name, timing && !/unknown/i.test(timing) ? timing : null].filter(Boolean).join(' · ')
+    return [job.scope ? `${job.project} ${job.scope}` : job.project, engineLabel(job.engine), modelLabel(providers().find(p => p.id === job.engine), job.model).name, timing && !/unknown/i.test(timing) ? timing : null].filter(Boolean).join(' · ')
   }
   function activityLine(job) {
     const activity = job.kind === 'engineer job' ? jobActivity({ ...job, state: 'running' }) : null

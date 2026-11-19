@@ -4445,18 +4445,21 @@ Antigravity persona's run on Claude Code on `fable` and log
      "own": null,
      "effective": {"provider": "claude-code", "model": "claude-opus-5-5", "effort": null, "source": "record"},
      "providers": ["claude-code"],
-     "deploy_on_land": null, "deploy_app": null, "lands_by": "main",
+     "deploy_on_land": false, "deploy_app": "loam-ui",
+     "deploy_label": "Deploy the app when an app-only job lands",
+     "scopes": ["app"], "lands_by": "main",
      "instructions": {"root": "vault", "path": "40_PROJECTS/Loam/engineer/projects/loam.md",
                       "system": {"root": "system", "path": "Engineer/Platform project.md"},
                       "host_path": "/home/loam/agents/engineer/project.md"},
      "jobs_running": 1},
-    {"project": "loam-ui", "platform": false, "repo": "octo-owner/loam-ui",
+    {"project": "webapp", "platform": false, "repo": "octo-owner/webapp",
      "own": {"provider": "codex", "model": null, "effort": "high"},
      "effective": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high", "source": "own"},
      "providers": ["claude-code", "codex"],
-     "deploy_on_land": false, "deploy_app": "loam-ui", "lands_by": "main",
+     "deploy_on_land": false, "deploy_app": "webapp",
+     "deploy_label": "Deploy when a job lands", "scopes": [], "lands_by": "main",
      "instructions": {"root": null, "path": null,
-                      "host_path": "/home/loam/projects/loam-ui/project.md",
+                      "host_path": "/home/loam/projects/webapp/project.md",
                       "note": "in the project's own repository, which its engineer edits; Files does not reach it"},
      "jobs_running": 0}
   ],
@@ -4471,8 +4474,17 @@ Antigravity persona's run on Claude Code on `fable` and log
 Loam's engineer is first, then the projects by name. `own` is the engineer's
 own setting (null: it follows the default, or its record); `effective` is
 what its next job runs on, `source` `own`, `default` or `record`.
-`deploy_on_land` is null where it cannot apply (Loam's engineer, a project
-landing by pull request, a project with no app). `GET /v1/engineers/<project
+`deploy_on_land` is null where it cannot apply (a project landing by pull
+request, a project with no app). **One engineer for Loam, with an app-only
+scope (2026-11-19).** The app's own engineer (`loam-ui`) is the Loam
+engineer's `scope: app` now, so it has no row: Loam's carries `scopes:
+["app"]` and the app's toggle (`deploy_on_land`, `deploy_app`, and
+`deploy_label`, the words the page shows; a full Loam job deploys itself).
+`GET /v1/engineers/loam-ui` answers Loam's row; `PATCH` of its
+`deploy_on_land` sets Loam's, and of its provider, model or tiers is a 409
+naming Loam, because the scope runs on the Loam engineer's. Its old row in
+the settings file is kept and read by nothing, except that Loam's toggle,
+until it is set, reads the old row's. `GET /v1/engineers/<project
 or default>` answers one row (the default as `{"project": "default", own,
 effective, providers, note, applies}`); 404 for an engineer nobody has.
 
@@ -5727,6 +5739,7 @@ line), then the finished, newest first. Every row has every key:
 {
   "job": "20261113-120317-0a880088",
   "project": "Loam",
+  "scope": "null, or \"app\" for the Loam engineer's app-only work (since 2026-11-19; its jobs read as Loam's)",
   "title": "Theme manifests may carry a dark-mode cover",
   "briefed_by": "ada",
   "thread": "t-780b66bd",

@@ -314,8 +314,8 @@ def finished_jobs() -> list[dict]:
                         datetime.fromtimestamp(mtime, timezone.utc)),
                     "started": result.get("started"),
                     "agent": label["briefed_by"], "actor": label["briefed_by"],
-                    "project": label["project"], "title": label["title"],
-                    "ok": result.get("ok"), "stage": result.get("stage"),
+                    "project": label["project"], "scope": label.get("scope"),
+                    "title": label["title"], "ok": result.get("ok"), "stage": result.get("stage"),
                     "outcome": result.get("outcome") or result.get("stage"),
                     "landing": result.get("landing_state"),
                     "landed_sha": result.get("landed_sha"),
@@ -422,7 +422,7 @@ def _vault_path(path: str | None) -> str | None:
 
 def _job_row(label: dict, state: str, now: datetime, **extra) -> dict:
     row = {"job": label.get("job"), "project": label.get("project"),
-           "title": label.get("title"), "briefed_by": label.get("briefed_by"),
+           "scope": label.get("scope"), "title": label.get("title"), "briefed_by": label.get("briefed_by"),
            "thread": label.get("thread"), "state": state, "phase": None,
            "since": None, "started": None, "finished": None,
            "elapsed_seconds": None, "outcome": None, "outcome_detail": None,
