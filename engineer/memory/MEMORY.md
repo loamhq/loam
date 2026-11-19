@@ -2161,3 +2161,20 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Seen, not fixed:** `github-orgs.test.js` fails a test or more now and
   then while `tests/run-all` loads the CPU beside it; 0 of 8 on a quiet box,
   on `main` and on the branch alike.
+- **A test with the fixture config manages the box's real plugin units.**
+  `loam_plugin_servers.managed()` is true when Yours is its config's
+  default, and under `tests/run-all`'s fixture config a scratch Yours is.
+  `test_to_market` installs and removes Dictation and Read aloud; once the
+  listed copies had servers, every run of it (this job's, and every other
+  job's landing after it reached `main`) stopped the live
+  `loam-plugin-dictation`/`read-aloud` units until the five-minute
+  reconcile restarted them (2026-11-19, 08:56 to 10:24 PT, repeatedly).
+  `run-all` now sets `LOAM_PLUGIN_UNITS=0` unless a test says otherwise.
+  Find such a leak with `journalctl --user | grep "Stopped loam-plugin-"`
+  against the landing log's test windows.
+- **A page plugin's listener on `health.changed` runs on every health
+  read**; one that always called `host.schedule()` after a fetch made other
+  page tests (GitHub's cards) fail under a loaded landing and never alone.
+  Redraw only when the answer changed.
+- **`pgrep -f "engineer-job --land"` matches the job's own session** (the
+  prompt names it). Wait on a pid, or on the landing log.
