@@ -1763,3 +1763,11 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `textContent` of `tt-stream` never returns in the fake DOM (on base main
   too). Prove an absence at the loader and registry level instead
   (`test/installation.test.js`).
+- **A scratch install whose `paths.root` is your job tree writes into it.**
+  `bin/library seed-starter` provisions, and provisioning renders the
+  engineer's seeded files (`engineer/CLAUDE.md`, `role.md`, `project.md`,
+  `agent.json`, `.claude/settings.json`) at `<root>/engineer/` with the
+  scratch install's values. They are git-ignored, so nothing lands, but the
+  job's next session loads them (its CLAUDE.md imported the scratch
+  install's `reach.md`). Copy the canonical checkout's seeded files back
+  after such a rehearsal, or point `paths.root` at a throwaway clone.
