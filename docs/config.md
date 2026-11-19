@@ -36,6 +36,7 @@ place on a particular machine. Added 2026-11-14 (first release, job L1).
 | `paths.reviewer_state` | the reviewer's notes and memory (its own key: `reviewer/`'s committed config names it) | `<state>/reviewer` |
 | `paths.secrets_env`, `paths.wake_env` | the key files (wake.env: the agents' OAuth token) | `~/.config/loam/` |
 | `paths.mcp_venv` | the MCP servers' Python | `~/.local/share/loam/mcp-venv` |
+| `paths.host_history` | the host's own setup, kept (root's alone; docs/host-history.md) | `/var/lib/loam/host-history` |
 | `paths.pycache` | Python's bytecode cache (`PYTHONPYCACHEPREFIX`) | `~/.cache/loam/pycache` |
 | `bin.claude`, `bin.codex`, `bin.agy`, `bin.uv` | the CLIs | `~/.local/bin/<name>` |
 | `vault.inbox`, `vault.boards`, `vault.general_board`, `vault.conversations`, `vault.projects`, `vault.attachments`, `vault.system` | the vault's own folders, relative to it | `Inbox`, `Inbox/boards`, `Inbox/boards/general.md`, `Conversations`, `Projects`, `Attachments`, `System` |

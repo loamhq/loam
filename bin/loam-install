@@ -840,6 +840,10 @@ def step_units(a, ans: dict) -> None:
     if not up:
         raise Stop("Loam's engine (the session broker) did not start.",
                    f"its log: sudo -u {cfg['user']} journalctl --user -u {brk.SERVICE} -n 50")
+    # The host's own setup is kept from here on, and can be put back with
+    # `loam host restore` (lib/loam_host.py, docs/host-history.md).
+    run([sys.executable, f"{root}/bin/loam-host", "install"])
+    run([sys.executable, f"{root}/bin/loam-host", "snapshot", "--reason", "installed"])
     say("Started Loam's engine, its plugin host and its timers.", 2)
 
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=Loam: save the host's own setup if it changed (loam host snapshot)
+# Compares the covered files (lib/loam_host.py, rules) with the last state
+# and commits only when something differs: nothing is written, and git is not
+# run, when nothing changed. No agent is woken and nothing is posted. Root's,
+# because it reads the sudoers and key files and the history is root's
+# alone. docs/host-history.md.
+
+[Service]
+Type=oneshot
+Environment=PYTHONPYCACHEPREFIX=@PYCACHE@
+ExecStart=/usr/bin/python3 @ROOT@/bin/loam-host snapshot --quiet
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=10min

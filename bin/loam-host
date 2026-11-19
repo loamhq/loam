@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Keep the host's own setup and put it back: web server, units, settings.
+
+  loam host restore [STATE]   put the covered files back as they were in
+                              STATE: by default the newest state whose checks
+                              passed; or a commit from `log`, a duration
+                              (`2h`: as it was two hours ago) or a time
+                              (`'2026-11-19 09:00'`). Says every file it will
+                              create, change or remove and what it will
+                              reload, then asks.
+        --only PATH           only this file or folder (repeatable)
+        --diff                show what changes in each text file (never a
+                              secret's)
+        --dry-run             say it, change nothing
+        --yes                 do not ask
+        --force               write a state whose web server or sudoers file
+                              does not validate
+  loam host log [N]           the newest N states (20), with what changed
+  loam host show [STATE]      what differs between now and STATE (no writes)
+  loam host snapshot [--reason WHY]
+                              save the present state now if anything changed
+                              (the timer does this every 15 minutes)
+  loam host covered           every path covered now, and what is not and why
+  loam host install           install and start the timer (installer, update)
+
+Root's: the history is root's alone (`paths.host_history`,
+/var/lib/loam/host-history), because it holds copies of key files. Works
+with the app, the broker and the network down: it needs git, systemd and
+this file. lib/loam_host.py; docs/host-history.md.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "lib"))
+import loam_host as lh  # noqa: E402
+
+NOT_COVERED = [
+    ("the vault, AI Spaces, the plugins' Yours layer", "each is its own history already "
+     "(the routine commit, docs/backup.md)"),
+    ("Loam's checkout", "it is a git checkout of a release; `loam update` and git put it back"),
+    ("the broker's sessions, threads, jobs, logs and other runtime state",
+     "data the runtime writes as it runs, not setup; large and changing every minute"),
+    ("plugins' private data (<state>/plugins/private/)", "each plugin's own data, not setup"),
+    ("Authelia's accounts and passkeys (its Docker volume)", "a live database inside a "
+     "container's volume; copying it safely needs Authelia stopped"),
+    ("Caddy's certificates and its own data", "private keys the web server re-issues by itself"),
+    ("Docker images, containers and volumes", "rebuilt from the compose files that are covered"),
+    ("installed packages, the kernel, the network and the firewall's base rules",
+     "the operating system's, not Loam's; the provider's or the person's own tools restore them"),
+    ("SSH keys", "identity, not setup; ~/.ssh/config is covered"),
+    ("a covered file larger than 2 MB", "kept out and named in the state's message"),
+]
+
+
+def need_root() -> None:
+    if os.geteuid() != 0:
+        raise lh.HostError("the host history is root's: run it with sudo "
+                           "(sudo loam host …)")
+
+
+def cmd_snapshot(a) -> int:
+    need_root()
+    r = lh.snapshot(a.reason or "")
+    if r["note"]:
+        print(r["note"], file=sys.stderr)
+    if r["commit"] is None:
+        if not a.quiet:
+            print("Nothing changed since the last state.")
+        return 0
+    print(f"Saved {r['commit'][:10]}: {len(r['changed'])} file(s) changed.")
+    for line in r["changed"][:40]:
+        print(f"  {line}")
+    if r["checks"]:
+        print("Checks failed:\n" + "\n".join(f"  {p}" for p in r["checks"]))
+    return 0
+
+
+def cmd_log(a) -> int:
+    need_root()
+    h = lh.history_dir()
+    found = lh.states(h, a.n)
+    if not found:
+        print(f"No host history yet at {h}.")
+        return 0
+    for s in found:
+        print(f"{s.sha[:10]}  {s.when.astimezone():%Y-%m-%d %H:%M %Z}  "
+              f"{'ok ' if s.ok else 'BAD'}  {s.subject}")
+        for c in s.changed[:a.files]:
+            print(f"    {c}")
+        if len(s.changed) > a.files:
+            print(f"    … {len(s.changed) - a.files} more")
+    print(f"\n{h}: {lh.size(h)} on disk")
+    return 0
+
+
+def cmd_restore(a, dry: bool = False) -> int:
+    need_root()
+    return lh.restore(a.state, only=a.only, yes=a.yes, force=a.force, show_diff=a.diff,
+                      dry=dry or a.dry_run)
+
+
+def cmd_covered(a) -> int:
+    try:
+        rule_list, _about = lh.rules()
+    except Exception as exc:  # noqa: BLE001
+        print(f"Loam's config could not be read: {exc}", file=sys.stderr)
+        return 1
+    print("Covered (each path as it is now):")
+    for r in rule_list:
+        extra = " (files git does not track)" if r.untracked else ""
+        print(f"  {r.root}/{r.pattern}{extra}: {r.why}")
+    if os.geteuid() == 0:
+        paths = lh.matched(rule_list)
+        print(f"\n{len(paths)} files and links now:")
+        for p in paths:
+            print(f"  {p}")
+    print("\nNot covered:")
+    for what, why in NOT_COVERED:
+        print(f"  {what}: {why}")
+    return 0
+
+
+def cmd_install(a) -> int:
+    need_root()
+    print(lh.install_units(ROOT))
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(prog="loam host", description=__doc__.split("\n")[0])
+    sub = p.add_subparsers(dest="cmd")
+    s = sub.add_parser("snapshot")
+    s.add_argument("--reason", default="")
+    s.add_argument("--quiet", action="store_true")
+    s.set_defaults(fn=cmd_snapshot)
+    s = sub.add_parser("log")
+    s.add_argument("n", nargs="?", type=int, default=20)
+    s.add_argument("--files", type=int, default=6)
+    s.set_defaults(fn=cmd_log)
+    for name, dry in (("restore", False), ("show", True)):
+        s = sub.add_parser(name)
+        s.add_argument("state", nargs="?")
+        s.add_argument("--only", action="append", default=[])
+        s.add_argument("--diff", action="store_true")
+        s.add_argument("--dry-run", action="store_true")
+        s.add_argument("--yes", action="store_true")
+        s.add_argument("--force", action="store_true")
+        s.set_defaults(fn=lambda a, d=dry: cmd_restore(a, dry=d))
+    s = sub.add_parser("covered")
+    s.set_defaults(fn=cmd_covered)
+    s = sub.add_parser("install")
+    s.set_defaults(fn=cmd_install)
+    a = p.parse_args(argv)
+    if not getattr(a, "fn", None):
+        print(__doc__.split('"""')[0].strip())
+        return 0
+    try:
+        return a.fn(a)
+    except lh.HostError as exc:
+        print(f"loam host: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
