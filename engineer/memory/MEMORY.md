@@ -1657,3 +1657,27 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   root**: a scratch workspace outside a git repo dropped `reach.md` and
   Loam's text silently even with its own directory trusted; `git init` on
   the scratch workspaces folder plus `ensure_trust` made them load.
+
+## 2026-11-18 — the owner's name on agents' commits
+
+- **What GitHub showed was the trailer, not the author.** Every job commit was
+  authored `<project> engineer <engineer+…@noreply.local>` (an address no
+  account owns, so no avatar) and Claude Code appended
+  `Co-Authored-By: Claude … <noreply@anthropic.com>`, which GitHub links to
+  Claude's account: the only face on the commit was the provider's. Pushes
+  were deploy keys, so there was no person as push actor either. The fix is
+  `lib/loam_git_identity.py` and `docs/attribution.md`.
+- **Codex has no local switch for its trailer.** 0.170 carries the instruction
+  "Commit messages must end with `Co-authored-by: Codex`" gated on a
+  workspace policy it fetches; `commit_attribution` (its docs' key) is
+  refused by `--strict-config`, and `[features]` accepts any key silently, so
+  a `features.*` pin proves nothing. Hence the clone's `commit-msg` hook and
+  the landing's `settle_commits`, which hold whatever a provider does.
+- **A gated checkout keeps its own identity.** The push gate compares every
+  new commit with the checkout's `user.name`/`user.email`, so the owner's name
+  there would be a held push; and a deny list may name the owner's handle on
+  purpose. The order in `resolve()` puts the repository's own identity before
+  the owner's for that reason.
+- **The landing never re-makes a pull-request branch**: its head may already
+  be on the remote, and a re-made commit would not fast-forward it, which
+  `settle_head` answers with a new pull request.
