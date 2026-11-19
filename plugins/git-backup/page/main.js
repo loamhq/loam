@@ -59,7 +59,8 @@ export function activate(loam) {
   const btn = (text, onclick, cls = 'pillbtn content-mark', extra = {}) => h('button', { class: cls, type: 'button', onclick, ...extra }, text)
 
   function pill(t) {
-    const words = { ok: t.last_pushed_ago ? `Backed up ${t.last_pushed_ago}` : 'Backed up', fail: 'Not backing up', wait: t.public_key && !(t.test?.ok) ? 'One step left' : 'Starting', off: 'Not connected' }[t.level]
+    const waiting = t.host === 'folder' ? 'Ready to test' : t.public_key && !(t.test?.ok) ? 'One step left' : 'Starting'
+    const words = { ok: t.last_pushed_ago ? `Backed up ${t.last_pushed_ago}` : 'Backed up', fail: 'Not backing up', wait: t.test?.ok ? 'Starting' : waiting, off: 'Not connected' }[t.level]
     return h('span', { class: `gb-pill gb-${t.level}${t.pushing ? ' gb-moving' : ''}` }, h('span', { class: 'gb-dot', 'aria-hidden': 'true' }), t.pushing ? 'Backing up…' : words)
   }
 
@@ -78,20 +79,36 @@ export function activate(loam) {
       act(t.id, 'connect', 'connect', { tree: t.id, remote }, () => { st.open[t.id] = false })
     } },
     h('label', { for: id, class: 'gb-label', text: 'Repository address' }),
-    h('input', { id, key: id, class: 'field-input gb-mono', type: 'text', inputmode: 'url', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', placeholder: `git@github.com:you/${t.id === 'vault' ? 'my-vault' : 'my-ai-spaces'}.git`, value: st.input[t.id] ?? '', disabled: busy, oninput: e => { st.input[t.id] = e.currentTarget.value } }),
-    h('p', { class: 'note', text: `An empty, private repository, used for your ${t.name} alone. On GitHub: New repository, choose Private, and add nothing to it. Its page’s address works too.` }),
+    h('input', { id, key: id, class: 'field-input gb-mono', type: 'text', inputmode: 'url', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', placeholder: `git@host:you/${t.id === 'vault' ? 'vault' : 'ai-spaces'}.git`, value: st.input[t.id] ?? '', disabled: busy, oninput: e => { st.input[t.id] = e.currentTarget.value } }),
+    h('p', { class: 'note', text: `An empty, private repository for your ${t.name} alone: on GitHub, GitLab, Codeberg or any git host, on a server of your own, or a folder on this machine. Paste its SSH address, its page’s address, or the folder’s path.` }),
     said(t.id),
     h('div', { class: 'gb-actions' },
       h('button', { class: 'pillbtn primary', type: 'submit', disabled: busy }, busy ? 'Checking…' : 'Continue'),
       t.remote ? null : btn('Cancel', () => { st.open[t.id] = false; st.said[t.id] = null; redraw() }, 'pillbtn content-mark', { disabled: busy })))
   }
 
+  const testButton = t => btn(st.busy[t.id] === 'test' ? 'Testing…' : t.host === 'folder' ? 'Test the connection' : 'I’ve added it: test', () => act(t.id, 'test', 'test', { tree: t.id }, out => {
+    st.said[t.id] = out.ok ? { ok: true, words: 'Connected. The first backup has started.' } : { ok: false, words: out.words }
+  }), 'pillbtn primary', { disabled: st.busy[t.id] === 'test' })
+  const another = t => h('button', { class: 'gb-quiet', type: 'button', onclick: () => { st.open[t.id] = true; st.input[t.id] = t.remote; redraw() } }, 'Use another repository')
+
+  // A folder on this machine: no key, nothing to add, one test.
+  function folderStep(t) {
+    return h('div', { class: 'gb-key', key: `folder-${t.id}` },
+      h('p', { class: 'gb-step-title' }, 'Test this folder'),
+      h('p', { class: 'gb-where' }, h('span', { class: 'gb-repo gb-mono', text: t.remote })),
+      h('p', { class: 'note', text: 'A folder on this machine needs no key. On another drive, it outlives this one.' }),
+      said(t.id),
+      h('div', { class: 'gb-actions' }, testButton(t)),
+      another(t))
+  }
+
   function keyStep(t) {
-    const busy = st.busy[t.id] === 'test'
     const where = t.host === 'github' ? 'GitHub' : t.host === 'gitlab' ? 'GitLab' : t.host === 'gitea' ? 'your host' : null
+    const known = ['github', 'gitlab', 'gitea'].includes(t.host)
     return h('div', { class: 'gb-key', key: `key-${t.id}` },
       h('p', { class: 'gb-step-title' }, 'Give Loam a key to this repository'),
-      h('p', { class: 'note', text: 'It opens this one repository and nothing else in your account, and it never leaves this machine.' }),
+      h('p', { class: 'note', text: known ? 'It opens this one repository and nothing else in your account, and it never leaves this machine.' : 'Loam made it for this repository alone. Its private half never leaves this machine.' }),
       h('div', { class: 'gb-keybox' },
         h('code', { class: 'gb-keytext', text: t.public_key }),
         h('button', { class: 'pillbtn content-mark gb-copy', type: 'button', 'aria-label': 'Copy the key', onclick: () => copy(t.id, t.public_key) }, st.copied === t.id ? glyph('check', 15) : glyph('copy', 15), st.copied === t.id ? 'Copied' : 'Copy')),
@@ -99,10 +116,8 @@ export function activate(loam) {
       said(t.id),
       h('div', { class: 'gb-actions' },
         t.add_key_at ? h('a', { class: 'pillbtn content-mark', href: t.add_key_at, target: '_blank', rel: 'noopener noreferrer' }, `Open deploy keys${where ? ` on ${where}` : ''}`, glyph('external', 14)) : null,
-        btn(busy ? 'Testing…' : 'I’ve added it: test', () => act(t.id, 'test', 'test', { tree: t.id }, out => {
-          st.said[t.id] = out.ok ? { ok: true, words: 'Connected. The first backup has started.' } : { ok: false, words: out.words }
-        }), 'pillbtn primary', { disabled: busy })),
-      h('button', { class: 'gb-quiet', type: 'button', onclick: () => { st.open[t.id] = true; st.input[t.id] = t.remote; redraw() } }, 'Use another repository'))
+        testButton(t)),
+      another(t))
   }
 
   function held(t) {
@@ -144,6 +159,7 @@ export function activate(loam) {
     if (st.open[t.id] || (!t.remote && st.open[t.id] !== false && st.input[t.id])) body = connectForm(t)
     else if (!t.remote) body = h('div', { class: 'gb-body' }, h('p', { class: 'note', text: t.id === 'vault' ? 'Every note and conversation, with its history.' : 'Every agent’s workspace and memory, with its history.' }), said(t.id),
       h('div', { class: 'gb-actions' }, btn('Connect a repository', () => { st.open[t.id] = true; st.said[t.id] = null; redraw() }, 'pillbtn')))
+    else if (t.level === 'wait' && t.host === 'folder' && !t.test?.ok) body = folderStep(t)
     else if (t.level === 'wait' && t.public_key && !t.test?.ok) body = keyStep(t)
     else body = healthy(t)
     return h('section', { class: `gb-card gb-card-${t.level}`, key: `card-${t.id}`, 'aria-label': t.name },

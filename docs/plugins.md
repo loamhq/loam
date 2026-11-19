@@ -617,7 +617,11 @@ says so before the yes. An unreadable `installed.json` leaves the list drawn
   update keeps whatever its switch was. A plugin built here is **off until
   turned on**: an agent writing a folder does not put code into the page by
   itself. Removing a Yours copy that shadowed a shipped one leaves the switch
-  for the shipped one; removing the last copy forgets it.
+  for the shipped one; removing the last copy forgets it. A row with a
+  switch says `chosen: true` once that switch has been set either way, and
+  `false` while it still stands at its default; first setup offers Git
+  backup only while its switch is off and unchosen, and its *Skip for now*
+  sets it off, so the offer is made once (2026-11-19).
 - **A theme has no switch.** A plugin whose kind is only `theme` (and which
   overrides nothing) is on where Appearance has chosen it (`appearance.phone.theme`,
   `appearance.desktop.theme`; `lib/loam_appearance.py`): its row's `on` is
