@@ -1,7 +1,7 @@
 ---
 id: read-aloud
 name: Read aloud
-version: 1.1.0
+version: 1.1.2
 author: Loam contributors
 api: 0
 default_on: false

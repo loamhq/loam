@@ -1,7 +1,7 @@
 ---
 id: dictation
 name: Dictation
-version: 1.1.0
+version: 1.1.1
 author: Loam contributors
 api: 0
 default_on: false
