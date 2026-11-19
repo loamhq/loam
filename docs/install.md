@@ -68,7 +68,8 @@ Where will your Loam live on the web? Either:
     itself). You add two DNS records where you bought the domain; the
     installer says which, and checks them.
     2. On a name under <BASE_DOMAIN>, like sam.<BASE_DOMAIN>. Loam's makers
-    add its records, so ask them for a name first.
+    add its records, so ask them for a name first, in an issue at
+    https://github.com/loamhq/loam/issues/new
 Type 1 or 2:
 ```
 
@@ -127,12 +128,8 @@ makers make `sam.<base>` and `*.sam.<base>`, and "The name, and DNS later"
 below is its account.
 
 What else knows the domain does not care which way it came: the deploy
-layer, the app (`APPS_DOMAIN`), `reach.md`, `loam update` (which never
-reads it), and the private feedback route of 0.2.7, which sends
-`edge.domain` and is admitted when that name resolves to the address the
-report came from. On an own domain that proves the report came from the
-server the domain points at, not that Loam's makers made the name; the
-route's per-install and daily limits are what keep it in bounds.
+layer, the app (`APPS_DOMAIN`), `reach.md`, and `loam update` (which never
+reads it).
 
 ## The eleven steps
 
@@ -451,15 +448,6 @@ repository served by `git daemon` on 127.0.0.1.
   elsewhere showed both sentences under *Name*; restored, all ok.
 - **`loam update`**: a walk-only `0.2.9` tag in the VM's repository was
   seen, applied, and the hosts answered after.
-- **The private feedback route**: with `feedback.url` pointed at a stand-in
-  receiver on the VM's loopback (the real `loam_feedback.Inbox`), `loam
-  report idea` drafted a report with the domain and the owner's name taken
-  out, `loam report send` posted it (`install: "loam.example.test"`,
-  `User-Agent: loam/0.2.8`), and the receiver wrote the note. The sandbox
-  has no public address and the receiver refuses a private caller, so the
-  caller was a stand-in public address that the receiver's resolver gave
-  for a name exactly when the VM's DNS said that name was this VM; a report
-  naming a domain that was not the install was refused (403).
 - **The name path**, on a second VM: `--name sam --base loam-proof.test`
   with the owner and the time zone asked at the terminal, as the README's
   command does; installed as before, no `own_domain` key.

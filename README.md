@@ -59,7 +59,8 @@ link that makes you the owner. It installs the newest release.
   made by Let's Encrypt for each address by themselves; nothing else to
   set up.
 - **On a name we give you** under Loam's own domain, like `sam.<Loam's
-  domain>`. Ask Loam's makers for a name first; they make its records.
+  domain>`. Ask Loam's makers for a name first, in an issue at
+  https://github.com/loamhq/loam/issues/new; they make its records.
   Then choose it when asked, or end the command with `-s -- --name sam`
   instead. Loam waits for the records and goes on the web by itself.
 

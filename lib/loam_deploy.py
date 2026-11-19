@@ -375,38 +375,6 @@ RELAY_PATH = "/_loam/login-code"
 # through the gate to the same service, which asks the login's own API with
 # the person's own session (deploy/README.md, "The claim and the relay").
 PASSKEYS_PATH = "/_loam/passkeys"
-# Reports from installs to Loam's makers (2026-11-18, Loam 0.2.7): on one
-# host of the one box that receives them (`feedback.receive`), outside the
-# login, to the same service. The host is `feedback.host`, by default the
-# product's own base domain, which every install sends to; it may be an
-# app's host or a `[[landing]]`'s. lib/loam_feedback.py has the rules.
-FEEDBACK_PATH = "/_loam/feedback"
-FEEDBACK_MAX_BODY = "64KB"
-
-
-def feedback_host() -> str | None:
-    """The host that carries FEEDBACK_PATH on this box, or None."""
-    if not lc.get("feedback.receive"):
-        return None
-    import loam_install  # noqa: PLC0415 -- the one place the domain is written
-    return str(lc.get("feedback.host") or loam_install.BASE_DOMAIN).lower()
-
-
-def feedback_lines() -> list[str]:
-    """Outside the login: the claim service takes a report only from an
-    install whose name resolves to the caller, plain text and capped
-    (lib/loam_feedback.py); Caddy caps the body first."""
-    return [
-        "\t# Reports from Loam installs to Loam's makers, outside the login; see lib/loam_feedback.py.",
-        f"\thandle {FEEDBACK_PATH} {{",
-        "\t\trequest_body {",
-        f"\t\t\tmax_size {FEEDBACK_MAX_BODY}",
-        "\t\t}",
-        f"\t\treverse_proxy 127.0.0.1:{CLAIM_PORT}",
-        "\t}",
-    ]
-
-
 # The login's session cookie: the one cookie the passkeys relay forwards.
 SESSION_COOKIE = "loam_auth"
 
@@ -679,7 +647,6 @@ def caddy_landing_block(e: dict) -> str:
         f"# PUBLIC: {lc.OWNER_NAME}'s yes in [[landing]] (deploy/loam.toml): {e['public']}. No gate.",
         f"{host} {{",
         access_log_line(host),
-        *(feedback_lines() if host.lower() == feedback_host() else []),
         f"\troot * {e['root']}",
         "\tfile_server {",
         f"\t\thide {' '.join(SITE_HIDE)}",
@@ -1753,8 +1720,6 @@ def caddy_host_block(app: App, public: bool, today: dt.date,
             "\t\trespond \"expired\" 410",
             "\t}",
         ]
-    if fq.lower() == feedback_host():
-        head += feedback_lines()    # on Loam's makers' box only
     if public:
         why = (f"{lc.OWNER_NAME}'s yes in the site record: {app.site_public}"
                if app.site_public else f"named in {PUBLIC_FILE} by the operator")

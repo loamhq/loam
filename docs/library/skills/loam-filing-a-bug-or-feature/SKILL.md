@@ -1,6 +1,6 @@
 ---
 name: loam-filing-a-bug-or-feature
-description: How to tell the people who make Loam something - a bug, a feature request, an idea, a suggestion or any feedback ("I wish", "this confused me", "I love") - privately with no account needed, or as a public GitHub issue, always with personal details taken out and on the owner's yes; and how to fix a defect on this install and offer the fix upstream. Use when the owner says "tell the makers", "send feedback", "I have an idea for Loam", "suggest", or when something in Loam is broken or behaves unexpectedly.
+description: How to tell the people who make Loam something - a bug, a feature request, an idea, a suggestion or any feedback ("I wish", "this confused me", "I love") - as an issue on Loam's GitHub, always with personal details taken out and on the owner's yes; and how to fix a defect on this install and offer the fix upstream. Use when the owner says "tell the makers", "send feedback", "I have an idea for Loam", "suggest", or when something in Loam is broken or behaves unexpectedly.
 ---
 
 # Telling Loam's makers: a bug, a feature, an idea
@@ -37,35 +37,24 @@ loam report bug --title "Threads lose the last message after a restart" --body-f
 loam report feature --title "…" --body "…"
 ```
 
-Drafting sends nothing. It answers with the report exactly as it would go,
-a list of what was taken out (the owner's name, agents' names, paths, this
-install's address, keys, e-mail and IP addresses, note names), the report's
-id, and the ways to send it. Read the report again yourself for anything
-personal it missed.
+Nothing is sent. It answers with the report exactly as it would go, a list
+of what was taken out (the owner's name, agents' names, paths, this
+install's address, keys, e-mail and IP addresses, note names), and a link.
+Read the report again yourself for anything personal it missed.
 
-## Show it, then send it on their yes
+## Show it, then give them the link on their yes
 
 1. **Show the owner every word**: the title and body as printed, and what
    was taken out. Ask whether to send it. Nothing goes without their yes.
-2. **Privately, by default.** On their yes, `loam report send <id>`. It goes
-   to a private inbox only Loam's makers read; no account is needed. It
-   carries this install's web address so the makers' box can tell it comes
-   from a Loam install; they keep a code for the install, not the address.
-   Tell the owner it was sent, that the makers read every one, and that they
-   may not answer.
-3. **On GitHub, if they want to follow it in public.** Give them the link
-   the draft printed instead. It opens GitHub's new-issue page for Loam with
-   the report filled in; they need a GitHub account (free, at
-   github.com/signup), and signed in, they press **Submit new issue**. A
-   very long report comes with its title only; they paste the body you
-   showed them. The makers may answer on the issue.
+2. **On their yes, give them the link.** It opens GitHub's new-issue page
+   for Loam with the report filled in. They need a GitHub account (free, at
+   github.com/signup); signed in, they press **Submit new issue**, and it is
+   sent from their account. A very long report comes with its title only;
+   they paste the body you showed them.
+3. Tell them where it went, and that the makers may answer on the issue.
 
-If the draft says it cannot go privately (an install older than 0.2.7, one
-with no web address of its own, or one not yet claimed), the GitHub link is
-the way, or updating Loam. A refusal from `send` is said in plain words
-(too many today, too long); tell the owner and try later or use the link.
-The owner's connected GitHub (Settings › Connections) cannot file an issue
-for them: it reaches only repositories on their own account.
+The owner's connected GitHub (Settings › Connections) cannot file it for
+them: it reaches only repositories on their own account.
 
 ## Fix it here, if it cannot wait
 
@@ -96,6 +85,6 @@ loam report bug --title "…" --body-file report.md --patch
 
 `--patch` adds the diff of this install's own changes to Loam since the
 release it runs, with the same things taken out. Show the owner, and send it
-on their yes either way. A pull request would need a fork and a push from
+on their yes the same way. A pull request would need a fork and a push from
 the owner's GitHub account that Loam cannot make for them yet; the patch in
-the report is what a maintainer applies.
+the issue is what a maintainer applies.

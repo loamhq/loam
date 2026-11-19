@@ -1133,21 +1133,6 @@ and three rules this file's renders follow only when the table is there:
   `DELETE /_loam/passkeys/<id>` passes Authelia's own removal through, with
   the elevated session Authelia always asks for; the app does not call it
   (its Remove opens the portal). Contract: `docs/install.md`.
-- **Feedback to Loam's makers** (2026-11-18, Loam 0.2.7). On the one box
-  with `feedback.receive = true` in loam.toml (the makers' own), the host
-  `feedback.host` names (by default the product's base domain,
-  `BASE_DOMAIN` in lib/loam_install.py; an app's host or a `[[landing]]`)
-  carries `POST /_loam/feedback` *outside* the login, its body capped at
-  64 KB by Caddy, to the same service. It is the endpoint every install's
-  `loam report send` posts to (`feedback.url`, default
-  `https://<BASE_DOMAIN>/_loam/feedback`). The service takes a
-  report only when the install's domain it names resolves, on this box's
-  DNS, to the address the report came from; plain text in five fields,
-  five an hour and twenty a day per install, two hundred a day in all.
-  Each lands as one markdown file in `<projects>/Loam/feedback/` with an
-  install code (an HMAC of the domain under a key only this box holds),
-  never the name or the address, and one line under *Other* on General's
-  board. Rules and tests: lib/loam_feedback.py, tests/test_feedback_inbox.py.
 
 `gen-deploy --init-secrets` makes the login's secrets and volume with no
 user; the claim writes the user. A box without `[edge]` renders exactly as

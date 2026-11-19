@@ -39,18 +39,6 @@ app's host and on nothing else (lib/loam_deploy.py, `[edge]`):
                           always asks for. The app does not call it today:
                           its Remove opens the portal's settings.
 
-  /_loam/feedback         OUTSIDE the login, rendered only on the box that
-                          receives Loam's feedback (`feedback.receive` in
-                          loam.toml: Loam's makers' own, 2026-11-18).
-    POST {v, kind, title, body, version, install}
-                          a report an install's owner chose to send
-                          privately (`loam report send`). Taken only when
-                          the install it names resolves to the caller's
-                          address, as plain text, capped and rate-limited;
-                          written to the vault as one markdown file, with a
-                          line on the General board. lib/loam_feedback.py,
-                          `Inbox`, has the rules.
-
 docs/install.md has the page contract both answer to. First release L12.
 """
 
@@ -76,7 +64,6 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
 import loam_deploy as dep  # noqa: E402
-import loam_feedback as fb  # noqa: E402
 import loam_install as li  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -88,7 +75,6 @@ MAX_BODY = 8192
 FAILS: list[float] = []
 FAIL_WINDOW, FAIL_LIMIT = 600, 20
 LOCK = threading.Lock()
-FEEDBACK_LOCK = threading.Lock()
 CODE_MAX_AGE = 15 * 60   # a code older than this is not shown
 
 
@@ -501,35 +487,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(403, {"error": "only the owner, signed in, sees the login's codes"})
         return self.json(200, newest_code())
 
-    def feedback(self) -> None:
-        """A report from an install, to the makers' inbox. The answer says
-        only whether it was taken; where it landed is logged, never told."""
-        if not fb.receiving():
-            return self.json(404, {"error": "not found"})
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            length = -1
-        if length < 0 or length > fb.MAX_REQUEST:
-            return self.json(413, {"error": f"a report is at most {fb.MAX_REQUEST // 1024} KB"})
-        if not (self.headers.get("Content-Type") or "").startswith("application/json"):
-            return self.json(415, {"error": "a report is sent as application/json"})
-        raw = self.rfile.read(length)
-        with FEEDBACK_LOCK:
-            try:
-                got = fb.Inbox().receive(raw, self.client())
-            except fb.Refused as exc:
-                log(f"feedback refused ({exc.status}): {exc.message[:80]}")
-                return self.json(exc.status, {"error": exc.message})
-            except OSError as exc:
-                log(f"feedback could not be written: {exc}")
-                return self.json(500, {"error": "it could not be kept; try again later"})
-        log(f"feedback taken: {Path(got['file']).name}")
-        return self.json(200, {"ok": True, "message": got["message"]})
-
     def do_POST(self):  # noqa: N802
-        if self.path.split("?")[0] == fb.RECEIVE_PATH:
-            return self.feedback()
         if self.path.split("?")[0] != dep.CLAIM_PATH:
             return self.json(404, {"error": "not found"})
         with LOCK:
