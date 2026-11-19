@@ -182,6 +182,12 @@ def test_stop_with_a_live_list_open(tmp: Path) -> None:
         check("the live list opened with its residency line",
               wait_until(lambda: "broker.residency" in reader.text(), 5),
               reader.text())
+        contender = subprocess.run(
+            [sys.executable, str(driver), str(AGENTS), str(state), str(free_port())],
+            capture_output=True, text=True, timeout=8)
+        check("a second host on a different port cannot take the same session store",
+              contender.returncode != 0 and "another session host owns" in contender.stderr
+              and "backfill:" not in contender.stderr, contender.stderr)
         opened = len(reader.data)
 
         proc.send_signal(signal.SIGTERM)

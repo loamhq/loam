@@ -4,7 +4,11 @@ The host-side half of a web front end for the personas. It starts a persona
 session on this box — the same session a conversation is today — and hands an
 app a narrow, authenticated interface to it. Built 2026-09-16.
 
-The HTTP server and session registry run in `bin/session-broker`.
+The HTTP server in `bin/session-broker` runs the registry from
+`lib/loam_session_host.py` in the same process. At startup it takes an
+exclusive lock on the session directory before reading records or accepting
+work. Two listeners pointed at the same directory cannot start competing
+writers.
 The three provider session implementations and the numbered journal they share
 live in `lib/loam_provider_session.py`. The configuration is `lib/loam_broker.py`,
 its proof is `bin/broker-probe`, and its units are
