@@ -246,8 +246,16 @@ def _job_caller(job_id: str) -> dict:
 # What is owed.
 # ---------------------------------------------------------------------------
 
+# A run's records have a folder of their own (2026-11-19): a broker that
+# predates the run route reads only the top folder, and would otherwise
+# take a cron's result for a thread's and drop it as "no thread".
+RUNS = STATE / "runs"
+
+
 def _path(job_id: str) -> Path:
-    return STATE / f"{job_id}.json"
+    """Where this job's record is: in ``RUNS`` if it is there, else the top."""
+    run = RUNS / f"{job_id}.json"
+    return run if run.exists() else STATE / f"{job_id}.json"
 
 
 def now_iso() -> str:
@@ -255,14 +263,17 @@ def now_iso() -> str:
 
 
 def write(record: dict) -> Path | None:
-    """The record, replaced whole. Fail-soft."""
+    """The record, replaced whole, in its route's folder. Fail-soft."""
     try:
-        STATE.mkdir(parents=True, exist_ok=True)
-        path = _path(str(record["job"]))
+        job = str(record["job"])
+        home, other = ((RUNS, STATE) if route(record) == "run" else (STATE, RUNS))
+        home.mkdir(parents=True, exist_ok=True)
+        path = home / f"{job}.json"
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps({k: v for k, v in record.items()
                                    if k != "result"}) + "\n", encoding="utf-8")
         tmp.replace(path)
+        (other / f"{job}.json").unlink(missing_ok=True)
         return path
     except (OSError, KeyError):
         return None
@@ -281,17 +292,19 @@ def register(job_id: str, project: str, job_dir: Path, persona: str,
 
 
 def settle(job_id: str) -> None:
-    """Nothing is owed (the brief was refused, or did not launch)."""
-    try:
-        _path(job_id).unlink()
-    except OSError:
-        pass
+    """Nothing is owed (the brief was refused, did not launch, or its
+    result was delivered)."""
+    for folder in (STATE, RUNS):
+        try:
+            (folder / f"{job_id}.json").unlink()
+        except OSError:
+            pass
 
 
 def records() -> list[dict]:
     out = []
     try:
-        paths = sorted(STATE.glob("*.json"))
+        paths = sorted([*STATE.glob("*.json"), *RUNS.glob("*.json")])
     except OSError:
         return out
     for path in paths:

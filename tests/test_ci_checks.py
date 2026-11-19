@@ -155,8 +155,6 @@ def main() -> int:
     check('mark_landing(p, "ci"' in body, "the CI wait marks its phase on the landing record")
     check("lock.__exit__" not in body and "ci-wait" not in body.split('"""', 2)[2],
           "and neither releases a slot nor writes a file of its own")
-    check("read_landing(p)" in src[src.index("def wait_for"):src.index("def last_beat")],
-          "the waiter honours a live landing")
 
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall passed")
     return 1 if FAILS else 0

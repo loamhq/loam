@@ -1046,6 +1046,11 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
         # A scratch registry (lib/loam_engineer.py, PROJECTS_DIR): the inner
         # must find the project the outer did.
         argv.append(f"--setenv=LOAM_PROJECTS_DIR={eng.PROJECTS_DIR}")
+    if os.environ.get("LOAM_CONFIG"):
+        # A scratch install (2026-11-19): the inner reads the config the
+        # outer did, so its records, logs and the result's run are that
+        # install's. Nothing in a unit or generator sets it.
+        argv.append(f"--setenv=LOAM_CONFIG={os.environ['LOAM_CONFIG']}")
     argv += [str(AGENTS / "bin" / "engineer-job"), project.name, job_id, "--in-unit"]
     subprocess.run(argv, check=True, capture_output=True, text=True)
 

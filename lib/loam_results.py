@@ -37,6 +37,12 @@ sweep every five minutes (``kick_all``: a kick that met a drain still
 running, a drain that could not get the lock), and the broker when a
 thread's result finds its thread gone (``to_headless``).
 
+**No identity gate.** A result run does not ask the canary question a wake
+asks before it starts: it is one more turn of a session that already ran
+under that gate (or, fresh, of a lane that does on its next fire), and the
+question would cost a model call per result. Its lane's file is loaded as
+the asker's was.
+
 **Silent.** The run posts nothing; the persona speaks only if it chooses to,
 by the ordinary routes. Its record is its row in ``logs/wake-<agent>.jsonl``
 (lane ``result:<job>``) and a fire in the schedule log, separate from the

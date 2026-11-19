@@ -1975,3 +1975,35 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `JOB_ID_RE` (hex suffix) or `owed()` ignores it silently.
 - **Seen, not fixed:** a turn model change (`set_choices`) posts the CLI's
   "Set model to … for this session only" text as a persona message.
+
+## 2026-11-19 — a run with no thread gets its result back (batch B step 3)
+
+- **Every brief returns at once**, every lane. `wait_for`, its four-hour
+  ceiling, the waiter's pid and the broker's quiet-route mark are gone; the
+  engineer MCP entry's `timeout` is 10 minutes (Codex's default per call is
+  60 s, and `cancel`/`site up` can take a minute), not four hours.
+- **`claude -p --resume <id>` keeps the id** (2.1.328, caused): the result
+  run appends to the asking session, so a second result resumes the same
+  id again. A missing id prints `No conversation found with session ID`
+  and exits 1. Every Claude wake/cron now starts with `--session-id` and
+  `LOAM_SESSION_ID`, and `loam_waiters.caller` records it for every lane.
+- **Two routes, two folders**: a thread's record in `engineer-waiters/`
+  (the broker's), a run's in `engineer-waiters/runs/` (bin/wake's). The
+  folder is what kept a pre-step-3 broker, which reads only the top and
+  would drop a cron's record as "no thread", out of it until its restart.
+- **The drain is a transient unit, `loam-results-<agent>`**, started by
+  `write_result` (the job's own launcher, `deliver=False` for the brief
+  call's own refusals), by `--recover` every 5 min, and by the broker for a
+  thread that is gone. A kick that meets a running drain says `running`;
+  the drain re-reads after each run, and the sweep catches the gap.
+- **A scratch install proves it end to end on the live box**: a
+  `LOAM_CONFIG` with `root` = the job's tree and every write path in
+  `$TMPDIR`, a scratch project through `LOAM_PROJECTS_DIR` (the platform
+  project's CLAUDE.md imports the real `ai-labs/_shared/reach.md`, which a
+  scratch `workspaces` rejects; a project record needs a `deploy_key`),
+  `bin/wake` loaded as a module with only the identity gate stubbed, and
+  probe jobs. `launch` and `kick` pass `LOAM_CONFIG` on to their units.
+  Host user units see `$TMPDIR` (the wall does not hide /tmp).
+- **Codex results are fresh runs**: a Codex wake's thread id is not where
+  a brief can read it. Resuming needs that id recorded (the running marker
+  is the obvious home) and `thread/resume`.

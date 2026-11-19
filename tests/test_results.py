@@ -271,6 +271,11 @@ try:
     job("20261119-140000-00001111", "2026-11-19T22:00:00Z", cron)
     job("20261119-140000-00002222", "2026-11-19T22:00:00Z",
         {"caller": "conversation", "caller_session": "s", "thread": "t-x"})
+    check("a run's record is in a folder of its own, out of an older broker's sight",
+          (w._path("20261119-140000-00001111").parent == w.RUNS,
+           w._path("20261119-140000-00002222").parent == w.STATE,
+           sorted(x.name for x in w.STATE.glob("*.json")))
+          == (True, True, ["20261119-140000-00002222.json"]))
     check("kick_for: a run's record starts its persona's drain; a thread's does not",
           (lr.kick_for("20261119-140000-00001111"), lr.kick_for("20261119-140000-00002222"),
            started) == ("started", None, [AGENT]), started)
@@ -279,7 +284,8 @@ try:
     lr.to_headless(rec, "thread gone")
     moved = json.loads(w._path("20261119-140000-00002222").read_text())
     check("a thread result whose thread is gone goes by a run instead",
-          (w.route(moved), moved.get("headless_why"), started[-1]) == ("run", "thread gone", AGENT),
+          (w.route(moved), moved.get("headless_why"), started[-1],
+           w._path("20261119-140000-00002222").parent) == ("run", "thread gone", AGENT, w.RUNS),
           moved)
     lr.kick = real_kick
     fresh = lr.fresh_text({**moved, "result": json.loads(
