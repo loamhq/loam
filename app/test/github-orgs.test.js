@@ -110,42 +110,32 @@ async function openIntegrations() {
   click(await until(() => all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'GitHub')))
   await until(() => first())
 }
-async function openOrg() {
+// The page is one app across these tests, so a card is first drawn from the
+// state the test before left and then again when the broker's answer for this
+// one arrives. `ready` names what this test's answer draws; under load (eight
+// suites at once, 2026-11-19) asserting on the first drawing failed a landing.
+async function openOrg(ready = () => true) {
   click(await until(() => all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'octo-org')))
-  await until(() => orgCard())
+  await until(() => orgCard() && ready(orgCard()))
 }
 const fields = () => all(connect(), 'field').map(f => f.childNodes[0])
-// The page draws the last answer it had while it reloads GitHub's state, so
-// right after a test changes `gh` the card can still show the previous
-// test's account for as long as the relay takes. Under load that was longer
-// than the first assertion waited (a flake in landings, 2026-11-18). Each
-// test's checks after opening are run until they hold, then once more for
-// the message if they never do.
-async function eventually(checks, timeout = 8000) {
-  try {
-    await until(() => { try { checks(); return true } catch { return false } }, { timeout })
-  } catch {}
-  checks()
-}
 
 test('an older host offers its one account without promising another connection', async () => {
   gh = SHAPES.authorized
   await openIntegrations()
-  await eventually(() => {
-    assert.equal(connect(), null)
-    assert.equal(orgCard(), null)
-    assert.deepEqual(pills(first()), ['Refresh', 'Disconnect'])
-    assert.ok(all(root, 'setrow').some(n => text(find(n, 'setrow-title')) === 'octo-owner'))
-  })
+  assert.equal(connect(), null)
+  assert.equal(orgCard(), null)
+  assert.deepEqual(pills(first()), ['Refresh', 'Disconnect'])
+  assert.ok(all(root, 'setrow').some(n => text(find(n, 'setrow-title')) === 'octo-owner'))
 })
 test('adding an account stays within GitHub, below the account list', async () => {
   gh = withOrgs(SHAPES.authorized)
   await openIntegrations()
-  await eventually(() => {
-    assert.deepEqual(pills(connect()), ['Add an account'])
-    assert.equal(orgCard(), null)
-    assert.deepEqual(pills(first()), ['Refresh', 'Disconnect'])
-  })
+  // Drawn only once this test's answer says organizations are offered.
+  await until(() => connect())
+  assert.deepEqual(pills(connect()), ['Add an account'])
+  assert.equal(orgCard(), null)
+  assert.deepEqual(pills(first()), ['Refresh', 'Disconnect'])
 })
 test('Add an account validates the organization before asking the broker', async () => {
   click(pill(connect(), 'Add an account'))
@@ -190,16 +180,12 @@ test('Continue preserves org/name and posts only the broker manifest to the orga
 test('an unfinished account opens its own detail and Install scopes the request to that organization', async () => {
   gh = withOrgs(SHAPES.authorized, ORG_SHAPES.registered)
   await openIntegrations()
-  await eventually(() => {
-    assert.equal(all(root, 'setrow').length, 2)
-    assert.deepEqual(pills(first()), ['Refresh all accounts', 'Disconnect all accounts'])
-  })
-  await openOrg()
-  await eventually(() => {
-    assert.equal(text(find(root, 'sheet-title')), 'octo-org')
-    assert.equal(text(find(orgCard(), 'ghword')), 'Created, not installed yet')
-    assert.equal(find(orgCard(), 'ghline').getAttribute('href'), 'https://github.com/apps/loam-for-octo-org')
-  })
+  await until(() => all(root, 'setrow').length === 2)
+  assert.deepEqual(pills(first()), ['Refresh all accounts', 'Disconnect all accounts'])
+  await openOrg((card) => find(card, 'ghword') && text(find(card, 'ghword')) === 'Created, not installed yet')
+  assert.equal(text(find(root, 'sheet-title')), 'octo-org')
+  assert.equal(text(find(orgCard(), 'ghword')), 'Created, not installed yet')
+  assert.equal(find(orgCard(), 'ghline').getAttribute('href'), 'https://github.com/apps/loam-for-octo-org')
   click(pill(orgCard(), 'Install'))
   await until(() => assigned.length === 1)
   assert.deepEqual(asked, [{ route: 'install', body: { org: 'octo-org' } }])
@@ -208,23 +194,20 @@ test('an unfinished account opens its own detail and Install scopes the request 
 })
 test('an authorized account shows scope, sign-in and renewal with shared actions explicitly labelled', async () => {
   gh = withOrgs(SHAPES.authorized, ORG_SHAPES.authorized)
-  await openIntegrations(); await openOrg()
-  await eventually(() => {
-    assert.deepEqual(all(orgCard(), 'ghline').map(text), ['selected repositories', 'Signed in as octo-owner', 'GitHub App: loam-for-octo-org'])
-    assert.equal(text(find(orgCard(), 'ghword')), 'Connected')
-    assert.equal(text(find(orgCard(), 'ghquiet')), `Sign in again by ${formatDate('2027-04-02T21:37:31Z', { year: 'numeric', month: 'short', day: 'numeric' })}`)
-    assert.deepEqual(pills(orgCard()), ['Refresh all accounts', 'Disconnect all accounts'])
-    assert.match(text(first()), /every GitHub account/)
-  })
+  await openIntegrations(); await openOrg((card) => all(card, 'ghline').length === 3)
+  assert.deepEqual(all(orgCard(), 'ghline').map(text), ['selected repositories', 'Signed in as octo-owner', 'GitHub App: loam-for-octo-org'])
+  assert.equal(text(find(orgCard(), 'ghword')), 'Connected')
+  assert.equal(text(find(orgCard(), 'ghquiet')), `Sign in again by ${formatDate('2027-04-02T21:37:31Z', { year: 'numeric', month: 'short', day: 'numeric' })}`)
+  assert.deepEqual(pills(orgCard()), ['Refresh all accounts', 'Disconnect all accounts'])
+  assert.match(text(first()), /every GitHub account/)
 })
 test('an unhealthy organization keeps its own warning and reconnect scope', async () => {
   gh = withOrgs(SHAPES.authorized, ORG_SHAPES.unhealthy)
-  await openIntegrations(); await openOrg()
-  await eventually(() => {
-    assert.equal(text(find(orgCard(), 'ghquiet')), ORG_SHAPES.unhealthy.health.last_error)
-    assert.equal(find(orgCard(), 'ghword').getAttribute('class'), 'setrow-sub ghword warn')
-    assert.deepEqual(pills(orgCard()), ['Reconnect', 'Refresh all accounts', 'Disconnect all accounts'])
-  })
+  await openIntegrations(); await openOrg((card) => find(card, 'ghquiet')
+    && text(find(card, 'ghquiet')) === ORG_SHAPES.unhealthy.health.last_error)
+  assert.equal(text(find(orgCard(), 'ghquiet')), ORG_SHAPES.unhealthy.health.last_error)
+  assert.equal(find(orgCard(), 'ghword').getAttribute('class'), 'setrow-sub ghword warn')
+  assert.deepEqual(pills(orgCard()), ['Reconnect', 'Refresh all accounts', 'Disconnect all accounts'])
 })
 test('Disconnect all explains scope, asks first, then retains every GitHub cleanup link', async () => {
   await openIntegrations()

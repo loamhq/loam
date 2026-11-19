@@ -1,13 +1,40 @@
 #!/usr/bin/env python3
-"""Run every tests/test_*.py, each as the script it is, and exit non-zero if
-any fails. This is the agents repository's test command: what a landing runs
-on a job's branch and on the merged tree (lib/loam_worktree.py).
+"""Run every tests/test_*.py, each as the script it is, in parallel, and exit
+non-zero if any fails. This is the agents repository's test command: what a
+landing runs on a job's branch and on the merged tree (lib/loam_worktree.py).
 
 Each test is run with the interpreter its own docstring names on its `Run:`
 line when that is the MCP venv -- a test of an MCP server imports `mcp`, which
 lives only there -- and with python3 otherwise.
 
-Run: python3 tests/run-all [test_x.py ...]   (named ones only, in full)
+**Sealed** (2026-11-19). A test sees nothing of the install it runs on. Each
+test file gets a scratch folder of its own, removed when it ends, and
+inside it everything the runtime would otherwise read or write on the box:
+
+  - a configuration of the suite's own (FIXTURE below), never the install's
+    /etc/loam/loam.toml, whose every path (vault, workspaces, projects,
+    plugins, state, logs, jobs, the secrets files) points into the scratch
+    folder;
+  - its own TMPDIR, lock table, schedule log, host settings, thread store,
+    vault and waiter records, so no two tests running at once share a temp
+    path or a piece of state, and nothing a test forgets to clean up
+    outlives it;
+  - no network: no socket off loopback and no credential read from a file
+    (lib/loam_offline.py), in this process and every one a test spawns.
+
+A landing adds a wall around the run (lib/loam_worktree.py `platform_argv`):
+a network namespace of its own, so even loopback is not the box's, and the
+box's live folders hidden behind empty ones. A test that needs the live box,
+the live app, the vault, another repository or the network is not a test of
+this suite: it lives beside it, named `live_*.py` or `e2e_*.py`, and is run
+by hand (`tests/README.md`).
+
+**Parallel.** `--jobs N` (or LOAM_TEST_JOBS) files at once; the default is
+half the CPUs, at least 2 and at most 8. The slowest files start first. Each
+file's output is printed whole when it ends, so lines never interleave.
+
+Run: python3 tests/run-all [--jobs N] [test_x.py ...]   (named ones only, in full)
+     python3 tests/run-all --live                  (the live set, by hand)
 """
 
 import json
@@ -18,6 +45,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,6 +53,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 import loam_config  # noqa: E402
 
 VENV = loam_config.MCP_VENV / "bin" / "python"
+PER_TEST_TIMEOUT = 600
 
 
 def interpreter(test: Path) -> str:
@@ -34,7 +63,12 @@ def interpreter(test: Path) -> str:
     return sys.executable
 
 
-# What the tests' fixtures assume of an install, over whatever it says.
+# The install the suite's fixtures are written against. Nothing here is read
+# from the install the suite runs on: on 2026-11-18 a fresh install's own
+# folder names (`Conversations`, `Inbox`, UTC) failed 35 files, and a test
+# that inherited this box's paths read its live jobs folder and loam-ui tree.
+# The user, its home and the tools in it (claude, uv, the MCP venv) are the
+# machine's, because a test runs as that user; `paths.root` is this checkout.
 FIXTURE = {
     "timezone": "America/Los_Angeles",
     "vault": {"inbox": "00_INBOX", "boards": "00_INBOX/boards",
@@ -43,12 +77,30 @@ FIXTURE = {
               "attachments": "98_ATTACHMENTS", "system": "99_SYSTEM"},
 }
 
+# What of the install a test may see: who it runs as, and its tools.
+MACHINE = {
+    "user": loam_config.USER,
+    "paths": {"home": str(loam_config.HOME), "root": str(ROOT),
+              "mcp_venv": str(loam_config.MCP_VENV),
+              "pycache": str(loam_config.PYCACHE)},
+}
 
-# And what the tests' fixtures assume an install does not say: an install
-# made by install.sh names its web front in `[edge]` (its domain, and which
-# app records it serves), and the deploy layer's tests render their own; a
-# `[bin]` table moves the tools a test's own stub stands in for.
-FIXTURE_DROP = ("edge", "bin")
+# Loam's starter agent, which every install has (lib/loam_install.py).
+STARTER = "iris"
+
+# Every other path, into the test's scratch folder (its name there).
+SCRATCH_PATHS = {
+    "vault": "vault", "workspaces": "ai-labs", "projects": "projects",
+    "plugins": "plugins", "state": "state", "logs": "state/logs",
+    "jobs": "state/jobs", "reviewer_state": "state/reviewer",
+    "secrets_env": "config/secrets.env", "wake_env": "config/wake.env",
+}
+
+# The files that take longest start first, so the run is not left waiting
+# on one of them at the end (measured 2026-11-19 on this suite).
+SLOW_FIRST = ("test_doc_comments.py", "test_schedule.py", "test_app.py",
+              "test_cron_locks.py", "test_stuck_command.py", "test_threads.py",
+              "test_settings.py")
 
 
 def toml_value(value) -> str:
@@ -72,153 +124,146 @@ def toml_text(table: dict, prefix: str = "") -> str:
     return "\n".join(out) + "\n"
 
 
-def fixture_config(where: Path) -> str:
-    """The install's configuration with FIXTURE laid over it, as a file."""
-    import tomllib  # noqa: PLC0415
-    real = Path(os.environ.get("LOAM_CONFIG") or loam_config.CONFIG_FILE)
-    try:
-        table = tomllib.loads(real.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        table = {}
-    for key in FIXTURE_DROP:
-        table.pop(key, None)
-    for key, value in FIXTURE.items():
-        table[key] = ({**table.get(key, {}), **value} if isinstance(value, dict)
-                      else value)
-    path = where / "loam.toml"
+def fixture_config(scratch: Path) -> str:
+    """The suite's own configuration, every path in `scratch`, as a file."""
+    table = json.loads(json.dumps(FIXTURE))
+    table.update(json.loads(json.dumps({k: v for k, v in MACHINE.items()
+                                        if k != "paths"})))
+    paths = dict(MACHINE["paths"])
+    for key, rel in SCRATCH_PATHS.items():
+        paths[key] = str(scratch / rel)
+    table["paths"] = paths
+    for key in ("vault", "workspaces", "projects", "plugins", "state"):
+        Path(paths[key]).mkdir(parents=True, exist_ok=True)
+    # The install's starter agent and the shared page every agent imports,
+    # as a fresh install has them (install.sh): the guard, the identity gate
+    # and the plugin gateway judge a call by the agent it comes from.
+    labs = Path(paths["workspaces"])
+    (labs / STARTER).mkdir()
+    (labs / STARTER / "agent.json").write_text(json.dumps({
+        "name": STARTER, "display": STARTER.title(), "emoji": "*",
+        "workspace": str(labs / STARTER), "vault": paths["vault"],
+        "wake_schedule": "04:00", "wake_timezone": FIXTURE["timezone"]},
+        indent=2) + "\n", encoding="utf-8")
+    # A soul, so a wake's identity gate has a sibling to draw its decoy
+    # from: before 2026-11-19 it drew one from the box's own agents' souls.
+    (labs / STARTER / "soul.md").write_text(
+        "# Soul\n\nI am the starter agent of a test install, and nobody's. "
+        "The heron standing in the shallow river is the picture I keep.\n",
+        encoding="utf-8")
+    (labs / "_shared").mkdir()
+    (labs / "_shared" / "reach.md").write_text(
+        "# What you can reach\n\nThe suite's own install.\n", encoding="utf-8")
+    (labs / "commons").mkdir()
+    path = scratch / "loam.toml"
     path.write_text(toml_text(table), encoding="utf-8")
     return str(path)
 
 
-def main() -> int:
-    # A lock table of the suite's own unless the caller chose one, as a
-    # landing's run_tests already does (lib/loam_worktree.py). test_cron_locks
-    # and test_wake_failed take run slots and wait for them; run from a job's
-    # session, they took the box's REAL slots beside the live jobs and left
-    # their holder lines in state/locks (probeone 17:40Z, wakefailedselftest
-    # 17:47Z on 2026-10-13), and with every slot held they would wait out
-    # their 1200 s budget.
-    locks = None
-    if not os.environ.get("LOAM_LOCK_DIR"):
-        locks = tempfile.mkdtemp(prefix="loam-test-locks-")
-        os.environ["LOAM_LOCK_DIR"] = locks
-        os.environ.pop("LOAM_LIVE_LOCKS", None)
-    # And a schedule log of its own: a test that runs bin/wake records a fire
-    # (lib/loam_schedule.py), which must not land in the box's real log.
-    schedules = None
-    if not os.environ.get("LOAM_SCHEDULE_STATE"):
-        schedules = tempfile.mkdtemp(prefix="loam-test-schedules-")
-        os.environ["LOAM_SCHEDULE_STATE"] = schedules
-    # And host settings of its own, empty: the box's own say what a project
-    # engineer runs on (`engineers` in state/broker/settings.json,
-    # lib/loam_engineer.py). On 2026-11-16 at 16:43:43Z the default became
-    # Antigravity mid-landing, and test_engineer_walled, whose stub stands in
-    # for the Claude CLI only, launched a REAL Antigravity session instead
-    # (the stub never ran, its receipt and commit never came);
-    # test_engineer_codex read 'antigravity' where its record said codex.
-    settings = None
-    if not os.environ.get("LOAM_HOST_SETTINGS"):
-        settings = tempfile.mkdtemp(prefix="loam-test-settings-")
-        os.environ["LOAM_HOST_SETTINGS"] = os.path.join(settings, "settings.json")
-    # And a thread store and vault of its own (2026-11-16): a test that
-    # writes threads without naming its own would write the owner's, as the
-    # live probe's `broker-probe` threads did. Every thread test names its
-    # own today; this is the floor under one that forgets.
-    stores = None
-    if not os.environ.get("LOAM_THREADS_STATE") or not os.environ.get("LOAM_VAULT"):
-        stores = tempfile.mkdtemp(prefix="loam-test-threads-")
-        if not os.environ.get("LOAM_THREADS_STATE"):
-            os.environ["LOAM_THREADS_STATE"] = os.path.join(stores, "threads")
-        if not os.environ.get("LOAM_VAULT"):
-            os.environ["LOAM_VAULT"] = os.path.join(stores, "vault")
-    # The engineer's delivery records and the broker's quiet-route mark
-    # (2026-11-18): every test that starts a broker runs its delivery pass,
-    # which marks the route and delivers what it finds owed. Against the
-    # owner's state that made `route_live` true for a test's lifetime (the
-    # landing of job 20261118-213751-94e2c7f7 left such a mark) and could
-    # deliver, or drop as "thread gone", a real job's result.
-    waiters = None
-    if not os.environ.get("LOAM_WAITERS_DIR"):
-        waiters = tempfile.mkdtemp(prefix="loam-test-waiters-")
-        os.environ["LOAM_WAITERS_DIR"] = waiters
-    # And the layout the suite was written against (2026-11-18): the
-    # install's own configuration, with the vault's folder names and the
-    # time zone the tests' fixtures spell out laid over it. Found by the
-    # 0.2.2 rehearsal: on a fresh install (`Conversations`, `Inbox`, UTC)
-    # 35 test files failed on a checkout nothing had changed, so no engineer
-    # change could land there. A test that names its own LOAM_CONFIG keeps it.
-    fixture = None
+def sealed_env(scratch: Path) -> dict[str, str]:
+    """The environment one test file runs in: everything it could share
+    with another test, or with the box, in its own scratch folder."""
+    env = dict(os.environ)
+    tmp = scratch / "tmp"
+    tmp.mkdir()
+    env["TMPDIR"] = str(tmp)
+    # A test that names its own of these keeps it; each is the floor under
+    # one that forgets. Why each exists (all caused on this box):
+    #   LOAM_LOCK_DIR        test_cron_locks and test_wake_failed took the
+    #                        box's real run slots (2026-10-13)
+    #   LOAM_SCHEDULE_STATE  bin/wake records a fire in the schedule log
+    #   LOAM_HOST_SETTINGS   the owner's engine switch reached a test's stub
+    #                        mid-landing (2026-11-16)
+    #   LOAM_THREADS_STATE, LOAM_VAULT  the live probe's threads (2026-11-16)
+    #   LOAM_WAITERS_DIR     a test broker delivered a real job's result
+    #                        (2026-11-18)
+    for var, rel in (("LOAM_LOCK_DIR", "locks"), ("LOAM_SCHEDULE_STATE", "schedules"),
+                     ("LOAM_THREADS_STATE", "threads"), ("LOAM_WAITERS_DIR", "waiters")):
+        (scratch / rel).mkdir()
+        env[var] = str(scratch / rel)
+    env["LOAM_HOST_SETTINGS"] = str(scratch / "settings.json")
+    env["LOAM_VAULT"] = str(scratch / "vault")
+    env.pop("LOAM_LIVE_LOCKS", None)
     if not os.environ.get("LOAM_TEST_INSTALL_CONFIG"):
-        fixture = tempfile.mkdtemp(prefix="loam-test-config-")
-        os.environ["LOAM_CONFIG"] = fixture_config(Path(fixture))
-        # The clock's zone too, for what reads the machine's local time.
-        os.environ["TZ"] = FIXTURE["timezone"]
+        env["LOAM_CONFIG"] = fixture_config(scratch)
+        env["TZ"] = FIXTURE["timezone"]
     # No test's broker object reads the box's real usage through a real CLI
-    # (lib/loam_provider_usage.py); the ones that build a Server say so too.
-    os.environ["LOAM_USAGE_READS"] = "off"
+    # (lib/loam_provider_usage.py).
+    env["LOAM_USAGE_READS"] = "off"
     # And nothing off the box: no real credential read and no socket off
-    # loopback, in this process and every one a test spawns
-    # (lib/loam_offline.py). A test of the move once repointed every real
-    # A DNS record to 5.6.7.8 with a real key from secrets.env
-    # (2026-11-10, 02:29Z, 1 h 56 min down).
-    os.environ["LOAM_OFFLINE"] = "1"
+    # loopback (lib/loam_offline.py). A test of the move once repointed every
+    # real A DNS record with a real key (2026-11-10, 1 h 56 min down).
+    env["LOAM_OFFLINE"] = "1"
     offline = str(ROOT / "tests" / "offline")
-    os.environ["PYTHONPATH"] = os.pathsep.join(
+    env["PYTHONPATH"] = os.pathsep.join(
         [offline] + [x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x])
+    return env
+
+
+def run_one(test: Path, live: bool = False) -> tuple[Path, object, str, float]:
+    t0 = time.monotonic()
+    scratch = Path(tempfile.mkdtemp(prefix=f"loam-t-{test.stem[5:][:12]}-"))
     try:
-        return run_all()
+        out = subprocess.run([interpreter(test), str(test)], cwd=ROOT,
+                             capture_output=True, text=True,
+                             timeout=PER_TEST_TIMEOUT,
+                             env=None if live else sealed_env(scratch),
+                             stdin=subprocess.DEVNULL)
+        code, text = out.returncode, out.stdout + out.stderr
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.stdout if isinstance(exc.stdout, str) else ""
+        code, text = "timeout", (partial or "") + f"\n(timed out after {PER_TEST_TIMEOUT} s)"
     finally:
-        if locks:
-            shutil.rmtree(locks, ignore_errors=True)
-        if schedules:
-            shutil.rmtree(schedules, ignore_errors=True)
-        if settings:
-            shutil.rmtree(settings, ignore_errors=True)
-        if stores:
-            shutil.rmtree(stores, ignore_errors=True)
-        if waiters:
-            shutil.rmtree(waiters, ignore_errors=True)
-        if fixture:
-            shutil.rmtree(fixture, ignore_errors=True)
+        shutil.rmtree(scratch, ignore_errors=True)
+    return test, code, text, time.monotonic() - t0
 
 
-def run_all() -> int:
+def workers(argv: list[str]) -> int:
+    if "--jobs" in argv:
+        return max(1, int(argv[argv.index("--jobs") + 1]))
+    if os.environ.get("LOAM_TEST_JOBS"):
+        return max(1, int(os.environ["LOAM_TEST_JOBS"]))
+    return max(2, min(8, (os.cpu_count() or 2) // 2))
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    only = [a for a in argv if a.endswith(".py")]
+    # `--live`: the tests that read this box as it is (live_*.py), one at a
+    # time, unsealed. Never a landing's; run by hand (tests/README.md).
+    live = "--live" in argv
+    tests = [t for t in sorted((ROOT / "tests").glob("live_*.py" if live else "test_*.py"))
+             if not only or t.name in only]
+    tests.sort(key=lambda t: (t.name not in SLOW_FIRST,
+                              SLOW_FIRST.index(t.name) if t.name in SLOW_FIRST else 0))
+    n = 1 if live else workers(argv)
     failed, tails = [], []
     started = time.monotonic()
-    # `run-all test_a.py test_b.py` runs only those, each in full.
-    only = [a for a in sys.argv[1:] if a.endswith(".py")]
-    for test in sorted((ROOT / "tests").glob("test_*.py")):
-        if only and test.name not in only:
-            continue
-        t0 = time.monotonic()
-        try:
-            out = subprocess.run([interpreter(test), str(test)], cwd=ROOT,
-                                 capture_output=True, text=True, timeout=600,
-                                 stdin=subprocess.DEVNULL)
-            code, text = out.returncode, out.stdout + out.stderr
-        except subprocess.TimeoutExpired:
-            code, text = "timeout", ""
-        mark = "ok  " if code == 0 else "FAIL"
-        if only:
-            print(text, flush=True)
-        print(f"{mark} {test.name} ({time.monotonic() - t0:.0f} s)", flush=True)
-        if code != 0:
-            failed.append(test.name)
-            lines = text.rstrip().splitlines()
-            tails.append((test.name, code, "\n".join(lines[-15:]),
-                          [ln for ln in lines[:-15] if ln.lstrip().startswith("FAIL")]))
-            print(tails[-1][2], flush=True)
+    print(f"{len(tests)} files, {n} at a time", flush=True)
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        for fut in as_completed([pool.submit(run_one, t, live) for t in tests]):
+            test, code, text, took = fut.result()
+            mark = "ok  " if code == 0 else "FAIL"
+            if only:
+                print(text, flush=True)
+            print(f"{mark} {test.name} ({took:.0f} s)", flush=True)
+            if code != 0:
+                failed.append(test.name)
+                lines = text.rstrip().splitlines()
+                tails.append((test.name, code, "\n".join(lines[-15:]),
+                              [ln for ln in lines[:-15] if ln.lstrip().startswith("FAIL")]))
+                print(tails[-1][2], flush=True)
     # Each failure's tail again, at the end. A landing quotes only the last
     # TAIL_LINES of this output (lib/loam_worktree.py), so a failure early in
-    # the alphabet was quoted as its name alone, behind the `ok` lines that
-    # followed it: a login test on 2026-11-08, never reproduced after.
-    # Its FAIL lines first: test_schedule prints 29 checks and its tail can be
-    # all PASS (caused, the same day).
-    for name, code, text, fails in tails:
+    # the run was quoted as its name alone, behind the `ok` lines that
+    # followed it (a login test on 2026-11-08). Its FAIL lines first:
+    # test_schedule prints 29 checks and its tail can be all PASS.
+    for name, code, text, fails in sorted(tails):
         print(f"--- {name} (exit {code}) ---", flush=True)
         if fails:
             print("\n".join(fails[:10]), flush=True)
         print(text, flush=True)
+    failed.sort()
     print(f"{len(failed)} failed in {time.monotonic() - started:.0f} s"
           + (f": {', '.join(failed)}" if failed else ""))
     return 1 if failed else 0

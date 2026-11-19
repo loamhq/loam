@@ -1446,6 +1446,18 @@ def platform_argv(tree: Path, command: str) -> list[str]:
     it. The venv is bound under the tree's `mcp/` first, because that mount
     hides the canonical one. A top-level entry the job ADDED has nothing to
     mount over and is missing from the view; the tests say so if it matters.
+
+    **The wall** (2026-11-19). A landing's tests are sealed: what they may
+    not read is not there to read. The command runs in a network namespace
+    of its own with only its own loopback up, so no test reaches the
+    network, the live app or the box's broker on its loopback port; and
+    each of the box's live folders (`sealed_paths`) is covered by an empty
+    read-only one, after the tree is bound in, so a test that reads the
+    vault, an agent's workspace, another repository, the state and jobs
+    folders (where every other job's tree is) or the secrets files finds
+    nothing, every time, instead of whatever the box holds that minute.
+    Before the wall, 15 of 68 non-landings in 30 days were a test reading
+    the live box or a flaky test, against 6 that were the work's.
     """
     uid, gid = os.getuid(), os.getgid()
     entries = git(tree, "ls-tree", "--name-only", "HEAD").stdout.split("\n")
@@ -1457,10 +1469,34 @@ def platform_argv(tree: Path, command: str) -> list[str]:
         src, dst = tree / name, eng.AGENTS / name
         if dst.exists() and src.is_dir() == dst.is_dir():
             mounts.append(f"mount --rbind {_q(str(src))} {_q(str(dst))}")
+    for path in sealed_paths():
+        mounts.append(f"mount -t tmpfs -o ro,size=64k,mode=0755 loam-sealed {_q(str(path))}")
+    mounts.append("ip link set lo up")
     inner = (f"cd {eng.AGENTS} && exec unshare -U --map-user={uid} "
              f"--map-group={gid} sh -c {_q(command)}")
     script = " && ".join(mounts + [f"exec sh -c {_q(inner)}"])
-    return ["unshare", "-Urm", "sh", "-c", script]
+    return ["unshare", "-Urmn", "sh", "-c", script]
+
+
+def sealed_paths() -> list[Path]:
+    """The live folders a landing's tests see empty: the install's data, its
+    other trees and repositories, its secrets and its user manager. Never
+    the checkout the tree is shown at, nor anything holding it, nor the
+    tools the tests run (the MCP venv, ~/.local/bin)."""
+    keep = [eng.AGENTS, lc.MCP_VENV, lc.LOCAL_BIN]
+    out = []
+    for path in (lc.VAULT, lc.WORKSPACES, lc.PROJECTS, lc.PLUGINS, lc.STATE,
+                 lc.LOGS, lc.JOBS, lc.REVIEWER_STATE, lc.SECRETS_ENV.parent,
+                 lc.WAKE_ENV.parent, lc.RUNTIME_DIR):
+        if not path.is_dir() or path in out:
+            continue
+        if any(k == path or path in k.parents for k in keep):
+            continue
+        out.append(path)
+    # A parent before what it holds: once it is covered, a folder inside it
+    # is not there to mount on (and is hidden already).
+    out.sort(key=lambda p: len(p.parts))
+    return [p for p in out if not any(q in p.parents for q in out)]
 
 
 def _q(text: str) -> str:
@@ -1921,11 +1957,226 @@ def _land_pr_locked(project, repo, tree, branch, keep_tree, result, say,
         remove_tree(project, record, delete_branch=False)
 
 
+# ---------------------------------------------------------------------------
+# The engineer's memory note never blocks a landing (2026-11-19).
+#
+# Seven times in November the only thing a failed landing held was the
+# engineer's own note in its memory file: the work had landed mid-job with
+# `--land`, and the note committed after it met a flaky test or the push
+# gate, so the job reported "not landed" and a continuation was sent to land
+# a note. A note is not the work. So, around every non-PR landing:
+#
+#   - a tree whose only uncommitted changes are the memory file has them
+#     committed by the landing, as the job's identity, instead of being
+#     refused as `uncommitted`;
+#   - when what the branch adds to `main` is the memory file alone and it
+#     does not land, a failed test run is tried once more; if it still does
+#     not land, the result is what landed before it (`landed_earlier`, or
+#     `nothing` when the note was all there was), no continuation is sent,
+#     and the note is kept as a patch in the job's folder
+#     (``memory_held``), which the receipt names;
+#   - when the push gate holds a branch only for its memory file or its
+#     commits' messages, the work lands as one commit of the branch's
+#     change without the memory file, under the landing's own message, and
+#     the note is held the same way. A hold on anything else the work adds
+#     is the work's, and stays a hold.
+#
+# Never for a pull-request project, whose landing is a proposal, and never
+# when the landing was cancelled.
+# ---------------------------------------------------------------------------
+
+MEMORY_PATCH = "memory-note.patch"
+MEMORY_COMMIT = "Engineer memory (committed by the landing)"
+MEMORY_RETRY = ("branch_tests", "merged_tests", "error")
+
+
+def memory_prefix(project: eng.Project) -> str:
+    return Path(memory_rel(project)).parent.as_posix() + "/"
+
+
+def only_memory(project: eng.Project, paths) -> bool:
+    paths = [p for p in paths if p]
+    prefix = memory_prefix(project)
+    return bool(paths) and all(p.startswith(prefix) for p in paths)
+
+
+def branch_changes(tree: Path, main_sha: str, tip: str) -> list[str]:
+    """The paths the branch changes since it last met `main`."""
+    return [p for p in git(tree, "diff", "--name-only", "--no-renames",
+                           f"{main_sha}...{tip}", check=False).stdout.split("\n") if p]
+
+
+def commit_memory(project: eng.Project, tree: Path, say) -> bool:
+    """Commit the tree's uncommitted changes when they are the memory file
+    alone. True when it did."""
+    dirty = dirty_files(tree)
+    if not dirty or not only_memory(project, dirty):
+        return False
+    git(tree, "add", "-A", "--", memory_prefix(project))
+    out = git(tree, "commit", "--quiet", "--no-verify", "-m", MEMORY_COMMIT, check=False)
+    if out.returncode != 0:
+        return False
+    say("landing: committed the engineer's uncommitted memory note")
+    return True
+
+
+def hold_note(project: eng.Project, record: dict, tree: Path, main_sha: str,
+              tip: str, why: str, detail: str) -> dict:
+    """Keep the memory change the branch makes as a patch in the job's
+    folder; what the receipt says of it."""
+    patch = git(tree, "diff", "--no-color", "--no-ext-diff", f"{main_sha}...{tip}",
+                "--", memory_prefix(project), check=False).stdout
+    where = project.jobs / record["job"] / MEMORY_PATCH
+    try:
+        where.write_text(patch, encoding="utf-8")
+        kept = str(where)
+    except OSError:
+        kept = None
+    return {"reason": why, "detail": (detail or "")[:600], "patch": kept}
+
+
+def gate_held_note_only(project: eng.Project, held: list[str]) -> bool:
+    """The gate's hold names nothing the work adds: every problem is the
+    memory file or a commit's message (identities are made right before the
+    gate reads them, ``settle_commits``)."""
+    prefix = memory_prefix(project)
+    for item in held:
+        _, _, what = item.partition(": ")
+        if what.startswith("its message names "):
+            continue
+        if what.startswith(prefix) and " adds " in what:
+            continue
+        if what.startswith(f"path {prefix}"):
+            continue
+        return False
+    return bool(held)
+
+
+def without_memory(project: eng.Project, tree: Path, branch: str, main_sha: str,
+                   message: str) -> str | None:
+    """Move `branch` to one commit on its merge base with `main` carrying
+    the branch's whole change except the memory file, under ``message``.
+    The old tip stays reachable as `refs/loam/held/<branch>`. Returns it."""
+    tip = branch_tip(tree, branch)
+    base = git(tree, "merge-base", main_sha, tip, check=False).stdout.strip()
+    if not tip or not base:
+        return None
+    index = Path(tempfile.mkdtemp(prefix="loam-note-index-")) / "index"
+    env = {**os.environ, "GIT_INDEX_FILE": str(index)}
+    try:
+        def g(*args):
+            return subprocess.run(["git", "-C", str(tree), *args], capture_output=True,
+                                  text=True, env=env, check=True).stdout
+        g("read-tree", tip)
+        g("rm", "-r", "--cached", "--quiet", "--ignore-unmatch", "--", memory_prefix(project))
+        if git(tree, "ls-tree", "-r", "--name-only", base, "--",
+               memory_prefix(project), check=False).stdout.strip():
+            g("read-tree", "--prefix=" + memory_prefix(project), f"{base}:{memory_prefix(project)}")
+        new_tree = g("write-tree").strip()
+        if new_tree == git(tree, "rev-parse", f"{base}^{{tree}}").stdout.strip():
+            return None     # nothing but the note
+        name, email = identity(canonical(project))
+        cenv = {**os.environ, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+                "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email}
+        commit = subprocess.run(["git", "-C", str(tree), "commit-tree", new_tree,
+                                 "-p", base, "-m", message], capture_output=True,
+                                text=True, env=cenv, check=True).stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    finally:
+        shutil.rmtree(index.parent, ignore_errors=True)
+    git(tree, "update-ref", f"refs/loam/held/{branch}", tip)
+    git(tree, "checkout", "--quiet", "-f", "-B", branch, commit)
+    return tip
+
+
 def land(project: eng.Project, record: dict, message: str, *,
          keep_tree: bool = False, say=None, release: str | None = None,
          title: str | None = None, summary: str = "",
          target_pr: int | None = None, reply: str = "",
          cancelled=None) -> dict:
+    """Land the job's branch on `main` (``_land_once``), with the memory note
+    kept out of the way of the work (the section above). Same result, and
+    ``memory_held`` ({"reason", "detail", "patch"}) when the note did not
+    land."""
+    say = say or (lambda _text: None)
+    kw = dict(keep_tree=keep_tree, say=say, release=release, title=title,
+              summary=summary, target_pr=target_pr, reply=reply,
+              cancelled=cancelled)
+    tree, branch = Path(record["path"]), record["branch"]
+    if project.pull_request or not tree.is_dir():
+        return _land_once(project, record, message, **kw)
+    try:
+        committed = commit_memory(project, tree, say)
+    except (WorktreeError, OSError, subprocess.SubprocessError):
+        committed = False
+    result = _land_once(project, record, message, **kw)
+    if committed:
+        result["memory_committed"] = True
+    if result.get("state") != "not_landed" or result.get("reason") in (
+            "cancelled", "uncommitted", None) or not tree.is_dir():
+        return result
+    try:
+        repo = canonical(project)
+        refresh_main(repo, tree)
+        main_sha, tip = rev(repo, MAIN), branch_tip(tree, branch)
+        if not main_sha or not tip:
+            return result
+        changes = branch_changes(tree, main_sha, tip)
+        if only_memory(project, changes):
+            if result["reason"] in MEMORY_RETRY:
+                say("landing: only the memory note is left and it did not "
+                    "land; trying once more")
+                again = _land_once(project, record, message, **kw)
+                if again.get("state") != "not_landed":
+                    return again
+                result = again
+            held = hold_note(project, record, tree, main_sha, tip,
+                             result.get("reason"), result.get("detail") or (
+                                 (result.get("test") or {}).get("tail", "")[-600:]))
+            base = git(tree, "merge-base", main_sha, tip, check=False).stdout.strip()
+            start = rev(repo, record["base"]) if record.get("base") else None
+            earlier = base if base and start and base != start \
+                and is_ancestor(tree, start, base) else None
+            say("landing: the memory note did not land and is kept as "
+                f"{held['patch'] or 'nothing (the patch could not be written)'}; "
+                "the work is not held by it")
+            out = {**result, "state": "landed_earlier" if earlier else "nothing",
+                   "sha": earlier or main_sha, "reason": None,
+                   "memory_held": held, "memory_test": result.get("test")}
+            if not keep_tree:
+                remove_tree(project, record, delete_branch=True)
+            return out
+        if result["reason"] == "gate" and gate_held_note_only(project, result.get("gate") or []):
+            if keep_tree:
+                return result   # the session is in the tree; it can fix its note
+            say("landing: the push gate holds only the memory note or a commit "
+                "message; landing the work as one commit without them")
+            note = any(c.startswith(memory_prefix(project)) for c in changes)
+            held = (hold_note(project, record, tree, main_sha, tip, "gate",
+                              result.get("detail") or "") if note else None)
+            old_tip = without_memory(project, tree, branch, main_sha, message)
+            if not old_tip:
+                return result
+            again = _land_once(project, record, message, **kw)
+            if again.get("state") == "not_landed":
+                # Put the branch back as the engineer left it.
+                git(tree, "checkout", "--quiet", "-f", "-B", branch, old_tip, check=False)
+                return again
+            if held:
+                again["memory_held"] = held
+            again["squashed"] = {"tip": old_tip, "gate": result.get("gate") or []}
+            return again
+    except (WorktreeError, OSError, subprocess.SubprocessError) as exc:
+        say(f"landing: could not set the memory note aside: {exc}")
+    return result
+
+
+def _land_once(project: eng.Project, record: dict, message: str, *,
+               keep_tree: bool = False, say=None, release: str | None = None,
+               title: str | None = None, summary: str = "",
+               target_pr: int | None = None, reply: str = "",
+               cancelled=None) -> dict:
     """Land the job's branch on `main`. Always returns a result, never raises:
 
         state    landed | nothing | not_landed
@@ -2788,6 +3039,30 @@ def _reply_file() -> str:
     return loam_pr_target.REPLY_FILE
 
 
+def note_section(result: dict) -> str:
+    """What became of the engineer's memory note, when it was not simply
+    part of what landed (``land``)."""
+    out = ""
+    if result.get("memory_committed"):
+        out += (" The engineer's memory note was uncommitted; the landing "
+                "committed it.")
+    squashed = result.get("squashed")
+    if squashed:
+        out += (f" The push gate held the branch only for its memory note or "
+                f"its commits' messages ({'; '.join(squashed.get('gate', [])[:3])}), "
+                f"so its change landed as one commit without them; the "
+                f"branch as made is `{squashed['tip'][:7]}`.")
+    held = result.get("memory_held")
+    if held:
+        why = REASONS.get(held.get("reason"), held.get("reason") or "it did not land")
+        where = (f"kept as `{held['patch']}`" if held.get("patch")
+                 else "**not kept**: its patch could not be written")
+        out += (f" **The engineer's memory note did not land** ({why}"
+                + (f": {held['detail'][:300]}" if held.get("detail") else "")
+                + f"); it is {where}, and no continuation is sent for it.")
+    return out
+
+
 def receipt_section(project: eng.Project, job_id: str, result: dict | None) -> str:
     """The launcher's paragraph on the landing, for the receipt."""
     if result is None:
@@ -2832,7 +3107,7 @@ def receipt_section(project: eng.Project, job_id: str, result: dict | None) -> s
                 if result.get("head") else "")
         return (f"**Landing: landed at `{result['sha'][:7]}`** — `{branch}` "
                 f"merged into `main`.{head}{tested} {push} {kept}{memory}"
-                + release_section(result.get("release")))
+                + note_section(result) + release_section(result.get("release")))
     if state == "landed_earlier":
         where = ("The worktree stays." if Path(result["tree"]).is_dir()
                  else "The worktree is removed.")
@@ -2844,6 +3119,7 @@ def receipt_section(project: eng.Project, job_id: str, result: dict | None) -> s
             text += (f" The job itself {result.get('detail') or 'did not complete'}; "
                      f"its work had already landed, so no continuation is "
                      f"offered.")
+        text += note_section(result)
         return text + release_section(result.get("release"))
     if state == "pull_request" and (result.get("pull_request") or {}).get("updated"):
         return update_section(result) + release_section(result.get("release"))
@@ -2862,6 +3138,11 @@ def receipt_section(project: eng.Project, job_id: str, result: dict | None) -> s
                 + release_section(result.get("release")))
     head = (f" Its HEAD was {result['head']}; the branch ref is what lands."
             if result.get("head") else "")
+    if state == "nothing" and result.get("memory_held"):
+        return (f"**Landing: nothing landed** — `{branch}` added only the "
+                f"engineer's memory note, and it did not land.{head} The "
+                f"worktree is removed." + note_section(result)
+                + release_section(result.get("release")))
     if state == "nothing":
         return (f"**Landing: nothing to land** — `{branch}` had no commits "
                 f"that `main` lacks.{head} The worktree is removed."

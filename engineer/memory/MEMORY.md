@@ -2067,3 +2067,32 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   checkout, and Codex and Antigravity inline it from that import at each build,
   so landing is enough. `loam_codex.instructions(<workspace>)` is the quickest
   assembled-prompt proof, and it leaves the workspace as it found it.
+## 2026-11-19 — the landing's tests are sealed and parallel
+
+- **What a sealed test sees.** `tests/run-all` writes each file its own
+  config (`FIXTURE`, never the install's file) with every data path in a
+  per-file scratch folder, plus a starter agent `iris` with a soul,
+  `_shared/reach.md` and `commons/`. A landing's `platform_argv` adds the
+  wall: `unshare -Urmn` with only loopback up, and an empty read-only tmpfs
+  over each of `sealed_paths()` (vault, workspaces, projects, plugins,
+  state, secrets folder, `/run/user/<uid>`), mounted after the tree's binds.
+  A bind survives a tmpfs over its source's parent, so the tree still
+  shows at the checkout's path.
+- **What the seal found** (each one passed before only because the box had
+  it): a broker test read the live broker token; the identity gate's decoy
+  came from the box's agents' real souls; the guard and the plugin gateway
+  needed the box's starter agent; a test read an agent's live provisioned
+  Codex config (now rendered by `provision.codex_config`); `test_engineer`
+  wrote into the live jobs folder. A test that needs the box is a
+  `tests/live_*.py`, run by hand with `run-all --live`.
+- **Wall time on a 16-CPU box**: 750 s one file at a time; about 100 s eight
+  at a time. The floor is `test_schedule` (40-80 s), which waits for a real
+  timer at the next minute boundary. `test_doc_comments` was 119 s until
+  its plugin suites ran at once and `test_places` ran as four processes by
+  unittest class name.
+- **The memory note never blocks a landing** (`land` wraps `_land_once`).
+  A note-only remainder that fails is retried once on a test failure, then
+  reported as what landed before it, with the note kept as
+  `memory-note.patch` in the job's folder and no continuation. A gate hold
+  on only the note or a commit message lands the change as one commit
+  without them (`without_memory`, a temporary index and `commit-tree`).
