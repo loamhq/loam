@@ -10,8 +10,8 @@ and the agents' OOMScoreAdjust (lib/loam_config.py), and the core units
 render the core's, below it:
 
   agent runs   an engineer job (bin/engineer-job's systemd-run line), a
-               wake (provision), a cron (lib/loam_cron.py), a Remote Control
-               server (gen-rc-units), the reviewer and the provider smoke
+               wake (provision), a cron (lib/loam_cron.py), the reviewer and
+               the provider smoke
                runs (static templates), a chat (the broker's `choom`).
   core         the session broker's unit and the plugins gateway's.
 
@@ -79,10 +79,6 @@ units: dict[str, str] = {}
 static = loam_units.rendered(AGENTS / "systemd")
 units["reviewer"] = static["loam-reviewer.service"]
 units["provider smoke"] = static["loam-provider-follow.service"]
-
-genrc = load("gen_rc_units_memtest", AGENTS / "bin" / "gen-rc-units")
-units["Remote Control"] = genrc.TEMPLATE.format(display="Iris", name="iris",
-                                                workspace="/w")
 
 prov = load("provision_memtest", AGENTS / "bin" / "provision")
 units["wake"] = prov.wake_units("iris", Path("/w"), "03:00")[0]

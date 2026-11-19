@@ -8,8 +8,7 @@
                rehearsal under --force); newer is installed beside the live
                build with the link untouched; a refused build is never
                taken again.
-  switch       a pass re-points, recycles RC (Claude Code), restarts the
-               broker, writes one Other line naming the alias move; a fail
+  switch       a pass re-points, restarts the broker, writes one Other line naming the alias move; a fail
                re-points nothing and writes an Important line; a rehearsal
                acts on nothing, even beside a real switch's hands.
   broker       busy is anything but `idle` (2026-11-17), a thread turn in
@@ -85,7 +84,6 @@ check("an alias the live build did not report is not a move",
 
 class Fake(f.Provider):
     name, label, broker_provider = "fake", "Fake CLI", "fake"
-    recycles_rc = True
 
     def __init__(self, root: Path, latest: str = "1.0.1", signed: bool = True,
                  smoke_ok: bool = True, fails: list[str] | None = None) -> None:
@@ -138,10 +136,6 @@ class FakeHands(f.Hands):
         twin.did = self.did
         twin.do_repoint = False
         return twin
-
-    def recycle_rc(self):
-        self.did.append(("recycle", self.dry))
-        return True
 
     def restart_broker(self):
         self.did.append(("restart", self.dry))
@@ -203,8 +197,9 @@ check("the smoke passed on the fake", plan.passed)
 hands = FakeHands()
 went = f.switch([plan], hands)
 check("a pass re-points the link", p.live() == "1.0.1" and went == [plan])
-check("a pass recycles the RC servers and restarts the broker, for real",
-      ("recycle", False) in hands.did and ("restart", False) in hands.did)
+check("a pass restarts the broker, for real", ("restart", False) in hands.did)
+check("...and recycles nothing (Remote Control is retired)",
+      not [d for d in hands.did if d[0] == "recycle"] and not hasattr(f.Hands, "recycle_rc"))
 lines = [d for d in hands.did if d[0] == "comms"]
 check("one comms line, under Other", len(lines) == 1 and lines[0][1] == "Other", str(lines))
 check("the line has the versions and the alias move",
@@ -236,9 +231,8 @@ rplan = f.decide(r, True)
 f.smoke(rplan, TMP)
 hands = FakeHands()
 f.switch([rplan], hands)
-check("a rehearsal recycles and restarts only dry",
-      ("recycle", True) in hands.did and ("restart", True) in hands.did
-      and ("recycle", False) not in hands.did and ("restart", False) not in hands.did,
+check("a rehearsal restarts only dry",
+      ("restart", True) in hands.did and ("restart", False) not in hands.did,
       str(hands.did))
 check("a rehearsal writes no comms line", not [d for d in hands.did if d[0] == "comms"])
 check("a rehearsal leaves no switch in the state", not f.read_state(r).get("switched_at"))
@@ -301,7 +295,7 @@ check("one Important line saying what failed",
       len(lines) == 1 and "4.0.1 rolled back to 4.0.0" in lines[0][2]
       and "ada wake invoke failed" in lines[0][2], str(lines))
 check("the rollback restarts the same careful way",
-      hands.did.count(("restart", False)) == 2 and hands.did.count(("recycle", False)) == 2)
+      hands.did.count(("restart", False)) == 2)
 state = f.read_state(s)
 check("the build is refused", "4.0.1" in state.get("refused", {}))
 check("a refused build is not taken again", f.decide(s, False) is None)

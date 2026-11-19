@@ -1,9 +1,8 @@
 [Unit]
-Description=Daily drift check, after the Remote Control recycle
+Description=Daily drift check and lane check, before the wake grid
 
 [Timer]
-# 01:40 @ZONE_WORD@: ten minutes after the recycle at 01:30, so it reads the RC
-# servers as they restarted, and twenty before the first wake at 02:00, so a
+# 01:40 @ZONE_WORD@: twenty minutes before the first wake at 02:00, so a
 # finding is in comms before any persona reads it. The check takes seconds.
 # Persistent=false like every timer in the grid: a night missed because the
 # box was down is not run late into the wakes.

@@ -9,7 +9,7 @@ secrets.env
 # and regenerated. Committing it would make every wake a dirty working tree.
 state/
 
-# Per-agent wake and RC logs. ~85 MB and growing without bound.
+# Per-agent wake and job logs. ~85 MB and growing without bound.
 logs/
 
 # ~87 MB of installed packages. Rebuild from mcp/requirements.txt:

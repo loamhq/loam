@@ -1,13 +1,14 @@
-# Run by loam-claude-signin.path on every change to the Claude Code login file:
-# start the Remote Control servers waiting for a sign-in, or stop the running
-# ones when the sign-in is gone (bin/rc-arm says which, and why a running or
-# deliberately stopped server is left alone). Never enabled itself.
+# Run by loam-claude-signin.path on every change to the Claude Code login
+# file: write down whether Claude Code is signed in (bin/claude-signin). It
+# starts and stops nothing since Remote Control was retired (2026-11-19); it
+# is where a sign-in will decide whether agents can run. Never enabled
+# itself.
 [Unit]
-Description=Loam: start or stop the Remote Control servers by the Claude Code sign-in
+Description=Loam: record the Claude Code sign-in
 
 [Service]
 Type=oneshot
-ExecStart=@ROOT@/bin/rc-arm
+ExecStart=@ROOT@/bin/claude-signin
 TimeoutStartSec=120
 StandardOutput=journal
 StandardError=journal

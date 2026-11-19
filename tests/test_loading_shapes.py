@@ -28,7 +28,7 @@ Then the switch: writing a map re-renders CLAUDE.md and the settings
 (`loam_loading.refresh`, and the persona's PostToolUse hook after a write
 made with the shell), removing it puts the old shape back, and the old
 files are never touched. And the readers: the identity gate's import check,
-rc-preflight, the size warning, the profile's file list.
+lane-check, the size warning, the profile's file list.
 
 Run: python3 tests/test_loading_shapes.py
 """
@@ -289,10 +289,10 @@ def main() -> int:
           and not loam_memory.is_auto_loaded(new / "_always.md", new)
           and loam_memory.is_auto_loaded(old / "_always.md", old)
           and not loam_memory.is_auto_loaded(old / "map.md", old))
-    rc = load("rc_preflight_shapes", AGENTS / "bin" / "rc-preflight")
+    rc = load("lane_check_shapes", AGENTS / "bin" / "lane-check")
     (new / "_active.md").write_text("no frontmatter at all\n")
     problems, _ = rc.findings(new)
-    check("rc-preflight with a map: no style finding for an `_active.md` that no longer loads",
+    check("lane-check with a map: no style finding for an `_active.md` that no longer loads",
           problems == [], problems)
     (new / "map.md").write_text("x" * (loam_memory.LIMIT_CHARS + 5))
     problems, _ = rc.findings(new)

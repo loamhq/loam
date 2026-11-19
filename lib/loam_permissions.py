@@ -31,8 +31,7 @@ session in ``default`` (caused 2026-11-12: a persona's thread session reported
 ``permissionMode: default`` in its init with the setting in place, and a
 scratch project the same); the ``--permission-mode`` flag is honoured, and
 the project's deny rules apply under it. So every lane passes it: the
-broker (``loam_broker.CLAUDE_STREAM_FLAGS``, conversations and threads), the
-Remote Control units (``bin/gen-rc-units``), ``bin/wake``,
+broker (``loam_broker.CLAUDE_STREAM_FLAGS``, conversations and threads), ``bin/wake``,
 ``bin/engineer-job`` (the platform engineer and every project engineer) and
 ``bin/review``. The settings files keep ``acceptEdits`` and their allow
 lists as the fallback for a launch that passes no flag.

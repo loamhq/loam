@@ -32,8 +32,8 @@ is the agent's own act: it writes ``map.md``. Loam never deletes or moves
 the old files; an agent with a map simply stops loading them.
 
 The shape is rendered into the two files every conversation route reads at
-start (the broker, Remote Control, the Claude Code app, and Codex and
-Antigravity, which compose from ``CLAUDE.md``'s imports): ``CLAUDE.md`` and
+start (the broker, the wake, the engineer and reviewer launchers, and Codex
+and Antigravity, which compose from ``CLAUDE.md``'s imports): ``CLAUDE.md`` and
 ``.claude/settings.json``, by ``bin/provision``'s ``claude_md`` and
 ``settings``. Because the agent can make or remove its map at any moment,
 ``refresh`` re-renders those two whenever the shape on disk and the shape

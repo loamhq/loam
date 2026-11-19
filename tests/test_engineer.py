@@ -14,9 +14,9 @@ every case here that passes would fail for a persona, or the reverse, and a
 guard that quietly applied the persona rule to the engineer would fail this
 file loudly rather than merely being wrong.
 
-**The clocks** are pure functions and are tested as such: when the next
-recycle is. Since 2026-11-10 nothing refuses a job for it, and a job has no
-default clock or round-trip cap; both are asserted below.
+**The clocks**: since 2026-11-10 a job has no default clock or round-trip
+cap, and since 2026-11-19 there is no recycle to compute; both are asserted
+below.
 
 Run: python3 tests/test_engineer.py
 """
@@ -138,22 +138,13 @@ print()
 # The clocks.
 # ---------------------------------------------------------------------------
 
-MIDDAY = datetime(2026, 9, 5, 12, 0, tzinfo=PT)
-LATE = datetime(2026, 9, 6, 1, 0, tzinfo=PT)     # half an hour before 01:30
-JUST_AFTER = datetime(2026, 9, 6, 1, 31, tzinfo=PT)
 
-# Nothing refuses a job at the recycle since 2026-11-10 (bin/recycle-rc
-# yields to it instead), and a job has no clock and no cap unless set.
+# No recycle to refuse a job at, and a job has no clock and no cap unless set.
 check("no crosses_recycle refusal left", hasattr(eng, "crosses_recycle"), False)
+check("no recycle clock left", hasattr(eng, "next_recycle") or hasattr(eng, "next_start"), False)
 check("no default clock", eng.DEFAULT_MAX_MINUTES, None)
 check("no round-trip cap by default",
       eng.MAX_TURNS if not os.environ.get("LOAM_ENGINEER_MAX_TURNS") else None, None)
-check("next start after 01:00",
-      eng.next_start(LATE).strftime("%Y-%m-%d %H:%M"), "2026-09-06 01:35")
-check("next start after midday",
-      eng.next_start(MIDDAY).strftime("%Y-%m-%d %H:%M"), "2026-09-06 01:35")
-check("next recycle after 01:31 is tomorrow's",
-      eng.next_recycle(JUST_AFTER).strftime("%Y-%m-%d %H:%M"), "2026-09-07 01:30")
 
 # The slug is the receipt's filename, and the owner reads it in a folder listing.
 check("slug from a title line",

@@ -28,7 +28,7 @@ sentences on both runtimes.
 Since 2026-09-04 it also carries the size limit on the auto-loaded files.
 That check is here rather than anywhere else for the reason the 08-30 hook
 defect taught: **enforcement belongs at the layer that acts.** A wake
-preflight and an RC start-up check both look at a file after it is written,
+preflight and the nightly lane check both look at a file after it is written,
 by which time the agent that wrote it has finished its turn and cannot be
 told. Refusing the Edit puts the number in front of the only party who can
 act on it, in the turn where acting is one more edit away.

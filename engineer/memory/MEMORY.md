@@ -65,12 +65,9 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **A change to the generators must be re-rendered, not just compared.**
   `drift-watch` compares against the previous night's state, so a
   comment-only change to every rendered unit is posted as new drift unless
-  the units are regenerated (`gen-units`, `gen-rc-units`, each agent's wake
+  the units are regenerated (`gen-units`, each agent's wake
   unit, `provision --reviewer`) and `loam-check-drift.service` is run once.
   Comment-only unit changes need a `daemon-reload` and no restart.
-- **`gen-rc-units` has no `--help`.** Any argument starting with `-` is
-  ignored and the run is live: `gen-rc-units --help` writes every rc unit.
-  Use `--dry-run`.
 - **Nor has `gen-deploy`** (caused 2026-11-17): `gen-deploy --help` is a
   live render. It wrote the Caddyfile, reloaded Caddy and ran `compose up`
   on the login and the browser. Read a generator's docstring, never its
@@ -1957,3 +1954,50 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `LOAM_PLAYWRIGHT=<scratch>/node_modules/playwright/index.mjs
   LOAM_CHROME=/usr/bin/chromium-headless-shell` (`PLUGIN_CASE=1440-latte-light`
   for one variant).
+## 2026-11-19 — Remote Control retired
+
+- **Remote Control is gone** (the owner: "I don't use it through app
+  anymore"): no `loam-rc-*` servers, no `gen-rc-units`, no `recycle-rc` or
+  its 01:30 timer. Every conversation is the broker's. `check-drift` reports
+  any `loam-rc-*` or `loam-recycle-rc.*` unit left on a box as a leftover.
+- **What Remote Control carried that was not Remote Control** kept a home:
+  rc-preflight's file-hygiene, lane-model and GitHub nightly checks are
+  `bin/lane-check`, run for every live persona by `bin/drift-watch` at
+  01:40 (the GitHub check is what keeps the user token's refresh token
+  rolling; dropping it would expire GitHub in six months, silently). The
+  sign-in watch (`loam-claude-signin.path`) runs `bin/claude-signin`, which
+  only records the state in `<state>/claude-signin.json` -- the seam for
+  deciding whether agents can run. The persona `settings.json` keeps
+  `model` and `outputStyle`: the broker passes neither by flag.
+- **Adopted sessions stay** (`lib/loam_adopt.py`): the conversations held
+  in the Claude Code app before the retirement still open in Loam, read
+  from the CLI's own files.
+## 2026-11-19 — input to a thread member is durable (batch B step 2)
+
+- **Every queued turn's input is on disk first**:
+  `state/threads/inputs/<thread>/<persona>.json` (`lib/loam_thread_inputs.py`),
+  written in `ThreadEngine.schedule`, marked `sent` right after the prompt
+  or steer goes in, removed when the turn settles (`_settle_inputs`). The
+  memory queue is a cache of it; `resume_inputs()` in `amain` rebuilds it.
+- **The stop rule:** while `broker.stopping`, an input whose turn neither
+  posted words nor finished is kept with `sent` cleared; everything else is
+  removed. No "didn't start" line, and no "turn ended: the broker restarted"
+  for a turn cut before a word (one cut after words still gets it).
+- **After a crash** (no orderly settle), a `sent` message is replayed and
+  `already_heard` (the member's `through`) decides; a `sent` result or
+  notice is dropped as given. That is the once-only key's on-disk half.
+- **"Same work" is decided by time, not topic**: a result `joins` the turn
+  in flight only if that turn started before the brief was accepted
+  (`since_ts`, added to the waiter record for this; `since` + 1 s for old
+  records). A later turn is about something newer; the result waits.
+- **A real broker on a scratch config works for live proof** with
+  `paths.home` left real (the CLI's credentials) and every other path
+  scratch, `--addr 127.0.0.1 --port 18932`, `env -i`, its stderr to a file
+  as the journal. Claude Code refuses a bare `sleep N` in Bash and
+  backgrounds long ones; `python3 -c 'import time; time.sleep(N)'` in the
+  foreground holds a turn mid-tool. A per-message model different from the
+  turn's stays queued (not steered), which is how to queue a message
+  behind a Claude turn on purpose. A waiter record's job id must match
+  `JOB_ID_RE` (hex suffix) or `owed()` ignores it silently.
+- **Seen, not fixed:** a turn model change (`set_choices`) posts the CLI's
+  "Set model to … for this session only" text as a persona message.

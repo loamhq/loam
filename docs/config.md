@@ -62,8 +62,7 @@ modules that import those two did not change.
   (`@ROOT@`, `@STATE@`, `@LOGS@`, `@WAKE_ENV@`, `@UNIT_PATH@`, …;
   `lib/loam_units.py` lists them). `bin/gen-units` installs the rendering,
   and `bin/check-drift` compares against the same rendering. The units
-  generated elsewhere (`bin/gen-rc-units`, `bin/provision`, the schedule
-  reconciler) fill the same values. `systemd/system/` is still installed by
+  generated elsewhere (`bin/provision`, the schedule reconciler) fill the same values. `systemd/system/` is still installed by
   hand.
 - **Deploy records.** `static_root` and `checkout` in `deploy/*/deploy.toml`
   take `@VAULT@`, `@WORKSPACES@`, `@PROJECTS@`, `@ROOT@`, `@STATE@`,
@@ -82,10 +81,8 @@ checkout. `bin/move-state` moves them to the fresh-install layout, once:
 
 1. builds the new venv;
 2. waits until no engineer job, wake, cron or review runs, no broker
-   session is working or asking, and no Remote Control server holds an
-   engineer call;
-3. stops the timers, the broker, the Remote Control servers and the plugin
-   gateway;
+   session is working or asking;
+3. stops the timers, the broker and the plugin gateway;
 4. renames each place (one filesystem, so each move is a rename);
 5. carries what records the old paths: Codex's thread table, and Claude
    Code's session folders for job trees, so a continuation still resumes;
@@ -136,16 +133,17 @@ Starting a timer that has stood clears its last trigger. systemd 252
 without a stamp file (every `Persistent=false` one) from the unit's previous
 activation. When that activation is older than the timer's last calendar
 time, the next elapse is already past and the timer fires on the spot.
-That is what fired every wake, the reviewer and recycle-rc when the state
+That is what fired every wake, the reviewer and the Remote Control recycle
+(retired 2026-11-19) when the state
 move restarted the timers, and it was reproduced on `loam-headroom.timer`.
 
 - **Tooling never stops and starts a standing timer.** A changed timer is
   moved by `systemctl --user daemon-reload` alone, which keeps its last
-  trigger. `gen-units`, `gen-rc-units`, `provision`, the schedule
+  trigger. `gen-units`, `provision`, the schedule
   reconciler, `move-state` and the installer and updater to come all follow
   this rule.
 - **A lane checks for itself.** The wake (reflection and cron), the
-  reviewer, recycle-rc and provider-follow call `loam_due.not_due()` first.
+  reviewer and provider-follow call `loam_due.not_due()` first.
   A run its timer started when none of the timer's calendar times fell in
   the ten minutes before goes no further, with a line in its journal and
   in `logs/not-due.jsonl`. A run started by hand or by "Run now" is never

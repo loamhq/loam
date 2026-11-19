@@ -11,8 +11,8 @@ the build was *"only hard-code the areas where it's necessary"*:
 
     the lane       lock, memory admission, heartbeat, run marker -- the
                    Move 8 machinery every unattended run on this box
-                   carries. No turn cap, wall clock or recycle refusal
-                   since 2026-11-10, as no wake has them.
+                   carries. No turn cap or wall clock since
+                   2026-11-10, as no wake has them.
     the facts      which personas exist, when each was first seen, when
                    each was last reviewed, how much has moved since. Read
                    from the roster, from git and from this file's own
@@ -51,12 +51,8 @@ the build was *"only hard-code the areas where it's necessary"*:
                    agent is not given on Antigravity.
 
 It is a static timer-fired unit like the persona wakes, not a transient one
-like the engineer's job. The 01:30 recycle restarts `loam-rc-*.service` and
-nothing else, so a oneshot fired by a timer is no more killable than a wake;
-the engineer's transient form answers a waiter that lives inside a Remote
-Control session, and the reviewer has no waiter. So since 2026-11-10 nothing
-refuses a run at the recycle (a refusal was kept until then for a hand-fired
-run at 01:00).
+like the engineer's job: the engineer's transient form answers a waiter that
+lives inside a persona's session, and the reviewer has no waiter.
 
 Usage: review [--persona <name>] [--dry-run]
        --persona pins tonight's choice by hand (the prototype, a re-run);
@@ -338,7 +334,7 @@ def git(*args: str) -> str:
 
 def roster() -> list[str]:
     """Every directory under ai-labs with an agent.json. Derived, never
-    listed -- the same rule as provision, gen-rc-units and check-drift."""
+    listed -- the same rule as provision, gen-units and check-drift."""
     import loam_agents  # noqa: PLC0415 -- an archived agent is asleep
     return loam_agents.live(sorted(
         d.name for d in AI_LABS.iterdir()
@@ -810,9 +806,6 @@ def main() -> int:
         log_line({"ts": iso(now_utc()), "ok": False, "stage": "preflight",
                   "lane": LANE, "error": refusal})
         return 3
-
-    # No refusal at the 01:30 recycle since 2026-11-10: it restarts only
-    # the Remote Control servers (bin/recycle-rc), never this unit.
 
     global LOCK_WAIT_S
     waiting_since = time.monotonic()

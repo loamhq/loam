@@ -55,8 +55,9 @@ The cost is memory, which is what the cap is for. Measured on this box
 - four sessions, idle: 1,126 MB
 
 That is *below* the ~440 MB the 09-04 memory investigation measured for a
-Remote Control session; a Remote Control server is a supervisor plus its
-sessions, and this is one session and its three MCP servers.
+Remote Control session (retired 2026-11-19); a Remote Control server was a
+supervisor plus its sessions, and this is one session and its three MCP
+servers.
 
 Until 2026-11-09 this measurement set a count: `MAX_SESSIONS = 4` against a
 unit sized for four. Since then sessions are admitted by the box's memory and
@@ -244,7 +245,7 @@ activity first:
 admission would let start now: the free memory past the reserve, the broker
 unit's own room and the backstop, each at `start_mb`), `sessions` (`live`,
 `mb`, `idle`), and `units`: the memory outside the broker by kind,
-`engineer_jobs`, `wakes`, `crons` and `rc_servers`, each `{count, mb,
+`engineer_jobs`, `wakes` and `crons`, each `{count, mb,
 units: [{name, mb}]}`. Everything is read from `/proc` and the user
 manager's cgroups (lib/loam_live.py) on each ask.
 
@@ -797,7 +798,7 @@ stands if the box truly runs out is the kernel's OOM order
 (`lib/loam_config.py`): every chat's CLI is started under `choom -n 800`
 (`CHILD_OOM_SCORE_ADJ`, the agents' `AGENT_OOM_SCORE_ADJ`), which its MCP
 servers inherit, as is every other agent run on the box -- engineer jobs,
-wakes, crons, the reviewer, the RC servers. The broker itself runs at the
+wakes, crons, the reviewer. The broker itself runs at the
 unit's 100 (`CORE_OOM_SCORE_ADJ`, the lowest a user unit may take), the
 plugins gateway too, and Caddy, Authelia, the app and the claim service at
 the system's 0. So the kernel ends an agent run first, and reaches the
@@ -1400,9 +1401,8 @@ home so the box's logins were never touched:
 | `antigravity` | (its CLI has no headless logout) | the token file and `account.json` |
 
 What a sign-out stops: every app chat on that provider, from its next turn,
-until a sign-in from the same card. **Claude Code's** also stops the
-Remote Control servers (`gen-rc-units`), which run on the same login file;
-the wakes, crons, the reviewer and engineer jobs run on the long-lived token
+until a sign-in from the same card. For **Claude Code**, the
+wakes, crons, the reviewer and engineer jobs run on the long-lived token
 in `wake.env` and are untouched. The route answers **`409`** while any live
 chat on that provider is working, asking or waiting on its children, so a
 sign-out never lands under a turn. `removed` is whether the login was there
@@ -1782,11 +1782,14 @@ A Codex thread runs the persona Claude Code runs; only the provider differs.
 
 ### Sessions from the Claude Code app
 
-Added 2026-09-20, because the owner asked for the conversations they have been
+Added 2026-09-20, because the owner asked for the conversations they had been
 having in the Claude Code app — on claude.ai/code and on their phone — to be
-in the app the broker serves as well.
+in the app the broker serves as well. Remote Control, which served those
+conversations, was retired on 2026-11-19 (the owner: "I don't use it through
+app anymore"); the sessions it left are still adopted and shown, and no new
+ones arise.
 
-**They were never anywhere else.** A Remote Control session is a Claude Code
+**They were never anywhere else.** A Remote Control session was a Claude Code
 session *on this box*: same login, same persona workspace, same hooks, and
 the same session file under `~/.claude/projects/<slug of the workspace>/`
 that a session started at a terminal here leaves. Nothing is imported from
@@ -1796,7 +1799,7 @@ is — there is no second copy of it on this box.
 
 `lib/loam_adopt.py` is the whole of it, and it only ever **reads** a session
 file. The one thing that must never happen is resuming an app session in
-place: the Remote Control server that owns it may still be running, and two
+place: the Remote Control server that owned it could still be running, and two
 processes appending to one session file is a corrupted conversation of
 The owner's. Nothing on this interface does that — sending into an adopted
 session forks it instead, which is *Sending into one: the fork* below.
@@ -2100,8 +2103,8 @@ cost in prose.
 Added 2026-09-20, the same day as the scan and the replay. An adopted
 session is **never resumed in place**, and that is the whole shape of this.
 Its `session_id` *is* the app's session id, so `claude --resume` on it would
-point a second process at a session file the Remote Control server may still
-be writing — a corrupted conversation of the owner's, and not the kind of
+point a second process at a session file the Remote Control server could
+still have been writing — a corrupted conversation of the owner's, and not the kind of
 failure that announces itself.
 
 So the first launch of an adopted record is:
@@ -3723,10 +3726,11 @@ helper answers for the job's own repository and nothing else.
 
 **The store** is `state/github/integration.json`, mode 600, outside git and
 outside every container; `integration.lock` beside it serialises every
-read-modify-write across the broker, `bin/provision` and `bin/rc-preflight`,
+read-modify-write across the broker, `bin/provision` and `bin/lane-check`,
 because a refresh token is single-use.
 
-**Nightly**: the first `rc-preflight` of each date calls
+**Nightly**: the first `bin/lane-check` of each date (run by `bin/drift-watch`
+at 01:40) calls
 `loam_github_app.nightly_warnings()` (`state/github/checked-on` holds the
 date) and writes one Important line in `comms.md` if the refresh token is
 within 14 days of expiry or GitHub says the installation is gone. That check
@@ -4696,7 +4700,7 @@ a draft with problems, or one already made. 201:
 ```json
 {"agent": {"id": "juniper", "name": "Juniper", "face": null},
  "first_thread": "t-1a2b3c4d", "workspace": "/home/…/ai-labs/juniper",
- "wake": "01:20", "rc": "active", "fleet_clauses": ["..."],
+ "wake": "01:20", "fleet_clauses": ["..."],
  "draft": {"...": "the draft, with made, made_at and yes"}}
 ```
 
@@ -4707,8 +4711,7 @@ clauses; a clause of the draft that has a fleet clause's title gives way to
 the fleet's), `_active.md` and `_reflection.md`, `memory/`, `skills/`,
 `crons/`, `threads/`; `agent.json` with the name and face; then
 `bin/provision <id> <wake>` (Claude Code, Codex and Antigravity files, the
-reflection record and its timer, the Remote Control unit, which is turned
-on). Provision holds Loam's live lock, so a confirm made while a landing
+reflection record and its timer). Provision holds Loam's live lock, so a confirm made while a landing
 of Loam is in progress waits for it (up to 20 minutes) before it answers. It
 is on the roster at once: `GET /v1/agents`, every picker, `@` mentions,
 General's members. Its first thread has it as the default and a line saying
@@ -4720,7 +4723,7 @@ answer is a 500 that says so.
 ### `POST /v1/agents/<agent>/archive` and `/restore`
 
 Body `{}` from the page; `{"thread", "yes"}` from an agent. Archive answers
-`{"agent", "archived": {"at", "by", "rc", "yes"?}, "event"}`; 409 when
+`{"agent", "archived": {"at", "by", "yes"?}, "event"}`; 409 when
 already archived, when it is the last agent awake, or (unless an agent
 archives itself) while it is mid-turn or in a wake or cron. Restore answers
 `{"agent", "event"}`; 409 when not archived, or when its name has since been
@@ -4730,14 +4733,13 @@ Archived means `archived` in its `agent.json`: out of `GET /v1/agents`,
 every picker, `@` mentions, thread membership, `by`, the reviewer's choice,
 the Schedules list and new sessions; the schedule reconciler removes its
 wake and cron timers (its records and their accepted copies are untouched),
-its Remote Control unit is disabled, and `bin/wake` refuses it. A thread
+and `bin/wake` refuses it. A thread
 whose default or member it is stays readable; a turn that would be its
 gets the line "Juniper is archived, so it won't answer. Tag another agent,
 or restore Juniper in Settings › Agents › Archived." Its profile
 (`GET /v1/agents/<agent>`, `identity.archived`) and its files (Files'
 `spaces` root) stay. Restore removes the mark; the reconciler puts back the
-same timers from the same records, armed without firing; the Remote
-Control unit comes back if it was on.
+same timers from the same records, armed without firing.
 
 `GET /v1/agents?archived=1` — Settings › Agents › Archived:
 `{"agents": [{"id", "name", "face", "archived": {"at", "by", ...}}]}`.
@@ -4831,8 +4833,9 @@ stop was SIGKILLed at 90 s; its dump showed no live session and one task,
 `ThreadEngine._work`, cancelled inside `create_subprocess_exec` while starting
 a session it had begun *after* SIGTERM, and `asyncio.run`'s cancel of it never
 returned. Now the first SIGTERM sets `Broker.stopping`: `start_session`
-answers 503 and a queued thread turn writes "Ada's turn didn't start: the
-broker restarted" instead of starting. `shutdown()` then stops the live
+answers 503 and a queued thread turn does not start (its input stays on
+disk for the next start since 2026-11-19; until then it wrote "Ada's turn
+didn't start: the broker restarted"). `shutdown()` then stops the live
 sessions together (`SHUTDOWN_SESSIONS_S`, 15 s), gives each thread's turn
 `SHUTDOWN_TASKS_S` (10 s) to write its last line, cancels every other task
 and waits `SHUTDOWN_TASKS_S` for them; a task that will not end is named
@@ -5088,11 +5091,57 @@ reply"). Three changes, in `lib/loam_thread_engine.py`:
   longer moves `through`: the system line says it ended, and the next turn
   is shown those messages again rather than reading them as answered.
 
-What is not durable: a turn still queued when the broker stops writes
-"…'s turn didn't start: the broker restarted. Tag @… to ask again."
-(unchanged), an explicit line rather than a re-delivery after the restart.
 Proved by `tests/test_thread_steer.py` (each case above; the m6 and m10
-shapes fail on the code before it).
+shapes fail on the code before it). What was not durable then -- a turn
+still queued when the broker stopped wrote "…'s turn didn't start: the
+broker restarted. Tag @… to ask again." -- is since 2026-11-19, below.
+
+#### Input to a member is durable and ordered (2026-11-19, batch B step 2)
+
+Each (thread, member) has an ordered list of input on disk,
+`state/threads/inputs/<thread id>/<persona>.json`
+(`lib/loam_thread_inputs.py`): the owner's messages, a job's result, another
+agent's mention, an update's notice -- whatever `ThreadEngine.schedule`
+queues. An input is written before it is queued, marked `sent` the moment
+its turn's prompt goes into the session (or it is steered into a turn in
+flight), and removed once its turn has dealt with it.
+
+- **The stop posts nothing for input it did not answer.** A queued turn does
+  not start and its input stays; a turn cut before it said a word posts no
+  line and its input is kept, unmarked, to be given again. A cut turn that
+  had said something posts its words and `Ada's turn ended: the broker
+  restarted`, as before, and its input is settled. The line "didn't start:
+  the broker restarted. Tag @Ada to ask again." is gone.
+- **The start gives it again** (`ThreadEngine.resume_inputs`, called in
+  `amain` before the delivery pass; the journal says `inputs: N scheduled
+  again for M thread member(s), K dropped`): every list in order, once each.
+  Each replayed turn's prompt ends with when the input was queued ("this
+  input was queued for you at Thu 2026-11-19 08:12 PST and was still
+  waiting when Loam's session host restarted …") so the persona can judge
+  whether it still matters; a job's handoff note also says when the job
+  finished.
+- **Once only.** A message is given again only while the member's `through`
+  has not passed it (`already_heard`), so a crash after the turn and before
+  its mark runs no second turn. A result or notice a crash left marked
+  `sent` was in front of the session already and is dropped, logged ("not
+  given twice"); a job is also delivered once by its key
+  (`system_turn_allowed`). Input for a thread that is gone is dropped.
+- **A result can reach a turn generating about the same work.** `joins`
+  lets a job's result into the member's turn in flight when that turn was
+  under way before the brief was accepted (the waiter record's `since`,
+  to the second): the turn that briefed it. It is steered in on Claude Code
+  and Codex (`result_steer_text`: "a result for work you briefed in this
+  turn …, not from the owner, nothing is posted for it") and settled with
+  that turn. A result for a turn about something else -- one started after
+  the brief, typically an answer to a newer message -- waits behind it and
+  has its own quiet turn, so an answer does not jump topic; every turn of a
+  member is of the same thread by key, so a result never goes into another
+  thread's turn. A turn parked on background work hands the session over to
+  a result as it does to a message (`hand_over`). Antigravity cannot steer:
+  the result waits for the turn to end.
+
+Proved by `tests/test_thread_inputs.py` and the stop case of
+`tests/test_thread_replies.py`.
 
 **A turn has no clock.** (2026-11-10; the owner, after `Ada's turn ended: it
 ran past 30 minutes` at 13:09 PT while Ada's session worked on: "Please
@@ -5242,8 +5291,9 @@ gets one quiet system line, `Ada's turn ended: the broker restarted`
 (`…: its session exited`, `…: its session closed`; the time-based `…: it ran
 past 30 minutes` went 2026-11-10), and a turn that finished saying nothing at all gets `Ada's
 turn ended without a reply`. A turn queued while the broker is stopping
-never starts: `Ada's turn didn't start: the broker restarted. Tag @Ada to
-ask again.` Two causes found in `t-6daf5a6f`: a resumed Claude Code session
+never starts and posts nothing; its input is given at the next start
+(2026-11-19; it wrote `Ada's turn didn't start: …` before), and a turn cut
+before any word posts no line either, for the same reason. Two causes found in `t-6daf5a6f`: a resumed Claude Code session
 can open with an empty `result` (`num_turns: 0`, nothing asked of the model,
 closing the background tasks the last process left), which was taken for the
 end of the turn (`m13`, "(no reply)", and the real answer went unwatched);

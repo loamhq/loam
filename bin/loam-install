@@ -822,8 +822,8 @@ def step_units(a, ans: dict) -> None:
     # timers armed so that none fires on the spot (lib/loam_units.py).
     as_user(cfg, ["python3", f"{root}/bin/gen-units"])
     as_user(cfg, ["systemctl", "--user", "daemon-reload"])
-    # loam-claude-signin.path: the Claude Code sign-in starts the agents' Remote
-    # Control servers, which wait until there is one (bin/rc-arm).
+    # loam-claude-signin.path: the Claude Code sign-in is noticed and written
+    # down (bin/claude-signin).
     for svc in (brk.SERVICE, "loam-plugins-gateway.service", "loam-claude-signin.path"):
         as_user(cfg, ["systemctl", "--user", "enable", "--now", svc])
     arm = (f"import sys; sys.path.insert(0, {root + '/lib'!r}); import loam_units as u\n"

@@ -29,7 +29,7 @@ on the record, and a second entry would attribute one event twice.
 The append logic itself is imported from ``bin/wake`` -- which since Move 7
 re-exports it from ``lib/loam_inbox`` -- rather than copied.
 A second implementation of "how a wake failure is written" is the same
-defect as the second copy of the RC units -- one artifact, one owner. For
+defect as a second copy of a generated unit -- one artifact, one owner. For
 the same reason the vault path is read out of the marker rather than
 re-derived from agent.json: one source, and it is the one the dead run
 actually used.

@@ -137,10 +137,10 @@ def latest_session(d: Path) -> tuple[Path, str] | None:
     timestamp.
 
     **Not the newest file by mtime** (until 2026-09-28 it was). The Remote
-    Control server keeps a session file of its own, named with a UUID v5,
-    and touches it about nine seconds after every start by appending an
-    ``atis-latch`` record that carries no timestamp. So at every 01:30
-    recycle a file whose last turn was weeks old became the newest on disk,
+    Control server (retired 2026-11-19) kept a session file of its own,
+    named with a UUID v5, and touched it about nine seconds after every
+    start by appending an ``atis-latch`` record that carries no timestamp.
+    So at every nightly restart a file whose last turn was weeks old became the newest on disk,
     outranked the previous night's real wake sessions, and the model alarm
     re-read the same stale session every night -- four identical false lines
     in comms on 09-26, 09-27 and 09-28. A turn carries its time; a touch does
@@ -238,9 +238,9 @@ def model_verdict(configured: str, seen: SessionModel,
     Drift means the lane ran a model that neither its config nor any record
     of a choice explains. A choice is either on the broker's record (the +
     menu, 2026-09-21) or in the session itself (a ``/model``, which is also
-    what the Claude Code app's model menu sends). One function because
-    ``bin/check-drift`` and ``bin/rc-preflight`` ask this and must not be
-    able to answer it differently.
+    what the Claude Code app's model menu sends). One function, so
+    that ``bin/check-drift`` and anything that asks after it cannot answer
+    it differently.
     """
     if model_matches(configured, seen.model):
         return "ok", ""

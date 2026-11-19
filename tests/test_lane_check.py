@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""bin/rc-preflight against the two thresholds, through the real code path.
+"""bin/lane-check against the two thresholds, through the real code path.
 
-The Remote Control start is the path that must not refuse (see the script's
-own docstring), so everything it finds is a write into the vault inbox and an
+The nightly lane check is a report, never a gate (see the script's own
+docstring), so everything it finds is a write into the vault inbox and an
 exit of 0. Two kinds of write since 2026-09-07, and this proves the line
 between them:
 
@@ -14,7 +14,7 @@ by running ``main()`` of the shipped script against a throwaway workspace
 that carries everything the check reads: agent.json, the two auto-loaded
 files, and the conversation-style symlink with its frontmatter.
 
-Run: python3 tests/test_rc_preflight.py
+Run: python3 tests/test_lane_check.py
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 from loam_memory import LIMIT_CHARS, NEAR_LIMIT_CHARS  # noqa: E402
 
-AGENT = "rcpreflighttest"
+AGENT = "lanechecktest"
 STYLE_HEADER = "---\nname: conversation\nkeep-coding-instructions: true\n---\n"
 WARNING = f"within {LIMIT_CHARS - NEAR_LIMIT_CHARS:,} characters of the"
 
@@ -46,8 +46,8 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 def load():
     loader = importlib.machinery.SourceFileLoader(
-        "rc_preflight_under_test", str(Path(__file__).resolve().parent.parent / "bin" / "rc-preflight"))
-    spec = importlib.util.spec_from_loader("rc_preflight_under_test", loader)
+        "lane_check_under_test", str(Path(__file__).resolve().parent.parent / "bin" / "lane-check"))
+    spec = importlib.util.spec_from_loader("lane_check_under_test", loader)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -65,7 +65,7 @@ def build(root: Path, always: int, active: int) -> tuple[Path, Path]:
     styles.mkdir(parents=True)
     (vault / "00_INBOX" / "from-agents").mkdir(parents=True)
     (ws / "agent.json").write_text(json.dumps({
-        "name": AGENT, "display": "Rcpreflighttest",
+        "name": AGENT, "display": "Lanechecktest",
         "workspace": str(ws), "vault": str(vault),
     }))
     (ws / "_always.md").write_text(padded("Always.\n", always))
@@ -80,7 +80,7 @@ def run(ws: Path) -> tuple[int, str, str]:
     # (tests/test_github_app.py) and must not stamp the box's real date file.
     mod.github_check = lambda vault: []
     out, err = io.StringIO(), io.StringIO()
-    sys.argv = ["rc-preflight", str(ws)]
+    sys.argv = ["lane-check", str(ws)]
     with redirect_stdout(out), redirect_stderr(err):
         code = mod.main()
     return code, out.getvalue(), err.getvalue()
@@ -96,7 +96,7 @@ def inbox(vault: Path) -> tuple[str, str]:
 
 def scenario(label: str, always: int, active: int, *, expect_log: str | None,
              expect_comms: bool, expect_file: str | None = None) -> Path:
-    root = Path(tempfile.mkdtemp(prefix="loam-rc-preflight-"))
+    root = Path(tempfile.mkdtemp(prefix="loam-lane-check-"))
     ws, vault = build(root, always, active)
     code, out, err = run(ws)
     log, comms = inbox(vault)
@@ -131,9 +131,9 @@ try:
         NEAR_LIMIT_CHARS - 1, LIMIT_CHARS + 1,
         expect_log="over the", expect_comms=True, expect_file="_active.md"))
 
-    # Once a night. The 01:30 recycle is one start; a restart the same day is
+    # Once a night. drift-watch is one run; a run by hand the same day is
     # the repeat this must not write twice.
-    root = Path(tempfile.mkdtemp(prefix="loam-rc-preflight-"))
+    root = Path(tempfile.mkdtemp(prefix="loam-lane-check-"))
     roots.append(root)
     ws, vault = build(root, NEAR_LIMIT_CHARS + 1, NEAR_LIMIT_CHARS - 1)
     run(ws)
@@ -141,30 +141,30 @@ try:
     code, out, _ = run(ws)
     log, comms = inbox(vault)
     warning_lines = [l for l in log.splitlines() if WARNING in l]
-    check("the second start the same day adds no line",
+    check("the second run the same day adds no line",
           len(warning_lines) == 1, f"{len(warning_lines)} line(s)")
     check("the warning names the count",
           f"{NEAR_LIMIT_CHARS + 1:,} characters" in log)
-    # This test is not a Remote Control start, and since 2026-09-30 the
-    # line says so rather than claiming to be one.
-    check("the warning names what ran it: not a Remote Control start",
-          "Remote Control start:" not in log
-          and ("rc-preflight run by hand:" in log or "rc-preflight run from " in log),
+    # This test is not the nightly run, and the line says so rather than
+    # claiming to be it.
+    check("the warning names what ran it: not the nightly run",
+          "Nightly lane check:" not in log
+          and ("lane-check run by hand:" in log or "lane-check run from " in log),
           log.strip()[-160:])
     rcp = load()
-    check("origin: an RC unit's ExecStartPre is a Remote Control start",
+    check("origin: drift-watch's unit is the nightly lane check",
           rcp.origin("0::/user.slice/user-1000.slice/user@1000.service/"
-                     "app.slice/loam-rc-ada.service\n")
-          == "Remote Control start")
+                     "app.slice/loam-check-drift.service\n")
+          == "Nightly lane check")
     check("origin: another unit is named",
           rcp.origin("0::/user.slice/user-1000.slice/user@1000.service/"
                      "app.slice/loam-check-memory.service\n")
-          == "rc-preflight run from loam-check-memory")
+          == "lane-check run from loam-check-memory")
     check("origin: a login shell is by hand",
           rcp.origin("0::/user.slice/user-1000.slice/session-12.scope\n")
-          == "rc-preflight run by hand")
-    check("a warned start still reports OK on stdout", "OK" in out, out.strip())
-    check("a warned start still exits 0", code == 0, str(code))
+          == "lane-check run by hand")
+    check("a warned run still reports OK on stdout", "OK" in out, out.strip())
+    check("a warned run still exits 0", code == 0, str(code))
     check("still nothing in comms", f"**{AGENT}**" not in comms)
 finally:
     for root in roots:

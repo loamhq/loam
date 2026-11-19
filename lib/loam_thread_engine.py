@@ -36,6 +36,15 @@ message queued and its member reads ``note`` "will answer when its
 background task returns". A member that is generating still queues. The sessions they use are classic sessions on the record, archived
 so that the Classic chats list stays the list it was.
 
+**A member's input is on disk, in order (2026-11-19, batch B step 2).**
+Every queued turn's input is written to that member's list
+(``lib/loam_thread_inputs.py``) before it is queued and removed once its
+turn has dealt with it; the broker's stop posts nothing for input it did
+not answer, and its next start gives it again, once and in order, saying
+when it was queued (``resume_inputs``). A job's result goes into the
+member's turn in flight when that turn briefed it (``joins``), takes over a
+turn parked on background work, and otherwise waits its turn.
+
 Mentions in a reply give the mentioned personas a turn too, up to
 ``loam_threads.AGENT_CHAIN_CAP`` agent-triggered turns since the owner last
 spoke; past it the chain stops with one system line.
@@ -61,6 +70,7 @@ import loam_lane_notice as lane_notice
 import loam_provider_memory as provider_memory
 import loam_broker as cfg
 import loam_thread_steps as steps
+import loam_thread_inputs as inputs
 import loam_threads as threads
 import loam_waiters
 
@@ -194,8 +204,26 @@ class Turn:
     def __init__(self, thread_id: str, persona: str, chain: int,
                  reason: str, model: str | None = None,
                  attachments: list[dict] | None = None,
-                 note: str | None = None) -> None:
+                 note: str | None = None,
+                 briefed_at: float | None = None) -> None:
         self.thread_id = thread_id
+        # Its entry in the member's input list on disk (2026-11-19, batch B
+        # step 2, lib/loam_thread_inputs.py), and when it was queued.
+        self.input_id: str | None = None
+        self.queued_at: str | None = None
+        # Given again after a broker restart: its prompt says when it was
+        # queued, so the persona can judge whether it still matters.
+        self.held = False
+        # A job's result: when its brief was accepted (epoch seconds). It
+        # may be steered only into a turn that was already under way then,
+        # the turn that briefed it (``ThreadEngine._claim``).
+        self.briefed_at = briefed_at
+        # Inputs steered into this turn while it ran (their input ids),
+        # settled with its own when it ends; and how it ended, for that.
+        self.carried: list[str] = []
+        self.sent = False
+        self.posted = False
+        self.completed = False
         # Words for this persona alone, after the thread in its prompt
         # (2026-11-12): a job's receipt the persona is to read
         # (`ThreadEngine.deliver_job`). Never posted in the thread.
@@ -215,6 +243,62 @@ class Turn:
     @property
     def key(self) -> tuple[str, str]:
         return (self.thread_id, self.persona)
+
+    def entry(self) -> dict:
+        """What the input list on disk keeps to make this turn again."""
+        out = {"reason": self.reason, "chain": self.chain}
+        for name in ("model", "note", "briefed_at"):
+            if getattr(self, name) is not None:
+                out[name] = getattr(self, name)
+        if self.attachments:
+            out["attachments"] = self.attachments
+        return out
+
+    @classmethod
+    def of_entry(cls, thread_id: str, persona: str, item: dict) -> "Turn":
+        turn = cls(thread_id, persona, int(item.get("chain") or 0),
+                   str(item.get("reason") or "mention"), model=item.get("model"),
+                   attachments=item.get("attachments") or None,
+                   note=item.get("note"), briefed_at=item.get("briefed_at"))
+        turn.input_id, turn.queued_at, turn.held = item["id"], item.get("at"), True
+        return turn
+
+
+def briefed_epoch(record: dict) -> float | None:
+    """When a job's brief was accepted, epoch seconds: the waiter record's
+    ``since_ts``, else its ``since`` (ISO, to the second) as the end of that
+    second, so a turn started within it counts as under way. None unknown."""
+    if isinstance(record.get("since_ts"), (int, float)):
+        return float(record["since_ts"])
+    from datetime import datetime  # noqa: PLC0415
+    try:
+        return datetime.fromisoformat(
+            str(record.get("since")).replace("Z", "+00:00")).timestamp() + 1
+    except (TypeError, ValueError):
+        return None
+
+
+def is_result(turn: "Turn") -> bool:
+    return str(getattr(turn, "reason", "")).startswith("job:")
+
+
+def held_line(turn: "Turn") -> str | None:
+    """For input given again after a broker restart: when it was queued."""
+    if not turn.held or not turn.queued_at:
+        return None
+    return (f"[Loam: this input was queued for you at "
+            f"{threads.local_stamp(turn.queued_at)} and was still waiting when "
+            f"Loam's session host restarted; it is given to you now. Judge "
+            f"whether it still matters.]")
+
+
+def result_steer_text(turn: "Turn") -> str:
+    """A job's result steered into the turn that briefed it."""
+    head = (f"[Loam: a result for work you briefed in this turn came in while "
+            f"you were working, delivered at this step. It is not from "
+            f"{lc.OWNER_NAME}, and nothing is posted for it. Take it into what "
+            f"you are doing.]")
+    return "\n".join(x for x in (head, held_line(turn), turn.note or "") if x)
 
 
 def background_list(session, origins: dict | None = None) -> list[dict]:
@@ -810,12 +894,24 @@ class ThreadEngine:
                                      "by": by})
             self.publish(thread_id, {"type": "message.done", "message": line})
 
-    def schedule(self, turn: Turn) -> None:
+    def schedule(self, turn: Turn, persist: bool = True) -> None:
         """Queue a turn behind that member's own, never behind another
         member's (2026-11-10). With that member's turn in flight, the
         message is handed over at once when the turn only waits on its
         background work, or steered into the turn when it is generating
-        (2026-11-14); otherwise it waits its turn."""
+        (2026-11-14); otherwise it waits its turn.
+
+        The input is written to the member's list on disk first
+        (2026-11-19, ``loam_thread_inputs``), so a restart loses none of it;
+        ``persist`` is False only for input read back from that list."""
+        if persist and turn.input_id is None:
+            turn.queued_at = threads.now_iso()
+            try:
+                turn.input_id = inputs.add(turn.thread_id, turn.persona,
+                                           {**turn.entry(), "at": turn.queued_at})
+            except OSError as exc:  # still queued in memory: lost only to a restart
+                steps.log(f"{turn.thread_id} {turn.persona}: {turn.reason} could "
+                          f"not be written to its input list ({exc})")
         queue = self.queues.setdefault(turn.key, asyncio.Queue())
         queue.put_nowait(turn)
         if not self._ensure_worker(turn.key):
@@ -844,12 +940,28 @@ class ThreadEngine:
             return
         asyncio.get_running_loop().create_task(self._steer(key))
 
+    def joins(self, key: tuple[str, str], queued: Turn,
+              model: str | None) -> bool:
+        """Whether a queued turn can go into the member's turn in flight: a
+        message's (``m<n>``) with no model of its own other than the running
+        turn's; or a job's result (2026-11-19, batch B step 2) when the turn
+        in flight is the one that briefed it -- under way since before the
+        brief was accepted, so about the same work. A result for a turn
+        about something else waits behind it, so an answer does not jump
+        topic. Every turn of a member here is of the same thread, by key."""
+        if threads.is_message_id(queued.reason):
+            return queued.model in (None, model)
+        if is_result(queued):
+            started = (self.turns.get(key) or {}).get("started_ts")
+            return (queued.briefed_at is not None and started is not None
+                    and started <= queued.briefed_at)
+        return False
+
     def _claim(self, key: tuple[str, str], model: str | None) -> list[Turn]:
         """Take the leading run of queued turns that can go into the turn in
-        flight: each a message's (``m<n>``), with no model of its own other
-        than the running turn's. A turn that is not -- a job's receipt, a
-        message asking for another model -- and everything behind it keep
-        their place, so nothing overtakes anything."""
+        flight (``joins``). A turn that cannot -- a result about other work,
+        a notice, a message asking for another model -- and everything
+        behind it keep their place, so nothing overtakes anything."""
         queue = self.queues.get(key)
         if queue is None:
             return []
@@ -857,8 +969,7 @@ class ThreadEngine:
         while not queue.empty():
             rest.append(queue.get_nowait())
         taken = []
-        while rest and threads.is_message_id(rest[0].reason) and \
-                rest[0].model in (None, model):
+        while rest and self.joins(key, rest[0], model):
             taken.append(rest.pop(0))
         for t in rest:
             queue.put_nowait(t)
@@ -914,15 +1025,20 @@ class ThreadEngine:
             news = [m for m in msgs if threads._num(m.get("id")) > cut
                     and m.get("author") != persona]
             ids = {t.reason for t in taken}
-            if not news:
+            results = [t for t in taken if is_result(t)]
+            if not news and not results:
                 # Every claimed message was already in what the turn read.
                 steps.COUNTS["already_heard"] += len(taken)
                 steps.log(f"{thread_id} {persona}: {', '.join(sorted(ids))} already "
                           f"in what its turn in flight read; not sent again")
+                self._settle_inputs(key, taken, done=True)
                 self.members_changed(thread_id)
                 return False
             attachments = [a for t in taken for a in t.attachments]
-            text = threads.steer_prompt(meta, persona, news, record=msgs)
+            parts = [threads.steer_prompt(meta, persona, news, record=msgs)] \
+                if news else []
+            parts += [result_steer_text(t) for t in results]
+            text = "\n\n".join(parts)
             turn["steering"] = True
             self.members_changed(thread_id)
             try:
@@ -941,14 +1057,26 @@ class ThreadEngine:
                 self.members_changed(thread_id)
                 return False
             heard = [m["id"] for m in news]
-            live.read_through = heard[-1]
-            turn.setdefault("steered", []).extend(heard)
-            steps.COUNTS["steered"] += len(heard)
-            steps.log(f"{thread_id} {persona}: {', '.join(heard)} steered into its "
+            if heard:
+                live.read_through = heard[-1]
+                turn.setdefault("steered", []).extend(heard)
+            # On disk the steered inputs are the turn in flight's now, settled
+            # with its own when it ends.
+            carried = [t.input_id for t in taken if t.input_id]
+            live.carried.extend(carried)
+            try:
+                inputs.mark_sent(thread_id, persona, carried)
+            except OSError as exc:
+                steps.log(f"{thread_id} {persona}: input list not marked ({exc})")
+            steps.COUNTS["steered"] += len(heard) + len(results)
+            named = heard + [t.reason for t in results]
+            steps.log(f"{thread_id} {persona}: {', '.join(named)} steered into its "
                       f"turn in flight (session {session.id[:8]}, seq {seq}); "
                       f"answered in this turn")
             self.publish(thread_id, {"type": "turn.steered", "persona": persona,
-                                     "messages": heard, "seq": seq})
+                                     "messages": heard, "seq": seq,
+                                     **({"results": [t.reason for t in results]}
+                                        if results else {})})
             self.members_changed(thread_id)
             return True
 
@@ -982,10 +1110,12 @@ class ThreadEngine:
         queue = self.queues.get(key)
         if turn is None or watch is None or queue is None or queue.empty():
             return False
-        # A job's result waits behind a parked turn rather than ending it
-        # (2026-11-18; joining one is batch B step 2's): only a message hands
-        # over, and the queue keeps its order behind it.
-        if not any(threads.is_message_id(t.reason) for t in list(queue._queue)):  # noqa: SLF001
+        # A message or a job's result hands over (a result since 2026-11-19,
+        # batch B step 2: a turn parked on background work is not mid-answer,
+        # so the result is taken now, in the same session). A notice alone
+        # waits for the turn to end, and the queue keeps its order.
+        if not any(threads.is_message_id(t.reason) or is_result(t)
+                   for t in list(queue._queue)):  # noqa: SLF001
             return False
         if not turn.get("on_background") or turn.get("handing"):
             return False
@@ -1002,6 +1132,66 @@ class ThreadEngine:
         watch.put_nowait({"type": HAND_OVER})
         return True
 
+    def _settle_inputs(self, key: tuple[str, str], turns: list[Turn],
+                       done: bool | None = None) -> None:
+        """Each turn's input on disk, and what was steered into it: removed
+        once dealt with, or kept to be given again when the broker stopping
+        cut the turn before it said or finished anything (``done`` None:
+        decide from the turn). Fail-soft."""
+        stopping = getattr(self.broker, "stopping", False)
+        for turn in turns:
+            ids = [i for i in [turn.input_id, *turn.carried] if i]
+            if not ids:
+                continue
+            finished = done if done is not None else \
+                (not stopping or turn.posted or turn.completed)
+            try:
+                if finished:
+                    inputs.remove(key[0], key[1], ids)
+                else:
+                    inputs.keep(key[0], key[1], ids)
+                    steps.log(f"{key[0]} {key[1]}: {turn.reason} "
+                              f"{'cut before a word' if turn.sent else 'not started'} "
+                              f"as the broker stops; kept for when it starts again"
+                              + (f" (and {len(turn.carried)} steered into it)"
+                                 if turn.carried else ""))
+            except OSError as exc:
+                steps.log(f"{key[0]} {key[1]}: input list not settled ({exc})")
+
+    def resume_inputs(self) -> dict:
+        """At the broker's start (2026-11-19): every member's input still on
+        disk scheduled again, once each and in order, its prompt saying when
+        it was queued. An input a crash left marked as given that is not a
+        message (a result, a notice) is not given twice; a message's is,
+        unless the member's ``through`` has passed it (``already_heard``).
+        Input for a thread that is gone is dropped. Returns the counts."""
+        counts = {"members": 0, "scheduled": 0, "dropped": 0}
+        for tid, persona, items in inputs.pending():
+            try:
+                threads.read(tid)
+            except threads.ThreadError:
+                counts["dropped"] += len(items)
+                inputs.drop_member(tid, persona)
+                steps.log(f"{tid} {persona}: {len(items)} input(s) for a thread "
+                          f"that is gone; dropped")
+                continue
+            counts["members"] += 1
+            for item in items:
+                turn = Turn.of_entry(tid, persona, item)
+                if item.get("sent") and not threads.is_message_id(turn.reason):
+                    inputs.remove(tid, persona, [turn.input_id])
+                    counts["dropped"] += 1
+                    steps.log(f"{tid} {persona}: {turn.reason} was given to the "
+                              f"session at {item['sent']} before the broker "
+                              f"stopped; not given twice")
+                    continue
+                counts["scheduled"] += 1
+                steps.log(f"{tid} {persona}: {turn.reason}, queued at "
+                          f"{item.get('at')}, scheduled again after the broker "
+                          f"restarted")
+                self.schedule(turn, persist=False)
+        return counts
+
     async def _work(self, key: tuple[str, str]) -> None:
         thread_id = key[0]
         queue = self.queues[key]
@@ -1011,11 +1201,9 @@ class ThreadEngine:
                 if getattr(self.broker, "stopping", False):
                     # No session starts once the broker is stopping
                     # (2026-11-10): the 11-10 stop hung on a start it began
-                    # after SIGTERM.
-                    self.system_line(thread_id, (
-                        f"{threads.display(turn.persona)}'s turn didn't start: "
-                        f"the broker restarted. Tag @{threads.display(turn.persona)} "
-                        f"to ask again."))
+                    # after SIGTERM. The input stays on disk and is given
+                    # when the broker starts again (2026-11-19); nothing is
+                    # posted.
                     continue
                 if loam_agents.is_archived(turn.persona, threads.AI_LABS):
                     # Asleep (2026-11-14): a thread's default or member that
@@ -1032,7 +1220,10 @@ class ThreadEngine:
                 await self.run_turn(turn)
             except Exception as exc:  # noqa: BLE001 - one turn must not end the queue
                 if getattr(self.broker, "stopping", False):
-                    text = ended_sentence(turn.persona, "stopping")
+                    # Its input is kept for the next start, unless the turn
+                    # had already posted words.
+                    text = (ended_sentence(turn.persona, "stopping")
+                            if turn.posted else None)
                 else:
                     text = (str(exc) if isinstance(exc, NoSeat) else
                             f"{threads.display(turn.persona)}'s turn failed: "
@@ -1040,6 +1231,7 @@ class ThreadEngine:
                 if text:
                     self.system_line(thread_id, text)
             finally:
+                self._settle_inputs(key, [turn])
                 self.turns.pop(key, None)
                 self.turn_sessions.pop(key, None)
                 self.turn_live.pop(key, None)
@@ -1228,7 +1420,8 @@ class ThreadEngine:
                       f"{', '.join(others)} {'is' if len(others) == 1 else 'are'} "
                       f"mid-turn; they run in parallel")
         self.turns[turn.key] = {"persona": turn.persona, "engine": engine,
-                                "model": model, "started_at": threads.now_iso()}
+                                "model": model, "started_at": threads.now_iso(),
+                                "started_ts": time.time()}
         self.publish(turn.thread_id, {"type": "turn.started", "persona": turn.persona,
                                       "engine": engine, "model": model})
         rotated = self.rotation(turn, engine)
@@ -1275,6 +1468,9 @@ class ThreadEngine:
                                      record=msgs, summary=summary, unshown=unshown)
         if turn.note:
             prompt += "\n\n" + turn.note
+        held = held_line(turn)
+        if held:
+            prompt += "\n\n" + held
         # A scheduled run of this persona's that failed since it last heard
         # (2026-11-18): one line, once, at the top of its next turn on any
         # thread and any provider; cleared by that lane's next good run.
@@ -1362,6 +1558,14 @@ class ThreadEngine:
                 await session.send_message(prompt, turn.attachments)
             else:
                 await session.send_message(prompt)
+            # The once-only mark, with no await between the send and it.
+            turn.sent = True
+            if turn.input_id:
+                try:
+                    inputs.mark_sent(turn.thread_id, turn.persona, [turn.input_id])
+                except OSError as exc:
+                    steps.log(f"{turn.thread_id} {turn.persona}: input list not "
+                              f"marked ({exc})")
             heard = False        # an assistant event since the last result
             empty_until = None   # watching on past an empty result, until
             # No deadline (2026-11-10): the watch ends on the turn's
@@ -1525,10 +1729,11 @@ class ThreadEngine:
                 # Steps since its `result` and before the hand-over; nothing
                 # at all is the usual case and writes nothing.
                 self.keep_unspoken(turn, session, reply, posted, through, "handed")
+            turn.completed, turn.posted = True, bool(posted)
             steps.COUNTS["delivered_while_waiting"] += 1
             tasks = [t.get("description") or t.get("id")
                      for t in background_list(session)]
-            steps.log(f"{turn.thread_id} {turn.persona}: a message arrived while "
+            steps.log(f"{turn.thread_id} {turn.persona}: input arrived while "
                       f"its turn waited on background work "
                       f"({'; '.join(str(t) for t in tasks) or 'settling'}); "
                       f"delivered now into session {session.id[:8]}")
@@ -1544,6 +1749,7 @@ class ThreadEngine:
                                 mentions=False)
             else:
                 self.keep_unspoken(turn, session, reply, posted, through, "ended")
+            turn.completed = True
             line = self.ended_line(turn.thread_id, turn.persona, ended_by)
             self.publish(turn.thread_id, {"type": "message.done", "message": line})
             return None
@@ -1557,11 +1763,19 @@ class ThreadEngine:
             # record and the stream get no message (2026-11-10).
             self.keep_unspoken(turn, session, reply, posted, through,
                                ended or "result")
+        turn.posted, turn.completed = bool(posted), ended == "result"
         if ended == "result" and not posted and quiet_turn(turn):
             # A job's result read and left unsaid (2026-11-18): the
             # persona's choice, and nothing goes into the thread.
             steps.log(f"{turn.thread_id} {turn.persona}: {turn.reason} taken in "
                       f"with no words; nothing posted")
+        elif ended == "stopping" and not posted:
+            # Cut by the broker's stop before a word (2026-11-19): its input
+            # is kept on disk and given again when the broker starts, so
+            # there is nothing to tell anyone and no line.
+            steps.log(f"{turn.thread_id} {turn.persona}: turn cut by the "
+                      f"broker's stop before any reply; its input is given "
+                      f"again at the next start")
         elif ended != "result" or not posted:
             # A turn that died, or finished saying nothing: one quiet system
             # line, never a persona message (2026-11-10).
@@ -1832,10 +2046,12 @@ class ThreadEngine:
         (``loam_waiters.handoff_text``). Nothing is posted in the thread and
         nothing is shown to the owner; the persona speaks only if it has
         something to say, and a turn with no words stays out of the thread.
-        The turn waits behind the persona's own turn under way, never
-        steered into one (``_claim`` takes messages only) nor handed a turn
-        parked on background work (``hand_over``). Delivered once per job
-        (``system_turn_allowed``). Returns ``delivered``, or why not (``no
+        Since 2026-11-19 (batch B step 2) it is written to the member's
+        input list on disk, so a restart does not lose it; it is steered
+        into the persona's turn under way when that turn is the one that
+        briefed it (``joins``), takes over a turn parked on background work
+        (``hand_over``), and otherwise waits behind the turn under way.
+        Delivered once per job (``system_turn_allowed``). Returns ``delivered``, or why not (``no
         thread``, ``thread gone``, ``not a member``, ``already
         delivered``)."""
         tid, persona = record.get("thread"), record.get("persona")
@@ -1852,7 +2068,8 @@ class ThreadEngine:
             return why
         steps.log(f"{tid} {persona}: job {record.get('job')} finished; its result "
                   f"queued as this persona's input, nothing posted")
-        self.schedule(Turn(tid, persona, 0, f"job:{record.get('job')}", note=note))
+        self.schedule(Turn(tid, persona, 0, f"job:{record.get('job')}", note=note,
+                           briefed_at=briefed_epoch(record)))
         return "delivered"
 
     def deliver_note(self, note: dict) -> str:

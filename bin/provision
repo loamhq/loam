@@ -150,8 +150,8 @@ def claude_md(display: str, workspace: Path) -> str:
 **Surface:** Claude Code
 
 You are running as a Claude Code session on the VPS that holds the vault.
-{lc.OWNER_NAME} reaches you from claude.ai/code in a browser or the Claude app on
-his phone, and on a schedule you wake by yourself with no one watching.
+{lc.OWNER_NAME} reaches you in Loam's app, and on a schedule you wake by
+yourself with no one watching.
 
 Markdown renders — headers, bold, lists, tables, code blocks, links. Write
 with whatever structure the thought actually has. Wiki-links like
@@ -227,8 +227,8 @@ def claude_md_mapped(display: str, workspace: Path) -> str:
 ---
 
 **Surface:** Claude Code, on the server that holds the vault. {lc.OWNER_NAME}
-reaches you in the app or the Claude app; on a schedule you wake by yourself
-with no one watching. Markdown renders, and wiki-links like [[Note Name]]
+reaches you in Loam's app; on a schedule you wake by yourself with no one
+watching. Markdown renders, and wiki-links like [[Note Name]]
 stay as written.
 
 **Your workspace** is `{workspace}/`. `CLAUDE.md`, `agent.json`, `.mcp.json`,
@@ -266,11 +266,13 @@ def settings(workspace: Path) -> dict:
     ws = str(workspace)
     plugin_tools = [f"mcp__{s}" for s in contributions.lane_servers("persona", workspace.name)]
     return {
-        # The persona model for the conversational surface. Remote Control
-        # takes no --model flag, so without this an agent the owner talks to
-        # runs on whatever the CLI defaults to that week while its wake runs
-        # on what bin/wake pins -- the same persona on two models. This and
-        # WAKE_MODEL in bin/wake move together.
+        # The persona model for a conversation. The broker passes a model
+        # only when a chat picked one, so without this an agent the owner
+        # talks to runs on whatever the CLI defaults to that week while its
+        # wake runs on what bin/wake pins -- the same persona on two models.
+        # This and WAKE_MODEL in bin/wake move together. (Until 2026-11-19
+        # Remote Control, which took no --model flag at all, was the other
+        # reason.)
         "model": "fable",
         "permissions": {
             "defaultMode": "acceptEdits",
@@ -297,7 +299,7 @@ def settings(workspace: Path) -> dict:
             ],
             # Since 2026-11-12 every lane runs with `--permission-mode
             # bypassPermissions` on its launch line (lib/loam_permissions.py:
-            # the broker, the Remote Control units, the wake): every tool
+            # the broker, the wake, the engineer and the reviewer): every tool
             # runs unasked, tools a future CLI adds included, and only the
             # deny list above applies. Not as `defaultMode` here: 2.1.322
             # ignores `bypassPermissions` from a project's settings and
@@ -445,12 +447,12 @@ def settings(workspace: Path) -> dict:
         # touching the owner's own Claude usage anywhere else.
         "disableClaudeAiConnectors": True,
         "enableAllProjectMcpServers": True,
-        # The conversation lane. `claude remote-control` accepts no
-        # system-prompt flag of any kind and builds its spawned child's argv
-        # itself, so there is no local seam in the flag path -- this settings
-        # key is the ONLY hook-free carrier that reaches a phone- or
-        # browser-attached session, and what it carries lands in the system
-        # prompt. The file it names is a symlink to the agent's own
+        # The conversation lane. The broker launches a chat with no
+        # appended system prompt (bin/session-broker), so this settings key
+        # is what carries the conversation layer, and what it carries lands
+        # in the system prompt. (It was chosen because `claude
+        # remote-control` took no system-prompt flag; Remote Control was
+        # retired 2026-11-19 and the carrier stayed.) The file it names is a symlink to the agent's own
         # `_active.md`, so the agent keeps writing where it always has and
         # `.claude/` stays operator-owned.
         # An agent with a map (2026-11-18, lib/loam_loading.py) loads no
@@ -821,12 +823,6 @@ def provision_antigravity(names: list[str], dry: bool = False) -> None:
         print(f"  {name}: .agents/ {'written' if changed else 'unchanged'}")
 
 
-# rc_unit() lived here and is deliberately gone. gen-rc-units owns
-# loam-rc-*.service. It held the tmux form after the live units were replaced
-# on 2026-08-26, so a provision run would have re-introduced the shared tmux
-# server that put all five agents in one cgroup and got Iris OOM-killed. Two
-# generators writing one artifact is the defect; one artifact, one owner.
-# bin/check-drift fails if this function ever comes back.
 
 
 def wake_units(name: str, workspace: Path, wake: str) -> tuple[str, str]:
@@ -914,7 +910,7 @@ USER_SETTINGS = lc.CLAUDE_HOME / "settings.json"
 
 # The box-wide clauses the runtime holds in ~/.claude/settings.json. Every
 # lane on this machine reads this file on every launch path -- a wake, a
-# broker session, a Remote Control server, a `claude` run by hand -- which is
+# broker session, an engineer job, a `claude` run by hand -- which is
 # what makes it the right home for a rule that must hold for all seven
 # personas and both runtime projects at once.
 #
@@ -927,8 +923,8 @@ USER_SETTINGS = lc.CLAUDE_HOME / "settings.json"
 # DISABLE_AUTOUPDATER  ~/.local/bin/claude is a SYMLINK into a shared
 #   versions/ directory, so a single `claude` run by hand that decides to
 #   update itself repoints that symlink for all seven agents at once. The
-#   unit templates carry the variable too, but they cover only the wakes and
-#   the RC servers; a pin that stopped there would let the next interactive
+#   unit templates carry the variable too, but they cover only the units;
+#   a pin that stopped there would let the next interactive
 #   session undo it for everybody. The `env` block is where the CLI's own
 #   migration puts this when it retires the legacy `autoUpdates: false`
 #   preference -- the supported spelling, not a trick.
@@ -1095,7 +1091,7 @@ def ensure_trust(workspace: Path, *extra: Path) -> None:
     2026-08-25: additionalDirectories is ignored in an untrusted workspace).
 
     The hazard is that ~/.claude.json is written continuously by every live
-    Claude Code session -- five Remote Control servers at the time of writing
+    Claude Code session -- every broker chat, wake and job --
     -- so the old unconditional read-modify-write here could clobber whatever
     they had just written. Three rules make provisioning safe while they run:
     never write when the values are already right (the common case for a new
@@ -1134,8 +1130,7 @@ def ensure_trust(workspace: Path, *extra: Path) -> None:
         return
     die(
         "~/.claude.json is being rewritten by live sessions faster than this "
-        "can safely update it. Stop the Remote Control units and retry:\n"
-        "  systemctl --user stop 'loam-rc-*'"
+        "can safely update it. Retry when the box is quieter."
     )
 
 
@@ -1291,8 +1286,8 @@ def report_readiness(name: str, workspace: Path) -> None:
                              and writes the reason to the vault inbox.
 
     So the honest report is not "it cannot act" but "you will not be able to
-    tell from talking to it." bin/rc-preflight is the instrument -- it runs
-    at each Remote Control start and reports these to the same inbox file --
+    tell from talking to it." bin/lane-check is the instrument -- it runs
+    every night from bin/drift-watch and reports these to the same inbox file --
     and this notice exists so nobody waits for it on the first day.
 
     The layer files are still deliberately NOT created here. `_always.md` is
@@ -1321,14 +1316,14 @@ def report_readiness(name: str, workspace: Path) -> None:
           f"silence except {REFLECTION_LAYER}, which bin/wake refuses on.")
     print(f"  {ALWAYS_LAYER}: every run. {CONVERSATION_LAYER}: conversations, "
           f"via the output-style symlink. {REFLECTION_LAYER}: the wake.")
-    print(f"  Write them before enabling the units. bin/rc-preflight reports "
-          f"these to vault/00_INBOX/from-agents/loam-wake-failures.md at every RC start.")
+    print(f"  Write them before enabling the units. bin/lane-check reports "
+          f"these to vault/00_INBOX/from-agents/loam-wake-failures.md every night.")
 
 
 # ---------------------------------------------------------------------------
 # The engineer. An eighth project on this box, and the only one that is not a
-# persona: no soul, no lane files, no output style, no reflection wake, no
-# Remote Control server. It exists only while a job runs.
+# persona: no soul, no lane files, no output style, no reflection wake. It
+# exists only while a job runs.
 #
 # Rendered here rather than in a generator of its own for the reason every
 # other artifact on this box has one owner: `bin/check-drift` imports this
@@ -1704,14 +1699,14 @@ def provision_engineer(dry: bool = False) -> None:
     # that gets run on its own.
     ensure_user_settings()
     print(f"  provisioned the engineer: project files, no units")
-    print(f"  it has no timer, no RC server and no unit of its own — "
+    print(f"  it has no timer and no unit of its own — "
           f"bin/engineer-job creates a transient one per job.")
 
 
 # ---------------------------------------------------------------------------
 # The reviewer. Move 11 (2026-09-09): a ninth project on this box, and like
-# the engineer not a persona -- no soul, no lane files, no output style, no
-# Remote Control server. Unlike the engineer it has a timer (it runs
+# the engineer not a persona -- no soul, no lane files, no output style.
+# Unlike the engineer it has a timer (it runs
 # unattended, once a night, on its own lane) and it has no hands at all: its
 # whole write reach is its own state directory, and the launcher delivers
 # its note to the persona's commons inbox after the session has ended.
@@ -2845,8 +2840,8 @@ def main() -> None:
         return
     # The engineer is provisioned by the same command and rendered from the
     # same module, because check-drift reads one module to compare everything
-    # on this box. It takes no wake time: it has no timer, no Remote Control
-    # server and no unit at all. It exists only while a job runs.
+    # on this box. It takes no wake time: it has no timer and no unit at
+    # all. It exists only while a job runs.
     if "--engineer" in sys.argv:
         if args:
             die("usage: provision --engineer [--dry-run]")
@@ -2996,12 +2991,6 @@ def main() -> None:
                              reason=f"provisioned with its reflection at {wake}")
         print(f"  wrote {record} (the timer follows it)")
 
-    # The RC unit belongs to gen-rc-units, which derives its roster from disk
-    # and rewrites nothing it would not change. Calling the owner keeps
-    # provisioning one step without giving this script a second copy of the
-    # template.
-    subprocess.run([str(AGENTS / "bin" / "gen-rc-units"), name], check=True)
-
     # The vault's schedule page carries both lanes in one table, and this is
     # one generator of it; the schedule reconciler is the other and
     # rewrites the same page on every change; whichever runs last is right,
@@ -3010,10 +2999,10 @@ def main() -> None:
     if write_schedule_page(VAULT):
         print(f"  rewrote {VAULT}/{lc.vault_folder('projects')}/Loam/infrastructure/schedule.md")
 
-    print(f"  provisioned {name}: project files, wake units, RC unit")
+    print(f"  provisioned {name}: project files, wake units")
     report_readiness(name, workspace)
     print(f"  next: systemctl --user daemon-reload && "
-          f"systemctl --user enable --now loam-rc-{name} loam-wake-{name}.timer")
+          f"systemctl --user enable --now loam-wake-{name}.timer")
 
 
 if __name__ == "__main__":

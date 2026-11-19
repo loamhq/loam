@@ -6,9 +6,6 @@ Description=Loam — providers follow their latest release (smoke test, switch, 
 # or model move. A provider not signed in is skipped in the run log
 # (logs/provider-follow.jsonl). A switch is followed by an hour's watch in
 # this same run, and a lane that fails to start in it rolls the link back.
-#
-# NOT named loam-rc-*: a switch runs bin/recycle-rc, which globs that
-# namespace, and a unit matching it would restart itself mid-command.
 
 [Service]
 Type=oneshot

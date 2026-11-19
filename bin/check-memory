@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report memory headroom and Remote Control session count. Reads only.
+"""Report memory headroom and the box's memory history. Reads only.
 
 Written 2026-09-02 after four global OOM kills (08-26, 08-30, 08-31, 09-01).
 The reasoning is in vault/40_PROJECTS/Loam/research/memory-headroom-investigation.md;
@@ -7,19 +7,12 @@ the numbers this script judges against are HERE, not there, so the note cites
 the script rather than restating values that would then drift.
 
 What this exists for: every one of those four kills was a GLOBAL out-of-memory
-kill -- the box, not a cgroup. Per-agent MemoryMax cannot see that coming and
-did not stop it. The largest term in it was the number of Remote Control
-sessions alive at once (ten, for five agents, on 08-31), and nothing on this
-box measured that. This does.
-
-Sessions are the unit, not agents. Each agent's Remote Control server holds one
-session of its own; every conversation opened against it adds another, and they
-persist. A session costs ~332 MB, so three extras cost about as much as the
-entire wake window's headroom.
-
-Roster is globbed from ai-labs/*/agent.json, never listed -- the same rule
-gen-rc-units, check-drift and the recycle unit are built on. A hardcoded roster
-is the thing that goes stale, and two of them have already had to be removed.
+kill -- the box, not a cgroup. Per-unit MemoryMax cannot see that coming and
+did not stop it. Until 2026-11-19 the largest term was the Remote Control
+sessions alive at once, and this counted them per agent; Remote Control was
+retired that day, every conversation is now the broker's (admitted by the
+box's memory, lib/loam_broker.py), and what is left here is the headroom the
+wake grid will run on and the history behind it.
 
 Since 2026-10-13 it also reads the box's history, logs/memsample.jsonl,
 written every 5 minutes by bin/memsample: the last 24 h peak per unit and
@@ -37,17 +30,13 @@ import datetime as dt
 import importlib.machinery
 import importlib.util
 import json
-import os
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
 
-AI_LABS = lc.WORKSPACES
 CG = lc.USER_SLICE / "app.slice"
-PAGE = os.sysconf("SC_PAGE_SIZE")
 
 
 def _memsample():
@@ -79,25 +68,6 @@ memsample = _memsample()
 # this number is the max of the record, not an estimate.
 WAKE_PEAK_MB = 758
 
-# A session's marginal cost. Measured on a persona carrying two sessions on
-# 2026-09-03, counted per process rather than by cgroup subtraction: the
-# session process itself was 301 MB, and it spawned its OWN two MCP servers at
-# 73 and 66 MB. So a session costs ~440 MB, not the ~332 MB the session
-# process shows alone.
-#
-# The earlier 332 MB came from differencing cgroup totals, which quietly
-# attributed the MCP servers to the baseline. That undercount is why the 900 MB
-# per-agent cap looked like it had room for a second session when arithmetic
-# says it never did.
-SESSION_MB = 440
-
-# Three extra sessions is ~1.3 GB at the corrected per-session cost -- about
-# two of the heaviest wakes, and more than a six-agent grid's window has to
-# spare. Left at three rather than tightened: this is advisory, and two extra
-# sessions is ordinary use now that the per-agent cap is sized to hold them.
-EXTRA_SESSIONS_WARN = 3
-
-
 # The session broker carries every web conversation in its own cgroup,
 # admitted by the box's memory (lib/loam_broker.py, since 2026-11-09). Until
 # 2026-11-16 the unit had a MemoryHigh (80% of RAM), past which the kernel
@@ -114,7 +84,7 @@ DAY = dt.timedelta(hours=24)
 
 # Unit kinds that are a fresh cgroup per run, so the cgroup's own memory.peak
 # is that run's peak and catches what falls between two samples. The broker
-# and the loam-rc-* servers live for days, so theirs is the sampled current.
+# lives for days, so its is the sampled current.
 PER_RUN = ("wake", "cron", "engineer", "reviewer")
 
 
@@ -126,7 +96,7 @@ def kind(unit: str) -> str:
 def history_report(rows: list[dict], at: dt.datetime) -> tuple[list[str], list[str]]:
     """(lines, warnings) from the sampler's history at time `at`.
 
-    Peak per unit over the last 24 h: the broker and each loam-rc-* by name,
+    Peak per unit over the last 24 h: the broker by name,
     and for each per-run kind the heaviest run. Disk: each mount's used now
     against the newest sample at least 24 h older, and each holder's latest
     daily `du` against the one before it.
@@ -157,7 +127,7 @@ def history_report(rows: list[dict], at: dt.datetime) -> tuple[list[str], list[s
         return f"{v} MB{of}"
 
     for unit in sorted(peaks):
-        if kind(unit) in ("broker", "rc"):
+        if kind(unit) == "broker":
             lines.append(f"  {unit.removeprefix('loam-'):<18}{fmt(unit)}")
     for k in PER_RUN:
         runs = [u for u in peaks if kind(u) == k]
@@ -191,14 +161,6 @@ def history_report(rows: list[dict], at: dt.datetime) -> tuple[list[str], list[s
     return lines, warnings
 
 
-def roster() -> list[str]:
-    import loam_agents  # noqa: PLC0415 -- an archived agent is asleep
-    return loam_agents.live(sorted(
-        d.name for d in AI_LABS.iterdir()
-        if d.is_dir() and (d / "agent.json").is_file()
-    ), AI_LABS)
-
-
 def mb(path: Path) -> int:
     try:
         return int(path.read_text().strip()) // 1048576
@@ -214,49 +176,8 @@ def meminfo() -> dict:
     return out
 
 
-def comm(pid: int) -> str | None:
-    try:
-        raw = Path(f"/proc/{pid}/stat").read_text()
-        return raw[raw.index("(") + 1:raw.rindex(")")]
-    except (OSError, ValueError):
-        return None
-
-
-def rss_mb(pid: int) -> int:
-    try:
-        return int(Path(f"/proc/{pid}/statm").read_text().split()[1]) * PAGE // 1048576
-    except (OSError, ValueError, IndexError):
-        return 0
-
-
-def is_session(c: str | None) -> bool:
-    """A session process's comm is the CLI version it runs, e.g. `2.1.281`.
-
-    Matched positively, never by exclusion. Until 2026-10-13 this counted
-    anything that was not `claude` or `python*`, and an MCP server with a
-    binary of its own (its own comm) arrived inside every session: each agent read two
-    sessions, the nightly "extra sessions" warning was false, and an agent
-    with none was hidden inside a total that still looked high.
-    """
-    return bool(c) and re.fullmatch(r"\d+\.\d+\.\d+", c) is not None
-
-
-def sessions_of(unit: str) -> list[tuple[int, int]]:
-    """(pid, rss_mb) for each Remote Control session process in the unit.
-
-    The supervisor's comm is `claude`; the MCP servers are `python`, `node`,
-    whatever their binary is called. See is_session.
-    """
-    try:
-        pids = [int(x) for x in (CG / unit / "cgroup.procs").read_text().split()]
-    except (OSError, ValueError):
-        return []
-    return sorted((pid, rss_mb(pid)) for pid in pids if is_session(comm(pid)))
-
-
 def main() -> int:
     quiet = "--quiet" in sys.argv
-    names = roster()
     mi = meminfo()
 
     avail = mi.get("MemAvailable", 0)
@@ -264,33 +185,7 @@ def main() -> int:
     swap_total = mi.get("SwapTotal", 0)
     headroom = avail + swap_free
 
-    rows, total_sessions, extras, warnings, criticals = [], 0, 0, [], []
-
-    for name in names:
-        unit = f"loam-rc-{name}.service"
-        d = CG / unit
-        if not d.is_dir():
-            rows.append((name, None, None, 0, "DOWN"))
-            criticals.append(f"{name}: Remote Control server is not running")
-            continue
-        cur, peak = mb(d / "memory.current"), mb(d / "memory.peak")
-        sess = sessions_of(unit)
-        total_sessions += len(sess)
-        # Per agent, so an agent with none cannot cancel another's extra.
-        extras += max(0, len(sess) - 1)
-        flag = ""
-        if not sess:
-            # The server pre-creates one session in its directory at every
-            # start (`--create-session-in-dir`, on by default), so a running
-            # server with none has lost the one it made. Iris sat at 0 from
-            # the first night this log kept (2026-09-03) to 2026-10-13, inside
-            # a total that read 12 for 7 agents, and nobody saw it.
-            flag = "NO SESSION"
-            warnings.append(
-                f"{name}: Remote Control server is running with no session -- "
-                f"the one it pre-creates at start did not stay up, so the app "
-                f"has nothing open for {name}")
-        rows.append((name, cur, peak, len(sess), flag))
+    warnings, criticals = [], []
 
     wakes_that_fit = headroom // WAKE_PEAK_MB
 
@@ -302,11 +197,6 @@ def main() -> int:
         warnings.append(
             f"headroom {headroom} MB fits one wake but not two overlapping "
             f"({WAKE_PEAK_MB} MB each)")
-    if extras >= EXTRA_SESSIONS_WARN:
-        warnings.append(
-            f"{extras} sessions above the {len(names)} baseline, ~{extras * SESSION_MB} MB. "
-            f"Restarting the Remote Control servers reclaims this "
-            f"(loam-recycle-rc.timer does it at 01:30)")
     if swap_total and swap_free < swap_total * 0.15:
         criticals.append(
             f"swap {swap_free}/{swap_total} MB free -- swap reached zero in all "
@@ -317,13 +207,6 @@ def main() -> int:
     warnings += hist_warnings
 
     if not quiet:
-        print(f"{'agent':<9}{'current':>9}{'peak':>8}{'sessions':>10}   note")
-        for name, cur, peak, ns, flag in rows:
-            if cur is None:
-                print(f"{name:<9}{'--':>9}{'--':>8}{'--':>10}   DOWN")
-            else:
-                print(f"{name:<9}{cur:>7} MB{peak:>6} MB{ns:>10}   {flag}")
-        print()
         print(f"app.slice        {mb(CG / 'memory.current'):>7} MB"
               f"{mb(CG / 'memory.peak'):>6} MB peak"
               f"   (memory.max = {(CG / 'memory.max').read_text().strip()})")
@@ -332,8 +215,6 @@ def main() -> int:
         print(f"swap             {swap_total - swap_free:>7} MB used of {swap_total} MB")
         print(f"headroom         {headroom:>7} MB (available + free swap) "
               f"= {wakes_that_fit} wake(s) of {WAKE_PEAK_MB} MB")
-        print(f"sessions         {total_sessions:>7} total, {len(names)} baseline, "
-              f"{extras} extra (~{extras * SESSION_MB} MB)")
         print()
         for line in hist_lines:
             print(line)
@@ -344,7 +225,7 @@ def main() -> int:
     for msg in warnings:
         print(f"WARNING:  {msg}")
     if not criticals and not warnings:
-        print("OK -- headroom and session count are within measured limits")
+        print("OK -- headroom is within measured limits")
 
     return 2 if criticals else (1 if warnings else 0)
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the deployment layer and put it live. The generator for the proxy.
 
-Same rule as provision and gen-rc-units: derives from disk, never copies, and
+Same rule as provision and gen-units: derives from disk, never copies, and
 rewrites nothing it would not change. What it renders is in
 lib/loam_deploy.py; this file is the hands -- it writes as root, validates
 the Caddyfile before it lands, reloads Caddy, and brings the runtime's two

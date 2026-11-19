@@ -28,8 +28,10 @@ the last ten minutes, read from the launcher's job state
      receipt's path and never waits; with the route not live, or from a
      cron, it waits as before. The broker's own delivery pass then hands
      two results that finished close together to the persona, each once,
-     oldest first, queued behind the persona's turn under way (not steered
-     into it), and posts nothing: a turn that reads one and says nothing
+     oldest first, queued behind the persona's turn under way, which is
+     about something else (started after the briefs, so not steered into;
+     the steer into the briefing turn is tests/test_thread_inputs.py), and
+     posts nothing: a turn that reads one and says nothing
      leaves the thread file as it was.
 
 Run: python3 tests/test_thread_jobs.py
