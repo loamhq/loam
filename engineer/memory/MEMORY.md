@@ -2642,3 +2642,27 @@ check-drift reported that one cause as two findings, the "source moved" note
 and the content diff, under the same heading. They are now one finding. Since
 `loam-check` runs `check-drift --quiet`, a finding printed a bare heading;
 `--quiet` now prints one line per finding (`one_line`).
+
+## 2026-11-19 — a persona's model had two homes
+
+- **The profile is the model.** Settings › Agents writes `model` into the
+  persona's `agent.json` (since 11-13). Wakes, crons, attention notices and
+  the identity preflight pass it as `--model` (`loam_profile.lane_choice`);
+  a thread turn passes it when the thread chose none (`persona_defaults`).
+  A chat the broker starts with no model passes nothing, so the CLI reads
+  `.claude/settings.json` -- which provision wrote as `fable` for everyone.
+  A persona set to opus therefore ran opus and fable by launch path, and
+  `bin/lane-check`, which also read settings.json, called its opus runs drift.
+- **Now one rule**, `loam_profile.claude_model(card)`: provision renders
+  settings.json's `model` through it, `update_agent` rewrites that key on a
+  profile change (`sync_settings_model`), lane-check and the broker's
+  `persona_model` read it. A thread's own model pick is still a choice, on
+  the broker's record (`chosen_model`), and is never drift.
+- **What it cost to find:** the session transcripts' `message.model`, grouped
+  by the first user line, told the paths apart in minutes; the app's journal
+  (`profile: <agent> ['model'] by <who>`) says who set the profile and when.
+- **A live broker holds the old `update_agent`** until it restarts; a landing
+  that changes it wants `bin/restart-broker --when-idle`.
+- `tests/test_boundary_guard.py`'s "Write under agents/" fails when the suite
+  is run from a job tree under `~/.local/state/loam/worktrees/`, and passes
+  from the same commit checked out under `$TMPDIR` and in the landing's wall.
