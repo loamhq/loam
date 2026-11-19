@@ -122,7 +122,7 @@ function settingsBody(sheet, back) {
 function settingsSheet(...args) { return host.registry.component('core.settings', { args, variant: 'settingsSheet', defaultView: () => builtinSettingsSheet(...args) }) }
 
 function builtinSettingsSheet(sheet) {
-  return h('div', { class: 'sheet settings' }, host.sheetTop(), ...settingsBody(sheet, true))
+  return h('div', { class: 'sheet settings' }, host.sheetTop(), host.runNotice(), ...settingsBody(sheet, true))
 }
 
 function settingsItems() {
@@ -138,7 +138,7 @@ function builtinSettingsDialog(sheet) {
     h('div', { class: 'setmain' },
       h('header', { class: 'app-modal-head settings-modal-close' },
         h('button', { class: 'iconbtn ghost', title: 'Close', 'aria-label': 'Close settings', onclick: () => host.closeSheet({ historyBack: true }) }, icon.close(14))),
-      h('div', { class: 'app-modal-body', key: `settings:${page}:${sheet.detail?.kind ?? ''}:${sheet.detail?.id ?? ''}:${sheet.provider ?? ''}:${sheet.account ?? ''}` }, ...settingsBody({ ...sheet, page }, false))))
+      h('div', { class: 'app-modal-body', key: `settings:${page}:${sheet.detail?.kind ?? ''}:${sheet.detail?.id ?? ''}:${sheet.provider ?? ''}:${sheet.account ?? ''}` }, host.runNotice(), ...settingsBody({ ...sheet, page }, false))))
 }
 
 function settingsPlugins(options = {}) { return host.pluginSettingsUI.view(options) }
@@ -435,7 +435,7 @@ function settingsProviders({ back = true, heading = true, footnote = true } = {}
     // The same one line the chats carry, at the top of the list: a sign-in
     // about to run out stops every session the host starts, and this is the
     // page it is fixed on.
-    ...host.state.providers.map((p) => host.loginNotice(p.id)).filter(Boolean),
+    ...(host.state.agentAvailability?.agents_can_run === false ? [] : host.state.providers.map((p) => host.loginNotice(p.id)).filter(Boolean)),
     rows.length === 0
       ? h('div', { class: 'reason', text: 'Providers could not be loaded. Try reopening Settings.' })
       : h(

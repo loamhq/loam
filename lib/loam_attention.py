@@ -45,8 +45,8 @@ over twice.
 
 **When nobody can run** (the account refused, every persona archived), a
 fact waits here and its runs keep failing into the failure log at that
-pace; the check on a clock's state file says why agents cannot run
-(lib/loam_check.py), and batch B step 7 (a mark in the app) draws it.
+pace. The app shows an install-wide status line when the session host
+reports that agents cannot run (lib/loam_check.py).
 
 For a plugin: ``loam_attention.tell("what happened", by="<plugin id>")`` in
 Python with the runtime's ``lib/`` on the path, or ``loam tell "what

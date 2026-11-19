@@ -383,6 +383,9 @@ export function createApp({
       const health = await broker.health()
       return sendJson(res, 200, { ...health, ...(Object.keys(config.avatarColours ?? {}).length ? { avatar_colours: config.avatarColours } : {}) })
     }
+    if (rest === '/agent-availability' && method === 'GET') {
+      return await relayJson(res, 'GET', '/v1/agent-availability', undefined, { signal: AbortSignal.timeout(5000) })
+    }
     // The numbers the page has to know before it does something the host would
     // refuse — the biggest file a chat will carry, the biggest image the model
     // can be shown, the types the host takes. They are the **host's** numbers

@@ -128,12 +128,7 @@ import loam_usage  # noqa: E402
 import loam_waiters  # noqa: E402
 from loam_account import AccountRefused, refusal  # noqa: E402
 from loam_permissions import PERMISSION_MODE  # noqa: E402  every lane's, one home
-from loam_inbox import (  # noqa: E402
-    record_account_refusal,
-    record_denials,
-    record_failure,
-    record_notice,
-)
+from loam_inbox import record_denials, record_failure, record_notice  # noqa: E402
 
 AGENTS_ROOT = lc.ROOT
 STATE_DIR = lc.STATE / "wake"
@@ -445,13 +440,12 @@ def account_refused(agent: str, vault: Path, started: str, lane: str,
                     stage: str, reason: str, **extra) -> int:
     """The provider refused this lane: the account's fault, named as such.
 
-    The lane's own log line as always, and the night's one comms line (see
-    ``record_account_refusal``). Not the identity's fault and not the run's,
-    and the marker is not advanced: the next wake should see this interval.
+    The failure log and wake ledger keep the evidence. The marker is not
+    advanced: the next wake should see this interval.
     """
     line = f"{lane} account_refused ({stage}): {reason}"
     print(line, file=sys.stderr)
-    record_account_refusal(agent, vault, line, reason)
+    record_failure(agent, vault, line)
     log_line(agent, {
         "ts": started, "ok": False, "stage": "account_refused",
         "refused_at": stage, "lane": lane, "error": reason, **extra,

@@ -26,6 +26,20 @@ test('GET /up answers 200 even with no broker configured at all', async (t) => {
   assert.deepEqual(health, { configured: false, ok: false })
 })
 
+test('agent availability relays the host’s answer without caching', async (t) => {
+  const body = { agents_can_run: false, why: ["Loam's own check has stopped."], action: null }
+  const broker = await fakeBroker({ 'GET /v1/agent-availability': (req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(body))
+  } })
+  const app = await appAgainst(broker)
+  t.after(closing(broker, app))
+  const res = await fetch(`${app.url}/api/agent-availability`)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('cache-control'), 'no-store')
+  assert.deepEqual(await res.json(), body)
+})
+
 // The policy the page is written against, on the one header that carries it.
 //
 // It is asserted here because the fix for a blocked inline style had a cheaper

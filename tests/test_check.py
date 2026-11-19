@@ -52,6 +52,7 @@ import loam_config as lc  # noqa: E402
 import loam_attention as la  # noqa: E402
 import loam_broker  # noqa: E402
 import loam_check as ck  # noqa: E402
+import loam_codex  # noqa: E402
 import loam_pressure  # noqa: E402
 
 results: list[bool] = []
@@ -245,8 +246,54 @@ ck.DISK_FREE_GB = 4
 
 real_persona = la.persona
 la.persona = lambda: None
-forced("nobody awake to hear", lambda: None, "hears", blocks="agents_can_run")
+forced("nobody awake to hear", lambda: None, "hears")
 la.persona = real_persona
+
+
+# -- Install-wide availability, between ticks -------------------------------
+
+healthy()
+ck.tick(AT, daily=True, tell=tell)
+CREDS.unlink()
+status = ck.current_run_status()
+check("availability: current login loss overrides the previous tick",
+      status["agents_can_run"] is False and status["action"]["provider"] == "claude-code", status)
+ada_card = LABS / "ada" / "agent.json"
+original = json.loads(ada_card.read_text())
+ada_card.write_text(json.dumps({**original, "provider": "codex"}))
+loam_codex.AUTH_PATH = TMP / "codex-auth.json"
+loam_codex.AUTH_PATH.write_text(json.dumps({"tokens": {"refresh_token": "scratch"}}))
+check("availability: another provider can run while Claude is signed out",
+      ck.current_run_status()["agents_can_run"] is True)
+states = ck.provider_logins(["ada"])
+check("availability: Codex-only needs just the Codex login",
+      set(states) == {"codex"} and ck.run_status(AT, ["ada"], states)["agents_can_run"] is True)
+
+refused = {"provider": "codex", "ok": False, "stage": "account_refused"}
+ledger("ada", [{**refused, "ts": ck.iso(AT - 100)}, {**refused, "ts": ck.iso(AT - 50)}])
+status = ck.current_run_status()
+check("availability: all used providers blocked, with evidence of Codex refusals",
+      status["agents_can_run"] is False and "Codex refused its recent runs." in status["why"], status)
+ledger("ada", [{**refused, "ts": ck.iso(AT - 100)}, {**refused, "ts": ck.iso(AT - 50)},
+               {"provider": "codex", "ok": True, "ts": ck.iso(AT - 10)}])
+check("availability: a later successful wake clears the account refusal",
+      ck.current_run_status()["agents_can_run"] is True)
+ledger("ada", [{**refused, "ts": ck.iso(AT - 27 * 3600)}, {**refused, "ts": ck.iso(AT - 50)}])
+check("availability: one recent refusal and an old one do not establish an outage",
+      ck.current_run_status()["agents_can_run"] is True)
+ada_card.write_text(json.dumps(original))
+healthy()
+ck.tick(AT, daily=True, tell=tell)
+for name in NAMES:
+    card = LABS / name / "agent.json"
+    card.write_text(json.dumps({**json.loads(card.read_text()), "archived": {"at": ck.iso(AT)}}))
+status = ck.current_run_status()
+check("availability: a fully archived roster has a restore action",
+      status["agents_can_run"] is False and status["action"]["kind"] == "archived", status)
+ck.write_state({"agents_can_run": True, "stale_after": ck.iso(AT - 1)})
+status = ck.current_run_status()
+check("availability: stale state never reports healthy and has no owner action",
+      status == {"agents_can_run": False, "why": ["Loam's own check has stopped."], "action": None}, status)
 
 
 # -- 3. unreadable is not true -----------------------------------------------

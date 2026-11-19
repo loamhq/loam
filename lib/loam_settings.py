@@ -797,6 +797,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
                               "image (loam-ui 11535026, 2026-11-15)",
     "rest === '/agents'": "a read",
     "rest === '/health'": "a read",
+    "rest === '/agent-availability'": "a read",
     "rest === '/limits'": "a read",
     "/^\\/files\\/(roots|list|stat|read|resolve)$/": "a read",
     "rest === '/files/config'": "a read",

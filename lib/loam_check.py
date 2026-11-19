@@ -62,12 +62,10 @@ first run of a new install), and their result kept until the next day:
 - ``lane:<agent>:<problem>``: ``bin/lane-check`` finds nothing wrong with
   each agent's auto-loaded files and the model its last session ran on.
 
-**Whether agents can run** (the seam for step 7). ``agents_can_run`` is
-false, with ``why`` in plain words, when a fact that stops every run is
-false: the Claude Code login gone or expired, or nobody awake to hear.
-``conversations`` is false while the broker does not answer. A reader knows
-the file is stale when ``now`` is past ``stale_after``: then the check is
-not running, which is itself the answer "we cannot say".
+**Whether agents can run.** A live agent needs a usable provider. The
+session host checks the freshness of this file, then reads the current
+roster, logins and recent scheduled outcomes so recovery needs no new tick.
+``conversations`` also depends on whether the broker answers.
 
 Stdlib and the runtime's lib only. Every reading is wrapped, so one fact
 that breaks costs that fact, never the others.
@@ -99,6 +97,7 @@ DAILY_AT = "01:40"
 REFLECTION_HOURS = 26
 BROKER_RETRY_S = 30
 LOGIN_WARN_DAYS = 3
+REFUSAL_HOURS = 26
 DISK_FREE_PCT = 10
 DISK_FREE_GB = 4
 MEMSAMPLE_STALE_MIN = 20
@@ -133,8 +132,8 @@ def fact(fid: str, ok: bool | None, says: str, evidence: str | None = None,
          blocks: str | None = None) -> dict:
     """One fact. ``says`` is the sentence a persona reads: what is wrong when
     ``ok`` is false, what could not be read when it is None, what is true
-    when it is true. ``blocks`` is ``runs`` or ``conversations`` when the
-    fact being false stops them."""
+    when it is true. ``blocks`` is ``conversations`` when this fact being
+    false stops conversations independently of agent availability."""
     return {"id": fid, "ok": ok, "says": says, "evidence": evidence, "blocks": blocks}
 
 
@@ -243,33 +242,39 @@ def broker(sleep: Callable[[float], None] = time.sleep) -> list[dict]:
                  blocks="conversations")]
 
 
-def logins(names: list[str] | None = None) -> list[dict]:
-    import loam_profile  # noqa: PLC0415
-    used = {"claude-code"}
-    for agent in (agents() if names is None else names):
+def provider_logins(names: list[str]) -> dict:
+    import loam_antigravity
+    import loam_broker
+    import loam_codex
+    from loam_threads import default_engine
+
+    readers = {"claude-code": loam_broker.login_state, "codex": loam_codex.login_state,
+               "antigravity": loam_antigravity.login_state}
+    states = {}
+    for provider in sorted({default_engine(agent) for agent in names}):
         try:
-            used.add(loam_profile.lane_provider(_config(agent)))
-        except (OSError, ValueError, KeyError):
-            pass
+            states[provider] = readers[provider]()
+        except Exception as exc:  # a broken reading is local to one provider
+            states[provider] = {"reason": type(exc).__name__}
+    return states
+
+
+def logins(states: dict) -> list[dict]:
+    from loam_broker import PROVIDER_NAMES
+
     out = []
     page = "the app's Providers page"
-    for provider in sorted(used):
-        if provider == "claude-code":
-            import loam_broker  # noqa: PLC0415
-            state = loam_broker.login_state()
-            name, blocks = "Claude Code", "runs"
-        elif provider == "codex":
-            import loam_codex  # noqa: PLC0415
-            state = loam_codex.login_state()
-            name, blocks = "Codex", None
-        else:
-            continue
+    for provider, state in states.items():
+        name = PROVIDER_NAMES[provider]
         days = state.get("days_left")
-        if not state.get("connected"):
+        if "connected" not in state:
+            out.append(fact(f"login:{provider}", None,
+                            f"the {name} login could not be read ({state['reason']})", page))
+        elif not state["connected"]:
             out.append(fact(f"login:{provider}:gone", False,
                             f"the {name} login cannot be used: {state.get('reason') or 'not signed in'}; "
                             f"agents on {name} cannot run until someone signs in again",
-                            page, blocks=blocks))
+                            page))
         elif isinstance(days, int) and days <= LOGIN_WARN_DAYS:
             out.append(fact(f"login:{provider}:expiring", False,
                             f"the {name} login expires in {days} day{'s' if days != 1 else ''} "
@@ -291,7 +296,7 @@ def hears() -> list[dict]:
     return [fact("hears", False,
                  "no agent is awake to hear when Loam needs attention: every agent is "
                  "archived, so nothing that goes wrong reaches anyone",
-                 "Settings › Agents", blocks="runs")]
+                 "Settings › Agents")]
 
 
 def memory(at: float) -> list[dict]:
@@ -470,9 +475,9 @@ def read(name: str, reader: Callable[[], list[dict]]) -> list[dict]:
                      f"`{STATE_FILE}`")]
 
 
-def every_tick(at: float) -> list[tuple[str, Callable[[], list[dict]]]]:
+def every_tick(at: float, states: dict) -> list[tuple[str, Callable[[], list[dict]]]]:
     return [("reflection", lambda: reflections(at)), ("broker", broker),
-            ("login", logins), ("hears", hears), ("memory", lambda: memory(at)),
+            ("login", lambda: logins(states)), ("hears", hears), ("memory", lambda: memory(at)),
             ("memsample", lambda: memsample(at)), ("disk", disks),
             ("units", units), ("github", github)]
 
@@ -504,12 +509,78 @@ def write_state(data: dict, path: Path | None = None) -> None:
     tmp.replace(path)
 
 
-def can_run(facts: list[dict]) -> dict:
-    stops = [f for f in facts if f["ok"] is False and f.get("blocks") == "runs"]
-    talks = [f for f in facts if f["ok"] is False and f.get("blocks") == "conversations"]
-    return {"agents_can_run": not stops, "why": [f["says"] for f in stops],
-            "conversations": not stops and not talks,
-            "conversations_why": [f["says"] for f in stops + talks]}
+def refused_providers(at: float, names: list[str], providers: set[str]) -> set[str]:
+    """Require two recent refusals with no later success between or after them.
+
+    The bounded wake ledger tails already have the provider and outcome.
+    A skipped lane or a local failure says nothing about the account.
+    """
+    if not providers:
+        return set()
+    outcomes: dict[str, list[tuple[float, bool]]] = {p: [] for p in providers}
+    for agent in names:
+        try:
+            rows = _tail_rows(lc.LOGS / f"wake-{agent}.jsonl", size=32 * 1024)
+        except OSError:
+            continue
+        for row in rows:
+            provider = row.get("provider", "claude-code")
+            refused = row.get("stage") == "account_refused"
+            if provider not in outcomes or (not refused and row.get("ok") is not True):
+                continue
+            when = parse_iso(row.get("finished") or row.get("ts"))
+            if when is not None and at - REFUSAL_HOURS * 3600 <= when <= at:
+                outcomes[provider].append((when, refused))
+    # A success wins a same-second tie: the order is not known that precisely.
+    return {p for p, rows in outcomes.items()
+            if [refused for _, refused in sorted(rows, key=lambda row: (-row[0], row[1]))[:2]]
+            == [True, True]}
+
+
+def run_status(at: float, names: list[str], states: dict) -> dict:
+    from loam_agents import archived
+    from loam_broker import PROVIDER_NAMES
+
+    if not names:
+        if archived():
+            return {"agents_can_run": False, "why": ["Every agent is archived."],
+                    "action": {"kind": "archived", "label": "Restore an agent"}}
+        return {"agents_can_run": False, "why": ["There are no agents yet."],
+                "action": {"kind": "agents", "label": "Open Agents"}}
+
+    connected = {p for p, state in states.items() if state.get("connected")}
+    refused = refused_providers(at, names, connected)
+    if connected - refused:
+        return {"agents_can_run": True, "why": [], "action": None}
+
+    why, action = [], None
+    for provider, state in states.items():
+        name = "Claude" if provider == "claude-code" else PROVIDER_NAMES[provider]
+        if state.get("connected") is False:
+            reason = f"Sign in to {name} again"
+            if action is None:
+                action = {"kind": "provider", "provider": provider, "label": reason}
+            why.append(reason)
+        elif provider in refused:
+            why.append(f"{name} refused its recent runs.")
+        else:
+            why.append(f"Loam couldn't read the {name} sign-in.")
+    if action:
+        why.remove(action["label"])
+        why.insert(0, action["label"])
+    return {"agents_can_run": False, "why": why, "action": action}
+
+
+def current_run_status() -> dict:
+    """The session host's answer. An old check can't vouch for this install."""
+    at = now()
+    state = load_state()
+    stale_after = parse_iso(state.get("stale_after"))
+    if stale_after is None or at >= stale_after or state.get("crashed"):
+        return {"agents_can_run": False, "why": ["Loam's own check has stopped."],
+                "action": None}
+    names = agents()
+    return run_status(at, names, provider_logins(names))
 
 
 def tell_all(facts: list[dict], tell: Callable[..., str] | None = None) -> dict:
@@ -539,8 +610,10 @@ def tick(at: float | None = None, daily: bool | None = None,
     last_daily = (prev.get("daily") or {})
     if daily is None:
         daily = last_daily.get("date") != today and (hhmm >= DAILY_AT or not last_daily)
+    names = agents()
+    states = provider_logins(names)
     facts: list[dict] = []
-    for name, reader in every_tick(at):
+    for name, reader in every_tick(at, states):
         facts.extend(read(name, reader))
     if daily:
         day_facts: list[dict] = []
@@ -549,12 +622,16 @@ def tick(at: float | None = None, daily: bool | None = None,
         last_daily = {"date": today, "at": iso(at), "facts": day_facts}
     facts.extend(last_daily.get("facts") or [])
     told = tell_all(facts, tell)
+    status = run_status(at, names, states)
+    talks = [f["says"] for f in facts if f["ok"] is False and f.get("blocks") == "conversations"]
     state = {
         "at": iso(at),
         "stale_after": iso(at + STALE_S),
         "ok": all(f["ok"] is True for f in facts),
         "crashed": None,
-        **can_run(facts),
+        "agents_can_run": status["agents_can_run"], "why": status["why"],
+        "conversations": status["agents_can_run"] and not talks,
+        "conversations_why": status["why"] + talks,
         "facts": [f for f in facts if f["ok"] is not True] +
                  [f for f in facts if f["ok"] is True],
         "told": told,

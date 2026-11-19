@@ -5529,6 +5529,13 @@ class Server:
         parts = [p for p in path.split("/") if p]
         broker = self.broker
 
+        if parts == ["v1", "agent-availability"] and method == "GET":
+            from loam_check import current_run_status
+            status = await asyncio.to_thread(current_run_status)
+            writer.write(response(200, status))
+            await writer.drain()
+            return
+
         # What a client must know before it does something this interface would
         # refuse. One number so far: the biggest file a chat carries, asked for
         # by the app so that a phone is told in the composer rather than after

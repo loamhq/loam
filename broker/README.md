@@ -123,6 +123,7 @@ on everything but `/up`.
 | route | does |
 |---|---|
 | `GET /up` | `{"ok": true}`. No token. |
+| `GET /v1/agent-availability` | Installation-wide `agents_can_run`, `why` (plain sentences in display order), and an optional owner `action`. The bearer-protected read checks the freshness of `check.json`, then reads the current active roster, its providers' login state and recent wake outcomes. |
 | `GET /v1/limits` | the numbers a client must know before it does something this interface would refuse: `attachment_max_bytes`, `inline_image_max_bytes`, `attachment_types` — "Attachments" below |
 | `GET /v1/agents` | the personas, derived from disk, each with its name and uploaded face |
 | `GET /v1/providers[?agent=<name>]` | the four providers, which are connected, the quota, when the login expires (`login`), and what each offers a chat: its `models` and its `efforts`. `?agent=` only decides whose default is ticked. |

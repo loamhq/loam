@@ -1691,6 +1691,15 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   border: 0; background: transparent; color: inherit; font-family: inherit; font-size: inherit;
   font-weight: 700; text-decoration: underline; padding: 0;
 }
+.run-notice {
+  margin: 0; padding: 0 12px; border-radius: 12px; min-height: 44px;
+  display: flex; flex-wrap: wrap; gap: 0 6px; align-items: center; justify-content: center;
+  font-size: 13px;
+}
+.run-notice > span { padding-block: 7px; }
+#app > .run-notice, #app > .editor > .run-notice {
+  margin: max(8px, env(safe-area-inset-top, 0px)) 12px 4px;
+}
 
 .signline { font-size: 14px; color: var(--paper-ink); line-height: 1.45; }
 .signline.warn { color: var(--warning); }

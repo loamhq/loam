@@ -103,6 +103,7 @@ const state = {
   maxAttachmentBytes: null,
   dragging: false,
   brokerState: '',
+  agentAvailability: null,
   // The desktop layout: three columns at 1100px and above, the phone's screens
   // below it. `wide` is read from the window on every draw rather than stored,
   // so a window dragged across the threshold is one redraw and not a listener
@@ -314,6 +315,7 @@ const shell = Object.defineProperties({}, {
   activityPanel: { get: () => activityPanel },
   schedules: { get: () => schedules },
   loadHealth: { get: () => loadHealth },
+  runNotice: { get: () => runNotice },
   loadAgents: { get: () => loadAgents },
   loadProviders: { get: () => loadProviders },
   loadLimits: { get: () => loadLimits },
@@ -382,6 +384,7 @@ const changedAgent = agent => {
     : state.agents.byId.has(agent.id) ? rows.map(row => row.id === agent.id ? agent : row) : [...rows, agent])
   threads.refreshAgents()
   sidePanel.threads.refreshAgents()
+  loadAgentAvailability(true)
 }
 
 const profiles = createProfiles({ api, redraw: schedule, changedAgent })
@@ -548,6 +551,48 @@ async function loadHealth() {
   schedule()
 }
 
+let availabilityReading = false
+let nextAvailabilityRead = 0
+async function loadAgentAvailability(force = false) {
+  if (authExpired() || availabilityReading || (!force && Date.now() < nextAvailabilityRead)) return
+  availabilityReading = true
+  nextAvailabilityRead = Date.now() + 15000
+  try {
+    state.agentAvailability = await api('GET', '/agent-availability')
+  } catch {
+    // The thread's reconnect feedback already covers a host that can't answer.
+    state.agentAvailability = null
+  } finally {
+    availabilityReading = false
+    schedule()
+  }
+}
+
+function runNotice() {
+  const status = state.agentAvailability
+  if (status?.agents_can_run !== false || !status.why?.[0]) return null
+  const why = status.why[0], action = status.action
+  const atProvider = action?.kind === 'provider' && state.sheet?.page === 'provider' && state.sheet.provider === action.provider
+  const atAgents = action?.kind === 'agents' && state.sheet?.page === 'agents' && !state.sheet.detail && !state.sheet.archivedAgents
+  const atArchive = action?.kind === 'archived' && state.sheet?.archivedAgents
+  const act = action && !atProvider && !atAgents && !atArchive
+  return h('div', { class: 'loginwarn run-notice', key: 'agent-availability', role: 'status' },
+    h('span', { text: `Agents can’t run: ${act && action.label === why ? '' : why}` }),
+    act ? h('button', { class: 'loginwarn-act', type: 'button', text: action.label, onclick: () => {
+      if (state.editor) page.closeEditor()
+      if (action.kind === 'provider') {
+        page.goSettings('provider', action.provider)
+        loadProviders()
+      } else {
+        page.goSettings('agents')
+        if (action.kind === 'archived') {
+          state.sheet.archivedAgents = true
+          settingsProfiles.archived()
+        }
+      }
+    } }) : null)
+}
+
 async function loadAgents() {
   try {
     const body = await api('GET', '/agents')
@@ -576,6 +621,7 @@ async function loadProviders() {
     state.providersError = error.message
     state.providers = []
   }
+  loadAgentAvailability(true)
   schedule()
 }
 
@@ -851,7 +897,8 @@ function render() {
   const screen = authExpired() ? signInAgain()
     : welcoming ? welcomeScreen({ checking: onboarding.checking, providers: state.providers, signIn: page.providerSignIn, continueWith: continueWelcome, retry: loadProviders, error: state.providersError, step: onboarding.step, backup: onboardingBackup, skipBackup: skipBackupWelcome })
     : state.wide ? page.desk(beside) : section?.frame === 'full' ? content : h('div', { class: 'screen plugin-screen' }, content, page.nav())
-  morph(root, authExpired() || welcoming ? [screen] : [screen, ...registry.draw('app.overlay', { slot: 'overlay', screen: state.screen, wide: state.wide })])
+  const notice = state.editor || state.sheet?.kind === 'settings' ? null : runNotice()
+  morph(root, authExpired() || welcoming ? [screen] : [notice, screen, ...registry.draw('app.overlay', { slot: 'overlay', screen: state.screen, wide: state.wide })])
   page.fitToolOutputs(); if (modern || state.wide && state.navigator === 'chats') threads.afterRender()
   if (panels.visible()) sidePanel.afterRender()
   activity.syncDialog(); profileActivity.syncDialog(); engineerActivity.syncDialog(); profileUI.syncFocus(); settingsProfileUI.syncFocus()
@@ -1067,6 +1114,7 @@ dailyNotes.refresh()
 function cameBack() {
   running.wake()
   if (authExpired()) return
+  loadAgentAvailability()
   fitViewport()
   threads.tick(['threads', 'home', 'activity', 'profile'].includes(state.screen) || state.wide && state.navigator === 'chats')
   sidePanel.threads.tick(panels.visible() && sidePanel.host.state.screen === 'threads')
@@ -1181,6 +1229,7 @@ window.addEventListener('focus', cameBack)
 const pageHeartbeat = setInterval(() => {
   running.wake()
   if (document.visibilityState !== 'hidden') {
+    loadAgentAvailability()
     threads.tick(['threads', 'home', 'activity', 'profile'].includes(state.screen) || state.wide && state.navigator === 'chats')
     sidePanel.threads.tick(panels.visible() && sidePanel.host.state.screen === 'threads')
     activity.tick(state.screen === 'activity' || state.sheet?.kind === 'activity')
@@ -1199,6 +1248,7 @@ const loginHeartbeat = setInterval(() => page.providerSignIn.poll(), 1000)
 try { setOwner(await api('GET', '/owner')) } catch { /* Unknown owner stays unknown; focus retries the runtime. */ }
 window.addEventListener('focus', () => api('GET', '/owner').then(value => { setOwner(value); schedule() }).catch(() => {}))
 loadHealth()
+loadAgentAvailability()
 running.start()
 const landedThread = threadFromPath(page.herePath())
 if (new URL(globalThis.location?.href ?? 'http://placeholder').searchParams.get('threads') === 'fixture') threads.preview()

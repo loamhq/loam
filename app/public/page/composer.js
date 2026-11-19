@@ -498,6 +498,7 @@ function editorNodes() {
     h(
       'div',
       { class: 'editor', key: 'editor' },
+      host.panelId === 'main' && host.state.sheet?.kind !== 'settings' ? host.runNotice() : null,
       h(
         'div',
         { class: 'editor-head' },

@@ -13,10 +13,12 @@ failure with a line under Urgent in ``comms.md``. Now:
 
 - a persona's own failed run is logged here and told to that persona at the
   top of its next turn (lib/loam_lane_notice.py), and nowhere else;
-- a fault that is no one persona's (the account refusing runs, a vault write
-  refused three nights running, a lane check's finding) is logged here and
+- a fault that is no one persona's (such as a vault write refused three nights
+  running) is logged here and
   handed to the system persona as a fact (lib/loam_attention.py), which
   decides whether the owner hears of it, in its own words;
+- individual account refusals stay in the failure log and wake ledger. The
+  app reads recent ledger outcomes to identify when no agent can run;
 - ``append_comms`` is kept only so an older plugin that still calls it does
   not break: it writes nothing on the board and hands its line to the system
   persona as a fact.
@@ -139,40 +141,6 @@ def record_fault(by: str, vault: Path, reason: str, key: str | None = None) -> s
     import loam_attention  # noqa: PLC0415
     _append_log(vault, by, reason, now_iso())
     return loam_attention.tell(reason, by=by, key=key, evidence=str(vault / FAILURE_LOG))
-
-
-# The account refusing is one fact a day, not one per lane (the owner read
-# seven wrong diagnoses on 2026-09-15 before the right one). It is the
-# runtime's, not any agent's: the lane that happened to be refused first is
-# not the subject of it.
-ACCOUNT_POSTER = "loam"
-ACCOUNT_PREFIX = "account refused runs from"
-
-
-def account_text(since: str, reason: str) -> str:
-    """``since`` is the first refused run's ISO stamp; HH:MMZ is shown."""
-    return f"{ACCOUNT_PREFIX} {since[11:16]}Z ({snippet(reason)})"
-
-
-def record_account_refusal(
-    agent: str, vault: Path, reason: str, provider: str,
-    stamp: str | None = None,
-) -> None:
-    """A lane the provider refused: its log line, and the day's one fact.
-
-    ``reason`` is the lane's whole entry for the log; ``provider`` is what
-    the provider said. The first refusal of a UTC date hands the system
-    persona the fact; each later one that date is the log's line only (the
-    log carries the count). When the account refuses every run, the system
-    persona's run is refused too: that case is the app's mark, not this."""
-    import loam_attention  # noqa: PLC0415
-    stamp = stamp or now_iso()
-    _append_log(vault, agent, reason, stamp)
-    loam_attention.tell(
-        f"The provider {account_text(stamp, provider)}; every lane it "
-        f"refuses that day is a line in the failure log.",
-        by=ACCOUNT_POSTER, key=f"account-refused:{stamp[:10]}",
-        evidence=str(vault / FAILURE_LOG))
 
 
 def record_notice(agent: str, vault: Path, reason: str, key: str) -> bool:

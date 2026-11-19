@@ -86,7 +86,9 @@ goes to the agent that hears when Loam needs attention, told once like any
 other problem. If a run handed facts fails, they are handed over again
 later, never dropped. The file (`check.json` in Loam's state, `bin/loam-check
 --status`) says each fact with where to look, whether agents can run and
-why not, and if the check itself crashed.
+why not, and if the check itself crashed. When no agent can run or Loam's
+check has stopped, the app shows one status line with the reason and a next
+step where there is one, and clears it when agents can run again.
 
 **The vault** is the owner's notes and the record, plain Markdown. Its
 `README.md` says what each folder is for. `About me.md`, at its top, is what

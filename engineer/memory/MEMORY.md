@@ -2677,3 +2677,15 @@ and the content diff, under the same heading. They are now one finding. Since
   (11-19: the project role.md drift was fixed at 12:02 and still carried at
   the 12:10 tick, told as `repeat`, no run). `bin/loam-check --daily`
   refreshes it by hand.
+
+## 2026-11-19 — app state when no agent can run
+
+The bearer-protected `GET /v1/agent-availability` uses `check.json` as
+the freshness check. While it is fresh, the host reads the live roster
+and each awake agent's default provider login, so a restored sign-in or
+agent takes effect before the next tick. A provider is also blocked when
+its two latest recorded scheduled outcomes, within 26 hours, both say
+`account_refused`. The wake ledger already records the provider, refusal
+and success. An interactive turn has no shared provider-outcome ledger.
+The app polls on its existing visible-page heartbeat and reuses the
+provider sign-in and archived-agent Settings routes for recovery.
