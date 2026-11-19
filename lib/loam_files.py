@@ -450,14 +450,6 @@ def _system_open(parts: list[str]) -> tuple[int, os.stat_result]:
     return fd, st
 
 
-def system_inventory() -> list[dict]:
-    """Every System entry and the host file it is, for the report and the
-    README; ``present`` is whether it is on the box today."""
-    return [{"path": virtual, "source": str(Path(SYSTEM_BASE) / rel),
-             "present": (Path(SYSTEM_BASE) / rel).is_file()}
-            for virtual, rel in SYSTEM_FILES.items()]
-
-
 # --- Reading -----------------------------------------------------------------
 
 def _check_root(root: str) -> None:

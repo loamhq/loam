@@ -161,11 +161,6 @@ def delete_repo(owner: str, name: str) -> None:
     call("DELETE", f"/repos/{owner}/{name}", ok=(204,))
 
 
-def list_deploy_keys(owner: str, name: str) -> list[dict]:
-    _, keys, _ = call("GET", f"/repos/{owner}/{name}/keys")
-    return keys
-
-
 def add_deploy_key(owner: str, name: str, title: str, public_key: str,
                    read_only: bool = False) -> dict:
     _, key, _ = call("POST", f"/repos/{owner}/{name}/keys", {

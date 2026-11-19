@@ -89,10 +89,6 @@ def step_file(n: int) -> Path:
     return STEPS_DIR / f"{n:02d}-{name}.done"
 
 
-def steps_done() -> list[int]:
-    return [n for n, _, _ in STEPS if step_file(n).exists()]
-
-
 def first_unfinished() -> int | None:
     for n, _, _ in STEPS:
         if not step_file(n).exists():
