@@ -293,6 +293,13 @@ def step_preflight(a, ans: dict) -> None:
 def ask_where(base: str) -> tuple[str, str]:
     """The first question of an install given neither --domain nor --name:
     which of the two ways. Returns (domain, "") or ("", name)."""
+    try:
+        open("/dev/tty", "r", encoding="utf-8").close()
+    except OSError:
+        raise Stop("The installer needs to know where your Loam will live on the web, "
+                   "and has no way to ask.",
+                   "run it again with --domain loam.example.com (a domain you have) or "
+                   f"--name <name> (a name under {base} from Loam's makers)") from None
     say("Where will your Loam live on the web? Either:", 2)
     say("1. On a domain you have, for example loam.example.com (or example.com "
         "itself). You add two DNS records where you bought the domain; the "
