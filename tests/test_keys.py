@@ -285,7 +285,7 @@ asyncio.run(routes())
 
 # -- the shipped plugins --------------------------------------------------------------
 for name in ("read-aloud", "dictation"):
-    data, _ = lp.parse_frontmatter((AGENTS / "app" / "public" / "plugins" / name / "PLUGIN.md").read_text())
+    data, _ = lp.parse_frontmatter((AGENTS / "plugins" / "_listed" / name / "PLUGIN.md").read_text())
     man, _ = lp.manifest_of(data, name)
     check(f"{name} declares Google's key", [x["provider"] for x in man.get("keys") or []]
           == ["google"], man.get("keys"))

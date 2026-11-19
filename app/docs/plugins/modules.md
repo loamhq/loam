@@ -10,10 +10,8 @@ mutable values. The facade is not a credential or a write-policy boundary.
 | --- | --- |
 | `page/files.js` | Files controller, editing field, link/embedding adapters, picker, navigation guards |
 | `page/accounts.js` | Provider sign-in and GitHub request state, polling and temporary fields |
-| `plugins/dictation/page/engine.js` | Live/recorded capture, transcription, terms, take lifecycle, microphone/settings views |
 | `page/composer.js` | The single draft, expanded editor, attachments, upload menus and composer rendering |
 | `page/transcript.js` | Copy/fold state, tool details, turn facts and normalized step rendering |
-| `plugins/read-aloud/page/engine.js` | Speech takes, lookup/generation, singleton audio, players, Media Session, Files reader/settings |
 | `page/settings.js` | Settings routes and views, account cards, appearance and Files preferences |
 | `page/layout.js` | Navigator lists and the permanent desktop workspace; phone navigation and profiles |
 | `panel-items.js`, `panels.js` | Shared registered panel renderer, item addresses, moves/uniqueness and split geometry |
@@ -27,7 +25,9 @@ Source-location checks now read the owning module. The standard suite and the
 8-variant computed-style/browser tour validate this behavior-preserving step.
 
 Read aloud and Dictation mount their own controllers and keep helpers,
-preferences, state and feature styles entirely in their plain-file packages.
+preferences, state and feature styles entirely in their plain-file packages,
+which are Market plugins since 0.2.9 (copies in `../plugins/_listed/`;
+`engine.js` in each owns capture/transcription and speech/players).
 `loam.ui.extension` delegates shared page operations while local state stays
 local. Public places, field/sheet contracts and lifecycle events connect them
 to the page; no audio controllers or inert audio adapters remain in core.

@@ -15,4 +15,8 @@ description: How to make a new agent with the owner: build it from a character (
 
 **Make it only on their yes to the version you showed**, in a conversation and never from a wake or a cron: `agent.confirm`, with that revision and the id of their message that said yes. The new agent appears in Chats with a first thread.
 
-**Write the soul to stand alone.** It must make sense if no other agent existed: no comparisons to other agents, and no "unlike Iris". It holds only who the agent is: its character, values and identity. Never instructions on how to behave or what tasks it does; how it works goes in its `_active.md`.
+**Write the soul to stand alone.** It must make sense if no other agent existed: no comparisons to other agents, and no "unlike Iris". It holds only who the agent is: its character, values and identity. Never instructions on how to behave or what tasks it does.
+
+**The config is the owner's words for this agent alone**, in their words and dated: often a single line saying so, because Loam's own text and the page every agent shares load beside it. Do not copy rules into it from other agents.
+
+**The map is the agent's.** A new agent starts with a one-line `map.md` (the draft's `map`, if you give one) and shapes its workspace itself. The map loads on every run, so it points to things and does not hold them.

@@ -31,7 +31,7 @@ import { h, icon, kept, blob, on as onNode } from '../ui.js'
 import { agentLook } from '../sessions.js'
 import { menuSurface } from '../menu-surface.js'
 import { sheetHandle } from '../chat-ui.js'
-import { KIND_ONE, KIND_MANY, KIND_ABOUT, KIND_HOME, search, highlight, leadOf, sectionsOf, kindsListed, dateline, buildRequest, actionOf, plainTouches, reachOf, kindOf, byLoam, listedOnly, hueOf } from '../market.js'
+import { KIND_ONE, KIND_MANY, KIND_ABOUT, KIND_HOME, KIND_LINE, TAGLINE, search, highlight, leadOf, sectionsOf, kindsListed, buildRequest, actionOf, plainTouches, reachOf, kindOf, byLoam, hueOf, tileRows, fineLine, madeBy } from '../market.js'
 import { themePreview } from '../theme-preview.js'
 import { creatorLinks } from '../creator-links.js'
 import { emptyState } from '../empty-state.js'
@@ -39,7 +39,7 @@ import { emptyState } from '../empty-state.js'
 const SUGGEST = 5
 
 export function mount(host) {
-  const st = { list: null, loading: false, details: new Map(), sel: 0, drop: false, picking: false, install: null, focus: null, themes: new Map(), listRequest: 0, failed: new Set() }
+  const st = { list: null, loading: false, details: new Map(), sel: 0, drop: false, picking: false, install: null, focus: null, themes: new Map(), listRequest: 0, failed: new Set(), docked: false }
   const events = host.registry?.scope?.({ id: '@core' })?.events
   const sheet = () => host.state.sheet?.kind === 'market' ? host.state.sheet : null
   const entries = () => st.list?.plugins ?? []
@@ -244,13 +244,15 @@ export function mount(host) {
     if (what === 'use') { host.theme.try(null); host.theme.set({ theme: entry.id }); host.schedule(); return }
     if (what === 'open') { close(); host.goApps(); return }
   }
-  function tryButton(entry, size = '') {
+  // Try it: a theme only, and not the one being worn. Over a photograph it
+  // is glass (`glass`); on a listing's page it reads "Try it first".
+  function tryButton(entry, size = '', { glass = false, first = false } = {}) {
     if (kindOf(entry) !== 'theme' || host.theme.value.theme === entry.id) return null
     const on = host.theme.trying === entry.id
     const ready = themeInstalled(entry.id) || st.themes.get(entry.id)?.state === 'ready'
     const failed = st.themes.get(entry.id)?.state === 'error' || st.details.get(entry.id)?.state === 'error'
     if (failed) return null
-    return button(on ? 'Stop trying' : 'Try it', e => { e.stopPropagation(); host.theme.try(on ? null : entry.id) }, `pillbtn market-try ${size}`.trim(),
+    return button(on ? 'Stop trying' : first ? 'Try it first' : 'Try it', e => { e.stopPropagation(); host.theme.try(on ? null : entry.id) }, `pillbtn market-try ${size}${glass ? ' market-glass' : ''}`.trim(),
       { 'aria-pressed': String(on), disabled: !ready, 'aria-label': `${on ? 'Stop trying' : 'Try'} ${entry.name}` })
   }
   const themeState = id => themeInstalled(id) ? 'ready' : st.themes.get(id)?.state ?? (st.details.get(id)?.state === 'error' ? 'error' : 'loading')
@@ -267,28 +269,63 @@ export function mount(host) {
     const ready = themeState(entry.id) === 'ready'
     return themePreview(ready ? entry.id : null, { cls: `market-preview${large ? ' market-preview-large' : ''}${ready ? '' : ' is-loading'}`, initial: (entry.name || entry.id).charAt(0).toUpperCase() })
   }
-  // A theme's card picture on the front page and in results.
+  // A theme's picture in results (the best match's frame).
   const swatch = entry => h('span', { class: 'market-swatch', 'aria-hidden': 'true' }, picture(entry))
-  function themeCard(entry, q = '') {
-    return h('div', { class: `market-theme${host.theme.trying === entry.id ? ' trying' : ''}`, key: `theme:${entry.id}` },
-      h('button', { type: 'button', class: 'market-theme-open', 'aria-label': `About ${entry.name}`, onclick: () => openListing(entry.id) }, swatch(entry)),
-      h('div', { class: 'market-theme-words' },
-        h('div', { class: 'market-name' }, ...marked(entry.name, q)),
+  const creatorOf = entry => entry.creator?.name || entry.author || ''
+  // A theme as a large photograph (2026-11-18, the store): its cover (or,
+  // without one, Loam wearing it) with Try it over it on hover, and under
+  // it the name in the display face, the maker on the right, and one line.
+  // `shape` is the row's: one wide tile, two half, or three tall.
+  function themeTile(entry, shape = 'half', q = '') {
+    const photo = Boolean(coverOf(entry))
+    const open = () => openListing(entry.id)
+    return h('article', { class: `market-theme market-theme-${shape}${photo ? ' has-photo' : ''}${host.theme.trying === entry.id ? ' trying' : ''}`, key: `theme:${entry.id}` },
+      h('div', { class: 'market-theme-frame' },
+        h('button', { type: 'button', class: 'market-theme-open', 'aria-label': `About ${entry.name}`, onclick: open },
+          h('span', { class: 'market-swatch', 'aria-hidden': 'true' }, picture(entry, { large: true }))),
+        h('span', { class: 'market-theme-try' }, tryButton(entry, 'small', { glass: photo }))),
+      h('div', { class: 'market-theme-meta', onclick: open },
+        h('h3', { class: 'display market-name' }, ...marked(entry.name, q)),
+        h('span', { class: 'market-theme-by', text: creatorOf(entry) })),
+      entry.description ? h('p', { class: 'market-desc', onclick: open }, ...marked(entry.description, q)) : null)
+  }
+  // A section's themes, in rows of two wide then three tall (tileRows).
+  function themeRows(list, q = '') {
+    let at = 0
+    return h('div', { class: 'market-themes' }, ...tileRows(list.length).map((n, r) => {
+      const row = list.slice(at, at += n)
+      return h('div', { class: `market-theme-row market-row-${n}`, key: `row:${r}:${row.map(e => e.id).join(',')}` }, ...row.map(e => themeTile(e, n === 1 ? 'wide' : n === 2 ? 'half' : 'tall', q)))
+    }))
+  }
+  // A listing's mark in Loam's blob shape: a theme's own cover, else the
+  // plugin's icon, else a theme's colours, else its first letter.
+  function blobMark(entry, cls = '') {
+    const d = st.details.get(entry.id), kind = kindOf(entry), cover = kind === 'theme' ? coverOf(entry) : null
+    const base = `market-blob ${cls}`.trim()
+    if (cover) return h('span', { class: `${base} market-blob-photo`, 'aria-hidden': 'true' }, coverImg(entry, cover, 'market-blob-img market-blob-cover'))
+    if (d?.body?.icon) return h('span', { class: base, 'aria-hidden': 'true' }, h('img', { class: 'market-blob-img', src: fileURL(entry.id, 'icon'), alt: '', loading: 'lazy', decoding: 'async', key: `icon:${entry.id}` }))
+    if (kind === 'theme' && themeState(entry.id) === 'ready') return h('span', { class: `${base} theme-preview market-blob-theme`, 'data-look': entry.id, 'aria-hidden': 'true' },
+      h('span', { class: 'market-tile-dot espresso' }), h('span', { class: 'market-tile-dot foam' }))
+    return h('span', { class: `${base} market-blob-letter`, 'aria-hidden': 'true', style: { '--tile': `var(${hueOf(entry.id)})` }, text: (entry.name || entry.id).trim().charAt(0).toUpperCase() })
+  }
+  // An extension, app, agent or skill as a calm card: its mark, the name,
+  // one line, the maker and how far it reaches, and its button. The name's
+  // hit area is the whole card; the button sits above it.
+  function item(entry, q = '', { kind: withKind = false } = {}) {
+    const by = withKind ? byline(entry) : creatorOf(entry)
+    return h('article', { class: 'market-item', key: `item:${entry.id}` },
+      blobMark(entry, 'market-item-mark'),
+      h('div', { class: 'market-item-words' },
+        h('h3', { class: 'market-item-title' }, h('button', { type: 'button', class: 'display market-name market-item-open', onclick: () => openListing(entry.id), 'aria-label': `About ${entry.name}` }, ...marked(entry.name, q))),
         entry.description ? h('p', { class: 'market-desc' }, ...marked(entry.description, q)) : null,
-        h('div', { class: 'market-theme-acts' }, action(entry, { size: 'small' }), tryButton(entry, 'small'))))
+        h('div', { class: 'market-item-foot' },
+          h('span', { class: 'market-by' }, by ? h('span', {}, ...marked(by, q)) : null, reach(entry)),
+          h('span', { class: 'market-item-act' }, action(entry, { size: 'small' })))))
   }
-  function item(entry, q = '') {
-    return h('div', { class: 'market-item', key: `item:${entry.id}` },
-      h('button', { type: 'button', class: 'market-item-open', onclick: () => openListing(entry.id), 'aria-label': `About ${entry.name}` },
-        tile(entry),
-        h('span', { class: 'market-item-words' },
-          h('span', { class: 'market-name' }, ...marked(entry.name, q)),
-          entry.description ? h('span', { class: 'market-desc' }, ...marked(entry.description, q)) : null,
-          h('span', { class: 'market-by' }, h('span', {}, ...marked(byline(entry), q)), reach(entry)))),
-      h('span', { class: 'market-item-act' }, action(entry, { size: 'small' })))
-  }
-  const kindChips = (active, kinds) => kinds.length ? h('div', { class: 'market-chips', role: 'group', 'aria-label': 'Kinds' },
-    ...[['all', 'Everything'], ...kinds.map(k => [k, KIND_MANY[k]])].map(([k, label]) => h('button', { type: 'button', key: k, class: `chip${active === k ? ' on' : ''}`, 'aria-pressed': String(active === k), text: label,
+  const items = (list, q = '', opts) => h('div', { class: `market-items${list.length === 1 ? ' market-items-one' : ''}` }, ...list.map(e => item(e, q, opts)))
+  // The kinds, as quiet text tabs with an accent line under the one shown.
+  const kindChips = (active, kinds) => kinds.length ? h('nav', { class: 'market-kinds', 'aria-label': 'Kinds' },
+    ...[['all', 'Everything'], ...kinds.map(k => [k, KIND_MANY[k]])].map(([k, label]) => h('button', { type: 'button', key: k, class: `market-kind${active === k ? ' on' : ''}`, 'aria-current': active === k ? 'true' : null, text: label,
       onclick: () => k === 'all' ? go({ view: 'front' }) : go({ view: 'kind', k }, { push: sheet()?.view !== 'kind' }) }))) : null
 
   function searchBar() {
@@ -326,6 +363,9 @@ export function mount(host) {
   // The build-it state is the app's one empty state (empty-state.js): a
   // sprout for the empty Market and for the end of every page, a lens when
   // a search found nothing. Its words and its one action are the Market's.
+  // At the end of a page it is a band (art, words, the button in a row);
+  // as the whole of an empty Market, or a search that found nothing, it is
+  // the centred empty state.
   function buildIt({ q = '', k = 'all', whole = false, none = false } = {}) {
     const list = agents(), kindWord = k !== 'all' ? (k === 'extension' ? 'plugin' : KIND_ONE[k].toLowerCase()) : null
     const one = list.length === 1 ? list[0] : null
@@ -336,7 +376,7 @@ export function mount(host) {
         h('p', { class: 'market-pick-label', text: 'Who should build it?' }),
         h('div', { class: 'market-pick-faces' }, ...list.slice(0, 12).map(agent => h('button', { type: 'button', key: agent.id, class: 'market-face', onclick: () => startBuild(agent, q, k), 'aria-label': `Ask ${agent.name} to build it` },
           blob(agentLook(agent.id, host.state.agents), { size: 44, font: 19 }), h('span', { text: agent.name })))))
-    return h('section', { class: `market-build${whole ? ' market-build-whole' : ''}`, 'aria-labelledby': 'market-build-title', key: 'market-build' },
+    return h('section', { class: `market-build${whole ? ' market-build-whole' : none ? ' market-build-none' : ' market-build-band'}`, 'aria-labelledby': 'market-build-title', key: 'market-build' },
       emptyState({ object: none ? 'search' : 'sprout', size: whole ? 'large' : 'pane', titleId: 'market-build-title', action: act,
         title: whole ? 'The Market is just opening' : q ? `Nothing quite right for “${q}”?` : 'Nothing quite right?',
         body: whole ? `Nothing is listed yet. Anything you can think of, one of your agents can build${kindWord ? ` as your own ${kindWord}` : ''}, and it stays yours.` : `Ask one of your agents to build it${kindWord ? ` as your own ${kindWord}` : ' as your own plugin'}. ${q ? 'Your words go with you, ready to send.' : 'Tell them what you have in mind.'}` }))
@@ -344,26 +384,35 @@ export function mount(host) {
 
   // ------------------------------------------------------------ views
   function masthead() {
-    const n = entries().length
     return h('header', { class: 'market-mast' },
       h('h1', { class: 'display market-title', tabindex: '-1', text: 'Market' }),
-      h('p', { class: 'market-dateline', text: st.list ? dateline(n) : 'Reading the list…' }))
+      h('p', { class: 'market-tagline', text: TAGLINE }))
   }
+  // The lead story (2026-11-18, the store): one photograph across the page
+  // with its words over a soft gradient at its foot, white on any picture.
+  // Without a cover it is a plate in the page's own colours, the theme
+  // wearing itself (or the plugin's mark) on the right, the words in ink.
   function leadStory(entry) {
-    return h('article', { class: 'market-lead', 'aria-labelledby': 'market-lead-title', key: `lead:${entry.id}` },
-      h('button', { type: 'button', class: 'market-lead-cover', 'aria-label': `About ${entry.name}`, onclick: () => openListing(entry.id) }, picture(entry, { large: true })),
-      h('div', { class: 'market-lead-words' },
-        h('p', { class: 'kicker market-kicker', text: entry.featured ? 'Featured' : byLoam(entry) ? 'From Loam' : 'New' }),
-        h('h2', { class: 'display', id: 'market-lead-title', text: entry.name }),
-        entry.description ? h('p', { class: 'market-lead-desc', text: entry.description }) : null,
-        h('div', { class: 'market-lead-acts' }, action(entry, { from: 'lead' }), tryButton(entry), button('Read more', () => openListing(entry.id), 'pillbtn market-more')),
-        h('p', { class: 'market-by' }, byline(entry), reach(entry))))
+    const cover = coverOf(entry), kind = kindOf(entry)
+    const kicker = entry.featured ? `Featured ${KIND_ONE[kind].toLowerCase()}` : byLoam(entry) ? `From Loam · ${KIND_ONE[kind]}` : KIND_ONE[kind]
+    const art = cover ? coverImg(entry, cover) : kind === 'theme' && themeState(entry.id) !== 'error' ? livePreview(entry, true) : h('span', { class: 'market-lead-mark' }, blobMark(entry, 'market-blob-xl'))
+    const by = creatorOf(entry)
+    return h('article', { class: `market-lead ${cover ? 'market-lead-photo' : 'market-lead-plate'}${kind === 'theme' ? ' market-lead-theme' : ''}`, 'aria-labelledby': 'market-lead-title', key: `lead:${entry.id}` },
+      h('button', { type: 'button', class: 'market-lead-cover', 'aria-label': `About ${entry.name}`, onclick: () => openListing(entry.id) }, art),
+      h('div', { class: 'market-lead-cap' },
+        h('div', { class: 'market-lead-words' },
+          h('p', { class: 'kicker market-kicker', text: kicker }),
+          h('h2', { class: 'display', id: 'market-lead-title', text: entry.name }),
+          entry.description ? h('p', { class: 'market-lead-desc', text: entry.description }) : null,
+          by ? h('p', { class: 'market-lead-by', text: `by ${by}` }) : null),
+        h('div', { class: 'market-lead-acts' }, tryButton(entry, '', { glass: Boolean(cover) }), action(entry, { from: 'lead' }))))
   }
   function section({ kind, entries: list, total }) {
-    return h('section', { class: 'market-section', 'aria-labelledby': `market-sec-${kind}`, key: `sec:${kind}` },
-      h('div', { class: 'market-section-head' }, h('h2', { class: 'display', id: `market-sec-${kind}`, text: KIND_MANY[kind] }),
-        total > 1 || list.length > 1 ? h('button', { type: 'button', class: 'quietlink market-see-all', onclick: () => go({ view: 'kind', k: kind }), 'aria-label': `See all ${KIND_MANY[kind].toLowerCase()}` }, total > list.length ? `See all ${total}` : 'See all', icon.chevronRight(12)) : null),
-      kind === 'theme' ? h('div', { class: 'market-themes' }, ...list.map(e => themeCard(e))) : h('div', { class: 'market-items' }, ...list.map(e => item(e))))
+    return h('section', { class: `market-section market-section-${kind}`, 'aria-labelledby': `market-sec-${kind}`, key: `sec:${kind}` },
+      h('div', { class: 'market-section-head' },
+        h('div', { class: 'market-section-titles' }, h('h2', { class: 'display', id: `market-sec-${kind}`, text: KIND_MANY[kind] }), h('span', { class: 'market-section-sub', text: KIND_LINE[kind] })),
+        total > 1 || list.length > 1 ? h('button', { type: 'button', class: 'quietlink market-see-all', onclick: () => go({ view: 'kind', k: kind }), 'aria-label': `See all ${KIND_MANY[kind].toLowerCase()}` }, 'See all', icon.chevronRight(12)) : null),
+      kind === 'theme' ? themeRows(list) : items(list))
   }
   function notice() {
     if (!st.list && st.loading) return h('div', { class: 'market-loading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading the Market…')
@@ -380,9 +429,9 @@ export function mount(host) {
   function kindPage(k) {
     const list = entries(), all = search(list, '', k)
     return [masthead(), searchBar(), kindChips(k, kindsListed(list).includes(k) ? kindsListed(list) : [...kindsListed(list), k]),
-      h('header', { class: 'market-page-head' }, h('h2', { class: 'display', text: KIND_MANY[k] }), h('p', { class: 'note', text: KIND_ABOUT[k] })),
+      h('header', { class: 'market-page-head' }, h('h2', { class: 'display', text: KIND_MANY[k] }), h('p', { class: 'market-section-sub', text: KIND_ABOUT[k] })),
       notice(),
-      all.length ? (k === 'theme' ? h('div', { class: 'market-themes' }, ...all.map(e => themeCard(e))) : h('div', { class: 'market-items' }, ...all.map(e => item(e)))) : null,
+      all.length ? (k === 'theme' ? themeRows(all) : items(all)) : null,
       st.list ? buildIt({ k, whole: !all.length && !list.length }) : null]
   }
   function results(q, k) {
@@ -391,65 +440,107 @@ export function mount(host) {
       notice(),
       st.list ? h('p', { class: 'market-count', role: 'status', text: found.length ? `${found.length} ${found.length === 1 ? 'match' : 'matches'} for “${q}”${k !== 'all' ? ` in ${KIND_MANY[k]}` : ''}` : `Nothing listed matches “${q}”${k !== 'all' ? ` in ${KIND_MANY[k]}` : ''} yet.` }) : null,
       best ? h('article', { class: 'market-best', key: `best:${best.id}`, 'aria-label': `Best match: ${best.name}` },
-        kindOf(best) === 'theme' ? h('button', { type: 'button', class: 'market-best-swatch', onclick: () => openListing(best.id), 'aria-label': `About ${best.name}` }, swatch(best)) : tile(best, 'lg'),
+        kindOf(best) === 'theme' ? h('button', { type: 'button', class: 'market-best-swatch', onclick: () => openListing(best.id), 'aria-label': `About ${best.name}` }, swatch(best)) : blobMark(best, 'market-blob-lg'),
         h('div', { class: 'market-best-words' },
           h('p', { class: 'kicker market-kicker', text: 'Best match' }),
           h('h2', { class: 'display' }, h('button', { type: 'button', class: 'market-best-name', onclick: () => openListing(best.id) }, ...marked(best.name, q))),
           best.description ? h('p', { class: 'market-best-desc' }, ...marked(best.description, q)) : null,
           h('p', { class: 'market-by' }, h('span', {}, ...marked(byline(best), q)), reach(best)),
           h('div', { class: 'market-lead-acts' }, action(best, { from: 'lead' }), tryButton(best)))) : null,
-      rest.length ? h('section', { class: 'market-section', 'aria-labelledby': 'market-also' }, h('div', { class: 'market-section-head' }, h('h2', { class: 'display', id: 'market-also', text: 'Also close' })),
-        h('div', { class: 'market-items' }, ...rest.map(e => item(e, q)))) : null,
+      rest.length ? h('section', { class: 'market-section', 'aria-labelledby': 'market-also' }, h('div', { class: 'market-section-head' }, h('div', { class: 'market-section-titles' }, h('h2', { class: 'display', id: 'market-also', text: 'Also close' }))),
+        items(rest, q, { kind: true })) : null,
       st.list ? buildIt({ q, k, none: !found.length }) : null]
   }
+  // A listing's page (2026-11-18, the store): a wide cover (the dark one in
+  // dark mode; a theme without one wears itself at the same size), then the
+  // name very large with Install on the right, the maker and their links,
+  // and the maker's README as an article beside a sticky column of facts.
+  // On a phone the buttons sit under the words, and stay at the foot of the
+  // screen once they have scrolled away (`dock`).
   function listing(id) {
     const entry = entryOf(id), d = detailsOf(id)
     if (!entry) return [h('div', { class: 'market-note', role: 'status' }, st.list ? h('p', { text: 'This listing is no longer in the Market.' }) : h('p', { text: 'Reading the Market…' }))]
-    const kind = kindOf(entry), body = d.body
-    const touches = body ? plainTouches(body.declaration, kind) : []
-    const creator = entry.creator ?? { name: entry.author, links: [] }
-    const src = body?.source?.url ?? entry.link
-    return [h('div', { class: 'market-listing', key: `listing:${id}` },
-      h('header', { class: 'market-listing-head' }, tile(entry, 'xl'),
+    const kind = kindOf(entry), body = d.body, theme = kind === 'theme'
+    const cover = coverOf(entry)
+    const frame = cover ? coverImg(entry, cover) : theme && themeState(id) !== 'error' ? livePreview(entry, true) : null
+    const version = body?.version || entry.version
+    const article = readme(entry, body)
+    return [h('div', { class: `market-listing${frame ? ' has-cover' : ' no-cover'}`, key: `listing:${id}` },
+      frame ? h('div', { class: 'market-listing-cover' }, frame) : null,
+      h('header', { class: 'market-listing-head' },
+        frame ? null : blobMark(entry, 'market-blob-xl market-listing-mark'),
         h('div', { class: 'market-listing-who' },
+          h('p', { class: 'kicker market-kicker', text: [KIND_ONE[kind], version ? `version ${version}` : null].filter(Boolean).join(' · ') }),
           h('h1', { class: 'display market-listing-title', tabindex: '-1', text: entry.name }),
-          h('p', { class: 'market-by', text: byline(entry) })),
-        h('div', { class: 'market-listing-acts' }, tryButton(entry), action(entry, { from: 'listing' }))),
-      entry.description ? h('p', { class: 'market-listing-desc', text: entry.description }) : null,
-      h('div', { class: 'market-listing-cover' }, picture(entry, { large: true })),
-      h('div', { class: 'market-facts' },
-        h('section', { class: 'market-touches', 'aria-labelledby': 'market-touches-title' },
-          h('h2', { class: 'market-facts-title', id: 'market-touches-title', text: 'What it touches' }),
-          d.state === 'loading' ? h('p', { class: 'note market-reading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading what it declares, from its own link…')
-            : d.state === 'error' ? h('p', { class: 'note', role: 'status', text: `Its declaration could not be read just now (${d.error}). Installing shows it before you say yes.` })
-            : touchList(touches),
-          body?.why ? h('p', { class: 'note market-why', text: `${body.why}: it is listed so you can see it, and it installs once Loam can.` }) : null),
-        h('section', { class: 'market-creator', 'aria-labelledby': 'market-creator-title' },
-          h('h2', { class: 'market-facts-title', id: 'market-creator-title', text: 'Made by' }),
-          h('p', { class: 'market-creator-name', text: creator.name || body?.author }),
-          creatorLinks(creator)),
+          entry.description ? h('p', { class: 'market-listing-desc', text: entry.description }) : null),
+        listingActs(entry, body, kind)),
+      maker(entry, body),
+      h('div', { class: `market-listing-body${article ? '' : ' market-listing-body-facts'}` }, article, facts(entry, d, kind)))]
+  }
+  function listingActs(entry, body, kind, { dock = false } = {}) {
+    return h('div', { class: `market-listing-acts${dock ? ' market-dock-acts' : ''}`, key: dock ? 'dock-acts' : 'acts' },
+      action(entry, { from: 'listing' }), tryButton(entry, '', { first: true }),
+      !dock && body ? h('p', { class: 'market-fine', text: fineLine(body.declaration, kind) }) : null)
+  }
+  // The maker: their mark and name, how many things they have in the
+  // Market, and the links they chose to show. With no links, only the name.
+  function maker(entry, body) {
+    const creator = entry.creator ?? { name: entry.author, links: [] }
+    const name = creator.name || body?.author || entry.author
+    if (!name) return null
+    const links = creator.links ?? [], n = madeBy(entries(), name)
+    return h('section', { class: `market-creator market-maker${links.length ? '' : ' market-maker-plain'}`, 'aria-label': `Made by ${name}` },
+      h('span', { class: 'market-maker-face', 'aria-hidden': 'true', text: name.trim().charAt(0).toUpperCase() }),
+      h('div', { class: 'market-maker-who' },
+        h('p', { class: 'market-creator-name', text: name }),
+        links.length && n ? h('p', { class: 'market-maker-count', text: `Made ${n} ${n === 1 ? 'thing' : 'things'} in the Market` }) : null),
+      links.length ? creatorLinks(creator) : null)
+  }
+  function facts(entry, d, kind) {
+    const body = d.body
+    const touches = body ? plainTouches(body.declaration, kind) : []
+    const src = body?.source?.url ?? entry.link
+    const options = body?.theme?.options ?? []
+    return h('aside', { class: 'market-side', 'aria-label': 'About it' },
+      h('section', { class: 'market-touches', 'aria-labelledby': 'market-touches-title' },
+        h('h2', { class: 'kicker market-side-title', id: 'market-touches-title', text: 'What it touches' }),
+        d.state === 'loading' ? h('p', { class: 'note market-reading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading what it declares, from its own link…')
+          : d.state === 'error' ? h('p', { class: 'note', role: 'status', text: `Its declaration could not be read just now (${d.error}). Installing shows it before you say yes.` })
+          : touchList(touches),
+        body?.why ? h('p', { class: 'note market-why', text: `${body.why}: it is listed so you can see it, and it installs once Loam can.` }) : null),
+      h('section', { class: 'market-details', 'aria-labelledby': 'market-details-title' },
+        h('h2', { class: 'kicker market-side-title', id: 'market-details-title', text: 'Details' }),
         h('dl', { class: 'market-kv' },
           h('div', {}, h('dt', { text: 'Version' }), h('dd', { text: body?.version || entry.version || '—' })),
           h('div', {}, h('dt', { text: 'Kind' }), h('dd', { text: (entry.kind ?? []).map(k => KIND_ONE[k]).join(', ') })),
+          // Every theme Loam wears has both: the host builds light and dark.
+          kind === 'theme' ? h('div', {}, h('dt', { text: 'Light and dark' }), h('dd', { text: 'Both' })) : null,
           h('div', {}, h('dt', { text: 'Source' }), h('dd', {}, h('a', { class: 'quietlink', href: src, target: '_blank', rel: 'noopener noreferrer' }, `${entry.repo}`, icon.external(12)))),
           entry.homepage ? h('div', {}, h('dt', { text: 'More' }), h('dd', {}, h('a', { class: 'quietlink', href: entry.homepage, target: '_blank', rel: 'noopener noreferrer' }, 'Homepage', icon.external(12)))) : null)),
-      readme(entry, body))]
+      options.length ? h('section', { class: 'market-options', 'aria-labelledby': 'market-options-title' },
+        h('h2', { class: 'kicker market-side-title', id: 'market-options-title', text: 'Options' }),
+        h('ul', { class: 'market-option-list' }, ...options.map((o, i) => h('li', { key: `o:${o.id ?? i}`, text: o.label || o.id })))) : null)
   }
   // The maker's README (2026-11-18), read at the listing's tag by the
   // broker with every HTML tag taken out and relative links pointed at
   // GitHub; drawn by the app's own Markdown renderer, which builds nodes
   // (never markup) and follows only http, https and mailto, in a new tab.
   // Its pictures are the ones in the plugin's folder the broker kept; any
-  // other stays as its words. Without a README, the plugin's own guide.
+  // other stays as its words. Without a README, the plugin's own guide. A
+  // first heading that only repeats the name is not drawn twice.
   function readme(entry, body) {
     const text = body?.readme || body?.guide
     if (!text) return null
     const kept = new Set(body.readme ? body.readme_images ?? [] : [])
     const images = { draw: (alt, dest) => kept.has(dest) ? h('img', { class: 'market-readme-img', src: fileURL(entry.id, `readme/${dest}`), alt: alt || '', loading: 'lazy', decoding: 'async' }) : null,
       group: nodes => h('div', { class: 'market-readme-figures' }, ...nodes) }
-    return h('section', { class: 'market-readme', 'aria-labelledby': 'market-readme-title', key: `readme:${entry.id}` },
-      h('h2', { class: 'market-facts-title', id: 'market-readme-title', text: body.readme ? 'About it' : 'About it, in its maker’s words' }),
-      h('div', { class: 'md market-readme-body' }, ...[host.markdown?.(text, { images }) ?? h('p', { text })].flat()))
+    let nodes = [host.markdown?.(text, { images }) ?? h('p', { text })].flat()
+    if (nodes.length === 1 && nodes[0]?.nodeType === 11) nodes = [...nodes[0].childNodes]
+    const same = n => String(n ?? '').trim().toLowerCase()
+    if (nodes[0]?.tagName === 'H1' && same(nodes[0].textContent) === same(entry.name)) nodes = nodes.slice(1)
+    return h('article', { class: 'market-readme', 'aria-labelledby': 'market-readme-title', key: `readme:${entry.id}` },
+      h('p', { class: 'market-readme-src', id: 'market-readme-title' }, icon.file(14), body.readme ? 'From the maker’s README' : 'In its maker’s words'),
+      h('div', { class: 'md market-readme-body' }, ...nodes))
   }
   const GLYPH = { out: icon.external, server: icon.code, page: icon.apps, record: icon.chat, memory: icon.brief, tool: icon.puzzle, key: icon.key, clock: icon.clock, safe: icon.check }
   const touchList = lines => h('ul', { class: 'market-touch-list' }, ...lines.map((l, i) => h('li', { key: `t:${i}`, class: `market-touch market-touch-${l.glyph}` },
@@ -480,7 +571,8 @@ export function mount(host) {
         inner || s.view === 'kind' ? null : h('span', { class: 'market-crumb', 'aria-hidden': 'true' }, h('span', { class: 'market-crumb-home', text: 'Market' })),
         trybar(),
         h('button', { type: 'button', class: 'iconbtn ghost market-close', 'aria-label': 'Close the Market', title: 'Close', onclick: close }, icon.close(14))),
-      h('div', { class: 'market-body', key: `market-body` }, h('div', { class: `market-page market-page-${s.view}` }, ...view)))
+      h('div', { class: 'market-body', key: `market-body`, onscroll: watchDock }, h('div', { class: `market-page market-page-${s.view}` }, ...view)),
+      dock(s))
     return [h('button', { class: 'scrim market-scrim', key: 'scrim:market', 'aria-label': 'Close the Market', tabindex: '-1', onclick: close }), root]
   }
   function keys(e) {
@@ -501,6 +593,26 @@ export function mount(host) {
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
     }
   }
+  // On a phone, a listing's buttons stay at the foot of the screen once
+  // the ones under its words have scrolled away.
+  function dockEntry(s) {
+    if (host.state.wide || s.view !== 'listing' || !s.id) return null
+    const entry = entryOf(s.id)
+    return entry && st.details.get(s.id)?.state === 'ready' ? entry : null
+  }
+  function dock(s) {
+    const entry = dockEntry(s)
+    if (!entry) return null
+    return h('div', { class: `market-dock${st.docked ? ' on' : ''}`, key: 'market-dock', 'aria-hidden': st.docked ? null : 'true', inert: st.docked ? null : true },
+      listingActs(entry, st.details.get(s.id)?.body, kindOf(entry), { dock: true }))
+  }
+  function watchDock() {
+    const s = sheet()
+    const acts = s && dockEntry(s) ? document.querySelector('.market .market-listing-head .market-listing-acts') : null
+    const scroller = body()
+    const docked = Boolean(acts && scroller && acts.getBoundingClientRect().bottom < scroller.getBoundingClientRect().top + 4)
+    if (docked !== st.docked) { st.docked = docked; host.schedule() }
+  }
   const body = () => document.querySelector('.market .market-body')
   // After a draw: where focus and the scroll go on arriving at a view.
   function sync() {
@@ -509,6 +621,7 @@ export function mount(host) {
     const scroller = body()
     if (!scroller) return
     st.focus = null
+    st.docked = false
     if (typeof want === 'object') { scroller.scrollTop = want.scroll ?? 0; return }
     scroller.scrollTop = 0
     if (want === 'field') field.focus({ preventScroll: true })

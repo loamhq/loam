@@ -78,6 +78,7 @@ mod.fetch_codex_models = no_models
 # this box's own (2026-11-18: the built-in take-over removed a live copy).
 mod.keep_listed_themes = no_models
 mod.take_over_built_ins = no_models
+mod.keep_moved_to_market = no_models
 
 class StandIn:
     """A live chat whose stop writes its record, as Session.stop does."""

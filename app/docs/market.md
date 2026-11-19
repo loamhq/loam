@@ -24,16 +24,33 @@ are in `docs/plugins.md` at the repository's root, "The marketplace".
 
 ## The pages
 
-- **The front page:** the masthead "Market" and a quiet line (the date and how
-  many things are listed); one search field; the kinds
-  that have listings (Everything, Themes, Extensions, Apps, Agents, Skills);
-  the lead story; a section per kind with listings, each with See all; and,
-  last, "Nothing quite right?".
+*The store (2026-11-18). The owner: "I want the design of the initial
+market home page and each item's page to be beautiful and look amazing,
+like a luxury and high quality store." Luxury here is restraint, space and
+photography: large pictures, generous room, hairline rules, the display
+face for names, slow hover (a picture eases to 1.05 over 1.2s), and no
+badges, counts or chips beyond what is named below. The design reference
+is the mock `market-store.html` the designer drew from the real covers.*
+
+- **The front page:** the masthead, a large "Market" with one line on the
+  right (`TAGLINE`); one search field; the kinds that have listings
+  (Everything, Themes, Extensions, Apps, Agents, Skills) as quiet text tabs,
+  an accent line under the one shown; the lead story; a section per kind
+  with listings; and, last, "Nothing quite right?" as a band. A section's
+  head is its name in the display face, a quiet subtitle (`KIND_LINE`),
+  See all, and a hairline under them. A kind with nothing is not shown.
 - **The lead story** is the listing marked `featured`, else one made by Loam
   (author "Loam…"; the list has no dates, so the highest version of Loam's
   own leads; "by Loam" is a listing from the `loamhq` organisation, or an
-  author starting "Loam"). Its picture is the listing's cover (below). It is
-  not repeated in its kind's section.
+  author starting "Loam"). It is one photograph across the page, about
+  16:7, with its words over a soft gradient at its foot: a kicker, the name
+  large, one line, "by" the maker, and Try it (glass) and Get or Install on
+  the right. The words over a photograph are the one paint that is not the
+  theme's: `--theme-cover-ink` on `--theme-cover-shade`, the core pair for
+  captions, so they read on any picture. Without a cover it is a plate in
+  the page's own colours, the theme wearing itself (or the plugin's mark)
+  on the right and the words in ink. It is not repeated in its kind's
+  section.
 - **A listing's picture** (2026-11-18, `picture` in `page/market.js`): its
   cover (the listing's `cover`, else the plugin's own `image`; the dark one,
   `cover_dark` or `image_dark`, while Loam is dark), at the plugin's
@@ -43,19 +60,42 @@ are in `docs/plugins.md` at the repository's root, "The marketplace".
   scopes (`/api/marketplace/<id>/theme.css`), larger in the big frames. Any
   other kind shows its icon (else its letter tile), large, on a quiet
   `--paper-card` field. Nothing is drawn as clip-art.
-- **Themes** are cards with that picture, the name and line, **Get** and
-  **Try it**.
+- **Themes** are large photographs in rows (`tileRows`): two wide, then
+  three tall, again. One alone is one wide tile, and a row never ends with
+  one small tile alone (a lone last one joins the row before). Under each,
+  the name in the display face, the maker on the right, and one line;
+  **Try it** sits on the picture's corner, shown on hover (always on touch).
+  The tile opens the listing; Get is on the listing's page.
+- **Extensions, apps, agents and skills** are calm cards, two to a row: the
+  listing's mark in Loam's blob shape (its icon, else its letter), the name,
+  one line, the maker and how far it reaches, and its button (Install, or
+  See it for agents and skills). One alone, or an odd last one, takes the
+  whole row.
 - **A kind's page** lists every listing of that kind and ends with
   "Nothing quite right?".
-- **A listing's page:** what it is, its picture (above), what it touches in
-  plain words (`plainTouches`, from the declaration the broker read at its
-  link), **Made by**: the creator's name and the links they chose to show,
-  each with its own mark (`public/creator-links.js`; the kind comes from the
-  host, `link_kind`), version, kind, source, then **About it**: the
-  plugin's README at the tag, drawn by the app's Markdown renderer with its
-  folder's pictures (the plugin's `PLUGIN.md` guide when it has no README),
-  and the action. There is no review claim anywhere: being listed is a
-  merged pull request, not an audit.
+- **A listing's page:** a wide cover at the top, about 21:8 (the dark one
+  while Loam is dark; a theme without one wears itself at the same size; any
+  other kind without one has no frame, and its mark sits beside its name).
+  Then the header: a kicker (kind · version), the name very large, its
+  line, and on the right Get or Install, **Try it first** for a theme, and
+  one fine line from its declaration (`fineLine`: "Free · changes only how
+  Loam looks", "Free · talks to one service"). Then the maker's row: their
+  mark, their name, "Made N things in the Market" (`madeBy`), and the links
+  they chose to show as pills, each with its own mark
+  (`public/creator-links.js`; the kind comes from the host, `link_kind`);
+  with no links, only the name. Then the body: the plugin's README at the
+  tag as an article about 640px wide ("From the maker's README"; its
+  `PLUGIN.md` guide, "In its maker's words", when it has none), drawn by the
+  app's Markdown renderer with its folder's pictures, headings in the
+  display face, and a first heading that only repeats the name left out.
+  Beside it, a sticky column: what it touches in plain words
+  (`plainTouches`), Details (version, kind, light and dark for a theme,
+  source), and a theme's Options. There is no review claim anywhere: being
+  listed is a merged pull request, not an audit.
+- **On a phone** every page is one column. The lead story is taller and its
+  name smaller, theme tiles are full width, and a listing's buttons sit
+  under its words, then stay docked at the foot of the screen once they
+  have scrolled away (`dock`, `watchDock`).
 - **Search is ask-first.** As a person types, the best five drop down under
   the field: arrows move, Enter opens the one chosen, Escape closes; the last
   row is "See all results". Enter with nothing chosen is the results page:
@@ -67,8 +107,10 @@ are in `docs/plugins.md` at the repository's root, "The marketplace".
 
 ## Nothing quite right? Ask one of your agents to build it
 
-It ends every results page and kind page, and is the whole of an empty
-Market. It is the friendliest moment in the Market, not an error. It is the
+It ends the front page, every results page and kind page as a band (the
+sprout, the words and the button in a row on a quiet plate; centred, with
+the lens, when a search found nothing), and is the
+whole of an empty Market. It is the friendliest moment in the Market, not an error. It is the
 app's one empty state (`docs/empty-states.md`): a sprout in Loam's blob,
 whose stem draws in once (a lens with the sprout's leaf in it when a search
 found nothing), a line, and **Ask an agent to build it**, which shows the
@@ -153,13 +195,16 @@ under reduced motion.
 
 - `test/market.test.js`: matching ("write" → writing, "sync with my phone" →
   the sync listing, no match → nothing, so the build-it panel), the lead
-  story, sections, the empty list, the button by install state, plain words,
+  story, sections, the tile rows, the fine line, a maker's count, the empty list, the button by install state, plain words,
   and a listed theme's CSS held to the installed themes' rules.
 - `test/market-browser.mjs`: the whole walk in a real browser at 390 and
   1440, light and dark, against `test/market-fixture.mjs` (an invented list:
   nothing in it is in the public marketplace), with colour families, control
   styles and no sideways scroll checked.
-- `tools/capture-market.mjs`: the pictures, in Latte and Autumn.
+- `tools/capture-market.mjs`: the pictures, in Latte and Autumn, with
+  whole-page captures of the front page and of a theme's and an
+  extension's listing, a lead story with a photograph, and a phone's docked
+  buttons.
 - `test/market-card.test.js`: the card's form (what is one and what is
   not, in order, three at most, never in code), an unknown id drawn as its
   words, and the agent's search ranking every query as this page does.

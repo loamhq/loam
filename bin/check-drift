@@ -213,6 +213,12 @@ def check_config_clauses(findings: list, names: list[str]) -> None:
         if not path.exists():
             findings.append((f"{name} config.md", str(path), "MISSING on disk"))
             continue
+        if (AI_LABS / name / "map.md").is_file():
+            # The map's shape (2026-11-18, lib/loam_loading.py): the shared
+            # rules are Loam's text and the owner's shared page, and this
+            # config holds only the owner's words for this one agent, so it
+            # has no shared clause to carry.
+            continue
         raw[name] = path.read_text(encoding="utf-8")
     if len(raw) < 2:
         return

@@ -1,4 +1,4 @@
-# The core's copies of five Market themes
+# The core's copies of Market plugins
 
 Autumn, Deep Forest, Foundry, Mist Trail and Yosemite were built into Loam
 until 0.2.5. They are Market plugins now, each in its maker's own repository
@@ -20,3 +20,17 @@ at `<id>-v1.0.1`); the makers' repositories went on from 1.0.2, which added
 only the README, the licence and the maker's name. When a maker changes a
 theme's look, bring its `theme.css`, `fonts.css` and fonts here, so the core
 is tested against what people wear.
+
+**Dictation and Read aloud** (`dictation/`, `read-aloud/`) were built into
+Loam until 0.2.9, as page plugins in the app's `public/plugins/`. They are
+Market plugins now, each in its maker's own repository (linked from its
+Market page), where a new version is made and tagged. The copies here are at
+1.0.0, the last version Loam shipped; the makers' repositories went on from
+1.0.1, which added only the README, the licence, an icon and the maker's
+name. They are here because the app's tests drive them
+(`app/test/audio-plugins.mjs`), because the app server keeps two of Read
+aloud's modules as its own (`app/src/speakable.js`, `document-speech.js`,
+held equal by `tests/test_to_market.py`), and as the release's fallback when
+an install that had one on updates without reaching the Market
+(`lib/loam_to_market.py`). When the maker changes one, bring the change
+here, so Loam is tested against what people run.

@@ -1658,3 +1658,79 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   live install by the landing's test run: on 11-18 the built-in take-over
   removed the box's own Images copy mid-landing (restored from the plugins
   folder's git within minutes). Stub every new start task in both drivers.
+## 2026-11-18 — three files load on every run: soul, config, map
+
+- **The shape is rendered, not chosen at launch.** Every conversation route
+  (the broker, Remote Control, the Claude Code app) reads the project's
+  `CLAUDE.md` and `.claude/settings.json` at start with no flag of Loam's,
+  and Codex and Antigravity compose from `CLAUDE.md`'s imports. So the
+  map's shape is rendered into those two files (`bin/provision`'s
+  `claude_md`/`settings`, branching on `map.md`), and `lib/loam_loading.py`'s
+  `refresh` re-renders them when the shape on disk and the one rendered
+  differ. It runs from every launcher (wake, broker start, rc-preflight,
+  each Codex/Antigravity instruction build) and from the persona's
+  PostToolUse hook after *every* tool call, because a map made with `echo >`
+  names no path the hook can see. A session already running keeps its shape.
+- **Loam's text resolves from the code's own tree** (`docs/persona/loam.md` beside
+  `lib/`), not from `paths.root`: a landing tests a merged tree while the
+  live checkout is still the old `main`, so a `paths.root` import of a new
+  file fails every test that resolves it.
+- **A path made at import time from `lc.WORKSPACES` writes the live box from
+  a test** that only sets `LOAM_AI_LABS` (caused: `test_agents.py` made
+  `ai-labs/_shared/owner.md` on the real install). `loam_loading.owner_page()`
+  reads the override as `loam_agents.ai_labs()` does.
+- **`tests/test_loading_shapes.py`** is the statement of what loads: every
+  run kind on every provider, assembled by the launchers' own functions
+  (`bin/wake`'s `lane_input` and `claude_argv`, `loam_codex.instructions`,
+  `loam_codex_wake.instructions`, `loam_antigravity.instructions`), against
+  `loam_loading.own_files`. A new route must be added there.
+- **A scratch install whose `paths.root` is the job's tree provisions the
+  engineer into that tree** (caused 2026-11-18, `bin/library seed-starter`
+  under a scratch `LOAM_CONFIG`): `ensure_engineer` rewrote the tree's
+  untracked `engineer/agent.json`, `CLAUDE.md`, `role.md`, `project.md` and
+  `.claude/settings.json` with the scratch paths, and the landing's
+  `test_boundary_guard.py` then failed on the tree alone. Restore them from
+  the canonical checkout's, or point `paths.root` at a copy.
+- **A new top-level folder is not in a landing's view** (`platform_argv`
+  binds only entries the canonical checkout already has): put a new shipped
+  file under an existing one (`docs/persona/loam.md`, not `persona/`).
+- **External `@` imports need the project's trust, keyed on the git repo
+  root**: a scratch workspace outside a git repo dropped `reach.md` and
+  Loam's text silently even with its own directory trusted; `git init` on
+  the scratch workspaces folder plus `ensure_trust` made them load.
+
+## 2026-11-18 — Dictation and Read aloud leave core for the Market (0.2.9)
+
+- **A shipped page plugin leaves core by four moves**: its folder goes to
+  `plugins/_listed/<id>/` (never read as a plugin; the tests' copy and the
+  release's fallback), the app tests that drove it get it from
+  `app/test/audio-plugins.mjs` (catalog rows whose `local` is the listed
+  file's `file://` URL, which the test page's importer loads as is), an
+  install that had it **on** gets it from the Market at the broker's first
+  start (`lib/loam_to_market.py`), and anything core imported from the
+  plugin's files gets core's own copy (`app/src/speakable.js`,
+  `document-speech.js`), held byte-equal by a test. The app deploys only
+  `app/`, so `app/src` can never import from `plugins/`.
+- **The migration reads the link from the marketplace listing** rather than
+  naming it: the push gate denies the owner's GitHub handle and display
+  name in Loam's repository, so a maker's repository URL cannot appear in
+  Loam's code. The listing is also the right source: it follows the maker's
+  version.
+- **Who sees the shipped layer on this box**: the broker reads
+  the canonical checkout's `app/public/plugins` (projects/loam-ui.json's
+  checkout), so a landing removes a shipped plugin before any app deploy.
+  For no gap, install the Market copy first: a Yours copy shadows the
+  shipped one, and the migration then finds it present.
+- **Preferences that live in a browser are kept by their storage keys**,
+  not by layer: `loam.settings.device(key)` is the raw localStorage key, so
+  a plugin keeps its device settings across shipped → Market as long as its
+  code keeps the key. Switch, agent values (`_settings/<id>/`) and keys
+  (shared, or `<private>/secrets.env`) are all kept by id.
+- **`bin/settings do … --by` must name a persona**; an engineer acting on a
+  brief names the persona who briefed it, with `--reason` saying the job.
+- **`gh` needs `env -u GITHUB_TOKEN`** in a job: the environment's
+  `GITHUB_TOKEN` was stale (401) while `gh`'s own login was good.
+- **The app page harness hangs, not fails, on a `threadPage` thread**:
+  `textContent` of `tt-stream` never returns in the fake DOM (on base main
+  too). Prove an absence at the loader and registry level instead
+  (`test/installation.test.js`).

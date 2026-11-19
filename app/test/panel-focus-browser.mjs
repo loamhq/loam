@@ -23,10 +23,10 @@ try {
     const plugins = await shippedPlugins(path.resolve('public'))
     plugins.find(p => p.id === 'dictation').on = true
     app.routes['GET /v1/plugins'] = (req, res) => json(res, { plugins })
-    for (const file of await readdir('public/plugins/dictation/page')) {
+    for (const file of await readdir('../plugins/_listed/dictation/page')) {
       app.routes[`GET /v1/plugins/dictation/files/page/${file}`] = async (req, res) => {
         res.writeHead(200, { 'content-type': file.endsWith('.css') ? 'text/css' : 'text/javascript' })
-        res.end(await readFile(`public/plugins/dictation/page/${file}`))
+        res.end(await readFile(`../plugins/_listed/dictation/page/${file}`))
       }
     }
     const garden = { name: 'Garden', url: 'https://garden.example.test/', frame: true, source: 'yours', access: 'private' }

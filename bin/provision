@@ -127,7 +127,16 @@ def claude_md(display: str, workspace: Path) -> str:
     operator-owned text present in every single run. Agents cannot read
     the runtime's checkout, so a limit that lives only where it is enforced
     is a rule the party expected to keep it can never look up.
+
+    **Two shapes (2026-11-18, lib/loam_loading.py).** An agent with a
+    ``map.md`` is rendered in the map's shape (``claude_md_mapped``): soul,
+    config in two parts (Loam's text, then the owner's words: the shared page
+    and the agent's own ``config.md``) and the map, and none of the three old
+    files. An agent with no map is rendered as below, unchanged.
     """
+    import loam_loading  # noqa: PLC0415
+    if loam_loading.mapped(workspace):
+        return claude_md_mapped(display, workspace)
     return f"""You are {display}.
 
 @soul.md
@@ -187,6 +196,62 @@ nothing to migrate, only prose to retire.
 
 Both trees auto-commit every 15 minutes, so a bad edit is recoverable and is
 not worth being timid about.
+""" + _plugin_words(workspace)
+
+
+def claude_md_mapped(display: str, workspace: Path) -> str:
+    """``CLAUDE.md`` for an agent that has a map: the three things of its own
+    (soul, config, map) and Loam's paragraphs, short. The same file on every
+    lane: a conversation, a wake and a cron each add only their own input,
+    and no output style or appended lane file loads beside it.
+
+    Loam's text and the shared owner's page are imported by absolute path,
+    as ``reach.md`` is (trust grants the project external includes); the
+    soul, the agent's own config and the map by relative path, inside the
+    project root. Every import must resolve: provision makes the shared page
+    when it is missing, and lib/loam_identity.py refuses a wake whose import
+    does not."""
+    import loam_loading  # noqa: PLC0415
+    return f"""You are {display}.
+
+@soul.md
+
+@{loam_loading.LOAM_TEXT}
+
+@{loam_loading.owner_page()}
+
+@config.md
+
+@{loam_loading.MAP}
+
+---
+
+**Surface:** Claude Code, on the server that holds the vault. {lc.OWNER_NAME}
+reaches you in the app or the Claude app; on a schedule you wake by yourself
+with no one watching. Markdown renders, and wiki-links like [[Note Name]]
+stay as written.
+
+**Your workspace** is `{workspace}/`. `CLAUDE.md`, `agent.json`, `.mcp.json`,
+`.claude/`, `.codex/` and `.agents/` are the runtime's: how you are
+assembled. Above, in order: your soul; Loam's text; the owner's words, the
+page every agent loads (`{loam_loading.owner_page()}`) and then your own
+(`config.md`); and your map (`{loam_loading.MAP}`). Those load on every run,
+in a conversation, at a wake and in a cron alike. Any `_always.md`,
+`_active.md` or `_reflection.md` still in your workspace no longer loads:
+it is an ordinary file of yours, to keep, fold in or delete.
+
+What you can reach and use is in the shared file below, which any agent may
+edit; what the owner's plugins add is at the end of this file:
+
+@{REACH}
+
+{skills_line()}
+
+**If you are already a subagent, call `Agent` synchronously or not at all.**
+A background subagent that launches background children ends before they
+do and returns a hollow report.
+
+Both trees auto-commit every 15 minutes, so a bad edit is recoverable.
 """ + _plugin_words(workspace)
 
 
@@ -388,7 +453,10 @@ def settings(workspace: Path) -> dict:
         # prompt. The file it names is a symlink to the agent's own
         # `_active.md`, so the agent keeps writing where it always has and
         # `.claude/` stays operator-owned.
-        "outputStyle": STYLE_NAME,
+        # An agent with a map (2026-11-18, lib/loam_loading.py) loads no
+        # conversation layer: its map is a CLAUDE.md import on every lane,
+        # so its conversations select the empty style its wakes already do.
+        "outputStyle": "none" if _mapped(workspace) else STYLE_NAME,
         # Auto memory off. It gives nothing a plain file cannot: no relevance
         # recall fires on this build (the machinery is in the binary behind a
         # server-side flag that can switch on with no release), its index
@@ -420,6 +488,11 @@ def settings(workspace: Path) -> dict:
                 _hook("loading_size.py", 15)]}],
         },
     }
+
+
+def _mapped(workspace: Path) -> bool:
+    import loam_loading  # noqa: PLC0415
+    return loam_loading.mapped(workspace)
 
 
 def _hook(script: str, timeout: int) -> dict:
@@ -1227,6 +1300,12 @@ def report_readiness(name: str, workspace: Path) -> None:
     the other two are what an agent carries into a room, and generating
     filler would put words in a new agent's mouth on its first breath.
     """
+    import loam_loading  # noqa: PLC0415
+    if loam_loading.mapped(workspace):
+        # The map's shape (2026-11-18): soul, config and map, every one an
+        # import the wake's identity preflight checks, and an empty map is a
+        # real map. Nothing here fails by silence.
+        return
     missing = [
         layer for layer in (ALWAYS_LAYER, CONVERSATION_LAYER, REFLECTION_LAYER)
         if not (workspace / layer).is_file()
@@ -2881,8 +2960,19 @@ def main() -> None:
     # Order matters: the style keys go into `_active.md` before the symlink
     # that points at it exists, so there is no window in which the settings
     # name a style that resolves to a file the loader would reject.
-    seed_always(name, workspace, datetime.now().strftime("%Y-%m-%d"))
-    ensure_style_frontmatter(own_name, workspace)
+    #
+    # An agent with a map (2026-11-18) is given none of the old files: no
+    # `_always.md` seeded, no keys added to an `_active.md` it may still
+    # keep. The output styles are still written: `none.md` is what its
+    # conversations select. The shared owner's page is made if missing, so
+    # the map's CLAUDE.md import of it resolves.
+    import loam_loading  # noqa: PLC0415
+    if loam_loading.mapped(workspace):
+        if loam_loading.ensure_owner_page():
+            print(f"  made {loam_loading.owner_page()}")
+    else:
+        seed_always(name, workspace, datetime.now().strftime("%Y-%m-%d"))
+        ensure_style_frontmatter(own_name, workspace)
     output_styles(workspace)
 
     ensure_trust(workspace)

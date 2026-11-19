@@ -10,15 +10,19 @@ owner. Everything an agent knows and makes is a file on that server.
 
 **An agent** is a folder, its workspace. What it is made of:
 
-- `soul.md`: who it is, its character, values and identity. `config.md`:
-  its rules. Both are the owner's. How it works day to day is in its
-  `_active.md`.
-- The loading files, the agent's own: `_always.md` loads on every run,
-  `_active.md` when the owner is in the conversation, `_reflection.md` when
-  it wakes alone, and anything under `crons/` on that cron's run. Each is
-  kept under 10,000 characters, because it is paid for on every run.
-- `skills/`: its own skills (see `loam-skills`). Notes and anything else it
-  keeps are ordinary files it reads when it needs them.
+- Three files load on every run, in a conversation, at a wake and in a
+  cron alike: `soul.md`, who it is (the owner's); its config, which is
+  Loam's short text followed by the owner's words (one page every agent
+  loads, then the agent's own `config.md`); and `map.md`, the agent's own.
+  A run adds only its own input: a thread's summary and recent messages, a
+  wake's list of what changed in the vault, a cron's file under `crons/`.
+- The workspace is the agent's to shape. The map is paid for on every run,
+  so it points to things and does not hold them; past 10,000 characters the
+  agent is told, and it still loads. `skills/` holds its own skills (see
+  `loam-skills`).
+- An agent made before the map loads `_always.md` on every run,
+  `_active.md` in a conversation and `_reflection.md` at its wake, until it
+  writes a `map.md`; from then on those are ordinary files of its own.
 - `CLAUDE.md`, `agent.json`, `.claude/`, `.codex/`, `.agents/` and
   `.mcp.json` are Loam's: rendered from those files, never edited by hand.
 
@@ -37,7 +41,8 @@ agent a turn. Each thread has a board, a Markdown file of items for the
 owner in the vault's inbox.
 
 **Wakes and crons.** An agent can wake by itself on a schedule: its nightly
-reflection, and crons, each a file under `crons/` that the owner approved.
+wake, given what changed in the vault to look into, keep track of or act on
+as it judges; and crons, each a file under `crons/` that the owner approved.
 A run starts when the box has memory for it; nothing caps how long it runs.
 
 **The vault** is the owner's notes and the record, plain Markdown. Its

@@ -90,18 +90,23 @@ def lane_block(lane_label: str, lane_path: Path, lane_text: str) -> str:
     return f"# Lane: {lane_label} ({lane_path})\n\n{lane_text.strip()}"
 
 
-def instructions(workspace: Path, lane_label: str, lane_path: Path,
-                 lane_text: str) -> str:
+def instructions(workspace: Path, lane_label: str, lane_path: Path | None,
+                 lane_text: str | None) -> str:
     """The wake's instructions: the provider line, ``CLAUDE.md`` and its
     imports in Claude Code's order, each under ``Contents of <path>`` as the
     Codex conversation lane presents them, then the lane's own file
     (frontmatter already stripped by ``loam_memory.resolve_lane``). No
-    ``_active.md``: a wake has no conversation layer on either provider."""
+    ``_active.md``: a wake has no conversation layer on either provider.
+
+    ``lane_text`` is None for the reflection wake of an agent with a map
+    (2026-11-18): no lane file, as on Claude Code; its instruction is the
+    prompt, and what loads is what its conversations load."""
     parts = [PROVIDER_LINE]
     for source in codex._imports(workspace / "CLAUDE.md", 0, set()):  # noqa: SLF001
         parts.append(f"Contents of {source}:\n\n"
                      f"{source.read_text(encoding='utf-8').strip()}")
-    parts.append(lane_block(lane_label, lane_path, lane_text))
+    if lane_text is not None and lane_path is not None:
+        parts.append(lane_block(lane_label, lane_path, lane_text))
     return "\n\n".join(parts) + "\n"
 
 

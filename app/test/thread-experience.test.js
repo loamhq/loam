@@ -1,4 +1,4 @@
-import { threadSpeechSet } from '../public/plugins/read-aloud/page/reply.js'
+import { threadSpeechSet } from '../../plugins/_listed/read-aloud/page/reply.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { threadWaiting, composerModel, replyChip } from '../public/thread-experience.js'

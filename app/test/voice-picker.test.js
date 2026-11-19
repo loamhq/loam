@@ -4,9 +4,9 @@ import { installDom } from './fakedom.js'
 import { h, icon } from '../public/ui.js'
 import { all, text } from './browser.js'
 import { menuSurface } from '../public/menu-surface.js'
-import { createVoicePicker } from '../public/plugins/read-aloud/page/voice-picker.js'
-import { voiceLabel, FEMALE_VOICES } from '../public/plugins/read-aloud/page/voices.js'
-import { shippedPlugins } from '../src/shipped-plugins.js'
+import { createVoicePicker } from '../../plugins/_listed/read-aloud/page/voice-picker.js'
+import { voiceLabel, FEMALE_VOICES } from '../../plugins/_listed/read-aloud/page/voices.js'
+import { listedManifest } from './audio-plugins.mjs'
 
 function fixture(t, available = true) {
   installDom()
@@ -28,7 +28,7 @@ function fixture(t, available = true) {
 }
 
 test('all thirty manifest labels include the supplied gender without changing voice ids or default', async () => {
-  const plugin = (await shippedPlugins('public')).find(p => p.id === 'read-aloud')
+  const plugin = await listedManifest('read-aloud')
   const voice = plugin.agent_settings.find(f => f.id === 'voice')
   assert.equal(voice.choices.length, 30); assert.equal(FEMALE_VOICES.size, 14)
   assert.equal(voice.default, 'Charon')

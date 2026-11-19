@@ -18,3 +18,7 @@ its maker's own repository instead (docs/plugins.md, "Built in, or from the
 Market"). `_listed/` is not a plugin folder: it holds the core's copies of
 the five themes that left the shipped set, for its tests
 (`_listed/README.md`).
+
+Dictation and Read aloud left the shipped set for the Market in 0.2.9; their
+copies are in `_listed/` too, for the tests and as the release's fallback
+(`lib/loam_to_market.py`).

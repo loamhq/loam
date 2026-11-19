@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mount } from '../public/plugins/read-aloud/page/engine.js'
+import { mount } from '../../plugins/_listed/read-aloud/page/engine.js'
 
 test('Full take identity and growing-response fallback preserve both description preference and voice/style', () => {
   const host = { store: { readAloud: { describeTablesAndDiagrams: true } } }

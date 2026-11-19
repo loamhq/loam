@@ -6,9 +6,10 @@ A throwaway install (LOAM_CONFIG names a scratch config before anything
 imports loam_config), with provisioning and the Remote Control unit faked:
 the real ones are proved on a scratch root in the job that built this.
 
-Checks: the starter agent is made from docs/starter/ in L10's shape (soul,
-config, the two loading files, agent.json), with the install's names filled
-in and no placeholder token left; the hello thread is pinned, marked
+Checks: the starter agent is made from docs/starter/ in the map's shape
+(2026-11-18: soul, config, map, the two files her map points at, agent.json,
+and none of `_always.md`, `_active.md`, `_reflection.md`), with the
+install's names filled in and no placeholder token left; the hello thread is pinned, marked
 `hello: true`, has the agent as its default and one message, the starter's
 text, posted as the agent and marked `"preset": true` in the record and in
 what the routes read; the agent's turn is told the opening was preset; the
@@ -48,6 +49,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 import loam_config as lc  # noqa: E402
 import loam_skills  # noqa: E402
 import loam_starter as st  # noqa: E402
+import loam_loading  # noqa: E402
 import loam_threads as threads  # noqa: E402
 
 FAILURES = 0
@@ -113,29 +115,33 @@ def main() -> int:
     check("...and says so", "set aside" in out.get("resumed", ""), True)
     ws = lc.WORKSPACES / "iris"
     check("the starter agent is made and provisioned once", provisioned, [("iris", out["wake"])])
-    check("...from docs/starter, in L10's shape",
+    check("...from docs/starter, in the map's shape",
           sorted(p.name for p in ws.iterdir()),
-          ["_active.md", "_always.md", "_reflection.md", "agent.json", "config.md", "crons",
-           "memory", "skills", "soul.md", "threads"])
-    always = (ws / "_always.md").read_text()
-    check("her _always.md points at About me.md: read it, add, tell",
-          (str(about) in always, "Read it; add what lasts about Sam; tell them when you do."
-           in always), (True, True))
+          ["agent.json", "config.md", "crons", "how-i-am-here.md", "map.md",
+           "memory", "nights.md", "skills", "soul.md", "threads"])
+    check("her map points at her two files; her nights keep About me.md",
+          ("`how-i-am-here.md`" in (ws / "map.md").read_text(),
+           "`nights.md`" in (ws / "map.md").read_text(),
+           "About me.md" in (ws / "nights.md").read_text()), (True, True, True))
+    check("Loam's text, loaded beside her config, says to read About me.md",
+          "`About me.md`" in loam_loading.LOAM_TEXT.read_text(), True)
+    check("the owner's shared page is made, in this install's workspaces",
+          loam_loading.owner_page(), lc.WORKSPACES / "_shared" / "owner.md")
+    check("...and exists", loam_loading.owner_page().is_file(), True)
     card = json.loads((ws / "agent.json").read_text())
     check("agent.json: its id and name, and no emoji face (retired 2026-11-16)",
           (card["name"], card["display"], "emoji" in card), ("iris", "Iris", False))
-    texts = "".join((ws / n).read_text() for n in ("soul.md", "config.md", "_active.md", "_reflection.md"))
+    texts = "".join((ws / n).read_text() for n in (
+        "soul.md", "config.md", "map.md", "how-i-am-here.md", "nights.md"))
     check("no placeholder token is left", [t for t in ("{owner}", "@VAULT@", "@WORKSPACES@", "@SYSTEM@") if t in texts], [])
-    check("...the install's names are filled in",
-          ("Sam" in texts, str(lc.VAULT / "System" / "Loam") in texts, str(ws) in texts),
-          (True, True, True))
+    check("...the install's names are filled in", "Sam" in texts, True)
     check("the soul is the starter's, word for word but the names",
           (ws / "soul.md").read_text(), st.fill((st.STARTER_DIR / "iris" / "soul.md").read_text()))
 
     skill = "loam-bringing-context-from-another-ai"
-    check("her _active.md offers bringing context from another AI, by the "
-          "library skill, and the seeded vault's library has that skill",
-          (f"`{skill}`" in (ws / "_active.md").read_text(),
+    check("her how-i-am-here.md offers bringing context from another AI, by "
+          "the library skill, and the seeded vault's library has that skill",
+          (f"`{skill}`" in (ws / "how-i-am-here.md").read_text(),
            (lc.VAULT / "System" / "Loam" / "skills" / skill / "SKILL.md").is_file(),
            (lc.VAULT / "System" / "Loam" / "skills" / skill / "inspect_export.py").is_file()),
           (True, True, True))
