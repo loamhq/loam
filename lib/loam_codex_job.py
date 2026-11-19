@@ -4,7 +4,9 @@ The owner, 2026-10-07 in chat: "make sure all of engineering agents for the
 project, not the Loam main agent, are with Codex instead of Claude Code.
 Their default model should be latest GPT with Sol on high effort." So a
 project's registry record carries ``"runtime": "codex"`` (or ``"claude"``),
-read by ``Project.runtime``; the platform engineer is always Claude Code.
+read by ``Project.runtime``. The platform engineer runs here too when its
+own setting says so (since 2026-11-19; ``PLATFORM_LINE``, ``argv``'s
+``platform``).
 
 ``bin/engineer-job`` keeps every guarantee it gave a Claude job, and this
 module is the part of each that is Codex's shape rather than the CLI's:
@@ -56,6 +58,33 @@ PROVIDER_LINE = (
     "you the same way. Nobody can answer an approval: a command the sandbox "
     "refuses is refused.")
 
+# The platform engineer's line (since 2026-11-19, when its provider became
+# its owner's to set). It holds full sudo by its project file's grant, and
+# Codex's write sandbox (bwrap, no_new_privs) would take that away, so its
+# job runs without one: the launcher's wall holds the canonical checkout,
+# every other tree and the harness read-only (``platform_protect`` and
+# ``PLATFORM_HARNESS``, by ``lib/loam_worktree.walled(protect=...)``), as it does for
+# a Claude platform job's Bash.
+PLATFORM_LINE = (
+    "You are the platform engineer running on Codex (`codex exec`), headless: "
+    "a shell with this box's sudo, behind the job's wall rather than Codex's "
+    "sandbox, and apply_patch. Claude Code's Read, Edit, Grep, Agent, "
+    "ToolSearch and Skill tools are not here; the files below are the "
+    "instructions the Claude Code engineer reads, unchanged, and they bind "
+    "you the same way, including every line the Claude engineer's settings "
+    "would have enforced for it. Nobody can answer an approval: decide, and "
+    "say so in the receipt.")
+
+# What a Claude platform engineer's settings deny its Edit and Write, held
+# read-only by the wall for a platform job on another CLI (which has no
+# such list): the transcripts and the list of public apps. The harness in
+# its tree is ``HARNESS`` plus ``agent.json``.
+def platform_protect() -> list[Path]:
+    return [eng.VAULT / "15_CONVERSATIONS", Path("/etc/loam/public")]
+
+
+PLATFORM_HARNESS = ("CLAUDE.md", "role.md", "project.md", "agent.json", ".claude")
+
 # Event items that are a tool call: each one ends a model response.
 TOOL_ITEMS = ("command_execution", "file_change", "mcp_tool_call",
               "web_search", "collab_tool_call")
@@ -80,10 +109,11 @@ INSTRUCTIONS = "instructions.md"
 LAST_MESSAGE = "last-message.md"
 
 
-def instructions(workdir: Path) -> str:
+def instructions(workdir: Path, platform: bool = False) -> str:
     """The Claude engineer's memory files, in Claude Code's order and
-    layout, under the provider line."""
-    parts = [PROVIDER_LINE]
+    layout, under the provider line (the platform engineer's own line when
+    ``platform``)."""
+    parts = [PLATFORM_LINE if platform else PROVIDER_LINE]
     for source in loam_codex._imports(workdir / "CLAUDE.md", 0, set()):  # noqa: SLF001
         parts.append(f"Contents of {source}:\n\n"
                      f"{source.read_text(encoding='utf-8').strip()}")
@@ -118,11 +148,27 @@ def argv(*, workdir: Path, tree: Path, job_dir: Path, prompt: str,
          extra_dirs: list[Path], fork_from: str | None,
          instructions_text: str, protected: list[Path] = (),
          model: str | None = None, effort: str | None = None,
-         mcp_servers: dict | None = None) -> list[str]:
+         mcp_servers: dict | None = None, platform: bool = False) -> list[str]:
     """The ``codex exec`` command line. ``--ignore-user-config`` because
     ``CODEX_HOME/config.toml`` is the broker's, rewritten at every persona
-    thread start; a job's whole configuration is on this line."""
+    thread start; a job's whole configuration is on this line.
+
+    ``platform``: the platform engineer's job, with no Codex sandbox (see
+    ``PLATFORM_LINE``); ``extra_dirs`` and ``protected`` are then the wall's
+    to hold, not this line's."""
     writable = [tree / ".git", job_dir, *extra_dirs]
+    if platform:
+        sandbox = ["-c", 'sandbox_mode="danger-full-access"']
+    else:
+        sandbox = [
+            "-c", 'sandbox_mode="workspace-write"',
+            "-c", "sandbox_workspace_write.network_access=true",
+            "-c", "sandbox_workspace_write.writable_roots="
+                  + json.dumps([str(p) for p in writable]),
+            "-c", 'default_permissions="engineer"',
+            "-c", f"permissions.engineer.filesystem={profile(tree, job_dir, list(protected))}",
+            "-c", "permissions.engineer.network.enabled=true",
+        ]
     flags = [
         "--json", "--strict-config", "--ignore-user-config",
         "--skip-git-repo-check",
@@ -130,13 +176,7 @@ def argv(*, workdir: Path, tree: Path, job_dir: Path, prompt: str,
         "-m", model or eng.CODEX_ENGINEER_MODEL,
         "-c", f"model_reasoning_effort={toml_string(effort or eng.CODEX_ENGINEER_EFFORT)}",
         "-c", 'approval_policy="never"',
-        "-c", 'sandbox_mode="workspace-write"',
-        "-c", "sandbox_workspace_write.network_access=true",
-        "-c", "sandbox_workspace_write.writable_roots="
-              + json.dumps([str(p) for p in writable]),
-        "-c", 'default_permissions="engineer"',
-        "-c", f"permissions.engineer.filesystem={profile(tree, job_dir, list(protected))}",
-        "-c", "permissions.engineer.network.enabled=true",
+        *sandbox,
         *[f for name in DISABLED_FEATURES for f in ("--disable", name)],
         # Codex's own memory, off (first release L8): a job ignores the home
         # config the broker pins it in, so the pins ride this line. Each key

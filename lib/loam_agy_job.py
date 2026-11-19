@@ -73,6 +73,20 @@ PROVIDER_LINE = (
     "the browser, image generation or scheduling tools; a job is the shell "
     "and the files.")
 
+# The platform engineer's line (since 2026-11-19), as Codex's
+# PLATFORM_LINE: the wall holds what its Claude settings would have denied.
+PLATFORM_LINE = (
+    "You are the platform engineer running on Antigravity (`agy --print`), "
+    "headless: Antigravity's own tools (run_command, view_file, "
+    "write_to_file, replace_file_content, grep_search, ...), with this box's "
+    "sudo, behind the job's wall. Claude Code's Read, Edit, Grep, Agent, "
+    "ToolSearch and Skill tools are not here; the files below are the "
+    "instructions the Claude Code engineer reads, unchanged, and they bind "
+    "you the same way, including every line the Claude engineer's settings "
+    "would have enforced for it. Nobody can answer an approval or a "
+    "question: decide, and say so in the receipt. Do not use the browser, "
+    "image generation or scheduling tools; a job is the shell and the files.")
+
 STREAM = "agy.jsonl"
 INSTRUCTIONS = "instructions.md"
 PROMPT_FILE = "prompt.md"
@@ -95,9 +109,12 @@ STEP_SILENT = ("user_input", "checkpoint")
 STEP_TEXT = ("agent_response",)
 
 
-def instructions(workdir: Path) -> str:
+def instructions(workdir: Path, platform: bool = False) -> str:
     """The Claude engineer's memory files, as Codex is given them, under
-    this provider's line."""
+    this provider's line (the platform engineer's when ``platform``)."""
+    if platform:
+        text = codex_job.instructions(workdir, platform=True)
+        return text.replace(codex_job.PLATFORM_LINE, PLATFORM_LINE, 1)
     text = codex_job.instructions(workdir)
     return text.replace(codex_job.PROVIDER_LINE, PROVIDER_LINE, 1)
 

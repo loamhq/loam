@@ -4,8 +4,9 @@
 What the launcher promises an Antigravity job, held here without a model:
 
   the setting       `antigravity` is a runtime a project engineer and the
-                    default can take; the platform engineer is Claude Code
-                    whatever its record says; nothing defaults to it.
+                    default can take, and the platform engineer by its own
+                    setting (2026-11-19; without one it is Claude Code
+                    whatever its record says); nothing defaults to it.
   the models        `agy models`' tab-separated lines are read as ids; an id
                     that ends in its level carries it, and `--effort` is not
                     passed beside it (agy refuses the pair).
@@ -105,7 +106,8 @@ try:
           "antigravity")
     loam = eng.Project("Loam", root, root / "jobs", platform=True,
                        record={"runtime": "antigravity"})
-    check("platform engineer: claude always", loam.runtime, "claude")
+    check("platform engineer: Claude Code with no setting, whatever its record says",
+          loam.runtime, "claude")
     check("nothing defaults to it", eng.DEFAULT_RUNTIME, "codex")
     check("built-in: the trial's model, no separate effort",
           eng.builtin_choice("antigravity"), ("gemini-4-hydrogen-high", None))
@@ -116,8 +118,14 @@ try:
     check("a setting moves a Codex record to agy, with its model",
           (choice["runtime"], choice["model"], choice["source"]),
           ("antigravity", "gemini-4-hydrogen-xhigh", "own"))
+    # Loam's own setting is a provider like the others' (2026-11-19); the
+    # default for every other project is never Loam's.
     choice = eng.engineer_choice(loam, {"projects": {"Loam": {"provider": "antigravity"}}})
-    check("...never Loam's", choice["runtime"], "claude")
+    check("Loam's own setting: antigravity", (choice["runtime"], choice["model"]),
+          ("antigravity", eng.AGY_ENGINEER_MODEL))
+    choice = eng.engineer_choice(loam, {"default": {"provider": "antigravity"}})
+    check("...the default is never Loam's", (choice["runtime"], choice["source"]),
+          ("claude", "record"))
 
     # -- the models --------------------------------------------------------
     models = agy.parse_models(MODELS_TEXT)

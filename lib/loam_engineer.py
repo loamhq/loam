@@ -80,11 +80,12 @@ MAX_TURNS = (int(os.environ["LOAM_ENGINEER_MAX_TURNS"])
 # The owner, 2026-10-07 in chat: "make sure all of engineering agents for the
 # project, not the Loam main agent, are with Codex instead of Claude Code.
 # Their default model should be latest GPT with Sol on high effort." The
-# platform engineer is always Claude Code. A record without the key ran on
+# platform engineer's record is Claude Code. A record without the key ran on
 # Claude Code before the key existed and still does; `bin/provision` writes
 # DEFAULT_RUNTIME into every new record, and `bin/check-drift` names a
 # record without one. Flipping one project back is `"runtime": "claude"` in
-# its record and nothing else.
+# its record and nothing else. (The platform engineer's choice is its own
+# setting since 2026-11-19; with none it is Claude Code, as before.)
 # `antigravity` since 2026-11-15 (lib/loam_agy_job.py), as a choice: the
 # owner wants to try it before any engineer moves, so nothing defaults to it.
 RUNTIMES = ("claude", "codex", "antigravity")
@@ -452,7 +453,8 @@ class Project:
         """`claude`, `codex` or `antigravity`: which CLI a job of this engineer runs. Since
         2026-11-13 the engineer's setting (Settings > Agents > Engineers,
         `engineer_choice`) when one is made, else the record's `runtime`.
-        The platform engineer is always Claude Code."""
+        The platform engineer's own setting too since 2026-11-19; with none
+        it is Claude Code, and it never follows the default."""
         return engineer_choice(self)["runtime"]
 
     def receipts_dir(self, vault: Path) -> Path:
@@ -486,7 +488,12 @@ class Project:
 #
 # Precedence: the engineer's own setting, else (project engineers only) the
 # default for every other project, else the record's `runtime` and the
-# built-in model and effort above. A setting is whole: a provider and,
+# built-in model and effort above. The platform engineer's own provider is
+# a setting like any other since 2026-11-19 (the owner, in chat: "Please make
+# the Loam engineer's provider editable by me and other users." "It should be
+# like the others."); until then it was Claude Code whatever was set. It does
+# not follow the default, so an install whose default is Codex keeps Loam's
+# engineer on Claude Code until its own provider is chosen. A setting is whole: a provider and,
 # optionally, a model and an effort for that provider; null model or effort
 # is that provider's built-in.
 # ---------------------------------------------------------------------------
@@ -536,8 +543,6 @@ def engineer_choice(project: "Project", settings: dict | None = None) -> dict:
           and default.get("provider") in RUNTIME_OF):
         row, source = default, "default"
     runtime = RUNTIME_OF[row["provider"]] if row else project.record_runtime
-    if project.platform and runtime != "claude":
-        row, source, runtime = None, "record", "claude"
     model, effort = builtin_choice(runtime)
     if row:
         model = row.get("model") or model

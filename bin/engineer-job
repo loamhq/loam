@@ -1048,6 +1048,12 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
         # A scratch registry (lib/loam_engineer.py, PROJECTS_DIR): the inner
         # must find the project the outer did.
         argv.append(f"--setenv=LOAM_PROJECTS_DIR={eng.PROJECTS_DIR}")
+    if os.environ.get("LOAM_HOST_SETTINGS"):
+        # Fixture settings (2026-11-19, lib/loam_engineer.py
+        # host_settings_path): the inner must choose the provider the outer
+        # was asked about, so a probe proves a setting without the box's
+        # own being changed. Nothing in a unit or generator sets it.
+        argv.append(f"--setenv=LOAM_HOST_SETTINGS={os.environ['LOAM_HOST_SETTINGS']}")
     if os.environ.get("LOAM_CONFIG"):
         # A scratch install (2026-11-19): the inner reads the config the
         # outer did, so its records, logs and the result's run are that
@@ -3033,6 +3039,11 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     # L4): their MCP servers and their words, at launch, so the committed
     # harness in the tree never names a plugin.
     plugin_words = contributions.lane_prompt("engineer")
+    # The platform engineer on Codex or Antigravity (since 2026-11-19, its
+    # provider its owner's to set): no Claude settings hold its harness or
+    # what they deny it, so the wall holds them read-only (lib/loam_codex_job.py,
+    # PLATFORM_LINE), and it is given the directories its Claude settings add.
+    protect, platform_dirs = platform_walls(project, runtime, tree, workdir)
     if runtime == "claude":
         plugin_mcp = contributions.lane_mcp_file("engineer")
         if plugin_mcp:
@@ -3040,7 +3051,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         if plugin_words:
             argv += ["--append-system-prompt", plugin_words]
     if codex:
-        instructions = codex_job.instructions(workdir)
+        instructions = codex_job.instructions(workdir, platform=project.platform)
         if plugin_words:
             instructions = f"{instructions.rstrip()}\n\n{plugin_words}\n"
         p["dir"].joinpath(codex_job.INSTRUCTIONS).write_text(
@@ -3051,6 +3062,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             instructions_text=instructions,
             model=job_model, effort=job_effort,
             mcp_servers=contributions.lane_servers("engineer"),
+            platform=project.platform,
             # Read-only where the repository does not track the harness. A
             # project that commits its harness re-renders it by its own
             # engineer's commit (check-drift says so), so there it stays
@@ -3058,18 +3070,18 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             protected=[tree / name for name in codex_job.HARNESS
                        if (tree / name).exists()
                        and not wt.tracked(tree, name)])
-    protect: list[Path] = []
     agy_argv = None
     if antigravity:
-        instructions = agy_job.instructions(workdir)
+        instructions = agy_job.instructions(workdir, platform=project.platform)
         if plugin_words:
             instructions = f"{instructions.rstrip()}\n\n{plugin_words}\n"
         p["dir"].joinpath(agy_job.INSTRUCTIONS).write_text(
             instructions, encoding="utf-8")
         # Antigravity has no write sandbox to name the harness in, so the
         # wall holds it, where the tree does not track it (as for Codex).
-        protect = [tree / name for name in agy_job.HARNESS
-                   if (tree / name).exists() and not wt.tracked(tree, name)]
+        if not project.platform:
+            protect = [tree / name for name in agy_job.HARNESS
+                       if (tree / name).exists() and not wt.tracked(tree, name)]
 
         def agy_argv(model: str, effort, text: str = prompt) -> list[str]:
             """The walled command line for one Antigravity attempt: the
@@ -3078,11 +3090,15 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                 prompt=agy_job.prompt_arg(p["dir"], agy_job.compose(instructions, text)),
                 job_dir=p["dir"], conversation=resume_from,
                 model=model, effort=effort,
-                extra_dirs=[paths(project, continue_job)["dir"]] if resume_from else [])
+                extra_dirs=[*platform_dirs,
+                            *([paths(project, continue_job)["dir"]] if resume_from else [])])
             return wt.walled(project, record, p["dir"], line, protect=protect)
         argv = agy_argv(job_model, job_effort)
     else:
-        argv = wt.walled(project, record, p["dir"], argv)
+        # `protect` only when a platform job on another CLI has some: every
+        # other job's wall is raised by the call it always was.
+        argv = (wt.walled(project, record, p["dir"], argv, protect=protect)
+                if protect else wt.walled(project, record, p["dir"], argv))
     os.environ.update(wt.wall_env())
     # What this session is started on, read off the command line it is
     # started with (since 2026-11-12), so Activity says the engine and model
@@ -3498,6 +3514,24 @@ def unknown_project(name: str) -> str:
         f"provisioned by the platform engineer, on a brief to project "
         f"'Loam' that names the project and its repo."
     )
+
+
+def platform_walls(project: eng.Project, runtime: str, tree: Path,
+                   workdir: Path) -> tuple[list[Path], list[Path]]:
+    """(protect, dirs) for the platform engineer on a CLI other than Claude
+    Code (since 2026-11-19): what the wall holds read-only that its Claude
+    settings deny it -- the harness in its tree where the tree does not
+    track it, the transcripts, the list of public apps -- and the directories
+    those settings add (bin/provision, `additionalDirectories`). Empty for a
+    Claude job and for a project engineer, whose own rules are unchanged."""
+    if not project.platform or runtime == "claude":
+        return [], []
+    protect = [workdir / name for name in codex_job.PLATFORM_HARNESS
+               if (workdir / name).exists()
+               and not wt.tracked(tree, str((workdir / name).relative_to(tree)))]
+    protect += codex_job.platform_protect()
+    dirs = [d for d in (eng.AGENTS, eng.VAULT, eng.AI_LABS, lc.PLUGINS) if d.is_dir()]
+    return protect, dirs
 
 
 def platform_defect(project: eng.Project) -> str | None:
