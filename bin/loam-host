@@ -9,6 +9,10 @@
                               create, change or remove and what it will
                               reload, then asks.
         --only PATH           only this file or folder (repeatable)
+        --except PATH         everything but this file or folder (repeatable):
+                              `--except` the login's folder puts back the
+                              rest and leaves its accounts and passkeys as
+                              they are now
         --diff                show what changes in each text file (never a
                               secret's)
         --dry-run             say it, change nothing
@@ -48,10 +52,11 @@ NOT_COVERED = [
     ("the broker's sessions, threads, jobs, logs and other runtime state",
      "data the runtime writes as it runs, not setup; large and changing every minute"),
     ("plugins' private data (<state>/plugins/private/)", "each plugin's own data, not setup"),
-    ("Authelia's accounts and passkeys (its Docker volume)", "a live database inside a "
-     "container's volume; copying it safely needs Authelia stopped"),
     ("Caddy's certificates and its own data", "private keys the web server re-issues by itself"),
-    ("Docker images, containers and volumes", "rebuilt from the compose files that are covered"),
+    ("Docker images, containers and volumes other than the login's two files",
+     "rebuilt from the compose files that are covered; an app's own data is the app's "
+     "(the login's sessions cost one sign-in per device; its notification file holds "
+     "one-time codes, never setup)"),
     ("installed packages, the kernel, the network and the firewall's base rules",
      "the operating system's, not Loam's; the provider's or the person's own tools restore them"),
     ("SSH keys", "identity, not setup; ~/.ssh/config is covered"),
@@ -102,13 +107,14 @@ def cmd_log(a) -> int:
 
 def cmd_restore(a, dry: bool = False) -> int:
     need_root()
-    return lh.restore(a.state, only=a.only, yes=a.yes, force=a.force, show_diff=a.diff,
+    return lh.restore(a.state, only=a.only, leave=a.leave, yes=a.yes, force=a.force, show_diff=a.diff,
                       dry=dry or a.dry_run)
 
 
 def cmd_covered(a) -> int:
     try:
-        rule_list, _about = lh.rules()
+        rule_list, about = lh.rules(previous=lh._last_about(lh.history_dir())
+                                    if os.geteuid() == 0 else None)
     except Exception as exc:  # noqa: BLE001
         print(f"Loam's config could not be read: {exc}", file=sys.stderr)
         return 1
@@ -121,6 +127,10 @@ def cmd_covered(a) -> int:
         print(f"\n{len(paths)} files and links now:")
         for p in paths:
             print(f"  {p}")
+    print(f"\nThe login: {about.get('_login_note', '?')}.")
+    if about.get("login"):
+        print("  Kept as secrets (never shown by --diff). A restore that includes them says so "
+              "in capitals before it asks; --except the folder above leaves them out.")
     print("\nNot covered:")
     for what, why in NOT_COVERED:
         print(f"  {what}: {why}")
@@ -148,6 +158,7 @@ def main(argv: list[str]) -> int:
         s = sub.add_parser(name)
         s.add_argument("state", nargs="?")
         s.add_argument("--only", action="append", default=[])
+        s.add_argument("--except", dest="leave", action="append", default=[])
         s.add_argument("--diff", action="store_true")
         s.add_argument("--dry-run", action="store_true")
         s.add_argument("--yes", action="store_true")

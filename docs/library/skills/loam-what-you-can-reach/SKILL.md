@@ -15,7 +15,11 @@ cron have the same tools as a conversation. What needs the owner's yes
 first is in your config. If you break the machine's own setup (the web
 server's config, a unit, a setting), `sudo loam host restore` puts it back
 and says what it will change first; `sudo loam host log` lists the saved
-states, and `restore 2h` names one by time.
+states, and `restore 2h` names one by time. The login's accounts and
+passkeys are kept too: when a restore would put them back it says so in
+capitals before it asks, because any passkey added since would be gone and
+the owner could be locked out. Unless the owner asked for exactly that, add
+the `--except` it names, which puts back everything else.
 
 **Sight.** A browser (MCP server `browser`) reaches the open web and this
 box's own sites, and nothing else on the machine. Load its tools with
