@@ -2658,7 +2658,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-about ul, .plugin-about ol { padding-left:22px; }
 .plugin-about li { margin:6px 0; }
 .setmain .plugin-gallery, .app-modal-body .plugin-gallery { padding:16px 0 4px; }
-.setmain .plugin-gallery-row, .app-modal-body .plugin-gallery-row { grid-auto-columns:minmax(240px, 78%); }
+.setmain .plugin-gallery-row, .app-modal-body .plugin-gallery-row { grid-auto-columns:max(240px, 78%); }
 .plugin-gallery-one .plugin-gallery-row { grid-auto-columns:minmax(0, 100%); }
 .plugin-how { margin:16px 0 8px; border-top:1px solid var(--paper-rule); }
 .plugin-how > summary.plugin-how-summary { list-style:none; text-align:left; display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:48px; cursor:pointer; font-size:15px; font-weight:600; color:var(--paper-ink); }

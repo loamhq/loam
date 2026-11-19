@@ -647,7 +647,7 @@
 /* A plugin's screenshots (plugin-gallery.js): one row, each a framed picture
  * with its line under it, sliding sideways when there are more than fit. */
 .plugin-gallery { padding: 36px 0 8px; }
-.plugin-gallery-row { list-style: none; margin: 0; padding: 4px 4px 18px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(280px, calc((100% - var(--space-xl)) / 2)); gap: var(--space-xl);
+.plugin-gallery-row { list-style: none; margin: 0; padding: 4px 4px 18px; display: grid; grid-auto-flow: column; grid-auto-columns: max(280px, calc((100% - var(--space-xl)) / 2)); gap: var(--space-xl);
   overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: thin; }
 .plugin-gallery-one .plugin-gallery-row { grid-auto-columns: minmax(0, 720px); }
 .plugin-shot { scroll-snap-align: start; display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; }
