@@ -15,7 +15,10 @@ Before any push to this repository, the landing's push gate checks every
 commit the repository does not have yet: it must carry that identity, and
 nothing it adds, no path it touches and nothing in its message may match the
 install's deny list of private names. A commit that fails is held on the
-install, not pushed (`push_gate` in `lib/loam_worktree.py`).
+install, not pushed (`push_gate` in `lib/loam_worktree.py`). A hold that
+names only the engineer's memory note or a commit's message is not the
+work's: the change lands as one commit without them, and the note is kept
+beside the job (`land` in the same file).
 
 ## Reports from installs
 
@@ -36,7 +39,8 @@ ask the same questions for anyone filing by hand.
    ran. A change to the app also runs `npm test` in `app/`. The suite needs
    a Linux box with systemd: `tests/test_schedule.py` starts a user manager
    of its own for its timers (`tests/private_systemd.py`) and never touches
-   yours.
+   yours. It runs files in parallel, and each sees only a scratch install
+   of its own (`tests/README.md`).
 3. Keep the change to one purpose. Say what must be true afterwards and how
    you checked it, the way the engineer's receipts do.
 4. Nothing personal goes in: no names, addresses, hosts, keys or captured
