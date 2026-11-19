@@ -168,7 +168,80 @@ def check_entry(entry) -> tuple[dict | None, str | None]:
     readme = entry.get("readme")
     if isinstance(readme, str) and is_readme_path(readme):
         out["readme"] = readme
+    review = review_of(entry.get("review"))
+    if review:
+        out["review"] = review
+        # The commit the reviewer read is the one this listing delivers: the
+        # page reads and installs it by commit, so a tag moved after the
+        # review changes nothing here.
+        folder = review.get("folder", out["path"])
+        out["pinned_link"] = (f"https://github.com/{out['repo']}/tree/{review['commit']}"
+                              + (f"/{folder}" if folder else ""))
+        out["pin"] = {"ref": review["commit"], "path": folder}
     return out, None
+
+
+# ---------------------------------------------------------------------------
+# Loam's note (2026-11-19)
+# ---------------------------------------------------------------------------
+#
+# The owner, 2026-11-19: a plugin that comes onto the Market is reviewed
+# first, new listings and updates alike, and its page carries a section from
+# Loam on "where it touches, what are the different things that it might
+# change, what are some of the things that are in the code that might be
+# interesting to the user". The marketplace's reviewer writes it beside each
+# listing (``notes/<id>.json``) and its build.py copies it into list.json as
+# the listing's ``review``: the commit it read, the version, the date and the
+# note. It is Loam's words, never the maker's, so it comes only from there;
+# a listing file that carries its own is refused by the marketplace's rules.
+# Every field is optional and bounded here; a value that is not one is left
+# out, never the listing.
+
+NOTE_LISTS = ("touches", "may_change", "worth_knowing", "changed")
+NOTE_ITEMS, NOTE_ITEM_MAX, NOTE_SUMMARY_MAX = 8, 400, 600
+SHA = re.compile(r"^[0-9a-f]{40}$")
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+FOLDER = re.compile(r"^(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+$")
+
+
+def _line(value, limit: int) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = " ".join(value.split())
+    return value if len(value) <= limit else value[:limit - 1].rstrip() + "…"
+
+
+def review_of(raw) -> dict | None:
+    """A listing's ``review`` made safe to draw, or None: a whole commit and
+    a note with a summary, at least."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("commit"), str) \
+            or not SHA.match(raw["commit"]):
+        return None
+    note = raw.get("note") if isinstance(raw.get("note"), dict) else {}
+    summary = _line(note.get("summary"), NOTE_SUMMARY_MAX)
+    if not summary:
+        return None
+    out_note: dict = {"summary": summary}
+    for field in NOTE_LISTS:
+        items = note.get(field)
+        if isinstance(items, list):
+            lines = [x for x in (_line(i, NOTE_ITEM_MAX) for i in items) if x][:NOTE_ITEMS]
+            if lines:
+                out_note[field] = lines
+    since = _line(note.get("since"), 40)
+    if since and "changed" in out_note:
+        out_note["since"] = since
+    out = {"commit": raw["commit"], "note": out_note}
+    version = raw.get("version")
+    if isinstance(version, str) and len(version) <= 40 and re.match(r"^\d+\.\d+\.\d+", version):
+        out["version"] = version
+    at = raw.get("reviewed_at")
+    if isinstance(at, str) and DATE.match(at):
+        out["reviewed_at"] = at[:10]
+    folder = raw.get("folder")
+    if isinstance(folder, str) and (folder == "" or (FOLDER.match(folder) and ".." not in folder.split("/"))):
+        out["folder"] = folder
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -662,7 +735,9 @@ def _readme(folder: Path, entry: dict) -> tuple[str | None, dict]:
 
 def _read_details(entry: dict) -> dict:
     import loam_plugins  # noqa: PLC0415
-    src = {"repo": entry["repo"], "ref": entry["ref"], "path": entry["path"]}
+    # A reviewed listing is read at the commit its review read.
+    src = {"repo": entry["repo"], "ref": entry["ref"], "path": entry["path"],
+           **(entry.get("pin") or {})}
     work = Path(tempfile.mkdtemp(prefix="market-", dir=loam_plugins._staging()))
     try:
         got = loam_plugins.fetch(src, work)
@@ -730,7 +805,7 @@ def _read_details(entry: dict) -> dict:
 
 def _loaded(pid: str, refresh: bool = False) -> dict:
     entry = _entry(pid)
-    key = entry["link"]
+    key = entry.get("pinned_link") or entry["link"]
     with _lock:
         gate = _details_locks.setdefault(key, threading.Lock())
     with gate:

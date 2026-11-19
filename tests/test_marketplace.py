@@ -323,6 +323,31 @@ try:
           [k for k in ("featured", "cover", "image")
            if k in mk.check_entry(entry("dusk", featured="yes", image="../x.png"))[0]], [])
 
+    # -- Loam's note (2026-11-19): the reviewer's record, read from list.json ------
+    sha = "a" * 40
+    note = {"summary": "  Counts   words. ", "touches": ["Nothing off the page.", 7, ""],
+            "may_change": ["x" * 900], "worth_knowing": [], "changed": ["Now reads threads."],
+            "since": "1.0.0", "extra": "dropped"}
+    reviewed, why = mk.check_entry(entry("pet", review={"commit": sha, "version": "1.0.0",
+                                                        "reviewed_at": "2026-11-19T10:00:00Z",
+                                                        "note": note}))
+    check("a reviewed listing keeps its note, bounded, and nothing else in it",
+          (why, reviewed["review"]["note"]["summary"], reviewed["review"]["note"]["touches"],
+           len(reviewed["review"]["note"]["may_change"][0]), "worth_knowing" in reviewed["review"]["note"],
+           "extra" in reviewed["review"]["note"], reviewed["review"]["note"]["since"],
+           reviewed["review"]["reviewed_at"]),
+          (None, "Counts words.", ["Nothing off the page."], 400, False, False, "1.0.0", "2026-11-19"))
+    check("and is read and installed at the commit the review read, not its tag",
+          (reviewed["pinned_link"], reviewed["pin"], reviewed["link"]),
+          (f"https://github.com/friend/loam-pet/tree/{sha}/pet", {"ref": sha, "path": "pet"},
+           entry("pet")["link"]))
+    for bad, what in (({"commit": "v1.0.0", "note": note}, "a tag for a commit"),
+                      ({"commit": sha, "note": {"touches": ["x"]}}, "a note with no summary"),
+                      ("reviewed", "a review that is not an object")):
+        got, why = mk.check_entry(entry("pet", review=bad))
+        check(f"a review with {what} is left out, never the listing",
+              (why, "review" in got, "pinned_link" in got), (None, False, False))
+
     # -- the creator, the cover and the README (2026-11-18) ----------------------
     old_style, why = mk.check_entry(entry("pet"))
     check("an old listing is still valid: a plain-string author, no cover, no readme",

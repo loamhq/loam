@@ -109,7 +109,7 @@ def market_link(pid: str) -> str:
         raise LookupError(got.get("message") or f"the marketplace is {got.get('state')}")
     for entry in got.get("plugins", []):
         if entry.get("id") == pid and entry.get("link"):
-            return entry["link"]
+            return entry.get("pinned_link") or entry["link"]
     raise LookupError(f"the marketplace lists no {pid!r}")
 
 
