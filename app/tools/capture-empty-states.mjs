@@ -14,6 +14,7 @@ import assert from 'node:assert/strict'
 import { readFile, readdir, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { marketFixture } from '../test/market-fixture.mjs'
+import { LISTED_THEMES, installListedTheme } from '../test/listed-themes.mjs'
 
 const out = process.env.EMPTY_EVIDENCE
 if (!out) throw new Error('Set EMPTY_EVIDENCE')
@@ -69,7 +70,8 @@ const SURFACES = {
   } },
 }
 
-const THEMES = (await readdir('public/themes', { withFileTypes: true })).filter(d => d.isDirectory()).map(d => d.name)
+// The shipped looks and the first-party ones now listed in the Market (Autumn among them).
+const THEMES = [...(await readdir('public/themes', { withFileTypes: true })).filter(d => d.isDirectory()).map(d => d.name), ...LISTED_THEMES]
 const files = [], failed = []
 try {
   for (const [surface, spec] of Object.entries(SURFACES)) {
@@ -78,6 +80,7 @@ try {
     for (const look of looks) for (const width of [390, 1440]) for (const mode of ['light', 'dark']) {
       if (spec.wide && width === 390) continue
       const app = await marketFixture({ mode, look, ...(spec.listings ? { listings: spec.listings } : {}) }), errors = []
+      if (LISTED_THEMES.includes(look)) await installListedTheme(app, look)
       const extra = await spec.setup?.(app)
       const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: mode, isMobile: width === 390, hasTouch: width === 390, timezoneId: 'America/Los_Angeles' })
       await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__cap={page,state,schedule};' }))
@@ -88,6 +91,7 @@ try {
         await page.goto(app.url)
         try {
           await page.waitForFunction(() => globalThis.__cap)
+          await page.waitForFunction(look => document.documentElement.dataset.look === look, look)
           await page.locator(spec.home ?? '.tt-row').first().waitFor()
           await spec.go(page, app, extra)
         } catch (e) {

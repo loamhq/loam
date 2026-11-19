@@ -2,17 +2,19 @@
 // public/empty-state.js): the sprout's stem draws in and its leaves unfold
 // once, and under `prefers-reduced-motion: reduce` the component renders
 // whole and still, with nothing animating; its paints are the theme's own
-// tokens in every shipped theme, light and dark; and the empty Market draws
+// tokens in every first-party theme (shipped or listed), light and dark; and the empty Market draws
 // it with its words and action.
 //
 //   LOAM_PLAYWRIGHT=…/playwright/index.mjs LOAM_CHROME=/usr/bin/chromium-headless-shell node test/empty-state-browser.mjs
 import assert from 'node:assert/strict'
 import { readdir } from 'node:fs/promises'
 import { marketFixture } from './market-fixture.mjs'
+import { LISTED_THEMES, installListedTheme } from './listed-themes.mjs'
 
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright')
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox'] })
-const themes = (await readdir('public/themes', { withFileTypes: true })).filter(d => d.isDirectory()).map(d => d.name)
+// The shipped looks and the first-party ones listed in the Market, installed.
+const themes = [...(await readdir('public/themes', { withFileTypes: true })).filter(d => d.isDirectory()).map(d => d.name), ...LISTED_THEMES]
 
 // What the sprout is doing, read off the browser, and every paint resolved
 // against the token it names.
@@ -45,6 +47,7 @@ const checks = []
 try {
   for (const motion of ['no-preference', 'reduce']) for (const look of motion === 'reduce' ? themes : ['latte']) for (const mode of ['light', 'dark']) {
     const app = await marketFixture({ mode, look, listings: [] }), errors = []
+    if (LISTED_THEMES.includes(look)) await installListedTheme(app, look)
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: mode, reducedMotion: motion })
     const page = await context.newPage(); page.setDefaultTimeout(15000)
     page.on('pageerror', e => errors.push(e.message))
