@@ -559,9 +559,12 @@ ENTRIES: list[Entry] = [
           "your agents carry, instead of the engineer's or a provider's",
           "PATCH /api/settings/git",
           route="PATCH /v1/settings/git",
-          values='"github" (the connected GitHub account\'s name and its private '
-                 'no-reply address), {"name": …, "email": …}, or null to clear '
-                 'it; default unset (commits carry "<project> engineer")',
+          values='null (the default: your one connected GitHub account\'s '
+                 'name and private no-reply address; with none, "<project> '
+                 'engineer" and a note saying how to set yours), "github" (that '
+                 'account, chosen: pull requests on its repositories may then '
+                 'be opened as you), {"name": …, "email": …}, or "neutral" '
+                 '(always "<project> engineer", no note); default null',
           body=lambda v, m: {"identity": v},
           read="GET /v1/settings/git",
           pick=lambda a, m: a.get("identity"),

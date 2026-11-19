@@ -1811,3 +1811,14 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **The landing never re-makes a pull-request branch**: its head may already
   be on the remote, and a re-made commit would not fast-forward it, which
   `settle_head` answers with a new pull request.
+- **Unset is the default, not neutral** (the same day, second change). The
+  store keeps no GitHub user id, and the no-reply address needs it, so
+  `owner_profile` reads `/user` once with the existing token and caches
+  `profile` on that authorization for a day. "Clearly designated" is one
+  login across every authorized app slot; two is a prompt, never a pick.
+  `neutral` is the explicit opt-out. Only an explicit `github` reaches
+  `owner_token`: the default is metadata and never changes the PR actor.
+- **In a test run the default reads nothing real.** `loam_offline.offline()`
+  makes `default()` treat the box as unconnected with no global git identity
+  unless a test sets `PROFILE_SOURCE`/`GLOBAL_GIT_SOURCE`; otherwise every
+  worktree test on an unset box would read the live store and its tokens.
