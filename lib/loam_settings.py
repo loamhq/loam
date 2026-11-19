@@ -440,8 +440,8 @@ ENTRIES: list[Entry] = [
                   else (a.get("effective") or {}).get(field)))
       for field, label, values in (
           ("provider", "An engineer's provider",
-           "claude-code, codex or antigravity (Loam's: claude-code only); null "
-           "to follow the default (or the project's record)"),
+           "claude-code, codex or antigravity; null to follow the default "
+           "(or the project's record; for Loam, its built-in Claude Code)"),
           ("model", "An engineer's model",
            "a model its provider lists, or null for the built-in "
            "(Antigravity's: gemini-4-hydrogen-high; its ids carry the level)"),
