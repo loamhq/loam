@@ -269,6 +269,71 @@ def cases() -> int:
     check("the two records to ask for",
           li.records_to_ask_for("sam", "203.0.113.7"),
           [f"sam.{li.BASE_DOMAIN}  A  203.0.113.7", f"*.sam.{li.BASE_DOMAIN}  A  203.0.113.7"])
+
+    # -- an own domain (Loam 0.2.8) ---------------------------------------------
+    check("own domains: a host, an apex, and refusals",
+          [li.valid_domain(d) is None for d in
+           ("loam.example.com", "example.com", "https://x.example.com", "*.example.com",
+            "localhost", f"sam.{li.BASE_DOMAIN}", li.BASE_DOMAIN, "a.b.123", "bad_.example.com")],
+          [True, True, False, False, False, False, False, False, False])
+    text = li.render_config(name="", owner="Sam", timezone="UTC", address="203.0.113.7",
+                            home="/home/loam", domain="Loam.Example.com.")
+    import tomllib  # noqa: PLC0415
+    edge = tomllib.loads(text)["edge"]
+    check("an own domain's [edge]: the domain as given, its first label as name, own_domain",
+          (edge["domain"], edge["name"], edge.get("own_domain")),
+          ("loam.example.com", "loam", True))
+    check("a name under the base has no own_domain key (that path is as it was)",
+          "own_domain" in li.render_config(name="sam", owner="Sam", timezone="UTC",
+                                           address="203.0.113.7", home="/home/loam"), False)
+    check("an own domain's two records", li.edge_records(edge),
+          ["loam.example.com  A  203.0.113.7", "*.loam.example.com  A  203.0.113.7"])
+    check("a name's two records through the same helper",
+          li.edge_records({"name": "sam", "domain": f"sam.{li.BASE_DOMAIN}", "address": "203.0.113.7"}),
+          li.records_to_ask_for("sam", "203.0.113.7"))
+
+    four: dict[str, set[str] | None] = {}
+    six: dict[str, set[str] | None] = {}
+    real4, real6 = li.resolve, li._resolve6
+    li.resolve = lambda name, resolver="public": four.get(name, set())
+    li._resolve6 = lambda name, resolver="public": six.get(name, set())
+    dom, probe, here = "loam.example.com", "loam-check.loam.example.com", "203.0.113.7"
+    try:
+        def own(mine=frozenset()):
+            return li.domain_check(dom, here, mine=set(mine))
+        four.update({dom: {here}, probe: {here}})
+        got = own()
+        check("own domain, both records here: here, nothing to say",
+              (got["state"], got["problems"]), ("here", []))
+        four.update({probe: set()})
+        got = own()
+        check("own domain, the wildcard missing: waiting, and it says which",
+              (got["state"], [p.split(" ", 1)[0] for p in got["problems"]]),
+              ("waiting", ["*.loam.example.com"]))
+        four.update({dom: {"192.0.2.9"}, probe: {"192.0.2.9"}})
+        got = own()
+        check("own domain pointing elsewhere: waiting (never 'taken': it is theirs), both named",
+              (got["state"], len(got["problems"]), "change its A record to 203.0.113.7" in got["problems"][0]),
+              ("waiting", 2, True))
+        four.update({dom: {here}, probe: {here}})
+        six.update({dom: {"2001:db8::1"}})
+        got = own()
+        check("an AAAA record that is not this box's holds it back, named",
+              (got["state"], "IPv6" in " ".join(got["problems"])), ("waiting", True))
+        check("an AAAA record that is this box's own is fine",
+              own({"2001:db8::1"})["state"], "here")
+        six.clear()
+        four.update({dom: {"104.21.3.4"}, probe: {"172.67.1.2"}})
+        check("Cloudflare's proxy is named as such",
+              any("DNS only" in p for p in own()["problems"]), True)
+        four[dom] = None
+        check("no resolver answered: unknown", own()["state"], "unknown")
+        four.update({dom: {here}, probe: {here}})
+        check("edge_check takes the own-domain path from the table",
+              li.edge_check({**edge, "address": here})["state"], "here")
+    finally:
+        li.resolve, li._resolve6 = real4, real6
+
     check("a private address is not public", (li.is_public("10.0.0.5"), li.is_public("203.0.113.7"),
                                                li.is_public("8.8.8.8")), (False, False, True))
 

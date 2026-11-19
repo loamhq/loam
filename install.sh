@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # Install Loam on a fresh Debian 12 (or Ubuntu 24.04) server, as root:
 #
-#   curl -fsSL https://<where the release is>/install.sh | sudo bash -s -- --name <name>
+#   curl -fsSL https://<where the release is>/install.sh | sudo bash
 #
 # This file fetches the release, then hands over to its bin/loam-install,
 # which does the eleven steps (docs/install.md). Run it again at any time:
 # it carries on from the first step that has not finished, and does nothing
 # when all of them have.
 #
-# Options (everything else is asked, or passed to bin/loam-install):
-#   --name NAME        your name on the web: NAME.<domain>
+# Your Loam lives on the web in one of two ways; without either option the
+# installer asks which:
+#   --domain DOMAIN    on a domain you have, e.g. loam.example.com: you add two
+#                      DNS records there, and the installer says which and
+#                      checks them
+#   --name NAME        on a name Loam's makers give you under their domain
+#                      (NAME.<their domain>): ask them first; they add the records
+#
+# Other options (everything else is asked, or passed to bin/loam-install):
 #   --owner "NAME"     your first name, as Loam should call you
 #   --timezone ZONE    for example Europe/Berlin
 #   --version TAG      a release (default: the newest)
@@ -34,8 +41,8 @@ while [ $# -gt 0 ]; do
     --version) VERSION=$2; shift 2 ;;
     --version=*) VERSION=${1#*=}; shift ;;
     -h|--help)
-      if [ -f "$0" ]; then sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
-      else echo "Usage: install.sh --name NAME [--owner \"NAME\"] [--timezone ZONE]"; fi
+      if [ -f "$0" ]; then sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
+      else echo "Usage: install.sh [--domain DOMAIN | --name NAME] [--owner \"NAME\"] [--timezone ZONE]"; fi
       exit 0 ;;
     *) shift ;;
   esac

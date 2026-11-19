@@ -55,7 +55,9 @@ report as one markdown file in that vault and one line in its General board.
 It takes a report only from a Loam install: the sender names its own domain
 and the box's public DNS must say that name is the address the report came
 from (installs' names under Loam's base domain are made by Loam's makers, so
-a name that points at its caller is one of theirs). It takes plain text only,
+a name that points at its caller is one of theirs; an install on its own
+domain, Loam 0.2.8, is proved only to be the server that domain points at,
+and the limits below are what bound it). It takes plain text only,
 of a capped size, a few an hour per install, and keeps a code for the
 install, never its name or address. ``feedback.receive`` in loam.toml turns
 the receiving end on (only the makers' box has it) on the host

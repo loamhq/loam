@@ -49,7 +49,7 @@ place on a particular machine. Added 2026-11-14 (first release, job L1).
 | `feedback.url` | where `loam report send` posts a report privately (https) | absent: `https://<BASE_DOMAIN>/_loam/feedback` (lib/loam_install.py), Loam's makers' box |
 | `feedback.receive`, `feedback.host`, `feedback.folder` | this box is the one that takes those reports: the host named (an app's or a `[[landing]]`'s) answers `/_loam/feedback` outside the login, and each report lands in the vault folder named (deploy/README.md, "Feedback to Loam's makers") | absent: off; `BASE_DOMAIN`; `<projects>/Loam/feedback` |
 | `marketplace.list`, `marketplace.repo` | the marketplace's list (an https URL; `""` turns the section off) and the repository a listing is asked for in (docs/plugins.md, "The marketplace") | absent: `loamhq/marketplace`'s `list.json` on `main` |
-| `edge.*` | an install's name on the web: its domain, address, the app at the domain itself, the records it serves, how DNS is asked, local certificates for a rehearsal, the DNS gate (first release L12; docs/install.md) | absent: the deploy layer reads `deploy/loam.toml` and serves every record, as the first install always has |
+| `edge.*` | an install's name on the web: its domain, address, the app at the domain itself, the records it serves, how DNS is asked, local certificates for a rehearsal, the DNS gate, and `own_domain` when the domain is the owner's own rather than a name under Loam's (first release L12; 0.2.8; docs/install.md) | absent: the deploy layer reads `deploy/loam.toml` and serves every record, as the first install always has |
 
 `lib/loam_broker` and `lib/loam_engineer` re-export the paths under their
 historical names (`AGENTS_ROOT`, `AI_LABS`, `VAULT`, `STATE_DIR`, …), so
