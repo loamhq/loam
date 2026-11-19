@@ -12,6 +12,8 @@ import { linkShape } from '../public/market.js'
 
 const LISTED = new URL('../../plugins/_listed/', import.meta.url)
 const webp = async file => `data:image/webp;base64,${(await readFile(new URL(file, LISTED))).toString('base64')}`
+// An icon drawn here, as a plugin's own `icon` would be read.
+const SYNC_ICON = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="#2F6F68"/><path d="M14 22a10 10 0 0 1 18-5l2-3v9h-9l3-3a6 6 0 0 0-10 2zM34 26a10 10 0 0 1-18 5l-2 3v-9h9l-3 3a6 6 0 0 0 10-2z" fill="#F6EDDF"/></svg>').toString('base64')}`
 const svg = async file => `data:image/svg+xml;base64,${(await readFile(new URL(file, LISTED))).toString('base64')}`
 const none = { network: [], record: 'none', memory: 'none', server: false }
 
@@ -22,13 +24,12 @@ export async function linkPlugins() {
       declaration: { touches: none, overrides: [], page_code: false }, pictures: { cover: await webp('autumn/cover.webp'), cover_dark: await webp('autumn/cover-dark.webp') } },
     { path: 'foundry', id: 'foundry', name: 'Foundry', version: '1.0.1', kind: ['theme'], description: 'Iron, soot and a warm forge light.', tag: 'foundry-v1.0.1',
       declaration: { touches: none, overrides: [], page_code: false }, pictures: { cover: await webp('foundry/cover.webp') } },
-    { path: 'images', id: 'images', name: 'Images', version: '1.1.1', kind: ['extension'], description: 'Lets your agents make and edit pictures.', tag: 'images-v1.1.1',
-      declaration: { touches: { network: [{ host: 'api.openai.com', why: 'Sends the prompt and any source images to OpenAI’s image models' }], record: 'none', memory: 'none', server: true,
-        keys: [{ provider: 'openai', name: 'OpenAI', why: 'Makes and changes images', optional: true }] }, overrides: [], page_code: false },
-      pictures: { icon: await svg('images/assets/icon.svg') } },
+    { path: 'dictation', id: 'dictation', name: 'Dictation', version: '1.0.0', kind: ['extension'], description: 'Speak instead of typing: what you say is written into the composer.', tag: 'dictation-v1.0.0',
+      declaration: { touches: { network: [{ host: 'generativelanguage.googleapis.com', why: 'Sends recorded microphone audio for transcription and cleanup' }], record: 'read', memory: 'none', server: false,
+        keys: [{ provider: 'google', name: 'Google', why: 'Transcribes and tidies what you record' }] }, overrides: [], page_code: true }, pictures: {} },
     { path: 'syncthing', id: 'syncthing', name: 'Syncthing', version: '1.0.0', kind: ['extension'], description: 'Keeps the vault in step with your other devices.', tag: 'syncthing-v1.0.0',
       declaration: { touches: { network: [{ host: 'your own devices', why: 'syncs vault files between them' }], record: 'none', memory: 'none', server: true }, overrides: [], page_code: false },
-      pictures: { icon: await svg('syncthing/assets/icon.svg') } },
+      pictures: { icon: SYNC_ICON } },
   ]
 }
 

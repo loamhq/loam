@@ -98,32 +98,32 @@ try {
       await sheet.locator('.market-touch').first().waitFor()
       await shot('6-found-theme')
       await sheet.locator('.market-link-back', { hasText: 'Pick another' }).click()
-      await sheet.locator('.market-link-pick', { hasText: 'Images' }).click()
-      await sheet.locator('.sheet-title', { hasText: 'Install Images?' }).waitFor()
+      await sheet.locator('.market-link-pick', { hasText: 'Syncthing' }).click()
+      await sheet.locator('.sheet-title', { hasText: 'Install Syncthing?' }).waitFor()
       await sheet.locator('.market-install-head img.market-tile-img').waitFor()
       await shot('7-found-extension')
       await sheet.locator('.pillbtn.primary', { hasText: 'Install' }).click()
       await sheet.locator('.market-install-done').waitFor()
-      assert.deepEqual(posts().at(-1).body, { url: 'loamhq/plugins', path: 'images', ref: 'images-v1.1.1', via: 'link', confirm: 'ok-images-images-v1.1.1' }, `${label}: the yes names exactly what was shown`)
+      assert.deepEqual(posts().at(-1).body, { url: 'loamhq/plugins', path: 'syncthing', ref: 'syncthing-v1.0.0', via: 'link', confirm: 'ok-syncthing-syncthing-v1.0.0' }, `${label}: the yes names exactly what was shown`)
       await shot('8-installed')
       await sheet.locator('.pillbtn', { hasText: 'See it in Plugins' }).click()
 
       // Its page says where it came from; the list marks it as from a link.
-      await page.locator('.plugin-from-link', { hasText: 'Installed from a link: github.com/loamhq/plugins/images, at images-v1.1.1' }).waitFor()
+      await page.locator('.plugin-from-link', { hasText: 'Installed from a link: github.com/loamhq/plugins/syncthing, at syncthing-v1.0.0' }).waitFor()
       await shot('9-detail')
       await page.getByRole('button', { name: 'Back to Plugins', exact: true }).click()
       await page.locator('.plugin-mark-link').first().waitFor()
       const marked = await page.locator('.plugin-list-item', { has: page.locator('.plugin-mark-link') }).locator('.setrow-title').allTextContents()
-      assert.deepEqual(marked, ['Images'], `${label}: only the plugin from a link is marked`)
-      await page.locator('.plugin-list-item', { hasText: 'Images' }).scrollIntoViewIfNeeded()
+      assert.deepEqual(marked, ['Syncthing'], `${label}: only the plugin from a link is marked`)
+      await page.locator('.plugin-list-item', { hasText: 'Syncthing' }).scrollIntoViewIfNeeded()
       await shot('10-marked')
 
       // A branch: installed at its commit, said in a line.
-      await page.evaluate(() => __cap.page.openLinkInstall({ link: 'https://github.com/loamhq/plugins/tree/main/syncthing' }))
+      await page.evaluate(() => __cap.page.openLinkInstall({ link: 'https://github.com/loamhq/plugins/tree/main/dictation' }))
       await sheet.locator('.market-link-note', { hasText: 'main is a branch' }).waitFor()
       await shot('11-branch')
       await sheet.locator('.market-link-back').click()
-      assert.equal(await field.inputValue(), 'https://github.com/loamhq/plugins/tree/main/syncthing', `${label}: Change link keeps the link`)
+      assert.equal(await field.inputValue(), 'https://github.com/loamhq/plugins/tree/main/dictation', `${label}: Change link keeps the link`)
 
       // Each refusal, in plain words, in place.
       for (const [link, says, name] of [
