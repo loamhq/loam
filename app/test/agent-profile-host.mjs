@@ -5,7 +5,10 @@ import path from 'node:path'
 export async function profileHost({ appOverrides = {} } = {}) {
   const app = await oneProductFixture({}, appOverrides), writes = [], voices = {}
   const json = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
-  const plugins = await shippedPlugins('public'), plugin = plugins.find(p => p.id === 'read-aloud')
+  // Read aloud left the shipped plugins for the Market (2026-11-19); a stand-in
+  // with its per-agent voice keeps the profile's plugin rows under test.
+  const plugins = await shippedPlugins('public')
+  const plugin = plugins.find(p => p.id === 'read-aloud') ?? { id:'read-aloud', name:'Read aloud', agent_settings:[{ id:'voice', label:'Voice', default:'Charon', choices:['Charon','Kore','Puck'].map(id => ({ id, name:id })) }] }
   plugin.on = true
   app.routes['GET /v1/files/read'] = (req, res) => json(res, { text: '# Soul\n\nMake space for thoughtful work. Keep the next step clear.' })
   app.routes['GET /v1/plugins'] = (req,res) => json(res,{plugins})
@@ -29,7 +32,7 @@ export async function profileHost({ appOverrides = {} } = {}) {
     plugins:[{id:'read-aloud',name:'Read aloud',on:true,fields:plugin.agent_settings,values:{voice:'Charon'}},{id:'off',name:'Hidden plugin',on:false,fields:plugin.agent_settings,values:{voice:'Kore'}}],
   }]))
   const engineers = {engineers:[{project:'Notebook',platform:false,own:null,effective:{provider:'codex',model:'code-fast',effort:'high'},providers:['claude-code','codex'],deploy_on_land:false,instructions:{root:null,note:'In the project repository; not reachable from Files.'}},
-    {project:'Loam',platform:true,own:null,effective:{provider:'claude-code',model:'fable',effort:null},providers:['claude-code'],deploy_on_land:null,instructions:{root:'system',path:'Engineer/Platform project.md'}}],default:{own:null,effective:{provider:'codex',model:'code-fast',effort:'high'},providers:['claude-code','codex'],note:'Every project engineer without its own setting.'},applies:'From the next job; a running job is unchanged.'}
+    {project:'Loam',platform:true,own:null,effective:{provider:'claude-code',model:'fable',effort:null},providers:['claude-code','codex'],deploy_on_land:null,instructions:{root:'system',path:'Engineer/Platform project.md'}}],default:{own:null,effective:{provider:'codex',model:'code-fast',effort:'high'},providers:['claude-code','codex'],note:'Every project engineer without its own setting.'},applies:'From the next job; a running job is unchanged.'}
   const reviewer = {id:'reviewer',name:'Nightly reviewer',schedule:'daily at 04:20 PT',plain:'Every day at 4:20 AM',next_fire:'2026-11-14T12:20:00Z',last_fire:'2026-11-13T12:20:00Z',provider:'claude-code',providers:['claude-code'],model:null,effort:null,effective:{provider:'claude-code',model:'fable',effort:null},instructions:{root:'system',path:'Reviewer/CLAUDE.md'},applies:'From the next run.'}
   const tiers = ['quick', 'standard', 'hard']
   const resolveTiers = row => { row.effective.tiers = Object.fromEntries(tiers.map(tier => [tier, { model: row.own?.tiers?.[tier] || row.effective.model, from: row.own?.tiers?.[tier] ? 'tier' : 'model' }])) }
@@ -41,6 +44,8 @@ export async function profileHost({ appOverrides = {} } = {}) {
     app.routes[`PATCH /v1/engineers/${id}`] = (req,res,url,raw) => {
       const b = JSON.parse(raw); writes.push({path:url.pathname,body:b})
       const row = id === 'default' ? engineers.default : engineers.engineers.find(r=>r.project===id)
+      // provider null: the engineer's own setting goes; Loam's is back on its built-in (the server's rule).
+      if (b.provider === null) { row.own = null; Object.assign(row.effective, row.platform ? { provider:'claude-code', model:'fable', effort:null } : { ...engineers.default.effective }); resolveTiers(row); return json(res,engineers) }
       if (['provider','model','effort'].some(key => key in b)) { row.own={...row.own,...b}; Object.assign(row.effective,b) }
       if (b.provider) {
         const provider = app.f.providers.find(p => p.id === b.provider)
