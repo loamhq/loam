@@ -11,6 +11,8 @@ The reviewer on another provider (Antigravity) is not compared with the
 newest Claude Code session on disk, which is from before the switch
 (2026-11-16: a "family mismatch" no run had); on Claude Code it still is.
 
+`--quiet` prints one line per finding saying what differs.
+
 Run: python3 tests/test_check_drift.py
 """
 
@@ -112,6 +114,18 @@ def main() -> int:
     check("an agent's own name still masks", not found, repr(found))
 
     lane_checks(cd)
+
+    # --quiet says what differs in one line, never a bare heading (2026-11-19).
+    diff = ("rendered from role.md @ aaa; the source is now @ bbb. Re-render.\n"
+            "--- live:x\n+++ generator\n@@ -24,2 +24,3 @@\n same\n+- **New line.**")
+    line = cd.one_line(diff)
+    check("--quiet: a moved source and its diff are one line",
+          line == "rendered from role.md @ aaa; the source is now @ bbb: +1/-0 "
+                  "line(s) against the generator from line 24, first +- **New line.**",
+          repr(line))
+    check("--quiet: a message alone is its first line",
+          cd.one_line("\nfirst\nsecond") == "first", cd.one_line("\nfirst\nsecond"))
+    check("--quiet: a long line is cut", len(cd.one_line("x" * 500)) == 240)
 
     print(f"\n{'OK' if not fails else f'{fails} FAILED'}")
     return 1 if fails else 0
