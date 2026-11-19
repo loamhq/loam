@@ -2536,3 +2536,40 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   (WebAuthn then works; a plain certificate error would refuse it).
   Authelia refuses `regulation.find_time` > `ban_time`, and an empty
   `users:` on reload (it keeps the old users).
+
+## 2026-11-19 — problems go to a persona; nothing of Loam's is posted
+
+- **The seam is `lib/loam_attention.py`** (`tell(fact, by=, key=, evidence=,
+  detail=)`, and `loam tell` for any command). A fact is a record under
+  `<state>/attention/`; the system persona (`system.persona` in the host
+  settings, Settings › Agents; the lead agent while awake by default) hears
+  every pending one in one fresh run of its drain, `bin/wake <ws> --results`
+  (lane `attention`), the same unit as a job's result for a run with no
+  thread. Addressed when heard, so changing the setting moves what waits.
+- **Once:** the key (default: first sentence with digits out, so a moving
+  count is one fact) is told once and counted after; told again only once
+  it has been quiet three days. Pick an explicit key when the words vary
+  otherwise (a job id, a month and band).
+- **Nothing writes on the board.** `loam_inbox.record_failure` is log-only (a
+  persona's own failed run reaches it by `lane_notice`); `record_fault` logs
+  and tells; `append_comms` is a shim that tells, kept for older plugins.
+- **Thread "Loam lines" are marks** (`ThreadEngine.mark`, `<threads
+  state>/marks.json`, `turn.mark`, `marks` on GET and the snapshot). Lines
+  recording someone's act (brought in, default, drafts, a persona's settings
+  change said in General) were left as records: a decision named in the job's
+  receipt, not made here.
+- **A test that runs unsealed now touches the box.** Calling a fault path
+  (lane-check, drift-watch, an account refusal) without `LOAM_ATTENTION_DIR`
+  writes into the real `<state>/attention/` and kicks the lead agent's drain.
+  `tests/run-all` seals it; a test run by hand must set it (each changed test
+  sets a scratch one). On 11-19 an unsealed run did this four times before
+  the tests were fixed; the kicks ran the old canonical `bin/wake` and did
+  nothing, and the records were removed.
+- **Proving it end to end without the lead agent:** a scratch install from
+  `tests/run-all`'s `fixture_config`, a scratch `probe` persona as its
+  system persona, a forced lane-check fault, and the real kick (it passes
+  `LOAM_CONFIG` to the unit), costs one small model call and touches nothing
+  of the box but `~/.claude/projects/<scratch slug>/`.
+- **`test_boundary_guard`'s "Write under agents/" fails when the suite runs
+  from a job worktree** (the guard roots are the canonical checkout); it
+  passes from a clean checkout of main, and landings are unaffected.
