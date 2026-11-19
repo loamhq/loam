@@ -86,6 +86,37 @@ def wait_idle(poll: float, max_wait: float | None, ceiling: float | None = None,
         sleep(poll)
 
 
+def upgrading_session_units():
+    """Older updaters call this executable after installing the new release."""
+    import loam_update as update
+    record = update.read_json("pending.json") or {}
+    old, target = record.get("from_commit"), record.get("to_commit")
+    if not old or not target or update.git("merge-base", "--is-ancestor", target, "HEAD",
+                                          check=False).returncode:
+        return False
+    entry = update.prefix() + "bin/session-services"
+    return update.show(old, entry) is None and update.show(target, entry) is not None
+
+
+def finish_upgrade():
+    from loam_session_services import Deferred, replace
+    import loam_live
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        state = loam_live.broker_live(timeout=2)
+        if state and state.get("api_pid"):
+            try:
+                print(replace("split"), flush=True)
+                return 0
+            except Deferred as exc:
+                print(f"session unit migration deferred after the combined restart: {exc}",
+                      file=sys.stderr)
+                return 1
+        time.sleep(.5)
+    print("the combined process did not become ready for the fenced migration", file=sys.stderr)
+    return 1
+
+
 def main(argv=None, *, wait=wait_idle, lock=None, restart=None,
          clock=time.monotonic) -> int:
     """``wait``, ``lock``, ``restart`` and ``clock`` are seams for the tests
@@ -120,7 +151,9 @@ def main(argv=None, *, wait=wait_idle, lock=None, restart=None,
         # again by now defers rather than waiting here.
         if args.when_idle and not wait(args.poll, UNDER_LOCK_READS * args.poll, 0):
             return DEFERRED
-        return restart()
+        migrate = args.when_idle and upgrading_session_units()
+        status = restart()
+        return finish_upgrade() if migrate and status == 0 else status
 
 
 if __name__ == "__main__":

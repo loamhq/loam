@@ -186,12 +186,20 @@ commits), plus the folders listed:
 | `agents` | `bin/provision`, once for each live agent, then `bin/provision --engineer` | `engineer-template/`, `engineer/install/` |
 | `providers` | `bin/provider-pin apply --no-restart` | |
 | `provider-memory` | `bin/provider-memory pin` | `lib/loam_pins.py` |
-| `broker` | `bin/session-broker` | `broker/`, `plugins/`, `lib/loam_pins.py` |
+| `broker` | `bin/session-broker`, `bin/session-host` | `broker/`, `plugins/`, `lib/loam_pins.py` |
 | `gateway` | `bin/plugin-gateway` | |
 | `deploy` | `sudo bin/gen-deploy` (the web front, the login, the walls: the inbound wall reaches an install that lacks it this way) | `deploy/` |
 | `app` | `sudo bin/deploy <app> up <commit>` | `app/`, `deploy/` |
 
-- **The broker** is restarted by `restart-broker --when-idle`. That waits
+- **The split session services** compare the running revision of each process
+  with the target, including the imports in both trees and its unit template.
+  An API change replaces the HTTP process while the provider keeps running.
+  A host change closes admission across both units, checks for starts, active
+  turns and pending provider work, then replaces the host. A busy install
+  defers. The old executable and unit are restored if the replacement fails
+  its process identity and health check. Rollback to a combined release
+  drains the split services under the same fence before moving the checkout.
+- **A combined broker** is restarted by `restart-broker --when-idle`. That waits
   until every session is idle and no thread turn is in flight; after half
   an hour (its ceiling) it defers instead of restarting, and the step fails
   as `deferred`: the apply is undone, and since the broker never restarted
