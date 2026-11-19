@@ -39,8 +39,9 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark']) {
   const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, timezoneId: 'America/Los_Angeles', reducedMotion: 'reduce', isMobile: width === 390, hasTouch: width === 390 })
   await context.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__meta = { threads, state, schedule };' }))
   await context.route('**/api/health', (route) => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
-  await context.route(/\/api\/speech(?:\/.*)?$/, (route) => {
-    assert.equal(new URL(route.request().url()).pathname, '/api/speech/lookup', 'no audio generation in this test')
+  await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+  await context.route(/\/x\/read-aloud\/speech(?:\/.*)?$/, (route) => {
+    assert.equal(new URL(route.request().url()).pathname, '/x/read-aloud/speech/lookup', 'no audio generation in this test')
     return route.fulfill({ json: { status: 'none' } })
   })
   const page = await context.newPage(); page.setDefaultTimeout(12000)

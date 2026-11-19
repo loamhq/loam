@@ -737,12 +737,6 @@ const server = http.createServer(async (req, res) => {
     })
   }
 
-  // The vault's terms dictation is biased towards, as the host sends them:
-  // the note already read by its rule. A made-up list; a real host reads its own.
-  if (p === '/v1/dictation-terms' && req.method === 'GET') {
-    return json(res, 200, { terms: ['Ada Lovelace', 'Grace Hopper', 'loam', 'broker'], source: 'Notes/Dictation terms.md' })
-  }
-
   // Shared keys (2026-11-18): Settings › Accounts. Made-up state, no value.
   const keysRoute = /^\/v1\/keys(?:\/([^/]+))?(?:\/(check|plugins)(?:\/([^/]+))?)?$/.exec(p)
   if (keysRoute) {

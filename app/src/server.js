@@ -9,7 +9,6 @@ import { shippedPlugins } from './shipped-plugins.js'
 // The browser never sees BROKER_TOKEN: every call it makes lands here, and the
 // token is added on the way out.
 
-import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,9 +19,7 @@ import { createContent } from './content.js'
 import { fileLink } from './file-links.js'
 import { createBroker, BrokerNotConfigured } from './broker.js'
 import { createStatic } from './static.js'
-import { createTranscriber, TRANSCRIBE_MAX_BYTES, tooBig } from './transcribe.js'
 import { createLog, requestId, loggedQuery } from './log.js'
-import { createSpeech } from './speech.js'
 import { appearanceBoot } from './appearance.js'
 import { loadThemes, marketThemeCSS, themeFontsCSS } from './themes.js'
 import { createBranchDrafter } from './thread-branch.js'
@@ -60,10 +57,8 @@ export function createApp({
   config = readConfig(),
   broker = createBroker(config),
   appMedia = null,
-  transcriber = createTranscriber(config, { getKey: brokerSecret(broker, 'dictation') }),
   publicDir = path.join(ROOT, 'public'),
   log = createLog({ level: config.logLevel }),
-  speech = createSpeech(config, { log, getKey: brokerSecret(broker, 'read-aloud') }),
   branchDraft = createBranchDrafter(config, { getKey: brokerSecret(broker, 'read-aloud') }),
 } = {}) {
   const serveStatic = createStatic(publicDir)
@@ -363,13 +358,12 @@ export function createApp({
       return await relayJson(res, method, target, body)
     }
 
-    // The broker's health, and beside it what this app can do of its own:
-    // `speech` is whether a reply can be read aloud here — false without the
-    // Gemini key, the encoder or somewhere to keep the audio, and the page
-    // then draws nothing for it.
+    // The broker's health, and beside it what this app adds of its own.
+    // Whether a reply can be read aloud is Read aloud's own server's answer
+    // (`/x/read-aloud/status`) since that plugin carries its server half.
     if (rest === '/health' && method === 'GET') {
-      const [health, spoken] = await Promise.all([broker.health(), speech.status()])
-      return sendJson(res, 200, { ...health, speech: spoken.available, ...(Object.keys(config.avatarColours ?? {}).length ? { avatar_colours: config.avatarColours } : {}) })
+      const health = await broker.health()
+      return sendJson(res, 200, { ...health, ...(Object.keys(config.avatarColours ?? {}).length ? { avatar_colours: config.avatarColours } : {}) })
     }
     // The numbers the page has to know before it does something the host would
     // refuse — the biggest file a chat will carry, the biggest image the model
@@ -378,13 +372,6 @@ export function createApp({
     // browser checks against and the cap the broker enforces cannot drift.
     if (rest === '/limits' && method === 'GET') {
       return await relayJson(res, 'GET', '/v1/limits')
-    }
-    // The names and terms dictation is biased towards, from the one note in
-    // the vault the Obsidian plugin reads too, read fresh by the host each
-    // time. A `404` — a host without the route yet, or no note — and an older
-    // host's `405` reach the page as they came; it reads either as no terms.
-    if (rest === '/dictation-terms' && method === 'GET') {
-      return await relayJson(res, 'GET', '/v1/dictation-terms')
     }
     // Agent lifecycle writes may wait behind the host's landing lock.
     const lifecycle = rest === '/agents/new' || rest === '/agents/drafts' || /^\/agents\/drafts\/[^/]+(?:\/confirm)?$/.test(rest) || /^\/agents\/[^/]+\/(archive|restore)$/.test(rest)
@@ -567,51 +554,6 @@ export function createApp({
     if (one && (method === 'GET' || method === 'DELETE')) {
       return await relayJson(res, method, `/v1/sessions/${encodeURIComponent(dec(one[1]))}`)
     }
-    // Dictation, recorded whole: the take's bytes in, the words out. This is
-    // the recording stays on the server, which reads this plugin's key from
-    // the broker. The browser never receives that value.
-    if (rest === '/transcribe' && method === 'POST') {
-      return await transcribe(req, res, 'transcribe')
-    }
-
-    // A reply read aloud, or a spoken brief of it. Like dictation, this is
-    // synthesized here, using the plugin key held by the broker. See
-    // `src/speech.js` for the pipeline and the README for the contract.
-    // Whether a take exists, with the same body as the POST, starting nothing:
-    // the page's glyph and menu say "ready" from this and not from a guess.
-    if ((rest === '/speech' || rest === '/speech/lookup') && method === 'POST') {
-      const raw = await readRaw(req, Math.max(config.speech.maxChars, config.speech.documentMaxChars) * 4 + MAX_BODY)
-      if (raw === null) {
-        return sendJson(res, 413, { error: `This is over the ${config.speech.maxChars.toLocaleString('en')} characters this app will read aloud at once.` })
-      }
-      const body = safeJson(raw.toString('utf8'))
-      if (!body || typeof body !== 'object' || Array.isArray(body)) {
-        return sendJson(res, 400, { error: 'The request was not a JSON object, so there is nothing to read aloud.' })
-      }
-      if (body.source !== 'document' && typeof body.agent === 'string') {
-        try {
-          const out = await broker.json('GET', `/v1/plugins/read-aloud/agents/${encodeURIComponent(body.agent)}`, undefined, { signal: AbortSignal.timeout(3000) })
-          const settings = out.status === 200 ? JSON.parse(out.body) : null
-          // No stored choice keeps the installation's configured voice/character.
-          if (settings?.on && typeof settings.stored?.voice === 'string') body.voice = settings.stored.voice
-        } catch { /* Older/offline hosts retain the configured speech voice. */ }
-      }
-      const out = rest === '/speech' ? await speech.request(body) : await speech.peek(body)
-      if (rest !== '/speech') res.setHeader('cache-control', 'no-store')
-      return sendJson(res, out.status, out.body)
-    }
-    const spoken = /^\/speech\/([^/]+)$/.exec(rest)
-    if (spoken && method === 'GET') {
-      const found = await speech.lookup(dec(spoken[1]))
-      if (!found) return sendJson(res, 404, { error: 'There is no audio by that id here: it has expired, or the app restarted while it was being made.' })
-      return sendJson(res, 200, found)
-    }
-    const audio = /^\/speech\/([^/]+)\/audio\.mp3$/.exec(rest)
-    if (audio && (method === 'GET' || method === 'HEAD')) {
-      const found = await speech.audio(dec(audio[1]))
-      if (!found) return sendJson(res, 404, { error: 'This audio has expired. Ask for it again.' })
-      return sendFileRange(req, res, found.file, found.size, 'audio/mpeg')
-    }
 
     // The retired System tree is no longer a browser capability. Shared
     // file routes continue to serve Vault and AI Spaces.
@@ -789,44 +731,6 @@ export function createApp({
     return sendJson(res, 404, { error: `no such route: ${method} /api${rest}` })
   }
 
-  // One take, in one of two bodies:
-  //
-  //   multipart/form-data  an `audio` file part and a `terms` field holding a
-  //                        JSON list — what the page sends since 2026-09-30,
-  //                        so a note's worth of terms fits where a header's
-  //                        6000 bytes held about 380
-  //   anything else        the audio itself, under the content type the
-  //                        recorder named, with the terms as URI-encoded JSON
-  //                        in `x-vocabulary` — what the Obsidian plugin sent,
-  //                        kept for one release after the page stopped
-  //
-  // `via` names the route on the take's log line.
-  async function transcribe(req, res, via) {
-    const form = /^multipart\/form-data/i.test(String(req.headers['content-type'] ?? ''))
-    let audio = await readRaw(req, form ? TRANSCRIBE_MAX_BYTES + TERMS_BODY_BYTES : TRANSCRIBE_MAX_BYTES)
-    let contentType = req.headers['content-type']
-    let vocabulary = vocabularyHeader(req.headers['x-vocabulary'])
-    let polish = 'off'
-    if (form && audio !== null) {
-      const take = await takeForm(audio, contentType)
-      if (!take) return sendJson(res, 400, { error: 'The recording did not arrive as a take: there was no audio part in it.' })
-      ;({ audio, contentType, vocabulary, polish } = take)
-    }
-    if (audio === null) {
-      log.warn({
-        event: 'transcribe', id: noteOf(res).id, via, bytes: Number(req.headers['content-length']) || null,
-        mime: req.headers['content-type'] ?? null, outcome: 'error', status: 413, error: tooBig(),
-      })
-      return sendJson(res, 413, { error: tooBig() })
-    }
-    const out = await transcriber.transcribe({ audio, contentType, vocabulary, polish })
-    // One line per take, for counting them: sizes, timings, counts and the
-    // outcome. Never the audio, never the words, never the terms themselves.
-    const report = { event: 'transcribe', id: noteOf(res).id, via, status: out.status, ...out.report }
-    if (report.outcome === 'error') log.warn(report)
-    else log.info(report)
-    return sendJson(res, out.status, out.body)
-  }
 
   // The broker's answer, whole: its status and its words. A 429 over the
   // session cap says what the cap is and what to do about it, and the page
@@ -971,45 +875,9 @@ export function createApp({
     upstream.stream.pipe(res, { end: false })
   }
 
-  server.on('close', () => speech.stop())
-  return { server, config, speech }
+  return { server, config }
 }
 
-// A file, whole or the one byte range asked for. A media element seeks with
-// `Range`, so this is what lets a long reply be scrubbed without fetching it
-// all first. Several ranges in one request are answered with the whole file,
-// which the standard allows; an unsatisfiable one is a 416.
-function sendFileRange(req, res, file, size, type) {
-  const headers = {
-    'content-type': type,
-    'accept-ranges': 'bytes',
-    'cache-control': 'private, max-age=3600',
-  }
-  let start = 0
-  let end = size - 1
-  let status = 200
-  const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? '').trim())
-  if (range && (range[1] !== '' || range[2] !== '')) {
-    if (range[1] === '') {
-      start = Math.max(0, size - Number(range[2]))
-    } else {
-      start = Number(range[1])
-      if (range[2] !== '') end = Math.min(end, Number(range[2]))
-    }
-    if (start > end || start >= size) {
-      res.writeHead(416, { ...headers, 'content-range': `bytes */${size}` })
-      return res.end()
-    }
-    status = 206
-    headers['content-range'] = `bytes ${start}-${end}/${size}`
-  }
-  headers['content-length'] = String(size === 0 ? 0 : end - start + 1)
-  res.writeHead(status, headers)
-  if (req.method === 'HEAD' || size === 0) return res.end()
-  const stream = fs.createReadStream(file, { start, end })
-  stream.on('error', () => res.destroy())
-  stream.pipe(res)
-}
 
 // Every request's one line: written when the response is done with — finished,
 // or cut off, which for an event stream is when the page went away — so `ms` is
@@ -1230,45 +1098,6 @@ function readRaw(req, limit = Infinity) {
   })
 }
 
-// The terms a take is biased towards, as the page sent them. Anything that
-// does not read as a list is no list: biasing is a help, never a refusal.
-function vocabularyHeader(value) {
-  if (!value) return []
-  try {
-    const parsed = JSON.parse(decodeURIComponent(String(value)))
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-// What a multipart take carries beyond its audio: the terms, a thousand of
-// at most eighty characters, as JSON, with the envelope's own lines.
-const TERMS_BODY_BYTES = 256 * 1024
-
-// A multipart take, read by the platform's own form parser: the audio part's
-// bytes and type, and the terms. `null` when there is no audio part. Terms that
-// do not read as a list are no list, as in the header.
-async function takeForm(body, contentType) {
-  let form
-  try {
-    form = await new Response(body, { headers: { 'content-type': contentType } }).formData()
-  } catch {
-    return null
-  }
-  const audio = form.get('audio')
-  if (!audio || typeof audio === 'string') return null
-  let vocabulary = []
-  try {
-    const parsed = JSON.parse(String(form.get('terms') ?? '[]'))
-    if (Array.isArray(parsed)) vocabulary = parsed
-  } catch {
-    /* biasing is a help, never a refusal */
-  }
-  // `polish`, the level the page asked for; absent, the take is not polished.
-  const polish = String(form.get('polish') ?? 'off')
-  return { audio: Buffer.from(await audio.arrayBuffer()), contentType: audio.type, vocabulary, polish }
-}
 
 function readBody(req, limit = MAX_BODY) {
   return new Promise((resolve, reject) => {
@@ -1308,10 +1137,7 @@ if (process.argv[1] && import.meta.url === `file://${path.resolve(process.argv[1
   for (const complaint of configComplaints(config)) {
     log.warn({ event: 'config', message: complaint })
   }
-  const { server, speech } = createApp({ config, log })
-  // Speech says at start whether it can run, and which model it will use.
-  Promise.all([speech.start(), speech.chooseModel()])
-    .catch((err) => log.error({ event: 'speech-config', message: String(err?.message ?? err) }))
+  const { server } = createApp({ config, log })
   server.listen(config.port, config.host, () => {
     log.info({ event: 'listening', host: config.host, port: config.port })
   })

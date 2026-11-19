@@ -25,6 +25,7 @@ import http from 'node:http'
 import { once } from 'node:events'
 
 import { fakeBroker, appAgainst, closing, until } from './harness.js'
+import { dictationApp } from './audio-servers.mjs'
 import { browser, find, all, text } from './browser.js'
 import { storage } from './browser.js'
 import { createPreferences } from '../../plugins/_listed/dictation/page/settings.js'
@@ -335,18 +336,6 @@ const WHOLE_NOTE = {
 }
 let termsNote = NOTE
 const routes = {
-  'GET /v1/dictation-terms': (req, res) => {
-    if (termsNote === null) {
-      res.writeHead(405, { 'content-type': 'application/json' })
-      return res.end(JSON.stringify({ error: 'no route' }))
-    }
-    if (typeof termsNote === 'string') {
-      res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-      return res.end(JSON.stringify({ error: termsNote }))
-    }
-    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-    res.end(JSON.stringify(termsNote))
-  },
   'GET /v1/agents': (req, res) => json(res, { agents: [{ id: 'juno', name: 'Juno', emoji: null }] }),
   'GET /v1/providers': (req, res) => json(res, { providers: [] }),
   'GET /v1/limits': (req, res) => json(res, { attachment_max_bytes: 10 * 1024 * 1024, attachment_types: [] }),
@@ -379,6 +368,27 @@ const routes = {
 }
 threadPage(routes, { agents: [{ id: RECORD.agent, name: 'Juno', emoji: null }], initial: [{ id: 'chat-1', title: RECORD.title, persona: RECORD.agent, text: 'MuseBot picked up the deploy. Yes, and Sable checked it. Everything is ready for the next step.' }], sent: posted })
 const broker = await fakeBroker(routes)
+
+// Dictation's own server answers the terms note at `/x/dictation/terms`
+// (1.1.0); here a stand-in does, from \`termsNote\`, counting each ask, while
+// \`/x/dictation/transcribe\` goes to the real plugin server further down.
+const termsAnswer = (req, res) => {
+    if (termsNote === null) {
+      res.writeHead(405, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ error: 'no route' }))
+    }
+    if (typeof termsNote === 'string') {
+      res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      return res.end(JSON.stringify({ error: termsNote }))
+    }
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(termsNote))
+  }
+const termsSeen = []
+const termsServer = http.createServer((req, res) => { termsSeen.push(req.url); termsAnswer(req, res) })
+termsServer.listen(0, '127.0.0.1')
+await once(termsServer, 'listening')
+const termsAsked = () => termsSeen.length
 
 // Gemini, answering from a queue this file fills. A polish request — the one
 // with a system instruction — is kept apart, in `polishes`, and answered from
@@ -418,8 +428,10 @@ const release = () => {
 }
 const words = (text) => [200, { status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text }] }] }]
 
-const app = await appAgainst(broker, { GEMINI_API_KEY: 'test-gemini-key', GEMINI_API_URL: `http://127.0.0.1:${gemini.address().port}` })
-const page = browser(app.url)
+const app = await appAgainst(broker, {})
+const dictation = await dictationApp({ GEMINI_API_KEY: 'test-gemini-key', GEMINI_API_URL: `http://127.0.0.1:${gemini.address().port}` })
+const page = browser(app.url, { plugin: (id, rest) => id !== 'dictation' ? null
+  : rest === 'terms' ? `http://127.0.0.1:${termsServer.address().port}/terms` : `${dictation.url}/${rest}` })
 
 // The browser's recorder, its microphone, its buzzer and its wake lock.
 const buzzes = []
@@ -573,9 +585,9 @@ globalThis.Audio = FakeAudio
 globalThis.localStorage.setItem('loam-ui.speech', JSON.stringify({ listenFrom: 10 }))
 const passFetch = globalThis.fetch
 globalThis.fetch = async (url, options) => {
-  if (url === '/api/health') return Response.json({ configured: true, ok: true, speech: true })
-  if (url === '/api/speech/lookup' || url === '/api/speech') {
-    return Response.json({ id: 'fixture-audio', status: 'ready', duration_s: 60, url: '/api/speech/fixture-audio/audio.mp3' })
+  if (url === '/x/read-aloud/status') return Response.json({ speech: true, reason: null })
+  if (url === '/x/read-aloud/speech/lookup' || url === '/x/read-aloud/speech') {
+    return Response.json({ id: 'fixture-audio', status: 'ready', duration_s: 60, url: '/x/read-aloud/speech/fixture-audio/audio.mp3' })
   }
   return passFetch(url, options)
 }
@@ -592,7 +604,8 @@ page.unwatch()
 test.after(async () => {
   Date.now = realNow
   page.stop()
-  await closing(broker, app)()
+  await closing(broker, app, dictation)()
+  await new Promise((resolve) => termsServer.close(resolve))
   gemini.closeAllConnections?.()
   await new Promise((resolve) => gemini.close(resolve))
   setImmediate(() => process.exit(process.exitCode ?? 0))
@@ -1441,13 +1454,13 @@ test('the Microphone card: nameless until allowed, then by name, and the choice 
   await closeSettings()
 })
 
-// Every request the page makes to `/api/transcribe`, as it made it: its
+// Every request the page makes to Dictation's `/x/dictation/transcribe`, as it made it: its
 // headers and its body, read back out of the form it sent.
 async function takesSent(run) {
   const realFetch = globalThis.fetch
   const sent = []
   globalThis.fetch = async (url, options = {}) => {
-    if (String(url).endsWith('/api/transcribe')) {
+    if (String(url).endsWith('/x/dictation/transcribe')) {
       const form = options.body instanceof FormData ? options.body : null
       sent.push({
         headers: { ...(options.headers ?? {}) },
@@ -1486,13 +1499,13 @@ const inputsIn = (node) => (node.nodeName === 'INPUT' || node.nodeName === 'TEXT
 
 test('a take sends the note’s terms in the body, first, with the chat’s own after them', async () => {
   termsNote = NOTE
-  const asked = broker.seen.filter((c) => c.path === '/v1/dictation-terms').length
+  const asked = termsAsked()
   let terms
   const sent = await takesSent(async () => {
     terms = await oneTake('Ada signed off.')
   })
   // The note was read afresh for this take.
-  assert.equal(broker.seen.filter((c) => c.path === '/v1/dictation-terms').length, asked + 1)
+  assert.equal(termsAsked(), asked + 1)
   // In the body, as a form: the audio, and the terms beside it. No header.
   assert.equal(sent.length, 1)
   assert.equal(sent[0].headers['x-vocabulary'], undefined, 'the terms went in the header')
@@ -1539,7 +1552,7 @@ test('with no note the take goes ahead with none of its terms, and the quiet lin
 
   // A note that cannot be read at all is the same: the take is not held for it.
   const realFetch = globalThis.fetch
-  const offline = (url, options) => (String(url).endsWith('/api/dictation-terms') ? Promise.reject(new TypeError('Failed to fetch')) : realFetch(url, options))
+  const offline = (url, options) => (String(url).endsWith('/x/dictation/terms') ? Promise.reject(new TypeError('Failed to fetch')) : realFetch(url, options))
   globalThis.fetch = offline
   try {
     const unreached = await oneTake('Offline note.')
@@ -1569,7 +1582,7 @@ test('the Names and terms card: the note’s path, how many terms, when they wer
   // the host has it before the page has the answer, and until then the card
   // still carries the `Failed to fetch` the test above left on it, which under
   // load was still there when the assertions below read it.
-  const asked = () => broker.seen.filter((c) => c.path === '/v1/dictation-terms').length
+  const asked = () => termsAsked()
   let before = asked()
   await openDictation()
   const terms = () => card('Names and terms')

@@ -330,14 +330,12 @@ def origins_env() -> dict:
 
 def app_env() -> dict:
     """The install's own values for the app (`[app]` in /etc/loam/loam.toml):
-    which voice each of its agents reads aloud in, and the avatar colours it
-    overrides. They name the install's agents, so they are config and never
-    the checkout's. Not secrets. Without the table the compose file's
-    defaults hold (Iris's voice; no colour overridden)."""
+    the avatar colours it overrides. They name the install's agents, so they
+    are config and never the checkout's. Not secrets. Without the table no
+    colour is overridden. (`app.speech_voices` was the app's read-aloud
+    voices until 0.2.12; Read aloud's server reads its own `voices` setting,
+    seeded once from it by lib/loam_to_market.py.)"""
     env = {}
-    voices = lc.get("app.speech_voices")
-    if isinstance(voices, str) and voices.strip():
-        env["LOAM_SPEECH_VOICES"] = voices.strip()
     colours = lc.get("app.avatar_colours")
     if isinstance(colours, dict):
         env["LOAM_AVATAR_COLOURS"] = json.dumps(colours, separators=(",", ":"))
@@ -788,13 +786,6 @@ def service_env(app: dep.App) -> dict:
         "NODE_ENV": "production",
         "APP_HOST": dep.SERVICE_HOST,
         "APP_PORT": str(app.port),
-        # Read aloud: each agent's voice, the install's (`app.speech_voices`),
-        # else the starter agent's; and the measured pace of the one voice
-        # measured (Aoede, 147 words/minute, 2026-10-13: a voice not listed
-        # uses the app's 150).
-        "SPEECH_VOICES": own.get("LOAM_SPEECH_VOICES", "iris=Aoede:warm, natural and unhurried"),
-        "SPEECH_PACES": "Aoede=147",
-        "SPEECH_DIR": str(state / "speech"),
         # Avatar colours the install overrides (`[app.avatar_colours]`).
         "AVATAR_COLOURS": own.get("LOAM_AVATAR_COLOURS", ""),
         # Files: the vault's and the commons' web origins, and this app's

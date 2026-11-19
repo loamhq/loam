@@ -285,21 +285,20 @@ deploy.origins_env = lambda: {
     "LOAM_DOMAIN": "example.com", "LOAM_VAULT_ORIGIN": "https://vault.example.com",
     "LOAM_FILES_ORIGIN": "https://files.example.com",
     "LOAM_PREVIEW_BASE": "http://preview.internal:8935", "LOAM_PREVIEW_ADDR": "172.31.0.1"}
-deploy.app_env = lambda: {"LOAM_SPEECH_VOICES": 'sam=Aoede:warm, "quoted"',
-                          "LOAM_AVATAR_COLOURS": '{"sam":"c54"}'}
+deploy.app_env = lambda: {"LOAM_AVATAR_COLOURS": '{"sam":"c54"}'}
 deploy.broker_env = lambda: {"BROKER_URL": "http://172.31.0.1:8932", "BROKER_TOKEN": "t0k"}
 deploy.app_secrets = lambda a: {"GEMINI_API_KEY": "k3y"}
 env = deploy.service_env(app)
-compose_names = {"APP_PORT", "BROKER_URL", "BROKER_TOKEN", "GEMINI_API_KEY", "SPEECH_VOICES",
-                 "SPEECH_PACES", "AVATAR_COLOURS", "FILES_VAULT_URLS", "FILES_WEB_URLS",
+compose_names = {"APP_PORT", "BROKER_URL", "BROKER_TOKEN", "GEMINI_API_KEY",
+                 "AVATAR_COLOURS", "FILES_VAULT_URLS", "FILES_WEB_URLS",
                  "FILES_CONTENT_ORIGIN", "APPS_DOMAIN", "APPS_PREVIEW_BASE",
                  "APPS_PREVIEW_ADDR", "APP_PREVIEW_CHROME", "NODE_ENV"}
 check("every name the compose file handed the container is handed to the unit",
       sorted(compose_names - set(env)), [])
 check("...with the same values it had",
-      (env["APP_PORT"], env["FILES_VAULT_URLS"], env["FILES_CONTENT_ORIGIN"], env["SPEECH_PACES"],
+      (env["APP_PORT"], env["FILES_VAULT_URLS"], env["FILES_CONTENT_ORIGIN"],
        env["FILES_WEB_URLS"], env["APP_PREVIEW_CHROME"]),
-      ("8081", "https://vault.example.com/", "https://loam-ui-content.example.com", "Aoede=147",
+      ("8081", "https://vault.example.com/", "https://loam-ui-content.example.com",
        '[{"root":"spaces","path":"commons/www","url":"https://files.example.com"}]',
        "chromium-headless-shell"))
 check("...and the install's own vault folders and zone (a fresh install said 00_INBOX)",
@@ -308,9 +307,10 @@ check("...and the install's own vault folders and zone (a fresh install said 00_
       (lc.vault_folder("inbox"), lc.vault_folder("boards"), lc.vault_folder("general_board"),
        lc.vault_folder("attachments"), lc.TIMEZONE))
 check("...and what the host adds: loopback, its state directory, the browser's OOM score",
-      (env["APP_HOST"], env["SPEECH_DIR"], env["APP_MEDIA_DIR"], env["APP_PREVIEW_OOM_SCORE_ADJ"]),
-      ("127.0.0.1", "/var/lib/loam-app/loam-ui/speech", "/var/lib/loam-app/loam-ui/app-media",
-       str(lc.AGENT_OOM_SCORE_ADJ)))
+      (env["APP_HOST"], env["APP_MEDIA_DIR"], env["APP_PREVIEW_OOM_SCORE_ADJ"]),
+      ("127.0.0.1", "/var/lib/loam-app/loam-ui/app-media", str(lc.AGENT_OOM_SCORE_ADJ)))
+check("...and nothing of Read aloud's: its server carries its own (0.2.12)",
+      sorted(n for n in env if n.startswith("SPEECH_")), [])
 text = deploy.env_file_text({"A": 'sam=Aoede:warm, "quoted"', "B": '{"x":"y"}', "C": "a\\b\nc"})
 check("an EnvironmentFile line keeps quotes, spaces, JSON and backslashes whole",
       text.splitlines()[1:], ['A="sam=Aoede:warm, \\"quoted\\""', 'B="{\\"x\\":\\"y\\"}"',

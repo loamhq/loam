@@ -76,15 +76,14 @@ try:
     env = json.loads(got)
 except ValueError:
     env = {}
-check("[app] reaches the compose environment",
-      env == {"LOAM_SPEECH_VOICES": "a=Aoede:warm;b=Charon:calm",
-              "LOAM_AVATAR_COLOURS": '{"b":"c54"}'}, got)
+check("[app] reaches the compose environment: the colours, and no voices (Read aloud's own since 0.2.12)",
+      env == {"LOAM_AVATAR_COLOURS": '{"b":"c54"}'}, got)
 got = child("", LOAD_DEPLOY)
 check("without [app], nothing is passed", got == "{}", got)
 source = (ROOT / "bin" / "deploy").read_text(encoding="utf-8")
 body = source[source.index("def service_env("):source.index("def env_file_text(")]
-check("the app's environment reads the voices, generic by default",
-      '"SPEECH_VOICES": own.get("LOAM_SPEECH_VOICES", "iris=Aoede:' in body)
+check("the app's environment hands it no voices",
+      "SPEECH_VOICES" not in body)
 check("...and the colours, none by default",
       '"AVATAR_COLOURS": own.get("LOAM_AVATAR_COLOURS", "")' in body)
 

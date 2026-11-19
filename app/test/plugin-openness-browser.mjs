@@ -34,8 +34,9 @@ for (const width of [390, 1440]) for (const mode of ['light', 'dark']) {
   })
   await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__open={pluginLoader,registry,coreScope,state,page,threads,goSettings,closeSheet,goProfile,schedule};' }))
   await context.route('**/api/health', route => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
-  await context.route('**/api/speech/lookup', route => route.fulfill({ json: { status: 'none' } }))
-  await context.route('**/api/speech', route => route.fulfill({ status: 202, json: { id: 'a'.repeat(32), status: 'ready', duration_s: 90, url: '/api/speech/fixture/audio.mp3' } }))
+  await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+  await context.route('**/x/read-aloud/speech/lookup', route => route.fulfill({ json: { status: 'none' } }))
+  await context.route('**/x/read-aloud/speech', route => route.fulfill({ status: 202, json: { id: 'a'.repeat(32), status: 'ready', duration_s: 90, url: '/x/read-aloud/speech/fixture/audio.mp3' } }))
   await context.addInitScript(() => {
     globalThis.__audios = []
     globalThis.Audio = class extends EventTarget {
@@ -46,7 +47,7 @@ for (const width of [390, 1440]) for (const mode of ['light', 'dark']) {
       removeAttribute() {}
     }
   })
-  await context.route('**/api/transcribe', route => route.fulfill({ json: { text: 'The dictated words.', polish: { ran: true } } }))
+  await context.route('**/x/dictation/transcribe', route => route.fulfill({ json: { text: 'The dictated words.', polish: { ran: true } } }))
   const capture = async name => {
     await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(120)
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `${label}/${name} page overflow`)
