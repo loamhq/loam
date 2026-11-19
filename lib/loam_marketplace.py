@@ -2,8 +2,7 @@
 
 Added 2026-11-17. Decided 2026-11-13: one public GitHub repository holds a
 list file; builders host their own work and ask by pull request to be listed;
-a maintainer reviews each by hand; Settings › Market (Settings › Plugins
-until 2026-11-18) reads the list and
+Settings › Market (Settings › Plugins until 2026-11-18) reads the list and
 installs from it through the same two calls as any link
 (lib/loam_plugins.install); installing from any link still works.
 
@@ -33,16 +32,19 @@ request when they press Propose. Nothing is sent from the box.
 **A listing's own page** (``details``, 2026-11-18, Settings › Market): what
 the plugin at the listing's link says of itself, read the way an install's
 first call reads it (fetched at its tag, PLUGIN.md read, nothing written):
-its declaration in full, its version, author and guide, and for a theme its
-token CSS and options, so the Market can draw its swatch and let the owner
-try it before getting it. Its icon, its cover (the listing's ``image``, else
-a theme's own cover) and its theme.css are kept in this process for
-``file``. Kept ``DETAILS_TTL`` seconds per link: a listing names a tag, so
+its declaration in full, its version, author and guide, its README, and for
+a theme its token CSS and options, so the Market can draw its swatch and let
+the owner try it before getting it. Its icon, its cover (the listing's
+``cover``, else a theme's own ``image``), the README's pictures and its
+theme.css are kept in this process for ``file``. Kept ``DETAILS_TTL`` seconds per link: a listing names a tag, so
 what it holds does not change under a reader.
 
-**Two optional fields** (2026-11-18): ``featured: true`` makes a listing
-the Market's lead story; ``image`` is a picture inside the plugin's folder
-(the same rule as a theme's cover) drawn as that story's cover.
+**Optional fields** (2026-11-18): ``featured: true`` makes a listing the
+Market's lead story; ``cover`` and ``cover_dark`` are its pictures (in the
+plugin's folder, or an https address; ``image`` is ``cover``'s older name);
+``readme`` names the README in the folder (README.md when absent); and
+``author`` may carry the creator's links. See "The creator, the cover and the
+README" below.
 
 **Finding things, for an agent** (``search``, 2026-11-18): the listings
 that answer plain words, ranked by the Market page's own search (run in
@@ -118,7 +120,7 @@ def check_entry(entry) -> tuple[dict | None, str | None]:
         return None, f"`id` {pid!r} is not a plugin id (lower case, digits, dashes)"
     out = {"id": pid}
     for field, required in (("name", True), ("author", True), ("description", False)):
-        value = entry.get(field)
+        value = author_name(entry) if field == "author" else entry.get(field)
         if value is None and not required:
             continue
         if not isinstance(value, str) or not value.strip():
@@ -149,10 +151,183 @@ def check_entry(entry) -> tuple[dict | None, str | None]:
     # that is not one is left out, never the listing.
     if entry.get("featured") is True:
         out["featured"] = True
-    image = entry.get("image")
-    if isinstance(image, str) and loam_plugins.IMAGE.match(image) and len(image) < 200:
-        out["image"] = image
+    # The creator (2026-11-18): a name, and the links they choose to show.
+    out["creator"] = creator_of(entry, out["author"])
+    # The cover (2026-11-18): `cover` and `cover_dark`, a picture in the
+    # plugin's folder at its tag or an https address; `image` is the older
+    # name for `cover`, still read.
+    for field, source in (("cover", entry.get("cover", entry.get("image"))),
+                          ("cover_dark", entry.get("cover_dark"))):
+        value = cover_value(source)
+        if value:
+            out[field] = value
+            out[f"{field}_url"] = public_url(out, value)
+    readme = entry.get("readme")
+    if isinstance(readme, str) and is_readme_path(readme):
+        out["readme"] = readme
     return out, None
+
+
+# ---------------------------------------------------------------------------
+# The creator, the cover and the README (2026-11-18)
+# ---------------------------------------------------------------------------
+#
+# The owner, 2026-11-18: "Plugins should be able to have their repo readme
+# displayed on their page and be able to have a beautiful cover photo with
+# it. They should also have the creator ... The creator should also be able
+# to attach their personal links, like social media, patreon, personal
+# website, etc. optionally."
+#
+# **A listing's `author`** is a name, or ``{"name", "links": [{"label",
+# "url"}]}``. The marketplace's build.py writes list.json with ``author`` as
+# the name alone and the whole as ``creator``, so a Loam from before this
+# reads the name and every listing stays on its list; this one reads
+# ``creator`` first. Each link's kind (GitHub, Patreon, email, ...) is read
+# from its address here, once, so the page and an agent's tool agree.
+
+LINKS_MAX = 8
+LABEL_MAX = 40
+URL_MAX = 300
+
+# A link's kind, by its host (or a host under it). Order matters only where
+# hosts could overlap; none do.
+LINK_HOSTS = (
+    ("github", ("github.com",)),
+    ("gitlab", ("gitlab.com",)),
+    ("codeberg", ("codeberg.org",)),
+    ("x", ("x.com", "twitter.com")),
+    ("bluesky", ("bsky.app", "bsky.social")),
+    ("instagram", ("instagram.com",)),
+    ("threads", ("threads.net", "threads.com")),
+    ("youtube", ("youtube.com", "youtu.be")),
+    ("tiktok", ("tiktok.com",)),
+    ("twitch", ("twitch.tv",)),
+    ("linkedin", ("linkedin.com",)),
+    ("patreon", ("patreon.com",)),
+    ("kofi", ("ko-fi.com",)),
+    ("buymeacoffee", ("buymeacoffee.com",)),
+    ("substack", ("substack.com",)),
+    ("discord", ("discord.gg", "discord.com")),
+    ("mastodon", ("mastodon.social", "mastodon.online", "mastodon.world", "mstdn.social",
+                  "mas.to", "fosstodon.org", "hachyderm.io", "infosec.exchange",
+                  "techhub.social", "universeodon.com", "social.coop", "mastodon.art",
+                  "kolektiva.social", "toot.community", "indieweb.social")),
+)
+LINK_LABEL = {
+    "github": "GitHub", "gitlab": "GitLab", "codeberg": "Codeberg", "x": "X",
+    "bluesky": "Bluesky", "instagram": "Instagram", "threads": "Threads", "youtube": "YouTube",
+    "tiktok": "TikTok", "twitch": "Twitch", "linkedin": "LinkedIn", "patreon": "Patreon",
+    "kofi": "Ko-fi", "buymeacoffee": "Buy Me a Coffee", "substack": "Substack",
+    "discord": "Discord", "mastodon": "Mastodon", "email": "Email", "website": "Website",
+}
+LINK_KINDS = tuple(LINK_LABEL)
+# Any other host whose path is just /@name is a Mastodon (or another
+# fediverse) profile: the form every instance uses.
+FEDIVERSE_PATH = re.compile(r"^/@[A-Za-z0-9_.]+(?:@[A-Za-z0-9.-]+)?/?$")
+
+
+def link_kind(url: str) -> str:
+    """The kind of a creator's link, read from its address."""
+    if url.lower().startswith("mailto:"):
+        return "email"
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.hostname or "").lower()
+    for prefix in ("www.", "m.", "mobile."):
+        if host.startswith(prefix):
+            host = host[len(prefix):]
+    for kind, hosts in LINK_HOSTS:
+        if any(host == h or host.endswith("." + h) for h in hosts):
+            return kind
+    if FEDIVERSE_PATH.match(parts.path or ""):
+        return "mastodon"
+    return "website"
+
+
+def check_link(raw) -> dict | None:
+    """One ``{label, url}`` made safe to draw, with its kind, or None."""
+    if isinstance(raw, str):
+        raw = {"url": raw}
+    if not isinstance(raw, dict):
+        return None
+    url = raw.get("url")
+    if not isinstance(url, str):
+        return None
+    url = url.strip()
+    if len(url) > URL_MAX or any(c.isspace() or ord(c) < 32 for c in url):
+        return None
+    if url.lower().startswith("mailto:"):
+        if not re.match(r"^mailto:[^@/?#]+@[^@/?#]+\.[^@/?#]+$", url, re.I):
+            return None
+    elif not url.startswith("https://") or not urllib.parse.urlsplit(url).hostname:
+        return None
+    kind = link_kind(url)
+    label = raw.get("label")
+    label = " ".join(label.split()) if isinstance(label, str) else ""
+    if not label:
+        label = LINK_LABEL[kind] if kind != "website" else (
+            (urllib.parse.urlsplit(url).hostname or "").removeprefix("www.") or "Website")
+    return {"label": label[:LABEL_MAX], "url": url, "kind": kind}
+
+
+def creator_of(entry: dict, name: str) -> dict:
+    """``{"name", "links"}``: the listing's ``creator`` (as build.py writes
+    it), else an ``author`` object, else the name alone. A link that is not
+    one is left out, never the listing."""
+    source = entry.get("creator") if isinstance(entry.get("creator"), dict) else entry.get("author")
+    raw = source.get("links") if isinstance(source, dict) else None
+    links, seen = [], set()
+    for item in raw if isinstance(raw, list) else []:
+        link = check_link(item)
+        if link and link["url"] not in seen and len(links) < LINKS_MAX:
+            seen.add(link["url"])
+            links.append(link)
+    return {"name": name, "links": links}
+
+
+def author_name(entry: dict):
+    """The name a listing gives its maker, whichever form it is in."""
+    for field in ("creator", "author"):
+        value = entry.get(field)
+        if isinstance(value, dict):
+            value = value.get("name")
+        if isinstance(value, str) and value.strip():
+            return value
+    return entry.get("author")
+
+
+def cover_value(value) -> str | None:
+    """A cover as a listing may name it: a picture in the plugin's folder,
+    or an https address of one."""
+    import loam_plugins  # noqa: PLC0415
+    if not isinstance(value, str) or not value.strip() or len(value) > URL_MAX:
+        return None
+    value = value.strip()
+    if value.startswith("https://"):
+        parts = urllib.parse.urlsplit(value)
+        return value if parts.hostname and not any(c.isspace() for c in value) else None
+    return value if loam_plugins.IMAGE.match(value) else None
+
+
+def is_url(value: str) -> bool:
+    return value.startswith("https://")
+
+
+def public_url(entry: dict, value: str) -> str:
+    """Where anyone can see a cover: its address, or the file in the
+    plugin's folder at the listing's tag, on GitHub."""
+    if is_url(value):
+        return value
+    folder = "/".join(p for p in (entry["path"], value) if p)
+    return f"https://raw.githubusercontent.com/{entry['repo']}/{entry['ref']}/{folder}"
+
+
+README_PATH = re.compile(r"^(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.(?:md|markdown)$",
+                         re.I)
+
+
+def is_readme_path(value: str) -> bool:
+    return (len(value) < 200 and bool(README_PATH.match(value))
+            and ".." not in value.split("/"))
 
 
 def parse(text: str) -> tuple[list[dict], list[str]]:
@@ -291,6 +466,197 @@ def _picture(folder: Path, rel, pattern, limit: int):
     return (path.read_bytes(), ctype) if ctype and ctype.startswith("image/") else None
 
 
+def sniff_image(data: bytes) -> str | None:
+    """A picture's type from its first bytes, never from what a host says."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[4:12] in (b"ftypavif", b"ftypavis"):
+        return "image/avif"
+    return None
+
+
+def remote_allowed(url: str) -> bool:
+    """Whether a cover's address may be fetched: https, to a host whose
+    every address is on the public internet (never this box or its LAN)."""
+    import ipaddress  # noqa: PLC0415
+    import socket  # noqa: PLC0415
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            return False
+    return bool(infos)
+
+
+class _CheckedRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: PLR0913
+        if not remote_allowed(newurl):
+            raise urllib.error.URLError("a redirect to an address not allowed")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _remote_image(url: str):
+    """A cover at an https address, as (bytes, type), or None. Fetched by
+    the broker so the page never asks another host (and never tells it who
+    is looking)."""
+    if not remote_allowed(url):
+        return None
+    opener = urllib.request.build_opener(_CheckedRedirect)
+    req = urllib.request.Request(url, headers={"User-Agent": "loam-marketplace"})
+    try:
+        with opener.open(req, timeout=TIMEOUT) as resp:
+            data = resp.read(IMAGE_MAX + 1)
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        return None
+    ctype = sniff_image(data)
+    return (data, ctype) if ctype and len(data) <= IMAGE_MAX else None
+
+
+def _cover(folder: Path, value: str):
+    import loam_plugins  # noqa: PLC0415
+    if is_url(value):
+        return _remote_image(value)
+    return _picture(folder, value, loam_plugins.IMAGE, IMAGE_MAX)
+
+
+# The README (2026-11-18). The plugin folder's README.md at the listed tag,
+# or the file the listing's `readme` names in that folder. What the page is
+# handed is Markdown with no HTML in it: comments and tags are taken out
+# (an <img> or <a> becomes its Markdown form first, so a README written for
+# GitHub keeps its pictures and links), relative links point at the file on
+# GitHub at the tag, and a picture in the folder is kept for the page to
+# load from here. The page's renderer (app/public/markdown.js) builds
+# nodes, never markup, and follows only http, https and mailto.
+README_MAX = 100_000
+README_IMAGES = 16
+README_IMAGES_TOTAL = 12 * 1024 * 1024
+FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+MD_LINK = re.compile(r"(!?)\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\(\s*<?([^()\s<>]*(?:\([^()\s]*\)[^()\s<>]*)*)>?"
+                     r"((?:\s+(?:\"[^\"]*\"|'[^']*'))?)\s*\)")
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+HTML_IMG = re.compile(r"<img\b([^>]*)/?>", re.I)
+HTML_A = re.compile(r"<a\b([^>]*)>(.*?)</a\s*>", re.I | re.S)
+HTML_BR = re.compile(r"<br\s*/?>", re.I)
+HTML_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
+ATTR = re.compile(r"""([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""")
+
+
+def _attrs(text: str) -> dict:
+    return {m.group(1).lower(): next(g for g in m.groups()[1:] if g is not None)
+            for m in ATTR.finditer(text)}
+
+
+def _resolve(folder_path: str, dest: str) -> str | None:
+    """A relative destination in the README as a path from the repository's
+    root, or None when it climbs out of the repository."""
+    import posixpath  # noqa: PLC0415
+    dest = urllib.parse.unquote(dest.split("#", 1)[0].split("?", 1)[0])
+    base = "" if dest.startswith("/") else folder_path
+    joined = posixpath.normpath(posixpath.join("/", base, dest.lstrip("/")))
+    return joined.lstrip("/") if joined != "/" else ""
+
+
+def readme_markdown(text: str, entry: dict) -> tuple[str, list[str]]:
+    """The README as the page is handed it, and the folder's pictures it
+    shows (paths inside the plugin's folder), in order."""
+    import html  # noqa: PLC0415
+    import loam_plugins  # noqa: PLC0415
+    repo_, ref, folder_path = entry["repo"], entry["ref"], entry.get("path") or ""
+    blob = f"https://github.com/{repo_}/blob/{ref}/"
+    raw = f"https://raw.githubusercontent.com/{repo_}/{ref}/"
+    pictures: list[str] = []
+
+    def html_to_md(chunk: str) -> str:
+        chunk = HTML_COMMENT.sub("", chunk)
+
+        def img(m):
+            a = _attrs(m.group(1))
+            return f"![{a.get('alt', '').replace(']', '')}]({a['src']})" if a.get("src") else ""
+
+        def anchor(m):
+            a = _attrs(m.group(1))
+            inner = HTML_TAG.sub("", HTML_IMG.sub(img, m.group(2))).strip()
+            return f"[{inner}]({a['href']})" if a.get("href") and inner else inner
+
+        chunk = HTML_IMG.sub(img, HTML_A.sub(anchor, chunk))
+        chunk = HTML_BR.sub("\n", chunk)
+        return html.unescape(HTML_TAG.sub("", chunk))
+
+    def link(m):
+        bang, label, dest, title = m.groups()
+        if not dest or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", dest) or dest.startswith("#"):
+            return m.group(0)
+        path = _resolve(folder_path, dest)
+        if path is None:
+            return label if not bang else ""
+        inside = folder_path and (path == folder_path or path.startswith(folder_path + "/"))
+        rel = path[len(folder_path) + 1:] if folder_path and inside else (path if not folder_path else None)
+        if bang and rel is not None and loam_plugins.IMAGE.match(rel):
+            if rel not in pictures and len(pictures) < README_IMAGES:
+                pictures.append(rel)
+            return f"![{label}]({rel})"
+        return f"{bang}[{label}]({(raw if bang else blob) + urllib.parse.quote(path)})"
+
+    out, fence, block = [], None, []
+
+    def flush():
+        if block:
+            chunk = html_to_md("\n".join(block))
+            # Inline code is kept as written; links outside it are resolved.
+            pieces = re.split(r"(`+[^`]*`+)", chunk)
+            out.append("".join(p if p.startswith("`") else MD_LINK.sub(link, p) for p in pieces))
+            block.clear()
+
+    for line in text.replace("\r\n", "\n").split("\n"):
+        mark = FENCE.match(line)
+        if fence:
+            out.append(line)
+            if mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence):
+                fence = None
+            continue
+        if mark:
+            flush()
+            fence = mark.group(1)
+            out.append(line)
+            continue
+        block.append(line)
+    flush()
+    md = re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+    return md, pictures
+
+
+def _readme(folder: Path, entry: dict) -> tuple[str | None, dict]:
+    """The README's Markdown and the pictures it shows, as files to keep."""
+    rel = entry.get("readme") or "README.md"
+    path = folder / rel
+    try:
+        path.resolve().relative_to(folder.resolve())
+    except ValueError:
+        return None, {}
+    if not path.is_file() or path.is_symlink():
+        return None, {}
+    text = path.read_bytes()[:README_MAX].decode("utf-8", errors="replace")
+    md, pictures = readme_markdown(text, entry)
+    files, total = {}, 0
+    import loam_plugins  # noqa: PLC0415
+    for pic in pictures:
+        got = _picture(folder, pic, loam_plugins.IMAGE, IMAGE_MAX)
+        if got and total + len(got[0]) <= README_IMAGES_TOTAL:
+            files[f"readme/{pic}"] = got
+            total += len(got[0])
+    return md or None, files
+
+
 def _read_details(entry: dict) -> dict:
     import loam_plugins  # noqa: PLC0415
     src = {"repo": entry["repo"], "ref": entry["ref"], "path": entry["path"]}
@@ -311,10 +677,24 @@ def _read_details(entry: dict) -> dict:
         icon = _picture(folder, manifest.get("icon"), loam_plugins.ICON, ICON_MAX)
         if icon:
             files["icon"] = icon
-        image = _picture(folder, entry.get("image") or manifest.get("image"),
-                         loam_plugins.IMAGE, IMAGE_MAX)
-        if image:
-            files["image"] = image
+        # The cover: the listing's own, else the plugin's (a theme's
+        # `image`). The dark one goes with whichever was used.
+        own = bool(entry.get("cover"))
+        for key, listed, fallback in (("cover", entry.get("cover"), manifest.get("image")),
+                                      ("cover-dark", entry.get("cover_dark"),
+                                       None if own else manifest.get("image_dark"))):
+            got_cover = _cover(folder, listed) if listed else None
+            if not got_cover and fallback and not (key == "cover" and own):
+                got_cover = _picture(folder, fallback, loam_plugins.IMAGE, IMAGE_MAX)
+            if got_cover:
+                files[key] = got_cover
+        if "cover-dark" in files and "cover" not in files:
+            files["cover"] = files.pop("cover-dark")
+        positions = {k: manifest.get(f"image_position{s}")
+                     for k, s in (("cover_position", ""), ("cover_position_dark", "_dark"))
+                     if manifest.get(f"image_position{s}")}
+        readme, readme_files = _readme(folder, entry)
+        files.update(readme_files)
         theme = None
         if "theme" in manifest["kind"]:
             css = folder / "theme.css"
@@ -334,7 +714,11 @@ def _read_details(entry: dict) -> dict:
             "why": (f"Loam reads and lists {listed_only[0]} packages and installs none yet"
                     if listed_only else None),
             "source": {**got["source"], "url": entry["link"]},
-            "icon": "icon" in files, "image": "image" in files, "theme": theme,
+            "icon": "icon" in files, "cover": "cover" in files,
+            "cover_dark": "cover-dark" in files, **positions,
+            "readme": readme,
+            "readme_images": sorted(k[len("readme/"):] for k in readme_files),
+            "theme": theme,
         }
         return {"at": time.time(), "body": body, "files": files}
     finally:
@@ -364,10 +748,16 @@ def details(pid: str, refresh: bool = False) -> dict:
     return _loaded(pid, refresh)["body"]
 
 
+FILE_NAMES = ("icon", "cover", "cover-dark", "theme.css")
+
+
 def file(pid: str, name: str) -> tuple[bytes, str]:
-    """``GET /v1/marketplace/<id>/<icon|image|theme.css>``: one of the files
-    ``details`` kept, as (bytes, type)."""
-    if name not in ("icon", "image", "theme.css"):
+    """``GET /v1/marketplace/<id>/<icon|cover|cover-dark|theme.css>``, or
+    ``readme/<path>`` (a picture the README shows): one of the files
+    ``details`` kept, as (bytes, type). ``image`` is the older name of
+    ``cover``."""
+    name = "cover" if name == "image" else name
+    if name not in FILE_NAMES and not name.startswith("readme/"):
         raise NotListed(f"a listing has no file {name!r}")
     got = _loaded(pid)["files"].get(name)
     if not got:
@@ -484,7 +874,9 @@ def search(q: str = "", kind: str = "all", limit: int = SEARCH_LIMIT,
         listed_only = [k for k in e["kind"] if k in loam_plugins.LISTED_ONLY]
         results.append({
             "id": pid, "name": e["name"], "author": e["author"], "kind": e["kind"],
+            "creator": e.get("creator") or {"name": e["author"], "links": []},
             "description": e.get("description") or "",
+            **({"cover": e["cover_url"]} if e.get("cover_url") else {}),
             "installed": bool(e.get("installed")),
             "installable": not listed_only,
             **({"why_not": f"Loam lists {listed_only[0]} packages and installs none yet"}
