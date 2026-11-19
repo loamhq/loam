@@ -3705,7 +3705,8 @@ because a refresh token is single-use.
 **Nightly**: the first `bin/lane-check` of each date (run by `bin/drift-watch`
 at 01:40) calls
 `loam_github_app.nightly_warnings()` (`state/github/checked-on` holds the
-date) and writes one Important line in `comms.md` if the refresh token is
+date) and tells the system persona once (lib/loam_attention.py; until
+2026-11-19 an Important line in `comms.md`) if the refresh token is
 within 14 days of expiry or GitHub says the installation is gone. That check
 also refreshes a stale user token, which is what keeps the six-month clock
 rolling on a box nobody touched.
@@ -4317,7 +4318,7 @@ changed Iris's model to sonnet"); the owner's clicks say nothing. Every error is
 `{"error": "<a sentence>"}` with the status given. The page's relay does not
 pass these routes yet (`PAGE_RELAY_AHEAD` in `lib/loam_settings.py`); the
 relay should spell them `/^\/agents\/([^/]+)$/`, `rest === '/engineers'`,
-`/^\/engineers\/([^/]+)$/`, `rest === '/system/reviewer'` and
+`/^\/engineers\/([^/]+)$/`, `rest === '/system/reviewer'`, `rest === '/system/persona'` and
 `/^\/plugins\/([^/]+)\/agents(?:\/([^/]+))?$/`, passing `by` through.
 
 ### `GET /v1/agents/<agent>` — the profile
@@ -4517,6 +4518,19 @@ continuation that names no tier keeps the model its parent ran on
 `QUOTA_RE`) runs once more on the tier below, never past `quick` nor onto
 the same model; the receipt's `model` row says the tier, the model and any
 retry.
+
+### `GET /v1/system/persona` and `PATCH /v1/system/persona` (2026-11-19)
+
+Which agent hears when something in Loam needs attention
+(`lib/loam_attention.py`). `GET` answers `{persona, chosen, default}`:
+`persona` the agent that hears now, `chosen` the owner's choice or null,
+`default` the first agent (the install's lead agent while it is awake, else
+the first awake agent by name). `PATCH {"persona": id | null}` stores the
+choice in the host settings file under `system` (null, or the default's
+id, removes it) and answers as `GET`; an agent not awake is `400`. A choice
+whose agent is archived later falls back to the default. The setting is
+`system.persona` in `bin/settings`, conversation only; nothing is said in
+any thread when it changes, and the journal has the line.
 
 ### `GET /v1/system/reviewer` and `PATCH /v1/system/reviewer`
 
@@ -4765,10 +4779,11 @@ Update. Every rule is `lib/loam_update.py`. The page contract and the rules
 are `docs/update.md`.
 
 The delivery pass that carries owed receipts also carries the updater's
-notices (`<state>/update/notices/`). Each notice becomes one Loam line in
-General and a turn for General's default agent, whose input names the
-release notes to tell the owner about in its own words
-(`ThreadEngine.deliver_note`).
+notices (`<state>/update/notices/`). Since 2026-11-19 each notice is a fact
+for the system persona (`lib/loam_attention.py`; Settings › Agents), its
+`line` the fact and its `note` what it comes with, told once: nothing is
+posted in General and no thread is given a turn (`ThreadEngine.deliver_note`).
+That agent tells the owner in its own words, if it should.
 
 ## Running it
 
@@ -5152,7 +5167,7 @@ hours on; an idle one ended and resumed by id).
 | `POST /v1/threads {persona?, text?, title?}` | 201 and the row; titled by the first message unless named. With no `persona` the thread has no default and no members (2026-11-09) |
 | `DELETE /v1/threads/:id` | removes the record and its board from the vault and the thread's runtime state → `{deleted, thread, removed[paths]}`. The owner's explicit action only (the app confirms); `409` mid-turn; General `400` |
 | `POST /v1/threads/:id/attachments` | multipart `file` parts → `201 {attachments[{path, name, size, type}]}`; starts nothing |
-| `GET /v1/threads/:id?limit=&before=<msg id>` | `{thread, messages[{id, author, at, kind, text, did[{label}], segments?, attachments?, model?, engine?, late?, reply_to?}], has_more, turn, turns, pending_permissions, board{path, markdown}}`, newest page; `turns` every turn in flight, earliest first, `turn` the earliest (2026-11-10); a read without `before` marks the thread read, unless `?seen=0` (2026-11-10: a read that is not the owner looking -- a page's background refresh -- writes nothing). `before=<msg id>` is a position: the messages earlier **in the record** than that one, in record order (2026-11-10; a recovered late reply sits where it was recovered, so ids are not in record order); an id the record lacks falls back to the number cut. `thread` is the row, members with `background` and `working` (2026-11-10); `model` on a persona message is the id the engine ran it on (see "Model and provider on every reply") |
+| `GET /v1/threads/:id?limit=&before=<msg id>` | `{thread, messages[{id, author, at, kind, text, did[{label}], segments?, attachments?, model?, engine?, late?, reply_to?}], has_more, turn, turns, marks[{persona, text, at}], pending_permissions, board{path, markdown}}`, newest page; `marks` (2026-11-19) are the turn marks below, never in `messages`; `turns` every turn in flight, earliest first, `turn` the earliest (2026-11-10); a read without `before` marks the thread read, unless `?seen=0` (2026-11-10: a read that is not the owner looking -- a page's background refresh -- writes nothing). `before=<msg id>` is a position: the messages earlier **in the record** than that one, in record order (2026-11-10; a recovered late reply sits where it was recovered, so ids are not in record order); an id the record lacks falls back to the number cut. `thread` is the row, members with `background` and `working` (2026-11-10); `model` on a persona message is the id the engine ran it on (see "Model and provider on every reply") |
 | `PATCH /v1/threads/:id {title?, icon?, pinned?, archived?, default?: persona\|null, add?, remove?, engine{persona: engine}?, model{persona: model\|null}?, seen?}` | the row. A changed default is said in the thread as a system line ("the owner made Iris the default", or that nobody is). A `model` is checked against the member's engine (Claude Code's aliases and ids, Codex's `model/list`, Antigravity's `agy models`); an engine switch clears it. Archive moves nothing on disk. General can't be renamed, archived or unpinned (`400`) |
 | `POST /v1/threads/:id/messages {text, attachments?: [path], model?, reply_to?}` | mentions join and get turns, else the default, else nobody; `@all`/`@everyone` gives every member a turn (2026-11-10, below). `attachments` are paths the upload route stored; they go on the message and to the turns it starts. `model` is those turns' model over each member's own, checked against their engines. Nothing moves the default but a PATCH `reply_to` (2026-11-11) is the id of an earlier message in this thread that this one answers: `400` if it is not an id like `m12`, `404` if this thread has no such message, and nothing is written or started either way (see "Replying to a message" below) |
 | `PUT /v1/threads/:id/board {markdown}` (and `GET`) | the board, saved whole |
@@ -5160,7 +5175,7 @@ hours on; an idle one ended and resumed by id).
 | `GET /v1/threads/:id/steps[?message=<msg id>]` | `{thread, steps: [entry]}`: the full record, one entry per reply, for the whole thread or one message (`404` for a message with none) (2026-11-10) |
 | `GET /v1/threads/writer` | the record writer's counts since the broker started: `{since, replies, late_recovered, late_prompt, fanout, parallel, delivered_while_waiting, reply_to, carried, rotated, steps_written, steps_failed, last_failure}` (2026-11-10; `rotated` 2026-11-11: turns that started a fresh session because the old one passed the context threshold). `parallel`: turns started while another member's ran; `late_prompt`: replies the after-result watch posted as they finished; `fanout`: turns `@all` made beyond its message's own mentions |
 | `GET /v1/threads/imported[?session=<id>]` | classic chats imported as threads (2026-11-11, below): `{imported: {session id: thread id}}`, or for one session `{session, thread}` and `404` for one never imported. What a link or bookmark to a classic chat is sent through. Each imported thread's row also carries `imported_from` (the session id) and `source` (its transcript, vault-relative); both null on every other thread |
-| `GET /v1/threads/:id/events?after=<msg id>[&steps=full]` | SSE: `thread.snapshot{turn, turns, pending, members}`, `members{members, background, working}` (2026-11-10), `turn.started{persona, engine}`, `message.delta{persona, text, draft}`, `turn.step{persona, label, steps, after_result?}`, `message.done{message}` (with `message.steps` on `?steps=full`), `member.joined{persona, by}`, `board.changed{board_new}`, `thread.changed{summary}`, `turn.waiting{persona, text}`, `turn.finished{persona}`, and `broker.permission_request`/`broker.permission_resolved` with `persona` and `session_id`, answered on `POST /v1/sessions/<session_id>/permissions/<request_id>` as today |
+| `GET /v1/threads/:id/events?after=<msg id>[&steps=full]` | SSE: `thread.snapshot{turn, turns, marks, pending, members}`, `members{members, background, working}` (2026-11-10), `turn.started{persona, engine}`, `message.delta{persona, text, draft}`, `turn.step{persona, label, steps, after_result?}`, `message.done{message}` (with `message.steps` on `?steps=full`), `member.joined{persona, by}`, `board.changed{board_new}`, `thread.changed{summary}`, `turn.waiting{persona, text}`, `turn.mark{persona, text, at}` (2026-11-19), `turn.finished{persona}`, and `broker.permission_request`/`broker.permission_resolved` with `persona` and `session_id`, answered on `POST /v1/sessions/<session_id>/permissions/<request_id>` as today |
 
 The stream opens with `thread.snapshot`: `turns` is every turn in flight,
 earliest first, and `turn` the earliest (`{persona, engine}`, or null), and
@@ -5179,13 +5194,30 @@ went out (`Session.pending_events()`), which is where this reads from.
 ends it ten minutes after the turn instead of the hour a classic chat keeps,
 and only when it is not busy; the next turn resumes it by `session_id`. When
 the box is full even after `start_session` has ended an idle session (see
-"Admission by memory" above), the turn posts one system line in a person's
-words — "Cleo is waiting for a free seat: four others are mid-turn. I'll
-post as soon as one frees up." — publishes `turn.waiting` with the same
-`text`, keeps it on `turn.waiting` in `GET`'s `turn`, and retries every
-`CAP_RETRY_S` for `CAP_WAIT_S` (300 s). Then it answers, or fails with
-"Cleo couldn't get a seat: the box stayed full for five minutes (…). Tag
-@Cleo to try again." The broker's route-level text never reaches a thread.
+"Admission by memory" above), the turn publishes `turn.waiting` with a
+person's sentence — "Cleo is waiting for a free seat: four others are
+mid-turn. I'll post as soon as one frees up." — keeps it as `waiting` on its
+row in `GET`'s `turn`/`turns`, and retries every `CAP_RETRY_S` for
+`CAP_WAIT_S` (300 s); nothing is written in the record (2026-11-19). Then it
+answers, or ends with the mark "Cleo couldn't get a seat: the box stayed
+full for five minutes (…). Tag @Cleo to try again." The broker's route-level
+text never reaches a thread.
+
+**Turn marks (2026-11-19, batch B step 5).** The thread's record holds only
+what the owner and the agents wrote. What Loam knows about a turn that could
+not run or ended without a reply is a mark on that member's turn, not a
+message: `ThreadEngine.mark(thread, persona, text)` keeps it in
+`<threads state>/marks.json` (one per member; the thread's own, `persona:
+null`, for "Nobody to reach" and the agent-chain pause), streams
+`turn.mark{persona, text, at}`, and `GET` and `thread.snapshot` carry
+`marks`. A member's mark goes when its next turn starts (`turn.mark` with
+`text: null`); the thread's own when the owner next writes. The marks: a
+seat that never came, "X is archived, so it won't answer…", "X's turn
+failed: …", "X's turn ended: …", "X's turn ended without a reply", "Paused
+after N turns between agents…". Lines recording what someone did ("Sam
+brought in Ada", "Sam made Iris the default", "Sam ended Iris's turn", a
+draft made or revised) are still in the record. Old records are not
+rewritten.
 
 **Every turn is told the time.** The prompt's head carries "It is now
 Monday, 2026-11-09, 9:25 AM PST (America/Los_Angeles)", fresh or resumed,
@@ -5260,7 +5292,7 @@ more. A harness turn with steps and no words carries them to the next reply;
 when no words come, they go into the full record alone, as an entry with
 `"message": null, "unspoken": true, "after": "<the id it follows>"`. A turn
 that ends without its `result` -- `exit`, `closed`, the broker stopping --
-gets one quiet system line, `Ada's turn ended: the broker restarted`
+gets a turn mark (above; a system line until 2026-11-19), `Ada's turn ended: the broker restarted`
 (`…: its session exited`, `…: its session closed`; the time-based `…: it ran
 past 30 minutes` went 2026-11-10), and a turn that finished saying nothing at all gets `Ada's
 turn ended without a reply`. A turn queued while the broker is stopping
@@ -5530,8 +5562,8 @@ had been tagged: one turn each, all started at once like several mentions
 are (each member's turns run on its own queue since 2026-11-10), mentions in the same
 message first and never doubled (`@all @ada` is one turn for Ada). Members
 already in the thread get no "brought in" line, as with any mention. In a
-thread with no default and no members it starts nothing and writes one
-system line, `Nobody to reach: bring someone in first`. Logged
+thread with no default and no members it starts nothing and puts the
+thread's own mark, `Nobody to reach: bring someone in first`. Logged
 `threads: <thread>: @all from Sam, n turn(s) (ada, iris, …)` and counted
 as `fanout` (turns beyond the message's own mentions). **From a persona,
 `@all` is plain text**: a reply or a `bin/thread post` saying it starts no

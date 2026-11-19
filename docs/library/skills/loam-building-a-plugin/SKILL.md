@@ -50,6 +50,16 @@ through `contributes:`. The whole interface, field by field, is
 `docs/examples/plugins/echo/`, and a real one with keys, an agent tool and
 settings is Images, built into Loam at `plugins/images/`.
 
+**When it needs the owner to know something** (a check failed, a spend
+passed a mark, a credential is about to expire), a plugin never posts in a
+thread or on a board. It tells the agent the owner chose to hear when
+something in Loam needs attention: `loam tell "what happened" --by
+<plugin id> --evidence "<where to look>"` from any command, or
+`loam_attention.tell(...)` in Python. Say the fact, not what to do about
+it; the same fact is told once. That agent decides whether the owner hears
+of it. `docs/plugins.md`, "Telling an agent that something needs
+attention".
+
 **Where it goes.** The owner's plugins live in their own plugins folder
 (`paths.plugins` in `bin/loam-config show`), a git repository committed
 every 15 minutes, which updates never touch. A plugin there with the id of

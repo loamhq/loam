@@ -634,6 +634,45 @@ provider's key** and is not shown as a key of its own (`declaration` in
 `lib/loam_plugins.py`, since 0.2.12), so no listing can say both. The page
 draws no pasted-key form for a plugin that declares `keys:`.
 
+## Telling an agent that something needs attention (2026-11-19)
+
+A plugin never posts in a thread or on General's board; nothing of Loam's
+does (batch B, 2026-11-18: "If something is wrong, they should pass it to
+a persona that then decides what to do and how to communicate with me if
+necessary"). When a plugin has something the owner may need to know (a
+backup failing, a spend threshold passed, a credential about to expire, a
+resize it made), it tells **the agent that hears when something in Loam
+needs attention**: the one the owner chose in Settings › Agents
+(`system.persona`; the first agent by default). That agent hears it as the
+input of a run of its own and decides what to do, including whether the
+owner hears of it, in General, in its own words.
+
+From a shell, a timer's command or any language:
+
+```sh
+loam tell "the backup of the vault has failed since 09:10: no deploy key" \
+  --by my-plugin --evidence "Settings › Plugins › My plugin"
+```
+
+From Python, with Loam's `lib/` on the path (as every plugin's process
+has):
+
+```python
+import loam_attention
+loam_attention.tell("the backup has failed since 09:10: no deploy key",
+                    by="my-plugin", evidence="Settings › Plugins › My plugin")
+```
+
+Write the fact as a fact: what happened, when, where the evidence is. Not
+an instruction to the agent. Each prints or returns `told`, or `repeat`
+when the same fact was already told: the same `key` (default: the fact's
+first sentence with its numbers taken out, so "RAM at 91%" and "RAM at
+93%" are one fact) is told once, and again only after it has been quiet for
+three days. Give a `key` when the words of one fact change in other ways
+(`--key "spend:2026-11:80"`). `lib/loam_attention.py` is the reference;
+`loam_inbox.append_comms`, which plugins called before, still works and
+now does exactly this.
+
 ## The installed list: `installed.json`
 
 ```json

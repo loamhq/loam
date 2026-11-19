@@ -162,7 +162,8 @@ anything outside the two trees (the plugins' Yours layer, the keys in
 with its own `LOAM_CONFIG`, two private GitHub repositories, deploy keys
 added through the API in place of the three clicks. Connect, a read-only
 key refused, the first and the routine push arriving, the key deleted on
-GitHub and the failure reaching the General board at the second attempt,
+GitHub and the failure reaching the General board at the second attempt (since
+2026-11-19 it reaches the agent that hears of Loam's problems instead),
 the recovery line, a public repository refused, and both trees restored
 onto the second install, the vault byte for byte.
 

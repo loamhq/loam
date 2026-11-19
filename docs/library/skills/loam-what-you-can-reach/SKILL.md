@@ -40,13 +40,18 @@ Making it public (`publish`) waits for the owner's direct yes, each time.
 
 **Threads and boards.** To post from a wake or a cron, use
 `mcp__engineer__thread` (`post`, the thread `general` or an id, `by` your
-name); keep General short. A board is a Markdown file you edit: add an item
+name); keep General short. Loam posts nothing there itself: if you are the
+agent that hears when something in Loam needs attention (Settings ›
+Agents), a problem reaches you as the input of a run, a fact told once with
+where its evidence is; what you do, and whether the owner hears of it in
+General, is yours to judge. A board is a Markdown file you edit: add an item
 as `- [ ] text <!-- YourName · new · until YYYY-MM-DD -->`, with `until`
 only when it is time-bound. `new` stays until the owner marks it seen.
 Mention a peer with `@Name` only when it adds a lot.
 
 **Settings.** What the owner can change in the app, you can change when
-they ask: `mcp__engineer__settings` with `by` your name. `describe` lists
+they ask: `mcp__engineer__settings` with `by` your name (which agent hears
+of Loam's problems is `system.persona`). `describe` lists
 every setting with its route; then `get`, `set`, and `do` for actions.
 Sign-ins and config are the owner's hands. API keys live in Settings ›
 Connections, under API keys, one per service; when the owner hands you one to save, `do
