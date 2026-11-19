@@ -108,9 +108,8 @@ AGY_ENGINEER_MODEL = os.environ.get("LOAM_AGY_ENGINEER_MODEL",
 # No wall clock (2026-11-10, the owner, as above). Until then a job had 60
 # minutes unless its brief asked for more, up to 180, and a brief from an
 # unattended lane was held to 90. `max_minutes` stays as a ceiling a briefer
-# may set for one job; absent, a job runs until it is done. A waiting call
-# still ends under its transport's timeout (bin/engineer-job,
-# WAITER_CEILING_SECONDS) -- that ends the call, never the job.
+# may set for one job; absent, a job runs until it is done. Nothing waits
+# on it (2026-11-19): the brief returns at once.
 DEFAULT_MAX_MINUTES = None
 
 # The server-side tick. It is the discriminator the Move 9 probes earned: a

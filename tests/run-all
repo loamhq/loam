@@ -131,12 +131,11 @@ def main() -> int:
             os.environ["LOAM_THREADS_STATE"] = os.path.join(stores, "threads")
         if not os.environ.get("LOAM_VAULT"):
             os.environ["LOAM_VAULT"] = os.path.join(stores, "vault")
-    # The engineer's delivery records and the broker's quiet-route mark
-    # (2026-11-18): every test that starts a broker runs its delivery pass,
-    # which marks the route and delivers what it finds owed. Against the
-    # owner's state that made `route_live` true for a test's lifetime (the
-    # landing of job 20261118-213751-94e2c7f7 left such a mark) and could
-    # deliver, or drop as "thread gone", a real job's result.
+    # The engineer's delivery records (2026-11-18): every test that starts a
+    # broker runs its delivery pass, which delivers what it finds owed --
+    # against the owner's state, a real job's result, or drop it as "thread
+    # gone". A scratch directory also turns off the start of a real
+    # `loam-results-<agent>` unit (lib/loam_results.kicks_enabled).
     waiters = None
     if not os.environ.get("LOAM_WAITERS_DIR"):
         waiters = tempfile.mkdtemp(prefix="loam-test-waiters-")
