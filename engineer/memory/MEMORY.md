@@ -2020,3 +2020,14 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `memory-note.patch` in the job's folder and no continuation. A gate hold
   on only the note or a commit message lands the change as one commit
   without them (`without_memory`, a temporary index and `commit-tree`).
+- **A names check at release time protects only a private `main`.** If
+  every landing pushes `main` to a public remote, the public copy is cut on
+  every landing, and a check moved to the release tag would let every
+  landing between two releases go out unchecked. Read the remote's
+  visibility (`curl -s https://api.github.com/repos/<owner>/<repo>`,
+  `"private"`) before moving such a check.
+- **A load-only flake in the app's suite** was a test asserting on the
+  first drawing of a card the page redraws when its own answer arrives (one
+  app instance across a file's tests). Wait for what this test's answer
+  draws (`until(() => ...)`), never for the node alone. Reproduce with a
+  dozen busy loops beside `node --test <file>`.
