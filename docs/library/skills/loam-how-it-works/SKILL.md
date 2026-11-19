@@ -65,7 +65,11 @@ owner's to read and edit.
 An agent hands it a job as a brief, which returns at once; the engineer
 works in its own copy of the repository, and when it is done its receipt,
 with the evidence, comes back to that agent as its next input. Every
-install has one for Loam (project `Loam`). Each engineer, Loam's
+install has one for Loam (project `Loam`). Work on Loam's web app alone
+is a brief to `Loam` with `scope: "app"`, which any agent may send: the
+engineer then changes only the `app/` folder, without the server's admin
+rights, runs the app's tests, and a deploy restarts the app alone; work
+that also touches the server is a `Loam` brief with no scope. Each engineer, Loam's
 included, runs on the provider, model and tiers set for it in Settings ›
 Agents (Loam's is Claude Code until someone changes it), from its next
 job; a job already running keeps what it started on. Its role and what it owns are in
