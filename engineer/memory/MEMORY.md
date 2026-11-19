@@ -2212,3 +2212,38 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   the landing failed with FileNotFoundError, though every test passed in the
   job tree. It is now `docs/releases/signers`. Put a new file inside an
   existing top-level folder, or expect the first landing to fail.
+
+## 2026-11-19 — the daily reflection is an ordinary record (batch B step 4)
+
+- **`loam-wake-<agent>.service` is the reconciler's now**, rendered from
+  `crons/reflection.md` beside its timer (`loam_cron.reflection_service`).
+  The timer text was kept byte-identical on purpose: a changed timer is only
+  re-cut by daemon-reload, but an unchanged one is no risk at all to the
+  night's grid. The old provision service carried `[Install]
+  WantedBy=default.target`; it was never enabled (checked `is-enabled` on all
+  seven), so dropping it left no stray wants link.
+- **The record's body is the instruction.** `loam_cron.reflection_default()`
+  is Loam's text, rendered with `lc.OWNER_NAME`; a body that is empty or one
+  of `REFLECTION_PLACEHOLDERS` is told the default, and `bin/provision`
+  replaces a placeholder body (`loam_schedule.adopt_default`), so every
+  install moves on its next update. Unmapped agents still get
+  `_reflection.md` appended as their lane file (what loads is batch A's).
+- **A refused direct pause must not stop the wake.** `enabled_now` read the
+  workspace file, so a persona writing `enabled: false` (refused by the
+  reconciler) would still have kept bin/wake from running. The reflection's
+  switch and instruction are read from the accepted copy
+  (`loam_schedule.reflection_text`) when the workspace is the box's own.
+- **The owner's word through the settings route** is `thread` + `yes`
+  (an owner message in a thread the persona is in, < 1 h, from a
+  conversation, each taken once), reusing `loam_agents.check_yes`. It cannot
+  tell whether the message asked for this; the event names it
+  (`relayed_by`, `yes`).
+- **`wake_schedule` is gone from agent.json.** Its time is
+  `loam_schedule.wake_time(agent)`; `bin/provision <agent>` takes the time
+  only for a new agent (and checks it agrees if given). Live agent.json files
+  lose the key on their next provision.
+- **`test_boundary_guard.py`'s engineer cases fail in any job tree run by
+  hand under `tests/run-all`** (on untouched main too, once
+  `engineer/agent.json` is present: the sealed config's roots are not the
+  tree). A /tmp checkout without `engineer/agent.json` skips them, which
+  looks like a pass. Trust the landing's run for that file.
