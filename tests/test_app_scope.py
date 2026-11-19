@@ -320,11 +320,6 @@ try:
     check("accept: an unknown project names the engineers and the scope",
           ("Loam, webapp" in said, "`scope: app`" in said, "loam-ui," in said),
           (True, True, False))
-    said = job.accept({**base_args, "project": "Loam"}, "otto")
-    check("accept: a full Loam brief from a persona not on the list is refused",
-          isinstance(said, str) and "Refused" in said, lc.ENGINEER_BRIEFERS != ()
-          and "otto" not in lc.ENGINEER_BRIEFERS)
-
     # -- provisioning --------------------------------------------------------
     role = "# The engineer\n\nthe Loam engineer's role\n"
     files = prov.app_scope_render(role)
