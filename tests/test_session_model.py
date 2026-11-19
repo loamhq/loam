@@ -392,6 +392,20 @@ try:
     check("once: naming its own model",
           "claude-haiku-4-5-20251001" in reported[-1], True)
     (ld / "t.jsonl").unlink()
+
+    # A scheduled lane runs on agent.json's model (2026-11-19): a session on
+    # it is configured, not drift; on neither model it still is.
+    shutil.rmtree(rcp.MODEL_MEMORY, ignore_errors=True)
+    (ld / "u.jsonl").write_text(assistant("claude-opus-5-5", "2026-09-28T09:00:00Z") + "\n",
+                                encoding="utf-8")
+    (lane / "agent.json").write_text(json.dumps({"name": "lane", "model": "opus"}))
+    check("lane model: a session on agent.json's model is not drift",
+          rcp.model_problem(lane), None)
+    (lane / "agent.json").write_text(json.dumps({"name": "lane", "model": "haiku"}))
+    check("lane model: on neither model it still is",
+          bool(rcp.model_problem(lane)), True)
+    (lane / "agent.json").unlink()
+    (ld / "u.jsonl").unlink()
 finally:
     loam_session.SESSIONS_DIR = saved
     shutil.rmtree(root, ignore_errors=True)
