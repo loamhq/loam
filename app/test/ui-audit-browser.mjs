@@ -350,8 +350,9 @@ try {
       await context.route('**/api/health', (route) =>
         route.fulfill({ json: { configured: true, ok: true, speech: true } })
       )
-      await context.route('**/api/speech/lookup', (route) => route.fulfill({ json: { status: 'none' } }))
-      await context.route('**/api/speech', (route) =>
+      await context.route('**/x/read-aloud/status', (route) => route.fulfill({ json: { speech: true } }))
+      await context.route('**/x/read-aloud/speech/lookup', (route) => route.fulfill({ json: { status: 'none' } }))
+      await context.route('**/x/read-aloud/speech', (route) =>
         route.fulfill({ status: 503, json: { error: 'Audio is temporarily unavailable. Try again.' } })
       )
       await context.route('**/api/files/preview?**', (route) =>

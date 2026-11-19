@@ -78,9 +78,10 @@ try {
       await route.fulfill({ json: { ...body, plugins: body.plugins.map(plugin => plugin.switch === 'plugin' ? { ...plugin, on: true } : plugin) } })
     })
     await context.route('**/api/health', route => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
     let audioSerial = 0
-    await context.route(/\/api\/speech(?:\/.*)?$/, route => route.fulfill({ json: route.request().url().endsWith('/lookup') ? { status: 'none' }
-      : { id: String(++audioSerial).padStart(32, '0'), status: 'ready', duration_s: 90, url: '/api/speech/fixture/audio.mp3' } }))
+    await context.route(/\/x\/read-aloud\/speech(?:\/.*)?$/, route => route.fulfill({ json: route.request().url().endsWith('/lookup') ? { status: 'none' }
+      : { id: String(++audioSerial).padStart(32, '0'), status: 'ready', duration_s: 90, url: '/x/read-aloud/speech/fixture/audio.mp3' } }))
     await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__panels = { panels, threads, sidePanel, goFiles, goApps, schedule };' }))
     await context.route('https://garden.example.com/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><style>:root{color-scheme:light dark}body{font:18px system-ui;padding:32px;background:#faf8f4;color:#35352b}button{padding:12px}@media(prefers-color-scheme:dark){body{background:#242722;color:#e4e7dc}}</style><h1>Garden</h1><p>A little room for ideas to grow.</p><button onclick="this.textContent=\'Growing\'">Plant an idea</button>' }))
     const page = await context.newPage(); page.setDefaultTimeout(10000)

@@ -239,8 +239,9 @@ The page loads plain-file extensions and themes from the host
 catalog. Read aloud and Dictation are Market plugins since 0.2.9, each in
 its maker's own repository: a fresh install has neither, and draws no mic or
 read-aloud control until one is installed from Settings › Market and on.
-Their copies for this repository's tests are in `../plugins/_listed/`; the
-server halves they call (`/api/transcribe`, `/api/speech`) stay here. Settings → Plugins shows declarations, provenance, failures and the
+Their copies for this repository's tests are in `../plugins/_listed/`. Since
+0.2.12 each carries its own server half (`server/`, run by Loam at
+`/x/dictation/` and `/x/read-aloud/`); this app has none of their routes. Settings → Plugins shows declarations, provenance, failures and the
 two-step install question. Installed code runs as trusted page code; its
 network declaration is informational. No build step or app dependency was added.
 

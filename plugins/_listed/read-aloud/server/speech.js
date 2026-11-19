@@ -26,10 +26,10 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 
-import { speakable, speakableBlocks } from './speakable.js'
+import { speakable, speakableBlocks } from '../page/speakable.js'
 import { createBlockDescriber } from './speech-descriptions.js'
 import { spokenWords } from './spoken-length.js'
-import { documentSpeakable, documentSpeechBlocks, documentWords, documentStops, withoutFrontmatter, DOCUMENT_VOICE, DOCUMENT_STYLE, PREBUILT_VOICES as VOICES } from './document-speech.js'
+import { documentSpeakable, documentSpeechBlocks, documentWords, documentStops, withoutFrontmatter, DOCUMENT_VOICE, DOCUMENT_STYLE, PREBUILT_VOICES as VOICES } from '../page/document-speech.js'
 
 // The thirty prebuilt voices, as the speech-generation docs list them on
 // 2026-10-02. A voice not on this list is refused by the API, so a
@@ -482,7 +482,19 @@ export function createSpeech(
 ) {
   const s = config.speech
   const dir = s.dir
-  const { voices, dropped } = parseVoices(s.voices)
+  // The voices may change while the server runs (the plugin's `voices`
+  // setting): `voicesNow()`, when given, is read on every request, and the
+  // map is parsed again only when its text changed.
+  let { voices, dropped } = parseVoices(s.voices)
+  let voicesSpec = s.voices
+  const currentVoices = () => {
+    const spec = typeof s.voicesNow === 'function' ? s.voicesNow() : s.voices
+    if (spec !== voicesSpec) {
+      voicesSpec = spec
+      ;({ voices } = parseVoices(spec))
+    }
+    return voices
+  }
   const { paces, dropped: droppedPaces } = parsePaces(s.paces)
   const paceFor = (voice, mode) => paces.get(`${voice}.${mode}`) ??
     (mode === 'brief' && voice === 'Aoede' ? 121 : paces.get(voice) ?? (voice === 'Aoede' ? 147 : DEFAULT_PACE_WPM))
@@ -900,7 +912,7 @@ export function createSpeech(
   }
 
   function view(id, meta) {
-    return { id, status: 'ready', duration_s: meta.duration_s, url: `/api/speech/${id}/audio.mp3`, brief_text: meta.brief_text ?? null }
+    return { id, status: 'ready', duration_s: meta.duration_s, url: `${s.audioBase ?? '/x/read-aloud/speech/'}${id}/audio.mp3`, brief_text: meta.brief_text ?? null }
   }
 
   function jobView(job) {
@@ -944,7 +956,7 @@ export function createSpeech(
     if (mode === 'verbatim' && spoken === '') {
       throw new Refusal(400, { error: 'There is nothing in this reply a voice could read: it is all code, tables or emoji. Try the brief.' })
     }
-    const { styled, ...v } = requestedVoice(voices, document ? { voice: voice ?? DOCUMENT_VOICE, style: style ?? DOCUMENT_STYLE } : { agent, voice, style })
+    const { styled, ...v } = requestedVoice(currentVoices(), document ? { voice: voice ?? DOCUMENT_VOICE, style: style ?? DOCUMENT_STYLE } : { agent, voice, style })
     const id = speechId({ model: ttsModel, voice: v.voice, mode, text: normal, style: styled ? v.character : null,
       describe,
       document: document ? ['document-v1', input.minutes, mode === 'brief' ? s.briefModel : null] : null })

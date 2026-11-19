@@ -277,9 +277,27 @@ Loam's code names no maker's repository. Nothing the person set moves: the
 switch, each agent's voice (`_settings/read-aloud/`), the plugin's own key
 and the shared keys are kept by id, and the browser's preferences by the page
 code's storage keys (`loam-ui.dictation`, `loam-ui.speech`,
-`loam-ui.read-aloud`), which the Market copies keep. Their server halves
-stay in Loam: the app's `/api/transcribe` and `/api/speech` and the broker's
-`/v1/dictation-terms`, each using the key of the plugin of that id.
+`loam-ui.read-aloud`), which the Market copies keep.
+
+**Each carries its own server half since 0.2.12** (Dictation and Read aloud
+1.1.0, 2026-11-19). Until
+then the app answered `/api/transcribe` and `/api/speech…` and the broker
+`/v1/dictation-terms`, so the plugins worked only on a Loam that shipped those
+routes, and a fresh install that never had either still carried their code.
+Now each is an ordinary server plugin ("Server plugins", below), in Node with
+the standard library only: Dictation at `/x/dictation/` (`POST transcribe`,
+`GET terms`), Read aloud at `/x/read-aloud/` (`GET status`, `POST speech`,
+`POST speech/lookup`, `GET speech/<id>`, `GET speech/<id>/audio.mp3`). No
+new seam was needed: the gateway, the supervised unit, `LOAM_PLUGIN_KEYS`
+for the Google key, the broker's agent settings route for each agent's voice,
+and `LOAM_VAULT_DATA`/`LOAM_VAULT_DATA_DIR` (from which Dictation finds the
+vault's system folder and its terms note) were all there. Saved audio is
+Read aloud's cache in its private folder (`<private>/speech`). The install's
+old `app.speech_voices` (each agent's voice and character) is Read aloud's
+`voices` setting now, seeded from it once (`lib/loam_to_market.py`,
+`seed_voices`), and a copy below 1.1.0 is brought up to its listing's
+version at the first start on 0.2.12 (`bring_up`), since it would have
+nothing to call. `tests/test_audio_routes_gone.py` holds core to none of it.
 
 **A plugin in Yours with the id of a shipped one wins**, and its row says what
 it shadows; the shipped row says `shadowed_by: "yours"`. A broken copy never
@@ -608,11 +626,13 @@ Every write takes `by` like any other setting route.
 
 **`settings.secret` stays** for a key that belongs to one plugin and no
 provider (a plugin's own service), pasted on the plugin's page. Read aloud
-and dictation moved from it to `keys: [google]` on 2026-11-18; their
-`settings.secret` of the same name stays through 0.2.3, so that a broker
-started before the update (it reads the new manifests until it restarts)
-still hands them the key. The page draws no pasted-key form for a plugin
-that declares `keys:`.
+and dictation moved from it to `keys: [google]` on 2026-11-18, and dropped
+their `settings.secret` of the same name in 1.1.0: a listing showed both
+"Uses your Google Gemini key" and "Asks for a key of its own" for the one
+key. **A `settings.secret` named as a field of a declared provider is that
+provider's key** and is not shown as a key of its own (`declaration` in
+`lib/loam_plugins.py`, since 0.2.12), so no listing can say both. The page
+draws no pasted-key form for a plugin that declares `keys:`.
 
 ## The installed list: `installed.json`
 
@@ -652,7 +672,11 @@ says so before the yes. An unreadable `installed.json` leaves the list drawn
   update keeps whatever its switch was. A plugin built here is **off until
   turned on**: an agent writing a folder does not put code into the page by
   itself. Removing a Yours copy that shadowed a shipped one leaves the switch
-  for the shipped one; removing the last copy forgets it.
+  for the shipped one; removing the last copy forgets it. A row with a
+  switch says `chosen: true` once that switch has been set either way, and
+  `false` while it still stands at its default; first setup offers Git
+  backup only while its switch is off and unchosen, and its *Skip for now*
+  sets it off, so the offer is made once (2026-11-19).
 - **A theme has no switch.** A plugin whose kind is only `theme` (and which
   overrides nothing) is on where Appearance has chosen it (`appearance.phone.theme`,
   `appearance.desktop.theme`; `lib/loam_appearance.py`): its row's `on` is

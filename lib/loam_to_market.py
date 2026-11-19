@@ -34,9 +34,17 @@ link, or installed by hand before the update) is left alone, and each id is
 settled once (``<state>/plugins/to-market.json``): one the person removes
 later stays removed. A failure is reported and tried again at the next start.
 
-The server's halves stay in Loam: ``/api/transcribe``, ``/api/speech`` and
-the broker's dictation terms are the app server's, and answer only a plugin
-that is installed and has a key.
+**Since 0.2.12 each carries its own server half** (Dictation and Read aloud
+1.1.0): ``/api/transcribe``, ``/api/speech`` and the broker's dictation
+terms left Loam, and each plugin's own server answers at ``/x/<id>/``. A copy
+older than that has nothing to talk to on this release, so once, at the same
+first start, :func:`bring_up` installs the listing's version over any copy
+below ``SERVER_SINCE`` that came from the Market (or from the release's own
+copy, for one built here by the step above), keeping everything kept by id
+as before. A copy installed from elsewhere, or edited since, is left alone
+and said so. And :func:`seed_voices` copies the install's
+``app.speech_voices`` (which the app used to read) into Read aloud's own
+``voices`` setting, once, when that is still unset.
 """
 
 from __future__ import annotations
@@ -56,6 +64,14 @@ MOVED = {
     "read-aloud": "0.2.9",
 }
 BY = "loam-update"
+# The first version of each that carries its own server half (0.2.12).
+SERVER_SINCE = {
+    "dictation": (1, 1, 0),
+    "read-aloud": (1, 1, 0),
+}
+# What the app read aloud in before 0.2.12 when the install named no voices
+# (bin/deploy's default): the starter agent's.
+DEFAULT_VOICES = "iris=Aoede:warm, natural and unhurried"
 
 
 def record_path() -> Path:
@@ -128,6 +144,10 @@ def _from_release(pid: str) -> None:
     staging = Path(tempfile.mkdtemp(prefix=f"to-market-{pid}-", dir=target.parent))
     try:
         shutil.copytree(source, staging / pid)
+        # A copy already there (bring_up's case) steps aside first, so the
+        # folder is never half one and half the other.
+        if target.exists():
+            os.replace(target, staging / f"{pid}.old")
         os.replace(staging / pid, target)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
@@ -171,3 +191,96 @@ def keep(install=None, from_release=None, link_of=None) -> dict:
     if out:
         _write_record(record)
     return out
+
+
+def _version(text) -> tuple[int, ...]:
+    import re  # noqa: PLC0415
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)", str(text or ""))
+    return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+
+
+def _yours_row(pid: str) -> dict | None:
+    import loam_plugins  # noqa: PLC0415
+    return next((r for r in loam_plugins._rows() if r["id"] == pid and r["layer"] == "yours"
+                 and not r.get("broken")), None)
+
+
+def bring_up(install=None, from_release=None, link_of=None) -> dict:
+    """Install the listing's version over a moved plugin's copy that predates
+    its own server, once each. Answers ``{id: {"how": ...}}`` for the ids it
+    settled or failed this time: ``link`` (from the listing), ``release``
+    (a copy built here, replaced by this release's), ``current``, ``kept``
+    (installed from elsewhere, or edited: left as it is, with ``why``),
+    ``absent`` or ``failed`` (tried again at the next start)."""
+    import loam_plugins  # noqa: PLC0415
+    install = install or loam_plugins.install
+    from_release = from_release or _from_release
+    link_of = link_of or market_link
+    record = _read_record()
+    done = record.setdefault("servers", {})
+    out: dict[str, dict] = {}
+    for pid, since in SERVER_SINCE.items():
+        if pid in done:
+            continue
+        entry: dict = {"at": _now()}
+        row = _yours_row(pid)
+        source = (row or {}).get("source") or {}
+        if row is None:
+            entry["how"] = "absent"
+        elif _version(row.get("version")) >= since:
+            entry["how"] = "current"
+        elif row.get("edited"):
+            entry.update(how="kept", why="edited since it was installed")
+        elif source.get("kind") == "link":
+            try:
+                link = link_of(pid)
+                first = install({"url": link}, by=BY)
+                if first.get("id") != pid:
+                    raise loam_plugins.PluginError(f"{link} is {first.get('id')!r}, not {pid}")
+                if _version((first.get("plugin") or first).get("version")) < since:
+                    raise loam_plugins.PluginError(f"the listing is still {first.get('version')}")
+                install({"url": link, "confirm": first["confirm"]}, by=BY)
+                entry.update(how="link", link=link, was=row.get("version"))
+            except Exception as exc:  # noqa: BLE001 - reported, tried again next start
+                entry.update(how="failed", error=str(exc)[:300])
+        elif source.get("kind") in (None, "built"):
+            try:
+                from_release(pid)
+                entry.update(how="release", was=row.get("version"))
+            except Exception as exc:  # noqa: BLE001
+                entry.update(how="failed", error=str(exc)[:300])
+        else:
+            entry.update(how="kept", why=f"installed from {source.get('kind')}, not the Market")
+        out[pid] = entry
+        if entry["how"] != "failed":
+            done[pid] = entry
+    if out:
+        _write_record(record)
+    return out
+
+
+def seed_voices(spec=None) -> dict | None:
+    """Read aloud's ``voices`` setting from the install's ``app.speech_voices``
+    (or the old default), once, when the setting is unset. Answers what it
+    did, or None when it had already settled."""
+    import loam_contributions  # noqa: PLC0415
+    record = _read_record()
+    if "voices" in record:
+        return None
+    if spec is None:
+        got = lc.get("app.speech_voices")
+        spec = got.strip() if isinstance(got, str) and got.strip() else DEFAULT_VOICES
+    path = loam_contributions.settings_path("read-aloud")
+    values = loam_contributions.setting_values("read-aloud")
+    if isinstance(values.get("voices"), str) and values["voices"].strip():
+        entry = {"how": "present", "at": _now()}
+    else:
+        values["voices"] = spec[:500]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(values, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+        entry = {"how": "seeded", "at": _now()}
+    record["voices"] = entry
+    _write_record(record)
+    return entry

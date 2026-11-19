@@ -17,9 +17,10 @@ identities the landed commits carry.
     re-authored as the checkout's identity (same tree and dates), and a
     commit a landing already put on `main` that way is re-authored by the
     next push, but only when nothing but landings moved `main`;
-  - a deny-list match in an added line, a path or a message is refused at
-    the landing (reason `gate`), before `main` has it, until the branch's
-    own commits are rewritten; a commit already on `main` holds the push,
+  - a deny-list match in an added line or a path is refused at the landing
+    (reason `gate`), before `main` has it, until the branch's own commits
+    are rewritten; one in a commit's message only lands the change as one
+    commit under the landing's message, so the word never reaches `main`; a commit already on `main` holds the push,
     not the next landing; a brief's title that matches is left out of the
     merge message; an `allow` line lets one file's match through; a missing
     list holds all;
@@ -279,8 +280,12 @@ try:
     r = start(proj, "20261116-100000-00000008")
     commit(r, "e.txt", "e\n", msg="mention Secretname in the message")
     result, text = land(proj, r)
-    check("landing gate: a denied word in a message is not landed",
-          (result["reason"], "its message names 'Secretname'" in text), ("gate", True))
+    # Since 2026-11-19 a message is not the work: the change lands as one
+    # commit under the landing's own message (tests/test_memory_note.py).
+    check("landing gate: a denied word in a message never reaches main or origin",
+          (result["state"], "its message names 'Secretname'" in text,
+           "Secretname" in git(proj.root, "log", "--format=%B", "main")),
+          ("landed", True, False))
     git(proj.root, "config", "loam.pushDeny", str(root / "gone"))
     check("gate: a deny list that is missing holds everything",
           any("is missing" in p for p in wt.push_gate(proj.root, None)), True)

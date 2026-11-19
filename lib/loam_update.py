@@ -35,7 +35,8 @@ said yes to can be read again.
 
 **After the move**, from the new code, each only when what it reads
 changed between the two commits: the user units (``gen-units``), every
-live agent's provisioned files (``provision``), the providers' memory pins
+live agent's provisioned files (``provision``), the provider CLIs at the
+release's pin (``provider-pin apply``, lib/loam_pins.py), the providers' memory pins
 (``provider-memory pin``), the broker (``restart-broker --when-idle``: it
 waits until no session is working, then restarts and must answer again on a
 new process) and the plugin gateway. "What it reads" is the script and the
@@ -114,8 +115,13 @@ TRIGGERS = {
     "units": {"script": "bin/gen-units", "dirs": ["systemd/"],
               "skip": ["systemd/system/"]},
     "agents": {"script": "bin/provision", "dirs": ["engineer-template/", "engineer/install/"]},
-    "provider-memory": {"script": "bin/provider-memory", "dirs": []},
-    "broker": {"script": "bin/session-broker", "dirs": ["broker/", "plugins/"]},
+    # The provider CLIs at the new release's pin (lib/loam_pins.py,
+    # 2026-11-19): a moved pin installs its builds and moves the links, and
+    # then the memory pins and the broker follow, so new sessions run them.
+    "providers": {"script": "bin/provider-pin", "dirs": []},
+    "provider-memory": {"script": "bin/provider-memory", "dirs": ["lib/loam_pins.py"]},
+    "broker": {"script": "bin/session-broker",
+               "dirs": ["broker/", "plugins/", "lib/loam_pins.py"]},
     "gateway": {"script": "bin/plugin-gateway", "dirs": []},
     # Loam's own app runs from a release of this checkout (2026-11-16): the
     # deployment layer is re-rendered (its unit template among it), then the
@@ -134,6 +140,7 @@ STEP_WORDS = {
     "library": "Replacing System/Loam",
     "units": "Regenerating the units",
     "agents": "Re-provisioning the agents",
+    "providers": "Putting the AI tools at the versions this release was tested with",
     "provider-memory": "Pinning the providers' memory off",
     "broker": "Restarting the broker when every session is idle",
     "gateway": "Restarting the plugin gateway",
@@ -145,6 +152,7 @@ STEP_WORDS = {
     "undo-views": "Refreshing the agents' skill views",
     "undo-units": "Regenerating the units from the previous release",
     "undo-agents": "Re-provisioning the agents from the previous release",
+    "undo-providers": "Putting the AI tools back at the previous release's versions",
     "undo-provider-memory": "Pinning the providers' memory again",
     "undo-broker": "Restarting the broker on the previous release",
     "undo-gateway": "Restarting the plugin gateway on the previous release",
@@ -974,6 +982,16 @@ class Box:
             said.append("the engineer")
         return f"provisioned {', '.join(said) or 'no agent'}"
 
+    def providers(self) -> str:
+        """Every CLI at the pin of the code now in place (the new release's
+        after a move, the old one's on an undo). The broker step after it
+        restarts what still runs the old build. A release from before the
+        pin (0.2.11 and older, put back by an undo) has no `provider-pin`:
+        the CLIs are left where they are."""
+        if not Path(self.bin("provider-pin")).is_file():
+            return "this release pins no CLI versions; left as they are"
+        return self._run(self.bin("provider-pin"), "apply", "--no-restart")
+
     def provider_memory(self) -> str:
         return self._run(self.bin("provider-memory"), "pin")
 
@@ -1208,7 +1226,8 @@ def verify(version: str) -> str:
     return f"{VERSION_FILE} says {version}"
 
 
-REGEN = ("units", "agents", "provider-memory", "broker", "gateway", "deploy", "app")
+REGEN = ("units", "agents", "providers", "provider-memory", "broker", "gateway",
+         "deploy", "app")
 
 
 def _regenerate(run: Run, box: Box, old: str, new: str, changed: list[str],

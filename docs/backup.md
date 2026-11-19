@@ -65,6 +65,24 @@ never made one, but it is GitHub only and needs a token with `repo` scope,
 which reaches every private repository the person has. Not built; the
 deploy-key path is the one that works everywhere.
 
+**No host is assumed** (2026-11-19). Loam may run on a personal server, a
+laptop or any provider's VPS, so the plugin's words name GitHub as one host
+among several and three cases are first-class:
+
+- *A git host* (GitHub, GitLab, Codeberg, Gitea, Forgejo): its own
+  deploy-key steps and a link to its page, as above.
+- *A server of the person's own* over SSH (`ssh://git@nas.home:2222/srv/git/vault.git`,
+  `git@backup.example:vault.git`): the key goes in as a deploy key if the
+  server runs a git host, or as one line of the owning account's
+  `~/.ssh/authorized_keys` if it is plain SSH. No page link; the steps say both.
+- *A folder on this machine* or a drive attached to it (`/mnt/usb/vault.git`,
+  `~/backups/vault.git`, `file://…`): no key is made and there is nothing to
+  add. A new or empty folder is made an empty bare repository at connect; a
+  folder that is already a bare repository is used as it is; one holding
+  anything else is refused, so nobody's files are written into. Its failures
+  say the folder is missing, detached or not writable, never "the host did
+  not accept the key".
+
 **Agents set it up the same way**, on the owner's word: `backup_connect`,
 `backup_test`, `backup_status`, `backup_now`, `backup_disconnect`,
 `backup_restore` (the plugin's `git-backup` tool), and the settings through

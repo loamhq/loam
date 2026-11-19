@@ -1301,6 +1301,15 @@ def declaration(manifest: dict, has: dict) -> dict:
     if manifest.get("keys"):
         import loam_keys  # noqa: PLC0415
         touches["keys"] = loam_keys.declaration_of(manifest["keys"])
+        # A pasted secret named as a declared provider's field is that
+        # provider's key, not one of its own: shown once, as "Uses your
+        # Google Gemini key" (2026-11-19: Read aloud's listing said both).
+        fields = {f["name"] for k in manifest["keys"] for f in k.get("fields") or []}
+        own = [n for n in touches.get("secrets") or [] if n not in fields]
+        if own:
+            touches["secrets"] = own
+        else:
+            touches.pop("secrets", None)
     return {"touches": touches, "overrides": list(manifest["overrides"]),
             "page_code": bool(has.get("page"))}
 
@@ -1595,6 +1604,9 @@ def _rows(listed: dict | None = None) -> list[dict]:
             if row["layer"] == "shipped" and isinstance(row.get("default_on"), bool):
                 default = row["default_on"]
             row["on"] = row["effective"] and listed["on"].get(row["id"], default)
+            # Whether anyone has ever set this switch (2026-11-19): first setup
+            # offers Git backup only while nobody has, so a skip is the answer.
+            row["chosen"] = row["id"] in listed["on"]
         row["files"] = f"/v1/plugins/{row['id']}/files/" if row["effective"] else None
     return rows
 

@@ -21,8 +21,7 @@ and a lock table of its own, and looks from inside the landing:
   status          `box_status` lists the job under `landing`, not as idle,
                   with its title and briefer; nothing shows as running.
   after           the `landing` record is gone once the verdict is written.
-  waiter          `wait_for` waits past the job's clock while a live landing
-                  record is there, and still reports a dead unit as died.
+  dead landing    a landing record whose pid is gone reads as nothing.
 
 Nothing outside a temporary directory is written; no unit is launched.
 
@@ -40,8 +39,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import threading
-import time
 from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent
@@ -212,42 +209,17 @@ try:
 finally:
     (job.loam_lock.LOCK_DIR, job.loam_broker.AI_LABS) = saved
 
-# The waiter. A landing record whose pid is alive extends the job's clock;
-# one whose pid is dead does not, and a dead unit is still `died`.
-job.POLL_SECONDS = 0.1
-job.STARTUP_GRACE_SECONDS = 0.5
-job.GRACE_SECONDS = 1
-unit = {"state": "active"}
-job.unit_state = lambda name: unit["state"]
-job.resume_queued = lambda: []
+# A dead landing's record reads as nothing (the waiter that read it went
+# on 2026-11-19; the recovery sweep and the status still read it).
 try:
     d = root / "wait"
     d.mkdir()
-    p = {"dir": d, "queued": d / "queued", "result": d / "result.json",
-         "heartbeat": d / "heartbeat", "landing": d / "landing"}
-    p["landing"].write_text(json.dumps({"pid": os.getpid(), "since": "x",
-                                        "phase": "landing"}))
-
-    def settle():
-        time.sleep(3)
-        p["result"].write_text(json.dumps({"ok": True, "stage": "done",
-                                           "receipt_text": "landed late"}))
-    threading.Thread(target=settle, daemon=True).start()
-    got = job.wait_for(p, "w1", 0.01)    # a ceiling: 0.6 s + 1 s grace
-    check("waiter: a landing past the job's clock is waited for",
-          (got["stage"], got["receipt_text"]), ("done", "landed late"))
-
-    p["result"].unlink()
+    p = {"dir": d, "landing": d / "landing", "result": d / "result.json"}
     dead = subprocess.Popen(["true"])
     dead.wait()
     p["landing"].write_text(json.dumps({"pid": dead.pid, "since": "x"}))
-    check("waiter: a dead landing's record reads as nothing",
+    check("landing: a dead landing's record reads as nothing",
           job.read_landing(p), None)
-    p["landing"].write_text(json.dumps({"pid": os.getpid(), "since": "x"}))
-    unit["state"] = "inactive"
-    got = job.wait_for(p, "w2", None)
-    check("waiter: a landing whose unit is gone is still `died`",
-          got["stage"], "died")
 finally:
     shutil.rmtree(root, ignore_errors=True)
 

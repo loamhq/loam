@@ -18,7 +18,7 @@ import { createUpdate } from '../public/update.js'
 import { createPasskey, authLogoutURL, authSettingsURL } from '../public/passkey.js'
 import { createFiles } from '../public/files.js'
 import { buildAppThread } from '../public/apps.js'
-import { createTranscriber } from '../src/transcribe.js'
+import { createTranscriber } from '../../plugins/_listed/dictation/server/transcribe.js'
 import { readConfig } from '../src/config.js'
 import { formatDate } from '../public/time.js'
 
@@ -208,7 +208,7 @@ test('3. a failed turn is a system line that says what happened and what to do, 
 
 // ---------------------------------------------------------------- 4
 test('4. dictation without a key says a Gemini key is needed and goes to where it is added; the terms card speaks plainly', async () => {
-  // What this app's own server answers a take when there is no key.
+  // What Dictation's own server answers a take when there is no key.
   const answer = await createTranscriber(readConfig({ LOG_LEVEL: 'off' }), { getKey: async () => '' }).transcribe({ audio: Buffer.from('take'), contentType: 'audio/webm' })
   assert.equal(answer.status, 503)
   const { mount } = await import('../../plugins/_listed/dictation/page/engine.js')

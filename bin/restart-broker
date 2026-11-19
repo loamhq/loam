@@ -26,8 +26,7 @@ restart went at its 1800 s ceiling past four silent turns and cut them, three
 of them waiting on engineer jobs. Now, when `--ceiling` (default
 `loam_live.RESTART_CEILING_S`, 30 min; `0` turns it off) or `--max-wait`
 (default none) runs out, it prints what still holds it and exits 75 with
-nothing restarted; the caller tries again later (lib/loam_follow.py's next
-run does; by hand, run it again). Each change in what holds it is printed.
+nothing restarted; the caller tries again later (by hand, run it again). Each change in what holds it is printed.
 
 Usage: restart-broker [--when-idle [--poll S] [--max-wait S] [--ceiling S]]
 Exit: the restart's own code; 75 when a planned restart deferred.
@@ -58,8 +57,8 @@ def wait_idle(poll: float, max_wait: float | None, ceiling: float | None = None,
     `restart_blockers`'s lines (empty: idle); one that raises is busy.
     ``started`` is when the wait began (the ceiling counts from it)."""
     if read is None:
-        import loam_follow  # noqa: PLC0415 -- the live list's reader
-        read = loam_follow.restart_read
+        import loam_live  # noqa: PLC0415 -- the live list's reader
+        read = loam_live.restart_read
     started = clock() if started is None else started
     limits = [s for s in (max_wait, ceiling or None) if s is not None]
     limit = min(limits) if limits else None

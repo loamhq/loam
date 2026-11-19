@@ -40,6 +40,9 @@ RestartSec=5s
 # for a cap of four chats.
 OOMScoreAdjust=@CORE_OOM@
 Environment=DISABLE_AUTOUPDATER=1
+# And Antigravity's own updater off (lib/loam_pins.py: the CLIs stay at
+# the release's pin; the variable is read only as `true`).
+Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
 Environment=PATH=@UNIT_PATH@
 WorkingDirectory=@ROOT@
 ExecStart=/usr/bin/python3 @ROOT@/bin/session-broker

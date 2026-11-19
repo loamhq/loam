@@ -217,6 +217,7 @@ function settingsAppearance({ back = true } = {}) {
 function goSettings(page, provider = null) {
   if (page === 'running') { host.goActivity(); return }
   const group = CONNECTIONS_GROUP[page] ?? null
+  if ((page === 'backup' || page === 'git-backup') && !provider) provider = 'git-backup'
   page = settingsHome(page, provider)
   if (page !== 'provider' || host.state.sheet?.provider !== provider) host.providerSignIn.cancel()
   if (!host.state.sheet) updates.check()

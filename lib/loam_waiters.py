@@ -19,32 +19,32 @@ Claude CLI started before the variable existed, its ``--session-id`` /
 message is sent) or else ``sessions.json``. Unknown is left out, never
 guessed.
 
-**The waiter** (``register`` / ``settle`` / ``owed``): a blocking brief's
-outer half waits on the job inside the calling session's process tree, so a
-broker restart (or the call's four-hour ceiling) ends the wait while the job
-runs on as its own unit. Each such call leaves a record in
-``state/engineer-waiters/<job>.json``; the outer removes it when it hands a
-final verdict back. A record whose waiter process is gone and whose job has
-a ``result.json`` is **owed**, and is delivered as below. One without a
-thread to deliver to is logged as undeliverable and removed. (Until
-2026-11-18 a delivery also posted one plain Loam line in the thread, and
-until 20:30 PT 11-12 that line pasted the receipt's body.)
+**The record of what is owed** (``register`` / ``owed`` / ``done``): every
+brief returns at once (since 2026-11-19, batch B step 3; from a thread since
+2026-11-18, step 1) and leaves a record in
+``state/engineer-waiters/<job>.json`` at accept. It is owed the moment its
+job has a ``result.json`` verdict, and it goes back to whoever asked by one
+of two routes:
 
-**A brief from a thread returns at once (2026-11-18, batch B step 1).**
-When the brief came from a thread and the broker's quiet route is live
-(``route_live``: the running broker wrote ``ROUTE`` with its pid when its
-delivery pass started), the launcher registers the record with no waiter
-(``returned``), launches the job and returns its id. Such a record is owed
-the moment its job has a verdict. Delivery posts nothing: the briefing
-persona gets a turn in that thread whose input is ``handoff_text`` -- the
-receipt's path, the launcher's one-line verdict (``verdict_line``), whether
-it landed -- and it may read it and end its turn without a word. The
-owner's words, 11-18: he does not want to be "spammed in my chat section".
-A caller with no thread (a wake, a cron, a job)
-still blocks, as does every caller while a broker that predates the quiet
-route is running; their records keep the waiter's pid, as before.
+- **A thread** (``route(record) == "thread"``): the broker hands the result
+  to the briefing persona as input to a turn in that thread, posting
+  nothing (``Server.deliver_owed``, ``ThreadEngine.deliver_job``). The input
+  is ``handoff_text``: the receipt's path, the launcher's one-line verdict
+  (``verdict_line``), whether it landed. The owner's words, 11-18: he does
+  not want to be "spammed in my chat section".
+- **A run** (``"run"``): a wake, a cron, a result run, or a thread that has
+  gone. ``bin/wake --results`` starts a new run of the persona that resumes
+  the asking CLI session with the result as its input, or, when that
+  session cannot be resumed, a fresh run carrying the result and what the
+  asker was doing (lib/loam_results.py). Nothing here needs the broker.
 
-Nothing here talks to the network; the broker does the delivering.
+A record is removed when it is delivered (``done``), and every outcome is a
+line in ``logs/engineer-deliveries.jsonl``. Until 2026-11-19 a caller with
+no thread blocked in the launcher's ``wait_for`` for up to four hours, and
+this file also kept that waiter's pid; a record whose waiter died was owed.
+
+Nothing here talks to the network or delivers anything; the broker and
+bin/wake do.
 """
 
 from __future__ import annotations
@@ -187,95 +187,124 @@ def thread_of(session_id: str | None, persona: str | None = None,
 
 def caller(env: dict | None = None, pid: int | None = None,
            proc: Path = PROC, state: Path | None = None) -> dict:
-    """{"caller": run kind, "caller_session"?: id, "thread"?: id} for the
-    brief being accepted now. Only what is known is there."""
+    """{"caller": run kind, "caller_session"?: id, "thread"?: id,
+    "caller_lane"?: lane} for the brief being accepted now. Only what is
+    known is there.
+
+    Every lane records the CLI session that made the call (since
+    2026-11-19): a wake or a cron runs with ``--session-id`` and
+    ``LOAM_SESSION_ID`` set by bin/wake, so its result can resume it. A
+    conversation adds the thread it is a turn in. An unattended lane adds
+    ``caller_lane``, its ``LOAM_WAKE`` (``reflection``, ``cron:<name>``),
+    which is what a result run reloads and what a fresh one names. A job
+    briefing a job answers to whoever asked the asking job (``asked_by_job``
+    and that job's own caller fields)."""
     env = os.environ if env is None else env
     lane = env.get("LOAM_WAKE") or ""
     kind = lane_kind(lane)
+    if kind == "job":
+        return _job_caller(lane.split(":", 1)[1])
     out: dict = {"caller": kind}
     if kind != "conversation":
-        return out
+        out["caller_lane"] = lane
     session = calling_session(env, pid, proc)
     if session:
         out["caller_session"] = session
-        thread = thread_of(session, env.get("LOAM_AGENT") or None, state)
-        if thread:
-            out["thread"] = thread
+        if kind == "conversation":
+            thread = thread_of(session, env.get("LOAM_AGENT") or None, state)
+            if thread:
+                out["thread"] = thread
+    return out
+
+
+CALLER_FIELDS = ("caller", "caller_session", "thread", "caller_lane")
+
+
+def _job_caller(job_id: str) -> dict:
+    """A job that briefs a job (2026-11-19): the result goes to whoever
+    asked the asking job -- its persona, by its thread or its run -- since
+    the asking job has ended by then and resuming it would be a whole new
+    engineer job to read one receipt. Its own brief says who that was."""
+    out: dict = {"caller": "job", "asked_by_job": job_id}
+    try:
+        import loam_engineer as eng  # noqa: PLC0415
+        for project in eng.projects().values():
+            brief = project.jobs / job_id / "brief.md"
+            if brief.is_file():
+                from loam_memory import front_matter  # noqa: PLC0415
+                head = front_matter(brief.read_text(encoding="utf-8"))
+                for key in ("caller_session", "thread", "caller_lane"):
+                    if head.get(key):
+                        out[key] = str(head[key])
+                break
+    except Exception:  # noqa: BLE001 -- a brief never fails for want of it
+        pass
     return out
 
 
 # ---------------------------------------------------------------------------
-# The waiter.
+# What is owed.
 # ---------------------------------------------------------------------------
 
+# A run's records have a folder of their own (2026-11-19): a broker that
+# predates the run route reads only the top folder, and would otherwise
+# take a cron's result for a thread's and drop it as "no thread".
+RUNS = STATE / "runs"
+
+
 def _path(job_id: str) -> Path:
-    return STATE / f"{job_id}.json"
-
-
-def _start_ticks(pid: int, proc: Path = PROC) -> str | None:
-    try:
-        stat = (proc / str(pid) / "stat").read_text(encoding="utf-8")
-        return stat.rsplit(")", 1)[1].split()[19]
-    except (OSError, IndexError):
-        return None
+    """Where this job's record is: in ``RUNS`` if it is there, else the top."""
+    run = RUNS / f"{job_id}.json"
+    return run if run.exists() else STATE / f"{job_id}.json"
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def register(job_id: str, project: str, job_dir: Path, persona: str,
-             caller_info: dict, pid: int | None = None,
-             returned: bool = False) -> Path | None:
-    """The outer's record that a result is owed for this job: a call
-    waiting on it (``pid``, the waiter), or, ``returned``, a call that
-    returned at once and is owed the result as input in its thread.
-    Fail-soft: a record that cannot be written costs only the delivery."""
-    record = {"job": job_id, "project": project, "job_dir": str(job_dir),
-              "persona": persona, "since": now_iso(),
-              # To the fraction (2026-11-19): what tells the turn that
-              # briefed a job from one that started after (the broker's
-              # ThreadEngine.joins).
-              "since_ts": time.time(), **caller_info}
-    if returned:
-        record["returned"] = True
-    else:
-        pid = os.getpid() if pid is None else pid
-        record.update(pid=pid, start=_start_ticks(pid))
+def write(record: dict) -> Path | None:
+    """The record, replaced whole, in its route's folder. Fail-soft."""
     try:
-        STATE.mkdir(parents=True, exist_ok=True)
-        tmp = _path(job_id).with_suffix(".tmp")
-        tmp.write_text(json.dumps(record) + "\n", encoding="utf-8")
-        tmp.replace(_path(job_id))
-        return _path(job_id)
-    except OSError:
+        job = str(record["job"])
+        home, other = ((RUNS, STATE) if route(record) == "run" else (STATE, RUNS))
+        home.mkdir(parents=True, exist_ok=True)
+        path = home / f"{job}.json"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({k: v for k, v in record.items()
+                                   if k != "result"}) + "\n", encoding="utf-8")
+        tmp.replace(path)
+        (other / f"{job}.json").unlink(missing_ok=True)
+        return path
+    except (OSError, KeyError):
         return None
 
 
+def register(job_id: str, project: str, job_dir: Path, persona: str,
+             caller_info: dict) -> Path | None:
+    """The record that a result is owed for this job, written at accept.
+    Fail-soft: a record that cannot be written costs only the delivery."""
+    return write({"job": job_id, "project": project, "job_dir": str(job_dir),
+                  "persona": persona, "since": now_iso(),
+                  # To the fraction (2026-11-19): what tells the turn that
+                  # briefed a job from one that started after (the broker's
+                  # ThreadEngine.joins).
+                  "since_ts": time.time(), "returned": True, **caller_info})
+
+
 def settle(job_id: str) -> None:
-    """The call handed a final verdict back: nothing is owed."""
-    try:
-        _path(job_id).unlink()
-    except OSError:
-        pass
-
-
-def waiter_alive(record: dict, proc: Path = PROC) -> bool:
-    """A blocking call's waiter is still running. A record that returned at
-    once has none: its result is owed as soon as its job has a verdict."""
-    if record.get("returned"):
-        return False
-    pid = record.get("pid")
-    if not isinstance(pid, int) or pid <= 1:
-        return False
-    start = _start_ticks(pid, proc)
-    return start is not None and (record.get("start") in (None, start))
+    """Nothing is owed (the brief was refused, did not launch, or its
+    result was delivered)."""
+    for folder in (STATE, RUNS):
+        try:
+            (folder / f"{job_id}.json").unlink()
+        except OSError:
+            pass
 
 
 def records() -> list[dict]:
     out = []
     try:
-        paths = sorted(STATE.glob("*.json"))
+        paths = sorted([*STATE.glob("*.json"), *RUNS.glob("*.json")])
     except OSError:
         return out
     for path in paths:
@@ -288,76 +317,42 @@ def records() -> list[dict]:
     return out
 
 
-def owed(proc: Path = PROC) -> list[dict]:
-    """Records whose job has a verdict and that no waiting call will carry
-    (it returned at once, or its waiter is gone), each with its `result`
-    read in, oldest first by when the job finished."""
+def route(record: dict) -> str:
+    """``thread``: the broker delivers it as a turn in that thread. ``run``:
+    bin/wake delivers it as a run of the persona (lib/loam_results.py) -- a
+    caller with no thread, or one whose thread the broker found gone
+    (``headless``)."""
+    return "thread" if record.get("thread") and not record.get("headless") else "run"
+
+
+def result_of(record: dict) -> dict | None:
+    """The job's verdict, or None while it has none."""
+    try:
+        result = json.loads((Path(record["job_dir"]) / "result.json")
+                            .read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError):
+        return None
+    if not isinstance(result, dict) or result.get("stage") == "queued":
+        return None
+    return result
+
+
+def owed(by: str | None = "thread", persona: str | None = None) -> list[dict]:
+    """Records whose job has a verdict, each with its `result` read in,
+    oldest first by when the job finished. ``by`` is the route (``thread``,
+    ``run``, or None for both); ``persona`` narrows to one asker."""
     out = []
     for record in records():
-        if waiter_alive(record, proc):
+        if by and route(record) != by:
             continue
-        try:
-            result = json.loads((Path(record["job_dir"]) / "result.json")
-                                .read_text(encoding="utf-8"))
-        except (OSError, ValueError, KeyError):
+        if persona and record.get("persona") != persona:
             continue
-        if not isinstance(result, dict) or result.get("stage") == "queued":
+        result = result_of(record)
+        if result is None:
             continue
         out.append({**record, "result": result})
     return sorted(out, key=lambda r: (str(r["result"].get("finished") or ""),
                                       str(r.get("job"))))
-
-
-# ---------------------------------------------------------------------------
-# The quiet route: is the running broker one that delivers a result as input?
-# ---------------------------------------------------------------------------
-
-ROUTE = STATE / "route"
-
-
-BROKER_UNIT = "loam-session-broker.service"
-
-
-def in_broker_unit(pid: int, proc: Path = PROC) -> bool:
-    try:
-        return BROKER_UNIT in (proc / str(pid) / "cgroup").read_text(encoding="utf-8")
-    except OSError:
-        return False
-
-
-def mark_route(pid: int | None = None) -> None:
-    """The broker's word, at the start of its delivery pass, that results
-    owed to a thread go back as input with nothing posted. Fail-soft.
-
-    The install's own route is marked only from the broker's unit: a test
-    or a probe that starts a broker of its own (the suite has dozens) would
-    otherwise make every brief from a thread return at once for its
-    lifetime, while the real broker might not deliver that way. Found on
-    the landing of 2026-11-18. With ``LOAM_WAITERS_DIR`` set, the caller
-    has its own records and marks freely."""
-    pid = os.getpid() if pid is None else pid
-    if not os.environ.get("LOAM_WAITERS_DIR") and not in_broker_unit(pid):
-        return
-    try:
-        STATE.mkdir(parents=True, exist_ok=True)
-        tmp = ROUTE.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"pid": pid, "start": _start_ticks(pid),
-                                   "since": now_iso()}) + "\n", encoding="utf-8")
-        tmp.replace(ROUTE)
-    except OSError:
-        pass
-
-
-def route_live(proc: Path = PROC) -> bool:
-    """The broker that wrote ``ROUTE`` is still the process it named. False
-    before any broker with the quiet route has started, and after it died:
-    a brief then blocks, as it did before."""
-    try:
-        record = json.loads(ROUTE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    return isinstance(record, dict) and record.get("start") is not None \
-        and waiter_alive({"pid": record.get("pid"), "start": record["start"]}, proc)
 
 
 def done(record: dict, outcome: str, **extra) -> None:

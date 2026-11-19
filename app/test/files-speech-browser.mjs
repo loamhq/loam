@@ -31,7 +31,7 @@ const broker = await fakeBroker(routes)
 const requests = []
 const jobs = new Map()
 const idFor = (body) => createHash('sha256').update(JSON.stringify([body.text, body.mode, body.minutes, body.voice])).digest('hex').slice(0, 32)
-const view = (id) => ({ id, status: 'ready', duration_s: 180, url: `/api/speech/${id}/audio.mp3`, brief_text: jobs.get(id)?.mode === 'brief' ? 'A fixture brief.' : null })
+const view = (id) => ({ id, status: 'ready', duration_s: 180, url: `/x/read-aloud/speech/${id}/audio.mp3`, brief_text: jobs.get(id)?.mode === 'brief' ? 'A fixture brief.' : null })
 const speech = {
   async status() { return { available: true } },
   async peek(body) { const id = idFor(body); return { status: 200, body: jobs.has(id) ? view(id) : { id, status: 'none' } } },

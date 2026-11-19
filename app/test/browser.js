@@ -13,7 +13,7 @@
 import { installDom } from './fakedom.js'
 import { audioRows } from './audio-plugins.mjs'
 
-export function browser(appUrl, { innerWidth = 430, audioEnabled = true } = {}) {
+export function browser(appUrl, { innerWidth = 430, audioEnabled = true, plugin = () => null } = {}) {
   const document = installDom()
   const root = document.createElement('div')
   root.__document = true
@@ -116,7 +116,17 @@ export function browser(appUrl, { innerWidth = 430, audioEnabled = true } = {}) 
   // installation.test.js. This keeps those tests exercising their feature:
   // Dictation and Read aloud, from the Market since 0.2.9, are added as an
   // install that has them on (test/audio-plugins.mjs).
-  globalThis.fetch = (url, options) => realFetch(String(url).startsWith('/') ? `${appUrl}${url}` : url, options).then(async res => {
+  // A plugin's own server is at `/x/<id>/` through Loam's gateway; `plugin(id,
+  // rest)` names where a test runs it (an absolute URL), and anything it does
+  // not name goes to the app, which answers 404 as a Loam with no such server.
+  const target = (url) => {
+    const text = String(url)
+    const x = /^\/x\/([a-z][a-z0-9-]*)\/(.*)$/.exec(text)
+    const there = x && plugin(x[1], x[2])
+    if (there) return there
+    return text.startsWith('/') ? `${appUrl}${text}` : url
+  }
+  globalThis.fetch = (url, options) => realFetch(target(url), options).then(async res => {
     if (audioEnabled && String(url) === '/shipped-plugins.json') {
       const body = await res.json()
       return Response.json({ ...body, plugins: [...body.plugins.map(row => row.switch === 'plugin' ? { ...row, on: true } : row), ...await audioRows()] })

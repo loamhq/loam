@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""The provider CLIs at the versions this release pins (lib/loam_pins.py).
+
+  provider-pin status [--json]
+      each CLI: the pinned version, what its link points at and says, and
+      the builds on disk; exit 1 when one present on the box is not at its pin
+  provider-pin apply [--provider NAME]... [--dry-run] [--no-restart] [--json]
+      every CLI at its pin: a missing build installed beside the live one,
+      checked by its own --version, then the link moved. When a link moved,
+      the providers' own memory is pinned off again and checked
+      (bin/provider-memory), and the broker is restarted once every session
+      is idle (bin/restart-broker --when-idle), so new sessions run the
+      pinned build; --no-restart leaves the restart to the caller (`loam
+      update` and the installer restart the broker themselves).
+  provider-pin ensure [--provider NAME]...
+      the pinned builds on disk, installed beside if missing; no link moves
+  provider-pin test
+      the pinned builds tested before they go live: each ensured, its own
+      --version read, and the live parity tests (tests/test_codex_parity.py
+      and tests/test_provider_parity.py, `--live`: real turns, paid) run
+      with every CLI path pointed at the pinned builds by their full paths
+      (a copy of the install's config with a `[bin]` table), so a pin moved
+      on a branch is tested on its new build while the links stay put
+
+Moving a pin: change PINS in lib/loam_pins.py, `provider-pin test`, land it,
+then `provider-pin apply` on the box. Names: claude-code, codex, antigravity.
+Exit: 0 done; 1 a provider failed or is off its pin; 75 the broker restart
+deferred (the links moved; run `restart-broker --when-idle` later).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "lib"))
+import loam_pins as pins  # noqa: E402
+
+
+def cmd_status(args) -> int:
+    rows = [pins.status(p) for p in pins.providers(args.provider)]
+    for r in rows:
+        if args.json:
+            print(json.dumps(r))
+        else:
+            mark = "ok " if r["as_pinned"] else ("-- " if r["says"] is None else "OFF")
+            print(f"{mark} {r['provider']:<12} pinned {r['pinned']:<9} link -> "
+                  f"{r['points_at'] or '(no pinned build)'}, says {r['says'] or '(nothing)'}; "
+                  f"on disk {', '.join(r['installed']) or 'none'}")
+    off = [r for r in rows if r["says"] is not None and not r["as_pinned"]]
+    return 1 if off else 0
+
+
+def cmd_ensure(args) -> int:
+    bad = 0
+    for p in pins.providers(args.provider):
+        try:
+            print(f"{p.name} {p.pin}: {p.ensure()}")
+        except Exception as exc:  # noqa: BLE001 -- said
+            print(f"{p.name} {p.pin}: could not be installed: {exc}", file=sys.stderr)
+            bad += 1
+    return 1 if bad else 0
+
+
+def cmd_apply(args) -> int:
+    rows = pins.apply(args.provider, dry=args.dry_run)
+    for r in rows:
+        if args.json:
+            print(json.dumps(r))
+        elif r["error"]:
+            print(f"{r['provider']}: FAILED at {r['pinned']}: {r['error']}")
+        elif r.get("would"):
+            print(f"{r['provider']}: {r['before'] or '(no pinned build)'} -> {r['pinned']}: "
+                  f"would {r['would']}")
+        elif r["moved"]:
+            print(f"{r['provider']}: {r['before'] or '(no pinned build)'} -> {r['after']}"
+                  + (" (installed)" if r["installed"] else "")
+                  + (f"; removed {', '.join(r['removed'])}" if r["removed"] else ""))
+        else:
+            print(f"{r['provider']}: at its pin, {r['pinned']}"
+                  + (f"; removed {', '.join(r['removed'])}" if r["removed"] else ""))
+    code = 1 if any(r["error"] for r in rows) else 0
+    if args.dry_run or not any(r["moved"] for r in rows):
+        return code
+    # A new build may have turned a memory setting back on (lib/loam_provider_memory.py).
+    for sub in ("pin", "check"):
+        done = subprocess.run([sys.executable, str(ROOT / "bin" / "provider-memory"), sub],
+                              capture_output=True, text=True, check=False)
+        if done.returncode:
+            print(f"provider-memory {sub} exited {done.returncode}: "
+                  f"{(done.stderr or done.stdout).strip()[-500:]}", file=sys.stderr)
+            code = 1
+    if args.no_restart:
+        return code
+    done = subprocess.run([sys.executable, str(ROOT / "bin" / "restart-broker"),
+                           "--when-idle"], check=False)
+    if done.returncode == 75:
+        print("the broker restart deferred (a session is busy); the links have moved, "
+              "so new CLI processes run the pinned builds. Run `restart-broker "
+              "--when-idle` later.", file=sys.stderr)
+        return 75 if code == 0 else code
+    return code or (1 if done.returncode else 0)
+
+
+LIVE_TESTS = ("tests/test_codex_parity.py", "tests/test_provider_parity.py")
+
+
+def pinned_config(where: Path) -> Path:
+    """The install's configuration with ``[bin]`` naming the pinned builds."""
+    import importlib.machinery  # noqa: PLC0415
+    import importlib.util  # noqa: PLC0415
+    import tomllib  # noqa: PLC0415
+
+    import loam_config as lc  # noqa: PLC0415
+    loader = importlib.machinery.SourceFileLoader("run_all", str(ROOT / "tests" / "run-all"))
+    run_all = importlib.util.module_from_spec(importlib.util.spec_from_loader("run_all", loader))
+    loader.exec_module(run_all)
+    try:
+        table = tomllib.loads(lc.CONFIG_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        table = {}
+    builds = {p.name: str(p.build(p.pin)) for p in pins.providers()}
+    table["bin"] = {**table.get("bin", {}), "claude": builds["claude-code"],
+                    "codex": builds["codex"], "agy": builds["antigravity"]}
+    path = where / "loam.toml"
+    path.write_text(run_all.toml_text(table), encoding="utf-8")
+    return path
+
+
+def cmd_test(args) -> int:
+    import os  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+    bad = 0
+    for p in pins.providers():
+        try:
+            build = p.ensure()
+            print(f"PASS  {p.label} {p.pin}: {build} --version says {p.pin}")
+        except Exception as exc:  # noqa: BLE001 -- said
+            print(f"FAIL  {p.label} {p.pin}: {exc}")
+            bad += 1
+    if bad:
+        return 1
+    with tempfile.TemporaryDirectory(prefix="provider-pin-test-") as tmp:
+        env = {**os.environ, "LOAM_CONFIG": str(pinned_config(Path(tmp))),
+               **pins.SELF_UPDATE_OFF}
+        for test in LIVE_TESTS:
+            print(f"--- {test} --live, on the pinned builds", flush=True)
+            done = subprocess.run([sys.executable, str(ROOT / test), "--live"],
+                                  cwd=str(ROOT), env=env, check=False, timeout=1800)
+            print(f"{'PASS' if done.returncode == 0 else 'FAIL'}  {test} exited "
+                  f"{done.returncode}", flush=True)
+            bad += done.returncode != 0
+    return 1 if bad else 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="provider-pin")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("test")
+    for name in ("status", "apply", "ensure"):
+        s = sub.add_parser(name)
+        s.add_argument("--provider", action="append")
+        if name != "ensure":
+            s.add_argument("--json", action="store_true")
+        if name == "apply":
+            s.add_argument("--dry-run", action="store_true")
+            s.add_argument("--no-restart", action="store_true")
+    args = ap.parse_args()
+    try:
+        return {"status": cmd_status, "apply": cmd_apply, "ensure": cmd_ensure,
+                "test": cmd_test}[args.cmd](args)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

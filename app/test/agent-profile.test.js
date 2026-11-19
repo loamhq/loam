@@ -6,6 +6,9 @@ import { createApp } from '../src/server.js'
 import { readConfig } from '../src/config.js'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
 import { listedManifest } from './audio-plugins.mjs'
+import { readAloudApp } from './audio-servers.mjs'
+import { readAloudConfig } from './key-fixture.js'
+import { agentVoiceFrom } from '../../plugins/_listed/read-aloud/server/app.js'
 import { PREBUILT_VOICES } from '../../plugins/_listed/read-aloud/page/document-speech.js'
 import { createActivity } from '../public/activity.js'
 import { installDom } from './fakedom.js'
@@ -78,15 +81,20 @@ test('plugin fields and engineer patch responses update from their authoritative
 test('speech requests and lookups use stored plugin voice, with legacy and document fallbacks', async t => {
   let stored={voice:'Puck'},on=true
   const broker=await fakeBroker({'GET /v1/plugins/read-aloud/agents/test-agent':(req,res)=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({on,stored,values:{voice:'Charon'}}))}})
+  const fs=await import('node:fs/promises'),os=await import('node:os'),path=await import('node:path')
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'voice-token-')),tokenFile=path.join(dir,'token');await fs.writeFile(tokenFile,TOKEN+'\n')
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}))
+  // Read aloud's own server asks the broker, as the page reads it (1.1.0).
   const calls=[],speech={request:async body=>(calls.push(body),{status:200,body}),peek:async body=>(calls.push(body),{status:200,body}),stop(){}}
-  const app=createApp({config:readConfig({BROKER_URL:broker.url,BROKER_TOKEN:TOKEN}),speech})
-  app.server.listen(0,'127.0.0.1');await once(app.server,'listening');t.after(closing(app,broker))
-  const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});assert.equal(r.status,200);return r.json()}
+  const app=await readAloudApp({config:readAloudConfig({}),speech,agentVoice:agentVoiceFrom({brokerUrl:broker.url,brokerTokenFile:tokenFile})})
+  t.after(closing(app,broker))
+  const call=async(route,body)=>{const r=await fetch(`${app.url}${route}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});assert.equal(r.status,200);return r.json()}
   for(const route of ['/speech','/speech/lookup']) assert.equal((await call(route,{agent:'test-agent',voice:'Kore'})).voice,'Puck')
   stored={};assert.equal((await call('/speech',{agent:'test-agent'})).voice,undefined)
   on=false;stored={voice:'Puck'};assert.equal((await call('/speech',{agent:'test-agent',voice:'Kore'})).voice,'Kore')
   assert.equal((await call('/speech',{source:'document',agent:'test-agent',voice:'Aoede'})).voice,'Aoede')
   assert.equal(calls.length,5)
+  assert.ok(broker.seen.every(r=>r.auth===`Bearer ${TOKEN}`))
 })
 
 test('read-aloud manifest declares precisely the supported voices through the ordinary profile place', async () => {

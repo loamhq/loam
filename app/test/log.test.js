@@ -12,7 +12,7 @@ import { stat } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
 import { createApp } from '../src/server.js'
-import { readConfig, fixtureBroker } from './key-fixture.js'
+import { readConfig } from './key-fixture.js'
 import { createLog, loggedQuery } from '../src/log.js'
 import {
   VOCABULARY_MAX_TERMS,
@@ -22,7 +22,8 @@ import {
   GEMINI_TIMEOUT_MAX_MS,
   AUDIO_BYTES_PER_MINUTE,
   geminiTimeoutMs,
-} from '../src/transcribe.js'
+} from '../../plugins/_listed/dictation/server/transcribe.js'
+import { dictationApp } from './audio-servers.mjs'
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public')
 import { TOKEN, fakeBroker, appAgainst, shut, closing, until, logInto } from './harness.js'
@@ -214,16 +215,15 @@ async function transcribing(t, answer) {
   })
   gemini.listen(0, '127.0.0.1')
   await once(gemini, 'listening')
+  // Dictation's own server (its server half since 1.1.0): its lines go to
+  // the plugin's journal, one per take.
   const lines = []
-  const config = readConfig({ GEMINI_API_KEY: KEY, GEMINI_API_URL: `http://127.0.0.1:${gemini.address().port}` })
-  const { server } = createApp({ config, broker: fixtureBroker(config), log: logInto(lines) })
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
+  const { server } = await dictationApp({ GEMINI_API_KEY: KEY, GEMINI_API_URL: `http://127.0.0.1:${gemini.address().port}` }, { lines })
   t.after(async () => {
     await shut(server)
     await shut(gemini)
   })
-  const post = (vocabulary) => fetch(`http://127.0.0.1:${server.address().port}/api/transcribe`, {
+  const post = (vocabulary) => fetch(`http://127.0.0.1:${server.address().port}/transcribe`, {
     method: 'POST',
     headers: {
       'content-type': 'audio/webm;codecs=opus',
@@ -241,12 +241,10 @@ test('a transcription writes its own line: sizes, timings, counts, outcome — n
   const res = await post(['Ada', 'Loam', 'Ada'])
   assert.equal(res.status, 200)
   await res.json()
-  await until(() => lines.length >= 2)
+  await until(() => lines.length >= 1)
 
   const line = lines.find((l) => l.event === 'transcribe')
-  const request = lines.find((l) => l.event === 'request')
-  assert.equal(lines.length, 2, 'the request line and the transcription line')
-  assert.equal(line.id, request.id, 'the two lines are the same request')
+  assert.equal(lines.length, 1, 'the transcription line')
   assert.equal(line.level, 'info')
   assert.equal(line.status, 200)
   assert.equal(line.bytes, AUDIO.length)
@@ -294,19 +292,18 @@ test('a take with no words in it is heard-no-words, and a refusal is an error wi
 
 test('a take over the size cap is an error line, refused before Gemini is asked', async (t) => {
   const { lines, url } = await transcribing(t, () => [200, completed(WORDS)])
-  const res = await fetch(`${url}/api/transcribe`, {
+  const res = await fetch(`${url}/transcribe`, {
     method: 'POST',
     headers: { 'content-type': 'audio/webm' },
     body: Buffer.alloc(TRANSCRIBE_MAX_BYTES + 1),
   })
   assert.equal(res.status, 413)
   const said = (await res.json()).error
-  await until(() => lines.some((l) => l.event === 'transcribe') && lines.some((l) => l.event === 'request'))
+  await until(() => lines.some((l) => l.event === 'transcribe'))
   const line = lines.find((l) => l.event === 'transcribe')
   assert.equal(line.outcome, 'error')
   assert.equal(line.status, 413)
   assert.equal(line.error, said)
-  assert.equal(line.id, lines.find((l) => l.event === 'request').id)
 })
 
 // The two dictation limits, which the page's own numbers have to fit inside.

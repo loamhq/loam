@@ -2,8 +2,8 @@
 // took on the page goes to Gemini's transcription model and comes back as the
 // words they said, with the ums and the false starts taken out.
 //
-// The key is this app's and stays here. The browser posts bytes to
-// `/api/transcribe` and gets text back; it never learns which service did it,
+// The key is this plugin's server's and stays here. The browser posts bytes
+// to `/x/dictation/transcribe` and gets text back; it never learns which service did it,
 // and it never holds anything it could spend.
 //
 // **What the model is asked to do is smart mode and nothing else.** Smart mode
@@ -13,7 +13,7 @@
 // licence to write something the person did not say.
 //
 // **Polish is a second, separate call**, after the words are in hand and only
-// when the page asks for it (`src/polish.js`): a text model reads the
+// when the page asks for it (`polish.js`): a text model reads the
 // transcript with the whole terms list and fixes the spelling of names and the
 // grammar, behind a guard that hands back the transcript as heard when the
 // answer is anything but the same words, tidied. A take never fails for it.
@@ -209,7 +209,7 @@ export function createTranscriber(config, { fetchImpl = fetch, getKey = async ()
       }
       try {
         if (!await getKey()) {
-          throw new Refusal(503, 'Dictation needs a Gemini API key. Add one in its plugin settings.')
+          throw new Refusal(503, 'Dictation needs a Gemini API key. Add a Google key under API keys, in Settings › Connections.')
         }
         if (!audio || audio.length === 0) {
           throw new Refusal(400, 'The recording was empty, so there was nothing to transcribe.')
@@ -278,5 +278,5 @@ export function createTranscriber(config, { fetchImpl = fetch, getKey = async ()
 }
 
 export function tooBig() {
-  return `The recording is over ${Math.round(TRANSCRIBE_MAX_BYTES / (1024 * 1024))} MB, which is more than this app will transcribe.`
+  return `The recording is over ${Math.round(TRANSCRIBE_MAX_BYTES / (1024 * 1024))} MB, which is more than Dictation will transcribe.`
 }

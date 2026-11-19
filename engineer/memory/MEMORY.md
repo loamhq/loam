@@ -1928,6 +1928,46 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   that is due), so after a switch the first commit may be the push's, not
   the timer's; wait for a timer run to see the timer's own.
 
+## 2026-11-19 — Dictation and Read aloud carry their own server halves (0.2.12)
+
+- **The plugin server surface needed nothing new to take a core route.**
+  `/x/<id>/` (gateway, `Connection: close`, no body cap), the supervised
+  unit, `LOAM_PLUGIN_KEYS` (re-read on every ask, so a key change needs no
+  restart), the broker's `GET /v1/plugins/<id>/agents/<agent>` with
+  `LOAM_BROKER_TOKEN_FILE`, and `LOAM_VAULT_DATA`/`_DIR` (the vault and its
+  system folder are read off the two) covered every route. Node and ffmpeg
+  are on every install (the app runs on the host), so `run: node
+  server/main.js` with the standard library is portable.
+- **A server that used to be core's had three hidden couplings**: the
+  install's `app.speech_voices` (each agent's voice *and character*, which is
+  part of a take's id, so a different spec misses the cache), the page's
+  `speech` flag on the app's `/api/health`, and the thread-branch drafter
+  borrowing Read aloud's Gemini key and its brief model. The voices became a
+  plugin `settings.entry` (seeded once by `loam_to_market.seed_voices`), the
+  flag the plugin's own `/status`, and the drafter got `BRANCH_MODEL`; it
+  still asks the broker for read-aloud's key (left as it was, said in the
+  0.2.12 receipt).
+- **The app's `shippedManifest` reads `contributes:` only as inline JSON**
+  (a YAML block there throws in `listedManifest`, and every audio-plugin
+  test with it). Keep a listed plugin's `contributes` on one line.
+- **A Market plugin moving to a server must be updated before core drops
+  the routes.** On this box: tag, list, install 1.1.0 over the Yours copies
+  (`bin/settings do plugin.install <link>` then `{url, confirm}`; the live
+  broker predates `request`), seed the setting, copy the audio cache
+  (`/var/lib/loam-app/loam-ui/speech`, loam-app 0700, so sudo) into
+  `<private>/read-aloud/speech`, then land. Other installs get `bring_up`.
+- **A listing showed "Uses your Google Gemini key" and "Asks for a key of
+  its own" for one key** because `touches.secrets` counted a
+  `settings.secret` named as the provider's field. `declaration` drops such
+  a name now; a plugin's own unrelated secret still shows.
+- **The page harness (`test/browser.js`) sends `/x/<id>/…` to the app**
+  unless `plugin(id, rest)` names a server; the app then answers 404, which
+  is a Loam with no such plugin.
+- **`_from_release` could not replace a folder that was there**
+  (`os.replace` onto a non-empty directory is ENOTEMPTY): step the old one
+  aside into the staging folder first.
+- **`pkill -f "node server/main.js"` killed the shell again** (2026-11-18's
+  lesson). Kill by pid from `ss -ltnp`.
 ## 2026-11-19 — Remote Control retired
 
 - **Remote Control is gone** (the owner: "I don't use it through app
@@ -1946,6 +1986,38 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Adopted sessions stay** (`lib/loam_adopt.py`): the conversations held
   in the Claude Code app before the retirement still open in Loam, read
   from the CLI's own files.
+
+## 2026-11-19 — the provider CLIs pinned to each release
+
+- **The CLIs are pinned, not followed** (the owner, 2026-11-19: "Sgtm" to
+  each release carrying the versions it was tested with). `PINS` in
+  `lib/loam_pins.py` is the one place. The installer (step 7) and `loam
+  update` (the `providers` step, which also triggers `provider-memory` and
+  `broker`) run `bin/provider-pin apply`; nothing else moves a link. The
+  daily follower (`provider-follow`, its timer, rollback watch, comms lines
+  and tests, ~1,880 lines) is gone; `gen-units` removes its units from a box
+  (`loam_units.RETIRED`) and `check-drift` reports them and any link off
+  its pin.
+- **Moving a pin**: edit `PINS`, `bin/provider-pin test` (installs the
+  builds beside and runs both live parity tests with a `[bin]` config
+  pointing at them; the links stay), land, `bin/provider-pin apply` here
+  (moves the links, re-pins memory, `restart-broker --when-idle`).
+- **Antigravity can be pinned after all**, with two seams found by causing:
+  its updater stops for `AGY_CLI_DISABLE_AUTO_UPDATE=true` (`1` and `TRUE`
+  are ignored; the log line is `Auto-update disabled via environment
+  variable`), and its release server
+  (`.../manifests/linux_amd64.json`, underscore) names only the latest
+  build, whose file URL carries a build id. So its pin is the URL and
+  SHA-512 per platform, and an old pin installs only while Google keeps the
+  file. `agy install` only copies the binary to `~/.local/bin/agy`; Loam
+  links it instead. An `agy` run by hand without the variable can still
+  update itself; check-drift sees it.
+- **A pre-pin release has no `bin/provider-pin`**: an undo back to it
+  leaves the CLIs where they are (`Box.providers`).
+- **The Antigravity file sweep** moved from the follower's last step to
+  `bin/clear-agy-files`, run by the nightly drift-watch after lane-check.
+- **`loam_live.restart_read`** is the broker's live-list reader now (was
+  `loam_follow.restart_read`); `restart-broker` and `move-state` use it.
 ## 2026-11-19 — input to a thread member is durable (batch B step 2)
 
 - **Every queued turn's input is on disk first**:
@@ -2012,3 +2084,116 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   (`tools/frame-shot.py`). Do not freeze the page clock there: a recording's
   timer and levels need time to run. The image tool writes only inside the
   reach: generate into the job's tree and move it to scratch.
+## 2026-11-19 — a run with no thread gets its result back (batch B step 3)
+
+- **Every brief returns at once**, every lane. `wait_for`, its four-hour
+  ceiling, the waiter's pid and the broker's quiet-route mark are gone; the
+  engineer MCP entry's `timeout` is 10 minutes (Codex's default per call is
+  60 s, and `cancel`/`site up` can take a minute), not four hours.
+- **`claude -p --resume <id>` keeps the id** (2.1.328, caused): the result
+  run appends to the asking session, so a second result resumes the same
+  id again. A missing id prints `No conversation found with session ID`
+  and exits 1. Every Claude wake/cron now starts with `--session-id` and
+  `LOAM_SESSION_ID`, and `loam_waiters.caller` records it for every lane.
+- **Two routes, two folders**: a thread's record in `engineer-waiters/`
+  (the broker's), a run's in `engineer-waiters/runs/` (bin/wake's). The
+  folder is what kept a pre-step-3 broker, which reads only the top and
+  would drop a cron's record as "no thread", out of it until its restart.
+- **The drain is a transient unit, `loam-results-<agent>`**, started by
+  `write_result` (the job's own launcher, `deliver=False` for the brief
+  call's own refusals), by `--recover` every 5 min, and by the broker for a
+  thread that is gone. A kick that meets a running drain says `running`;
+  the drain re-reads after each run, and the sweep catches the gap.
+- **A scratch install proves it end to end on the live box**: a
+  `LOAM_CONFIG` with `root` = the job's tree and every write path in
+  `$TMPDIR`, a scratch project through `LOAM_PROJECTS_DIR` (the platform
+  project's CLAUDE.md imports the real `ai-labs/_shared/reach.md`, which a
+  scratch `workspaces` rejects; a project record needs a `deploy_key`),
+  `bin/wake` loaded as a module with only the identity gate stubbed, and
+  probe jobs. `launch` and `kick` pass `LOAM_CONFIG` on to their units.
+  Host user units see `$TMPDIR` (the wall does not hide /tmp).
+- **Codex results are fresh runs**: a Codex wake's thread id is not where
+  a brief can read it. Resuming needs that id recorded (the running marker
+  is the obvious home) and `thread/resume`.
+## 2026-11-19 — Loam's text, the owner's short version
+
+- **`engineer-job --land` outlives a foreground call**: it runs the whole
+  suite (about 11 minutes), past the 10-minute foreground limit, and a killed
+  landing lands nothing. Run it in the background with a long timeout and
+  wait on its log.
+- **Inside the job's wall, `tests/run-all` fails two tests by environment**:
+  `test_engineer.py` (the jobs directory is read-only) and
+  `test_wake_failed.py` (its log line). The landing's run, outside the wall,
+  passes them; read the landing's verdict, not the job tree's.
+- **Loam's text changes reach agents with no render**: every mapped
+  `CLAUDE.md` imports `docs/persona/loam.md` by absolute path in the live
+  checkout, and Codex and Antigravity inline it from that import at each build,
+  so landing is enough. `loam_codex.instructions(<workspace>)` is the quickest
+  assembled-prompt proof, and it leaves the workspace as it found it.
+## 2026-11-19 — the landing's tests are sealed and parallel
+
+- **What a sealed test sees.** `tests/run-all` writes each file its own
+  config (`FIXTURE`, never the install's file) with every data path in a
+  per-file scratch folder, plus a starter agent `iris` with a soul,
+  `_shared/reach.md` and `commons/`. A landing's `platform_argv` adds the
+  wall: `unshare -Urmn` with only loopback up, and an empty read-only tmpfs
+  over each of `sealed_paths()` (vault, workspaces, projects, plugins,
+  state, secrets folder, `/run/user/<uid>`), mounted after the tree's binds.
+  A bind survives a tmpfs over its source's parent, so the tree still
+  shows at the checkout's path.
+- **What the seal found** (each one passed before only because the box had
+  it): a broker test read the live broker token; the identity gate's decoy
+  came from the box's agents' real souls; the guard and the plugin gateway
+  needed the box's starter agent; a test read an agent's live provisioned
+  Codex config (now rendered by `provision.codex_config`); `test_engineer`
+  wrote into the live jobs folder. A test that needs the box is a
+  `tests/live_*.py`, run by hand with `run-all --live`.
+- **Wall time on a 16-CPU box**: 750 s one file at a time; about 100 s eight
+  at a time. The floor is `test_schedule` (40-80 s), which waits for a real
+  timer at the next minute boundary. `test_doc_comments` was 119 s until
+  its plugin suites ran at once and `test_places` ran as four processes by
+  unittest class name.
+- **The memory note never blocks a landing** (`land` wraps `_land_once`).
+  A note-only remainder that fails is retried once on a test failure, then
+  reported as what landed before it, with the note kept as
+  `memory-note.patch` in the job's folder and no continuation. A gate hold
+  on only the note or a commit message lands the change as one commit
+  without them (`without_memory`, a temporary index and `commit-tree`).
+- **A names check at release time protects only a private `main`.** If
+  every landing pushes `main` to a public remote, the public copy is cut on
+  every landing, and a check moved to the release tag would let every
+  landing between two releases go out unchecked. Read the remote's
+  visibility (`curl -s https://api.github.com/repos/<owner>/<repo>`,
+  `"private"`) before moving such a check.
+- **A load-only flake in the app's suite** was a test asserting on the
+  first drawing of a card the page redraws when its own answer arrives (one
+  app instance across a file's tests). Wait for what this test's answer
+  draws (`until(() => ...)`), never for the node alone. Reproduce with a
+  dozen busy loops beside `node --test <file>`.
+
+## 2026-11-19 — backup offered once on every fresh install; Git backup assumes no host
+
+- **A plugin row's `chosen` says whether its switch was ever set**
+  (`installed.json`'s `on` map holds an id only once someone set it). First
+  setup's backup offer reads it: shown while Git backup is off and
+  unchosen, on both first-visit paths; *Skip for now* PATCHes it off, which
+  is the "shown, answered" mark: server-side, every device, no new setting.
+- **The installer signs in to no provider** (`docs/install.md`, "What an
+  install leaves to others"), so a provider is connected before the first
+  visit only when the owner signed the CLI in from a shell first, as on a
+  machine where Claude Code or Codex was already in use.
+- **The shared release browser fixtures are stale**: `agent-profile-host.mjs`
+  (under `release-u3/u4-fixture.mjs`) expects `read-aloud` in
+  `app/public/plugins`, which left core in `e45f685`, so
+  `release-u4-entry-browser.mjs` cannot start. Build a walk on
+  `oneProductFixture` directly (`app/test/onboarding-backup-entry-browser.mjs`).
+- **`$TMPDIR` is empty in this job's Bash shell**: set it from the job's
+  scratch path before `> $TMPDIR/x.log`, or the redirect is to `/` and the
+  command never runs.
+- **A plugin page's real flow can be walked off-box**: start its
+  `server/main.py` on a scratch `Install` (from `tests/test_git_backup.py`)
+  with `PORT`, serve `/api/plugins/<id>/files/*` from the tree and proxy
+  `/x/<id>/*` to the port with `route.fetch` in Playwright.
+- **Seen, not fixed:** `github-orgs.test.js` fails a test or more now and
+  then while `tests/run-all` loads the CPU beside it; 0 of 8 on a quiet box,
+  on `main` and on the branch alike.

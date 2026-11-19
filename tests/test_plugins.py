@@ -379,6 +379,8 @@ check("...and a write is refused rather than overwrite it", ok, said)
 
 # -- on and off ---------------------------------------------------------------
 
+check("a switch nobody has set is unchosen, on or off",
+      row("notes", "yours")["chosen"] is False and row("read-aloud", "shipped")["chosen"] is False)
 P.set_on("notes", True)
 check("turn on a plugin built here: on, and in installed.json",
       row("notes", "yours")["on"] is True
@@ -388,6 +390,8 @@ check("the first write leaves a README and a .gitignore for the staging folder",
       and (YOURS / ".gitignore").read_text() == ".staging/\n")
 P.set_on("read-aloud", False)
 check("turn off a shipped extension: off", row("read-aloud", "shipped")["on"] is False)
+check("a switch once set is chosen, whichever way (first setup's backup offer reads it)",
+      row("notes", "yours")["chosen"] is True and row("read-aloud", "shipped")["chosen"] is True)
 ok, said = refuses(lambda: P.set_on("midnight", True), "it is on where Appearance")
 check("a theme has no switch of its own: 409, pointing at Appearance", ok, said)
 ok, said = refuses(lambda: P.set_on("dusk", True), "dusk is broken")

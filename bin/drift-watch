@@ -10,6 +10,8 @@ not archived: the auto-loaded files' hygiene, the lane-model alarm and the
 GitHub integration's nightly check, which until 2026-11-19 ran as the
 preflight of each Remote Control start. Each is its own process with its own
 timeout, says what it found itself, and cannot change what this exits.
+Then `bin/clear-agy-files` (Antigravity's week-old conversation files),
+the same way.
 
 What it says, and where:
 
@@ -148,10 +150,29 @@ def lane_checks(names: list[str] | None = None, run=subprocess.run) -> dict[str,
     return out
 
 
+CLEAR_AGY_FILES = AGENTS / "bin" / "clear-agy-files"
+
+
+def clear_agy_files(run=subprocess.run) -> str:
+    """``bin/clear-agy-files``, Antigravity's week-old conversation files,
+    as its own process (until 2026-11-19 the retired provider follower's
+    last step). Never raises; it logs what it cleared itself."""
+    try:
+        done = run([sys.executable, str(CLEAR_AGY_FILES)], capture_output=True,
+                   text=True, timeout=600, check=False)
+        for line in (done.stdout + done.stderr).splitlines():
+            print(line)
+        return f"exit {done.returncode}"
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"drift-watch: clear-agy-files did not run: {exc}", file=sys.stderr)
+        return f"did not run: {exc}"
+
+
 if __name__ == "__main__":
     code = watch()
     try:
         lane_checks()
     except Exception as exc:  # noqa: BLE001 - the drift result stands
         print(f"drift-watch: lane checks could not run: {exc}", file=sys.stderr)
+    clear_agy_files()
     sys.exit(code)

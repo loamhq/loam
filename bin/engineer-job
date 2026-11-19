@@ -3,14 +3,15 @@
 in it that matter are written by this file rather than by the model.
 
 Move 9 (phase-5 closing plan, decisions 1-7). The persona's tool calls this
-and waits; everything below is what stands between "a persona asked" and "a
+and gets the job id back at once; everything below is what stands between "a persona asked" and "a
 receipt the owner can read in the vault without opening a terminal".
 
 **Two processes, and the split is the whole design.**
 
     outer   runs inside the MCP server, which is a child of the persona's
-            session. It refuses what should not start, launches
-            the inner as a TRANSIENT SYSTEMD UNIT, and then waits.
+            session. It refuses what should not start, records who asked
+            (lib/loam_waiters.py), launches the inner as a TRANSIENT SYSTEMD
+            UNIT, and returns. Until 2026-11-19 it then waited.
     inner   runs inside that unit, owned by systemd and by nothing else. It
             is admitted by the box's memory, ticks a heartbeat, runs the
             session, and writes the receipt to disk before anybody is told
@@ -19,10 +20,10 @@ receipt the owner can read in the vault without opening a terminal".
 The reason they are separate is that the session which asked can end before
 the job does, and the runtime is explicit about what that does to work the
 session owns: *"it does not survive exiting this session."* So the work is
-not the session's to own. What an ending session can still take is the
-WAITER, which is why the receipt lands on disk first and the tool's return
-value is a copy rather than the original. (The first such ending was the
-nightly Remote Control recycle, retired 2026-11-19 with Remote Control.)
+not the session's to own, and nothing waits on it: the receipt lands on disk
+and the result goes back to whoever asked when it does -- a turn in the
+thread it was asked from, or a run of the asking persona that resumes its
+session (lib/loam_results.py, batch B step 3, 2026-11-19).
 
 **No count, no clock, no cap (since 2026-11-10).** The owner that day: "why do
 we have limits on the number of engineering tasks?" and "Please remove any
@@ -55,8 +56,8 @@ its Bash tool has its own timeout. And ``--status`` says each running job's
 last engine event, not only its start, so a stuck job reads as stuck.
 
 What stays: the project's live lock around the steps that change live
-state, and the waiter's own ceiling under the tool call's four-hour
-transport timeout, which ends the call and never the job.
+state. (The waiter's ceiling under the tool call's four-hour timeout went
+on 2026-11-19 with the waiter.)
 
 **The receipt has two halves and they are not written by the same author.**
 The engineer writes the body: what changed, linked to evidence. This file
@@ -189,28 +190,15 @@ CLAUDE = str(lc.CLAUDE_BIN)
 AGENTS = eng.AGENTS
 STATE_DIR = lc.STATE / "wake"
 
-# How long the outer waits past a job's own ceiling, when its brief set one
-# (`max_minutes`), before it stops believing the job will finish. The inner
-# kills the session at the ceiling and still has a receipt to assemble and
-# copy; ninety seconds is generous for that. A job with no ceiling -- every
-# job since 2026-11-10 unless its briefer set one -- is waited for until it
-# finishes or WAITER_CEILING_SECONDS ends the call.
+# What a job's unit is given past the ceiling its brief set (`max_minutes`),
+# for the inner to assemble and copy its receipt after cutting the session.
+# Ninety seconds is generous for that. A job with no ceiling -- every job
+# since 2026-11-10 unless its briefer set one -- has no unit timeout at all.
 GRACE_SECONDS = 90
 
-# systemd-run returns once the job is enqueued, not once it is running. Do not
-# read "not active" as "died" inside this window.
+# systemd-run returns once the job is enqueued, not once it is running. A
+# record younger than this is never read as "died before it started".
 STARTUP_GRACE_SECONDS = 15
-
-POLL_SECONDS = 2
-
-# The most one `brief` call waits, queue and run together: five minutes under
-# the four-hour tool-call timeout `bin/provision` renders for the engineer
-# server, so this process answers before the transport aborts the call and
-# orphans the answer (tests/test_engineer_queue_wait.py holds the two
-# numbers together). This ends the CALL, never the job: since 2026-11-10 a
-# job has no clock, so a job that runs past it goes on in its own unit and
-# its receipt lands in the vault; the call says so and where.
-WAITER_CEILING_SECONDS = 4 * 3600 - 300
 
 # How long a session may go without a line landing in its transcript before
 # the heartbeat calls it stalled (since 2026-09-30). Job dd7958fd (09-25) sat
@@ -580,15 +568,26 @@ def paths(project: eng.Project, job_id: str) -> dict[str, Path]:
     }
 
 
-def write_result(p: dict[str, Path], payload: dict) -> None:
-    """Atomic, because the outer is polling for this file's existence.
+def write_result(p: dict[str, Path], payload: dict, deliver: bool = True) -> None:
+    """Atomic, because the broker and bin/wake read this file's existence as
+    the job's verdict. A partial read would hand a persona a truncated
+    receipt and call it the answer.
 
-    A partial read would hand a persona a truncated receipt and call it the
-    answer.
-    """
+    A verdict owed to a run with no thread starts that run's delivery now
+    (2026-11-19, lib/loam_results.py): the persona that asked gets a run
+    resuming its session with this as its input. A thread's is the
+    broker's to deliver, within thirty seconds. ``deliver`` False: the
+    brief call itself is answering (a refusal, a failed launch)."""
     tmp = p["result"].with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(tmp, p["result"])
+    if not deliver:
+        return
+    try:
+        import loam_results  # noqa: PLC0415
+        loam_results.kick_for(p["dir"].name)
+    except Exception:  # noqa: BLE001 -- the sweep starts it if this did not
+        pass
 
 
 def mark_landing(p: dict[str, Path], phase: str, **extra) -> None:
@@ -900,6 +899,10 @@ def read_brief_meta(p: dict[str, Path]) -> dict:
         "caller": head.get("caller") or "",
         "caller_session": head.get("caller_session") or "",
         "thread": head.get("thread") or "",
+        # The asking run's lane, and the job that asked (2026-11-19): what
+        # a result run reloads, and whom a job's brief answers to.
+        "caller_lane": head.get("caller_lane") or "",
+        "asked_by_job": head.get("asked_by_job") or "",
         "lane": head.get("lane") or "",
         # The tier the brief named (2026-11-15), or "": `standard` on a
         # fresh job, the parent's model on a continuation (`job_choice`).
@@ -1006,6 +1009,8 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
         f"--property=SuccessExitStatus={TIMEOUT_EXIT}",
         f"--property=EnvironmentFile=-{lc.WAKE_ENV}",
         "--setenv=DISABLE_AUTOUPDATER=1",
+        # Antigravity's own updater off too (lib/loam_pins.py).
+        "--setenv=AGY_CLI_DISABLE_AUTO_UPDATE=true",
         f"--setenv=PATH={lc.UNIT_PATH}",
     ]
     if project.platform:
@@ -1043,6 +1048,11 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
         # A scratch registry (lib/loam_engineer.py, PROJECTS_DIR): the inner
         # must find the project the outer did.
         argv.append(f"--setenv=LOAM_PROJECTS_DIR={eng.PROJECTS_DIR}")
+    if os.environ.get("LOAM_CONFIG"):
+        # A scratch install (2026-11-19): the inner reads the config the
+        # outer did, so its records, logs and the result's run are that
+        # install's. Nothing in a unit or generator sets it.
+        argv.append(f"--setenv=LOAM_CONFIG={os.environ['LOAM_CONFIG']}")
     argv += [str(AGENTS / "bin" / "engineer-job"), project.name, job_id, "--in-unit"]
     subprocess.run(argv, check=True, capture_output=True, text=True)
 
@@ -1078,131 +1088,6 @@ def plugin_job_env(project, job_id: str, p: dict[str, Path],
     else:
         log.unlink(missing_ok=True)
     return env
-
-
-def wait_for(p: dict[str, Path], job_id: str, minutes: int | None,
-             return_if_queued: bool = False) -> dict:
-    """Poll until the job settles, dies, or outlasts its briefer's ceiling.
-
-    Three outcomes and they are deliberately distinguishable, because the
-    probes found that a client that gave up and a job that died look identical
-    from the outside unless something ticks. The heartbeat is that something.
-
-    **A queued job is waited for like a running one (since 2026-10-13).**
-    Until then the waiter returned `stage: queued` the moment the job joined
-    the queue, and the call that carried the brief -- a background subagent
-    whose whole task it was -- ended with no receipt, so nothing ever woke
-    the briefing session when the job ran and finished. Caused that day: job
-    20261013-101042-70bcc8af queued behind three Loam jobs, its subagent was
-    done in 34 seconds with `receipt_path: null`. Now the job's own clock
-    starts when it leaves the queue, and the whole wait is bounded by
-    WAITER_CEILING_SECONDS, under the tool call's timeout, so a long queue
-    ends this call with a sentence rather than an abort.
-
-    `return_if_queued` keeps the old early return, for a caller that asks
-    for it. Until 2026-11-10 every unattended lane did, because a wake held
-    one of the box's run slots for its whole run and a cron that blocked on
-    a queued job would sit on a slot while its job waited for one; there are
-    no slots now, and an unattended lane waits like a conversation.
-
-    With no ceiling (`minutes` None) the only bound is WAITER_CEILING_SECONDS,
-    which ends this call and not the job.
-    """
-    def until(now: float) -> float:
-        return now + minutes * 60 + GRACE_SECONDS if minutes else float("inf")
-
-    unit = unit_name(job_id)
-    started = time.monotonic()
-    ceiling = started + WAITER_CEILING_SECONDS
-    # Reset each time the job is (re)launched or leaves the queue: the job's
-    # clock is its own run's, not the queue's.
-    seen = started
-    deadline = until(started)
-    was_queued = False
-
-    while time.monotonic() < min(deadline, ceiling):
-        queued = p["queued"].is_file() and not p["result"].is_file()
-        if queued:
-            if return_if_queued:
-                return {"ok": True, "stage": "queued",
-                        "receipt_text": queued_text(p, job_id)}
-            was_queued = True
-            deadline = until(time.monotonic())
-        elif was_queued:
-            was_queued = False
-            seen = time.monotonic()
-            deadline = until(seen)
-        if read_landing(p) is not None:
-            # The session is over and the landing runs on its own clocks --
-            # the live-lock wait, the suite, GitHub's checks -- which may run
-            # past the job's. Its unit is alive, so the death check below
-            # still catches a kill; WAITER_CEILING_SECONDS still bounds this.
-            deadline = max(deadline, time.monotonic() + GRACE_SECONDS)
-        if p["result"].is_file():
-            try:
-                return json.loads(p["result"].read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                pass  # mid-write; the next poll gets it
-        if time.monotonic() - seen > STARTUP_GRACE_SECONDS:
-            if unit_state(unit) not in ("active", "activating", "deactivating"):
-                time.sleep(POLL_SECONDS)   # one more look: the race is real
-                if p["result"].is_file():
-                    continue
-                if p["queued"].is_file() and job_id in resume_queued():
-                    # A queued unit that died leaves its marker and no
-                    # verdict; this waiter is a launcher like any other, so
-                    # it relaunches it rather than reporting a death.
-                    seen = time.monotonic()
-                    continue
-                beat = last_beat(p) or "none — it never started ticking"
-                return {
-                    "ok": False,
-                    "stage": "died",
-                    "receipt_text": (
-                        f"The job stopped without writing a receipt. Its unit "
-                        f"`{unit}.service` is no longer running and "
-                        f"{p['result']} was never written, which means it did "
-                        f"not reach any of its own exit paths — a kill, not a "
-                        f"failure it could report.\n\n"
-                        f"Last heartbeat: {beat}.\n"
-                        f"What it left behind is in {p['dir']}.\n\n"
-                        f"`journalctl --user -u {unit}.service` has whatever "
-                        f"it printed. This is the one failure the engineer "
-                        f"cannot report on itself, so nothing here is its "
-                        f"account of it."
-                    ),
-                }
-        time.sleep(POLL_SECONDS)
-
-    if p["queued"].is_file() and not p["result"].is_file():
-        return {"ok": False, "stage": "waiter_timeout", "receipt_text": (
-            f"Still queued after {round((time.monotonic() - started) / 60)} "
-            f"minutes, and this call has to end before its own transport "
-            f"timeout does. " + queued_text(p, job_id) + "\n\nDo not send "
-            f"this brief again. If it came from a thread, Loam posts its "
-            f"receipt there when it finishes and gives you a turn; otherwise "
-            f"read the receipt from the vault.")}
-    return {
-        "ok": False,
-        "stage": "waiter_timeout",
-        "receipt_text": (
-            f"Still running. I stopped waiting after "
-            f"{round((time.monotonic() - started) / 60)} minutes"
-            + (", the most one call may wait" if time.monotonic() >= ceiling
-               else f", the {minutes}-minute ceiling its brief set, plus grace")
-            + "; the job did not stop.\n\n"
-            f"It is its own systemd unit (`{unit}.service`) and losing this "
-            f"call did not touch it. Its heartbeat is at {p['heartbeat']} "
-            f"(last tick: {last_beat(p) or 'none'}), and its receipt will "
-            f"land at {p['dir']}/result.json and in the vault whenever it "
-            f"finishes.\n\n"
-            f"Do not send this brief again — it would start a second job on "
-            f"the same work in a tree of its own, and the two would race to "
-            f"land. If this brief came from a thread, Loam posts the receipt "
-            f"there when the job finishes and gives you a turn; otherwise "
-            f"wait, then read the receipt from the vault."
-        ),
-    }
 
 
 def last_beat(p: dict[str, Path]) -> str | None:
@@ -1685,9 +1570,8 @@ def receipt_summary(p: dict[str, Path], limit: int = 3000) -> str:
 # ---------------------------------------------------------------------------
 # The queue (stage two). A job that finds no room on the box -- by memory
 # since 2026-11-10 (lib/loam_lock.py, admission), by a free run slot until
-# then -- waits as its own unit instead of being refused, and the persona's call waits through
-# the queue as it waits through the run (since 2026-10-13; an unattended lane
-# still returns at once -- see `wait_for`). The queue is the job directories
+# then -- waits as its own unit instead of being refused; the brief that
+# started it has already returned. The queue is the job directories
 # themselves: a `queued` file in each, holding when it joined. Order is by
 # that time, so a later job never overtakes an earlier one -- and a job that
 # has not joined yet is later than all of them: it asks for room only when
@@ -1732,30 +1616,6 @@ def queued_ahead(job_id: str) -> int:
     yet has every waiting job ahead of it: it joins at the back."""
     jobs = [j for _, _, j in queued_jobs()]
     return jobs.index(job_id) if job_id in jobs else len(jobs)
-
-
-def queued_text(p: dict[str, Path], job_id: str) -> str:
-    try:
-        state = json.loads(p["queued"].read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        state = {}
-    position, total = queue_position(job_id)
-    # The project's real receipts folder, which is not always its name
-    # (`widget` files under `Widget/`). Until 2026-10-13 this sentence said
-    # "40_PROJECTS/<project>/receipts/" with the placeholder left in.
-    project = eng.projects().get(state.get("project", ""))
-    where = (str(project.receipts_dir(eng.VAULT)) if project
-             else f"the project's {lc.vault_folder('projects')}/…/receipts/ folder")
-    return (
-        f"Queued, not refused: job {job_id} is waiting for memory on the box "
-        f"— position {position or '?'} of {total or '?'}, queued since "
-        f"{state.get('joined', '?')}. What it is waiting on: "
-        f"{state.get('held_by') or 'room to start'}. It is its own "
-        f"systemd unit (`{unit_name(job_id)}.service`) and starts by itself "
-        f"when the box has room; there is nothing more to send. Its status is "
-        f"{p['queued']} while it waits, and its receipt lands in the vault "
-        f"under {where}/ with {job_id} in the name."
-    )
 
 
 def take_slot(project: eng.Project, job_id: str, lane: str, p: dict[str, Path]):
@@ -2757,7 +2617,7 @@ def classify(project: eng.Project, job_id: str) -> str:
 
 
 def died_unheard(project: eng.Project, job_id: str, p: dict[str, Path]) -> bool:
-    """A job whose brief returned at once (2026-11-18) and whose unit ended
+    """A job whose brief returned at once (every brief since 2026-11-19) and whose unit ended
     before its inner ever took the job -- no lease, no verdict, nothing
     queued -- has no waiter to say it died. Its verdict is written here, the
     waiter's own "died", so the broker hands it to the persona that briefed
@@ -2768,7 +2628,7 @@ def died_unheard(project: eng.Project, job_id: str, p: dict[str, Path]) -> bool:
             tzinfo=timezone.utc)
     except (OSError, ValueError, KeyError, TypeError):
         return False
-    if not record.get("returned") or p["result"].is_file() or \
+    if p["result"].is_file() or \
             (eng.now_utc() - since).total_seconds() < STARTUP_GRACE_SECONDS:
         return False
     unit = unit_name(job_id)
@@ -2828,6 +2688,15 @@ def sweep() -> dict:
         if pushed:
             report["pushes"].append(pushed)
     report["requeued"] = resume_queued()
+    # The backstop for results owed to a run (2026-11-19,
+    # lib/loam_results.py): a verdict whose kick met a drain still running,
+    # or a drain that could not get its lock, is started again here.
+    try:
+        import loam_results  # noqa: PLC0415
+        report["results"] = {a: o for a, o in loam_results.kick_all().items()
+                             if o != "running"}
+    except Exception as exc:  # noqa: BLE001
+        report["results"] = {"error": repr(exc)}
     return report
 
 
@@ -2852,7 +2721,8 @@ def run_recover() -> int:
     tmp.write_text(json.dumps({**report, "legacy": legacy}, indent=2),
                    encoding="utf-8")
     os.replace(tmp, RECOVERY_STATE)
-    if any(report[k] for k in ("recovered", "cancelled", "pushes", "requeued", "died")):
+    if any(report.get(k) for k in ("recovered", "cancelled", "pushes", "requeued",
+                                   "died", "results")):
         RECOVERY_LOG.parent.mkdir(parents=True, exist_ok=True)
         with RECOVERY_LOG.open("a", encoding="utf-8") as log:
             log.write(json.dumps(report) + "\n")
@@ -2988,7 +2858,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
 
     # A slot only, since 2026-10-02: the job's tree is its own, so nothing
     # about its PROJECT can be busy. A full box queues the job rather than
-    # refusing it (stage two): the waiter keeps waiting, see `wait_for`.
+    # refusing it (stage two); its result goes back when it has run.
     lock = take_slot(project, job_id, lane, p)
     if lock is None:
         return 0
@@ -3805,19 +3675,17 @@ def write_brief(directory: Path, project: eng.Project, title: str,
 
 # ---------------------------------------------------------------------------
 
-def run_outer(project: eng.Project, job_id: str, p: dict[str, Path],
-              wait: bool = True) -> tuple[int, dict]:
-    """Refuse, launch, wait. (exit code, verdict) -- the verdict always has
-    `receipt_text`, and `vault_receipt` once a job has finished. With
-    `wait` False (a brief from a thread, since 2026-11-18) it returns once
-    the job is launched, `stage` `launched` or `queued` and no
-    `receipt_text`; a refusal or a failed launch is final either way."""
+def run_outer(project: eng.Project, job_id: str, p: dict[str, Path]) -> tuple[int, dict]:
+    """Refuse or launch. (exit code, verdict): `stage` `launched` or
+    `queued` once the job is its own unit, and no `receipt_text`; a refusal
+    or a failed launch is final, with its sentence. Nobody waits on the job
+    (since 2026-11-19, batch B step 3; from a thread since 2026-11-18)."""
     p["dir"].mkdir(parents=True, exist_ok=True)
     meta = read_brief_meta(p)
     refusal = preflight(project, p, meta)
     if refusal:
         verdict = {"ok": False, "stage": "refused", "receipt_text": refusal}
-        write_result(p, verdict)
+        write_result(p, verdict, deliver=False)
         return 3, verdict
 
     # Any result.json here is from an earlier attempt at this same job id, and
@@ -3825,9 +3693,9 @@ def run_outer(project: eng.Project, job_id: str, p: dict[str, Path],
     # that already exists was written before this launch. Found by causing on
     # 2026-09-05 -- the first real job failed to launch, was fixed and relaunched,
     # and the waiter returned the FAILED verdict in under a second while the
-    # relaunched job ran happily behind it for eleven minutes. A waiter that can
-    # return a verdict older than the run it is waiting on is worse than one that
-    # times out, because it looks like an answer.
+    # relaunched job ran happily behind it for eleven minutes. A verdict
+    # older than the run it stands for is worse than none, because it looks
+    # like an answer.
     p["result"].unlink(missing_ok=True)
     p["heartbeat"].unlink(missing_ok=True)
 
@@ -3837,19 +3705,34 @@ def run_outer(project: eng.Project, job_id: str, p: dict[str, Path],
         verdict = {"ok": False, "stage": "launch_failed", "receipt_text": (
             f"Could not start the job: systemd-run exited {exc.returncode}.\n"
             f"{(exc.stderr or '').strip()[:500]}")}
-        write_result(p, verdict)
+        write_result(p, verdict, deliver=False)
         return 4, verdict
+    return 0, {"ok": True, "stage": "queued" if p["queued"].is_file()
+               and not p["result"].is_file() else "launched"}
 
-    if not wait:
-        return 0, {"ok": True, "stage": "queued" if p["queued"].is_file()
-                   and not p["result"].is_file() else "launched"}
-    settled = wait_for(p, job_id, meta["max_minutes"])
-    return (0 if settled.get("ok") else 1), settled
+
+def returns_how(meta: dict) -> str:
+    """Where the result goes, in the words the brief's caller reads."""
+    if meta.get("thread"):
+        return ("Its result comes back to you in this thread as your next "
+                "input when it ends, nothing posted; you may read it and end "
+                "your turn without saying anything.")
+    return ("When it ends, its result comes back to you as a new run that "
+            "resumes this session (or, if it cannot, a fresh run carrying the "
+            "result and this brief), nothing posted. You need not wait for it: "
+            "end this run when the rest of your work is done.")
 
 
 def run_tool() -> int:
     """The `--brief` form. One JSON object in on stdin, one out on stdout,
-    and nothing else ever reaches stdout in this mode."""
+    and nothing else ever reaches stdout in this mode.
+
+    Returns once the job is launched or queued, on every lane (2026-11-19,
+    batch B step 3). The record of what is owed is written first
+    (lib/loam_waiters.py), and the result goes back to whoever asked: a
+    thread's as a turn in it (the broker), anyone else's as a run of the
+    persona that resumes the asking session (lib/loam_results.py). Until
+    then a wake, a cron or a job blocked here for up to four hours."""
     def reply(payload: dict) -> None:
         print(json.dumps(payload))
 
@@ -3868,20 +3751,11 @@ def run_tool() -> int:
         return 3
     project, job_id, p = accepted
     meta = read_brief_meta(p)
-    caller_info = {k: meta[k] for k in ("caller", "caller_session", "thread")
-                   if meta[k]}
-    # A brief from a thread returns at once (2026-11-18, batch B step 1):
-    # the record is written now, with no waiter, and the broker hands the
-    # result to the briefing persona as input to a turn in that thread
-    # when the job has a verdict, posting nothing. Only while the running
-    # broker is one that delivers that way (`loam_waiters.route_live`);
-    # otherwise, and for a caller with no thread, the call waits as before,
-    # and a waiter the restart cut is delivered for by the same pass.
-    returns_now = bool(meta["thread"]) and loam_waiters.route_live()
     loam_waiters.register(job_id, project.name, p["dir"], meta["briefed_by"],
-                          caller_info, returned=returns_now)
-    code, verdict = run_outer(project, job_id, p, wait=not returns_now)
-    if returns_now and verdict.get("stage") in ("launched", "queued"):
+                          {k: meta[k] for k in loam_waiters.CALLER_FIELDS + ("asked_by_job",)
+                           if meta.get(k)})
+    code, verdict = run_outer(project, job_id, p)
+    if verdict.get("stage") in ("launched", "queued"):
         queued = verdict["stage"] == "queued"
         reply({
             "ok": True,
@@ -3890,16 +3764,13 @@ def run_tool() -> int:
             "receipt_path": str(p["receipt"]),
             "receipt": (
                 f"Job {job_id} is {'queued for memory' if queued else 'running'}. "
-                f"Its result comes back to you in this thread as your next input "
-                f"when it ends, nothing posted; you may read it and end your "
-                f"turn without saying anything. The engineer's receipt will be "
-                f"at {p['receipt']}, and the full one in the vault."),
+                f"{returns_how(meta)} The engineer's receipt will be at "
+                f"{p['receipt']}, and the full one in the vault."),
         })
         return 0
-    if verdict.get("stage") != "waiter_timeout":
-        loam_waiters.settle(job_id)
+    loam_waiters.settle(job_id)
     reply({
-        "ok": code == 0,
+        "ok": False,
         "job_id": job_id,
         "receipt_path": verdict.get("vault_receipt"),
         "receipt": verdict.get("receipt_text", ""),

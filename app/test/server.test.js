@@ -22,7 +22,8 @@ test('GET /up answers 200 even with no broker configured at all', async (t) => {
 
   // And the page says so plainly rather than half-working.
   const health = await (await fetch(`http://127.0.0.1:${server.address().port}/api/health`)).json()
-  assert.deepEqual(health, { configured: false, ok: false, speech: false })
+  // Whether a reply can be read aloud is Read aloud's own server's (0.2.12).
+  assert.deepEqual(health, { configured: false, ok: false })
 })
 
 // The policy the page is written against, on the one header that carries it.
@@ -325,57 +326,6 @@ test('the providers reach the page whole, the ones that are not wired included',
   // report, so nothing here filters the list down to the connected ones.
   assert.deepEqual(body, answer)
   assert.equal('usage' in body.providers[1], false, 'an unwired provider carries no zeroed quota')
-})
-
-// The terms, relayed as the host answers them — the note whole, or already
-// read by its rule. Its `404` and an older host's `405` both reach the page
-// with their status, which is what the page reads as no vault terms.
-test('the terms note is relayed whole and uncached, and a 404 or a 405 reaches the page as it came', async (t) => {
-  const NOTE = {
-    path: 'System/Dictation terms.md',
-    obsidian_url: 'obsidian://open?vault=notes&file=System%2FDictation%20terms',
-    modified: '2026-09-30T18:13:57Z',
-    text: '# Dictation terms\n\nAda\n',
-  }
-  let answer = [200, NOTE]
-  const broker = await fakeBroker({
-    'GET /v1/dictation-terms': (req, res) => {
-      res.writeHead(answer[0], { 'content-type': 'application/json', 'cache-control': 'no-store' })
-      res.end(JSON.stringify(answer[1]))
-    },
-  })
-  const app = await appAgainst(broker)
-  t.after(closing(broker, app))
-
-  let res = await fetch(`${app.url}/api/dictation-terms`)
-  assert.equal(res.status, 200)
-  assert.equal(res.headers.get('cache-control'), 'no-store')
-  assert.deepEqual(await res.json(), NOTE)
-  const call = broker.seen.find((c) => c.path === '/v1/dictation-terms')
-  assert.equal(call.method, 'GET')
-  assert.equal(call.auth, `Bearer ${TOKEN}`)
-
-  // The host that parses the note itself: its answer, as it came.
-  const PARSED = { terms: ['Ada', 'Grace Hopper'], source: 'Notes/Dictation terms.md' }
-  answer = [200, PARSED]
-  res = await fetch(`${app.url}/api/dictation-terms`)
-  assert.equal(res.status, 200)
-  assert.deepEqual(await res.json(), PARSED)
-
-  answer = [404, { error: 'no dictation terms note on this box' }]
-  res = await fetch(`${app.url}/api/dictation-terms`)
-  assert.equal(res.status, 404)
-  assert.deepEqual(await res.json(), { error: 'no dictation terms note on this box' })
-
-  answer = [405, { error: 'no route' }]
-  res = await fetch(`${app.url}/api/dictation-terms`)
-  assert.equal(res.status, 405)
-  assert.equal(res.headers.get('cache-control'), 'no-store')
-
-  // Read-only: nothing else goes through to the host.
-  res = await fetch(`${app.url}/api/dictation-terms`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } })
-  assert.equal(res.status, 404)
-  assert.equal(broker.seen.filter((c) => c.path === '/v1/dictation-terms').length, 4)
 })
 
 test('a pin is a PATCH, and the record comes back as the broker wrote it', async (t) => {
