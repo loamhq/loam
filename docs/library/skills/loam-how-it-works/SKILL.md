@@ -65,7 +65,8 @@ change the engineer made to Loam's own code on this install is kept: each
 update merges the release around it, and stops, changing nothing, if the
 two touch the same lines.
 
-**Loam's makers** hear about a defect or a wish when the owner sends it: an
-agent writes the report with personal details taken out, shows it, and on
-the owner's yes gives them a link that files it from their own GitHub
-account (`loam-filing-a-bug-or-feature`).
+**Loam's makers** hear a bug, a wish or any feedback ("tell the people who
+make Loam…") when the owner sends it: an agent writes it with personal
+details taken out, shows every word, and on the owner's yes sends it to a
+private inbox only the makers read, no account needed, or as a GitHub issue
+they can follow (`loam-filing-a-bug-or-feature`).

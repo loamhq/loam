@@ -45,7 +45,9 @@ place on a particular machine. Added 2026-11-14 (first release, job L1).
 | `owner.legacy_ids` | ids an install used for its owner before `owner.id` existed; records that carry one still read as the owner's | absent: none |
 | `deploy.config` | the deployment configuration (domain, `[moved]`, `[[forward]]`) of a box set up by hand, kept outside the checkout so an update never replaces it; same format as `deploy/loam.toml` | absent: `deploy/loam.toml` |
 | `app.speech_voices`, `app.avatar_colours` | the install's agents' read-aloud voices (`agent=Voice:character;...`) and avatar colour overrides (a table of agent id = palette token), passed by `bin/deploy` to the app's compose file | absent: Iris's voice; no override |
-| `feedback.repo` | where `loam report` sends a bug report or a feature request (lib/loam_feedback.py) | absent: `loamhq/loam` |
+| `feedback.repo` | the repository whose new-issue page `loam report` links a bug, a feature request or an idea to (lib/loam_feedback.py) | absent: `loamhq/loam` |
+| `feedback.url` | where `loam report send` posts a report privately (https) | absent: `https://<BASE_DOMAIN>/_loam/feedback` (lib/loam_install.py), Loam's makers' box |
+| `feedback.receive`, `feedback.host`, `feedback.folder` | this box is the one that takes those reports: the host named (an app's or a `[[landing]]`'s) answers `/_loam/feedback` outside the login, and each report lands in the vault folder named (deploy/README.md, "Feedback to Loam's makers") | absent: off; `BASE_DOMAIN`; `<projects>/Loam/feedback` |
 | `marketplace.list`, `marketplace.repo` | the marketplace's list (an https URL; `""` turns the section off) and the repository a listing is asked for in (docs/plugins.md, "The marketplace") | absent: `loamhq/marketplace`'s `list.json` on `main` |
 | `edge.*` | an install's name on the web: its domain, address, the app at the domain itself, the records it serves, how DNS is asked, local certificates for a rehearsal, the DNS gate (first release L12; docs/install.md) | absent: the deploy layer reads `deploy/loam.toml` and serves every record, as the first install always has |
 
