@@ -123,11 +123,18 @@ def toml_str(value: str) -> str:
 def render_config(*, name: str, owner: str, timezone: str, address: str,
                   home: str, user: str = USER, base: str = BASE_DOMAIN,
                   resolver: str = "public", tls: str = "acme",
-                  root: str | None = None) -> str:
+                  root: str | None = None, domain: str | None = None) -> str:
     """The install's /etc/loam/loam.toml. Every key docs/config.md lists that
     a fresh install needs spelled out, and the `[edge]` table that makes the
-    box one person's name."""
-    domain = f"{name}.{base}"
+    box one person's name. With `domain`, the install is on a domain its
+    owner has (`own_domain = true`): `name` is then only that domain's first
+    label, kept for anything that wants a short name."""
+    own = bool(domain)
+    if own:
+        domain = domain.lower().rstrip(".")
+        name = domain.split(".", 1)[0]
+    else:
+        domain = f"{name}.{base}"
     root = root or f"{home}/loam"
     today = dt.date.today().isoformat()
     return f"""\
@@ -166,7 +173,7 @@ apps = ["loam-ui", "files", "vault"]
 resolver = {toml_str(resolver)}
 tls = {toml_str(tls)}
 dns_gate = true
-"""
+""" + ("own_domain = true\n" if own else "")
 
 
 def reach_text(lc=None) -> str:
@@ -303,6 +310,175 @@ def name_check(name: str, address: str, *, base: str = BASE_DOMAIN,
 
 def records_to_ask_for(name: str, address: str, base: str = BASE_DOMAIN) -> list[str]:
     return [f"{name}.{base}  A  {address}", f"*.{name}.{base}  A  {address}"]
+
+
+# ---------------------------------------------------------------------------
+# A domain of the owner's own (Loam 0.2.8)
+# ---------------------------------------------------------------------------
+#
+# Instead of a name under BASE_DOMAIN, which Loam's makers make the records
+# for, an install can live on a domain its owner has: `loam.example.com`, or
+# `example.com` itself. The owner makes the same two A records at their DNS
+# provider; the installer says which, checks them, says plainly what is
+# still missing, and goes on the web by itself once they are right.
+#
+# Certificates are Caddy's default: one Let's Encrypt certificate per host,
+# by the HTTP-01 / TLS-ALPN-01 challenges on ports 80 and 443. No wildcard
+# certificate is needed, because every host (the app, auth., vault., files.,
+# each agent's site) is its own block in the Caddyfile, and the wildcard A
+# record makes every one of them resolve. A wildcard certificate would need
+# DNS-01, which needs an API key for the owner's DNS provider and a Caddy
+# built with that provider's module: a second thing to set up, for nothing
+# the per-host route does not already give.
+
+def valid_domain(domain: str) -> str | None:
+    """Why `domain` cannot be an install's own domain, or None."""
+    d = (domain or "").strip().lower().rstrip(".")
+    if d.startswith(("http://", "https://")) or "/" in d or ":" in d:
+        return "give the domain alone, without https:// or a path (for example loam.example.com)"
+    if d.startswith("*."):
+        return "give the domain itself, without *. (the installer asks for the wildcard too)"
+    labels = d.split(".")
+    if len(d) > 200 or len(labels) < 2 or not all(
+            re.match(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", x) for x in labels) \
+            or not re.match(r"^[a-z][a-z0-9-]*$", labels[-1]):
+        return "that is not a domain name (for example loam.example.com)"
+    if d == BASE_DOMAIN or d.endswith("." + BASE_DOMAIN):
+        return (f"names under {BASE_DOMAIN} are Loam's makers' to give: ask them for "
+                f"one and run the install with --name instead")
+    return None
+
+
+def own_records(domain: str, address: str) -> list[str]:
+    """The two records an own domain needs, as the installer prints them."""
+    return [f"{domain}  A  {address}", f"*.{domain}  A  {address}"]
+
+
+def edge_records(edge: dict) -> list[str]:
+    """The two records an install's `[edge]` needs, either kind."""
+    address = edge.get("address", "?")
+    if edge.get("own_domain"):
+        return own_records(edge["domain"], address)
+    return records_to_ask_for(edge["name"], address, edge["domain"].split(".", 1)[1])
+
+
+def _resolve6(name: str, resolver: str = "public") -> set[str] | None:
+    """The name's IPv6 addresses, asked the same way as `resolve`."""
+    if resolver == "system":
+        try:
+            return {ai[4][0].split("%")[0]
+                    for ai in socket.getaddrinfo(name, None, socket.AF_INET6)}
+        except socket.gaierror as exc:
+            if exc.errno in (socket.EAI_NONAME, getattr(socket, "EAI_NODATA", -5)):
+                return set()
+            return None
+    for base in ("https://1.1.1.1/dns-query", "https://dns.google/resolve"):
+        url = f"{base}?{urllib.parse.urlencode({'name': name, 'type': 'AAAA'})}"
+        req = urllib.request.Request(url, headers={"accept": "application/dns-json",
+                                                   "user-agent": "loam-install"})
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read())
+        except (OSError, ValueError):
+            continue
+        if data.get("Status") not in (0, 3):
+            continue
+        return {a["data"] for a in data.get("Answer") or [] if a.get("type") == 28}
+    return None
+
+
+def own_addresses() -> set[str]:
+    """Every address on this box's interfaces (`ip -j addr`)."""
+    run = subprocess.run(["ip", "-j", "addr"], capture_output=True, text=True, check=False)
+    try:
+        return {a["local"] for link in json.loads(run.stdout)
+                for a in link.get("addr_info", []) if a.get("local")}
+    except (ValueError, TypeError, KeyError):
+        return set()
+
+
+# Cloudflare's published IPv4 ranges (https://www.cloudflare.com/ips-v4/).
+# A record that answers with one of these is proxied (the orange cloud):
+# the person's DNS is right but the proxy hides this server, and Let's
+# Encrypt's challenge and the agents' sites need it to say "DNS only".
+CLOUDFLARE = tuple(ipaddress.ip_network(n) for n in (
+    "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+    "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+    "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+    "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22"))
+
+
+def _proxied(addrs) -> bool:
+    for a in addrs or ():
+        try:
+            ip = ipaddress.ip_address(a)
+        except ValueError:
+            continue
+        if any(ip in n for n in CLOUDFLARE):
+            return True
+    return False
+
+
+def domain_check(domain: str, address: str, *, resolver: str = "public",
+                 mine: set[str] | None = None) -> dict:
+    """What DNS says about an own domain: `domain` and `*.domain` (asked as
+    `loam-check.<domain>`), each A and AAAA.
+
+    `state` is one of:
+      here       both A records are this box's, and no AAAA record points
+                 anywhere else: the edge can go up now
+      waiting    something is missing or points elsewhere; `problems` says
+                 what, one plain sentence per record, and what to do
+      unknown    no resolver could be asked
+
+    Unlike a name under BASE_DOMAIN there is no "taken": the domain is the
+    person's, so a record pointing elsewhere is one for them to change (an
+    old server, a parking page, a proxy), not someone else's claim.
+    An AAAA record that is not this box's matters because Let's Encrypt
+    asks over IPv6 first when a name has one, and the challenge would then
+    reach another server."""
+    probe = f"{PROBE_LABEL}.{domain}"
+    a_apex, a_probe = resolve(domain, resolver), resolve(probe, resolver)
+    six_apex, six_probe = _resolve6(domain, resolver), _resolve6(probe, resolver)
+    out = {"domain": domain, "address": address,
+           "apex": sorted(a_apex) if a_apex is not None else None,
+           "wildcard": sorted(a_probe) if a_probe is not None else None,
+           "apex6": sorted(six_apex or []), "wildcard6": sorted(six_probe or [])}
+    if a_apex is None or a_probe is None:
+        return {**out, "state": "unknown", "problems": [
+            "DNS could not be asked just now (no answer from the resolvers); "
+            "it is asked again in a moment"]}
+    mine = own_addresses() if mine is None else mine
+    mine = set(mine) | {address}
+    problems: list[str] = []
+    for label, shown, got, got6 in ((domain, domain, a_apex, six_apex),
+                                    (probe, f"*.{domain}", a_probe, six_probe)):
+        if not got:
+            problems.append(f"{shown} has no A record yet: make one pointing to {address}")
+        elif got != {address}:
+            problems.append(f"{shown} points to {', '.join(sorted(got))}, not to this "
+                            f"server: change its A record to {address}")
+        stray6 = sorted(set(got6 or ()) - mine)
+        if stray6:
+            problems.append(f"{shown} also has an IPv6 (AAAA) record, {', '.join(stray6)}, "
+                            "that is not this server: delete it, or the certificate "
+                            "cannot be made")
+    if _proxied((a_apex or set()) | (a_probe or set())):
+        problems.append("these answers are Cloudflare's own addresses, so the records are "
+                        "proxied: in Cloudflare's DNS page, set both records to \"DNS only\" "
+                        "(the grey cloud)")
+    return {**out, "state": "waiting" if problems else "here", "problems": problems}
+
+
+def edge_check(edge: dict) -> dict:
+    """The DNS check an install's `[edge]` needs, either kind. The state is
+    the name check's (here, taken, unset, unknown) or the own domain's
+    (here, waiting, unknown)."""
+    resolver = edge.get("resolver", "public")
+    if edge.get("own_domain"):
+        return domain_check(edge["domain"], edge.get("address", ""), resolver=resolver)
+    return name_check(edge["name"], edge.get("address", ""),
+                      base=edge["domain"].split(".", 1)[1], resolver=resolver)
 
 
 # ---------------------------------------------------------------------------

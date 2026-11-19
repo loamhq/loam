@@ -348,6 +348,8 @@ class DeployError(Exception):
 #   resolver = "public"                 # how DNS is asked: "public" | "system"
 #   tls = "acme"                        # "internal": Caddy's own CA (rehearsals)
 #   dns_gate = true                     # no site block until the name resolves
+#   own_domain = true                   # the owner's own domain (0.2.8): only the
+#                                       #   installer's DNS check reads it
 #
 # Three things follow from the table and nothing else does:
 # - **No site block before DNS.** Until loam-await-dns has seen the name and

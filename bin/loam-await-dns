@@ -5,7 +5,8 @@ One run (`loam-await-dns.service`, root, started every 30 seconds by
 `loam-await-dns.timer` until it is done; the installer's step 10 runs it once
 first). Each run:
 
-1. asks DNS for `<name>.<base>` and `loam-check.<name>.<base>` (the wildcard);
+1. asks DNS for the domain and `loam-check.<domain>` (the wildcard), and on
+   an own domain (`edge.own_domain`, Loam 0.2.8) their AAAA records too;
 2. until both answer with this box's address, writes what it found to
    /var/lib/loam/edge.json for `loam status` and stops there: the Caddyfile
    has no host block yet, so Caddy asks Let's Encrypt for nothing;
@@ -75,16 +76,17 @@ def main(argv: list[str]) -> int:
         state = {"domain": domain}
 
     if state.get("dns") != "resolved":
-        base = domain.split(".", 1)[1]
-        found = li.name_check(edge["name"], address, base=base,
-                              resolver=edge.get("resolver", "public"))
+        found = li.edge_check(edge)
         state.update({"checked": now(), "last": found["state"],
                       "apex": found["apex"], "wildcard": found["wildcard"]})
+        if "problems" in found:     # an own domain: what is still missing, in words
+            state["problems"] = found["problems"]
         if found["state"] != "here":
             state["dns"] = found["state"]
             write_state(state)
             say(f"{domain} does not point here yet ({found['state']}); checking again in 30 seconds")
             return 0
+        state.pop("problems", None)
         state.update({"dns": "resolved", "resolved_at": now()})
         write_state(state)
         say(f"{domain} points here. Putting it on the web…")

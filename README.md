@@ -35,22 +35,40 @@ minutes.
 On a fresh server, as root:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/loamhq/loam/main/install.sh | sudo bash -s -- --name <name>
+curl -fsSL https://raw.githubusercontent.com/loamhq/loam/main/install.sh | sudo bash
 ```
 
-It can be run again at any time, and ends with a one-time link that makes
-you the owner. It installs the newest release.
+It asks where your Loam will live on the web (below), your first name and
+your time zone. It can be run again at any time, and ends with a one-time
+link that makes you the owner. It installs the newest release.
+
+**Where your Loam lives.** One of two ways:
+
+- **On a domain you have**, for example `loam.example.com`, or `example.com`
+  itself. Choose it when asked, or say it in the command:
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/loamhq/loam/main/install.sh | sudo bash -s -- --domain loam.example.com
+  ```
+
+  You make two DNS records where you manage the domain (usually the
+  company you bought it from), both type A, pointing at your server:
+  `loam.example.com` and `*.loam.example.com`. The installer prints them
+  with your server's address, checks them, says plainly which one is still
+  missing or wrong, and can wait while you make them. Certificates are
+  made by Let's Encrypt for each address by themselves; nothing else to
+  set up.
+- **On a name we give you** under Loam's own domain, like `sam.<Loam's
+  domain>`. Ask Loam's makers for a name first; they make its records.
+  Then choose it when asked, or end the command with `-s -- --name sam`
+  instead. Loam waits for the records and goes on the web by itself.
 
 **What you need:**
 
 - **A server** running Debian 12 or Ubuntu 24.04, with a public IPv4 address,
   at least 4 GB of memory and 15 GB of free disk.
-- **A name on the web.** Your Loam lives at `<name>` under Loam's own
-  domain (`BASE_DOMAIN` in `lib/loam_install.py`). The installer prints the
-  two DNS records it needs (`<name>` and `*.<name>`, type A, pointing at your
-  server); records under that domain are added by whoever runs it, today
-  Loam's maintainers. Loam waits for them and goes on the web by itself once
-  they resolve.
+- **A name on the web**: a domain of your own whose DNS you can change, or
+  a name from Loam's makers (above).
 - **An account with an AI provider**: Claude (Claude Code), ChatGPT (Codex)
   or Google (Antigravity). You sign in from the app; Loam signs in to nothing
   on your behalf.

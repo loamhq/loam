@@ -2,10 +2,15 @@
 """The installer's eleven steps (first release L12). Started by install.sh,
 which fetched this release; run as root.
 
-  loam-install [--name NAME] [--owner "NAME"] [--timezone ZONE] [--yes]
-               [--source URL] [--version TAG]
+  loam-install [--domain DOMAIN | --name NAME] [--owner "NAME"]
+               [--timezone ZONE] [--yes] [--source URL] [--version TAG]
   rehearsal only: [--address IP] [--resolver system] [--local-certs]
                   [--base DOMAIN]
+
+Where it lives on the web is one of two (docs/install.md, "Where your Loam
+lives"): `--domain loam.example.com`, a domain the person has, for which they
+make two DNS records; or `--name sam`, a name under Loam's own domain, whose
+records Loam's makers make (ask them first). Without either, it asks.
 
 Each step writes /var/lib/loam/install/<n>-<step>.done when it has finished,
 and a run starts at the first step without one, so running the install
@@ -119,20 +124,25 @@ def as_user(cfg: dict, argv: list[str], **kw) -> subprocess.CompletedProcess:
 
 
 def ask(question: str, default: str = "", *, check=None) -> str:
-    """One question, from the terminal even when the script came down a pipe."""
+    """One question, from the terminal even when the script came down a pipe.
+    The terminal is opened twice, to read and to write: a text file opened
+    "r+" on /dev/tty raises "not seekable", so until 0.2.8 every question
+    stopped the install as if there were no terminal (found walking 0.2.8;
+    every earlier rehearsal gave all its answers as options)."""
     try:
-        tty = open("/dev/tty", "r+", encoding="utf-8")
+        tty_in = open("/dev/tty", "r", encoding="utf-8")
+        tty = open("/dev/tty", "w", encoding="utf-8")
     except OSError:
         if default:
             return default
         raise Stop(f"The installer needs an answer and has no way to ask: {question}",
                    "run it again with the answer given as an option (see --help)")
-    with tty:
+    with tty_in, tty:
         while True:
             hint = f" [{default}]" if default else ""
             tty.write(f"\n{question}{hint}: ")
             tty.flush()
-            answer = tty.readline().strip() or default
+            answer = tty_in.readline().strip() or default
             why = check(answer) if check else (None if answer else "an answer is needed")
             if not why:
                 logline(f"ASKED {question} -> {answer}")
@@ -227,9 +237,13 @@ def step_preflight(a, ans: dict) -> None:
     if CONFIG.exists():
         cfg = config_values()
         name = cfg["edge"].get("name")
-        if a.name and name and a.name != name:
-            raise Stop(f"This server is already set up as {cfg['edge'].get('domain')}.",
-                       f"run the install command with --name {name}, or without --name")
+        have = cfg["edge"].get("domain")
+        own = bool(cfg["edge"].get("own_domain"))
+        if (a.domain and a.domain.lower().rstrip(".") != have) or \
+                (a.name and (own or (name and a.name != name))):
+            again = f"--domain {have}" if own else f"--name {name}"
+            raise Stop(f"This server is already set up as {have}.",
+                       f"run the install command with {again}, or without it")
         ans.update({"name": name, "owner": cfg["owner"], "timezone": cfg["timezone"],
                     "address": cfg["edge"].get("address", address)})
         save_answers(ans)
@@ -237,12 +251,26 @@ def step_preflight(a, ans: dict) -> None:
         return
 
     base = a.base or ans.get("base") or li.BASE_DOMAIN
-    name = a.name or ans.get("name") or ask(
-        f"Choose your name. Your Loam will be at <name>.{base}",
-        check=li.valid_name)
-    why = li.valid_name(name)
-    if why:
-        raise Stop(f"\"{name}\" cannot be used: {why}.", "run it again with another --name")
+    if a.name and a.domain:
+        raise Stop("--name and --domain were both given; Loam lives at one of them.",
+                   "run it again with --domain for your own domain, or --name for a "
+                   f"name under {base}")
+    domain = (a.domain or ans.get("domain") or "").strip().lower().rstrip(".")
+    name = "" if domain else (a.name or ans.get("name") or "")
+    if not domain and not name:
+        domain, name = ask_where(base)
+    if domain:
+        why = li.valid_domain(domain)
+        if why:
+            raise Stop(f"\"{domain}\" cannot be used: {why}.",
+                       "run it again with another --domain")
+        name = domain.split(".", 1)[0]
+        where = domain
+    else:
+        why = li.valid_name(name)
+        if why:
+            raise Stop(f"\"{name}\" cannot be used: {why}.", "run it again with another --name")
+        where = f"{name}.{base}"
     owner = a.owner or ans.get("owner") or ask("Your first name, as Loam should call you")
     tz_default = run(["timedatectl", "show", "-p", "Timezone", "--value"],
                      check=False).stdout.strip() or "UTC"
@@ -252,19 +280,44 @@ def step_preflight(a, ans: dict) -> None:
     if valid_zone(tz):
         raise Stop(f"\"{tz}\" is not a time zone this server knows.",
                    "use a name like Europe/Berlin or America/Los_Angeles")
-    ans.update({"name": name, "owner": owner, "timezone": tz, "address": address,
-                "base": base, "resolver": a.resolver, "tls": "internal" if a.local_certs else "acme",
+    ans.update({"name": name, "domain": domain, "owner": owner, "timezone": tz,
+                "address": address, "base": base, "resolver": a.resolver, "tls": "internal" if a.local_certs else "acme",
                 "source": a.source or ans.get("source") or DEFAULT_SOURCE,
                 "version": ans.get("version") or a.version})
     save_answers(ans)
     home = f"/home/{li.USER}"
     text = li.render_config(name=name, owner=owner, timezone=tz, address=address, home=home,
-                            base=base, resolver=a.resolver,
+                            base=base, resolver=a.resolver, domain=domain or None,
                             tls="internal" if a.local_certs else "acme")
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
     CONFIG.write_text(text, encoding="utf-8")
     os.chmod(CONFIG, 0o644)
-    say(f"Your Loam will be {name}.{base}, for {owner}, in {tz}.", 2)
+    say(f"Your Loam will be {where}, for {owner}, in {tz}.", 2)
+
+
+def ask_where(base: str) -> tuple[str, str]:
+    """The first question of an install given neither --domain nor --name:
+    which of the two ways. Returns (domain, "") or ("", name)."""
+    try:
+        open("/dev/tty", "r", encoding="utf-8").close()
+    except OSError:
+        raise Stop("The installer needs to know where your Loam will live on the web, "
+                   "and has no way to ask.",
+                   "run it again with --domain loam.example.com (a domain you have) or "
+                   f"--name <name> (a name under {base} from Loam's makers)") from None
+    say("Where will your Loam live on the web? Either:", 2)
+    say("1. On a domain you have, for example loam.example.com (or example.com "
+        "itself). You add two DNS records where you bought the domain; the "
+        "installer says which, and checks them.", 4)
+    say(f"2. On a name under {base}, like sam.{base}. Loam's makers add its "
+        "records, so ask them for a name first.", 4)
+    choice = ask("Type 1 or 2", check=lambda x: None if x.strip() in ("1", "2")
+                 else "type 1 for your own domain, or 2 for a name we give you")
+    if choice.strip() == "1":
+        return ask("Your domain (for example loam.example.com)",
+                   check=li.valid_domain).strip().lower().rstrip("."), ""
+    return "", ask(f"The name Loam's makers gave you (your Loam will be at <name>.{base})",
+                   check=li.valid_name)
 
 
 def valid_zone(zone: str) -> str | None:
@@ -283,6 +336,8 @@ def valid_zone(zone: str) -> str | None:
 def step_name(a, ans: dict) -> None:
     cfg = config_values()
     edge = cfg["edge"]
+    if edge.get("own_domain"):
+        return step_name_own(edge, ans)
     base = edge["domain"].split(".", 1)[1]
     found = li.name_check(edge["name"], edge["address"], base=base,
                           resolver=edge.get("resolver", "public"))
@@ -302,6 +357,47 @@ def step_name(a, ans: dict) -> None:
             f"until the last steps works without it. Two DNS records are needed:", 2)
         for rec in li.records_to_ask_for(edge["name"], edge["address"], base):
             say(rec, 6)
+
+
+def say_records(edge: dict) -> None:
+    """The two records, and where they are made, for an own domain."""
+    for rec in li.edge_records(edge):
+        say(rec, 6)
+    say("Make them where you manage the domain's DNS (usually the company you "
+        "bought it from: its \"DNS\" or \"DNS records\" page). Type A, the name "
+        "as shown (some pages want only the part before your domain), the "
+        "address as shown. If the domain is on Cloudflare, set both to \"DNS "
+        "only\", not proxied.", 2)
+
+
+def say_problems(found: dict) -> None:
+    for line in found.get("problems") or []:
+        print(textwrap.fill(f"- {line}", WIDTH, initial_indent="    ",
+                            subsequent_indent="      "), flush=True)
+        logline(f"SAY - {line}")
+
+
+def step_name_own(edge: dict, ans: dict) -> None:
+    """Step 2 on the person's own domain: nothing is anybody else's, so it
+    never stops here. It says what DNS has now and which records to make;
+    the install goes on, and step 10 checks again (and can wait)."""
+    found = li.edge_check(edge)
+    ans["name_check"] = found
+    save_answers(ans)
+    if found["state"] == "here":
+        say(f"{edge['domain']} and *.{edge['domain']} already point to this server.", 2)
+        return
+    if found["state"] == "unknown":
+        say("DNS could not be asked right now. Carrying on; it is checked again "
+            "before Loam goes on the web.", 2)
+    else:
+        say(f"{edge['domain']} is not ready for Loam yet. That is fine: everything "
+            "until the last steps works without it. What DNS says now:", 2)
+        say_problems(found)
+    say("Loam needs these two DNS records on your domain:", 2)
+    say_records(edge)
+    say("You can make them now, while the install carries on; it checks them "
+        "again near the end.", 2)
 
 
 # ---------------------------------------------------------------------------
@@ -766,9 +862,23 @@ def step_edge(a, ans: dict) -> None:
         say(f"Loam is on the web at https://{edge['domain']}/ with its certificate.", 2)
         return
     run(["systemctl", "enable", "--now", "loam-await-dns.timer"])
+    if edge.get("own_domain") and state.get("dns") != "resolved" and not a.yes \
+            and wait_for_dns(cfg, edge):
+        state = dep.edge_state()
+        if state.get("ready_at"):
+            say(f"Loam is on the web at https://{edge['domain']}/ with its certificate.", 2)
+            return
     if state.get("dns") == "resolved":
         say(f"{edge['domain']} points here; its certificate is on its way. Loam keeps "
             f"checking by itself.", 2)
+    elif edge.get("own_domain"):
+        say(f"Everything is ready except the domain: {edge['domain']} is not pointing "
+            "to this server yet. What DNS says now:", 2)
+        say_problems(state)
+        say("The two records it needs:", 2)
+        say_records(edge)
+        say("Loam checks every 30 seconds and goes on the web by itself as soon as they "
+            "work. Nothing else needs doing here; `loam status` says what it last found.", 2)
     else:
         base = edge["domain"].split(".", 1)[1]
         say(f"Everything is ready except the name: {edge['domain']} does not point to this "
@@ -779,6 +889,48 @@ def step_edge(a, ans: dict) -> None:
             "work. Nothing else needs doing here.", 2)
     if res.returncode:
         logline("loam-await-dns exited non-zero; the timer will carry on")
+
+
+DNS_WAIT = 15 * 60          # how long step 10 waits here for an own domain's records
+DNS_POLL = 15
+
+
+def wait_for_dns(cfg: dict, edge: dict) -> bool:
+    """On an own domain, with someone at the terminal: wait here while they
+    make the records, saying what is still missing whenever it changes, and
+    put Loam on the web the moment they are right. Enter stops the wait (the
+    timer carries on by itself). True when the records came right."""
+    import select  # noqa: PLC0415
+    try:
+        tty = open("/dev/tty", "r", encoding="utf-8")
+    except OSError:
+        return False
+    with tty:
+        say(f"{edge['domain']} does not point to this server yet. The installer can "
+            "wait here while you make the two records:", 2)
+        say_records(edge)
+        say(f"Checking every {DNS_POLL} seconds for up to {DNS_WAIT // 60} minutes. "
+            "Press Enter to stop waiting; Loam then keeps checking by itself.", 2)
+        shown: list[str] | None = None
+        deadline = time.time() + DNS_WAIT
+        while time.time() < deadline:
+            found = li.edge_check(edge)
+            if found["state"] == "here":
+                say("Both records are right. Putting Loam on the web (this can take a "
+                    "minute while the certificates are made)…", 2)
+                run([sys.executable, f"{cfg['root']}/bin/loam-await-dns"], timeout=1800,
+                    check=False)
+                return True
+            if found.get("problems") != shown:
+                shown = found.get("problems")
+                say("Still waiting for:", 2)
+                say_problems(found)
+            ready, _, _ = select.select([tty], [], [], DNS_POLL)
+            if ready:
+                tty.readline()
+                say("Stopped waiting here.", 2)
+                return False
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -833,7 +985,10 @@ def finale(elapsed: float | None = None) -> None:
 
 def main() -> int:
     p = argparse.ArgumentParser(prog="install.sh", description="Install Loam on this server.")
-    p.add_argument("--name", help="your name on the web: <name>.<domain>")
+    p.add_argument("--domain", help="your own domain, for example loam.example.com: "
+                   "you make two DNS records there, and the installer says which")
+    p.add_argument("--name", help=f"or a name under {li.BASE_DOMAIN} (<name>.{li.BASE_DOMAIN}), "
+                   "whose records Loam's makers make: ask them first")
     p.add_argument("--owner", help="your first name, as Loam should call you")
     p.add_argument("--timezone", help="for example Europe/Berlin")
     p.add_argument("--yes", action="store_true", help="take the defaults; ask nothing")

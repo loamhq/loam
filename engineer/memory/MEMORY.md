@@ -1586,3 +1586,34 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   its install's DNS. The test name was put in the makers' box's
   `/etc/hosts` for the length of the test (getaddrinfo reads it), the same
   check a public record would pass, and taken out after.
+
+## 2026-11-18 — an own domain as a normal install (0.2.8)
+
+- **The installer had never asked a question.** `ask()` opened `/dev/tty`
+  as a text file `"r+"`, which raises `io.UnsupportedOperation` ("not
+  seekable"), a subclass of `OSError`, which it caught as "no terminal".
+  Every rehearsal passed all its answers as options, so nobody saw it; the
+  README's own command (`--name` and nothing else) would have stopped at
+  the owner's name. Open the terminal twice, to read and to write. Walk a
+  prompt by running the installer on a pty (`pty.fork()` and a small loop
+  that answers each prompt as it appears), never by passing the answer.
+- **A wildcard can be rehearsed for real with dnsmasq** on the VM's
+  loopback: `host-record=<domain>,<ip>` is the apex alone,
+  `address=/<domain>/<ip>` the apex and every name under it, and a
+  `systemctl restart dnsmasq` drops its cache. With `/etc/resolv.conf` at
+  127.0.0.1, `--resolver system` sees exactly what a public record would
+  say, records can be made and broken while the installer waits, and
+  `host-record=` with an IPv6 address gives a stray AAAA to test.
+- **An own domain has no "taken".** The name check's "taken" is about a
+  shared base where another person's record means someone else's name; on
+  the owner's own domain a record elsewhere is theirs to change, so
+  `domain_check` says what to change and never stops the install.
+- **The feedback receiver does not care which domain** an install has; it
+  admits a report when the named domain resolves to the caller. For a
+  name under the base that proves the makers made it; for an own domain it
+  proves only that the sender is the server the domain points at. The
+  limits bound it.
+- **The push gate refuses the product's domain in docs.** Write "Loam's
+  own domain" or `BASE_DOMAIN` in prose; a prompt that shows the domain
+  builds it from `li.BASE_DOMAIN` at run time.
+

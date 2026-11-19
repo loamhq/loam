@@ -106,9 +106,12 @@ def gather() -> dict:
             part("dns", "Name", OK, f"{domain} points to this server")
         else:
             last = state.get("dns") or "not checked yet"
-            records = li.records_to_ask_for(edge["name"], edge.get("address", "?"),
-                                            domain.split(".", 1)[1])
-            if last == "taken":
+            records = li.edge_records(edge)
+            if edge.get("own_domain"):
+                missing = state.get("problems") or []
+                say, st = (f"{domain} does not point here yet (checked every 30 seconds)"
+                           + "".join(f"\n             - {p}" for p in missing)), WAIT
+            elif last == "taken":
                 say, st = f"{domain} points to a different server: the name is someone else's", BAD
             else:
                 say, st = f"{domain} does not point here yet (checked every 30 seconds)", WAIT

@@ -14,11 +14,13 @@ On a fresh Debian 12 (or Ubuntu 24.04) server with a public IPv4 address,
 at least 4 GB of memory and 15 GB of free disk, as root:
 
 ```sh
-curl -fsSL https://<where the release is>/install.sh | sudo bash -s -- --name sam
+curl -fsSL https://<where the release is>/install.sh | sudo bash -s -- --domain loam.example.com
 ```
 
-It asks for anything not given (`--owner "Sam"`, `--timezone
-Europe/Berlin`), from the terminal even though the script came down a pipe.
+or `--name sam` in place of `--domain` (below, "Where your Loam lives").
+It asks for anything not given (where it lives, `--owner "Sam"`,
+`--timezone Europe/Berlin`), from the terminal even though the script came
+down a pipe.
 It takes a few minutes (about two on a fresh Debian 12 or
 Ubuntu 24.04 server in the rehearsals of 2026-11-16), and says how long it
 took when it is done. Every line it prints is meant for someone
@@ -52,13 +54,93 @@ mints those; one lives an hour, which is enough, because a re-run uses the
 release already fetched). A token is for one install and is never stored on
 the server. Once the repository is public, none of this is needed.
 
+## Where your Loam lives: your own domain, or a name we give you
+
+*Loam 0.2.8 (2026-11-18). Before it, an own domain was a hidden `--base`
+flag that made `<name>.<base>`; that flag is still there, for rehearsals
+only.*
+
+Given neither `--domain` nor `--name`, step 1 asks first:
+
+```
+Where will your Loam live on the web? Either:
+    1. On a domain you have, for example loam.example.com (or example.com
+    itself). You add two DNS records where you bought the domain; the
+    installer says which, and checks them.
+    2. On a name under <BASE_DOMAIN>, like sam.<BASE_DOMAIN>. Loam's makers
+    add its records, so ask them for a name first.
+Type 1 or 2:
+```
+
+**A domain of the owner's own** (`--domain loam.example.com`;
+`lib/loam_install.valid_domain`): any domain name, a host under one or the
+apex itself, except names under `BASE_DOMAIN`, which are the other way.
+The `[edge]` table gets `own_domain = true`, `domain` as given (lowercase,
+no trailing dot) and `name` its first label. The person makes two records
+at their DNS provider, both type A, not proxied:
+
+```
+loam.example.com     A  <the server's IPv4>
+*.loam.example.com   A  <the server's IPv4>
+```
+
+`lib/loam_install.domain_check` asks for both (the wildcard as
+`loam-check.<domain>`), their A and their AAAA records, and returns `here`
+or `waiting` with one sentence per thing still wrong, saying what to do:
+
+- a record that is missing ("has no A record yet: make one pointing to …");
+- a record pointing elsewhere ("points to 192.0.2.9, not to this server:
+  change its A record to …"). There is no "taken" on an own domain: the
+  name is the person's, so another address is an old server or a parking
+  page for them to change, and the install never stops for it;
+- an AAAA (IPv6) record that is not one of the box's own addresses: Let's
+  Encrypt asks over IPv6 first when a name has one, and its challenge would
+  reach the other server;
+- answers inside Cloudflare's published ranges: the records are proxied (the
+  orange cloud); they must be "DNS only".
+
+Step 2 prints what DNS says now and the two records, and carries on (the
+records can be made during the install's few minutes). Step 10, with a
+person at the terminal (not `--yes`), **waits** for them: it checks every
+15 seconds for up to 15 minutes, says what is still missing whenever that
+changes, and puts Loam on the web the moment both are right. Enter stops
+the wait. Either way `loam-await-dns.timer` keeps checking every 30 seconds
+as on the other path, writes the sentences into `/var/lib/loam/edge.json`
+(`problems`), and `loam status` shows them under *Name*.
+
+**Certificates**: Caddy's own default, one Let's Encrypt certificate per
+host by the HTTP-01 / TLS-ALPN-01 challenge on ports 80 and 443, which the
+installer already requires. The app, `auth.`, `vault.`, `files.`,
+`loam-ui-content.` and every agent's site are each their own block in the
+Caddyfile, and the wildcard A record makes each of them resolve, so a new
+agent site gets its certificate the first time it is rendered. A wildcard
+certificate would need DNS-01, which needs an API key for the person's DNS
+provider and a Caddy built with that provider's module: a second thing to
+set up and keep secret, for nothing the per-host route does not give. The
+cost is one certificate per host against Let's Encrypt's limit of 50 new
+certificates per registered domain per week, which one person's Loam does
+not come near. A CAA record on the domain that names another authority
+would refuse Let's Encrypt; the domain's DNS page is where to check.
+
+**A name under `BASE_DOMAIN`** (`--name sam`) is exactly as before: the
+makers make `sam.<base>` and `*.sam.<base>`, and "The name, and DNS later"
+below is its account.
+
+What else knows the domain does not care which way it came: the deploy
+layer, the app (`APPS_DOMAIN`), `reach.md`, `loam update` (which never
+reads it), and the private feedback route of 0.2.7, which sends
+`edge.domain` and is admitted when that name resolves to the address the
+report came from. On an own domain that proves the report came from the
+server the domain points at, not that Loam's makers made the name; the
+route's per-install and daily limits are what keep it in bounds.
+
 ## The eleven steps
 
 | # | Step | What it does |
 |---|---|---|
 | — | bootstrap (`install.sh`) | root; git, curl, Python and certificates if missing; finds the newest release tag (`git ls-remote`), clones it to `/var/lib/loam/install/release`; runs that release's `bin/loam-install` |
-| 1 | preflight | Debian 12 or Ubuntu 24.04; memory, disk; ports 80 and 443 free (Caddy itself excepted, for a re-run); the box's public IPv4 from its route; the name, the owner's name and the zone; writes `/etc/loam/loam.toml` (never rewritten after: it is the person's) |
-| 2 | the name | `lib/loam_install.name_check` (below). Taken: stop. Here: go on. Not yet: print the two records and go on |
+| 1 | preflight | Debian 12 or Ubuntu 24.04; memory, disk; ports 80 and 443 free (Caddy itself excepted, for a re-run); the box's public IPv4 from its route; where it lives (`--domain`, `--name`, or asked) and the owner's name and the zone; writes `/etc/loam/loam.toml` (never rewritten after: it is the person's) |
+| 2 | the name | a name: `lib/loam_install.name_check` (below). Taken: stop. Here: go on. Not yet: print the two records and go on. An own domain: `domain_check`; never stops; prints what is missing and the two records |
 | 3 | packages | git, python3 and python3-yaml, sqlite3, ripgrep, ffmpeg, nftables, iptables, sudo, dnsutils and the rest, with `fonts-noto-core` and a Chromium headless shell for the app's page previews (Debian's `chromium-headless-shell` package; on Ubuntu, which has none, Playwright's at a pinned version, linked as `/usr/local/bin/chromium-headless-shell`); Caddy, Docker CE (the login and the agents' browser run in it; the app does not) and Node 24 from their own apt repositories |
 | 4 | the user | `loam`, with lingering, `sudo` (NOPASSWD: the agents get the whole machine) and `docker`; the zone; `PYTHONPYCACHEPREFIX` for its services, shells and sudo, so Python never writes into the checkout; Docker's `daemon.json` before anything uses Docker |
 | 5 | Loam | the release cloned to `paths.root` (`/home/loam/loam`), `origin` set to the source; the vault, workspaces, projects and plugins folders (plugins a git repo); uv; the MCP servers' Python; `/usr/local/bin/loam` |
@@ -66,7 +148,7 @@ the server. Once the repository is public, none of this is needed.
 | 7 | providers | Claude Code and Codex at the versions this release was tested on (`loam_install.TESTED`, installed by the same code `provider-follow` uses), Antigravity by Google's own script; then `provider-memory pin` and `check` |
 | 8 | Iris | `bin/library seed-starter`: Iris and the hello thread (docs/starter.md); then `bin/provision --engineer`, the engineer that changes Loam itself (docs/update.md, "A change to Loam's own parts") |
 | 9 | units | the broker's bridge (`loam-broker`) and its wall; the system units, `loam-user-manager.service` enabled (it starts Loam's user manager at boot where lingering alone does not); the user units from the templates; the broker and the plugin gateway started; every timer armed without firing (`loam_units.arm_timer`); waits for the broker to answer |
-| 10 | the edge | `gen-deploy --init-secrets` (the login's secrets, no user), `gen-deploy`, the app (`bin/deploy loam-ui up <commit>`: the commit's `app/` unpacked to `/var/lib/loam-releases/loam-ui/` and run as `loam-app@loam-ui.service`, no container), `loam-claim.service`; then one `loam-await-dns` run: if the name resolves here the hosts go up now, otherwise the timer is left polling and the records are printed. Exits 0 either way |
+| 10 | the edge | `gen-deploy --init-secrets` (the login's secrets, no user), `gen-deploy`, the app (`bin/deploy loam-ui up <commit>`: the commit's `app/` unpacked to `/var/lib/loam-releases/loam-ui/` and run as `loam-app@loam-ui.service`, no container), `loam-claim.service`; then one `loam-await-dns` run: if the name resolves here the hosts go up now, otherwise the timer is left polling and the records are printed; on an own domain with someone at the terminal it first waits up to 15 minutes for them. Exits 0 either way |
 | 11 | the claim | mints the one-time token (`/etc/loam/claim`, root 0600) and prints the link |
 
 ## What an install's configuration says: `[edge]`
@@ -87,6 +169,7 @@ apps = ["loam-ui", "files", "vault"]  # the records this install serves, no othe
 resolver = "public"                   # DNS over HTTPS to 1.1.1.1 / 8.8.8.8 ("system": /etc/hosts too)
 tls = "acme"                          # "internal": Caddy's own authority (rehearsals)
 dns_gate = true                       # no host block until the name resolves here
+own_domain = true                     # only on an own domain (--domain); absent for a name
 ```
 
 The hosts: the app at `sam.example.com`, the portal at `auth.`, the
@@ -334,3 +417,54 @@ will be, in a git bundle tagged `0.1.0`: `install.sh --source <bundle>`.
   --ignored` in the checkout 0 lines; L13's `loam update check` read the
   install as stock 0.1.0, the newest; `loam status` all ok.
 - **Ubuntu 24.04**: the same install in one run, and the same proof.
+
+## How an own domain was proved (2026-11-18, 0.2.8)
+
+On a throwaway Debian 12 VM (Modal `runtime="vm"`, systemd in a PID
+namespace, as above), with nothing reachable from the internet: the domain
+was `loam.example.test`, public DNS was stood in for by **dnsmasq** on the
+VM's loopback (`/etc/resolv.conf` pointed at it, so `--resolver system`
+asks it), and the certificates were Caddy's own authority
+(`--local-certs`). The release was this branch tagged `0.2.8` in a bare
+repository served by `git daemon` on 127.0.0.1.
+
+- **The question**: run with neither `--domain` nor `--name`, on a pty, step
+  1 asked "Type 1 or 2", then the domain, and wrote `own_domain = true`.
+  (Before this, the installer could ask nothing at all; see the release
+  notes.)
+- **No records yet**: step 2 said both were missing and printed the two
+  records; steps 3 to 9 went on.
+- **Making them while it waits**: at step 10 the installer waited. A script
+  standing in for the owner added the apex record 25 seconds in (the wait
+  then said only `*.loam.example.test` was missing) and the wildcard 40
+  seconds later (dnsmasq `address=/loam.example.test/…`, a true wildcard);
+  within 15 seconds it said both were right, rendered the hosts, had the
+  certificate and printed the claim link. About 3 minutes in all.
+- **The claim, sign-in and passkeys**: `/` 302 to `/claim`; the claim 200;
+  Loam's sign-in page with the claimed password; the app (its welcome
+  screen); `vault.` and `files.` listings; an agent's site made with
+  `bin/site up walk --by iris` answered at `walk.loam.example.test` behind
+  the login. A passkey was added in the sign-in settings with a CDP virtual
+  authenticator, the one-time code read through `/_loam/login-code`, and a
+  fresh session signed in with the passkey alone.
+- **`loam status`** with a stray AAAA on the apex and the wildcard pointing
+  elsewhere showed both sentences under *Name*; restored, all ok.
+- **`loam update`**: a walk-only `0.2.9` tag in the VM's repository was
+  seen, applied, and the hosts answered after.
+- **The private feedback route**: with `feedback.url` pointed at a stand-in
+  receiver on the VM's loopback (the real `loam_feedback.Inbox`), `loam
+  report idea` drafted a report with the domain and the owner's name taken
+  out, `loam report send` posted it (`install: "loam.example.test"`,
+  `User-Agent: loam/0.2.8`), and the receiver wrote the note. The sandbox
+  has no public address and the receiver refuses a private caller, so the
+  caller was a stand-in public address that the receiver's resolver gave
+  for a name exactly when the VM's DNS said that name was this VM; a report
+  naming a domain that was not the install was refused (403).
+- **The name path**, on a second VM: `--name sam --base loam-proof.test`
+  with the owner and the time zone asked at the terminal, as the README's
+  command does; installed as before, no `own_domain` key.
+
+What this does not prove: Let's Encrypt itself on a real domain. The
+certificate route is the one every install on a name already uses (one
+certificate per host, HTTP-01 / TLS-ALPN-01), and nothing in it depends on
+which domain it is.

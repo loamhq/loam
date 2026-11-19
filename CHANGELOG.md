@@ -6,6 +6,10 @@ Each release's notes are written for the people who run Loam, in
 - [0.2.9](docs/releases/0.2.9.md), 2026-11-18: Dictation and Read aloud
   are Market plugins now, not part of Loam; if you had either on, it is
   installed from the Market for you with your settings kept.
+- [0.2.8](docs/releases/0.2.8.md), 2026-11-18: install Loam on a domain of
+  your own. The installer asks where Loam lives, says which two DNS records
+  to make, checks them in plain words and waits while you make them; a name
+  from Loam's makers works as before, and the installer's questions work.
 - [0.2.7](docs/releases/0.2.7.md), 2026-11-18: tell Loam's makers a bug, a
   wish or an idea privately through your agent, with no GitHub account;
   the GitHub issue stays for anyone who wants to follow it in public.
