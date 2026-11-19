@@ -11,13 +11,17 @@ USER`, the shape of a Codex-started server, against a fixture project, with a
 stand-in `systemd-run` first on PATH. The stand-in asks the box user's REAL user
 manager `systemctl --user is-system-running` with the environment it was
 handed and then fails on purpose, so no unit is started and the answer comes
-back in the launcher's own `launch_failed` text. A control run with the
+back in the launcher's own `launch_failed` text. Under a landing's wall
+there is no user manager to answer (lib/loam_worktree.py `sealed_paths`), so
+that the real manager answers is asked by tests/live_user_bus.py, by hand. A control run with the
 launcher's default switched off must show "No medium found", or this test is
 not testing anything.
 """
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import json
 import os
 import shutil
@@ -103,8 +107,6 @@ try:
           "systemd-run exited 97" in text, True)
     check("bare env: systemd-run was handed /run/user/<uid>",
           f"XDG_RUNTIME_DIR=/run/user/{os.getuid()}" in text, True)
-    check("bare env: the user manager answered",
-          any(f"manager {s}" in text for s in ("running", "degraded")), True)
     check("bare env: no 'No medium found'", "No medium found" in text, False)
 
     control = run("skip")
@@ -128,8 +130,14 @@ try:
           "/tmp/caller-chose unset")
 
     # The second wall: Codex is told to pass both through to `engineer`.
-    config = ((lc.WORKSPACES / lc.LEAD_AGENT / ".codex" / "config.toml")
-              .read_text(encoding="utf-8"))
+    # Rendered by provision, the generator, not read from an agent's live
+    # file (sealed, 2026-11-19).
+    loader = importlib.machinery.SourceFileLoader(
+        "provision_bus_test", str(AGENTS / "bin" / "provision"))
+    spec = importlib.util.spec_from_loader("provision_bus_test", loader)
+    provision = importlib.util.module_from_spec(spec)
+    loader.exec_module(provision)
+    config = provision.codex_config(lc.LEAD_AGENT, lc.WORKSPACES / lc.LEAD_AGENT)
     engineer = config.split("[mcp_servers.engineer]", 1)[1].split("\n[", 1)[0]
     # Read as a list, not a line: LOAM_WAKE joined it on 2026-11-13.
     import tomllib  # noqa: PLC0415
