@@ -59,6 +59,18 @@ the proof.
 "Forever" means nothing rotates it. Every file in `agents/logs/` together was
 1.4 MB on 2026-09-28, so that is a note for later, not a problem.
 
+## Reading memory samples
+
+Use mount usage for disk totals. The daily directory survey counts nested
+directories separately, and hard links can appear in more than one survey.
+A log rotation can remove today's survey marker and cause one extra survey.
+
+The five-minute samples show trends. The pressure sampler checks every
+minute because swap can approach exhaustion while RAM use is still moderate.
+Three consecutive readings with high RAM use or low free swap open an
+episode. The first reading within both thresholds closes it. The health
+check and capacity plugins read the current episode from `pressure.json`.
+
 ## What a web request line holds, and what it never holds
 
 Caddy's access record: `request.method`, `request.host`, `request.uri`,

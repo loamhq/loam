@@ -1,25 +1,8 @@
-"""Memory pressure on the box: one reading a minute, one line when it begins.
+"""Sample RAM and swap each minute. The check and capacity plugins read pressure.json.
 
-Every install needs it, so it is core (2026-11-14, first release L5; until
-then it lived inside the module that resizes this box, which is a plugin of
-the owner's now). RAM in use at or above ``PRESSURE_PCT`` for
-``SUSTAIN_MIN`` consecutive minutes, or swap nearly gone, is an episode. Its
-start and end are recorded (``logs/pressure.jsonl``) and the live reading is
-``<state>/pressure.json``, with the episode's sentence and the heaviest units
-in ``episode_says``. This module tells nobody since 2026-11-19: it is a
-sampler, and the one check on a clock (lib/loam_check.py) reads the episode
-from that file as one of its facts and hands it to the agent that hears when
-Loam needs attention. A plugin that can add capacity reads the same file, and
-says how to pull its lever in its own words to the agents.
-
-Why 85% for 3 minutes, measured on logs/memsample.jsonl 2026-10-13..11-06
-(6,994 samples every 5 min): RAM in use was p50 50%, p95 65%, p99 73%, max
-90%, and at or above 85% for two samples running (10 minutes) never once. So
-the line does not fire on an ordinary heavy day, and when it fires it is new.
-Swap below 15% free was the common term in all four global kills
-(the retired bin/check-memory); swap reached 77 MB free on 10-27 with RAM at 75%, which
-the RAM line alone would have missed.
-"""
+Low swap can precede exhaustion even when RAM use is moderate. A sustained
+breach of either threshold starts an episode in the pressure log. The
+first reading below both thresholds ends it."""
 
 from __future__ import annotations
 
@@ -84,7 +67,7 @@ def reading(mi: dict) -> dict:
 
 
 def heavy_units(top: int = 3) -> list[str]:
-    """The biggest loam-* cgroups now, for the line that names the pressure."""
+    """List the largest service cgroups for the episode report."""
     cg = lc.USER_SLICE / "app.slice"
     found = []
     for d in cg.glob("loam-*"):
@@ -97,8 +80,7 @@ def heavy_units(top: int = 3) -> list[str]:
 
 
 def pressure_step(prev: dict, r: dict, at: float) -> tuple[dict, str | None]:
-    """The next pressure state from the last one and this minute's reading,
-    and the fact to tell if an episode just began. Pure, for tests."""
+    """Return the next state and a report only when an episode begins."""
     streak = prev.get("streak", 0) + 1 if r["over"] else 0
     state = {**r, "at": iso(at), "streak": streak,
              "episode_since": prev.get("episode_since"),

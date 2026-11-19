@@ -1,44 +1,6 @@
 #!/usr/bin/env python3
-"""One run per agent, and admission to the box by memory — proved by causing.
-
-This does not test ``lib/loam_lock.py`` in isolation. It runs ``bin/wake``
-itself, as a real subprocess, through ``main()`` — the same argument parsing,
-the same lane selection, the same ``hold()`` call in the same place — against
-throwaway workspaces. The only two boundaries replaced are the two that reach
-outside the box: ``preflight_identity``, which would spend a live model call
-proving a fake agent's soul, and the ``claude`` launch itself, which becomes a
-sleep of a stated length. Everything in between, including every lock, is the
-shipped code.
-
-The crons are sleep-shaped on purpose. Proving contention needs runs that
-overlap, and the way to get overlap without spending an agent's night is to
-make the work a stopwatch.
-
-Three things are asserted, each by causing it:
-
-  same agent, twice   the second launch waits for the first and then runs.
-                      Its start must fall AFTER the first one's finish.
-  no count            four at once -- one more than the three slots the box
-                      had until 2026-11-10 -- on a simulated box with room:
-                      all four run together.
-  the give-up         a launch that waits out its budget skips, exits 0 (so
-                      OnFailure does not fire and report a death on top of a
-                      skip), and leaves a line naming which lane waited on
-                      what.
-
-Only the give-up case shortens the wait, through the probe-only
-``LOAM_LOCK_WAIT_S``: the real 1200 seconds is the thing being budgeted, not
-the thing being tested, and a twenty-minute test is a test nobody runs.
-
-  no memory           on a simulated box with no room (``LOAM_LOCK_MEMINFO``,
-                      a file shaped like /proc/meminfo), a launch waits out
-                      its budget and skips, and the line says it was memory.
-
-The suite runs with a lock table of its own (``LOAM_LOCK_DIR``, set by
-tests/run-all), so nothing here sees or holds a live run.
-
-Run: python3 tests/test_cron_locks.py
-"""
+"""Run competing wakes in throwaway workspaces with a sleeping provider.
+The run trace records overlap and the wake log distinguishes waiting from execution."""
 
 from __future__ import annotations
 
@@ -57,10 +19,6 @@ WAKE = str(Path(__file__).resolve().parent.parent / "bin" / "wake")
 SELF = str(Path(__file__).resolve())
 
 
-# ---------------------------------------------------------------------------
-# Child mode. One launch of bin/wake, with the model call replaced by a sleep,
-# writing a two-line trace of when it actually started and finished running.
-# ---------------------------------------------------------------------------
 def child(project: str, cron: str, seconds: float, trace: Path) -> int:
     import importlib.machinery
     import importlib.util
@@ -106,9 +64,6 @@ if len(sys.argv) > 1 and sys.argv[1] == "--child":
                    Path(sys.argv[5])))
 
 
-# ---------------------------------------------------------------------------
-# Parent.
-# ---------------------------------------------------------------------------
 results: list[bool] = []
 
 
@@ -157,7 +112,6 @@ def windows(trace: Path) -> dict[str, tuple[float, float]]:
 import loam_config as lc  # noqa: E402
 import loam_lock  # noqa: E402
 
-# Four probes: one more than the slot count the box had until 2026-11-10.
 PROBES = [f"probe{i}" for i in range(1, 5)]
 ROOMY = 32 * 1024 * 1024     # kB: a simulated 32 GB box, all of it free
 NO_ROOM = 1024 * 1024        # kB: 1 GB available, under the 2 GB reserve
@@ -186,7 +140,6 @@ def clean_state(*agents: str) -> None:
             stray.unlink(missing_ok=True)
 
 
-# --- 1. Same agent, twice. The second waits, then runs. --------------------
 print("--- one run per agent -----------------------------------------------")
 root = Path(tempfile.mkdtemp(prefix="loam-lock-a-"))
 try:
@@ -217,8 +170,7 @@ try:
           f"{first.returncode}/{second.returncode}")
     check("no failure was recorded — waiting is not failing",
           "waited" not in failures_text(root))
-    # The wait is in the run's own record (since 2026-10-13): `ts` is
-    # stamped before the lock, so without it a wait read as a long run.
+    # The wake timestamp includes time spent waiting for the lock.
     waits = {}
     log = Path(f"{lc.LOGS}/wake-probeone.jsonl")
     for raw in (log.read_text().splitlines() if log.is_file() else []):
@@ -232,7 +184,6 @@ finally:
     clean_state("probeone")
 
 
-# --- 2. No count. Four across agents, on a box with room, all at once. ---
 print()
 print("--- no count: admission by memory -----------------------------------")
 root = Path(tempfile.mkdtemp(prefix="loam-lock-b-"))
@@ -261,8 +212,6 @@ try:
               concurrent == len(PROBES), f"peak was {concurrent}")
     check(f"all {len(PROBES)} exited 0", all(p.returncode == 0 for p in procs),
           str([p.returncode for p in procs]))
-    # Only the probes' own records: the lock folder is the live box's, and a
-    # wake or engineer job running meanwhile holds a record of its own.
     left = set(loam_lock.LOCK_DIR.glob("run-*.lock")) - records_before
     check("no run record is left behind", not left, str(sorted(left)))
 finally:
@@ -271,7 +220,6 @@ finally:
     clean_state(*PROBES)
 
 
-# --- 3. The give-up. Skipped, exit 0, and a line naming who waited. --------
 print()
 print("--- waiting out the budget ------------------------------------------")
 root = Path(tempfile.mkdtemp(prefix="loam-lock-c-"))
@@ -281,7 +229,6 @@ try:
     trace.touch()
     holder = launch(ws, "sleeper", 12, trace)
     time.sleep(1.5)
-    # Three seconds of patience instead of twenty minutes. Probe only.
     waiter = launch(ws, "impatient", 1, trace, {"LOAM_LOCK_WAIT_S": "3"})
     waiter.wait(timeout=120)
     holder.wait(timeout=120)
@@ -304,10 +251,6 @@ finally:
     clean_locks()
     clean_state("probeone")
 
-# --- 4. The same give-up, on memory rather than the agent lock. ----------
-# Different wait, same behaviour, and worth causing separately: the agent
-# lock is one file and admission reads the box, so they are two code paths
-# and only one of them was exercised above.
 print()
 print("--- waiting out the budget on memory --------------------------------")
 root = Path(tempfile.mkdtemp(prefix="loam-lock-d-"))

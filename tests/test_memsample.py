@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""bin/memsample's rotation and daily du.
-
-  rotation     the live file passes MAX_BYTES and becomes .1, replacing the
-               last; two files at most, so the history is bounded.
-  holders      the du runs on the first sample of a day at or after 01:45
-               and on no other.
-
-Everything runs against the shipped scripts with a throwaway log file.
-
-Run: python3 tests/test_memsample.py
-"""
+"""Check sampler rotation and daily disk surveys with a throwaway log."""
 
 from __future__ import annotations
 

@@ -1,43 +1,5 @@
 #!/usr/bin/env python3
-"""The box's memory and disk history. Reads, never writes anything but its log.
-
-One sample per run, one JSON line per sample, appended to
-logs/memsample.jsonl. loam-memsample.timer runs it every 5 minutes. It is
-data for whoever asks (`bin/logs memory`, an agent looking into memory); the
-daily check-memory that read it back was retired on 2026-11-19, and the one
-check on a clock (lib/loam_check.py) now holds only that it is still being
-written.
-
-Rewritten 2026-10-13. The first version (2026-09-02) was a one-night
-instrument run as a transient unit, and when its night ended nothing sampled
-again: two health checks (10-06, 10-13) could not answer the week's memory
-peak or what grew the disk ~2 GB. This one is a standing record.
-
-Every sample carries:
-  mem     box RAM and swap, MB
-  units   every loam-* service under app.slice -- the broker, and
-          whichever wake, cron, engineer job or reviewer is
-          running -- by its cgroup: current, peak, swap, and its MemoryHigh /
-          MemoryMax (null when unset). Globbed, never listed: a unit that
-          exists is sampled, and rosters drift where patterns don't.
-  mounts  used and size per real filesystem, MB (statvfs, so cheap enough
-          for every sample)
-
-and the first sample of each day at or after 01:45 also carries:
-  holders `du` of the big holders named on 2026-10-06, MB. du walks the
-          tree, so once a day is enough; 01:45 keeps it clear
-          of the wake grid.
-
-Why 5 minutes: a wake runs 10-20 minutes, so every wake lands in at least
-two samples, and the broker's climb toward its MemoryHigh is a trend over
-hours. 288 lines a day at ~1.5 KB is ~0.4 MB a day.
-
-Rotation: when the live file passes MAX_BYTES it becomes memsample.jsonl.1,
-replacing the previous one. Two files at most, so the history can never
-pass 2 x MAX_BYTES plus one line: 8 MiB, which is 9-18 days of samples.
-
-Usage:  memsample          take one sample
-"""
+"""Append a memory and disk sample to the rotating log described in docs/logs.md."""
 
 from __future__ import annotations
 
@@ -57,11 +19,7 @@ MAX_BYTES = 4 * 1024 * 1024
 VERSION = 2
 
 HOME = lc.HOME
-# The holders the 10-06 health check named. vault includes vault/.git; both
-# are kept because the git store is what grows on its own (autocommit every
-# 15 minutes). runroot-4a hard-links some of the vault's packs, so the
-# holders overlap and do not sum to a mount: the mount's `used` is what the
-# disk pays. The one root-only tree is read with `sudo -n du`.
+# Nested paths and shared inodes make holder sizes overlap. Use mounts for disk totals.
 HOLDERS = {
     "vault": HOME / "vault",
     "vault/.git": HOME / "vault/.git",
@@ -142,9 +100,7 @@ def du(label: str, path: Path) -> int | None:
 
 
 def history(out: Path = OUT) -> list[dict]:
-    """Every v2 sample in the rotated file and the live one, oldest first.
-    Lines from the one-night instrument of 09-02 and anything unparseable
-    are skipped, not fatal: the reader of a log must survive the log."""
+    """Read current-version samples oldest first, skipping malformed or older records."""
     rows = []
     for path in (out.with_name(out.name + ".1"), out):
         try:
@@ -162,9 +118,7 @@ def history(out: Path = OUT) -> list[dict]:
 
 
 def holders_due(at: dt.datetime, out: Path = OUT) -> bool:
-    """True for the first sample of the day at or after HOLDERS_AFTER. A
-    text scan of the live file, not a parse: this runs every 5 minutes, and
-    a rotation that took today's line with it costs one extra du, no more."""
+    """Check the live log for today's disk survey. Rotation may trigger one extra survey."""
     if at.time() < HOLDERS_AFTER:
         return False
     today = f'"ts":"{at.date().isoformat()}'

@@ -1,29 +1,5 @@
 #!/usr/bin/env python3
-"""Admission by memory, not by count (lib/loam_lock.py, since 2026-11-10).
-
-The owner, 2026-11-10: "why do we have limits on the number of engineering
-tasks?" Until then a run -- an engineer job, a wake, a cron, the reviewer --
-took one of three slot files and a fourth waited. Now a run starts while
-the box has room, by the session broker's rule. Caused here against a
-simulated box (``LOAM_LOCK_MEMINFO`` is read at import, so the module's
-``MEMINFO`` is pointed at a temp file) and a lock table of its own:
-
-  the numbers     the reserve and the start size are the broker's
-                  (lib/loam_broker.py), so the two admissions agree.
-  no count        with room, eight runs are admitted at once -- more than
-                  any slot count the box ever had.
-  in flight       each run admitted in the last ADMIT_GRACE_S counts its
-                  start size against the next, so a burst is not all
-                  admitted on one reading; past the grace it no longer does.
-  no room         below the reserve a run is refused with the box's numbers,
-                  and ``hold_slot`` raises ``Busy`` saying so.
-  release         leaving removes the run's record; a record whose holder
-                  died (its flock free) is swept by the next admission.
-  the agent lock  ``hold`` still takes it first: a second run of one agent
-                  is refused for the lock, not for memory.
-
-Run: python3 tests/test_lock_admission.py
-"""
+"""Exercise memory admission, burst accounting, lock order and stale-record cleanup."""
 
 from __future__ import annotations
 
@@ -63,7 +39,6 @@ try:
     loam_lock.LOCK_DIR = root / "locks"
     loam_lock.MEMINFO = str(meminfo)
 
-    # The numbers.
     import loam_broker  # noqa: E402,PLC0415
     check("the reserve is the broker's", loam_lock.MEMORY_RESERVE_MB,
           loam_broker.MEMORY_RESERVE_MB)
@@ -73,7 +48,6 @@ try:
 
     reserve, need = loam_lock.MEMORY_RESERVE_MB, loam_lock.RUN_START_MB
 
-    # No count: room for many, eight admitted at once.
     box(reserve + need * 20)
     held = []
     for n in range(8):
@@ -121,7 +95,6 @@ try:
         loam_lock.ADMIT_GRACE_S = real_grace
     a.__exit__(None, None, None)
 
-    # No room.
     box(reserve - 1)
     r = loam_lock.room()
     check("no room: below the reserve does not fit", r["fits"], False)
@@ -134,7 +107,6 @@ try:
     check("no room: Busy, with the box's numbers",
           refused is not None and "MB available" in refused, True)
 
-    # Unreadable memory admits (the unit caps and the OOM order still stand).
     loam_lock.MEMINFO = str(root / "absent")
     check("unreadable meminfo admits", loam_lock.room()["fits"], True)
     loam_lock.MEMINFO = str(meminfo)
@@ -148,7 +120,6 @@ try:
         check("the next admission swept the dead holder's record",
               stale.exists(), False)
 
-    # The agent lock is still first, and still one run per agent.
     with loam_lock.hold("probeagent", "reflection", wait_seconds=0):
         try:
             with loam_lock.hold("probeagent", "cron:x", wait_seconds=0.2, poll=0.05):
