@@ -67,72 +67,60 @@ def check(label, got, want):
 
 # -- the plugin's own suites ------------------------------------------------------
 
+# Each is its own process and its own temp folders, so they run at once
+# (2026-11-19: one after another they were 119 s, the whole suite's floor;
+# page.test.mjs and browser.test.mjs also ran twice). Python suites end on
+# "OK"; node's pass on exit 0. The browser suite is skipped unless
+# LOAM_PLAYWRIGHT names a Playwright install (the plugin's README).
+SUITES = [
+    ("py", "test_model.py", 300, "the model's suite passes (anchors, merge, sidecar, operations)"),
+    ("node", "editor.test.mjs", 300, "the editor's suite passes (round trips byte for byte, positions)"),
+    ("py", "test_share.py", 600, "the share door's suite passes (modes, throttling, off, one doc, text, agents)"),
+    ("node", "page.test.mjs", 300, "the page module registers nothing without files.own, and cleans up"),
+    ("node", "browser.test.mjs", 900, "the editor in a browser (or skipped without Playwright)"),
+    ("py", "test_withme.py", 600, "Shared with me's suite passes (addresses refused, failures named, the password kept in)"),
+    # test_places is three long seeded classes and some short ones: run as
+    # four processes, by unittest class name (40 s at most, from 68).
+    ("py", "test_places.py TwinsSeeded", 600, "where a note sits: seeded twin sections"),
+    ("py", "test_places.py Seeded", 600, "where a note sits after the text changes (seeded)"),
+    ("py", "test_places.py WholeBlocks", 600, "where a note sits: whole blocks removed and put back"),
+    ("py", "test_places.py TheWalksCases WhatItsWordsBecame HistoryRows Twins", 600,
+     "where a note sits after the text changes (the walk's cases, carried)"),
+    ("py", "test_look.py", 120, "the plugin wears core's tokens; the share page carries Latte's exactly"),
+]
+
+
 def test_suites():
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-    r = subprocess.run([sys.executable, str(PLUGIN / "test" / "test_model.py")],
-                       capture_output=True, text=True, env=env, timeout=300)
-    tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
-    check("the model's suite passes (anchors, merge, sidecar, operations)", (r.returncode, tail[0]), (0, "OK"))
-    if r.returncode:
-        print(r.stdout[-3000:], r.stderr[-3000:])
     node = shutil.which("node")
     if not node:
         check("node is here for the editor's suite", False, True)
-        return
-    r = subprocess.run([node, "--test", str(PLUGIN / "test" / "editor.test.mjs")],
-                       capture_output=True, text=True, timeout=300)
-    check("the editor's suite passes (round trips byte for byte, positions)", r.returncode, 0)
-    if r.returncode:
-        print(r.stdout[-3000:], r.stderr[-3000:])
-    r = subprocess.run([sys.executable, str(PLUGIN / "test" / "test_share.py")],
-                       capture_output=True, text=True, env=env, timeout=600)
-    tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
-    check("the share door's suite passes (modes, throttling, off, one doc, text, agents)", (r.returncode, tail[0]), (0, "OK"))
-    if r.returncode:
-        print(r.stdout[-3000:], r.stderr[-3000:])
-    r = subprocess.run([node, "--test", str(PLUGIN / "test" / "page.test.mjs")],
-                       capture_output=True, text=True, timeout=300)
-    check("the page module registers nothing without files.own, and cleans up", r.returncode, 0)
-    if r.returncode:
-        print(r.stdout[-3000:], r.stderr[-3000:])
-    # The editor in a real browser (positions, typing, Suggesting): skipped
-    # unless LOAM_PLAYWRIGHT names a Playwright install (the plugin's README).
-    r = subprocess.run([node, "--test", "--test-timeout=120000", str(PLUGIN / "test" / "browser.test.mjs")],
-                       capture_output=True, text=True, timeout=900)
-    check("the editor in a browser (or skipped without Playwright)", r.returncode, 0)
-    if r.returncode:
-        print(r.stdout[-3000:], r.stderr[-3000:])
-    r = subprocess.run([sys.executable, str(PLUGIN / "test" / "test_withme.py")],
-                       capture_output=True, text=True, env=env, timeout=600)
-    tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
-    check("Shared with me's suite passes (addresses refused, failures named, the password kept in)",
-          (r.returncode, tail[0]), (0, "OK"))
-    if r.returncode:
-        print(r.stdout[-3000:], r.stderr[-3000:])
-    r = subprocess.run([sys.executable, str(PLUGIN / "test" / "test_places.py")],
-                       capture_output=True, text=True, env=env, timeout=600)
-    tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
-    check("where a note sits after the text changes (carried, seeded)", (r.returncode, tail[0]), (0, "OK"))
-    if r.returncode:
-        print(r.stdout[-3000:], r.stderr[-3000:])
-    r = subprocess.run([sys.executable, str(PLUGIN / "test" / "test_look.py")],
-                       capture_output=True, text=True, env=env, timeout=120)
-    tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
-    check("the plugin wears core's tokens; the share page carries Latte's exactly", (r.returncode, tail[0]), (0, "OK"))
-    if r.returncode:
-        print(r.stdout[-3000:], r.stderr[-3000:])
-    r = subprocess.run([node, "--test", str(PLUGIN / "test" / "page.test.mjs")],
-                       capture_output=True, text=True, timeout=300)
-    check("the page module registers nothing without files.own, and cleans up", r.returncode, 0)
-    if r.returncode:
-        print(r.stdout[-3000:], r.stderr[-3000:])
-    # The editor in a real browser (positions, typing, Suggesting): skipped
-    # unless LOAM_PLAYWRIGHT names a Playwright install (the plugin's README).
-    r = subprocess.run([node, "--test", "--test-timeout=120000", str(PLUGIN / "test" / "browser.test.mjs")],
-                       capture_output=True, text=True, timeout=900)
-    check("the editor in a browser (or skipped without Playwright)", r.returncode, 0)
-    if r.returncode:
-        print(r.stdout[-3000:], r.stderr[-3000:])
+
+    def run(suite):
+        kind, name, timeout, _label = suite
+        if kind == "node":
+            if not node:
+                return None
+            argv = [node, "--test"] + (["--test-timeout=120000"] if name.startswith("browser") else [])
+        else:
+            argv = [sys.executable]
+        script, *classes = name.split()
+        return subprocess.run(argv + [str(PLUGIN / "test" / script)] + classes, capture_output=True,
+                              text=True, env=env, timeout=timeout)
+
+    with ThreadPoolExecutor(max_workers=len(SUITES)) as pool:
+        outs = list(pool.map(run, SUITES))
+    for (kind, _name, _timeout, label), r in zip(SUITES, outs):
+        if r is None:
+            continue
+        if kind == "py":
+            tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
+            check(label, (r.returncode, tail[0]), (0, "OK"))
+        else:
+            check(label, r.returncode, 0)
+        if r.returncode:
+            print(r.stdout[-3000:], r.stderr[-3000:])
 
 
 # -- a real broker on a scratch vault ------------------------------------------------
