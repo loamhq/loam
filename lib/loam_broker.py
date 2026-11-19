@@ -1219,6 +1219,7 @@ def read_token() -> str:
     as an environment variable, the way every other credential on this box is
     mounted at job time rather than baked in."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not TOKEN_PATH.exists():
         TOKEN_PATH.write_text(secrets.token_urlsafe(32), encoding="utf-8")
     os.chmod(TOKEN_PATH, stat.S_IRUSR | stat.S_IWUSR)
