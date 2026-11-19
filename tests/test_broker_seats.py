@@ -194,6 +194,45 @@ async def main() -> None:
           sorted(s.id for s in broker.live()), sorted(s.id for s in seats))
     await stop_all(broker)
 
+    # Two APIs can reach the same binding while the first provider launch
+    # is still awaiting its process. Both must get the same child.
+    broker = broker_mod.Broker()
+    on(Box(broker, 32000, 6000))
+    one, two = await asyncio.gather(*(broker.start_session("probe1", "shared-start")
+                                     for _ in range(2)))
+    check("overlapping starts of the same binding have one child PID",
+          len({one.proc.pid, two.proc.pid}), 1)
+    print(f"      overlapping start PIDs {one.proc.pid}, {two.proc.pid}")
+    for started_session in {one, two}:
+        await started_session.stop()
+
+    gate, entered = asyncio.Event(), asyncio.Event()
+    launches = []
+    start_child = broker._start
+
+    async def delayed_start(agent, sid, *args):
+        launches.append(sid)
+        entered.set()
+        await gate.wait()
+        return await start_child(agent, sid, *args)
+
+    broker._start = delayed_start
+    lost = asyncio.create_task(broker.start_session("probe1", "lost-start"))
+    await asyncio.wait_for(entered.wait(), 5)
+    lost.cancel()
+    await asyncio.gather(lost, return_exceptions=True)
+    try:
+        await asyncio.wait_for(broker.start_session("probe2", "lost-start"), 5)
+    except broker_mod.BrokerError as exc:
+        check("a different persona cannot join the pending launch", exc.status, 409)
+    else:
+        check("a different persona cannot join the pending launch", True, False)
+    gate.set()
+    recovered = await asyncio.wait_for(broker.start_session("probe1", "lost-start"), 5)
+    check("a disconnected starter leaves one launch for the replacement",
+          (launches, recovered.is_live(), len(broker._starting)), (["lost-start"], True, 0))
+    await recovered.stop()
+
     # -- 2. no count cap -----------------------------------------------------
     broker = broker_mod.Broker()
     box = on(Box(broker, 32000, 6000))

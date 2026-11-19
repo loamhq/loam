@@ -95,6 +95,7 @@ class SessionHost:
         # and one against the backstop, so two starts that arrive together
         # cannot both take the last room (2026-11-09).
         self._starting: set[str] = set()
+        self._opening: dict[str, tuple[str, str, asyncio.Task]] = {}
         # Everyone watching the live list. Sessions come and go; a subscriber
         # here is watching the whole box, so it is held by the broker and not
         # by any one session.
@@ -240,6 +241,11 @@ class SessionHost:
         # names none is a resume on that one. A conversation cannot move
         # between providers: neither CLI can read the other's thread.
         stored = None
+        if session_id and session_id in self._opening:
+            owner, engine, task = self._opening[session_id]
+            if owner != agent or (provider and provider != engine):
+                raise BrokerError(409, "session is starting for another agent or provider")
+            return await asyncio.shield(task)
         if session_id:
             try:
                 stored = json.loads((cfg.SESSION_DIR / f"{session_id}.json")
@@ -266,14 +272,28 @@ class SessionHost:
             existing = self.sessions[session_id]
             if existing.state == "running":
                 return existing
-        await self.make_room(agent)
-        reserved = session_id or f"starting-{uuid.uuid4()}"
-        self._starting.add(reserved)
-        try:
-            return await self._start(agent, session_id, resume, provider,
-                                     model, effort)
-        finally:
-            self._starting.discard(reserved)
+        sid = session_id or str(uuid.uuid4())
+
+        async def open_session():
+            try:
+                if self.stopping:
+                    raise BrokerError(503, "the broker is stopping")
+                await self.make_room(agent)
+                if self.stopping:
+                    raise BrokerError(503, "the broker is stopping")
+                self._starting.add(sid)
+                return await self._start(agent, sid, resume, provider, model, effort)
+            finally:
+                self._starting.discard(sid)
+                self._opening.pop(sid, None)
+
+        # Register before yielding, including while making room. A lost
+        # caller can rejoin the same launch without taking another seat.
+        task = asyncio.create_task(open_session())
+        self._opening[sid] = (agent, provider, task)
+        # A caller can leave before a failed launch returns its error.
+        task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+        return await asyncio.shield(task)
 
     def seats_taken(self) -> int:
         """Sessions in RAM and starts in flight: what the backstop counts."""
