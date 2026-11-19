@@ -218,7 +218,7 @@ admin, which on an install is the one person who claimed it.
   and is under 15 minutes old; **200** `{"code": null}` otherwise.
 - **403** `{"error"}` for anyone but the owner. Without a session the gate
   answers first (a 302 to the portal).
-- The flow to draw: Settings › Sign-in › *Add a passkey* opens Authelia's
+- The flow to draw: Settings › Account › *Add a passkey* opens Authelia's
   own settings at `https://auth.<domain>/settings` (Two-Factor
   Authentication › WebAuthn Credentials › Add, which asks for the one-time
   code; the API underneath is `POST /api/user/session/elevation`, which
@@ -240,7 +240,7 @@ admin, which on an install is the one person who claimed it.
   does not answer. Without a session the gate answers first (a 302).
 - `DELETE /_loam/passkeys/<id>`: **200** `{"ok": true}`, or the login's own
   refusal passed on (a **403** when it wants an elevated session first).
-- The app (`app/public/passkey.js`) lists them under Settings › Sign-in and
+- The app (`app/public/passkey.js`) lists them under Settings › Account and
   falls back to a link to the portal's own list on any answer but a 200.
 
 ## `loam status`

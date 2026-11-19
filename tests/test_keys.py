@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared keys (2026-11-18): Settings › Accounts, lib/loam_keys.py.
+"""Shared keys (2026-11-18): Settings › Connections › API keys, lib/loam_keys.py.
 
   - the manifest's `keys:`: a provider Loam knows takes Loam's fields; another
     needs its name and fields; a wrong one breaks the row with a sentence;
@@ -149,7 +149,7 @@ check("the listing never carries the value; it shows the last four",
       GOOD not in listing and answer["shown"] == {"OPENAI_API_KEY": "…1234"}
       and answer["source"] == "saved" and answer["checked"]["ok"], answer)
 ids = [p["id"] for p in k.listing()["providers"]]
-check("Accounts lists Loam's three first, then the ones plugins declare",
+check("API keys lists Loam's three first, then the ones plugins declare",
       ids[:3] == ["openai", "google", "hetzner"] and "replicate" in ids
       and "modal" not in ids, ids)
 
@@ -169,7 +169,7 @@ check("a plugin's own key wins for it alone",
       c.secret_for("talk", "GEMINI_API_KEY") == "AIzaOWN"
       and c.secret_for("pics", "GEMINI_API_KEY") == "AIzaBOX")
 g = k.one("google")
-check("...and Accounts says which plugin uses its own",
+check("...and API keys says which plugin uses its own",
       {u["id"]: u["uses"] for u in g["plugins"]} == {"pics": "shared", "talk": "own"}, g["plugins"])
 try:
     k.set_own("openai", "talk", {"value": GOOD})

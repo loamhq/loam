@@ -3984,7 +3984,7 @@ posts is the app's bot. The app and its installation both held
 `GET /app/installations` with the app JWT). Tests:
 `tests/test_pr_update.py`.
 
-## Shared keys: Settings › Accounts (2026-11-18)
+## Shared keys: Settings › Connections › API keys (2026-11-18)
 
 API keys by provider, entered once, handed only to the plugins that
 declared the provider in `keys:`. Every rule, the routes and their answers

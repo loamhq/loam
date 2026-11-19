@@ -28,6 +28,7 @@ import { loadThemes, marketThemeCSS, themeFontsCSS } from './themes.js'
 import { createBranchDrafter } from './thread-branch.js'
 import { INSTALLATION_DEFAULTS } from '../public/installation.js'
 import { createAppMedia } from './app-media.js'
+import { serverFacts, signedIn } from './about.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MAX_BODY = 1 << 20 // a message from a phone; not a file upload
@@ -248,7 +249,7 @@ export function createApp({
       if (!['GET', 'POST'].includes(method)) return sendJson(res, 405, { error: 'Use GET or POST for plugins.' })
       return await relayJson(res, method, '/v1/plugins', method === 'POST' ? await readBody(req) : undefined, { signal: AbortSignal.timeout(method === 'POST' ? 420000 : 5000) })
     }
-    // Shared keys (2026-11-18): Settings › Accounts. The broker never
+    // Shared keys (2026-11-18): Settings › Connections › API keys. The broker never
     // answers a whole value on these routes; the app server's own key reads
     // go to /v1/plugins/<id>/secrets/<name>/value, which this relay never
     // passes.
@@ -423,6 +424,16 @@ export function createApp({
         if (url.searchParams.has(key)) query.set(key, url.searchParams.get(key))
       }
       return await relayJson(res, method, `/v1/activity${query.size ? `?${query}` : ''}`)
+    }
+    // Settings › Account and About Loam (2026-11-18): reads the app answers
+    // itself, from the login's headers and from the machine it runs on.
+    if (rest === '/account') {
+      if (method !== 'GET') return sendJson(res, 405, { error: 'Who is signed in is read only.' })
+      return sendJson(res, 200, signedIn(req.headers))
+    }
+    if (rest === '/server') {
+      if (method !== 'GET') return sendJson(res, 405, { error: 'The server is read only.' })
+      return sendJson(res, 200, serverFacts())
     }
     if (rest === '/owner') {
       if (method !== 'GET') return sendJson(res, 405, { error: 'The owner is read only.' })

@@ -51,7 +51,7 @@ test('Settings, archive, search and imported thread use threads exclusively', as
   await until(() => all(root, 'tt-row').length === 4)
   click(find(root, 'roundbtn')); await until(() => find(root, 'settings'))
   assert.doesNotMatch(text(find(root, 'settings')), /Classic chats/)
-  for (const label of ['Appearance', 'Agents', 'Providers', 'Integrations', 'Files', 'Plugins']) assert.match(text(find(root, 'settings')), new RegExp(label))
+  for (const label of ['Account', 'Appearance', 'Agents', 'Connections', 'Plugins', 'Files', 'About Loam']) assert.match(text(find(root, 'settings')), new RegExp(label))
   page.press('Escape'); await until(() => !find(root, 'settings'))
   click(buttons('Thread list actions')); await until(() => find(root, 'tt-list-menu'))
   click(all(find(root, 'tt-list-menu'), 'setrow').find(n => /Archived threads/.test(text(n))))

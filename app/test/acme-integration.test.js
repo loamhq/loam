@@ -214,7 +214,7 @@ async function openIntegrations() {
   }
   click(find(root, 'roundbtn'))
   await until(() => find(root, 'settings'))
-  const row = all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Integrations')
+  const row = all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Connections')
   click(row)
   click(await until(() => all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'Acme')))
   // A fresh broker reading can replace the previous unsigned card with an
@@ -336,8 +336,8 @@ test('acme card unhealthy: the host’s sentence in the warning ink, Sign in aga
   noStyle(card())
   printed('unhealthy')
   while (text(find(root, 'sheet-title')) !== 'Settings') { click(find(root, 'backbtn')); await new Promise(resolve => setTimeout(resolve, 5)) }
-  const row = await until(() => all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Integrations'))
-  assert.ok(find(row, 'navdot'), 'no dot on the Integrations row')
+  const row = await until(() => all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Connections'))
+  assert.ok(find(row, 'navdot'), 'no dot on the Connections row')
   assert.ok(text(find(row, 'setrow-sub')).length)
 })
 
@@ -484,7 +484,7 @@ test('acme login expired or denied: broker warning and Try again; failed sign-in
     assert.equal(pills()[0], 'Sign in to Acme')
     t.diagnostic(`expired/denied card:\n${printed('failed sign-in card')}`)
     while (text(find(root, 'sheet-title')) !== 'Settings') { click(find(root, 'backbtn')); await new Promise(resolve => setTimeout(resolve, 5)) }
-    const row = await until(() => all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Integrations'))
+    const row = await until(() => all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Connections'))
     assert.equal(find(row, 'navdot'), null)
   }
 })
@@ -498,7 +498,7 @@ test('acme login unhealthy: host sentence, Sign in first, notice and tab dot', a
   noStyle(card())
   t.diagnostic(`unhealthy by login:\n${printed('unhealthy by login')}`)
   while (text(find(root, 'sheet-title')) !== 'Settings') { click(find(root, 'backbtn')); await new Promise(resolve => setTimeout(resolve, 5)) }
-  const row = await until(() => all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Integrations'))
+  const row = await until(() => all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Connections'))
   assert.ok(find(row, 'navdot'))
   page.press('Escape')
   await until(() => !find(root, 'sheet'))

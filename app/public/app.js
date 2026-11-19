@@ -221,7 +221,7 @@ async function api(method, path, body) {
     pluginLoader?.refresh()
     if (path.startsWith('/plugins/daily-notes')) dailyNotes.refresh()
     if (/^\/plugins\/[^/]+\/secrets\//.test(path)) registry.emit('plugin.secrets.changed', { id: path.split('/')[2] })
-    // A shared key changed (Accounts): every plugin that uses it hears so.
+    // A shared key changed (API keys): every plugin that uses it hears so.
     if (path.startsWith('/keys/')) for (const user of parsed?.plugins ?? []) registry.emit('plugin.secrets.changed', { id: user.id })
   }
   return parsed
@@ -235,7 +235,7 @@ const moved = Object.fromEntries(Object.entries({
   accounts: "loadGithub githubStep keepGithub setupGithub connectOrg installGithub refreshGithub disconnectGithub githubReturn providerSignIn connectKeys orgField orgAppField",
   composer: "DRAFT_MAX_PX MAC draft editorDraft openEditor closeEditor sendFromEditor fileChooser imageChooser growDraft submitDraft attachStrip chipSub loginNotice activeThread composer expandGlyph editorNodes menuPage menuRootOf menuOpen openPage openMenu togglePlus closeMenus composerMenu menuRow menuSheet menuGroups menuPopover",
   transcript: "lineKeys lineCount keyOf MINE_MAX_PX MINE_SLACK_PX fitMine COPIED_MS copied copyWithCue copyButton stepItems stepChildren itemNode foldCard stepNode askLine openBlocks longToolDetails toggleOpen toolNode toolDetail fitToolOutputs answeredLine openTurns toggleTurn turnModelName turnFacts turnLine",
-  settings: "settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsAccounts apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks",
+  settings: "settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsApiKey settingsAccount settingsConnections settingsAbout apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks",
   layout: "nav profileScreen profileBody desk rail filesList listColumn browseSection setCollapsed mainPane profilePane backToChat filesPane",
   sheets: "openSheet closeSheet sheetTop SHEET_SETTLE_MS pickerNodes filesSheetNodes sheetNodes",
   market: "marketCards marketState openMarket openMarketInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore loadMarket"

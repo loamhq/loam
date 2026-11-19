@@ -616,7 +616,7 @@ def share(pid: str, repository: str) -> dict:
         helper = loam_github.helper_env(repository)
         if not helper:
             raise ShareError("GitHub is not connected on this install: the owner "
-                             "connects it in Settings › Integrations, then this "
+                             "connects it in Settings › Connections, then this "
                              "can push to a repository on their account")
         env.update(helper)
     remote = f"{_share_base()}{repository}.git"

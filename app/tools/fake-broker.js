@@ -652,7 +652,7 @@ function filePart(raw, contentType) {
   return { name, size }
 }
 
-// Shared keys' made-up state, also read by tools/capture-accounts.mjs.
+// Shared keys' made-up state, also read by tools/capture-accounts.mjs and tools/capture-settings.mjs.
 const FAKE_KEYS = JSON.parse(readFileSync(new URL('./fake-keys.json', import.meta.url), 'utf8'))
 
 function json(res, status, body) {

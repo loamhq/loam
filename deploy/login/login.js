@@ -470,7 +470,7 @@
   // Managing passkeys asks Authelia for an elevated session. When the
   // session already counts (a second factor this session), nothing is asked.
   // Otherwise: the second factor this person has, or a one-time code Loam
-  // keeps for them (Settings › Sign-in in the app shows it: this box sends no
+  // keeps for them (Settings › Account in the app shows it: this box sends no
   // mail, so Authelia's "email" lands in a file Loam reads).
   async function confirmIdentity(section, hide) {
     const el = await api('GET', '/api/user/session/elevation')
@@ -548,7 +548,7 @@
           finish(true)
         })
         panel.replaceChildren(h('h2', { id: 'confirm-title', text: 'First, confirm it’s you' }),
-          h('p', { class: 'note', text: 'Loam has made you a one-time code. Find it in your Loam tab, under Settings › Sign-in, and type it here.' }),
+          h('p', { class: 'note', text: 'Loam has made you a one-time code. Find it in your Loam tab, under Settings › Account, and type it here.' }),
           f, h('div', { class: 'links' }, cancel))
         if (matchMedia('(hover:hover)').matches) f.otc.focus()
       }

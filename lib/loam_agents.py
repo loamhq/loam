@@ -87,7 +87,12 @@ YES_WINDOW = timedelta(minutes=30)
 STARTER = lc.get("agents.starter", "iris")
 # Where the agent's soul and config come from, as fields of a draft.
 DRAFT_TEXT = ("soul", "config", "active", "reflection")
-DRAFT_FIELDS = ("id", "name", "provider", "wake", *DRAFT_TEXT)
+DRAFT_FIELDS = ("id", "name", "about", "provider", "wake", *DRAFT_TEXT)
+# The draft card's one plain line about who the agent is (2026-11-18): the
+# card showed the soul's opening, which is written to the agent ("You are
+# Juniper, …"). Written by the drafting agent for the person, in the third
+# person; never part of the soul, and not kept once the agent is made.
+ABOUT_MAX = 200
 # Retired keys a draft may still carry from before 2026-11-16: never shown.
 RETIRED_DRAFT_KEYS = ("emoji",)
 PROVIDERS = ("claude-code", "codex", "antigravity")
@@ -409,6 +414,14 @@ def _clean_fields(patch: dict, draft: dict, by: str | None) -> dict:
         out["name"] = name
     if "id" in patch and patch["id"] is not None:
         out["id"] = str(patch["id"]).strip().lower()
+    if "about" in patch:
+        about = " ".join(str(patch["about"] or "").split())
+        if len(about) > ABOUT_MAX:
+            raise AgentsError(f"`about` is one plain line, at most {ABOUT_MAX} "
+                              f"characters")
+        if any(unicodedata.category(c).startswith("C") for c in about):
+            raise AgentsError("`about` has a control character in it")
+        out["about"] = about or None
     if "provider" in patch:
         v = patch["provider"]
         if v is not None and v not in PROVIDERS:

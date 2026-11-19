@@ -223,7 +223,7 @@ export function plainTouches(declaration, kind = null) {
   if (t.memory === 'read') out.push({ glyph: 'memory', text: 'Reads what your agents keep for themselves', sub: '' })
   if (t.memory === 'write') out.push({ glyph: 'memory', text: 'Adds to what your agents keep for themselves', sub: '' })
   if (t.agents?.tools?.length) out.push({ glyph: 'tool', text: `Gives your agents ${t.agents.tools.length === 1 ? 'a new tool' : `${t.agents.tools.length} new tools`}`, sub: t.agents.tools.map(x => x.replace(/ \(.*\)$/, '')).join(', ') })
-  for (const key of t.keys ?? []) out.push({ glyph: 'key', text: `Uses your ${key.name} key${key.optional ? ' if you have one' : ''}`, sub: key.why || 'From Settings › Accounts.' })
+  for (const key of t.keys ?? []) out.push({ glyph: 'key', text: `Uses your ${key.name} key${key.optional ? ' if you have one' : ''}`, sub: key.why || 'From API keys, in Settings › Connections.' })
   if (t.secrets?.length) out.push({ glyph: 'key', text: 'Asks for a key of its own', sub: 'You paste it in its settings; agents never see it.' })
   if (t.vault?.length) out.push({ glyph: 'record', text: 'Writes files into your vault', sub: t.vault.join(', ') })
   if (t.schedule?.length) out.push({ glyph: 'clock', text: 'Runs on a schedule', sub: t.schedule.join(', ') })

@@ -1,7 +1,7 @@
 """Shared keys: API keys by provider, entered once, handed only to the
 plugins that declared that provider (2026-11-18; the owner, m444 and m446).
 
-**The model.** Settings › Accounts holds one key per provider (OpenAI,
+**The model.** Settings › Connections › API keys holds one key per provider (OpenAI,
 Google, Hetzner, …). A plugin's ``PLUGIN.md`` says which providers' keys it
 uses (``keys:``, docs/plugins.md, "Keys"), and that declaration is shown
 before it is installed, beside ``touches``. A plugin uses the shared key of
@@ -55,7 +55,7 @@ import loam_config as lc
 # The providers Loam knows
 # ---------------------------------------------------------------------------
 
-# `shown`: drawn in Accounts even before any plugin declares it, because a
+# `shown`: drawn in API keys even before any plugin declares it, because a
 # person setting up Loam reaches for these first. The rest appear once a
 # plugin in either layer declares them or a key is saved.
 PROVIDERS: dict[str, dict] = {
@@ -357,7 +357,7 @@ def box_values(fields: list[dict]) -> dict[str, str]:
 
 
 def shared_source(pid: str, fields: list[dict]) -> str | None:
-    """``saved`` (Accounts), ``box`` (the box's own secrets file), or None."""
+    """``saved`` (API keys), ``box`` (the box's own secrets file), or None."""
     if _complete(shared_values(pid, fields), fields):
         return "saved"
     if _complete(box_values(fields), fields):
@@ -481,7 +481,7 @@ def adopt(rows: list[dict] | None = None) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# What Accounts shows
+# What API keys shows
 # ---------------------------------------------------------------------------
 
 def _shown_values(fields: list[dict], values: dict[str, str]) -> dict[str, str]:
@@ -622,7 +622,7 @@ def forget_shared(pid: str, by: str | None = None) -> dict:
     prov = provider(pid)
     path = keys_dir() / f"{pid}.env"
     if not path.exists():
-        raise KeyError_(f"no {prov['name']} key is saved in Accounts" + (
+        raise KeyError_(f"no {prov['name']} key is saved in API keys, in Settings › Connections" + (
             "; the one in use is in this box's own secrets file, which Loam does "
             "not change" if shared_source(pid, prov["fields"]) == "box" else ""), 404)
     path.unlink()

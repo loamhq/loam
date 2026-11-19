@@ -10,7 +10,7 @@ tag. Anyone installs it from that link (Settings › Plugins › Install from a
 link). The **marketplace** is a list of such links that every Loam shows in
 Settings › Plugins; being on it is asking, not publishing.
 
-What the owner needs: a GitHub account, connected in Settings › Integrations
+What the owner needs: a GitHub account, connected in Settings › Connections
 (that is how you push for them), and a repository they made for it.
 
 ## Share it by link

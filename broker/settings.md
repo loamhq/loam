@@ -98,8 +98,8 @@ own `thread.*` rows cover the same things.
 | `job.cancel` | Cancel an engineer job | POST /api/jobs/{id}/cancel | persona, by `mcp__engineer__cancel` | yes, that tool |
 | `provider.login` | Sign a provider in again, or out | POST /api/providers/{p}/login (+ /code, DELETE), POST /api/providers/{p}/logout | owner | — |
 | `integration.github` | Connect / disconnect GitHub | /api/integrations/github/… | owner | — |
-| `plugin.secret` | A plugin's own API key, pasted and checked on entry (2026-11-14); a plugin that declares `keys:` uses Accounts instead | PUT/DELETE /api/plugins/{plugin}/secrets/{name} | owner | — |
-| `keys.set` | A provider's shared API key in Accounts, checked before it is kept; the value is never read back (2026-11-18) | PUT /api/keys/{provider} | persona, conversation only | — |
+| `plugin.secret` | A plugin's own API key, pasted and checked on entry (2026-11-14); a plugin that declares `keys:` uses API keys (Settings › Connections) instead | PUT/DELETE /api/plugins/{plugin}/secrets/{name} | owner | — |
+| `keys.set` | A provider's shared API key in Settings › Connections › API keys, checked before it is kept; the value is never read back (2026-11-18) | PUT /api/keys/{provider} | persona, conversation only | — |
 | `keys.forget` | Forget a provider's shared key | DELETE /api/keys/{provider} | persona, conversation only | — |
 | `keys.check` | Check a provider's shared key again | POST /api/keys/{provider}/check | persona | — |
 | `keys.own` | Give one plugin a different key of a provider it declared | PUT /api/keys/{provider}/plugins/{plugin} | persona, conversation only | — |
@@ -109,7 +109,7 @@ own `thread.*` rows cover the same things.
 | `agent.model` | An agent's default model, on its provider | PATCH /api/agents/{agent} | persona, conversation only | no |
 | `agent.effort` | An agent's default thinking level, on its provider | PATCH /api/agents/{agent} | persona, conversation only | no |
 | `agent.face` | An agent's face, an uploaded image (PNG, JPEG, WebP, GIF; 2 MB) over the theme's drawn face (2026-11-14). The emoji face, `agent.emoji`, is retired (2026-11-16) | PUT /api/agents/{agent}/face | persona, conversation only | no |
-| `agent.draft` | Draft a new agent (name, soul, config; a character, not a job: the library skill `loam-making-an-agent`) in a thread, to show the person (2026-11-14) | POST /api/agents/drafts | persona, conversation only | no |
+| `agent.draft` | Draft a new agent (name, soul, config, and `about`: the one plain line the draft card shows; a character, not a job: the library skill `loam-making-an-agent`) in a thread, to show the person (2026-11-14) | POST /api/agents/drafts | persona, conversation only | no |
 | `agent.revise` | Change a draft on the person's word; each change is a revision | PATCH /api/agents/drafts/{draft} | persona, conversation only | no |
 | `agent.confirm` | Make the agent, on the person's yes to the revision shown (their message's id) | POST /api/agents/drafts/{draft}/confirm | persona, conversation only | no |
 | `agent.archive` | Archive an agent, never delete: out of Chats and pickers, wakes and crons stopped | POST /api/agents/{agent}/archive | persona, conversation only, on the person's yes | no |

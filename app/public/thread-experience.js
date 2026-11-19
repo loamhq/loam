@@ -189,7 +189,7 @@ const PROVIDER_ERROR_RE = /^(?:Failed to authenticate|OAuth\b|API Error|Invalid 
 const AUTH_ERROR_RE = /authenticat|oauth|expired|unauthori[sz]ed|\b401\b|\b403\b|api[_ ]?key|not logged in|log ?in again|sign ?in again|credential/i
 const QUOTA_ERROR_RE = /rate[_ ]?limit|quota|\b429\b|credit balance|usage limit|billing/i
 // Claude Code's sign-in is the person's Claude account, so the line names Claude;
-// the others by the name Settings › Providers shows.
+// the others by the name Settings › Connections shows.
 const PROVIDER_WORDS = { 'claude-code': 'Claude' }
 
 export function failedTurnInfo(message, { agentName = (id) => id, engineOf = () => null, providers = [] } = {}) {
@@ -214,8 +214,8 @@ export function failedTurnInfo(message, { agentName = (id) => id, engineOf = () 
   }
   const provider = PROVIDER_WORDS[engine] ?? providers.find((p) => p.id === engine)?.name ?? null
   const reach = provider ? `${agent} couldn’t reach ${provider}.` : `${agent} couldn’t reach their AI provider.`
-  if (AUTH_ERROR_RE.test(raw)) return { kind: 'signin', agent, engine, provider, raw, summary: `${reach} Sign in again in Settings › Providers.`, action: 'providers' }
-  if (QUOTA_ERROR_RE.test(raw)) return { kind: 'limit', agent, engine, provider, raw, summary: `${provider ?? 'The provider'} has paused replies for now. Try again later, or see Settings › Providers.`, action: 'providers' }
+  if (AUTH_ERROR_RE.test(raw)) return { kind: 'signin', agent, engine, provider, raw, summary: `${reach} Sign in again in Settings › Connections.`, action: 'providers' }
+  if (QUOTA_ERROR_RE.test(raw)) return { kind: 'limit', agent, engine, provider, raw, summary: `${provider ?? 'The provider'} has paused replies for now. Try again later, or see Settings › Connections.`, action: 'providers' }
   return { kind: 'failed', agent, engine, provider, raw, summary: `${agent}’s turn didn’t finish. Send your message again, or ask another agent.`, action: null }
 }
 

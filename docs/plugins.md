@@ -427,7 +427,7 @@ and nothing else is.
 
 ## Keys: API keys by provider, entered once (2026-11-18)
 
-The owner, m444 and m446 (2026-11-17): **Settings › Accounts holds API keys
+The owner, m444 and m446 (2026-11-17): **Settings › Connections › API keys holds API keys
 by provider**, entered once; a plugin says which providers' keys it uses; a
 plugin uses the shared key of each, with "use a different key" as an
 override for that plugin alone; and a key is handed only to the plugins that
@@ -460,7 +460,7 @@ A provider Loam knows takes Loam's fields whatever the manifest says (a
 warning). Another must name itself and its fields, and its key is kept as
 given. `optional: true` says the plugin works without that provider: Images
 declares OpenAI and Google, each optional, and uses whichever is there.
-Accounts shows OpenAI, Google and Hetzner always, and any other provider
+API keys shows OpenAI, Google and Hetzner always, and any other provider
 once a plugin in either layer declares it or a key of it is saved.
 
 **The declaration.** `keys:` is shown before install as `touches.keys`
@@ -470,17 +470,17 @@ new provider asks again, as a new network host does. The page says each as
 
 **Where a key comes from**, for each provider a plugin declared, first found:
 
-1. **its own key**, set in Accounts under that provider ("use a different
+1. **its own key**, set in API keys under that provider ("use a different
    key"), kept in its private `secrets.env`;
-2. **the shared key**, saved in Accounts: `<state>/plugins/keys/<provider>.env`
+2. **the shared key**, saved in API keys, in Settings › Connections: `<state>/plugins/keys/<provider>.env`
    (0600, in a 0700 folder);
 3. **the box's own secrets file** (`paths.secrets_env`), as before shared
-   keys, so a key an install already set there keeps working. Accounts shows
+   keys, so a key an install already set there keeps working. API keys shows
    it as "Set on this server" and cannot forget it.
 
 A key a plugin kept of its own before shared keys becomes the shared one
 when that provider has none yet (`adopt`, run with the five-minute reconcile
-and when Accounts is read); one equal to the shared key is dropped; a
+and when API keys are read); one equal to the shared key is dropped; a
 different one stays that plugin's own.
 
 **What a plugin's process reads**: `LOAM_PLUGIN_KEYS`, the path of
@@ -499,7 +499,7 @@ is given to it by no route; until 2026-11-18 any name in the box's secrets
 file was. Plugins run as the install's user, so this is what Loam hands a
 plugin, not a wall around it.
 
-**Who changes them**: the owner in Settings › Accounts, and any persona in a
+**Who changes them**: the owner in Settings › Connections › API keys, and any persona in a
 conversation through `bin/settings` (`keys.set`, `keys.forget`, `keys.check`,
 `keys.own`, `keys.shared`; the owner, 2026-11-10: every setting is an
 agent's to change too). No route answers a whole value: a listing carries

@@ -33,16 +33,17 @@ export function registerPage(loam) {
   loam.places.app.overlay.add({ id: 'core.activity-dialogs', render: () => host.registry.component('core.activity', { variant: 'dialogs', defaultView: () => host.activity.dialogNodes() }) })
   loam.places.app.overlay.add({ id: 'core.profile-dialogs', render: () => host.registry.component('core.activity', { variant: 'profile-dialogs', defaultView: () => host.profileActivity.dialogNodes() }) })
   loam.places.app.overlay.add({ id: 'core.engineer-dialogs', render: () => host.engineerActivity.dialogNodes() })
+  // Settings in seven (2026-11-18). The ids that were sections before
+  // (providers, integrations, accounts, signin, update) still open, at their
+  // new home: app-shape.js, settingsHome.
   const sections = [
+    ['account', 'Account', 'person', () => host.settingsAccount],
     ['appearance', 'Appearance', 'sun', () => host.settingsAppearance],
     ['agents', 'Agents', 'users', () => host.settingsAgents],
-    ['providers', 'Providers', 'code', () => host.settingsProviders],
-    ['integrations', 'Integrations', 'link', () => host.settingsIntegrations],
-    ['accounts', 'Accounts', 'key', () => host.settingsAccounts],
-    ['files', 'Files', 'folder', () => host.settingsFiles],
+    ['connections', 'Connections', 'link', () => host.settingsConnections],
     ['plugins', 'Plugins', 'puzzle', () => host.settingsPlugins],
-    ['signin', 'Sign-in', 'lock', () => context => host.settingsBody({ page: 'signin' }, context.back)],
-    ['update', 'Update', 'refresh', () => context => host.settingsBody({ page: 'update' }, context.back)],
+    ['files', 'Files', 'folder', () => host.settingsFiles],
+    ['about', 'About Loam', 'info', () => host.settingsAbout],
   ]
   for (const [id, title, icon, view] of sections) loam.places.settings.section.add({ id, title, icon, render: context => view()(context) })
   loam.commands.register({ id: 'core.settings', title: 'Settings', run: () => host.goSettings('root') })

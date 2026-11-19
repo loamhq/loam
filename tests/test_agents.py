@@ -291,6 +291,16 @@ async def main():
         check("a reserved id is a problem",
               status == 201 and any("keeps for itself" in p for p in body["problems"]),
               body)
+        status, body = await http(port, "POST", "/v1/agents/drafts",
+                                  {"name": "Sage", "soul": "s", "config": "c",
+                                   "about": "  A calm   gardener who notices things.  "})
+        check("a draft keeps its plain `about` line, tidied, for the card",
+              status == 201 and body.get("about") == "A calm gardener who notices things.", body)
+        status, body = await http(port, "POST", "/v1/agents/drafts",
+                                  {"name": "Sage", "soul": "s", "config": "c",
+                                   "about": "x" * 201})
+        check("...and an `about` longer than one line is refused",
+              status == 400 and "about" in body.get("error", ""), (status, body))
 
         # The person speaks, then the draft is revised: that yes is too old.
         early = server.threads.post_person(tid, "Sounds nice")

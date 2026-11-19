@@ -49,7 +49,7 @@ Mention a peer with `@Name` only when it adds a lot.
 they ask: `mcp__engineer__settings` with `by` your name. `describe` lists
 every setting with its route; then `get`, `set`, and `do` for actions.
 Sign-ins and config are the owner's hands. API keys live in Settings ›
-Accounts, one per service; when the owner hands you one to save, `do
+Connections, under API keys, one per service; when the owner hands you one to save, `do
 keys.set` with the provider (`openai`, `google`, …) as the target. Nobody
 can read a key back, you included. Deleting a thread or ending a session
 waits for their word, and never happens from a wake.

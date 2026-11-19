@@ -1274,7 +1274,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     return h('div', { class: 'exitline tt-system tt-system-failed', key: m.id, 'data-message-id': m.id, 'data-failure': info.kind },
       h('p', { class: 'tt-failed-summary', text: info.summary }),
       h('div', { class: 'tt-failed-actions' },
-        info.action === 'providers' && openSettings ? button('Go to Providers', () => openSettings('providers'), { class: 'pillbtn tt-failed-go' }) : null,
+        info.action === 'providers' && openSettings ? button('Go to Connections', () => openSettings('providers'), { class: 'pillbtn tt-failed-go' }) : null,
         h('details', { class: 'tt-failed-details', open: openMessages.has(`failed:${st.open.thread.id}:${m.id}`), ontoggle: (event) => { if (event.currentTarget.isConnected) { if (event.currentTarget.open) openMessages.add(`failed:${st.open.thread.id}:${m.id}`); else openMessages.delete(`failed:${st.open.thread.id}:${m.id}`) } } },
           h('summary', { text: 'Details' }),
           h('pre', { class: 'tt-failed-raw', text: info.raw }))))

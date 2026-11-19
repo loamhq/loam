@@ -11,9 +11,12 @@ import { rootsAnswer } from './fixtures/files-contract.js'
 import { readFile } from 'node:fs/promises'
 
 test('removed settings destinations resolve to the current settings catalog', () => {
-  assert.deepEqual(SETTINGS_SECTIONS.map(item => item.label), ['Appearance', 'Agents', 'Providers', 'Integrations', 'Accounts', 'Files', 'Plugins', 'Sign-in', 'Update'])
-  for (const page of ['providers', 'integrations']) assert.equal(settingsHome(page), page)
-  assert.equal(settingsHome('accounts'), 'accounts')
+  assert.deepEqual(SETTINGS_SECTIONS.map(item => item.label), ['Account', 'Appearance', 'Agents', 'Connections', 'Plugins', 'Files', 'About Loam'])
+  assert.ok(SETTINGS_SECTIONS.every(item => !/accounts/i.test(`${item.id} ${item.label}`)), 'the word is kept for the Loam account')
+  for (const page of ['providers', 'integrations', 'accounts']) assert.equal(settingsHome(page), 'connections')
+  assert.equal(settingsHome('accounts', 'openai'), 'api-key')
+  assert.equal(settingsHome('signin'), 'account')
+  assert.equal(settingsHome('update'), 'about')
   for (const page of ['voice', 'dictation', 'read-aloud']) assert.equal(settingsHome(page), 'plugins')
   assert.equal(settingsHome('provider'), 'provider')
 })
@@ -21,7 +24,7 @@ test('the settings registry handoff preserves all destinations and Appearance ke
   const handoff = JSON.parse(await readFile('docs/settings-sections.registry.json', 'utf8'))
   const appearance = JSON.parse(await readFile('docs/appearance-settings.registry.json', 'utf8'))
   assert.deepEqual(handoff.sections.map(section => section.id), SETTINGS_SECTIONS.map(section => section.id))
-  assert.deepEqual(handoff.sections[0].fields.map(field => `appearance.${field}`).sort(), appearance.settings.map(setting => setting.key).sort())
+  assert.deepEqual(handoff.sections.find(section => section.id === 'appearance').fields.map(field => `appearance.${field}`).sort(), appearance.settings.map(setting => setting.key).sort())
   assert.equal(handoff.threadConfiguration.effortControl, false)
 })
 test('the attachment picker has no host-record collection and old System requests return to its roots', async () => {

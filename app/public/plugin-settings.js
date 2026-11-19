@@ -10,7 +10,7 @@ export function touchSentences(declaration = {}) {
   if (touches.memory && touches.memory !== 'none') lines.push(touches.memory === 'read' ? 'Reads shared memory.' : 'Reads and changes shared memory.')
   if (touches.server) lines.push('Contains code for the host.')
   // Shared keys (2026-11-18): the providers whose keys it is given, from
-  // Settings › Accounts. A plugin is handed no key it did not declare here.
+  // Settings › Connections › API keys. A plugin is handed no key it did not declare here.
   for (const key of touches.keys ?? []) lines.push(`Uses your ${key.name} key${key.optional ? ' if you have one' : ''}${key.why ? `: ${key.why}` : '.'}`)
   for (const id of declaration.overrides ?? []) lines.push(`Replaces ${label(id)}.`)
   return lines
@@ -22,6 +22,17 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, text, onclick, ...props })
   const notice = (text, bad = true) => text ? h('p', { class: `plugin-notice${bad ? ' err' : ''}`, role: bad ? 'alert' : 'status', text }) : null
   const meta = row => [row.author || 'Unknown author', row.version || 'Version unknown', sourceLine(row.source)].join(' · ')
+  // A plugin's page says who made it, its version and where to read it
+  // (2026-11-18): the repository, ref and commit are the link's, behind View
+  // source (a link's `url` is the tree at the commit it was installed from).
+  const byline = row => {
+    const url = external(row.source)
+    const who = row.author ? `By ${row.author}` : row.source?.kind === 'loam' ? 'By Loam' : 'Unknown author'
+    return h('p', { class: 'plugin-meta plugin-byline' },
+      h('span', { text: `${who} · ${row.version ? `Version ${row.version}` : 'Version unknown'}` }),
+      url ? h('a', { class: 'quietlink plugin-source', href: url, target: '_blank', rel: 'noopener noreferrer', text: 'View source' }) : null)
+  }
+
   const declarations = (declaration, title = 'What it touches') => h('section', { class: 'plugin-declaration', 'aria-label': title }, h('h3', { class: 'kicker', text: title }),
     touchSentences(declaration).length ? h('ul', {}, ...touchSentences(declaration).map(text => h('li', { text }))) : h('p', { class: 'note', text: 'Declares no network, record or memory access.' }))
   function opened() {
@@ -43,7 +54,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           try { const settings = await host.api('GET', `/plugins/${encodeURIComponent(row.id)}/settings`); if (st.selected?.key === row.key) hostSettings = settings }
           catch (e) { if (st.selected?.key === row.key) st.detailError = e.message }
         }
-        // A plugin that declares `keys:` takes them from Accounts (2026-11-18);
+        // A plugin that declares `keys:` takes them from API keys (2026-11-18);
         // its `settings.secret` of the same name stays only so a broker from
         // before 0.2.3 still hands it the key, and is not drawn here.
         if (st.selected?.key === row.key && !(out.plugin?.keys || row.keys)?.length && (out.plugin?.contributes || row.contributes)?.['settings.secret']?.length) {
@@ -157,9 +168,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     const declaration = row.declaration ?? { touches: row.touches, overrides: row.overrides, page_code: row.has?.page_main }
     const url = external(row.source)
     return [h('button', { class: 'backbtn plugin-back', 'aria-label': 'Back to Plugins', onclick: () => { st.selected = null; st.detail = null; st.error = ''; changed() } }, icon.chevronLeft(18), 'Plugins'),
-      host.settingsHead(row.name || row.id), pluginIcon(row), h('p', { class: 'plugin-meta', text: meta(row) }), serviceView(row),
-      url ? h('a', { class: 'quietlink plugin-source', href: url, target: '_blank', rel: 'noopener noreferrer', text: 'View source' }) : null,
-      row.source?.commit ? h('p', { class: 'note plugin-commit', text: row.source.commit }) : null,
+      host.settingsHead(row.name || row.id), pluginIcon(row), byline(row), serviceView(row),
       row.shadows ? h('p', { class: 'plugin-mark', text: 'Changes a shipped plugin.' }) : null,
       row.edited ? h('p', { class: 'note', text: 'Edited here since it was installed.' }) : null,
       notice(row.broken), notice(loader.st.failures.get(row.id)), notice(st.error), notice(st.detailError),
@@ -180,8 +189,10 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       row.on && row.id !== 'daily-notes' ? entrySettings(row) : null,
       row.on ? secretSettings?.view() : null,
       row.keys?.length ? h('section', { class: 'plugin-keys', 'aria-label': 'Keys' }, h('h3', { class: 'kicker', text: 'Keys' }),
-        h('p', { class: 'note', text: `Uses your ${row.keys.map(k => k.name).join(' and ')} ${row.keys.length > 1 ? 'keys' : 'key'} from Accounts${row.keys.every(k => k.optional) && row.keys.length > 1 ? ', whichever you have' : ''}.` }),
-        host.goSettings ? button('Open Accounts', () => host.goSettings('accounts', row.keys.length === 1 ? row.keys[0].provider : null), 'pillbtn content-mark') : null) : null,
+        h('p', { class: 'note', text: row.keys.every(k => k.optional) && row.keys.length > 1
+          ? `Uses your ${row.keys.map(k => k.name).join(' or ')} key, whichever you have. Keys are saved under API keys, in Connections.`
+          : `Uses your ${row.keys.map(k => k.name).join(' and ')} ${row.keys.length > 1 ? 'keys' : 'key'}, saved under API keys in Connections.` }),
+        host.goSettings ? button('Open API keys', () => row.keys.length === 1 ? host.goSettings('api-key', row.keys[0].provider) : host.goSettings('api-keys'), 'pillbtn content-mark') : null) : null,
       declarations(declaration), ...(row.warnings ?? []).map(warning => notice(typeof warning === 'string' ? warning : JSON.stringify(warning), false)),
       st.detail?.plugin?.guide ? h('details', { class: 'plugin-guide', open: st.guide, ontoggle: event => { st.guide = event.currentTarget.open } }, h('summary', { text: 'About this plugin' }), h('div', { class: 'md' }, host.markdown?.(st.detail.plugin.guide) ?? h('p', { text: st.detail.plugin.guide }))) : null,
       loader.st.failures.has(row.id) ? button('Try again', () => loader.refresh(), 'pillbtn content-mark') : null,
@@ -205,9 +216,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     const p = st.preview, update = p.replaces, added = p.added && Object.keys(p.added).length
     const full = declarations(p.declaration)
     return h('section', { class: 'plugin-preview', id: 'plugin-install-question', 'aria-label': 'Review plugin installation' },
-      h('h3', { class: 'display', tabindex: '-1', text: `${update ? 'Update' : 'Install'} ${p.name || p.id}?` }), h('p', { class: 'plugin-meta', text: meta(p) }),
-      p.source?.commit ? h('p', { class: 'note plugin-commit', text: p.source.commit }) : null,
-      external(p.source) ? h('a', { class: 'quietlink', href: external(p.source), target: '_blank', rel: 'noopener noreferrer', text: 'View source' }) : null,
+      h('h3', { class: 'display', tabindex: '-1', text: `${update ? 'Update' : 'Install'} ${p.name || p.id}?` }), byline(p),
       p.shadows ? h('p', { class: 'plugin-mark', text: 'Changes a shipped plugin.' }) : null,
       update ? h('p', { class: 'note', text: `Replaces version ${update.version ?? 'unknown'}.${update.edited ? ' Local edits will be replaced.' : ''}` }) : null,
       update && added ? declarations({ touches: p.added, overrides: p.added.overrides, page_code: p.added.page_code }, 'Added in this update') : null,

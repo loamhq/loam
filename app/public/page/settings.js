@@ -1,6 +1,7 @@
 import { createUpdate } from '../update.js'
 import { createPasskey } from '../passkey.js'
-import { settingsHome, SETTINGS_SECTIONS } from "../app-shape.js"
+import { settingsHome, settingsSection, CONNECTIONS_GROUP } from "../app-shape.js"
+import { owner, ownerInitial } from "../owner.js"
 import { h, icon, kept, blob } from "../ui.js"
 import { settingsNav, segmentedControl, settingsRow } from "../chat-ui.js"
 import { connectedCount, providerRows, providerDetail, loginView } from "../providers.js"
@@ -15,38 +16,100 @@ import { themeImageURL, themeImagePosition } from '../theme-image.js'
 import { fileShortcuts, toggleFileShortcut } from '../store.js'
 import { createApiKeys } from '../api-keys.js'
 
+// About Loam's server card, in words.
+const GB = 1024 ** 3
+const size = bytes => bytes >= 100 * GB ? `${Math.round(bytes / GB)} GB` : bytes >= GB ? `${(bytes / GB).toFixed(1).replace(/\.0$/, '')} GB` : `${Math.round(bytes / 1024 ** 2)} MB`
+const upFor = seconds => {
+  const days = Math.floor(seconds / 86400), hours = Math.floor(seconds / 3600), minutes = Math.max(1, Math.floor(seconds / 60))
+  return days >= 1 ? `${days} ${days === 1 ? 'day' : 'days'}` : hours >= 1 ? `${hours} ${hours === 1 ? 'hour' : 'hours'}` : `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`
+}
+export function serverRows(facts, address = globalThis.location?.host ?? '') {
+  if (!facts) return []
+  return [
+    ['Address', address || null],
+    ['Name', facts.name || null],
+    ['System', facts.system ? `${facts.system}${facts.arch ? ` · ${facts.arch}` : ''}` : null],
+    ['Processors', Number.isFinite(facts.processors) ? `${facts.processors} ${facts.processors === 1 ? 'core' : 'cores'}` : null],
+    ['Memory', Number.isFinite(facts.memory?.total) ? `${size(facts.memory.total)}${Number.isFinite(facts.memory.free) ? ` · ${size(facts.memory.free)} free` : ''}` : null],
+    ['Storage', Number.isFinite(facts.storage?.total) ? `${size(facts.storage.free)} free of ${size(facts.storage.total)}` : null],
+    ['Running for', Number.isFinite(facts.up_seconds) ? upFor(facts.up_seconds) : null],
+  ].filter(([, value]) => value)
+}
 // Mounted once. Cross-module state and operations are explicit host services.
 export function mount(host) {
 const failedThemeImages = new Set()
 const settingsEvents = host.registry?.scope?.({ id: '@core' })?.events
 const updates = createUpdate({ api: (...args) => host.api(...args), changed: () => host.schedule() })
 const passkey = createPasskey({ changed: () => host.schedule() })
-settingsEvents?.on('settings.opened', ({ opening, page }) => { if (opening || page === 'update') updates.check() })
-settingsEvents?.on('sheet.changing', ({ sheet }) => { if (sheet?.kind !== 'settings' || sheet.page !== 'signin') passkey.stop() })
+settingsEvents?.on('settings.opened', ({ opening, page }) => { if (opening || page === 'about') updates.check() })
+settingsEvents?.on('sheet.changing', ({ sheet }) => { if (sheet?.kind !== 'settings' || sheet.page !== 'account') passkey.stop() })
 settingsEvents?.on('page.leaving', () => { updates.stop(); passkey.stop() })
 
-// Settings › Accounts (2026-11-18): API keys by provider, entered once.
+// API keys by provider, entered once (2026-11-18): the third group of
+// Connections, and one provider's page under it. Its list and its pages are
+// api-keys.js's, drawn as they were designed; only where they sit moved.
 const apiKeys = createApiKeys({ api: (...args) => host.api(...args), changed: () => host.schedule(), openPlugin: id => goSettings('plugins', id) })
-function settingsAccounts({ back = true } = {}) {
-  const provider = host.state.sheet?.page === 'accounts' ? host.state.sheet.provider : null
-  return apiKeys.view({ provider,
-    back: provider ? settingsBack('Accounts', 'accounts') : null,
-    head: [back ? settingsBack('Settings', 'root') : null, settingsHead('Accounts', 'API keys for the services your plugins use, entered once.')],
-    open: id => goSettings('accounts', id) })
+function settingsApiKey() {
+  const provider = host.state.sheet?.provider ?? null
+  return apiKeys.view({ provider, back: settingsBack('Connections', 'connections'), open: id => goSettings('api-key', id) })
+}
+
+// Settings › Account (2026-11-18): who is signed in, the password, the
+// passkeys and Sign out. The Loam account will live here too, later.
+const account = { data: null, loading: false, failed: false }
+async function loadAccount() {
+  if (account.loading) return
+  account.loading = true
+  try { account.data = await host.api('GET', '/account'); account.failed = false }
+  catch { account.failed = true }
+  finally { account.loading = false; host.schedule() }
+}
+function accountName() {
+  const me = owner(), name = account.data?.name || (me.id ? me.name : null)
+  return { name: name || account.data?.username || 'You', username: account.data?.username ?? null }
+}
+function settingsAccount({ back = true } = {}) {
+  if (!account.data && !account.loading && !account.failed) loadAccount()
+  if (!passkey.st.listed && !passkey.st.listing) passkey.loadPasskeys()
+  const who = accountName()
+  return [back ? settingsBack('Settings', 'root') : null, settingsHead('Account'),
+    h('section', { class: 'card account-card', 'aria-label': 'Signed in' },
+      blob({ initial: Array.from(who.name.trim())[0]?.toLocaleUpperCase() || ownerInitial(), color: 'var(--latte-espresso)', ink: 'var(--latte-espresso-ink)', shape: '50%' }, { size: 52, font: 22 }),
+      h('div', { class: 'account-who' },
+        h('div', { class: 'account-name', text: who.name }),
+        h('div', { class: 'note account-username', text: who.username ? `Signs in as ${who.username}` : 'Signed in to this Loam' }))),
+    passkey.view({ password: true })]
+}
+
+// Settings › About Loam (2026-11-18): the version and its update, and the
+// machine Loam runs on (GET /api/server, read where the app runs).
+const server = { data: null, loading: false, failed: false }
+async function loadServer() {
+  if (server.loading) return
+  server.loading = true
+  try { server.data = await host.api('GET', '/server'); server.failed = false }
+  catch { server.failed = true }
+  finally { server.loading = false; host.schedule() }
+}
+function settingsAbout({ back = true } = {}) {
+  if (!server.data && !server.loading && !server.failed) loadServer()
+  const rows = serverRows(server.data)
+  return [back ? settingsBack('Settings', 'root') : null, settingsHead('About Loam'),
+    updates.view(),
+    h('section', { class: 'card about-server', 'aria-labelledby': 'about-server' },
+      h('h3', { class: 'kicker', id: 'about-server', text: 'This server' }),
+      rows.length ? h('dl', { class: 'about-facts' }, ...rows.flatMap(([label, value]) => [h('dt', { text: label }), h('dd', { text: value })]))
+        : h('p', { class: 'note', role: 'status', text: server.failed ? 'This server’s details couldn’t be read.' : 'Reading this server…' }))]
 }
 
 const githubAccounts = createGithubAccounts({ state: () => host.state.github, api: (...args) => host.api(...args), changed: () => host.schedule(), reload: () => host.loadGithub() })
 function settingsBody(sheet, back) {
-  const page = settingsHome(sheet.page)
+  const page = settingsHome(sheet.page, sheet.provider)
   if (page === 'agents' && sheet.detail) return sheet.detail.kind === 'agent'
     ? [settingsBack('Agents', 'agents'), ...host.settingsProfileUI.body(sheet.detail.id)] : host.settingsProfileUI.settingsDetail()
-  if (page === 'update') return [back ? settingsBack('Settings', 'root') : null, settingsHead('Update', 'A little care for your Loam.'), updates.view()]
-  if (page === 'signin') {
-    if (!passkey.st.listed && !passkey.st.listing) passkey.loadPasskeys()
-    return [back ? settingsBack('Settings', 'root') : null, settingsHead('Sign-in', 'Your way into Loam.'), passkey.view()]
-  }
   if (page === 'provider') return settingsProvider(sheet.provider)
   if (page === 'integration') return settingsIntegration(sheet.provider, sheet.account)
+  if (page === 'api-key') return sheet.provider ? settingsApiKey() : settingsConnections({ back })
   const section = host.registry.entries('settings.section').find(entry => !entry.component && entry.id === page && (!entry.children || host.registry.entries('settings.section').some(child => child.group === entry.children)))
   return section ? host.registry.invoke(section, 'render', { back, sheet }) : settingsRoot()
 }
@@ -58,15 +121,15 @@ function builtinSettingsSheet(sheet) {
 }
 
 function settingsItems() {
-  return host.registry.entries('settings.section').filter(item => !item.component && !item.group && (!item.children || host.registry.entries('settings.section').some(child => child.group === item.children))).map(item => ({ ...item, label: item.title, glyph: typeof item.icon === 'function' ? item.icon(16) : (icon[item.icon] ?? icon.code)(16), dot: item.id === 'providers' ? providersWarn() : item.id === 'accounts' ? apiKeys.warn() : item.id === 'integrations' && integrationsWarn() }))
+  return host.registry.entries('settings.section').filter(item => !item.component && !item.group && (!item.children || host.registry.entries('settings.section').some(child => child.group === item.children))).map(item => ({ ...item, label: item.title, glyph: typeof item.icon === 'function' ? item.icon(16) : (icon[item.icon] ?? icon.code)(16), dot: item.id === 'connections' && (providersWarn() || apiKeys.warn() || integrationsWarn()) }))
 }
 
 function settingsDialog(...args) { return host.registry.component('core.settings', { args, variant: 'settingsDialog', defaultView: () => builtinSettingsDialog(...args) }) }
 
 function builtinSettingsDialog(sheet) {
-  const page = settingsHome(sheet.page === 'root' ? 'appearance' : sheet.page)
+  const page = settingsHome(sheet.page === 'root' ? 'account' : sheet.page, sheet.provider)
   return h('div', { class: 'sheet settings twopane' },
-    settingsNav({ title: 'Settings', items: settingsItems(), active: page === 'provider' ? 'providers' : page === 'integration' ? 'integrations' : page, choose: item => goSettings(item.id), footer: host.marketDoor({ nav: true }) }),
+    settingsNav({ title: 'Settings', items: settingsItems(), active: settingsSection(page), choose: item => goSettings(item.id), footer: host.marketDoor({ nav: true }) }),
     h('div', { class: 'setmain' },
       h('header', { class: 'app-modal-head settings-modal-close' },
         h('button', { class: 'iconbtn ghost', title: 'Close', 'aria-label': 'Close settings', onclick: () => host.closeSheet({ historyBack: true }) }, icon.close(14))),
@@ -155,10 +218,11 @@ function settingsAppearance({ back = true } = {}) {
 
 function goSettings(page, provider = null) {
   if (page === 'running') { host.goActivity(); return }
-  page = settingsHome(page)
+  const group = CONNECTIONS_GROUP[page] ?? null
+  page = settingsHome(page, provider)
   if (page !== 'provider' || host.state.sheet?.provider !== provider) host.providerSignIn.cancel()
   if (!host.state.sheet) updates.check()
-  const sheet = { kind: 'settings', page, provider }
+  const sheet = { kind: 'settings', page, provider, ...(group ? { group } : {}) }
   host.registry.emit('sheet.changing', { previous: host.state.sheet, sheet })
   host.state.sheet = sheet
   if (page === 'plugins') {
@@ -172,8 +236,9 @@ function goSettings(page, provider = null) {
       else host.pluginLoader?.refresh()?.then(openPlugin).catch(() => {})
     } else host.pluginLoader?.refresh()
   }
-  if (page === 'signin') passkey.loadPasskeys()
-  if (page === 'accounts' || page === 'root') apiKeys.load(page === 'accounts' && !provider)
+  if (page === 'account') { passkey.loadPasskeys(); loadAccount() }
+  if (page === 'about') loadServer()
+  if (page === 'connections' || page === 'api-key' || page === 'root') apiKeys.load(page === 'connections')
   host.registry.emit('settings.opened', { page })
   if (page === 'agents') host.settingsProfiles.directory()
   host.schedule()
@@ -196,11 +261,21 @@ function tile(child, { kind = '' } = {}) {
   return h('div', { class: `icon-tile ${kind}`.trim() }, child)
 }
 
+function providerCount() {
+  const { connected } = connectedCount(host.state.providers)
+  return connected ? `${connected} AI ${connected === 1 ? 'provider' : 'providers'}` : null
+}
+
 function settingsRoot() {
-  const summaries = { appearance: `${({ system: 'System', sun: 'Sun', dark: 'Dark', light: 'Light' })[host.theme.value.mode]} · ${host.theme.value.size}%`,
-    agents: `${host.state.agents.list.length} agents`, providers: connectedCount(host.state.providers).label,
-    integrations: integrationCatalog(host.state).filter(service => service.connected).map(service => service.name).join(' · ') || 'Connect your services',
-    files: 'Shortcuts and folders', plugins: 'Themes and extensions', accounts: apiKeys.summary() }
+  const who = accountName()
+  const services = integrationCatalog(host.state).filter(service => service.connected).map(service => service.name)
+  const version = updates.st.data?.current?.version
+  const summaries = { account: who.username && who.username !== who.name ? `${who.name} · ${who.username}` : who.name,
+    appearance: `${({ system: 'System', sun: 'Sun', dark: 'Dark', light: 'Light' })[host.theme.value.mode]} · ${host.theme.value.size}%`,
+    agents: `${host.state.agents.list.length} agents`,
+    connections: [providerCount(), ...services, apiKeys.st.list ? apiKeys.summary() : null].filter(Boolean).join(' · ') || 'AI providers, services and API keys',
+    files: 'Shortcuts and folders', plugins: 'Themes and extensions',
+    about: updates.st.data?.check?.available ? `Loam ${updates.st.data.check.latest?.version} is ready` : version ? `Version ${version}` : 'Version and updates' }
   const jobs = host.activity.st.now
   const working = host.running.rows().filter(row => row.state === 'working').length
     + (jobs?.slots.filter(job => !job.free).length ?? 0) + (jobs?.landing.length ?? 0)
@@ -322,11 +397,11 @@ function settingsAgents({ back = true } = {}) {
 
 // Every provider the host knows, wired or not. "Codex — not wired" is an
 // answer; a missing row is a bug report.
-function settingsProviders({ back = true, heading = true } = {}) {
+function settingsProviders({ back = true, heading = true, footnote = true } = {}) {
   const rows = providerRows(host.state.providers)
   return [
     back ? settingsBack('Settings', 'root') : null,
-    heading ? settingsHead('Providers', 'The AI services your agents use.') : null,
+    heading ? settingsHead('AI providers', 'The AI services your agents use.') : null,
     // The same one line the chats carry, at the top of the list: a sign-in
     // about to run out stops every session the host starts, and this is the
     // page it is fixed on.
@@ -346,21 +421,47 @@ function settingsProviders({ back = true, heading = true } = {}) {
             }),
           ),
         ),
-    h('div', { class: 'footnote', text: 'Choose a provider and model in any thread.' }),
+    footnote ? h('div', { class: 'footnote', text: 'Choose a provider and model in any thread.' }) : null,
   ]
 }
 
 
+
+// Settings › Connections (2026-11-18): one page, three groups, each a
+// kicker and its rows, in the order a person reaches for them: the AI the
+// agents run on, the services they work with, the keys the plugins use. An
+// old link to Providers, Integrations or the API keys opens here, at its
+// group (sheet.group).
+function connectionsGroup(id, title, why, children) {
+  return h('section', { class: 'settings-section connections-group', id: `connections-${id}`, 'aria-labelledby': `connections-${id}-title`, key: `connections:${id}` },
+    h('div', { class: 'connections-group-head' },
+      h('h3', { class: 'kicker', id: `connections-${id}-title`, text: title }),
+      why ? h('p', { class: 'note', text: why }) : null),
+    ...children)
+}
+function settingsConnections({ back = true } = {}) {
+  const sheet = host.state.sheet
+  if (sheet?.group && !sheet.groupShown) {
+    sheet.groupShown = true
+    const id = `connections-${sheet.group}`
+    setTimeout(() => globalThis.document?.getElementById(id)?.scrollIntoView?.({ block: 'start' }), 0)
+  }
+  return [back ? settingsBack('Settings', 'root') : null,
+    settingsHead('Connections', 'What your agents run on, the services they work with, and the keys your plugins use.'),
+    connectionsGroup('providers', 'AI providers', 'What your agents think with. Choose one in any thread.', settingsProviders({ back: false, heading: false, footnote: false })),
+    connectionsGroup('services', 'Services', 'Where your agents do their work.', servicesRows()),
+    connectionsGroup('api-keys', 'API keys', 'For the services your plugins use, entered once.', apiKeys.view({ open: id => goSettings('api-key', id) }))]
+}
 
 // One provider's page: the plan if the host named one, the quota it last read,
 // and — for one that is not wired — the host's own sentence for why.
 function settingsProvider(id) {
   const detail = providerDetail(host.state.providers.find((p) => p.id === id))
   if (!detail) {
-    return [settingsBack('Providers', 'providers'), h('div', { class: 'reason', text: 'The host no longer lists that provider.' })]
+    return [settingsBack('Connections', 'connections'), h('div', { class: 'reason', text: 'The host no longer lists that provider.' })]
   }
   return [
-    settingsBack('Providers', 'providers'),
+    settingsBack('Connections', 'connections'),
     h('div', { class: 'provider-hero' },
       tile(providerMark(detail.id, 20, providerGlyph(detail.id)), { kind: `glyph ${detail.id}` }),
       settingsHead(detail.name, detail.connected ? (detail.plan ? `${detail.plan} · connected` : 'Connected') : 'Not connected')),
@@ -465,21 +566,28 @@ function goIntegration(id, account = null) {
   host.state.sheet.account = account
 }
 
-function settingsIntegrations({ back = true } = {}) {
-  const services = [...integrationCatalog(host.state), ...integrationSections().flatMap(entry => {
+function integrationServices() {
+  return [...integrationCatalog(host.state), ...integrationSections().flatMap(entry => {
     const summary = host.registry.invoke(entry, 'summary', {})
     return summary ? [{ ...summary, id: entry.id, name: entry.title, mark: typeof entry.icon === 'function' ? host.registry.invoke(entry, 'icon', 20) : (icon[entry.icon] ?? icon.code)(20) }] : []
   })]
+}
+
+// The services, connected ones first, as one list: in Connections a second
+// pair of headings (Connected, Available) inside a group was one level too
+// many. The line under each name says which it is.
+function servicesRows() {
+  const services = integrationServices().sort((a, b) => Number(b.connected) - Number(a.connected))
+  return services.length ? [h('div', { class: 'rows' }, ...services.map(service => settingsRow({
+    key: service.id, lead: tile(service.mark ?? providerMark(service.id, 20), { kind: `glyph ${service.id}` }),
+    title: service.name, sub: service.summary, onclick: () => goIntegration(service.id) })))]
+    : [h('p', { class: 'note', text: 'No services are available yet.' })]
+}
+
+// The page Integrations was, for anything that still draws it by name.
+function settingsIntegrations({ back = true } = {}) {
   return [back ? settingsBack('Settings', 'root') : null,
-    settingsHead('Integrations', 'Connect the services your agents work with.'),
-    ...[['Connected', true], ['Available', false]].map(([label, connected]) => {
-      const group = services.filter(service => service.connected === connected)
-      return group.length ? h('section', { class: 'settings-section', 'aria-label': label },
-        h('h3', { class: 'kicker', text: label }), h('div', { class: 'rows' }, ...group.map(service => settingsRow({
-          key: service.id, lead: tile(service.mark ?? providerMark(service.id, 20), { kind: `glyph ${service.id}` }),
-          title: service.name, sub: service.summary, onclick: () => goIntegration(service.id) })))) : null
-    }),
-    !services.length ? h('p', { class: 'note', text: 'No integrations are available yet.' }) : null]
+    settingsHead('Services', 'Connect the services your agents work with.'), ...servicesRows()]
 }
 
 function integrationBack(label, id) {
@@ -502,17 +610,17 @@ function integrationSections() {
 function settingsIntegration(id, accountId = null) {
   const extension = integrationSections().find(entry => entry.id === id)
   if (extension) return host.registry.invoke(extension, 'render', { back: true, sheet: { ...host.state.sheet, account: accountId } }) ?? []
-  if (id === 'github' && Object.hasOwn(host.state.github, 'accounts')) return [settingsBack('Integrations', 'integrations'), settingsHead('GitHub'),
+  if (id === 'github' && Object.hasOwn(host.state.github, 'accounts')) return [settingsBack('Connections', 'connections'), settingsHead('GitHub'),
     ...githubOutcome(host.state.github.at),
     host.state.github.installUrl || host.state.github.orgInstall ? h('button', { class: 'pillbtn primary', text: 'Install on GitHub', onclick: () => host.installGithub('install', host.state.github.orgInstall?.org ?? null) }) : null,
     ...githubAccounts.view()]
   const service = integrationCatalog(host.state).find(service => service.id === id)
-  if (!service) return [settingsBack('Integrations', 'integrations'), settingsHead('Integration unavailable')]
+  if (!service) return [settingsBack('Connections', 'connections'), settingsHead('Integration unavailable')]
   const account = service.accounts.find(account => String(account.id) === String(accountId))
   if (account) return [integrationBack(service.name, id), settingsHead(account.name),
     githubAccountCard(account)]
   const gh = host.state.github
-  return [settingsBack('Integrations', 'integrations'), settingsHead(service.name),
+  return [settingsBack('Connections', 'connections'), settingsHead(service.name),
     service.accounts.length ? h('div', { class: 'rows' }, ...service.accounts.map(account => settingsRow({
       key: account.id, title: account.name, sub: account.scope || (['authorized', 'unhealthy'].includes(account.record.status) ? 'Connected' : 'Finish connecting'), onclick: () => goIntegration(id, account.id) }))) : null,
     [
@@ -735,7 +843,10 @@ return Object.defineProperties({}, {
     settingsAgents: { enumerable: true, get: () => settingsAgents },
     goSettingsDetail: { enumerable: true, get: () => goSettingsDetail },
     settingsProviders: { enumerable: true, get: () => settingsProviders },
-    settingsAccounts: { enumerable: true, get: () => settingsAccounts },
+    settingsApiKey: { enumerable: true, get: () => settingsApiKey },
+    settingsAccount: { enumerable: true, get: () => settingsAccount },
+    settingsConnections: { enumerable: true, get: () => settingsConnections },
+    settingsAbout: { enumerable: true, get: () => settingsAbout },
     apiKeys: { enumerable: true, get: () => apiKeys },
     settingsProvider: { enumerable: true, get: () => settingsProvider },
     usageCard: { enumerable: true, get: () => usageCard },

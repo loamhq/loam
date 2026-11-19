@@ -42,7 +42,7 @@ What it does and how to use it.
 `kind: theme` needs `theme.css`; an `app` is a server plugin that also has
 a row in Apps. A plugin that calls a paid service names its provider in
 `keys:` (`- provider: openai`, with a `why`) instead of asking for a key of
-its own: the owner enters each key once in Settings › Accounts, and Loam
+its own: the owner enters each key once in Settings › Connections › API keys, and Loam
 hands the plugin the keys it declared, in the file `$LOAM_PLUGIN_KEYS`
 names. A plugin can also add tools for agents, timers and settings
 through `contributes:`. The whole interface, field by field, is

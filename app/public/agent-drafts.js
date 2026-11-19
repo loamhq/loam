@@ -8,6 +8,29 @@ const stripFrontmatter = (text = '') => String(text ?? '').replace(/^---\s*\n[\s
 // The name is the card's title; a soul that opens by repeating it as a heading starts below it.
 const withoutTitle = (text, name) => { const [first, ...rest] = text.split('\n'); return /^#\s/.test(first) && first.replace(/^#+\s*/, '').trim().toLowerCase() === name.toLowerCase() ? rest.join('\n').trim() : text }
 
+// The card's one plain line about who the agent is (2026-11-18). A soul is
+// written to the agent ("You are Juniper, Sam's kitchen companion…"), so its
+// opening is instructions, not a description. The draft's own `about` line,
+// written for the person, comes first; else a soul that opens "You are
+// <name>, <who>" gives "<Who>", and one that opens in the third person gives
+// its first two sentences, as before. Anything else said to the agent is never shown here.
+const firstSentence = text => {
+  const prose = String(text ?? '').replace(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/, '').split('\n').filter(line => !/^\s*#/.test(line)).join(' ').replace(/\s+/g, ' ').trim()
+  return (prose.match(/^.+?[.!?](?=\s|$)/)?.[0] ?? prose).trim()
+}
+const upper = text => text ? text[0].toLocaleUpperCase() + text.slice(1) : text
+const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+export function draftLine(draft = {}) {
+  const about = String(draft.about ?? '').replace(/\s+/g, ' ').trim()
+  if (about) return about
+  const sentence = firstSentence(draft.soul), name = String(draft.name ?? '').trim()
+  if (!sentence) return null
+  const named = name ? new RegExp(`^(?:you are|you're|you’re)\\s+${escape(name)}\\s*(?:,|—|–|-|:)\\s*(.+)$`, 'i').exec(sentence) : null
+  if (named) return upper(named[1].trim().replace(/[.!]$/, '')) + '.'
+  if (/^(?:you|your|you're|you’re|be|always|never|do|don't|don’t)\b/i.test(sentence)) return null
+  return soulExcerpt(draft.soul)
+}
+
 // Drafts belong to the host and the conversation. Only an explicit confirmation
 // publishes the revision currently on screen; the host rejects a stale revision.
 export function createAgentDrafts({ api, redraw, made = () => {}, askChanges = () => {}, openThread = null, renderText = markdown }) {
@@ -36,14 +59,14 @@ export function createAgentDrafts({ api, redraw, made = () => {}, askChanges = (
   }
   // The review is a card in the thread's flow, after the line that says the
   // draft was made, where the agent says it is ("below"): the face and name,
-  // two sentences of who they are, the whole soul and config rendered behind
+  // one plain line of who they are (draftLine), the whole soul and config rendered behind
   // one fold, then Create and Ask for changes. A revision number is shown only
   // once there is more than one ("2nd draft"); the draft's id never is.
   function card(d) {
     const id = d.id || d.draft || 'new-agent'
     const name = d.name || 'Your new agent'
     const look = agentLook(id, createAgents([{ id, name }]))
-    const who = soulExcerpt(d.soul || '')
+    const who = draftLine(d)
     const draftLabel = ordinalDraft(d.rev)
     const expanded = st.expanded.has(d.draft)
     const soulText = withoutTitle(stripFrontmatter(d.soul), name)

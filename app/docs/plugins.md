@@ -27,7 +27,7 @@ Desktop main and side panels re-read the catalog before opening a plugin;
 off, starting, failing, stopping and stopped apps show their state without
 creating a frame. Phones open running apps in a browser tab.
 
-Settings › Integrations › GitHub reads `/api/integrations/github/accounts` in
+Settings › Connections › GitHub reads `/api/integrations/github/accounts` in
 host order. Each account has its own refresh and disconnect, with the host's
 `disconnect_also` named before a personal account is disconnected. Returned
 uninstall/revoke/delete links remain explicit browser actions. Add account

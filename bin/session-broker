@@ -5663,7 +5663,7 @@ class Server:
             await writer.drain()
             return
 
-        # Shared keys (2026-11-18): Settings › Accounts. API keys by provider,
+        # Shared keys (2026-11-18): Settings › Connections › API keys. API keys by provider,
         # entered once; each plugin that declared a provider uses its shared
         # key unless it has its own. Every rule is lib/loam_keys.py;
         # docs/plugins.md, "Keys", is the interface. An agent may change them
@@ -5707,7 +5707,7 @@ class Server:
             await writer.drain()
             return
 
-        # Updates (2026-11-14, first release L13): Settings › Update reads
+        # Updates (2026-11-14, first release L13): Settings › About Loam reads
         # the state, checks, applies and rolls back. Every rule is
         # lib/loam_update.py; docs/update.md is the page contract.
         if parts[:2] == ["v1", "update"]:

@@ -13,17 +13,26 @@ The settings sections are declared in `public/app-shape.js`:
 
 | Section | Contents |
 | --- | --- |
+| Account | Who is signed in (name, username), the password, passkeys, Sign out. The Loam account will live here later |
 | Appearance | Theme, mode, size |
-| Agents | Agent profiles, workspace and schedules |
-| Providers | AI providers, plan, usage and sign-in |
-| Integrations | Connected and available services, then each service’s accounts |
+| Agents | Agent profiles, workspace and schedules; the system ones under them |
+| Connections | One page, three groups: AI providers (plan, usage, sign-in), Services (GitHub and any a plugin adds, then each service's accounts), API keys (by provider, entered once) |
+| Plugins | Themes and extensions; plugin preferences while on; who made it, version and View source in detail; the Market |
 | Files | File folders and preferences, shortcut removal; links remain on Files home |
-| Plugins | Themes and extensions; plugin preferences while on, version/source and enable switch in detail |
+| About Loam | The version and Update, and this server (address, processors, memory, storage) |
 
-The old Accounts destination resolves to Integrations; Voice, Dictation and Read aloud
-resolve to Plugins. Provider details return to Providers. Account is reserved for
-a future personal Loam account. Old Running now requests resolve
-to Activity. The thread provider/model sheet remains about the current thread.
+Seven since 2026-11-18 (the owner: "love it", to this structure). On a phone
+Activity stays Settings' first row and the seven follow in this order. **The
+word "Accounts" never names the API keys**, anywhere: it is kept for the Loam
+account under Account.
+
+Every id that was a section before still opens (`settingsHome` in
+`public/app-shape.js`): `providers`, `integrations` and `accounts` open
+Connections at their group (`accounts` with a provider is that provider's API
+key page, `api-key`), `signin` opens Account and `update` opens About Loam.
+Voice, Dictation and Read aloud resolve to Plugins. Provider, service and API
+key pages return to Connections. Old Running now requests resolve to Activity.
+The thread provider/model sheet remains about the current thread.
 The developer preview remains available at `/?threads=fixture`; its Settings
 shortcut is removed so a host outage does not introduce another section.
 

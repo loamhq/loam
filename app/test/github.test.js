@@ -169,7 +169,7 @@ async function openIntegrations() {
   await until(() => !find(root, 'sheet'))
   click(find(root, 'roundbtn'))
   await until(() => find(root, 'settings'))
-  const row = all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Integrations')
+  const row = all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Connections')
   click(row)
   click(await until(() => all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'GitHub')))
   const account = await until(() => card() || all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'octo-owner'))
@@ -284,8 +284,8 @@ test('unhealthy: the host’s error in the warning ink, Reconnect, and a dot on 
   printed('unhealthy')
   // The Integrations row on Settings' first page carries the dot.
   while (text(find(root, 'sheet-title')) !== 'Settings') { click(find(root, 'backbtn')); await new Promise(resolve => setTimeout(resolve, 5)) }
-  const row = await until(() => all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Integrations'))
-  assert.ok(find(row, 'navdot'), 'no dot on the Integrations row')
+  const row = await until(() => all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Connections'))
+  assert.ok(find(row, 'navdot'), 'no dot on the Connections row')
   assert.ok(text(find(row, 'setrow-sub')).length)
 
 })

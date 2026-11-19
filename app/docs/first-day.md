@@ -41,7 +41,7 @@ A turn that ends in the provider's error is not the agent speaking. Claude
 Code records it as its own stand-in reply (`model: "<synthetic>"`, the raw
 error as its text); the engine records "<name>'s turn failed: …". Either is
 drawn as a system line that says what happened and what to do, for example
-"Iris couldn't reach Claude. Sign in again in Settings › Providers." with **Go
+"Iris couldn't reach Claude. Sign in again in Settings › Connections." with **Go
 to Providers**; a usage limit says the provider has paused replies; anything
 else says the turn didn't finish and to send again. The raw error is behind
 **Details**. A real reply that only mentions an error is left alone: it has
@@ -62,7 +62,7 @@ A finished update shows its outcome and the versions ("0.1.0 → 0.1.1"); its
 steps, the backup's path and the memory-pin counts are behind **Details**.
 While it runs, the steps show and only their paths and counts are folded.
 
-## Sign out and passkeys (`passkey.js`, Settings › Sign-in)
+## Sign out and passkeys (`passkey.js`, Settings › Account)
 
 **Sign out** goes to the login portal's `/logout` (`auth.` in front of this
 host, `deploy/login/README.md`), which signs this browser out and says so.

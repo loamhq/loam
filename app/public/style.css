@@ -2450,6 +2450,23 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 }
 .settings-section { display:flex; flex-direction:column; gap:var(--space-lg); margin:0; }
 .settings-place { margin-bottom:0; }
+/* Settings › Connections (2026-11-18): three groups on one page. The room
+   between groups is twice the room inside one, so each reads as its own. */
+.connections-group { gap:var(--space-md); scroll-margin-top:var(--space-lg); }
+.connections-group + .connections-group { margin-top:var(--space-lg); }
+.connections-group-head { display:flex; flex-direction:column; gap:2px; padding:0 4px; }
+.connections-group-head > .kicker,.connections-group-head > .note { margin:0; }
+.connections-group > .footnote { margin:0; }
+.connections-group > .note { margin:0; padding:0 4px; }
+/* Settings › Account: who is signed in. */
+.account-card { flex-direction:row; align-items:center; gap:var(--space-lg); }
+.account-who { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.account-name { font-size:19px; font-weight:600; line-height:1.3; overflow-wrap:anywhere; }
+.account-username { margin:0; overflow-wrap:anywhere; }
+/* Settings › About Loam: the server, as label and value. */
+.about-facts { display:grid; grid-template-columns:max-content minmax(0,1fr); column-gap:var(--space-xl); row-gap:var(--space-md); margin:0; }
+.about-facts dt { color:var(--paper-ink-2); font-size:14px; }
+.about-facts dd { margin:0; font-size:15px; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
 .settings-section > .sheet-head { margin-top:0; }
 .settings-section > .kicker { margin:0; }
 .plugin-row { cursor:pointer; }
@@ -2629,6 +2646,8 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-preview-actions,.plugin-remove-question { display:flex; flex-wrap:wrap; gap:10px; }
 .plugin-remove-question > p { flex-basis:100%; }
 .plugin-source { display:inline-flex; align-items:center; min-height:44px; }
+.plugin-byline { display:flex; flex-wrap:wrap; align-items:center; column-gap:14px; margin:0; }
+.plugin-byline > .plugin-source { margin-block:-10px; }
 
 /* A utility beside the tab group has its own matching paper surface. */
 .nav > .settings-utility,.nav > .settings-utility.on { background:var(--paper-pane-glass); color:var(--paper-pane-ink); border:0; }
@@ -2777,7 +2796,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 
 .profile-menu-button { align-self:flex-start; flex:none; }
 
-/* Settings › Accounts (2026-11-18): API keys by provider. One card for the
+/* Settings › Connections › API keys (2026-11-18): API keys by provider. One card for the
    key, a list of the plugins that use it, each opening in place. */
 .icon-tile.glyph.keys-mark { background:var(--paper-card); color:var(--paper-card-ink); }
 .keys-mark .mark-letter { font-family:var(--font-display); font-size:18px; font-weight:700; line-height:1; }

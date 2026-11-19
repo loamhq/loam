@@ -80,12 +80,28 @@ export function createPasskey({ changed, request = authenticatedFetch, later = s
         h('a', { class: 'pillbtn passkey-remove', href: authSettingsURL(), target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Remove ${p.name}`, text: 'Remove' }))
     }))
   }
-  function view() {
+  function passwordCard() {
+    return h('section', { class: 'card passkey-card password-card' },
+      h('h3', { text: 'Password' }),
+      h('p', { text: 'Change the password you sign in with.' }),
+      h('div', { class: 'passkey-actions' },
+        h('a', { class: 'pillbtn', href: authSettingsURL(), target: '_blank', rel: 'noopener noreferrer', text: 'Change password' })))
+  }
+  function signOutCard() {
+    return h('section', { class: 'card passkey-card signout-card' },
+      h('h3', { text: 'Sign out' }),
+      h('p', { text: 'Sign out of Loam in this browser. Your agents keep working.' }),
+      h('a', { class: 'pillbtn signout', href: authLogoutURL(), text: 'Sign out' }))
+  }
+  // Settings › Account (2026-11-18): the password, the passkeys, sign out.
+  function view({ password = false } = {}) {
+    return h('div', { class: 'passkey-sections' }, password ? passwordCard() : null, passkeysCard(), signOutCard())
+  }
+  function passkeysCard() {
     const valid = st.code && now() - st.at < 900000
     const age = valid ? Math.max(st.age, Math.floor((now() - st.at) / 1000)) : null
     const known = Array.isArray(st.passkeys), some = known && st.passkeys.length > 0
-    return h('div', { class: 'passkey-sections' },
-      h('section', { class: 'card passkey-card' },
+    return h('section', { class: 'card passkey-card' },
         h('h3', { text: some ? 'Your passkeys' : 'A quicker way in' }),
         h('p', { text: some ? 'Sign in with your face, fingerprint or device screen lock. Add one on each phone or computer you use.' : 'Add a passkey to sign in with your face, fingerprint or device screen lock.' }),
         passkeyList(),
@@ -100,11 +116,7 @@ export function createPasskey({ changed, request = authenticatedFetch, later = s
             valid ? [h('div', { class: 'passkey-code', text: st.code }), h('p', { class: 'note', text: age < 60 ? `${age} seconds ago` : `${Math.floor(age / 60)} minutes ago` }),
               h('button', { class: 'pillbtn', type: 'button', text: st.copied ? 'Copied' : 'Copy code', onclick: async () => { const value = st.code; if (await copyText(value) && value === st.code) { st.copied = true; changed() } } })] : null),
           h('button', { class: 'pillbtn', type: 'button', text: 'Done', onclick: () => { stop(); loadPasskeys(); changed() } })) : null,
-        st.error ? h('p', { class: 'reason', role: 'status', text: st.error }) : null),
-      h('section', { class: 'card passkey-card signout-card' },
-        h('h3', { text: 'Sign out' }),
-        h('p', { text: 'Sign out of Loam in this browser. Your agents keep working.' }),
-        h('a', { class: 'pillbtn signout', href: authLogoutURL(), text: 'Sign out' })))
+        st.error ? h('p', { class: 'reason', role: 'status', text: st.error }) : null)
   }
   return { st, start, stop, poll, loadPasskeys, view }
 }

@@ -25,7 +25,8 @@ test('any enabled plugin can contribute an integration row, mark, detail, accoun
     summary: () => summaries, notice: () => ({ text: 'Needs attention' }),
     render: ({ sheet }) => [h('p', { text: `Account ${sheet.account ?? 'list'}` })] })
   const view = h('div', {}, ...settings.settingsIntegrations())
-  assert.match(text(view), /Connected.*Mark.*Example service.*2 accounts/)
+  assert.match(text(view), /Services.*Mark.*Example service.*2 accounts/)
+  assert.match(text(h('div', {}, ...settings.settingsConnections())), /AI providers.*Services.*Example service.*API keys/)
   assert.equal(settings.integrationsWarn(), true)
   all(view, 'setrow')[0].fire('click', {})
   assert.equal(events.length, 1)

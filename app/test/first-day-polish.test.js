@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { installDom } from './fakedom.js'
 import { all, find, text } from './browser.js'
 import { h } from '../public/ui.js'
-import { createAgentDrafts } from '../public/agent-drafts.js'
+import { createAgentDrafts, draftLine } from '../public/agent-drafts.js'
 import { ordinalDraft, failedTurnInfo, formatSystemLine } from '../public/thread-experience.js'
 import { createThreads } from '../public/threads.js'
 import { createUpdate } from '../public/update.js'
@@ -53,6 +53,17 @@ const juniper = {
   config: '## Scope\n\n- **Meals** and the shopping list only',
 }
 
+test('the draft card says who the agent is in a plain line, never the soul’s words to the agent', () => {
+  assert.equal(draftLine({ name: 'Juniper', soul: "You are Juniper, Sam's kitchen companion. You keep the fridge in mind." }), "Sam's kitchen companion.")
+  assert.equal(draftLine({ name: 'Ash', soul: '# Ash\n\nYou are Ash — a quiet gardener who notices things.' }), 'A quiet gardener who notices things.')
+  assert.equal(draftLine({ name: 'Juniper', about: 'A warm, practical cook.', soul: 'You are Juniper, Sam’s kitchen companion.' }), 'A warm, practical cook.')
+  assert.equal(draftLine({ name: 'Juniper', soul: 'You care about small steps. Always be kind.' }), null)
+  const c = createAgentDrafts({ redraw() {}, api: async () => ({ drafts: [] }) })
+  c.st.thread = 't-1'; c.st.rows = [{ draft: 'd-1', name: 'Juniper', soul: "You are Juniper, Sam's kitchen companion. You help." }]
+  const card = find(c.view('t-1'), 'agent-draft-card')
+  assert.equal(text(find(card, 'agent-draft-summary')), "Sam's kitchen companion.")
+  assert.doesNotMatch(text(card), /You are/)
+})
 test('1. the new agent is a card: face, name, two sentences, the whole soul and config rendered behind one fold, Create and Ask for changes', async () => {
   const asked = [], opened = []
   let drafts = [juniper]
@@ -157,13 +168,13 @@ test('3. a failed turn is a system line that says what happened and what to do, 
   const providers = [{ id: 'claude-code', name: 'Claude Code' }, { id: 'codex', name: 'Codex' }]
   const expired = { id: 'm2', author: 'iris', kind: 'message', engine: 'claude-code', model: '<synthetic>', text: 'Failed to authenticate: OAuth session expired and could not be refreshed', at: '2026-11-16T17:49:30Z' }
   const info = failedTurnInfo(expired, { agentName: () => 'Iris', providers })
-  assert.equal(info.summary, 'Iris couldn’t reach Claude. Sign in again in Settings › Providers.')
+  assert.equal(info.summary, 'Iris couldn’t reach Claude. Sign in again in Settings › Connections.')
   assert.equal(info.action, 'providers')
   assert.equal(info.raw, expired.text)
 
   // The engine's own line ("<name>'s turn failed: …"), for another provider.
   const engine = failedTurnInfo({ id: 'm9', author: 'loam', kind: 'system', text: "Juniper's turn failed: 401 Unauthorized: token expired" }, { engineOf: (who) => who === 'Juniper' ? 'codex' : null, providers })
-  assert.equal(engine.summary, 'Juniper couldn’t reach Codex. Sign in again in Settings › Providers.')
+  assert.equal(engine.summary, 'Juniper couldn’t reach Codex. Sign in again in Settings › Connections.')
   const limit = failedTurnInfo({ id: 'm8', author: 'iris', kind: 'message', engine: 'claude-code', model: '<synthetic>', text: 'API Error: 429 rate_limit_error' }, { agentName: () => 'Iris', providers })
   assert.equal(limit.action, 'providers')
   assert.match(limit.summary, /^Claude has paused replies for now/)
@@ -186,7 +197,7 @@ test('3. a failed turn is a system line that says what happened and what to do, 
   const line = find(stream, 'tt-system-failed')
   assert.ok(line)
   assert.equal(all(stream, 'tt-author-run').length, 0, 'not drawn as Iris’s message')
-  assert.equal(text(find(line, 'tt-failed-summary')), 'Iris couldn’t reach Claude. Sign in again in Settings › Providers.')
+  assert.equal(text(find(line, 'tt-failed-summary')), 'Iris couldn’t reach Claude. Sign in again in Settings › Connections.')
   const details = tags(line, 'details')[0]
   assert.equal(Boolean(details.open), false)
   assert.equal(text(tags(details, 'summary')[0]), 'Details')

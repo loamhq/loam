@@ -1,6 +1,6 @@
 # Updating Loam: `loam update`
 
-An install moves to a newer release in one tap (Settings › Update) or one
+An install moves to a newer release in one tap (Settings › About Loam) or one
 command (`loam update apply`). Only what Loam ships is replaced; everything
 that is the person's is never touched. Added 2026-11-14 (first release,
 job L13). The rules are all in `lib/loam_update.py`; the command is

@@ -45,7 +45,7 @@ Read the report again yourself for anything personal it missed.
    they paste the body you showed them.
 3. Tell them where it went, and that the makers may answer on the issue.
 
-The owner's connected GitHub (Settings › Integrations) cannot file it for
+The owner's connected GitHub (Settings › Connections) cannot file it for
 them: it reaches only repositories on their own account.
 
 ## Fix it here, if it cannot wait

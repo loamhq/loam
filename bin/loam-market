@@ -14,7 +14,7 @@
       Share a plugin from the owner's plugins folder by link: its folder is
       pushed to that GitHub repository (the owner makes it on github.com;
       whether it is public is their yes) as <id>/ at the tag v<version>,
-      through the GitHub account connected in Settings › Integrations. The
+      through the GitHub account connected in Settings › Connections. The
       answer is the link anyone installs it by.
   loam market request <link at a tag> --description "one sentence" [--json]
       The listing for the plugin at that link, read from the plugin itself,

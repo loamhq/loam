@@ -45,7 +45,7 @@ plugin-scoped credential. The app reads the Dictation credential for
 transcription/polish and Read aloud’s for speech/descriptions. Either can report
 the host’s existing `source: box` fallback. That shared fallback stays on the
 host; this change creates no shared credential or duplicate field. Each plugin
-detail renders its existing key controls exactly once. No Accounts page or
+detail renders its existing key controls exactly once. No API keys page or
 credential storage changes are needed for this move.
 
 ## Outstanding host contract: persona parity

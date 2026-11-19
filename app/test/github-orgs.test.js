@@ -106,7 +106,7 @@ async function openIntegrations() {
   await until(() => !find(root, 'sheet'))
   click(find(root, 'roundbtn'))
   await until(() => find(root, 'settings'))
-  click(all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'Integrations'))
+  click(all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'Connections'))
   click(await until(() => all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'GitHub')))
   await until(() => first())
 }

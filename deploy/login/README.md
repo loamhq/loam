@@ -67,7 +67,7 @@ preferred second factor. The settings page links to it ("More options").
 | `/?rd=…` with a session one factor short | One more step: the password after a passkey, or a passkey or authenticator code after a password. |
 | `/` | You're signed in: Open Loam, Sign-in settings, Sign out. |
 | `/logout` | You're signed out. |
-| `/settings` | Passkeys (list, add, remove) and the password. Adding or removing asks Authelia for an elevated session first: a second factor if the person has one, else a one-time code. This box sends no mail, so the code lands in Authelia's file notifier, and the app's Settings › Sign-in shows it (`/_loam/login-code`, `bin/loam-claim`). |
+| `/settings` | Passkeys (list, add, remove) and the password. Adding or removing asks Authelia for an elevated session first: a second factor if the person has one, else a one-time code. This box sends no mail, so the code lands in Authelia's file notifier, and the app's Settings › Account shows it (`/_loam/login-code`, `bin/loam-claim`). |
 
 Its words follow the app's: sentence case, plain, nothing about email.
 Light and dark follow the device.

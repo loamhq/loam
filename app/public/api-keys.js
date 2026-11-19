@@ -1,4 +1,4 @@
-// Settings › Accounts: API keys by provider, entered once (2026-11-18).
+// Settings › Connections › API keys: by provider, entered once (2026-11-18).
 //
 // The one place a person goes for keys. Each provider (OpenAI, Google,
 // Hetzner, and any a plugin declares) holds one shared key; every plugin that
@@ -13,7 +13,7 @@ import { h, icon } from './ui.js'
 import { providerMark } from './marks.js'
 import { formatDate } from './time.js'
 
-// The marks Accounts draws: the OpenAI knot is the Codex mark's own path, so
+// The marks the API keys draw: the OpenAI knot is the Codex mark's own path, so
 // it is that mark; the rest are drawn as their first letter on the tile.
 const MARK = { openai: 'codex', google: 'gemini' }
 const SPARK = 'M12 1.5c.35 5.6 4.9 10.15 10.5 10.5-5.6.35-10.15 4.9-10.5 10.5C11.65 16.9 7.1 12.35 1.5 12 7.1 11.65 11.65 7.1 12 1.5z'
@@ -43,7 +43,7 @@ export function providerLine(p) {
   return users.length ? `${head} · ${names(users)}` : head
 }
 
-// Whether the Accounts row should carry the "needs you" dot.
+// Whether the Connections row should carry the "needs you" dot.
 export function providerWarn(p) {
   return Boolean((p.set && p.checked?.ok === false) || p.plugins.some(u => u.on && !u.has_key && !u.optional))
 }
@@ -56,7 +56,7 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
     if (st.loading || (!force && st.list && Date.now() - loadedAt < 15000)) return
     st.loading = true; changed()
     try { st.list = (await api('GET', '/keys')).providers ?? []; st.error = ''; loadedAt = Date.now() }
-    catch (e) { st.error = [404, 405].includes(e.status) ? 'This server does not hold shared keys yet. Update Loam to use Accounts.' : e.message }
+    catch (e) { st.error = [404, 405].includes(e.status) ? 'This server does not hold shared keys yet. Update Loam to use API keys.' : e.message }
     finally { st.loading = false; changed() }
   }
 

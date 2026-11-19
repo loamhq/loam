@@ -3,6 +3,21 @@
   "status": "UI destinations and runtime integration handoff; not an installed host registry",
   "sections": [
     {
+      "id": "account",
+      "views": [
+        "passkeys",
+        "password",
+        "sign-out"
+      ],
+      "routes": [
+        "/api/account",
+        "/_loam/passkeys",
+        "/_loam/login-code"
+      ],
+      "fields": [],
+      "note": "Who is signed in (the login's Remote-User and Remote-Name), the password and passkeys (changed on the login's own /settings), and Sign out. The Loam account will live here later. Was Sign-in (signin) until 2026-11-18."
+    },
+    {
       "id": "appearance",
       "registry": "appearance-settings.registry.json",
       "route": "/v1/settings/appearance",
@@ -44,51 +59,50 @@
       ]
     },
     {
-      "id": "providers",
-      "routes": [
-        "/v1/providers",
-        "/v1/providers/:id/login"
-      ]
-    },
-    {
-      "id": "integrations",
-      "views": [
-        "service",
-        "account"
+      "id": "connections",
+      "groups": [
+        {
+          "id": "providers",
+          "label": "AI providers",
+          "views": [
+            "provider"
+          ],
+          "routes": [
+            "/v1/providers",
+            "/v1/providers/:id/login"
+          ]
+        },
+        {
+          "id": "services",
+          "label": "Services",
+          "views": [
+            "service",
+            "account"
+          ],
+          "routes": [
+            "/v1/integrations/github",
+            "/v1/integrations/github/accounts",
+            "/v1/integrations/github/accounts/:login/refresh",
+            "/v1/integrations/github/accounts/:login"
+          ],
+          "accountOperations": "GitHub lists personal accounts, installations and organizations in host order. Refresh/disconnect use the encoded account login; personal disconnect confirms disconnect_also. Adding uses the existing GitHub manifest/install callbacks. Older hosts without the accounts route retain the legacy shared flow."
+        },
+        {
+          "id": "api-keys",
+          "label": "API keys",
+          "views": [
+            "api-key"
+          ],
+          "routes": [
+            "/v1/keys",
+            "/v1/keys/:provider",
+            "/v1/keys/:provider/check",
+            "/v1/keys/:provider/plugins/:plugin"
+          ],
+          "keyOperations": "API keys by provider, entered once (2026-11-18). Save checks the key first and keeps it only when the provider accepts it; Forget removes the saved key; a plugin that declared the provider can be given its own key and put back on the shared one. No route answers a whole value."
+        }
       ],
-      "routes": [
-        "/v1/integrations/github",
-        "/v1/integrations/github/accounts",
-        "/v1/integrations/github/accounts/:login/refresh",
-        "/v1/integrations/github/accounts/:login"
-      ],
-      "accountOperations": "GitHub lists personal accounts, installations and organizations in host order. Refresh/disconnect use the encoded account login; personal disconnect confirms disconnect_also. Adding uses the existing GitHub manifest/install callbacks. Older hosts without the accounts route retain the legacy shared flow."
-    },
-    {
-      "id": "accounts",
-      "views": [
-        "provider"
-      ],
-      "routes": [
-        "/v1/keys",
-        "/v1/keys/:provider",
-        "/v1/keys/:provider/check",
-        "/v1/keys/:provider/plugins/:plugin"
-      ],
-      "keyOperations": "API keys by provider, entered once (2026-11-18). Save checks the key first and keeps it only when the provider accepts it; Forget removes the saved key; a plugin that declared the provider can be given its own key and put back on the shared one. No route answers a whole value."
-    },
-    {
-      "id": "files",
-      "browserPreferences": {
-        "loam-ui.files": [
-          "inbox",
-          "daily",
-          "shortcuts",
-          "hiddenShortcuts"
-        ]
-      },
-      "route": null,
-      "runtimeRequired": "Define a host settings route and register file preferences; preserve existing shortcuts during migration."
+      "note": "One page in three groups (2026-11-18): what were Providers, Integrations and the API keys page."
     },
     {
       "id": "plugins",
@@ -125,14 +139,32 @@
       "runtimeRequired": "Device-scoped host settings route is still absent. A host contract for device identity, import of browser preferences and live delivery of persona changes is required before page/persona parity can be claimed."
     },
     {
-      "id": "signin",
-      "route": "/_loam/login-code",
-      "fields": []
+      "id": "files",
+      "browserPreferences": {
+        "loam-ui.files": [
+          "inbox",
+          "daily",
+          "shortcuts",
+          "hiddenShortcuts"
+        ]
+      },
+      "route": null,
+      "runtimeRequired": "Define a host settings route and register file preferences; preserve existing shortcuts during migration."
     },
     {
-      "id": "update",
-      "route": "/v1/update",
-      "fields": []
+      "id": "about",
+      "label": "About Loam",
+      "views": [
+        "version",
+        "update",
+        "server"
+      ],
+      "routes": [
+        "/v1/update",
+        "/api/server"
+      ],
+      "fields": [],
+      "note": "Was Update (update) until 2026-11-18."
     }
   ],
   "threadConfiguration": {
@@ -146,11 +178,16 @@
     "runtimeRequired": "Ensure the persona settings tool exposes these same per-member operations. Existing host coverage is unverified."
   },
   "redirects": {
-    "provider": "providers/detail",
+    "provider": "connections/provider",
+    "integration": "connections/service",
     "dictation": "plugins",
     "read-aloud": "plugins",
+    "voice": "plugins",
     "running": "activity",
-    "accounts": "integrations",
-    "voice": "plugins"
+    "providers": "connections",
+    "integrations": "connections",
+    "accounts": "connections (with a provider: connections/api-key)",
+    "signin": "account",
+    "update": "about"
   }
 }

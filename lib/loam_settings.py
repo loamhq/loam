@@ -287,11 +287,11 @@ ENTRIES: list[Entry] = [
           "PUT/DELETE /api/plugins/{plugin}/secrets/{name}", reach=OWNER,
           why=f"a key is a credential {lc.OWNER_NAME} pastes himself, and it is "
               "billed to him"),
-    # Shared keys (2026-11-18): Settings › Accounts, API keys by provider,
+    # Shared keys (2026-11-18): Settings › Connections › API keys, API keys by provider,
     # each checked on entry and handed only to the plugins that declared the
     # provider (lib/loam_keys.py). A persona's to change too (the owner,
     # 2026-11-10: every setting); never to read back.
-    Entry("keys.set", "action", "Save a provider's shared API key (Accounts; checked on entry)",
+    Entry("keys.set", "action", "Save a provider's shared API key (Settings › Connections › API keys; checked on entry)",
           "PUT /api/keys/{provider}", route="PUT /v1/keys/{provider}",
           target="provider id (openai, google, hetzner, …)", unattended=False,
           values='the key as text, or {"values": {"NAME": "…"}} for a provider of '
@@ -376,8 +376,11 @@ ENTRIES: list[Entry] = [
           values='{"thread": <this thread\'s id>, "name": "Juniper", '
                  '"soul": <text> or "soul_file": <path>, "config": <text> '
                  'or "config_file": <path>}; optional "id" (the folder name, '
-                 'from the name), "provider", "wake" (HH:MM), "active"/'
-                 '"reflection" (their loading files; plain starters otherwise)',
+                 'from the name), "about" (one plain line for the person, in the '
+                 'third person: "A warm, practical cook who keeps Sam company '
+                 'in the kitchen"; the draft card shows it), "provider", '
+                 '"wake" (HH:MM), "active"/"reflection" (their loading files; '
+                 'plain starters otherwise)',
           body=lambda v, m: dict(v) if isinstance(v, dict) else {"name": v},
           note="How to make an agent: read the library skill "
                "loam-making-an-agent first (a character, never a job). Draft "
@@ -809,6 +812,10 @@ PAGE_RELAY_AHEAD: dict[str, list[str] | str] = {
     "/^\\/plugins\\/([^/]+)\\/secrets\\/([^/]+)\\/check$/": ["plugin.secret"],
     # The owner (2026-11-14, first release L2): who this install is for.
     "rest === '/owner'": "a read: the owner's id, the ids accepted as theirs, the name",
+    # Settings › Account and About Loam (2026-11-18): answered by the app
+    # itself, not relayed; nothing to change.
+    "rest === '/account'": "a read: who is signed in, from the login's own headers",
+    "rest === '/server'": "a read: the machine Loam runs on (processors, memory, storage)",
     # Loam's update, as the page shows it (loam-ui 2d2eace, 2026-11-14). The
     # page also relays POST /update/check, /apply and /rollback, from an
     # `includes([...])` list `relay_routes` does not read; they are the
@@ -822,7 +829,7 @@ PAGE_RELAY_AHEAD: dict[str, list[str] | str] = {
     # icon, cover and theme, read from its link before anything is installed.
     "/^\\/marketplace\\/([a-z][a-z0-9-]*)(?:\\/(icon|image|theme\\.css))?$/":
         "a read: one listing's declaration, icon, cover and theme, before it is installed",
-    # Shared keys (2026-11-18): Settings › Accounts. Never a value.
+    # Shared keys (2026-11-18): Settings › Connections › API keys. Never a value.
     "/^\\/keys(?:\\/([^/]+))?$/": ["keys.set", "keys.forget"],
     "/^\\/keys\\/([^/]+)\\/check$/": ["keys.check"],
     "/^\\/keys\\/([^/]+)\\/plugins\\/([^/]+)$/": ["keys.own", "keys.shared"],

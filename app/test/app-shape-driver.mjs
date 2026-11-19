@@ -44,11 +44,11 @@ try {
   const face = find(root, 'blob')
   assert.match(face.style.background, /^var\(--agent-avatar-tone-\d+, var\(--persona-/)
 
-  for (const label of ['Appearance', 'Agents', 'Providers', 'Integrations', 'Accounts', 'Files', 'Plugins', 'Sign-in', 'Update']) {
+  for (const label of ['Account', 'Appearance', 'Agents', 'Connections', 'Plugins', 'Files', 'About Loam']) {
     click(utility('Settings')); await until(() => find(root, 'settings'))
     const destinations = width >= 1100 ? all(root, 'navrow').map(text) : all(root, 'setrow-title').map(text)
     // The Market (2026-11-18) is the last row, set apart: a place of its own.
-    assert.deepEqual(destinations, [...(width < 1100 ? ['Activity'] : []), 'Appearance', 'Agents', 'Providers', 'Integrations', 'Accounts', 'Files', 'Plugins', 'Sign-in', 'Update', 'Market'])
+    assert.deepEqual(destinations, [...(width < 1100 ? ['Activity'] : []), 'Account', 'Appearance', 'Agents', 'Connections', 'Plugins', 'Files', 'About Loam', 'Market'])
     if (width < 1100) await until(() => text(find(setting('Activity'), 'setrow-sub')) === '1 working')
     click(setting(label))
     await until(() => all(root, 'sheet-title').some(node => text(node) === label))
@@ -60,6 +60,12 @@ try {
       assert.equal(all(root, 'plugin-switch').length, 2)
       assert.ok(all(root, 'plugin-switch').every(node => node.getAttribute('aria-checked') === 'true'))
 
+    }
+    if (label === 'Connections') {
+      // One page, three groups, in this order (2026-11-18).
+      const groups = all(root, 'connections-group').map(node => text(find(node, 'kicker')))
+      assert.deepEqual(groups, ['AI providers', 'Services', 'API keys'])
+      assert.doesNotMatch(text(find(root, 'settings')), /Accounts/)
     }
     if (label === 'Files') {
       assert.match(text(find(root, 'settings')), /Shortcuts[\s\S]*Notes/)

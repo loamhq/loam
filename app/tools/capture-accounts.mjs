@@ -1,4 +1,4 @@
-// Captures of Settings › Accounts and of an agent's images in a thread, at 390
+// Captures of Settings › Connections › API keys (the old id, `accounts`, still opens them) and of an agent's images in a thread, at 390
 // and 1440, light and dark, against the fixture app: no person's data.
 //
 //   ACCOUNTS_EVIDENCE=<folder> LOAM_PLAYWRIGHT=<playwright/index.mjs> node tools/capture-accounts.mjs

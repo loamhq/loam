@@ -474,6 +474,8 @@ const PIN = 'M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h
 export const icon = {
   download: (s = 18) => svg(s, [['path', { d: 'M12 4v11m-5-5 5 5 5-5M5 20h14' }]], { stroke: 2.2 }),
   key: (s = 18) => svg(s, [['circle', { cx: 7.5, cy: 15.5, r: 4.5 }], ['path', { d: 'M10.7 12.3 20.5 2.5M17 6l3 3M14.5 8.5l2 2' }]]),
+  person: (s = 18) => svg(s, [['circle', { cx: 12, cy: 8, r: 4 }], ['path', { d: 'M4.5 20.5a7.5 7.5 0 0 1 15 0' }]]),
+  info: (s = 18) => svg(s, [['circle', { cx: 12, cy: 12, r: 9 }], ['path', { d: 'M12 11v6M12 7.5v.01' }]]),
   lock: (s = 18) => svg(s, [['rect', { x: 4, y: 10, width: 16, height: 11, rx: 2 }], ['path', { d: 'M8 10V7a4 4 0 0 1 8 0v3M12 14v3' }]]),
   power: (s = 18) => svg(s, [['path', { d: 'M12 3v9M6.2 5.8a9 9 0 1 0 11.6 0' }]]),
   clock: (s = 18) => svg(s, [['circle', { cx: 12, cy: 12, r: 9 }], ['path', { d: 'M12 7v5l3 2' }]]),

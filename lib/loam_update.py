@@ -499,7 +499,7 @@ def run_lock():
     except BlockingIOError:
         fh.close()
         raise Refusal("busy", "An update is already running; its progress is "
-                              "in Settings › Update.") from None
+                              "in Settings › About Loam.") from None
     try:
         yield
     finally:
@@ -667,7 +667,7 @@ def tell_available(tag: str, current: str | None) -> None:
            f"Loam {bare(tag)} is out; this install runs {current}. Its notes are "
            f"in {path}. Read them and tell {_owner()}, briefly and in your own "
            f"words, what this release would change for them, and that they can "
-           f"update from Settings › Update when they like. Do not paste the notes "
+           f"update from Settings › About Loam when they like. Do not paste the notes "
            f"or list commits.",
            key=f"available:{bare(tag)}")
 
@@ -711,7 +711,7 @@ def tell_refused(tag: str | None, refusal: Refusal) -> None:
            f"{runtime()}. Find out what this is (state that leaked into the "
            f"tree, an edit, a conflicting local change), explain it to "
            f"{_owner()} in plain words, and with their yes put it right. Then "
-           f"`{runtime()}/bin/loam-update apply` (or Settings › Update) runs "
+           f"`{runtime()}/bin/loam-update apply` (or Settings › About Loam) runs "
            f"the update again. Never discard a change of theirs without asking.",
            key=f"refused:{tag}:{refusal.code}:{len(files)}")
 
