@@ -2760,9 +2760,36 @@ def classify(project: eng.Project, job_id: str) -> str:
     return "legacy"
 
 
+def died_unheard(project: eng.Project, job_id: str, p: dict[str, Path]) -> bool:
+    """A job whose brief returned at once (2026-11-18) and whose unit ended
+    before its inner ever took the job -- no lease, no verdict, nothing
+    queued -- has no waiter to say it died. Its verdict is written here, the
+    waiter's own "died", so the broker hands it to the persona that briefed
+    it. True when one was written."""
+    try:
+        record = json.loads(loam_waiters._path(job_id).read_text(encoding="utf-8"))  # noqa: SLF001
+        since = datetime.strptime(record["since"], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if not record.get("returned") or p["result"].is_file() or \
+            (eng.now_utc() - since).total_seconds() < STARTUP_GRACE_SECONDS:
+        return False
+    unit = unit_name(job_id)
+    write_result(p, {"ok": False, "stage": "died", "outcome": "died",
+                     "finished": eng.iso(eng.now_utc()), "receipt_text": (
+        f"The job stopped before it started: its unit `{unit}.service` is no "
+        f"longer running, and it never took its tree or wrote a verdict, so "
+        f"nothing ran. What it left is in {p['dir']}; `journalctl --user -u "
+        f"{unit}.service` has whatever it printed. Send the brief again if "
+        f"the work is still wanted.")})
+    return True
+
+
 def sweep() -> dict:
     report = {"at": eng.iso(eng.now_utc()), "boot_id": boot_id(),
-              "recovered": [], "cancelled": [], "legacy": [], "pushes": []}
+              "recovered": [], "cancelled": [], "legacy": [], "pushes": [],
+              "died": []}
     for project in eng.projects().values():
         try:
             ids = sorted(d.name for d in project.jobs.iterdir()
@@ -2780,7 +2807,10 @@ def sweep() -> dict:
                 write_cancelled(p, job_id, project)
                 report["cancelled"].append(job_id)
             elif state == "legacy":
-                report["legacy"].append(job_id)
+                if died_unheard(project, job_id, p):
+                    report["died"].append(job_id)
+                else:
+                    report["legacy"].append(job_id)
             elif state == "interrupted":
                 record = wt.read_record(p["dir"])
                 handle = loam_lock._try_take(  # noqa: SLF001
@@ -2826,7 +2856,7 @@ def run_recover() -> int:
     tmp.write_text(json.dumps({**report, "legacy": legacy}, indent=2),
                    encoding="utf-8")
     os.replace(tmp, RECOVERY_STATE)
-    if any(report[k] for k in ("recovered", "cancelled", "pushes", "requeued")):
+    if any(report[k] for k in ("recovered", "cancelled", "pushes", "requeued", "died")):
         RECOVERY_LOG.parent.mkdir(parents=True, exist_ok=True)
         with RECOVERY_LOG.open("a", encoding="utf-8") as log:
             log.write(json.dumps(report) + "\n")
@@ -3779,9 +3809,13 @@ def write_brief(directory: Path, project: eng.Project, title: str,
 
 # ---------------------------------------------------------------------------
 
-def run_outer(project: eng.Project, job_id: str, p: dict[str, Path]) -> tuple[int, dict]:
+def run_outer(project: eng.Project, job_id: str, p: dict[str, Path],
+              wait: bool = True) -> tuple[int, dict]:
     """Refuse, launch, wait. (exit code, verdict) -- the verdict always has
-    `receipt_text`, and `vault_receipt` once a job has finished."""
+    `receipt_text`, and `vault_receipt` once a job has finished. With
+    `wait` False (a brief from a thread, since 2026-11-18) it returns once
+    the job is launched, `stage` `launched` or `queued` and no
+    `receipt_text`; a refusal or a failed launch is final either way."""
     p["dir"].mkdir(parents=True, exist_ok=True)
     meta = read_brief_meta(p)
     refusal = preflight(project, p, meta)
@@ -3810,6 +3844,9 @@ def run_outer(project: eng.Project, job_id: str, p: dict[str, Path]) -> tuple[in
         write_result(p, verdict)
         return 4, verdict
 
+    if not wait:
+        return 0, {"ok": True, "stage": "queued" if p["queued"].is_file()
+                   and not p["result"].is_file() else "launched"}
     settled = wait_for(p, job_id, meta["max_minutes"])
     return (0 if settled.get("ok") else 1), settled
 
@@ -3834,16 +3871,35 @@ def run_tool() -> int:
         reply({"ok": False, "error": accepted})
         return 3
     project, job_id, p = accepted
-    # The call is waiting from here (since 2026-11-12, lib/loam_waiters.py).
-    # If this process ends before it hands a verdict back -- a broker restart
-    # takes the calling session's tree, or the waiter's ceiling ends the call
-    # -- the broker posts the receipt into the caller's thread when the job
-    # finishes. Settled only once a final verdict is in hand.
     meta = read_brief_meta(p)
+    caller_info = {k: meta[k] for k in ("caller", "caller_session", "thread")
+                   if meta[k]}
+    # A brief from a thread returns at once (2026-11-18, batch B step 1):
+    # the record is written now, with no waiter, and the broker hands the
+    # result to the briefing persona as input to a turn in that thread
+    # when the job has a verdict, posting nothing. Only while the running
+    # broker is one that delivers that way (`loam_waiters.route_live`);
+    # otherwise, and for a caller with no thread, the call waits as before,
+    # and a waiter the restart cut is delivered for by the same pass.
+    returns_now = bool(meta["thread"]) and loam_waiters.route_live()
     loam_waiters.register(job_id, project.name, p["dir"], meta["briefed_by"],
-                          {k: meta[k] for k in ("caller", "caller_session", "thread")
-                           if meta[k]})
-    code, verdict = run_outer(project, job_id, p)
+                          caller_info, returned=returns_now)
+    code, verdict = run_outer(project, job_id, p, wait=not returns_now)
+    if returns_now and verdict.get("stage") in ("launched", "queued"):
+        queued = verdict["stage"] == "queued"
+        reply({
+            "ok": True,
+            "job_id": job_id,
+            "queued": queued,
+            "receipt_path": str(p["receipt"]),
+            "receipt": (
+                f"Job {job_id} is {'queued for memory' if queued else 'running'}. "
+                f"Its result comes back to you in this thread as your next input "
+                f"when it ends, nothing posted; you may read it and end your "
+                f"turn without saying anything. The engineer's receipt will be "
+                f"at {p['receipt']}, and the full one in the vault."),
+        })
+        return 0
     if verdict.get("stage") != "waiter_timeout":
         loam_waiters.settle(job_id)
     reply({

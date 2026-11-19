@@ -22,6 +22,15 @@ the last ten minutes, read from the launcher's job state
      row has the contract's fields; the receipt is a vault path.
   4. The same list read as a persona would: `bin/settings get thread.jobs`.
   5. The outcome words, from the launcher's verdicts.
+  6. A brief returns at once, and its result comes back as input (batch B
+     step 1, 2026-11-18): `--brief` from a thread, with the broker's quiet
+     route live, answers in under five seconds with the job id and the
+     receipt's path and never waits; with the route not live, or from a
+     cron, it waits as before. The broker's own delivery pass then hands
+     two results that finished close together to the persona, each once,
+     oldest first, queued behind the persona's turn under way (not steered
+     into it), and posts nothing: a turn that reads one and says nothing
+     leaves the thread file as it was.
 
 Run: python3 tests/test_thread_jobs.py
 """
@@ -385,6 +394,265 @@ cases = [
 got = [activity.outcome_word(item) for item, _ in cases]
 check("outcome words from the launcher's verdicts", got == [w_ for _, w_ in cases], got)
 check("...each one of OUTCOMES", set(got) <= set(activity.OUTCOMES))
+
+# -- 6. a brief returns at once; its result comes back as input ---------------
+
+import io  # noqa: E402
+import time  # noqa: E402
+
+launched, waited = [], []
+job.launch = lambda project, jid, p, minutes: launched.append(jid)
+job.resume_queued = lambda: []
+job.preflight = lambda project, p, meta: None   # the composition is not this test's
+
+
+def fake_wait(p, jid, minutes, return_if_queued=False):
+    waited.append(jid)
+    return {"ok": True, "stage": "done", "receipt_text": "done", "vault_receipt": "/v/x.md"}
+
+
+job.wait_for = fake_wait
+
+
+def tool(env, title):
+    """`engineer-job --brief` in-process: stdin in, the one JSON line out."""
+    keep = {k: os.environ.get(k) for k in ("LOAM_WAKE", w.SESSION_ENV, "LOAM_AGENT")}
+    for k in keep:
+        os.environ.pop(k, None)
+    os.environ.update(env)
+    stdin, stdout = sys.stdin, sys.stdout
+    sys.stdin = io.StringIO(json.dumps({"project": "Loam", "title": title,
+                                        "brief": "Do it.", "involvement": "go"}))
+    sys.stdout = io.StringIO()
+    started = time.monotonic()
+    try:
+        code = job.run_tool()
+        out = json.loads(sys.stdout.getvalue())
+    finally:
+        sys.stdin, sys.stdout = stdin, stdout
+        for k, v in keep.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+    return code, out, time.monotonic() - started
+
+
+THREAD_ENV = {"LOAM_AGENT": LEAD, w.SESSION_ENV: "sess-lead"}
+w.mark_route()   # this process stands in for a broker with the quiet route
+code, out, took = tool(THREAD_ENV, "Returns at once")
+fast_id = out.get("job_id")
+check("--brief from a thread returns in under 5 s, with the job id",
+      code == 0 and out.get("ok") and fast_id and took < 5, (round(took, 2), out))
+check("...launched and never waited on",
+      launched[-1:] == [fast_id] and fast_id not in waited, (launched, waited))
+check("...the receipt's path and a sentence saying the result comes back as input",
+      out.get("receipt_path") == str(job.paths(PROJECT, fast_id)["receipt"])
+      and "next input" in out.get("receipt", "") and out.get("queued") is False, out)
+rec = json.loads(w._path(fast_id).read_text())
+check("...its record names the thread and has no waiter",
+      rec.get("thread") == home and rec.get("returned") is True and "pid" not in rec, rec)
+w.settle(fast_id)
+
+code, out, _ = tool({"LOAM_AGENT": LEAD, "LOAM_WAKE": "cron:infra-watch",
+                     w.SESSION_ENV: "sess-lead"}, "From a cron, blocking")
+check("a brief with no thread (a cron) still waits for its verdict",
+      out.get("job_id") in waited and out.get("receipt_path") == "/v/x.md", out)
+w.ROUTE.unlink()
+code, out, _ = tool(THREAD_ENV, "Before the broker restarts")
+check("from a thread while the broker's quiet route is not live, it waits as before",
+      out.get("job_id") in waited, out)
+check("...and a waiting call settled leaves no record", w.records() == [], w.records())
+
+
+class TurnSession:
+    """A session whose turns say nothing unless told to, and whose first
+    turn can be held open (`gate`) to stand for a turn under way."""
+    STEERS = True
+
+    def __init__(self, agent, sid):
+        self.agent, self.id, self.provider = agent, sid, "claude-code"
+        self.model, self.title, self._busy = None, None, None
+        self.subs, self.prompts, self.steers = set(), [], []
+        self.idle_timeout_s, self.live, self.proc = None, True, None
+        self.last_activity = time.time() - 600
+        self.gate, self.words, self.state = None, {}, "idle"
+
+    def busy(self):
+        return self._busy
+
+    def status(self):
+        return self.state
+
+    def save(self):
+        pass
+
+    def watch(self, q):
+        self.subs.add(q)
+
+    def unwatch(self, q):
+        self.subs.discard(q)
+
+    def meta(self):
+        return {"session_id": self.id, "agent": self.agent}
+
+    async def steer(self, text, attachments=None):
+        self.steers.append(text)
+        return 1
+
+    async def send_message(self, text):
+        self.prompts.append(text)
+        n = len(self.prompts)
+
+        async def go():
+            self.state = "working"
+            if n == 1 and self.gate is not None:
+                await self.gate.wait()
+            for q in list(self.subs):
+                said = self.words.get(n)
+                if said:
+                    q.put_nowait({"type": "assistant", "parent_tool_use_id": None,
+                                  "message": {"content": [{"type": "text", "text": said}]}})
+                q.put_nowait({"type": "result", "parent_tool_use_id": None})
+            self.state = "idle"
+        asyncio.get_running_loop().create_task(go())
+        return 1
+
+    async def stop(self):
+        self.live = False
+
+
+class TurnBroker:
+    def __init__(self):
+        self.sessions, self.record_subscribers = {}, set()
+        self.stopping = False
+        self.token = "test-token"
+
+    def live(self):
+        return [s for s in self.sessions.values() if s.live]
+
+    def seats_taken(self):
+        return len(self.live())
+
+    def room(self):
+        return {"ok": True, "available_mb": 20_000, "reserve_mb": 3_000, "need_mb": 450,
+                "starting": 0, "cgroup_room_mb": None}
+
+    async def start_session(self, agent, session_id=None, resume=False, provider=None, **kw):
+        for s in self.sessions.values():
+            if s.agent == agent:
+                return s
+        s = TurnSession(agent, session_id or f"s{len(self.sessions) + 1}")
+        self.sessions[s.id] = s
+        return s
+
+
+def loam_lines(tid):
+    return sum(1 for m in threads.read(tid)[1] if m.get("author") == "system")
+
+
+async def deliveries():
+    quiet = threads.create(LEAD, "Quiet results")["id"]
+    server = broker_mod.Server.__new__(broker_mod.Server)
+    fake = TurnBroker()
+    server.broker = fake
+    server.threads = engine_mod.ThreadEngine(fake)
+    # Two jobs briefed from this thread, finishing two seconds apart; the
+    # later one registered first, so order is the verdicts', not the files'.
+    ids = []
+    for title, finished_at in (("Second to finish", NOW + timedelta(seconds=2)),
+                               ("First to finish", NOW)):
+        jid, p = brief(title, THREAD_ENV)
+        (p["dir"] / "result.json").write_text(json.dumps({
+            "ok": True, "stage": "done", "outcome": "completed",
+            "landing_state": "landed", "landing": "**Landing: landed at `abc1234`**",
+            "finished": iso(finished_at)}))
+        w.register(jid, "Loam", p["dir"], LEAD,
+                   {"caller": "conversation", "thread": quiet}, returned=True)
+        ids.append(jid)
+    second, first = ids
+    # The persona is mid-answer to a message when they arrive.
+    session = await fake.start_session(LEAD)
+    session.gate = asyncio.Event()
+    session.words = {1: "Here is my answer about the other thing."}
+    msg = threads.post_person(quiet, "Something else, please.") \
+        if hasattr(threads, "post_person") else None
+    server.threads.schedule(engine_mod.Turn(quiet, LEAD, 0,
+                                            (msg or {}).get("id") or "m1"))
+    for _ in range(200):
+        await asyncio.sleep(0.01)
+        if session.prompts:
+            break
+    lines_before = loam_lines(quiet)
+    count_before = len(threads.read(quiet)[1])
+    broker_mod.DELIVER_FIRST_S, broker_mod.DELIVER_EVERY_S = 0, 0.05
+    pass_task = asyncio.create_task(server.deliver_owed())
+    for _ in range(200):
+        await asyncio.sleep(0.02)
+        if not w.records():
+            break
+    check("the delivery pass takes both results while the persona's turn is under way",
+          w.records() == [] and len(session.prompts) == 1, (w.records(), len(session.prompts)))
+    await asyncio.sleep(0.3)
+    check("...neither is steered into the turn that is generating",
+          session.steers == [] and len(session.prompts) == 1,
+          (len(session.steers), len(session.prompts)))
+    session.gate.set()
+    for _ in range(400):
+        await asyncio.sleep(0.02)
+        if server.threads.settled(quiet) and len(session.prompts) >= 3:
+            break
+    await asyncio.sleep(0.2)
+    fake.stopping = True
+    await asyncio.wait_for(pass_task, 5)
+    prompts = session.prompts
+    check("...then each is the input of its own turn, after the one under way, oldest first",
+          len(prompts) == 3 and first in prompts[1] and second in prompts[2]
+          and second not in prompts[1], [p[-400:] for p in prompts[1:]])
+    check("...the input carries the receipt's path, the verdict and the landing",
+          all(s in prompts[1] for s in ("receipt.md", "completed: Landing: landed at abc1234",
+                                        "Landing: landed", "Nothing was posted")),
+          prompts[1][-500:])
+    msgs = threads.read(quiet)[1]
+    check("the thread holds no new Loam line (the count before and after)",
+          (lines_before, loam_lines(quiet)) == (lines_before, lines_before),
+          (lines_before, loam_lines(quiet)))
+    check("...and only the persona's answer to the message: the turns that "
+          "said nothing left nothing", [m["author"] for m in msgs[count_before:]]
+          in ([LEAD], []) and len(msgs) - count_before <= 1,
+          [(m["author"], m["text"][:60]) for m in msgs[count_before:]])
+    log = [json.loads(x) for x in w.LOG.read_text().splitlines()]
+    mine = [x for x in log if x["job"] in ids]
+    check("each delivered once, and logged so, oldest first",
+          [(x["job"], x["outcome"]) for x in mine]
+          == [(first, "delivered"), (second, "delivered")], mine)
+    check("...a second delivery of the same job is refused",
+          server.threads.deliver_job({"job": first, "thread": quiet, "persona": LEAD},
+                                     "x") == "already delivered")
+
+
+w.LOG = TMP / "deliveries.jsonl"
+asyncio.run(deliveries())
+
+# A job that returned at once and whose unit ended before its inner took it
+# has no waiter to say so: recovery writes the waiter's "died", and the
+# delivery pass then carries it like any verdict.
+job.unit_state = lambda unit: "inactive"
+dead_id, dead_p = brief("Died before it started", THREAD_ENV)
+w.register(dead_id, "Loam", dead_p["dir"], LEAD, {"thread": home}, returned=True)
+check("recovery leaves a just-launched job alone for its startup grace",
+      not job.died_unheard(PROJECT, dead_id, dead_p) and not dead_p["result"].is_file())
+rec = json.loads(w._path(dead_id).read_text())
+rec["since"] = iso(NOW - timedelta(minutes=2))
+w._path(dead_id).write_text(json.dumps(rec))
+report = job.sweep()
+verdict = json.loads(dead_p["result"].read_text()) if dead_p["result"].is_file() else {}
+check("...then writes it a 'died' verdict, which makes its result owed",
+      dead_id in report["died"] and verdict.get("stage") == "died"
+      and dead_id in [r["job"] for r in w.owed()], (report.get("died"), verdict))
+check("...and a legacy job with no such record is left as legacy",
+      dead_id not in report["legacy"] and not set(report["died"]) - {dead_id},
+      report["died"])
+w.settle(dead_id)
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if results and all(results) else 1)

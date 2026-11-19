@@ -19,25 +19,32 @@ Claude CLI started before the variable existed, its ``--session-id`` /
 message is sent) or else ``sessions.json``. Unknown is left out, never
 guessed.
 
-**The waiter** (``register`` / ``settle`` / ``owed``): the launcher's outer
-half waits on the job inside the calling session's process tree, so a
+**The waiter** (``register`` / ``settle`` / ``owed``): a blocking brief's
+outer half waits on the job inside the calling session's process tree, so a
 broker restart (or the call's four-hour ceiling) ends the wait while the job
-runs on as its own unit. Until now its receipt then reached the vault and
-nobody told the thread. Each waiting call now leaves a record in
+runs on as its own unit. Each such call leaves a record in
 ``state/engineer-waiters/<job>.json``; the outer removes it when it hands a
 final verdict back. A record whose waiter process is gone and whose job has
-a ``result.json`` is **owed**: the broker posts one plain line into the
-caller's thread -- what finished and whether it landed, never the receipt --
-and gives the briefing persona a turn whose input names the receipt's path,
-so the persona reads it and tells the owner in its own words
-(``ThreadEngine.deliver_job``), then removes the record. Until 20:30 PT
-11-12 the line pasted the receipt's body; the owner said twice that day they
-does not want receipts in threads. A turn the restart cut off posts no
-"turn ended" line while a delivery for it is still to come
-(``pending_for``). One without a
-thread to post to is logged as undeliverable and removed.
+a ``result.json`` is **owed**, and is delivered as below. One without a
+thread to deliver to is logged as undeliverable and removed. (Until
+2026-11-18 a delivery also posted one plain Loam line in the thread, and
+until 20:30 PT 11-12 that line pasted the receipt's body.)
 
-Nothing here talks to the network; the broker does the posting.
+**A brief from a thread returns at once (2026-11-18, batch B step 1).**
+When the brief came from a thread and the broker's quiet route is live
+(``route_live``: the running broker wrote ``ROUTE`` with its pid when its
+delivery pass started), the launcher registers the record with no waiter
+(``returned``), launches the job and returns its id. Such a record is owed
+the moment its job has a verdict. Delivery posts nothing: the briefing
+persona gets a turn in that thread whose input is ``handoff_text`` -- the
+receipt's path, the launcher's one-line verdict (``verdict_line``), whether
+it landed -- and it may read it and end its turn without a word. The
+owner's words, 11-18: he does not want to be "spammed in my chat section".
+A caller with no thread (a wake, a cron, a Remote Control chat, a job)
+still blocks, as does every caller while a broker that predates the quiet
+route is running; their records keep the waiter's pid, as before.
+
+Nothing here talks to the network; the broker does the delivering.
 """
 
 from __future__ import annotations
@@ -217,13 +224,19 @@ def now_iso() -> str:
 
 
 def register(job_id: str, project: str, job_dir: Path, persona: str,
-             caller_info: dict, pid: int | None = None) -> Path | None:
-    """The outer's record that a call is waiting on this job. Fail-soft: a
-    record that cannot be written costs only the redelivery."""
-    pid = os.getpid() if pid is None else pid
+             caller_info: dict, pid: int | None = None,
+             returned: bool = False) -> Path | None:
+    """The outer's record that a result is owed for this job: a call
+    waiting on it (``pid``, the waiter), or, ``returned``, a call that
+    returned at once and is owed the result as input in its thread.
+    Fail-soft: a record that cannot be written costs only the delivery."""
     record = {"job": job_id, "project": project, "job_dir": str(job_dir),
-              "persona": persona, "pid": pid, "start": _start_ticks(pid),
-              "since": now_iso(), **caller_info}
+              "persona": persona, "since": now_iso(), **caller_info}
+    if returned:
+        record["returned"] = True
+    else:
+        pid = os.getpid() if pid is None else pid
+        record.update(pid=pid, start=_start_ticks(pid))
     try:
         STATE.mkdir(parents=True, exist_ok=True)
         tmp = _path(job_id).with_suffix(".tmp")
@@ -243,6 +256,10 @@ def settle(job_id: str) -> None:
 
 
 def waiter_alive(record: dict, proc: Path = PROC) -> bool:
+    """A blocking call's waiter is still running. A record that returned at
+    once has none: its result is owed as soon as its job has a verdict."""
+    if record.get("returned"):
+        return False
     pid = record.get("pid")
     if not isinstance(pid, int) or pid <= 1:
         return False
@@ -267,8 +284,9 @@ def records() -> list[dict]:
 
 
 def owed(proc: Path = PROC) -> list[dict]:
-    """Records whose waiter is gone and whose job has a verdict, each with
-    its `result` read in."""
+    """Records whose job has a verdict and that no waiting call will carry
+    (it returned at once, or its waiter is gone), each with its `result`
+    read in, oldest first by when the job finished."""
     out = []
     for record in records():
         if waiter_alive(record, proc):
@@ -281,7 +299,41 @@ def owed(proc: Path = PROC) -> list[dict]:
         if not isinstance(result, dict) or result.get("stage") == "queued":
             continue
         out.append({**record, "result": result})
-    return out
+    return sorted(out, key=lambda r: (str(r["result"].get("finished") or ""),
+                                      str(r.get("job"))))
+
+
+# ---------------------------------------------------------------------------
+# The quiet route: is the running broker one that delivers a result as input?
+# ---------------------------------------------------------------------------
+
+ROUTE = STATE / "route"
+
+
+def mark_route(pid: int | None = None) -> None:
+    """The broker's word, at the start of its delivery pass, that results
+    owed to a thread go back as input with nothing posted. Fail-soft."""
+    pid = os.getpid() if pid is None else pid
+    try:
+        STATE.mkdir(parents=True, exist_ok=True)
+        tmp = ROUTE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"pid": pid, "start": _start_ticks(pid),
+                                   "since": now_iso()}) + "\n", encoding="utf-8")
+        tmp.replace(ROUTE)
+    except OSError:
+        pass
+
+
+def route_live(proc: Path = PROC) -> bool:
+    """The broker that wrote ``ROUTE`` is still the process it named. False
+    before any broker with the quiet route has started, and after it died:
+    a brief then blocks, as it did before."""
+    try:
+        record = json.loads(ROUTE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(record, dict) and record.get("start") is not None \
+        and waiter_alive({"pid": record.get("pid"), "start": record["start"]}, proc)
 
 
 def done(record: dict, outcome: str, **extra) -> None:
@@ -298,9 +350,11 @@ def done(record: dict, outcome: str, **extra) -> None:
     settle(str(record.get("job")))
 
 
-# What a finished job's state reads as in the thread's one line.
+# What a finished job's landing reads as in its delivery.
 LANDED_WORDS = {"landed": "landed", "landed_earlier": "landed",
-                "not_landed": "did not land"}
+                "not_landed": "did not land", "nothing": "nothing to land",
+                "read_only": "read-only, nothing landed",
+                "pull_request": "opened a pull request"}
 
 
 def status_words(result: dict) -> str:
@@ -318,42 +372,32 @@ def receipt_path(record: dict) -> str:
                or Path(str(record.get("job_dir") or "")) / "receipt.md")
 
 
-def delivery_text(record: dict, title: str | None = None,
-                  who: str | None = None) -> str:
-    """The one plain line posted into the thread (2026-11-12, the owner 11:25
-    and 11:52 PT: "stop giving me these receipts", "Please do not send me
-    this stuff"): what finished and whether it landed. No receipt body, no
-    job id, no path -- the persona reads the receipt and says it in its own
-    words (``handoff_text``)."""
-    who = who or str(record.get("persona") or "a persona").capitalize()
-    what = f": {title.strip()}" if title and title.strip() else ""
-    return (f"An engineer job {who} started finished{what} "
-            f"({status_words(record.get('result') or {})}).")
+def verdict_line(result: dict, limit: int = 240) -> str:
+    """The launcher's verdict in one line: the outcome, and the landing's
+    own sentence when there was one, else the first line of what the
+    launcher said (a refusal, a death)."""
+    outcome = str(result.get("outcome") or result.get("stage") or "finished")
+    said = str(result.get("landing") or "").strip()
+    if not said and result.get("stage") != "done":
+        said = next((ln.strip() for ln in str(result.get("receipt_text") or "")
+                     .splitlines() if ln.strip() and not ln.startswith(("---", "#"))), "")
+    said = re.sub(r"[*`]", "", " ".join(said.split()))
+    line = f"{outcome}: {said}" if said else outcome
+    return line if len(line) <= limit else line[:limit - 1].rstrip() + "…"
 
 
 def handoff_text(record: dict, title: str | None = None) -> str:
-    """The note the briefing persona's delivery turn carries, after the
-    thread: which job, where its receipt is, and what to do with it."""
+    """The input of the briefing persona's delivery turn, after the thread:
+    which job, where its receipt is, the launcher's verdict, whether it
+    landed -- and that nothing was posted, so it may end its turn without
+    a word. Never shown in the thread (batch B, 2026-11-18)."""
     result = record.get("result") or {}
     named = f" (\"{title.strip()}\")" if title and title.strip() else ""
     return (f"[Loam: the engineer job {record.get('job')}{named} you briefed "
-            f"finished ({status_words(result)}) after the call that was waiting "
-            f"on it had ended, so its receipt never reached you. The thread was "
-            f"told in one line only. Read the receipt at {receipt_path(record)} "
-            f"and tell {lc.OWNER_NAME} what came of it in your own words, briefly: what "
-            f"changed, what is left, anything he must decide. Do not paste the "
-            f"receipt, its ids or its paths into the thread.]")
-
-
-def pending_for(thread_id: str | None, persona: str | None) -> bool:
-    """A delivery is still to come into this thread for this persona: a
-    waiting call's record names them and its job is still on disk. A turn
-    the broker's restart cut off then posts no "turn ended" line, because
-    the delivery line follows (2026-11-12)."""
-    if not thread_id or not persona:
-        return False
-    for record in records():
-        if (record.get("thread") == thread_id and record.get("persona") == persona
-                and Path(str(record.get("job_dir") or "/nonexistent")).is_dir()):
-            return True
-    return False
+            f"from this thread has finished. Nothing was posted in the thread. "
+            f"Receipt: {receipt_path(record)}. Launcher's verdict: "
+            f"{verdict_line(result)}. Landing: {status_words(result)}. "
+            f"Read the receipt if you need it. Tell {lc.OWNER_NAME} only what he "
+            f"needs to hear, in your own words and without the receipt's ids or "
+            f"paths; if nothing, end your turn without writing anything and "
+            f"nothing is posted.]")

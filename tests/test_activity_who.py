@@ -6,17 +6,17 @@ receipt a waiting call could not carry.
      the environment, an ancestor's environment, or an ancestor Claude CLI's
      argv (fake /proc); its thread from the session marker or sessions.json;
      a waiter's record registered, settled, and owed once its waiter is gone
-     and its job has a verdict; the line delivered.
+     and its job has a verdict, or at once for a brief that returned; the
+     persona's input; the quiet route's mark.
   2. **bin/engineer-job**: the model read off a Claude and a Codex command
      line; a job's label carries engine, model, caller, thread and title,
      and the job it continues with the chain's first job; an older job
      without the new files says null, not a guess.
   3. **The broker**: a session row's `run_kind`, `engine_label`, the model
      the CLI said it runs (`model`) beside the one asked (`model_asked`);
-     `deliver_job` posts one plain Loam line (no receipt, id or path) and
-     gives the persona a turn whose input names the receipt's path, and
-     refuses a thread the persona is not in; a turn the restart cuts off
-     posts no "turn ended" line while a delivery for it is pending.
+     `deliver_job` posts nothing (since 2026-11-18) and gives the persona a
+     turn whose input names the receipt's path, once, and refuses a thread
+     the persona is not in; a turn the restart cuts off says so.
   4. **lib/loam_live.restart_blockers** (2026-11-17): only `idle` lets a
      planned restart go; `working`, `asking`, `background`, a thread turn in
      flight and a failed read hold it.
@@ -153,30 +153,22 @@ owed = w.owed()
 check("...owed once the waiter is gone and the job has a verdict",
       [(r["job"], r["thread"], r["persona"]) for r in owed],
       [("20261112-120000-aaaaaaaa", "t-x", "ada")])
-text = w.delivery_text(owed[0], "Fix it", "Ada")
-check("the thread's line is one plain sentence: who, the title, landed",
-      text, "An engineer job Ada started finished: Fix it (landed).")
-check("...with no receipt body, no job id and no path",
-      any(s in text for s in ("Did the thing.", "20261112-120000-aaaaaaaa", "/v/",
-                              "\n")), False)
-check("...a job that did not land says so, one with nothing to land its outcome",
-      (w.delivery_text({"persona": "ada", "result": {"landing_state": "not_landed",
-                                                       "outcome": "completed"}}),
-       w.delivery_text({"persona": "ada", "result": {"outcome": "failed"}}, "")),
-      ("An engineer job Ada started finished (did not land).",
-       "An engineer job Ada started finished (failed)."))
 note = w.handoff_text(owed[0], "Fix it")
-check("the persona's note names the job, the receipt's path, and asks for its own words",
-      all(s in note for s in ("20261112-120000-aaaaaaaa", "/v/r.md", "own words",
-                              "Do not paste")), True)
+check("the persona's input names the job, the receipt's path, the verdict, the landing",
+      all(s in note for s in ("20261112-120000-aaaaaaaa", "/v/r.md",
+                              "verdict: completed", "Landing: landed",
+                              "Nothing was posted", "end your turn without writing")),
+      True)
 check("...and the receipt's own path when the vault copy is not named",
       w.receipt_path({"job_dir": "/j/x", "result": {}}), "/j/x/receipt.md")
-check("a delivery is pending for that thread and persona while the record stands",
-      (w.pending_for("t-x", "ada"), w.pending_for("t-x", "iris"),
-       w.pending_for("t-y", "ada")), (True, False, False))
+check("the verdict line: the outcome and the landing's sentence, plain",
+      (w.verdict_line({"outcome": "completed", "stage": "done",
+                       "landing": "**Landing: landed at `abc1234`** — merged"}),
+       w.verdict_line({"stage": "died", "receipt_text": "The job stopped.\nMore."}),
+       w.status_words({"landing_state": "nothing", "outcome": "completed"})),
+      ("completed: Landing: landed at abc1234 — merged", "died: The job stopped.",
+       "nothing to land"))
 w.done(owed[0], "delivered")
-check("...and nothing is pending once it is dealt with",
-      (w.done(owed[0], "delivered"), w.pending_for("t-x", "ada"))[1], False)
 w.register("20261112-120000-aaaaaaaa", "Loam", jobdir, "ada",
            {"caller": "conversation", "thread": "t-x"})
 w.done(owed[0], "delivered")
@@ -186,6 +178,21 @@ check("...and once dealt with it is gone and logged",
 w.register("20261112-120000-bbbbbbbb", "Loam", jobdir, "ada", {})
 w.settle("20261112-120000-bbbbbbbb")
 check("a settled call leaves nothing", w.records(), [])
+w.register("20261112-120000-aaaaaaaa", "Loam", jobdir, "ada",
+           {"caller": "conversation", "thread": "t-x"}, returned=True)
+check("a brief that returned at once: no waiter in its record, owed at its verdict",
+      ("pid" in w.records()[0], [r["job"] for r in w.owed()]),
+      (False, ["20261112-120000-aaaaaaaa"]))
+w.settle("20261112-120000-aaaaaaaa")
+check("the quiet route is not live until a broker marks it",
+      w.route_live(), False)
+w.mark_route()
+check("...live while the process that marked it runs",
+      w.route_live(), True)
+w.ROUTE.write_text(json.dumps({"pid": os.getpid(), "start": "1"}))
+check("...and not once that pid is another process (its start differs)",
+      w.route_live(), False)
+w.ROUTE.unlink()
 
 
 # -- 2. bin/engineer-job ------------------------------------------------------
@@ -343,52 +350,41 @@ async def broker_checks():
     record = {"job": "20261112-120000-cccccccc", "thread": tid, "persona": "ada",
               "result": {"outcome": "completed", "vault_receipt": "/v/r.md",
                          "receipt_text": "All done."}}
-    got = server.threads.deliver_job(record, w.delivery_text(record, "Fix it", "Ada"),
-                                     w.handoff_text(record, "Fix it"))
+    before = len(threads.read(tid)[1])
+    got = server.threads.deliver_job(record, w.handoff_text(record, "Fix it"))
     for _ in range(300):
         await asyncio.sleep(0.01)
         if server.threads.settled(tid):
             break
     msgs = threads.read(tid)[1]
-    check("deliver_job: delivered, one plain Loam line, then Ada's turn answers",
-          (got, msgs[-2]["author"], msgs[-2]["text"], msgs[-1]["author"]),
-          ("delivered", "system", "An engineer job Ada started finished: Fix it (completed).",
-           "ada"))
+    check("deliver_job: delivered, nothing posted by Loam, then Ada's turn answers",
+          (got, [m["author"] for m in msgs[before:]]), ("delivered", ["ada"]))
     check("...the thread holds no receipt body and no path",
           any("All done." in m["text"] or "/v/r.md" in m["text"] for m in msgs), False)
     ada = next(v for v in fake.sessions.values() if v.agent == "ada" and v.prompts)
     check("...and Ada's turn input names the receipt's path to read",
           ("/v/r.md" in ada.prompts[-1], "own words" in ada.prompts[-1],
            ada.prompts[-1].rstrip().endswith("]")), (True, True, True))
+    check("...delivered once: the same job again is not",
+          server.threads.deliver_job(record, "x"), "already delivered")
 
-    # The restart's "turn ended" line, skipped while a delivery follows.
-    jd = TMP / "jobs" / "20261112-120000-dddddddd"
-    jd.mkdir(parents=True)
-    turn = engine_mod.Turn(tid, "ada", 0, "x")
-    check("no delivery follows a turn while no waiting call names it",
-          server.threads.delivery_follows(turn), False)
-    w.register("20261112-120000-dddddddd", "Loam", jd, "ada",
-               {"caller": "conversation", "thread": tid})
-    check("...follows once a waiting call's record names its thread and persona",
-          server.threads.delivery_follows(turn), True)
-
+    # A turn the restart cuts says so, job or no job (`delivery_follows`
+    # went with the blocking call, 2026-11-18).
     async def boom(t):
         fake.stopping = True      # the restart lands mid-turn
         raise RuntimeError("cut")
     real, server.threads.run_turn = server.threads.run_turn, boom
     before = len(threads.read(tid)[1])
-    for who in ("ada", "iris"):
-        server.threads.schedule(engine_mod.Turn(tid, who, 0, "y"))
-        for _ in range(100):
-            await asyncio.sleep(0.01)
-            if all(t.done() for t in server.threads.workers.values()):
-                break
-        fake.stopping = False
+    server.threads.schedule(engine_mod.Turn(tid, "ada", 0, "y"))
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        if all(t.done() for t in server.threads.workers.values()):
+            break
+    fake.stopping = False
     lines = [m["text"] for m in threads.read(tid)[1][before:]]
-    check("...so a turn the restart ends posts no line for Ada, and still does for another",
-          lines, ["Iris's turn ended: the broker restarted"])
+    check("...a turn the restart ends posts its line", lines,
+          ["Ada's turn ended: the broker restarted"])
     server.threads.run_turn = real
-    w.settle("20261112-120000-dddddddd")
     check("...a persona not in the thread is not given a turn",
           server.threads.deliver_job({**record, "persona": "iris"}, "x"), "not a member")
     check("...nor a thread that is gone",
