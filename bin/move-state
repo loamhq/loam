@@ -294,7 +294,7 @@ def regenerate(log: list[str]) -> None:
         cfg = ws / "agent.json"
         if cfg.is_file():
             data = json.loads(cfg.read_text())
-            steps.append([str(bin_ / "provision"), data["name"], data["wake_schedule"]])
+            steps.append([str(bin_ / "provision"), data["name"]])
     steps += [[str(bin_ / "provision"), "--codex"],
               [str(bin_ / "provision"), "--antigravity"],
               [str(bin_ / "provision"), "--engineer"],

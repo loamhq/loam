@@ -83,8 +83,7 @@ UNITS = TMP / "units"
 UNITS.mkdir()
 (LABS / AGENT / "crons").mkdir(parents=True)
 (LABS / AGENT / "agent.json").write_text(json.dumps(
-    {"name": AGENT, "wake_schedule": "02:00",
-     "wake_timezone": "America/Los_Angeles"}) + "\n")
+    {"name": AGENT}) + "\n")
 
 loam_cron.AI_LABS = LABS
 loam_cron.UNIT_DIR = UNITS
@@ -354,8 +353,7 @@ try:
         raise subprocess.TimeoutExpired(["claude"], 1800)
     cut.run = too_long
     (LABS / AGENT / "agent.json").write_text(json.dumps(
-        {"name": AGENT, "vault": str(TMP / "vault"), "wake_schedule": "02:00",
-         "wake_timezone": "America/Los_Angeles"}) + "\n")
+        {"name": AGENT, "vault": str(TMP / "vault")}) + "\n")
     sys.argv = ["wake", str(LABS / AGENT), "--cron", "digest"]
     try:
         cut.main()
@@ -533,10 +531,66 @@ try:
               lane="engineer", reason="the test's reflection", systemd=SYSTEMD)
     status, body = save_file("reflection", ls.reflection_record("03:30"))
     config = json.loads((LABS / AGENT / "agent.json").read_text())
-    check("Files save of crons/reflection.md: the owner's, agent.json follows",
+    check("Files save of crons/reflection.md: the owner's; the time is the record's alone",
           status == 200 and body["schedule"]["state"] == "live"
           and body["schedule"]["last_edit"]["actor"] == OWNER
-          and config["wake_schedule"] == "03:30", body["schedule"]["state_words"])
+          and ls.wake_time(AGENT) == "03:30" and "wake_schedule" not in config,
+          body["schedule"]["state_words"])
+
+    # -- the daily reflection through the settings route (2026-11-19) ---------
+    import loam_threads as threads  # noqa: PLC0415
+    threads.AI_LABS = LABS
+    reflection = f"/v1/schedules/{AGENT}/reflection"
+    status, body = call("PATCH", reflection, {
+        "body": "Read the week's notes first.", "by": AGENT,
+        "lane": "conversation", "reason": "my own way of waking"})
+    check("a persona edits its reflection's instruction",
+          status == 200 and body["schedule"]["body"] == "Read the week's notes first.",
+          body)
+    status, body = call("PATCH", reflection, {
+        "enabled": False, "by": AGENT, "lane": "conversation",
+        "reason": "nothing to do this week"})
+    check("a persona's own pause through the route: refused, the owner's to turn off",
+          status != 200 and body["error"].startswith(ls.REFLECTION_OWNERS)
+          and "`yes`" in body["error"]
+          and "enabled: true" in (LABS / AGENT / "crons" / "reflection.md").read_text(),
+          body)
+    tid = threads.create(AGENT, "Wakes")["id"]
+    mine = threads.append(tid, AGENT, "Shall I turn my wake off?")["id"]
+    asked = threads.append(tid, OWNER, "Yes, turn your nightly wake off for now.")["id"]
+    status, body = call("PATCH", reflection, {
+        "enabled": False, "by": AGENT, "lane": "conversation",
+        "thread": tid, "yes": mine})
+    check("...citing its own message: refused, not the owner's",
+          status != 200 and "is not" in body["error"], body)
+    status, body = call("PATCH", reflection, {
+        "enabled": False, "by": AGENT, "lane": "cron",
+        "thread": tid, "yes": asked})
+    check("...the owner's word from an unattended run: refused",
+          status != 200 and "unattended" in body["error"], body)
+    status, body = call("PATCH", reflection, {
+        "enabled": False, "by": AGENT, "lane": "conversation",
+        "thread": tid, "yes": asked})
+    took = last_change = next(e for e in reversed(ls.events())
+                              if e.get("kind") == "change" and e.get("record") == "reflection")
+    check("...on the owner's word, cited: accepted as the owner's, the relay named",
+          status == 200 and body["schedule"]["enabled"] is False
+          and took["actor"] == OWNER and took.get("relayed_by") == AGENT
+          and took.get("yes", {}).get("message") == asked, took)
+    status, body = call("PATCH", reflection, {
+        "enabled": True, "by": AGENT, "lane": "conversation", "reason": "back on"})
+    check("a persona turns it back on", status == 200 and body["schedule"]["enabled"] is True,
+          body)
+    status, body = call("PATCH", reflection, {
+        "enabled": False, "by": AGENT, "lane": "conversation",
+        "thread": tid, "yes": asked})
+    check("...and the same word twice: refused, each is taken once",
+          status != 200 and "already taken" in body["error"], body)
+    status, body = call("PATCH", reflection, {"enabled": False})
+    check("the owner's own switch in the app: accepted",
+          status == 200 and body["schedule"]["enabled"] is False
+          and body["event"]["actor"] == OWNER, body)
+    call("PATCH", reflection, {"enabled": True})
     status, body = call("GET", f"/v1/schedules/{AGENT}")
     check("GET /v1/schedules: every row has the line's fields",
           status == 200 and all({"state", "running", "state_words", "problem",

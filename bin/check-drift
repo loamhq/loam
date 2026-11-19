@@ -305,15 +305,8 @@ def check_crons(findings: list, names: list[str]) -> list[str]:
                         live, content)
         if name == loam_cron.REFLECTION:
             cron = loam_cron.parse_record(agent, name, text, check_systemd=False)
-            hhmm = loam_cron.reflection_hhmm(cron.schedule_text)
-            cfg = json.loads((AI_LABS / agent / "agent.json").read_text(
-                encoding="utf-8"))
-            if cfg.get("wake_schedule") != hhmm:
-                findings.append((label, str(AI_LABS / agent / "agent.json"),
-                                 f"wake_schedule {cfg.get('wake_schedule')} "
-                                 f"disagrees with the record's {hhmm}"))
             if not cron.enabled:
-                notes.append(f"  {agent}/reflection — paused ({path})")
+                notes.append(f"  {agent}/reflection — turned off by the owner ({path})")
         elif not loam_cron.parse_record(agent, name, text,
                                         check_systemd=False).live:
             notes.append(f"  {agent}/{name} — paused or done ({path})")
@@ -322,8 +315,8 @@ def check_crons(findings: list, names: list[str]) -> list[str]:
         if not loam_cron.cron_path(AI_LABS / agent, loam_cron.REFLECTION).exists():
             findings.append((
                 f"schedule {agent}/reflection", str(AI_LABS / agent / "crons"),
-                "no reflection record: the nightly wake is not on the "
-                "schedule path (`bin/schedule migrate` gives it one)"))
+                "no reflection record: this persona has no daily wake "
+                "(`bin/provision <agent> <HH:MM>` gives it one)"))
         for unit in loam_cron.UNIT_DIR.glob(f"{loam_cron.UNIT_PREFIX}{agent}-*"):
             if unit.name not in wanted:
                 try:
@@ -1119,7 +1112,7 @@ def main() -> int:
         # The persona's own words are rendered on the id's name: a display
         # name set on its profile (2026-11-13) is the app's, not its self's.
         # The name it was made with when it has one (`self_name`, 2026-11-14).
-        display, wake = loam_profile.self_name(name, cfg), cfg["wake_schedule"]
+        display = loam_profile.self_name(name, cfg)
 
         compare(findings, f"{name} settings.json",
                 ws / ".claude" / "settings.json",
@@ -1159,8 +1152,6 @@ def main() -> int:
             "display": name.capitalize(),
             "workspace": str(ws),
             "vault": str(prov.VAULT),
-            "wake_schedule": wake,
-            "wake_timezone": lc.TIMEZONE,
             **loam_profile.kept(cfg),
         })
         compare(findings, f"{name} agent.json", ws / "agent.json", expected_agent)
@@ -1211,13 +1202,8 @@ def main() -> int:
                     f"absent or disagrees — with no error. Re-run provision.",
                 ))
 
-        svc, tmr = prov.wake_units(name, ws, wake)
-        compare(findings, f"{name} wake.service",
-                UNIT_DIR / f"loam-wake-{name}.service", svc)
-        # The timer is the reflection record's (check_crons) once it has one.
-        if not loam_cron.cron_path(ws, loam_cron.REFLECTION).exists():
-            compare(findings, f"{name} wake.timer",
-                    UNIT_DIR / f"loam-wake-{name}.timer", tmr)
+        # The daily wake's service and timer are its reflection record's,
+        # compared with every other record's in check_crons (2026-11-19).
 
     check_config_clauses(findings, names)
     check_user_settings(findings, prov)

@@ -186,10 +186,17 @@ try:
     prompt, _, _ = wake.lane_prompt(AGENT, sv, "2026-11-18T10:00:00Z", None)
     check("a small diff is still inline", "A\t20_NOTES/" in prompt
           and "too many to list" not in prompt)
+    check("it says where the vault stood at the last wake",
+          f"Your last wake saw the vault at commit {ssince[:12]} "
+          f"(2026-11-17T11:00:00Z). What has changed since:" in prompt, prompt)
     # No marker at all, and the marker equal to head: no changes.
     (wake.STATE_DIR / f"{AGENT}.json").unlink()
     prompt, _, _ = wake.lane_prompt(AGENT, sv, "2026-11-18T10:00:00Z", None)
-    check("no marker yet: no changes", wake.NO_CHANGES in prompt)
+    check("no marker yet: said as a first wake, with the vault's commit",
+          "This is your first wake here" in prompt and shead[:12] in prompt,
+          prompt)
+    check("the instruction is Loam's default when the record has none",
+          wake.loam_cron.reflection_default().strip() in prompt, prompt)
     # A marker that is not in the history any more.
     (wake.STATE_DIR / f"{AGENT}.json").write_text(json.dumps(
         {"last_vault_ref": "0" * 40, "last_wake": "2026-11-17T11:00:00Z"}))

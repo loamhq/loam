@@ -960,11 +960,10 @@ class Box:
 
     def agents(self) -> str:
         said = []
+        # Each by its name alone: its wake time is its reflection record's
+        # (2026-11-19), and an agent.json `wake_schedule` was only a copy.
         for name in loam_agents.live(loam_agents.every()):
-            wake = loam_agents.card(name).get("wake_schedule")
-            if not isinstance(wake, str):
-                continue
-            self._run(self.bin("provision"), name, wake)
+            self._run(self.bin("provision"), name)
             said.append(name)
         # The engineer too (2026-11-18): its role and project file come from
         # the vault, seeded from this release's and never over the owner's

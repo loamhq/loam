@@ -40,9 +40,13 @@ that tags nobody goes to the thread's default agent; `@Name` gives that
 agent a turn. Each thread has a board, a Markdown file of items for the
 owner in the vault's inbox.
 
-**Wakes and crons.** An agent can wake by itself on a schedule: its nightly
-wake, given what changed in the vault to look into, keep track of or act on
-as it judges; and crons, each a file under `crons/` that the owner approved.
+**Wakes and crons.** Every agent wakes by itself once a day. Its daily wake
+is a schedule like any other, `crons/reflection.md`: when it runs and what it
+is told, by default to keep learning from the owner's life and what is
+happening, keep its workspace up and do what might need doing, or nothing,
+with what changed in the vault since its last wake. The agent moves its time
+and changes what it says; only the owner turns it off, and archiving an
+agent stops it. Its other schedules are crons, each a file under `crons/`.
 A run starts when the box has memory for it; nothing caps how long it runs.
 
 **The vault** is the owner's notes and the record, plain Markdown. Its

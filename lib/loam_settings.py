@@ -214,9 +214,14 @@ ENTRIES: list[Entry] = [
     Entry("schedule.enabled", "setting", "A schedule on or paused",
           "PATCH /api/schedules/{agent}/{name}",
           route="PATCH /v1/schedules/{agent}/{name}", target="agent/name",
-          values="true or false; your own schedules only, with a reason",
-          body=lambda v, m: {"enabled": v}, read=SCHEDULE_READ,
-          pick=lambda a, m: a.get("enabled")),
+          values="true or false; your own schedules only, with a reason. Your "
+                 "daily reflection is the owner's to turn off: only on their "
+                 'word, as {"enabled": false, "thread": <the thread they asked '
+                 'in>, "yes": <the id of their message asking>}',
+          body=lambda v, m: (
+              {k: v[k] for k in ("enabled", "thread", "yes") if k in v}
+              if isinstance(v, dict) else {"enabled": v}),
+          read=SCHEDULE_READ, pick=lambda a, m: a.get("enabled")),
     Entry("schedule.schedule", "setting", "When a recurring schedule runs",
           "PATCH /api/schedules/{agent}/{name}",
           route="PATCH /v1/schedules/{agent}/{name}", target="agent/name",
@@ -237,7 +242,7 @@ ENTRIES: list[Entry] = [
     Entry("schedule.body", "setting", "A schedule's instruction",
           "PATCH /api/schedules/{agent}/{name}",
           route="PATCH /v1/schedules/{agent}/{name}", target="agent/name",
-          values="text; not the reflection's (that is _reflection.md, or Loam's default once the agent has a map.md)",
+          values="text; the daily reflection's too, which starts as Loam's default",
           body=lambda v, m: {"body": v}, read=SCHEDULE_READ,
           pick=lambda a, m: a.get("body")),
     Entry("schedule.create", "action", "Make a schedule",
