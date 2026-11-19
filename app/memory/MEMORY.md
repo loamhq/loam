@@ -141,3 +141,19 @@ have never met.
 - **In a dock that is always drawn but hidden, selectors find two.**
   `.market-listing-acts` matches the dock's copy on a phone too; tests and
   captures use `.market-listing-head .market-listing-acts`.
+- **Files home empty Shortcuts** (2026-11-18): `homeShortcuts()` in
+  `public/files.js` renders `.fs-noshort` as a plain muted paragraph aligned
+  with `.fs-kicker` (no `.card` surface or icon tile), still gated behind
+  `st.roots.loaded && !st.roots.error`.
+- **Streaming Zip64 folder archives** (2026-11-18, `src/archive.js`,
+  `GET /api/files/archive`): relays `/v1/files/archive` when the broker offers
+  it and otherwise streams Zip64 over `/v1/files/list` + `/v1/files/download`,
+  excluding `.git`, `.stversions`, secrets, symlinks and `spaces` churn.
+  Requires `Remote-User` (`signedIn(req.headers).username`), returning `403`
+  (not `401`, which would trigger `auth.js`'s `/up` session-renewal retry
+  loop on a browser preflight `&check=1`). In `streamZipArchive()`, abort only
+  on `res.on('close')` when `!res.writableFinished` — never `req.on('close')`,
+  which fires immediately on a bodyless `GET` in Node HTTP. Playwright's
+  `extraHTTPHeaders` is not attached to Chrome DownloadManager requests, so
+  `test/files-archive-browser.mjs` puts a local `authProxy` in front of `app`
+  to model Caddy's `forward_auth`.

@@ -67,7 +67,7 @@ try {
       await page.goto(`${app.url}/files`)
       await page.waitForFunction(() => globalThis.__fixes && document.body.textContent.includes('Loading…'))
       await page.evaluate(() => document.fonts.ready)
-      report.coldEmpty = await page.getByText('No shortcuts yet', { exact: true }).count()
+      report.coldEmpty = await page.getByText('Nothing pinned yet. Add any file or folder from its ⋯ menu.', { exact: true }).count()
       if (!baseline) assert.equal(report.coldEmpty, 0)
       await page.screenshot({ path: `${out}/files-loading-${label}.png` })
       answerRoots()
