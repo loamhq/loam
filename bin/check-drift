@@ -1299,16 +1299,6 @@ def main() -> int:
             f"{timer_on or 'unknown'}: the host's setup is not being kept, so "
             f"`loam host restore` has nothing newer to put back. "
             f"`sudo loam host install`"))
-    # The sign-in watch (bin/claude-signin): with it off, a sign-in or a
-    # sign-out is noticed by nothing that runs on its own.
-    armed = user_systemctl("is-active", "loam-claude-signin.path")
-    if armed != "active":
-        findings.append((
-            "Claude Code sign-in watch", "systemctl --user is-active loam-claude-signin.path",
-            f"{armed or 'unknown'}: a Claude Code sign-in or sign-out is not "
-            f"noticed while this is off. `systemctl --user enable --now "
-            f"loam-claude-signin.path`"))
-
     # Remote Control was retired on 2026-11-19 (the owner: "I don't use it
     # through app anymore"). A unit of it left on the box -- a per-agent
     # server or the nightly recycle -- has no generator and no owner, and

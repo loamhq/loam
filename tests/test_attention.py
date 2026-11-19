@@ -18,7 +18,8 @@ command line and answers like ``claude -p --output-format json``:
      ``wake-<agent>.jsonl`` (lane ``attention``) and a fire in the schedule
      log; the records gone. Another persona's drain does not take them.
   4. **Never twice.** A record already given (its run died) is not given
-     again: it is logged and removed.
+     again: it is logged and removed. A run that failed told nobody: its
+     facts stay pending and are handed over after the retry wait.
   5. **The seam for plugins.** ``loam tell`` prints told, then repeat.
 
 Nothing outside a temporary directory is written; no unit is started.
@@ -192,6 +193,28 @@ try:
     check("a fact already given is not given again: logged and removed",
           calls() == [] and records() == []
           and "a fact whose run died" in log.read_text(), (calls(), records()))
+
+    # -- 4b: a run that failed told nobody (2026-11-19, batch B step 6) -------
+    CALLS.unlink(missing_ok=True)
+    refusing = TMP / "claude-refusing"
+    refusing.write_text(FAKE_CLI.replace('"subtype": "success"', '"subtype": "error_during_execution"')
+                        + "sys.exit(1)\n")
+    refusing.chmod(0o755)
+    wake.CLAUDE = str(refusing)
+    la.tell("a fact whose run is refused", by="probe", kick=False)
+    rc = wake.results_main(TMP / "ai-labs" / "ada")
+    back = records()
+    check("a fact whose run failed stays pending, not given, a try counted",
+          len(calls()) == 1 and len(back) == 1 and not back[0].get("given")
+          and back[0].get("tries") == 1 and back[0].get("retry_at"), back)
+    rc = wake.results_main(TMP / "ai-labs" / "ada")
+    check("...and is not handed over again before its retry time",
+          len(calls()) == 1 and len(records()) == 1, calls())
+    wake.CLAUDE = str(cli)
+    la._write(la.STATE / f"{back[0]['id']}.json", {**back[0], "retry_at": 0})
+    rc = wake.results_main(TMP / "ai-labs" / "ada")
+    check("...after it, a run that succeeds hears it and removes it",
+          len(calls()) == 2 and records() == [], records())
 
     # -- 5: the seam for plugins ----------------------------------------------
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}

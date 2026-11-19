@@ -1,0 +1,19 @@
+[Unit]
+Description=Loam — the one check on a clock: read the facts, tell what is false
+# bin/loam-check, lib/loam_check.py: the only thing in Loam that watches Loam
+# on a clock (2026-11-19, batch B step 6; it replaced drift-watch and
+# check-memory). Every fact true: it writes <state>/check.json and does
+# nothing else. A fact false or unreadable: told once to the agent that hears
+# when Loam needs attention (lib/loam_attention.py). Exit 1 is a false fact,
+# which is the check working, so it does not mark the unit failed; exit 2 is
+# the check itself crashing, which does, and which the state file says too.
+
+[Service]
+Type=oneshot
+# check-drift and the lane checks, once a day, take seconds; the broker is
+# asked twice 30 s apart. Ten minutes is stuck, not slow.
+TimeoutStartSec=10min
+Nice=10
+Environment=PYTHONPYCACHEPREFIX=@PYCACHE@
+ExecStart=/usr/bin/python3 @ROOT@/bin/loam-check
+SuccessExitStatus=1

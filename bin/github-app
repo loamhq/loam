@@ -20,6 +20,11 @@ installs or changes anything on GitHub.
       nobody pastes anything (2026-11-15, Loam HQ's app). ``--for`` keeps the
       state alive that long (at most a week), for a person who clicks later;
       GitHub's own code still lives an hour from Create.
+  github-app check
+      The day's one call to GitHub (``loam_github_app.daily_check``), run
+      by the nightly housekeeping (loam-tmp-sweep.service): it refreshes the
+      user token when due, so the refresh token keeps rolling while nobody
+      touches GitHub, and records the outcome the check on a clock reads.
   github-app org-watch <org> --note PATH [--for 48h] [--repo NAME] [--site NAME]
       Wait for the org's app to be installed and authorized (the broker's
       store says so), then write a short note to PATH: the app's slug, the
@@ -241,6 +246,7 @@ def main(argv: list[str]) -> int:
     i = sub.add_parser("org-install")
     i.add_argument("org")
     sub.add_parser("status")
+    sub.add_parser("check")
     f = sub.add_parser("org-forget")
     f.add_argument("org")
     args = parser.parse_args(argv)
@@ -248,6 +254,14 @@ def main(argv: list[str]) -> int:
     try:
         if args.cmd == "status":
             print(json.dumps(app.public_view(), indent=2))
+            return 0
+        if args.cmd == "check":
+            # The nightly housekeeping's call (loam-tmp-sweep.service): it
+            # keeps the refresh token rolling. What is wrong is read from
+            # the store by the check on a clock (lib/loam_check.py).
+            said = app.daily_check()
+            print("github-app: already checked today" if said is None else
+                  json.dumps({"warnings": said}))
             return 0
         if args.cmd == "org-forget":
             print(json.dumps(app.forget(args.org), indent=2))

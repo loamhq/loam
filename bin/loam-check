@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""The one check on a clock (lib/loam_check.py): read every fact about Loam,
+write the state file, and hand what is false to the agent that hears when
+Loam needs attention. Run every 15 minutes by loam-check.timer.
+
+  loam-check            one tick: exit 0 when every fact is true, 1 when one
+                        is false or unreadable, 2 when the check crashed
+  loam-check --daily    the same, with the once-a-day facts (check-drift,
+                        lane-check) read now whatever the hour
+  loam-check --status   print the state file as the last tick left it; read
+                        nothing, tell nobody
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+
+def main(argv: list[str]) -> int:
+    if "-h" in argv or "--help" in argv:
+        print(__doc__.strip())
+        return 0
+    try:
+        import loam_check  # noqa: PLC0415
+        if "--status" in argv:
+            print(json.dumps(loam_check.load_state(), indent=1))
+            return 0
+        if __import__("os").environ.get("LOAM_CHECK_CRASH"):
+            # A crash on purpose, for proving the state file says one.
+            raise RuntimeError("LOAM_CHECK_CRASH is set: a crash on purpose")
+        state = loam_check.tick(daily=True if "--daily" in argv else None)
+    except Exception as exc:  # noqa: BLE001 -- the crash is said, not swallowed
+        try:
+            import loam_check  # noqa: PLC0415
+            state = loam_check.crashed(exc)
+            print(f"loam-check: crashed: {state['crashed']['error']}", file=sys.stderr)
+        except Exception as again:  # noqa: BLE001
+            print(f"loam-check: crashed, and could not write its state: {exc}; {again}",
+                  file=sys.stderr)
+        return 2
+    false = [f for f in state["facts"] if f["ok"] is not True]
+    for f in false:
+        word = "false" if f["ok"] is False else "unreadable"
+        print(f"loam-check: {word}: {f['id']}: {f['says']} -> {state['told'].get(f['id'])}")
+    print(f"loam-check: {len(state['facts']) - len(false)} of {len(state['facts'])} facts true")
+    return 0 if not false else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

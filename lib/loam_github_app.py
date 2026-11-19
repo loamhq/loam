@@ -1718,12 +1718,14 @@ def add_account(org: str | None = None, own_app: bool = False) -> dict:
     return {"step": "install", **start_install(None)}
 
 
-def nightly_warnings() -> list[str]:
-    """What the nightly check says in comms.md, or nothing. Two cases only:
+def nightly_warnings(view: dict | None = None) -> list[str]:
+    """What is wrong with the GitHub integration, or nothing. Two cases only:
     the refresh token is within fourteen days of its expiry, or GitHub says
     the installation is gone. Unregistered is silence: not connecting is a
-    choice, not a fault."""
-    view = check()
+    choice, not a fault. With no ``view`` it calls GitHub first (``check``);
+    the check on a clock (lib/loam_check.py) passes ``public_view()``, the
+    store as the last call left it, and calls nothing."""
+    view = check() if view is None else view
     out = []
     apps = ([(None, view)] if view["registered"] else []) + \
         [(own["org"], own) for own in view["org_apps"]]
@@ -1740,3 +1742,23 @@ def nightly_warnings() -> list[str]:
                        + (f"install the {org} app again" if org else
                           "reconnect GitHub from the app"))
     return out
+
+
+def daily_check(today: str | None = None) -> list[str] | None:
+    """The day's one call to GitHub, from the nightly housekeeping
+    (``github-app check``, loam-tmp-sweep.service; until 2026-11-19 a step
+    of drift-watch's lane checks). It is work, not watching: the call
+    refreshes the user token when it is due, which is what keeps the
+    six-month refresh token rolling while nobody touches GitHub, and records
+    the outcome as health, which the check on a clock reads. Once a date
+    (``CHECKED_PATH``); None when it already ran today, else the warnings."""
+    from datetime import date  # noqa: PLC0415
+    today = today or date.today().isoformat()
+    try:
+        if CHECKED_PATH.read_text(encoding="utf-8").strip() == today:
+            return None
+    except OSError:
+        pass
+    STORE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    CHECKED_PATH.write_text(today + "\n", encoding="utf-8")
+    return nightly_warnings()

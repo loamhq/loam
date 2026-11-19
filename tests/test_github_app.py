@@ -59,12 +59,6 @@ spec = importlib.util.spec_from_loader(loader.name, loader)
 broker_mod = importlib.util.module_from_spec(spec)
 loader.exec_module(broker_mod)
 
-pf_loader = importlib.machinery.SourceFileLoader(
-    "lane_check_github", str(AGENTS / "bin" / "lane-check"))
-pf_spec = importlib.util.spec_from_loader(pf_loader.name, pf_loader)
-preflight = importlib.util.module_from_spec(pf_spec)
-pf_loader.exec_module(preflight)
-
 results: list[bool] = []
 SHAPES: dict[str, dict] = {}
 
@@ -511,32 +505,31 @@ async def main(root: Path, fake_url: str) -> None:
     data["user"]["refresh_expires_at"] = iso(time.time() + 5 * 86400)
     data["user"]["token_expires_at"] = iso(time.time() + 6 * 3600)  # no refresh due
     gh.save(data)
-    wrote = preflight.github_check(vault, today="2026-10-01")
-    attention = Path(os.environ["LOAM_ATTENTION_DIR"])
+    wrote = gh.daily_check(today="2026-10-01")
+    import loam_check  # noqa: PLC0415 -- the check on a clock reads the store
 
     def told() -> str:
-        """What the system persona was told (lib/loam_attention.py)."""
-        return "\n".join(json.loads(p.read_text())["fact"]
-                         for p in sorted(attention.glob("2*.json")))
+        """What the check on a clock holds false, read from the store
+        without calling GitHub (lib/loam_check.py)."""
+        return "\n".join(f["says"] for f in loam_check.github() if f["ok"] is False)
     comms = told()
     check("test_nightly_refresh_near_expiry: one warning",
           len(wrote), 1)
-    check("...a fact for the system persona, nothing on the board",
+    check("...a false fact for the check, nothing on the board",
           "the GitHub authorization expires in" in comms
-          and not (vault / "00_INBOX" / "from-agents" / "comms.md").exists(),
-          True)
-    check("...once a night: the next preflight of the date does nothing",
-          preflight.github_check(vault, today="2026-10-01"), [])
+          and not (vault / "00_INBOX" / "from-agents" / "comms.md").exists(), True)
+    check("...once a day: the next call of the date does nothing",
+          gh.daily_check(today="2026-10-01"), None)
 
     # -- test_nightly_installation_gone -------------------------------------
     data = store()
     data["user"]["refresh_expires_at"] = iso(time.time() + 150 * 86400)
     gh.save(data)
     Fake.installation_gone = True
-    wrote = preflight.github_check(vault, today="2026-10-02")
+    wrote = gh.daily_check(today="2026-10-02")
     check("test_nightly_installation_gone: one warning, the installation",
           [("installation is gone" in w) for w in wrote], [True])
-    check("...told", "installation is gone" in told(), True)
+    check("...a false fact for the check", "installation is gone" in told(), True)
     status, sick = await request(server, "GET", base)
     SHAPES["unhealthy"] = sick
     check("...and the page sees status unhealthy",
@@ -547,7 +540,7 @@ async def main(root: Path, fake_url: str) -> None:
 
     # -- test_nightly_silent_when_healthy -----------------------------------
     check("test_nightly_silent_when_healthy",
-          preflight.github_check(vault, today="2026-10-03"), [])
+          (gh.daily_check(today="2026-10-03"), told()), ([], ""))
 
     # -- test_accounts (2026-11-13): one account at a time -----------------
     original = store()

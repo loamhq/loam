@@ -148,7 +148,7 @@ def kick_all() -> dict:
     # (lib/loam_attention.py): the same drain hears both.
     try:
         import loam_attention  # noqa: PLC0415
-        if loam_attention.pending():
+        if loam_attention.waiting(loam_attention.pending()):
             who = loam_attention.persona()
             if who:
                 agents.add(who)

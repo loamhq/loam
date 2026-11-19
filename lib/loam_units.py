@@ -50,8 +50,8 @@ def render(text: str) -> str:
 
 
 def templates(root: Path | None = None) -> list[Path]:
-    """The user units this repository ships (not ``system/``). A `.path`
-    since 2026-11-14 (loam-claude-signin.path, bin/claude-signin)."""
+    """The user units this repository ships (not ``system/``): services,
+    timers, and any `.path` a release ships (none since 2026-11-19)."""
     base = root or TEMPLATES
     return sorted(p for p in base.iterdir()
                   if p.suffix in (".service", ".timer", ".path") and p.is_file())
@@ -131,7 +131,14 @@ RETIRED = ("loam-provider-follow.timer", "loam-provider-follow.service",
            # a script that is gone, and each agent's server would keep
            # running with no one to talk to (found walking 0.2.0 -> 0.2.12).
            # A pattern is matched with fnmatch.
-           "loam-recycle-rc.timer", "loam-recycle-rc.service", "loam-rc-*.service")
+           "loam-recycle-rc.timer", "loam-recycle-rc.service", "loam-rc-*.service",
+           # The separate watchers, replaced 2026-11-19 by the one check on
+           # a clock (loam-check.timer, lib/loam_check.py, batch B step 6):
+           # drift-watch, check-memory and the sign-in watch, whose login
+           # reading is now the check's login fact.
+           "loam-check-drift.timer", "loam-check-drift.service",
+           "loam-check-memory.timer", "loam-check-memory.service",
+           "loam-claude-signin.path", "loam-claude-signin.service")
 
 
 def retire(unit_dir: Path | None = None, dry: bool = False,

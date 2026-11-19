@@ -1208,8 +1208,8 @@ def report_readiness(name: str, workspace: Path) -> None:
                              and writes the reason to the vault inbox.
 
     So the honest report is not "it cannot act" but "you will not be able to
-    tell from talking to it." bin/lane-check is the instrument -- it runs
-    every night from bin/drift-watch and reports these to the same inbox file --
+    tell from talking to it." bin/lane-check is the instrument -- it is read
+    every day by bin/loam-check, which tells what it finds --
     and this notice exists so nobody waits for it on the first day.
 
     The layer files are still deliberately NOT created here. `_always.md` is

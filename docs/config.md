@@ -170,7 +170,7 @@ is what the installer runs.
   entry under its tree of a kind not known on 2026-11-16
   (`AGY_KNOWN`), which is what a store of its own would look like.
   Those files are cleared after a week by `bin/clear-agy-files`, which
-  the nightly drift-watch runs (`lib/loam_agy_files.py`): an engineer job's or reviewer run's a week
+  the nightly housekeeping runs (`lib/loam_agy_files.py`): an engineer job's or reviewer run's a week
   after its last job, and every other conversation, a persona's included,
   once nothing has touched it for a week (2026-11-16). A thread whose
   member's conversation was cleared starts that member on a fresh session,

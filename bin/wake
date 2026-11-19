@@ -1129,7 +1129,7 @@ def results_main(project: Path) -> int:
     # heard by whichever persona is the system persona now, all pending in
     # one run.
     import loam_attention  # noqa: PLC0415
-    if loam_attention.persona() == agent and loam_attention.pending():
+    if loam_attention.persona() == agent and loam_attention.waiting(loam_attention.pending()):
         deliver_attention(project, agent, vault)
     return 0
 
@@ -1155,7 +1155,7 @@ def deliver_attention(project: Path, agent: str, vault: Path) -> str:
                     f"the system ended without its record; they are not handed "
                     f"over again: " + "; ".join(r["fact"][:120] for r in dead)))
                 la.done(dead)
-            records = [r for r in records if not r.get("given")]
+            records = la.due(records)
             if not records:
                 return "none"
             mark_running(agent, started, vault, lane)
@@ -1198,7 +1198,7 @@ def deliver_attention(project: Path, agent: str, vault: Path) -> str:
                     record_failure(agent, vault, (
                         f"{lane}: the run handing over {len(records)} fact(s) about "
                         f"the system failed ({str(extra.get('error') or '')[:300]}); "
-                        f"they are not handed over again: "
+                        f"they stay pending and are handed over again later: "
                         + "; ".join(r["fact"][:120] for r in records)))
                 log_line(agent, row)
                 loam_schedule.log({"kind": "fire", "agent": agent,
@@ -1207,7 +1207,13 @@ def deliver_attention(project: Path, agent: str, vault: Path) -> str:
                                    "finished": finished,
                                    "facts": len(records),
                                    "stage": None if ok else "invoke"})
-                la.done(records)
+                # A failed run told nobody: its facts go back to pending
+                # (lib/loam_attention.py, ``failed``), and only a run that
+                # succeeded removes them.
+                if ok:
+                    la.done(records)
+                else:
+                    la.failed(records)
                 print(reply)
                 return "ran" if ok else "failed"
             finally:

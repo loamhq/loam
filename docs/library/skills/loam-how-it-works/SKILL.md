@@ -68,6 +68,23 @@ a run of its own, told once. That agent decides what to do: it can brief
 the engineer, and it tells the owner in General, in its own words, only if
 they need to know. The failure log and Activity keep the quiet record.
 
+**How Loam watches itself.** One check runs every fifteen minutes, and it is
+the only thing in Loam that watches Loam on a clock. It reads a fixed list
+of facts: every agent that is not archived finished its daily reflection in
+the last 26 hours; the session host answers; no provider login an agent runs
+on is gone or within three days of expiring; an agent is awake to hear; no
+memory pressure; the memory history is still written; every disk Loam
+writes to has room; no unit of Loam's own machinery (the sweeps, the off-box
+backup, the host's history) has failed; GitHub's authorization is not about
+to lapse. Once a day, at 01:40, it also runs the drift check and each
+agent's file check. When every fact is true it writes one file and does
+nothing else: no run, no cost. A fact that is false, or that cannot be read,
+goes to the agent that hears when Loam needs attention, told once like any
+other problem. If a run handed facts fails, they are handed over again
+later, never dropped. The file (`check.json` in Loam's state, `bin/loam-check
+--status`) says each fact with where to look, whether agents can run and
+why not, and if the check itself crashed.
+
 **The vault** is the owner's notes and the record, plain Markdown. Its
 `README.md` says what each folder is for. `About me.md`, at its top, is what
 the owner's agents know about them: the agents add to it, and it is the

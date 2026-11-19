@@ -21,8 +21,8 @@ usage: logs                          the list of names, and where each lives
   transcripts          the transcript writer's own log
   memory               the box's memory and disk history, one JSON line per
                        5-minute sample (bin/memsample)
-  memory-check         the daily check-memory reports
-  drift-check          the nightly check-drift runs (bin/drift-watch)
+  drift-check          the daily check-drift runs (bin/loam-check)
+  check                the one check on a clock: its state file now
   authelia | browser   the login's and the persona browser's containers
 
 Every command it runs is printed first, on stderr, so the command is the thing
@@ -111,8 +111,11 @@ def command(name: str, arg: str | None, n: int, follow: bool) -> list[str]:
         return tail(LOGS / "transcript-capture.log", n, follow)
     if name == "memory":
         return tail(LOGS / "memsample.jsonl", n, follow)
-    if name == "memory-check":
-        return tail(LOGS / "memory-check.log", n, follow)
+    if name == "check":
+        import loam_check  # noqa: PLC0415
+        print(f"$ cat {loam_check.STATE_FILE}", file=sys.stderr)
+        print(loam_check.STATE_FILE.read_text(encoding="utf-8"), end="")
+        return 0
     if name == "drift-check":
         return tail(LOGS / "drift-check.log", n, follow)
     if name in ("authelia", "browser"):
