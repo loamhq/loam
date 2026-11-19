@@ -6,10 +6,13 @@ Loam is developed in this repository. There are two ways a change reaches
 ## The maintainers' install pushes to `main`
 
 Loam is built with Loam: the maintainers run it, and its platform engineer
-develops it. Each of that engineer's jobs lands on the install's own
-checkout (tests run on the branch and on the merge; see
-`lib/loam_worktree.py`), and the landing pushes `main` here. Those commits
-carry the engineer's own identity, never a person's.
+develops it. Each job tests the proposed merge in its own clone. For a
+fast-forward, the job branch tip itself is the candidate. The landing
+checks both tips under the project lock before advancing `main` and pushing.
+If either tip moves during testing, it builds and tests a fresh candidate.
+Repeated races move testing under the lock so a busy project can still land.
+Commits made in the job during a test stay on its branch for the next landing.
+Maintainer commits use the platform engineer's repository identity.
 
 Before any push to this repository, the landing's push gate checks every
 commit the repository does not have yet: it must carry that identity, and

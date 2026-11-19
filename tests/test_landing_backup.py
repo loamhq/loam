@@ -1,19 +1,4 @@
-"""A canonical checkout's off-box copy, the `backup` remote (since 2026-11-16).
-
-A checkout whose code lives nowhere else (the first install's own, which has
-no `origin`) names an off-box copy `backup`, mapped to a branch of its choice
-by `remote.backup.push`. Every landing pushes `main` there; a release tag and
-the update path still read only `origin`; the recovery sweep pushes again
-only when `main` has moved past the last backup push.
-
-Asserted against real git repositories in a temp directory: a bare `backup`
-holding unrelated history on its own `main`, a canonical checkout with no
-`origin`, job trees made by lib/loam_worktree.py as bin/engineer-job makes
-them. Every check reads what is observable: the branches on the bare remote,
-the receipt's words, the sweep's report.
-
-Run: python3 tests/test_landing_backup.py
-"""
+"""Verify backup refspecs, pending retries and independence from the release remote."""
 
 import importlib.machinery
 import importlib.util

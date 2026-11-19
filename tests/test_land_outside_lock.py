@@ -1,27 +1,4 @@
-"""A landing tests the merged tree outside the live lock (since 2026-11-16).
-
-Against real git repositories in a temp directory, made the way
-tests/test_worktree.py makes them, and real landings (lib/loam_worktree.land).
-Every check reads what happened: where `main` points here and on the remote,
-which commit each test run saw, who held the live lock while it ran, and the
-landing's own telemetry.
-
-  moved      `main` moves while the branch's merge is being tested -- another
-             job lands in the gap, through its own landing -- so the first
-             tested merge is stale. The landing lets go of the lock, merges
-             again on the new `main`, tests again, and lands exactly the
-             commit it tested last. `retests` is 1.
-  starved    `main` moves under every attempt. After OUTSIDE_TRIES lost
-             races the landing tests under the lock, which another process
-             then cannot take, and lands. Nothing it did not test is pushed.
-  pair       two landings, two processes, started together, each with a
-             suite that takes SLOW seconds. Neither waits for the other's
-             suite: both test at once, and the lock is waited on for the
-             other's final step only, not its run.
-  telemetry  the receipt's cell names the new phases.
-
-Run: python3 tests/test_land_outside_lock.py
-"""
+"""Race landings against real Git refs and verify that only the tested commit reaches the remote."""
 
 import json
 import os

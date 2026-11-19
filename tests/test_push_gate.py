@@ -1,44 +1,4 @@
-"""The gate in front of `origin`, and a landing after `main` was rewritten
-(since 2026-11-16; lib/loam_worktree.py `push_gate`, `push_origin`,
-`replay_if_rewritten`).
-
-Asserted against real git repositories in a temp directory: a bare `origin`,
-a canonical checkout, job trees made by lib/loam_worktree.py as
-bin/engineer-job makes them. Every check reads what is observable: where
-`main` is on origin, what the landing's result and receipt say, which
-identities the landed commits carry.
-
-  - with no `loam.pushGate`, a landing pushes as it always has, whoever the
-    commits are by (a project's own repository has no gate);
-  - with the gate on, a commit made by hand under another identity is held,
-    `main` still lands here, and the receipt says why; once origin has it no
-    longer matters;
-  - a job tree from before the checkout's identity was set lands its commits
-    re-authored as the checkout's identity (same tree and dates), and a
-    commit a landing already put on `main` that way is re-authored by the
-    next push, but only when nothing but landings moved `main`;
-  - a deny-list match in an added line or a path is refused at the landing
-    (reason `gate`), before `main` has it, until the branch's own commits
-    are rewritten; one in a commit's message only lands the change as one
-    commit under the landing's message, so the word never reaches `main`; a commit already on `main` holds the push,
-    not the next landing; a brief's title that matches is left out of the
-    merge message; an `allow` line lets one file's match through; a missing
-    list holds all;
-  - a job begun before `main` was rewritten lands only its own commits,
-    replayed onto the new `main` as the checkout's identity, and none of
-    the old history comes back;
-  - a job branch that took `main`'s commits (by mid-job landings) before
-    `main` was rewritten lands only its own work, read from the reflog of
-    `main` and not the record's base: once when the rewrite came after the
-    base, once in the 2026-11-16 sequence (the base itself rewritten, a
-    replay, more mid-job landings, a second rewrite);
-  - the replay skips a commit whose change main already has (a mid-job
-    landing then rewritten, the record's base deciding; or the same patch
-    landed by another job), and the dry check (`replay_plan`) names
-    exactly what the landing then does.
-
-Run: python3 tests/test_push_gate.py
-"""
+"""Check outgoing identities and private names, plus job replay after a rewrite of main."""
 
 import os
 import shutil
@@ -180,9 +140,7 @@ try:
            git(proj.root, "rev-parse", "main") != first, "made again" in text),
           (True, True, True, True))
 
-    # A commit a landing already put on main under another identity (the
-    # 2026-11-16 case: landed by a tree from before the gate, then held): the
-    # next push re-authors it, because only landings moved main since origin.
+    # Only landing fast-forwards make an unpublished main eligible for re-authoring.
     tree = root / "pre-gate-tree"
     subprocess.run(["git", "clone", "-q", str(proj.root), str(tree)], check=True)
     (tree / "held.txt").write_text("held\n")
@@ -280,8 +238,7 @@ try:
     r = start(proj, "20261116-100000-00000008")
     commit(r, "e.txt", "e\n", msg="mention Secretname in the message")
     result, text = land(proj, r)
-    # Since 2026-11-19 a message is not the work: the change lands as one
-    # commit under the landing's own message (tests/test_memory_note.py).
+    # A denied commit message can be replaced while preserving the work.
     check("landing gate: a denied word in a message never reaches main or origin",
           (result["state"], "its message names 'Secretname'" in text,
            "Secretname" in git(proj.root, "log", "--format=%B", "main")),
@@ -324,10 +281,7 @@ try:
     check("rewritten: main is one commit past the rewrite (a fast-forward)",
           git(proj.root, "rev-list", "--count", f"{rewritten}..main"), "1")
 
-    # -- A job branch that predates a rewrite of main (the 2026-11-16 case).
-    # The record is read from disk before each landing, as bin/engineer-job
-    # does (`--land` is a process of its own), never the dict a landing
-    # changed in memory.
+    # Reload the job record for each landing, as separate launcher processes do.
     def land_from_disk(project, record, keep_tree=False):
         fresh = wt.read_record(project.jobs / record["job"])
         return wt.land(project, fresh, f"Land {record['branch']}",
@@ -426,12 +380,7 @@ try:
         return {k: [git(tree, "log", "-1", "--format=%s", c) for c in plan[k]]
                 for k in ("commits", "skipped")} if plan else None
 
-    # (c) The 2026-11-16 landing that stuck: a job lands mid-job, main is
-    # rewritten (the job's landed commit with it), the job commits again,
-    # and the final landing replays from the record's base -- here because
-    # the reflog of main is gone. The landed commit's change is already on
-    # main as its rewritten twin; replaying it comes out empty, and the
-    # replay must skip it, not stop.
+    # A missing reflog leaves the recorded base as the fallback for replay.
     proj, origin = make("stuck")
     git(proj.root, "config", "loam.pushGate", "true")
     (proj.root / "b.txt").write_text("b\n")
@@ -484,9 +433,7 @@ try:
     check("same patch (d): main's own commits are untouched (a fast-forward)",
           (in_main(proj, rewritten), origin_main(origin) == git(proj.root, "rev-parse", "main")),
           (True, True))
-    # A binary file in a commit (2026-11-16: the sign-in page's fonts). The
-    # gate reads diffs with --text, and the bytes are not UTF-8: it read them
-    # as a crash before; now they are U+FFFD and the gate goes on.
+    # Invalid UTF-8 in a forced text diff must not break scanning.
     bin_repo = root / "binary"
     git(root, "init", "-q", "-b", "main", str(bin_repo))
     (bin_repo / "font.woff2").write_bytes(b"wOF2\x00\x01\x98\xff\xfe" * 300)

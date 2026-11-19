@@ -1,17 +1,4 @@
-"""A landed job can cut a release (since 2026-10-02).
-
-A job writes a tag into `release-tag` in its job directory; the landing
-(lib/loam_worktree.py `land(..., release=)`) tags the commit it landed and
-pushes the tag, only after the merge, the tests and the push of `main`. The
-tag must equal the landed tree's version in manifest.json / package.json.
-
-Asserted against real git repositories in a temp directory -- a bare
-`origin`, a canonical clone, job trees made by lib/loam_worktree.py as
-bin/engineer-job makes them -- and every check reads what is observable: the
-tags on origin, where `main` points there, and the words of the receipt.
-
-Run: python3 tests/test_release_tag.py
-"""
+"""Tag only the tested, pushed commit whose version matches the release request."""
 
 import json
 import os

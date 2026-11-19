@@ -1,28 +1,4 @@
-"""A job sees every branch on GitHub as it starts (since 2026-10-13), on a
-project whose record sets `mirror_refresh` -- `acme` and `acme-foundation`.
-
-Asserted against real git repositories in a temp directory: a bare
-repository standing in for GitHub, a canonical checkout cloned from it -- the
-project's mirror -- and a branch pushed to the bare repository AFTER that
-clone, the way a teammate's blueprint branch reached GitHub on 2026-10-09 while
-acme's mirror held only what it had fetched before. The job's tree is cut by
-lib/loam_worktree.setup, the call bin/engineer-job makes, and every check is
-read from inside the tree with git itself: the branch is listed, resolves to
-the pushed commit, and checks out with `--track`.
-
-Then the consequences around it: a tag pushed late arrives too; a branch
-deleted on GitHub is gone from the next job's view; a refresh that fails
-still makes the tree, and the receipt's `mirror` row says it failed and
-when the last one succeeded.
-
-And the control, which is what makes the first check mean anything: the same
-setup on a project without the key does not see the branch, keeps git's
-default view, fetches nothing from GitHub and has no `mirror` row. Run with
-`--without-refresh` and the main check itself runs with the refresh stubbed
-out and FAILS.
-
-Run: python3 tests/test_mirror_refresh.py
-"""
+"""Check upstream branch visibility, pruning and stale-mirror reporting through temporary Git remotes."""
 
 import shutil
 import subprocess

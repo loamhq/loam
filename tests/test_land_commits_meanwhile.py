@@ -1,23 +1,4 @@
-"""A commit made while a landing runs is kept (2026-11-19).
-
-A mid-job `--land` merges and tests in the job's own tree, for as long as
-the tests take, and the session goes on meanwhile. A commit it made then
-went onto the landing's detached HEAD and was left behind when the tree went
-back on its branch, so it never landed (2026-11-16 and 2026-11-17, recovered
-by hand both times). Real git repositories in a temp directory and real
-landings (lib/loam_worktree.land); the "session" is a commit made from
-inside the test run.
-
-  detached   main moved, so the landing tests a merge on a detached HEAD;
-             a commit is made there during the tests. It is on the branch
-             afterwards, and it lands too.
-  branch     a fast-forward, tested on the branch itself; a commit is made
-             during the tests. It lands (the landing tests again).
-  locked     the same under the lock (no outside tries): the commit is
-             carried onto what landed instead of stopping the landing.
-
-Run: python3 tests/test_land_commits_meanwhile.py
-"""
+"""Check that a commit made during testing stays on the job branch for the next landing."""
 
 import os
 import shutil
