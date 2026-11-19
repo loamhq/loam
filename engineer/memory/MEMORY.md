@@ -1651,3 +1651,10 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   (`_git_env` sets `GIT_CONFIG_GLOBAL=/dev/null`).
 - **The guard refuses the Write tool outside the reach** (job scratch in
   `/tmp` included); write scratch scripts with a shell heredoc.
+- **Two broker tests start the real broker against the box's own config**
+  (`test_broker_stop_streams.py`, `test_broker_shutdown_dump.py`: their
+  drivers load `bin/session-broker` and run `amain`, stubbing each start
+  task by name). A new start task that writes anything is run against the
+  live install by the landing's test run: on 11-18 the built-in take-over
+  removed the box's own Images copy mid-landing (restored from the plugins
+  folder's git within minutes). Stub every new start task in both drivers.
