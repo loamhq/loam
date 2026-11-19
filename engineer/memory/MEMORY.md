@@ -2585,3 +2585,43 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   up" (Comments' optional share-page link is blank by design); a
   `settings.entry` marked `setup: true` (Git backup's repositories) and the
   plugin's declared keys decide whether its page leads with its controls.
+
+## 2026-11-19 — one check on a clock (batch B step 6)
+
+- **`bin/loam-check` (lib/loam_check.py) on `loam-check.timer` (:10/15) is
+  the only thing that watches Loam on a clock.** It replaced drift-watch
+  (and its nightly lane checks), check-memory, the pressure tick's own
+  telling and the sign-in watch (`claude-signin.path`, whose only output,
+  `claude-signin.json`, nothing read). `loam_units.RETIRED` names their
+  units, so `gen-units` removes them from a box on update.
+- **Healthy is silent by construction:** `tell` is only called for a fact
+  whose `ok` is not True. The seam's once-per-key rule is the only rate
+  rule; a fact that stays false keeps its key's `last` fresh every tick, so
+  it is told once for the whole time it stays false.
+- **Daily facts** (check-drift, lane-check) run at the first tick at or
+  after 01:40 local of each date, or on the first run with no state; their
+  result rides in `check.json` → `daily.facts` until the next day. Running
+  check-drift every 15 minutes would tell transient mid-landing drift.
+- **Machinery units only:** the failed-units fact counts units this repo
+  ships (`systemd/`, `systemd/system/`) and `loam-plugin-*`. On 11-19 the
+  box held six failed transient one-offs (`loam-restart-after-0-2-5` …)
+  from earlier jobs' `systemd-run`; counting every `loam-*` would have told
+  the lead agent six stale facts on go-live.
+- **The check's tools are its own tree's** (`TREE`, not `lc.ROOT`): from a
+  job worktree `lc.ROOT` is the canonical checkout, whose old lane-check
+  had no `--json` (found by the first live reading: seven "could not read").
+- **Work that rode on drift-watch moved to the housekeeping unit**
+  (`loam-tmp-sweep.service`, extra `ExecStart=-` lines): `clear-agy-files`
+  and `github-app check` (the day's one GitHub call, which keeps the
+  six-month refresh token rolling). The check reads GitHub's store with
+  `nightly_warnings(public_view())` and calls nothing.
+- **A failed attention run no longer spends its facts:** `la.failed` puts
+  them back with `tries` and `retry_at` (15 min doubling, 6 h cap);
+  `la.waiting` is the drain's and the sweep's gate (due or dead-given).
+- **Scratch proof recipe:** load `tests/run-all` as a module for
+  `fixture_config`, then DELETE every `loam*` entry from `sys.modules`
+  before importing with the scratch `LOAM_CONFIG` — run-all imports
+  `loam_config` with the box's config, and without the purge `lc.STATE` is
+  the box's (an assert caught it). Rename the starter `iris` to `probe`:
+  `loam-results-<agent>` is the unit name, and a scratch `iris` would
+  collide with the box's real drain.

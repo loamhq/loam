@@ -4,11 +4,12 @@ Every install needs it, so it is core (2026-11-14, first release L5; until
 then it lived inside the module that resizes this box, which is a plugin of
 the owner's now). RAM in use at or above ``PRESSURE_PCT`` for
 ``SUSTAIN_MIN`` consecutive minutes, or swap nearly gone, is an episode. Its
-start hands the system persona one fact naming the pressure and the
-heaviest units (lib/loam_attention.py; nothing is posted since 2026-11-19,
-and an episode within three days of the last is the same fact); its end is
-recorded and tells nobody. The live reading is
-``<state>/pressure.json``; a plugin that can add capacity reads it there, and
+start and end are recorded (``logs/pressure.jsonl``) and the live reading is
+``<state>/pressure.json``, with the episode's sentence and the heaviest units
+in ``episode_says``. This module tells nobody since 2026-11-19: it is a
+sampler, and the one check on a clock (lib/loam_check.py) reads the episode
+from that file as one of its facts and hands it to the agent that hears when
+Loam needs attention. A plugin that can add capacity reads the same file, and
 says how to pull its lever in its own words to the agents.
 
 Why 85% for 3 minutes, measured on logs/memsample.jsonl 2026-10-13..11-06
@@ -16,7 +17,7 @@ Why 85% for 3 minutes, measured on logs/memsample.jsonl 2026-10-13..11-06
 90%, and at or above 85% for two samples running (10 minutes) never once. So
 the line does not fire on an ordinary heavy day, and when it fires it is new.
 Swap below 15% free was the common term in all four global kills
-(bin/check-memory); swap reached 77 MB free on 10-27 with RAM at 75%, which
+(the retired bin/check-memory); swap reached 77 MB free on 10-27 with RAM at 75%, which
 the RAM line alone would have missed.
 """
 
@@ -31,8 +32,6 @@ import loam_config as lc
 
 PRESSURE = lc.STATE / "pressure.json"
 EVENTS = lc.LOGS / "pressure.jsonl"
-POSTER = "loam"
-LINK = "`<state>/pressure.json` (bin/pressure)"
 PRESSURE_PCT = 85
 SWAP_FREE_PCT = 15
 SUSTAIN_MIN = 3
@@ -128,10 +127,11 @@ def tick() -> dict:
         heavy = heavy_units()
         if heavy:
             post += ". Heaviest now: " + ", ".join(heavy)
-        import loam_attention  # noqa: PLC0415
-        loam_attention.tell(post, by=POSTER, key="memory pressure", evidence=LINK)
+        state["episode_says"] = post
         event("pressure", **r)
-    elif prev.get("episode_since") and not state.get("episode_since"):
+    elif state.get("episode_since"):
+        state["episode_says"] = prev.get("episode_says")
+    elif prev.get("episode_since"):
         event("pressure-end", since=prev["episode_since"])
     _write(PRESSURE, state)
     return state

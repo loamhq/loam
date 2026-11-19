@@ -2,10 +2,11 @@
 """Antigravity's per-conversation files, cleared after a week.
 
 What is cleared and when is lib/loam_agy_files.py's docstring. The nightly
-drift-watch (loam-check-drift.timer, 01:40) runs this after its checks;
-until 2026-11-19 it was the last step of the retired provider follower.
+housekeeping (loam-tmp-sweep.service, 00:27 Pacific) runs this after the
+/tmp sweep; until 2026-11-19 it was a step of drift-watch and before that the
+last step of the retired provider follower.
 Each conversation cleared is one line in logs/agy-files.jsonl and in the
-journal; a failure is retried the next night, never said in comms.
+journal; a failure is retried the next night, never told anyone.
 
 Usage: clear-agy-files [--dry-run]     exit 1 when a clearing failed
 """

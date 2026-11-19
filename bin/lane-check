@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """Report what is wrong with an agent's auto-loaded files. Never refuse.
 
-Run once a night for every persona by ``bin/drift-watch`` (01:40, before the
-wake grid opens). Until 2026-11-19 this was ``bin/rc-preflight``, the
-``ExecStartPre=`` of each Remote Control server, and fired at the 01:30
-recycle; Remote Control was retired that day (the owner: "I don't use it
-through app anymore") and the checks, which are about the files every lane
-loads and not about Remote Control, kept their nightly run here.
+Read once a day for every persona by the one check on a clock
+(``bin/loam-check``, lib/loam_check.py, since 2026-11-19), which runs
+``lane-check --json`` and makes each problem one of its facts. Until
+2026-11-19 this was first ``bin/rc-preflight`` (the ``ExecStartPre=`` of each
+Remote Control server) and then a step of ``bin/drift-watch``; both are gone.
 
-**It exits 0 whatever it finds.** It is a report, not a gate: the layer that
-refuses should be the one that can also repair, and this one cannot. So it
-writes its line in the failure log, hands the finding to the system persona
-as a fact once (lib/loam_attention.py; nothing is posted, 2026-11-19), and
-gets out of the way.
+**It reports and does nothing else.** It writes no log line and tells nobody:
+what it finds is printed (``--json`` for the check), and the check is what
+hands a problem to the agent that hears when Loam needs attention. It exits 0
+whatever it finds, 2 only when it could not read the agent at all.
 
 For an agent with a map (2026-11-18, lib/loam_loading.py) it sizes the map
 and nothing else: the map loads as a CLAUDE.md import, with no style to lose.
@@ -33,16 +31,15 @@ at runtime:
 And one thing it warns about without calling it wrong (since 2026-09-07):
 
   near the limit     either file past ``NEAR_LIMIT_CHARS`` but not over the
-                     limit. One line in the log, once a night, no comms line.
-                     The file that grows on every wake is told while there is
-                     still room to act.
+                     limit: printed as a warning, never a fact. A file at
+                     9,900 is not a broken layer and must not read as one.
 
 This is the second instrument D4's 08-31 amendment asks for: the end-marker
 convention is a check the artifact performs on itself by being read, so it is
 structurally blind to the artifact being ABSENT. This one runs from outside
 the session and sees absence, which is the worse of the two failures.
 
-Usage: lane-check <agent-project-dir>
+Usage: lane-check [--json] <agent-project-dir>
 """
 
 from __future__ import annotations
@@ -58,8 +55,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
 
 import loam_session as sess  # noqa: E402
-import loam_attention  # noqa: E402
-from loam_inbox import record_fault, record_notice  # noqa: E402
 from loam_memory import (  # noqa: E402
     CONVERSATION_LAYER,
     LIMIT_CHARS,
@@ -79,10 +74,10 @@ CHECKED = (ALWAYS_LAYER, CONVERSATION_LAYER)
 def findings(workspace: Path) -> tuple[list[str], list[tuple[str, str]]]:
     """``(problems, warnings)``.
 
-    A problem is something the session will silently run without; it goes
-    to the log AND to the system persona. A warning is ``(key, text)`` for a file that is
-    within reach of the limit but not over it (since 2026-09-07); it goes to
-    the log alone, once a night, and the key is what makes a repeat a repeat.
+    A problem is something the session will silently run without; the
+    daily check makes it a fact. A warning is ``(key, text)`` for a file
+    that is within reach of the limit but not over it (since 2026-09-07);
+    it is printed and is never a fact.
     """
     out: list[str] = []
     warnings: list[tuple[str, str]] = []
@@ -272,109 +267,48 @@ def remember(lane: str, memory: dict) -> None:
               file=sys.stderr)
 
 
-def origin(cgroup: str | None = None) -> str:
-    """What ran this check, as the failure log's prefix: "Nightly lane
-    check" when drift-watch's unit ran it, else who did. The cgroup is
-    read rather than a flag passed (named 2026-09-30, when a line that
-    claimed the wrong origin sent a reader looking for a run that never
-    happened)."""
-    if cgroup is None:
-        try:
-            cgroup = Path("/proc/self/cgroup").read_text(encoding="utf-8")
-        except OSError:
-            cgroup = ""
-    unit = cgroup.strip().rsplit("/", 1)[-1] if cgroup.strip() else ""
-    if unit == NIGHTLY_UNIT:
-        return "Nightly lane check"
-    if unit.endswith(".service"):
-        return f"lane-check run from {unit.removesuffix('.service')}"
-    return "lane-check run by hand"
-
-
-NIGHTLY_UNIT = "loam-check-drift.service"
-GITHUB_LINK = "the app's Integrations screen, GitHub"
-
-
-def github_check(vault: Path, today: str | None = None) -> list[str]:
-    """The GitHub integration's nightly check (2026-09-30), once a night.
-
-    drift-watch runs this for every persona each night, so the first one
-    of the date calls GitHub and writes the date to ``CHECKED_PATH``; the
-    others read the date and return. The check itself is
-    ``loam_github_app.nightly_warnings``: the installation and the user token
-    each get one call (refreshing the user token if it is due, which is what
-    keeps the six-month refresh token rolling while nobody touches GitHub),
-    and a warning is one fact for the system persona -- the refresh token within
-    fourteen days of its expiry, or the installation gone. Not connected is
-    silence. Returns what was written, for the tests and the log."""
-    import loam_github_app as github  # noqa: PLC0415
-    from datetime import date  # noqa: PLC0415
-    today = today or date.today().isoformat()
-    try:
-        if github.CHECKED_PATH.read_text(encoding="utf-8").strip() == today:
-            return []
-    except OSError:
-        pass
-    try:
-        github.STORE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-        github.CHECKED_PATH.write_text(today + "\n", encoding="utf-8")
-        warnings = github.nightly_warnings()
-    except Exception as exc:  # noqa: BLE001 - this preflight never refuses
-        print(f"lane-check: github check could not run ({exc})", file=sys.stderr)
-        return []
-    for warning in warnings:
-        print(f"lane-check: github: {warning}", file=sys.stderr)
-        loam_attention.tell(warning, by="github", evidence=GITHUB_LINK)
-    return warnings
-
-
-def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: lane-check <agent-project-dir>", file=sys.stderr)
-        return 0
-
-    try:
-        project = Path(sys.argv[1]).resolve()
-        config = load_config(project)
-        agent = config["name"]
-        workspace = Path(config["workspace"])
-        vault = Path(config["vault"])
-        # The shape on disk, rendered before it is read (2026-11-18).
-        import loam_loading  # noqa: PLC0415
-        loam_loading.quiet_refresh(workspace)
-        problems, warnings = findings(workspace)
-        model = model_problem(workspace)
-        ran_as = origin()
-    except (LayerError, KeyError, OSError) as exc:
-        # A broken check is a line on stderr, which drift-watch keeps, and
-        # never a failure of the night's run.
-        print(f"lane-check: could not run ({exc})", file=sys.stderr)
-        return 0
-
-    github_check(vault)
-
-    # Warnings first and separately: the log line only, deduplicated per
-    # night inside record_notice, told to nobody. A file at 9,900 is not
-    # a broken layer and must not read as one.
-    for key, warning in warnings:
-        print(f"lane-check: {agent}: warning: {warning}", file=sys.stderr)
-        record_notice(agent, vault, f"{ran_as}: {warning}", key=key)
-
+def report(project: Path) -> dict:
+    """``{"agent", "problems", "warnings"}`` for one agent's project folder.
+    A model finding is remembered as reported (``remember``) once it is in
+    a report. Raises LayerError, KeyError or OSError when the agent cannot
+    be read."""
+    config = load_config(project)
+    agent = config["name"]
+    workspace = Path(config["workspace"])
+    # The shape on disk, rendered before it is read (2026-11-18).
+    import loam_loading  # noqa: PLC0415
+    loam_loading.quiet_refresh(workspace)
+    problems, warnings = findings(workspace)
+    model = model_problem(workspace)
     if model:
         problems.append(model[0])
         remember(workspace.name, model[1])
+    return {"agent": agent, "problems": problems,
+            "warnings": [text for _, text in warnings]}
 
-    if not problems:
-        print(f"lane-check: {sys.argv[1]} OK")
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    as_json = "--json" in argv
+    rest = [a for a in argv if a != "--json"]
+    if len(rest) != 1:
+        print("usage: lane-check [--json] <agent-project-dir>", file=sys.stderr)
+        return 2
+    try:
+        found = report(Path(rest[0]).resolve())
+    except (LayerError, KeyError, OSError) as exc:
+        print(f"lane-check: could not read {rest[0]} ({exc})", file=sys.stderr)
+        return 2
+    if as_json:
+        print(json.dumps(found))
         return 0
-
-    for problem in problems:
-        print(f"lane-check: {agent}: {problem}", file=sys.stderr)
-        # The log every night; the system persona once (2026-11-19,
-        # lib/loam_attention.py): a finding that persists for a week is one
-        # fact, keyed on the agent and the finding with its numbers out.
-        record_fault("lane-check", vault, f"{agent}: {ran_as}: {problem}",
-                     key=f"{agent}:{loam_attention.key_of(problem)}")
+    agent = found["agent"]
+    for warning in found["warnings"]:
+        print(f"lane-check: {agent}: warning: {warning}")
+    for problem in found["problems"]:
+        print(f"lane-check: {agent}: {problem}")
+    if not found["problems"]:
+        print(f"lane-check: {rest[0]} OK")
     return 0
 
 

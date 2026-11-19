@@ -8,7 +8,7 @@ keeps the session there; nothing on this box compared what a lane was
 configured for against what it actually ran.
 
 Two readers ask this question -- `bin/check-drift` by hand and
-`bin/lane-check` every night -- and both get it from
+`bin/lane-check` every day for the check on a clock -- and both get it from
 lib/loam_session.py, so what is proved here is proved for both.
 
 The two strictnesses are the point and each has a case below: a family
@@ -344,26 +344,16 @@ try:
     (lane / ".claude" / "output-styles").mkdir()
     (lane / ".claude" / "output-styles" / "conversation.md").symlink_to(
         "../../_active.md")
-    log = vault / "00_INBOX" / "from-agents" / "loam-wake-failures.md"
-    comms = vault / "00_INBOX" / "from-agents" / "comms.md"
-    attention = Path(os.environ.get("LOAM_ATTENTION_DIR") or tempfile.mkdtemp())
-    os.environ["LOAM_ATTENTION_DIR"] = str(attention)
-
-    def told() -> list[str]:
-        """What the system persona was told (lib/loam_attention.py)."""
-        return [l for p in sorted(attention.glob("2*.json"))
-                for l in [json.loads(p.read_text())["fact"]] if "EARLIER" in l]
+    reported: list[str] = []
 
     def start() -> None:
+        """One daily read by the check on a clock: ``lane-check --json``."""
         import io
         from contextlib import redirect_stderr, redirect_stdout
-        sys.argv = ["lane-check", str(lane_cfg)]
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            rcp.main()
-
-    def lines(path: Path) -> list[str]:
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        return [l for l in text.splitlines() if "EARLIER" in l]
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            rcp.main(["--json", str(lane_cfg)])
+        reported.extend(p for p in json.loads(out.getvalue())["problems"] if "EARLIER" in p)
 
     shutil.rmtree(rcp.MODEL_MEMORY, ignore_errors=True)
     # A refusal to Opus 4.8, and a last turn on Opus 5 nothing chose: the
@@ -381,29 +371,26 @@ try:
           "refusal" in text, False)
 
     start()
-    check("once: the first start reports it", len(lines(log)), 1)
-    check("once: and tells the system persona once", len(told()), 1)
-    check("once: and nothing on the board", comms.exists(), False)
+    check("once: the first read reports it", len(reported), 1)
     memory = json.loads((rcp.MODEL_MEMORY / "lane.json").read_text())
     check("once: the memory holds the session and its last turn",
           (memory["session"], memory["last"]), ("s.jsonl", "2026-09-25T19:00:00Z"))
     start()
-    check("once: the next start adds nothing to the log", len(lines(log)), 1)
-    check("once: nor tells it again", len(told()), 1)
+    check("once: the next read does not report it again", len(reported), 1)
     # The same session going on drifting is still the same session.
     with (ld / "s.jsonl").open("a") as fh:
         fh.write(assistant("claude-opus-5", "2026-09-26T09:00:00Z") + "\n")
     start()
     check("once: new turns in a reported session are not a new report",
-          len(lines(log)), 1)
+          len(reported), 1)
     # A different, newer drifted session IS new.
     (ld / "t.jsonl").write_text(
         assistant("claude-haiku-4-5-20251001", "2026-09-27T09:00:00Z") + "\n",
         encoding="utf-8")
     start()
-    check("once: a newer drifted session is reported", len(lines(log)), 2)
+    check("once: a newer drifted session is reported", len(reported), 2)
     check("once: naming its own model",
-          "claude-haiku-4-5-20251001" in lines(log)[-1], True)
+          "claude-haiku-4-5-20251001" in reported[-1], True)
     (ld / "t.jsonl").unlink()
 finally:
     loam_session.SESSIONS_DIR = saved

@@ -3699,17 +3699,19 @@ helper answers for the job's own repository and nothing else.
 
 **The store** is `state/github/integration.json`, mode 600, outside git and
 outside every container; `integration.lock` beside it serialises every
-read-modify-write across the broker, `bin/provision` and `bin/lane-check`,
+read-modify-write across the broker, `bin/provision` and `bin/github-app`,
 because a refresh token is single-use.
 
-**Nightly**: the first `bin/lane-check` of each date (run by `bin/drift-watch`
-at 01:40) calls
-`loam_github_app.nightly_warnings()` (`state/github/checked-on` holds the
-date) and tells the system persona once (lib/loam_attention.py; until
-2026-11-19 an Important line in `comms.md`) if the refresh token is
-within 14 days of expiry or GitHub says the installation is gone. That check
-also refreshes a stale user token, which is what keeps the six-month clock
-rolling on a box nobody touched.
+**Nightly**: the housekeeping (`loam-tmp-sweep.service`, 00:27 Pacific)
+runs `bin/github-app check`, the day's one call to GitHub
+(`loam_github_app.daily_check`; `state/github/checked-on` holds the date). It
+refreshes a stale user token, which is what keeps the six-month clock rolling
+on a box nobody touched, and records the outcome as health. The one check on
+a clock (lib/loam_check.py) reads the store every quarter hour without
+calling GitHub (`nightly_warnings(public_view())`) and tells the agent that
+hears when Loam needs attention, once, if the refresh token is within 14
+days of expiry or GitHub said the installation is gone. Until 2026-11-19 the
+call and the telling were a step of `bin/lane-check` under `bin/drift-watch`.
 
 Tests: `tests/test_github_app.py`, against a fake GitHub that verifies the
 JWT signature.
@@ -5455,11 +5457,7 @@ tokens (rotates at <m>); this turn starts a fresh one` and counted `rotated`
 on `GET /v1/threads/writer`. The old session is left to the idle reaper
 (`THREAD_IDLE_S`), like any idle thread session.
 
-**Measuring it**: `bin/thread-context-report <thread id> [--since <UTC>]`
-lists every turn of a thread from the broker's session logs -- the tokens
-the turn's first request held (`message_start` usage, the `context_used`
-sum), the CLI's own `ttft_ms` on it, whether it opened its session, and the
-prompt's size. Proved by `tests/test_thread_context.py`.
+**Measuring it**: each turn's first request is in the broker's session logs (its `message_start` usage, the `context_used` sum, and the CLI's `ttft_ms`). The one-off report that tabulated it, `bin/thread-context-report`, was retired on 2026-11-19 with the other one-off reports. Proved by `tests/test_thread_context.py`.
 
 ### Late replies, who is working, model, `@all` (2026-11-10)
 

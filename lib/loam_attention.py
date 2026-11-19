@@ -35,9 +35,18 @@ week after it stopped is told again.
 persona. The drain of whichever persona is the system persona when it runs
 takes it, so changing the setting moves what is still pending.
 
+**A run that failed did not tell** (2026-11-19, batch B step 6). When the
+run handed the facts fails (the account refusing it, the CLI erroring), the
+records stay pending and are handed over again by a later drain, after
+``RETRY_MIN`` minutes doubling each try up to ``RETRY_MAX_H`` hours
+(``failed``, ``due``). Only a run that succeeded removes them. A run that
+died after its input went in is the other case (``given``): it is not handed
+over twice.
+
 **When nobody can run** (the account refused, every persona archived), a
-fact waits here and its run fails into the failure log; batch B step 7 (a
-mark in the app) covers that case, not this file.
+fact waits here and its runs keep failing into the failure log at that
+pace; the check on a clock's state file says why agents cannot run
+(lib/loam_check.py), and batch B step 7 (a mark in the app) draws it.
 
 For a plugin: ``loam_attention.tell("what happened", by="<plugin id>")`` in
 Python with the runtime's ``lib/`` on the path, or ``loam tell "what
@@ -69,6 +78,8 @@ KEY_CHARS = 200
 # engineers' and the reviewer's.
 SETTING = "system"
 LANE = "attention"
+RETRY_MIN = 15
+RETRY_MAX_H = 6
 
 
 def now_iso() -> str:
@@ -246,6 +257,35 @@ def mark_given(records: list[dict]) -> None:
     for record in records:
         try:
             _write(STATE / f"{record['id']}.json", {**record, "given": stamp})
+        except (OSError, KeyError):
+            pass
+
+
+def due(records: list[dict], at: float | None = None) -> list[dict]:
+    """The records a drain hands over now: not given, and past any retry
+    time a failed run set."""
+    at = time.time() if at is None else at
+    return [r for r in records if not r.get("given")
+            and float(r.get("retry_at") or 0) <= at]
+
+
+def waiting(records: list[dict], at: float | None = None) -> list[dict]:
+    """The records a drain has work for now: due ones, and given ones (a
+    dead run's, which the drain logs and removes)."""
+    return [r for r in records if r.get("given")] + due(records, at)
+
+
+def failed(records: list[dict], at: float | None = None) -> None:
+    """The run they were handed failed: they were not heard. Each goes back
+    to pending, to be handed over again after its next retry time."""
+    at = time.time() if at is None else at
+    for record in records:
+        tries = int(record.get("tries") or 0) + 1
+        wait = min(RETRY_MAX_H * 3600, RETRY_MIN * 60 * 2 ** (tries - 1))
+        clean = {k: v for k, v in record.items() if k != "given"}
+        try:
+            _write(STATE / f"{record['id']}.json",
+                   {**clean, "tries": tries, "retry_at": at + wait})
         except (OSError, KeyError):
             pass
 

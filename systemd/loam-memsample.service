@@ -1,8 +1,8 @@
 [Unit]
 Description=Loam — one sample of the box's memory and disk history
 # bin/memsample holds the what and the why (and the rotation bound); this unit
-# only runs it. The history it appends to, logs/memsample.jsonl, is what the
-# daily check-memory reads for its 24 h peak and disk delta lines.
+# only runs it. The history it appends to, logs/memsample.jsonl, is data for
+# whoever asks; the one check on a clock holds only that it is being written.
 
 [Service]
 Type=oneshot

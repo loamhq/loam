@@ -2,9 +2,11 @@
 """The box's memory and disk history. Reads, never writes anything but its log.
 
 One sample per run, one JSON line per sample, appended to
-logs/memsample.jsonl. loam-memsample.timer runs it every 5 minutes; the
-daily bin/check-memory reads it back for the last 24 h peak per unit and the
-disk delta per mount (`history_report` there).
+logs/memsample.jsonl. loam-memsample.timer runs it every 5 minutes. It is
+data for whoever asks (`bin/logs memory`, an agent looking into memory); the
+daily check-memory that read it back was retired on 2026-11-19, and the one
+check on a clock (lib/loam_check.py) now holds only that it is still being
+written.
 
 Rewritten 2026-10-13. The first version (2026-09-02) was a one-night
 instrument run as a transient unit, and when its night ended nothing sampled
@@ -23,8 +25,8 @@ Every sample carries:
 
 and the first sample of each day at or after 01:45 also carries:
   holders `du` of the big holders named on 2026-10-06, MB. du walks the
-          tree, so once a day is enough; 01:45 puts it ten minutes before
-          check-memory, which then compares it with the day before's.
+          tree, so once a day is enough; 01:45 keeps it clear
+          of the wake grid.
 
 Why 5 minutes: a wake runs 10-20 minutes, so every wake lands in at least
 two samples, and the broker's climb toward its MemoryHigh is a trend over

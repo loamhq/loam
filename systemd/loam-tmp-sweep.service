@@ -1,5 +1,5 @@
 [Unit]
-Description=Loam — remove /tmp entries no live process holds, quiet for 2 days
+Description=Loam — the nightly housekeeping: /tmp, Antigravity's old files, the GitHub refresh
 # bin/sweep-tmp holds the what and the why. It is the backstop behind each
 # engineer job's own scratch (removed when the job ends): a unit killed before
 # its `finally`, a path typed by hand. Caused 2026-10-21, `/` full of ~30 GB
@@ -14,3 +14,14 @@ TimeoutStartSec=30min
 Nice=10
 IOSchedulingClass=idle
 ExecStart=/usr/bin/python3 -I -X pycache_prefix=@PYCACHE@ @ROOT@/bin/sweep-tmp
+# Work that was a step of drift-watch until 2026-11-19, when the one check on
+# a clock (bin/loam-check) replaced it: work is not watching, so it is done
+# here. Each is its own process; the leading `-` keeps one that fails from
+# stopping the next or marking the sweep failed, and each says what it did in
+# this unit's journal. clear-agy-files removes Antigravity's week-old
+# conversation files. `github-app check` is the day's one call to GitHub,
+# which refreshes the user token when it is due and so keeps the six-month
+# refresh token rolling while nobody touches GitHub; what it finds wrong is
+# read from its store by the check (lib/loam_check.py), not said here.
+ExecStart=-/usr/bin/python3 -X pycache_prefix=@PYCACHE@ @ROOT@/bin/clear-agy-files
+ExecStart=-/usr/bin/python3 -X pycache_prefix=@PYCACHE@ @ROOT@/bin/github-app check

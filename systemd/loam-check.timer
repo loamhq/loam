@@ -1,0 +1,15 @@
+[Unit]
+Description=Read Loam's facts every 15 minutes
+
+[Timer]
+# On :10, :25, :40 and :55, so the once-a-day facts (check-drift, the lane
+# checks) are read at 01:40 @ZONE_WORD@, twenty minutes before the first
+# wake, where drift-watch read them until 2026-11-19. Clear of the host
+# history (:04/15) and the minute sampler (:30 s).
+OnCalendar=*:10/15
+AccuracySec=1min
+Persistent=false
+Unit=loam-check.service
+
+[Install]
+WantedBy=timers.target
