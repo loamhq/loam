@@ -557,13 +557,17 @@ async function loadAgentAvailability(force = false) {
   if (authExpired() || availabilityReading || (!force && Date.now() < nextAvailabilityRead)) return
   availabilityReading = true
   nextAvailabilityRead = Date.now() + 15000
+  let notice = null
   try {
-    state.agentAvailability = await api('GET', '/agent-availability')
+    const status = await api('GET', '/agent-availability')
+    if (status?.agents_can_run === false) notice = status
   } catch {
     // The thread's reconnect feedback already covers a host that can't answer.
-    state.agentAvailability = null
   } finally {
     availabilityReading = false
+  }
+  if (JSON.stringify(notice) !== JSON.stringify(state.agentAvailability)) {
+    state.agentAvailability = notice
     schedule()
   }
 }
