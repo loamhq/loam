@@ -479,7 +479,7 @@ try:
     publish("1.0.9")
     done, ran, kept = fresh_install(with_a, "1.0.9", "light")
     check("install.sh: a lightweight tag stops before anything from it runs",
-          (done.returncode, ran, kept, "could not\nbe verified (it is not signed)"
+          (done.returncode, ran, kept, "could not be verified.\n  it is not signed."
            in done.stdout), (3, False, False, True))
     forge("1.0.8", genuine, c_evil)
     done, ran, kept = fresh_install(with_a, "1.0.8", "forged")

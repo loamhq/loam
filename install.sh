@@ -100,7 +100,7 @@ verify_release() {
   if [ -z "$principal" ]; then rm -rf "$tmp"; WHY="it is signed, but not by a Loam maintainer key"; return 1; fi
   if ! ssh-keygen -Y verify -f "$tmp/allowed" -I "$principal" -n git -s "$tmp/sig" \
        <"$tmp/payload" >>"$LOG" 2>&1; then
-    rm -rf "$tmp"; WHY="its signature does not match its contents (it was changed after it was signed)"; return 1
+    rm -rf "$tmp"; WHY="its signature does not match its contents, so it was changed after it was signed"; return 1
   fi
   rm -rf "$tmp"
   git -C "$dir" checkout --quiet --detach "$commit" 2>>"$LOG" || { WHY="its commit is missing"; return 1; }
@@ -109,10 +109,11 @@ verify_release() {
 
 refuse() {
   echo
-  say "The install stopped before anything ran: Loam $VERSION from $SOURCE could not"
-  say "be verified ($WHY). It may have been tampered with, so nothing from it was run"
-  say "and nothing on this server was changed. Do not work around this; tell Loam's"
-  say "makers what happened, and send them $LOG."
+  say "The install stopped: Loam $VERSION from $SOURCE could not be verified."
+  say "  $WHY."
+  say "It may have been tampered with, so nothing from it was run and the copy that"
+  say "was fetched has been removed. Do not work around this; tell Loam's makers"
+  say "what happened, and send them $LOG."
   exit 3
 }
 

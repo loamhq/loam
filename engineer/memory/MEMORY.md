@@ -1991,3 +1991,31 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   checkout, and Codex and Antigravity inline it from that import at each build,
   so landing is enough. `loam_codex.instructions(<workspace>)` is the quickest
   assembled-prompt proof, and it leaves the workspace as it found it.
+
+## 2026-11-19 — Signed releases (docs/signing.md)
+
+- **Releases are SSH-signed git tags**, checked with `ssh-keygen -Y
+  find-principals` then `-Y verify -n git` over the tag object cut at its
+  `-----BEGIN SSH SIGNATURE-----` line (what git signs). That needs git and
+  OpenSSH only, and agrees with `git verify-tag` (the test proves it). The
+  verifier also checks the tag object's own `tag` header, because a signed
+  object can be pushed under another release's ref.
+- **The trusted keys are HEAD's committed `keys/release-signers`**, never the
+  incoming tree's. The move goes to the verified object's commit, because a
+  page `check` during an apply force-fetches the tag ref again.
+- **No key ships yet.** With an empty file nothing is checked and every side
+  says so. Where the private key lives is the maintainers' call: the options
+  table is in docs/signing.md. Until a key is in the file, `cut_release`
+  tags lightweight as before.
+- **`install.sh` cannot import the verifier** (it lives in the unverified
+  clone), so it carries a shell copy and its own key block, which
+  `tests/test_signing.py` keeps equal to the file. Run install.sh in tests
+  with `unshare -r` (uid 0 without root) plus `LOAM_INSTALL_STATE` and
+  `LOAM_INSTALL_LOG`. To stop at the handover, put a `python3` shim first in
+  PATH that catches `*/bin/loam-install`.
+- **A tampered-but-signed tag for tests**: `git cat-file tag <signed> | sed
+  '1s/.*/object <other>/' | git hash-object -t tag -w --stdin`, then
+  `update-ref`. git accepts the object; the signature then fails.
+- **Installs use `--no-install-recommends`**, so git's recommended
+  openssh-client is not guaranteed. It is now in APT and in install.sh's
+  first needs. Any box reached over SSH has it anyway.
