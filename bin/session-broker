@@ -4230,11 +4230,6 @@ async def serve(addr: str, port: int) -> int:
     # (lib/loam_to_market.py). Off the loop, and fail-soft.
     asyncio.create_task(keep_moved_to_market())
     tcp = await asyncio.start_server(server.handle, addr, port)
-    print(f"session-broker listening on {addr}:{port} "
-          f"(admission by memory: reserve {cfg.MEMORY_RESERVE_MB} MB, "
-          f"{cfg.SESSION_START_MB} MB a start; backstop {cfg.MAX_SESSIONS} "
-          f"sessions)", file=sys.stderr, flush=True)
-
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     watch = ShutdownWatch(broker, loop)
@@ -4246,6 +4241,10 @@ async def serve(addr: str, port: int) -> int:
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, on_signal, sig)
+    print(f"session-broker listening on {addr}:{port} "
+          f"(admission by memory: reserve {cfg.MEMORY_RESERVE_MB} MB, "
+          f"{cfg.SESSION_START_MB} MB a start; backstop {cfg.MAX_SESSIONS} "
+          f"sessions)", file=sys.stderr, flush=True)
     async with tcp:
         await stop.wait()
     await shutdown(broker, server)

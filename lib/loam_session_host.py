@@ -246,6 +246,10 @@ class SessionHost:
             if owner != agent or (provider and provider != engine):
                 raise BrokerError(409, "session is starting for another agent or provider")
             return await asyncio.shield(task)
+        if session_id in self._starting:
+            # A fresh start has published its generated id but has not
+            # returned it to its caller yet. Only one launch can own it.
+            raise BrokerError(409, "the session is still starting")
         if session_id:
             try:
                 stored = json.loads((cfg.SESSION_DIR / f"{session_id}.json")
@@ -286,6 +290,11 @@ class SessionHost:
             finally:
                 self._starting.discard(sid)
                 self._opening.pop(sid, None)
+
+        if session_id is None:
+            # A first start has no caller-supplied key. Hand its result to
+            # the caller inline, before queued provider events are pumped.
+            return await open_session()
 
         # Register before yielding, including while making room. A lost
         # caller can rejoin the same launch without taking another seat.
