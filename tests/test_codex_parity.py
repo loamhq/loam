@@ -226,7 +226,9 @@ def main() -> int:
     # 1. Instruction sources.
     sources = codex.instruction_sources(ws)
     text = codex.instructions(ws)
-    names = [str(p.relative_to(ws)) for p in sources]
+    # A source outside the workspace (Loam's own persona text, under the
+    # runtime's docs/persona/ since cf8cc3c) is named by its full path.
+    names = [str(p.relative_to(ws)) if p.is_relative_to(ws) else str(p) for p in sources]
     check("Claude Code's sources: CLAUDE.md first, _active.md last",
           names[0] == "CLAUDE.md" and names[-1] == "_active.md", str(names))
     check("the provider line opens the Codex file",
