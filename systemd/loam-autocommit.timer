@@ -1,0 +1,10 @@
+[Unit]
+Description=Commit the vault, AI Spaces and the plugins every 15 minutes
+
+[Timer]
+OnCalendar=*:00/15:00
+Persistent=true
+Unit=loam-autocommit.service
+
+[Install]
+WantedBy=timers.target

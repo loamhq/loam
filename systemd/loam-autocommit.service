@@ -1,0 +1,12 @@
+[Unit]
+Description=Loam — commit the vault, AI Spaces and the plugins on this machine
+# The recovery floor (lib/loam_autocommit.py, docs/backup.md): each tree is
+# committed to its own repository here, and nothing is sent anywhere. A
+# tree a hand-made crontab line already commits is left to that line.
+
+[Service]
+Type=oneshot
+TimeoutStartSec=20min
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 -I -X pycache_prefix=@PYCACHE@ @ROOT@/bin/autocommit

@@ -641,7 +641,7 @@ def step_loam(a, ans: dict) -> None:
     as_user(cfg, ["mkdir", "-p", f"{cfg['home']}/.local/state/loam",
                   f"{cfg['home']}/.config/loam", f"{cfg['home']}/.local/bin"])
     if not (Path(cfg["plugins"]) / ".git").is_dir():
-        as_user(cfg, ["git", "-C", cfg["plugins"], "init", "--quiet"])
+        as_user(cfg, ["git", "-C", cfg["plugins"], "init", "--quiet", "-b", "main"])
     # uv, then the MCP servers' Python.
     if not Path(f"{cfg['home']}/.local/bin/uv").exists():
         as_user(cfg, ["sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | "
@@ -671,7 +671,9 @@ def step_vault(a, ans: dict) -> None:
     for key in ("vault", "workspaces"):
         where = cfg[key]
         if not Path(where, ".git").is_dir():
-            as_user(cfg, ["git", "-C", where, "init", "--quiet"])
+            # On `main` by name: git's own default is `master` on Debian's
+            # git, and the backup plugin restores from `main` (docs/backup.md).
+            as_user(cfg, ["git", "-C", where, "init", "--quiet", "-b", "main"])
             as_user(cfg, ["git", "-C", where, *ident, "add", "-A"])
             as_user(cfg, ["git", "-C", where, *ident, "commit", "--quiet", "--allow-empty",
                           "-m", "Loam: the starting point"])
