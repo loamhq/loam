@@ -153,6 +153,8 @@ def main() -> int:
     check("...holding one message, by Iris, the starter's text, marked preset",
           [(m["id"], m["author"], m["kind"], m.get("preset"), m["text"]) for m in msgs],
           [("m1", "iris", "message", True, st.read_hello()[1])])
+    check("...greeting the owner by the name from setup",
+          [m["text"].startswith("Hi Sam,") for m in msgs], [True])
     check("...and the record's own comment says so",
           '"preset": true' in path.read_text(), True)
     check("...in the vault's conversations folder", path.parent, lc.VAULT / "Conversations")

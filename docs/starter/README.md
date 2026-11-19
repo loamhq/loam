@@ -9,8 +9,8 @@ the map's shape (2026-11-18): soul, config and map load on every run, and no
 `_always.md`, `_active.md` or `_reflection.md` is made.
 
 The words are the owner's approved starter (2026-11-16), which replaced the
-placeholders of 2026-11-14; its source is the design note "Starter Iris: soul
-and hello". To change them, edit these files and nothing else:
+placeholders of 2026-11-14. The source is the design note "Starter Iris: soul
+and hello". The hello greeting and guidance were revised on 2026-11-19.
 
 | File | What it becomes |
 |---|---|
@@ -20,7 +20,7 @@ and hello". To change them, edit these files and nothing else:
 | `iris/map.md` | her `map.md`, the one file of her own that loads on every run: it points at the two below |
 | `iris/how-i-am-here.md` | how she is here, and the hello conversation's aims; her map tells her to read it before her first reply |
 | `iris/nights.md` | what she does with her nightly wake; her map tells her to read it when she wakes |
-| `hello.md` | the hello thread: its title (frontmatter) and the first message, written as Iris (the body) |
+| `hello.md` | the hello thread's title (frontmatter) and Iris's first message (the body), which greets the owner by name |
 
 In the text, `{owner}` is the owner's name and `@VAULT@`, `@WORKSPACES@` and
 `@SYSTEM@` are this install's vault, workspaces folder and the vault's

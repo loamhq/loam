@@ -1,8 +1,8 @@
 ---
 title: Hello
 ---
-Hi, I'm Iris 👋 Welcome to your Loam.
+Hi {owner}, I'm Iris.
 
-Everything here is yours to shape, and you shape it by talking: to me, or to any agent we make together. Whenever you wonder how something works, or want something changed, just ask.
+Everything here is yours to shape, and you shape it by talking: to me, or to any agent we make together.
 
-To start, what should I call you?
+You can tell me what you'd like to try, or I can suggest a few places to start.

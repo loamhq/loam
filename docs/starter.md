@@ -4,7 +4,8 @@
 `lib/loam_starter.py`; the command is `bin/library seed-starter`; the tests
 are `tests/test_starter.py`; the words are in `docs/starter/`
 (`docs/starter/README.md` says which file holds which). The words are the
-owner's approved starter of 2026-11-16, which replaced L11's placeholders.*
+owner's approved starter of 2026-11-16, which replaced L11's placeholders.
+The hello conversation guidance and greeting were revised on 2026-11-19.*
 
 ## What a blank install gets
 
@@ -20,7 +21,7 @@ to 2026-11-19 every agent in the map's shape was told of it by Loam's text
 name it, and the library's `loam-how-it-works` does. Iris's `nights.md` keeps it.
 Until 2026-11-18 a new agent was given an `_always.md` with that line
 instead; an agent made then keeps it. After that the note is
-the person's and the agents': Iris fills it in during the hello conversation
+the person's and the agents'. Iris adds to it as she gets to know the person
 and keeps it accurate on her nightly wake.
 
 `seed-starter` makes Iris from `docs/starter/iris/` through
@@ -33,7 +34,8 @@ is an ordinary agent: the person can change her, rename her or archive her.
 
 Then it writes the hello thread: a thread with Iris as its default and only
 member, pinned, with `hello: true` in its frontmatter, and one message, the
-body of `docs/starter/hello.md`, posted as Iris and marked preset.
+body of `docs/starter/hello.md` with `{owner}` filled from the install's
+owner name. Loam posts it as Iris and marks it preset.
 
 **Once per install.** A marker, `<state>/agents/starter.json` (the agent,
 the thread, the message, when), makes every later run a no-op, so a person
@@ -59,16 +61,16 @@ with `(preset: Loam posted this opening in your name before your first
 turn; carry on from it as yours)` after her name (`loam_threads.transcript`).
 From that reply on, the conversation is the model's. What she does in it is
 in her `how-i-am-here.md`, "The hello conversation", which her map tells her
-to read before her first reply: aims and leans, not a script.
-By the end she knows who the person is (their name, where they live, their
-age, and whatever they choose to tell her, kept in `About me.md`); they know
-they can come to her or any agent about Loam; they have a rough sense of
-what Loam is; and they have their first agent, drafted as a character
-through the library skill `loam-making-an-agent` and made on their yes.
-If they mention an AI they used before, she tells them once that they can
-bring its context over (a prompt to paste, or the service's export), an
-offer and never a step: the library skill `loam-bringing-context-from-another-ai`
-(2026-11-17).
+to read before her first reply. The guidance leaves the choices and wording
+to Iris. She starts with what the person came to do. Otherwise she usually
+offers a couple of ways to get started and follows the person's choice.
+They might make an agent (`loam-making-an-agent`), ask to change how Loam
+looks or works, build a page or tool at their own address, bring over
+context from another AI or service, or just talk. Bringing context over
+is worth offering early, even if they have yet to mention another service
+(`loam-bringing-context-from-another-ai`). Iris already has their name from
+setup and adds to `About me.md` as she gets to know them. They can make
+their first agent whenever they're ready.
 
 ## The page's contract (for U4)
 
@@ -90,9 +92,9 @@ On a scratch install root (2026-11-14): a blank config, `seed-vault`, then
 connection to the user's systemd manager, so nothing on the box could be
 started or stopped. Then a broker of the scratch install on a loopback port:
 `GET /v1/threads` listed `Hello` with `hello: true`, its `m1` by Iris with
-`preset: true`; the person's `Hi Iris, I am Sam.` was answered by Iris on
-Claude Code (`claude-fable-5-2`): "Good to meet you, Sam. A couple of small
-things so I know who I'm talking with. First: how old are you?"
+`preset: true`. The person's first reply started Iris's first model turn
+on Claude Code (`claude-fable-5-2`). This check used the original starter
+wording.
 
 ## Not covered here
 
