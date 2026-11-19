@@ -2237,3 +2237,32 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   still reads as enabled for an unmigrated file.
 - **Plugin `touches.record` takes `bypass`** as well as none/read/write
   (`lib/loam_plugins.RECORD`); the plugin skill had left it out.
+
+## 2026-11-19 — the Loam engineer's provider is a setting like the others'
+
+- **Loam's own setting picks its CLI** (`engineer_choice`); with none it is
+  Claude Code, and the `default` row is never Loam's, so an install whose
+  default is Codex keeps Loam on Claude Code until Loam's own is chosen.
+  `provider: null` puts it back on the built-in. The page and
+  `bin/settings` offer and refuse exactly what they do for a project.
+- **A platform job on Codex runs with `danger-full-access`.** Codex's
+  `workspace-write` sandbox is bwrap with no_new_privs, which takes away
+  the sudo the project file grants. The wall (sudo unshare, the platform
+  route) is what holds it: `platform_walls` in `bin/engineer-job` binds
+  read-only the untracked harness in `engineer/` (CLAUDE.md, role.md,
+  project.md, agent.json, .claude), `15_CONVERSATIONS/` and
+  `/etc/loam/public`, i.e. what the Claude settings deny, and gives
+  Antigravity `--add-dir` for the dirs those settings add. A Claude
+  platform job is unchanged (its settings already do this).
+- **The platform wall can be raised from inside a job** when every path in
+  it is scratch (`tests/test_engineer_platform_provider.py` does so with
+  passwordless sudo); the nested failure the 11-15 note names is a remount
+  of a path the job's own wall already holds.
+- **`LOAM_HOST_SETTINGS` is handed into the job's unit** (as
+  `LOAM_PROJECTS_DIR`), so a probe can prove a provider choice on fixture
+  settings without touching the box's.
+- **loam-ui's profile host fixture had gone stale**: Read aloud left the
+  shipped plugins, and the Engineers section is now one "System" list
+  (rows are buttons named `Loam Engineer Claude Code`). The older
+  `*-browser.mjs` checks that select `section[aria-label="Engineers"]`
+  still fail on that; `loam-engineer-provider-browser.mjs` does not.

@@ -62,7 +62,10 @@ owner's to read and edit.
 An agent hands it a job as a brief, which returns at once; the engineer
 works in its own copy of the repository, and when it is done its receipt,
 with the evidence, comes back to that agent as its next input. Every
-install has one for Loam (project `Loam`). Its role and what it owns are in
+install has one for Loam (project `Loam`). Each engineer, Loam's
+included, runs on the provider, model and tiers set for it in Settings ›
+Agents (Loam's is Claude Code until someone changes it), from its next
+job; a job already running keeps what it started on. Its role and what it owns are in
 the vault's projects folder, under `Loam/engineer/` (`role.md`,
 `projects/loam.md`): the owner's to read and change, and an update never
 overwrites a change of theirs. A job that changes how Loam works updates

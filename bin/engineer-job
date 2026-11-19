@@ -3095,7 +3095,10 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             return wt.walled(project, record, p["dir"], line, protect=protect)
         argv = agy_argv(job_model, job_effort)
     else:
-        argv = wt.walled(project, record, p["dir"], argv, protect=protect)
+        # `protect` only when a platform job on another CLI has some: every
+        # other job's wall is raised by the call it always was.
+        argv = (wt.walled(project, record, p["dir"], argv, protect=protect)
+                if protect else wt.walled(project, record, p["dir"], argv))
     os.environ.update(wt.wall_env())
     # What this session is started on, read off the command line it is
     # started with (since 2026-11-12), so Activity says the engine and model
