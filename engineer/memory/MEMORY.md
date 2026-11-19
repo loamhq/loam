@@ -1930,3 +1930,33 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **The plugin's push commits first** (core's commit, on every push tick
   that is due), so after a switch the first commit may be the push's, not
   the timer's; wait for a timer run to see the timer's own.
+
+## 2026-11-19 — input to a thread member is durable (batch B step 2)
+
+- **Every queued turn's input is on disk first**:
+  `state/threads/inputs/<thread>/<persona>.json` (`lib/loam_thread_inputs.py`),
+  written in `ThreadEngine.schedule`, marked `sent` right after the prompt
+  or steer goes in, removed when the turn settles (`_settle_inputs`). The
+  memory queue is a cache of it; `resume_inputs()` in `amain` rebuilds it.
+- **The stop rule:** while `broker.stopping`, an input whose turn neither
+  posted words nor finished is kept with `sent` cleared; everything else is
+  removed. No "didn't start" line, and no "turn ended: the broker restarted"
+  for a turn cut before a word (one cut after words still gets it).
+- **After a crash** (no orderly settle), a `sent` message is replayed and
+  `already_heard` (the member's `through`) decides; a `sent` result or
+  notice is dropped as given. That is the once-only key's on-disk half.
+- **"Same work" is decided by time, not topic**: a result `joins` the turn
+  in flight only if that turn started before the brief was accepted
+  (`since_ts`, added to the waiter record for this; `since` + 1 s for old
+  records). A later turn is about something newer; the result waits.
+- **A real broker on a scratch config works for live proof** with
+  `paths.home` left real (the CLI's credentials) and every other path
+  scratch, `--addr 127.0.0.1 --port 18932`, `env -i`, its stderr to a file
+  as the journal. Claude Code refuses a bare `sleep N` in Bash and
+  backgrounds long ones; `python3 -c 'import time; time.sleep(N)'` in the
+  foreground holds a turn mid-tool. A per-message model different from the
+  turn's stays queued (not steered), which is how to queue a message
+  behind a Claude turn on purpose. A waiter record's job id must match
+  `JOB_ID_RE` (hex suffix) or `owed()` ignores it silently.
+- **Seen, not fixed:** a turn model change (`set_choices`) posts the CLI's
+  "Set model to … for this session only" text as a persona message.
