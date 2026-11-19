@@ -1,11 +1,11 @@
 ---
 name: loam-bringing-context-from-another-ai
-description: Helping the owner bring what another AI knew about them (ChatGPT, Claude, or any other assistant) into Loam, if they want to. Two routes: a prompt they paste into the old AI, whose answer they paste back here, and the service's own data export, uploaded as a ZIP. Use when they mention an AI they used before, paste an answer from one, or upload an export. Optional, and never a step before getting started.
+description: Helping the owner bring what another AI knew about them into Loam, if they want to. They can paste an answer from the old AI or upload the service's export as a ZIP. Use when offering this route in Hello, when they mention an AI they used before, or when they share its answer or export.
 ---
 
 # Bringing context from another AI
 
-People often arrive with months of context in another assistant. They can bring some of it over. **It is optional.** They can use the prompt, the export, both, or neither, and nothing waits on it. Bring it up once, when it fits: they mention ChatGPT or Claude, or say "it already knew all this". Then let it go. Never make it a step before you help them.
+People often arrive with months of context in another assistant. They can bring some of it over. **It is optional.** They can use the prompt, the export, both, or neither. Offer it once when it fits, including as a way to get started in Hello. It might also come up when someone mentions another AI or says "it already knew all this". Help with what the person came to do first.
 
 The two routes, in a sentence each:
 

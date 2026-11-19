@@ -60,6 +60,14 @@ During a brief
 outage the app keeps submitted messages in this browser and delivers them
 in order when the service returns.
 
+On a fresh install the owner lands in Hello with Iris. Loam posts a greeting
+as Iris using the name from setup, and Iris takes over on the first reply.
+She helps with whatever the owner came to do or offers a couple of ways to
+start and follows their choice. They can make an agent, change Loam by
+asking, build a page or tool at their own address, or just talk. Iris can
+also offer early to bring over context from another AI or service.
+`About me.md` fills in as they get to know each other.
+
 **Wakes and crons.** An agent also runs by itself on a schedule, and each
 schedule is a file under its `crons/` saying when it runs (or once, at a set
 time) and what it is told. Every agent wakes once a day by its daily wake,
@@ -77,9 +85,8 @@ connected provider those runs support. An explicit unsupported provider
 pauses those runs. The nightly reviewer can use Claude Code or Antigravity
 and waits if neither is connected and automatic selection is on.
 
-**When something needs attention.** Loam itself posts nothing in a thread
-or on General's board: a thread's record holds only what the owner and the
-agents wrote, and a turn that is waiting for room, could not run or ended
+**When something needs attention.** Loam itself posts no notices in a thread
+or on General's board. A turn that is waiting for room, could not run or ended
 without a reply shows so on the turn in the app. An agent whose own
 scheduled run failed is told at the top of its next turn. A problem that is
 no one agent's (drift, memory pressure, a check or a plugin's event, an
