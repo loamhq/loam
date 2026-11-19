@@ -219,40 +219,26 @@
 .market-reading { display: flex; align-items: center; gap: var(--space-sm); margin: 0; }
 
 /* --------------------------------------------------------- build it: the
- * friendliest moment in the Market, not an error. */
-.market-build {
-  display: grid; grid-template-columns: 300px 1fr; align-items: center; gap: var(--space-xl);
-  padding: var(--space-xl) var(--space-2xl); border-radius: var(--radius-xl);
-  background: var(--latte-foam); color: var(--latte-foam-ink);
-}
-.market-build-whole { margin-top: var(--space-lg); padding: var(--space-2xl); grid-template-columns: 1fr; justify-items: center; text-align: center; }
-.market-phone .market-build { grid-template-columns: 1fr; padding: var(--space-xl) var(--space-lg); justify-items: center; text-align: center; }
-.market-build-art svg { display: block; width: 100%; height: auto; max-width: 300px; }
-.market-build-whole .market-build-art svg { max-width: 420px; }
-.market-build-words { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; }
-.market-build-whole .market-build-words, .market-phone .market-build-words { align-items: center; max-width: 520px; }
-.market-build-words h2 { margin: 0; font-size: 28px; line-height: 1.12; color: var(--latte-foam-ink); }
-.market-build-whole .market-build-words h2 { font-size: 34px; }
-.market-build-words p { margin: 0; font-size: var(--type-lead); line-height: 1.5; color: var(--latte-foam-ink-2); }
-.market-build-words .note { color: var(--latte-foam-ink-2); }
-.market-build-go { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-sm); margin-top: var(--space-sm); padding: 0 22px !important; height: 48px; }
-.market-build-whole .market-build-go, .market-phone .market-build-go { align-self: center; }
+ * app's one empty state (empty-state.css), at the end of every page and the
+ * whole of an empty Market. Its button and the picker it opens are here. */
+.market-build { display: flex; flex-direction: column; margin-top: var(--space-xl); }
+.market-build-whole { margin-top: var(--space-lg); }
+.market-build .empty-state-action { flex-direction: column; align-items: center; }
+.market-build-go { display: inline-flex; align-items: center; gap: var(--space-sm); padding: 0 22px !important; height: 48px; }
 .market-pick { display: flex; flex-direction: column; gap: var(--space-sm); margin-top: var(--space-sm); }
 .market-pick-label { font-weight: 600; font-size: 15px; }
 .market-pick-faces { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
-.market-build-whole .market-pick-faces, .market-phone .market-pick-faces { justify-content: center; }
+.market-pick-faces { justify-content: center; }
 .market-face {
   display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 72px; padding: var(--space-sm);
-  border: 0; border-radius: var(--radius-md); background: transparent; color: var(--latte-foam-ink); font: inherit; font-size: var(--type-small); font-weight: 600; cursor: pointer;
+  border: 0; border-radius: var(--radius-md); background: transparent; color: var(--paper-ink); font: inherit; font-size: var(--type-small); font-weight: 600; cursor: pointer;
   transition: transform var(--motion-fast) ease;
 }
-@media (hover: hover) { .market-face:hover { background: var(--latte-hover); color: var(--latte-hover-ink); transform: translateY(-2px); } }
-.market-face:focus-visible { outline: 2px solid var(--latte-coffee); outline-offset: 2px; }
+@media (hover: hover) { .market-face:hover { background: var(--paper-hover); color: var(--paper-hover-ink, var(--paper-ink)); transform: translateY(-2px); } }
+.market-face:focus-visible { outline: 2px solid var(--paper-ink-3); outline-offset: 2px; }
 .market-art .market-art-twinkle { transform-box: fill-box; transform-origin: center; animation: market-twinkle 2.4s ease-in-out infinite; }
 @keyframes market-twinkle { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.6); } }
-.market-build-art .market-art-agent { animation: market-bob 3.2s ease-in-out infinite; }
-@keyframes market-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-@media (prefers-reduced-motion: reduce) { .market-art .market-art-twinkle, .market-build-art .market-art-agent, .market-swatch.is-loading .theme-miniature, .market-scene.is-loading > * { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .market-art .market-art-twinkle, .market-swatch.is-loading .theme-miniature, .market-scene.is-loading > * { animation: none; } }
 
 /* ------------------------------------------------------- notes and waiting */
 .market-note { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-md); padding: var(--space-lg) var(--space-xl); border-radius: var(--radius-lg); background: var(--paper-card); color: var(--paper-card-ink); }

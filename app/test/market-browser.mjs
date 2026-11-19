@@ -90,7 +90,7 @@ try {
       await page.locator('.market-count').filter({ hasText: 'Nothing listed matches' }).waitFor()
       assert.equal(await page.locator('.market-best').count(), 0)
       assert.equal(await page.locator('#market-build-title').textContent(), 'Nothing quite right for “a zebra that tells jokes”?')
-      assert.equal(await page.locator('.market-build-art svg').count(), 1, `${label}: a drawn picture`)
+      assert.equal(await page.locator('.market-build .empty-state-search').count(), 1, `${label}: the lens, drawn`)
       await families(page, `${label} build-it`)
 
       // A kind's page, from a chip; it ends with build-it too.

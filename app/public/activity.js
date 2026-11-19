@@ -1,6 +1,7 @@
 import { createCoreRegistry } from './core-registrations.js'
 import { formatTime, formatDate } from './time.js'
 import { h, kept, morph, icon } from './ui.js'
+import { emptyState } from './empty-state.js'
 import { segmentedControl } from './chat-ui.js'
 import { foldJobChains, engineLabel, jobThread, jobContext } from './activity-record.js'
 import { modelLabel } from './providers.js'
@@ -300,7 +301,8 @@ export function createActivity({ registry = createCoreRegistry(), api, redraw, a
         validTime(group.ts) ? h('h3', { class: 'kicker activity-day-title', text: activityDay(group.ts) }) : null,
         h('ul', { class: 'activity-items' }, group.rows.map(({ item, chat }) => chat
           ? threadEntry(chat) : registry.draw('activity.kind', { item, defaultView: () => entry(item) }))))),
-      !items.length && !(embedded && showChats && rows.pinned.length) ? h('p', { class: 'activity-empty', text: st.loading ? 'Loading activity…' : st.error ? 'Activity could not be loaded.' : st.agent || st.kind ? 'No activity matches these filters.' : 'Nothing has happened here yet.' }) : null,
+      !items.length && !(embedded && showChats && rows.pinned.length) ? (st.loading || st.error ? h('p', { class: 'activity-empty', text: st.loading ? 'Loading activity…' : 'Activity could not be loaded.' })
+        : emptyState({ object: st.agent || st.kind ? 'search' : 'moon', size: 'small', level: 'h3', title: st.agent || st.kind ? 'No activity matches these filters' : 'Nothing has happened here yet', body: st.agent || st.kind ? 'Try another agent or kind.' : 'What your agents do shows up here.', props: { class: 'activity-empty', key: 'activity-empty' } })) : null,
     ]
   }
 

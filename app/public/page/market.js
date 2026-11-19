@@ -32,7 +32,8 @@ import { agentLook } from '../sessions.js'
 import { menuSurface } from '../menu-surface.js'
 import { sheetHandle } from '../chat-ui.js'
 import { KIND_ONE, KIND_MANY, KIND_ABOUT, KIND_HOME, search, highlight, leadOf, sectionsOf, kindsListed, dateline, buildRequest, actionOf, plainTouches, reachOf, kindOf, byLoam, listedOnly } from '../market.js'
-import { buildArt, coverArt, hueOf } from '../market-art.js'
+import { coverArt, hueOf } from '../market-art.js'
+import { emptyState } from '../empty-state.js'
 
 const SUGGEST = 5
 
@@ -317,21 +318,23 @@ export function mount(host) {
       promptBody: `${agent.name} will ask what’s needed, then build it as your own plugin. Nothing is sent until you send it.` })
     host.schedule()
   }
-  function buildIt({ q = '', k = 'all', whole = false } = {}) {
+  // The build-it state is the app's one empty state (empty-state.js): a
+  // sprout for the empty Market and for the end of every page, a lens when
+  // a search found nothing. Its words and its one action are the Market's.
+  function buildIt({ q = '', k = 'all', whole = false, none = false } = {}) {
     const list = agents(), kindWord = k !== 'all' ? (k === 'extension' ? 'plugin' : KIND_ONE[k].toLowerCase()) : null
     const one = list.length === 1 ? list[0] : null
+    const act = !list.length ? h('p', { class: 'note', text: 'Your agents appear here once you have one.' })
+      : one ? button([icon.pencil(16), `Ask ${one.name} to build it`], () => startBuild(one, q, k), 'pillbtn primary market-build-go')
+      : !st.picking ? button([icon.pencil(16), 'Ask an agent to build it'], () => { st.picking = true; st.focus = 'picker'; host.schedule() }, 'pillbtn primary market-build-go', { 'aria-expanded': 'false' })
+      : h('div', { class: 'market-pick', role: 'group', 'aria-label': 'Who should build it?' },
+        h('p', { class: 'market-pick-label', text: 'Who should build it?' }),
+        h('div', { class: 'market-pick-faces' }, ...list.slice(0, 12).map(agent => h('button', { type: 'button', key: agent.id, class: 'market-face', onclick: () => startBuild(agent, q, k), 'aria-label': `Ask ${agent.name} to build it` },
+          blob(agentLook(agent.id, host.state.agents), { size: 44, font: 19 }), h('span', { text: agent.name })))))
     return h('section', { class: `market-build${whole ? ' market-build-whole' : ''}`, 'aria-labelledby': 'market-build-title', key: 'market-build' },
-      h('div', { class: 'market-build-art' }, buildArt()),
-      h('div', { class: 'market-build-words' },
-        h('h2', { class: 'display', id: 'market-build-title', text: whole ? 'The Market is just opening' : q ? `Nothing quite right for “${q}”?` : 'Nothing quite right?' }),
-        h('p', { text: whole ? `Nothing is listed yet. Anything you can think of, one of your agents can build${kindWord ? ` as your own ${kindWord}` : ''}, and it stays yours.` : `Ask one of your agents to build it${kindWord ? ` as your own ${kindWord}` : ' as your own plugin'}. ${q ? 'Your words go with you, ready to send.' : 'Tell them what you have in mind.'}` }),
-        !list.length ? h('p', { class: 'note', text: 'Your agents appear here once you have one.' })
-          : one ? button([icon.pencil(16), `Ask ${one.name} to build it`], () => startBuild(one, q, k), 'pillbtn primary market-build-go')
-          : !st.picking ? button([icon.pencil(16), 'Ask an agent to build it'], () => { st.picking = true; st.focus = 'picker'; host.schedule() }, 'pillbtn primary market-build-go', { 'aria-expanded': 'false' })
-          : h('div', { class: 'market-pick', role: 'group', 'aria-label': 'Who should build it?' },
-            h('p', { class: 'market-pick-label', text: 'Who should build it?' }),
-            h('div', { class: 'market-pick-faces' }, ...list.slice(0, 12).map(agent => h('button', { type: 'button', key: agent.id, class: 'market-face', onclick: () => startBuild(agent, q, k), 'aria-label': `Ask ${agent.name} to build it` },
-              blob(agentLook(agent.id, host.state.agents), { size: 44, font: 19 }), h('span', { text: agent.name })))))))
+      emptyState({ object: none ? 'search' : 'sprout', size: whole ? 'large' : 'pane', titleId: 'market-build-title', action: act,
+        title: whole ? 'The Market is just opening' : q ? `Nothing quite right for “${q}”?` : 'Nothing quite right?',
+        body: whole ? `Nothing is listed yet. Anything you can think of, one of your agents can build${kindWord ? ` as your own ${kindWord}` : ''}, and it stays yours.` : `Ask one of your agents to build it${kindWord ? ` as your own ${kindWord}` : ' as your own plugin'}. ${q ? 'Your words go with you, ready to send.' : 'Tell them what you have in mind.'}` }))
   }
 
   // ------------------------------------------------------------ views
@@ -396,7 +399,7 @@ export function mount(host) {
           h('div', { class: 'market-lead-acts' }, action(best, { from: 'lead' }), tryButton(best)))) : null,
       rest.length ? h('section', { class: 'market-section', 'aria-labelledby': 'market-also' }, h('div', { class: 'market-section-head' }, h('h2', { class: 'display', id: 'market-also', text: 'Also close' })),
         h('div', { class: 'market-items' }, ...rest.map(e => item(e, q)))) : null,
-      st.list ? buildIt({ q, k }) : null]
+      st.list ? buildIt({ q, k, none: !found.length }) : null]
   }
   function listing(id) {
     const entry = entryOf(id), d = detailsOf(id)

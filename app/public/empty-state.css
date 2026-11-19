@@ -1,0 +1,53 @@
+/* One empty state for the whole app (2026-11-18, `empty-state.js`).
+ * Loam's blob in a quiet tint of the theme, one fine-line object in it, a
+ * display-face title, one line of words, at most one action. Every paint is
+ * a token, so it is right in every theme, light and dark, and under Sun. */
+.empty-state {
+  flex: 1 1 auto; align-self: stretch;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0; margin: 0 auto; padding: var(--space-2xl) var(--space-lg); text-align: center;
+  color: var(--paper-ink);
+}
+.empty-state-art { display: block; flex: none; width: 136px; height: auto; overflow: visible; }
+.empty-state-title { margin: var(--space-md) 0 0; max-width: 26ch; font-size: 21px; line-height: 1.15; font-weight: 400; color: inherit; text-wrap: balance; }
+.empty-state-body { margin: var(--space-sm) 0 0; max-width: 40ch; font-size: 14px; line-height: 1.5; color: var(--paper-ink-2); text-wrap: pretty; }
+.empty-state-action { margin-top: var(--space-lg); display: flex; justify-content: center; }
+.empty-state-action:empty { display: none; }
+
+.empty-state-large { padding: var(--space-2xl) var(--space-lg) calc(var(--space-2xl) * 1.5); }
+.empty-state-large .empty-state-art { width: 164px; }
+.empty-state-large .empty-state-title { margin-top: 18px; font-size: 30px; }
+.empty-state-large .empty-state-body { max-width: 46ch; font-size: var(--type-lead, 16px); }
+
+.empty-state-small { flex: 0 0 auto; padding: var(--space-xl) var(--space-md); }
+.empty-state-small .empty-state-art { width: 108px; }
+.empty-state-small .empty-state-title { margin-top: var(--space-sm); font-size: 18px; }
+.empty-state-small .empty-state-body { font-size: 13.5px; }
+
+/* The paints. The blob is the theme's foam, softened; the sheet is the
+ * raised surface with the third ink as its outline; the accent is espresso. */
+.empty-state-art .es-blob { fill: var(--latte-foam); opacity: .55; }
+.empty-state-art .es-sheet { fill: var(--paper-raised); stroke: var(--paper-ink-3); stroke-width: 1.75; stroke-linejoin: round; }
+.empty-state-art .es-line { fill: none; stroke: var(--paper-ink-3); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.empty-state-art .es-line-strong { stroke-width: 2.5; }
+.empty-state-art .es-accent { fill: var(--latte-espresso); }
+.empty-state-art .es-accent-line { fill: none; stroke: var(--latte-espresso); stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; }
+.empty-state-art .es-accent-line-thin { stroke-width: 2; }
+.empty-state-art .es-faint { opacity: .7; }
+.empty-state-art .es-fainter { opacity: .4; }
+.empty-state-art .es-soil { fill: var(--latte-coffee-2); }
+.empty-state-art .es-ground { fill: none; stroke: var(--latte-coffee-2); stroke-width: 1.5; stroke-linecap: round; opacity: .45; }
+.empty-state-art .es-leaf-2 { opacity: .8; }
+
+/* The one touch of motion: the sprout's stem draws in, then its leaves
+ * unfold, once, when the empty state first appears. */
+.empty-state-sprout .es-stem { stroke-dasharray: 1; stroke-dashoffset: 1; animation: es-draw 1.1s .15s cubic-bezier(.3, .6, .2, 1) forwards; }
+.empty-state-sprout .es-leaf { transform-box: fill-box; transform: scale(0); animation: es-unfold .7s cubic-bezier(.3, 1.4, .5, 1) forwards; }
+.empty-state-sprout .es-leaf-1 { transform-origin: 100% 100%; animation-delay: .8s; }
+.empty-state-sprout .es-leaf-2 { transform-origin: 0 100%; animation-delay: 1s; }
+@keyframes es-draw { to { stroke-dashoffset: 0; } }
+@keyframes es-unfold { to { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .empty-state-sprout .es-stem { animation: none; stroke-dashoffset: 0; }
+  .empty-state-sprout .es-leaf { animation: none; transform: none; }
+}

@@ -1,4 +1,5 @@
 import { h, icon, blob } from "../ui.js"
+import { emptyState } from "../empty-state.js"
 import { agentLook } from "../sessions.js"
 import { folderView, fileView } from "../files.js"
 import { renderPanel } from '../panel-items.js'
@@ -183,12 +184,7 @@ function filesPane(empty = false) {
       'div',
       { class: 'pane-body', key: 'pane:files:empty' },
       host.registry.draw('app.overlay', { slot: 'player' }),
-      h(
-        'div',
-        { class: 'pane-nothing' },
-        h('div', { class: 'display', text: 'Pick a file' }),
-        h('div', { class: 'why', text: 'One on the left. It opens here.' }),
-      ),
+      emptyState({ object: 'folder', title: 'Pick a file', body: 'One on the left. It opens here.' }),
     )
   }
   return h(

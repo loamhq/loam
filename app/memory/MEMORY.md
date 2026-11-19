@@ -100,3 +100,13 @@ have never met.
   of the prose cache (`progressiveProse` keeps a node per text), or a card
   would never turn to Installed. The prose slot for a message with no card
   is unchanged (`index`), so nothing else re-renders.
+- **One empty state** (2026-11-18, `docs/empty-states.md`): `emptyState()` in
+  `public/empty-state.js` draws every place with nothing to show: the blob,
+  one object, a title, one line, at most one action. A size class and an
+  object class live on different nodes but share the `empty-state-` prefix,
+  so no size may share an object's name (a size called `page` once painted
+  the board's page object as a padded box). The sprout plays its motion once
+  per appearance only because `morph()` keeps the SVG node; a key or a
+  wrapper that changes between redraws would replay it. On a wide screen,
+  where the list column and the pane would both be empty (no threads, no
+  apps), the pane says it and the list stays quiet.

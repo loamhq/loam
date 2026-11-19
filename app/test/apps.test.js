@@ -125,7 +125,9 @@ test('an app list beside another main document does not mark its earlier app as 
 })
 test('empty catalog starts a thread; unavailable and malformed catalogs offer retry', async () => {
   const f = setup({ api: async () => ({ apps: [], sources: ['yours'] }) }); await f.apps.load()
-  const view = f.apps.view({ list: true }); assert.match(text(view), /An agent can build an app for you/)
+  // Wide: the pane says it, with its action, and the list column does not say it twice.
+  assert.equal(find(f.apps.view({ list: true }), 'apps-empty'), null)
+  const view = f.apps.view(); assert.match(text(view), /No apps yetAn agent can build an app for you/)
   all(view, 'pillbtn').find(node => text(node) === 'Build an app').fire('click'); assert.equal(f.started.length, 1)
   for (const status of [404, 405]) {
     const f = setup({ api: async () => { throw Object.assign(new Error('no route'), { status }) } }); await f.apps.load()

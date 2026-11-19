@@ -8,6 +8,7 @@
 // arrives.
 
 import { h, icon } from './ui.js'
+import { emptyState } from './empty-state.js'
 import { rootsOf, rowsOf, nextOf, isFolder, tileOf, metaOf, splitPath, parentOf, ROOT_LOOK, FILES_LOCATION_HIDDEN } from './files.js'
 
 export function createPicker({ api, schedule }) {
@@ -106,7 +107,7 @@ export function pickerSheet(picker, { agentName = null } = {}) {
         ),
       )
     }
-  } else if (st.rows.length === 0) rows.push(h('div', { class: 'fs-quiet', text: 'Nothing here.' }))
+  } else if (st.rows.length === 0) rows.push(emptyState({ object: 'folder', size: 'small', level: 'h3', title: 'Nothing here yet', props: { class: 'fs-quiet' } }))
   else {
     for (const row of st.rows) {
       const key = `${row.root}:${row.path}`
