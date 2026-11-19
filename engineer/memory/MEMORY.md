@@ -1930,3 +1930,30 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **The plugin's push commits first** (core's commit, on every push tick
   that is due), so after a switch the first commit may be the push's, not
   the timer's; wait for a timer run to see the timer's own.
+
+## 2026-11-19 — the small fixes before friends install
+
+- **A mid-job `--land` tests in the job's own tree, on a detached HEAD at
+  the merge**, for as long as the suite takes. A commit made then went onto
+  that HEAD and was left behind; `back_to_branch` and `carry_onto`
+  (`lib/loam_worktree.py`) now keep it, and `result["carried"]` names it.
+  Uncommitted edits made during a landing are still at risk from its
+  `checkout -f`: commit before `--land`, and not while it runs.
+- **Antigravity reports a whole run ERROR for a side call's failure**: its
+  "implicit" conversations run on its default model whatever `--model`
+  says, and a 503 there ended a finished Claude-model job. A transient
+  error naming another model is the side call's
+  (`loam_agy_job.side_call_failure`); with a receipt written, the job lands.
+- **A fixed sleep in a test is a flake in a landing.** Several jobs land at
+  once; wait for the condition (`until`) instead. In the app's fake-DOM
+  tests the card shows the previous answer while it reloads: assert with
+  `eventually`, as `app/test/github-orgs.test.js` does. A 400 ms delay
+  in the fake route reproduces the old failure every time.
+- **Bare `python3 tests/test_engineer_codex.py` fails 4 checks on a box
+  whose default runtime is not Claude**: it reads the box's settings. Run it
+  through `tests/run-all <file>`, which empties `LOAM_HOST_SETTINGS`.
+- **`app/test/plugin-host-browser.mjs` runs with a Playwright in scratch**:
+  `npm i playwright@1.65.1` with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, then
+  `LOAM_PLAYWRIGHT=<scratch>/node_modules/playwright/index.mjs
+  LOAM_CHROME=/usr/bin/chromium-headless-shell` (`PLUGIN_CASE=1440-latte-light`
+  for one variant).
