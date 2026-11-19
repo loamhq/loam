@@ -65,6 +65,7 @@ import json
 import os
 import re
 import time
+from itertools import groupby
 
 import loam_agents
 import loam_config as lc
@@ -1111,11 +1112,24 @@ class ThreadEngine:
                 self._unclaim(key, taken)
                 return False
             cut = threads._num(live.read_through)
-            news = [m for m in msgs if threads._num(m.get("id")) > cut
-                    and m.get("author") != persona]
+            news, parts, results = [], [], []
+            for jobs, group in groupby(taken, key=is_result):
+                if jobs:
+                    for job in group:
+                        parts.append(result_steer_text(job))
+                        results.append(job)
+                    continue
+                # Include intervening context only through the last message
+                # this group claimed. Later inputs may require another model.
+                end = max(threads._num(t.reason) for t in group)
+                batch = [m for m in msgs if cut < threads._num(m.get("id")) <= end
+                         and m.get("author") != persona]
+                if batch:
+                    parts.append(threads.steer_prompt(meta, persona, batch, record=msgs))
+                    news.extend(batch)
+                cut = max(cut, end)
             ids = {t.reason for t in taken}
-            results = [t for t in taken if is_result(t)]
-            if not news and not results:
+            if not parts:
                 # Every claimed message was already in what the turn read.
                 steps.COUNTS["already_heard"] += len(taken)
                 steps.log(f"{thread_id} {persona}: {', '.join(sorted(ids))} already "
@@ -1124,9 +1138,6 @@ class ThreadEngine:
                 self.members_changed(thread_id)
                 return False
             attachments = [a for t in taken for a in t.attachments]
-            parts = [threads.steer_prompt(meta, persona, news, record=msgs)] \
-                if news else []
-            parts += [result_steer_text(t) for t in results]
             text = "\n\n".join(parts)
             turn["steering"] = True
             self.members_changed(thread_id)

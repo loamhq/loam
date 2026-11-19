@@ -383,6 +383,32 @@ async def main():
           (len(ada.prompts), said(tid)[-1][1], through(tid, "ada")),
           (1, "All three handled.", ms[-1]["id"]))
 
+    # One batch can contain a job between two messages. A message for a
+    # different model, already on disk, must stay for its own turn.
+    tid = await new_thread("ada")
+    gate = Gate()
+    fake.next_scripts["ada"] = [[init(), tool(), gate, text("Batch handled."), result(1)]]
+    await post(tid, "begin the batch")
+    await until(lambda: gate.reached)
+    ada = session("ada")
+    engine.post_person(tid, "batch first")
+    engine.schedule(engine_mod.Turn(tid, "ada", 0, "job:batch", note="batch middle",
+                                    briefed_at=time.time()))
+    last = engine.post_person(tid, "batch last")
+    engine.post_person(tid, "separate choice", model="other-model")
+    await until(lambda: ada.steers)
+    batch = ada.steers[0]
+    positions = [batch.find(word) for word in ("batch first", "batch middle", "batch last")]
+    check("one claimed batch preserves message, job, message order",
+          min(positions) >= 0 and positions == sorted(positions), True)
+    check("the steer stops at the last input it claimed",
+          ("separate choice" in batch, engine.turn_live[tid, "ada"].read_through),
+          (False, last["id"]))
+    gate.open()
+    await until(lambda: engine.settled(tid))
+    check("the other model's message still gets its own dispatch",
+          (len(ada.prompts), "separate choice" in ada.prompts[-1]), (2, True))
+
     # -- 3. end-of-turn race on Claude Code ----------------------------------
     tid = await new_thread("ada")
     gate = Gate()
