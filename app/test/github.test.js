@@ -75,7 +75,12 @@ const broker = await fakeBroker({
     res.write(line({ type: 'broker.user_message', seq: 1, session_id: 'chat-1', text: 'hello' }))
     res.end()
   },
-  'GET /v1/integrations/github': (req, res) => json(res, gh),
+  'GET /v1/integrations/github': (req, res) => {
+    const answer = gh
+    // Exercise navigation while the previous, registered state is still drawn.
+    if (answer === SHAPES.authorized) setTimeout(() => json(res, answer), 150)
+    else json(res, answer)
+  },
   'POST /v1/integrations/github/callback': (req, res, url, body) => {
     note('POST', 'callback')(req, res, url, body)
     json(res, { error: REFUSED }, 400)
@@ -174,8 +179,12 @@ async function openIntegrations() {
   const row = all(root, 'setrow').find((n) => text(find(n, 'setrow-title')) === 'Connections')
   click(row)
   click(await until(() => all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'GitHub')))
-  const account = await until(() => card() || all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'octo-owner'))
-  if (!card()) click(account)
+  // The previous state can draw a card before the new response adds an
+  // account row. Wait for the requested shape, not whichever appears first.
+  if (gh.installed) {
+    const account = await until(() => all(root, 'setrow').find(n => text(find(n, 'setrow-title')) === 'octo-owner'))
+    click(account)
+  }
   await until(() => card())
 }
 
