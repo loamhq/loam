@@ -2248,3 +2248,28 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   the landing failed with FileNotFoundError, though every test passed in the
   job tree. It is now `docs/releases/signers`. Put a new file inside an
   existing top-level folder, or expect the first landing to fail.
+- **A test's leak outlives its fix by the trees that copied it.** Four
+  job trees had merged the leaky test in the seven minutes before the fix
+  landed, and a hijacked unit stays *loaded* (a scratch folder, port
+  9100), which the reconcile never touched. The runtime side now heals it:
+  `reconcile` restarts a wanted unit whose `WorkingDirectory` is not its
+  plugin's folder (`moved` in its answer). Fix the runtime, not only the
+  test, when a test can reach live state.
+
+## 2026-11-19 — the library is the one description of Loam
+
+- **`docs/library/` is how Loam describes itself**, to agents and the owner
+  (`loam-how-it-works` first). The Loam project file now says a job that
+  changes what it describes updates it in the same job and names the page
+  in the receipt; nothing checks this, by design.
+- **A sentence added to the source role reaches project engineers** through
+  `render_craft`: it must avoid `CRAFT_FORBIDDEN` words (Loam, vault,
+  persona, the owner's name) or every project render fails, and it makes
+  `check-drift` ask for `bin/provision --project <name> --rerender` on each
+  project. A Loam-only rule belongs in the project file, which renders to
+  nobody else.
+- **Crons are `enabled: true` plus `reason:`**, live within a minute
+  (`lib/loam_schedule.py`); `approved:` was retired 2026-10-14 and only
+  still reads as enabled for an unmigrated file.
+- **Plugin `touches.record` takes `bypass`** as well as none/read/write
+  (`lib/loam_plugins.RECORD`); the plugin skill had left it out.
