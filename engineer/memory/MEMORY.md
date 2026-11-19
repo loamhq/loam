@@ -2052,3 +2052,18 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Two jobs may cut the same version.** A job that writes `release-tag`
   early is visible in its job folder; read the other running jobs'
   `release-tag` before choosing a number.
+## 2026-11-19 — Loam's text, the owner's short version
+
+- **`engineer-job --land` outlives a foreground call**: it runs the whole
+  suite (about 11 minutes), past the 10-minute foreground limit, and a killed
+  landing lands nothing. Run it in the background with a long timeout and
+  wait on its log.
+- **Inside the job's wall, `tests/run-all` fails two tests by environment**:
+  `test_engineer.py` (the jobs directory is read-only) and
+  `test_wake_failed.py` (its log line). The landing's run, outside the wall,
+  passes them; read the landing's verdict, not the job tree's.
+- **Loam's text changes reach agents with no render**: every mapped
+  `CLAUDE.md` imports `docs/persona/loam.md` by absolute path in the live
+  checkout, and Codex and Antigravity inline it from that import at each build,
+  so landing is enough. `loam_codex.instructions(<workspace>)` is the quickest
+  assembled-prompt proof, and it leaves the workspace as it found it.
