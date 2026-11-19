@@ -14,6 +14,7 @@ export const SETTINGS_SECTIONS = [
 // Every id a link, a plugin or an agent may still hold, and where it lives
 // now. `accounts` with a provider is that provider's API key page.
 const MOVED = { voice: 'plugins', dictation: 'plugins', 'read-aloud': 'plugins',
+  backup: 'plugins', 'git-backup': 'plugins',
   providers: 'connections', integrations: 'connections', accounts: 'connections', keys: 'connections', 'api-keys': 'connections',
   signin: 'account', 'sign-in': 'account', update: 'about' }
 // The group of Connections an old id named, so the page can open there.
