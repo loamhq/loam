@@ -987,6 +987,21 @@ def finale(elapsed: float | None = None) -> None:
         say(f"Open https://{domain}/ and sign in.")
         print()
         say("To see how everything is doing, type:  loam status")
+    print()
+    backup_step()
+
+
+def backup_step() -> None:
+    """The last step, offered and not taken: the history is already kept on
+    this machine (loam-autocommit.timer, every 15 minutes, from step 6's
+    first commit); the copy off it is the Git backup plugin, which needs the
+    person's own private repository and so cannot be made for them here."""
+    say("Your vault and your agents' files keep their own history on this server "
+        "from now on: every change is committed every 15 minutes, nothing sent "
+        "anywhere.")
+    say("Recommended next: back them up to a private GitHub repository (or any git "
+        "host), so a lost server loses nothing. Once you are signed in: Settings › "
+        "Plugins › Git backup, or ask Iris to set it up with you.")
 
 
 def main() -> int:

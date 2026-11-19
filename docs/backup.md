@@ -35,7 +35,9 @@ any backup is set up.
   record, and `check-drift` does not count the timer as missing. Taking the
   line out hands the tree over at the next quarter hour.
 - `loam update` installs the timer and arms it once on an install made
-  before it (`lib/loam_update.py`, `units`).
+  before it: `gen-units` arms any timer it installs for the first time
+  (since 2026-11-19), which is what reaches an install whose older release
+  runs the update, and `lib/loam_update.py`'s `units` step arms it too.
 
 ## The copy off the machine: the Git backup plugin
 

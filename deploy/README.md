@@ -67,6 +67,8 @@ Rendered by `sudo bin/gen-deploy` into, and diffed by `bin/check-drift` against:
 | `/etc/loam/browser/compose.yaml` | `loam_deploy.browser_compose()` |
 | `/etc/loam/browser/firewall.sh` | `loam_deploy.sight_firewall_script()`; check-drift also asks the kernel for every rule |
 | `/etc/systemd/system/loam-sight-firewall.service` | `loam_deploy.sight_firewall_unit()` |
+| `/etc/loam/inbound/firewall.sh` | `loam_deploy.inbound_firewall_script()`; check-drift asks it who guards inbound |
+| `/etc/systemd/system/loam-inbound-firewall.service` | `loam_deploy.inbound_firewall_unit()` |
 | `/etc/sudoers.d/loam-deploy` | `loam_deploy.sudoers()` |
 | `/etc/sysctl.d/60-loam-preview.conf` | `loam_deploy.preview_sysctl()`; check-drift also reads the kernel's value |
 | `/etc/loam/login/{index.html,login.css,login.js,icon.svg}` | `loam_deploy.login_files()`, from `deploy/login/` |
@@ -716,6 +718,31 @@ in `bin/provision`), rendered from the deployment records.
   of both handles and unchanged.
 - **Each MCP session is its own browser context.** Two clients, one
   navigated, the other's tab list still empty (caused 2026-09-08).
+- **The inbound wall: this server's own ports** (2026-11-19). Every agent
+  is root and can start a server on `0.0.0.0`; without a firewall that
+  server is on the open web with no login. `gen-deploy` renders
+  `/etc/loam/inbound/firewall.sh` and `loam-inbound-firewall.service`
+  (raised at boot, before the network) and runs it: chain `LOAM-INBOUND`,
+  appended last in `INPUT` for IPv4 and IPv6, accepts loopback, replies,
+  ping and neighbour discovery, DHCP replies, SSH (22 and every port
+  `sshd` is on, read at each run, so a changed SSH port never locks anyone
+  out; established sessions are accepted first), TCP 80 and 443, UDP 443,
+  and the owner's `firewall.open` ports, and drops the rest. The broker's
+  and the sight's jumps sit above it in `INPUT` and decide their own
+  traffic first. Published container ports go through FORWARD and are not
+  its business (Loam publishes on 127.0.0.1 only).
+  - **It stands aside** for a firewall the server already has: with ufw or
+    firewalld active, or a family's INPUT policy already DROP, it takes its
+    own chain out of that family and says so (`firewall.sh status`:
+    `inbound: IPv4:ufw IPv6:ufw`). The first box is such a server, and
+    `gen-deploy` there changes no rule. Open ports in that firewall, not
+    here.
+  - `firewall.open = ["22000/tcp", "22000/udp"]` in loam.toml opens more
+    (a plugin's `box.listener` names a process, not a port, so a listener
+    that must be reached from outside is opened here by hand);
+    `firewall.manage = false` takes the wall out.
+  - Proved in a throwaway network namespace by `tests/test_inbound_firewall.py`
+    and on a fresh and an upgraded install (`docs/install.md`).
 - **Open to the web, walled off from the box.** Since 2026-09-09 (the owner:
   designs must render "correctly and without errors", so a page's fonts,
   scripts and images come from wherever the page says) there is no origin
