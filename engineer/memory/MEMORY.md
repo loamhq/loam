@@ -1617,3 +1617,37 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   own domain" or `BASE_DOMAIN` in prose; a prompt that shows the domain
   builds it from `li.BASE_DOMAIN` at run time.
 
+## 2026-11-18 — built in or from the Market; Images graduates (0.2.9)
+
+- **Two kinds of plugin, Obsidian's model.** Built-in ones ship in
+  `plugins/` (Shipped layer, `default_on` for their default). Market ones
+  live one per repository on their maker's account, at `v<version>` tags,
+  with the plugin at the repository's root: a link `…/tree/<tag>` with no
+  folder parses on every release since 0.2.3 (`GITHUB` is unchanged), and
+  `public_url` drops the empty path, so covers resolve at the root.
+- **A Yours copy wins over a shipped one forever**, so graduating a Market
+  plugin into Loam needs a take-over step, like the themes' keep step in
+  reverse: `lib/loam_built_in.py` (`GRADUATED`) at the broker's first start
+  removes a Yours copy that is exactly what the Market installed (link from
+  a listed repository, not `edited`) through `loam_plugins.remove`, which
+  keeps the id's switch when a shipped copy exists. Settings
+  (`_settings/<id>/`), data, the private folder (keys, `checks.json`) and
+  shared keys are all keyed by id, so nothing has to move. It waits,
+  unsettled, while the release has no shipped copy.
+- **The push gate's deny list holds the owner's surname**, so the owner's
+  GitHub handle can never be written in this repository: code that must
+  follow a plugin to its maker's repository reads the marketplace list, or
+  keeps the first published link. `loam_listed_themes.LINK` stays at the
+  archived `loamhq/plugins` (an archived repository still answers fetches,
+  and its tags were kept).
+- **The five themes' folders stay in `plugins/_listed/`** as the core's test
+  copies: about eighteen app tests and tools read them, and the core still
+  styles them by id. The makers' repositories are the source.
+- **`gh auth setup-git` writes a credential helper into `~/.gitconfig`.**
+  Don't: push with `git -c credential.helper= -c
+  'credential.helper=!/usr/bin/gh auth git-credential' push`, and
+  `env -u GITHUB_TOKEN` (the box's `GITHUB_TOKEN` is stale; `gh`'s own
+  login is the owner's). Loam's own fetches ignore the global config anyway
+  (`_git_env` sets `GIT_CONFIG_GLOBAL=/dev/null`).
+- **The guard refuses the Write tool outside the reach** (job scratch in
+  `/tmp` included); write scratch scripts with a shell heredoc.

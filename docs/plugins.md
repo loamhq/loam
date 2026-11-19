@@ -182,13 +182,38 @@ it does `image`.
 `LOAM_PLUGIN_SHIPPED` (folders joined by `:`) and `LOAM_PLUGINS_DIR` replace
 them, for the tests and for another install.
 
+**Built in, or from the Market** (the owner, 2026-11-18: "default
+everything to going to market in my name and we can always graduate some of
+them to be part of core"). The model is Obsidian's. A *built-in* plugin
+ships inside Loam, in the Shipped layer: it comes with each release, and
+most start off (`default_on: false`) until they are turned on in Settings ›
+Plugins. A *Market* plugin lives in its maker's own repository, one
+repository per plugin, versioned by its own tags, and is listed in the
+marketplace in its maker's name. Something new goes to the Market in its
+maker's name; one that proves itself can **graduate** into Loam, and then:
+
+- its folder moves into this repository's `plugins/` (Images did, in 0.2.9);
+- its listing is withdrawn from the marketplace;
+- on the update, at the broker's first start, a copy the Market installed
+  steps aside for the built-in one, once (`lib/loam_built_in.py`,
+  `GRADUATED`, recorded in `<state>/plugins/built-in.json`). It goes
+  through the normal removal, which keeps the id's switch, so what was on
+  stays on; its settings, data, keys and key choices are kept by id and do
+  not move. A copy built here, edited since it was installed, or installed
+  from a repository other than the ones it was published from is the
+  person's own and stays in force.
+
 **Two themes ship, Latte and Plain** (since 0.2.5, 2026-11-18). The other
-first-party looks (Autumn, Deep Forest, Foundry, Mist Trail, Yosemite) are
-plugins from the Market: their source is `plugins/_listed/<id>/` in this
-repository, published to `loamhq/plugins` at `<id>-v<version>`. An install
-that was using one, or had saved choices for one, has it installed from its
-link at the broker's first start on 0.2.5, or from the release's own copy
-when GitHub cannot be reached (`lib/loam_listed_themes.py`, once per look).
+looks that were first-party until then (Autumn, Deep Forest, Foundry, Mist
+Trail, Yosemite) are Market plugins, each in its maker's own repository
+since 0.2.9; the core keeps their per-look CSS and holds copies of them in
+`plugins/_listed/` for its tests (`plugins/_listed/README.md`). An install
+that was using one, or had saved choices for one, has it installed at the
+broker's first start on 0.2.5 from its first published link (the archived
+`loamhq/plugins`, at `<id>-v1.0.1`, whose tags stay), or from the release's
+own copy when GitHub cannot be reached (`lib/loam_listed_themes.py`, once
+per look). An installed copy runs from its own folder and never reads its
+link again, so copies from those links keep working.
 A theme's display faces are its own `fonts.css`, which the app serves checked
 (app/docs/appearance.md).
 
@@ -196,7 +221,9 @@ A theme's display faces are its own `fonts.css`, which the app serves checked
 runtime's own `plugins/` (2026-11-14, first release L9), the third shipped
 folder after loam-ui's two: `reviewer` (on by default: its timer, its
 instructions, what every agent is told about it) and `daily-notes` (off by
-default: its folder; the page's button). `default_on` is a shipped plugin's
+default: its folder; the page's button), then `doc-comments` (off) and,
+since 0.2.9, `images` (off: its agents' `generate_image` tool, its keys and
+settings). `default_on` is a shipped plugin's
 default and nothing more: any saved choice in `installed.json` wins, on or
 off.
 
