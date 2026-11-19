@@ -102,7 +102,7 @@ try:
           sorted(p.name for p in (ROOT / "app" / "public" / "themes").iterdir() if p.is_dir()),
           ["latte", "plain"])
     check("the link is the listing's, at the look's own tag", kept.link("autumn"),
-          "https://github.com/loamhq/plugins/tree/autumn-v1.0.0/autumn")
+          "https://github.com/loamhq/plugins/tree/autumn-v1.0.1/autumn")
 
     # Which are wanted.
     settings({"phone": {"theme": "foundry", "options": {"latte": {"latte-mug": "on"}}},
@@ -120,8 +120,8 @@ try:
     listed = loam_plugins.load_list()["plugins"]
     check("each is an installed plugin with its link and tag",
           {k: (v["source"]["repo"], v["source"]["ref"], v["installed_by"]) for k, v in listed.items()},
-          {"autumn": ("loamhq/plugins", "autumn-v1.0.0", "loam-update"),
-           "foundry": ("loamhq/plugins", "foundry-v1.0.0", "loam-update")})
+          {"autumn": ("loamhq/plugins", "autumn-v1.0.1", "loam-update"),
+           "foundry": ("loamhq/plugins", "foundry-v1.0.1", "loam-update")})
     check("Appearance lists them again", loam_appearance.themes(),
           ["latte", "autumn", "foundry", "plain"])
     # Its display faces are served from its folder (0.2.5); nothing else new.

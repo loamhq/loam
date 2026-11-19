@@ -39,11 +39,11 @@ import loam_config as lc
 
 # id -> version at its listing's tag. The link is LINK.format(id=, version=).
 MOVED = {
-    "autumn": "1.0.0",
-    "deep-forest": "1.0.0",
-    "foundry": "1.0.0",
-    "mist-trail": "1.0.0",
-    "yosemite": "1.0.0",
+    "autumn": "1.0.1",
+    "deep-forest": "1.0.1",
+    "foundry": "1.0.1",
+    "mist-trail": "1.0.1",
+    "yosemite": "1.0.1",
 }
 LINK = "https://github.com/loamhq/plugins/tree/{id}-v{version}/{id}"
 BY = "loam-update"
