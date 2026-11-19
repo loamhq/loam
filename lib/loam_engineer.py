@@ -782,7 +782,8 @@ def display_name(project: "Project | None") -> str:
     scope, the project's name otherwise."""
     if project is None:
         return ""
-    return f"{project.lane_of} ({APP_SCOPE})" if project.lane_of else project.name
+    lane_of = getattr(project, "lane_of", None)
+    return f"{lane_of} ({APP_SCOPE})" if lane_of else project.name
 
 
 def brief_target(name: str, scope: str = "",
