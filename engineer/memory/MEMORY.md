@@ -1975,3 +1975,40 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `JOB_ID_RE` (hex suffix) or `owed()` ignores it silently.
 - **Seen, not fixed:** a turn model change (`set_choices`) posts the CLI's
   "Set model to … for this session only" text as a persona message.
+
+## 2026-11-19 — plugin pages that explain themselves
+
+- **A theme is previewed in a frame of its own** (`app/public/theme-scene.html`,
+  served with `frame-ancestors 'self'`, the one page the app frames). Looks are
+  written against the root (`:root[data-look][data-theme][data-option-*]`), so
+  scoping a look's rules to an element would mean rewriting materials.css,
+  face-paints and the signature faces; a frame wears the real rules unchanged.
+  The scene re-dresses on a hash change (`look`, `mode`, `from`, `o.<option>`),
+  never reloads, and the page reads its colours back through
+  `loamScene.colours()` (a probe painted with `var(--token)`, so mixes resolve).
+- **A listed theme's fonts reach the preview** through the listing: the broker
+  keeps `fonts.css` and `font/<file>`, and the app holds the sheet to
+  @font-face rules over `/api/marketplace/<id>/font/` (`themeFontsCSS`'s new
+  `base`). Before this, a listed theme's preview and Try it wore the fallback.
+- **New PLUGIN.md fields cost an old Loam only a warning** (`extra`), never the
+  listing: `description`, `screenshots`, `palette` (`words_of`). The JS reader
+  (`shipped-plugins.js`) reads only line-shaped YAML: write `screenshots` and
+  `palette` as block lists of one-line flow maps, and quote a caption with a
+  comma. An apostrophe inside a flow map opens a quote for the Python reader
+  ("a `{` that never closes"): use ’.
+- **Markdown's single newline is a break in chat and a space in a document**
+  (`markdown(text, { soft: true })`): READMEs and guides are hard-wrapped.
+- **The design system marks a selection with a paper thumb and an underline**
+  (button-tiers.css), not the espresso fill; a segmented control on a tinted
+  group hides its thumb. Leave the group untinted.
+- **The colour guard (themes.test.js) reads `rgb(` in a regex as a literal
+  colour**; build such a pattern from parts.
+- **The demo world for screenshots** is `app/tools/capture-plugin-shots.mjs`:
+  the fixture app's invented agents, a thread retitled by PATCH and its record
+  replaced by route, a plugin installed from its folder (rows by the real
+  Python reader), its server stood in for by Playwright routes at `/x/<id>/`,
+  a speech-like WAV as the fake microphone
+  (`--use-file-for-fake-audio-capture`), and one frame for every picture
+  (`tools/frame-shot.py`). Do not freeze the page clock there: a recording's
+  timer and levels need time to run. The image tool writes only inside the
+  reach: generate into the job's tree and move it to scratch.

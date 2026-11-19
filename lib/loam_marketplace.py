@@ -577,9 +577,19 @@ def _resolve(folder_path: str, dest: str) -> str | None:
     return joined.lstrip("/") if joined != "/" else ""
 
 
+# What a README says that the listing's page already shows above it
+# (2026-11-19): its pictures of the plugin at work, between
+# `<!-- loam:gallery -->` and `<!-- /loam:gallery -->` (the gallery, or a
+# theme's live preview), and its one-line promise, between `<!-- loam:hero -->`
+# and `<!-- /loam:hero -->` (the listing's description). The page is handed
+# the README without them; GitHub, and a Loam before this one, show them.
+GALLERY_BLOCK = re.compile(r"<!--\s*loam:(gallery|hero)\s*-->.*?<!--\s*/loam:\1\s*-->", re.S)
+
+
 def readme_markdown(text: str, entry: dict) -> tuple[str, list[str]]:
     """The README as the page is handed it, and the folder's pictures it
     shows (paths inside the plugin's folder), in order."""
+    text = GALLERY_BLOCK.sub("", text)
     import html  # noqa: PLC0415
     import loam_plugins  # noqa: PLC0415
     repo_, ref, folder_path = entry["repo"], entry["ref"], entry.get("path") or ""

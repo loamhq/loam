@@ -417,6 +417,9 @@ try:
     check("README: code is kept as written, fenced and inline",
           ('<img src="kept-as-code.png">' in md, "[code](y.md)" in md, "`[not a link](x.md)`" in md),
           (True, True, True))
+    shown, shown_pics = mk.readme_markdown("<!-- loam:hero -->\n**Its promise.**\n<!-- /loam:hero -->\n\nIntro.\n\n<!-- loam:gallery -->\n![one](shots/one.png)\n*It at work.*\n<!-- /loam:gallery -->\n\n## More", {**at, "path": ""})
+    check("README: the gallery's own pictures are left to the gallery",
+          (shown, shown_pics), ("Intro.\n\n## More", []))
     root_md, root_pics = mk.readme_markdown("![a](a.png) [b](b.md)", {**at, "path": ""})
     check("README of a plugin at the repository's root",
           (root_md, root_pics), ("![a](a.png) [b](https://github.com/friend/loam-pet/blob/v1.0.0/b.md)", ["a.png"]))

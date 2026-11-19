@@ -107,6 +107,13 @@ heading, and below it everything exact: hosts, files, permissions,
 settings. A plugin's page shows the plain part at the top and the technical
 part under Details at its foot.
 
+**A README read by the Market** (2026-11-19) may mark what its listing's page
+already shows: its one-line promise between `<!-- loam:hero -->` and
+`<!-- /loam:hero -->`, and its pictures between `<!-- loam:gallery -->` and
+`<!-- /loam:gallery -->`. The listing's page leaves both out of the README it
+draws (the description and the gallery or a theme's live preview are above
+it); GitHub and a Loam before 0.2.12 show them as written.
+
 **One package shape for everything shared** (2026-11-13; the owner, m261 and
 m263): the marketplace shares themes, extensions, apps and later agents and
 skills, and each is this folder with its `PLUGIN.md`; `kind` names what it
