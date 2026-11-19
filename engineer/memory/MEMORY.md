@@ -2002,3 +2002,53 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `JOB_ID_RE` (hex suffix) or `owed()` ignores it silently.
 - **Seen, not fixed:** a turn model change (`set_choices`) posts the CLI's
   "Set model to … for this session only" text as a persona message.
+
+## 2026-11-19 — a fresh install as safe as a long-running one; the upgrade walked
+
+- **An update runs the OLD release's `lib/loam_update.py`.** Its step list
+  and `Box` methods are the running release's; only the scripts each step
+  runs (`gen-units`, `provision`, `gen-deploy`, `deploy`) are the new
+  release's. So anything a release adds to the box must ride on one of
+  those scripts, never on a new update step: the 15-minute history timer
+  added in `Box.units` on 11-18 never reached a box updated from 0.2.0-0.2.11
+  (their `Box.units` has no such line). `gen-units` now arms any timer it
+  installs for the first time and retires what `loam_units.RETIRED` names;
+  the inbound wall rides on `gen-deploy` (the `deploy` step, by sudo).
+- **A release that removes a unit template leaves the unit installed** on
+  every older box unless something removes it: Remote Control's
+  `loam-recycle-rc.timer` stayed armed after 0.2.0 -> 0.2.12, firing a
+  script that was gone. Add a retired unit to `loam_units.RETIRED`.
+- **The inbound wall is iptables, not nft**, appended last in INPUT
+  (`LOAM-INBOUND`), because Docker guarantees iptables and the broker's and
+  the sight's walls are iptables jumps inserted at the top: a separate nft
+  table would drop what their chains accept. It stands aside per family
+  where ufw/firewalld is active or INPUT's policy is DROP (the first box).
+  Prove it in `sudo unshare -n` (a network namespace of its own, nothing on
+  the host touched): `tests/test_inbound_firewall.py`. On a walk VM, a
+  container on `docker0` stands in for the outside: its `curl` to an
+  agent's `http.server` on 0.0.0.0 times out, to 443 answers.
+- **Fixed literals of the first box's folders fail open.** `15_CONVERSATIONS`
+  in the files tree, the reviewer, two MCP servers and the transcript
+  writer meant fences on nothing and transcripts in a folder of their own on
+  a fresh vault. `tests/test_no_box_folder_literals.py` refuses them.
+- **The upgrade walk** (Modal VM, as in "How it was proved"): install the
+  old tag with `--source git://127.0.0.1/loam.git --version 0.2.0`, the
+  candidate added to the VM's bare repository as a lightweight tag
+  (release tags are lightweight), `loam update apply --yes --foreground` as
+  the install's user. Notes for next time:
+  - workspaces are `paths.workspaces` (`~/agents` on a fresh install, not
+    `~/ai-labs`);
+  - Docker is userns-remapped, so Authelia's data is under
+    `/var/lib/docker/100000.100000/volumes/authelia-data/_data/`
+    (`db.sqlite3`: `webauthn_credentials`);
+  - the claim token is the link's fragment, not `/etc/loam/claim`;
+  - a wildcard needs dnsmasq (`/etc/hosts` gives the apex only and the
+    name never goes ready);
+  - the welcome screen needs a placeholder Claude login, written again
+    before each browser run (a failed turn blanks it);
+  - a passkey survives a browser: `WebAuthn.getCredentials` after adding
+    it, `WebAuthn.addCredential` into a new virtual authenticator after the
+    update, then the sign-in page's passkey button.
+- **Two jobs may cut the same version.** A job that writes `release-tag`
+  early is visible in its job folder; read the other running jobs'
+  `release-tag` before choosing a number.
