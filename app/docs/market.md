@@ -90,8 +90,24 @@ is the mock `market-store.html` the designer drew from the real covers.*
   display face, and a first heading that only repeats the name left out.
   Beside it, a sticky column: what it touches in plain words
   (`plainTouches`), Details (version, kind, light and dark for a theme,
-  source), and a theme's Options. There is no review claim anywhere: being
-  listed is a merged pull request, not an audit.
+  source), and a theme's Options. Without Loam's note there is no review
+  claim anywhere.
+- **Loam's note** (2026-11-19). The owner: when a plugin comes onto the
+  Market "we review the code, we review its description … we also have a
+  section … where we talk about where it touches, what are the different
+  things that it might change, what are some of the things that are in the
+  code that might be interesting to the user", and an update is reviewed
+  and the note rewritten. A listing whose list entry carries `review`
+  (docs/plugins.md, "The list") shows it right after the maker's row, above a
+  theme's showcase, the screenshots and the README, as wide as the README
+  (`loamNote`): Loam's own mark,
+  "Loam's note", "Loam's review of version N · date. Not the maker's
+  words.", the summary, then **New since N** set apart on a quiet plate for
+  an update, then What it touches, What it may change and Worth knowing.
+  The side column's touches are then titled **What it declares**, since
+  they are the plugin's own declaration. A listing without a review shows
+  none of this. Its Get or Install asks for the reviewed commit
+  (`pinned_link`), not the tag.
 - **On a phone** every page is one column. The lead story is taller and its
   name smaller, theme tiles are full width, and a listing's buttons sit
   under its words, then stay docked at the foot of the screen once they
@@ -129,6 +145,14 @@ what it touches, in plain words, from the declaration the first call answers;
 Plugins). The listing's button then reads In use, Use, Open or Installed.
 Agents and skills are listed and read but not installed yet (the host's
 `LISTED_ONLY`): their button is See it, and their page says so.
+
+**From a link, nobody reviewed it** (2026-11-19, the owner's yes that day).
+A plugin installed from a link was read by nobody at Loam, and the sheet
+says so in one sentence before the yes, on a quiet plate above "Before you
+say yes": "Nobody at Loam has looked at this. Once installed, it can do
+anything you can on this machine." For a theme with no page or server code
+the second sentence is "A theme changes only how Loam looks." The Market's
+own sheet does not carry it.
 
 A persona sets the same things through the same routes: `plugin.install`
 and `appearance.<kind>.theme` (`bin/settings`).
@@ -205,6 +229,11 @@ under reduced motion.
   whole-page captures of the front page and of a theme's and an
   extension's listing, a lead story with a photograph, and a phone's docked
   buttons.
+- `tools/capture-market-note.mjs`: Loam's note on a listing's page and its
+  install sheet at 390 and 1440, light and dark, in Latte and Autumn, with a
+  note from the reviewer's test set (`REVIEWED` in the fixture); it checks the
+  note opens the body, says whose words it is, shows New since for an
+  update, and that Install asks for the reviewed commit.
 - `test/market-card.test.js`: the card's form (what is one and what is
   not, in order, three at most, never in code), an unknown id drawn as its
   words, and the agent's search ranking every query as this page does.

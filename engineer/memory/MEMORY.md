@@ -2232,6 +2232,27 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   checkout, and Codex and Antigravity inline it from that import at each build,
   so landing is enough. `loam_codex.instructions(<workspace>)` is the quickest
   assembled-prompt proof, and it leaves the workspace as it found it.
+
+## 2026-11-19 — what a Market listing's link really pins
+
+- **A tag is not a pin, and neither is "a full commit".** A listing's tag can
+  be moved by its maker at any time, and GitHub serves a commit that exists
+  only in a *fork* through the parent repository's address
+  (`/repos/<parent>/commits/<sha>`, tarballs, `git fetch <sha>`). Caused on
+  2026-11-19: a fork-only commit fetched through the parent, and a moved tag
+  delivering a planted line through `loam_plugins.fetch`. What holds: the
+  reviewed commit, resolved once from the repository's own `git ls-remote`
+  tags (which never list a fork's), stored in list.json as `review.commit`,
+  and read and installed by commit (`pin`, `pinned_link` in
+  `lib/loam_marketplace.py`).
+- **`pull_request_target` gets the base repository's write token and
+  secrets for a fork's request**, even in a private repository whose
+  fork-workflow settings withhold both from `pull_request`. That is what lets
+  a reviewer comment on and merge a stranger's request, and why such a
+  workflow must never check out or run the request's code.
+- **A merge or push made with `GITHUB_TOKEN` starts no other workflow**, so a
+  workflow that merges must also do whatever a push to `main` would have
+  triggered (the marketplace's reviewer rebuilds list.json itself).
 ## 2026-11-19 — the landing's tests are sealed and parallel
 
 - **What a sealed test sees.** `tests/run-all` writes each file its own

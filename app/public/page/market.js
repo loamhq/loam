@@ -468,7 +468,7 @@ export function mount(host) {
     const cover = coverOf(entry)
     const frame = cover ? coverImg(entry, cover) : theme && themeState(id) !== 'error' ? livePreview(entry, true) : null
     const version = body?.version || entry.version
-    const article = readme(entry, body)
+    const article = readme(entry, body), note = loamNote(entry)
     return [h('div', { class: `market-listing${frame ? ' has-cover' : ' no-cover'}`, key: `listing:${id}` },
       frame ? h('div', { class: 'market-listing-cover' }, frame) : null,
       h('header', { class: 'market-listing-head' },
@@ -479,9 +479,38 @@ export function mount(host) {
           entry.description ? h('p', { class: 'market-listing-desc', text: entry.description }) : null),
         listingActs(entry, body, kind)),
       maker(entry, body),
+      // Loam's note comes first after the maker, before the showcase, the
+      // screenshots and the README: it is what a deciding owner reads first.
+      note ? h('div', { class: 'market-listing-note-row' }, note) : null,
       theme && body?.theme && themeState(id) !== 'error' ? showcase.view({ key: `market-${id}`, look: id, name: entry.name, options: body.theme.options ?? [], palette: body.theme.palette ?? [], from: themeInstalled(id) ? 'installed' : 'market' }) : null,
       gallery(entry, body),
       h('div', { class: `market-listing-body${article ? '' : ' market-listing-body-facts'}` }, article, facts(entry, d, kind)))]
+  }
+  // Loam's note (2026-11-19): what Loam's reviewer wrote of the version this
+  // listing delivers, from the list itself (`review`), never from the
+  // plugin's own files. It comes right after the maker's row, above the
+  // showcase, the screenshots and the README, so it is the first thing read
+  // after the name and the button; it carries
+  // Loam's own mark and says whose words they are. A listing without a
+  // review shows nothing here.
+  const NOTE_GROUPS = [['touches', 'What it touches'], ['may_change', 'What it may change'], ['worth_knowing', 'Worth knowing']]
+  function loamNote(entry) {
+    const review = entry.review, note = review?.note
+    if (!note?.summary) return null
+    const when = review.reviewed_at ? new Date(`${review.reviewed_at}T12:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : null
+    const sub = ['Loam’s review of', review.version ? `version ${review.version}` : 'this version', when ? `· ${when}` : null].filter(Boolean).join(' ')
+    const group = (key, title, extra = '') => note[key]?.length ? h('section', { class: `market-note-group${extra}`, key: `g:${key}` },
+      h('h3', { class: 'market-note-group-title', text: title }),
+      h('ul', { class: 'market-note-list' }, ...note[key].map((line, i) => h('li', { key: `${key}:${i}`, text: line })))) : null
+    return h('section', { class: 'market-loam-note', 'aria-labelledby': 'market-loam-note-title', key: `note:${entry.id}:${review.commit}` },
+      h('header', { class: 'market-loam-note-head' },
+        h('img', { class: 'market-loam-mark', src: '/icon.svg', alt: '' }),
+        h('div', {},
+          h('h2', { class: 'market-loam-note-title', id: 'market-loam-note-title', text: 'Loam’s note' }),
+          h('p', { class: 'market-loam-note-sub', text: `${sub}. Not the maker’s words.` }))),
+      h('p', { class: 'market-loam-note-summary', text: note.summary }),
+      note.changed?.length ? group('changed', note.since ? `New since ${note.since}` : 'New in this version', ' market-note-changed') : null,
+      h('div', { class: 'market-note-groups' }, ...NOTE_GROUPS.map(([key, title]) => group(key, title))))
   }
   function listingActs(entry, body, kind, { dock = false } = {}) {
     return h('div', { class: `market-listing-acts${dock ? ' market-dock-acts' : ''}`, key: dock ? 'dock-acts' : 'acts' },
@@ -515,7 +544,9 @@ export function mount(host) {
     const options = body?.theme?.options ?? []
     return h('aside', { class: 'market-side', 'aria-label': 'About it' },
       h('section', { class: 'market-touches', 'aria-labelledby': 'market-touches-title' },
-        h('h2', { class: 'kicker market-side-title', id: 'market-touches-title', text: 'What it touches' }),
+        // Beside Loam's note, which says what it touches in the reviewer's
+        // words, this column is what the plugin itself declares.
+        h('h2', { class: 'kicker market-side-title', id: 'market-touches-title', text: entry.review?.note ? 'What it declares' : 'What it touches' }),
         d.state === 'loading' ? h('p', { class: 'note market-reading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading what it declares, from its own link…')
           : d.state === 'error' ? h('p', { class: 'note', role: 'status', text: `Its declaration could not be read just now (${d.error}). Installing shows it before you say yes.` })
           : touchList(touches),
@@ -657,7 +688,8 @@ export function mount(host) {
     st.install = { id, entry, phase: 'reading', preview: null, error: '' }
     host.schedule()
     try {
-      const preview = await host.pluginLoader.install({ url: entry.link })
+      // A reviewed listing installs the commit its review read (`pinned_link`).
+      const preview = await host.pluginLoader.install({ url: entry.pinned_link ?? entry.link })
       if (st.install?.id !== id) return
       Object.assign(st.install, { preview, phase: 'ready' })
     } catch (error) {
@@ -674,7 +706,7 @@ export function mount(host) {
     job.phase = 'installing'; job.error = ''; host.schedule()
     // A link's yes names exactly what was shown (its repository, folder and
     // tag or commit: `request`), so a newer release since is never what lands.
-    const request = job.mode === 'link' ? { ...(job.preview.request ?? { url: job.text }), via: 'link' } : { url: job.entry.link, via: 'market' }
+    const request = job.mode === 'link' ? { ...(job.preview.request ?? { url: job.text }), via: 'link' } : { url: job.entry.pinned_link ?? job.entry.link, via: 'market' }
     try {
       const out = await host.pluginLoader.install({ ...request, confirm: job.preview.confirm })
       if (st.install !== job) return
@@ -827,6 +859,9 @@ export function mount(host) {
       done ? h('p', { class: 'market-install-done', role: 'status', text: theme ? `It’s in Appearance with your other themes.${host.theme.value.theme === job.id ? ' You’re wearing it.' : ''}` : kind === 'app' ? 'It’s in Apps, and runs on your server.' : `It’s on, and in Settings › ${home}.` })
         : description ? h('p', { class: 'market-install-desc', text: description }) : null,
       link && !done && p?.note ? h('p', { class: 'note market-link-note' }, icon.branch(14), h('span', { text: p.note })) : null,
+      // From a link (the owner, 2026-11-19): nobody reviewed it, and the one
+      // sentence that says so comes before the yes, above what it declares.
+      link && !done && p ? h('p', { class: 'market-unreviewed', role: 'note' }, icon.info(15), h('span', { text: kind === 'theme' && !p.declaration?.page_code && !p.declaration?.touches?.server ? 'Nobody at Loam has looked at this. A theme changes only how Loam looks.' : 'Nobody at Loam has looked at this. Once installed, it can do anything you can on this machine.' })) : null,
       !done ? h('section', { class: 'market-install-touches', 'aria-label': update ? 'Added in this version' : 'Before you say yes' },
         h('h3', { class: 'market-facts-title', text: update ? (Object.keys(p.added ?? {}).length ? 'New in this version' : 'Nothing new in what it touches') : 'Before you say yes' }),
         job.phase === 'reading' ? h('p', { class: 'note market-reading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading what it declares, from its own link…')

@@ -57,6 +57,15 @@ export const LISTINGS = [
     description: 'Turns a transcript into decisions, owners and dates, filed beside the meeting.', ...at('ada-park/meeting-notes', 'meeting-notes', 'v0.3.0'),
     declaration: { touches: { network: [], record: 'write', memory: 'none', server: false }, overrides: [], page_code: false }, installable: false, why: 'Loam reads and lists skill packages and installs none yet' },
 ]
+// A listing Loam's reviewer has read (2026-11-19): its `review` is the commit
+// it read and Loam's note, verbatim from the reviewer's run over the test set
+// (focus-timer 1.1.1, an update that began to reach further in 1.1.0).
+export const REVIEWED = { id: 'focus-timer', name: 'Focus timer', author: 'Sam Rivera', kind: ['extension'], version: '1.1.1',
+  description: 'A 25-minute focus timer beside the composer.', ...at('sam-rivera/focus-timer', 'focus-timer', 'v1.1.1'),
+  pinned_link: 'https://github.com/sam-rivera/focus-timer/tree/01a0ca1f1d77eadde887a4716c1cb2dbb177b205/focus-timer',
+  review: { commit: '01a0ca1f1d77eadde887a4716c1cb2dbb177b205', version: '1.1.1', reviewed_at: '2026-11-19', note: {"summary": "Adds a 25-minute focus and 5-minute break timer button beside the composer. It checks public holidays via date.nager.at on load and counts the messages in your currently open conversation in your browser to shorten focus blocks during long discussions.", "touches": ["Contacts date.nager.at once when the plugin loads, sending the current year and a country code (defaulting to US) to fetch public holidays.", "Reads your currently open conversation in the browser to count how many messages it has (it does not read or send the text of your messages)."], "may_change": ["Adds a Focus timer button to the composer toolbar and shows a toast message when switching between focus and break phases."], "worth_knowing": ["If today is a public holiday in the configured country, the timer does not count down even after you press the Focus button to start it.", "Although the README and manifest mention a settings section for custom lengths, the code only reads the focus, break, and country settings and does not currently register a settings panel UI, so it uses the defaults (25 minutes, 5 minutes, and US) unless those settings are already set.", "When the open conversation passes 40 messages during a focus session, any remaining focus time above 5 minutes is immediately cut down to 5 minutes."], "changed": ["Now contacts date.nager.at on startup with the current year and country code to check if today is a public holiday.", "Now reads your open conversation in the browser to check if it has more than 40 messages, shortening the remaining focus time to 5 minutes when it does."], "since": "1.0.0"} },
+  declaration: { touches: { network: [{ host: 'date.nager.at', why: 'Public holidays, so the timer does not nag on a day off' }], record: 'read', memory: 'none', server: false }, overrides: [], page_code: true },
+  readme: "# Focus timer\n\nA small timer beside the composer: 25 minutes of focus, then a 5-minute\nbreak. Tap to start, tap again to pause. Lengths are in Settings › Plugins ›\nFocus timer.\n\nWhat it reaches:\n\n- It asks date.nager.at for your country's public holidays once a day (only\n  the year and the country code are sent), so it stays quiet on a day off.\n- Since 1.1.0 it counts the messages in the conversation you have open, in\n  your browser, and shortens a focus block when a conversation has run long.\n  It reads no words and sends nothing about them.\n\n## Changelog\n\n- 1.1.1: the README says what 1.1.0 began to reach.\n- 1.1.0: holidays from date.nager.at; reads how long the open conversation is.\n- 1.0.0: first release.\n" }
 const LISTED_FILES = new URL('../../plugins/_listed/', import.meta.url)
 const ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="#B4733A"/><circle cx="33" cy="15" r="6" fill="#F6EDDF"/><path d="M6 40 L19 22 L28 33 L33 27 L42 40Z" fill="#2F2017"/></svg>'
 
@@ -140,7 +149,7 @@ export async function marketFixture({ mode = 'light', look = 'latte', listings =
   }
   app.routes['POST /v1/plugins'] = async (req, res, url, raw) => {
     const body = JSON.parse(raw); writes.push({ method: 'POST', path: '/v1/plugins', body })
-    const entry = listings.find(e => e.link === body.url)
+    const entry = listings.find(e => e.link === body.url || (e.pinned_link && e.pinned_link === body.url))
     if (!entry) return json(res, 404, { error: 'No plugin at that link.' })
     const preview = { installed: false, id: entry.id, name: entry.name, version: entry.version, author: entry.author, api: 0, kind: entry.kind, places: [],
       source: { kind: 'link', repo: entry.repo, path: entry.path, ref: entry.ref, ref_kind: 'tag', commit: 'c'.repeat(40), url: entry.link },
