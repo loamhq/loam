@@ -1946,6 +1946,38 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Adopted sessions stay** (`lib/loam_adopt.py`): the conversations held
   in the Claude Code app before the retirement still open in Loam, read
   from the CLI's own files.
+
+## 2026-11-19 — the provider CLIs pinned to each release
+
+- **The CLIs are pinned, not followed** (the owner, 2026-11-19: "Sgtm" to
+  each release carrying the versions it was tested with). `PINS` in
+  `lib/loam_pins.py` is the one place. The installer (step 7) and `loam
+  update` (the `providers` step, which also triggers `provider-memory` and
+  `broker`) run `bin/provider-pin apply`; nothing else moves a link. The
+  daily follower (`provider-follow`, its timer, rollback watch, comms lines
+  and tests, ~1,880 lines) is gone; `gen-units` removes its units from a box
+  (`loam_units.RETIRED`) and `check-drift` reports them and any link off
+  its pin.
+- **Moving a pin**: edit `PINS`, `bin/provider-pin test` (installs the
+  builds beside and runs both live parity tests with a `[bin]` config
+  pointing at them; the links stay), land, `bin/provider-pin apply` here
+  (moves the links, re-pins memory, `restart-broker --when-idle`).
+- **Antigravity can be pinned after all**, with two seams found by causing:
+  its updater stops for `AGY_CLI_DISABLE_AUTO_UPDATE=true` (`1` and `TRUE`
+  are ignored; the log line is `Auto-update disabled via environment
+  variable`), and its release server
+  (`.../manifests/linux_amd64.json`, underscore) names only the latest
+  build, whose file URL carries a build id. So its pin is the URL and
+  SHA-512 per platform, and an old pin installs only while Google keeps the
+  file. `agy install` only copies the binary to `~/.local/bin/agy`; Loam
+  links it instead. An `agy` run by hand without the variable can still
+  update itself; check-drift sees it.
+- **A pre-pin release has no `bin/provider-pin`**: an undo back to it
+  leaves the CLIs where they are (`Box.providers`).
+- **The Antigravity file sweep** moved from the follower's last step to
+  `bin/clear-agy-files`, run by the nightly drift-watch after lane-check.
+- **`loam_live.restart_read`** is the broker's live-list reader now (was
+  `loam_follow.restart_read`); `restart-broker` and `move-state` use it.
 ## 2026-11-19 — input to a thread member is durable (batch B step 2)
 
 - **Every queued turn's input is on disk first**:

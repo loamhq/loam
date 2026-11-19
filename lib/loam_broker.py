@@ -35,8 +35,8 @@ AI_LABS = lc.WORKSPACES
 CLAUDE = str(lc.CLAUDE_BIN)
 # The flags every broker session's launch line opens with, after the binary
 # (``Session.argv`` in bin/session-broker says why each is load-bearing).
-# Here so the provider follower's smoke test starts a candidate build with
-# exactly the broker's line (lib/loam_follow.py, 2026-11-11).
+# Here so one authority holds them (the retired provider follower's smoke
+# test shared it, 2026-11-11 to 11-19).
 CLAUDE_STREAM_FLAGS = (
     "-p",
     "--input-format", "stream-json",

@@ -1579,8 +1579,8 @@ class Session:
         way, and reading it back is the one answer that cannot be wrong. See
         ``_handle``.
         """
-        # The flags are cfg.CLAUDE_STREAM_FLAGS, one authority shared with the
-        # provider follower's smoke test (2026-11-11). Among them,
+        # The flags are cfg.CLAUDE_STREAM_FLAGS, their one authority
+        # (2026-11-11). Among them,
         # --permission-prompt-tool stdio routes a permission prompt onto the
         # control channel instead of auto-denying it. Without it the CLI
         # denies anything that would prompt and reports it in

@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Antigravity's per-conversation files, cleared after a week.
+
+What is cleared and when is lib/loam_agy_files.py's docstring. The nightly
+drift-watch (loam-check-drift.timer, 01:40) runs this after its checks;
+until 2026-11-19 it was the last step of the retired provider follower.
+Each conversation cleared is one line in logs/agy-files.jsonl and in the
+journal; a failure is retried the next night, never said in comms.
+
+Usage: clear-agy-files [--dry-run]     exit 1 when a clearing failed
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+LOG = lc.LOGS / "agy-files.jsonl"
+
+
+def main() -> int:
+    dry = "--dry-run" in sys.argv[1:]
+    import loam_agy_files  # noqa: PLC0415
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    try:
+        rows = loam_agy_files.clear(dry=dry)
+    except Exception as exc:  # noqa: BLE001 -- logged, not swallowed
+        rows = [{"error": f"{type(exc).__name__}: {exc}", "conversation": None}]
+    if not dry and rows:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with LOG.open("a", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps({"ts": stamp, **row}) + "\n")
+    for row in rows:
+        print(json.dumps({"dry": dry, **row}))
+    if not rows:
+        print("clear-agy-files: nothing due")
+    return 1 if any(r.get("error") for r in rows) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

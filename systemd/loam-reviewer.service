@@ -12,6 +12,9 @@ Type=oneshot
 # (lib/loam_config.py).
 OOMScoreAdjust=@AGENT_OOM@
 Environment=DISABLE_AUTOUPDATER=1
+# And Antigravity's own updater off (lib/loam_pins.py: the CLIs stay at
+# the release's pin; the variable is read only as `true`).
+Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
 Environment=PATH=@UNIT_PATH@
 EnvironmentFile=-@WAKE_ENV@
 WorkingDirectory=@ROOT@/reviewer

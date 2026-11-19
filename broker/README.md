@@ -267,7 +267,7 @@ holds it: `working` (a silent turn in a long tool call or a call waiting on
 an engineer job included), `asking`, `background` (a subagent ends with the
 session's process tree, and a waiting call is cut), a state the rule does
 not know, and a failed read. The rule is `lib/loam_live.restart_blockers`,
-which `lib/loam_follow.py` and `bin/move-state` use too. At its ceiling
+which `bin/move-state` uses too (`loam_live.restart_read`). At its ceiling
 (`loam_live.RESTART_CEILING_S`, 30 min) or `--max-wait` it **defers**:
 exit 75, nothing restarted, and the caller tries again later. On 11-16 the
 ceiling used to let it go past silent turns, and it cut four, three of them
