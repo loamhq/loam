@@ -123,8 +123,8 @@ def main() -> int:
           ("`how-i-am-here.md`" in (ws / "map.md").read_text(),
            "`nights.md`" in (ws / "map.md").read_text(),
            "About me.md" in (ws / "nights.md").read_text()), (True, True, True))
-    check("Loam's text, loaded beside her config, says to read About me.md",
-          "`About me.md`" in loam_loading.LOAM_TEXT.read_text(), True)
+    # Loam's text no longer names About me.md (the owner's short text,
+    # 2026-11-19); her nights.md does, checked above.
     check("the owner's shared page is made, in this install's workspaces",
           loam_loading.owner_page(), lc.WORKSPACES / "_shared" / "owner.md")
     check("...and exists", loam_loading.owner_page().is_file(), True)
