@@ -64,8 +64,8 @@ or on General's board: a thread's record holds only what the owner and the
 agents wrote, and a turn that is waiting for room, could not run or ended
 without a reply shows so on the turn in the app. An agent whose own
 scheduled run failed is told at the top of its next turn. A problem that is
-no one agent's (drift, memory pressure, the account refusing runs, a check
-or a plugin's event, an update) goes to the one agent the owner chose in
+no one agent's (drift, memory pressure, a check or a plugin's event, an
+update) goes to the one agent the owner chose in
 Settings › Agents (the first agent, unless they change it), as the input of
 a run of its own, told once. That agent decides what to do: it can brief
 the engineer, and it tells the owner in General, in its own words, only if
