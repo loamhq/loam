@@ -16,7 +16,9 @@ directory, no ``--settings`` override, no appended system prompt, and no
 default is still nothing on the launch line). That is the whole trick. The
 persona's ``.claude/settings.json``
 then supplies the model, ``outputStyle: conversation`` (so ``_active.md``
-loads and ``_reflection.md`` does not), the permission rules, and the three
+loads and ``_reflection.md`` does not; for an agent with a map, since
+2026-11-18, ``none``, and its map loads as a CLAUDE.md import on every
+lane: lib/loam_loading.py), the permission rules, and the three
 hooks -- transcript capture on Stop and SessionEnd, the boundary guard on
 every PreToolUse. ``LOAM_WAKE`` is deliberately NOT set: the transcript hook
 defaults to "conversation" when it is absent, and a session a person is
@@ -217,6 +219,7 @@ import loam_github_app as github_app  # noqa: E402
 # Codex, the second provider (2026-10-01): its binary, home, login, models and
 # the translation of its app-server notifications into this file's events.
 import loam_codex as codex  # noqa: E402
+import loam_loading  # noqa: E402  the shape an agent loads in (2026-11-18)
 # Antigravity, the third (2026-11-09): binary, login probe, instructions and
 # the translation of `agy -p` stream-json.
 import loam_antigravity as agy  # noqa: E402
@@ -1619,6 +1622,10 @@ class Session:
         # Claude shelf above the workspaces and this persona's view. Never
         # fails a start (lib/loam_skills.py).
         await asyncio.to_thread(loam_skills.quiet_refresh, self.workspace)
+        # The shape this agent is in (2026-11-18, lib/loam_loading.py): an
+        # agent that wrote its map since CLAUDE.md was rendered starts this
+        # session in the map's shape. Never fails a start.
+        await asyncio.to_thread(loam_loading.quiet_refresh, self.workspace)
         env = dict(os.environ)
         env["DISABLE_AUTOUPDATER"] = "1"
         env["CLAUDE_PROJECT_DIR"] = str(self.workspace)
@@ -8188,6 +8195,11 @@ async def amain(addr: str, port: int) -> int:
     # one the person was using or had chosen is installed from its Market
     # link, once (lib/loam_listed_themes.py). Off the loop, and fail-soft.
     asyncio.create_task(keep_listed_themes())
+    # Built-in plugins that left for the Market in 0.2.9 (Dictation, Read
+    # aloud): one that was on is installed from its Market listing, once,
+    # keeping its switch, voices, keys and preferences
+    # (lib/loam_to_market.py). Off the loop, and fail-soft.
+    asyncio.create_task(keep_moved_to_market())
     tcp = await asyncio.start_server(server.handle, addr, port)
     print(f"session-broker listening on {addr}:{port} "
           f"(admission by memory: reserve {cfg.MEMORY_RESERVE_MB} MB, "
@@ -8222,6 +8234,19 @@ async def keep_listed_themes() -> None:
                   file=sys.stderr, flush=True)
     except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
         print(f"themes: keeping the listed looks failed ({exc!r})", file=sys.stderr, flush=True)
+
+
+async def keep_moved_to_market() -> None:
+    try:
+        import loam_to_market  # noqa: PLC0415
+        kept = await asyncio.to_thread(loam_to_market.keep)
+        for pid, entry in kept.items():
+            print(f"to-market: {pid} {entry['how']}"
+                  + (f" ({entry.get('link_error') or entry.get('error')})"
+                     if entry["how"] != "link" and (entry.get("link_error") or entry.get("error")) else ""),
+                  file=sys.stderr, flush=True)
+    except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
+        print(f"to-market: keeping the moved plugins failed ({exc!r})", file=sys.stderr, flush=True)
 
 
 async def fetch_codex_models() -> None:

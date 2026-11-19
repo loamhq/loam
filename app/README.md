@@ -236,8 +236,11 @@ cover both widths, both themes and both modes.
 ## Plugins
 
 The page loads plain-file extensions and themes from the host
-catalog. Read aloud and Dictation are independently switchable first-party
-plugins. Settings → Plugins shows declarations, provenance, failures and the
+catalog. Read aloud and Dictation are Market plugins since 0.2.9, each in
+its maker's own repository: a fresh install has neither, and draws no mic or
+read-aloud control until one is installed from Settings › Market and on.
+Their copies for this repository's tests are in `../plugins/_listed/`; the
+server halves they call (`/api/transcribe`, `/api/speech`) stay here. Settings → Plugins shows declarations, provenance, failures and the
 two-step install question. Installed code runs as trusted page code; its
 network declaration is informational. No build step or app dependency was added.
 
@@ -283,7 +286,7 @@ All configuration is supplied at run time. No credentials belong in this repo
 or its image. `GET /up` is the web half's readiness endpoint.
 
 Agent voice labels, sample recording status and regeneration are documented in
-the [Read aloud voice guide](public/plugins/read-aloud/README.md).
+the [Read aloud voice guide](../plugins/_listed/read-aloud/README.md).
 
 ## Configuration
 

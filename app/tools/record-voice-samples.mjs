@@ -8,8 +8,8 @@ import { readConfig } from '../src/config.js'
 import { createBroker } from '../src/broker.js'
 import { brokerSecret } from '../src/plugin-secrets.js'
 import { createSpeech, DEFAULT_VOICE } from '../src/speech.js'
-import { PREBUILT_VOICES } from '../public/plugins/read-aloud/page/document-speech.js'
-import { sampleText } from '../public/plugins/read-aloud/page/voice-samples.js'
+import { PREBUILT_VOICES } from '../src/document-speech.js'
+import { sampleText } from '../../plugins/_listed/read-aloud/page/voice-samples.js'
 
 if (process.argv.slice(2).join(' ') !== '--record') {
   console.log('Usage: BROKER_URL=… BROKER_TOKEN=… SPEECH_DIR=<scratch cache> node tools/record-voice-samples.mjs --record')
@@ -21,7 +21,7 @@ if (!config.brokerUrl || !config.brokerToken || !process.env.SPEECH_DIR) throw n
 const getKey = brokerSecret(createBroker(config), 'read-aloud')
 if (!await getKey()) throw new Error('The read-aloud plugin key is unavailable from the configured broker.')
 const speech = createSpeech(config, { getKey })
-const root = fileURLToPath(new URL('../public/plugins/read-aloud/', import.meta.url))
+const root = fileURLToPath(new URL('../../plugins/_listed/read-aloud/', import.meta.url))
 const staged = [], samples = {}
 try {
   for (const voice of PREBUILT_VOICES) {

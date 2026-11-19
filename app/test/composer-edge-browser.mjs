@@ -35,10 +35,10 @@ try {
     const app = await oneProductFixture(), errors = [], captures = [], checks = []
     const plugins = await shippedPlugins(path.resolve('public'))
     app.routes['GET /v1/plugins'] = (req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ plugins })) }
-    for (const plugin of ['dictation', 'read-aloud']) for (const file of await readdir(`public/plugins/${plugin}/page`)) {
+    for (const plugin of ['dictation', 'read-aloud']) for (const file of await readdir(`../plugins/_listed/${plugin}/page`)) {
       app.routes[`GET /v1/plugins/${plugin}/files/page/${file}`] = async (req, res) => {
         res.writeHead(200, { 'content-type': file.endsWith('.css') ? 'text/css' : 'text/javascript', 'cache-control': 'no-store' })
-        res.end(await readFile(`public/plugins/${plugin}/page/${file}`))
+        res.end(await readFile(`../plugins/_listed/${plugin}/page/${file}`))
       }
     }
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, serviceWorkers: 'block', isMobile: width === 390, hasTouch: width === 390 })

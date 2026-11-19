@@ -30,7 +30,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const CSS = ['style.css', 'plugins/read-aloud/page/style.css', 'plugins/dictation/page/style.css'].map(file => readFileSync(new URL('../public/' + file, import.meta.url), 'utf8')).join('\n')
+// Read aloud and Dictation are Market plugins since 0.2.9; their listed copies' styles are read beside the core's.
+const CSS = ['../public/style.css', '../../plugins/_listed/read-aloud/page/style.css', '../../plugins/_listed/dictation/page/style.css'].map(file => readFileSync(new URL(file, import.meta.url), 'utf8')).join('\n')
 
 // Every selector in the file, with whether it is inside an `@media (hover:
 // hover)` block. Comments come off first, because this file explains itself at

@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_broker as cfg  # noqa: E402
 import loam_config as lc  # noqa: E402
 import loam_identity  # noqa: E402
+import loam_loading  # noqa: E402
 
 TOKEN = cfg.read_token()
 STEP = 0
@@ -243,20 +244,33 @@ def probe(args, agent: str, workspace, thread_id: str) -> int:
     # -- message 1: identity, and the first line of _active.md ------------
     canary = loam_identity.pick_canary(workspace)
     decoy, decoy_owner = loam_identity.pick_decoy(workspace)
-    active = workspace / "_active.md"
-    reflection = workspace / "_reflection.md"
-    active_phrase = phrase_from(active, avoid=reflection.read_text(encoding="utf-8"))
-    reflection_phrase = phrase_from(reflection,
-                                    avoid=active.read_text(encoding="utf-8"))
+    # What must load in a conversation and what must not, in the agent's
+    # shape (2026-11-18, lib/loam_loading.py): without a map, `_active.md`
+    # loads and `_reflection.md` does not; with one, the map loads and an
+    # `_active.md` it may still keep does not.
+    if loam_loading.mapped(workspace):
+        active = workspace / loam_loading.MAP
+        reflection = next((workspace / n for n in ("_active.md", "_reflection.md")
+                           if (workspace / n).is_file()), None)
+        style_words = "your map.md"
+    else:
+        active = workspace / "_active.md"
+        reflection = workspace / "_reflection.md"
+        style_words = ("your active-context file (the one that loads as your "
+                       "conversation output style)")
+    absent_text = reflection.read_text(encoding="utf-8") if reflection else ""
+    active_phrase = phrase_from(active, avoid=absent_text)
+    reflection_phrase = (phrase_from(reflection, avoid=active.read_text(encoding="utf-8"))
+                         if reflection else loam_identity.pick_decoy(workspace)[0])
     expected_line = first_body_line(active)
 
     step("message 1 -- identity the way the wake preflight does, "
          "plus the first line of _active.md")
     say(f"  canary (from {agent}/soul.md): {canary[:90]!r}")
     say(f"  decoy  (from {decoy_owner}/soul.md): {decoy[:90]!r}")
-    say(f"  _active.md phrase:     {active_phrase[:90]!r}")
-    say(f"  _reflection.md phrase: {reflection_phrase[:90]!r}")
-    say(f"  expected first body line of _active.md: {expected_line!r}")
+    say(f"  {active.name} phrase (must load): {active_phrase[:90]!r}")
+    say(f"  {reflection.name if reflection else 'decoy'} phrase (must not): {reflection_phrase[:90]!r}")
+    say(f"  expected first body line of {active.name}: {expected_line!r}")
     prompt = (
         "This is an automated check of the runtime, not a request for work. "
         "Use no tools and read no files; answer only from what is already in "
@@ -266,8 +280,7 @@ def probe(args, agent: str, workspace, thread_id: str) -> int:
         f"  2. is this phrase in your context? <<{decoy}>>\n"
         f"  3. is this phrase in your context? <<{active_phrase}>>\n"
         f"  4. is this phrase in your context? <<{reflection_phrase}>>\n"
-        "Second line: the first line of the body of your active-context file "
-        "(the one that loads as your conversation output style), quoted "
+        f"Second line: the first line of the body of {style_words}, quoted "
         "exactly, from context and not from disk.\n"
         "Nothing else."
     )
@@ -281,7 +294,7 @@ def probe(args, agent: str, workspace, thread_id: str) -> int:
         ["YES", "NO", "YES", "NO"] else "FAIL"
     say(f"  identity verdict: {verdict} (want YES NO YES NO, got {words})")
     line_ok = expected_line.strip().strip('"') in reply
-    say(f"  first line of _active.md present: {line_ok}")
+    say(f"  first line of {active.name} present: {line_ok}")
     member = member_session(thread_id, agent)
     session_id = member["id"] if member else None
     say(f"  the member's session: {session_id} "

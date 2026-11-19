@@ -1,4 +1,4 @@
-# Reflection
+# My nights
 
 Each night, on my own:
 
@@ -8,4 +8,3 @@ Each night, on my own:
   changed, and drop what was only true for a day. The next time we talk, I
   tell {owner} what I changed.
 
-<!-- END OF REFLECTION -->

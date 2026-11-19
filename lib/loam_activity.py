@@ -750,7 +750,11 @@ def _row(agent: str, name: str, text: str | None, log: list[dict],
         "enabled": enabled,
         "done": cron.done if cron else None,
         "body": strip_frontmatter(text).strip(),
-        "instruction": "_reflection.md" if kind == "reflection" else None,
+        # The reflection's instruction is the agent's `_reflection.md`, or
+        # Loam's default prompt once it has a map (2026-11-18), which is no
+        # file: None, as a cron's.
+        "instruction": ("_reflection.md" if kind == "reflection"
+                        and not (_ai_labs_ws(agent) / "map.md").is_file() else None),
         "timer": _timer(agent, name, kind),
         "file": {"root": "spaces", "path": f"{agent}/{CRON_LANE_DIR}/{name}.md"},
         "last_fire": ({k: fires[-1].get(k) for k in ("id", "ts", "outcome")}
@@ -861,9 +865,11 @@ def edit(agent: str, name: str, fields: dict) -> dict:
     if previous is None:
         raise NotFound(f"there is no schedule {agent}/{name}")
     if name == loam_cron.REFLECTION and "body" in fields:
-        raise ls.Refused(f"the reflection's instruction is {agent}'s own "
-                         f"_reflection.md; this record holds only when it "
-                         f"runs and whether it is on")
+        where = ("Loam's default wake prompt, since it has a map"
+                 if (_ai_labs_ws(agent) / "map.md").is_file()
+                 else f"{agent}'s own _reflection.md")
+        raise ls.Refused(f"the reflection's instruction is {where}; this "
+                         f"record holds only when it runs and whether it is on")
     text = compose(fields, previous)
     if text == previous:
         raise ls.Refused("that changes nothing in the schedule")
@@ -947,3 +953,9 @@ def run_now(agent: str, name: str, fields: dict | None = None) -> dict:
 def seen_schedule(agent: str, name: str) -> dict:
     row = schedule(agent, name)
     return {"marked": mark_seen(row["unseen"]), "unread": unread()}
+
+
+def _ai_labs_ws(agent: str):
+    """The agent's workspace, for which shape its reflection is in."""
+    import loam_config as lc  # noqa: PLC0415
+    return lc.WORKSPACES / agent

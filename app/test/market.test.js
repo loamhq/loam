@@ -3,7 +3,7 @@
 // a thin or empty list draws nothing it does not have.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { stem, search, highlight, leadOf, sectionsOf, kindsListed, dateline, buildRequest, actionOf, plainTouches, reachOf } from '../public/market.js'
+import { stem, search, highlight, leadOf, sectionsOf, kindsListed, dateline, buildRequest, actionOf, plainTouches, reachOf, tileRows, fineLine, madeBy } from '../public/market.js'
 import { LISTINGS } from './market-fixture.mjs'
 import { allRoots, readThemeCSS } from './listed-themes.mjs'
 
@@ -107,4 +107,27 @@ test('a listed theme’s CSS is held to an installed theme’s rules before the 
   await assert.rejects(marketThemeCSS('ember', ':root[data-look="ember"] { --paper-page: url(https://example.invalid/x.png); }'), /Invalid theme value/)
   await assert.rejects(marketThemeCSS('ember', 'body { color: red; }'), /Invalid theme/)
   await assert.rejects(marketThemeCSS('Ember!', css), /Invalid theme id/)
+})
+
+test('theme tiles fall into rows of two wide and three tall, and none is left alone', () => {
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 8].map(tileRows), [[1], [2], [3], [2, 2], [2, 3], [2, 2, 2], [2, 3, 2], [2, 3, 3]])
+  assert.deepEqual(tileRows(0), [])
+  for (let n = 1; n <= 30; n++) {
+    const rows = tileRows(n)
+    assert.equal(rows.reduce((a, b) => a + b, 0), n)
+    if (n > 1) assert.ok(rows.every(r => r > 1), `${n}: no lone tile`)
+  }
+})
+
+test('the fine line under Install, from the declaration', () => {
+  assert.equal(fineLine({ touches: {}, page_code: false }, 'theme'), 'Free · changes only how Loam looks')
+  assert.equal(fineLine(LISTINGS[0].declaration, 'extension'), 'Free · talks to one service')
+  assert.equal(fineLine({ touches: { server: true } }, 'app'), 'Free · stays on your server')
+  assert.equal(fineLine({ touches: {}, page_code: true }, 'extension'), 'Free · stays on your Loam')
+})
+
+test('how many things a maker has in the Market', () => {
+  assert.equal(madeBy(LISTINGS, 'Ada Park'), 4)
+  assert.equal(madeBy(LISTINGS, ' ada park '), 4)
+  assert.equal(madeBy(LISTINGS, ''), 0)
 })

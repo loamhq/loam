@@ -36,13 +36,13 @@ try {
     await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__paint = { threads, pluginLoader, schedule };' }))
     if (baseline) for (const file of ['plugin-styles.js', 'threads.js']) await context.route(`**/${file}`, route => route.fulfill({ contentType: 'text/javascript', body: execFileSync('git', ['show', `${baseline}:public/${file}`], { encoding: 'utf8' }) }))
     let slowCSS = false
-    for (const plugin of ['dictation', 'read-aloud']) for (const file of await readdir(`public/plugins/${plugin}/page`)) {
+    for (const plugin of ['dictation', 'read-aloud']) for (const file of await readdir(`../plugins/_listed/${plugin}/page`)) {
       const asset = `/plugins/${plugin}/files/page/${file}`
       app.routes[`GET /v1${asset}`] = async (req, res) => {
         requests.push({ file: asset, slow: slowCSS, at: Date.now() })
         if (slowCSS && file.endsWith('.css')) await delay(700)
         res.writeHead(200, { 'content-type': file.endsWith('.css') ? 'text/css' : 'text/javascript', 'cache-control': 'no-store' })
-        res.end(await readFile(`public/plugins/${plugin}/page/${file}`))
+        res.end(await readFile(`../plugins/_listed/${plugin}/page/${file}`))
       }
     }
     const page = await context.newPage();

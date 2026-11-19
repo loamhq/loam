@@ -97,9 +97,12 @@ ONE_OFF_MAX_AHEAD = timedelta(days=30)
 # above the longest a run can take (lock wait plus the briefing lane's clock).
 ONE_OFF_STALE_AFTER = timedelta(hours=3)
 
+# Shape-neutral since 2026-11-18: an agent with a map has no
+# `_reflection.md` to load, and its wake's instruction is Loam's default.
 REFLECTION_BODY = (
-    "The nightly reflection wake. Its instruction is `_reflection.md`; this "
-    "record holds only when it runs and whether it is on.\n")
+    "The nightly reflection wake. Its instruction is `_reflection.md`, or "
+    "Loam's default once there is a `map.md`; this record holds only when it "
+    "runs and whether it is on.\n")
 
 
 class Refused(Exception):

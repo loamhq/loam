@@ -38,12 +38,13 @@ test('core imports no audio package, and audio packages import only their own fi
     for (const match of source.matchAll(/(?:from\s+|import\s*\()(['"])(\.[^'"]+\.js)\1/g)) {
       const imported = path.resolve(path.dirname(file), match[2])
       if (packageRoot) assert.ok(imported.startsWith(packageRoot + '/'), `${file} imports core: ${imported}`)
-      else assert.ok(!imported.includes('/public/plugins/'), `${file} imports an optional package`)
+      else assert.ok(!imported.includes('/public/plugins/') && !imported.includes('/plugins/_listed/'), `${file} imports an optional package`)
       await graph(imported, packageRoot)
     }
   }
   await graph('public/app.js')
-  for (const id of ['dictation', 'read-aloud']) await graph(`public/plugins/${id}/page/main.js`, path.resolve(`public/plugins/${id}`))
+  for (const file of ['src/server.js', 'src/speech.js', 'src/spoken-length.js']) await graph(file)
+  for (const id of ['dictation', 'read-aloud']) await graph(`../plugins/_listed/${id}/page/main.js`, path.resolve(`../plugins/_listed/${id}`))
   const store = await readFile('public/store.js', 'utf8')
   assert.doesNotMatch(store, /dictation|readAloud|speechSettings/)
 })

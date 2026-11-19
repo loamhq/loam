@@ -24,10 +24,14 @@ Decided 2026-11-14 (first release, decisions 6 and 7; job L10):
   days"). A draft takes none and a made agent's ``agent.json`` has none; an
   older ``agent.json`` that still holds ``emoji`` is left as it is, and
   nothing serves the key.
-- **About me.** An install whose vault has ``About me.md`` at its top
-  (``bin/library seed-vault`` writes it) gives every agent made on it a line
-  in its ``_always.md`` pointing there (``ABOUT_LINE``). A vault without one
-  gets no line.
+- **Born in the map's shape** (2026-11-18, lib/loam_loading.py). A new
+  agent is made with a ``soul.md``, a ``config.md`` that is the draft's own
+  config as written (the owner's words for this agent, which may be one
+  line), and a ``map.md`` (the draft's, or ``loam_loading.MAP_SEED``), and
+  never ``_always.md``, ``_active.md`` or ``_reflection.md``. Loam's text and
+  the owner's shared page load beside its config without being copied into
+  it, so nothing of the fleet's configs is composed in any more. ``About
+  me.md`` is named by Loam's text, so no line about it is written either.
 
 **The yes.** A person's own call (the page, which sends no ``by``) is the
 person's yes. An agent's call (``by``) must name the thread it is talking to
@@ -86,7 +90,7 @@ YES_WINDOW = timedelta(minutes=30)
 # The starter agent, which "New agent" opens a thread with.
 STARTER = lc.get("agents.starter", "iris")
 # Where the agent's soul and config come from, as fields of a draft.
-DRAFT_TEXT = ("soul", "config", "active", "reflection")
+DRAFT_TEXT = ("soul", "config", "map")
 DRAFT_FIELDS = ("id", "name", "about", "provider", "wake", *DRAFT_TEXT)
 # The draft card's one plain line about who the agent is (2026-11-18): the
 # card showed the soul's opening, which is written to the agent ("You are
@@ -94,41 +98,15 @@ DRAFT_FIELDS = ("id", "name", "about", "provider", "wake", *DRAFT_TEXT)
 # person; never part of the soul, and not kept once the agent is made.
 ABOUT_MAX = 200
 # Retired keys a draft may still carry from before 2026-11-16: never shown.
-RETIRED_DRAFT_KEYS = ("emoji",)
+# `active` and `reflection` since 2026-11-18: a new agent loads its map,
+# and has neither file.
+RETIRED_DRAFT_KEYS = ("emoji", "active", "reflection")
 PROVIDERS = ("claude-code", "codex", "antigravity")
 
-# The loading files a new agent needs before its first run, when the draft
-# brings none: structure only, no words in the agent's mouth (bin/provision,
-# `report_readiness`, says why each must exist). The agent writes its own.
-STARTER_ACTIVE = """\
-# Active
-
-What you carry into a conversation. This file is yours: write it as you learn
-how you want to be with {owner}.
-
-<!-- END OF ACTIVE -->
-"""
-# A new agent's `_always.md`, on an install whose vault has `About me.md`
-# (the owner, 2026-11-16): one line, and the file is the agent's from then on.
-STARTER_ALWAYS = """\
-# Always
-
-This file loads into every run you have, with {owner} and alone. It is yours:
-write it, cut it, restructure it however serves you.
-
-{about}
-"""
-ABOUT_LINE = ("`About me.md`, at the top of the vault ({path}), is what "
-              "{owner}'s agents know about them. Read it; add what lasts about "
-              "{owner}; tell them when you do.")
-STARTER_REFLECTION = """\
-# Reflection
-
-What you do on your nightly wake. This file is yours: write it as you learn
-what your nights are for.
-
-<!-- END OF REFLECTION -->
-"""
+# A new agent's loading files were seeded here until 2026-11-18
+# (`_active.md`, `_reflection.md`, and `_always.md` with a line about
+# `About me.md`). A new agent now has a map (lib/loam_loading.MAP_SEED when
+# the draft brings none), and `About me.md` is named by Loam's text.
 
 
 class AgentsError(Exception):
@@ -438,7 +416,7 @@ def _clean_fields(patch: dict, draft: dict, by: str | None) -> dict:
     for field in ("soul", "config"):
         if field in patch:
             out[field] = _clean_text(field, patch[field], TEXT_MAX)
-    for field in ("active", "reflection"):
+    for field in ("map",):
         if field in patch:
             out[field] = (None if patch[field] is None
                           else _clean_text(field, patch[field], LAYER_MAX))
@@ -506,13 +484,11 @@ def shown(draft: dict) -> dict:
     out = {k: v for k, v in draft.items()
            if k != "id_given" and k not in RETIRED_DRAFT_KEYS}
     out["problems"] = [] if draft.get("made") else check_new(draft)
-    # What the made config.md adds to the draft's own: the protocol every
-    # agent's config carries, copied (see compose_config).
+    # What the made config.md adds to the draft's own: nothing since
+    # 2026-11-18. Loam's text and the owner's shared page load beside it and
+    # are not copied in (compose_config is no longer called by `make`).
     if not draft.get("made"):
-        try:
-            out["fleet_clauses"] = [t for t, _ in fleet_clauses() if t != "(preamble)"]
-        except Exception:  # noqa: BLE001 -- a draft still shows
-            out["fleet_clauses"] = []
+        out["fleet_clauses"] = []
     out["ready"] = not out["problems"] and not draft.get("made")
     return out
 
@@ -538,6 +514,13 @@ def _newest_message(thread: str | None) -> str | None:
 
 
 def _refuse_retired(fields) -> None:
+    old = sorted({"active", "reflection"} & set(fields))
+    if old:
+        raise AgentsError(
+            f"`{'`, `'.join(old)}` retired on 2026-11-18: a new agent loads its "
+            f"soul, its config and its map (`map`, optional; it points to "
+            f"things and does not hold them), and has no _active.md or "
+            f"_reflection.md")
     if "emoji" in fields:
         raise AgentsError("`emoji` is retired: an agent's face is the one the theme "
                           "draws, or an image uploaded once it is made (agent.face)")
@@ -552,8 +535,8 @@ def new_draft(payload: dict, by: str | None) -> dict:
     _refuse_retired(unknown)
     if unknown:
         raise AgentsError(f"a draft has no field {', '.join(unknown)}; it takes "
-                          f"{', '.join(DRAFT_FIELDS)} (soul, config, active and "
-                          f"reflection also as <field>_file)")
+                          f"{', '.join(DRAFT_FIELDS)} (soul, config and map "
+                          f"also as <field>_file)")
     if by and not thread:
         raise AgentsError("pass `thread`: the thread you are drafting in, where "
                           f"{lc.OWNER_NAME} will see it and say yes")
@@ -800,19 +783,16 @@ def make(agent: str, draft: dict, wake: str, *, provision=None, units=None) -> d
     for sub in ("memory", "skills", "crons", "threads"):
         (ws / sub).mkdir()
     (ws / "soul.md").write_text(draft["soul"], encoding="utf-8")
-    config_text, fleet = compose_config(agent, draft["config"], name=draft["name"])
+    # The map's shape (2026-11-18): soul, the draft's config as written, and
+    # a map. The map goes first of the three loading ones, so provisioning
+    # renders the new shape and seeds none of the old files.
+    import loam_loading  # noqa: PLC0415
+    (ws / loam_loading.MAP).write_text(
+        draft.get("map") or loam_loading.MAP_SEED, encoding="utf-8")
+    config_text = draft["config"] if draft["config"].endswith("\n") else draft["config"] + "\n"
     (ws / "config.md").write_text(config_text, encoding="utf-8")
-    (ws / "_active.md").write_text(
-        draft.get("active") or STARTER_ACTIVE.format(owner=lc.OWNER_NAME),
-        encoding="utf-8")
-    (ws / "_reflection.md").write_text(
-        draft.get("reflection") or STARTER_REFLECTION, encoding="utf-8")
-    about = Path(lc.VAULT) / ABOUT_ME
-    if about.is_file():
-        # Before provisioning, which seeds `_always.md` only where there is none.
-        (ws / "_always.md").write_text(STARTER_ALWAYS.format(
-            owner=lc.OWNER_NAME,
-            about=ABOUT_LINE.format(path=about, owner=lc.OWNER_NAME)), encoding="utf-8")
+    fleet: list[str] = []
+    loam_loading.ensure_owner_page()
     config = {"name": agent, "display": draft["name"],
               "workspace": str(ws), "vault": str(lc.VAULT),
               "wake_schedule": wake, "wake_timezone": lc.TIMEZONE}

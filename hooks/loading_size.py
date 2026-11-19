@@ -14,7 +14,11 @@ of the agent in the turn where acting on them is one more edit away:
 - the size of a loading file past LIMIT_CHARS, with the limit;
 - a filename Android cannot store (it would never reach the phone);
 - `_active.md` losing the frontmatter that makes it load at all (the loader
-  fails silently without it).
+  fails silently without it), for an agent with no map.
+
+And since 2026-11-18 it keeps the shape rendered: an agent that has made or
+removed its `map.md` has its CLAUDE.md and settings re-rendered here
+(lib/loam_loading.py), so its next run loads soul, config and map.
 
 It reads the file as it now is on disk rather than modelling the edit, so
 every tool that writes is covered the same way, on both providers: Claude
@@ -34,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 from loam_memory import (  # noqa: E402
     LIMIT_CHARS,
+    MAP_LAYER,
     LayerError,
     is_auto_loaded,
     load_config,
@@ -108,7 +113,8 @@ def warnings_for(raw: str, workspace: Path | None) -> list[str]:
             f"run. The edit landed. This file's size is paid on every run: "
             f"move the bulk to a file you read on demand and leave an index "
             f"line pointing at it, or cut.")
-    if path.name == "_active.md" and not style_frontmatter_intact(text):
+    if (path.name == "_active.md" and not (workspace / MAP_LAYER).is_file()
+            and not style_frontmatter_intact(text)):
         out.append(
             f"{raw!r} no longer opens with the frontmatter block (name, "
             f"description, keep-coding-instructions) that makes it load into "
@@ -122,13 +128,24 @@ def main() -> None:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
-    paths = written_paths(payload)
-    if not paths:
-        sys.exit(0)
     try:
         workspace = Path(load_config(project_dir_from(payload))["workspace"])
     except (LayerError, KeyError, OSError, ValueError):
         workspace = None
+    # The shape (2026-11-18, lib/loam_loading.py), after every tool call and
+    # not only a write this hook can name: a map made with the shell counts
+    # too. When the agent has made or removed its map since CLAUDE.md was
+    # rendered, the two files are re-rendered now, so the next run of any
+    # kind loads the shape on disk. Two small reads when nothing changed.
+    if workspace is not None:
+        try:
+            import loam_loading  # noqa: PLC0415
+            loam_loading.quiet_refresh(workspace)
+        except Exception:  # noqa: BLE001 -- a hook never stops a session
+            pass
+    paths = written_paths(payload)
+    if not paths:
+        sys.exit(0)
     found = [w for raw in paths for w in warnings_for(raw, workspace)]
     if found:
         print(json.dumps({"hookSpecificOutput": {

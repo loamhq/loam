@@ -420,11 +420,19 @@ def _imports(path: Path, depth: int, seen: set) -> list[Path]:
 
 def instruction_sources(workspace: Path) -> list[Path]:
     """The files a persona's conversation loads, in order: ``CLAUDE.md``,
-    its imports, then the conversation output style (``_active.md``)."""
+    its imports, then the conversation output style (``_active.md``).
+
+    An agent with a map (2026-11-18, lib/loam_loading.py) has no
+    conversation style: its map is one of the imports, as on Claude Code,
+    whose settings select the empty style for it. ``CLAUDE.md`` is brought
+    to the shape on disk first, so the thread loads what the next Claude
+    Code session would."""
     from loam_memory import CONVERSATION_LAYER  # noqa: PLC0415
+    import loam_loading  # noqa: PLC0415
+    loam_loading.quiet_refresh(workspace)
     sources = _imports(workspace / "CLAUDE.md", 0, set())
     active = workspace / CONVERSATION_LAYER
-    if active.is_file():
+    if active.is_file() and not loam_loading.mapped(workspace):
         sources.append(active)
     return sources
 

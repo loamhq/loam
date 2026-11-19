@@ -239,7 +239,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     const faceSrc = data.identity.face === null ? null : data.identity.face?.url?.replace(/^\/v1\//, '/api/') || look.imageSrc
     const upload = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', hidden: true, 'aria-label': 'Upload face', onchange: e => { const f = e.target.files[0]; if (f) c.face(f); e.target.value = '' } })
     const files = [file('Open workspace', data.files.workspace, null, null, { folder: true }), file('Soul', data.files.soul), file('Config', data.files.config),
-      group('Memory', Object.entries(data.files.memory || {}).map(([key, ref]) => file(({ always: 'Every conversation', active: 'While working', reflection: 'On reflection', folder: 'Memory folder' })[key] || key, ref, null, null, { folder: key === 'folder' }))),
+      group('Memory', Object.entries(data.files.memory || {}).map(([key, ref]) => file(({ map: 'Every run', always: 'Every conversation', active: 'While working', reflection: 'On reflection', folder: 'Memory folder' })[key] || key, ref, null, null, { folder: key === 'folder' }))),
       file('Skills', data.files.skills, null, h('span', { class: 'setrow-value', text: String(data.files.skills?.count ?? '') }), { folder: true })]
     return [h('div', { class: 'agent-profile', key: `agent-profile:${agent}` },
       h('header', { class: 'profile-hero' },

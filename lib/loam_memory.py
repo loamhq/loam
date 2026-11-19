@@ -100,6 +100,11 @@ NEAR_LIMIT_CHARS = 9_000
 
 ALWAYS_LAYER = "_always.md"
 CONVERSATION_LAYER = "_active.md"
+# The map (2026-11-18, lib/loam_loading.py): the one file of the agent's own
+# that loads, on every run, once the agent has one. Its presence is the
+# switch between the two shapes; without it the three files above load as
+# they always have.
+MAP_LAYER = "map.md"
 REFLECTION_LAYER = "_reflection.md"
 CRON_LANE_DIR = "crons"
 
@@ -156,14 +161,22 @@ def is_auto_loaded(target: Path, workspace: Path) -> bool:
     three universal layers in the workspace root, plus every ``.md`` under the
     cron lane folder, whatever lanes turn out to exist. A cron lane added
     later is covered the day it is added, with nothing to remember.
+
+    In the map's shape (2026-11-18) the root's loading file is the map alone:
+    an agent with a ``map.md`` loads none of the three, so a write to one of
+    them is a write to an ordinary file.
     """
     try:
         target = target.resolve()
         workspace = workspace.resolve()
     except OSError:
         return False
-    if target.parent == workspace and target.name in UNIVERSAL_LAYERS:
-        return True
+    if target.parent == workspace:
+        if (workspace / MAP_LAYER).is_file():
+            if target.name == MAP_LAYER:
+                return True
+        elif target.name in UNIVERSAL_LAYERS:
+            return True
     lanes = workspace / CRON_LANE_DIR
     return target.is_relative_to(lanes) and target.suffix == ".md"
 

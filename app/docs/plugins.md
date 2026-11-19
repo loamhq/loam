@@ -56,10 +56,17 @@ the manifest omitted that declaration. Going past stable component ids or
 changing DOM directly remains allowed.
 
 Read aloud and Dictation own their page code, helpers, styles, controller
-state and existing device preferences inside `public/plugins/`. They use the
-same public interface available to personal packages. Disabling both leaves
-no mic, reader or agent voice field and loads neither
-package on a fresh page. Generic fields, sheets, lifecycle, navigation,
+state and existing device preferences in their own packages. Since 0.2.9
+they are Market plugins, each in its maker's own repository, and no longer
+ship: a fresh install has neither, and draws no mic, reader or agent voice
+field until one is installed and on. Their copies for this repository's
+tests are `../plugins/_listed/dictation/` and `../plugins/_listed/read-aloud/`
+(`test/audio-plugins.mjs` installs them into the test page). They use the
+same public interface available to personal packages, and keep their device
+preferences under the same storage keys, so an install that had them keeps
+its choices. The server keeps its own copies of the two modules it shares
+with Read aloud (`src/speakable.js`, `src/document-speech.js`), held equal
+to the listed copy by `tests/test_to_market.py`. Generic fields, sheets, lifecycle, navigation,
 normalization, browser audio focus and UI primitives stay core. Server speech,
 transcription and authenticated relays remain server infrastructure; this
 page-only change does not retire them or change vendor credentials.
