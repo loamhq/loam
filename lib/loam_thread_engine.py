@@ -1452,7 +1452,7 @@ class ThreadEngine:
             return None
         return context
 
-    def agy_conversation_gone(self, turn: Turn, engine: str) -> str | None:
+    def agy_conversation_gone(self, turn: Turn, engine: str, inspected=None) -> str | None:
         """The Antigravity conversation this member's kept session would
         resume, when its files were cleared (lib/loam_agy_files.py
         ``clear_idle``, a week idle; 2026-11-16): the turn then starts a fresh
@@ -1465,8 +1465,8 @@ class ThreadEngine:
             return None
         sid = kept["session_id"]
         live = (getattr(self.broker, "sessions", None) or {}).get(sid)
-        conversation = getattr(live, "thread_id", None) if live is not None else None
-        if conversation is None:
+        conversation = getattr(inspected or live, "thread_id", None)
+        if conversation is None and not getattr(self.broker, "remote", False):
             try:
                 conversation = json.loads((cfg.SESSION_DIR / f"{sid}.json")
                                           .read_text(encoding="utf-8")).get("thread_id")
@@ -1550,7 +1550,17 @@ class ThreadEngine:
                       f"{str(old.get('session_id'))[:8]} holds {rotated['used']} "
                       f"tokens (rotates at {rotate_at(rotated)}); this turn starts "
                       f"a fresh one")
-        gone = None if rotated is not None else self.agy_conversation_gone(turn, engine)
+        inspected = None
+        if rotated is None and engine == "antigravity" and getattr(self.broker, "remote", False):
+            kept = threads.session_for(*turn.key) or {}
+            sid = kept.get("session_id")
+            if sid and kept.get("engine") == engine and sid not in self.broker.sessions:
+                try:
+                    inspected = await self.broker.inspect(sid)
+                except Exception as exc:
+                    if getattr(exc, "status", None) != 404:
+                        raise
+        gone = None if rotated is not None else self.agy_conversation_gone(turn, engine, inspected)
         if gone:
             steps.log(f"{turn.thread_id} {turn.persona}: Antigravity conversation "
                       f"{gone[:8]} was cleared after a week idle; this turn "
@@ -1971,7 +1981,8 @@ class ThreadEngine:
                       f"before any reply; its messages stay new to the next turn")
         threads.remember_session(turn.thread_id, turn.persona, session.id,
                                  engine, seen, seq=turn.cursor,
-                                 context=session_context(session))
+                                 context=session_context(session),
+                                 watch=ended == "result" and getattr(self.broker, "remote", False))
         if ended == "handed":
             # Its words were posted at its `result`; what it waits on is the
             # next turn's to hear, on the same session (2026-11-10). No
@@ -2050,26 +2061,28 @@ class ThreadEngine:
         if not bindings:
             return
         pending = {(tid, persona) for tid, persona, items in inputs.pending() if items}
-        rows, _ = await self.broker.catalog()
-        records = {row["session_id"]: row for row in rows}
         for tid, members in bindings.items():
             for persona, kept in members.items():
-                if (tid, persona) in pending:
-                    continue
-                row = records.get(kept.get("session_id"))
                 since = kept.get("seq")
-                if row is None or not isinstance(since, int):
-                    continue
-                if not row.get("live") and row.get("record_seq", 0) <= since:
+                if not kept.get("watch") or (tid, persona) in pending or not isinstance(since, int):
                     continue
                 turn = Turn(tid, persona, 0, "notification")
                 turn.read_through = kept.get("through")
-                session = await self.broker.inspect(row["session_id"])
+                try:
+                    session = await self.broker.inspect(kept["session_id"])
+                except Exception as exc:
+                    if getattr(exc, "status", None) != 404:
+                        raise
+                    threads.finish_watch(tid, persona, kept["session_id"])
+                    continue
+                if not session.is_live() and session.seq <= since:
+                    threads.finish_watch(tid, persona, session.id)
+                    continue
                 await session.attach(since)
                 queue = asyncio.Queue()
                 for event in session.replay(since):
                     queue.put_nowait(event)
-                self.keep_watching(turn, session, kept["engine"], row.get("model"), backlog=queue)
+                self.keep_watching(turn, session, kept["engine"], session.model, backlog=queue)
 
     def keep_watching(self, turn: Turn, session, engine: str, model: str | None,
                       backlog: asyncio.Queue | None = None) -> None:
@@ -2120,11 +2133,15 @@ class ThreadEngine:
             while True:
                 event = await queue.get()
                 if event is None:
+                    if getattr(self.broker, "remote", False) and not self.broker.stopping:
+                        threads.finish_watch(*key, session.id)
                     break
                 if isinstance(event, Exception):
                     raise event
                 kind = event.get("type")
                 if kind == "broker.exit":
+                    if getattr(self.broker, "remote", False):
+                        threads.finish_watch(*key, session.id)
                     break
                 reply.keep(event)
                 top = event.get("parent_tool_use_id") is None

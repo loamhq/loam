@@ -1395,7 +1395,7 @@ def session_for(thread_id: str, persona: str) -> dict | None:
 
 def remember_session(thread_id: str, persona: str, session_id: str,
                      engine: str, through: str, seq: int | None = None,
-                     context: dict | None = None) -> None:
+                     context: dict | None = None, watch: bool | None = None) -> None:
     """``seq`` (2026-11-10) is how far into the broker's session log the
     thread has recorded; the next turn posts any reply past it that nobody
     was watching (``ThreadEngine.recover_late``). ``context`` (2026-11-11)
@@ -1408,8 +1408,19 @@ def remember_session(thread_id: str, persona: str, session_id: str,
             row["seq"] = seq
         if isinstance(context, dict) and isinstance(context.get("used"), int):
             row["context"] = {"used": context["used"], "window": context.get("window")}
+        previous = data.get(thread_id, {}).get(persona, {})
+        if watch or (watch is None and previous.get("watch") and previous.get("session_id") == session_id):
+            row["watch"] = True
         data.setdefault(thread_id, {})[persona] = row
         save_state("sessions.json", data)
+
+
+def finish_watch(thread_id, persona, session_id):
+    with locked(VAULT):
+        data = load_state("sessions.json")
+        kept = data.get(thread_id, {}).get(persona, {})
+        if kept.get("session_id") == session_id and kept.pop("watch", False):
+            save_state("sessions.json", data)
 
 
 def mark_seen(thread_id: str, msg_id: str) -> None:
