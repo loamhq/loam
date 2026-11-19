@@ -2760,9 +2760,36 @@ def classify(project: eng.Project, job_id: str) -> str:
     return "legacy"
 
 
+def died_unheard(project: eng.Project, job_id: str, p: dict[str, Path]) -> bool:
+    """A job whose brief returned at once (2026-11-18) and whose unit ended
+    before its inner ever took the job -- no lease, no verdict, nothing
+    queued -- has no waiter to say it died. Its verdict is written here, the
+    waiter's own "died", so the broker hands it to the persona that briefed
+    it. True when one was written."""
+    try:
+        record = json.loads(loam_waiters._path(job_id).read_text(encoding="utf-8"))  # noqa: SLF001
+        since = datetime.strptime(record["since"], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if not record.get("returned") or p["result"].is_file() or \
+            (eng.now_utc() - since).total_seconds() < STARTUP_GRACE_SECONDS:
+        return False
+    unit = unit_name(job_id)
+    write_result(p, {"ok": False, "stage": "died", "outcome": "died",
+                     "finished": eng.iso(eng.now_utc()), "receipt_text": (
+        f"The job stopped before it started: its unit `{unit}.service` is no "
+        f"longer running, and it never took its tree or wrote a verdict, so "
+        f"nothing ran. What it left is in {p['dir']}; `journalctl --user -u "
+        f"{unit}.service` has whatever it printed. Send the brief again if "
+        f"the work is still wanted.")})
+    return True
+
+
 def sweep() -> dict:
     report = {"at": eng.iso(eng.now_utc()), "boot_id": boot_id(),
-              "recovered": [], "cancelled": [], "legacy": [], "pushes": []}
+              "recovered": [], "cancelled": [], "legacy": [], "pushes": [],
+              "died": []}
     for project in eng.projects().values():
         try:
             ids = sorted(d.name for d in project.jobs.iterdir()
@@ -2780,7 +2807,10 @@ def sweep() -> dict:
                 write_cancelled(p, job_id, project)
                 report["cancelled"].append(job_id)
             elif state == "legacy":
-                report["legacy"].append(job_id)
+                if died_unheard(project, job_id, p):
+                    report["died"].append(job_id)
+                else:
+                    report["legacy"].append(job_id)
             elif state == "interrupted":
                 record = wt.read_record(p["dir"])
                 handle = loam_lock._try_take(  # noqa: SLF001
@@ -2826,7 +2856,7 @@ def run_recover() -> int:
     tmp.write_text(json.dumps({**report, "legacy": legacy}, indent=2),
                    encoding="utf-8")
     os.replace(tmp, RECOVERY_STATE)
-    if any(report[k] for k in ("recovered", "cancelled", "pushes", "requeued")):
+    if any(report[k] for k in ("recovered", "cancelled", "pushes", "requeued", "died")):
         RECOVERY_LOG.parent.mkdir(parents=True, exist_ok=True)
         with RECOVERY_LOG.open("a", encoding="utf-8") as log:
             log.write(json.dumps(report) + "\n")

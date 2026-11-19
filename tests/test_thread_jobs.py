@@ -633,5 +633,26 @@ async def deliveries():
 w.LOG = TMP / "deliveries.jsonl"
 asyncio.run(deliveries())
 
+# A job that returned at once and whose unit ended before its inner took it
+# has no waiter to say so: recovery writes the waiter's "died", and the
+# delivery pass then carries it like any verdict.
+job.unit_state = lambda unit: "inactive"
+dead_id, dead_p = brief("Died before it started", THREAD_ENV)
+w.register(dead_id, "Loam", dead_p["dir"], LEAD, {"thread": home}, returned=True)
+check("recovery leaves a just-launched job alone for its startup grace",
+      not job.died_unheard(PROJECT, dead_id, dead_p) and not dead_p["result"].is_file())
+rec = json.loads(w._path(dead_id).read_text())
+rec["since"] = iso(NOW - timedelta(minutes=2))
+w._path(dead_id).write_text(json.dumps(rec))
+report = job.sweep()
+verdict = json.loads(dead_p["result"].read_text()) if dead_p["result"].is_file() else {}
+check("...then writes it a 'died' verdict, which makes its result owed",
+      dead_id in report["died"] and verdict.get("stage") == "died"
+      and dead_id in [r["job"] for r in w.owed()], (report.get("died"), verdict))
+check("...and a legacy job with no such record is left as legacy",
+      dead_id not in report["legacy"] and not set(report["died"]) - {dead_id},
+      report["died"])
+w.settle(dead_id)
+
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if results and all(results) else 1)
