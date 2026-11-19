@@ -259,7 +259,11 @@ test('registered: the slug, linked to the app, and Install', async () => {
 test('connected: every fact in order, the quiet date, Refresh and Disconnect', async () => {
   gh = SHAPES.authorized
   await openIntegrations()
-  await until(() => lines().length === 3)
+  // The card is drawn first from the state the test before left, then from
+  // this test's answer; wait for the whole of this one (under load the quiet
+  // date and the pills came a drawing after the lines, 2026-11-19).
+  await until(() => lines().join('|') === 'all repositories|Signed in as octo-owner|GitHub App: loam'
+    && find(card(), 'ghquiet') && pills().join('|') === 'Refresh|Disconnect')
   assert.deepEqual(lines(), ['all repositories', 'Signed in as octo-owner', 'GitHub App: loam'])
   assert.equal(text(find(card(), 'ghquiet')), `Sign in again by ${formatDate('2027-04-02T21:37:31Z', { year: 'numeric', month: 'short', day: 'numeric' })}`)
   assert.equal(find(card(), 'ghquiet').getAttribute('class'), 'note ghquiet')
