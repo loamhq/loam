@@ -245,6 +245,14 @@ try:
     check("Loam's own setting: the scope's job runs on it",
           (eng.engineer_choice(lane)["model"], eng.tier_choice(lane, "claude", "hard")["model"]),
           ("fable", "opus"))
+    write_settings({"projects": {"Loam": {"provider": "antigravity"}}})
+    check("Loam on another provider (its owner's to set): the scope follows it",
+          (eng.engineer_choice(lane)["runtime"], lane.runtime), ("antigravity", "antigravity"))
+    check("...and is still no platform job, so it runs in a project's sandbox, not sudo",
+          lane.platform, False)
+    write_settings({"projects": {"Loam": {"provider": "claude-code", "model": "fable",
+                                          "tiers": {"hard": "opus"}},
+                                 "loam-ui": {"provider": "antigravity"}}})
     check("...and the old row is kept in the file, read by nothing",
           read_settings()["projects"]["loam-ui"], {"provider": "antigravity"})
 
