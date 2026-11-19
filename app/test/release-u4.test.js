@@ -108,3 +108,17 @@ test('an available release with no System/Loam changes draws no empty file list'
   await c.check()
   assert.doesNotMatch(text(c.view()), /Loam is up to date/)
 })
+
+test('a release whose signature does not verify is never offered as ready (docs/signing.md)', async () => {
+  const { installDom } = await import('./fakedom.js'), { text } = await import('./browser.js')
+  installDom()
+  const blocked = { code: 'signature', reason: 'unsigned', message: 'Release 0.1.1 was refused: it is not signed. It may have been tampered with, so nothing was changed and it will not be applied.' }
+  const signing = { keys: 1, checked: true, message: 'Releases are checked against 1 maintainer key(s) before they run.' }
+  const c = createUpdate({ changed() {}, reload() {}, later() {}, cancel() {}, api: async () => ({ current: { version: '0.1.0', kind: 'stock', signing }, check: { latest: { version: '0.1.1' }, available: true, blocked, changes: null } }) })
+  await c.check()
+  const words = text(c.view())
+  assert.match(words, /Loam 0\.1\.1 could not be verified/)
+  assert.doesNotMatch(words, /is ready|your agent will tell you what’s new|Update Loam/)
+  assert.match(words, /it is not signed/)
+  assert.match(words, /checked against 1 maintainer key/)
+})

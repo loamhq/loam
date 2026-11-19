@@ -68,10 +68,11 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   the units are regenerated (`gen-units`, each agent's wake
   unit, `provision --reviewer`) and `loam-check-drift.service` is run once.
   Comment-only unit changes need a `daemon-reload` and no restart.
-- **Nor has `gen-deploy`** (caused 2026-11-17): `gen-deploy --help` is a
-  live render. It wrote the Caddyfile, reloaded Caddy and ran `compose up`
-  on the login and the browser. Read a generator's docstring, never its
-  `--help`.
+- **`gen-deploy --help` was a live render until 2026-11-19** (caused
+  2026-11-17: it wrote the Caddyfile, reloaded Caddy and ran `compose up`).
+  `gen-deploy` and `gen-units` now print help and refuse an unknown flag;
+  an older release's copy does not. Read a generator's docstring before
+  trusting its `--help`.
 
 ## 2026-11-16 — a correct record can still draw in the wrong order
 
@@ -1917,7 +1918,7 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   app's light/dark comes from the boot script `/appearance-state.js` as
   well as the GET, so set `documentElement.dataset.theme` after load (DOM
   only, nothing saved), and abort every non-GET so viewing writes nothing.
-- **`bin/gen-units` takes no flags:** `gen-units --help` runs it and writes.
+- **`bin/gen-units` took no flags** until 2026-11-19: `gen-units --help` ran it and wrote.
 - **`$TMPDIR` can be empty in a Bash call**; spell the scratch path out
   before anything that writes to it (`crontab "$TMPDIR/x"` read `/x`).
 - **Git backup pushes to the address, not to `origin`**, so the trees'
@@ -1928,6 +1929,72 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   that is due), so after a switch the first commit may be the push's, not
   the timer's; wait for a timer run to see the timer's own.
 
+## 2026-11-19 — the small fixes before friends install
+
+- **A mid-job `--land` tests in the job's own tree, on a detached HEAD at
+  the merge**, for as long as the suite takes. A commit made then went onto
+  that HEAD and was left behind; `back_to_branch` and `carry_onto`
+  (`lib/loam_worktree.py`) now keep it, and `result["carried"]` names it.
+  Uncommitted edits made during a landing are still at risk from its
+  `checkout -f`: commit before `--land`, and not while it runs.
+- **Antigravity reports a whole run ERROR for a side call's failure**: its
+  "implicit" conversations run on its default model whatever `--model`
+  says, and a 503 there ended a finished Claude-model job. A transient
+  error naming another model is the side call's
+  (`loam_agy_job.side_call_failure`); with a receipt written, the job lands.
+- **A fixed sleep in a test is a flake in a landing.** Several jobs land at
+  once; wait for the condition (`until`) instead. In the app's fake-DOM
+  tests the card shows the previous answer while it reloads: assert with
+  `eventually`, as `app/test/github-orgs.test.js` does. A 400 ms delay
+  in the fake route reproduces the old failure every time.
+- **Bare `python3 tests/test_engineer_codex.py` fails 4 checks on a box
+  whose default runtime is not Claude**: it reads the box's settings. Run it
+  through `tests/run-all <file>`, which empties `LOAM_HOST_SETTINGS`.
+- **`app/test/plugin-host-browser.mjs` runs with a Playwright in scratch**:
+  `npm i playwright@1.65.1` with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, then
+  `LOAM_PLAYWRIGHT=<scratch>/node_modules/playwright/index.mjs
+  LOAM_CHROME=/usr/bin/chromium-headless-shell` (`PLUGIN_CASE=1440-latte-light`
+  for one variant).
+## 2026-11-19 — Dictation and Read aloud carry their own server halves (0.2.12)
+
+- **The plugin server surface needed nothing new to take a core route.**
+  `/x/<id>/` (gateway, `Connection: close`, no body cap), the supervised
+  unit, `LOAM_PLUGIN_KEYS` (re-read on every ask, so a key change needs no
+  restart), the broker's `GET /v1/plugins/<id>/agents/<agent>` with
+  `LOAM_BROKER_TOKEN_FILE`, and `LOAM_VAULT_DATA`/`_DIR` (the vault and its
+  system folder are read off the two) covered every route. Node and ffmpeg
+  are on every install (the app runs on the host), so `run: node
+  server/main.js` with the standard library is portable.
+- **A server that used to be core's had three hidden couplings**: the
+  install's `app.speech_voices` (each agent's voice *and character*, which is
+  part of a take's id, so a different spec misses the cache), the page's
+  `speech` flag on the app's `/api/health`, and the thread-branch drafter
+  borrowing Read aloud's Gemini key and its brief model. The voices became a
+  plugin `settings.entry` (seeded once by `loam_to_market.seed_voices`), the
+  flag the plugin's own `/status`, and the drafter got `BRANCH_MODEL`; it
+  still asks the broker for read-aloud's key (left as it was, said in the
+  0.2.12 receipt).
+- **The app's `shippedManifest` reads `contributes:` only as inline JSON**
+  (a YAML block there throws in `listedManifest`, and every audio-plugin
+  test with it). Keep a listed plugin's `contributes` on one line.
+- **A Market plugin moving to a server must be updated before core drops
+  the routes.** On this box: tag, list, install 1.1.0 over the Yours copies
+  (`bin/settings do plugin.install <link>` then `{url, confirm}`; the live
+  broker predates `request`), seed the setting, copy the audio cache
+  (`/var/lib/loam-app/loam-ui/speech`, loam-app 0700, so sudo) into
+  `<private>/read-aloud/speech`, then land. Other installs get `bring_up`.
+- **A listing showed "Uses your Google Gemini key" and "Asks for a key of
+  its own" for one key** because `touches.secrets` counted a
+  `settings.secret` named as the provider's field. `declaration` drops such
+  a name now; a plugin's own unrelated secret still shows.
+- **The page harness (`test/browser.js`) sends `/x/<id>/…` to the app**
+  unless `plugin(id, rest)` names a server; the app then answers 404, which
+  is a Loam with no such plugin.
+- **`_from_release` could not replace a folder that was there**
+  (`os.replace` onto a non-empty directory is ENOTEMPTY): step the old one
+  aside into the staging folder first.
+- **`pkill -f "node server/main.js"` killed the shell again** (2026-11-18's
+  lesson). Kill by pid from `ss -ltnp`.
 ## 2026-11-19 — Remote Control retired
 
 - **Remote Control is gone** (the owner: "I don't use it through app
@@ -1946,6 +2013,64 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Adopted sessions stay** (`lib/loam_adopt.py`): the conversations held
   in the Claude Code app before the retirement still open in Loam, read
   from the CLI's own files.
+
+## 2026-11-19 — the host's own setup, kept and put back
+
+- **`loam host` (lib/loam_host.py) is the undo for the box around Loam**:
+  root's git history at `paths.host_history` (`/var/lib/loam/host-history`,
+  0700), a mirror under `files/<absolute path>`, `meta.tsv` for modes and
+  owners by name, `scope.json` for the rules as resolved. A restore reads
+  everything it needs from the state itself, so it works with
+  `/etc/loam/loam.toml` broken; keep it stdlib-only and never import
+  `loam_config` at module level there.
+- **Enablement is links, and links are files**: a disabled unit is a
+  missing `*.wants/<unit>` symlink, so covering the links makes "disabled"
+  something a restore can put back (and it then starts the unit). Walk with
+  `os.walk(followlinks=False)` and list symlinks to folders by hand: they
+  are in `dirs`, not `names`.
+- **The state after a break is saved too**, within 15 minutes, so "the
+  newest state" can be the broken one. The default is the newest whose
+  checks passed (Caddyfile validates, sudoers parses, TOML/JSON read); a
+  valid-but-wrong break needs `restore 2h` or a named state.
+- **Root reaches the install user's manager with `systemctl --user -M
+  <user>@`** (systemd 252 here); it goes over unix sockets, so it works
+  inside `unshare -n`, which is how "no network, no broker, no app" is
+  proved.
+- **A Loam landing can time out at 900 s** when several jobs land at once
+  (load 26 on 16 CPUs, 15 suites): the record says "tests fail" and the
+  log says only `(timed out after 900 s)`. Read the log before the verdict,
+  and land again when the box is quieter.
+## 2026-11-19 — the provider CLIs pinned to each release
+
+- **The CLIs are pinned, not followed** (the owner, 2026-11-19: "Sgtm" to
+  each release carrying the versions it was tested with). `PINS` in
+  `lib/loam_pins.py` is the one place. The installer (step 7) and `loam
+  update` (the `providers` step, which also triggers `provider-memory` and
+  `broker`) run `bin/provider-pin apply`; nothing else moves a link. The
+  daily follower (`provider-follow`, its timer, rollback watch, comms lines
+  and tests, ~1,880 lines) is gone; `gen-units` removes its units from a box
+  (`loam_units.RETIRED`) and `check-drift` reports them and any link off
+  its pin.
+- **Moving a pin**: edit `PINS`, `bin/provider-pin test` (installs the
+  builds beside and runs both live parity tests with a `[bin]` config
+  pointing at them; the links stay), land, `bin/provider-pin apply` here
+  (moves the links, re-pins memory, `restart-broker --when-idle`).
+- **Antigravity can be pinned after all**, with two seams found by causing:
+  its updater stops for `AGY_CLI_DISABLE_AUTO_UPDATE=true` (`1` and `TRUE`
+  are ignored; the log line is `Auto-update disabled via environment
+  variable`), and its release server
+  (`.../manifests/linux_amd64.json`, underscore) names only the latest
+  build, whose file URL carries a build id. So its pin is the URL and
+  SHA-512 per platform, and an old pin installs only while Google keeps the
+  file. `agy install` only copies the binary to `~/.local/bin/agy`; Loam
+  links it instead. An `agy` run by hand without the variable can still
+  update itself; check-drift sees it.
+- **A pre-pin release has no `bin/provider-pin`**: an undo back to it
+  leaves the CLIs where they are (`Box.providers`).
+- **The Antigravity file sweep** moved from the follower's last step to
+  `bin/clear-agy-files`, run by the nightly drift-watch after lane-check.
+- **`loam_live.restart_read`** is the broker's live-list reader now (was
+  `loam_follow.restart_read`); `restart-broker` and `move-state` use it.
 ## 2026-11-19 — input to a thread member is durable (batch B step 2)
 
 - **Every queued turn's input is on disk first**:
@@ -1976,6 +2101,122 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Seen, not fixed:** a turn model change (`set_choices`) posts the CLI's
   "Set model to … for this session only" text as a persona message.
 
+## 2026-11-19 — a fresh install as safe as a long-running one; the upgrade walked
+
+- **An update runs the OLD release's `lib/loam_update.py`.** Its step list
+  and `Box` methods are the running release's; only the scripts each step
+  runs (`gen-units`, `provision`, `gen-deploy`, `deploy`) are the new
+  release's. So anything a release adds to the box must ride on one of
+  those scripts, never on a new update step: the 15-minute history timer
+  added in `Box.units` on 11-18 never reached a box updated from 0.2.0-0.2.11
+  (their `Box.units` has no such line). `gen-units` now arms any timer it
+  installs for the first time and retires what `loam_units.RETIRED` names;
+  the inbound wall rides on `gen-deploy` (the `deploy` step, by sudo).
+- **A release that removes a unit template leaves the unit installed** on
+  every older box unless something removes it: Remote Control's
+  `loam-recycle-rc.timer` stayed armed after 0.2.0 -> 0.2.12, firing a
+  script that was gone. Add a retired unit to `loam_units.RETIRED`.
+- **The inbound wall is iptables, not nft**, appended last in INPUT
+  (`LOAM-INBOUND`), because Docker guarantees iptables and the broker's and
+  the sight's walls are iptables jumps inserted at the top: a separate nft
+  table would drop what their chains accept. It stands aside per family
+  where ufw/firewalld is active or INPUT's policy is DROP (the first box).
+  Prove it in `sudo unshare -n` (a network namespace of its own, nothing on
+  the host touched): `tests/test_inbound_firewall.py`. On a walk VM, a
+  container on `docker0` stands in for the outside: its `curl` to an
+  agent's `http.server` on 0.0.0.0 times out, to 443 answers.
+- **Fixed literals of the first box's folders fail open.** `15_CONVERSATIONS`
+  in the files tree, the reviewer, two MCP servers and the transcript
+  writer meant fences on nothing and transcripts in a folder of their own on
+  a fresh vault. `tests/test_no_box_folder_literals.py` refuses them.
+- **The upgrade walk** (Modal VM, as in "How it was proved"): install the
+  old tag with `--source git://127.0.0.1/loam.git --version 0.2.0`, the
+  candidate added to the VM's bare repository as a lightweight tag
+  (release tags are lightweight), `loam update apply --yes --foreground` as
+  the install's user. Notes for next time:
+  - workspaces are `paths.workspaces` (`~/agents` on a fresh install, not
+    `~/ai-labs`);
+  - Docker is userns-remapped, so Authelia's data is under
+    `/var/lib/docker/100000.100000/volumes/authelia-data/_data/`
+    (`db.sqlite3`: `webauthn_credentials`);
+  - the claim token is the link's fragment, not `/etc/loam/claim`;
+  - a wildcard needs dnsmasq (`/etc/hosts` gives the apex only and the
+    name never goes ready);
+  - the welcome screen needs a placeholder Claude login, written again
+    before each browser run (a failed turn blanks it);
+  - a passkey survives a browser: `WebAuthn.getCredentials` after adding
+    it, `WebAuthn.addCredential` into a new virtual authenticator after the
+    update, then the sign-in page's passkey button.
+- **Two jobs may cut the same version.** A job that writes `release-tag`
+  early is visible in its job folder; read the other running jobs'
+  `release-tag` before choosing a number.
+## 2026-11-19 — plugin pages that explain themselves
+
+- **A theme is previewed in a frame of its own** (`app/public/theme-scene.html`,
+  served with `frame-ancestors 'self'`, the one page the app frames). Looks are
+  written against the root (`:root[data-look][data-theme][data-option-*]`), so
+  scoping a look's rules to an element would mean rewriting materials.css,
+  face-paints and the signature faces; a frame wears the real rules unchanged.
+  The scene re-dresses on a hash change (`look`, `mode`, `from`, `o.<option>`),
+  never reloads, and the page reads its colours back through
+  `loamScene.colours()` (a probe painted with `var(--token)`, so mixes resolve).
+- **A listed theme's fonts reach the preview** through the listing: the broker
+  keeps `fonts.css` and `font/<file>`, and the app holds the sheet to
+  @font-face rules over `/api/marketplace/<id>/font/` (`themeFontsCSS`'s new
+  `base`). Before this, a listed theme's preview and Try it wore the fallback.
+- **New PLUGIN.md fields cost an old Loam only a warning** (`extra`), never the
+  listing: `description`, `screenshots`, `palette` (`words_of`). The JS reader
+  (`shipped-plugins.js`) reads only line-shaped YAML: write `screenshots` and
+  `palette` as block lists of one-line flow maps, and quote a caption with a
+  comma. An apostrophe inside a flow map opens a quote for the Python reader
+  ("a `{` that never closes"): use ’.
+- **Markdown's single newline is a break in chat and a space in a document**
+  (`markdown(text, { soft: true })`): READMEs and guides are hard-wrapped.
+- **The design system marks a selection with a paper thumb and an underline**
+  (button-tiers.css), not the espresso fill; a segmented control on a tinted
+  group hides its thumb. Leave the group untinted.
+- **The colour guard (themes.test.js) reads `rgb(` in a regex as a literal
+  colour**; build such a pattern from parts.
+- **The demo world for screenshots** is `app/tools/capture-plugin-shots.mjs`:
+  the fixture app's invented agents, a thread retitled by PATCH and its record
+  replaced by route, a plugin installed from its folder (rows by the real
+  Python reader), its server stood in for by Playwright routes at `/x/<id>/`,
+  a speech-like WAV as the fake microphone
+  (`--use-file-for-fake-audio-capture`), and one frame for every picture
+  (`tools/frame-shot.py`). Do not freeze the page clock there: a recording's
+  timer and levels need time to run. The image tool writes only inside the
+  reach: generate into the job's tree and move it to scratch.
+## 2026-11-19 — a run with no thread gets its result back (batch B step 3)
+
+- **Every brief returns at once**, every lane. `wait_for`, its four-hour
+  ceiling, the waiter's pid and the broker's quiet-route mark are gone; the
+  engineer MCP entry's `timeout` is 10 minutes (Codex's default per call is
+  60 s, and `cancel`/`site up` can take a minute), not four hours.
+- **`claude -p --resume <id>` keeps the id** (2.1.328, caused): the result
+  run appends to the asking session, so a second result resumes the same
+  id again. A missing id prints `No conversation found with session ID`
+  and exits 1. Every Claude wake/cron now starts with `--session-id` and
+  `LOAM_SESSION_ID`, and `loam_waiters.caller` records it for every lane.
+- **Two routes, two folders**: a thread's record in `engineer-waiters/`
+  (the broker's), a run's in `engineer-waiters/runs/` (bin/wake's). The
+  folder is what kept a pre-step-3 broker, which reads only the top and
+  would drop a cron's record as "no thread", out of it until its restart.
+- **The drain is a transient unit, `loam-results-<agent>`**, started by
+  `write_result` (the job's own launcher, `deliver=False` for the brief
+  call's own refusals), by `--recover` every 5 min, and by the broker for a
+  thread that is gone. A kick that meets a running drain says `running`;
+  the drain re-reads after each run, and the sweep catches the gap.
+- **A scratch install proves it end to end on the live box**: a
+  `LOAM_CONFIG` with `root` = the job's tree and every write path in
+  `$TMPDIR`, a scratch project through `LOAM_PROJECTS_DIR` (the platform
+  project's CLAUDE.md imports the real `ai-labs/_shared/reach.md`, which a
+  scratch `workspaces` rejects; a project record needs a `deploy_key`),
+  `bin/wake` loaded as a module with only the identity gate stubbed, and
+  probe jobs. `launch` and `kick` pass `LOAM_CONFIG` on to their units.
+  Host user units see `$TMPDIR` (the wall does not hide /tmp).
+- **Codex results are fresh runs**: a Codex wake's thread id is not where
+  a brief can read it. Resuming needs that id recorded (the running marker
+  is the obvious home) and `thread/resume`.
 ## 2026-11-19 — Loam's text, the owner's short version
 
 - **`engineer-job --land` outlives a foreground call**: it runs the whole
@@ -2012,3 +2253,286 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **A merge or push made with `GITHUB_TOKEN` starts no other workflow**, so a
   workflow that merges must also do whatever a push to `main` would have
   triggered (the marketplace's reviewer rebuilds list.json itself).
+## 2026-11-19 — the landing's tests are sealed and parallel
+
+- **What a sealed test sees.** `tests/run-all` writes each file its own
+  config (`FIXTURE`, never the install's file) with every data path in a
+  per-file scratch folder, plus a starter agent `iris` with a soul,
+  `_shared/reach.md` and `commons/`. A landing's `platform_argv` adds the
+  wall: `unshare -Urmn` with only loopback up, and an empty read-only tmpfs
+  over each of `sealed_paths()` (vault, workspaces, projects, plugins,
+  state, secrets folder, `/run/user/<uid>`), mounted after the tree's binds.
+  A bind survives a tmpfs over its source's parent, so the tree still
+  shows at the checkout's path.
+- **What the seal found** (each one passed before only because the box had
+  it): a broker test read the live broker token; the identity gate's decoy
+  came from the box's agents' real souls; the guard and the plugin gateway
+  needed the box's starter agent; a test read an agent's live provisioned
+  Codex config (now rendered by `provision.codex_config`); `test_engineer`
+  wrote into the live jobs folder. A test that needs the box is a
+  `tests/live_*.py`, run by hand with `run-all --live`.
+- **Wall time on a 16-CPU box**: 750 s one file at a time; about 100 s eight
+  at a time. The floor is `test_schedule` (40-80 s), which waits for a real
+  timer at the next minute boundary. `test_doc_comments` was 119 s until
+  its plugin suites ran at once and `test_places` ran as four processes by
+  unittest class name.
+- **The memory note never blocks a landing** (`land` wraps `_land_once`).
+  A note-only remainder that fails is retried once on a test failure, then
+  reported as what landed before it, with the note kept as
+  `memory-note.patch` in the job's folder and no continuation. A gate hold
+  on only the note or a commit message lands the change as one commit
+  without them (`without_memory`, a temporary index and `commit-tree`).
+- **A names check at release time protects only a private `main`.** If
+  every landing pushes `main` to a public remote, the public copy is cut on
+  every landing, and a check moved to the release tag would let every
+  landing between two releases go out unchecked. Read the remote's
+  visibility (`curl -s https://api.github.com/repos/<owner>/<repo>`,
+  `"private"`) before moving such a check.
+- **A load-only flake in the app's suite** was a test asserting on the
+  first drawing of a card the page redraws when its own answer arrives (one
+  app instance across a file's tests). Wait for what this test's answer
+  draws (`until(() => ...)`), never for the node alone. Reproduce with a
+  dozen busy loops beside `node --test <file>`.
+
+## 2026-11-19 — backup offered once on every fresh install; Git backup assumes no host
+
+- **A plugin row's `chosen` says whether its switch was ever set**
+  (`installed.json`'s `on` map holds an id only once someone set it). First
+  setup's backup offer reads it: shown while Git backup is off and
+  unchosen, on both first-visit paths; *Skip for now* PATCHes it off, which
+  is the "shown, answered" mark: server-side, every device, no new setting.
+- **The installer signs in to no provider** (`docs/install.md`, "What an
+  install leaves to others"), so a provider is connected before the first
+  visit only when the owner signed the CLI in from a shell first, as on a
+  machine where Claude Code or Codex was already in use.
+- **The shared release browser fixtures are stale**: `agent-profile-host.mjs`
+  (under `release-u3/u4-fixture.mjs`) expects `read-aloud` in
+  `app/public/plugins`, which left core in `e45f685`, so
+  `release-u4-entry-browser.mjs` cannot start. Build a walk on
+  `oneProductFixture` directly (`app/test/onboarding-backup-entry-browser.mjs`).
+- **`$TMPDIR` is empty in this job's Bash shell**: set it from the job's
+  scratch path before `> $TMPDIR/x.log`, or the redirect is to `/` and the
+  command never runs.
+- **A plugin page's real flow can be walked off-box**: start its
+  `server/main.py` on a scratch `Install` (from `tests/test_git_backup.py`)
+  with `PORT`, serve `/api/plugins/<id>/files/*` from the tree and proxy
+  `/x/<id>/*` to the port with `route.fetch` in Playwright.
+- **Seen, not fixed:** `github-orgs.test.js` fails a test or more now and
+  then while `tests/run-all` loads the CPU beside it; 0 of 8 on a quiet box,
+  on `main` and on the branch alike.
+- **A test with the fixture config manages the box's real plugin units.**
+  `loam_plugin_servers.managed()` is true when Yours is its config's
+  default, and under `tests/run-all`'s fixture config a scratch Yours is.
+  `test_to_market` installs and removes Dictation and Read aloud; once the
+  listed copies had servers, every run of it (this job's, and every other
+  job's landing after it reached `main`) stopped the live
+  `loam-plugin-dictation`/`read-aloud` units until the five-minute
+  reconcile restarted them (2026-11-19, 08:56 to 10:24 PT, repeatedly).
+  `run-all` now sets `LOAM_PLUGIN_UNITS=0` unless a test says otherwise.
+  Find such a leak with `journalctl --user | grep "Stopped loam-plugin-"`
+  against the landing log's test windows.
+- **A page plugin's listener on `health.changed` runs on every health
+  read**; one that always called `host.schedule()` after a fetch made other
+  page tests (GitHub's cards) fail under a loaded landing and never alone.
+  Redraw only when the answer changed.
+- **`pgrep -f "engineer-job --land"` matches the job's own session** (the
+  prompt names it). Wait on a pid, or on the landing log.
+
+## 2026-11-19 — Signed releases (docs/signing.md)
+
+- **Releases are SSH-signed git tags**, checked with `ssh-keygen -Y
+  find-principals` then `-Y verify -n git` over the tag object cut at its
+  `-----BEGIN SSH SIGNATURE-----` line (what git signs). That needs git and
+  OpenSSH only, and agrees with `git verify-tag` (the test proves it). The
+  verifier also checks the tag object's own `tag` header, because a signed
+  object can be pushed under another release's ref.
+- **The trusted keys are HEAD's committed `docs/releases/signers`**, never the
+  incoming tree's. The move goes to the verified object's commit, because a
+  page `check` during an apply force-fetches the tag ref again.
+- **No key ships yet.** With an empty file nothing is checked and every side
+  says so. Where the private key lives is the maintainers' call: the options
+  table is in docs/signing.md. Until a key is in the file, `cut_release`
+  tags lightweight as before.
+- **`install.sh` cannot import the verifier** (it lives in the unverified
+  clone), so it carries a shell copy and its own key block, which
+  `tests/test_signing.py` keeps equal to the file. Run install.sh in tests
+  with `unshare -r` (uid 0 without root) plus `LOAM_INSTALL_STATE` and
+  `LOAM_INSTALL_LOG`. To stop at the handover, put a `python3` shim first in
+  PATH that catches `*/bin/loam-install`.
+- **A tampered-but-signed tag for tests**: `git cat-file tag <signed> | sed
+  '1s/.*/object <other>/' | git hash-object -t tag -w --stdin`, then
+  `update-ref`. git accepts the object; the signature then fails.
+- **Installs use `--no-install-recommends`**, so git's recommended
+  openssh-client is not guaranteed. It is now in APT and in install.sh's
+  first needs. Any box reached over SSH has it anyway.
+- **A new top-level entry is missing from a landing's test run**
+  (`platform_argv` binds only the top-level entries that already exist in the
+  canonical checkout). The signers file was first `keys/release-signers`, and
+  the landing failed with FileNotFoundError, though every test passed in the
+  job tree. It is now `docs/releases/signers`. Put a new file inside an
+  existing top-level folder, or expect the first landing to fail.
+
+## 2026-11-19 — the daily reflection is an ordinary record (batch B step 4)
+
+- **`loam-wake-<agent>.service` is the reconciler's now**, rendered from
+  `crons/reflection.md` beside its timer (`loam_cron.reflection_service`).
+  The timer text was kept byte-identical on purpose: a changed timer is only
+  re-cut by daemon-reload, but an unchanged one is no risk at all to the
+  night's grid. The old provision service carried `[Install]
+  WantedBy=default.target`; it was never enabled (checked `is-enabled` on all
+  seven), so dropping it left no stray wants link.
+- **The record's body is the instruction.** `loam_cron.reflection_default()`
+  is Loam's text, rendered with `lc.OWNER_NAME`; a body that is empty or one
+  of `REFLECTION_PLACEHOLDERS` is told the default, and `bin/provision`
+  replaces a placeholder body (`loam_schedule.adopt_default`), so every
+  install moves on its next update. Unmapped agents still get
+  `_reflection.md` appended as their lane file (what loads is batch A's).
+- **A refused direct pause must not stop the wake.** `enabled_now` read the
+  workspace file, so a persona writing `enabled: false` (refused by the
+  reconciler) would still have kept bin/wake from running. The reflection's
+  switch and instruction are read from the accepted copy
+  (`loam_schedule.reflection_text`) when the workspace is the box's own.
+- **The owner's word through the settings route** is `thread` + `yes`
+  (an owner message in a thread the persona is in, < 1 h, from a
+  conversation, each taken once), reusing `loam_agents.check_yes`. It cannot
+  tell whether the message asked for this; the event names it
+  (`relayed_by`, `yes`).
+- **`wake_schedule` is gone from agent.json.** Its time is
+  `loam_schedule.wake_time(agent)`; `bin/provision <agent>` takes the time
+  only for a new agent (and checks it agrees if given). Live agent.json files
+  lose the key on their next provision.
+- **`test_boundary_guard.py`'s engineer cases fail in any job tree run by
+  hand under `tests/run-all`** (on untouched main too, once
+  `engineer/agent.json` is present: the sealed config's roots are not the
+  tree). A /tmp checkout without `engineer/agent.json` skips them, which
+  looks like a pass. Trust the landing's run for that file.
+- **A test's leak outlives its fix by the trees that copied it.** Four
+  job trees had merged the leaky test in the seven minutes before the fix
+  landed, and a hijacked unit stays *loaded* (a scratch folder, port
+  9100), which the reconcile never touched. The runtime side now heals it:
+  `reconcile` restarts a wanted unit whose `WorkingDirectory` is not its
+  plugin's folder (`moved` in its answer). Fix the runtime, not only the
+  test, when a test can reach live state.
+
+## 2026-11-19 — the library is the one description of Loam
+
+- **`docs/library/` is how Loam describes itself**, to agents and the owner
+  (`loam-how-it-works` first). The Loam project file now says a job that
+  changes what it describes updates it in the same job and names the page
+  in the receipt; nothing checks this, by design.
+- **A sentence added to the source role reaches project engineers** through
+  `render_craft`: it must avoid `CRAFT_FORBIDDEN` words (Loam, vault,
+  persona, the owner's name) or every project render fails, and it makes
+  `check-drift` ask for `bin/provision --project <name> --rerender` on each
+  project. A Loam-only rule belongs in the project file, which renders to
+  nobody else.
+- **Crons are `enabled: true` plus `reason:`**, live within a minute
+  (`lib/loam_schedule.py`); `approved:` was retired 2026-10-14 and only
+  still reads as enabled for an unmigrated file.
+- **Plugin `touches.record` takes `bypass`** as well as none/read/write
+  (`lib/loam_plugins.RECORD`); the plugin skill had left it out.
+
+## 2026-11-19 — the Loam engineer's provider is a setting like the others'
+
+- **Loam's own setting picks its CLI** (`engineer_choice`); with none it is
+  Claude Code, and the `default` row is never Loam's, so an install whose
+  default is Codex keeps Loam on Claude Code until Loam's own is chosen.
+  `provider: null` puts it back on the built-in. The page and
+  `bin/settings` offer and refuse exactly what they do for a project.
+- **A platform job on Codex runs with `danger-full-access`.** Codex's
+  `workspace-write` sandbox is bwrap with no_new_privs, which takes away
+  the sudo the project file grants. The wall (sudo unshare, the platform
+  route) is what holds it: `platform_walls` in `bin/engineer-job` binds
+  read-only the untracked harness in `engineer/` (CLAUDE.md, role.md,
+  project.md, agent.json, .claude), `15_CONVERSATIONS/` and
+  `/etc/loam/public`, i.e. what the Claude settings deny, and gives
+  Antigravity `--add-dir` for the dirs those settings add. A Claude
+  platform job is unchanged (its settings already do this).
+- **The platform wall can be raised from inside a job** when every path in
+  it is scratch (`tests/test_engineer_platform_provider.py` does so with
+  passwordless sudo); the nested failure the 11-15 note names is a remount
+  of a path the job's own wall already holds.
+- **`LOAM_HOST_SETTINGS` is handed into the job's unit** (as
+  `LOAM_PROJECTS_DIR`), so a probe can prove a provider choice on fixture
+  settings without touching the box's.
+- **loam-ui's profile host fixture had gone stale**: Read aloud left the
+  shipped plugins, and the Engineers section is now one "System" list
+  (rows are buttons named `Loam Engineer Claude Code`). The older
+  `*-browser.mjs` checks that select `section[aria-label="Engineers"]`
+  still fail on that; `loam-engineer-provider-browser.mjs` does not.
+- **A README may hide from the Market what its listing already shows**:
+  `<!-- loam:hero -->…<!-- /loam:hero -->` (the promise) and
+  `<!-- loam:gallery -->…<!-- /loam:gallery -->` (its pictures), cut by
+  `loam_marketplace.GALLERY_BLOCK` before the README reaches the page. Use no
+  Markdown tables for pictures: a gallery block of image + italic caption
+  reads on GitHub and in an old Loam alike.
+- **Landing under load (2026-11-19, load average 40 on 16 CPUs)** failed three
+  times on tests that pass alone: `test_land_outside_lock.py`'s "both done in
+  under 15 s" (16.1 s), `activity.test.js` "schedule reading changes…", and
+  `github.test.js`'s connected/Refresh cases. Each passed three times alone on
+  the branch and the merge; the fourth landing went through. Rerun alone
+  before touching code.
+- **Live captures from the loopback port need `/x/` routed to the gateway**
+  (`127.0.0.1:8933`): the app does not serve plugin servers, so a plugin's
+  own settings section says "The plugin answered 404" in a loopback capture
+  only. Closing the Market ends Try it, so the real app wearing a listed
+  theme is photographed on the fixture app with the theme installed from its
+  repository, not on staging.
+
+## 2026-11-19 — one Loam engineer; the app is its `scope: app`
+
+- **The app's engineer is a scope, not an engineer.** `lib/loam_engineer.py`
+  `app_lane()` is the folder project the app engineer was (`subdir` `app`,
+  root the checkout), registered record or built in from `app/package.json`;
+  `projects()` has it (so its jobs, continuations and landings are found),
+  `engineers()` does not (Settings, refusals). `brief_target` routes `Loam` +
+  `scope: app`, the old name `loam-ui`, and a Loam brief continuing one of its
+  jobs. Every safeguard is the folder project's code, unchanged: session in
+  `app/`, `outside_scope` at landing, `cd app && npm test`, NoNewPrivileges,
+  no deploy key, Loam's live lock, `loam_autodeploy` on `loam-ui` only.
+- **Keep the internal name.** `loam-ui` is the deploy record, the unit, the
+  jobs folder, the worktrees and the receipts folder; renaming any of it
+  breaks history, continuations or rollback for nothing a person sees.
+  What a person sees goes through `job_label` (`project: Loam`, `scope:
+  app`) and `profile.engineers()` (one row).
+- **Settings follow the engineer, not the scope.** `settings_project()` maps
+  the scope to the platform project for provider, model, tiers; the old
+  `projects.loam-ui` row stays in the file, read by nothing except
+  `deploy_default`'s fallback until Loam's own toggle is said. A PATCH of a
+  provider for `loam-ui` is a 409 naming Loam, so a persona cannot move the
+  whole platform engineer while meaning the app.
+- **A scope job on a non-Claude provider is still not a platform job**: it
+  takes the project sandbox (Codex workspace-write, Antigravity's wall),
+  never the platform's sudo route from 5884aae1.
+- **`app/`'s harness is rendered by `provision --engineer`**: the Loam
+  role verbatim plus `engineer/install/app-project.md`; `check-drift`'s
+  `check_app_scope` holds it. A release install has it from its first
+  provision.
+- **`test_thread_no_clock.py` flakes about one run in ten under load**, on
+  main too (measured side by side 2026-11-19); rerun before blaming a change.
+
+## 2026-11-19 — the login's accounts and passkeys are in the host history
+
+- **Copy a live SQLite database as its owner, into memory.** `sqlite_copy`
+  in `lib/loam_host.py` runs `Connection.backup` in a child with
+  `user=`/`group=` set to the file's owner, opening it `mode=ro`, and
+  `serialize()`s the in-memory copy to stdout. Root opening a WAL database
+  in a container's volume would leave a root-owned `-shm` the container
+  cannot open. The backup bytes of an unchanged database are identical run
+  to run (they differ from the file's own header), so it is the backup that
+  is compared.
+- **Authelia rejects a passkey whose counter goes backwards** ("authenticator
+  sign count indicates that it is cloned") and sets `clone_warning`. A
+  CDP virtual authenticator re-imported from an exported credential replays
+  its old count: bump `signCount` on import, or a proof fails for the
+  harness's reason, not the code's. Authelia's elevation one-time codes are
+  rate-limited after a few in a minute ("Failed to generate the One-Time
+  Code"); `authelia storage user webauthn delete <user> --all --config …`
+  inside the container removes a passkey without a session.
+- **A scratch login** for proofs: the same image, a config with
+  `server.tls` on a self-signed cert for `auth.scratch.test`, published on
+  127.0.0.1 only, and Chromium launched with `--host-resolver-rules=MAP
+  *.scratch.test 127.0.0.1:<port>` and `--ignore-certificate-errors-spki-list`
+  (WebAuthn then works; a plain certificate error would refuse it).
+  Authelia refuses `regulation.find_time` > `ban_time`, and an empty
+  `users:` on reload (it keeps the old users).

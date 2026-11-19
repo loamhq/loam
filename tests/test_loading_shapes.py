@@ -216,10 +216,11 @@ def main() -> int:
            "--append-system-prompt-file" in argv_old), (True, True))
     check("a mapped agent's wake is sized by its map",
           wake.lane_input(new, None)[0] == "map.md" and wake.lane_input(new, None)[2] == new / "map.md")
-    check("the mapped wake's prompt is Loam's default: the changes, and judgment",
-          "{diff_block}" in wake.MAPPED_PROMPT_TEMPLATE
-          and "judgment" in wake.MAPPED_PROMPT_TEMPLATE
-          and "your map says where" in wake.MAPPED_PROMPT_TEMPLATE)
+    check("the reflection's prompt, either shape: its record's instruction and the vault",
+          "{instruction}" in wake.REFLECTION_PROMPT_TEMPLATE
+          and "{vault_block}" in wake.REFLECTION_PROMPT_TEMPLATE
+          and not hasattr(wake, "MAPPED_PROMPT_TEMPLATE")
+          and not hasattr(wake, "PROMPT_TEMPLATE"))
     check("the mapped cron's prompt does not claim `_always.md` loaded",
           "_always.md" not in wake.MAPPED_CRON_PROMPT_TEMPLATE
           and "_always.md" in wake.CRON_PROMPT_TEMPLATE)

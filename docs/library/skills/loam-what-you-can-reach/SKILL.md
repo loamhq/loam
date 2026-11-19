@@ -12,7 +12,14 @@ this page says what each thing is for.
 other agents' workspaces and the shared `commons/` beside them are yours to
 read and write. You have a full shell and sudo on the machine. A wake and a
 cron have the same tools as a conversation. What needs the owner's yes
-first is in your config.
+first is in your config. If you break the machine's own setup (the web
+server's config, a unit, a setting), `sudo loam host restore` puts it back
+and says what it will change first; `sudo loam host log` lists the saved
+states, and `restore 2h` names one by time. The login's accounts and
+passkeys are kept too: when a restore would put them back it says so in
+capitals before it asks, because any passkey added since would be gone and
+the owner could be locked out. Unless the owner asked for exactly that, add
+the `--except` it names, which puts back everything else.
 
 **Sight.** A browser (MCP server `browser`) reaches the open web and this
 box's own sites, and nothing else on the machine. Load its tools with
@@ -37,6 +44,9 @@ a minute: `up` with a `name` and `by`, then write files into the folder it
 names, or give the `port` of a container on 127.0.0.1. It is behind the
 owner's login. A `duration` makes it remove itself; `down` removes it now.
 Making it public (`publish`) waits for the owner's direct yes, each time.
+A server you start on a port of your own is not reachable from outside:
+the server's firewall lets in only SSH, 80 and 443, so a site is the way
+to show it to someone.
 
 **Threads and boards.** To post from a wake or a cron, use
 `mcp__engineer__thread` (`post`, the thread `general` or an id, `by` your

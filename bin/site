@@ -4,7 +4,7 @@
 The owner, 2026-11-08: behind the existing login, agents stand things up
 freely (mockups, slides, prototypes and their backends) on subdomains of
 their own, without asking anyone; anything on the open web without the login
-waits for his direct yes each time. This is the command for the first half
+waits for their direct yes each time. This is the command for the first half
 and the one deliberate act for the second.
 
     site up <name> --by <agent> [--root DIR | --port N] [--expires DATE | --for 2d]
@@ -217,7 +217,7 @@ def cmd_publish(args) -> int:
     words = " ".join((args.yes or "").split())
     if len(words) < 8:
         return say({"ok": False, "error": f"--yes takes {lc.OWNER_NAME}'s own words with the date, "
-                    "quoted; going public waits for his direct yes each time"})
+                    "quoted; going public waits for their direct yes each time"})
     ok, out = change(args.name, {**before, "public": words}, before)
     if not ok:
         return say({"ok": False, "error": out})

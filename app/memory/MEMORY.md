@@ -110,6 +110,12 @@ have never met.
   wrapper that changes between redraws would replay it. On a wide screen,
   where the list column and the pane would both be empty (no threads, no
   apps), the pane says it and the list stays quiet.
+- **Whose engineer the app has.** Since 2026-11-19 work on the app is the
+  Loam engineer's `scope: app` (a brief to `Loam` with `scope: app`): it
+  runs in `app/`, a landing refuses any path outside it, `npm test` in
+  `app/` is the test, and `deploy` restarts the app's unit and never the
+  session broker. Work that needs the broker or the deploy layer too is a
+  Loam brief without a scope.
 
 ## 2026-11-18 — the Market as a store
 

@@ -130,14 +130,12 @@ def blockers() -> list[str]:
     for pattern, what in (("loam-engineer-*.service", "engineer job"),
                           ("loam-wake-*.service", "wake"),
                           ("loam-cron-*.service", "cron"),
-                          ("loam-reviewer.service", "review"),
-                          ("loam-provider-follow.service", "provider follow")):
+                          ("loam-reviewer.service", "review")):
         why += [f"{what} {u}" for u in units(pattern)
                 if not u.startswith("loam-wake-failed@")]
     try:
-        import loam_follow
         import loam_live
-        why += loam_follow.restart_read()
+        why += loam_live.restart_read()
     except Exception as exc:  # noqa: BLE001 -- a broker we cannot read is busy
         why.append(f"the broker's live list could not be read ({exc})")
     return why
@@ -294,7 +292,7 @@ def regenerate(log: list[str]) -> None:
         cfg = ws / "agent.json"
         if cfg.is_file():
             data = json.loads(cfg.read_text())
-            steps.append([str(bin_ / "provision"), data["name"], data["wake_schedule"]])
+            steps.append([str(bin_ / "provision"), data["name"]])
     steps += [[str(bin_ / "provision"), "--codex"],
               [str(bin_ / "provision"), "--antigravity"],
               [str(bin_ / "provision"), "--engineer"],

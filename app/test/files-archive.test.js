@@ -243,6 +243,34 @@ test('archive route relays host /v1/files/archive directly when the broker suppo
   assert.equal(await res.text(), 'ZIP:vault:')
 })
 
+test('a fallback zip leaves a file over the host download limit out and says so in the zip', async (t) => {
+  // A host without `/v1/files/archive` downloads each file whole, up to its
+  // 50 MiB (`DOWNLOAD_MAX`); a bigger one answered 413 and cut the zip off
+  // after the page had said "Download started" (2026-11-19).
+  const BIG = 60 * 1024 * 1024
+  const broker = await fakeBroker({
+    'GET /v1/files/list': (req, res) => json(res, 200, listAnswer(row('vault', '', { kind: 'folder' }), [
+      row('vault', 'small.md', { size: 5 }),
+      row('vault', 'film.mov', { size: BIG }),
+    ])),
+    'GET /v1/files/download': (req, res, url) => {
+      if (url.searchParams.get('path') === 'film.mov') return json(res, 413, { error: 'too large', size: BIG, max: 50 * 1024 * 1024 })
+      res.writeHead(200, { 'content-type': 'application/octet-stream' })
+      res.end('hello')
+    },
+  })
+  const app = await appAgainst(broker)
+  t.after(closing(broker, app))
+  const res = await fetch(`${app.url}/api/files/archive?root=vault`, { headers: { 'Remote-User': 'sam' } })
+  assert.equal(res.status, 200)
+  const zip = await inspectZip(Buffer.from(await res.arrayBuffer()))
+  assert.equal(zip.bad, null)
+  assert.deepEqual(zip.entries.map((e) => e.name), ['small.md', 'Left out of this zip.txt'])
+  const note = zip.entries.find((e) => e.name === 'Left out of this zip.txt').data
+  assert.match(note, /- film\.mov \(60\.0 MiB\)/)
+  assert.match(note, /larger than the 50 MiB/)
+})
+
 test('Files UI shows Download as zip in folder menus, Preparing state, plain errors, and redesigned empty Shortcuts state', async () => {
   installDom()
   let resolveCheck

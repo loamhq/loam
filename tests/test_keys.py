@@ -66,6 +66,11 @@ plugin("odd", "keys:\n  - provider: replicate\n    name: Replicate\n    why: run
               "    fields: [{name: REPLICATE_API_TOKEN, label: API token}]\n")
 plugin("wrong", "keys:\n  - provider: replicate\n    why: no fields\n")
 plugin("twice", "keys: [openai, openai]\n")
+# Read aloud 1.0.1's shape: its provider's key, and a pasted secret of the
+# same name kept for old brokers (the listing said it both ways, 2026-11-19).
+plugin("both", layer=TMP / "loose", head="keys:\n  - provider: google\n    why: speaks\n"
+               'contributes: {"settings.secret":[{"name":"GEMINI_API_KEY","label":"Gemini API key"},'
+               '{"name":"OWN_TOKEN","label":"Its own service"}]}\n')
 
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_plugins as lp  # noqa: E402
@@ -95,6 +100,10 @@ check("keys: the declaration shows them beside touches",
           {"provider": "openai", "name": "OpenAI", "why": "makes the pictures", "optional": True},
           {"provider": "google", "name": "Google Gemini", "why": "makes them too", "optional": True}],
       pics["declaration"]["touches"].get("keys"))
+found = lp.read_folder(TMP / "loose" / "both")
+both = lp.declaration(found["manifest"], found["has"])["touches"]
+check("keys: a pasted secret named as a declared provider's field is shown once, as that key",
+      (both["keys"][0]["provider"], both.get("secrets")) == ("google", ["OWN_TOKEN"]), both)
 odd = row("odd")
 check("keys: an unknown provider brings its own name and fields",
       odd["keys"][0]["name"] == "Replicate"
@@ -289,11 +298,10 @@ for name in ("read-aloud", "dictation"):
     man, _ = lp.manifest_of(data, name)
     check(f"{name} declares Google's key", [x["provider"] for x in man.get("keys") or []]
           == ["google"], man.get("keys"))
-    # Its settings.secret of the same name stays for one release, so a broker
-    # from before 0.2.3 still hands it the key; a field of a declared
-    # provider resolves through keys first all the same.
-    check(f"{name}: its old settings.secret is the same name",
-          [x["name"] for x in man["contributes"]["settings.secret"]] == ["GEMINI_API_KEY"])
+    # 1.1.0 dropped the settings.secret of the same name (kept through
+    # 0.2.3): the listing said "Asks for a key of its own" beside the key.
+    check(f"{name}: no pasted secret beside the provider's key",
+          (man.get("contributes") or {}).get("settings.secret") is None)
 
 srv.shutdown()
 print(f"\n{sum(results)}/{len(results)} passed")

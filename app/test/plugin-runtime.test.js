@@ -19,7 +19,9 @@ test('server states, collapsed failure logs, listed packages and restart refusal
   for (const state of ['running', 'starting', 'failing', 'stopping', 'stopped']) {
     loader.st.rows = [row(state)]
     const view = tree(ui.view())
-    assert.match(text(view), new RegExp(`Server · ${state[0].toUpperCase() + state.slice(1)}`))
+    // The list speaks of a server only when it is not running (2026-11-19).
+    if (state === 'running') assert.doesNotMatch(text(view), /Server ·/)
+    else assert.match(text(view), new RegExp(`Server · ${state[0].toUpperCase() + state.slice(1)}`))
     assert.equal(all(view, 'plugin-icon')[0].getAttribute('src'), '/api/plugins/demo/files/icon.svg')
     assert.equal(all(view, 'plugin-service-failure').length, state === 'failing' ? 1 : 0)
     if (state === 'failing') {

@@ -47,11 +47,12 @@ try {
       await observeAudio(context)
       await context.route('**/app.js', r => r.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__regen = { threads, state, schedule, goChats, goFiles, get speech() { return __audio["read-aloud"] } };' }))
       await context.route('**/api/health', r => r.fulfill({ json: { configured: true, ok: true, speech: true } }))
+      await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
       let serial = 0, pending = true, failure = false
       const posts = [], jobs = new Map(), known = new Map()
       const key = b => JSON.stringify([b.source, b.minutes, b.voice, b.style, b.mode, b.text])
-      const ready = id => ({ id, status: 'ready', duration_s: 179, url: `/api/speech/${id}/audio.mp3` })
-      await context.route(/\/api\/speech(?:\/.*)?$/, async route => {
+      const ready = id => ({ id, status: 'ready', duration_s: 179, url: `/x/read-aloud/speech/${id}/audio.mp3` })
+      await context.route(/\/x\/read-aloud\/speech(?:\/.*)?$/, async route => {
         const req = route.request(), u = new URL(req.url())
         if (u.pathname.endsWith('/audio.mp3')) return route.fulfill({ contentType: 'audio/wav', body: wav })
         if (u.pathname.endsWith('/lookup')) {
@@ -59,7 +60,7 @@ try {
           if (!known.has(k) && b.mode === 'verbatim') known.set(k, ready('original'))
           return route.fulfill({ json: known.get(k) ?? { status: 'none' } })
         }
-        if (u.pathname === '/api/speech') {
+        if (u.pathname === '/x/read-aloud/speech') {
           const b = req.postDataJSON(); posts.push(b)
           const id = `replacement-${++serial}`; jobs.set(id, b)
           return route.fulfill({ status: 202, json: { id, status: 'preparing', stage: 'voicing' } })

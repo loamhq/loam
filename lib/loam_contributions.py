@@ -75,8 +75,8 @@ PLACES = ("agent.tool", "agent.prompt", "schedule.kind", "settings.entry",
           # share door").
           "web.door")
 # The checks the host runs itself for a `settings.secret` (`check: builtin:<n>`),
-# so a plugin with no code of its own (read aloud, dictation) can have its key
-# checked: lib/loam_keys.py.
+# so a plugin needs no code of its own to have its key checked:
+# lib/loam_keys.py.
 BUILTIN_CHECKS = ("gemini",)
 SECRET_MAX = 4096
 LANES = ("persona", "engineer", "reviewer")
@@ -1107,7 +1107,7 @@ def apply(reason: str = "") -> dict:
             continue
         try:
             data = json.loads(cfg.read_text(encoding="utf-8"))
-            res = subprocess.run([str(prov), data["name"], data["wake_schedule"]],
+            res = subprocess.run([str(prov), data["name"]],
                                  capture_output=True, text=True, check=False, timeout=120)
             (out["rendered"] if res.returncode == 0 else out["errors"]).append(
                 data["name"] if res.returncode == 0

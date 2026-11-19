@@ -152,25 +152,29 @@ test('onboarding backup step supports non-GitHub remotes, local folder paths, st
   assert.equal(statusCalls, 0)
 })
 
-test('skipping onboarding backup turns git-backup back off only if onboarding turned it on without saving a remote', async t => {
+test('skipping onboarding backup records Git backup as off, so the offer is made once', async t => {
   installDom()
   const row = backupRow(false)
   const patches = []
+  const api = async (method, path, body) => { patches.push({ method, path, body }); row.on = Boolean(body.on); row.chosen = true; return { plugin: row } }
   const backup = createOnboardingBackup({
     pluginLoader: { st: { rows: [row] } },
-    api: async (method, path, body) => { patches.push({ method, path, body }); row.on = Boolean(body.on); return { plugin: row } },
+    api,
     request: async () => ({ ok: false, status: 400, json: async () => ({ error: 'Bad remote.' }) }),
   })
   t.after(() => backup.stop())
 
-  // Skipping immediately without opening a form makes zero plugin API calls.
+  assert.equal(backup.offered(), true)
+  // Skipping without opening a form says "off" in so many words: the switch is chosen.
   backup.skipCleanup()
-  assert.equal(patches.length, 0)
+  assert.deepEqual(patches, [{ method: 'PATCH', path: '/plugins/git-backup', body: { on: false } }])
+  assert.equal(backup.offered(), false)
 
   // If onboarding enabled the plugin during a failed connect, skipping turns it back off.
+  row.chosen = false
   const backup2 = createOnboardingBackup({
     pluginLoader: { st: { rows: [row] } },
-    api: async (method, path, body) => { patches.push({ method, path, body }); row.on = Boolean(body.on); return { plugin: row } },
+    api,
     request: async () => ({ ok: false, status: 400, json: async () => ({ error: 'Bad remote.' }) }),
   })
   t.after(() => backup2.stop())
@@ -178,6 +182,34 @@ test('skipping onboarding backup turns git-backup back off only if onboarding tu
   assert.equal(row.on, true)
   backup2.skipCleanup()
   assert.deepEqual(patches.at(-1), { method: 'PATCH', path: '/plugins/git-backup', body: { on: false } })
+  assert.equal(row.on, false)
+
+  // A remote already saved (connected, key not yet tested) leaves it on.
+  const before = patches.length
+  const backup3 = createOnboardingBackup({
+    pluginLoader: { st: { rows: [{ ...row, on: true }] } },
+    api,
+    request: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, trees: [{ id: 'vault', name: 'Vault', level: 'wait', remote: 'git@host:you/vault.git' }, { id: 'spaces', name: 'AI Spaces', level: 'off', remote: null }] }) }),
+  })
+  t.after(() => backup3.stop())
+  await backup3.refresh()
+  backup3.skipCleanup()
+  assert.equal(patches.length, before)
+})
+
+test('the backup offer stands only while Git backup is off and its switch was never set', () => {
+  const offer = row => createOnboardingBackup({ api: async () => ({}), pluginLoader: { st: { rows: row ? [row] : [] } } }).offered()
+  assert.equal(offer({ ...backupRow(false), chosen: false }), true, 'a fresh install')
+  assert.equal(offer(backupRow(false)), true, 'a host older than `chosen` still offers on the welcome path')
+  assert.equal(offer({ ...backupRow(false), chosen: true }), false, 'skipped once')
+  assert.equal(offer({ ...backupRow(true), chosen: true }), false, 'backup on (this box)')
+  assert.equal(offer({ ...backupRow(true), chosen: false }), false, 'on by any other route')
+  assert.equal(offer({ ...backupRow(false), broken: 'bad manifest' }), false, 'broken')
+  assert.equal(offer(null), false, 'no plugin')
+  installDom()
+  const backup = createOnboardingBackup({ api: async () => ({}), pluginLoader: { st: { rows: [{ ...backupRow(false), chosen: true }] } } })
+  const screen = welcomeScreen({ providers, signIn: { card: () => null }, continueWith() {}, retry() {}, backup })
+  assert.match(text(screen), /Meet your first agent/, 'a chosen switch: the welcome goes straight to Hello')
 })
 
 test('Settings plainly says when off-box backup is off and leaves connected Git backup unchanged', async () => {

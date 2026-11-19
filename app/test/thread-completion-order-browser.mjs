@@ -71,9 +71,10 @@ try {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, reducedMotion: 'reduce', serviceWorkers: 'block', isMobile: width === 390, hasTouch: width === 390 })
     await observeAudio(context)
     await context.route('**/api/health', (route) => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
     let speechMade = false
-    const readySpeech = { id: 'fixture-audio', status: 'ready', duration_s: 30, url: '/api/speech/fixture-audio/audio.mp3' }
-    await context.route(/\/api\/speech(?:\/.*)?$/, (route) => {
+    const readySpeech = { id: 'fixture-audio', status: 'ready', duration_s: 30, url: '/x/read-aloud/speech/fixture-audio/audio.mp3' }
+    await context.route(/\/x\/read-aloud\/speech(?:\/.*)?$/, (route) => {
       const pathname = new URL(route.request().url()).pathname
       if (pathname.endsWith('/audio.mp3')) return route.fulfill({ contentType: 'audio/wav', body: wav })
       if (pathname.endsWith('/lookup')) return route.fulfill({ json: speechMade ? readySpeech : { status: 'none' } })

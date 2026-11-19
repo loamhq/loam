@@ -4,11 +4,12 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { readConfig } from '../src/config.js'
+import { readConfig as appConfig } from '../src/config.js'
+import { readConfig as readAloudConfig } from '../../plugins/_listed/read-aloud/server/config.js'
 import { createBroker } from '../src/broker.js'
 import { brokerSecret } from '../src/plugin-secrets.js'
-import { createSpeech, DEFAULT_VOICE } from '../src/speech.js'
-import { PREBUILT_VOICES } from '../src/document-speech.js'
+import { createSpeech, DEFAULT_VOICE } from '../../plugins/_listed/read-aloud/server/speech.js'
+import { PREBUILT_VOICES } from '../../plugins/_listed/read-aloud/page/document-speech.js'
 import { sampleText } from '../../plugins/_listed/read-aloud/page/voice-samples.js'
 
 if (process.argv.slice(2).join(' ') !== '--record') {
@@ -16,7 +17,8 @@ if (process.argv.slice(2).join(' ') !== '--record') {
   console.log('Makes 30 paid Gemini TTS recordings using the runtime read-aloud plugin key. Requires ffmpeg.')
   process.exit(0)
 }
-const config = readConfig()
+// The broker's address from the app's config; speech's own from Read aloud's.
+const config = { ...appConfig(), speech: readAloudConfig().speech }
 if (!config.brokerUrl || !config.brokerToken || !process.env.SPEECH_DIR) throw new Error('Recording requires BROKER_URL, BROKER_TOKEN and an explicit scratch SPEECH_DIR.')
 const getKey = brokerSecret(createBroker(config), 'read-aloud')
 if (!await getKey()) throw new Error('The read-aloud plugin key is unavailable from the configured broker.')

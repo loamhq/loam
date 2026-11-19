@@ -93,6 +93,6 @@ check("the probe's body runs inside the clean-up's try/finally",
 runner = (ROOT / "tests" / "run-all").read_text(encoding="utf-8")
 for var in ("LOAM_THREADS_STATE", "LOAM_VAULT"):
     check(f"run-all gives every test a scratch {var}",
-          f'os.environ.get("{var}")' in runner and f'os.environ["{var}"]' in runner, True)
+          f'"{var}"' in runner and "def sealed_env(scratch" in runner, True)
 print(f"\n{'OK' if not fails else f'{fails} FAILED'}")
 sys.exit(1 if fails else 0)

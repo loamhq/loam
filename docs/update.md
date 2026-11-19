@@ -19,7 +19,11 @@ job L13). The rules are all in `lib/loam_update.py`; the command is
 
 What the new code then regenerates is the generators' own output, as on any
 install: the user units (`gen-units`), each live agent's provisioned files
-(`provision`), the providers' memory pins (`provider-memory pin`).
+(`provision`), the provider CLIs at the versions the release was tested
+with (`provider-pin apply`, `lib/loam_pins.py`: each build installed beside
+the others under `~/.local/share/<cli>/versions/` and the link in
+`~/.local/bin/` moved; sign-ins and provider homes untouched), the
+providers' memory pins (`provider-memory pin`).
 
 ## The two kinds of install
 
@@ -116,6 +120,7 @@ Other refusals:
 | `no-release` | no release has been published yet |
 | `no-such-release` | the requested `to` does not exist |
 | `not-newer` | the target is not newer than what is running |
+| `signature` | the release's signature does not verify against the maintainer keys the running release carries (`reason`: `unsigned`, `not-ssh`, `untrusted-key`, `bad-signature`, `wrong-name`, `cannot-check`; docs/signing.md) |
 | `bad-release` | the tag's `manifest.json` names a different version |
 | `busy` | an apply or rollback is already running |
 | `unreachable` | `origin` could not be read |
@@ -125,6 +130,19 @@ Every refusal except `library-edits` leaves a notice for the person's
 agent (below). The notice names what was found and asks the agent to
 explain it and, with the person's yes, put it right. `library-edits` is the
 person looking at their own diff, so the agent gets no notice for it.
+
+## A release must be signed (2026-11-19)
+
+Before anything is read from a fetched release, its tag is checked against
+`docs/releases/signers` as the running release committed it
+(`lib/loam_signing.py`, `docs/signing.md`). A release that does not verify
+is refused as `signature` before anything moves. `check` marks it
+`blocked`, the page says it could not be verified, and the person's agent is
+told it was refused (once per release and reason), never that it is
+available. A release that verifies is moved to by the commit its verified
+tag object names. `current.signing` (`{keys, checked, message}`) says
+whether this install checks releases at all: while the running release
+carries no key, nothing is checked, and the message says so.
 
 ## System/Loam: shown first, replaced whole, kept
 
@@ -164,11 +182,14 @@ commits), plus the folders listed:
 | Step | Script | Also |
 |---|---|---|
 | `library` | always: `bin/library install` (System/Loam, then the skill views) | |
-| `units` | `bin/gen-units` | `systemd/`, except `systemd/system/` (still installed by hand) |
+| `units` | `bin/gen-units` (a timer it installs for the first time it also arms, so a release's new timer runs after an update the older release's code ran) | `systemd/`, except `systemd/system/` (still installed by hand) |
 | `agents` | `bin/provision`, once for each live agent, then `bin/provision --engineer` | `engineer-template/`, `engineer/install/` |
-| `provider-memory` | `bin/provider-memory pin` | |
-| `broker` | `bin/session-broker` | `broker/`, `plugins/` |
+| `providers` | `bin/provider-pin apply --no-restart` | |
+| `provider-memory` | `bin/provider-memory pin` | `lib/loam_pins.py` |
+| `broker` | `bin/session-broker` | `broker/`, `plugins/`, `lib/loam_pins.py` |
 | `gateway` | `bin/plugin-gateway` | |
+| `deploy` | `sudo bin/gen-deploy` (the web front, the login, the walls: the inbound wall reaches an install that lacks it this way) | `deploy/` |
+| `app` | `sudo bin/deploy <app> up <commit>` | `app/`, `deploy/` |
 
 - **The broker** is restarted by `restart-broker --when-idle`. That waits
   until every session is idle and no thread turn is in flight; after half

@@ -44,9 +44,9 @@ try {
     assert.equal(asked, 2, 'the refused request was sent once more, and only once')
     assert.equal(await page.getByRole('link', { name: 'Sign in again', exact: true }).count(), 0)
 
-    await page.route('**/api/speech/lookup', (route) => route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }))
+    await page.route('**/x/read-aloud/speech/lookup', (route) => route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }))
     await page.route('**/up', (route) => route.fulfill({ status: 302, headers: { location: '/login' } }))
-    await page.evaluate(async () => { const { authenticatedFetch } = await import('/auth.js'); await authenticatedFetch('/api/speech/lookup', { method: 'POST' }).catch(() => {}) })
+    await page.evaluate(async () => { const { authenticatedFetch } = await import('/auth.js'); await authenticatedFetch('/x/read-aloud/speech/lookup', { method: 'POST' }).catch(() => {}) })
     await page.getByRole('link', { name: 'Sign in again', exact: true }).waitFor({ timeout: 20000 })
     for (const theme of ['light', 'dark']) {
       await page.emulateMedia({ colorScheme: theme })

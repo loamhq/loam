@@ -73,6 +73,20 @@ PROVIDER_LINE = (
     "the browser, image generation or scheduling tools; a job is the shell "
     "and the files.")
 
+# The platform engineer's line (since 2026-11-19), as Codex's
+# PLATFORM_LINE: the wall holds what its Claude settings would have denied.
+PLATFORM_LINE = (
+    "You are the platform engineer running on Antigravity (`agy --print`), "
+    "headless: Antigravity's own tools (run_command, view_file, "
+    "write_to_file, replace_file_content, grep_search, ...), with this box's "
+    "sudo, behind the job's wall. Claude Code's Read, Edit, Grep, Agent, "
+    "ToolSearch and Skill tools are not here; the files below are the "
+    "instructions the Claude Code engineer reads, unchanged, and they bind "
+    "you the same way, including every line the Claude engineer's settings "
+    "would have enforced for it. Nobody can answer an approval or a "
+    "question: decide, and say so in the receipt. Do not use the browser, "
+    "image generation or scheduling tools; a job is the shell and the files.")
+
 STREAM = "agy.jsonl"
 INSTRUCTIONS = "instructions.md"
 PROMPT_FILE = "prompt.md"
@@ -91,13 +105,42 @@ HARNESS = codex_job.HARNESS
 QUOTA_RE = re.compile(r"RESOURCE_EXHAUSTED|quota|\b429\b|exhausted your capacity|"
                       r"rate.?limit|out of credits", re.I)
 
+# A side call's failure (caused 2026-11-19, job 20261118-203030-08dd33be).
+# Beside the job's own conversation Antigravity makes "implicit" calls of
+# its own (the `.pb` files the files record names), on its default model,
+# whatever `--model` says. One of them answered 503 ("No capacity available
+# for model gemini-4-hydrogen-high") after a run on a Claude model had done
+# its work, and the CLI reported the whole run as ERROR (exit 0). An error
+# that is transient (503 / UNAVAILABLE / no capacity) and names a model that
+# is not the job's is that side call's, not the job's.
+TRANSIENT_RE = re.compile(r"UNAVAILABLE|\b503\b|No capacity available", re.I)
+ERROR_MODEL_RE = re.compile(r"\bfor model ([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def side_call_failure(failed: str | None, job_model: str | None) -> str | None:
+    """The other model's name when ``failed`` is a transient error of a
+    model other than ``job_model`` (a side call's); else None, and the run's
+    error stands as the job's."""
+    if not failed or not job_model or not TRANSIENT_RE.search(failed):
+        return None
+    named = ERROR_MODEL_RE.search(failed)
+    if not named:
+        return None
+    other = named.group(1)
+    return None if other == job_model or job_model.startswith(other) \
+        or other.startswith(job_model) else other
+
+
 STEP_SILENT = ("user_input", "checkpoint")
 STEP_TEXT = ("agent_response",)
 
 
-def instructions(workdir: Path) -> str:
+def instructions(workdir: Path, platform: bool = False) -> str:
     """The Claude engineer's memory files, as Codex is given them, under
-    this provider's line."""
+    this provider's line (the platform engineer's when ``platform``)."""
+    if platform:
+        text = codex_job.instructions(workdir, platform=True)
+        return text.replace(codex_job.PLATFORM_LINE, PLATFORM_LINE, 1)
     text = codex_job.instructions(workdir)
     return text.replace(codex_job.PROVIDER_LINE, PROVIDER_LINE, 1)
 

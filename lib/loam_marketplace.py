@@ -91,6 +91,14 @@ _details_locks: dict[str, threading.Lock] = {}
 ICON_MAX = 512 * 1024
 IMAGE_MAX = 3 * 1024 * 1024
 THEME_MAX = 128 * 1024
+# A listing's screenshots (2026-11-19, `screenshots` in PLUGIN.md): each
+# picture at most IMAGE_MAX, all of them together at most SHOTS_TOTAL.
+SHOTS_TOTAL = 16 * 1024 * 1024
+# A listed theme's display faces, so its preview wears them before install:
+# its fonts.css and the .woff2/.woff files beside it, each at most FONT_MAX.
+FONT_MAX = 400 * 1024
+FONTS_MAX = 8
+FONT_NAME = re.compile(r"^[A-Za-z0-9_-]+\.(?:woff2|woff)$")
 GUIDE_MAX = 8000
 
 
@@ -642,9 +650,19 @@ def _resolve(folder_path: str, dest: str) -> str | None:
     return joined.lstrip("/") if joined != "/" else ""
 
 
+# What a README says that the listing's page already shows above it
+# (2026-11-19): its pictures of the plugin at work, between
+# `<!-- loam:gallery -->` and `<!-- /loam:gallery -->` (the gallery, or a
+# theme's live preview), and its one-line promise, between `<!-- loam:hero -->`
+# and `<!-- /loam:hero -->` (the listing's description). The page is handed
+# the README without them; GitHub, and a Loam before this one, show them.
+GALLERY_BLOCK = re.compile(r"<!--\s*loam:(gallery|hero)\s*-->.*?<!--\s*/loam:\1\s*-->", re.S)
+
+
 def readme_markdown(text: str, entry: dict) -> tuple[str, list[str]]:
     """The README as the page is handed it, and the folder's pictures it
     shows (paths inside the plugin's folder), in order."""
+    text = GALLERY_BLOCK.sub("", text)
     import html  # noqa: PLC0415
     import loam_plugins  # noqa: PLC0415
     repo_, ref, folder_path = entry["repo"], entry["ref"], entry.get("path") or ""
@@ -733,6 +751,50 @@ def _readme(folder: Path, entry: dict) -> tuple[str | None, dict]:
     return md or None, files
 
 
+def _screenshots(folder: Path, manifest: dict, files: dict) -> list[dict]:
+    """The screenshots its manifest names, kept as ``shot/<n>`` (and
+    ``shot/<n>-dark``); what the page is told of each: its caption and
+    whether it has a dark one."""
+    import loam_plugins  # noqa: PLC0415
+    out, total = [], 0
+    for shot in (manifest.get("screenshots") or [])[:loam_plugins.SCREENSHOTS_MAX]:
+        light = _picture(folder, shot.get("src"), loam_plugins.IMAGE, IMAGE_MAX)
+        if not light or total + len(light[0]) > SHOTS_TOTAL:
+            continue
+        dark = _picture(folder, shot.get("src_dark"), loam_plugins.IMAGE, IMAGE_MAX) \
+            if shot.get("src_dark") else None
+        if dark and total + len(light[0]) + len(dark[0]) > SHOTS_TOTAL:
+            dark = None
+        n = len(out)
+        files[f"shot/{n}"] = light
+        total += len(light[0])
+        if dark:
+            files[f"shot/{n}-dark"] = dark
+            total += len(dark[0])
+        out.append({"caption": shot.get("caption") or "", "dark": bool(dark)})
+    return out
+
+
+def _theme_fonts(folder: Path, files: dict) -> bool:
+    """A listed theme's fonts.css and its font files, kept as ``fonts.css``
+    and ``font/<file>``. The app holds the sheet to @font-face rules naming
+    files beside it (themeFontsCSS) before the page sees it."""
+    sheet = folder / "fonts.css"
+    if not sheet.is_file() or sheet.is_symlink() or sheet.stat().st_size > 64 * 1024:
+        return False
+    kept = 0
+    for font in sorted(folder.iterdir()):
+        if kept >= FONTS_MAX:
+            break
+        if FONT_NAME.match(font.name) and font.is_file() and not font.is_symlink() \
+                and font.stat().st_size <= FONT_MAX:
+            files[f"font/{font.name}"] = (font.read_bytes(), "font/woff2" if
+                                          font.suffix == ".woff2" else "font/woff")
+            kept += 1
+    files["fonts.css"] = (sheet.read_bytes(), "text/css; charset=utf-8")
+    return True
+
+
 def _read_details(entry: dict) -> dict:
     import loam_plugins  # noqa: PLC0415
     # A reviewed listing is read at the commit its review read.
@@ -778,7 +840,10 @@ def _read_details(entry: dict) -> dict:
             css = folder / "theme.css"
             if css.is_file() and css.stat().st_size <= THEME_MAX:
                 files["theme.css"] = (css.read_bytes(), "text/css; charset=utf-8")
-                theme = {"options": manifest.get("options") or []}
+                theme = {"options": manifest.get("options") or [],
+                         "palette": manifest.get("palette") or [],
+                         "fonts": _theme_fonts(folder, files)}
+        shots = _screenshots(folder, manifest, files)
         listed_only = [k for k in manifest["kind"] if k in loam_plugins.LISTED_ONLY]
         guide = (found.get("guide") or "").strip()
         body = {
@@ -797,6 +862,9 @@ def _read_details(entry: dict) -> dict:
             "readme": readme,
             "readme_images": sorted(k[len("readme/"):] for k in readme_files),
             "theme": theme,
+            # 2026-11-19: its promise and its pictures (`words_of`).
+            "description": manifest.get("description"),
+            "screenshots": shots,
         }
         return {"at": time.time(), "body": body, "files": files}
     finally:
@@ -826,16 +894,19 @@ def details(pid: str, refresh: bool = False) -> dict:
     return _loaded(pid, refresh)["body"]
 
 
-FILE_NAMES = ("icon", "cover", "cover-dark", "theme.css")
+FILE_NAMES = ("icon", "cover", "cover-dark", "theme.css", "fonts.css")
+SHOT_FILE = re.compile(r"^shot/[0-5](?:-dark)?$")
 
 
 def file(pid: str, name: str) -> tuple[bytes, str]:
-    """``GET /v1/marketplace/<id>/<icon|cover|cover-dark|theme.css>``, or
-    ``readme/<path>`` (a picture the README shows): one of the files
-    ``details`` kept, as (bytes, type). ``image`` is the older name of
-    ``cover``."""
+    """``GET /v1/marketplace/<id>/<icon|cover|cover-dark|theme.css|fonts.css>``,
+    ``readme/<path>`` (a picture the README shows), ``shot/<n>`` and
+    ``shot/<n>-dark`` (its screenshots) or ``font/<file>`` (a listed theme's
+    face): one of the files ``details`` kept, as (bytes, type). ``image`` is
+    the older name of ``cover``."""
     name = "cover" if name == "image" else name
-    if name not in FILE_NAMES and not name.startswith("readme/"):
+    if name not in FILE_NAMES and not name.startswith(("readme/", "font/")) \
+            and not SHOT_FILE.match(name):
         raise NotListed(f"a listing has no file {name!r}")
     got = _loaded(pid)["files"].get(name)
     if not got:

@@ -252,6 +252,11 @@ export function actionOf(entry, { installed = false, themeInUse = null, trying =
   return { action: 'none', label: 'Installed' }
 }
 
+// Said on every install sheet but a plain theme's (2026-11-19): what a
+// plugin runs, it runs with the whole server, as the agents do. The
+// README's first screen says the same of Loam.
+export const ROOT_LINE = 'Like your agents, a plugin has full control of this server: install what you trust. That is why Loam wants a server you use for nothing else.'
+
 // What a plugin declares, in plain words, for the listing page and the
 // install sheet: `{ glyph, text, sub }`. Read from the declaration an
 // install's first call answers (lib/loam_plugins.declaration).

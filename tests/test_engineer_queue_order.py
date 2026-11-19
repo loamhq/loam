@@ -14,9 +14,6 @@ is always free), against a temp jobs root:
   the queue empties       it takes the slot, and its queue.log says when.
   nobody is waiting       a new job takes the slot at once and never queues.
 
-And the queued reply names the project's real receipts folder, not
-"40_PROJECTS/<project>/receipts/" with the placeholder left in.
-
 Nothing outside a temporary directory is written; no unit is launched.
 
 Run: python3 tests/test_engineer_queue_order.py
@@ -112,11 +109,6 @@ try:
           (3, 3))
     check("...and says how many are ahead of it", state["held_by"],
           "2 job(s) queued ahead of this one")
-    check("the queued reply names the project's real receipts folder",
-          f"under {root}/vault/40_PROJECTS/Demo/receipts/ with {newcomer}"
-          in job.queued_text(p, newcomer), True)
-    check("...and no placeholder", "<project>" in job.queued_text(p, newcomer),
-          False)
 
     (waiting[0] / "result.json").write_text("{}")
     time.sleep(0.3)

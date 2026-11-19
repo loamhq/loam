@@ -124,7 +124,6 @@ on everything but `/up`.
 |---|---|
 | `GET /up` | `{"ok": true}`. No token. |
 | `GET /v1/limits` | the numbers a client must know before it does something this interface would refuse: `attachment_max_bytes`, `inline_image_max_bytes`, `attachment_types` — "Attachments" below |
-| `GET /v1/dictation-terms` | the dictation terms note, read fresh → `{path, obsidian_url, modified, text}`, `Cache-Control: no-store`; **`404`** when there is no note. No parameter names a file — "The dictation terms note" below |
 | `GET /v1/agents` | the personas, derived from disk, each with its name and uploaded face |
 | `GET /v1/providers[?agent=<name>]` | the four providers, which are connected, the quota, when the login expires (`login`), and what each offers a chat: its `models` and its `efforts`. `?agent=` only decides whose default is ticked. |
 | `POST /v1/providers/claude-code/login` | begins a fresh Claude Code sign-in → **`201`** with `{state: "pending", url, code: null, instructions, login}`. Idempotent: a second POST while one is pending answers `200` with the same URL. "Making the login again" below. |
@@ -267,7 +266,7 @@ holds it: `working` (a silent turn in a long tool call or a call waiting on
 an engineer job included), `asking`, `background` (a subagent ends with the
 session's process tree, and a waiting call is cut), a state the rule does
 not know, and a failed read. The rule is `lib/loam_live.restart_blockers`,
-which `lib/loam_follow.py` and `bin/move-state` use too. At its ceiling
+which `bin/move-state` uses too (`loam_live.restart_read`). At its ceiling
 (`loam_live.RESTART_CEILING_S`, 30 min) or `--max-wait` it **defers**:
 exit 75, nothing restarted, and the caller tries again later. On 11-16 the
 ceiling used to let it go past silent turns, and it cut four, three of them
@@ -3083,39 +3082,13 @@ is `""` and the session's stand-in title is `Attached <name>`.
 (**`404`**). Making a persona read an arbitrary file on the box is a
 capability the app has never had, and it does not gain it here.
 
-### The dictation terms note
+### The dictation terms note (retired 0.2.12)
 
-The names and terms that bias dictation live in one vault note,
-`99_SYSTEM/Dictation terms.md`. The Obsidian plugin reads it from the vault;
-an app's container cannot see the vault, so it asks here. Added 2026-09-30.
-
-```
-GET /v1/dictation-terms
-  → 200 {"path": "99_SYSTEM/Dictation terms.md",
-         "obsidian_url": "obsidian://open?vault=vault&file=99_SYSTEM%2FDictation%20terms",
-         "modified": "2026-09-30T18:13:57Z",
-         "text": "---\ncreated_by: ...\n# Dictation terms\n..."}
-  → 404 {"error": "no dictation terms note on this box"}
-```
-
-- **One file, and no client can name another.** The path is
-  `DICTATION_TERMS_PATH` in `lib/loam_broker.py`, overridable only by
-  `LOAM_DICTATION_TERMS` in the broker's own environment (the unit, or a
-  test). The route reads no query parameter, and any longer path is not this
-  route (`405`, "no route").
-- **The text is sent whole, frontmatter and headings included.** Turning it
-  into terms is the reader's job, by the note's own rule: one term per line,
-  headings, blank lines and frontmatter ignored, a line with commas is several
-  terms. One rule in two readers (the plugin and the page) is kept honest by
-  the note saying it, not by this route parsing it a third way.
-- **`modified` is the file's mtime**, UTC, to the second. **`no-store`** on
-  both answers, because the note is edited by hand and the next take must see
-  the edit.
-- **`obsidian_url`'s vault name is the vault's directory name, `vault`.**
-  Obsidian keeps a vault's name nowhere in `.obsidian/`; it is the folder's
-  name on the device that opened it. If the phone's copy is named otherwise
-  the link opens nothing, and this is the line to change. A path pointed
-  outside the vault answers its absolute path and `obsidian_url: null`.
+Until 0.2.12 the broker answered `GET /v1/dictation-terms`, the one vault
+note of names and terms that biases dictation. Since Dictation 1.1.0 the
+plugin's own server reads that note (`<system>/Dictation terms.md`) and
+answers it at `/x/dictation/terms`, in the same shape; the broker has no
+such route.
 
 ### Files
 
@@ -4472,18 +4445,21 @@ Antigravity persona's run on Claude Code on `fable` and log
      "own": null,
      "effective": {"provider": "claude-code", "model": "claude-opus-5-5", "effort": null, "source": "record"},
      "providers": ["claude-code"],
-     "deploy_on_land": null, "deploy_app": null, "lands_by": "main",
+     "deploy_on_land": false, "deploy_app": "loam-ui",
+     "deploy_label": "Deploy the app when an app-only job lands",
+     "scopes": ["app"], "lands_by": "main",
      "instructions": {"root": "vault", "path": "40_PROJECTS/Loam/engineer/projects/loam.md",
                       "system": {"root": "system", "path": "Engineer/Platform project.md"},
                       "host_path": "/home/loam/agents/engineer/project.md"},
      "jobs_running": 1},
-    {"project": "loam-ui", "platform": false, "repo": "octo-owner/loam-ui",
+    {"project": "webapp", "platform": false, "repo": "octo-owner/webapp",
      "own": {"provider": "codex", "model": null, "effort": "high"},
      "effective": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high", "source": "own"},
      "providers": ["claude-code", "codex"],
-     "deploy_on_land": false, "deploy_app": "loam-ui", "lands_by": "main",
+     "deploy_on_land": false, "deploy_app": "webapp",
+     "deploy_label": "Deploy when a job lands", "scopes": [], "lands_by": "main",
      "instructions": {"root": null, "path": null,
-                      "host_path": "/home/loam/projects/loam-ui/project.md",
+                      "host_path": "/home/loam/projects/webapp/project.md",
                       "note": "in the project's own repository, which its engineer edits; Files does not reach it"},
      "jobs_running": 0}
   ],
@@ -4498,8 +4474,17 @@ Antigravity persona's run on Claude Code on `fable` and log
 Loam's engineer is first, then the projects by name. `own` is the engineer's
 own setting (null: it follows the default, or its record); `effective` is
 what its next job runs on, `source` `own`, `default` or `record`.
-`deploy_on_land` is null where it cannot apply (Loam's engineer, a project
-landing by pull request, a project with no app). `GET /v1/engineers/<project
+`deploy_on_land` is null where it cannot apply (a project landing by pull
+request, a project with no app). **One engineer for Loam, with an app-only
+scope (2026-11-19).** The app's own engineer (`loam-ui`) is the Loam
+engineer's `scope: app` now, so it has no row: Loam's carries `scopes:
+["app"]` and the app's toggle (`deploy_on_land`, `deploy_app`, and
+`deploy_label`, the words the page shows; a full Loam job deploys itself).
+`GET /v1/engineers/loam-ui` answers Loam's row; `PATCH` of its
+`deploy_on_land` sets Loam's, and of its provider, model or tiers is a 409
+naming Loam, because the scope runs on the Loam engineer's. Its old row in
+the settings file is kept and read by nothing, except that Loam's toggle,
+until it is set, reads the old row's. `GET /v1/engineers/<project
 or default>` answers one row (the default as `{"project": "default", own,
 effective, providers, note, applies}`); 404 for an engineer nobody has.
 
@@ -5754,6 +5739,7 @@ line), then the finished, newest first. Every row has every key:
 {
   "job": "20261113-120317-0a880088",
   "project": "Loam",
+  "scope": "null, or \"app\" for the Loam engineer's app-only work (since 2026-11-19; its jobs read as Loam's)",
   "title": "Theme manifests may carry a dark-mode cover",
   "briefed_by": "ada",
   "thread": "t-780b66bd",

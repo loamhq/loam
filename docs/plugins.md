@@ -58,6 +58,13 @@ keys:                       # the providers whose API keys it uses (2026-11-18)
   - provider: openai          # a provider Loam knows: openai, google, hetzner, cloudflare, modal
     why: makes the pet's portrait   # shown before install, beside touches
     optional: true            # it works without this one (another key will do)
+description: Listen to your agents instead of reading them.   # its promise, one line (2026-11-19)
+screenshots:                # pictures of it in use, in its folder (2026-11-19)
+  - src: assets/shots/listen.webp
+    src_dark: assets/shots/listen-dark.webp
+    caption: Press Listen under any reply
+palette:                    # a theme's named colours, by token (kind theme only; 2026-11-19)
+  - {token: --paper-page, name: Lichen, name_dark: Night floor}
 agent_settings:             # what it keeps for each agent, on the agent's profile
   - id: voice
     label: Voice
@@ -77,7 +84,35 @@ profile (`GET /v1/agents/<agent>`) lists each such plugin with the agent's
 values. Contract: `broker/README.md`, "Agent profiles, engineers and the
 reviewer". Any plugin may; first-party ones get nothing more.
 
+**What a plugin says about itself** (2026-11-19). `description` is its
+promise: one plain line of at most 160 characters, about what someone gets
+from it, not how it works; Settings › Plugins shows it under the name and at
+the top of its page. `screenshots` are at most six pictures in its folder
+(`.webp`, `.avif`, `.jpg`, `.png`), each `{src, src_dark?, caption}`; its
+page and its Market listing show them as a gallery that opens larger, the
+dark one when Loam is dark, and the files route serves exactly those.
+`palette` (a theme only) is at most eight of its colours by token, each with
+a name of at most 24 characters from the theme's story and an optional
+`name_dark`; the theme's preview names its swatches with them, and a theme
+without one shows six roles by plain names. Each wrong entry is left out
+with a warning. A Loam before 0.2.12 keeps them as `extra` with a warning
+and installs and lists the plugin as before.
+
 The body after the closing `---` is the guide, for a person and an agent.
+**Write it plain first** (2026-11-19): a few sentences on what it is for,
+`## What you can do`, `## How to use it` in at most three steps, and what it
+needs and what leaves the server, all in words a person who does not build
+software reads easily. Then a rule (`---`) or a `## Technical details`
+heading, and below it everything exact: hosts, files, permissions,
+settings. A plugin's page shows the plain part at the top and the technical
+part under Details at its foot.
+
+**A README read by the Market** (2026-11-19) may mark what its listing's page
+already shows: its one-line promise between `<!-- loam:hero -->` and
+`<!-- /loam:hero -->`, and its pictures between `<!-- loam:gallery -->` and
+`<!-- /loam:gallery -->`. The listing's page leaves both out of the README it
+draws (the description and the gallery or a theme's live preview are above
+it); GitHub and a Loam before 0.2.12 show them as written.
 
 **One package shape for everything shared** (2026-11-13; the owner, m261 and
 m263): the marketplace shares themes, extensions, apps and later agents and
@@ -242,9 +277,27 @@ Loam's code names no maker's repository. Nothing the person set moves: the
 switch, each agent's voice (`_settings/read-aloud/`), the plugin's own key
 and the shared keys are kept by id, and the browser's preferences by the page
 code's storage keys (`loam-ui.dictation`, `loam-ui.speech`,
-`loam-ui.read-aloud`), which the Market copies keep. Their server halves
-stay in Loam: the app's `/api/transcribe` and `/api/speech` and the broker's
-`/v1/dictation-terms`, each using the key of the plugin of that id.
+`loam-ui.read-aloud`), which the Market copies keep.
+
+**Each carries its own server half since 0.2.12** (Dictation and Read aloud
+1.1.0, 2026-11-19). Until
+then the app answered `/api/transcribe` and `/api/speech…` and the broker
+`/v1/dictation-terms`, so the plugins worked only on a Loam that shipped those
+routes, and a fresh install that never had either still carried their code.
+Now each is an ordinary server plugin ("Server plugins", below), in Node with
+the standard library only: Dictation at `/x/dictation/` (`POST transcribe`,
+`GET terms`), Read aloud at `/x/read-aloud/` (`GET status`, `POST speech`,
+`POST speech/lookup`, `GET speech/<id>`, `GET speech/<id>/audio.mp3`). No
+new seam was needed: the gateway, the supervised unit, `LOAM_PLUGIN_KEYS`
+for the Google key, the broker's agent settings route for each agent's voice,
+and `LOAM_VAULT_DATA`/`LOAM_VAULT_DATA_DIR` (from which Dictation finds the
+vault's system folder and its terms note) were all there. Saved audio is
+Read aloud's cache in its private folder (`<private>/speech`). The install's
+old `app.speech_voices` (each agent's voice and character) is Read aloud's
+`voices` setting now, seeded from it once (`lib/loam_to_market.py`,
+`seed_voices`), and a copy below 1.1.0 is brought up to its listing's
+version at the first start on 0.2.12 (`bring_up`), since it would have
+nothing to call. `tests/test_audio_routes_gone.py` holds core to none of it.
 
 **A plugin in Yours with the id of a shipped one wins**, and its row says what
 it shadows; the shipped row says `shadowed_by: "yours"`. A broken copy never
@@ -573,11 +626,13 @@ Every write takes `by` like any other setting route.
 
 **`settings.secret` stays** for a key that belongs to one plugin and no
 provider (a plugin's own service), pasted on the plugin's page. Read aloud
-and dictation moved from it to `keys: [google]` on 2026-11-18; their
-`settings.secret` of the same name stays through 0.2.3, so that a broker
-started before the update (it reads the new manifests until it restarts)
-still hands them the key. The page draws no pasted-key form for a plugin
-that declares `keys:`.
+and dictation moved from it to `keys: [google]` on 2026-11-18, and dropped
+their `settings.secret` of the same name in 1.1.0: a listing showed both
+"Uses your Google Gemini key" and "Asks for a key of its own" for the one
+key. **A `settings.secret` named as a field of a declared provider is that
+provider's key** and is not shown as a key of its own (`declaration` in
+`lib/loam_plugins.py`, since 0.2.12), so no listing can say both. The page
+draws no pasted-key form for a plugin that declares `keys:`.
 
 ## The installed list: `installed.json`
 
@@ -617,7 +672,11 @@ says so before the yes. An unreadable `installed.json` leaves the list drawn
   update keeps whatever its switch was. A plugin built here is **off until
   turned on**: an agent writing a folder does not put code into the page by
   itself. Removing a Yours copy that shadowed a shipped one leaves the switch
-  for the shipped one; removing the last copy forgets it.
+  for the shipped one; removing the last copy forgets it. A row with a
+  switch says `chosen: true` once that switch has been set either way, and
+  `false` while it still stands at its default; first setup offers Git
+  backup only while its switch is off and unchosen, and its *Skip for now*
+  sets it off, so the offer is made once (2026-11-19).
 - **A theme has no switch.** A plugin whose kind is only `theme` (and which
   overrides nothing) is on where Appearance has chosen it (`appearance.phone.theme`,
   `appearance.desktop.theme`; `lib/loam_appearance.py`): its row's `on` is

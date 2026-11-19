@@ -98,8 +98,9 @@ is the mock `market-store.html` the designer drew from the real covers.*
   things that it might change, what are some of the things that are in the
   code that might be interesting to the user", and an update is reviewed
   and the note rewritten. A listing whose list entry carries `review`
-  (docs/plugins.md, "The list") shows it as the first thing in the body,
-  above the maker's README and as wide as it (`loamNote`): Loam's own mark,
+  (docs/plugins.md, "The list") shows it right after the maker's row, above a
+  theme's showcase, the screenshots and the README, as wide as the README
+  (`loamNote`): Loam's own mark,
   "Loam's note", "Loam's review of version N · date. Not the maker's
   words.", the summary, then **New since N** set apart on a quiet plate for
   an update, then What it touches, What it may change and Worth knowing.

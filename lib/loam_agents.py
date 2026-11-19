@@ -715,9 +715,10 @@ def compose_config(agent: str, own: str, root: Path | None = None,
 def free_wake() -> str:
     """The first twenty-minute slot from 01:00 to 05:40 at least ten minutes
     from every other agent's nightly wake."""
+    import loam_schedule  # noqa: PLC0415
     taken = []
     for a in every():
-        hhmm = card(a).get("wake_schedule")
+        hhmm = loam_schedule.wake_time(a)
         if isinstance(hhmm, str) and re.fullmatch(r"\d{2}:\d{2}", hhmm):
             taken.append(int(hhmm[:2]) * 60 + int(hhmm[3:]))
     for minute in range(60, 6 * 60, 20):
@@ -786,8 +787,7 @@ def make(agent: str, draft: dict, wake: str, *, provision=None) -> dict:
     fleet: list[str] = []
     loam_loading.ensure_owner_page()
     config = {"name": agent, "display": draft["name"],
-              "workspace": str(ws), "vault": str(lc.VAULT),
-              "wake_schedule": wake, "wake_timezone": lc.TIMEZONE}
+              "workspace": str(ws), "vault": str(lc.VAULT)}
     if draft.get("provider") and draft["provider"] != "claude-code":
         config["provider"] = draft["provider"]
     if draft["name"] != agent.capitalize():

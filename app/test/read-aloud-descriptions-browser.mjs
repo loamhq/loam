@@ -31,10 +31,11 @@ try {
     await context.addInitScript(() => { localStorage.setItem('loam-ui.read-aloud', JSON.stringify({ voice: 'Kore' })) })
     await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__desc={pluginLoader,goSettings,closeSheet,coreScope,page};' }))
     await context.route('**/api/health', route => route.fulfill({ json: { ok: true, configured: true, speech: true } }))
-    await context.route('**/api/speech/lookup', route => route.fulfill({ json: { status: 'none' } }))
-    await context.route('**/api/speech', route => {
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+    await context.route('**/x/read-aloud/speech/lookup', route => route.fulfill({ json: { status: 'none' } }))
+    await context.route('**/x/read-aloud/speech', route => {
       requests.push(route.request().postDataJSON())
-      return route.fulfill({ status: 202, json: { id: String(requests.length).padStart(32, '0'), status: 'ready', duration_s: 90, url: '/api/speech/fixture/audio.mp3' } })
+      return route.fulfill({ status: 202, json: { id: String(requests.length).padStart(32, '0'), status: 'ready', duration_s: 90, url: '/x/read-aloud/speech/fixture/audio.mp3' } })
     })
     const openSettings = async () => {
       await page.evaluate(() => __desc.goSettings('plugins'))
@@ -61,7 +62,7 @@ try {
       await page.evaluate(() => { __desc.closeSheet(); __desc.coreScope.commands.run('core.chats') })
       await page.locator('.tt-row').filter({ hasText: 'A little room for the week' }).click()
       await page.locator('.speakbtn').last().click()
-      const response = page.waitForResponse(res => res.url().endsWith('/api/speech'))
+      const response = page.waitForResponse(res => res.url().endsWith('/x/read-aloud/speech'))
       await page.locator('.speakmenu .setrow').first().click()
       await response
       await page.waitForFunction(() => document.querySelector('.player-play'))

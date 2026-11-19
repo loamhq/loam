@@ -214,9 +214,14 @@ ENTRIES: list[Entry] = [
     Entry("schedule.enabled", "setting", "A schedule on or paused",
           "PATCH /api/schedules/{agent}/{name}",
           route="PATCH /v1/schedules/{agent}/{name}", target="agent/name",
-          values="true or false; your own schedules only, with a reason",
-          body=lambda v, m: {"enabled": v}, read=SCHEDULE_READ,
-          pick=lambda a, m: a.get("enabled")),
+          values="true or false; your own schedules only, with a reason. Your "
+                 "daily reflection is the owner's to turn off: only on their "
+                 'word, as {"enabled": false, "thread": <the thread they asked '
+                 'in>, "yes": <the id of their message asking>}',
+          body=lambda v, m: (
+              {k: v[k] for k in ("enabled", "thread", "yes") if k in v}
+              if isinstance(v, dict) else {"enabled": v}),
+          read=SCHEDULE_READ, pick=lambda a, m: a.get("enabled")),
     Entry("schedule.schedule", "setting", "When a recurring schedule runs",
           "PATCH /api/schedules/{agent}/{name}",
           route="PATCH /v1/schedules/{agent}/{name}", target="agent/name",
@@ -237,7 +242,7 @@ ENTRIES: list[Entry] = [
     Entry("schedule.body", "setting", "A schedule's instruction",
           "PATCH /api/schedules/{agent}/{name}",
           route="PATCH /v1/schedules/{agent}/{name}", target="agent/name",
-          values="text; not the reflection's (that is _reflection.md, or Loam's default once the agent has a map.md)",
+          values="text; the daily reflection's too, which starts as Loam's default",
           body=lambda v, m: {"body": v}, read=SCHEDULE_READ,
           pick=lambda a, m: a.get("body")),
     Entry("schedule.create", "action", "Make a schedule",
@@ -278,15 +283,15 @@ ENTRIES: list[Entry] = [
     Entry("provider.login", "action", "Sign a provider in again, or out",
           "POST /api/providers/{provider}/login, .../logout", reach=OWNER,
           why=f"a provider sign-in finishes only in {lc.OWNER_NAME}'s browser, with the "
-              "code the provider's page gives him, and a sign-out ends every "
+              "code the provider's page gives them, and a sign-out ends every "
               "chat's login on that provider"),
-    # A plugin's key (2026-11-14, first release L9): read aloud's and
-    # dictation's API key, pasted by the owner in the plugin's settings and
-    # checked on entry. lib/loam_contributions.py, `settings.secret`.
+    # A plugin's key (2026-11-14, first release L9): a key that belongs to
+    # one plugin and no provider, pasted by the owner in the plugin's
+    # settings and checked on entry. lib/loam_contributions.py, `settings.secret`.
     Entry("plugin.secret", "action", "Paste a plugin's API key (checked on entry)",
           "PUT/DELETE /api/plugins/{plugin}/secrets/{name}", reach=OWNER,
-          why=f"a key is a credential {lc.OWNER_NAME} pastes himself, and it is "
-              "billed to him"),
+          why=f"a key is a credential {lc.OWNER_NAME} pastes themselves, and it is "
+              "billed to them"),
     # Shared keys (2026-11-18): Settings › Connections › API keys, API keys by provider,
     # each checked on entry and handed only to the plugins that declared the
     # provider (lib/loam_keys.py). A persona's to change too (the owner,
@@ -440,8 +445,8 @@ ENTRIES: list[Entry] = [
                   else (a.get("effective") or {}).get(field)))
       for field, label, values in (
           ("provider", "An engineer's provider",
-           "claude-code, codex or antigravity (Loam's: claude-code only); null "
-           "to follow the default (or the project's record)"),
+           "claude-code, codex or antigravity; null to follow the default "
+           "(or the project's record; for Loam, its built-in Claude Code)"),
           ("model", "An engineer's model",
            "a model its provider lists, or null for the built-in "
            "(Antigravity's: gemini-4-hydrogen-high; its ids carry the level)"),
@@ -777,12 +782,6 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "rest === '/agents'": "a read",
     "rest === '/health'": "a read",
     "rest === '/limits'": "a read",
-    "rest === '/dictation-terms'": "a read (the terms note is a vault file)",
-    "rest === '/transcribe'": "dictation itself, not a setting",
-    "rest === '/speech'": "reading a reply aloud, not a setting",
-    "rest === '/speech/lookup'": "a read",
-    "/^\\/speech\\/([^/]+)$/": "a read",
-    "/^\\/speech\\/([^/]+)\\/audio\\.mp3$/": "a read",
     "/^\\/files\\/(roots|list|stat|read|resolve)$/": "a read",
     "rest === '/files/config'": "a read",
     "rest === '/files/link'": "a read",
@@ -853,8 +852,9 @@ PAGE_RELAY_AHEAD: dict[str, list[str] | str] = {
     "rest === '/marketplace'": "a read: the marketplace's list, each entry marked installed or not",
     # A listing's own page (2026-11-18, Settings › Market): its declaration,
     # icon, cover and theme, read from its link before anything is installed.
-    "/^\\/marketplace\\/([a-z][a-z0-9-]*)(?:\\/(icon|image|cover|cover-dark|theme\\.css|readme\\/(?:[A-Za-z0-9_-]+\\/)*[A-Za-z0-9_-]+\\.(?:webp|avif|jpe?g|png)))?$/":
-        "a read: one listing's declaration, README, icon, covers and theme, before it is installed",
+    # Its screenshots and a theme's fonts came on 2026-11-19.
+    "/^\\/marketplace\\/([a-z][a-z0-9-]*)(?:\\/(icon|image|cover|cover-dark|theme\\.css|fonts\\.css|shot\\/[0-5](?:-dark)?|font\\/[A-Za-z0-9_-]+\\.woff2?|readme\\/(?:[A-Za-z0-9_-]+\\/)*[A-Za-z0-9_-]+\\.(?:webp|avif|jpe?g|png)))?$/":
+        "a read: one listing's declaration, README, icon, covers, screenshots, theme and its fonts, before it is installed",
     # Shared keys (2026-11-18): Settings › Connections › API keys. Never a value.
     "/^\\/keys(?:\\/([^/]+))?$/": ["keys.set", "keys.forget"],
     "/^\\/keys\\/([^/]+)\\/check$/": ["keys.check"],

@@ -3,7 +3,7 @@
 // against the fixture app with one reviewed listing added
 // (test/market-fixture.mjs, REVIEWED: a note from the reviewer's test set).
 // Also checks what must hold: the note opens the body above the maker's
-// README, says whose words it is, shows "New since" for an update, and the
+// README (and any showcase or screenshots), says whose words it is, shows "New since" for an update, and the
 // install asks for the commit that was reviewed.
 //
 //   MARKET_EVIDENCE=<folder> LOAM_PLAYWRIGHT=<playwright/index.mjs> LOAM_CHROME=<chromium> node tools/capture-market-note.mjs
@@ -48,8 +48,8 @@ try {
       await page.evaluate(() => __cap.page.openMarket({ id: 'focus-timer' }))
       await page.locator('.market-loam-note').waitFor()
       await page.locator('.market-readme').waitFor()
-      const order = await page.evaluate(() => [...document.querySelector('.market-listing-main').children].map(n => n.className))
-      assert.deepEqual(order, ['market-loam-note', 'market-readme'], 'the note opens the body, above the README')
+      const order = await page.evaluate(() => [...document.querySelector('.market-listing').children].map(n => n.className.split(' ')[0]))
+      assert.ok(order.indexOf('market-listing-note-row') === order.indexOf('market-creator') + 1 && order.indexOf('market-listing-note-row') < order.indexOf('market-listing-body'), `the note follows the maker, above the rest: ${order}`)
       assert.match(await page.locator('.market-loam-note-sub').innerText(), /Loam’s review of version 1\.1\.1 · Nov 19, 2026\. Not the maker’s words\./)
       assert.equal(await page.locator('.market-note-changed .market-note-group-title').innerText(), 'NEW SINCE 1.0.0')
       await page.evaluate(() => document.activeElement?.blur())

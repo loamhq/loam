@@ -10,8 +10,7 @@ and the agents' OOMScoreAdjust (lib/loam_config.py), and the core units
 render the core's, below it:
 
   agent runs   an engineer job (bin/engineer-job's systemd-run line), a
-               wake (provision), a cron (lib/loam_cron.py), the reviewer and
-               the provider smoke
+               wake (provision), a cron (lib/loam_cron.py), the reviewer's
                runs (static templates), a chat (the broker's `choom`).
   core         the session broker's unit and the plugins gateway's.
 
@@ -78,12 +77,13 @@ check("the core at the user manager's floor, not below it",
 units: dict[str, str] = {}
 static = loam_units.rendered(AGENTS / "systemd")
 units["reviewer"] = static["loam-reviewer.service"]
-units["provider smoke"] = static["loam-provider-follow.service"]
-
-prov = load("provision_memtest", AGENTS / "bin" / "provision")
-units["wake"] = prov.wake_units("iris", Path("/w"), "03:00")[0]
 
 import loam_cron  # noqa: E402
+units["wake"] = loam_cron.render_units(loam_cron.Cron(
+    agent="iris", display="Iris", name="reflection", workspace=Path("/w"),
+    path=Path("/w/crons/reflection.md"), schedule_text="daily at 03:00 PT",
+    oncalendar="*-*-* 03:00:00 America/Los_Angeles", enabled=True,
+    body_chars=10, kind="reflection"))[0]
 cron = loam_cron.Cron(agent="iris", display="Iris", name="x", workspace=Path("/w"),
                       path=Path("/w/crons/x.md"), schedule_text="daily at 09:00 PT",
                       oncalendar="*-*-* 09:00:00 America/Los_Angeles",

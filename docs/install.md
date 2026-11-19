@@ -27,6 +27,13 @@ took when it is done. Every line it prints is meant for someone
 who has never used a terminal; what it runs goes to
 `/var/log/loam-install.log` (root, 0600).
 
+**What it checks** (docs/signing.md): the release it clones must be a tag
+signed by one of the maintainer keys written into `install.sh`, checked
+with `git` and `ssh-keygen` before anything from the clone runs. If the check
+fails, the clone is removed and it stops (exit 3) with the reason. The script
+itself is trusted as it was served. While `install.sh` carries no key, it
+says the release is not checked.
+
 **Run it again at any time.** Each step writes
 `/var/lib/loam/install/<n>-<step>.done` when it has finished, and a run
 starts at the first step without one. A step that stopped says what to do,
@@ -142,11 +149,11 @@ reads it).
 | 4 | the user | `loam`, with lingering, `sudo` (NOPASSWD: the agents get the whole machine) and `docker`; the zone; `PYTHONPYCACHEPREFIX` for its services, shells and sudo, so Python never writes into the checkout; Docker's `daemon.json` before anything uses Docker |
 | 5 | Loam | the release cloned to `paths.root` (`/home/loam/loam`), `origin` set to the source; the vault, workspaces, projects and plugins folders (plugins a git repo); uv; the MCP servers' Python; `/usr/local/bin/loam` |
 | 6 | the vault | `bin/library seed-vault`; the vault and workspaces made git repos; **`<workspaces>/_shared/reach.md` written** (below) |
-| 7 | providers | Claude Code and Codex at the versions this release was tested on (`loam_install.TESTED`, installed by the same code `provider-follow` uses), Antigravity by Google's own script; then `provider-memory pin` and `check` |
+| 7 | providers | Claude Code, Codex and Antigravity at the builds this release pins (`lib/loam_pins.py`, `bin/provider-pin apply`): each installed beside under `~/.local/share/<cli>/versions/`, checked by its own `--version`, and linked from `~/.local/bin/`; Antigravity by the address and SHA-512 the pin recorded, since its release server serves only its latest. Then `provider-memory pin` and `check` |
 | 8 | Iris | `bin/library seed-starter`: Iris and the hello thread (docs/starter.md); then `bin/provision --engineer`, the engineer that changes Loam itself (docs/update.md, "A change to Loam's own parts") |
-| 9 | units | the broker's bridge (`loam-broker`) and its wall; the system units, `loam-user-manager.service` enabled (it starts Loam's user manager at boot where lingering alone does not); the user units from the templates; the broker and the plugin gateway started; every timer armed without firing (`loam_units.arm_timer`); waits for the broker to answer |
-| 10 | the edge | `gen-deploy --init-secrets` (the login's secrets, no user), `gen-deploy`, the app (`bin/deploy loam-ui up <commit>`: the commit's `app/` unpacked to `/var/lib/loam-releases/loam-ui/` and run as `loam-app@loam-ui.service`, no container), `loam-claim.service`; then one `loam-await-dns` run: if the name resolves here the hosts go up now, otherwise the timer is left polling and the records are printed; on an own domain with someone at the terminal it first waits up to 15 minutes for them. Exits 0 either way |
-| 11 | the claim | mints the one-time token (`/etc/loam/claim`, root 0600) and prints the link |
+| 9 | units | the broker's bridge (`loam-broker`) and its wall; the system units, `loam-user-manager.service` enabled (it starts Loam's user manager at boot where lingering alone does not); the user units from the templates; the broker and the plugin gateway started; every timer armed without firing (`loam_units.arm_timer`); waits for the broker to answer; the host history's timer installed and its first state taken (`loam host`, docs/host-history.md) |
+| 10 | the edge | `gen-deploy --init-secrets` (the login's secrets, no user), `gen-deploy` (with it the inbound wall: default-deny, SSH, 80 and 443 open, or standing aside for a firewall the server already has; one line says which), the app (`bin/deploy loam-ui up <commit>`: the commit's `app/` unpacked to `/var/lib/loam-releases/loam-ui/` and run as `loam-app@loam-ui.service`, no container), `loam-claim.service`; then one `loam-await-dns` run: if the name resolves here the hosts go up now, otherwise the timer is left polling and the records are printed; on an own domain with someone at the terminal it first waits up to 15 minutes for them. Exits 0 either way |
+| 11 | the claim | mints the one-time token (`/etc/loam/claim`, root 0600) and prints the link; the last lines say the history is already kept on this server and recommend the Git backup plugin for a copy off it (docs/backup.md) |
 
 ## What an install's configuration says: `[edge]`
 

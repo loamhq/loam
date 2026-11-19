@@ -412,6 +412,9 @@ APT = ["git", "python3", "python3-yaml",
        "sqlite3", "ripgrep", "ffmpeg", "nftables",
        "iptables", "curl", "ca-certificates", "gnupg", "sudo", "dnsutils", "iproute2",
        "unzip",
+       # ssh-keygen: every update checks the release's signature with it
+       # (lib/loam_signing.py). A box reached over SSH has it already.
+       "openssh-client",
        "dbus-user-session", "procps", "lsof", "systemd-timesyncd",
        # Loam's app runs on the host, not in a container (2026-11-16): its page
        # previews' browser, their fonts, and `choom` (util-linux) to start
@@ -693,43 +696,30 @@ def step_vault(a, ans: dict) -> None:
 # 7. The providers
 # ---------------------------------------------------------------------------
 
-PROVIDERS_PY = """
-import sys
-sys.path.insert(0, {lib!r})
-import loam_follow as f
-which, version = sys.argv[1], sys.argv[2]
-p = {{"claude-code": f.ClaudeCode, "codex": f.Codex}}[which]()
-if version not in p.installed():
-    p.install(version)
-p.link.parent.mkdir(parents=True, exist_ok=True)
-p.repoint(version)
-print(p.version_of(p.link))
-"""
-
-
 def step_providers(a, ans: dict) -> None:
+    """Claude Code, Codex and Antigravity at the builds this release pins
+    (lib/loam_pins.py), each installed beside under ~/.local/share, checked
+    by its own --version, and linked from ~/.local/bin; nothing updates them
+    between releases."""
     cfg = config_values()
-    root, home = cfg["root"], cfg["home"]
-    script = PROVIDERS_PY.format(lib=f"{root}/lib")
-    got = {}
-    for which, label in (("claude-code", "Claude Code"), ("codex", "Codex")):
-        want = li.TESTED[which]
-        res = as_user(cfg, ["python3", "-c", script, which, want], timeout=1800, check=False)
-        version = res.stdout.strip().splitlines()[-1:] or [""]
-        if res.returncode != 0 or version[0] != want:
+    root = cfg["root"]
+    res = as_user(cfg, ["python3", f"{root}/bin/provider-pin", "apply", "--no-restart",
+                        "--json"], timeout=3600, check=False)
+    rows = []
+    for line in res.stdout.splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    labels = {"claude-code": "Claude Code", "codex": "Codex", "antigravity": "Antigravity"}
+    got = {r["provider"]: r.get("after") for r in rows}
+    for which, label in labels.items():
+        row = next((r for r in rows if r["provider"] == which), None)
+        if row is None or row["error"] or row.get("after") != row["pinned"]:
+            want = row["pinned"] if row else "its pinned build"
             raise Stop(f"{label} {want} could not be installed.",
                        "check this server can reach the internet, then run the install "
-                       "command again")
-        got[which] = version[0]
-    agy = Path(home) / ".local" / "bin" / "agy"
-    if not agy.exists():
-        as_user(cfg, ["sh", "-c", "curl -fsSL https://antigravity.google/cli/install.sh | bash"],
-                timeout=1800)
-    res = as_user(cfg, [str(agy), "--version"], check=False)
-    got["antigravity"] = (re.search(r"\d+\.\d+\.\d+", res.stdout) or [""])[0] if res.returncode == 0 else ""
-    if not got["antigravity"]:
-        raise Stop("Antigravity could not be installed.",
-                   "check this server can reach the internet, then run the install command again")
+                       "command again; the details are at the end of /var/log/loam-install.log")
     # Every provider's own memory off, and proved off.
     as_user(cfg, ["python3", f"{root}/bin/provider-memory", "pin"])
     check = as_user(cfg, ["python3", f"{root}/bin/provider-memory", "check"], check=False)
@@ -840,6 +830,10 @@ def step_units(a, ans: dict) -> None:
     if not up:
         raise Stop("Loam's engine (the session broker) did not start.",
                    f"its log: sudo -u {cfg['user']} journalctl --user -u {brk.SERVICE} -n 50")
+    # The host's own setup is kept from here on, and can be put back with
+    # `loam host restore` (lib/loam_host.py, docs/host-history.md).
+    run([sys.executable, f"{root}/bin/loam-host", "install"])
+    run([sys.executable, f"{root}/bin/loam-host", "snapshot", "--reason", "installed"])
     say("Started Loam's engine, its plugin host and its timers.", 2)
 
 
@@ -857,9 +851,12 @@ def step_edge(a, ans: dict) -> None:
     run([py, f"{root}/bin/deploy", edge.get("app", "loam-ui"), "up", commit], timeout=3600)
     install_system_units(cfg)
     run(["systemctl", "enable", "--now", "loam-claim.service"])
-    res = run([py, f"{root}/bin/loam-await-dns"], timeout=1800, check=False)
     sys.path.insert(0, f"{root}/lib")
     import loam_deploy as dep  # noqa: PLC0415
+    # gen-deploy raised the inbound wall (lib/loam_deploy.py, "The inbound
+    # wall"); one line says what guards this server now.
+    say(dep.inbound_wall_words(dep.inbound_wall_status()), 2)
+    res = run([py, f"{root}/bin/loam-await-dns"], timeout=1800, check=False)
     state = dep.edge_state()
     if state.get("ready_at"):
         say(f"Loam is on the web at https://{edge['domain']}/ with its certificate.", 2)
@@ -984,6 +981,21 @@ def finale(elapsed: float | None = None) -> None:
         say(f"Open https://{domain}/ and sign in.")
         print()
         say("To see how everything is doing, type:  loam status")
+    print()
+    backup_step()
+
+
+def backup_step() -> None:
+    """The last step, offered and not taken: the history is already kept on
+    this machine (loam-autocommit.timer, every 15 minutes, from step 6's
+    first commit); the copy off it is the Git backup plugin, which needs the
+    person's own private repository and so cannot be made for them here."""
+    say("Your vault and your agents' files keep their own history on this server "
+        "from now on: every change is committed every 15 minutes, nothing sent "
+        "anywhere.")
+    say("Recommended next: back them up to a private GitHub repository (or any git "
+        "host), so a lost server loses nothing. Loam offers it when you first sign "
+        "in; later it is in Settings › Plugins › Git backup, or ask Iris.")
 
 
 def main() -> int:

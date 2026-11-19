@@ -13,9 +13,14 @@ somewhere to be.
 
 **An agent with a map** (2026-11-18, lib/loam_loading.py) loads its soul,
 its config and its map through CLAUDE.md on both lanes, as in a
-conversation. Its reflection appends no file (its instruction is Loam's
-default prompt, MAPPED_PROMPT_TEMPLATE, with the vault's changes), and its
-cron appends the cron's own file, as before. The map is what its wake sizes.
+conversation. Its reflection appends no file, and its cron appends the
+cron's own file, as before. The map is what its wake sizes.
+
+**The reflection's instruction is its record's** (2026-11-19): the body of
+`crons/reflection.md`, Loam's short default unless it has been changed,
+followed by where the vault stood at the last wake and what changed since
+(REFLECTION_PROMPT_TEMPLATE). The same reconciler that renders a cron's
+units renders the reflection's, and only the owner turns it off.
 
 Four differences and no more. Three are the lane: the file appended, the
 prompt (which names the cron, so the session knows which of its jobs this
@@ -81,7 +86,18 @@ code is caught by ``main`` and written as a ``crash`` -- the lane's log line
 and the failure log, with the step it died at. A run killed from outside is
 bin/wake-failed's to report, from the marker it leaves.
 
-Usage: wake <agent-project-dir> [--cron <name>]
+**Results come back as a run** (2026-11-19, batch B step 3). Every Claude
+run here has a ``--session-id`` of its own and ``LOAM_SESSION_ID`` set to it,
+so a brief made in it records the session (lib/loam_waiters.caller) and
+returns at once. When the job has a verdict, ``wake <dir> --results`` (a
+transient unit, ``loam-results-<agent>``, started by the job's launcher or
+the recovery sweep) drains what is owed to this agent, oldest first: each
+result is a new run that resumes the asking session with the result as its
+input and the asker's lane loaded again, or a fresh run with the result and
+what the asker was doing when it cannot be resumed (lib/loam_results.py).
+Its log line is its own (lane ``result:<job>``), and it posts nothing.
+
+Usage: wake <agent-project-dir> [--cron <name> | --results]
 """
 
 from __future__ import annotations
@@ -92,6 +108,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -108,6 +125,7 @@ import loam_profile  # noqa: E402
 import loam_schedule  # noqa: E402
 import loam_session  # noqa: E402
 import loam_usage  # noqa: E402
+import loam_waiters  # noqa: E402
 from loam_account import AccountRefused, refusal  # noqa: E402
 from loam_permissions import PERMISSION_MODE  # noqa: E402  every lane's, one home
 from loam_inbox import (  # noqa: E402
@@ -163,14 +181,19 @@ LANE_PROVIDER: str = "claude-code"
 MAX_TURNS = (int(os.environ["LOAM_WAKE_MAX_TURNS"])
              if os.environ.get("LOAM_WAKE_MAX_TURNS") else None)
 
-PROMPT_TEMPLATE = """\
-You're waking. It's {timestamp}. This time is yours — for reflection, for keeping what's worth carrying, for letting go of what isn't. Doing nothing is a real use of the time.
+# The daily reflection's prompt (2026-11-19). Its instruction is its record's
+# body, `crons/reflection.md` (Loam's default, lib/loam_cron.reflection_default,
+# until the persona or the owner changes it); this adds the moment and where
+# the vault stood at the last wake, with the changes since inline when they
+# are few and by path when they are many (``vault_block``). Until 2026-11-19
+# the instruction was one of two templates here, chosen by the agent's shape,
+# and the record held only a time and a switch.
+REFLECTION_PROMPT_TEMPLATE = """\
+You're waking. It's {timestamp}. Nobody is in a conversation with you.
 
-Here's what's changed in the vault since you were last here:
+{instruction}
 
-{diff_block}
-
-Your workspace is yours, and you have what a conversation has: the whole box, subagents and the engineer included. Write where it feels right.
+{vault_block}
 """
 
 # The cron prompt is short because the cron's own file is long: that file is
@@ -182,22 +205,6 @@ CRON_PROMPT_TEMPLATE = """\
 You're waking. It's {timestamp}. This is cron `{cron}` — a task lane, not a reflection wake. You're up for one job.
 
 The job is in the instructions appended to this prompt. That file and `_always.md` are what loaded; `_reflection.md` did not, and reflection is not this lane's work. You have what a conversation has: the shell, sudo, subagents, and every engineer tool, `brief` included. When the job is done, stop.
-"""
-
-# The wake of an agent with a map (2026-11-18, lib/loam_loading.py). Its
-# instruction is this, Loam's short default, and no file of the agent's: the
-# owner, 2026-11-18 15:45, the agent "is given all the changes in the Vault
-# that has happened over the past day and for them to use their judgment on
-# what changes they want to look into and keep track of or act on". An agent
-# that keeps its own checklist for these nights points to it from its map.
-MAPPED_PROMPT_TEMPLATE = """\
-You're waking. It's {timestamp}. Nobody is in a conversation with you.
-
-Here's what's changed in the vault since you were last here:
-
-{diff_block}
-
-Use your judgment on what to look into, what to keep track of and what to act on; doing nothing is a real use of the time. If you keep your own way of spending these nights, your map says where. You have what a conversation has: the whole box, subagents and the engineer included.
 """
 
 MAPPED_CRON_PROMPT_TEMPLATE = """\
@@ -229,17 +236,24 @@ LANE_SETTINGS = {"outputStyle": "none"}
 def claude_argv(agent: str, lane: str, prompt: str, lane_file: Path | None,
                 model: str | None = None,
                 max_turns: int | None = MAX_TURNS,
-                effort: str | None = None) -> list[str]:
+                effort: str | None = None,
+                session_id: str | None = None,
+                resume: str | None = None) -> list[str]:
     """The lane's command line. One function so a probe of a lane's reach
     runs the same flags the lane does, with only the prompt its own. The
     model and effort default to this run's (LANE_MODEL, LANE_EFFORT).
 
     ``lane_file`` is None for the reflection wake of an agent with a map
-    (2026-11-18): it appends nothing, and loads what its conversations load."""
+    (2026-11-18): it appends nothing, and loads what its conversations load.
+    ``session_id`` names a new session; ``resume`` continues one, under the
+    same id (a result run, 2026-11-19)."""
     model = model or LANE_MODEL
     effort = effort if effort is not None else LANE_EFFORT
     return [
-        CLAUDE, "-p", prompt, "--model", model,
+        CLAUDE, "-p", prompt,
+        *(["--resume", resume] if resume else
+          ["--session-id", session_id] if session_id else []),
+        "--model", model,
         *(["--effort", effort] if effort else []),
         "--permission-mode", PERMISSION_MODE,
         *(["--max-turns", str(max_turns)] if max_turns else []),
@@ -445,22 +459,33 @@ def account_refused(agent: str, vault: Path, started: str, lane: str,
     return 7
 
 
+USAGE = "usage: wake <agent-project-dir> [--cron <name> | --results]"
+
+
 def parse_argv(argv: list[str]) -> tuple[Path, str | None]:
-    """``(project, cron_name)``. Raises ValueError with the usage line.
+    """``(project, cron_name)``; the cron name is ``RESULTS`` for the
+    ``--results`` form. Raises ValueError with the usage line.
 
     Deliberately hand-rolled and strict rather than argparse: this is the
     entry point of the only process on this box that runs unattended, and a
     flag it half-understood would launch the wrong lane in the dark.
     """
     if not argv or argv[0].startswith("-"):
-        raise ValueError("usage: wake <agent-project-dir> [--cron <name>]")
+        raise ValueError(USAGE)
     project = Path(argv[0]).resolve()
     rest = argv[1:]
     if not rest:
         return project, None
-    if len(rest) != 2 or rest[0] != "--cron":
-        raise ValueError("usage: wake <agent-project-dir> [--cron <name>]")
+    if rest == ["--results"]:
+        return project, RESULTS
+    if len(rest) != 2 or rest[0] != "--cron" or rest[1] == RESULTS:
+        raise ValueError(USAGE)
     return project, rest[1]
+
+
+# The `--results` form's marker in place of a cron name: no cron file can be
+# called this, since a cron's name is a file name and this is not one.
+RESULTS = "\0results"
 
 
 def _main() -> int:
@@ -469,6 +494,8 @@ def _main() -> int:
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 64
+    if cron == RESULTS:
+        return results_main(project)
     # A run its timer started when it was not due goes no further
     # (lib/loam_due.py, 2026-11-14).
     if loam_due.refuse_if_not_due("wake"):
@@ -626,13 +653,15 @@ def main() -> int:
 
 
 def lane_prompt(agent: str, vault: Path, started: str, cron: str | None,
-                mapped: bool = False) -> tuple[str, str | None, Path]:
+                mapped: bool = False, project: Path | None = None
+                ) -> tuple[str, str | None, Path]:
     """(prompt, vault head to advance to or None, the marker's path).
 
     The vault diff, and the marker it advances, are reflection's alone. See
     the module docstring: a cron sharing the marker would eat the interval
     the next reflection wake is owed. ``mapped``: the agent has a map, and
-    the prompt is the map's shape's (MAPPED_PROMPT_TEMPLATE)."""
+    a cron's prompt is the map's shape's. A reflection's is its record's
+    instruction (``project``'s `crons/reflection.md`) and the vault block."""
     state_path = STATE_DIR / f"{agent}.json"
     if cron:
         template = MAPPED_CRON_PROMPT_TEMPLATE if mapped else CRON_PROMPT_TEMPLATE
@@ -641,10 +670,29 @@ def lane_prompt(agent: str, vault: Path, started: str, cron: str | None,
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         state = {}
-    diff_block, head = vault_diff(vault, state.get("last_vault_ref"), agent,
-                                  state.get("last_wake"))
-    template = MAPPED_PROMPT_TEMPLATE if mapped else PROMPT_TEMPLATE
-    return template.format(timestamp=started, diff_block=diff_block), head, state_path
+    since, last_wake = state.get("last_vault_ref"), state.get("last_wake")
+    diff_block, head = vault_diff(vault, since, agent, last_wake)
+    instruction = loam_cron.reflection_instruction(
+        loam_schedule.reflection_text(project or loam_cron.AI_LABS / agent))
+    return REFLECTION_PROMPT_TEMPLATE.format(
+        timestamp=started, instruction=instruction,
+        vault_block=vault_block(since, head, last_wake, diff_block)
+    ), head, state_path
+
+
+def vault_block(since: str | None, head: str, last_wake: str | None,
+                diff_block: str) -> str:
+    """Where the vault stood at the last wake, and what changed since."""
+    if not since:
+        return (f"This is your first wake here: the vault is at commit "
+                f"{head[:12]}, and there is no earlier mark to compare with.")
+    if diff_block == NO_CHANGES:
+        return (f"Your last wake saw the vault at commit {since[:12]}"
+                f"{f' ({last_wake})' if last_wake else ''}, and nothing has "
+                f"changed since.")
+    return (f"Your last wake saw the vault at commit {since[:12]}"
+            f"{f' ({last_wake})' if last_wake else ''}. What has changed "
+            f"since:\n\n{diff_block}")
 
 
 def advance_marker(state_path: Path, head: str | None, finished: str) -> None:
@@ -694,7 +742,8 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
         return 5
 
     step("prompt")
-    prompt, head, state_path = lane_prompt(agent, vault, started, cron, mapped)
+    prompt, head, state_path = lane_prompt(agent, vault, started, cron, mapped,
+                                            project)
     step("launch")
     try:
         out = cw.run(project, text, prompt, model=LANE_MODEL, effort=LANE_EFFORT,
@@ -755,7 +804,7 @@ def lane_input(project: Path, cron: str | None
 
     Reflection appends `_reflection.md` and a cron its own file. The
     reflection of an agent with a map (2026-11-18, lib/loam_loading.py)
-    appends nothing: its instruction is the prompt (MAPPED_PROMPT_TEMPLATE),
+    appends nothing: its instruction is its record's, in the prompt,
     and the file it is sized by is the map. Raises LayerError when a lane
     file it needs is missing or empty."""
     import loam_loading  # noqa: PLC0415
@@ -882,7 +931,8 @@ def run(project: Path, agent: str, vault: Path, started: str,
         return 5
 
     step("prompt")
-    prompt, head, state_path = lane_prompt(agent, vault, started, cron, mapped)
+    prompt, head, state_path = lane_prompt(agent, vault, started, cron, mapped,
+                                            project)
 
     # The shared skills, current for this run (first release L7): the Claude
     # shelf above the workspaces and this persona's view. Never fails a wake.
@@ -915,9 +965,13 @@ def run(project: Path, agent: str, vault: Path, started: str,
             lane_temp = Path(handle.name)
 
     step("launch")
+    # The run's own session id, known before it starts (2026-11-19): a brief
+    # made in it records this, so its result can resume it.
+    session_id = str(uuid.uuid4())
+    os.environ[loam_waiters.SESSION_ENV] = session_id
     try:
         result = subprocess.run(
-            claude_argv(agent, lane, prompt, lane_temp),
+            claude_argv(agent, lane, prompt, lane_temp, session_id=session_id),
             cwd=str(project), capture_output=True, text=True, check=False,
             timeout=loam_cron.lane_timeout_s(agent, lane),
             stdin=subprocess.DEVNULL,
@@ -1031,11 +1085,216 @@ def run(project: Path, agent: str, vault: Path, started: str,
         "identity_canary": canary,
         "identity_decoy_from": decoy_owner,
         "lane_chars": len(lane_text or ""), "mapped": mapped,
+        "session_id": envelope.get("session_id"),
         **spent,
         **memory,
     })
     print(reply)
     return 0
+
+# ---------------------------------------------------------------------------
+# Results (2026-11-19, batch B step 3): `wake <dir> --results`.
+# ---------------------------------------------------------------------------
+
+def results_main(project: Path) -> int:
+    """Hand this agent every engineer result owed to it by a run, oldest
+    verdict first, one run each (lib/loam_results.py). Ends when none is
+    left, or when the run lock or the box's memory could not be had (the
+    records stay; the recovery sweep starts this again)."""
+    config = json.loads((project / "agent.json").read_text(encoding="utf-8"))
+    agent = config["name"]
+    CRASH["agent"], CRASH["lane"] = agent, "results"
+    if config.get("archived"):
+        # An archived agent sleeps; what it is owed waits for it, recorded.
+        print(f"wake: {agent} is archived; its results wait", file=sys.stderr)
+        return 0
+    vault = Path(config["vault"])
+    CRASH["vault"] = vault
+    global LANE_MODEL, LANE_EFFORT, LANE_NOTE, LANE_PROVIDER
+    LANE_MODEL, LANE_EFFORT, LANE_NOTE = loam_profile.lane_choice(
+        config, WAKE_MODEL, pinned=bool(os.environ.get("LOAM_WAKE_MODEL")))
+    LANE_PROVIDER = loam_profile.lane_provider(config)
+    os.environ["CLAUDE_PROJECT_DIR"] = str(project)
+    tried: set[str] = set()
+    while True:
+        pending = [r for r in loam_waiters.owed(by="run", persona=agent)
+                   if r["job"] not in tried]
+        if not pending:
+            return 0
+        record = pending[0]
+        tried.add(record["job"])
+        if deliver_result(project, agent, vault, record) == "busy":
+            return 0
+
+
+def _given_dead(agent: str, vault: Path, record: dict) -> None:
+    """A record marked given whose run ended without removing it: the run
+    that carried it died after the input went in. Not given twice; said."""
+    reason = (f"result:{record.get('job')}: the run that was handed engineer job "
+              f"{record.get('job')}'s result (receipt: "
+              f"{loam_waiters.receipt_path(record)}) ended without its record; "
+              f"it is not handed over a second time.")
+    record_failure(agent, vault, reason)
+    loam_waiters.done(record, "given; its run ended without a record")
+
+
+def deliver_result(project: Path, agent: str, vault: Path, record: dict) -> str:
+    """One result, one run. Returns ``busy`` when the lock or memory was not
+    to be had, else the outcome written to the delivery log."""
+    job = str(record["job"])
+    lane = f"result:{job}"
+    asker = str(record.get("caller_lane") or "")
+    cron = asker[len("cron:"):] if asker.startswith("cron:") else None
+    # The asker's lane, so a brief made in this run is answered the same way
+    # and the transcript hook keeps it out of the conversations.
+    os.environ["LOAM_WAKE"] = asker if asker and asker != "conversation" else lane
+    started = now_iso()
+    CRASH.update(lane=lane, started=started, at="lock", launched=False)
+    waiting_since = time.monotonic()
+    try:
+        with loam_lock.hold(agent, lane, info={"engine": LANE_PROVIDER,
+                                               "model": LANE_MODEL}):
+            # Re-read under the lock: another drain (a hand run) may have
+            # delivered it, or a dead one marked it given.
+            current = next((r for r in loam_waiters.records()
+                            if r.get("job") == job), None)
+            if current is None:
+                return "gone"
+            record = {**current, "result": record.get("result")}
+            if current.get("given"):
+                _given_dead(agent, vault, record)
+                return "given"
+            mark_running(agent, started, vault, lane)
+            try:
+                return _deliver(project, agent, vault, record, lane, cron,
+                                started, round(time.monotonic() - waiting_since, 1))
+            finally:
+                clear_running(agent)
+    except loam_lock.Busy as exc:
+        print(f"{lane}: {exc}; the result waits for the next pass", file=sys.stderr)
+        log_line(agent, {"ts": started, "finished": now_iso(), "ok": False,
+                         "stage": "lock_timeout", "lane": lane, "result_of": job,
+                         "detail": str(exc)})
+        return "busy"
+
+
+def _deliver(project: Path, agent: str, vault: Path, record: dict, lane: str,
+             cron: str | None, started: str, lock_wait: float) -> str:
+    import loam_results as lr  # noqa: PLC0415
+    from loam_memory import LayerError  # noqa: PLC0415
+    job = str(record["job"])
+    record_name = cron or loam_cron.REFLECTION
+    try:
+        _, lane_text, lane_path = lane_input(project, cron)
+    except LayerError:
+        lane_text, lane_path = None, None
+    session, why = lr.resumable(record, project, LANE_PROVIDER)
+    # Given, just before the model hears it: from here a death is not
+    # retried (see _given_dead).
+    loam_waiters.write({**record, "given": now_iso()})
+    common = {"ts": started, "lane": lane, "result_of": job,
+              "asked_by_lane": record.get("caller_lane") or record.get("caller"),
+              "lock_wait_s": lock_wait}
+    step("launch")
+    if LANE_PROVIDER == "codex":
+        ok, extra, reply = _deliver_codex(project, cron, lane_text, lane_path,
+                                          lr.fresh_text(record, why))
+        resumed = False
+    else:
+        ok, extra, reply, resumed, why = _deliver_claude(
+            project, agent, lane, record, session, why, lane_text)
+    CRASH["launched"] = True
+    finished = now_iso()
+    outcome = ("resumed" if resumed else "fresh") if ok else "failed"
+    row = {**common, "finished": finished, "ok": ok, "resumed": resumed,
+           **({} if resumed else {"not_resumed": why}), **extra,
+           **cgroup_memory()}
+    if not ok:
+        row["stage"] = "invoke"
+        record_failure(agent, vault, (
+            f"{lane}: the run handing over engineer job {job}'s result failed "
+            f"({str(extra.get('error') or '')[:300]}). The receipt is at "
+            f"{loam_waiters.receipt_path(record)}; it is not handed over again."))
+    log_line(agent, row)
+    loam_schedule.log({"kind": "fire", "agent": agent, "record": record_name,
+                       "outcome": "ran" if ok else "failed", "lane": lane,
+                       "started": started, "finished": finished,
+                       "result_of": job, "resumed": resumed,
+                       "stage": None if ok else "invoke"})
+    loam_waiters.done(record, outcome, **({"session": extra.get("session_id")}
+                                          if extra.get("session_id") else {}))
+    print(reply)
+    return outcome
+
+
+def _deliver_claude(project: Path, agent: str, lane: str, record: dict,
+                    session: str | None, why: str, lane_text: str | None):
+    """(ok, log fields, reply, resumed, why not resumed)."""
+    import loam_results as lr  # noqa: PLC0415
+    lane_temp = None
+    if lane_text is not None:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=f"-{agent}-lane.md", delete=False
+        ) as handle:
+            handle.write(lane_text)
+            lane_temp = Path(handle.name)
+
+    def launch(prompt: str, resume: str | None, new: str | None):
+        os.environ[loam_waiters.SESSION_ENV] = resume or new or ""
+        return subprocess.run(
+            claude_argv(agent, lane, prompt, lane_temp, session_id=new,
+                        resume=resume),
+            cwd=str(project), capture_output=True, text=True, check=False,
+            timeout=loam_cron.lane_timeout_s(agent, "reflection"),
+            stdin=subprocess.DEVNULL)
+
+    try:
+        resumed = session is not None
+        if resumed:
+            result = launch(lr.resumed_text(record), session, None)
+            said = f"{result.stdout}\n{result.stderr}"
+            if result.returncode != 0 and "No conversation found" in said:
+                resumed, why = False, "the CLI could not find the session to resume"
+        if not resumed:
+            result = launch(lr.fresh_text(record, why), None, str(uuid.uuid4()))
+    finally:
+        if lane_temp is not None:
+            lane_temp.unlink(missing_ok=True)
+    try:
+        envelope = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        envelope = {}
+    reply = envelope.get("result") or result.stdout or ""
+    ok = result.returncode == 0 and envelope.get("subtype") in (None, "success")
+    extra = {"session_id": envelope.get("session_id") or os.environ.get(
+                 loam_waiters.SESSION_ENV),
+             "num_turns": envelope.get("num_turns"),
+             "total_cost_usd": envelope.get("total_cost_usd"),
+             "reply_chars": len(reply), **loam_usage.from_envelope(envelope)}
+    if not ok:
+        extra.update(returncode=result.returncode,
+                     error=(result.stderr or result.stdout or "").strip()[:2000])
+    return ok, extra, reply, resumed, why
+
+
+def _deliver_codex(project: Path, cron: str | None, lane_text: str | None,
+                   lane_path: Path | None, prompt: str):
+    """A fresh Codex thread with the result: a Codex wake's thread id is not
+    where a brief can read it, so it is never resumed (yet)."""
+    import loam_codex_wake as cw  # noqa: PLC0415
+    label = f"cron `{cron}`" if cron else "reflection wake"
+    text = cw.instructions(project, label,
+                           lane_path if lane_text is not None else None, lane_text)
+    try:
+        out = cw.run(project, text, prompt, model=LANE_MODEL, effort=LANE_EFFORT,
+                     timeout=None, env=cw.env_for_lane())
+    except cw.CodexWakeError as exc:
+        return False, {"error": str(exc)}, ""
+    extra = {"codex_thread": out.thread_id, "reply_chars": len(out.reply or ""),
+             **({"usage": cw.claude_usage(out.usage)} if out.usage else {})}
+    if not out.ok:
+        extra["error"] = (out.error or "")[:2000]
+    return out.ok, extra, out.reply or ""
 
 
 if __name__ == "__main__":

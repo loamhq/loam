@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Sign a Loam release and push its tag, from the machine that holds the
+maintainer's key (docs/signing.md).
+
+  sign-release VERSION [COMMIT] [--key PUBKEY] [--remote origin] [--yes]
+
+Run it in any clone of Loam's repository. It fetches `main` and the tags,
+then checks, before it signs anything:
+
+  - COMMIT (default: the remote's `main`) is on the remote's `main`;
+  - its manifest.json says VERSION;
+  - no tag VERSION is on the remote yet (or the one there is this same
+    signed release, and there is nothing to do);
+
+shows what it is about to sign, and on a yes makes the signed tag
+(`git tag -s`, an SSH signature), checks it against the keys in the
+previous release and in the release's own tree -- what the installs will
+check it with -- and pushes it. Nothing is pushed if any check fails.
+
+The key is `--key` (an SSH public key file, or `key::ssh-ed25519 AAAA...`;
+the private half stays in your ssh-agent or on your hardware key), or the
+clone's `user.signingKey`. Needs git 2.34 or newer and ssh-keygen.
+
+When a landing on the maintainers' install has no signing key, its receipt
+names this command with the commit to sign.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_signing  # noqa: E402
+
+
+def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    done = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    if check and done.returncode != 0:
+        sys.exit(f"git {' '.join(args)}: {done.stderr.strip()}")
+    return done
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="sign-release", description=__doc__.split("\n")[0])
+    ap.add_argument("version")
+    ap.add_argument("commit", nargs="?")
+    ap.add_argument("--key", default=None)
+    ap.add_argument("--remote", default="origin")
+    ap.add_argument("--yes", action="store_true")
+    a = ap.parse_args()
+    tag, remote = a.version, a.remote
+    if not loam_signing.TAG_RE.match(tag):
+        sys.exit(f"{tag!r} is not a release number (x.y.z).")
+    repo = Path(git("rev-parse", "--show-toplevel").stdout.strip())
+
+    git("fetch", "--quiet", "--tags", remote, "main")
+    main_sha = git("rev-parse", "FETCH_HEAD").stdout.strip()
+    sha = git("rev-parse", "--verify", f"{a.commit or main_sha}^{{commit}}").stdout.strip()
+    if git("merge-base", "--is-ancestor", sha, main_sha, check=False).returncode != 0:
+        sys.exit(f"{sha[:12]} is not on {remote}'s main; only what landed is released.")
+    try:
+        said = json.loads(git("show", f"{sha}:manifest.json").stdout).get("version")
+    except ValueError:
+        said = None
+    if said != tag:
+        sys.exit(f"manifest.json at {sha[:12]} says {said!r}, not {tag}.")
+
+    on_remote = git("ls-remote", remote, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"
+                    ).stdout.split()
+    need = loam_signing.required_signers(repo, tag, sha)
+    if on_remote:
+        peeled = on_remote[-2] if len(on_remote) >= 4 else on_remote[0]
+        if peeled != sha:
+            sys.exit(f"{remote} already has a tag {tag}, at another commit.")
+        git("fetch", "--quiet", remote, f"+refs/tags/{tag}:refs/tags/{tag}")
+        bad = [w for w, text in need
+               if not loam_signing.verify_tag(repo, tag, text)["ok"]]
+        if not bad:
+            print(f"{remote} already has release {tag}, signed. Nothing to do.")
+            return 0
+        sys.exit(f"{remote} already has a tag {tag} at {sha[:12]}, but it does not "
+                 f"verify against the keys in {', '.join(bad)}. Delete it there "
+                 f"first (`git push {remote} :refs/tags/{tag}`), then run this again.")
+    if git("rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
+        sys.exit(f"There is a local tag {tag} that is not on {remote}: "
+                 f"`git tag -d {tag}`, then run this again.")
+    if not need:
+        print("Note: neither the previous release nor this one carries a key in "
+              f"{loam_signing.SIGNERS_FILE}, so no install will check this "
+              "signature yet.")
+
+    key = a.key or git("config", "user.signingKey", check=False).stdout.strip()
+    if not key:
+        sys.exit("No key: pass --key with your SSH public key file, or set "
+                 "`git config user.signingKey` in this clone.")
+    subject = git("log", "-1", "--format=%h %s", sha).stdout.strip()
+    print(f"Signing Loam {tag} at {sha}\n  {subject}\n  with {key}")
+    if not a.yes:
+        if input("Sign and push it? [y/N] ").strip().lower() not in ("y", "yes"):
+            print("Nothing was signed.")
+            return 1
+    done = git("-c", "gpg.format=ssh", "-c", f"user.signingKey={key}",
+               "tag", "-s", "-m", f"Loam {tag}", tag, sha, check=False)
+    if done.returncode != 0:
+        git("tag", "-d", tag, check=False)
+        sys.exit(f"Signing failed: {done.stderr.strip()}")
+    for where, text in need:
+        res = loam_signing.verify_tag(repo, tag, text)
+        if not res["ok"]:
+            git("tag", "-d", tag, check=False)
+            sys.exit(f"The new tag does not verify against the keys in {where} "
+                     f"({res['message']}); it was deleted and nothing was pushed. "
+                     f"Is this the key those files name?")
+        print(f"  verifies against {where}: {res['message']}")
+    push = git("push", "--quiet", remote, f"refs/tags/{tag}", check=False)
+    if push.returncode != 0:
+        sys.exit(f"The signed tag is made here but could not be pushed: "
+                 f"{push.stderr.strip()}\nRun `git push {remote} refs/tags/{tag}`.")
+    print(f"Release {tag} is signed and pushed.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

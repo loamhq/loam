@@ -4,6 +4,19 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { themeImage } from '../public/theme-image.js'
+// A block list of one-line flow maps under `name:` (2026-11-19: `palette`,
+// `screenshots`), as `  - {key: value, key: "quoted, value"}`.
+function flowList(header, name) {
+  const block = new RegExp(`^${name}:\\s*\\r?\\n((?:  - \\{.*\\}[ \\t]*(?:\\r?\\n|$))+)`, 'm').exec(header)?.[1]
+  if (!block) return []
+  return block.split(/\r?\n/).filter(line => line.trim()).map(line => {
+    const out = {}
+    for (const m of line.trim().replace(/^- \{|\}$/g, '').matchAll(/([a-z_]+):\s*("(?:[^"\\]|\\.)*"|[^,]*)/g)) out[m[1]] = m[2].startsWith('"') ? JSON.parse(m[2]) : m[2].trim()
+    return out
+  })
+}
+const unquote = value => value?.startsWith('"') ? JSON.parse(value) : value
+
 export function shippedManifest(text) {
   const header = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1]
   if (!header) throw new Error('A shipped plugin needs PLUGIN.md frontmatter.')
@@ -18,6 +31,9 @@ export function shippedManifest(text) {
   // The providers whose keys it uses (2026-11-18), as `keys:` lists them.
   const keys = [...header.matchAll(/^  - provider:\s*(\S+)\r?\n    why:\s*(.+)$/gm)].map(([, provider, why]) => ({ provider, why }))
   return { ...(defaultOn === undefined ? {} : { default_on: defaultOn === 'true' }), id: field('id'), name: field('name'), version: field('version'), author: field('author'), api: Number(field('api')), kind: list('kind'), ...themeImage({ image: field('image'), image_position: field('image_position'), image_dark: field('image_dark'), image_position_dark: field('image_position_dark') }), ...(field('contributes') ? { contributes: JSON.parse(field('contributes')) } : {}), ...(field('options') ? { options: JSON.parse(field('options')) } : {}), ...(field('agent_settings') ? { agent_settings: JSON.parse(field('agent_settings')) } : {}), places: list('places'), overrides: list('overrides'), ...(keys.length ? { keys } : {}),
+    ...(field('description') ? { description: unquote(field('description')) } : {}),
+    ...(flowList(header, 'screenshots').length ? { screenshots: flowList(header, 'screenshots') } : {}),
+    ...(flowList(header, 'palette').length ? { palette: flowList(header, 'palette') } : {}),
     touches: { network, record: touch('record') ?? 'none', memory: touch('memory') ?? 'none', server: touch('server') === 'true' } }
 }
 export async function shippedPlugins(publicDir) {

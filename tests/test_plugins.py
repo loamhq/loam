@@ -379,6 +379,8 @@ check("...and a write is refused rather than overwrite it", ok, said)
 
 # -- on and off ---------------------------------------------------------------
 
+check("a switch nobody has set is unchosen, on or off",
+      row("notes", "yours")["chosen"] is False and row("read-aloud", "shipped")["chosen"] is False)
 P.set_on("notes", True)
 check("turn on a plugin built here: on, and in installed.json",
       row("notes", "yours")["on"] is True
@@ -388,6 +390,8 @@ check("the first write leaves a README and a .gitignore for the staging folder",
       and (YOURS / ".gitignore").read_text() == ".staging/\n")
 P.set_on("read-aloud", False)
 check("turn off a shipped extension: off", row("read-aloud", "shipped")["on"] is False)
+check("a switch once set is chosen, whichever way (first setup's backup offer reads it)",
+      row("notes", "yours")["chosen"] is True and row("read-aloud", "shipped")["chosen"] is True)
 ok, said = refuses(lambda: P.set_on("midnight", True), "it is on where Appearance")
 check("a theme has no switch of its own: 409, pointing at Appearance", ok, said)
 ok, said = refuses(lambda: P.set_on("dusk", True), "dusk is broken")
@@ -515,6 +519,7 @@ def mono(work):
 
 def solo(work):
     plugin(work.parent, work.name, {"id": "lantern", "name": "Lantern"})
+    (work / "README.md").write_text("# Lantern\n")
     git("add", "-A", cwd=work); git("commit", "-q", "-m", "1", cwd=work)
 
 
@@ -586,6 +591,11 @@ for url, want, test in (
          ("autumn", "1.0.1", "autumn-v1.0.1", "autumn"), at),
         ("https://github.com/friend/kite", ("kite", "1.10.0", "v1.10.0", "src/kite"), at),
         ("friend/solo", ("lantern", "1.0.0", SOLO_HEAD, ""), at),
+        # A file's link under /tree/ (GitHub serves both): its folder.
+        ("https://github.com/friend/solo/tree/main/README.md",
+         ("lantern", "1.0.0", SOLO_HEAD, ""), at),
+        ("https://github.com/friend/loam-pet/tree/v1.0.0/plugins/pet-folder/PLUGIN.md",
+         ("pet", "1.0.0", "v1.0.0", "plugins/pet-folder"), at),
         ("friend/loam-pet/tree/v1.0.0/plugins/pet-folder",
          ("pet", "1.0.0", "v1.0.0", "plugins/pet-folder"), at)):
     out = shape(url)
@@ -1254,6 +1264,49 @@ path, ctype = P.file_for("evening", ["c.webp"])
 check("files: and its light cover beside it", ctype == "image/webp", (path, ctype))
 ok, said = refuses(lambda: P.file_for("evening", ["e.webp"]), "")
 check("files: another image beside them is not", ok, said)
+
+# -- what a plugin says about itself (2026-11-19): description, screenshots,
+# a theme's palette; each wrong one left out with a warning, never broken ---
+
+got = P.read_folder(plugin(COVER_ROOT, "said", {
+    "kind": ["extension"], "description": "Listen to your agents instead of reading them.",
+    "screenshots": [{"src": "assets/a.webp", "src_dark": "assets/a-dark.webp", "caption": "Listen under a reply"},
+                    {"src": "assets/b.png"}, {"src": "../out.webp"}, {"src": "assets/none.webp"},
+                    {"src": "assets/a.webp", "src_dark": "gone.webp"}],
+    "palette": [{"token": "--paper-page", "name": "Fern"}]},
+    files={"assets/a.webp": "x", "assets/a-dark.webp": "x", "assets/b.png": "x", "page/main.js": ""}), "said")
+m = got["manifest"]
+check("words: a description is kept as given",
+      m.get("description") == "Listen to your agents instead of reading them.", m)
+check("words: screenshots in the folder are kept, with their dark pair and caption",
+      m.get("screenshots", [])[:2] == [{"src": "assets/a.webp", "src_dark": "assets/a-dark.webp",
+                                         "caption": "Listen under a reply"}, {"src": "assets/b.png"}], m)
+check("words: a screenshot outside the folder or missing is left out, with a warning",
+      len(m.get("screenshots", [])) == 3
+      and sum("] names no picture" in w for w in got["warnings"]) == 2, got["warnings"])
+check("words: a missing dark pair falls back to the light one, with a warning",
+      m["screenshots"][2] == {"src": "assets/a.webp"}
+      and any("src_dark names no picture" in w for w in got["warnings"]), m)
+check("words: an extension's palette is left out, with a warning",
+      "palette" not in m and any("palette is a theme's" in w for w in got["warnings"]), got["warnings"])
+check("words: the new fields are spec fields, not extras", "extra" not in m, m.get("extra"))
+got = P.read_folder(plugin(COVER_ROOT, "hued", {
+    **THEME, "description": "x" * 161,
+    "palette": [{"token": "--paper-page", "name": "Fern floor", "name_dark": "Night floor"},
+                {"token": "paper", "name": "Bad"}, {"token": "--latte-espresso", "name": ""}]},
+    files={"theme.css": ""}), "hued")
+m = got["manifest"]
+check("words: a theme's palette is kept by token, with its dark name",
+      m.get("palette") == [{"token": "--paper-page", "name": "Fern floor", "name_dark": "Night floor"}]
+      and sum("palette[" in w for w in got["warnings"]) == 2, (m, got["warnings"]))
+check("words: a description over 160 characters is left out, with a warning",
+      "description" not in m and any("description is one line" in w for w in got["warnings"]), got["warnings"])
+plugin(YOURS, "pictured", {"kind": ["extension"], "screenshots": [{"src": "shots/one.webp"}]},
+       files={"shots/one.webp": "RIFF", "shots/other.webp": "x", "page/main.js": ""})
+path, ctype = P.file_for("pictured", ["shots", "one.webp"])
+check("files: a screenshot it names is served", ctype == "image/webp", (path, ctype))
+ok, said = refuses(lambda: P.file_for("pictured", ["shots", "other.webp"]), "")
+check("files: a picture beside it that it does not name is not", ok, said)
 
 real_themes = (Path(__file__).resolve().parent.parent / "app") / "public" / "themes"
 # Held to the core table those themes ship beside, not this file's fixture:

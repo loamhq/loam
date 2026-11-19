@@ -1137,7 +1137,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       ...(link ? { type: 'button', 'aria-label': `${job.title} · ${jobStatus(job)} · Open receipt`, onclick: () => { closeTasks(); openRef(job.receipt) } } : {}) },
       h('span', { class: 'tt-job-face', role: 'img', 'aria-label': name(job.persona) }, avatar(job.persona, 28)),
       h('span', { class: 'tt-task-copy' }, h('span', { class: 'tt-task-title', text: job.title }),
-        h('span', { class: 'tt-task-name', text: job.project }),
+        h('span', { class: 'tt-task-name', text: job.scope ? `${job.project} ${job.scope}` : job.project }),
         h('span', { class: `tt-job-status${jobActivity(job)?.stuck ? ' tt-job-quiet' : ''}`, title: job.outcome_detail ?? (job.last_activity ? `Last engine event ${formatDateTime(job.last_activity)}` : undefined), text: jobStatus(job) })),
       elapsed !== null ? h('span', { class: 'tt-job-elapsed', 'aria-label': `Elapsed ${elapsed}`, text: elapsed }) : null,
       link ? icon.chevronRight(14) : null)

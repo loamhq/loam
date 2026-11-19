@@ -3,7 +3,8 @@
 *Since 2026-11-18. Two halves: the routine local commit, in core
 (`lib/loam_autocommit.py`, `bin/autocommit`, `systemd/loam-autocommit.*`),
 and the **Git backup** plugin, built in and off by default
-(`plugins/git-backup/`). Tests: `tests/test_git_backup.py`.*
+(`plugins/git-backup/`). Tests: `tests/test_git_backup.py`. A copy taken by
+hand, as one zip, is Files' Download as zip: docs/download.md.*
 
 ## The floor: every change, committed on this machine
 
@@ -35,7 +36,14 @@ any backup is set up.
   record, and `check-drift` does not count the timer as missing. Taking the
   line out hands the tree over at the next quarter hour.
 - `loam update` installs the timer and arms it once on an install made
-  before it (`lib/loam_update.py`, `units`).
+  before it: `gen-units` arms any timer it installs for the first time
+  (since 2026-11-19), which is what reaches an install whose older release
+  runs the update, and `lib/loam_update.py`'s `units` step arms it too.
+
+**The host's own setup** (the web server's config, Loam's units, its
+config and settings, and the login's accounts and passkeys) has a history
+of its own, root's alone and kept on the machine: `loam host`,
+docs/host-history.md.
 
 ## The copy off the machine: the Git backup plugin
 
@@ -64,6 +72,24 @@ let Loam make the repositories"*: it would be friendlier for someone who has
 never made one, but it is GitHub only and needs a token with `repo` scope,
 which reaches every private repository the person has. Not built; the
 deploy-key path is the one that works everywhere.
+
+**No host is assumed** (2026-11-19). Loam may run on a personal server, a
+laptop or any provider's VPS, so the plugin's words name GitHub as one host
+among several and three cases are first-class:
+
+- *A git host* (GitHub, GitLab, Codeberg, Gitea, Forgejo): its own
+  deploy-key steps and a link to its page, as above.
+- *A server of the person's own* over SSH (`ssh://git@nas.home:2222/srv/git/vault.git`,
+  `git@backup.example:vault.git`): the key goes in as a deploy key if the
+  server runs a git host, or as one line of the owning account's
+  `~/.ssh/authorized_keys` if it is plain SSH. No page link; the steps say both.
+- *A folder on this machine* or a drive attached to it (`/mnt/usb/vault.git`,
+  `~/backups/vault.git`, `file://…`): no key is made and there is nothing to
+  add. A new or empty folder is made an empty bare repository at connect; a
+  folder that is already a bare repository is used as it is; one holding
+  anything else is refused, so nobody's files are written into. Its failures
+  say the folder is missing, detached or not writable, never "the host did
+  not accept the key".
 
 **Agents set it up the same way**, on the owner's word: `backup_connect`,
 `backup_test`, `backup_status`, `backup_now`, `backup_disconnect`,
@@ -160,7 +186,10 @@ without new keys or repositories:
    (`bin/settings set plugin.git-backup.vault_remote git@github-vault:owner/vault.git`).
    With no key of its own for that tree, the push uses the alias's
    `IdentityFile` from `~/.ssh/config`, as the old script did. Nothing is
-   pushed twice: the remote already has the history.
+   pushed twice: the remote already has the history. The push goes to the
+   address, not to `origin` by name; after each one the plugin moves
+   `origin/main` (any remote whose address is the same repository) to what
+   it sent, so `git status` does not read "ahead" (since 2026-11-19).
 2. Take the autocommit lines out of the crontab. The core timer commits the
    trees from the next quarter hour; `gen-units` and arming
    `loam-autocommit.timer` once makes it run (`check-drift` then expects it).

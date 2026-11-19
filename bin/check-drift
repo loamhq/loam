@@ -305,15 +305,8 @@ def check_crons(findings: list, names: list[str]) -> list[str]:
                         live, content)
         if name == loam_cron.REFLECTION:
             cron = loam_cron.parse_record(agent, name, text, check_systemd=False)
-            hhmm = loam_cron.reflection_hhmm(cron.schedule_text)
-            cfg = json.loads((AI_LABS / agent / "agent.json").read_text(
-                encoding="utf-8"))
-            if cfg.get("wake_schedule") != hhmm:
-                findings.append((label, str(AI_LABS / agent / "agent.json"),
-                                 f"wake_schedule {cfg.get('wake_schedule')} "
-                                 f"disagrees with the record's {hhmm}"))
             if not cron.enabled:
-                notes.append(f"  {agent}/reflection — paused ({path})")
+                notes.append(f"  {agent}/reflection — turned off by the owner ({path})")
         elif not loam_cron.parse_record(agent, name, text,
                                         check_systemd=False).live:
             notes.append(f"  {agent}/{name} — paused or done ({path})")
@@ -322,8 +315,8 @@ def check_crons(findings: list, names: list[str]) -> list[str]:
         if not loam_cron.cron_path(AI_LABS / agent, loam_cron.REFLECTION).exists():
             findings.append((
                 f"schedule {agent}/reflection", str(AI_LABS / agent / "crons"),
-                "no reflection record: the nightly wake is not on the "
-                "schedule path (`bin/schedule migrate` gives it one)"))
+                "no reflection record: this persona has no daily wake "
+                "(`bin/provision <agent> <HH:MM>` gives it one)"))
         for unit in loam_cron.UNIT_DIR.glob(f"{loam_cron.UNIT_PREFIX}{agent}-*"):
             if unit.name not in wanted:
                 try:
@@ -578,6 +571,8 @@ def check_projects(findings: list, prov) -> list[str]:
                              f"unreadable: {exc}"))
             continue
         names.append(project.name)
+        if project.lane_of:
+            continue   # the Loam engineer's app-only scope: check_app_scope
         for finding in runtime_findings(project):
             findings.append((f"project {project.name} runtime", str(path), finding))
         root = project.root
@@ -585,6 +580,13 @@ def check_projects(findings: list, prov) -> list[str]:
             findings.append((f"project {project.name} checkout", str(root),
                              "registered but not on disk. Retire it or re-provision."))
             continue
+        # What its test command names is there (2026-11-19, lib/loam_testcmd.py).
+        import loam_testcmd  # noqa: PLC0415
+        import loam_worktree as wt  # noqa: PLC0415
+        # Loam's own record is rooted in engineer/; its suite runs at the top.
+        for finding in loam_testcmd.findings(wt.test_command(project),
+                                             AGENTS if project.platform else root):
+            findings.append((f"project {project.name} test command", str(path), finding))
         if project.pull_request:
             for finding in adopted_harness(root, prov.ADOPT_CLASHES):
                 findings.append((f"project {project.name} history", str(root), finding))
@@ -664,6 +666,34 @@ def check_projects(findings: list, prov) -> list[str]:
                 "it owns.",
             ))
     return names
+
+
+def check_app_scope(findings: list, prov) -> None:
+    """The Loam engineer's app-only scope (2026-11-19): its harness in
+    `app/` against what `bin/provision --engineer` renders there (the Loam
+    engineer's role, the app's shipped project file, the template's CLAUDE.md
+    and settings), and excluded from the repository. Nothing when the
+    checkout has no app."""
+    import loam_engineer as eng  # noqa: PLC0415
+    if eng.app_lane() is None or not prov.APP_PROJECT_SHIPPED.is_file():
+        return
+    if not prov.ENGINEER_ROLE_SRC.is_file():
+        return   # check_engineer reports the missing source
+    home = prov.AGENTS / eng.APP_SCOPE
+    if prov.harness_tracked(prov.AGENTS, eng.APP_SCOPE):
+        return
+    expected = prov.app_scope_render(prov.ENGINEER_ROLE_SRC.read_text(encoding="utf-8"))
+    for rel, text in expected.items():
+        compare(findings, f"app-only scope {rel}", home / rel, text)
+    exclude = prov.AGENTS / ".git" / "info" / "exclude"
+    have = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.is_file() else set()
+    missing = [f"/{eng.APP_SCOPE}/{p}" for p in prov.HARNESS_PATHS
+               if p != "memory/" and f"/{eng.APP_SCOPE}/{p}" not in have]
+    if missing:
+        findings.append((
+            "app-only scope exclude", str(exclude),
+            f"{', '.join(missing)} not excluded, so a `git add -A` puts the "
+            f"harness in the repository. `bin/provision --engineer` adds them."))
 
 
 def check_broker(findings: list) -> list[str]:
@@ -907,6 +937,16 @@ def check_deploy(findings: list) -> list[str]:
                              f"kernel. `sudo systemctl restart {dep.SIGHT_WALL_SERVICE}` "
                              f"raises it (after `systemctl restart docker` if a ufw reload "
                              f"took Docker's chains too):\n" + "\n".join("  " + m for m in missing)))
+    # The inbound wall (2026-11-19): a family nobody guards is a finding,
+    # unless the owner turned it off (`firewall.manage = false`).
+    inbound = dep.inbound_wall_status()
+    if dep.inbound_managed() and dep.INBOUND_FIREWALL_SCRIPT.exists() and (
+            not inbound or ":open" in inbound):
+        findings.append(("deploy inbound wall", f"{dep.INBOUND_FIREWALL_SCRIPT} status",
+                         f"inbound is not guarded ({inbound or 'no answer'}): "
+                         f"`sudo systemctl restart {dep.INBOUND_WALL_SERVICE}` raises it"))
+    elif inbound:
+        notes.append(f"  {inbound}")
     members = dep.docker_group_members()
     if lc.USER in members:
         findings.append(("deploy docker group", "/etc/group",
@@ -1119,7 +1159,7 @@ def main() -> int:
         # The persona's own words are rendered on the id's name: a display
         # name set on its profile (2026-11-13) is the app's, not its self's.
         # The name it was made with when it has one (`self_name`, 2026-11-14).
-        display, wake = loam_profile.self_name(name, cfg), cfg["wake_schedule"]
+        display = loam_profile.self_name(name, cfg)
 
         compare(findings, f"{name} settings.json",
                 ws / ".claude" / "settings.json",
@@ -1159,8 +1199,6 @@ def main() -> int:
             "display": name.capitalize(),
             "workspace": str(ws),
             "vault": str(prov.VAULT),
-            "wake_schedule": wake,
-            "wake_timezone": lc.TIMEZONE,
             **loam_profile.kept(cfg),
         })
         compare(findings, f"{name} agent.json", ws / "agent.json", expected_agent)
@@ -1211,13 +1249,8 @@ def main() -> int:
                     f"absent or disagrees — with no error. Re-run provision.",
                 ))
 
-        svc, tmr = prov.wake_units(name, ws, wake)
-        compare(findings, f"{name} wake.service",
-                UNIT_DIR / f"loam-wake-{name}.service", svc)
-        # The timer is the reflection record's (check_crons) once it has one.
-        if not loam_cron.cron_path(ws, loam_cron.REFLECTION).exists():
-            compare(findings, f"{name} wake.timer",
-                    UNIT_DIR / f"loam-wake-{name}.timer", tmr)
+        # The daily wake's service and timer are its reflection record's,
+        # compared with every other record's in check_crons (2026-11-19).
 
     check_config_clauses(findings, names)
     check_user_settings(findings, prov)
@@ -1226,6 +1259,7 @@ def main() -> int:
     check_engineer(findings, prov)
     check_reviewer(findings, prov)
     project_names = check_projects(findings, prov)
+    check_app_scope(findings, prov)
     cron_notes = check_crons(findings, names)
     broker_notes = check_broker(findings)
     deploy_notes = check_deploy(findings)
@@ -1251,6 +1285,20 @@ def main() -> int:
                 and not (UNIT_DIR / name).exists()):
             continue
         compare(findings, f"static {name}", UNIT_DIR / name, text)
+    # The host history (2026-11-19, lib/loam_host.py): root's timer, rendered
+    # from systemd/system/ by `loam host install`. Off or stale, the host's
+    # setup stops being kept and nothing else says so.
+    import loam_host  # noqa: PLC0415
+    for name, text in loam_host.render_units(AGENTS).items():
+        compare(findings, f"system {name}", loam_host.SYSTEM_UNIT_DIR / name, text)
+    timer_on = subprocess.run(["systemctl", "is-enabled", loam_host.TIMER],
+                              capture_output=True, text=True).stdout.strip()
+    if timer_on != "enabled":
+        findings.append((
+            "host history timer", f"systemctl is-enabled {loam_host.TIMER}",
+            f"{timer_on or 'unknown'}: the host's setup is not being kept, so "
+            f"`loam host restore` has nothing newer to put back. "
+            f"`sudo loam host install`"))
     # The sign-in watch (bin/claude-signin): with it off, a sign-in or a
     # sign-out is noticed by nothing that runs on its own.
     armed = user_systemctl("is-active", "loam-claude-signin.path")
@@ -1275,6 +1323,24 @@ def main() -> int:
             f"{', '.join(leftovers)}: Remote Control is retired and nothing "
             f"generates these. Stop, disable and remove them.",
         ))
+
+    # A unit this repository retired (lib/loam_units.py RETIRED: the
+    # provider follower since 2026-11-19), still installed: `gen-units`
+    # removes it.
+    retired = loam_units.retire(dry=True)
+    if retired:
+        findings.append((
+            "retired units", str(UNIT_DIR),
+            f"{', '.join(retired)}: retired, and nothing generates them. "
+            f"`bin/gen-units` stops, disables and removes them.",
+        ))
+
+    # The provider CLIs at this release's pin (lib/loam_pins.py, 2026-11-19):
+    # nothing moves a CLI between releases, so a link off its pin is drift
+    # (a CLI that updated itself, or a hand-moved link).
+    import loam_pins  # noqa: PLC0415
+    for line in loam_pins.drift():
+        findings.append(("provider pin", "lib/loam_pins.py", line))
 
     # loam-cron-* are generated per-cron by the schedule reconciler
     # (lib/loam_schedule.py) straight into the user unit dir (since

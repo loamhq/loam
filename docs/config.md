@@ -36,16 +36,20 @@ place on a particular machine. Added 2026-11-14 (first release, job L1).
 | `paths.reviewer_state` | the reviewer's notes and memory (its own key: `reviewer/`'s committed config names it) | `<state>/reviewer` |
 | `paths.secrets_env`, `paths.wake_env` | the key files (wake.env: the agents' OAuth token) | `~/.config/loam/` |
 | `paths.mcp_venv` | the MCP servers' Python | `~/.local/share/loam/mcp-venv` |
+| `paths.host_history` | the host's own setup, kept (root's alone; docs/host-history.md) | `/var/lib/loam/host-history` |
 | `paths.pycache` | Python's bytecode cache (`PYTHONPYCACHEPREFIX`) | `~/.cache/loam/pycache` |
 | `bin.claude`, `bin.codex`, `bin.agy`, `bin.uv` | the CLIs | `~/.local/bin/<name>` |
 | `vault.inbox`, `vault.boards`, `vault.general_board`, `vault.conversations`, `vault.projects`, `vault.attachments`, `vault.system` | the vault's own folders, relative to it | `Inbox`, `Inbox/boards`, `Inbox/boards/general.md`, `Conversations`, `Projects`, `Attachments`, `System` |
 | `git.autocommit.name`, `.email` | the identity of the 15-minute vault, workspace and plugin commits (`bin/autocommit`, docs/backup.md) | `loam`, `loam@<user>` |
 | `git.autocommit.max_file_mb` | a file larger than this many megabytes is kept out of those commits and named instead, so a git host's size limit never stops a backup (docs/backup.md) | `100` |
 | `git.identity.name`, `.email` | the Loam HQ bot that makes releases and the `loam` repository's root commit. Never a person's address. | unset until that bot exists |
+| `firewall.open` | ports the inbound wall lets in beside SSH, 80 and 443, as `"22000/tcp"`, `"21027/udp"` or a bare number for TCP (deploy/README.md, "The inbound wall") | absent: none |
+| `firewall.manage` | `false` takes Loam's inbound wall out, for a server whose provider's firewall does the job; a firewall the server already has (ufw, firewalld) is left alone either way | absent: `true` |
 | `engineer.briefers` | the personas who may brief the platform engineer, a list of names (`["ada"]`); a project engineer is open to every persona whatever this says (lib/loam_engineer.py, "Who may brief which project") | absent: every persona |
 | `owner.legacy_ids` | ids an install used for its owner before `owner.id` existed; records that carry one still read as the owner's | absent: none |
 | `deploy.config` | the deployment configuration (domain, `[moved]`, `[[forward]]`) of a box set up by hand, kept outside the checkout so an update never replaces it; same format as `deploy/loam.toml` | absent: `deploy/loam.toml` |
-| `app.speech_voices`, `app.avatar_colours` | the install's agents' read-aloud voices (`agent=Voice:character;...`) and avatar colour overrides (a table of agent id = palette token), passed by `bin/deploy` to the app's compose file | absent: Iris's voice; no override |
+| `app.avatar_colours` | avatar colour overrides (a table of agent id = palette token), passed by `bin/deploy` to the app | absent: no override |
+| `app.speech_voices` | the install's agents' read-aloud voices (`agent=Voice:character;...`), read once since 0.2.12 to seed Read aloud's own `voices` setting (`lib/loam_to_market.py`); change voices there, or on an agent's profile | absent: Iris's voice |
 | `feedback.repo` | the repository whose new-issue page `loam report` links a bug, a feature request or an idea to (lib/loam_feedback.py) | absent: `loamhq/loam` |
 | `marketplace.list`, `marketplace.repo` | the marketplace's list (an https URL; `""` turns the section off) and the repository a listing is asked for in (docs/plugins.md, "The marketplace") | absent: `loamhq/marketplace`'s `list.json` on `main` |
 | `edge.*` | an install's name on the web: its domain, address, the app at the domain itself, the records it serves, how DNS is asked, local certificates for a rehearsal, the DNS gate, and `own_domain` when the domain is the owner's own rather than a name under Loam's (first release L12; 0.2.8; docs/install.md) | absent: the deploy layer reads `deploy/loam.toml` and serves every record, as the first install always has |
@@ -141,7 +145,7 @@ move restarted the timers, and it was reproduced on `loam-headroom.timer`.
   reconciler, `move-state` and the installer and updater to come all follow
   this rule.
 - **A lane checks for itself.** The wake (reflection and cron), the
-  reviewer and provider-follow call `loam_due.not_due()` first.
+  reviewer call `loam_due.not_due()` first.
   A run its timer started when none of the timer's calendar times fell in
   the ten minutes before goes no further, with a line in its journal and
   in `logs/not-due.jsonl`. A run started by hand or by "Run now" is never
@@ -165,13 +169,13 @@ is what the installer runs.
   state (2026-11-16): counted for the log, never said. What is said is an
   entry under its tree of a kind not known on 2026-11-16
   (`AGY_KNOWN`), which is what a store of its own would look like.
-  Those files are cleared after a week by the nightly `provider-follow`
-  pass (`lib/loam_agy_files.py`): an engineer job's or reviewer run's a week
+  Those files are cleared after a week by `bin/clear-agy-files`, which
+  the nightly drift-watch runs (`lib/loam_agy_files.py`): an engineer job's or reviewer run's a week
   after its last job, and every other conversation, a persona's included,
   once nothing has touched it for a week (2026-11-16). A thread whose
   member's conversation was cleared starts that member on a fresh session,
   given the thread's recent exchange and its summary.
 
-The checks run at every session start, after each provider-follow switch,
-and on `bin/provider-memory check`. A store that grew is said once, in
+The checks run at every session start, after `provider-pin apply` moves a
+CLI, and on `bin/provider-memory check`. A store that grew is said once, in
 comms.md under Important; never in a conversation's thread (2026-11-16).

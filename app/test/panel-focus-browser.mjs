@@ -35,6 +35,7 @@ try {
     await context.addInitScript(() => { globalThis.SpeechRecognition ??= class {} })
     await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__focus={panels,threads,sidePanel,schedule};' }))
     await context.route('**/api/health', route => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
     await context.route('https://garden.example.test/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><h1>Garden</h1><button>Plant an idea</button>' }))
     const page = await context.newPage(); page.setDefaultTimeout(10000)
     page.on('pageerror', e => errors.push(e.message))

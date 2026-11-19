@@ -342,8 +342,9 @@ finally:
 
 # Another project's job. Refused whichever way it is sent, and the sentence
 # names the project that owns it -- a session can only be resumed in the tree
-# it ran in.
-others = [p for p in eng.projects().values() if not p.platform]
+# it ran in. (The Loam engineer's app-only scope is not another project: a
+# Loam brief continuing one of its jobs is routed to it, tests/test_app_scope.py.)
+others = [p for p in eng.engineers().values() if not p.platform]
 if others:
     other = others[0]
     other_id = "20260101-000000-ccccdddd"
@@ -410,11 +411,16 @@ refusal = eng.brief_refusal(platform, "otto", "Scope the engineer surface", ONLY
 check("another persona may not brief Loam", refusal is None, False)
 check("the refusal names who may send it", f"briefed by {BRIEFER}" in refusal, True)
 check("the refusal names where the rule is set", "`engineer.briefers`" in refusal, True)
+# The deploy lane covers every deployable project, the app-only scope's
+# app (`Deploy loam-ui`) included.
+deployable = [p for p in eng.projects().values() if not p.platform]
 check("the refusal names the deploy lane it could have used",
-      ("`Deploy <project>`" if others else "no project engineer is provisioned")
+      ("`Deploy <project>`" if deployable else "no project engineer is provisioned")
       in refusal, True)
 check("the refusal names the provisioned projects",
-      all(p.name in refusal for p in others) if others else True, True)
+      all(p.name in refusal for p in deployable) if deployable else True, True)
+check("...and, with an app, the app-only scope any persona may brief",
+      ("`scope: app`" in refusal) if eng.app_lane() is not None else True, True)
 check("the refusal quotes the title it refused",
       "'Scope the engineer surface'" in refusal, True)
 check("the refusal says it is not queued", "not queued" in refusal, True)

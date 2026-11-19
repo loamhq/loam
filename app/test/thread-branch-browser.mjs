@@ -57,7 +57,8 @@ try {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, isMobile: width === 390, hasTouch: width === 390 })
     await context.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__branch = { threads, schedule };' }))
     await context.route('**/api/health', (route) => route.fulfill({ json: { configured: true, ok: true, speech: true } }))
-    await context.route('**/api/speech/lookup', (route) => route.fulfill({ json: { status: 'none' } }))
+    await context.route('**/x/read-aloud/status', r => r.fulfill({ json: { speech: true } }))
+    await context.route('**/x/read-aloud/speech/lookup', (route) => route.fulfill({ json: { status: 'none' } }))
     const page = await context.newPage(); page.setDefaultTimeout(15000); page.on('pageerror', (e) => errors.push(e.message))
     page.on('console', (m) => { if (m.type() === 'error' && /Content Security Policy/.test(m.text())) errors.push(m.text()) })
     const settle = async () => { await page.waitForTimeout(200); await page.evaluate(async () => { await document.fonts.ready; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame) }) }

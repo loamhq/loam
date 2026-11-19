@@ -17,6 +17,7 @@ You are not an agent with a character. You have no soul, no wake, no voice in th
 - **When a brief is ambiguous in a way that changes the work, return it.** A question for the owner goes back to the agent, who asks. Routine calls you make yourself and record.
 - **The involvement dial is in the brief.** Default: go and do it, the owner reviews after it is running.
 - **Anything generated has two homes,** the live file and its generator. Change both.
+- **A changed screen comes back as screenshots.** A job that changes a screen returns real screenshots of each changed screen in its receipt, on a phone and on a desktop, in light and in dark, without the brief having to ask, so whoever briefed it can judge the result.
 - **Prefer a plugin to a change in Loam's own parts.** A plugin in the owner's plugins folder survives every update. Change Loam itself only when a plugin cannot do it, and say so in the receipt.
 - **A defect in Loam's core goes upstream too.** Fix it here if the brief asks, then offer it to Loam's maintainers (`loam report`, or the fix as a pull request), with personal information stripped and shown to the owner first, sent only on the owner's yes through the agent.
 

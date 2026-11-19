@@ -86,6 +86,9 @@ async function listFolder(broker, root, relPath, signal) {
   return entries
 }
 
+// The note a fallback zip ends with when it had to leave files out.
+export const LEFT_OUT_NAME = 'Left out of this zip.txt'
+
 // Streams a ZIP / ZIP64 archive over the broker's paginated list and file
 // download routes without buffering files or the archive in memory or on disk.
 export async function streamZipArchive({ root, path: basePath = '', broker, req, res }) {
@@ -97,6 +100,7 @@ export async function streamZipArchive({ root, path: basePath = '', broker, req,
 
   let offset = 0n
   const cd = []
+  const leftOut = []
   const emit = async (buf) => {
     await writeChunk(res, buf)
     offset += BigInt(buf.length)
@@ -130,11 +134,40 @@ export async function streamZipArchive({ root, path: basePath = '', broker, req,
     cd.push({ nameBuf, flags: 0x0800, method: 0, time, date, crc: 0, compSize: 0n, uncompSize: 0n, offset: localOffset, externalAttrs: 0x10 })
   }
 
+  // A small file made here (the note of what was left out), stored whole.
+  const writeText = async (relName, text) => {
+    const nameBuf = Buffer.from(relName, 'utf8')
+    const data = Buffer.from(text, 'utf8')
+    const { time, date } = dosDateTime(new Date().toISOString())
+    const crc = zlib.crc32(data) >>> 0
+    const localOffset = offset
+    const hdr = Buffer.allocUnsafe(30 + nameBuf.length)
+    hdr.writeUInt32LE(0x04034b50, 0)
+    hdr.writeUInt16LE(20, 4)
+    hdr.writeUInt16LE(0x0800, 6)
+    hdr.writeUInt16LE(0, 8)
+    hdr.writeUInt16LE(time, 10)
+    hdr.writeUInt16LE(date, 12)
+    hdr.writeUInt32LE(crc, 14)
+    hdr.writeUInt32LE(data.length, 18)
+    hdr.writeUInt32LE(data.length, 22)
+    hdr.writeUInt16LE(nameBuf.length, 26)
+    hdr.writeUInt16LE(0, 28)
+    nameBuf.copy(hdr, 30)
+    await emit(hdr)
+    await emit(data)
+    cd.push({ nameBuf, flags: 0x0800, method: 0, time, date, crc, compSize: BigInt(data.length), uncompSize: BigInt(data.length), offset: localOffset, externalAttrs: 0 })
+  }
+
   const writeFile = async (entry, relName) => {
     const qs = new URLSearchParams({ root, path: entry.path })
     const out = await broker.download(`/v1/files/download?${qs}`)
     if (!out.ok) {
       if (out.status === 404) return // removed or hidden between list and read
+      // Over what the host's file download carries (`DOWNLOAD_MAX`, 50 MiB, on
+      // a host without `/v1/files/archive`): left out and named in a note at
+      // the end, not a zip cut off after "Download started" (2026-11-19).
+      if (out.status === 413) { leftOut.push({ name: relName, size: entry.size }); return }
       let message = `Could not download ${entry.path} (${out.status}).`
       try { const parsed = JSON.parse(out.body); if (parsed?.error) message = parsed.error } catch {}
       const err = new Error(message)
@@ -257,6 +290,18 @@ export async function streamZipArchive({ root, path: basePath = '', broker, req,
       }
       // Preserve listing order when popping from stack.
       for (let i = subdirs.length - 1; i >= 0; i--) stack.push(subdirs[i])
+    }
+
+    if (leftOut.length) {
+      const mib = (n) => Number.isFinite(n) ? `${(n / (1 << 20)).toFixed(1)} MiB` : 'size unknown'
+      await writeText(LEFT_OUT_NAME, [
+        'These files are not in this zip: each is larger than the 50 MiB this',
+        'Loam can put in a zip one file at a time. Download each one by itself',
+        'from Files, or update Loam, whose zips carry files of any size.',
+        '',
+        ...leftOut.map((f) => `- ${f.name} (${mib(f.size)})`),
+        '',
+      ].join('\n'))
     }
 
     const cdOffset = offset

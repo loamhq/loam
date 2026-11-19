@@ -134,13 +134,16 @@ HTTPS_URL = re.compile(r"^https?://(?:[^@/\s]+@)?(?P<host>[A-Za-z0-9._-]+)(?::\d
 
 
 def normalise(text: str) -> str:
-    """What a person pastes, as the SSH address the push uses. A GitHub,
-    GitLab or Gitea web or HTTPS address becomes `git@host:owner/repo.git`,
-    because a deploy key works over SSH only. A folder on this machine
-    (`/srv/backups/vault.git`, `file://...`) is kept as it is."""
+    """What a person pastes, as the address the push uses. A web or HTTPS
+    address on any host becomes `git@host:owner/repo.git`, because a deploy
+    key works over SSH only. A folder on this machine or a drive attached to
+    it (`/srv/backups/vault.git`, `~/backups/vault.git`, `file://...`) is
+    kept as it is, with `~` spelled out."""
     raw = (text or "").strip()
     if not raw:
         return ""
+    if raw == "~" or raw.startswith("~/"):
+        return str(Path(raw).expanduser())
     if raw.startswith("file://") or raw.startswith("/"):
         return raw
     m = HTTPS_URL.match(raw)
@@ -162,12 +165,58 @@ def normalise(text: str) -> str:
         return f"git@{host}:{path}"
     if SSH_URL.match(raw) or SCP.match(raw):
         return raw
-    raise BackupError("That is not a repository address. Copy the SSH address from "
-                      "the repository's page (it looks like git@github.com:you/vault.git).")
+    raise BackupError("That is not a repository address. Paste the repository's SSH "
+                      "address (it looks like git@host:you/vault.git), its page's "
+                      "address, or the path of a folder on this machine "
+                      "(like /srv/backups/vault.git).")
+
+
+def is_folder(url: str) -> bool:
+    """A remote that is a folder on this machine (or a drive attached to it),
+    which needs no key and no host."""
+    return (url or "").startswith(("/", "file://"))
+
+
+def folder_path(url: str) -> Path:
+    return Path(url.removeprefix("file://"))
+
+
+def prepare_folder(url: str) -> None:
+    """A folder remote made ready to receive: a new or empty folder becomes
+    an empty bare repository; one that is already a repository is left as
+    it is; anything else is refused, so nobody's files are written into."""
+    where = folder_path(url)
+    try:
+        if where.exists():
+            if not where.is_dir():
+                raise BackupError(f"{where} is a file, not a folder. Choose a folder, or "
+                                  f"a new name for Loam to make one.")
+            if (where / "HEAD").is_file() and (where / "objects").is_dir():
+                return
+            if (where / ".git").exists():
+                raise BackupError(f"{where} is a working copy, which cannot be pushed to. "
+                                  f"Choose an empty folder, or a new name for Loam to make one.")
+            if any(where.iterdir()):
+                raise BackupError(f"{where} already holds other files. Choose an empty "
+                                  f"folder, or a new name for Loam to make one.")
+        elif not where.parent.is_dir():
+            raise BackupError(f"There is no folder {where.parent} on this machine. If it "
+                              f"is on a drive, attach it and try again.")
+        where.mkdir(exist_ok=True)
+    except PermissionError:
+        raise BackupError(f"Loam is not allowed to write in {where}. Choose a folder it "
+                          f"can write to.") from None
+    done = subprocess.run(["git", "init", "-q", "--bare", "-b", BRANCH, str(where)],
+                          capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        raise BackupError(f"Could not make a repository in {where}: "
+                          f"{done.stderr.strip()[-200:] or 'no reason given'}")
 
 
 def parts(url: str) -> dict:
     """{user, host, port, path} of an SSH address; {} for a local folder."""
+    if is_folder(url):
+        return {}
     m = SSH_URL.match(url)
     if m:
         return {"user": m["user"], "host": m["host"], "port": m["port"], "path": m["path"]}
@@ -355,8 +404,21 @@ PUBLIC_WORDS = ("This repository is public: anyone on the internet can read it. 
 LARGE_FILE = re.compile(r"File (?P<path>.+?) is (?P<size>[\d.]+ ?[MG]B); this exceeds")
 
 
-def classify(stderr: str) -> dict:
-    """A push's or a probe's failure, in plain words: {kind, words, files?}."""
+FOLDER_WORDS = ("Loam cannot reach a repository in that folder. Check that it is "
+                "still there, that its drive is attached, and that Loam can write to it.")
+
+
+def classify(stderr: str, url: str = "") -> dict:
+    """A push's or a probe's failure, in plain words: {kind, words, files?}.
+    A folder remote has no key and no network, so what would be either is
+    said as the folder's."""
+    why = _classify(stderr)
+    if is_folder(url) and why["kind"] in ("key", "network"):
+        return {"kind": "folder", "words": FOLDER_WORDS}
+    return why
+
+
+def _classify(stderr: str) -> dict:
     err = stderr or ""
     low = err.lower()
     large = [m.groupdict() for m in LARGE_FILE.finditer(err)]
@@ -442,7 +504,7 @@ def probe(tree: str, url: str) -> dict:
     except subprocess.TimeoutExpired:
         return {"ok": False, "kind": "network", "words": "The host did not answer in time."}
     if ls.returncode != 0:
-        return {"ok": False, **classify(ls.stderr)}
+        return {"ok": False, **classify(ls.stderr, url)}
     remote_main = next((line.split()[0] for line in ls.stdout.splitlines()
                         if line.endswith(f"refs/heads/{BRANCH}")), None)
     head = git(tree, "rev-parse", "--verify", "-q", "HEAD").stdout.strip()
@@ -455,7 +517,7 @@ def probe(tree: str, url: str) -> dict:
         if dry.returncode != 0:
             # A dry run against history it lacks is "rejected" before any
             # write check; say the true thing.
-            return {"ok": False, **classify(dry.stderr + dry.stdout)}
+            return {"ok": False, **classify(dry.stderr + dry.stdout, url)}
     return {"ok": True, "empty": not ls.stdout.strip(), "remote_main": remote_main,
             "words": "Connected. Loam can write to this repository."}
 
@@ -478,7 +540,11 @@ def connect(tree: str, remote: str) -> dict:
     if seen == "public":
         host = real_host(parts(url).get("host", "")) or "the host"
         raise BackupError(PUBLIC_WORDS.format(name=NOUN[tree], host=host))
-    pub = make_key(tree)
+    if is_folder(url):
+        prepare_folder(url)
+        pub = None
+    else:
+        pub = make_key(tree)
     set_value(SETTING[tree], url)
     state = load_state()
     t = state["trees"][tree]
@@ -508,8 +574,13 @@ def steps(url: str) -> list[str]:
         return ["Open the repository's Settings, then Deploy Keys, then Add Deploy Key.",
                 "Paste the key, give it a title like Loam, and tick Enable Write Access.",
                 "Choose Add Deploy Key, then come back and test the connection."]
-    return ["Add this key to the repository as a deploy key (or an SSH key that can "
-            "reach only this repository), with write access.",
+    if kind == "folder":
+        return ["Nothing to add: this is a folder on this machine, so no key is needed.",
+                "Test the connection, and the first backup starts."]
+    return ["If the server runs a git host (Gitea, Forgejo, GitLab or another), add this "
+            "key to the repository as a deploy key with write access.",
+            "If it is a plain SSH server, add the key as one line to "
+            "~/.ssh/authorized_keys of the account that owns the repository.",
             "Then come back and test the connection."]
 
 
@@ -601,6 +672,38 @@ def due(tree: str, state: dict, every: str) -> bool:
     return last is None or (now() - last).total_seconds() >= EVERY[every] - 60
 
 
+def same_repository(a: str, b: str) -> bool:
+    """Whether two addresses name one repository: the same text, the same
+    web page (an SSH alias and the host it stands for), or one folder."""
+    if a == b:
+        return True
+    wa, wb = web_address(a), web_address(b)
+    if wa and wb:
+        return wa.lower().removesuffix(".git") == wb.lower().removesuffix(".git")
+    if not parts(a) and not parts(b):
+        try:
+            return Path(a).resolve() == Path(b).resolve()
+        except OSError:
+            return False
+    return False
+
+
+def track(tree: str, url: str, head: str) -> list[str]:
+    """After a push to ``url``, move each remote-tracking `main` of a remote
+    with that same repository to ``head``, as `git push <remote>` would
+    have. The push goes to the address, not to a remote by name, so until
+    2026-11-19 a tree whose `origin` is that repository read "ahead N" in
+    `git status` for ever. Returns the remotes moved."""
+    moved = []
+    names = git(tree, "remote").stdout.split()
+    for name in names:
+        have = git(tree, "remote", "get-url", name).stdout.strip()
+        if have and same_repository(have, url):
+            if git(tree, "update-ref", f"refs/remotes/{name}/{BRANCH}", head).returncode == 0:
+                moved.append(name)
+    return moved
+
+
 def push(tree: str, force: bool = False) -> dict:
     """One backup of one tree: commit what is new (Loam's own routine), then
     send `main` to the repository. Never forced, never to a public one."""
@@ -643,10 +746,12 @@ def push(tree: str, force: bool = False) -> dict:
                            timeout=PUSH_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 done = subprocess.CompletedProcess([], 1, "", "push timed out")
+            if done.returncode == 0:
+                track(tree, url, head)
     except TimeoutError:
         return {"ok": True, "tree": tree, "skipped": "busy: Loam's commit is running"}
     if done.returncode != 0:
-        why = classify(done.stderr + "\n" + done.stdout)
+        why = classify(done.stderr + "\n" + done.stdout, url)
         why["detail"] = done.stderr.strip()[-600:]
         failing = _fail(tree, url, why, state)
         save_state(state)
@@ -735,7 +840,8 @@ def tree_status(tree: str, state: dict, vals: dict) -> dict:
             "web": web_address(url) if url else None, "host": host_kind(url) if url else None,
             "add_key_at": deploy_key_page(url) if url else None,
             "steps": steps(url) if url else None,
-            "public_key": public_key(tree), "fingerprint": fingerprint(tree),
+            "public_key": None if is_folder(url) else public_key(tree),
+            "fingerprint": None if is_folder(url) else fingerprint(tree),
             "visibility": t.get("visibility"), "level": level, "line": line,
             "last_pushed_at": t.get("last_pushed_at"), "last_pushed_ago": ago(pushed_at),
             "last_pushed_sha": (pushed or "")[:7] or None,
@@ -817,7 +923,7 @@ def restore(tree: str, remote: str | None = None, replace: bool = False) -> dict
         except subprocess.TimeoutExpired:
             raise BackupError("The host did not finish sending the backup in time.")
         if got.returncode != 0:
-            raise BackupError(classify(got.stderr)["words"])
+            raise BackupError(classify(got.stderr, url)["words"])
         aside = where.parent / f"{where.name}.before-restore-{stamp}"
         n = 1
         while aside.exists():
@@ -854,15 +960,12 @@ def restore(tree: str, remote: str | None = None, replace: bool = False) -> dict
 
 def reprovision() -> list[str]:
     """Each restored agent is made runnable on this machine again, as an
-    update does it (bin/provision with its own wake time)."""
+    update does it (bin/provision by its name; its wake time is its record's)."""
     import loam_agents  # noqa: PLC0415
     root = Path(lc.ROOT)
     done = []
     for name in loam_agents.live(loam_agents.every()):
-        wake = loam_agents.card(name).get("wake_schedule")
-        if not isinstance(wake, str):
-            continue
-        r = subprocess.run([sys.executable, str(root / "bin" / "provision"), name, wake],
+        r = subprocess.run([sys.executable, str(root / "bin" / "provision"), name],
                            capture_output=True, text=True, check=False, timeout=600)
         done.append(name if r.returncode == 0 else f"{name} (provision failed: "
                     f"{(r.stderr or r.stdout).strip()[-200:]})")

@@ -13,7 +13,8 @@ export const LISTINGS = [
   { id: 'images', name: 'Images', author: 'Loam contributors', kind: ['extension'], version: '1.0.0', featured: true,
     description: 'Lets your agents make and edit pictures, and put them in their replies.', ...at('loamhq/loam', 'images', 'v0.2.3'),
     declaration: { touches: { network: [{ host: 'api.openai.com', why: 'sends the description of a picture you asked for' }], record: 'none', memory: 'none', server: true, agents: { tools: ['generate_image (chat, wake)'], prompt: [] }, keys: [{ provider: 'openai', name: 'OpenAI', why: 'draws the pictures' }] }, overrides: [], page_code: false },
-    guide: 'Any agent can draw on request: a cover for an essay, a diagram, a picture to go with a story. Pictures are saved as ordinary image files in the vault.', icon: true },
+    guide: 'Any agent can draw on request: a cover for an essay, a diagram, a picture to go with a story. Pictures are saved as ordinary image files in the vault.', icon: true,
+    shots: [{ caption: 'Ask for a picture in any thread', file: 'deep-forest/cover-large.webp', dark: 'autumn/cover-large-dark.webp' }, { caption: 'It lands in the reply, and in your vault', file: 'yosemite/cover-large.webp' }, { caption: 'Change one you already have', file: 'mist-trail/cover-large.webp' }] },
   { id: 'pocket-sync', name: 'Pocket Sync', author: 'Ada Park', kind: ['extension'], version: '0.4.0',
     description: 'Keeps your vault in step with your phone and laptop, device to device, with no cloud between.', ...at('ada-park/pocket-sync', 'pocket-sync', 'v0.4.0'),
     declaration: { touches: { network: [{ host: 'your own devices', why: 'syncs vault files directly between them' }], record: 'none', memory: 'none', server: true }, overrides: [], page_code: false } },
@@ -36,7 +37,8 @@ export const LISTINGS = [
       { label: 'Email', url: 'mailto:ada@adapark.example', kind: 'email' }] },
     readme: '# Moss\n\nA theme for **long evenings**: the colours of moss, bark and the last of the light, low enough to read by for hours.\n\n![Moss in the evening](shots/evening.webp)\n\n## What changes\n\n- The page is a deep bark brown, the cards a soft moss.\n- Replies sit in a lighter green, so a long thread still reads at a glance.\n- Type stays in Loam’s own faces; only colour and light move.\n\n## Made with\n\nPhotographs of an old forest floor, sampled one colour at a time. See [the palette notes](https://github.com/ada-park/moss/blob/v1.1.0/moss/PALETTE.md) for every value.\n\n> Calm is a colour too.',
     readmeImages: { 'shots/evening.webp': 'deep-forest/cover.webp' },
-    themeOptions: [{ id: 'agent-shapes', label: 'Agent faces', choices: [{ id: 'round', label: 'Round' }, { id: 'signature', label: 'Signature' }], default: 'round' }, { id: 'face-content', label: 'Inside the face', choices: [{ id: 'mark', label: 'Mark' }, { id: 'initials', label: 'Initials' }], default: 'mark' }] },
+    palette: [{ token: '--paper-page', name: 'Lichen', name_dark: 'Night floor' }, { token: '--paper-card', name: 'Moss' }, { token: '--paper-ink', name: 'Bark' }, { token: '--latte-espresso', name: 'Fern' }, { token: '--signal-crema', name: 'Amber' }],
+    themeOptions: [{ id: 'agent-shapes', label: 'Agent faces', choices: [{ id: 'circle', label: 'Round' }, { id: 'signature', label: 'Signature' }], default: 'circle' }, { id: 'face-content', label: 'Inside the face', choices: [{ id: 'mark', label: 'Mark' }, { id: 'initials', label: 'Initials' }], default: 'mark' }] },
   { id: 'tide', name: 'Tide', author: 'Sam Rivera', kind: ['theme'], version: '1.0.0', from: 'yosemite',
     description: 'Granite and sky. Clear, cool and bright.', ...at('sam-rivera/tide', 'tide') },
   { id: 'story-desk', name: 'Story desk', author: 'Ada Park', kind: ['app'], version: '0.9.0',
@@ -117,7 +119,7 @@ export async function marketFixture({ mode = 'light', look = 'latte', listings =
   const rows = () => [...base, ...installed.values()]
   app.routes['GET /v1/plugins'] = (req, res) => json(res, 200, { api: 0, layers: { shipped: [], yours: 'fixture' }, plugins: rows() })
   const list = () => ({ url: 'https://example.invalid/list.json', state: listings.length ? 'listed' : 'empty', checked_at: '2026-11-18T19:30:00Z', skipped: [], message: null, repo: 'loamhq/marketplace',
-    plugins: listings.map(({ declaration, guide, icon, from, installable, why, coverFile, coverDarkFile, coverPosition, coverPositionDark, readme, readmeImages, themeOptions, ...entry }) => ({ ...entry, creator: entry.creator ?? { name: entry.author, links: [] }, installed: installed.has(entry.id), installed_version: installed.get(entry.id)?.version ?? null, installed_from: installed.has(entry.id) ? entry.repo : null })) })
+    plugins: listings.map(({ declaration, guide, icon, from, installable, why, coverFile, coverDarkFile, coverPosition, coverPositionDark, readme, readmeImages, themeOptions, palette, shots, ...entry }) => ({ ...entry, creator: entry.creator ?? { name: entry.author, links: [] }, installed: installed.has(entry.id), installed_version: installed.get(entry.id)?.version ?? null, installed_from: installed.has(entry.id) ? entry.repo : null })) })
   app.routes['GET /v1/marketplace'] = async (req, res) => { writes.push({ method: 'GET', path: '/v1/marketplace' }); if (slow) await wait(); json(res, 200, list()) }
   for (const entry of listings) {
     const theme = css.has(entry.id)
@@ -128,12 +130,17 @@ export async function marketFixture({ mode = 'light', look = 'latte', listings =
         source: { kind: 'link', repo: entry.repo, path: entry.path, ref: entry.ref, ref_kind: 'tag', commit: 'c'.repeat(40), url: entry.link }, icon: Boolean(entry.icon),
         cover: Boolean(entry.coverFile), cover_dark: Boolean(entry.coverDarkFile),
         ...(entry.coverPosition ? { cover_position: entry.coverPosition } : {}), ...(entry.coverPositionDark ? { cover_position_dark: entry.coverPositionDark } : {}),
-        readme: entry.readme ?? null, readme_images: Object.keys(entry.readmeImages ?? {}), theme: theme ? { options: entry.themeOptions ?? [] } : null })
+        readme: entry.readme ?? null, readme_images: Object.keys(entry.readmeImages ?? {}), theme: theme ? { options: entry.themeOptions ?? [], palette: entry.palette ?? [], fonts: false } : null,
+        screenshots: (entry.shots ?? []).map(s => ({ caption: s.caption, dark: Boolean(s.dark) })) })
     }
     const picture = file => async (req, res) => { res.writeHead(200, { 'content-type': 'image/webp' }); res.end(await readFile(new URL(file, LISTED_FILES))) }
     if (entry.coverFile) app.routes[`GET /v1/marketplace/${entry.id}/cover`] = picture(entry.coverFile)
     if (entry.coverDarkFile) app.routes[`GET /v1/marketplace/${entry.id}/cover-dark`] = picture(entry.coverDarkFile)
     for (const [name, file] of Object.entries(entry.readmeImages ?? {})) app.routes[`GET /v1/marketplace/${entry.id}/readme/${name}`] = picture(file)
+    for (const [i, shot] of (entry.shots ?? []).entries()) {
+      app.routes[`GET /v1/marketplace/${entry.id}/shot/${i}`] = picture(shot.file)
+      if (shot.dark) app.routes[`GET /v1/marketplace/${entry.id}/shot/${i}-dark`] = picture(shot.dark)
+    }
     if (entry.icon) app.routes[`GET /v1/marketplace/${entry.id}/icon`] = (req, res) => { res.writeHead(200, { 'content-type': 'image/svg+xml' }); res.end(ICON) }
     if (theme) {
       app.routes[`GET /v1/marketplace/${entry.id}/theme.css`] = (req, res) => { res.writeHead(200, { 'content-type': 'text/css; charset=utf-8' }); res.end(css.get(entry.id)) }

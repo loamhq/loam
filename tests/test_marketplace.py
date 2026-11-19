@@ -442,6 +442,9 @@ try:
     check("README: code is kept as written, fenced and inline",
           ('<img src="kept-as-code.png">' in md, "[code](y.md)" in md, "`[not a link](x.md)`" in md),
           (True, True, True))
+    shown, shown_pics = mk.readme_markdown("<!-- loam:hero -->\n**Its promise.**\n<!-- /loam:hero -->\n\nIntro.\n\n<!-- loam:gallery -->\n![one](shots/one.png)\n*It at work.*\n<!-- /loam:gallery -->\n\n## More", {**at, "path": ""})
+    check("README: the gallery's own pictures are left to the gallery",
+          (shown, shown_pics), ("Intro.\n\n## More", []))
     root_md, root_pics = mk.readme_markdown("![a](a.png) [b](b.md)", {**at, "path": ""})
     check("README of a plugin at the repository's root",
           (root_md, root_pics), ("![a](a.png) [b](https://github.com/friend/loam-pet/blob/v1.0.0/b.md)", ["a.png"]))
@@ -459,12 +462,19 @@ try:
     (work / "dusk").mkdir(parents=True)
     (work / "dusk" / "PLUGIN.md").write_text(
         "---\nid: dusk\nname: Dusk\nversion: 1.2.0\napi: 0\nkind: [theme]\nauthor: Sam\n"
-        "icon: icon.svg\n---\nA warm dark theme, for evenings.\n")
+        "icon: icon.svg\ndescription: Warm lamplight for the evening.\n"
+        "screenshots:\n  - {src: shots/one.png, src_dark: shots/two.webp, caption: A thread at dusk}\n"
+        "  - {src: shots/one.png}\n"
+        "palette:\n  - {token: --paper-page, name: Ember, name_dark: Coal}\n"
+        "---\nA warm dark theme, for evenings.\n")
+    (work / "dusk" / "fonts.css").write_text("@font-face { font-family: Dusk; src: url(d.woff2) format('woff2'); }\n")
+    (work / "dusk" / "d.woff2").write_bytes(b"wOF2FONT")
     (work / "dusk" / "theme.css").write_text(':root[data-look="dusk"] { --paper-page: #222222; }\n')
     (work / "dusk" / "icon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
     (work / "dusk" / "cover.webp").write_bytes(b"RIFF0000WEBPVP8 ")
     (work / "dusk" / "shots").mkdir()
     (work / "dusk" / "shots" / "one.png").write_bytes(b"\x89PNG\r\n\x1a\nPIXELS")
+    (work / "dusk" / "shots" / "two.webp").write_bytes(b"RIFF0000WEBPVP8 DARK")
     (work / "dusk" / "README.md").write_text(
         "# Dusk\n\n<img src=\"shots/one.png\" alt=\"Dusk at work\">\n\n"
         "Read [the notes](NOTES.md). <script>alert(1)</script>\n")
@@ -488,7 +498,16 @@ try:
            about["declaration"]["touches"]["server"]), ([], False, False))
     check("details: the listing marked featured, its icon, cover and theme",
           (about["listing"]["featured"], about["icon"], about["cover"], about["cover_dark"], about["theme"]),
-          (True, True, True, False, {"options": []}))
+          (True, True, True, False, {"options": [], "fonts": True,
+                                     "palette": [{"token": "--paper-page", "name": "Ember", "name_dark": "Coal"}]}))
+    check("details: its promise and its screenshots, each with its caption and dark pair",
+          (about["description"], about["screenshots"]),
+          ("Warm lamplight for the evening.", [{"caption": "A thread at dusk", "dark": True}, {"caption": "", "dark": False}]))
+    check("its screenshots are served by number, light and dark",
+          (mk.file("dusk", "shot/0"), mk.file("dusk", "shot/0-dark")[1], mk.file("dusk", "shot/1")[1]),
+          ((b"\x89PNG\r\n\x1a\nPIXELS", "image/png"), "image/webp", "image/png"))
+    check("a listed theme's fonts.css and its font, for its preview before install",
+          (mk.file("dusk", "fonts.css")[1], mk.file("dusk", "font/d.woff2")), ("text/css; charset=utf-8", (b"wOF2FONT", "font/woff2")))
     check("details: the README at the tag, made safe, with the folder's picture kept",
           (about["readme"], about["readme_images"]),
           ("# Dusk\n\n![Dusk at work](shots/one.png)\n\nRead [the notes]"
