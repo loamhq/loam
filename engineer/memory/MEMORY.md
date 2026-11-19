@@ -1869,3 +1869,11 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   does): the jobs dir is read-only inside it, which is also why
   `tests/test_engineer.py` fails inside a job and passes outside. A probe
   job lands "nothing" and removes its own tree and branch.
+- **The suite starts real brokers, and their delivery pass reaches the
+  owner's state.** The first landing of this work left a real
+  `engineer-waiters/route` mark from a test's broker (twice: 22:15 and
+  22:31 PT). Two fixes: `tests/run-all` gives every test a scratch
+  `LOAM_WAITERS_DIR`, and `mark_route` writes the install's own route only
+  from inside `loam-session-broker.service` (its cgroup). Before this, any
+  test broker's `deliver_owed` could also have delivered, or dropped as
+  "thread gone", a real owed record.
