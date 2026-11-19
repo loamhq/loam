@@ -33,6 +33,8 @@ import { menuSurface } from '../menu-surface.js'
 import { sheetHandle } from '../chat-ui.js'
 import { KIND_ONE, KIND_MANY, KIND_ABOUT, KIND_HOME, KIND_LINE, TAGLINE, search, highlight, leadOf, sectionsOf, kindsListed, buildRequest, actionOf, plainTouches, reachOf, kindOf, byLoam, hueOf, tileRows, fineLine, madeBy, linkShape } from '../market.js'
 import { themePreview } from '../theme-preview.js'
+import { createThemeShowcase } from '../theme-showcase.js'
+import { pluginGallery } from '../plugin-gallery.js'
 import { creatorLinks } from '../creator-links.js'
 import { emptyState } from '../empty-state.js'
 
@@ -47,6 +49,8 @@ export function mount(host) {
   const installedRow = id => host.pluginLoader?.st.rows?.find(r => r.id === id && r.effective) ?? null
   const isInstalled = entry => Boolean(installedRow(entry.id) || entry.installed)
   const themeInstalled = id => host.theme.installed.some(t => t.id === id)
+  // A theme's listing shows it worn, before Try it or Get (2026-11-19).
+  const showcase = createThemeShowcase({ schedule: () => host.schedule(), mode: () => host.theme.current === 'dark' ? 'dark' : 'light' })
 
   // ------------------------------------------------------------ the list
   async function load(refresh = false) {
@@ -475,12 +479,20 @@ export function mount(host) {
           entry.description ? h('p', { class: 'market-listing-desc', text: entry.description }) : null),
         listingActs(entry, body, kind)),
       maker(entry, body),
+      theme && body?.theme && themeState(id) !== 'error' ? showcase.view({ key: `market-${id}`, look: id, name: entry.name, options: body.theme.options ?? [], palette: body.theme.palette ?? [], from: themeInstalled(id) ? 'installed' : 'market' }) : null,
+      gallery(entry, body),
       h('div', { class: `market-listing-body${article ? '' : ' market-listing-body-facts'}` }, article, facts(entry, d, kind)))]
   }
   function listingActs(entry, body, kind, { dock = false } = {}) {
     return h('div', { class: `market-listing-acts${dock ? ' market-dock-acts' : ''}`, key: dock ? 'dock-acts' : 'acts' },
       action(entry, { from: 'listing' }), tryButton(entry, '', { first: true }),
       !dock && body ? h('p', { class: 'market-fine', text: fineLine(body.declaration, kind) }) : null)
+  }
+  // Its screenshots (2026-11-19, `screenshots` in its PLUGIN.md, read at its
+  // link by the broker as `shot/<n>` and `shot/<n>-dark`).
+  function gallery(entry, body) {
+    const shots = (body?.screenshots ?? []).map((s, i) => ({ caption: s.caption, src: fileURL(entry.id, `shot/${i}`), src_dark: s.dark ? fileURL(entry.id, `shot/${i}-dark`) : null }))
+    return pluginGallery({ shots, dark: host.theme.current === 'dark', name: entry.name, key: `gallery:${entry.id}`, failed: st.failed, redraw: () => host.schedule() })
   }
   // The maker: their mark and name, how many things they have in the
   // Market, and the links they chose to show. With no links, only the name.
@@ -534,7 +546,7 @@ export function mount(host) {
     const kept = new Set(body.readme ? body.readme_images ?? [] : [])
     const images = { draw: (alt, dest) => kept.has(dest) ? h('img', { class: 'market-readme-img', src: fileURL(entry.id, `readme/${dest}`), alt: alt || '', loading: 'lazy', decoding: 'async' }) : null,
       group: nodes => h('div', { class: 'market-readme-figures' }, ...nodes) }
-    let nodes = [host.markdown?.(text, { images }) ?? h('p', { text })].flat()
+    let nodes = [host.markdown?.(text, { images, soft: true }) ?? h('p', { text })].flat()
     if (nodes.length === 1 && nodes[0]?.nodeType === 11) nodes = [...nodes[0].childNodes]
     const same = n => String(n ?? '').trim().toLowerCase()
     if (nodes[0]?.tagName === 'H1' && same(nodes[0].textContent) === same(entry.name)) nodes = nodes.slice(1)

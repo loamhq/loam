@@ -20,8 +20,9 @@ export function closeImageView() {
   if (before?.isConnected) before.focus?.({ preventScroll: true })
 }
 
-// `items`: [{ src, name, href }]; `index`: the one tapped.
-export function openImageView(items, index = 0) {
+// `items`: [{ src, name, href }]; `index`: the one tapped. `download: false`
+// (a plugin's screenshots, 2026-11-19) leaves Download out.
+export function openImageView(items, index = 0, { download = true, label = 'Image' } = {}) {
   closeImageView()
   if (!items?.length) return
   let at = Math.min(Math.max(index, 0), items.length - 1)
@@ -29,7 +30,7 @@ export function openImageView(items, index = 0) {
   const img = h('img', { class: 'image-view-img', alt: '', decoding: 'async' })
   const name = h('span', { class: 'image-view-name' })
   const count = many ? h('span', { class: 'image-view-count' }) : null
-  const save = h('a', { class: 'image-view-save image-view-stop', download: '', title: 'Download' }, icon.download(16), h('span', { text: 'Download' }))
+  const save = download ? h('a', { class: 'image-view-save image-view-stop', download: '', title: 'Download' }, icon.download(16), h('span', { text: 'Download' })) : null
   const show = (i) => {
     at = (i + items.length) % items.length
     const item = items[at]
@@ -37,11 +38,11 @@ export function openImageView(items, index = 0) {
     img.alt = item.name ?? ''
     name.textContent = item.name ?? ''
     if (count) count.textContent = `${at + 1} of ${items.length}`
-    save.href = item.href ?? item.src
+    if (save) save.href = item.href ?? item.src
   }
   const step = (d) => (e) => { e?.stopPropagation(); show(at + d) }
   const close = h('button', { class: 'iconbtn image-view-close image-view-stop', type: 'button', 'aria-label': 'Close', title: 'Close', onclick: (e) => { e.stopPropagation(); closeImageView() } }, icon.close(16))
-  const root = h('div', { class: 'image-view', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Image', onclick: (e) => { if (e.target === root || e.target.classList.contains('image-view-stage')) closeImageView() } },
+  const root = h('div', { class: 'image-view', role: 'dialog', 'aria-modal': 'true', 'aria-label': label, onclick: (e) => { if (e.target === root || e.target.classList.contains('image-view-stage')) closeImageView() } },
     h('div', { class: 'image-view-top' }, h('div', { class: 'image-view-title' }, name, count), save, close),
     h('div', { class: 'image-view-stage' }, img),
     many ? h('button', { class: 'iconbtn image-view-step prev image-view-stop', type: 'button', 'aria-label': 'Previous image', onclick: step(-1) }, icon.chevronLeft(18)) : null,

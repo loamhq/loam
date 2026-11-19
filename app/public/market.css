@@ -585,3 +585,52 @@
 .market-note-acts { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
 .market-card-name-plain { cursor: default; }
 .market-card-name-plain::after { content: none; }
+
+/* ---------------------------------------------------------------------------
+ * A theme worn before it is got (2026-11-19, theme-showcase.js): the scene of
+ * Loam in a frame with the page's own soft edge, its controls in a row under
+ * it, and the palette as named chips. The same pieces draw on a theme's page
+ * in Settings › Plugins, so none of this is the Market's alone.
+ * ------------------------------------------------------------------------- */
+.theme-show { container: theme-show / inline-size; display: flex; flex-direction: column; gap: var(--space-lg); padding: 36px 0 32px; border-bottom: 1px solid var(--paper-rule); }
+.theme-show-stage { position: relative; aspect-ratio: 880 / 520; width: 100%; border-radius: var(--radius-xl); overflow: hidden; background: var(--paper-card);
+  box-shadow: 0 0 0 1px var(--paper-rule), var(--shadow-float); transition: opacity var(--motion-normal) var(--ease-standard); }
+.theme-show-stage.is-loading { opacity: .55; }
+.theme-show-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: transparent; pointer-events: none; }
+@container theme-show (max-width: 599px) { .theme-show-stage { aspect-ratio: auto; height: 540px; } }
+.theme-show-controls { display: flex; flex-wrap: wrap; gap: var(--space-lg) var(--space-2xl); align-items: flex-end; }
+.theme-show-control { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; }
+.theme-show-label { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--paper-ink-3); }
+.theme-show-choices { flex-wrap: wrap; padding: 3px; box-shadow: inset 0 0 0 1px var(--paper-rule); }
+.theme-show-choices button { min-height: 36px; padding: 6px 14px; font-size: 13.5px; flex: 0 0 auto; }
+.theme-palette { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-sm) var(--space-lg); transition: opacity var(--motion-normal) var(--ease-standard); }
+.theme-palette.is-loading { opacity: .5; }
+.theme-swatch { position: relative; display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px; border-radius: var(--radius-pill); outline: none; }
+.theme-swatch:focus-visible { box-shadow: 0 0 0 2px var(--paper-ink); }
+.theme-swatch-chip { width: 34px; height: 34px; border-radius: 50%; background: var(--paper-card); box-shadow: inset 0 0 0 1px var(--paper-rule); }
+.theme-swatch-name { font-size: 14px; font-weight: 600; color: var(--paper-ink); line-height: 1.2; }
+.theme-swatch-hex { position: absolute; left: 6px; bottom: calc(100% + 4px); padding: 4px 8px; border-radius: var(--radius-sm); background: var(--paper-ink); color: var(--paper-page); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.2; white-space: nowrap; pointer-events: none; opacity: 0; transform: translateY(2px); transition: opacity var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard); }
+.theme-swatch-hex:empty { display: none; }
+.theme-swatch:hover .theme-swatch-hex, .theme-swatch:focus-visible .theme-swatch-hex { opacity: 1; }
+.theme-swatch:hover .theme-swatch-hex, .theme-swatch:focus-visible .theme-swatch-hex { transform: none; }
+.market-phone .theme-show { padding: var(--space-xl) 0; }
+.market-phone .theme-show-controls { gap: var(--space-lg); }
+.market-phone .theme-show-control { width: 100%; }
+.market-phone .theme-show-choices { width: 100%; }
+.market-phone .theme-show-choices button { flex: 1 1 auto; min-height: 44px; }
+
+/* A plugin's screenshots (plugin-gallery.js): one row, each a framed picture
+ * with its line under it, sliding sideways when there are more than fit. */
+.plugin-gallery { padding: 36px 0 8px; }
+.plugin-gallery-row { list-style: none; margin: 0; padding: 4px 4px 18px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(280px, calc((100% - 2 * var(--space-xl)) / 3)); gap: var(--space-xl);
+  overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.plugin-gallery-one .plugin-gallery-row { grid-auto-columns: minmax(0, 720px); }
+.plugin-shot { scroll-snap-align: start; display: flex; flex-direction: column; gap: var(--space-md); min-width: 0; }
+.plugin-shot-open { display: block; padding: 0; border: 0; background: var(--paper-card); border-radius: var(--radius-lg); overflow: hidden; cursor: zoom-in; aspect-ratio: 16 / 10;
+  box-shadow: 0 0 0 1px var(--paper-rule); transition: transform var(--motion-normal) var(--ease-standard), box-shadow var(--motion-normal) var(--ease-standard); }
+.plugin-shot-img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 0; }
+@media (hover: hover) { .plugin-shot-open:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px var(--paper-rule-strong), var(--shadow-float); } }
+@media (prefers-reduced-motion: reduce) { .plugin-shot-open { transition: none; } .plugin-shot-open:hover { transform: none; } }
+.plugin-shot-caption { margin: 0; font-size: 14.5px; line-height: 1.45; color: var(--paper-ink-2); }
+.market-phone .plugin-gallery { padding-top: var(--space-xl); }
+.market-phone .plugin-gallery-row { grid-auto-columns: 84%; gap: var(--space-lg); margin: 0 calc(-1 * var(--space-lg)); padding: 4px var(--space-lg) 14px; scroll-padding: 0 var(--space-lg); }

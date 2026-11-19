@@ -1,0 +1,70 @@
+/* A theme's preview (2026-11-19): the scene theme-scene.js draws, laid out
+ * like Loam at about half size, in tokens only, so the look it wears is the
+ * whole of its colour and type. Faces, buttons, the user's bubble and the
+ * pane's material are Loam's own classes (style.css, materials.css). */
+html[data-scene], html[data-scene] body { height: 100%; overflow: hidden; }
+html[data-scene] body { zoom: 1; }
+#scene { height: 100%; }
+
+.sc-wide {
+  width: 880px; height: 520px; display: flex; transform: scale(var(--scene-scale, 1)); transform-origin: 0 0;
+  background: var(--paper-page); color: var(--paper-ink); font-family: var(--font-body);
+}
+.sc-rail { width: 58px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 0; }
+.sc-brand { width: 30px; height: 30px; margin-bottom: 6px; }
+.sc-tab { width: 42px; height: 42px; border-radius: 13px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--paper-ink-2); font-size: 8.5px; font-weight: 600; }
+.sc-tab.on { background: var(--latte-foam); color: var(--paper-ink); }
+.sc-list { width: 232px; flex: none; padding: 14px 14px 0 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sc-list-head { display: flex; align-items: center; justify-content: space-between; color: var(--paper-ink-2); padding: 0 4px 4px; }
+.sc-list-tools { display: flex; gap: 14px; }
+.sc-title { font-family: var(--font-display); font-size: 25px; line-height: 1.1; color: var(--paper-ink); }
+.sc-faces { display: flex; gap: 12px; padding: 4px 4px 6px; }
+.sc-face { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 9.5px; color: var(--paper-ink-2); }
+.sc-kicker { margin: 6px 4px 0; font-size: 9px; }
+.sc-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: 16px; min-width: 0; }
+.sc-row.on { background: var(--paper-hover); }
+.sc-row-icon { width: 32px; height: 32px; border-radius: 10px; flex: none; display: flex; align-items: center; justify-content: center; background: var(--paper-card); color: var(--paper-ink-2); }
+.sc-row-words { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.sc-row-title { font-size: 12.5px; color: var(--paper-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-row.on .sc-row-title { font-weight: 600; }
+.sc-row-sub { font-size: 10.5px; color: var(--paper-ink-2); }
+.sc-row-time { font-size: 9.5px; color: var(--paper-ink-3); align-self: flex-start; }
+
+html[data-scene] .sc-pane { margin: 10px 10px 10px 0; border-radius: 20px; flex: 1; display: flex; flex-direction: column; padding: 0 28px; }
+.sc-head { display: flex; align-items: center; gap: 12px; height: 54px; flex: none; color: var(--paper-ink-2); }
+.sc-thread-title { font-family: var(--font-display); font-size: 16px; color: var(--paper-ink); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-thread { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding: 8px 18px 0; overflow: hidden; }
+.sc-msg-you { display: flex; justify-content: flex-end; }
+html[data-scene] .sc-msg-you .say.user { margin: 0; max-width: 72%; font-size: 12.5px; padding: 8px 12px; border-radius: 16px 16px 5px 16px; white-space: normal; }
+.sc-msg { display: flex; flex-direction: column; gap: 6px; }
+.sc-who { display: flex; align-items: center; gap: 8px; }
+.sc-name { font-size: 10.5px; color: var(--paper-ink-2); }
+.sc-steps { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600; color: var(--paper-ink-2); }
+.sc-text { margin: 0; font-family: var(--font-thread); font-size: 12.5px; line-height: 1.5; color: var(--paper-ink); }
+.sc-card { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 14px; background: var(--paper-raised); border: 1px solid var(--paper-rule); max-width: 340px; }
+.sc-card-icon { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: var(--latte-foam); color: var(--latte-coffee); flex: none; }
+.sc-card-words { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.sc-card-title { font-size: 12px; font-weight: 600; color: var(--paper-ink); }
+.sc-card-sub { font-size: 10px; color: var(--paper-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-chip { font-size: 9.5px; font-weight: 600; padding: 3px 8px; border-radius: var(--radius-pill); background: var(--latte-foam); color: var(--latte-coffee); }
+.sc-composer { margin: 10px 18px 16px; border: 1px solid var(--paper-rule-strong); border-radius: 16px; background: var(--paper-raised); padding: 10px 10px 8px 14px; display: flex; flex-direction: column; gap: 6px; flex: none; }
+.sc-typed { font-size: 12.5px; color: var(--paper-ink); }
+.sc-composer-row { display: flex; align-items: center; gap: 12px; color: var(--paper-ink-2); }
+.sc-tool { display: inline-flex; align-items: center; font-size: 10.5px; }
+.sc-model { flex: 1; }
+.sc-send { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--latte-espresso); color: var(--latte-espresso-ink); }
+
+/* A phone's thread, at full size, for a frame narrower than 600px. */
+.sc-phone { height: 100%; display: flex; background: var(--paper-page); color: var(--paper-ink); font-family: var(--font-body); }
+html[data-scene] .sc-phone .sc-pane { margin: 0; border-radius: 0; padding: 0 14px; }
+.sc-phone .sc-head { gap: 10px; }
+.sc-phone .sc-thread-title { font-size: 18px; }
+.sc-phone .sc-thread { padding: 6px 4px 0; gap: 16px; }
+.sc-phone .sc-text, .sc-phone .sc-msg-you .say.user { font-size: 15px; }
+html[data-scene] .sc-phone .sc-msg-you .say.user { font-size: 15px; max-width: 84%; }
+.sc-phone .sc-name { font-size: 12px; }
+.sc-phone .sc-card-title { font-size: 14px; }
+.sc-phone .sc-card-sub { font-size: 12px; }
+.sc-phone .sc-composer { margin: 10px 4px 14px; }
+.sc-phone .sc-typed { font-size: 15px; }
+.sc-phone .sc-tool { font-size: 12px; }

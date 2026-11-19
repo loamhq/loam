@@ -6,6 +6,7 @@ author: Loam contributors
 api: 0
 default_on: true
 kind: [theme]
+description: "Quiet greys and nothing else: Loam with every colour taken out, for when you want only the words."
 places: []
 overrides: []
 touches:
@@ -15,5 +16,12 @@ touches:
   server: false
 ---
 
-Plain is a token-only theme. Choose it separately for phone and desktop in
-Appearance. It runs no page code and contacts no network host.
+Plain takes the colour out of Loam: greys in light and in dark, so the page
+is only your words and your agents'. Choose it in Settings › Appearance,
+separately for your phone and your desktop.
+
+---
+
+## Technical details
+
+A token-only theme. It runs no page code and contacts no network host.
