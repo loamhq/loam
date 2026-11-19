@@ -3,6 +3,9 @@
 Each release's notes are written for the people who run Loam, in
 `docs/releases/<version>.md`. The app shows them when it offers an update.
 
+- [0.2.7](docs/releases/0.2.7.md), 2026-11-18: tell Loam's makers a bug, a
+  wish or an idea privately through your agent, with no GitHub account;
+  the GitHub issue stays for anyone who wants to follow it in public.
 - [0.2.6](docs/releases/0.2.6.md), 2026-11-18: Settings in seven: Account,
   Appearance, Agents, Connections (AI providers, services and API keys on
   one page), Plugins, Files and About Loam. A plugin's page and a new
