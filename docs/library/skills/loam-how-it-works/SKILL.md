@@ -50,6 +50,14 @@ A run starts when the box has memory for it; nothing caps how long it runs.
 the owner's agents know about them: the agents add to it, and it is the
 owner's to read and edit.
 
+**History and backup.** Every fifteen minutes the vault and AI Spaces are
+each committed to their own git history on the server, so a change anyone
+regrets can be got back from it; nothing leaves the machine. The Git backup
+plugin (Settings › Plugins, off until the owner turns it on) sends that
+history to a private repository of the owner's own. In Files, **Download as
+zip** on the vault, AI Spaces or any folder gives the owner a copy of it as
+it is now, without git's history or anything secret-shaped.
+
 **The engineer** builds and changes Loam itself and the owner's projects.
 An agent hands it a job as a brief; it works in its own copy of the
 repository and returns a receipt with the evidence. Every install has one
