@@ -627,12 +627,13 @@ def disconnect(tree: str, forget: bool = False) -> dict:
 # -- pushing ------------------------------------------------------------------
 
 def _notify(text: str, section: str = "Urgent") -> bool:
-    """One line on the owner's General board, as Loam's other warnings are
-    (lib/loam_inbox.py); written once per (who, words)."""
+    """A fact for the agent that hears when something in Loam needs
+    attention (lib/loam_attention.py, 2026-11-19): it decides whether the
+    owner hears of it, in its own words. Nothing is posted. Told once per
+    words. ``section`` is kept for callers and says nothing now."""
     try:
-        import loam_inbox  # noqa: PLC0415
-        vault = Path(os.environ.get("LOAM_GIT_BACKUP_INBOX_VAULT") or lc.VAULT)
-        return loam_inbox.append_comms(vault, "loam", text, LINK, section=section)
+        import loam_attention  # noqa: PLC0415
+        return loam_attention.tell(text, by="git-backup", evidence=LINK) == "told"
     except Exception:  # noqa: BLE001 -- a warning never stops a backup
         return False
 

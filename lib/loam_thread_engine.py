@@ -83,6 +83,11 @@ CAP_WAIT_S = 300
 # same line for the same agent in one thread is not given again within
 # SYSTEM_REPEAT_S, under any key. The record is in the threads' state.
 SYSTEM_TURNS = "system-turns.json"
+# A turn's mark (2026-11-19, batch B step 5): what the app shows on a turn
+# that could not run or ended without a reply, kept here and never in the
+# thread's record. One per (thread, member); "" is the thread's own (nobody
+# to reach). Cleared when that member's next turn starts.
+MARKS = "marks.json"
 SYSTEM_KEEP_S = 30 * 86400
 SYSTEM_REPEAT_S = 3600
 CAP_RETRY_S = 5
@@ -577,6 +582,7 @@ class ThreadEngine:
     def __init__(self, broker) -> None:
         self.broker = broker
         self._system_turns: dict | None = None   # read on first use
+        self._marks: dict | None = None          # read on first use
         self.queues: dict[tuple[str, str], asyncio.Queue] = {}
         self.workers: dict[tuple[str, str], asyncio.Task] = {}
         self.listeners: dict[str, set[asyncio.Queue]] = {}
@@ -836,6 +842,7 @@ class ThreadEngine:
             extra["reply_to"] = reply_to
         msg = threads.append(thread_id, threads.OWNER, text, **extra)
         self.publish(thread_id, {"type": "message.done", "message": msg})
+        self.clear_mark(thread_id, "")
         # A branch's prepared opening (2026-11-11) is spent once he writes.
         threads.set_draft(thread_id, None)
         if meta.get("archived") and meta.get("imported_from"):
@@ -862,7 +869,7 @@ class ThreadEngine:
             fan = [p for p in pool if p not in named and not threads.is_owner(p)]
             answer = named + fan
             if not answer:
-                self.system_line(thread_id, "Nobody to reach: bring someone in first")
+                self.mark(thread_id, "", "Nobody to reach: bring someone in first")
             steps.COUNTS["fanout"] += len(fan)
             steps.log(f"{thread_id}: @all from {lc.OWNER_NAME}, {len(answer)} turn(s) "
                       f"({', '.join(answer) or 'nobody'})")
@@ -1209,7 +1216,7 @@ class ThreadEngine:
                     # Asleep (2026-11-14): a thread's default or member that
                     # was archived answers nothing; its threads stay readable
                     # and go on with another agent.
-                    self.system_line(thread_id, (
+                    self.mark(thread_id, turn.persona, (
                         f"{threads.display(turn.persona)} is archived, so it "
                         f"won't answer. Tag another agent, or restore "
                         f"{threads.display(turn.persona)} in Settings › Agents › "
@@ -1229,7 +1236,7 @@ class ThreadEngine:
                             f"{threads.display(turn.persona)}'s turn failed: "
                             f"{getattr(exc, 'message', None) or exc}")
                 if text:
-                    self.system_line(thread_id, text)
+                    self.mark(thread_id, turn.persona, text)
             finally:
                 self._settle_inputs(key, [turn])
                 self.turns.pop(key, None)
@@ -1353,13 +1360,11 @@ class ThreadEngine:
                         active = self.turns.get(turn.key)
                         if active is not None:
                             active["waiting"] = text
-                        line = threads.append(turn.thread_id, "system", text,
-                                              kind="system")
+                        # State on the turn, never a line in the record
+                        # (2026-11-19): the app draws `waiting`.
                         self.publish(turn.thread_id, {
                             "type": "turn.waiting", "persona": turn.persona,
                             "text": text})
-                        self.publish(turn.thread_id, {"type": "message.done",
-                                                      "message": line})
                     await asyncio.sleep(CAP_RETRY_S)
                     continue
                 if resume and status in (404, 409):
@@ -1422,6 +1427,7 @@ class ThreadEngine:
         self.turns[turn.key] = {"persona": turn.persona, "engine": engine,
                                 "model": model, "started_at": threads.now_iso(),
                                 "started_ts": time.time()}
+        self.clear_mark(turn.thread_id, turn.persona)
         self.publish(turn.thread_id, {"type": "turn.started", "persona": turn.persona,
                                       "engine": engine, "model": model})
         rotated = self.rotation(turn, engine)
@@ -1777,9 +1783,11 @@ class ThreadEngine:
                       f"broker's stop before any reply; its input is given "
                       f"again at the next start")
         elif ended != "result" or not posted:
-            # A turn that died, or finished saying nothing: one quiet system
-            # line, never a persona message (2026-11-10).
-            self.system_line(turn.thread_id, ended_sentence(turn.persona, ended or "result"))
+            # A turn that died, or finished saying nothing: a mark on the
+            # turn in the app, never a line in the record (2026-11-19; a
+            # system line since 2026-11-10).
+            self.mark(turn.thread_id, turn.persona,
+                      ended_sentence(turn.persona, ended or "result"))
         # Codex states its thread id once the session is open; mark it too.
         mark(session, turn.thread_id)
         if ended == "result":
@@ -1947,10 +1955,10 @@ class ThreadEngine:
         """Every provider's own memory off, re-pinned and checked at each
         session start (first release L8; lib/loam_provider_memory.py): a CLI
         that updated itself can have turned one back on. A store that grew
-        is said once per growth, in comms.md under Important and never in
-        the thread (2026-11-16: the owner read such lines in a fresh chat as
-        an error; bookkeeping is not the conversation's). Never stops the
-        turn."""
+        is a fact handed to the system persona once (lib/loam_attention.py,
+        2026-11-19), never a line in the thread (2026-11-16: the owner read
+        such lines in a fresh chat as an error) nor on the board. Never
+        stops the turn."""
         try:
             def run() -> list[str]:
                 # Codex's pins ride CODEX_HOME/config.toml, which the broker
@@ -1958,22 +1966,81 @@ class ThreadEngine:
                 provider_memory.pin_claude()
                 provider_memory.pin_env()
                 grew = provider_memory.check(engine)[1]
-                import loam_inbox  # noqa: PLC0415
+                import loam_attention  # noqa: PLC0415
                 for text in grew:
                     steps.log(f"{thread_id}: provider memory: {text}")
-                    loam_inbox.append_comms(
-                        lc.VAULT, "loam", text,
-                        "`lib/loam_provider_memory.py` (the broker's check at a "
-                        "session start)", section="Important")
+                    loam_attention.tell(
+                        text, by="loam",
+                        evidence="`lib/loam_provider_memory.py` (the broker's "
+                                 "check at a session start)")
                 return grew
             await asyncio.to_thread(run)
         except Exception as exc:  # noqa: BLE001 -- a check never costs a turn
             steps.log(f"{thread_id}: the provider memory check failed: {exc}")
 
     def system_line(self, thread_id: str, text: str) -> dict:
+        """A line recording an act someone did in the thread (a draft made,
+        an agent made). Never a report of Loam's own state: that is a mark
+        (``mark``), since 2026-11-19."""
         line = threads.append(thread_id, "system", text, kind="system")
         self.publish(thread_id, {"type": "message.done", "message": line})
         return line
+
+    # -- marks on a turn (2026-11-19, batch B step 5) ------------------------
+    #
+    # "Waiting for room", "X is archived", "X's turn failed: ...", "X's turn
+    # ended without a reply": until 2026-11-19 each was a Loam line in the
+    # thread's record. The record is conversation only now; these are state
+    # the app draws on the member's turn, read with the thread
+    # (``marks_for``) and streamed as ``turn.mark``.
+
+    def _marks_all(self) -> dict:
+        if self._marks is None:
+            try:
+                self._marks = json.loads(
+                    (threads.STATE / MARKS).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                self._marks = {}
+            if not isinstance(self._marks, dict):
+                self._marks = {}
+        return self._marks
+
+    def _marks_save(self) -> None:
+        try:
+            path = threads.STATE / MARKS
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f".{path.name}.{os.getpid()}")
+            tmp.write_text(json.dumps(self._marks or {}), encoding="utf-8")
+            tmp.replace(path)
+        except OSError as exc:  # kept in memory still
+            steps.log(f"marks: the record could not be written ({exc})")
+
+    def mark(self, thread_id: str, persona: str, text: str) -> dict:
+        """Put ``text`` on ``persona``'s turn in this thread ("" for the
+        thread's own), replacing the one before. Nothing is written in the
+        record."""
+        row = {"persona": persona or None, "text": text, "at": threads.now_iso()}
+        self._marks_all().setdefault(thread_id, {})[persona or ""] = row
+        self._marks_save()
+        steps.log(f"{thread_id} {persona or '-'}: mark: {text}")
+        self.publish(thread_id, {"type": "turn.mark", **row})
+        return row
+
+    def clear_mark(self, thread_id: str, persona: str) -> None:
+        marks = self._marks_all().get(thread_id)
+        if not marks or (persona or "") not in marks:
+            return
+        marks.pop(persona or "", None)
+        if not marks:
+            self._marks_all().pop(thread_id, None)
+        self._marks_save()
+        self.publish(thread_id, {"type": "turn.mark", "persona": persona or None,
+                                 "text": None})
+
+    def marks_for(self, thread_id: str) -> list[dict]:
+        rows = (self._marks_all().get(thread_id) or {}).values()
+        return sorted((dict(r) for r in rows if isinstance(r, dict)),
+                      key=lambda r: str(r.get("at")))
 
     # -- system turns: once each, never in a loop (2026-11-17) ---------------
     #
@@ -2073,37 +2140,23 @@ class ThreadEngine:
         return "delivered"
 
     def deliver_note(self, note: dict) -> str:
-        """What an update left for the person's agent (2026-11-14, first
-        release L13, lib/loam_update.py): ``line`` posted in the thread as a
-        Loam line, and the agent given a turn whose input ends with
-        ``note`` -- where the release notes are, to tell the owner in its
-        own words. The thread is General unless the notice names one; the
-        agent is the thread's default unless it names one. Returns
-        ``delivered`` or why not."""
-        tid = note.get("thread") or threads.GENERAL_ID
-        try:
-            if tid == threads.GENERAL_ID:
-                threads.ensure_general()
-            meta = threads.read(tid)[0]
-        except threads.ThreadError:
-            return "thread gone"
-        persona = note.get("persona") or meta.get("default") or next(
-            iter(meta.get("members") or []), None)
-        if not persona:
-            return "no agent"
-        if persona not in meta["members"]:
-            return "not a member"
+        """What an update left (2026-11-14, first release L13,
+        lib/loam_update.py). Since 2026-11-19 (batch B step 5) nothing is
+        posted in General and no thread is given a turn: the notice is a
+        fact for the system persona (lib/loam_attention.py), its ``line``
+        the fact and its ``note`` what it came with, told once per notice.
+        That persona tells the owner in General, in its own words, if it
+        should. Returns ``delivered`` or why not."""
+        import loam_attention  # noqa: PLC0415
         text = note.get("line") or "Loam's update."
-        why = self.system_turn_allowed(f"update:{note.get('id')}", tid, persona, text)
-        if why:
-            return why
-        line = self.system_line(tid, text)
-        steps.log(f"{tid} {persona}: update notice {note.get('id')} "
-                  f"({note.get('kind')}) posted as {line.get('id')}; a turn "
-                  f"given to say it")
-        self.schedule(Turn(tid, persona, 0, f"update:{note.get('kind')}",
-                           note=note.get("note")))
-        return "delivered"
+        said = loam_attention.tell(text, by="loam update",
+                                   key=f"update:{note.get('id')}",
+                                   detail=note.get("note"))
+        steps.log(f"update notice {note.get('id')} ({note.get('kind')}): "
+                  f"{said} to the system persona; nothing posted")
+        if said == "repeat":
+            return "already delivered"
+        return "delivered" if said == "told" else said
 
     def keep_unspoken(self, turn: Turn, session, reply: "Reply", posted: list[dict],
                       through: str, why: str) -> None:
@@ -2311,13 +2364,11 @@ class ThreadEngine:
             return
         chain = turn.chain + 1
         if chain > threads.AGENT_CHAIN_CAP:
-            line = threads.append(
-                turn.thread_id, "system",
-                f"Paused after {threads.AGENT_CHAIN_CAP} turns between agents; "
-                f"{', '.join(threads.display(p) for p in named)} will answer "
-                f"when {lc.OWNER_NAME} next writes or tags them.",
-                kind="system")
-            self.publish(turn.thread_id, {"type": "message.done", "message": line})
+            # The thread's own mark, cleared when the owner next writes.
+            self.mark(turn.thread_id, "",
+                      f"Paused after {threads.AGENT_CHAIN_CAP} turns between agents; "
+                      f"{', '.join(threads.display(p) for p in named)} will answer "
+                      f"when {lc.OWNER_NAME} next writes or tags them.")
             return
         self._join(turn.thread_id, meta, named, by=turn.persona)
         for persona in named:

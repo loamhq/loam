@@ -206,27 +206,30 @@ def main() -> int:
               words, "NO ACTIVITY FOR 13 h 9 min (last engine event 2026-11-16T22:51:00Z); "
                      "it may be stuck; the launcher stopped 1 command that never returned")
 
-        # The second stop on one job posts one line to the briefing thread.
-        posted = []
-        fake = type(sys)("loam_threads")
-        fake.append = lambda tid, author, text, kind="message", **kw: posted.append((tid, author, kind, text))
-        sys.modules["loam_threads"] = fake
+        # The second stop on one job is one fact for the system persona
+        # (2026-11-19), and nothing in any thread.
+        told, posted = [], []
+        fake = type(sys)("loam_attention")
+        fake.tell = lambda text, **kw: told.append((text, kw)) or "told"
+        threads_fake = type(sys)("loam_threads")
+        threads_fake.append = lambda *a, **kw: posted.append(a)
+        sys.modules["loam_attention"] = fake
+        sys.modules["loam_threads"] = threads_fake
         try:
             on_stop = job_mod.stuck_stopped({}, {"thread": "t-1", "title": "Polish"}, "j1")
             record = {"pid": 7, "quiet_minutes": 30, "argv": "bash -c node --test",
                       "command": "node --test test/x.test.js"}
             on_stop(record, 1)
-            check("first stop: nothing posted", posted, [])
+            check("first stop: nothing told", told, [])
             on_stop(record, 2)
             on_stop(record, 3)
-            check("second stop: one system line to the briefing thread, and only one",
-                  [(tid, author, kind) for tid, author, kind, _ in posted], [("t-1", "system", "system")])
+            check("second stop: one fact, and only one", len(told), 1)
+            check("...keyed on the job", told[0][1].get("key"), "stuck:j1")
             check("...naming the job and the command",
-                  "“Polish”" in posted[0][3] and "node --test test/x.test.js" in posted[0][3], True)
-            posted.clear()
-            job_mod.stuck_stopped({}, {"thread": "", "title": "x"}, "j2")(record, 2)
-            check("a job with no thread posts nothing", posted, [])
+                  "“Polish”" in told[0][0] and "node --test test/x.test.js" in told[0][0], True)
+            check("nothing is posted in the briefing thread", posted, [])
         finally:
+            sys.modules.pop("loam_attention", None)
             sys.modules.pop("loam_threads", None)
 
         sessions = tmp / "sessions"

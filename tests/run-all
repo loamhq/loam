@@ -179,8 +179,11 @@ def sealed_env(scratch: Path) -> dict[str, str]:
     #                        (2026-11-18); a scratch one also keeps a test
     #                        from starting a real `loam-results-<agent>`
     #                        unit (lib/loam_results.kicks_enabled)
+    #   LOAM_ATTENTION_DIR   a test's fault would hand the box's system
+    #                        persona a fact (lib/loam_attention.py, 2026-11-19)
     for var, rel in (("LOAM_LOCK_DIR", "locks"), ("LOAM_SCHEDULE_STATE", "schedules"),
-                     ("LOAM_THREADS_STATE", "threads"), ("LOAM_WAITERS_DIR", "waiters")):
+                     ("LOAM_THREADS_STATE", "threads"), ("LOAM_WAITERS_DIR", "waiters"),
+                     ("LOAM_ATTENTION_DIR", "attention")):
         (scratch / rel).mkdir()
         env[var] = str(scratch / rel)
     env["LOAM_HOST_SETTINGS"] = str(scratch / "settings.json")

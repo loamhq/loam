@@ -31,6 +31,10 @@ and removed when the run ends; a ``given`` record found later belonged to a
 run that died after the input went in, and is logged and reported, not
 given twice (the same rule as a thread's sent result, step 2).
 
+**The system's facts** (lib/loam_attention.py, 2026-11-19) ride the same
+drain: when this agent is the system persona, every pending fact is heard
+in one fresh run after its results.
+
 **Started from three places**, none of them the broker: the job's own
 launcher the moment it writes the verdict (``kick_for``), the recovery
 sweep every five minutes (``kick_all``: a kick that met a drain still
@@ -138,9 +142,19 @@ def kick_for(job_id: str) -> str | None:
 
 def kick_all() -> dict:
     """The sweep's backstop: every agent owed a result by a run."""
-    agents = sorted({str(r.get("persona")) for r in lw.owed(by="run")
-                     if r.get("persona")})
-    return {agent: kick(agent) for agent in agents}
+    agents = {str(r.get("persona")) for r in lw.owed(by="run")
+              if r.get("persona")}
+    # And the system persona, when a fact about the system waits for it
+    # (lib/loam_attention.py): the same drain hears both.
+    try:
+        import loam_attention  # noqa: PLC0415
+        if loam_attention.pending():
+            who = loam_attention.persona()
+            if who:
+                agents.add(who)
+    except Exception:  # noqa: BLE001 -- the sweep goes on without it
+        pass
+    return {agent: kick(agent) for agent in sorted(agents)}
 
 
 def to_headless(record: dict, why: str) -> str:

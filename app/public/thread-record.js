@@ -192,6 +192,12 @@ export function applyThreadEvent(open, e) {
       else delete open.thread[key]
     }
   }
+  if (e.type === 'thread.snapshot' && Array.isArray(e.marks)) open.marks = e.marks
+  if (e.type === 'turn.mark') {
+    const persona = e.persona ?? null
+    open.marks = (open.marks ?? []).filter((m) => (m.persona ?? null) !== persona)
+    if (e.text) open.marks.push({ persona, text: e.text, at: e.at })
+  }
   if (e.type === 'thread.snapshot') {
     const previous = open.turns ?? [], turns = threadTurns(e)
     const continuing = new Set(turns.filter((turn) => previous.some((old) => old.persona === turn.persona
@@ -234,6 +240,7 @@ export function applyThreadEvent(open, e) {
       && !open.messages.some((m) => m.streaming && m.author === member.persona)) draftFor(open, member.persona)
   }
   if (e.type === 'turn.started') {
+    if (open.marks?.length) open.marks = open.marks.filter((m) => m.persona !== e.persona)
     open.liveReplies.delete(e.persona)
     open.turns = [...(open.turns ?? []).filter((t) => t.persona !== e.persona), e]
     open.activeTurns.add(e.persona)
@@ -351,6 +358,21 @@ export function withPending(messages, pending) {
   let at = messages.length
   while (at > 0 && messages[at - 1].streaming) at--
   return [...messages.slice(0, at), pending, ...messages.slice(at)]
+}
+// A turn's mark (2026-11-19): "waiting for room", "X is archived", "X's turn
+// failed: ...". Host state on the member's turn, never a message in the
+// record; drawn where it happened, as Loam's lines were, and gone when that
+// member's next turn starts (or, for the thread's own, when you next write).
+export function withMarks(messages, marks) {
+  if (!Array.isArray(marks) || !marks.length) return messages
+  const out = [...messages]
+  for (const mark of [...marks].sort((a, b) => String(a.at).localeCompare(String(b.at)))) {
+    if (!mark?.text) continue
+    let at = out.findIndex((m) => m.streaming || (m.at && String(m.at) > String(mark.at)))
+    if (at < 0) at = out.length
+    out.splice(at, 0, { id: `mark:${mark.persona ?? ''}`, kind: 'system', author: 'system', mark: true, persona: mark.persona ?? null, text: mark.text, at: mark.at })
+  }
+  return out
 }
 export function messageNumber(id) { return Number(String(id).match(/(\d+)$/)?.[1] ?? 0) }
 

@@ -15,13 +15,14 @@ the same way.
 
 What it says, and where:
 
-  clean        nothing, anywhere the owner looks. The run is in the log.
-  drift        one line under Important in `comms.md` per finding that was
-               not in the previous night's run. A finding that stays is the
-               same item, and comms is not a log; a finding that clears and
-               comes back is new again.
-  check broke  one line in the failure log (and its Urgent comms line), as
-               every wake failure has: check-drift exited with something
+  clean        nothing, anywhere. The run is in the log.
+  drift        each finding that was not in the previous night's run is a
+               fact handed to the system persona (lib/loam_attention.py),
+               which decides what to do; nothing is posted (2026-11-19). A
+               finding that stays is the same item; a finding that clears
+               and comes back is new again.
+  check broke  one line in the failure log, and the fact handed to the
+               system persona: check-drift exited with something
                other than 0 or 1, timed out, or said "drift" without a
                finding this could read. The last is an error on purpose:
                Python exits 1 on an uncaught traceback too, and neither a
@@ -47,7 +48,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
 
-from loam_inbox import append_comms, record_failure  # noqa: E402
+import loam_attention  # noqa: E402
+from loam_inbox import record_fault  # noqa: E402
 
 AGENTS = lc.ROOT
 VAULT = lc.VAULT
@@ -98,9 +100,10 @@ def watch(check: list[str] = CHECK, vault: Path = VAULT, log_path: Path = LOG,
                              timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         log(log_path, stamp, f"drift-watch: check-drift did not run: {exc}")
-        record_failure(POSTER, vault,
-                       f"The nightly check-drift did not run: {exc}. Nothing "
-                       f"was compared tonight; {LINK} has the run.")
+        record_fault(POSTER, vault,
+                     f"The nightly check-drift did not run: {exc}. Nothing "
+                     f"was compared tonight; {LINK} has the run.",
+                     key="check-drift did not run")
         return 2
 
     output = run.stdout + (f"\n[stderr]\n{run.stderr}" if run.stderr.strip() else "")
@@ -109,17 +112,18 @@ def watch(check: list[str] = CHECK, vault: Path = VAULT, log_path: Path = LOG,
 
     if run.returncode not in (0, 1) or (run.returncode == 1 and not found):
         last = (run.stderr.strip().splitlines() or ["no stderr"])[-1]
-        record_failure(POSTER, vault,
-                       f"The nightly check-drift failed (exit {run.returncode}): "
-                       f"{last}. Nothing was compared tonight; {LINK} has the "
-                       f"whole output.")
+        record_fault(POSTER, vault,
+                     f"The nightly check-drift failed (exit {run.returncode}): "
+                     f"{last}. Nothing was compared tonight; {LINK} has the "
+                     f"whole output.", key="check-drift failed")
         return 2
 
     previous = load_previous(state)
     for item in found:
         if item not in previous:
-            append_comms(vault, POSTER, f"new drift — {item}", LINK,
-                         section="Important")
+            loam_attention.tell(f"check-drift found new drift: {item}",
+                                by=POSTER, key=f"drift:{item}",
+                                evidence=LINK)
     save(state, found, stamp)
     return 0
 

@@ -6406,6 +6406,9 @@ class Server:
                 # first; `turn` is the earliest, for the clients that read one.
                 "turn": engine.active.get(thread_id),
                 "turns": engine.live_turns(thread_id),
+                # `marks` (2026-11-19): what a turn that could not run or
+                # ended without a reply shows; never in `messages`.
+                "marks": engine.marks_for(thread_id),
                 "pending_permissions": engine.pending(thread_id),
                 "board": {"path": meta["board"],
                           "markdown": threads_rec.board_text(meta)}}))
@@ -6740,6 +6743,7 @@ class Server:
                                             "thread": thread_id,
                                             "turn": self.threads.active.get(thread_id),
                                             "turns": self.threads.live_turns(thread_id),
+                                            "marks": self.threads.marks_for(thread_id),
                                             "pending": self.threads.pending(thread_id),
                                             "members": self.threads.summary(
                                                 thread_id)["members"]})

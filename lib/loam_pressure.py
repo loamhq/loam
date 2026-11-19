@@ -4,8 +4,10 @@ Every install needs it, so it is core (2026-11-14, first release L5; until
 then it lived inside the module that resizes this box, which is a plugin of
 the owner's now). RAM in use at or above ``PRESSURE_PCT`` for
 ``SUSTAIN_MIN`` consecutive minutes, or swap nearly gone, is an episode. Its
-start posts one line under Urgent in ``comms.md`` naming the pressure and the
-heaviest units; its end is recorded and posts nothing. The live reading is
+start hands the system persona one fact naming the pressure and the
+heaviest units (lib/loam_attention.py; nothing is posted since 2026-11-19,
+and an episode within three days of the last is the same fact); its end is
+recorded and tells nobody. The live reading is
 ``<state>/pressure.json``; a plugin that can add capacity reads it there, and
 says how to pull its lever in its own words to the agents.
 
@@ -97,7 +99,7 @@ def heavy_units(top: int = 3) -> list[str]:
 
 def pressure_step(prev: dict, r: dict, at: float) -> tuple[dict, str | None]:
     """The next pressure state from the last one and this minute's reading,
-    and the comms text to post if an episode just began. Pure, for tests."""
+    and the fact to tell if an episode just began. Pure, for tests."""
     streak = prev.get("streak", 0) + 1 if r["over"] else 0
     state = {**r, "at": iso(at), "streak": streak,
              "episode_since": prev.get("episode_since"),
@@ -126,8 +128,8 @@ def tick() -> dict:
         heavy = heavy_units()
         if heavy:
             post += ". Heaviest now: " + ", ".join(heavy)
-        import loam_inbox  # noqa: PLC0415
-        loam_inbox.append_comms(lc.VAULT, POSTER, post, LINK)
+        import loam_attention  # noqa: PLC0415
+        loam_attention.tell(post, by=POSTER, key="memory pressure", evidence=LINK)
         event("pressure", **r)
     elif prev.get("episode_since") and not state.get("episode_since"):
         event("pressure-end", since=prev["episode_since"])

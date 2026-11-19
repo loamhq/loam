@@ -1120,11 +1120,104 @@ def results_main(project: Path) -> int:
         pending = [r for r in loam_waiters.owed(by="run", persona=agent)
                    if r["job"] not in tried]
         if not pending:
-            return 0
+            break
         record = pending[0]
         tried.add(record["job"])
         if deliver_result(project, agent, vault, record) == "busy":
             return 0
+    # The system's facts (2026-11-19, batch B step 5, lib/loam_attention.py):
+    # heard by whichever persona is the system persona now, all pending in
+    # one run.
+    import loam_attention  # noqa: PLC0415
+    if loam_attention.persona() == agent and loam_attention.pending():
+        deliver_attention(project, agent, vault)
+    return 0
+
+
+def deliver_attention(project: Path, agent: str, vault: Path) -> str:
+    """Every pending fact about the system, one fresh run of the system
+    persona with them as its input. Nothing is posted. Returns ``busy``,
+    ``none``, ``ran`` or ``failed``."""
+    import loam_attention as la  # noqa: PLC0415
+    lane = la.LANE
+    os.environ["LOAM_WAKE"] = lane
+    started = now_iso()
+    CRASH.update(lane=lane, started=started, at="lock", launched=False)
+    try:
+        with loam_lock.hold(agent, lane, info={"engine": LANE_PROVIDER,
+                                               "model": LANE_MODEL}):
+            records = la.pending()
+            dead = [r for r in records if r.get("given")]
+            if dead:
+                # Their run died after the input went in: not given twice.
+                record_failure(agent, vault, (
+                    f"{lane}: the run that was handed {len(dead)} fact(s) about "
+                    f"the system ended without its record; they are not handed "
+                    f"over again: " + "; ".join(r["fact"][:120] for r in dead)))
+                la.done(dead)
+            records = [r for r in records if not r.get("given")]
+            if not records:
+                return "none"
+            mark_running(agent, started, vault, lane)
+            try:
+                la.mark_given(records)
+                prompt = la.input_text(records)
+                step("launch")
+                if LANE_PROVIDER == "codex":
+                    ok, extra, reply = _deliver_codex(project, None, None, None, prompt)
+                else:
+                    os.environ[loam_waiters.SESSION_ENV] = new = str(uuid.uuid4())
+                    result = subprocess.run(
+                        claude_argv(agent, lane, prompt, None, session_id=new),
+                        cwd=str(project), capture_output=True, text=True,
+                        check=False,
+                        timeout=loam_cron.lane_timeout_s(agent, "reflection"),
+                        stdin=subprocess.DEVNULL)
+                    try:
+                        envelope = json.loads(result.stdout or "{}")
+                    except json.JSONDecodeError:
+                        envelope = {}
+                    reply = envelope.get("result") or result.stdout or ""
+                    ok = (result.returncode == 0
+                          and envelope.get("subtype") in (None, "success"))
+                    extra = {"session_id": envelope.get("session_id") or new,
+                             "num_turns": envelope.get("num_turns"),
+                             "total_cost_usd": envelope.get("total_cost_usd"),
+                             "reply_chars": len(reply),
+                             **loam_usage.from_envelope(envelope)}
+                    if not ok:
+                        extra.update(returncode=result.returncode,
+                                     error=(result.stderr or result.stdout or "").strip()[:2000])
+                CRASH["launched"] = True
+                finished = now_iso()
+                row = {"ts": started, "finished": finished, "ok": ok, "lane": lane,
+                       "facts": [r["id"] for r in records], **extra,
+                       **cgroup_memory()}
+                if not ok:
+                    row["stage"] = "invoke"
+                    record_failure(agent, vault, (
+                        f"{lane}: the run handing over {len(records)} fact(s) about "
+                        f"the system failed ({str(extra.get('error') or '')[:300]}); "
+                        f"they are not handed over again: "
+                        + "; ".join(r["fact"][:120] for r in records)))
+                log_line(agent, row)
+                loam_schedule.log({"kind": "fire", "agent": agent,
+                                   "record": lane, "outcome": "ran" if ok else "failed",
+                                   "lane": lane, "started": started,
+                                   "finished": finished,
+                                   "facts": len(records),
+                                   "stage": None if ok else "invoke"})
+                la.done(records)
+                print(reply)
+                return "ran" if ok else "failed"
+            finally:
+                clear_running(agent)
+    except loam_lock.Busy as exc:
+        print(f"{lane}: {exc}; the facts wait for the next pass", file=sys.stderr)
+        log_line(agent, {"ts": started, "finished": now_iso(), "ok": False,
+                         "stage": "lock_timeout", "lane": lane,
+                         "detail": str(exc)})
+        return "busy"
 
 
 def _given_dead(agent: str, vault: Path, record: dict) -> None:

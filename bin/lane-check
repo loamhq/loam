@@ -10,8 +10,9 @@ loads and not about Remote Control, kept their nightly run here.
 
 **It exits 0 whatever it finds.** It is a report, not a gate: the layer that
 refuses should be the one that can also repair, and this one cannot. So it
-writes a line where the owner already looks -- the failure log and one line
-under Urgent in `comms.md` -- and gets out of the way.
+writes its line in the failure log, hands the finding to the system persona
+as a fact once (lib/loam_attention.py; nothing is posted, 2026-11-19), and
+gets out of the way.
 
 For an agent with a map (2026-11-18, lib/loam_loading.py) it sizes the map
 and nothing else: the map loads as a CLAUDE.md import, with no style to lose.
@@ -57,7 +58,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
 
 import loam_session as sess  # noqa: E402
-from loam_inbox import append_comms, record_failure, record_notice  # noqa: E402
+import loam_attention  # noqa: E402
+from loam_inbox import record_fault, record_notice  # noqa: E402
 from loam_memory import (  # noqa: E402
     CONVERSATION_LAYER,
     LIMIT_CHARS,
@@ -78,7 +80,7 @@ def findings(workspace: Path) -> tuple[list[str], list[tuple[str, str]]]:
     """``(problems, warnings)``.
 
     A problem is something the session will silently run without; it goes
-    to the log AND to comms. A warning is ``(key, text)`` for a file that is
+    to the log AND to the system persona. A warning is ``(key, text)`` for a file that is
     within reach of the limit but not over it (since 2026-09-07); it goes to
     the log alone, once a night, and the key is what makes a repeat a repeat.
     """
@@ -302,7 +304,7 @@ def github_check(vault: Path, today: str | None = None) -> list[str]:
     ``loam_github_app.nightly_warnings``: the installation and the user token
     each get one call (refreshing the user token if it is due, which is what
     keeps the six-month refresh token rolling while nobody touches GitHub),
-    and a warning is one Important line in comms -- the refresh token within
+    and a warning is one fact for the system persona -- the refresh token within
     fourteen days of its expiry, or the installation gone. Not connected is
     silence. Returns what was written, for the tests and the log."""
     import loam_github_app as github  # noqa: PLC0415
@@ -322,7 +324,7 @@ def github_check(vault: Path, today: str | None = None) -> list[str]:
         return []
     for warning in warnings:
         print(f"lane-check: github: {warning}", file=sys.stderr)
-        append_comms(vault, "github", warning, GITHUB_LINK, section="Important")
+        loam_attention.tell(warning, by="github", evidence=GITHUB_LINK)
     return warnings
 
 
@@ -352,7 +354,7 @@ def main() -> int:
     github_check(vault)
 
     # Warnings first and separately: the log line only, deduplicated per
-    # night inside record_notice, nothing in comms. A file at 9,900 is not
+    # night inside record_notice, told to nobody. A file at 9,900 is not
     # a broken layer and must not read as one.
     for key, warning in warnings:
         print(f"lane-check: {agent}: warning: {warning}", file=sys.stderr)
@@ -368,11 +370,11 @@ def main() -> int:
 
     for problem in problems:
         print(f"lane-check: {agent}: {problem}", file=sys.stderr)
-        # Both files, one call. The comms line is deduplicated on its text,
-        # which matters most here: this runs every night, so a finding that persists for a week would
-        # otherwise write seven identical lines into an outlet that is not a
-        # log. The log beside it still gets all seven.
-        record_failure(agent, vault, f"{ran_as}: {problem}")
+        # The log every night; the system persona once (2026-11-19,
+        # lib/loam_attention.py): a finding that persists for a week is one
+        # fact, keyed on the agent and the finding with its numbers out.
+        record_fault("lane-check", vault, f"{agent}: {ran_as}: {problem}",
+                     key=f"{agent}:{loam_attention.key_of(problem)}")
     return 0
 
 

@@ -59,9 +59,10 @@ status says so.
 
 **Release notes go to the person's agent**, never to the person as a
 changelog. A notice (``<state>/update/notices/``) is left for the broker,
-which posts one plain line in General and gives the person's default agent
-(General's default) a turn that names the notes to read and asks it to say
-in its own words what the update means for them. Four kinds: a newer
+which hands it to the agent chosen to hear of Loam's matters (Settings ›
+Agents; lib/loam_attention.py) as the input of a run, with nothing posted
+anywhere (2026-11-19); the notice names the notes to read, and the agent
+says in its own words, in General, what the update means for them. Four kinds: a newer
 release found (once per version), applied, refused, failed and rolled back.
 
 The broker's routes (``/v1/update``) and the CLI (``bin/loam-update``)
@@ -597,8 +598,10 @@ def save_notes(tag: str, old: str | None) -> Path:
 
 
 def notice(kind: str, line: str, note: str, key: str | None = None) -> dict | None:
-    """Leave a notice for the broker to deliver: ``line`` posted in General,
-    ``note`` the default agent's turn input. ``key`` makes it once only."""
+    """Leave a notice for the broker to deliver: ``line`` the fact and
+    ``note`` what it comes with, handed to the system persona
+    (lib/loam_attention.py; nothing is posted in General since 2026-11-19).
+    ``key`` makes it once only."""
     sent = read_json("told.json") or {}
     if key and key in sent:
         return None

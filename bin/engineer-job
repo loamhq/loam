@@ -1723,25 +1723,27 @@ def stuck_stopped(p: dict[str, Path], meta: dict, job_id: str):
     """The callback lib/loam_stuck.py calls after it stops a command that
     did not return (since 2026-11-17). The stop is already in the job
     directory's record, which the receipt reads; the second stop on one job
-    also posts one line to the thread that briefed it, because a job that
-    hangs twice is likely to hang again and someone should look."""
+    is also a fact for the system persona (lib/loam_attention.py; until
+    2026-11-19 a line in the briefing thread), because a job that hangs
+    twice is likely to hang again and someone should look."""
     def on_stop(record: dict, count: int) -> None:
         print(f"engineer-job: stopped a command that did not return "
               f"(pid {record['pid']}, {record['quiet_minutes']} min quiet): "
               f"{record['argv']}", file=sys.stderr, flush=True)
-        if count != 2 or not meta.get("thread"):
+        if count != 2:
             return
         title = meta.get("title") or job_id
-        text = (f"The engineer job “{title}” has hung on a command a second "
-                f"time: `{record['command'][:160]}` gave no answer for "
+        text = (f"The engineer job {job_id} (“{title}”, briefed by "
+                f"{meta.get('briefed_by') or 'unknown'}) hung on a command a "
+                f"second time: `{record['command'][:160]}` gave no answer for "
                 f"{record['quiet_minutes']} minutes, and Loam stopped it again "
-                f"so the job could carry on. The job is still running; if it "
-                f"keeps hanging, cancel it from Activity.")
+                f"so the job could carry on. The job is still running.")
         try:
-            import loam_threads  # noqa: PLC0415
-            loam_threads.append(meta["thread"], "system", text, kind="system")
-        except Exception as exc:  # noqa: BLE001 - a post never ends a job
-            print(f"engineer-job: the second-stop line was not posted: {exc}",
+            import loam_attention  # noqa: PLC0415
+            loam_attention.tell(text, by="engineer-job", key=f"stuck:{job_id}",
+                                evidence=str(p["dir"]) if "dir" in p else None)
+        except Exception as exc:  # noqa: BLE001 - telling never ends a job
+            print(f"engineer-job: the second stop was not told: {exc}",
                   file=sys.stderr)
     return on_stop
 

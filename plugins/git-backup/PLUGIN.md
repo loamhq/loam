@@ -60,8 +60,8 @@ with its whole history.
   private repository; Loam makes a key for that one repository and shows
   you where to add it. A folder or a drive needs no key at all.
 - **Know it is working.** This page shows when each was last backed up. If
-  backups stop, a plain line saying why reaches your General board, and
-  another when they work again.
+  backups stop, the agent you chose to hear of Loam's problems is told
+  why, and again when they work again; it tells you if you need to know.
 - **Choose how often.** Every 15 minutes, every hour, every 6 hours or once a
   day.
 - **Get everything back.** On a new Loam, connect the same two repositories

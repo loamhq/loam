@@ -12,7 +12,7 @@ What it holds:
 - a host's failure messages read as the right plain sentence;
 - connecting, testing and the first push; the routine push when due, and
   not before; a remote with history of its own is never overwritten, and
-  its failure reaches the owner's General board at the second attempt, and
+  its failure reaches the system persona as a fact at the second attempt, and
   its recovery after;
 - a repository anyone can read is refused at connect and at push, and
   nothing is sent;
@@ -91,7 +91,8 @@ email = "loam@{name}.test"
                         DBUS_SESSION_BUS_ADDRESS=f"unix:path={self.home}/run/none",
                         LOAM_CONTRIBUTIONS_FOLLOW="0", LOAM_CRONTAB_FILE="",
                         LOAM_HOST_SETTINGS=str(self.home / "state" / "host.json"),
-                        LOAM_OFFLINE="1", PYTHONDONTWRITEBYTECODE="1")
+                        LOAM_OFFLINE="1", PYTHONDONTWRITEBYTECODE="1",
+                        LOAM_ATTENTION_DIR=str(self.home / "attention"))
         self.vault, self.spaces = self.home / "vault", self.home / "agents"
 
     def starter(self):
@@ -137,8 +138,13 @@ email = "loam@{name}.test"
         self.state_file.write_text(json.dumps(s))
 
     def board(self) -> str:
+        """What the system persona was told (lib/loam_attention.py): the
+        board itself must stay untouched (2026-11-19)."""
         p = self.vault / "Inbox" / "boards" / "general.md"
-        return p.read_text() if p.exists() else ""
+        assert not p.exists() or "backup of your" not in p.read_text(), "nothing on the board"
+        told = sorted((self.home / "attention").glob("2*.json"))
+        return "\n".join(f"{r['fact']} · {r.get('evidence')}" for r in
+                         (json.loads(f.read_text()) for f in told))
 
 
 def bare(base: Path, name: str) -> Path:

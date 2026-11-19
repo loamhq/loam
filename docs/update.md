@@ -247,19 +247,20 @@ the current System/Loam.
 The update never shows the person a changelog. It leaves a notice in
 `<state>/update/notices/`. On its 30-second delivery pass, the broker:
 
-- posts the notice's `line` in General as a Loam line;
-- gives General's default agent (Iris on a fresh install) a turn whose
-  input is the notice's `note`.
+- hands it to the agent the owner chose to hear when something in Loam
+  needs attention (Settings › Agents; the first agent on a fresh install),
+  as a fact (`lib/loam_attention.py`): the notice's `line` is the fact and
+  its `note` what it comes with. Nothing is posted in General or anywhere
+  else (since batch B step 5, 2026-11-19); that agent's run, with the
+  notice as its input, tells the owner in General in its own words if it
+  should.
 
 The note names the notes file (`<state>/update/notes/<version>.md`) and
 asks the agent to tell the owner, briefly and in its own words, what the
 release means for them (`ThreadEngine.deliver_note`).
 
-A notice gives its turn once (since 0.2.1). The engine keeps every notice
-it has delivered in `<state>/threads/system-turns.json` for 30 days and
-never delivers the same one again, and the same line for the same agent
-in the same thread is not posted again within an hour under any id. The
-same holds for a finished job's delivery. A notice whose file cannot be
+A notice is told once: its id is the fact's key, and a key already told
+is not told again (`lib/loam_attention.py`). A notice whose file cannot be
 removed is logged once (`notice-stuck` in the update log, and the
 broker's journal) with the `chown` that fixes it. Until 0.2.1 a notice a
 root run had left was posted, and given a paid turn, every 30 seconds.

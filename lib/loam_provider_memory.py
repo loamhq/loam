@@ -30,9 +30,9 @@ What each provider has, as read on this box (2026-11-14):
 The check counts each store and compares it with the count first seen,
 kept in `<state>/provider-memory.json`, and says so once per growth
 (the new count becomes the one compared). A store that grew is a provider
-writing memory of its own, and the caller says so where it will be read:
-in comms.md, by the broker at a session start (and `provider-pin apply`
-says it after moving a CLI).
+writing memory of its own, and the caller says so: as a fact for the
+system persona (lib/loam_attention.py), by the broker at a session start
+(and `provider-pin apply` says it after moving a CLI).
 
 Antigravity's stores leave out what Loam's engineer jobs' own
 conversations made (2026-11-15, lib/loam_agy_files.py): the lead persona
@@ -53,8 +53,8 @@ growth is never said. What the check says for Antigravity now is anything
 under its tree that is none of the kinds known on 2026-11-16
 (``AGY_KNOWN``): a new store a later build adds is the one thing a memory of
 its own would look like. And nothing it says goes into a conversation: the
-broker posts a growth line in comms.md under Important, never in the
-session's thread.
+broker hands a growth to the system persona as a fact, never a line in the
+session's thread or on the board (2026-11-19).
 """
 
 from __future__ import annotations

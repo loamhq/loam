@@ -28,7 +28,7 @@ import { providerMark } from './marks.js'
 import { readEvents } from './sse.js'
 import { createLink } from './link.js'
 import { readField, caretPoint, setMarkdown } from './compose.js'
-import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuotes, editBoard, markBoardSeen, addBoardItem, applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readThreadBoard, readAcceptedMessage, compareThreads, messageSegments, firstMessageTitle, groupJoinNotices, withPending } from './thread-record.js'
+import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuotes, editBoard, markBoardSeen, addBoardItem, applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readThreadBoard, readAcceptedMessage, compareThreads, messageSegments, firstMessageTitle, groupJoinNotices, withPending, withMarks } from './thread-record.js'
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
@@ -515,9 +515,9 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   function event(e, ticket) {
     const o = st.open
     if (!o || ticket !== generation) return
-    if (['thread.snapshot', 'members', 'turn.started', 'turn.step', 'turn.waiting', 'turn.finished', 'message.delta', 'message.done', 'broker.user_message'].includes(e.type)) cancelRemoval(o.thread.id)
+    if (['thread.snapshot', 'members', 'turn.started', 'turn.step', 'turn.waiting', 'turn.mark', 'turn.finished', 'message.delta', 'message.done', 'broker.user_message'].includes(e.type)) cancelRemoval(o.thread.id)
     if (e.type === 'turn.started') awaitingSince.delete(e.persona)
-    if (['thread.snapshot', 'members', 'turn.started', 'turn.step', 'turn.waiting', 'turn.finished', 'message.delta', 'message.done'].includes(e.type)) o.eventVersion = (o.eventVersion ?? 0) + 1
+    if (['thread.snapshot', 'members', 'turn.started', 'turn.step', 'turn.waiting', 'turn.mark', 'turn.finished', 'message.delta', 'message.done'].includes(e.type)) o.eventVersion = (o.eventVersion ?? 0) + 1
     if (e.type === 'board.changed') {
       if (o.boardBusy || o.boardRefreshing) o.boardRefreshAfter = true
       else if (o.editing) o.boardChanged = true
@@ -1619,7 +1619,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       mentionButton: round(st.mention ? 'Remove mention' : 'Mention an agent', '@', toggleMention, { class: `plusbtn tt-mention-button${st.mention ? ' on' : ''}`, onpointerdown: (e) => e.preventDefault(), disabled: o.sending || Boolean(compose.dictating?.()), 'aria-expanded': String(Boolean(st.mention)) }) })
     // Place player rows before asking for the bar: visible rows own playback.
     const messageRows = [
-      ...messageRuns(groupJoinNotices(withPending(o.messages, o.pending), catalog())), ...unmatched.map(permission),
+      ...messageRuns(groupJoinNotices(withMarks(withPending(o.messages, o.pending), o.marks), catalog())), ...unmatched.map(permission),
     ]
     const listeners = listeningFaces()
     o.listeningInset = listeningInset(o.listeners.size > 0, o.listeningInset, o.atEnd)
