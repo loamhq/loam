@@ -109,6 +109,18 @@ def _change(thread_id: str, persona: str, ids, fn) -> None:
         _write(path, out)
 
 
+def bind(thread_id: str, persona: str, input_id: str, dispatch: dict) -> None:
+    """Write the exact dispatch before any provider IO. Never recreate a lost input."""
+    path = _path(thread_id, persona)
+    entries = items(thread_id, persona)
+    for entry in entries:
+        if entry["id"] == input_id:
+            entry["dispatch"] = dispatch
+            _write(path, entries)
+            return
+    raise OSError(f"missing input {input_id} for {thread_id}/{persona}")
+
+
 def mark_sent(thread_id: str, persona: str, ids) -> None:
     """The session has been given these inputs."""
     now = threads.now_iso()
@@ -121,6 +133,7 @@ def keep(thread_id: str, persona: str, ids) -> None:
     def unsend(item):
         item = dict(item)
         item.pop("sent", None)
+        item.pop("dispatch", None)
         return item
     _change(thread_id, persona, ids, unsend)
 

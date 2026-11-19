@@ -46,7 +46,9 @@ that tags nobody goes to the thread's default agent; `@Name` gives that
 agent a turn. Each thread has a board, a Markdown file of items for the
 owner in the vault's inbox. The session host runs the provider and records its
 output as it arrives. The thread worker turns that output into the reply the
-app shows. Both currently run in the service that answers the app, so a
+app shows. Before sending a turn, the worker saves the input, the bound
+session and where to read its output. A returning worker can use that
+record to finish filing the same reply. Both currently run in the service that answers the app, so a
 planned service restart waits for conversations to go idle.
 
 **Wakes and crons.** An agent also runs by itself on a schedule, and each

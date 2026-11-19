@@ -323,6 +323,10 @@ class Session:
         self.workspace = cfg.workspace(agent)
         self.proc: asyncio.subprocess.Process | None = None
         self.seq = 0
+        # A session id survives resumption. This identity belongs to the
+        # particular host object which owns outstanding provider writes.
+        self.incarnation = str(uuid.uuid4())
+        self._dispatches: dict[str, asyncio.Task] = {}
         self.subscribers: set[asyncio.Queue] = set()
         self.pending: dict[str, dict] = {}     # request_id -> can_use_tool request
         self.turns: list[dict] = []            # one record per result envelope
@@ -962,8 +966,19 @@ class Session:
             self.proc.stdin.write((json.dumps(obj) + "\n").encode())
             await self.proc.stdin.drain()
 
+    async def dispatch(self, dispatch_id: str, text: str, attachments=None,
+                       *, steer: bool = False) -> int | None:
+        """Repeat callers join the same write, even if its first caller left."""
+        task = self._dispatches.get(dispatch_id)
+        if task is None:
+            send = self.steer if steer else self.send_message
+            task = asyncio.create_task(send(text, attachments, dispatch_id=dispatch_id))
+            self._dispatches[dispatch_id] = task
+        return await asyncio.shield(task)
+
     async def send_message(self, text: str,
-                           attachments: list[dict] | None = None) -> int:
+                           attachments: list[dict] | None = None, *,
+                           dispatch_id: str | None = None) -> int:
         """A person's words, into the process AND into the durable log.
 
         ``broker.user_message`` exists because the CLI does not echo what a
@@ -1005,6 +1020,8 @@ class Session:
         event = {"type": "broker.user_message",
                  "session_id": self.id,
                  "text": text}
+        if dispatch_id:
+            event["dispatch_id"] = dispatch_id
         if attachments:
             event["attachments"] = attachments
         await self.emit(event)
@@ -1029,7 +1046,8 @@ class Session:
     STEERS = True
 
     async def steer(self, text: str,
-                    attachments: list[dict] | None = None) -> int | None:
+                    attachments: list[dict] | None = None, *,
+                    dispatch_id: str | None = None) -> int | None:
         """Words for the turn in flight, at its next safe boundary; the seq
         of the ``broker.user_message`` (``steered: true``) that records them,
         or None when there is no turn in flight to take them (the caller
@@ -1049,6 +1067,8 @@ class Session:
         attachments = attachments or []
         event = {"type": "broker.user_message", "session_id": self.id,
                  "text": text, "steered": True}
+        if dispatch_id:
+            event["dispatch_id"] = dispatch_id
         if attachments:
             event["attachments"] = attachments
         await self.emit(event)
@@ -1295,6 +1315,8 @@ class Session:
             self._append(event)
         except OSError as exc:
             self._not_saved(event, exc)
+            if event.get("type") == "broker.user_message" and event.get("dispatch_id"):
+                raise
         for queue in list(self.subscribers):
             queue.put_nowait(event)
 
@@ -1608,6 +1630,8 @@ class Session:
             self._turn_usage = None
             self._compacted_to = None
         self.last_activity = time.time()
+        if kind == "result":
+            obj["working_behind"] = self.working_behind()
         await self.emit(obj)
         if kind == "result" and self._unsaved is not None:
             # Something this turn said is not in the log -- its own result
@@ -2784,7 +2808,8 @@ class CodexSession(Session):
     # -- turns -------------------------------------------------------------
 
     async def send_message(self, text: str,
-                           attachments: list[dict] | None = None) -> int:
+                           attachments: list[dict] | None = None, *,
+                           dispatch_id: str | None = None) -> int:
         """``turn/start`` with the person's words, after the same
         ``broker.user_message`` a Claude turn logs. Attachments are named by
         path in the text, as for Claude; an image small enough is also given
@@ -2798,6 +2823,8 @@ class CodexSession(Session):
         attachments = attachments or []
         event = {"type": "broker.user_message", "session_id": self.id,
                  "text": text}
+        if dispatch_id:
+            event["dispatch_id"] = dispatch_id
         if attachments:
             event["attachments"] = attachments
         await self.emit(event)
@@ -2836,7 +2863,8 @@ class CodexSession(Session):
         return event["seq"]
 
     async def steer(self, text: str,
-                    attachments: list[dict] | None = None) -> int | None:
+                    attachments: list[dict] | None = None, *,
+                    dispatch_id: str | None = None) -> int | None:
         """``turn/steer`` into the root's open turn (2026-11-14, Codex
         0.169.0), guarded by ``expectedTurnId``: Codex refuses it when that
         turn is no longer the active one, so a steer racing the turn's end
@@ -2875,6 +2903,8 @@ class CodexSession(Session):
             return None
         event = {"type": "broker.user_message", "session_id": self.id,
                  "text": text, "steered": True, "turn_id": turn_id}
+        if dispatch_id:
+            event["dispatch_id"] = dispatch_id
         if attachments:
             event["attachments"] = attachments
         await self.emit(event)
@@ -2990,11 +3020,13 @@ class AntigravitySession(Session):
     STEERS = False
 
     async def steer(self, text: str,
-                    attachments: list[dict] | None = None) -> int | None:
+                    attachments: list[dict] | None = None, *,
+                    dispatch_id: str | None = None) -> int | None:
         return None
 
     async def send_message(self, text: str,
-                           attachments: list[dict] | None = None) -> int:
+                           attachments: list[dict] | None = None, *,
+                           dispatch_id: str | None = None) -> int:
         if self.state != "running":
             raise BrokerError(409, f"session {self.id} is not running")
         if self.proc is not None and self.proc.returncode is None:
@@ -3002,6 +3034,8 @@ class AntigravitySession(Session):
         attachments = attachments or []
         event = {"type": "broker.user_message", "session_id": self.id,
                  "text": text}
+        if dispatch_id:
+            event["dispatch_id"] = dispatch_id
         if attachments:
             event["attachments"] = attachments
         await self.emit(event)

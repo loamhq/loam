@@ -579,7 +579,7 @@ def render_message(msg: dict, quoted: dict | None = None) -> str:
     # an agent's name -- the hello thread's first message -- not a model's
     # turn (docs/starter.md).
     for key in ("persona", "engine", "model", "segments", "attachments", "late",
-                "link", "after", "steered", "preset"):
+                "link", "after", "steered", "preset", "journal_reply"):
         if msg.get(key):
             meta[key] = msg[key]
     text = (msg.get("text") or "").strip()
@@ -925,12 +925,23 @@ def _rewrite(path: Path, meta: dict) -> None:
 
 def append(thread_id: str, author: str, text: str, kind: str = "message",
            did: list[dict] | None = None, **extra) -> dict:
+    return append_once(thread_id, author, text, kind, did, **extra)[0]
+
+
+def append_once(thread_id: str, author: str, text: str, kind: str = "message",
+                did: list[dict] | None = None, **extra) -> tuple[dict, bool]:
+    """Atomically find or file a keyed message under the thread's existing lock."""
     if kind not in KINDS:
         raise ThreadError(400, f"`kind` is one of {', '.join(KINDS)}")
     if not extra.get("reply_to"):
         extra.pop("reply_to", None)
     with locked(VAULT):
         meta, msgs, path = read(thread_id)
+        if extra.get("journal_reply"):
+            existing = next((m for m in msgs if m["author"] == author
+                             and m.get("journal_reply") == extra["journal_reply"]), None)
+            if existing is not None:
+                return existing, False
         # Checked under the lock, against the record as written: a reply to
         # a message of another thread, or to none, is refused (2026-11-11).
         quoted = (check_reply_to(msgs, extra["reply_to"], thread_id)
@@ -942,7 +953,7 @@ def append(thread_id: str, author: str, text: str, kind: str = "message",
                "kind": kind, "text": text.strip(), "did": did or [], **extra}
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(render_message(msg, quoted))
-    return msg
+    return msg, True
 
 
 def replace_message(thread_id: str, msg_id: str, new: list[dict]) -> list[dict]:

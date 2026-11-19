@@ -215,6 +215,9 @@ class Turn:
         # Its entry in the member's input list on disk (2026-11-19, batch B
         # step 2, lib/loam_thread_inputs.py), and when it was queued.
         self.input_id: str | None = None
+        self.dispatch: dict | None = None
+        self.cursor: int | None = None
+        self.settle = True
         self.queued_at: str | None = None
         # Given again after a broker restart: its prompt says when it was
         # queued, so the persona can judge whether it still matters.
@@ -266,6 +269,7 @@ class Turn:
                    attachments=item.get("attachments") or None,
                    note=item.get("note"), briefed_at=item.get("briefed_at"))
         turn.input_id, turn.queued_at, turn.held = item["id"], item.get("at"), True
+        turn.dispatch = item.get("dispatch")
         return turn
 
 
@@ -926,6 +930,19 @@ class ThreadEngine:
                 self.steer_soon(turn.key)
             self.members_changed(turn.thread_id)
 
+    def schedule_message(self, turn, message_id, *, enqueue=True):
+        """Persist a message's delivery before waking its worker. A replay
+        can meet an already queued input or one the member already read."""
+        turn.input_id = f"{turn.thread_id}-{message_id}-{turn.persona}"
+        through = (threads.session_for(*turn.key) or {}).get("through")
+        if threads._num(through) >= threads._num(message_id) or any(
+                item["id"] == turn.input_id for item in inputs.items(*turn.key)):
+            return
+        turn.queued_at = threads.now_iso()
+        inputs.add(*turn.key, {**turn.entry(), "id": turn.input_id, "at": turn.queued_at})
+        if enqueue:
+            self.schedule(turn, persist=False)
+
     def _ensure_worker(self, key: tuple[str, str]) -> bool:
         """Start the member's worker when none is running; True when this
         started one."""
@@ -1048,14 +1065,28 @@ class ThreadEngine:
             text = "\n\n".join(parts)
             turn["steering"] = True
             self.members_changed(thread_id)
+            descriptor = None
             try:
-                seq = await session.steer(text, attachments or None)
+                if live.dispatch:
+                    descriptor = {"id": inputs.new_id(), "inputs": [t.input_id for t in taken],
+                                  "messages": [m["id"] for m in news],
+                                  "text": text, "attachments": attachments}
+                    live.dispatch["steers"].append(descriptor)
+                    inputs.bind(*key, live.input_id, live.dispatch)
+                    seq = await session.dispatch(descriptor["id"], text, attachments,
+                                                 steer=True)
+                else:
+                    seq = await session.steer(text, attachments or None)
             except Exception as exc:  # noqa: BLE001 - a refused steer is a queued message
                 steps.log(f"{thread_id} {persona}: steer failed ({exc!r})")
-                seq = None
+                seq = next((e["seq"] for e in session.replay(live.dispatch["since"])
+                            if e.get("dispatch_id") == descriptor["id"]), None) if descriptor else None
             finally:
                 turn.pop("steering", None)
             if seq is None:
+                if descriptor:
+                    live.dispatch["steers"].remove(descriptor)
+                    inputs.bind(*key, live.input_id, live.dispatch)
                 steps.COUNTS["steer_refused"] += 1
                 steps.log(f"{thread_id} {persona}: {', '.join(sorted(ids))} could "
                           f"not go into the turn in flight; kept in order for a "
@@ -1183,9 +1214,14 @@ class ThreadEngine:
                           f"that is gone; dropped")
                 continue
             counts["members"] += 1
+            carried = {input_id for parent in items
+                       for steer in (parent.get("dispatch") or {}).get("steers", [])
+                       for input_id in steer["inputs"]}
             for item in items:
+                if item["id"] in carried:
+                    continue
                 turn = Turn.of_entry(tid, persona, item)
-                if item.get("sent") and not threads.is_message_id(turn.reason):
+                if item.get("sent") and not turn.dispatch and not threads.is_message_id(turn.reason):
                     inputs.remove(tid, persona, [turn.input_id])
                     counts["dropped"] += 1
                     steps.log(f"{tid} {persona}: {turn.reason} was given to the "
@@ -1222,9 +1258,27 @@ class ThreadEngine:
                         f"{threads.display(turn.persona)} in Settings › Agents › "
                         f"Archived."))
                     continue
-                if self.already_heard(turn):
+                if not turn.dispatch and self.already_heard(turn):
                     continue
                 await self.run_turn(turn)
+            except OSError as exc:
+                if not turn.dispatch:
+                    self.mark(thread_id, turn.persona,
+                              f"{threads.display(turn.persona)}'s turn failed: {exc}")
+                    continue
+                # A failed cursor or markdown write is retryable. Keep the
+                # same intent at the head, even if a shutdown interrupts us.
+                turn.settle = False
+                steps.log(f"{thread_id} {turn.persona}: retrying dispatch "
+                          f"{turn.input_id} after IO failure ({exc})")
+                await asyncio.sleep(1)
+                entries = inputs.items(*key)
+                item = next((entry for entry in entries if entry["id"] == turn.input_id), None)
+                if item and not getattr(self.broker, "stopping", False):
+                    self._unclaim(key, [Turn.of_entry(*key, item)])
+            except asyncio.CancelledError:
+                turn.settle = False
+                raise
             except Exception as exc:  # noqa: BLE001 - one turn must not end the queue
                 if getattr(self.broker, "stopping", False):
                     # Its input is kept for the next start, unless the turn
@@ -1238,7 +1292,8 @@ class ThreadEngine:
                 if text:
                     self.mark(thread_id, turn.persona, text)
             finally:
-                self._settle_inputs(key, [turn])
+                if turn.settle:
+                    self._settle_inputs(key, [turn])
                 self.turns.pop(key, None)
                 self.turn_sessions.pop(key, None)
                 self.turn_live.pop(key, None)
@@ -1398,38 +1453,7 @@ class ThreadEngine:
         session.save()
         return session, (kept if resume else None)
 
-    async def run_turn(self, turn: Turn) -> dict | None:
-        meta, msgs, _ = threads.read(turn.thread_id)
-        if turn.persona not in meta["members"]:
-            return None
-        # A watch kept on this member's session since its last turn lets
-        # go: this turn reads the session from here.
-        self.stop_tail(turn.thread_id, turn.persona)
-        engine = meta["engines"].get(turn.persona) or threads.default_engine(turn.persona)
-        model = turn.model or (meta.get("models") or {}).get(turn.persona) or None
-        # The persona's own defaults (2026-11-13, its profile's "Runs on"):
-        # its model when the thread chose none, and its thinking level, on
-        # the provider they were set for.
-        mine = threads.persona_defaults(turn.persona)
-        effort = None
-        if mine["provider"] == engine:
-            model = model or mine["model"]
-            effort = mine["effort"]
-        others = [t["persona"] for t in self.live_turns(turn.thread_id)
-                  if t["persona"] != turn.persona]
-        if others:
-            # Started while another member's turn runs (2026-11-10): before,
-            # it waited for that turn to finish.
-            steps.COUNTS["parallel"] = steps.COUNTS.get("parallel", 0) + 1
-            steps.log(f"{turn.thread_id} {turn.persona}: turn starts while "
-                      f"{', '.join(others)} {'is' if len(others) == 1 else 'are'} "
-                      f"mid-turn; they run in parallel")
-        self.turns[turn.key] = {"persona": turn.persona, "engine": engine,
-                                "model": model, "started_at": threads.now_iso(),
-                                "started_ts": time.time()}
-        self.clear_mark(turn.thread_id, turn.persona)
-        self.publish(turn.thread_id, {"type": "turn.started", "persona": turn.persona,
-                                      "engine": engine, "model": model})
+    async def _prepare_turn(self, turn, meta, engine, model, effort):
         rotated = self.rotation(turn, engine)
         if rotated is not None:
             old = threads.session_for(turn.thread_id, turn.persona) or {}
@@ -1486,12 +1510,112 @@ class ThreadEngine:
             steps.log(f"{turn.thread_id} {turn.persona}: told of a failed "
                       f"scheduled run: {dark[:200]}")
         through = msgs[-1]["id"] if msgs else "m0"
+        return session, kept, prompt, through
+
+    async def _restore_steers(self, turn, session, history):
+        """Reconcile claimed FIFO batches before the replacement reader runs."""
+        intent = turn.dispatch
+        receipts = {e["dispatch_id"] for e in history if e.get("dispatch_id")}
+        entries = {i["id"]: i for i in inputs.items(*turn.key)}
+        refused = []
+        for steer in list(intent["steers"]):
+            accepted = steer["id"] in receipts
+            if not accepted and session.incarnation == intent["incarnation"]:
+                seq = await session.dispatch(steer["id"], steer["text"],
+                                             steer["attachments"], steer=True)
+                accepted = seq is not None
+            if accepted:
+                turn.carried.extend(steer["inputs"])
+            else:
+                refused.extend(Turn.of_entry(*turn.key, entries[i])
+                               for i in steer["inputs"] if i in entries)
+                intent["steers"].remove(steer)
+        if refused:
+            inputs.bind(*turn.key, turn.input_id, intent)
+            self._unclaim(turn.key, refused)
+
+    async def run_turn(self, turn: Turn) -> dict | None:
+        meta, msgs, _ = threads.read(turn.thread_id)
+        if turn.persona not in meta["members"]:
+            return None
+        # A watch kept on this member's session since its last turn lets
+        # go: this turn reads the session from here.
+        self.stop_tail(turn.thread_id, turn.persona)
+        engine = meta["engines"].get(turn.persona) or threads.default_engine(turn.persona)
+        model = turn.model or (meta.get("models") or {}).get(turn.persona) or None
+        # The persona's own defaults (2026-11-13, its profile's "Runs on"):
+        # its model when the thread chose none, and its thinking level, on
+        # the provider they were set for.
+        mine = threads.persona_defaults(turn.persona)
+        effort = None
+        if mine["provider"] == engine:
+            model = model or mine["model"]
+            effort = mine["effort"]
+        if turn.dispatch:
+            engine, model = turn.dispatch["engine"], turn.dispatch["model"]
+        others = [t["persona"] for t in self.live_turns(turn.thread_id)
+                  if t["persona"] != turn.persona]
+        if others:
+            # Started while another member's turn runs (2026-11-10): before,
+            # it waited for that turn to finish.
+            steps.COUNTS["parallel"] = steps.COUNTS.get("parallel", 0) + 1
+            steps.log(f"{turn.thread_id} {turn.persona}: turn starts while "
+                      f"{', '.join(others)} {'is' if len(others) == 1 else 'are'} "
+                      f"mid-turn; they run in parallel")
+        self.turns[turn.key] = {"persona": turn.persona, "engine": engine,
+                                "model": model, "started_at": threads.now_iso(),
+                                "started_ts": time.time()}
+        self.clear_mark(turn.thread_id, turn.persona)
+        self.publish(turn.thread_id, {"type": "turn.started", "persona": turn.persona,
+                                      "engine": engine, "model": model})
+        recovering = turn.dispatch is not None
+        if recovering:
+            intent = turn.dispatch
+            session = self.broker.load(intent["session_id"])
+            if session.agent != turn.persona or session.provider != engine:
+                raise ValueError("dispatch belongs to another provider session")
+            kept, prompt, through = intent["previous"], intent["prompt"], intent["through"]
+            history = session.replay(intent["since"])
+            accepted = any(e.get("dispatch_id") == turn.input_id for e in history)
+            same_host = session.incarnation == intent["incarnation"]
+            if not accepted and not same_host:
+                # The old host exited before its journalled write. A new
+                # process can take this intent with its original binding.
+                session = await self.broker.start_session(
+                    turn.persona, session.id, resume=bool(kept), provider=engine,
+                    model=model, effort=intent["effort"])
+                session.tell_time = False
+                session.idle_timeout_s = cfg.THREAD_IDLE_S
+                history = session.replay(intent["since"])
+                intent["incarnation"] = session.incarnation
+                inputs.bind(*turn.key, turn.input_id, intent)
+            self.turns[turn.key].update(engine=engine, model=model,
+                                        started_ts=intent["started_ts"])
+        else:
+            session, kept, prompt, through = await self._prepare_turn(
+                turn, meta, engine, model, effort)
+            accepted = False
+            if hasattr(session, "dispatch"):
+                if turn.input_id is None:
+                    raise OSError("turn must have a durable input before dispatch")
+                turn.dispatch = {
+                    "session_id": session.id, "incarnation": session.incarnation,
+                    "engine": engine, "model": model, "effort": effort,
+                    "previous": kept, "through": through, "since": session.seq,
+                    "prompt": prompt, "started_ts": self.turns[turn.key]["started_ts"],
+                    "steers": [],
+                }
+                inputs.bind(*turn.key, turn.input_id, turn.dispatch)
         turn.read_through = through
 
         queue: asyncio.Queue = asyncio.Queue()
+        if recovering:
+            for event in history:
+                queue.put_nowait(event)
+            if accepted and (not same_host or session.state != "running"):
+                queue.put_nowait(None)
         session.watch(queue)
         self.turn_sessions[turn.key] = session
-        self.turn_watch[turn.key] = queue
         self.turn_live[turn.key] = turn
         follow_s = STEER_FOLLOW_S.get(engine, 0.0)
         steered_since = False   # a steer went in since the last `result`
@@ -1499,7 +1623,7 @@ class ThreadEngine:
         # hook stops filing a second copy of its turns (2026-11-10).
         mark(session, turn.thread_id)
         # Replies the last turn's watcher never saw, posted before this one.
-        if kept:
+        if kept and not recovering:
             self.recover_late(turn, session, kept, engine, model)
 
         reply = Reply()
@@ -1560,7 +1684,14 @@ class ThreadEngine:
             reply = Reply()
 
         try:
-            if turn.attachments:
+            restored_steers = {}
+            if recovering:
+                await self._restore_steers(turn, session, history)
+                restored_steers = {s["id"]: s for s in turn.dispatch["steers"]}
+            if turn.dispatch:
+                if not accepted or (same_host and session.state == "running"):
+                    await session.dispatch(turn.input_id, prompt, turn.attachments)
+            elif turn.attachments:
                 await session.send_message(prompt, turn.attachments)
             else:
                 await session.send_message(prompt)
@@ -1572,6 +1703,10 @@ class ThreadEngine:
                 except OSError as exc:
                     steps.log(f"{turn.thread_id} {turn.persona}: input list not "
                               f"marked ({exc})")
+            self.turn_watch[turn.key] = queue
+            queued = self.queues.get(turn.key)
+            if queued is not None and not queued.empty():
+                self.steer_soon(turn.key)
             heard = False        # an assistant event since the last result
             empty_until = None   # watching on past an empty result, until
             # No deadline (2026-11-10): the watch ends on the turn's
@@ -1615,11 +1750,16 @@ class ThreadEngine:
                     # park or its end.
                     active["handing"] = False
                     continue
+                turn.cursor = event.get("seq", turn.cursor)
                 reply.keep(event)
                 kind = event.get("type")
                 top = event.get("parent_tool_use_id") is None
                 if kind == "broker.user_message" and event.get("steered"):
                     steered_since = True
+                    restore = restored_steers.pop(event.get("dispatch_id"), None)
+                    if restore and restore["messages"]:
+                        turn.read_through = restore["messages"][-1]
+                        self.turns[turn.key].setdefault("steered", []).extend(restore["messages"])
                     continue
                 if kind == "stream_event" and top:
                     inner = event.get("event") or {}
@@ -1670,7 +1810,8 @@ class ThreadEngine:
                     heard = False
                     empty_until = None
                     behind = getattr(session, "working_behind", None)
-                    more = bool(callable(behind) and behind())
+                    more = (event["working_behind"] if "working_behind" in event
+                            else bool(callable(behind) and behind()))
                     follow = steered_since and follow_s > 0
                     steered_since = False
                     flush("result", more or follow)
@@ -1714,6 +1855,12 @@ class ThreadEngine:
         # steered into it -- unless it died before a word came back: then
         # what it was shown is still news to the next turn, and nothing reads
         # as answered that was not (2026-11-14).
+        lock = self.steer_locks.get(turn.key)
+        if lock is not None and lock.locked():
+            # A provider may acknowledge a steer after its result arrived.
+            # Its inputs must settle with this turn, in their original order.
+            async with lock:
+                pass
         through = turn.read_through or through
         seen = through
         if ended in ("exit", "closed") and not posted and not reply.spoken() \
@@ -1722,7 +1869,7 @@ class ThreadEngine:
             steps.log(f"{turn.thread_id} {turn.persona}: turn ended ({ended}) "
                       f"before any reply; its messages stay new to the next turn")
         threads.remember_session(turn.thread_id, turn.persona, session.id,
-                                 engine, seen, seq=getattr(session, "seq", None),
+                                 engine, seen, seq=turn.cursor,
                                  context=session_context(session))
         if ended == "handed":
             # Its words were posted at its `result`; what it waits on is the
@@ -1791,12 +1938,13 @@ class ThreadEngine:
         # Codex states its thread id once the session is open; mark it too.
         mark(session, turn.thread_id)
         if ended == "result":
-            self.keep_watching(turn, session, engine, model)
+            self.keep_watching(turn, session, engine, model, backlog=queue)
         return posted[-1] if posted else None
 
     # -- after the result (2026-11-10) -----------------------------------------
 
-    def keep_watching(self, turn: Turn, session, engine: str, model: str | None) -> None:
+    def keep_watching(self, turn: Turn, session, engine: str, model: str | None,
+                      backlog: asyncio.Queue | None = None) -> None:
         """Keep a light watch on the member's session after its turn's
         `result`: a queue on the session, nothing polled, for as long as the
         session is alive (the reaper ends an idle thread session after
@@ -1814,7 +1962,7 @@ class ThreadEngine:
             return
         key = (turn.thread_id, turn.persona)
         self.stop_tail(*key)
-        queue: asyncio.Queue = asyncio.Queue()
+        queue = backlog if backlog is not None else asyncio.Queue()
         session.watch(queue)
         after = Turn(turn.thread_id, turn.persona, turn.chain, "notification",
                      model=turn.model)
@@ -2195,22 +2343,29 @@ class ThreadEngine:
         used = used_model(reply, session, model)
         if used:
             extra["model"] = used
-        msg = threads.append(turn.thread_id, turn.persona, text, did=reply.did, **extra)
-        steps.COUNTS["replies"] += 1
-        steps.write(turn.thread_id, steps.entry(
-            msg, turn.thread_id, session.id, reply.events, ended=why))
+        seq = next((event["seq"] for event in reversed(reply.events)
+                    if isinstance(event.get("seq"), int)), None)
+        if seq is not None:
+            extra["journal_reply"] = f"{session.id}/{seq}"
+        msg, created = threads.append_once(turn.thread_id, turn.persona, text,
+                                           did=reply.did, **extra)
+        if created:
+            steps.COUNTS["replies"] += 1
+        if created or not steps.read(turn.thread_id, msg["id"]):
+            steps.write(turn.thread_id, steps.entry(
+                msg, turn.thread_id, session.id, reply.events, ended=why))
         # `through` stays what the turn read: its own reply is not news to it
         # (the next turn skips its own messages), and another member's message
         # that landed while it ran is (2026-11-10). `seq` moves on.
         read = turn.read_through or (threads.session_for(*turn.key) or {}).get("through") \
             or msg["id"]
         threads.remember_session(turn.thread_id, turn.persona, session.id,
-                                 engine, read, seq=getattr(session, "seq", None))
+                                 engine, read, seq=seq if seq is not None else getattr(session, "seq", None))
         self.publish(turn.thread_id, {"type": "message.done", "message": msg})
         if reply.launched:
             self.stamp_launched(turn.key, reply, msg)
         if mentions:
-            self.agent_mentions(turn, threads.read(turn.thread_id)[0], text)
+            self.agent_mentions(turn, threads.read(turn.thread_id)[0], text, message_id=msg["id"])
         return msg
 
     def shown_draft(self, turn: Turn, reply: "Reply") -> dict | None:
@@ -2304,12 +2459,16 @@ class ThreadEngine:
                       f"(session {session.id[:8]}, after seq {since}) recovered")
             said, marked = self.reply_mark(turn, late.spoken(), {})
             said, marked = reply_images(said, marked)
-            msg = threads.append(turn.thread_id, turn.persona, said, did=late.did,
-                                 engine=engine, late=True, **marked,
-                                 **({"model": used} if (used := used_model(
-                                     late, session, model)) else {}))
-            steps.write(turn.thread_id, steps.entry(msg, turn.thread_id, session.id,
-                                                    chunk, ended="late"))
+            last = chunk[-1].get("seq")
+            if last is not None:
+                marked["journal_reply"] = f"{session.id}/{last}"
+            msg, created = threads.append_once(
+                turn.thread_id, turn.persona, said, did=late.did, engine=engine,
+                late=True, **marked, **({"model": used} if (used := used_model(
+                    late, session, model)) else {}))
+            if created or not steps.read(turn.thread_id, msg["id"]):
+                steps.write(turn.thread_id, steps.entry(msg, turn.thread_id, session.id,
+                                                        chunk, ended="late"))
             self.publish(turn.thread_id, {"type": "message.done", "message": msg})
 
     def posted(self, thread_id: str, message_id: str, by: str) -> dict:
@@ -2356,7 +2515,7 @@ class ThreadEngine:
                   f"{' (chain cap)' if named and not woke else ''}")
         return {"woke": woke}
 
-    def agent_mentions(self, turn: Turn, meta: dict, text: str) -> None:
+    def agent_mentions(self, turn: Turn, meta: dict, text: str, message_id=None) -> None:
         # `@all` from a persona is plain text: no fan-out (2026-11-10), so two
         # agents cannot set every member answering every other.
         named = [p for p in threads.mentions(text) if p != turn.persona]
@@ -2372,4 +2531,8 @@ class ThreadEngine:
             return
         self._join(turn.thread_id, meta, named, by=turn.persona)
         for persona in named:
-            self.schedule(Turn(turn.thread_id, persona, chain, "mention"))
+            mention = Turn(turn.thread_id, persona, chain, "mention")
+            if message_id:
+                self.schedule_message(mention, message_id)
+            else:
+                self.schedule(mention)
