@@ -14,7 +14,7 @@ can move an agent from one to another without it forgetting who it is.
 - **They change the app for you.** When you want Loam to work differently,
   you ask, and an agent changes it, Loam's own code included. They build and
   host your own sites and apps too.
-- **Finished out of the box.** An opinionated design and seven themes, and
+- **Finished out of the box.** An opinionated design, two themes built in and more in the Market, and
   everything else is open to change.
 - **Open source, under the AGPL.** Nobody can lock you out of your agents,
   and that includes Loam.

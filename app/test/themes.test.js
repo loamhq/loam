@@ -11,6 +11,7 @@ import { appAgainst, closing, fakeBroker } from './harness.js'
 import { themeContrasts } from '../tools/theme-contrast.mjs'
 import { agentLook, setAvatarColours } from '../public/sessions.js'
 import { AGENT_COLOURS, AGENT_TINTS, LEGACY_AGENT_COLOURS, readAvatarColours } from '../public/avatar-colours.js'
+import { allRoots, readThemeCSS } from './listed-themes.mjs'
 
 // The claim document is served outside the app under an isolated CSP. It must
 // carry its own tokens; release-u4 tests enforce its self-contained boundary.
@@ -26,10 +27,10 @@ test('all app CSS and JavaScript use semantic colour tokens; only core defaults 
 })
 
 test('installed manifests contain partial, token-only overrides', async () => {
-  const installed = await loadThemes(), defaults = await loadCoreTokens()
+  const installed = await loadThemes(await allRoots()), defaults = await loadCoreTokens()
   assert.deepEqual(installed.themes.map(t => t.id), ['latte', 'autumn', 'deep-forest', 'foundry', 'mist-trail', 'plain', 'yosemite'])
   for (const { id } of installed.themes) {
-    const css = await readFile(`public/themes/${id}/theme.css`, 'utf8')
+    const css = await readThemeCSS(id)
     assert.equal(validateThemeCSS(css, id, defaults), css)
     const valid = `:root[data-look="${id}"] { --radius-md: 17px; }`
     for (const mutation of [valid.replace('--radius-md:', 'color:'), valid + 'body { display:none; }', valid + '@import "bad.css";', valid.replace('17px', 'url(https://example.invalid/track)'), valid.replace('--radius-md:', '--unknown:'), valid.replace('--radius-md:', '--c1:'), valid.replace('17px', 'var(--unknown)'), valid + valid, '@media (prefers-color-scheme:dark) {' + valid + '}']) {
@@ -95,7 +96,7 @@ test('the same manifest loader reads an additional directory layer without chang
 })
 
 test('supported text pairs clear 4.5:1 and avatar initials clear 3:1 in light and dark', async () => {
-  for (const { id } of (await loadThemes()).themes) for (const row of await themeContrasts(id)) assert.ok(row.ratio >= row.minimum, `${id}: ${JSON.stringify(row)}`)
+  for (const { id } of (await loadThemes(await allRoots())).themes) for (const row of await themeContrasts(id)) assert.ok(row.ratio >= row.minimum, `${id}: ${JSON.stringify(row)}`)
 })
 
 test('theme changes share host persistence, survive a fresh client, and reject unknown IDs', async () => {

@@ -113,7 +113,7 @@ export function progressiveProse({ build, plain, changed, cache = new Map(), Obs
       scheduled = false
       if (stopped) return
       const entry = queue.pop()
-      if (entries.get(entry.key) === entry) { changed(() => { entry.node = build(entry.text); entry.ready = true }) }
+      if (entries.get(entry.key) === entry) { changed(() => { entry.node = build(entry.text, entry.context); entry.ready = true }) }
       pump()
     })
   }
@@ -123,10 +123,13 @@ export function progressiveProse({ build, plain, changed, cache = new Map(), Obs
   }
   return {
     cache,
-    node(text, key) {
+    // `context` (2026-11-18: a reply's pictures) goes to build and plain; a
+    // different `context.signature` builds the node again.
+    node(text, key, context = null) {
       let entry = entries.get(key)
-      if (!entry || entry.text !== text) {
-        entry = { key, text, ready: !Observer, node: Observer ? plain(text, key) : build(text) }
+      const signature = context?.signature ?? null
+      if (!entry || entry.text !== text || entry.signature !== signature) {
+        entry = { key, text, signature, context, ready: !Observer, node: Observer ? plain(text, key, context) : build(text, context) }
         entries.set(key, entry)
       }
       return entry.node

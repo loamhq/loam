@@ -97,3 +97,36 @@ test('a plugin’s own settings (settings.entry) are drawn on its page and saved
   assert.deepEqual(calls.at(-1), ['PATCH', '/plugins/doc-comments/settings', { values: { reach: 'staging' } }])
   assert.match(text(draw()), /Saved\./)
 })
+
+// Images 1.1.0 (2026-11-18): a setting reads for a person. A choice shows its
+// words, a note sits under it, and the model names wait behind Advanced.
+test('a plugin’s settings show choice labels and notes, and keep advanced ones behind Advanced', async () => {
+  installDom()
+  const registry = createRegistry(), calls = []
+  const entries = [{ key: 'backend', label: 'Service', choices: ['auto', 'openai', 'google'], labels: { auto: 'Automatic', openai: 'OpenAI', google: 'Google' }, note: 'Automatic uses OpenAI when you have that key.', default: 'auto' },
+    { key: 'openai_model', label: 'OpenAI model', choices: null, default: 'gpt-image-2', advanced: true }]
+  const row = { id: 'images', key: 'yours:images', name: 'Images', layer: 'yours', on: true, effective: true, switch: 'plugin', contributes: { 'settings.entry': entries } }
+  const loader = { st: { rows: [row], loaded: true, failures: new Map(), writing: new Set() } }
+  const api = async (method, path, body) => {
+    calls.push([method, path, body])
+    if (path.endsWith('/settings') && method === 'GET') return { id: row.id, entries, values: { backend: 'auto', openai_model: 'gpt-image-2' } }
+    if (path.endsWith('/settings') && method === 'PATCH') return { id: row.id, values: body.values }
+    return { plugin: row }
+  }
+  const settings = createPluginSettings({ loader, theme: { value: {} }, host: { registry, settingsHead: title => h('h2', { text: title }), api } })
+  await settings.open(row)
+  const page = h('div', {}, settings.view())
+  const words = text(page)
+  assert.match(words, /Automatic/)
+  assert.doesNotMatch(words, /\bauto\b/, 'a choice shows its words, not its id')
+  assert.match(words, /Automatic uses OpenAI when you have that key\./)
+  const advanced = all(page, 'plugin-entry-advanced')
+  assert.equal(advanced.length, 1)
+  assert.match(text(advanced[0]), /^Advanced/)
+  assert.match(text(advanced[0]), /OpenAI model/)
+  const select = all(page, 'field-input').find(n => n.tagName === 'SELECT' || n.tag === 'select')
+  select.value = 'google'
+  select.fire('change', { currentTarget: select })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(calls.at(-1), ['PATCH', '/plugins/images/settings', { values: { backend: 'google' } }], 'the value saved is the choice’s id')
+})

@@ -8183,6 +8183,10 @@ async def amain(addr: str, port: int) -> int:
     # Codex's model list, so the + menu has a Codex row before any Codex
     # session has run. Off the loop, and fail-soft: the cached list stays.
     asyncio.create_task(fetch_codex_models())
+    # The first-party looks that left the shipped set in 0.2.5 (2026-11-18):
+    # one the person was using or had chosen is installed from its Market
+    # link, once (lib/loam_listed_themes.py). Off the loop, and fail-soft.
+    asyncio.create_task(keep_listed_themes())
     tcp = await asyncio.start_server(server.handle, addr, port)
     print(f"session-broker listening on {addr}:{port} "
           f"(admission by memory: reserve {cfg.MEMORY_RESERVE_MB} MB, "
@@ -8204,6 +8208,19 @@ async def amain(addr: str, port: int) -> int:
         await stop.wait()
     await shutdown(broker, server)
     return 0
+
+
+async def keep_listed_themes() -> None:
+    try:
+        import loam_listed_themes  # noqa: PLC0415
+        kept = await asyncio.to_thread(loam_listed_themes.keep)
+        for pid, entry in kept.items():
+            print(f"themes: {pid} {entry['how']} ({entry['why']})"
+                  + (f": {entry.get('link_error') or entry.get('error')}"
+                     if entry["how"] != "link" and (entry.get("link_error") or entry.get("error")) else ""),
+                  file=sys.stderr, flush=True)
+    except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
+        print(f"themes: keeping the listed looks failed ({exc!r})", file=sys.stderr, flush=True)
 
 
 async def fetch_codex_models() -> None:

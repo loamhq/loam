@@ -18,6 +18,7 @@ import {
 } from '../public/sun-shift.js'
 import { loadCoreTokens } from '../src/themes.js'
 import { installDom } from './fakedom.js'
+import { allRoots, readThemeCSS } from './listed-themes.mjs'
 
 const place = { latitude: 37.8, longitude: -122.4, source: 'geolocation', timeZone: 'America/Los_Angeles' }
 const held = () => ({
@@ -45,7 +46,7 @@ async function themeTokenMaps(themeId) {
   const defaults = await loadCoreTokens()
   const light = new Map(defaults.light), dark = new Map(defaults.dark)
   if (themeId !== 'plain') {
-    const css = (await readFile(new URL(`../public/themes/${themeId}/theme.css`, import.meta.url), 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+    const css = (await readThemeCSS(themeId)).replace(/\/\*[\s\S]*?\*\//g, '')
     for (const block of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       const sel = block[1].trim()
       if (sel.includes('[data-option-')) continue

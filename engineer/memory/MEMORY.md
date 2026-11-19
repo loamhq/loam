@@ -1406,6 +1406,27 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   is set only after the module's top-level awaits, so wait for it. The
   owner's appearance may follow the sun: set the browser clock, not the
   setting, for light and dark.
+## 2026-11-18 — an agent's images, drawn where it wrote them
+
+- **Keep the reference; don't take it off.** The morning's version took
+  `![alt](path)` off the message text and put the file in `attachments`, and
+  the page still showed the raw syntax: it rebuilds a reply's words from the
+  full record (raw events), which never lost it, and from live deltas. The
+  same lesson as reply markers, from the other side: when three sources feed
+  the page, make the page's rule work on what all three already say. The
+  reference stays in the text and each attachment carries `refs` (the
+  destinations as written); the page draws a picture at a reference whose
+  destination is in `refs`, and leaves anything else as text.
+- **The app's thread renderer is `page/conversation.js`'s `renderText`,
+  not `markdown` itself.** It wraps `markdown(text, {copy, onLink})`; an
+  option passed to `renderText` is dropped unless that wrapper forwards it.
+  Unit tests with the default `renderText = markdown` passed while the real
+  page ignored the option. Only the browser capture found it.
+- **A lazy picture inside a just-opened thread may never load in a capture**:
+  the thread settles at its end after opening and undoes a single scroll.
+  Re-scroll inside the wait (`tools/capture-reply-images.mjs`).
+- **`image_size` reads PNG/GIF/WebP/JPEG headers** with seeks, no library,
+  so the page can hold a picture's exact space before it loads.
 
 ## 2026-11-18 — the Market for agents: search and the card in a thread
 
@@ -1430,3 +1451,40 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `mcp/.venv/bin/python` beside the repo, and the venv lives at
   `lc.MCP_VENV` (`~/.local/share/loam/mcp-venv`). Run it by hand with
   `VENV_PYTHON` pointed there to see it pass.
+
+## 2026-11-18 — 0.2.5: the Market's first listings
+
+- **Two themes ship; five are listed.** Autumn, Deep Forest, Foundry, Mist
+  Trail and Yosemite live in `plugins/_listed/<id>/` and are published to
+  `loamhq/plugins` as `<id>/` at the tag `<id>-v<version>` (one repository,
+  so a tag names its plugin; the link regex takes no `/` in a ref). The
+  core keeps their per-look CSS (`materials.css`, `face-paints.css`,
+  `signature-avatar.js`), which applies whenever one is installed.
+- **Moving a shipped theme out needs a keep step**, because `loam update`
+  runs the *old* release's code. `lib/loam_listed_themes.py` runs at the
+  broker's first start on the new code: a moved look in use, or with saved
+  option choices, is installed from its link by the normal two calls, else
+  copied from the release as built here; once per id
+  (`<state>/plugins/kept-themes.json`), so a later removal sticks.
+  Appearance keeps a stored theme id and options even when the theme is
+  gone, which is what lets the step find them.
+- **The appearance handoff is the shipped catalog.**
+  `node tools/appearance-registry.js --write` after a shipped theme moves;
+  `tests/test_settings.py`'s parity check reads the shipped folders only.
+- **A theme's fonts were never servable from Yours.** The broker's files
+  route served `page/`, `assets/`, `theme.css`, `PLUGIN.md` and covers, so
+  an installed Autumn wore a fallback face. A theme now serves `fonts.css`
+  and top-level `.woff2`/`.woff`; the app serves the CSS checked at
+  `/theme-fonts/<id>.css` (`themeFontsCSS`: `@font-face` only, files beside
+  it). Found only by walking a fresh install: unit tests of each half passed.
+- **`settings.entry` takes `labels`, `note` and `advanced`** (hosts before
+  0.2.5 ignore them, so a listed plugin using them still installs there).
+- **The push gate checks paths with no `allow`.** A file under a folder
+  whose name the deny list holds can never land; only the pattern itself
+  can change. Line `allow`s are exact paths: moving an allowed file needs
+  its line moved.
+- **The marketplace's list workflow pushes `list.json` itself**
+  (`permissions: contents: write` in the workflow beats the org's read-only
+  default). Merge listings one at a time and wait for each push run, or the
+  runs race to push. `raw.githubusercontent.com` serves the old list for
+  about five minutes after; read it through the API to check.

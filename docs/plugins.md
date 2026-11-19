@@ -182,6 +182,16 @@ it does `image`.
 `LOAM_PLUGIN_SHIPPED` (folders joined by `:`) and `LOAM_PLUGINS_DIR` replace
 them, for the tests and for another install.
 
+**Two themes ship, Latte and Plain** (since 0.2.5, 2026-11-18). The other
+first-party looks (Autumn, Deep Forest, Foundry, Mist Trail, Yosemite) are
+plugins from the Market: their source is `plugins/_listed/<id>/` in this
+repository, published to `loamhq/plugins` at `<id>-v<version>`. An install
+that was using one, or had saved choices for one, has it installed from its
+link at the broker's first start on 0.2.5, or from the release's own copy
+when GitHub cannot be reached (`lib/loam_listed_themes.py`, once per look).
+A theme's display faces are its own `fonts.css`, which the app serves checked
+(app/docs/appearance.md).
+
 **First-party plugins whose halves are the machine's** ship in this
 runtime's own `plugins/` (2026-11-14, first release L9), the third shipped
 folder after loam-ui's two: `reviewer` (on by default: its timer, its
@@ -251,7 +261,13 @@ contributes:
     - key: greeting
       label: What it says
       choices: [hello, hi]     # or no choices: text, at most 500 characters
+      labels: {hello: Hello, hi: "Hi there"}   # optional: words per choice
+      note: A sentence under it, for the person.   # optional, at most 300
       default: hello
+    - key: model
+      label: Model
+      advanced: true           # optional: behind the page's quiet Advanced
+      default: big
   engineer.env:                # an engineer job's environment
     - name: HELLO_MODE
       setting: greeting        # or value: <text>, or secret: <name in the secrets file>
@@ -271,6 +287,14 @@ contributes:
   vault.folder:                # a vault folder it uses (2026-11-14, L9)
     - setting: folder          # or path: Daily
 ```
+
+**A `settings.entry` reads for a person** (2026-11-18, 0.2.5): `labels`
+gives a choice its words in the page's menu (the stored value is still the
+choice), `note` is one sentence under the control, and `advanced: true`
+puts the entry behind a quiet **Advanced** at the end of the plugin's
+settings, for what a person rarely needs (a model's name). Hosts before
+0.2.5 ignore all three, so a plugin that uses them still installs there and
+shows its plain labels.
 
 **`schedule.kind` may name `setting:`**, one of its own `settings.entry`
 keys: the timer follows that value whenever it is a valid schedule in the

@@ -5,6 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { stem, search, highlight, leadOf, sectionsOf, kindsListed, dateline, buildRequest, actionOf, plainTouches, reachOf } from '../public/market.js'
 import { LISTINGS } from './market-fixture.mjs'
+import { allRoots, readThemeCSS } from './listed-themes.mjs'
 
 const ids = list => list.map(e => e.id)
 
@@ -99,7 +100,7 @@ test('what a plugin touches, in plain words', () => {
 test('a listed theme’s CSS is held to an installed theme’s rules before the page wears it', async () => {
   const { marketThemeCSS } = await import('../src/themes.js')
   const { readFile } = await import('node:fs/promises')
-  const css = (await readFile('public/themes/autumn/theme.css', 'utf8')).replaceAll('data-look="autumn"', 'data-look="ember"')
+  const css = (await readThemeCSS('autumn')).replaceAll('data-look="autumn"', 'data-look="ember"')
   const out = await marketThemeCSS('ember', css)
   assert.match(out, /\.theme-preview\[data-look="ember"\]/, 'its swatch scope comes with it')
   await assert.rejects(marketThemeCSS('ember', ':root[data-look="ember"] { --paper-page: url(https://example.invalid/x.png); }'), /Invalid theme value/)

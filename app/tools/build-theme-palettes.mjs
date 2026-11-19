@@ -28,7 +28,7 @@ const status = {
 }
 for (const theme of newThemes) {
   const themeOptions = options.map(option => option.id === 'agent-shapes' && theme.id === 'foundry' ? { ...option, default: 'rounded-square' } : option)
-  const folder = new URL(`../public/themes/${theme.id}/`, import.meta.url)
+  const folder = new URL(`../../plugins/_listed/${theme.id}/`, import.meta.url)
   await mkdir(folder, { recursive: true })
   const shared = { 'font-body': 'Figtree, system-ui, sans-serif', 'font-thread': "'Thread Figtree', Figtree, system-ui, sans-serif", 'font-mono': "'JetBrains Mono', ui-monospace, monospace", 'font-display': `'${theme.font}', Georgia, serif` }
   if (theme.id === 'foundry') Object.assign(shared, { 'radius-sm': '4px', 'radius-md': '8px', 'radius-lg': '10px', 'radius-xl': '14px', 'radius-pill': '8px' })

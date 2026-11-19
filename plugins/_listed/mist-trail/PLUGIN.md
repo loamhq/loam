@@ -1,10 +1,9 @@
 ---
-id: deep-forest
-name: Deep Forest
+id: mist-trail
+name: Mist Trail
 version: 1.0.0
 author: Loam contributors
 api: 0
-default_on: true
 kind: [theme]
 image: cover.webp
 image_position: 50% 42%
@@ -18,4 +17,4 @@ touches:
   server: false
 ---
 
-Deep Forest is drawn from the fern floor and soft canopy light of an old forest.
+Mist Trail is drawn from waterfall spray, fir shade and cedar trunks along a forest trail.

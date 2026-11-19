@@ -1,6 +1,7 @@
 import { isImage, attachmentFilePath } from './attach.js'
 import { openImageView } from './image-view.js'
 import { h, kept, blob, avatarLook, icon } from './ui.js'
+import { imageRefs } from './markdown.js'
 
 // Rendering primitives shared by threads and page panels.
 // State and protocol adapters stay with their respective screens.
@@ -198,6 +199,137 @@ export function messageFiles(files = [], key = null) {
     if (keyedViews.size > KEYED_MAX) keyedViews.delete(keyedViews.keys().next().value)
   }
   return kept(view)
+}
+
+// An agent's images, drawn where it wrote them (2026-11-18, evening).
+//
+// The reply keeps its `![a few words](path)` lines; the host checked each
+// file and put it on the message with `refs`, the destinations as written
+// that name it. A reference whose destination is one of those draws its
+// picture in place, through the same Files download route the owner's files
+// use; any other reference is text, as it was written. A message from the
+// morning before has attachments without `refs` and text the images were
+// taken off: its pictures stay under its words, and a reference to one in
+// its full record (the raw events still have them) draws nothing.
+//
+// `key` is the message's own, so a thread read again (new attachment
+// objects, same files) keeps the same picture nodes and they do not load
+// again. While a reply streams the host has not named its files yet: a
+// finished reference to a local picture keeps its place as a quiet empty
+// frame, and an unfinished one at the end is held back, not shown as marks.
+const figureViews = new Map(), FIGURES_MAX = 300
+const mark = (node, name) => { const now = node.getAttribute('class') ?? ''; if (!now.split(/\s+/).includes(name)) node.setAttribute('class', `${now} ${name}`.trim()) }
+const LOCAL_PICTURE = /^<?\s*(?![a-z][a-z0-9+.-]*:(?!\/\/\/))[^<>]*\.(png|jpe?g|webp|gif|avif)\s*>?(\s+"[^"]*")?$/i
+const PICTURE_REF = /!\[([^\]\n]{0,300})\]\(\s*(<[^>\n]+>|[^)\n]+?)\s*\)/g
+const refPath = (dest) => {
+  let path = String(dest ?? '').trim()
+  if (path.startsWith('<') && path.endsWith('>')) path = path.slice(1, -1).trim()
+  else path = path.replace(/\s+"[^"]*"$/, '')
+  if (/^file:\/\//i.test(path)) path = path.slice(7)
+  try { path = decodeURIComponent(path) } catch { /* as written */ }
+  return path
+}
+export function replyImages(message, key = null, { streaming = false } = {}) {
+  const all = (message?.attachments ?? []).filter((file) => file && typeof file === 'object')
+  const pictures = all.filter((file) => isImage(file.type) && attachmentFilePath(file.path) !== null)
+  const placed = pictures.some((file) => Array.isArray(file.refs))
+  const find = (dest) => {
+    const written = String(dest ?? '').trim()
+    if (placed) return pictures.find((file) => file.refs?.includes(written)) ?? null
+    const path = refPath(written)
+    return pictures.find((file) => path === file.path || path.endsWith(`/${file.path}`)) ?? null
+  }
+  const src = (file) => `/api/files/download?${new URLSearchParams({ root: file.root === 'spaces' ? 'spaces' : 'vault', path: attachmentFilePath(file.path) })}`
+  const failed = new Set()
+  const gallery = () => pictures.filter((file) => !failed.has(file)).map((file) => ({ src: src(file), href: src(file), name: file.alt || file.name || '' }))
+  const open = (file) => {
+    const items = gallery(), at = pictures.filter((f) => !failed.has(f)).indexOf(file)
+    if (at >= 0) openImageView(items, at)
+  }
+  function figure(file, alt) {
+    const ratio = file.width > 0 && file.height > 0 ? file.width / file.height : null
+    const words = String(alt ?? '').trim()
+    const cacheKey = key === null ? null : `${key}|${file.root}|${file.path}|${words}`
+    const signature = JSON.stringify([src(file), file.width, file.height, words])
+    const had = cacheKey === null ? null : figureViews.get(cacheKey)
+    if (had?.signature === signature) { had.open = open; had.failed = failed; if (had.missing) failed.add(file); return had.stub }
+    const record = { signature, open, failed, missing: false }
+    const node = h('figure', { class: 'reply-figure', style: { '--ratio': ratio ? ratio.toFixed(4) : '1.3333' } })
+    const view = h('a', { class: 'reply-image', href: src(file), 'aria-label': words ? `Open image: ${words}` : 'Open image', onclick: (e) => {
+      // A plain tap opens it full size; a modified click keeps the browser's own.
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button > 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (!record.missing) record.open(file)
+    } },
+    h('img', { src: src(file), alt: words, width: file.width > 0 ? String(file.width) : null, height: file.height > 0 ? String(file.height) : null,
+      loading: 'lazy', decoding: 'async',
+      onload: (e) => {
+        const img = e.target
+        if (!ratio && img.naturalWidth > 0 && img.naturalHeight > 0) node.style.setProperty('--ratio', (img.naturalWidth / img.naturalHeight).toFixed(4))
+        mark(node, 'loaded')
+      },
+      onerror: () => {
+        record.missing = true
+        record.failed.add(file)
+        mark(node, 'missing')
+        view.removeAttribute('href')
+        view.setAttribute('aria-label', 'Image unavailable')
+      } }),
+    h('span', { class: 'reply-image-missing', 'aria-hidden': 'true' }, icon.image(16), h('span', { text: 'Image unavailable' })))
+    node.append(view)
+    if (words) node.append(h('figcaption', { class: 'reply-caption', text: words }))
+    record.stub = kept(node)
+    record.stub.__ratio = ratio ?? 4 / 3
+    if (cacheKey !== null) {
+      figureViews.delete(cacheKey); figureViews.set(cacheKey, record)
+      if (figureViews.size > FIGURES_MAX) figureViews.delete(figureViews.keys().next().value)
+    }
+    return record.stub
+  }
+  function waiting() {
+    const node = h('figure', { class: 'reply-figure waiting', style: { '--ratio': '1.3333' }, 'aria-hidden': 'true' }, h('span', { class: 'reply-image' }))
+    node.__ratio = 4 / 3
+    return node
+  }
+  const images = {
+    draw(alt, dest) {
+      const file = find(dest)
+      if (!file) return streaming && LOCAL_PICTURE.test(String(dest ?? '').trim()) ? waiting() : null
+      return placed ? figure(file, alt) : false
+    },
+    group(nodes) {
+      const ratios = nodes.map((node) => node.__ratio ?? 4 / 3)
+      return h('div', { class: 'reply-figures', 'data-count': String(nodes.length) },
+        h('div', { class: 'reply-figures-row', style: { '--ratio-sum': ratios.reduce((a, b) => a + b, 0).toFixed(4), '--count': String(nodes.length) } }, ...nodes))
+    },
+  }
+  return {
+    images,
+    streaming,
+    signature: JSON.stringify([placed, streaming, pictures.map((f) => [f.root, f.path, f.refs, f.width, f.height])]),
+    // The attachments that have no place in these texts: drawn under the
+    // words, as every attachment was before.
+    rest(texts) {
+      if (!placed) return all
+      const dests = new Set(texts.flatMap((text) => imageRefs(text ?? '').map((ref) => ref.dest.trim())))
+      return all.filter((file) => !pictures.includes(file) || !file.refs.some((ref) => dests.has(ref)))
+    },
+    // The text as words: what Copy takes and a plain placeholder shows.
+    // A picture's reference goes; one that is only text stays.
+    words(text) {
+      if (typeof text !== 'string' || !text.includes('![')) return text
+      const out = text.replace(PICTURE_REF, (raw, alt, dest) => find(dest) || (streaming && LOCAL_PICTURE.test(dest.trim())) ? '\u0000' : raw)
+      if (!out.includes('\u0000')) return text
+      return out.split('\n').filter((line) => line.replace(/\u0000/g, '').trim() || !line.includes('\u0000'))
+        .map((line) => line.replace(/[ \t]?\u0000/g, '')).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+    },
+    // While it streams: an unfinished `![…` at the very end waits for the rest.
+    live(text) {
+      if (!streaming || typeof text !== 'string') return text
+      return text.replace(/!\[[^\]\n]{0,300}(\](\([^)\n]*)?)?$/, '')
+    },
+  }
 }
 
 export function selectionMark({ kind = 'checkbox', chosen = false } = {}) {

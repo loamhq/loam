@@ -8,6 +8,7 @@ import { createTheme } from '../public/theme.js'
 import { appearanceBoot, appearanceValues } from '../src/appearance.js'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
 import { installDom } from './fakedom.js'
+import { allRoots, readThemeCSS } from './listed-themes.mjs'
 
 function page() {
   const document = installDom()
@@ -154,7 +155,7 @@ test('the registry handoff covers every manifest option and the UI limits', asyn
   const registry = JSON.parse(await readFile(new URL('../docs/appearance-settings.registry.json', import.meta.url)))
   assert.equal(registry.route, '/v1/settings/appearance')
   assert.deepEqual(registry, appearanceRegistry((await loadThemes()).themes))
-  assert.equal(registry.settings.length, 37)
+  assert.equal(registry.settings.length, 17)
   for (const kind of ['phone', 'desktop']) {
     const mode = registry.settings.find((s) => s.key === `appearance.${kind}.mode`)
     const transition = registry.settings.find((s) => s.key === `appearance.${kind}.transition`)

@@ -1,12 +1,17 @@
-// Only the active first-party look registers its display face. Inactive cover
-// captions use their serif fallback until that look has been selected once.
+// Only the active look registers its display face. Inactive cover captions
+// use their serif fallback until that look has been selected once.
+//
+// Since 2026-11-18 the first-party looks beyond Latte and Plain are plugins
+// from the Market, so a look's faces are its own folder's `fonts.css`, which
+// the app serves checked at /theme-fonts/<id>.css (an empty sheet when the
+// theme has none). Latte and Plain use the core faces.
 ;(function () {
-  const looks = new Set(['deep-forest', 'autumn', 'yosemite', 'mist-trail', 'foundry'])
+  const core = new Set(['latte', 'plain'])
   const loaded = new Set()
   globalThis.LoamThemeFonts = function (id) {
-    if (!looks.has(id) || loaded.has(id)) return
+    if (typeof id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(id) || core.has(id) || loaded.has(id)) return
     loaded.add(id)
-    const href = `/themes/${id}/fonts.css`
+    const href = `/theme-fonts/${id}.css`
     if (document.readyState === 'loading') {
       // Insert in the parser's path so saved themes have their font rules
       // before first paint, under the same self-only stylesheet policy.
