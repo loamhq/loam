@@ -21,7 +21,7 @@ annotated tag carrying an SSH signature (`git tag -s` with
 `gpg.format=ssh`). The signature covers the tag object, which names the
 commit, so it covers the whole tree of that commit.
 
-**The keys** are in `keys/release-signers`, in OpenSSH's `allowed_signers`
+**The keys** are in `docs/releases/signers`, in OpenSSH's `allowed_signers`
 format:
 
 ```
@@ -38,7 +38,7 @@ then checks it before anything else is read from it:
 
 - the tag must be a tag object named for that release, signed with an SSH
   key;
-- the key must be in `keys/release-signers` **as the running release
+- the key must be in `docs/releases/signers` **as the running release
   committed it**. The incoming release's own copy is never used, so a
   release cannot bring the key it was signed with;
 - the signature must match the tag object.
@@ -67,7 +67,7 @@ itself (between its `RELEASE-SIGNERS` markers). It checks before anything
 from the clone runs, and checks again on a re-run that reuses the clone. If
 the check fails, the clone is removed, nothing on the server was changed,
 and the installer stops with exit code 3 and the reason. A test keeps the
-installer's copy of the keys equal to `keys/release-signers`.
+installer's copy of the keys equal to `docs/releases/signers`.
 
 ## What a first install still trusts
 
@@ -90,8 +90,8 @@ the maintainer's key fingerprint from somewhere other than the repository
 
 ```sh
 git clone --branch 0.3.0 https://github.com/loamhq/loam.git && cd loam
-grep -v '^#' keys/release-signers | cut -d' ' -f3- | ssh-keygen -lf -   # compare the fingerprint
-git -c gpg.ssh.allowedSignersFile=keys/release-signers verify-tag 0.3.0
+grep -v '^#' docs/releases/signers | cut -d' ' -f3- | ssh-keygen -lf -   # compare the fingerprint
+git -c gpg.ssh.allowedSignersFile=docs/releases/signers verify-tag 0.3.0
 sudo bash install.sh
 ```
 
@@ -103,7 +103,7 @@ their own publishers serve them, and a Loam signature does not cover them.
 ## The first signed release, and boxes already installed
 
 Every release before the first one that carries a key in
-`keys/release-signers` is unsigned, and so is checked by nothing. An install
+`docs/releases/signers` is unsigned, and so is checked by nothing. An install
 on such a release (every install today, this one included) updates to the
 first keyed release the way every update worked before: it trusts TLS to
 GitHub and whoever can push a tag there. That one hop is the only unchecked
@@ -140,12 +140,12 @@ release carries a key, the landing signs the tag as part of that step:
   what it is about to sign, and asks. On a yes it signs, checks the
   signature as the installs will, and pushes the tag.
 
-A project whose tree has no `keys/release-signers` tags as it always did.
+A project whose tree has no `docs/releases/signers` tags as it always did.
 
 ## Rotating a key, and losing one
 
 **Rotation.** A release signed with the old key adds the new key to
-`keys/release-signers` (and to `install.sh`'s copy). Every install accepts
+`docs/releases/signers` (and to `install.sh`'s copy). Every install accepts
 it, because it holds the old key. From then on the installs hold both, and
 the next release can be signed with the new key. A later release, signed
 with the new key, drops the old one. A key can also be given an end date in
@@ -157,7 +157,7 @@ rotation: the other signs a release that removes the lost one.
 
 **A lost key, with no second key.** No release can reach the installs by
 the update. Each owner has to give their install the new key once by hand,
-after checking it somewhere they trust (`keys/release-signers` in a commit
+after checking it somewhere they trust (`docs/releases/signers` in a commit
 of their own on the install, or a re-install). Loam's makers would say so on
 the front page and in an issue. That is costly, and the
 reason to keep two keys.
@@ -182,7 +182,7 @@ server can be used by any agent that has been fooled.
 | A key on the maintainers' server | GitHub, and a push credential leaked elsewhere; **not** a fooled agent on that server | nothing: the landing signs |
 
 **Recommended:** a hardware key and its backup, both in
-`keys/release-signers`, with signing done by `bin/sign-release` on the
+`docs/releases/signers`, with signing done by `bin/sign-release` on the
 maintainer's own computer. It is the only option that stops an agent on the
 server, fooled or not, from making a release the installs accept, without
 new infrastructure. It costs one command and one touch per release, and it

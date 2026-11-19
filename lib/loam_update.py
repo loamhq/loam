@@ -50,7 +50,7 @@ the last successful apply, in one command.
 
 **A release must be signed** (2026-11-19, lib/loam_signing.py): before
 anything moves, the tag is checked against the maintainer keys in
-``keys/release-signers`` of the release running now, and a release that
+``docs/releases/signers`` of the release running now, and a release that
 does not verify is refused (``signature``) and never half-applied. The move
 goes to the commit the verified tag object names, not to the tag's name
 again. While the running release carries no key, nothing is checked and the
@@ -311,7 +311,7 @@ def fetch_tag(tag: str) -> None:
 
 
 def trusted_signers() -> str | None:
-    """The maintainer keys this install trusts: ``keys/release-signers`` as
+    """The maintainer keys this install trusts: ``docs/releases/signers`` as
     the running release committed it (HEAD's, never the working tree's and
     never the incoming release's)."""
     return show("HEAD", f"{prefix()}{loam_signing.SIGNERS_FILE}")
@@ -739,7 +739,7 @@ SIGNATURE_NOTE = (
     "Loam refused the update to {to}: {message}\n\nThe release that is "
     "running is untouched and nothing was changed. This is not a fault of "
     "this install and not something to work around: do not move the checkout "
-    "by hand, fetch the release another way, or edit `keys/release-signers`. "
+    "by hand, fetch the release another way, or edit `docs/releases/signers`. "
     "A release that does not verify against the maintainer keys this install "
     "already holds may have been tampered with on its way here, or signed by a "
     "key this install was never given. Tell {owner} plainly, in a sentence or "

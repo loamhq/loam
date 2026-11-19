@@ -33,7 +33,7 @@
 set -Eeuo pipefail
 
 # The maintainer keys a release must be signed with: the key lines of
-# keys/release-signers, copied here (tests/test_signing.py keeps the two
+# docs/releases/signers, copied here (tests/test_signing.py keeps the two
 # equal). While there are none, a release is not checked, and this says so.
 RELEASE_SIGNERS=$(cat <<'RELEASE-SIGNERS'
 RELEASE-SIGNERS

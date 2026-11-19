@@ -2081,7 +2081,7 @@ def cut_release(repo: Path, result: dict, tag: str) -> dict:
 
 # ---------------------------------------------------------------------------
 # A signed release (2026-11-19, docs/signing.md). A project whose tree carries
-# `keys/release-signers` with a key in it -- Loam does -- is installed by
+# `docs/releases/signers` with a key in it -- Loam does -- is installed by
 # boxes that check every release against those keys, so its tag is signed
 # here, as the same step, and checked before it is pushed. With a signing key
 # in the checkout's git config (`user.signingKey`, an SSH key) the landing

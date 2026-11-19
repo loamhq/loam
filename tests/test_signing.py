@@ -31,7 +31,7 @@ Checks:
     lightweight and an altered one stop before anything from the clone
     runs, and the clone is removed; with no key written in, it says the
     release is not checked;
-  - install.sh's copy of the keys equals keys/release-signers.
+  - install.sh's copy of the keys equals docs/releases/signers.
 
 Run: python3 tests/test_signing.py
 """
@@ -496,7 +496,7 @@ try:
     # == the two homes of the keys ======================================================
     text = (ROOT / "install.sh").read_text()
     block = text.split("<<'RELEASE-SIGNERS'\n", 1)[1].split("RELEASE-SIGNERS\n)", 1)[0]
-    check("install.sh carries exactly the key lines of keys/release-signers",
+    check("install.sh carries exactly the key lines of docs/releases/signers",
           sg.key_lines(block),
           sg.key_lines((ROOT / sg.SIGNERS_FILE).read_text()))
 finally:

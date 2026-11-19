@@ -2000,7 +2000,7 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   OpenSSH only, and agrees with `git verify-tag` (the test proves it). The
   verifier also checks the tag object's own `tag` header, because a signed
   object can be pushed under another release's ref.
-- **The trusted keys are HEAD's committed `keys/release-signers`**, never the
+- **The trusted keys are HEAD's committed `docs/releases/signers`**, never the
   incoming tree's. The move goes to the verified object's commit, because a
   page `check` during an apply force-fetches the tag ref again.
 - **No key ships yet.** With an empty file nothing is checked and every side
@@ -2019,3 +2019,9 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **Installs use `--no-install-recommends`**, so git's recommended
   openssh-client is not guaranteed. It is now in APT and in install.sh's
   first needs. Any box reached over SSH has it anyway.
+- **A new top-level entry is missing from a landing's test run**
+  (`platform_argv` binds only the top-level entries that already exist in the
+  canonical checkout). The signers file was first `keys/release-signers`, and
+  the landing failed with FileNotFoundError, though every test passed in the
+  job tree. It is now `docs/releases/signers`. Put a new file inside an
+  existing top-level folder, or expect the first landing to fail.

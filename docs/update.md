@@ -130,7 +130,7 @@ person looking at their own diff, so the agent gets no notice for it.
 ## A release must be signed (2026-11-19)
 
 Before anything is read from a fetched release, its tag is checked against
-`keys/release-signers` as the running release committed it
+`docs/releases/signers` as the running release committed it
 (`lib/loam_signing.py`, `docs/signing.md`). A release that does not verify
 is refused as `signature` before anything moves. `check` marks it
 `blocked`, the page says it could not be verified, and the person's agent is

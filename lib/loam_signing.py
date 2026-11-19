@@ -7,7 +7,7 @@ made with the maintainer's key. Checking it needs only ``git`` and
 ``ssh-keygen`` (OpenSSH 8.1 or newer, on every Linux and macOS box an
 install runs on): no keyserver, no GnuPG keyring, no network.
 
-**The keys a box trusts** are the lines of ``keys/release-signers`` in the
+**The keys a box trusts** are the lines of ``docs/releases/signers`` in the
 release the box is already running (``HEAD``'s committed copy, never the
 working tree and never the incoming release's). The file is OpenSSH's
 ``allowed_signers`` format. A release that adds a key is accepted because an
@@ -23,7 +23,7 @@ releases come from, and whoever can push a tag there).
 The installer (``install.sh``) cannot import this module, because this
 module comes from the clone it has not checked yet; it carries the same
 check in shell, and its own copy of the keys, which a test keeps equal to
-``keys/release-signers``.
+``docs/releases/signers``.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-SIGNERS_FILE = "keys/release-signers"
+SIGNERS_FILE = "docs/releases/signers"
 NAMESPACE = "git"
 SSH_ARMOR = b"-----BEGIN SSH SIGNATURE-----"
 # Words for each way a check can fail; `reason` in a result.
@@ -63,7 +63,7 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def signers_at(repo: Path, rev: str, prefix: str = "") -> str | None:
-    """``keys/release-signers`` as committed at ``rev``, or None."""
+    """``docs/releases/signers`` as committed at ``rev``, or None."""
     done = _git(repo, "show", f"{rev}:{prefix}{SIGNERS_FILE}")
     return done.stdout.decode("utf-8", "replace") if done.returncode == 0 else None
 
