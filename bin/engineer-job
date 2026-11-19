@@ -989,7 +989,7 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
     argv = [
         "systemd-run", "--user", "--collect",
         f"--unit={unit_name(job_id)}",
-        f"--description=Loam engineer job {job_id} ({project.name})",
+        f"--description=Loam engineer job {job_id} ({eng.display_name(project)})",
         f"--property=OOMScoreAdjust={lc.AGENT_OOM_SCORE_ADJ}",
         "--property=OOMPolicy=continue",
         "--property=StandardOutput=null",
