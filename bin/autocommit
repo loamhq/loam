@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""The routine local commit of the vault, AI Spaces and the plugins.
+
+  autocommit [vault|spaces|plugins ...]   (all three when none is named)
+
+Run every fifteen minutes by loam-autocommit.timer. Commits each tree on
+this machine and sends nothing anywhere; a tree whose commit is already
+done by a hand-made crontab line is left to it. lib/loam_autocommit.py has
+the what and the why; docs/backup.md the whole of backing up.
+
+Exit 0 when every tree committed or had nothing to commit, 1 when one
+failed (its record in <state>/autocommit/<tree>.json says why).
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_autocommit  # noqa: E402
+
+
+def main(argv: list[str]) -> int:
+    if any(a.startswith("-") for a in argv):
+        print(__doc__.strip())
+        return 0 if argv in (["-h"], ["--help"]) else 2
+    bad = [a for a in argv if a not in loam_autocommit.ORDER]
+    if bad:
+        print(f"autocommit: no tree {bad[0]!r}; the trees are "
+              f"{', '.join(loam_autocommit.ORDER)}", file=sys.stderr)
+        return 2
+    out = loam_autocommit.run(argv or None)
+    for r in out:
+        print(json.dumps({k: r[k] for k in ("tree", "committed", "skipped", "error")}
+                         | {"held": len(r["held"])}))
+    return 1 if any(r["error"] for r in out) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

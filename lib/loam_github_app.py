@@ -922,6 +922,7 @@ def open_pull_request(project_name: str, branch: str, title: str,
         pr = open_prs[0]
     return {"url": pr.get("html_url"), "number": pr.get("number"), "sha": sha,
             "branch": branch, "head": head, "base": base, "created": created,
+            "actor": dict(last_actor),
             **({"replaces": replaces} if replaces else {})}
 
 
@@ -1035,14 +1036,54 @@ def _pr_job(project_name: str, branch: str):
     return project, base, sha
 
 
+# Who a pull request's push and its opening are made as (2026-11-18): the
+# person on a person-authored project (``person_token``); else the owner,
+# when the owner chose their GitHub account for their agents' work
+# (lib/loam_git_identity.py, source ``github``) and the connection that
+# reaches the repository is that same account (``owner_token``); else the
+# app's installation, as before. Never another account, a new scope or a
+# fresh sign-in: a connection that is not the owner's falls back to the app,
+# and ``last_actor`` says which it was.
+last_actor: dict = {}
+
+
+def owner_token(project) -> str | None:
+    """The owner's user token for ``project``'s repository, when the owner's
+    git identity is their GitHub account and GitHub says this token is that
+    account's; else None."""
+    import loam_git_identity  # noqa: PLC0415
+    owner = loam_git_identity.stored()
+    if not owner or owner.get("source") != "github" or not owner.get("login"):
+        return None
+    try:
+        data = load()
+        org = project.repo.partition("/")[0].lower()
+        route(data, project.repo)
+        token = user_token(org=org if org in org_apps(data) else None)
+        _, user = api("GET", "/user", token)
+    except (IntegrationError, OSError, ValueError):
+        return None
+    if (user.get("login") or "").lower() != owner["login"].lower():
+        return None
+    return token
+
+
 def _pr_token(project, branch: str, sha: str, title: str, body: str) -> str:
     """The token a pull-request project's branch is pushed with: the person's
     (``person_token``, which checks the commits and the text first) on a
-    person-authored project, else an installation token for the one repo."""
+    person-authored project, the owner's (``owner_token``) when it applies,
+    else an installation token for the one repo."""
     import loam_commit_identity  # noqa: PLC0415
     identity = loam_commit_identity.of(project.record)
     if identity:
+        last_actor.update(actor=identity["github_login"], kind="person")
         return person_token(project, branch, sha, identity, title, body)
+    mine = owner_token(project)
+    if mine:
+        import loam_git_identity  # noqa: PLC0415
+        last_actor.update(actor=loam_git_identity.stored()["login"], kind="owner")
+        return mine
+    last_actor.update(actor="the app", kind="app")
     slot, found = route(load(), project.repo)
     inst = found["installation_id"]
     _, live = api("GET", f"/app/installations/{inst}", _jwt(slot))

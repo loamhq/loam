@@ -39,7 +39,8 @@ place on a particular machine. Added 2026-11-14 (first release, job L1).
 | `paths.pycache` | Python's bytecode cache (`PYTHONPYCACHEPREFIX`) | `~/.cache/loam/pycache` |
 | `bin.claude`, `bin.codex`, `bin.agy`, `bin.uv` | the CLIs | `~/.local/bin/<name>` |
 | `vault.inbox`, `vault.boards`, `vault.general_board`, `vault.conversations`, `vault.projects`, `vault.attachments`, `vault.system` | the vault's own folders, relative to it | `Inbox`, `Inbox/boards`, `Inbox/boards/general.md`, `Conversations`, `Projects`, `Attachments`, `System` |
-| `git.autocommit.name`, `.email` | the identity of the 15-minute vault, workspace and plugin commits | `loam`, `loam@<user>` |
+| `git.autocommit.name`, `.email` | the identity of the 15-minute vault, workspace and plugin commits (`bin/autocommit`, docs/backup.md) | `loam`, `loam@<user>` |
+| `git.autocommit.max_file_mb` | a file larger than this many megabytes is kept out of those commits and named instead, so a git host's size limit never stops a backup (docs/backup.md) | `100` |
 | `git.identity.name`, `.email` | the Loam HQ bot that makes releases and the `loam` repository's root commit. Never a person's address. | unset until that bot exists |
 | `engineer.briefers` | the personas who may brief the platform engineer, a list of names (`["ada"]`); a project engineer is open to every persona whatever this says (lib/loam_engineer.py, "Who may brief which project") | absent: every persona |
 | `owner.legacy_ids` | ids an install used for its owner before `owner.id` existed; records that carry one still read as the owner's | absent: none |
@@ -65,7 +66,8 @@ modules that import those two did not change.
 - **Deploy records.** `static_root` and `checkout` in `deploy/*/deploy.toml`
   take `@VAULT@`, `@WORKSPACES@`, `@PROJECTS@`, `@ROOT@`, `@STATE@`,
   `@HOME@` (`loam_config.expand`).
-- **Shell.** The autocommit scripts call `bin/loam-config`.
+- **Shell.** The hand-made autocommit scripts (`bin/vault-autocommit`,
+  `ai-labs-autocommit`, `plugins-autocommit`) call `bin/loam-config`.
 - **The MCP servers' interpreter.** Committed config (the reviewer's
   `.mcp.json`) names `bin/mcp-python`, which execs `paths.mcp_venv`, so
   moving the venv changes nothing tracked.

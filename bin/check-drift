@@ -1249,7 +1249,15 @@ def main() -> int:
     # was never committed look identical from either side alone.
     # Templates since 2026-11-14 (lib/loam_units.py): compared as rendered for
     # this install, which is what bin/gen-units installs.
+    # The routine local commit (2026-11-18, lib/loam_autocommit.py) is not
+    # missing on a box whose crontab still commits the trees by hand: the
+    # hand-made lines stand in for it until they are taken out.
+    import loam_autocommit  # noqa: PLC0415
+    hand = any(loam_autocommit.hand_routine(t) for t in loam_autocommit.ORDER)
     for name, text in loam_units.rendered(STATIC_UNITS).items():
+        if (hand and name.startswith("loam-autocommit.")
+                and not (UNIT_DIR / name).exists()):
+            continue
         compare(findings, f"static {name}", UNIT_DIR / name, text)
     # The sign-in arms the Remote Control servers (bin/rc-arm, 2026-11-14):
     # with the watch off, a sign-in starts none of them.

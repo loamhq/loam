@@ -945,7 +945,18 @@ class Box:
         return self._run(self.bin("library"), "install")
 
     def units(self) -> str:
-        return self._run(self.bin("gen-units"))
+        said = self._run(self.bin("gen-units"))
+        # The routine local commit is new (2026-11-18, lib/loam_autocommit.py):
+        # gen-units never arms a timer, and an install made before it has its
+        # repositories and no routine, so the update arms it, once. A box
+        # whose crontab commits the trees by hand is left as it is.
+        armed = self._run("-c", (
+            "import sys; sys.path.insert(0, sys.argv[1]); import loam_units as u, "
+            "loam_autocommit as a\n"
+            "t = 'loam-autocommit.timer'\n"
+            "if t in u.rendered() and not any(a.hand_routine(x) for x in a.ORDER):\n"
+            "    print(t, u.arm_timer(t))\n"), str(runtime() / "lib"))
+        return "\n".join(x for x in (said, armed) if x)
 
     def agents(self) -> str:
         said = []

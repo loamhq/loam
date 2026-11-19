@@ -1724,6 +1724,34 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `.plugin-meta`: stale since Settings changed. Its install section was
   checked by running a copy without the stale parts.
   `app/test/link-install-browser.mjs` is the browser proof of the link sheet.
+## 2026-11-18 — backups: the local commit in core, Git backup built in
+
+- **A fresh install had repositories and no routine.** The installer made
+  the vault's and workspaces' repositories with one commit and nothing ever
+  committed again; the fifteen-minute commits existed only as one box's own
+  crontab lines. `loam-autocommit.timer` (`lib/loam_autocommit.py`) is the
+  routine now. It defers per tree to a crontab line naming
+  `<tree>-autocommit`, and check-drift skips its units while one does, so a
+  box with the hand-made setup is unchanged until the lines go.
+- **`gen-units` never arms a timer**; an update that adds a core timer must
+  arm it itself (`loam_update.Update.units`).
+- **A lock file inside `.git/` makes `.git/`.** Taking the lock before `git
+  init` left a tree that `exists()` said was a repository and was not; check
+  `.git/HEAD`, and init before locking.
+- **`git push --dry-run` asks the host for write permission**: a GitHub
+  deploy key added read only fails it with "marked as read only", so a
+  connection test can prove write access without writing.
+- **Is a repository public?** `git ls-remote https://host/path` with
+  `GIT_CONFIG_GLOBAL=/dev/null`, `credential.helper=` and no prompt: 0 is
+  public, an auth word in stderr is private, anything else unknown.
+- **Two installs on one repository diverge** the moment the second pushes
+  (a restore re-provisions, which rewrites agents' paths and commits them).
+  The push is never forced; the first install's backup reports "diverged".
+- **The settings modal has a fixed height**: capture a long plugin section
+  as top and end shots, not a taller viewport (`tools/capture-git-backup.mjs`).
+- **A plugin section's class names share a namespace with its state
+  classes**: `gb-${level}` on the pill and `.gb-fail` on the failure box
+  made the pill a padded grid. Name boxes and states apart.
 - **A scratch install whose `paths.root` is the job's tree provisions the
   engineer into that tree** (caused 2026-11-18, `bin/library seed-starter`
   under a scratch `LOAM_CONFIG`): `ensure_engineer` rewrote the tree's
@@ -1774,3 +1802,34 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `textContent` of `tt-stream` never returns in the fake DOM (on base main
   too). Prove an absence at the loader and registry level instead
   (`test/installation.test.js`).
+- **A scratch install whose `paths.root` is your job tree writes into it.**
+  `bin/library seed-starter` provisions, and provisioning renders the
+  engineer's seeded files (`engineer/CLAUDE.md`, `role.md`, `project.md`,
+  `agent.json`, `.claude/settings.json`) at `<root>/engineer/` with the
+  scratch install's values. They are git-ignored, so nothing lands, but the
+  job's next session loads them (its CLAUDE.md imported the scratch
+  install's `reach.md`). Copy the canonical checkout's seeded files back
+  after such a rehearsal, or point `paths.root` at a throwaway clone.
+## 2026-11-18 — the owner's name on agents' commits
+
+- **What GitHub showed was the trailer, not the author.** Every job commit was
+  authored `<project> engineer <engineer+…@noreply.local>` (an address no
+  account owns, so no avatar) and Claude Code appended
+  `Co-Authored-By: Claude … <noreply@anthropic.com>`, which GitHub links to
+  Claude's account: the only face on the commit was the provider's. Pushes
+  were deploy keys, so there was no person as push actor either. The fix is
+  `lib/loam_git_identity.py` and `docs/attribution.md`.
+- **Codex has no local switch for its trailer.** 0.170 carries the instruction
+  "Commit messages must end with `Co-authored-by: Codex`" gated on a
+  workspace policy it fetches; `commit_attribution` (its docs' key) is
+  refused by `--strict-config`, and `[features]` accepts any key silently, so
+  a `features.*` pin proves nothing. Hence the clone's `commit-msg` hook and
+  the landing's `settle_commits`, which hold whatever a provider does.
+- **A gated checkout keeps its own identity.** The push gate compares every
+  new commit with the checkout's `user.name`/`user.email`, so the owner's name
+  there would be a held push; and a deny list may name the owner's handle on
+  purpose. The order in `resolve()` puts the repository's own identity before
+  the owner's for that reason.
+- **The landing never re-makes a pull-request branch**: its head may already
+  be on the remote, and a re-made commit would not fast-forward it, which
+  `settle_head` answers with a new pull request.

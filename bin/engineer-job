@@ -3126,9 +3126,12 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         # this box's rule, so it arrives with the job, as the job directory
         # does. The platform engineer's settings already carry it.
         settings = dict(GUARD_SETTINGS)
-        if identity_of(project):
-            import loam_commit_identity  # noqa: PLC0415
-            settings.update(loam_commit_identity.CLI_SETTINGS)
+        # No provider attribution on any job's commits or pull requests
+        # (2026-11-18, the owner: agents' work is under the owner's name, not
+        # the provider's; lib/loam_git_identity.py). Until then only a
+        # person-authored project's job had it off.
+        import loam_commit_identity  # noqa: PLC0415
+        settings.update(loam_commit_identity.CLI_SETTINGS)
         argv += ["--settings", json.dumps(settings)]
     # What plugins that are on give an engineer (2026-11-14, first release
     # L4): their MCP servers and their words, at launch, so the committed

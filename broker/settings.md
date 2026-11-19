@@ -97,6 +97,7 @@ own `thread.*` rows cover the same things.
 | `activity.undo` | Activity: Undo a schedule change | POST /api/activity/{id}/undo | persona, own records | no |
 | `job.cancel` | Cancel an engineer job | POST /api/jobs/{id}/cancel | persona, by `mcp__engineer__cancel` | yes, that tool |
 | `provider.login` | Sign a provider in again, or out | POST /api/providers/{p}/login (+ /code, DELETE), POST /api/providers/{p}/logout | owner | — |
+| `git.identity` | Your name on agents' work: the name and address new commits by agents carry (`"github"`, `{name, email}` or null; 2026-11-18, docs/attribution.md) | PATCH /api/settings/git | persona, conversation only | no |
 | `integration.github` | Connect / disconnect GitHub | /api/integrations/github/… | owner | — |
 | `plugin.secret` | A plugin's own API key, pasted and checked on entry (2026-11-14); a plugin that declares `keys:` uses API keys (Settings › Connections) instead | PUT/DELETE /api/plugins/{plugin}/secrets/{name} | owner | — |
 | `keys.set` | A provider's shared API key in Settings › Connections › API keys, checked before it is kept; the value is never read back (2026-11-18) | PUT /api/keys/{provider} | persona, conversation only | — |

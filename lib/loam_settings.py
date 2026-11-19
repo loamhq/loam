@@ -552,6 +552,23 @@ ENTRIES: list[Entry] = [
           note="shared by phone and desktop; with Sun chosen and no place "
                "saved, the page uses its time zone's"),
 
+    # Whose name agents' commits carry (2026-11-18, lib/loam_git_identity.py):
+    # Settings › GitHub, "Your name on agents' work". One value.
+    Entry("git.identity", "setting",
+          "Your name on agents' work: the name and address new commits by "
+          "your agents carry, instead of the engineer's or a provider's",
+          "PATCH /api/settings/git",
+          route="PATCH /v1/settings/git",
+          values='"github" (the connected GitHub account\'s name and its private '
+                 'no-reply address), {"name": …, "email": …}, or null to clear '
+                 'it; default unset (commits carry "<project> engineer")',
+          body=lambda v, m: {"identity": v},
+          read="GET /v1/settings/git",
+          pick=lambda a, m: a.get("identity"),
+          unattended=False,
+          note="a project's own person (commit_identity) and a repository's "
+               "own identity come first; history is never rewritten"),
+
     # -- Settings: Plugins (2026-11-12), the plugin host -------------------
     # lib/loam_plugins.py; docs/plugins.md. On and off is one setting per
     # plugin; a theme that is only a theme has none (it is on where
@@ -734,6 +751,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "rest === '/integrations/github'": ["integration.github"],
     "/^\\/integrations\\/github\\/(manifest|register|install|callback|refresh)$/":
         ["integration.github"],
+    "rest === '/settings/git'": ["git.identity"],
     "rest === '/settings/appearance'": [
         "appearance.phone.mode", "appearance.phone.transition",
         "appearance.phone.size", "appearance.phone.theme",

@@ -12,6 +12,7 @@ import { providerMark } from "../marks.js"
 import { githubNotice, orgApps, offersOrgs, orgView, githubView } from "../integrations.js"
 import { integrationCatalog } from '../integration-catalog.js'
 import { createGithubAccounts } from '../github-accounts.js'
+import { createGitIdentity } from '../git-identity.js'
 import { formatDate } from '../time.js'
 import { themeImageURL, themeImagePosition } from '../theme-image.js'
 import { themePreview } from '../theme-preview.js'
@@ -105,6 +106,7 @@ function settingsAbout({ back = true } = {}) {
 }
 
 const githubAccounts = createGithubAccounts({ state: () => host.state.github, api: (...args) => host.api(...args), changed: () => host.schedule(), reload: () => host.loadGithub() })
+const gitIdentity = createGitIdentity({ api: (...args) => host.api(...args), changed: () => host.schedule() })
 function settingsBody(sheet, back) {
   const page = settingsHome(sheet.page, sheet.provider)
   if (page === 'agents' && sheet.detail) return sheet.detail.kind === 'agent'
@@ -609,7 +611,8 @@ function settingsIntegration(id, accountId = null) {
   if (id === 'github' && Object.hasOwn(host.state.github, 'accounts')) return [settingsBack('Connections', 'connections'), settingsHead('GitHub'),
     ...githubOutcome(host.state.github.at),
     host.state.github.installUrl || host.state.github.orgInstall ? h('button', { class: 'pillbtn primary', text: 'Install on GitHub', onclick: () => host.installGithub('install', host.state.github.orgInstall?.org ?? null) }) : null,
-    ...githubAccounts.view()]
+    ...githubAccounts.view(),
+    gitIdentity.view({ github: (host.state.github.accounts ?? []).some(account => account.kind === 'personal' && account.status === 'authorized') })]
   const service = integrationCatalog(host.state).find(service => service.id === id)
   if (!service) return [settingsBack('Connections', 'connections'), settingsHead('Integration unavailable')]
   const account = service.accounts.find(account => String(account.id) === String(accountId))

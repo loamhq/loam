@@ -194,7 +194,9 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         } }, h('label', { for: 'daily-note-folder', text: 'Daily notes folder' }), h('input', { id: 'daily-note-folder', class: 'field-input', value: hostSettings.values.folder, disabled: !row.on }), h('p', { class: 'note', text: 'Daily notes use YYYY-MM-DD.md in this vault folder.' }), h('button', { class: 'pillbtn', type: 'submit', disabled: !row.on, text: 'Save folder' })) : null, notice(st.done, false)) : null,
       ...(row.on ? (host.registry?.entries('settings.section') ?? []).filter(entry => entry.plugin === row.id || (entry.group === 'plugin' && entry.owner === row.id))
         .map(entry => h('section', { class: 'plugin-preferences', key: `${entry.owner}:${entry.id}`, 'aria-label': entry.title }, host.registry.invoke(entry, 'render', { plugin: true, back: false }))) : []),
-      row.on && row.id !== 'daily-notes' ? entrySettings(row) : null,
+      // A plugin whose own section draws its settings (`entries: 'own'`, Git
+      // backup) is not given the plain form of them as well.
+      row.on && row.id !== 'daily-notes' && !(host.registry?.entries('settings.section') ?? []).some(entry => entry.entries === 'own' && (entry.plugin === row.id || entry.owner === row.id)) ? entrySettings(row) : null,
       row.on ? secretSettings?.view() : null,
       row.keys?.length ? h('section', { class: 'plugin-keys', 'aria-label': 'Keys' }, h('h3', { class: 'kicker', text: 'Keys' }),
         h('p', { class: 'note', text: row.keys.every(k => k.optional) && row.keys.length > 1
