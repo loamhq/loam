@@ -1,25 +1,8 @@
 #!/usr/bin/env python3
-"""Compare what the generators would produce against what is actually live.
+"""Report differences between live state and the files produced by the generators.
+Both uninstalled generator changes and edits made only to the live copy are drift.
 
-The defect this exists for is not any one stale value -- it is that live
-state and the generators drift in BOTH directions, and both directions have
-now bitten:
-
-  generator -> live   `provision.rc_unit()` held the tmux form after the live
-                      units were replaced. Running it would have re-introduced
-                      the shape that put five agents in one cgroup and got
-                      Iris OOM-killed.
-  live -> generator   `WebSearch`/`WebFetch` and `mcp__loam__move_file` were
-                      hand-edited into all five live settings and never
-                      reached `provision.settings()`. The next provision run
-                      would have silently revoked a working grant.
-
-Neither was visible by reading either side alone. So this reads both and
-diffs them. Boring on purpose: no fixing, no writing, just a report and an
-exit code, so it can be run from cron or by hand before any provision run.
-
-Usage: check-drift [--quiet]   exit 0 = no drift, 1 = drift found
-"""
+Usage: check-drift [--quiet]   exit 0 = no drift, 1 = drift found"""
 
 from __future__ import annotations
 

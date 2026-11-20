@@ -45,7 +45,7 @@ class WorktreeError(Exception):
 
 
 def canonical(project: eng.Project) -> Path:
-    """Resolve the checkout from the project so fixtures use their own repositories."""
+    """The platform engineer's root is the checkout's engineer/ subdirectory. Other project roots are checkouts."""
     return project.root.parent if project.platform else project.root
 
 

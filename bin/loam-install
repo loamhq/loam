@@ -734,7 +734,7 @@ def step_providers(a, ans: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 8. Iris and the hello thread
+# 8. The starter agent and its hello thread
 # ---------------------------------------------------------------------------
 
 def step_starter(a, ans: dict) -> None:

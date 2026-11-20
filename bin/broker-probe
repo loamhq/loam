@@ -384,12 +384,7 @@ def probe(args, agent: str, workspace, thread_id: str) -> int:
     say(f"  still live after the end: {member_session(thread_id, agent) is not None}")
 
     step("send again, with a question that needs both earlier turns")
-    # Until 2026-11-12 this also asked for a Write into another persona's
-    # workspace, to prove the boundary guard refused it through this surface.
-    # Since the owner's 2026-11-08 authority change no tool refuses a write by
-    # its path, so that write lands (caused 2026-11-12: it created a file in
-    # Iris's workspace, since removed); the check is gone rather than left to
-    # write into a workspace that is not the probe's.
+    # Probe recall using only this thread’s earlier turns.
     status, posted = call("POST", f"/v1/threads/{thread_id}/messages", {
         "text": "Two lines, no tools. (a) What single word was in the file "
                 "you read earlier in this conversation? (b) What were the "
