@@ -2534,12 +2534,33 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 /* Plugin catalog uses the shared Settings rhythm and native controls. */
 .plugin-group { margin:0; }
 .plugin-group > .kicker { margin:0 0 var(--space-lg); }
+.plugin-origin-groups { display:grid; gap:var(--space-xl); }
+.plugin-origin-title { margin:0 0 var(--space-sm); padding-inline:var(--space-sm); font-size:14px; font-weight:650; line-height:1.4; }
+.plugin-row-origin { margin-top:3px; color:var(--paper-ink-2); font-size:12px; line-height:1.4; }
+.plugin-theme-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,145px),1fr)); gap:var(--space-md); }
+.plugin-theme-card { min-width:0; display:flex; flex-direction:column; border-radius:20px; background:var(--paper-card); }
+.plugin-theme-about { display:flex; flex:1; flex-direction:column; gap:4px; min-width:0; padding:8px 8px 12px; border:0; border-radius:inherit; text-align:left; color:var(--paper-ink); background:transparent; }
+@media (hover: hover) { .plugin-theme-about:hover { background:var(--paper-hover-alpha); } }
+.plugin-theme-about:focus-visible { outline:2px solid var(--paper-mark-active); outline-offset:2px; }
+.plugin-theme-about .theme-preview { width:100%; height:82px; margin-bottom:4px; border:1px solid var(--paper-rule); }
+.plugin-theme-about .theme-miniature { padding:8px; }
+.plugin-theme-about .theme-miniature .pillbtn { min-height:26px; }
+.plugin-theme-about .theme-mini-body { display:none; }
+.plugin-theme-label { display:flex; align-items:center; justify-content:space-between; gap:4px; padding-inline:4px; }
+.plugin-theme-label svg { flex:none; color:var(--paper-ink-2); }
+.plugin-theme-origin, .plugin-theme-state { padding-inline:4px; color:var(--paper-ink-2); font-size:12px; line-height:1.4; }
+.plugin-theme-state { display:flex; align-items:center; gap:4px; }
+.plugin-theme-card > .plugin-switch { align-self:flex-end; margin:0 var(--space-md) var(--space-sm); }
+@media (max-width:499px) {
+  .plugin-theme-label { min-height:2.8em; align-items:flex-start; }
+  .plugin-theme-label svg { margin-top:5px; }
+}
 .plugin-list-row { display:flex; align-items:center; gap:8px; padding-right:14px; }
 .plugin-list-row + .plugin-list-row { border-top:1px solid var(--paper-rule); }
 .plugin-list-item + .plugin-list-item { border-top:1px solid var(--paper-rule); }
-.plugin-icon { width:36px; height:36px; object-fit:contain; border-radius:10px; flex:none; }
-.plugin-icon-letter { display:inline-flex; align-items:center; justify-content:center; background:var(--paper-card); color:var(--paper-card-ink-2); font-family:var(--font-display); font-weight:700; font-size:17px; line-height:1; }
-.plugin-row .plugin-icon-letter { background:var(--paper-page); }
+.plugin-icon { width:36px; height:36px; object-fit:contain; border-radius:10px; flex:none; background:var(--paper-card); }
+.plugin-icon-letter { display:inline-flex; align-items:center; justify-content:center; color:var(--paper-ink-2); font-family:var(--font-display); font-weight:700; font-size:17px; line-height:1; }
+.plugin-row .plugin-icon { background:var(--paper-page); }
 /* A plugin's own settings (settings.entry): the label above its control, so a
    sentence-long label never folds into a column a few pixels wide. */
 .plugin-entry-settings .plugin-entry { flex-direction:column; align-items:stretch; gap:8px; }
@@ -2661,6 +2682,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-hero .plugin-icon-letter { font-size:26px; }
 .plugin-hero-words { min-width:0; display:flex; flex-direction:column; gap:4px; }
 .plugin-hero-words .sheet-head { margin:0; padding:0; }
+.plugin-about-origin { margin:0; font-size:13px; line-height:1.45; color:var(--paper-ink-2); overflow-wrap:anywhere; }
 .plugin-promise { margin:0; font-size:16px; line-height:1.45; color:var(--paper-ink-2); }
 .plugin-about { margin:8px 0 20px; font-size:15.5px; line-height:1.55; }
 .plugin-about h2, .plugin-about h3 { font-size:17px; margin:22px 0 8px; }
@@ -2946,6 +2968,3 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
    readers) draws no box: nobody can tab to it, so there is nothing to show. */
 :is(.sheet-title, [role="heading"], h1, h2, h3)[tabindex="-1"]:focus { outline:none; box-shadow:none; }
 /* A plugin installed from a link someone shared (2026-11-18). */
-.plugin-mark-link { display:inline-flex; align-items:center; gap:4px; }
-.plugin-from-link { display:flex; align-items:flex-start; gap:8px; }
-.plugin-from-link svg { flex:none; margin-top:3px; color:var(--paper-ink-3); }

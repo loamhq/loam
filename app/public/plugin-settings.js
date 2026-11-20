@@ -2,13 +2,24 @@ import { h, icon } from './ui.js'
 import { createSecretSettings } from './plugin-secrets.js'
 import { pluginGallery } from './plugin-gallery.js'
 import { createThemeShowcase } from './theme-showcase.js'
+import { themePreview } from './theme-preview.js'
+import { listingAddress } from './market-card.js'
 const label = id => ({ 'core.message': 'the message bubble', 'core.thread-list': 'the thread list', 'core.composer': 'the composer', 'core.files.viewer': 'the Files viewer', 'core.files.editor': 'the Files editor', 'core.rail': 'the navigation rail', 'core.activity': 'Activity', 'core.apps': 'Apps', 'core.settings': 'Settings' }[id] ?? id)
-export const sourceLine = source => source?.kind === 'loam' ? 'Loam' : source?.kind === 'link' ? `From github.com/${source.repo}` : 'Built here'
-// Installed from a link someone shared, not from the Market (2026-11-18): the
-// install records `via`; one from before then is the Market's when the Market
-// lists that id from that repository.
-export const fromLink = (row, listed = []) => row?.source?.kind === 'link' && row.source.via !== 'market'
-  && (row.source.via === 'link' || !listed.some(e => e.id === row.id && e.repo === row.source.repo))
+const ORIGINS = { loam: 'Built into Loam', market: 'From the Market', yours: 'Made by you', link: 'From a link' }
+const UNREVIEWED = 'Unreviewed by Loam'
+
+export function pluginOrigin(row, entry) {
+  const source = row.source
+  if (row.layer === 'shipped' || source?.kind === 'loam') return 'loam'
+  if (source?.kind !== 'link') return 'yours'
+  if (source.via === 'market') return 'market'
+  if (entry?.id !== row.id || !source.repo || source.repo.toLowerCase() !== entry.repo?.toLowerCase()) return 'link'
+  const folder = source.path ?? ''
+  const listedFolder = entry.pin?.path ?? entry.path
+  const sameRelease = entry.ref && [source.ref, source.commit].includes(entry.ref) && (!listedFolder || folder === listedFolder)
+  const samePin = entry.pin?.ref && source.commit === entry.pin.ref && folder === (listedFolder ?? '')
+  return sameRelease || samePin ? 'market' : 'link'
+}
 export function touchSentences(declaration = {}) {
   const touches = declaration.touches ?? {}, lines = []
   if (declaration.page_code) lines.push('Runs code in the page.')
@@ -50,10 +61,15 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   let hostSettings = null, secretSettings = null
   const showcase = createThemeShowcase({ schedule: () => changed(), mode: () => theme.current === 'dark' ? 'dark' : 'light' })
   const failedShots = new Set()
+  const failedIcons = new Set()
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, text, onclick, ...props })
   const notice = (text, bad = true) => text ? h('p', { class: `plugin-notice${bad ? ' err' : ''}`, role: bad ? 'alert' : 'status', text }) : null
-  const linked = row => fromLink(row, host.marketState?.list?.plugins ?? [])
-  const meta = row => [row.author || 'Unknown author', row.version || 'Version unknown', sourceLine(row.source)].join(' · ')
+  const marketEntry = row => host.marketState?.list?.plugins?.find(entry => entry.id === row.id)
+  const awaitingMarket = row => host.marketState && !host.marketState.list && row.source?.kind === 'link' && row.source.via !== 'market'
+  const reviewKnown = () => ['listed', 'empty'].includes(host.marketState?.list?.state)
+  const originOf = row => pluginOrigin(row, marketEntry(row))
+  const originText = origin => origin === 'link' && reviewKnown() ? `${ORIGINS.link} · ${UNREVIEWED}` : ORIGINS[origin]
+  const meta = (row, origin) => [row.author, row.version, originText(origin)].filter(Boolean).join(' · ')
   const declarations = (declaration, title = 'What it touches') => h('section', { class: 'plugin-declaration', 'aria-label': title }, h('h3', { class: 'kicker', text: title }),
     touchSentences(declaration).length ? h('ul', {}, ...touchSentences(declaration).map(text => h('li', { text }))) : h('p', { class: 'note', text: 'Declares no network, record or memory access.' }))
   function opened() {
@@ -69,21 +85,23 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     try {
       const out = await host.api('GET', `/plugins/${encodeURIComponent(row.id)}`)
       if (st.selected?.key === row.key) {
-        st.detail = out
+        const sameCopy = copy => copy?.layer === row.layer && copy?.folder === row.folder
+        const plugin = !out.rows || sameCopy(out.plugin) ? out.plugin : out.rows.find(sameCopy)
+        st.detail = { plugin }
         // A plugin's own settings (`settings.entry`): until 0.2.1 only Daily
         // notes' were read and shown, so no other plugin's could be changed
         // here (the 0.2.0 walk: Comments & suggestions' `reach`).
-        if (row.id === 'daily-notes' || (out.plugin?.contributes || row.contributes)?.['settings.entry']?.length) {
+        if (row.id === 'daily-notes' || (plugin?.contributes || row.contributes)?.['settings.entry']?.length) {
           try { const settings = await host.api('GET', `/plugins/${encodeURIComponent(row.id)}/settings`); if (st.selected?.key === row.key) hostSettings = settings }
           catch (e) { if (st.selected?.key === row.key) st.detailError = e.message }
         }
         // A plugin that declares `keys:` takes them from API keys (2026-11-18);
         // its `settings.secret` of the same name stays only so a broker from
         // before 0.2.3 still hands it the key, and is not drawn here.
-        if (st.selected?.key === row.key && !(out.plugin?.keys || row.keys)?.length && (out.plugin?.contributes || row.contributes)?.['settings.secret']?.length) {
+        if (st.selected?.key === row.key && !(plugin?.keys || row.keys)?.length && (plugin?.contributes || row.contributes)?.['settings.secret']?.length) {
           secretSettings = createSecretSettings({ id: row.id, request: host.api, redraw: changed })
         }
-        if (out.plugin) loader.st.rows = loader.st.rows.map(current => current.key === row.key ? { ...current, ...out.plugin, key: current.key } : current)
+        if (plugin) loader.st.rows = loader.st.rows.map(current => current.key === row.key ? { ...current, ...plugin, key: current.key } : current)
       }
     }
     catch (error) { if (st.selected?.key === row.key) st.detailError = error.message }
@@ -125,38 +143,57 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         button(st.restarting === row.id ? 'Restarting…' : 'Restart', () => restart(row), 'pillbtn content-mark', { disabled: st.restarting !== null, 'aria-label': `Restart ${row.name || row.id}` })) : null,
       st.serviceError?.id === row.id ? notice(st.serviceError.message) : null)
   }
-  // A plugin's picture (2026-11-18): its icon through the page's own files
-  // route (the row's `files` is the broker's /v1 path, which the page cannot
-  // load), and a calm letter tile when it has none or the file fails.
+  // The row's files URL belongs to the broker. Browser assets use the app's relay.
   const letterTile = row => h('span', { class: 'plugin-icon plugin-icon-letter', 'aria-hidden': 'true', text: (row.name || row.id || '?').trim().charAt(0).toUpperCase() })
   const pluginIcon = row => {
     if (row.kind?.includes?.('theme') && !row.icon) return null
     if (!row.icon) return letterTile(row)
-    const img = h('img', { class: 'plugin-icon', src: `/api/plugins/${encodeURIComponent(row.id)}/files/${row.icon.replace(/^\//, '').split('/').map(encodeURIComponent).join('/')}`, alt: '', loading: 'lazy',
-      onerror: e => { const tile = letterTile(row); e.currentTarget?.replaceWith?.(tile) } })
-    return img
+    const src = `/api/plugins/${encodeURIComponent(row.id)}/files/${row.icon.replace(/^\//, '').split('/').map(encodeURIComponent).join('/')}`
+    if (failedIcons.has(src)) return letterTile(row)
+    return h('img', { class: 'plugin-icon', src, alt: '', decoding: 'async',
+      onerror: event => { if (event.currentTarget.isConnected) { failedIcons.add(src); changed() } } })
   }
-  function rowView(row) {
-    row = { ...row, overrides: [...new Set([...(row.overrides ?? []), ...(host.registry?.overrides(row.id) ?? [])])] }
-    const failed = loader.st.failures.get(row.id), broken = row.broken || failed
-    const themeState = theme.value.theme === row.id ? 'In use' : 'Not in use'
-    const control = row.switch === 'plugin' && !row.broken ? h('button', { class: 'schedule-switch plugin-switch', role: 'switch', 'aria-checked': String(Boolean(row.on)), 'aria-label': `Enable ${row.name || row.id}`, disabled: loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span', { 'aria-hidden': 'true' }))
-      : row.switch === 'appearance' ? h('span', { class: 'plugin-state', text: themeState })
-      : row.switch === 'listed' ? null : h('span', { class: 'plugin-state', text: 'Unavailable' })
+  const pluginSwitch = row => row.switch === 'plugin' && !row.broken
+    ? h('button', { type: 'button', class: 'schedule-switch plugin-switch', role: 'switch', 'aria-checked': String(Boolean(row.on)), 'aria-label': `Enable ${row.name || row.id}`, disabled: loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span', { 'aria-hidden': 'true' }))
+    : null
+  function rowNotices(row) {
+    const overrides = [...new Set([...(row.overrides ?? []), ...(host.registry?.overrides(row.id) ?? [])])]
+    const broken = row.broken || loader.st.failures.get(row.id)
+    return [
+      row.shadows ? h('span', { class: 'plugin-mark', text: 'Changes a shipped plugin' }) : null,
+      overrides.length ? h('span', { class: 'plugin-mark', text: `Replaces ${overrides.map(label).join(', ')}` }) : null,
+      broken ? h('span', { class: 'plugin-row-error', text: broken }) : row.warnings?.length ? h('span', { class: 'plugin-row-warning', text: `${row.warnings.length} ${row.warnings.length === 1 ? 'warning' : 'warnings'}` }) : null,
+    ]
+  }
+  function rowView(row, origin) {
+    const unreviewed = origin === 'link' && reviewKnown()
+    const control = pluginSwitch(row) ?? (row.switch === 'listed' ? null : h('span', { class: 'plugin-state', text: 'Unavailable' }))
     return h('div', { class: 'plugin-list-item', key: row.key }, h('div', { class: 'plugin-list-row' },
-      h('button', { type: 'button', class: 'setrow plugin-row', onclick: () => open(row), 'aria-label': `About ${row.name || row.id}`, 'aria-description': row.switch === 'appearance' ? `${meta(row)} · ${themeState}` : meta(row) },
+      h('button', { type: 'button', class: 'setrow plugin-row', onclick: () => open(row), 'aria-label': `About ${row.name || row.id}`, 'aria-description': meta(row, origin) },
         pluginIcon(row),
-        h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: row.name || row.id }), h('div', { class: 'setrow-sub', text: row.description || (row.switch === 'appearance' ? 'Theme' : row.on ? 'Enabled' : row.id === 'git-backup' ? 'Off-box backup is off' : 'Disabled') }),
+        h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: row.name || row.id }), h('div', { class: 'setrow-sub', text: row.description || (row.on ? 'Enabled' : row.id === 'git-backup' ? 'Off-box backup is off' : 'Disabled') }),
           // Backup off is a state worth saying under its promise (f8d860d).
           row.description && row.id === 'git-backup' && !row.on ? h('span', { class: 'plugin-mark plugin-mark-warn', text: 'Off-box backup is off' }) : null,
-          linked(row) ? h('span', { class: 'plugin-mark plugin-mark-link' }, icon.link(11), 'From a link') : null,
-          row.shadows ? h('span', { class: 'plugin-mark', text: 'Changes a shipped plugin' }) : null,
-          row.overrides?.length ? h('span', { class: 'plugin-mark', text: `Replaces ${row.overrides.map(label).join(', ')}` }) : null,
-          broken ? h('div', { class: 'plugin-row-error', text: broken }) : row.warnings?.length ? h('div', { class: 'plugin-row-warning', text: `${row.warnings.length} ${row.warnings.length === 1 ? 'warning' : 'warnings'}` }) : null),
-        row.switch === 'appearance' ? control : null, icon.chevronRight(12)), row.switch === 'appearance' ? null : control),
-      // In the list, the server says something only when it is not running
-      // as it should (2026-11-19); its page always says, under Details.
-      row.service && row.service.state !== 'running' ? serviceView(row) : null)
+          unreviewed ? h('div', { class: 'plugin-row-origin', text: UNREVIEWED }) : null,
+          rowNotices(row)),
+        icon.chevronRight(12)), control),
+      row.on && row.service && row.service.state !== 'running' ? serviceView(row) : null)
+  }
+  function themeCard(row) {
+    const name = row.name || row.id, origin = originOf(row)
+    const inUse = row.effective && theme.value.theme === row.id
+    const state = row.broken ? 'Unavailable' : inUse ? 'In use' : 'Not in use'
+    return h('div', { class: 'plugin-theme-card', key: row.key },
+      h('button', { type: 'button', class: 'plugin-theme-about', onclick: () => open(row),
+        'aria-label': `About ${name}`, 'aria-description': `${meta(row, origin)} · ${state}` },
+        themePreview(row.id),
+        h('span', { class: 'plugin-theme-label' },
+          h('span', { class: 'setrow-title', text: name }), icon.chevronRight(12)),
+        h('span', { class: 'plugin-theme-origin', text: originText(origin) }),
+        inUse ? h('span', { class: 'plugin-theme-state' }, icon.check(12), state) : null,
+        rowNotices(row)),
+      pluginSwitch(row),
+      row.on && row.service && row.service.state !== 'running' ? serviceView(row) : null)
   }
   // Each `settings.entry` of a plugin that is on: a choice as a menu, text as
   // a field, each saved by itself (PATCH /plugins/<id>/settings).
@@ -209,12 +246,26 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       declarations(declaration),
       h('dl', { class: 'plugin-facts' },
         fact('Version', row.version || 'Unknown'),
-        fact('Made by', who),
-        fact('Comes from', row.source?.kind === 'loam' ? 'Built into Loam' : row.source?.kind === 'link' ? `github.com/${row.source.repo}` : 'Made on this server'),
-        row.service ? fact('Its server', `${SERVICE[row.service.state] ?? row.service.state}`) : null,
+        originOf(row) !== 'market' ? fact('Made by', who) : null,
+        row.on && row.service ? fact('Its server', `${SERVICE[row.service.state] ?? row.service.state}`) : null,
         url ? fact('Source', h('a', { class: 'quietlink plugin-source', href: url, target: '_blank', rel: 'noopener noreferrer' }, 'View source', icon.external(12))) : null),
       technical ? h('details', { class: 'plugin-guide', open: st.guide, ontoggle: event => { st.guide = event.currentTarget.open } }, h('summary', { text: 'Technical details' }),
         h('div', { class: 'md' }, ...[host.markdown?.(technical, { soft: true }) ?? h('p', { text: technical })].flat())) : null)
+  }
+  function aboutOrigin(row) {
+    const line = (...words) => h('p', { class: 'plugin-about-origin' }, ...words)
+    if (awaitingMarket(row)) return line('Checking Market listings…')
+    const origin = originOf(row)
+    if (origin === 'market') {
+      const author = marketEntry(row)?.author || row.author
+      return line(h('a', { class: 'quietlink', href: listingAddress('', row.id), onclick: event => {
+        if (!host.openMarket || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+        event.preventDefault()
+        host.openMarket({ id: row.id, from: { label: 'Plugins' }, back: { page: 'plugins', provider: row.id } })
+      } }, ORIGINS.market), author ? ` · By ${author}` : '')
+    }
+    if (origin === 'yours' && row.folder) return line(`${ORIGINS.yours} · ${row.folder}`)
+    return line(originText(origin))
   }
   // Set up: on, its keys saved (every one it needs, or any one of keys it
   // can choose between), and, when entries are marked `setup` (Git backup's
@@ -251,13 +302,13 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       shots, plain ? h('div', { class: 'md plugin-about' }, ...[host.markdown?.(plain, { soft: true }) ?? h('p', { text: plain })].flat()) : null) : null
     return [h('button', { class: 'backbtn plugin-back', 'aria-label': 'Back to Plugins', onclick: () => { st.selected = null; st.detail = null; st.error = ''; changed() } }, icon.chevronLeft(18), 'Plugins'),
       h('header', { class: 'plugin-hero' }, pluginIcon(row),
-        h('div', { class: 'plugin-hero-words' }, host.settingsHead(row.name || row.id), row.description ? h('p', { class: 'plugin-promise', text: row.description }) : null)),
+        h('div', { class: 'plugin-hero-words' }, host.settingsHead(row.name || row.id),
+          aboutOrigin(row), row.description ? h('p', { class: 'plugin-promise', text: row.description }) : null)),
       notice(row.broken), notice(loader.st.failures.get(row.id)),
       row.service && row.on && row.service.state !== 'running' ? serviceView(row) : null,
       theme ? picture(row) : null,
       ready ? null : how,
       row.shadows ? h('p', { class: 'plugin-mark', text: 'Changes a shipped plugin.' }) : null,
-      linked(row) ? h('p', { class: 'note plugin-from-link' }, icon.link(13), h('span', { text: `Installed from a link: github.com/${row.source.repo}${row.source.path ? `/${row.source.path}` : ''}, at ${row.source.ref_kind === 'tag' ? row.source.ref : `commit ${String(row.source.commit ?? row.source.ref).slice(0, 7)}`}. To update it, install from its link again.` })) : null,
       row.edited ? h('p', { class: 'note', text: 'Edited here since it was installed.' }) : null,
       notice(st.error), notice(st.detailError),
       st.opening ? h('p', { class: 'note', role: 'status', text: 'Reading plugin details…' }) : null,
@@ -293,11 +344,29 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   }
   function view({ back = true } = {}) {
     if (st.selected && loader.st.loaded && !loader.st.rows.some(row => row.key === st.selected.key)) { st.selected = null; st.detail = null; st.done = 'This copy was removed.' }
-    if (st.selected) return detail()
     const rows = loader.st.rows.filter(row => row.effective || row.broken)
+    const waiting = rows.some(awaitingMarket)
+    const market = host.marketState
+    if (market && !market.loading && Date.now() - (market.loadedAt ?? 0) > 60000 && rows.some(row => row.source?.kind === 'link')) {
+      host.loadMarket(false, { prefetch: false })
+    }
+    if (st.selected) return detail()
+    const themes = [], groups = new Map(Object.keys(ORIGINS).map(origin => [origin, []]))
+    for (const row of rows) {
+      if (awaitingMarket(row)) continue
+      if (row.kind?.includes('theme')) themes.push(row)
+      else groups.get(originOf(row)).push(row)
+    }
+    const group = (title, content) => h('section', { class: 'plugin-group', 'aria-label': title, key: title },
+      h('h3', { class: 'kicker', text: title }), content)
     return [back ? host.settingsBack('Settings', 'root') : null, host.settingsHead('Plugins'), notice(st.error), notice(st.done, false), notice(loader.st.error),
       !loader.st.loaded ? h('p', { class: 'note', role: 'status', text: 'Reading plugins…' }) : null,
-      ...[['Themes', true], ['Extensions', false]].map(([title, themes]) => { const group = rows.filter(row => Boolean(row.kind?.includes('theme')) === themes); return group.length ? h('section', { class: 'plugin-group', 'aria-label': title }, h('h3', { class: 'kicker', text: title }), h('div', { class: 'rows' }, ...group.map(rowView))) : null }),
+      themes.length ? group('Themes', h('div', { class: 'plugin-theme-grid' }, ...themes.map(themeCard))) : null,
+      [...groups.values()].some(rows => rows.length) ? group('Extensions', h('div', { class: 'plugin-origin-groups' },
+        ...Array.from(groups, ([origin, rows]) => rows.length ? h('section', { class: 'plugin-origin-group', 'aria-labelledby': `plugin-origin-${origin}`, key: origin },
+          h('h4', { class: 'plugin-origin-title', id: `plugin-origin-${origin}`, text: ORIGINS[origin] }),
+          h('div', { class: 'rows' }, ...rows.map(row => rowView(row, origin)))) : null))) : null,
+      waiting ? h('p', { class: 'note', role: 'status', text: 'Checking Market listings…' }) : null,
       // Settings › Market (2026-11-18) holds what can be got; this page shows
       // what is installed, and ends with the way there and the way in from a
       // link (one row, opening the Market's own install sheet: page/market.js).
