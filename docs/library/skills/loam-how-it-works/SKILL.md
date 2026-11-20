@@ -166,6 +166,11 @@ overwrites a change of theirs. A job that changes how Loam works updates
 this library in the same job, so these pages stay the one description of
 Loam.
 
+**Temporary storage.** The launcher clears an engineer job's scratch when
+the job ends. Nightly housekeeping sweeps leftovers and removes generated
+Python bytecode for vanished source directories, along with bytecode left
+idle for 14 days.
+
 **Plugins** add themes, page code, tools and servers. Loam's own ship with
 it; the owner's live in their own folder, which updates never touch (see
 `loam-building-a-plugin`). A customisation is a plugin wherever one can do

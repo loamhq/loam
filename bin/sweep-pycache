@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Sweep Loam's generated Python bytecode. Use --dry-run to measure it."""
+
+from __future__ import annotations
+
+import argparse
+import errno
+import os
+import re
+import stat
+import sys
+import time
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_config as lc  # noqa: E402
+
+IDLE_DAYS = 14
+PARTIAL_WRITE = re.compile(r"\.pyc\.[0-9]+$")  # CPython's atomic write scratch file
+
+
+def sweep(cache: Path, *, dry_run: bool) -> int:
+    cutoff = time.time() - IDLE_DAYS * 86400
+    removed = freed = errors = 0
+
+    def report(exc: OSError) -> None:
+        nonlocal errors
+        if exc.errno != errno.ENOENT:  # imports and other sweeps can race this walk
+            errors += 1
+            print(f"sweep-pycache: {exc}", file=sys.stderr)
+
+    try:
+        device = cache.stat().st_dev
+    except FileNotFoundError:
+        print(f"sweep-pycache: no cache at {cache}")
+        return 0
+
+    for directory, dirs, files, fd in os.fwalk(cache, topdown=False, onerror=report):
+        if os.fstat(fd).st_dev != device:
+            continue
+        # A prefix cache mirrors the absolute path of the source directory.
+        # Avoid reconstructing filenames: loaders also cache extensionless scripts.
+        relative = Path(directory).relative_to(cache)
+        try:
+            orphaned = not (Path("/") / relative).is_dir()
+        except OSError as exc:
+            report(exc)
+            orphaned = False
+
+        for name in files:
+            bytecode = name.endswith(".pyc")
+            if not bytecode and not PARTIAL_WRITE.search(name):
+                continue
+            try:
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                if not stat.S_ISREG(info.st_mode):
+                    continue
+                expired = max(info.st_atime, info.st_mtime) < cutoff
+                if not (expired or (bytecode and orphaned)):
+                    continue
+                if not dry_run:
+                    os.unlink(name, dir_fd=fd)
+                removed += 1
+                freed += info.st_blocks * 512
+            except OSError as exc:
+                report(exc)
+
+        if not dry_run:
+            for name in dirs:
+                try:
+                    os.rmdir(name, dir_fd=fd)
+                except OSError as exc:
+                    if exc.errno not in (errno.ENOTEMPTY, errno.ENOTDIR, errno.EBUSY):
+                        report(exc)
+
+    verb = "would remove" if dry_run else "removed"
+    print(f"sweep-pycache: {verb} {removed} files ({freed} allocated bytes)")
+    return 1 if errors else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dry-run", action="store_true")
+    return sweep(lc.PYCACHE.resolve(), dry_run=parser.parse_args().dry_run)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

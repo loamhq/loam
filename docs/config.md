@@ -37,7 +37,7 @@ place on a particular machine. Added 2026-11-14 (first release, job L1).
 | `paths.secrets_env`, `paths.wake_env` | the key files (wake.env: the agents' OAuth token) | `~/.config/loam/` |
 | `paths.mcp_venv` | the MCP servers' Python | `~/.local/share/loam/mcp-venv` |
 | `paths.host_history` | the host's own setup, kept (root's alone; docs/host-history.md) | `/var/lib/loam/host-history` |
-| `paths.pycache` | Python's bytecode cache (`PYTHONPYCACHEPREFIX`) | `~/.cache/loam/pycache` |
+| `paths.pycache` | Python's bytecode cache (`PYTHONPYCACHEPREFIX`). Nightly housekeeping removes bytecode whose source directory is gone or whose last access and modification are both over 14 days old. `bin/sweep-pycache --dry-run` previews the sweep. | `~/.cache/loam/pycache` |
 | `bin.claude`, `bin.codex`, `bin.agy`, `bin.uv` | the CLIs | `~/.local/bin/<name>` |
 | `vault.inbox`, `vault.boards`, `vault.general_board`, `vault.conversations`, `vault.projects`, `vault.attachments`, `vault.system` | the vault's own folders, relative to it | `Inbox`, `Inbox/boards`, `Inbox/boards/general.md`, `Conversations`, `Projects`, `Attachments`, `System` |
 | `git.autocommit.name`, `.email` | the identity of the 15-minute vault, workspace and plugin commits (`bin/autocommit`, docs/backup.md) | `loam`, `loam@<user>` |

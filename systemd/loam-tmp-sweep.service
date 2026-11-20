@@ -1,5 +1,5 @@
 [Unit]
-Description=Loam — the nightly housekeeping: /tmp, Antigravity's old files, the GitHub refresh
+Description=Loam — nightly housekeeping for /tmp, bytecode, Antigravity, GitHub and plugins
 # bin/sweep-tmp holds the what and the why. It is the backstop behind each
 # engineer job's own scratch (removed when the job ends): a unit killed before
 # its `finally`, a path typed by hand. Caused 2026-10-21, `/` full of ~30 GB
@@ -14,6 +14,9 @@ TimeoutStartSec=30min
 Nice=10
 IOSchedulingClass=idle
 ExecStart=/usr/bin/python3 -I -X pycache_prefix=@PYCACHE@ @ROOT@/bin/sweep-tmp
+# The Python prefix cache outlives test scratch and job clones. Sweep it
+# independently so a failure still leaves the rest of housekeeping to run.
+ExecStart=-/usr/bin/python3 -IB @ROOT@/bin/sweep-pycache
 # Work that was a step of drift-watch until 2026-11-19, when the one check on
 # a clock (bin/loam-check) replaced it: work is not watching, so it is done
 # here. Each is its own process; the leading `-` keeps one that fails from
