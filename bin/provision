@@ -736,14 +736,6 @@ def codex_config(name: str, workspace: Path) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def codex_hook_commands(workspace: Path) -> set[str]:
-    """The hook commands codex_config writes: what the broker may trust."""
-    return {hook["command"]
-            for event, groups in settings(workspace)["hooks"].items()
-            if event in CODEX_HOOK_EVENTS
-            for group in groups for hook in group["hooks"]}
-
-
 def provision_codex(names: list[str], dry: bool = False) -> None:
     """Write `.codex/` for each named persona, or every provisioned one:
     `config.toml` and `skills -> ../skills`, as `.claude/` has it."""

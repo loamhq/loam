@@ -382,23 +382,6 @@ def reattach(sc: dict, text: str, tid: str, start: int, end: int) -> dict:
 
 # -- finding passages again ------------------------------------------------------
 
-def _touched(ops: list, start: int, end: int) -> bool:
-    """Whether the change ``ops`` alters anything strictly inside the old
-    range [start, end): a deletion overlapping it, or an insertion inside it."""
-    old = 0
-    for op, val in ops:
-        if op == "=":
-            old += val
-        elif op == "-":
-            if old < end and old + val > start:
-                return True
-            old += val
-        elif op == "+":
-            if start < old < end:
-                return True
-    return False
-
-
 SURVIVE = 0.5        # below this share of its own letters left, a passage is gone
 
 
@@ -412,22 +395,6 @@ def _survived(ops: list, start: int, end: int) -> int:
         elif op == "-":
             old += val
     return kept
-
-
-def _churn(ops: list, start: int, end: int) -> int:
-    """How many letters a change put in or took out at or inside [start, end]."""
-    old, n = 0, 0
-    for op, val in ops:
-        if op == "=":
-            old += val
-        elif op == "-":
-            if old <= end and old + val >= start:
-                n += val
-            old += val
-        elif op == "+":
-            if start <= old <= end:
-                n += len(val)
-    return n
 
 
 def _deleted_run(ops: list, pos: int):
