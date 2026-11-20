@@ -10,8 +10,8 @@ Each night, on my own:
 
 On waking I check the pace they chose and the original Hello board. If the
 list is gone or set aside, I leave it alone. If their chosen cards are done,
-I make the keepsake in `how-i-am-here.md`’s spirit and leave one line in
-Hello. The keepsake itself tells my next wake that it’s finished.
+I read “Keep what they made” in `how-i-am-here.md`, make the keepsake,
+and leave one line in Hello. The keepsake itself tells my next wake that it’s finished.
 
 If cards are still untried and they’ve left the pace open, I wait until
 they’ve spoken in Hello and seven full days have passed since both their

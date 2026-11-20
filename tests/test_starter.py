@@ -151,6 +151,9 @@ def main() -> int:
     check("Hello seeds six ordinary Markdown checkboxes with the starter's exact words",
           (board["markdown"], len(cards), st.status().get("first_weeks")),
           ((st.STARTER_DIR / "hello-board.md").read_text(), 6, True))
+    first_note = next(line for line in board["markdown"].splitlines() if line.startswith("- "))
+    check("the reassurance is a visible board note before the six checkboxes",
+          (first_note.startswith("- ["), "delete this list" in first_note), (False, True))
     ticked = board["markdown"].replace("- [ ]", "- [x]", 1)
     check("...an ordinary board save can tick the first card",
           threads.write_board(meta, ticked, board["revision"])["markdown"], ticked)
