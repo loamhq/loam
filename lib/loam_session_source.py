@@ -111,19 +111,49 @@ def import_trees(rev, entry, prefix):
     return trees
 
 
+def ordinary_definitions(tree):
+    # Unknown decorators and metaclasses may inspect siblings at definition time.
+    allowed = {a for n in tree.body if isinstance(n, ast.ImportFrom)
+               and n.module == "contextlib" and not n.level for a in n.names
+               if a.name == "contextmanager" and a.asname is None}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name):
+            if n.id == "__name__" or (n.id == "contextmanager" and not isinstance(n.ctx, ast.Load)):
+                return False
+        if isinstance(n, ast.alias) and (n.asname or n.name) == "contextmanager" and n not in allowed:
+            return False
+        if getattr(n, "name", None) == "contextmanager" and n not in allowed:
+            return False
+        if isinstance(n, ast.arg) and n.arg == "contextmanager":
+            return False
+        if isinstance(n, ast.ClassDef) and (n.keywords or any(
+                not isinstance(base, ast.Name) or base.id not in {"object", "Exception", "RuntimeError"}
+                for base in n.bases)):
+            return False
+        for decorator in getattr(n, "decorator_list", ()):
+            if not (allowed and isinstance(decorator, ast.Name) and decorator.id == "contextmanager"):
+                return False
+    return True
+
+
 def direct_calls_only(trees, owner, names):
-    """Trace simple named imports. Treat namespace escapes and reflection as observable."""
+    """Trace named imports and literal calls. Treat escapes and reflection as observable."""
+    if any(tree is None for tree in trees.values()) or not ordinary_definitions(trees[owner]):
+        return False
     module = PurePosixPath(owner).stem
     functions = names - {None}
     namespaces = {module}
     for path, tree in trees.items():
-        if tree is None:
-            return False
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and any(a.name in functions for a in node.names):
                 namespaces.add(PurePosixPath(path).stem)
 
+    # An imported namespace may be re-exported through its importing module.
+    aliases = {a.asname or a.name for tree in trees.values() for n in ast.walk(tree)
+               if isinstance(n, ast.Import) for a in n.names if a.name in namespaces}
     for path, tree in trees.items():
+        local = {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.Import)
+                 for a in n.names if a.name in namespaces}
         parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
         calls = {n.func for n in parents if isinstance(n, ast.Call)}
         for n in ast.walk(tree):
@@ -155,10 +185,21 @@ def direct_calls_only(trees, owner, names):
                     "getattr", "hasattr"}:
                 if len(n.args) < 2 or not isinstance(n.args[1], ast.Constant):
                     return False
-            if isinstance(n, ast.Import) and any(a.name in namespaces for a in n.names):
+            if isinstance(n, ast.Name) and n.id in local:
+                attribute = parents[n]
+                if not (isinstance(attribute, ast.Attribute) and attribute.value == n
+                        and not attribute.attr.startswith("__")):
+                    return False
+                use = parents.get(attribute)
+                # Direct calls and exception matching consume the named member.
+                # Passing other attributes on can expose the namespace to reflection.
+                if attribute not in calls and not (isinstance(use, ast.ExceptHandler)
+                                                   and use.type == attribute):
+                    return False
+            if isinstance(n, ast.Attribute) and n.attr in aliases:
                 return False
             if isinstance(n, ast.ImportFrom) and any(
-                    a.name in namespaces or a.name == "*" or (a.name in functions and a.asname)
+                    a.name in namespaces or a.name in aliases or a.name == "*" or (a.name in functions and a.asname)
                     for a in n.names):
                 return False
             if isinstance(n, ast.Name):
@@ -169,7 +210,7 @@ def direct_calls_only(trees, owner, names):
             if isinstance(n, ast.Attribute) and n.attr in functions and n not in calls:
                 return False
             if isinstance(n, ast.Constant) and isinstance(n.value, str) and (
-                    n.value == "__doc__" or n.value in functions or n.value in namespaces):
+                    n.value == "__doc__" or n.value in functions or n.value in namespaces or n.value in aliases):
                 return False
     return True
 
