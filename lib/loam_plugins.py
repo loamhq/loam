@@ -1106,7 +1106,7 @@ def manifest_of(data: dict, folder_name: str | None,
     # not declare its provider. lib/loam_keys.py.
     import loam_keys  # noqa: PLC0415
     try:
-        keys = loam_keys.keys_of(data.get("keys"), warnings)
+        keys = loam_keys.keys_of(data.get("keys"), warnings, pid)
     except ValueError as exc:
         raise ManifestError(str(exc))
     if keys:
@@ -2448,6 +2448,9 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                 if trash:
                     os.replace(trash, target)
                 raise
+        if any(k.get("source") for k in manifest.get("keys", [])):
+            import loam_keys  # noqa: PLC0415
+            loam_keys.sync(refresh_sources=True)
         server = _servers_follow(pid, restart=True)
         out = one(pid)
         if (mine or {}).get("contributes") or (out.get("plugin") or {}).get("contributes"):

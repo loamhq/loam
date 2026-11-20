@@ -5,17 +5,20 @@ metadata to settings clients.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
 import tempfile
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 import loam_config as lc
 import loam_hetzner
+import loam_syncthing
 
 # ---------------------------------------------------------------------------
 # The providers Loam knows
@@ -44,6 +47,10 @@ PROVIDERS: dict[str, dict] = {
               "fields": [{"name": "MODAL_TOKEN_ID", "label": "Token ID", "secret": False},
                          {"name": "MODAL_TOKEN_SECRET", "label": "Token secret",
                           "secret": True}]},
+    "syncthing": {"name": "Syncthing", "check": "syncthing",
+                  "fields": [{"name": loam_syncthing.KEY, "label": "API key", "secret": True},
+                             {"name": loam_syncthing.GUI, "label": "Local GUI URL",
+                              "secret": False, "optional": True}]},
 }
 
 PROVIDER_ID = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
@@ -67,7 +74,7 @@ class KeyError_(Exception):
 # The manifest field: `keys:`
 # ---------------------------------------------------------------------------
 
-def keys_of(value, warnings: list[str]) -> list[dict]:
+def keys_of(value, warnings: list[str], plugin_id: str | None = None) -> list[dict]:
     """A manifest's ``keys:`` into ``[{provider, name, why, optional,
     fields}]``. A provider Loam knows takes its fields from Loam; another
     must say its own ``name`` and ``fields``. Raises ValueError for anything
@@ -92,6 +99,11 @@ def keys_of(value, warnings: list[str]) -> list[dict]:
         if pid in seen:
             raise ValueError(f"keys: {pid} is named twice")
         seen.add(pid)
+        if pid == loam_syncthing.PROVIDER and plugin_id != pid:
+            raise ValueError("keys: the Syncthing GUI key is reserved for the Syncthing plugin")
+        source = raw.get("source")
+        if "source" in raw and (pid != loam_syncthing.PROVIDER or source != loam_syncthing.SOURCE):
+            raise ValueError("keys: source must name the supported Syncthing GUI settings and gui/apikey")
         why = raw.get("why")
         if why is None:
             warnings.append(f"keys: {pid} says no `why`; the person is shown none")
@@ -118,7 +130,8 @@ def keys_of(value, warnings: list[str]) -> list[dict]:
             name = name.strip()
             fields = _fields_of(pid, raw.get("fields"))
         out.append({"provider": pid, "name": name, "why": why.strip(),
-                    "optional": optional, "fields": fields})
+                    "optional": optional, "fields": fields,
+                    **({"source": dict(source)} if source else {})})
     return out
 
 
@@ -155,7 +168,8 @@ def _fields_of(pid: str, value) -> list[dict]:
 def declaration_of(keys: list[dict]) -> list[dict]:
     """What the install question shows: provider, its name, why, optional."""
     return [{"provider": k["provider"], "name": k["name"], "why": k["why"],
-             **({"optional": True} if k["optional"] else {})} for k in keys]
+             **({"optional": True} if k["optional"] else {}),
+             **({"source": k["source"]} if k.get("source") else {})} for k in keys]
 
 
 # ---------------------------------------------------------------------------
@@ -386,11 +400,58 @@ def keys_file(plugin_id: str) -> Path:
     return _private(plugin_id) / "keys.env"
 
 
-def sync(rows: list[dict] | None = None) -> list[str]:
+@contextmanager
+def _shared_write(pid: str):
+    """Serialize the daemon import with manual changes to the same key."""
+    if pid != loam_syncthing.PROVIDER:
+        yield
+        return
+    path = keys_dir()
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (path / ".syncthing.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def _refresh_syncthing(rows: list[dict]) -> None:
+    pid = loam_syncthing.PROVIDER
+    row = next((row for row in rows if row["id"] == pid and row.get("on")), None)
+    if row is None:
+        return
+    keys = declaration_of(row.get("keys") or [])
+    confirmed = ((row.get("installed") or {}).get("confirmed") or {}).get("touches", {}).get("keys", [])
+    source = next((key["source"] for key in keys if key.get("source") and key in confirmed), None)
+    if not source:
+        return
+    fields = PROVIDERS[pid]["fields"]
+    with _shared_write(pid):
+        values, used = resolve(pid, pid, fields)
+        if values and not loam_syncthing.probe(values)[2]:
+            return
+        try:
+            imported = _clean(fields, {"values": loam_syncthing.read_source(source)})
+        except (KeyError_, loam_syncthing.SourceError) as exc:
+            slot = f"{pid}:refused"
+            why = str(exc)
+            if (_checks().get(slot) or {}).get("why") != why:
+                _record(slot, {"at": _now(), "ok": False, "why": why})
+            return
+        if imported == values:
+            return
+        path = _private(pid) / "secrets.env" if used == "own" else keys_dir() / f"{pid}.env"
+        _write_env(path, imported, keep_other=used == "own")
+        slot = f"{pid}@{pid}" if used == "own" else pid
+        _record(slot, {"at": _now(), "ok": True, "why": "Read from Syncthing’s settings on this server."})
+        _record(f"{pid}:refused", None)
+
+
+def sync(rows: list[dict] | None = None, *, refresh_sources: bool = False) -> list[str]:
     """Write each declaring plugin's ``keys.env`` from what is in force now,
     and remove the file of a plugin that declares none. Answers the ids whose
     file changed. Cheap, idempotent: run after any change and on reconcile."""
     rows = _rows() if rows is None else rows
+    if refresh_sources:
+        _refresh_syncthing(rows)
     changed = []
     seen = set()
     for row in rows:
@@ -576,6 +637,9 @@ def _merge_check(pid: str, prov: dict, values: dict[str, str],
 
 def check_values(prov: dict, values: dict[str, str]) -> tuple[bool, str]:
     name = prov.get("check")
+    if name == loam_syncthing.PROVIDER:
+        ok, why, _ = loam_syncthing.probe(values)
+        return ok, why
     if not name:
         return True, f"Saved. Loam has no check for a {prov['name']} key, so it was not tried."
     return check(name, values if len(prov["fields"]) > 1 else
@@ -587,13 +651,14 @@ def set_shared(pid: str, body, by: str | None = None) -> dict:
     of ``pid``. A refusal keeps nothing and raises with the check's sentence."""
     prov = provider(pid)
     values = _clean(prov["fields"], body)
-    merged, ok, why = _merge_check(pid, prov, values, shared_values(pid, prov["fields"]))
-    if not ok:
-        _record(f"{pid}:refused", {"at": _now(), "ok": False, "why": why, "by": by})
-        raise KeyError_(why, 422)
-    _write_env(keys_dir() / f"{pid}.env", merged, keep_other=False)
-    _record(pid, {"at": _now(), "ok": True, "why": why, "by": by})
-    _record(f"{pid}:refused", None)
+    with _shared_write(pid):
+        merged, ok, why = _merge_check(pid, prov, values, shared_values(pid, prov["fields"]))
+        if not ok:
+            _record(f"{pid}:refused", {"at": _now(), "ok": False, "why": why, "by": by})
+            raise KeyError_(why, 422)
+        _write_env(keys_dir() / f"{pid}.env", merged, keep_other=False)
+        _record(pid, {"at": _now(), "ok": True, "why": why, "by": by})
+        _record(f"{pid}:refused", None)
     sync()
     return one(pid)
 
@@ -601,18 +666,21 @@ def set_shared(pid: str, body, by: str | None = None) -> dict:
 def forget_shared(pid: str, by: str | None = None) -> dict:
     prov = provider(pid)
     path = keys_dir() / f"{pid}.env"
-    if not path.exists():
-        raise KeyError_(f"no {prov['name']} key is saved in API keys, in Settings › Connections" + (
-            "; the one in use is in this box's own secrets file, which Loam does "
-            "not change" if shared_source(pid, prov["fields"]) == "box" else ""), 404)
-    path.unlink()
-    _record(pid, None)
+    with _shared_write(pid):
+        if not path.exists():
+            raise KeyError_(f"no {prov['name']} key is saved in API keys, in Settings › Connections" + (
+                "; the one in use is in this box's own secrets file, which Loam does "
+                "not change" if shared_source(pid, prov["fields"]) == "box" else ""), 404)
+        path.unlink()
+        _record(pid, None)
     sync()
     return one(pid)
 
 
 def recheck(pid: str, by: str | None = None) -> dict:
     prov = provider(pid)
+    if pid == loam_syncthing.PROVIDER:
+        sync(refresh_sources=True)
     source = shared_source(pid, prov["fields"])
     if source is None:
         raise KeyError_(f"no {prov['name']} key is set", 404)
@@ -638,12 +706,13 @@ def set_own(pid: str, plugin_id: str, body, by: str | None = None) -> dict:
     like a shared one, kept in its private ``secrets.env``."""
     prov = _user(pid, plugin_id)
     values = _clean(prov["fields"], body)
-    merged, ok, why = _merge_check(pid, prov, values, own_values(plugin_id, prov["fields"]))
-    if not ok:
-        _record(f"{pid}@{plugin_id}:refused", {"at": _now(), "ok": False, "why": why})
-        raise KeyError_(why, 422)
-    _write_env(_private(plugin_id) / "secrets.env", merged)
-    _record(f"{pid}@{plugin_id}", {"at": _now(), "ok": True, "why": why, "by": by})
+    with _shared_write(pid):
+        merged, ok, why = _merge_check(pid, prov, values, own_values(plugin_id, prov["fields"]))
+        if not ok:
+            _record(f"{pid}@{plugin_id}:refused", {"at": _now(), "ok": False, "why": why})
+            raise KeyError_(why, 422)
+        _write_env(_private(plugin_id) / "secrets.env", merged)
+        _record(f"{pid}@{plugin_id}", {"at": _now(), "ok": True, "why": why, "by": by})
     sync()
     return one(pid)
 
@@ -652,8 +721,9 @@ def use_shared(pid: str, plugin_id: str, by: str | None = None) -> dict:
     """Back to the shared key: forget ``plugin_id``'s own key for ``pid``."""
     prov = _user(pid, plugin_id)
     names = {f["name"] for f in prov["fields"]}
-    _write_env(_private(plugin_id) / "secrets.env", {}, drop=names)
-    _record(f"{pid}@{plugin_id}", None)
+    with _shared_write(pid):
+        _write_env(_private(plugin_id) / "secrets.env", {}, drop=names)
+        _record(f"{pid}@{plugin_id}", None)
     sync()
     return one(pid)
 

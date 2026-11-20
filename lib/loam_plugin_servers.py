@@ -352,7 +352,7 @@ def reconcile() -> dict:
     try:
         import loam_keys  # noqa: PLC0415
         loam_keys.adopt()
-        loam_keys.sync()
+        loam_keys.sync(refresh_sources=True)
     except Exception:  # noqa: BLE001
         pass
     want = plugins.wanted_servers()
