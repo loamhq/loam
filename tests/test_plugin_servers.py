@@ -325,8 +325,7 @@ check("...leaves a failed one alone", "other" not in out["started"]
 check("...and stops one no longer wanted", out["stopped"] == ["gone"]
       and "loam-plugin-gone.service" not in fake.units, out)
 
-# a unit running from another folder (a test's scratch copy under the real
-# unit name, 2026-11-19) is started afresh from the plugin's own
+# A running unit with the right name but the wrong working directory is stale.
 fake.units["loam-plugin-echo.service"]["WorkingDirectory"] = "/tmp/a-test/plugins/echo"
 fake.calls.clear()
 out = S.reconcile()

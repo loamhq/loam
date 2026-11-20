@@ -1,36 +1,7 @@
-"""A systemd user manager of a test's own, so no test makes a unit on the live one.
-
-Since 2026-11-16. tests/test_schedule.py proves schedules against a REAL user
-manager -- a timer installed, armed, moved, fired once -- and did it in the
-box user's own manager, in its runtime unit directory under the names
-`loam-*-zzsched<pid>` and `zzother<pid>`. It cleaned up after itself, but every
-landing's test run made and removed timers in the manager every persona's
-wakes and crons live in (seen 11-16), and since landings test outside the
-live lock, two suites may now run at once.
-
-So the test starts a second user manager for this uid, private to it:
-
-    XDG_RUNTIME_DIR    a temp directory; `systemctl --user` reaches the
-                       manager at `$XDG_RUNTIME_DIR/systemd/private`, so the
-                       test's own process points there and nowhere else
-                       (DBUS_SESSION_BUS_ADDRESS is dropped, or it would win)
-    SYSTEMD_UNIT_PATH  the temp runtime unit directory and the distribution's
-                       /usr/lib/systemd/user (targets and slices only) -- not
-                       ~/.config/systemd/user or /etc/systemd/user, so not one
-                       of the box's own units is loaded, and none can fire
-    XDG_CONFIG_HOME,   temp, for the manager and for every `systemctl` the
-    XDG_DATA_HOME      test runs, so an `enable` without `--runtime` links
-                       into the temp tree too
-
-Its timers are real timers and fire, as the live manager's do (measured the
-same day, also inside the landing's user namespace). The manager is put in a
-cgroup of its own under the caller's first, where the cgroup tree is writable:
-a user manager moves every process of the cgroup it starts in into its
-`init.scope`, which would otherwise be the whole calling unit. It is stopped,
-and its cgroup removed, at the end.
-
-A machine where it cannot start fails the test, never falls back to the live
-manager.
+"""Start a real systemd user manager in a temporary runtime directory. Point both
+systemctl and the child environment at its bus and unit paths. Never install a test
+unit in the user's running manager. Keep the manager alive for the lifetime of the
+fixture so timers can be armed, moved and observed firing. See tests/test_schedule.py.
 """
 
 from __future__ import annotations
@@ -47,10 +18,7 @@ DISTRO_UNITS = "/usr/lib/systemd/user"
 
 
 class Unavailable(RuntimeError):
-    """This machine cannot run a second user manager at all: `systemd
-    --user` exits at once and says nothing, even at debug level. Seen on a
-    rehearsal VM whose systemd runs in a PID namespace, with every entered
-    process in the root cgroup (2026-11-18); not on a booted server."""
+    """Report that the host cannot start an independent user manager."""
 
 
 class PrivateManager:

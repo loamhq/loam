@@ -1,6 +1,4 @@
-"""Loaded by every Python process of a test run (tests/run-all puts this
-directory first on PYTHONPATH): no socket leaves loopback. See
-lib/loam_offline.py for why (the 2026-11-10 DNS outage)."""
+"""Install the offline test guards in each Python child started with this directory on PYTHONPATH."""
 import os
 import sys
 

@@ -1,44 +1,10 @@
 #!/usr/bin/env python3
-"""Files end to end: the app's real server in front of the broker's real one.
+"""Exercise the Files API through the app's real Node relay and a real loopback broker.
+Use fixture sessions for message delivery. Check upload limits, binary contents,
+path scope and preview policy. Browser enforcement of the policy requires a browser.
 
-Added 2026-10-02. `tests/test_broker_files.py` proves the broker's half over
-real HTTP and loam-ui's suite proves the app's half against a recorded host;
-neither proves the two agree. This does: the broker's `Server.handle` on a
-loopback port over temp roots (the fixture of `test_broker_files.py`), and
-the app's own `src/server.js`, exported from a git ref of its repository into
-a temp directory and run by Node with `BROKER_URL` pointed at that port.
-Every request below goes browser-side to the app (`/api/files/...`), which
-relays it to the broker; nothing is mocked between them.
-
-Sessions: two fixture sessions are put in the broker's table with a
-`send_message` that records what it was handed, so `POST .../messages` runs
-the broker's real route -- `resources` parsing, the agent's read scope, the
-refusals -- and no CLI is started and no transcript written.
-
-Upload (rewritten 2026-10-02 against 5148de9, which added the route): every
-upload is a WHATWG `FormData` `fetch`ed by Node to the app's own
-`POST /api/files/upload`, as the add sheet sends it -- the duplicate's new
-name, binary integrity, metadata, scope and read-only refusals with nothing
-written, both size caps. A real saved page with its stylesheet and images is
-then uploaded the same way and previewed, and the preview's policy and body
-are checked. What this cannot prove is what a browser does with that policy:
-the page's `<form>`, `<iframe>` and `javascript:` link are left in the body
-and are inert only because the browser enforces `sandbox` and
-`default-src 'none'`.
-
-The published vault URL is the one bin/deploy hands the app
-(`FILES_VAULT_URLS`, `service_env`), read from there, so a change there is
-tested here.
-
-Not in `tests/run-all`, on purpose: it starts a broker and the app and takes
-minutes. Run it by hand:
-
-  python3 tests/e2e_files_app.py [<checkout>] [<git ref>]
-
-defaults to this repository and `main`, and takes the app from its `app/`
-folder (since 2026-11-16 the app is Loam's own; before, a loam-ui checkout,
-whose root was the app). The checkout is only read (`git archive`). In a job's tree, run it under the tree's view of the
-runtime (`loam_worktree.platform_argv`) or it imports the live broker.
+Run by hand: python3 tests/e2e_files_app.py [<checkout>] [<git ref>].
+The app is read with git archive. Use the job's runtime view when testing a branch.
 """
 
 import asyncio
@@ -199,9 +165,7 @@ def run(app: App, server, t: dict, app_dir: Path, broker_url: str, token: str) -
     status, body = app.get("resolve", ref="/files/vault/From%20app/new.md")
     check("app → broker: resolve the app's own deep link",
           (status, body.get("status")), (200, "found"))
-    # Folders (2026-10-02): every way a chat writes one, relayed by the app,
-    # answered as a folder row, and read by the page's own `resolveOf` and
-    # `isFolder` -- the branch `openFileRef` takes to open the folder in Files.
+    # Check folder rows through both the relay and the page's own parsers.
     ui = {"from_root": "vault", "from_path": "40_PROJECTS/loam-ui/loam-ui.md"}
     folder_refs = [
         ("[[40_PROJECTS/Loam]]", {}, "found", "40_PROJECTS/Loam"),

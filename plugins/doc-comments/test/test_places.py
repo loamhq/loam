@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Where a note sits after the text changes (2026-11-17, round 4 of the
-walk): a note's place is carried through every change, never searched for,
-on a doc that repeats itself on purpose (the same sentences in each section,
-tables with equal cells). What must hold:
-
-- a change outside a note's passage never changes which words it is on;
-- a change inside leaves it there (marked changed) or detaches it, never
-  moves it to other words;
-- Accept writes into the passage the person saw marked, or refuses.
-
-The walk's four cases are named tests; then seeded runs of known changes
-(saves typing and deleting, accepts, rejects, restores) and changes on disk,
-near, inside and far from the notes, checking after every step that each
-note is on the very occurrence it was put on.
-
-Run: python3 plugins/doc-comments/test/test_places.py
-"""
+"""Exercise note anchoring through edits, deletions and ambiguous passages. Keep the original selection available when its placement needs review."""
 
 import os
 import random
@@ -524,9 +508,7 @@ def without(text, i):
 
 
 class Twins(unittest.TestCase):
-    """Round 6 (2026-11-17): sections that differ only in their digits. A
-    comparison cannot tell them apart; a note carried onto a twin is
-    detached there, and one whose text returns byte for byte is home."""
+    """Text differing only in digits must not silently attach a note to the wrong section."""
 
     def test_case_1_swapping_which_twin_section_is_missing(self):
         w = World()

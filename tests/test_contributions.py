@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""The plugin-host seams (2026-11-14, first release L4): `contributes:` read,
-declared, filtered by lane, rendered into timers; and arming a timer that has
-stood before without starting it as it stands (lib/loam_units.arm_timer, which
-loam_schedule.Systemd.arm calls).
+"""Render plugin contributions into the supported providers and verify their declared
+scopes.
 
 Run: python3 tests/test_contributions.py
 """
@@ -300,8 +298,7 @@ with tempfile.TemporaryDirectory() as tmp:
           did == "made fresh, started"
           and ("enable", "--runtime", "loam-cron-x-y.timer") in sd.fake.calls, sd.fake.calls)
 
-# settings.entry reads for a person (2026-11-18, Images 1.1.0): a label per
-# choice, a note, and `advanced`. Older hosts ignore all three.
+# Render choice labels, notes and advanced settings from a manifest.
 nice = c.contributes_of({"settings.entry": [
     {"key": "backend", "label": "Made with", "choices": ["auto", "openai"],
      "labels": {"auto": " Whichever key you have "}, "note": "A sentence.", "default": "auto"},
@@ -318,8 +315,7 @@ for bad in ({"labels": {"other": "x"}, "choices": ["a"]}, {"labels": {"a": ""}, 
     except c.ContributionError:
         check(f"settings.entry {sorted(bad)} is refused", True)
 
-# `setup` (2026-11-19): what setting the plugin up means; the page leads with
-# its controls once one such entry has a value.
+# Setup controls take precedence while the plugin needs configuration.
 marked = c.contributes_of({"settings.entry": [{"key": "remote", "label": "Repository", "default": "", "setup": True},
                                               {"key": "every", "label": "Every", "default": "1h"}]}, None, [])["settings.entry"]
 check("setup is kept where given, absent elsewhere", (marked[0].get("setup"), "setup" in marked[1]), (True, False))
