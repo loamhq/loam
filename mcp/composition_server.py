@@ -1,29 +1,7 @@
 #!/usr/bin/env python3
-"""Wren's craft path as a shared MCP server: PDF, fonts, page render.
-
-Ported from ``chassis.image_gen`` and ``chassis.pdf_gen``. Two deliberate
-changes from the chassis version, both ratified 2026-08-25:
-
-* **No per-agent allowlist.** On the chassis these were the only scoped tool
-  grants in the system, gated to one persona for craft ownership rather than for
-  safety. Here every agent gets them all.
-* **Write targets are not fenced** (since 2026-11-08, "the authority
-  move"; until then they were held to the agent's own workspace, the
-  commons and the vault). A target's filename is still checked for the
-  characters Android cannot store.
-
-``render_typst_pages`` is the one that closes the loop -- it is how an agent
-*sees* what it composed. Composing without preview is working blind.
-
-The verbatim stdout/stderr passthrough on the Typst tools is the contract,
-not a nicety: it is what lets an agent read its own compile diagnostics and
-fix its own source. The parsed ``diagnostics`` overlay is a convenience; a
-parse miss never affects the raw text.
-
-Configured by environment: LOAM_AGENT, LOAM_AGENT_WORKSPACE, LOAM_VAULT and
-LOAM_AI_LABS. Image making left on 2026-11-18 for the Images plugin, and
-with it the only reason this server read a secret.
-"""
+"""Serve PDF, font and page-rendering tools to every agent. Validate target names
+for Android compatibility. Return the compiler's stdout and stderr verbatim
+so the caller can diagnose failures even when structured diagnostics are unavailable."""
 
 from __future__ import annotations
 

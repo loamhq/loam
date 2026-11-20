@@ -206,12 +206,8 @@ def check_config_clauses(findings: list, names: list[str]) -> None:
     if len(raw) < 2:
         return
 
-    # A line byte-identical in a majority of the raw configs is compared raw.
-    # Masking exists for each agent's own name, and a fleet-wide sentence that
-    # names one agent ("Today's only grant: Ada's `infra-watch`", 2026-10-06)
-    # would otherwise mask in that agent's copy alone and read as drift there.
-    # A majority rather than all, so one config diverging in that sentence is
-    # reported against itself and not also against the agent it names.
+    # Compare majority-identical lines before masking. A shared clause that names
+    # one agent would otherwise appear to differ only in that agent's copy.
     lines = Counter(l for t in raw.values() for l in set(t.splitlines()))
     shared = {l for l, n in lines.items() if n >= len(raw) // 2 + 1}
     per_agent = {name: config_clauses(text, name, _own_name(name), shared)
@@ -1013,20 +1009,8 @@ def check_managed_settings(findings: list, prov) -> None:
 
 
 def check_lane_models(findings: list, names: list[str], prov) -> list[str]:
-    """Every lane's EFFECTIVE model against the model its own config names.
-
-    The alarm this file was missing. On 2026-09-25 one persona's lane ran most of a
-    conversation on Opus 4.8 while `ai-labs/ada/.claude/settings.json` said
-    `fable`, and the only thing that said so was one warning line in the
-    scroll, which the owner happened to catch. Nothing on this box compared
-    the two. A config is a statement of intent; this reads what actually
-    happened and reports when they differ, so an unchosen model is a finding
-    rather than a thing someone notices.
-
-    The comparison rule and the transcript read live in loam_session, not
-    here, because bin/lane-check asks the same question once a night per
-    agent and the two must not be able to answer it differently.
-    """
+    """Compare each lane's effective model with its configured model. Share the transcript
+    reader and comparison rules with lane-check so interactive and scheduled findings agree."""
     notes = []
     # Each lane's configured model is what it launches on now: a persona's
     # own default when it set a Claude Code one (2026-11-13, its profile;

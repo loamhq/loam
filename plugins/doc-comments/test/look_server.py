@@ -34,7 +34,7 @@ svc.sync_links(did, [links_mod.public(l) for l in links.for_doc(did)])
 lid = svc.ensure_id(owner, "vault", "Essays/drafts/Long.md")
 links.create(lid, "comment", "Kim", 30, "pass-long")
 svc.sync_links(lid, [links_mod.public(l) for l in links.for_doc(lid)])
-# a second save by Ada, so History has a version to read
+# Save a second version for the history view.
 p = ("vault", "Essays/drafts/On staying.md")
 cur = svc.get(owner, *p)
 rev = svc.revision(owner, *p)

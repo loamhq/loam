@@ -1,51 +1,7 @@
-"""A thread's full record (2026-11-10): every step of every reply, kept.
-
-The readable record in ``15_CONVERSATIONS/<title>.md`` keeps a reply's text
-and its ``did`` labels; it is the human record. This is the machine one: one
-append-only JSONL file per thread, ``state/threads/steps/<thread id>.jsonl``,
-one line per message a member's session produced::
-
-    {"message": "m4", "thread": "t-6daf5a6f", "author": "ada",
-     "engine": "claude-code", "model": null, "at": "2026-11-10T17:47:55Z",
-     "session_id": "ede89dc4-…", "seq": [12, 4310],
-     "steps": [{"type": "text", "text": "…", "parent": null}, …]}
-
-**Why not beside the record in the vault.** Tool outputs go in untrimmed --
-a ``cat`` of a config, an ``env`` listing, a whole file -- and the vault is
-pushed to GitHub and served at the vault's own host; its history already weighs
-4.6 GB. So this lives with the runtime's thread state, which is gitignored
-and never served. Unlike the rest of ``state/threads/`` it is **not a
-cache**: nothing else in the thread holds tool inputs and outputs. The
-broker's session event log (``state/broker/sessions/<session id>.jsonl``)
-holds the same events and more, and ``seq`` points into it.
-
-``steps`` is every event the harness emitted for the reply, in order, each
-in one of these shapes:
-
-- ``{"type": "text", "text", "parent"}`` -- what was said; ``parent`` is the
-  ``Agent`` tool call a subagent said it under, null at the top.
-- ``{"type": "thinking", "thinking", "parent"}``
-- ``{"type": "tool", "id", "name", "input", "parent", "output", "is_error",
-  "result"}`` -- a call and, once it came back, its output as the harness
-  returned it (a string or a list of content blocks), untrimmed. ``result``
-  is the rest of the tool result event (``tool_use_result`` and the like).
-- ``{"type": "tool", "id", "name": "Agent", "input": {"description"},
-  "parent": null, "carried": true, "output", "is_error"}`` -- the stub of an
-  ``Agent`` call made in an earlier reply, ahead of that subagent's steps
-  in this one (``nest_carried``, 2026-11-12).
-- ``{"type": "permission", "event"}`` / ``{"type": "permission_resolved",
-  "event"}`` -- a question or permission card and its answer, the broker's
-  own ``broker.permission_request`` / ``…_resolved`` events whole.
-- ``{"type": "end", "event"}`` -- a ``result``: the end of a harness turn,
-  with its usage and cost.
-- ``{"type": "event", "event"}`` -- anything else, whole (``system`` lines,
-  task notifications, rate limits, ``broker.*``).
-
-The one thing left out is ``stream_event``: the token deltas that the
-``assistant`` events repeat whole. They stay in the session log. No size cap.
-
-Stdlib only, like ``loam_threads``.
-"""
+"""Keep an append-only record of each reply's steps in runtime state. Tool input and
+output can contain private files or environment data, so they stay outside the vault.
+The readable thread carries the reply and short activity labels. The step record
+holds the message ID, session and event range, and preserves parent calls for nesting."""
 
 from __future__ import annotations
 
@@ -187,24 +143,8 @@ def build(events: list[dict]) -> list[dict]:
 
 
 def nest_carried(steps: list[dict]) -> list[dict]:
-    """A subagent's steps under a call this reply did not make get that call
-    back, as a ``carried`` stub ahead of the first of them (2026-11-12).
-
-    A background subagent launched in one reply often finishes in the next:
-    its last words, its ``task_notification`` and the persona's follow-up
-    turn all land in the reply after the one holding its ``Agent`` call. Its
-    steps keep their ``parent``, but nothing in this record has that id, and
-    a reader that nests by parent (the page's transcript) falls back to the
-    top level -- where the subagent's last sentence reads as the persona's
-    own words. Seen in thread t-6daf5a6f on 11-12: "The Show more fix is
-    ready for Ada to check." drawn as Ada's, and before it two raw
-    engineer receipts. The stub names the call from the task's own events
-    (``description``) and, once the task has reported, carries its
-    ``summary`` as the output, so the subagent's work is drawn folded under
-    its call as a step and never as speech. The message's text was never
-    affected: only top-level text is what a persona said.
-
-    Idempotent, so a record written before this is mended as it is read."""
+    """Insert a carried parent before the first step of a subagent whose call belongs
+    to an earlier reply. Otherwise its words would appear under the replying persona."""
     known = {s.get("id") for s in steps
              if isinstance(s, dict) and s.get("type") == "tool" and s.get("id")}
     about: dict[str, dict] = {}

@@ -1,43 +1,8 @@
-"""An agent's profile, and the settings of the engineers and the reviewer.
-
-Decided 2026-11-13 (the owner, on a persona's mockup at its agent-profile site:
-"Looks good. Please proceed."; earlier that day: "build out ... the agent
-profile and all the different settings for a specific agent ... customizing
-and editing the engineers and other systems ... being able for me to be able
-to set the provider for them"). This is the host's half; the page is
-loam-ui's. The routes are in bin/session-broker; their contract is in
-broker/README.md, "Agent profiles, engineers and the reviewer".
-
-**Where each setting lives.**
-
-- An agent's display name and default provider, model and thinking level
-  are its ``agent.json`` (``display``, ``provider``, ``model``,
-  ``effort``); its face is the theme's, or an uploaded image
-  (lib/loam_agents.py). The emoji face is retired (the owner, 2026-11-16):
-  an older file's ``emoji`` is kept through a provision, in its old place,
-  and served by nothing. That file already held the name, and every reader of an agent's name or face already reads it
-  (the page's cards, threads' lines and mentions, the schedule page). The
-  id (the folder's name) never changes: it is the workspace, the units, the
-  session records and the ``@`` an old message carries, so a rename is the
-  display name only, and ``@`` mentions match both. bin/provision keeps
-  these five keys when it renders agent.json again, and bin/check-drift
-  compares the rest of the file. The persona's own words for itself
-  ("You are Ada" in its CLAUDE.md, its style's name) stay on the id.
-- The engineers' and the reviewer's are the broker's host settings file
-  (``state/broker/settings.json``, keys ``engineers`` and ``reviewer``),
-  beside Appearance's, written under the same lock
-  (``loam_appearance.mutate``). Not ``projects/<name>.json`` or a unit
-  file: those are tracked in this repository, and a page's write must not
-  dirty the canonical checkout. The launchers read them on every run
-  (lib/loam_engineer.py ``engineer_choice``; ``reviewer_choice`` here).
-  The reviewer's schedule is applied as a systemd drop-in beside the
-  tracked unit (``loam-reviewer.timer.d/schedule.conf``), and
-  check-drift holds the drop-in to the setting.
-
-**Where the defaults apply.** An agent can inherit a connected provider or
-name one explicitly. A thread member can override it. Wakes and crons have
-their own supported providers, and a lane with no eligible choice pauses.
-"""
+"""Read and update agent, engineer and reviewer profiles. Agent display preferences
+belong in agent.json. A rename keeps the workspace ID used by units, sessions
+and existing mentions. Engineer and reviewer choices belong in locked runtime
+settings so a page action cannot dirty the checkout. The reviewer timer applies
+its schedule through a drop-in. See broker/README.md for the route contract."""
 
 from __future__ import annotations
 

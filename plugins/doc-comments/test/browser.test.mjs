@@ -445,7 +445,7 @@ test('Suggesting next to and inside someone else\'s suggestion, and with a chang
   assert.ok(seen.includes('slowly') && seen.includes('greeey dog too') && seen.includes('comfort at all'), seen)
   await closeMine(p, 'accept')
   assert.equal(body((await disk(p)).text), body(seen))
-  // Ada's is still there, open, on what is left of its words or changed
+  // The other author’s note stays open after its passage changes.
   const ada = (await api(p, 'doc', 'GET')).notes.filter(n => n.author.id === 'ada' && n.state === 'open')
   assert.equal(ada.length, 1)
   assert.deepEqual(page.errors, [])

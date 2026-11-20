@@ -60,11 +60,7 @@ COMMS_WINDOW = timedelta(days=14)
 # Structure, never a swept item -- same role README.md plays in the commons.
 PRESERVED_NAMES = frozenset({"README.md", ".gitkeep"})
 
-# A comms line is `- 2026-09-05 · **ada** · snippet · [[link]]`. The date is
-# first precisely so this can read it. An optional bullet is tolerated because
-# a hand-written line may not carry one; everything that does not start with a
-# date -- headings, the register note, anything the owner adds -- is left alone,
-# which is what keeps this from being a general-purpose file rewriter.
+# Comms entries start with a date and an optional bullet. Preserve headings and undated notes.
 DATED_LINE = re.compile(r"^\s*(?:[-*+]\s+)?(\d{4}-\d{2}-\d{2})(?=\s|$)")
 
 

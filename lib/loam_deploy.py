@@ -589,8 +589,8 @@ def caddy_forward_block(f: dict) -> str:
 #
 #   [[landing]]
 #   host = "example.net"
-#   root = "/home/sam/ai-labs/ada/sites/landing"   # served in place
-#   public = "Sam, 2026-11-16, in chat: \"put it on example.net\""
+#   root = "/srv/www/landing"
+#   public = "<dated approval from the owner>"
 #
 # One ungated block per entry: the folder, read by Caddy where it lies, so
 # an edit to it is live with no deploy; no directory listing, and `.git` and

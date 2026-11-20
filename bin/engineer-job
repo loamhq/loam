@@ -866,13 +866,7 @@ def read_brief_meta(p: dict[str, Path]) -> dict:
     head = front_matter(text)
     max_minutes = clamp_minutes(head.get("max_minutes"))
     return {
-        # `title` since 2026-09-05, from the witness. The first-line heuristic
-        # is a fallback rather than the rule: a persona's brief opened with its own
-        # provenance ("From Ada, 2026-09-05, with the owner in the room…") --
-        # a perfectly good opening sentence -- and the receipt landed in the
-        # vault as `…-from-ada-2026-09-05-with-the-owner-in-the-room-th.md`,
-        # which tells the owner nothing about what the job was. A filename they
-        # browses should not depend on how a persona opens a paragraph.
+        # Use the brief's explicit title for the receipt filename. Its first line may be provenance.
         "title": head.get("title") or "",
         "briefed_by": head.get("briefed_by") or "unknown",
         "involvement": head.get("involvement") or "",
@@ -3445,12 +3439,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         # which is most of them.
         "session": ran_as or "none",
         "continues": f"`{continue_job}`" if continue_job else "—",
-        # The one Loam brief a persona other than the platform briefer may send (since
-        # 2026-09-25). "—" on every other job, which is nearly all of them,
-        # the same way `continues` is. It is recorded because the rule above it
-        # is invisible in a receipt otherwise: `briefed by otto` on a Loam
-        # job would read as the rule not being enforced, when it is exactly
-        # the lane the rule leaves open.
+        # Record the app scope that permits a project briefer to request a platform job.
         "deploy_brief": deploy_row(project, meta),
         "git_rows": git_rows(before, after),
         "ended_chats": ended_chats(project, started_at, finished_at),

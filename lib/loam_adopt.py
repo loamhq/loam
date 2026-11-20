@@ -74,10 +74,7 @@ ORIGIN_UI = "loam-ui"
 # (2026-09-20); it is one number and it is here.
 WINDOW_DAYS = 14
 
-# The CLI's own name for a working directory's session folder: every
-# character that is not a letter or a digit becomes a dash. Derived from the
-# 40 folders on this box rather than from documentation --
-# `/home/u/ai-labs/ada` is `-home-u-ai-labs-ada`.
+# Match the CLI's working-directory slug so the existing session directory is found.
 _SLUG = re.compile(r"[^A-Za-z0-9]")
 
 # A cheap pre-filter before anything is parsed. A persona has up to 230

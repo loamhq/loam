@@ -1,25 +1,8 @@
 #!/usr/bin/env python3
-"""Per lane, over the last n days: what the runs spent, and how much the cache served.
-
-Reads the wake log (``logs/wake-<agent>.jsonl``) and nothing else. A lane is
-an agent's reflection or one of its crons -- ``ada reflection`` and
-``ada cron:market-watch`` are two rows. Runs are the wakes that launched a
-session (a lock skip or a refused preflight spent nothing and is not one).
-
-The token columns come from the envelope's ``usage`` on each line, which
-bin/wake has kept since 2026-09-30 (lib/loam_usage.py). A line from before
-then has no usage, and a lane none of whose runs has any says "no usage
-recorded" rather than zeros. ``cost`` is the sum of the CLI's own
-``total_cost_usd``: an estimate at list price, not a bill. ``cached`` is the
-share of input served from cache: cache reads over all input (uncached +
-cache writes + cache reads), over the runs that recorded usage.
-
-Supersedes the hand-built week in the 09-15 paid-services report.
-``bin/cache-report`` is the older reconstruction from session transcripts,
-for dates before the envelope was kept.
-
-usage: usage-by-lane [days]     (default 7)
-"""
+"""Summarize launched wakes and cron runs from their log envelopes.
+Exclude lock skips and refused preflights. Older entries may lack usage, which
+is distinct from zero. Cost is the provider's list-price estimate. The cache
+share divides cache reads by all input tokens across runs that recorded usage."""
 
 from __future__ import annotations
 

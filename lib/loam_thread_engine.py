@@ -111,8 +111,7 @@ def _count(n: int) -> str:
 
 
 def _others(persona: str, detail: dict) -> str:
-    """``four others are mid-turn`` / ``three others are mid-turn and Ada is
-    waiting on you``: who holds the seats, from the 429's ``busy``."""
+    """Describe the other busy sessions reported when admission is refused."""
     busy = [b for b in (detail.get("busy") or []) if isinstance(b, dict)]
     asking = sorted({threads.display(b["agent"]) for b in busy
                      if b.get("status") == "needs_input" and b.get("agent")})
@@ -358,8 +357,7 @@ ENDED_WHY = {
 
 
 def ended_sentence(persona: str, why: str) -> str:
-    """``Ada's turn ended: the broker restarted``; ``why`` is a key of
-    ``ENDED_WHY``, or ``result`` for a turn that finished saying nothing."""
+    """Format the reason a member's turn ended, including a result with no reply."""
     if why == "result":
         return f"{threads.display(persona)}'s turn ended without a reply"
     return (f"{threads.display(persona)}'s turn ended: "

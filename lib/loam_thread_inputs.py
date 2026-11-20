@@ -1,32 +1,7 @@
-"""Each thread member's input, on disk and in order (2026-11-19, batch B step 2).
-
-What a member of a thread is owed -- the owner's messages, a job's result,
-another agent's mention, an update's notice -- was an in-memory queue until
-now: a broker restart dropped it, and even the owner's own message came back
-as "didn't start: the broker restarted. Tag @Ada to ask again". Each input is
-now written here before it is queued (``ThreadEngine.schedule``) and removed
-once its turn has dealt with it; the broker reads the lists when it starts
-and schedules what is still pending, once each and in order
-(``ThreadEngine.resume_inputs``).
-
-One file per (thread, member): ``<threads state>/inputs/<thread id>/<persona>.json``,
-``{"items": [entry, ...]}`` oldest first. An entry is what a ``Turn`` needs
-to be made again (``reason``, ``chain``, ``model``, ``attachments``,
-``note``, ``briefed_at``) plus its own ``id``, the time it was queued
-(``at``), and ``sent``: when the member's session was given it (its turn's
-prompt went in, or it was steered into a turn in flight).
-
-``sent`` is the once-only key's half that lives here. After an orderly stop
-an input whose turn was cut before it said anything is kept with ``sent``
-cleared, and is given again. After a crash an entry still marked ``sent``
-was in front of the session when the broker died: a message's is given
-again only if the member's ``through`` has not passed it
-(``ThreadEngine.already_heard``); any other kind (a result, a notice) is
-not given twice, and its drop is logged.
-
-Only the broker writes these files, on its one event loop; a write is a
-whole-file atomic replace.
-"""
+"""Persist ordered inputs per thread member before dispatch. The broker rewrites
+each member's file atomically on its event loop. On startup, recover queued
+inputs in order and inspect previously dispatched inputs against their journal
+positions before deciding whether another turn is needed."""
 
 from __future__ import annotations
 

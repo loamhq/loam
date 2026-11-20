@@ -214,7 +214,7 @@ class Service_(unittest.TestCase):
         # Detached keeps its quote and stays in the sidecar.
         self.assertEqual(got["notes"][2]["anchor"]["quote"],
                          "These are small things, but small things are most of a life.")
-        # The outside edit is in the record, under Ada.
+        # Keep the outside editor's identity in the revision history.
         hist = svc.history(OWNER, *self.P)
         self.assertEqual(hist["saves"][0]["kind"], "outside")
         self.assertEqual(hist["saves"][0]["author"]["id"], "ada")
@@ -394,8 +394,7 @@ class Service_(unittest.TestCase):
         self.comment(svc, "eighteen months")
         opened = svc.get(OWNER, *self.P)              # the owner opens the editor
         base_text, base_rev = opened["text"], opened["revision"]
-        # Meanwhile Ada saves first: changes the opening's verb and the
-        # last line.
+        # The other editor saves changes to the opening verb and the last line first.
         theirs = (base_text.replace("I told myself", "I promised myself")
                   .replace("careless in March", "careless in April"))
         store.outside_edit(*self.P, theirs)

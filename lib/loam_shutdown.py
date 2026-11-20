@@ -242,10 +242,8 @@ async def shutdown(broker: "Broker", server: "Server") -> None:
             s = stops[fut]
             say(f"session {s.agent}/{s.id} did not stop within "
                 f"{cfg.SHUTDOWN_SESSIONS_S}s; going on without it")
-    # Each thread's turn in flight ends on its session's exit. One that had
-    # said something posts it and its last line ("Ada's turn ended: the
-    # broker restarted"); one cut before a word, and every queued one, keeps
-    # its input on disk for the next start and posts nothing (2026-11-19).
+    # Post any partial reply and its stop reason. Preserve unsent and queued inputs
+    # for recovery so the next start can deliver them.
     engine = getattr(server, "threads", None)
     workers = {t: tid for tid, t in getattr(engine, "workers", {}).items()
                if not t.done()}
