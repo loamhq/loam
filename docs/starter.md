@@ -39,11 +39,7 @@ owner name. Loam posts it as Iris and marks it preset.
 
 Hello’s board opens with the six checkboxes in `docs/starter/hello-board.md`.
 Iris mentions the board once and waits for something the person says to make
-one idea relevant. They choose the pace, including hearing about things only
-on request. Iris can offer one visible change through Settings and tell them
-how to undo it. She adds their plans for later and ticks completed cards in
-their words with the date. At the end, the completed cards become a short
-record of their first weeks. Their own plans stay on the board.
+one idea relevant. When they try it, she ticks the card in their words.
 Her daily reflection runs even while she is the only agent. Its identity
 check compares a phrase from her soul with one from the preset greeting.
 Once there are other agents it draws the second phrase from a sibling.

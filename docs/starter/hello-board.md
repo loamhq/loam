@@ -1,6 +1,6 @@
 ## Things to try
 
-- Try these in any order, skip any, or add something for later. You can delete this list whenever you like and ask Iris to bring it back.
+Six things that make Loam yours. They are in no order and you can skip any of them. Delete this list whenever you like; Iris can bring it back.
 
 - [ ] **Make an agent.** Someone with a character of their own, for one part of your life.
 - [ ] **Change Loam by asking.** How it looks or what it does.
