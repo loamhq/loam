@@ -134,8 +134,8 @@ At desktop width the catalog occupies the left list column, beside an empty
 “Pick an app” main pane or the selected app. A frameable HTTPS site on a
 subdomain of the configured apps domain opens in the main pane; its row's
 panel icon or Alt/Option-click opens it to the side, following the shared
-[panel rules](wide-panels.md). Its bar offers Back to apps, the address, Open in browser and
-Copy link, with visible copy success/failure. Other origins, `frame:false`, and
+[panel rules](wide-panels.md). Its bar shows Back when the panel has history, the app address, Open in browser,
+Copy link and Close app. Closing returns to the catalog. Copying reports its result. Other origins, `frame:false`, and
 all phone rows open a separate browser tab. Unsafe protocols and credentialed
 URLs are rejected. Frames have accessible titles and a sandbox permitting
 scripts, same-origin site storage, forms, downloads and external links, while

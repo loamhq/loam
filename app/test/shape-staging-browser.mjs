@@ -92,7 +92,7 @@ try {
         assert.ok(pills.every(pill => pill.decoration === 'none' && pill.height >= 44 && pill.align === 'center'))
         assertControls(await auditControls(page))
         await screenshot(page, `app-bar-${label}`)
-        await page.getByRole('button', { name: 'Back to apps', exact: true }).click()
+        await page.getByRole('button', { name: 'Close app', exact: true }).click()
       }
       // Pointer-open Settings focuses its heading, never Appearance.
       await settings.click(); await page.locator('.settings:popover-open').waitFor()

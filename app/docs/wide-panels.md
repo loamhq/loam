@@ -87,13 +87,39 @@ retain their paths; apps use `/apps?url=<encoded app URL>`. Plugin items use
 encoded by `URLSearchParams`; it contains no app inventory or file capabilities.
 Side actions replace the current entry's query; choosing a new main item pushes
 an entry carrying the current side. Resizing and rail browsing add no entries.
-Reload and Back/Forward restore both slots from that entry, using the same
-uniqueness and save guards. Modal-only history entries still preserve both
-mounts. Copy-link actions continue to use the item owning that action.
+Reload opens the two items in the address. Browser Back and Forward traverse
+main and carry the currently open side item into the destination URL. Its live
+chat, editor or iframe stays mounted. Modal-only entries preserve both mounts.
+Copy-link actions use the item owning that action.
 The former main-app fallback in device storage becomes a one-time upgrade:
 old app/side identities are converted to URLs before the new store format is
 written. After that, `/` means an empty main and an app has its own shareable,
 reloadable address.
+
+## Back and Forward
+
+Each header has a leading Back chevron when its panel has a previous location.
+On a phone, a direct link uses the view’s existing way up to its chat or file
+list. Desktop rail browsing still chooses a list independently of main.
+Boards and thread details can be reopened with browser Forward or a direct
+thread link with `?view=board` or `?view=details`.
+
+The main button, browser buttons and native back gesture traverse the same
+session history entries. Cmd+[ and Cmd+] on Mac, or Ctrl+[ and Ctrl+] elsewhere,
+traverse the focused panel. Text fields, composers and editors retain their
+shortcuts. An embedded site handles keys within its own document.
+
+Opening a side item starts a trail for that pane. Side navigation replaces
+only its descriptor in the address. Closing side ends the trail. A new
+destination after Back discards its Forward branch. If an earlier item has
+since moved to the other panel, traversal skips that item. File changes use
+the same save and discard prompt as navigation from a row. Keeping edits
+returns to the original browser entry, including its Forward history.
+
+Within the open page, conversations remember their message anchor and drafts.
+File visits remember the scroll offset, mode and selection when their viewer
+exposes them. Browser entries hold an identifier for the visit. Document text
+and drafts stay in their existing controllers.
 
 ## Panel ownership
 
@@ -197,4 +223,9 @@ that list visibility and main-document navigation now remain independent.
 The [panel ownership record](evidence/panel-items/README.md) supersedes the
 section-owned desktop frame described in earlier implementation notes. It
 includes the delayed Files/Apps opening reproduction, all ordered rail pairs,
-plugin item reloads and history entries with different side items.
+plugin item reloads and independent main and side navigation.
+
+The [panel history gallery](evidence/panel-history/README.md) pairs the original
+and current headers at desktop and phone widths in both color modes. The
+interactive checks run with `node test/panel-history-browser.mjs` when
+`LOAM_PLAYWRIGHT` and `LOAM_CHROME` point to Playwright and Chromium.

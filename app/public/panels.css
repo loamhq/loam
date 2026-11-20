@@ -112,3 +112,24 @@
   .panel-divider > span,.row-side-action { transition:none; }
   .panel-pair.closing > .pane,.panel-pair.closing > .panel-divider { transition:none; }
 }
+
+.panel-history-back { flex:none; }
+.panel-history-head { display:flex; align-items:center; min-height:64px; padding:8px 16px 8px max(16px,var(--pane-lead,0px)); }
+.pane:has(> .showbar) :is(.fs-edhead,.fs-livehead,.apps-toolbar) { padding-inline-start:var(--pane-lead); }
+@media (prefers-reduced-motion:no-preference) {
+  .pane .panel-history-back { animation:panel-back-arrive 150ms ease-out; }
+  @keyframes panel-back-arrive { from { opacity:0; margin-inline-end:-32px; } to { opacity:1; margin-inline-end:0; } }
+}
+.fs-custom-view,.fs-custom-content { position:relative; display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; }
+.fs-custom-view { --viewer-back-left:max(12px,var(--pane-lead,0px)); }
+.fs-custom-view > .panel-history-back { position:absolute; z-index:4; inset-inline-start:var(--viewer-back-left); top:15px; width:38px; height:38px; }
+.fs-custom-view > .panel-history-back + .fs-custom-content { --pane-lead:calc(var(--viewer-back-left) + 42px); }
+.screen.files .fs-custom-view { --viewer-back-left:2px; }
+.screen.files .fs-custom-view > .panel-history-back { top:5px; width:44px; height:44px; }
+/* The history action leads even when Show sidebar shares the header. */
+.pane:has(> .showbar):has(.panel-history-back) > .showbar { left:62px; }
+.pane:has(> .showbar) .panel-history-back:not(.tt-board-head *) { translate:-48px 0; }
+.fs-custom-view > .panel-history-back svg { width:15px; height:15px; stroke-width:1.8px; }
+@container pane (max-width:760px) {
+  .fs-custom-view > .panel-history-back { top:6px; }
+}

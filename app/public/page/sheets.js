@@ -80,7 +80,7 @@ function closeSheet({ historyBack = false, settled = false } = {}) {
 // does: the shared sheet gesture closes it when dragged down. The row is its own line rather than a button laid over
 // the header, so a long title never runs under the ✕. The desktop's dialogs
 // hide the row and keep their own Close.
-function sheetTop() { return sheetHandle(closeSheet) }
+function sheetTop() { return sheetHandle(() => closeSheet({ historyBack: host.state.sheet?.kind === 'settings' })) }
 
 
 
@@ -123,7 +123,7 @@ function sheetNodes() {
   if (sheet.kind === 'market') return host.marketNodes(sheet)
   if (!['settings', 'activity', 'menu'].includes(sheet.kind)) return host.registry.draw('app.overlay', { slot: 'sheet', sheet })
   const centered = host.state.wide && ['settings', 'activity'].includes(sheet.kind)
-  const close = () => closeSheet({ historyBack: centered })
+  const close = () => closeSheet({ historyBack: centered || sheet.kind === 'settings' })
   const scrim = h('button', { class: 'scrim', key: 'scrim', title: 'Close', 'aria-label': 'Close', onclick: close })
   const body = sheet.kind === 'settings' ? host.state.wide ? host.settingsDialog(sheet) : host.settingsSheet(sheet)
     : sheet.kind === 'activity' ? h('div', { class: 'sheet app-modal activity-modal' },

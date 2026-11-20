@@ -22,7 +22,7 @@ try {
     app.routes['GET /v1/apps'] = (req, res) => json(res, { apps, sources: ['yours'] })
     app.routes['GET /v1/settings/appearance'] = (req, res) => json(res, { desktop: { theme: 'latte', mode, size: 100 } })
     await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__sidebar = { state, panels, threads, sidePanel, page, apps, schedule };' }))
-    await context.route(/^https:\/\/(garden|notebook)\.myloam\.space\//, route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><style>body{font:18px system-ui;padding:32px;background:${mode === 'dark' ? '#242722;color:#e4e7dc' : '#faf8f4;color:#35352b'}}button{padding:12px}</style><h1>${new URL(route.request().url()).hostname.split('.')[0]}</h1><p>Keep this place while choosing the next item.</p><button id="counter" onclick="this.textContent=Number(this.textContent)+1">0</button>` }))
+    await context.route(/^https:\/\/(garden|notebook)\.example\.com\//, route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><style>body{font:18px system-ui;padding:32px;background:${mode === 'dark' ? '#242722;color:#e4e7dc' : '#faf8f4;color:#35352b'}}button{padding:12px}</style><h1>${new URL(route.request().url()).hostname.split('.')[0]}</h1><p>Keep this place while choosing the next item.</p><button id="counter" onclick="this.textContent=Number(this.textContent)+1">0</button>` }))
     const main = page.locator('[data-panel=main]'), side = page.locator('[data-panel=side]')
     const rail = id => page.locator(`.rail-tabs [title=${id}]`)
     const capture = async name => {
@@ -142,10 +142,10 @@ try {
         await select('files')
         await page.evaluate(app => __sidebar.panels.openSide({ kind: 'app', app }), apps[0])
         await page.goBack(); await ready('chats')
-        await page.waitForFunction(() => (__sidebar.panels.st.side.app?.url ?? __sidebar.panels.st.side.url).includes('notebook'))
+        await page.waitForFunction(() => (__sidebar.panels.st.side.app?.url ?? __sidebar.panels.st.side.url).includes('garden'))
         await page.goForward(); await ready('files')
         await page.waitForFunction(() => (__sidebar.panels.st.side.app?.url ?? __sidebar.panels.st.side.url).includes('garden'))
-        checks.push('Back/Forward restores the side item recorded beside each main document')
+        checks.push('Back/Forward preserves the current side item while traversing main')
       }
       const registerNotes = () => {
         const scope = __sidebar.page.registry.scope({ id: 'fixture-notes' })

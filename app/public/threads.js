@@ -36,7 +36,7 @@ import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuot
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
-export function createThreads({ registry = createCoreRegistry(), appearance = null, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
+export function createThreads({ registry = createCoreRegistry(), appearance = null, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, viewAddress = () => {}, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -83,6 +83,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
   try { if (localStorage.getItem('loam.board.view') === 'doc') boardView = 'doc' } catch {}
   const awaitingSince = new Map()
   const visits = new Map()
+  const readingPlaces = new Map()
   let transferred = null
   let proseSerial = 0
   let listLink = null, fixtureListStream = null, stopFixtureList = null
@@ -353,7 +354,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
   function exitPreview() {
     close(); stopList(); transport = api; fixtureStream = null; fixtureListStream = null; fixtureAgents = null; fixtureProviders = null
     st.fixture = false; st.available = false; st.threads = []; st.drafts.clear(); st.boardDrafts.clear(); st.quickDrafts.clear()
-    visits.clear()
+    visits.clear(); readingPlaces.clear()
     leave(); load()
   }
   function close({ navigate = true } = {}) {
@@ -373,9 +374,11 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     const o = st.open, id = o.thread.id
     const drop = unsentHere(o) && transferred !== id
     if (!o.readFailed && o.messages.length) {
+      const place = { anchor: readingAnchor(pane) ?? o.readingPosition, atEnd: o.atEnd !== false }
+      if (o.visitId != null) readingPlaces.set(o.visitId, { id, ...place })
       visits.delete(id)
       visits.set(id, { messages: o.messages.filter((m) => !m.streaming).map(({ steps, ...message }) => message), has_more: o.has_more, thread: o.thread, board: o.board,
-        anchor: readingAnchor(pane) ?? o.readingPosition, atEnd: o.atEnd !== false, unread: o.openingUnread, firstUnseen: o.firstUnseen, proseCache: o.prose?.cache })
+        ...place, unread: o.openingUnread, firstUnseen: o.firstUnseen, proseCache: o.prose?.cache })
     } else if (!o.readFailed && !o.loading) visits.delete(id)
     o.replySteps?.stop()
     o.readingObserver?.disconnect()
@@ -720,7 +723,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
   }
   function create(persona = null, options = {}) {
     if (st.creating) return
-    close(); enter({ kind: 'thread', id: 'new-thread' }); st.creating = true; st.error = ''
+    close({ navigate: false }); enter({ kind: 'thread', id: 'new-thread' }); st.creating = true; st.error = ''
     const ticket = generation
     const o = st.open = { thread: { id: 'new-thread', title: 'New thread', default: persona, members: persona ? [{ persona, engine: null }] : [] },
       messages: [], loading: false, creating: true, typing: new Set(), permissions: new Map(), steps: new Map(),
@@ -1052,7 +1055,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     const visible = st.archived ? rows.slice(0, archiveLimit) : rows
     return h('section', { class: `${st.wide ? 'listcol' : 'screen home'} tt-list${st.wide && collapsed() ? ' away' : ''}`, inert: st.wide && collapsed() ? true : null, 'aria-hidden': st.wide && collapsed() ? 'true' : null, 'aria-label': 'Threads' },
       listHeading({ wide: st.wide, title: st.archived ? 'Archived' : 'Chats',
-        leading: st.archived ? round('Back to Chats', icon.chevronLeft(18), () => showArchived(false)) : null,
+        leading: st.archived ? round('Back to Chats', icon.chevronLeft(18), () => showArchived(false)) : !st.wide ? historyButton() : null,
         props: { class: `${st.wide ? 'list-head' : 'home-head'}${st.archived ? ' tt-archived-head' : ''}` }, actions: [
         !st.archived ? round('New thread', icon.pencil(18), () => create(), { class: `iconbtn${listIsMain() && !st.open && !st.personaMenu ? ' secondary' : ''}`, disabled: st.creating }) : null,
         round('Search threads', icon.search(18), () => { st.searchOpen = !st.searchOpen; st.focusSearch = st.searchOpen; redraw() }, { 'aria-expanded': String(Boolean(st.searchOpen)) }),
@@ -1586,12 +1589,34 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     catch (e) { o.error = e.status === 409 ? `Wait for ${[...o.typing][0] || o.thread.members.some((m) => m.busy || m.running) ? name([...o.typing][0] ?? o.thread.members.find((m) => m.busy || m.running).persona) : 'the current turn'} to finish, then delete.` : e.status === 405 ? 'Deleting threads needs a runtime update.' : failureSentence(e.message); o.deleteBlocked = e.status === 409 ? o.error : null }
     finally { o.patching = false; redraw() }
   }
-  function showDetails() { const pane = dom.querySelector('.tt-stream'); st.open.readingTop = pane?.scrollTop; st.open.readingPosition = readingAnchor(pane); st.manage = true; st.open.choice = null; st.open.boardOpen = false; st.open.focusDetails = true; redraw() }
+  function currentView() { return st.manage ? 'details' : st.open?.boardOpen ? 'board' : null }
+  function setView(view) {
+    const o = st.open
+    if (!o || (currentView() === (view || null))) return
+    if (o.boardOpen) { finishBoardEdit(); drag.cancel() }
+    if (st.manage && o.atEnd === false) o.restoreTop = o.readingTop
+    if (view === 'details') {
+      const pane = dom.querySelector('.tt-stream')
+      o.readingTop = pane?.scrollTop; o.readingPosition = readingAnchor(pane); o.focusDetails = true
+    } else if (view === 'board') o.focusBoard = true
+    else o.focusChat = true
+    st.manage = view === 'details'; o.boardOpen = view === 'board'; o.choice = null
+    redraw()
+  }
+  function chooseView(view) {
+    if (currentView() === view) return
+    setView(view); viewAddress(view)
+  }
+  function showDetails() { chooseView('details') }
   function details() {
     const o = st.open, general = o.thread.general || o.thread.id === 'general', busy = o.patching || o.creating || o.createFailed
-    const back = () => { if (o.atEnd === false) o.restoreTop = o.readingTop; st.manage = false; o.choice = null; o.focusTitle = true; redraw() }
+    const back = () => { chooseView(null); o.focusTitle = true }
+    const history = historyButton()
+    const lead = history ?? (st.wide ? null : button([icon.chevronLeft(18), 'Chat'], back, { class: 'backbtn' }))
+    const actions = sidePanel ? [...side().controls().slice(0, 2), round('Thread actions', icon.dots(18), () => { back(); o.headerMenu = true; redraw() }), side().controls().at(-1)] : []
+    if (st.wide && !history) actions.unshift(round('Close thread details', icon.close(16), back))
     return h('main', { class: 'tt-details', key: `details:${o.thread.id}` },
-      panelHeader({ title: 'Thread details', back: button([icon.chevronLeft(18), 'Chat'], back, { class: 'backbtn' }), actions: sidePanel ? [...side().controls().slice(0, 2), round('Thread actions', icon.dots(18), () => { back(); o.headerMenu = true; redraw() }), side().controls().at(-1)] : [], props: { class: 'chat-head plain tt-details-head' } }),
+      panelHeader({ title: 'Thread details', back: lead, actions, props: { class: 'chat-head plain tt-details-head' } }),
       registry.draw('app.overlay', { slot: 'player' }),
       h('div', { class: 'tt-details-workspace' }, st.wide ? settingsNav({ title: null, active: o.detailsSection ?? 'identity',
         items: [{ id: 'identity', label: 'Conversation', glyph: icon.chat(18) }, { id: 'members', label: 'Members', glyph: icon.users(18) }, { id: 'manage', label: 'Manage', glyph: icon.sliders(18) }],
@@ -1614,7 +1639,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
           !Object.hasOwn(m, 'model') ? h('p', { class: 'tt-configuration-note', text: 'Model settings need a runtime update.' }) : null)),
           h('h4', { class: 'kicker', text: 'Bring someone in' }), h('div', { class: 'tt-add-members' }, ...catalog().filter((a) => !o.thread.members.some((m) => m.persona === a.id)).map((a) => button([icon.plus(12), ` ${a.name}`], () => patch({ add: [a.id] }), { class: 'pillbtn', 'aria-label': `Add ${a.name}`, disabled: busy })))),
         h('section', { class: 'tt-details-section tt-details-actions', id: elementId('tt-manage') },
-          settingsRow({ title: 'Open board', lead: h('span', { class: 'icon-tile' }, icon.list(18)), onclick: () => { st.manage = false; o.boardOpen = true; o.focusBoard = true; redraw() } }),
+          settingsRow({ title: 'Open board', lead: h('span', { class: 'icon-tile' }, icon.list(18)), onclick: () => chooseView('board') }),
           settingsRow({ title: o.thread.pinned ? 'Unpin thread' : 'Pin thread', lead: h('span', { class: 'icon-tile' }, icon.pin(18)), onclick: () => patch({ pinned: !o.thread.pinned }), props: { disabled: busy || general } }),
           !general ? settingsRow({ title: o.thread.archived ? 'Unarchive thread' : 'Archive thread', lead: h('span', { class: 'icon-tile' }, icon.folder(18)), onclick: () => patch({ archived: !o.thread.archived }), props: { disabled: busy } }) : null,
           !general ? settingsRow({ title: 'Delete thread', lead: h('span', { class: 'icon-tile' }, icon.close(14)), onclick: () => { o.confirmDelete = true; o.focusDelete = true; redraw() }, props: { class: 'setrow tt-danger', disabled: busy } }) : null,
@@ -1635,10 +1660,10 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     }).filter(s => s.key !== 'top' || s.group || all.length === 1 || s.blocks.some(b => b.item || b.text.trim()))
     const lists = sections.filter(s => !s.group)
     const count = lines.filter(l => l.unseen).length
-    const closeBoard = () => { finishBoardEdit(); drag.cancel(); o.boardOpen = false; o.focusChat = true; redraw() }
+    const closeBoard = () => chooseView(null)
     const busy = o.boardBusy || o.boardRefreshing || !o.board.revision || Boolean(o.recovery)
     const closeMenu = () => { o.boardMenu = null; o.menuPage = null; redraw() }
-    const chooseView = view => {
+    const chooseBoardLayout = view => {
       if (o.editing) finishBoardEdit()
       boardView = view; if (!st.fixture) appearance?.set({ board_view: view }); closeMenu(); drag.cancel()
       try { localStorage.setItem('loam.board.view', view) } catch {}
@@ -1704,7 +1729,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
         h('div', { class: 'md tt-description-copy' }, ...renderText(reflowBoardQuotes(block.text))))
     }
     if (o.loading || o.refreshing || o.readFailed || o.boardUnavailable) return h('aside', { class: 'tt-board', 'aria-label': 'Thread board', onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeBoard() } } },
-      panelHeader({ title: 'Board', actions: [round('Close board', icon.close(14), closeBoard)], props: { class: 'chat-head plain tt-board-head' } }),
+      panelHeader({ title: 'Board', back: historyButton(), actions: [round('Close board', icon.close(14), closeBoard)], props: { class: 'chat-head plain tt-board-head' } }),
       h('div', { class: 'tt-empty', role: 'status' }, o.loading || o.refreshing ? 'Opening your board…' : 'The board could not be loaded.',
         o.boardError ? h('p', { role: 'alert', text: o.boardError }) : null,
         o.readFailed || o.boardUnavailable ? button('Try again', () => open(o.thread.id)) : null))
@@ -1732,7 +1757,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     return h('aside', { class: 'tt-board', 'aria-label': 'Thread board', onkeydown: e => {
       if (e.key === 'Escape') { e.stopPropagation(); if (o.boardMenu != null) closeMenu(); else closeBoard() }
     } },
-      panelHeader({ title: 'Board', actions: [segmentedControl({ label: 'Board view', value: boardView, choose: chooseView,
+      panelHeader({ title: 'Board', back: historyButton(), actions: [segmentedControl({ label: 'Board view', value: boardView, choose: chooseBoardLayout,
         options: [{ id: 'cards', label: 'Cards' }, { id: 'doc', label: 'Doc' }] }),
         round('Close board', icon.close(16), closeBoard)], props: { class: 'chat-head plain tt-board-head' } }),
       h('span', { class: 'sr-only tt-board-status', role: 'status', text: o.boardNotice ?? '' }),
@@ -1769,13 +1794,13 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     const unmatched = [...o.permissions.values()].filter((p) => !o.messages.some((m) => m.id === p.message_id))
     const closeMenu = (act) => () => { o.headerMenu = false; act(); redraw() }
     const header = chatHeader({ wide: st.wide,
-      back: round('Back to threads', icon.chevronLeft(20), () => { close(); refreshList(); redraw() }, { class: 'iconbtn ghost tt-back' }),
+      back: historyButton() ?? (st.wide ? null : round('Back to threads', icon.chevronLeft(20), () => { close(); refreshList(); redraw() }, { class: 'iconbtn ghost tt-back' })),
       face: threadFace(o.thread, st.wide ? 42 : 40), onIdentity: showDetails, identityTitle: 'Thread details',
       title: o.thread.title || 'New thread', subtitle: null,
       onRename: general ? null : beginRename, renameLabel: 'Rename thread', titleField: o.renaming ? kept(title) : null,
       titleProps: { class: `${st.wide ? 'chattitle' : 'headtitle'} tt-title` },
       props: { class: `${st.wide ? 'chat-head' : 'thread-head'} tt-head` },
-      actions: [...(sidePanel ? side().controls().slice(0, 2) : [round('Board', [icon.list(18), count ? h('span', { class: 'navdot', 'aria-label': `${count} new board items` }) : null], () => { o.boardOpen = !o.boardOpen; o.focusBoard = o.boardOpen; redraw() }, { class: 'iconbtn ghost tt-board-button', 'aria-description': count ? `${count} new board items` : 'Open thread board', 'aria-expanded': String(Boolean(o.boardOpen)) }), taskIndicator()]),
+      actions: [...(sidePanel ? side().controls().slice(0, 2) : [round('Board', [icon.list(18), count ? h('span', { class: 'navdot', 'aria-label': `${count} new board items` }) : null], () => chooseView(o.boardOpen ? null : 'board'), { class: 'iconbtn ghost tt-board-button', 'aria-description': count ? `${count} new board items` : 'Open thread board', 'aria-expanded': String(Boolean(o.boardOpen)) }), taskIndicator()]),
         round('Thread actions', icon.dots(20), () => { o.headerMenu = !o.headerMenu; redraw() }, { class: 'iconbtn ghost', 'aria-expanded': String(Boolean(o.headerMenu)) }),
         sidePanel ? side().controls().at(-1) : null] })
     const chosenModel = defaultMember?.engine && composerModel(defaultMember, o.messages, providerCatalog())
@@ -1809,7 +1834,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
       registry.draw('app.overlay', { slot: 'player' }),
       o.headerMenu ? menuSurface(h('div', { key: 'header-menu', class: 'popover tt-header-menu', role: 'menu' },
         side()?.available() && !o.creating && !o.createFailed ? settingsRow({ title: 'Open to the side', lead: icon.panelRight(18), onclick: closeMenu(() => side().openSide({ kind: 'thread', id: o.thread.id })) }) : null,
-        sidePanel ? settingsRow({ title: 'Board', lead: icon.list(18), onclick: closeMenu(() => { o.boardOpen = true; o.focusBoard = true }) }) : null,
+        sidePanel ? settingsRow({ title: 'Board', lead: icon.list(18), onclick: closeMenu(() => chooseView('board')) }) : null,
         sidePanel ? settingsRow({ title: 'Tasks', lead: icon.code(18), onclick: closeMenu(() => { o.tasksOpen = true; o.focusTasks = true }) }) : null,
         settingsRow({ title: 'Thread details', lead: icon.users(18), onclick: closeMenu(showDetails) }),
         !general ? settingsRow({ title: o.thread.pinned ? 'Unpin thread' : 'Pin thread', lead: icon.pin(18), onclick: closeMenu(() => patch({ pinned: !o.thread.pinned })) }) : null,
@@ -1845,7 +1870,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
           o.error ? h('div', { class: 'banner', role: 'alert' }, o.error, o.createFailed ? button('Try creating again', () => create(o.thread.default, { promptTitle: o.promptTitle, promptBody: o.promptBody, placeholder: o.promptPlaceholder })) : button('Refresh thread', () => open(o.thread.id))) : null,
           o.connection ? h('div', { class: 'noticerow', role: 'status', text: o.connection }) : null,
           composingReply(), renderedComposer), composerHint({ wide: st.wide, chord: sendHint(isMac(globalThis.navigator)), thread: true }))),
-      o.boardOpen ? h('button', { class: 'tt-board-scrim', title: 'Dismiss board panel', tabindex: '-1', onclick: () => { o.boardOpen = false; o.focusChat = true; redraw() } }) : null,
+      o.boardOpen ? h('button', { class: 'tt-board-scrim', title: 'Dismiss board panel', tabindex: '-1', onclick: () => chooseView(null) }) : null,
       board(),
       branchPanel(),
     ] })
@@ -1965,6 +1990,16 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     if (st.open?.focusChat) { dom.querySelector('.tt-board-button')?.focus({ preventScroll: true }); st.open.focusChat = false }
     const pane = dom.querySelector('.tt-stream')
     const o = st.open
+    if (pane && o && o.visitId == null) {
+      o.visitId = visitId()
+      const place = readingPlaces.get(o.visitId)
+      if (place?.id === o.thread.id) {
+        o.atEnd = place.atEnd
+        o.savedAnchor = place.atEnd ? null : place.anchor
+        o.landing = false
+        readingPlaces.delete(o.visitId)
+      }
+    }
     if (o?.readOnShow && visible() && o.atEnd !== false) { o.readOnShow = false; markRead(o) }
     const placeBoundary = (id) => {
       const boundary = [...pane.querySelectorAll('[data-unread-boundary]')].find((n) => n.getAttribute('data-unread-boundary') === id)
@@ -2040,5 +2075,5 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     const groups = threadActivity(t, activityOptions(t))
     return { status: groups.asking.length ? 'Needs your input' : groups.working.length ? 'Working' : groups.waiting.length ? 'Waiting' : 'Quiet',
       secondary: state === 'Quiet' ? t.last?.text || 'Quiet' : state }
-  }, view, pane, afterRender, tick, dirty, send, saveCompose, transferTo, receiveVisit: (id, visit) => visits.set(id, visit), mention, mentionKey, pause, defaultName: () => name(st.open?.thread.default) }
+  }, view, pane, currentView, setView, afterRender, tick, dirty, send, saveCompose, transferTo, receiveVisit: (id, visit) => visits.set(id, visit), mention, mentionKey, pause, defaultName: () => name(st.open?.thread.default) }
 }

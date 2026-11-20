@@ -1,3 +1,4 @@
+import { historyBackButton } from './panel-history.js'
 import { noteDateParts } from './time.js'
 import { fileShortcuts } from './store.js'
 import { createCoreRegistry } from './core-registrations.js'
@@ -515,6 +516,7 @@ export function createFiles({
   timers = { set: (fn, ms) => globalThis.setTimeout(fn, ms), clear: (t) => globalThis.clearTimeout(t) },
   onResolveTo = null,
   onRead = null,
+  onCloseFile = null,
   onRename = null,
   fetchBytes = (href) => fetch(href, { credentials: 'same-origin' }),
   urls = globalThis.URL,
@@ -632,10 +634,22 @@ export function createFiles({
   // field}`, each optional, `save` returning a promise. The way out of an
   // unsaved edit (`guard`) then waits on its save. Released by `remove()`, or
   // when another file opens.
+  let registeredOwner = null
   function own(file, handlers) {
     if (!file || st.file !== file || !handlers) return { remove() {} }
+    const registration = registeredOwner = { root: file.root, path: file.path, handlers }
     file.owner = handlers
-    return { remove() { if (file.owner === handlers) file.owner = null } }
+    return { remove() {
+      if (registeredOwner === registration) registeredOwner = null
+      if (file.owner === handlers) file.owner = null
+      if (st.file?.owner === handlers) st.file.owner = null
+    } }
+  }
+  // A kept plugin editor can be reattached on Back without registering again.
+  // Rebind only after its actual field has rejoined the page for this file.
+  function resumeOwner() {
+    const file = st.file, owner = registeredOwner
+    if (owner && file && !file.owner && owner.root === file.root && owner.path === file.path && owner.handlers.field?.isConnected) file.owner = owner.handlers
   }
 
   // Every way out of an unsaved edit comes through here. Clean, `proceed` runs
@@ -683,8 +697,9 @@ export function createFiles({
   }
 
   // The open file goes: its object URL, if it had one, is given back.
-  function closeFile() {
+  function closeFile({ remember = true } = {}) {
     const f = st.file
+    if (f && remember) onCloseFile?.(f)
     if (f?.timer) timers.clear(f.timer)
     if (f?.blobUrl) urls?.revokeObjectURL?.(f.blobUrl)
     st.file = null
@@ -763,7 +778,7 @@ export function createFiles({
     const known = isRow(row) ? row : st.listing.rows.find((x) => x.path === path)
     const r = known ?? { root, path, name: nameOf(path), kind: 'file' }
     const view = viewOf(r)
-    closeFile()
+    closeFile({ remember: st.file?.root !== root || st.file.path !== path })
     const file = {
       root,
       path,
@@ -954,6 +969,7 @@ export function createFiles({
 
   function resourceMenu(resource, home, { openFolder = null } = {}) {
     if (st.file?.root === resource.root && st.file.path === resource.path) {
+      openFolder ??= st.file.openFolder
       resource.shareLink = st.file.shareLink
       resource.linkPromise = st.file.linkPromise
       // Follow a still-pending check into the menu's own view object.
@@ -1434,7 +1450,7 @@ export function createFiles({
     }
   }
 
-  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function triggerBrowserDownload(href, filename) {
@@ -1626,7 +1642,7 @@ function homeActions(home) {
 // The header, the title and the list of one folder — the phone's whole Files
 // screen and the desktop's list column. `go(root, path, opts)` is the app's,
 // because going somewhere is also writing an address.
-export function folderView(files, { go, wide, collapse = null, returnBack = null, home = null }) {
+export function folderView(files, { go, wide, collapse = null, historyBack = null, returnBack = null, home = null }) {
   const { st } = files
   const atRoot = !st.root
   const own = files.pluginRoot?.() ?? null
@@ -1646,12 +1662,12 @@ export function folderView(files, { go, wide, collapse = null, returnBack = null
   // The home's header is the Chats header, class for class, so the two tabs
   // start at the same place: no back row above it and no line under it.
   const head = atRoot
-    ? h('div', { class: wide ? 'list-head fs-homehead' : 'home-head fs-homehead' }, h('div', { class: 'display', text: 'Files' }), returnBack, collapse)
+    ? h('div', { class: wide ? 'list-head fs-homehead' : 'home-head fs-homehead' }, historyBack, h('div', { class: 'display', text: 'Files' }), historyBack ? null : returnBack, collapse)
     : h(
     'div',
     { class: 'fs-head' },
-    returnBack,
-    parent !== null
+    historyBack ?? returnBack,
+    !historyBack && parent !== null
       ? h(
           'button',
           { class: 'backbtn fs-back', title: `Back to ${parent}`, onclick: () => go(st.path === '' ? null : st.root, parentOf(st.path)) },
@@ -1778,10 +1794,19 @@ export function fileView(files, options) {
   return files.registry.component('core.files.viewer', context)
 }
 
-function builtinFileView(files, { close, closeLabel, wide, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null }) {
+function builtinFileView(files, { close, closeLabel, historyBack = null, wide, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null }) {
   const context = { files, file: files.st.file, options: { close, closeLabel, wide, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
   const custom = files.registry.entries('files.viewer', context).findLast(entry => !entry.component && entry.slot === 'viewer')
-  if (custom) return files.registry.invoke(custom, 'render', context)
+  if (custom) {
+    if (files.st.file) files.st.file.openFolder = close
+    // A kept editor may outlive a history entry or a phone/desktop resize.
+    // The shell owns this slot so neither change requires remounting it.
+    const up = close && { title: `Back to ${closeLabel}`, go: close, label: `Back to ${closeLabel}` }
+    const back = historyBackButton(historyBack ?? up)
+    const content = files.registry.invoke(custom, 'render', { ...context, options: { ...context.options, close: null, returnBack: null, openFolder: close } })
+    return h('div', { class: 'fs-custom-view', key: `viewer:${files.st.file.root}:${files.st.file.path}` },
+      back, h('div', { class: 'fs-custom-content', key: 'viewer-content' }, content))
+  }
   const f = files.st.file
   if (!f) return null
   // A plugin that draws Markdown files (a `files.viewer` in its manifest) may
@@ -1821,7 +1846,7 @@ function builtinFileView(files, { close, closeLabel, wide, field, onLink = null,
   const head = files.registry.reduce('files.action', { slot: 'toolbar', file: f, files, defaultView: () => h(
     'div',
     { class: `fs-head fs-edhead${wide && tools ? ' withtools' : ''}${close && !returnBack ? ' folder-back' : ''}` },
-    returnBack ?? (close ? h('button', { class: 'backbtn fs-back', title: closeLabel, onclick: close }, icon.chevronLeft(20), h('span', { text: closeLabel })) : null),
+    historyBackButton(historyBack) ?? returnBack ?? (close ? h('button', { class: 'backbtn fs-back', title: closeLabel, onclick: close }, icon.chevronLeft(20), h('span', { text: closeLabel })) : null),
     h('div', { class: 'headspace' }),
     wide ? saveWord : null,
     tabs,
@@ -1836,7 +1861,7 @@ function builtinFileView(files, { close, closeLabel, wide, field, onLink = null,
   const toolrow = wide && tools ? h('div', { class: 'fs-toolrow' }, tools) : null
 
   const liveHead = htmlPreview ? h('div', { class: 'fs-htmlbar fs-livehead' },
-    returnBack ?? (close ? h('button', { class: 'iconbtn fs-back', title: `Back to ${closeLabel}`, 'aria-label': `Back to ${closeLabel}`, onclick: close }, icon.chevronLeft(18)) : null),
+    historyBackButton(historyBack) ?? returnBack ?? (close ? h('button', { class: 'iconbtn fs-back', title: `Back to ${closeLabel}`, 'aria-label': `Back to ${closeLabel}`, onclick: close }, icon.chevronLeft(18)) : null),
     h('span', { class: 'fs-htmlmark', text: 'HTML' }),
     renameTitle(files, f.row, name, 'fs-htmlname'),
     h('button', { class: 'pillbtn fs-htmlreload', title: 'Reload page', disabled: f.liveLoading, text: 'Reload', onclick: () => files.loadLive(f) }),

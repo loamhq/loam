@@ -45,7 +45,30 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
     if (value === storedValue) return
     try { storage?.setItem(key, value); storedValue = value } catch {}
   }
-  function notify() { persist(); address(st.side); changed() }
+  // Side changes replace the side query in the current browser entry. Its
+  // local trail belongs to this mount and ends when the pane closes.
+  let trail = [], cursor = -1, serial = 0
+  function recordSide() {
+    const at = itemDescriptor(st.side)
+    if (!at) { trail = []; cursor = -1; return }
+    if (itemKey(trail[cursor]) === itemKey(at) && trail[cursor]?.view === (st.side.view || null)) return
+    trail.splice(++cursor, Infinity, { ...at, view: st.side.view || null, visit: ++serial })
+  }
+  function sideTarget(delta) {
+    let next = cursor + delta
+    // An item moved into main is still open. Skip it to preserve ownership.
+    while (trail[next] && itemKey(trail[next]) === itemKey(main.item())) next += delta
+    return trail[next] ? next : -1
+  }
+  function goSide(delta) {
+    const next = sideTarget(delta)
+    if (next < 0 || !visible()) return false
+    if (!guard(side, () => goSide(delta))) return true
+    cursor = next
+    openSide(trail[next])
+    return true
+  }
+  function notify() { recordSide(); persist(); address(st.side); changed() }
   function guard(endpoint, retry) { return endpoint.guard?.(retry) !== false }
   function transfer(from, to, item) { if (item?.kind === 'thread') from.transfer?.(to, item.id) }
   function close() {
@@ -84,6 +107,9 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
       if (previous) main.open(previous)
       else main.emptyAddress?.()
     }
+    if (itemKey(item) === itemKey(side.item()) && !item.message && !item.fragment && !item.mode) {
+      side.setView?.(item.view); st.side = side.item(); st.focused = 'side'; notify(); return true
+    }
     if (!st.side) st.sidebar = false
     st.side = item; st.loaded = true; side.open(item); st.focused = 'side'; st.version++; notify(); return true
   }
@@ -103,12 +129,13 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
   function restore() {
     if (!st.side || st.loaded || !available()) return
     if (itemKey(st.side) === itemKey(main.item())) { st.side = null; notify(); return }
-    st.loaded = true; side.open(st.side)
+    recordSide(); st.loaded = true; side.open(st.side)
   }
   function sync() {
     if (st.loaded && side.empty?.()) { close(); return }
     const current = side.item()
     if (st.loaded && current) st.side = current
+    recordSide()
     persist(); address(st.side)
   }
   function tucked() { return visible() && !st.closing && width() < SIDEBAR_MIN && !st.sidebar }
@@ -129,7 +156,7 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
       onkeydown: event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'Enter'].includes(event.key)) return; event.preventDefault(); split(event.key === 'Home' || event.key === 'Enter' ? DEFAULT_SPLIT : st.split + (event.key === 'ArrowLeft' ? -2 : 2)) },
     }, h('span', { 'aria-hidden': 'true' }))
   }
-  return { st, available, visible, focused, focus, tucked, showSidebar, openMain, openSide, swap, promote, close, restore, sync, split, controls, affordance, divider, persist }
+  return { st, available, visible, focused, focus, goSide, sideVisit: () => trail[cursor]?.visit, canSideBack: () => sideTarget(-1) >= 0, tucked, showSidebar, openMain, openSide, swap, promote, close, restore, sync, split, controls, affordance, divider, persist }
 }
 
 // Selectors used by an instance must never borrow another instance's stream,

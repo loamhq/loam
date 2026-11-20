@@ -32,13 +32,14 @@ function hereAddress() {
 }
 
 function pushAddress(data, title, href) {
-  globalThis.history?.pushState?.(data, title, host.panels && globalThis.location?.href ? withSide(href, host.panels.st.side) : href)
+  host.mainHistory.push(data, title, host.panels && globalThis.location?.href ? withSide(href, host.panels.st.side) : href)
 }
 
 const files = createFiles({
   registry: host.registry,
   api: host.api,
   schedule: host.schedule,
+  onCloseFile: rememberFilePlace,
   onRead: (row) => host.schedules.seeFile(row),
   onRename: (answer, offered) => followRename(answer, true, offered),
   onResolveTo: (root, path, isFile, row) => goFiles(root, path, { isFile, row }),
@@ -73,7 +74,7 @@ function followRename(answer, broadcast = true, offered = []) {
   const at = parseFilesPath(herePath())
   if (navigation && at) {
     const next = renamedResource(at, answer)
-    if (next !== at) globalThis.history?.replaceState?.({ files: true }, '', withSide(filesHref(next.root, next.path) + (globalThis.location?.hash ?? ''), host.panels?.st.side))
+    if (next !== at) globalThis.history?.replaceState?.({ ...globalThis.history.state, files: true }, '', withSide(filesHref(next.root, next.path) + (globalThis.location?.hash ?? ''), host.panels?.st.side))
   }
   if (broadcast) renameChannel?.postMessage(answer)
   host.schedule()
@@ -112,6 +113,51 @@ const fileField = fileEditor({
   save: () => files.save(),
   blur: () => { if (files.dirty() && !host.fieldActivity('file')) files.save() },
 })
+
+// A visit remembers only reading coordinates. Text and revisions still come
+// from Files, and an editor that owns the field supplies its selection API.
+const places = new Map()
+let mountedFile = null, mountedVisit = null
+function fileSurface(file) {
+  const dom = host.panelDOM
+  const field = file.owner?.field ?? (fileField.isConnected ? fileField : null)
+  let scroll = dom.querySelector('.fs-preview') ?? (field === fileField ? field : null)
+  if (!scroll) {
+    let node = dom.querySelector('.fs-custom-content [contenteditable]')
+    while (node && !node.hasAttribute('data-panel')) {
+      if (node.clientHeight && /^(auto|scroll)$/.test(globalThis.getComputedStyle?.(node)?.overflowY) && node.scrollHeight > node.clientHeight) {
+        scroll = node; break
+      }
+      node = node.parentElement
+    }
+  }
+  return { field, scroll }
+}
+function rememberFilePlace(file) {
+  fileField.__for = null
+  if (file !== mountedFile || file.loading) return
+  const { field, scroll } = fileSurface(file)
+  places.set(mountedVisit, { root: file.root, path: file.path, mode: file.mode, top: scroll?.scrollTop ?? 0,
+    start: field?.selectionStart, end: field?.selectionEnd })
+  mountedFile = null
+}
+function restoreFilePlace() {
+  const file = files.st.file
+  if (!file || file.loading) return
+  files.resumeOwner()
+  if (mountedFile === file) return
+  const visit = host.panelId === 'side' ? host.panels.sideVisit() : globalThis.history?.state?.panelVisit ?? 'initial'
+  const saved = places.get(visit)
+  if (saved?.root === file.root && saved.path === file.path && !file.fragment) {
+    if (saved.mode !== file.mode) { files.setMode(saved.mode); return }
+    const { field, scroll } = fileSurface(file)
+    if ((saved.top && !scroll) || (saved.start !== undefined && !field)) return
+    if (saved.start !== undefined) field?.setSelectionRange?.(saved.start, saved.end)
+    if (scroll) scroll.scrollTop = saved.top
+  }
+  places.delete(visit)
+  mountedFile = file; mountedVisit = visit
+}
 
 fileField.__for = null
 
@@ -162,10 +208,10 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
   // list: nothing reopens, but its address now names the list it is in.
   const mainHere = host.state.mainItem?.kind === 'file' && host.state.mainItem.root === root && host.state.mainItem.path === path && files.st.file?.root === root && files.st.file?.path === path
   if (navigation && !routed && isFile === true && list && mainHere && host.panelId !== 'side' && !heldFile) {
-    if (files.st.root === list && hereAddress() !== filesHref(root, path, list)) globalThis.history?.replaceState?.({ files: true }, '', withSide(filesHref(root, path, list), host.panels?.st.side))
+    if (files.st.root === list && hereAddress() !== filesHref(root, path, list)) globalThis.history?.replaceState?.({ ...globalThis.history.state, files: true }, '', withSide(filesHref(root, path, list), host.panels?.st.side))
     host.schedule(); return true
   }
-  if (!routed && (isFile === true || (isFile === null && heldFile)) && host.panels) return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain']({ kind: 'file', root, path, row, fragment, push, list })
+  if (!routed && (isFile === true || (isFile === null && heldFile)) && host.panels) return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain']({ kind: 'file', root, path, row, fragment, mode, push, list })
   if (!routed && host.panelId !== 'side') host.state.navigator = 'files'
   const hidden = root === 'system'
   if (hidden) { root = null; path = ''; isFile = false; row = null; fragment = null }
@@ -179,7 +225,7 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
     files.st.sheet.proceed = proceedThen(() => goFiles(hidden ? 'system' : root, path, { isFile, row, fragment, list }))
     return false
   }
-  host.state.mainItem = root && path ? { kind: 'file', root, path } : null
+  host.state.mainItem = isFile !== false && root && path ? { kind: 'file', root, path } : null
   // Browsing a folder starts a Files navigation path of its own. Merely having
   // a chat to return to must not replace that folder's ordinary back button.
   files.st.chatFile = Boolean(isFile && (host.activeThread() || (host.state.screen === 'files' && files.st.chatFile)))
@@ -195,8 +241,8 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
   files.show(root, path, { isFile, row, fragment, mode, list })
   if (hidden) files.st.notice = FILES_LOCATION_HIDDEN
   const href = filesHref(root, path, isFile === false ? null : list)
-  if (navigation && hidden && herePath() !== href) globalThis.history?.replaceState?.({ files: true }, '', href)
-  else if (navigation && push && hereAddress() !== href) pushAddress({ files: true }, '', href)
+  if (navigation && hidden && herePath() !== href) globalThis.history?.replaceState?.({ ...globalThis.history.state, files: true }, '', href)
+  else if (navigation && push && hereAddress() !== href) pushAddress({ files: true, folder: isFile === false || !path }, '', href)
   host.schedule()
   return true
 }
@@ -305,7 +351,7 @@ if (navigation) setFileLinks((ref, from, event) => openFileRef(ref, from, event)
 if (navigation) globalThis.addEventListener?.('popstate', () => {
   const session = sessionFromAddress(globalThis.location?.href ?? herePath() + (globalThis.location?.search ?? ''))
   if (session) { host.openImportedSession(session); return }
-  if (host.state.wide && host.routePanels) { host.routePanels(); return }
+  if (globalThis.location?.href && host.routePanels) { host.routePanels(); return }
   const thread = threadFromPath(herePath())
   if (thread) {
     if (host.state.screen === 'files') {
@@ -469,6 +515,7 @@ function filesScreen() {
       { class: 'screen files', key: 'screen:files:file' },
       fileView(files, {
         close: () => goFiles(files.st.root, files.st.path),
+        historyBack: host.backAction('main'),
         closeLabel: files.pluginRoot() ? files.pluginRoot().name : files.st.path === '' ? (ROOT_LOOK[f.root]?.name ?? f.root) : fileNameOf(files.st.path),
         wide: false,
         field: fileFieldFor,
@@ -485,7 +532,7 @@ function filesScreen() {
     'section',
     { class: 'screen files', key: 'screen:files' },
     host.registry.draw('app.overlay', { slot: 'player' }),
-    folderView(files, { go: goFiles, wide: false, returnBack: returnToChatButton(), home: filesHome() }),
+    folderView(files, { go: goFiles, wide: false, historyBack: host.backButton('main'), returnBack: returnToChatButton(), home: filesHome() }),
     host.nav(),
   )
 }
@@ -518,6 +565,7 @@ function returnToChatButton({ compact = false } = {}) {
   return h('button', { class: compact ? 'backbtn fs-return fs-chatback' : 'pillbtn fs-return', 'aria-label': 'Back to chat', onclick: () => leaveFiles({ toChat: true }), text: compact ? null : 'Back to chat' }, compact ? icon.chevronLeft(20) : null, compact ? h('span', { text: 'Chat' }) : null)
 }
 return Object.defineProperties({}, {
+    restoreFilePlace: { enumerable: true, get: () => restoreFilePlace },
     herePath: { enumerable: true, get: () => herePath },
     pushAddress: { enumerable: true, get: () => pushAddress },
     files: { enumerable: true, get: () => files },

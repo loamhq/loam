@@ -21,6 +21,7 @@ import { mount as mountLayout } from './page/layout.js'
 import { mount as mountSheets } from './page/sheets.js'
 import { mount as mountMarket } from './page/market.js'
 import { menuSurface, createMenuSurfaces } from './menu-surface.js'
+import { backTitle, createMainHistory, historyBackButton, historyShortcut } from './panel-history.js'
 import { createAppModalHistory } from './app-modal-history.js'
 import { settingsRow, agentProse, userBubble, messageFiles, stepFold, emptyConversation, panelHeader, settingsNav, segmentedControl, createMessageState, sheetHandle } from './chat-ui.js'
 import { setAvatarColours } from './sessions.js'
@@ -72,7 +73,7 @@ import { markdown, strip } from './markdown.js'
 import { copyText } from './clipboard.js'
 import { appFrame, sameFrame } from './viewport.js'
 import { layoutPixels } from './scale.js'
-import { itemDescriptor, itemHref, itemFromURL, sideFromURL, withSide, migratePanelURL } from './panel-items.js'
+import { renderPanel, itemDescriptor, itemHref, itemFromURL, sideFromURL, withSide, migratePanelURL } from './panel-items.js'
 import { createPanels, panelDOM, itemKey, readPanels } from './panels.js'
 import { mount as mountConversation } from './page/conversation.js'
 import { mountSidePanel } from './page/side-panel.js'
@@ -232,7 +233,7 @@ async function api(method, path, body) {
 // Lazy getters preserve initialization order without duplicating a state owner.
 const modules = Object.create(null)
 const moved = Object.fromEntries(Object.entries({
-  files: "herePath pushAddress files filesUploadChooser chooseUpload fileField fileNameField fileFieldFor goFiles leaveFiles proceedThen openFileRef refNotice vaultUrls picker pickFromFiles applyTool embeds embedFor loadEmbed fileDictation filesScreen filesHome returnToChatButton",
+  files: "restoreFilePlace herePath pushAddress files filesUploadChooser chooseUpload fileField fileNameField fileFieldFor goFiles leaveFiles proceedThen openFileRef refNotice vaultUrls picker pickFromFiles applyTool embeds embedFor loadEmbed fileDictation filesScreen filesHome returnToChatButton",
   accounts: "loadGithub githubStep keepGithub setupGithub connectOrg installGithub refreshGithub disconnectGithub githubReturn providerSignIn connectKeys orgField orgAppField",
   composer: "DRAFT_MAX_PX MAC draft editorDraft openEditor closeEditor sendFromEditor fileChooser imageChooser growDraft submitDraft attachStrip chipSub loginNotice activeThread composer expandGlyph editorNodes menuPage menuRootOf menuOpen openPage openMenu togglePlus closeMenus composerMenu menuRow menuSheet menuGroups menuPopover",
   transcript: "lineKeys lineCount keyOf MINE_MAX_PX MINE_SLACK_PX fitMine COPIED_MS copied copyWithCue copyButton stepItems stepChildren itemNode foldCard stepNode askLine openBlocks longToolDetails toggleOpen toolNode toolDetail fitToolOutputs answeredLine openTurns toggleTurn turnModelName turnFacts turnLine",
@@ -242,6 +243,9 @@ const moved = Object.fromEntries(Object.entries({
   market: "marketCards marketState openMarket openMarketInstall openLinkInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore marketLinkDoor loadMarket"
 }).flatMap(([group, names]) => names.split(' ').map(name => [name, group])))
 const shell = Object.defineProperties({}, {
+  mainHistory: { get: () => mainHistory },
+  backAction: { get: () => backAction },
+  backButton: { get: () => backButton },
   routePanels: { get: () => routePanels },
   panels: { get: () => panels },
   panelId: { get: () => 'main' },
@@ -401,6 +405,13 @@ const running = createRunning({ api, redraw: schedule, agents: () => state.agent
 const threads = mountConversation(page, { messageState, dom: panelDOM('main'),
   navigate: (item) => panels.openMain(item),
   side: () => panels,
+  viewAddress: view => {
+    const url = new URL(globalThis.location?.href ?? threadHref(threads.st.open.thread.id), 'http://placeholder')
+    if (view) url.searchParams.set('view', view)
+    else url.searchParams.delete('view')
+    if (!view && globalThis.history?.state?.threadView) mainHistory.go(-1)
+    else page.pushAddress({ threadView: Boolean(view) }, '', url.pathname + url.search)
+  },
   address: (id) => {
     if (id) state.mainItem = { kind: 'thread', id }
     else if (state.mainItem?.kind === 'thread') state.mainItem = null
@@ -411,19 +422,19 @@ const threads = mountConversation(page, { messageState, dom: panelDOM('main'),
   leave: goChats,
 })
 const apps = createApps({ registry, api, redraw: schedule, wide: () => state.wide,
-  isCurrent: () => state.screen === 'apps',
+  isCurrent: () => state.screen === 'apps', historyButton: () => backButton('main'),
   side: () => panels, navigate: item => panels.openMain(item),
   avatar: (id, { size = 40, font = 18 } = {}) => isOwner(id) ? blob({ initial: ownerInitial(), color: 'var(--latte-espresso)', ink: 'var(--latte-espresso-ink)', shape: '50%' }, { size, font }) : blob(agentLook(id, state.agents), { size, font }),
   agentName: id => isOwner(id) ? 'you' : state.agents.list.find(agent => agent.id === id)?.name ?? id ?? 'Unknown',
   newThread: () => buildAppThread(threads, state.agents.list), copy: copyText, leave: () => goApps(),
 })
-function goApps() {
+function goApps({ push = true } = {}) {
   if (state.screen === 'files') {
     if (!page.files.guard(null)) { page.files.st.sheet.proceed = page.proceedThen(goApps); return }
     page.files.closeFile()
   }
-  importRequest++; page.closeSheet(); threads.close(); closeThread()
-  if (page.herePath() !== '/') page.pushAddress(null, '', '/')
+  importRequest++; page.closeSheet(); threads.close({ navigate: false }); closeThread()
+  if (push && (page.herePath() !== '/apps' || globalThis.location?.search?.includes('url='))) page.pushAddress(null, '', '/apps')
   apps.st.selected = null
   state.navigator = 'apps'
   state.mainItem = null
@@ -470,11 +481,12 @@ function goChats() {
     if (!page.files.guard(null)) { page.files.st.sheet.proceed = page.proceedThen(goChats); return }
     page.leaveFiles(); return
   }
-  threads.close(); goHome(); threads.load({ quiet: true })
+  threads.close({ navigate: false }); goHome(); threads.load({ quiet: true })
+  if (withSide(globalThis.location?.href ?? page.herePath(), null) !== '/') page.pushAddress(null, '', '/')
 }
 
 
-function goActivity() {
+function goActivity({ push = true } = {}) {
   if (isWide()) {
     if (state.sheet?.kind === 'activity') { page.closeSheet({ historyBack: true }); return }
     page.openSheet({ kind: 'activity' })
@@ -488,10 +500,10 @@ function goActivity() {
       return
     }
     page.files.closeFile()
-    if (page.herePath() !== '/') page.pushAddress(null, '', '/')
   }
+  if (push && state.screen !== 'activity') page.pushAddress(null, '', '/?screen=activity')
   page.closeSheet()
-  threads.close()
+  threads.close({ navigate: false })
   closeThread()
   state.profileAgent = null
   state.screen = 'activity'
@@ -519,6 +531,7 @@ function returnFromActivity() {
   const back = activityReturn
   activityReturn = null
   page.closeSheet()
+  if (!back && !isWide()) { goChats(); return }
   if (back?.file) { page.goFiles(back.file.root, back.file.path, { isFile: back.file.isFile }); return }
   if (back?.thread) { threads.open(back.thread); return }
   state.screen = back?.screen ?? 'home'
@@ -533,7 +546,7 @@ function activityScreen() {
 function activityPanel() {
   return h('div', { class: 'activity-panel' },
     !state.wide ? h('div', { class: 'activity-return' },
-      h('button', { class: 'backbtn', 'aria-label': 'Back from Activity', onclick: returnFromActivity }, icon.chevronLeft(18), 'Back')) : null,
+      backButton('main') ?? h('button', { class: 'backbtn', 'aria-label': 'Back from Activity', onclick: returnFromActivity }, icon.chevronLeft(18), 'Back')) : null,
     activity.view())
 }
 const schedules = createSchedules({ api, redraw: schedule, openFile: ({ root, path }) => page.goFiles(root, path, { isFile: true }) })
@@ -663,14 +676,14 @@ function goHome() {
 function goProfile(agent, { push = true } = {}) {
   importRequest++
   state.backToThread = page.activeThread()?.thread.id ?? null
-  threads.close()
+  threads.close({ navigate: false })
   // Which chat "Back to chat" goes back to on the desktop's profile pane. The
   // thread is closed either way — a profile is not a chat with a header on it
   // — so what is kept is the id, not the connection.
   closeThread()
   state.screen = 'profile'
   state.mainItem = { kind: 'profile', id: agent }
-  if (isWide() && push) page.pushAddress(null, '', itemHref(state.mainItem))
+  if (push) page.pushAddress(null, '', itemHref(state.mainItem))
   state.profileAgent = agent
   state.profileTab = 'activity'
   profileActivity.st.kind = ''; profileActivity.st.project = ''
@@ -883,11 +896,13 @@ function render() {
   const welcoming = onboarding.checking || onboarding.needed
   const screen = authExpired() ? signInAgain()
     : welcoming ? welcomeScreen({ checking: onboarding.checking, providers: state.providers, signIn: page.providerSignIn, continueWith: continueWelcome, retry: loadProviders, error: state.providersError })
-    : state.wide ? page.desk(beside) : section?.frame === 'full' ? content : h('div', { class: 'screen plugin-screen' }, content, page.nav())
+    : state.wide ? page.desk(beside) : section?.frame === 'full' ? content : h('div', { class: 'screen plugin-screen' },
+      backButton('main'), state.screen === 'item' ? renderPanel({ host: page, item: state.mainItem }) : content, page.nav())
   const notice = state.editor || state.sheet?.kind === 'settings' ? null : runNotice()
   morph(root, authExpired() || welcoming ? [screen] : [notice, screen, ...registry.draw('app.overlay', { slot: 'overlay', screen: state.screen, wide: state.wide })])
   page.fitToolOutputs(); if (modern || state.wide && state.navigator === 'chats') threads.afterRender()
   if (panels.visible()) sidePanel.afterRender()
+  page.restoreFilePlace(); if (panels.visible()) sidePanel.host.restoreFilePlace()
   activity.syncDialog(); profileActivity.syncDialog(); engineerActivity.syncDialog(); profileUI.syncFocus(); settingsProfileUI.syncFocus()
   running.syncDialog(); fitPreviewTables(root); page.fitMine(); landOnFragment(); menuSurfaces.sync(); files.focusRename(); files.revealOpen(root); revealThemeChoice(); registry.emit('rendered', { root, screen: state.screen })
 }
@@ -960,7 +975,17 @@ function fitViewport() {
 
 // Register overlay history before the document router: a modal-only Back must
 // never reach the thread opener and replace its in-memory conversation.
-const appModalHistory = createAppModalHistory({ wide: isWide, sheet: () => state.sheet,
+const mainHistory = createMainHistory({
+  itemAt: url => itemKey(itemFromURL(url)),
+  sideKey: () => itemKey(panels.st.side),
+  guard: retry => {
+    const target = itemKey(itemFromURL(location.href))
+    if (target === itemKey(mainPanel.item())) return true
+    return mainPanel.guard(retry)
+  },
+  syncSide: () => syncSideAddress(panels.st.side),
+})
+const appModalHistory = createAppModalHistory({ push: mainHistory.push, wide: isWide, sheet: () => state.sheet,
   changed: schedule, close: () => page.closeSheet(), restore: sheet => {
     if (sheet.kind === 'market') { modules.market.openMarket({ kind: sheet.k, q: sheet.q, id: sheet.id }); if (sheet.install) modules.market.openLinkInstall({ link: sheet.install }); return }
     page.openSheet(sheet)
@@ -980,7 +1005,8 @@ const mainPanel = {
   threads,
   pending: () => Boolean(threads.st.open?.creating || threads.st.open?.createFailed),
   item: () => state.mainItem?.kind === 'file' && files.st.file ? { ...state.mainItem, mode: files.st.file.mode }
-    : state.mainItem?.kind === 'app' && apps.st.selected ? { kind: 'app', app: apps.st.selected } : state.mainItem,
+    : state.mainItem?.kind === 'app' && apps.st.selected ? { kind: 'app', app: apps.st.selected }
+    : state.mainItem?.kind === 'thread' ? { ...state.mainItem, view: threads.currentView() } : state.mainItem,
   guard: retry => {
     if (!files.dirty()) return true
     files.guard(null); files.st.sheet.proceed = page.proceedThen(retry); return false
@@ -992,10 +1018,12 @@ const mainPanel = {
     if (item.kind === 'thread') {
       files.closeFile(); apps.st.selected = null
       const pending = threads.open(item.id, { routed: true, push: item.push !== false, listing: item.listing })
+      if (item.view) threads.setView(item.view)
       if (item.message && threads.st.open) Object.assign(threads.st.open, { replyJump: item.message, jumpKind: 'quote' })
       return pending
     }
     if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false, list: item.list })
+    if (item.kind === 'app' && !state.wide && item.push === false) return goApps({ push: false })
     if (item.kind === 'profile') return goProfile(item.id, { push: item.push !== false })
     const ticket = ++importRequest
     threads.close({ navigate: false }); files.closeFile(); closeThread(); page.closeSheet()
@@ -1015,16 +1043,18 @@ const mainPanel = {
   },
 }
 
-let routingPanels = false
-const panels = createPanels({ main: mainPanel, side: sidePanel, changed: schedule,
-  address: side => {
-    if (routingPanels || !globalThis.location?.href || !globalThis.history?.replaceState) return
-    const href = withSide(location.href, side)
-    if (href !== location.pathname + location.search + location.hash) globalThis.history?.replaceState?.(globalThis.history.state, '', href)
-  },
-})
-// A URL restores both slots. Device storage retains geometry, not authority
-// over which main document a shared link or a browser history entry opens.
+function syncSideAddress(side) {
+  if (!globalThis.location?.href || !globalThis.history?.replaceState) return
+  const href = withSide(location.href, side)
+  if (href !== location.pathname + location.search + location.hash) history.replaceState(history.state, '', href)
+}
+const panels = createPanels({ main: mainPanel, side: sidePanel, changed: schedule, address: syncSideAddress })
+function backAction(panel) {
+  if (panel === 'side') return panels.canSideBack() ? { title: backTitle(), go: () => panels.goSide(-1) } : null
+  return mainHistory.canBack() ? { title: backTitle(), go: () => mainHistory.go(-1) } : null
+}
+function backButton(panel) { return historyBackButton(backAction(panel)) }
+// Initial load restores both slots from the address. Traversal keeps side mounted.
 if (globalThis.location?.href) {
   const migrated = migratePanelURL(location.href, readPanels())
   if (globalThis.history?.replaceState && migrated !== location.pathname + location.search + location.hash) history.replaceState(history.state, '', migrated)
@@ -1032,31 +1062,25 @@ if (globalThis.location?.href) {
 }
 function routePanels(value = globalThis.location?.href) {
   if (!value) return
-  const item = itemFromURL(value), side = sideFromURL(value)
-  const apply = () => {
-    const sideChanges = JSON.stringify(itemDescriptor(panels.st.side)) !== JSON.stringify(side)
-    const mainChanges = itemKey(item) !== itemKey(mainPanel.item())
-    const movesSide = item && itemKey(item) === itemKey(panels.st.side)
-    if ((mainChanges && !mainPanel.guard(apply)) || ((sideChanges || movesSide) && !sidePanel.guard(apply))) {
-      globalThis.history?.replaceState?.(globalThis.history.state, '', withSide(itemHref(mainPanel.item()), panels.st.side))
-      schedule(); return
-    }
-    routingPanels = true
-    try {
-      if (sideChanges) {
-        if (item?.kind === 'thread' && itemKey(item) === itemKey(sidePanel.item())) sidePanel.transfer(mainPanel, item.id)
-        if (side?.kind === 'thread' && itemKey(side) === itemKey(mainPanel.item())) mainPanel.transfer(sidePanel, side.id)
-        if (!panels.close()) return
-      }
-      if (item) panels.openMain({ ...item, ...(item.kind === 'file' ? { list: listFromURL(value) } : {}), push: false })
-      else { mainPanel.clear(); state.screen = 'home'; schedule() }
-      if (sideChanges && side && itemKey(side) !== itemKey(mainPanel.item())) {
-        panels.st.side = side; panels.st.loaded = false; panels.restore()
-      }
-      globalThis.history?.replaceState?.(globalThis.history.state, '', withSide(value, panels.st.side))
-    } finally { routingPanels = false }
+  const url = new URL(value), item = itemFromURL(value)
+  const at = parseFilesPath(url.pathname)
+  if (at && (!state.wide || !item || history.state?.folder || !history.state?.files)) {
+    if (itemKey(item) !== itemKey(mainPanel.item())) mainPanel.clear()
+    if (state.wide && !item) state.navigator = 'files'
+    page.goFiles(at.root, at.path, { push: false, isFile: history.state?.folder ? false : null, list: listFromURL(value) })
+    return
   }
-  apply()
+  if (item) {
+    panels.openMain({ ...item, list: listFromURL(value), push: false })
+    if (item.kind === 'thread') threads.setView(url.searchParams.get('view'))
+    return
+  }
+  mainPanel.clear()
+  if (url.pathname === '/apps') goApps({ push: false })
+  else if (url.searchParams.get('screen') === 'activity') goActivity({ push: false })
+  else if (url.searchParams.get('screen')?.startsWith('plugin:')) state.screen = url.searchParams.get('screen')
+  else { state.screen = 'home'; if (!state.wide) state.navigator = 'chats' }
+  schedule()
 }
 
 panels.sideHost = sidePanel.host
@@ -1137,6 +1161,15 @@ fitViewport()
 //
 // It acts only when something is open, so the Escape that cancels an inline
 // rename is still the field's own and is not answered twice.
+document.addEventListener('keydown', event => historyShortcut(event, delta => {
+  if (state.sheet && !globalThis.history?.state?.appModal) return false
+  if (panels.focused() === 'side' && !state.sheet) {
+    panels.goSide(delta)
+    return true // A side boundary must not fall through to browser navigation.
+  }
+  return mainHistory.go(delta)
+}))
+
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return
   const target = event.target?.closest?.('[data-panel="side"]') ? sidePanel.host : page
@@ -1255,8 +1288,13 @@ else {
       }
     } catch { /* An unavailable starter leaves ordinary Chats accessible. */ }
   }
-  if (!onboarding.hello && landedThread) threads.open(landedThread, { push: false, listing })
+  if (!onboarding.hello && landedThread) {
+    threads.open(landedThread, { push: false, listing })
+    threads.setView(new URL(globalThis.location?.href ?? 'http://placeholder').searchParams.get('view'))
+  }
   else if (!onboarding.hello && itemFromURL(globalThis.location?.href ?? page.herePath())?.kind === 'app') { state.navigator = 'apps'; panels.openMain({ ...itemFromURL(location.href), push: false }) }
+  else if (!onboarding.hello && page.herePath() === '/apps') goApps({ push: false })
+  else if (!onboarding.hello && new URL(globalThis.location?.href ?? 'http://placeholder').searchParams.has('screen')) routePanels()
   else if (!onboarding.hello && page.herePath() === '/panel') panels.openMain({ ...itemFromURL(location.href), push: false })
   else if (!onboarding.hello) { const session = sessionFromAddress(globalThis.location?.href ?? page.herePath() + (globalThis.location?.search ?? '')) ?? (!parseFilesPath(page.herePath()) ? lastClassicSession : null); if (session) openImportedSession(session) }
 }

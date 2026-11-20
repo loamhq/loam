@@ -101,7 +101,7 @@ export function mountSidePanel(base) {
     const at = state.mainItem
     if (at?.kind === 'file' && host.files.st.file) return { ...at, mode: host.files.st.file.mode }
     if (at?.kind === 'app' && own.apps.st.selected) return { kind: 'app', app: own.apps.st.selected }
-    return at
+    return at?.kind === 'thread' ? { ...at, view: own.threads.currentView() } : at
   }
   function clear() {
     request++; state.mainItem = null; state.appMenu = false
@@ -114,6 +114,7 @@ export function mountSidePanel(base) {
     own.apps.st.selected = null
     if (item.kind === 'thread') {
       const pending = own.threads.open(item.id, { routed: true })
+      if (item.view) own.threads.setView(item.view)
       if (item.message && own.threads.st.open) Object.assign(own.threads.st.open, { replyJump: item.message, jumpKind: 'quote' })
       return pending
     }
@@ -149,7 +150,7 @@ export function mountSidePanel(base) {
     const location = at?.kind === 'app' ? at.app ? appAddress(at.app.url) : at.url : f ? (f.plugin ? f.row?.place ?? ownRoot?.name ?? f.root : [ROOT_LOOK[f.root]?.name ?? f.root, ...splitPath(parentOf(f.path))].join(' / ')) : ''
     const controls = base.panels.controls()
     return h('header', { class: 'side-head' },
-      h('span', { class: 'side-face', 'aria-hidden': 'true' }, at?.kind === 'app' ? icon.apps(20) : icon.file(20)),
+      base.backButton('side'), h('span', { class: 'side-face', 'aria-hidden': 'true' }, at?.kind === 'app' ? icon.apps(20) : icon.file(20)),
       h('div', { class: 'side-heading' }, h('strong', { text: label }), h('span', { text: location, title: location })),
       controls[0], controls[1], h('button', { class: 'iconbtn ghost', title: 'Item actions', 'aria-label': 'Item actions', onclick: () => {
         if (f && ownRoot?.menu) host.files.itemsMenu(f.row, ownRoot.menu(f.path))
@@ -180,6 +181,6 @@ export function mountSidePanel(base) {
       f.landed = heading?.getAttribute('data-anchor') ?? null
     }
   }
-  return { host, threads: own.threads, item, open, clear, guard, transfer, view, afterRender,
+  return { host, threads: own.threads, setView: own.threads.setView, item, open, clear, guard, transfer, view, afterRender,
     pending: () => Boolean(own.threads.st.open?.creating || own.threads.st.open?.createFailed), empty: () => state.screen === 'threads' && !own.threads.st.open }
 }

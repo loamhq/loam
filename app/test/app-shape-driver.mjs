@@ -114,7 +114,7 @@ try {
     assert.equal(find(root, 'apps-embed').getAttribute('title'), 'Garden')
     click(all(root, 'pillbtn').find(node => text(node) === 'Copy link'))
     await until(() => text(root).includes('Copied')); assert.deepEqual(copies, [apps[0].url])
-    click(all(root, 'iconbtn').find(node => node.getAttribute('aria-label') === 'Back to apps'))
+    click(all(root, 'iconbtn').find(node => node.getAttribute('aria-label') === 'Close app'))
     await until(() => all(root, 'apps-row').length === 2)
   } else assert.deepEqual(browserOpens, [apps[0].url])
   click(all(root, 'apps-row')[1]); assert.equal(browserOpens.at(-1), apps[1].url)

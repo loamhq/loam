@@ -85,7 +85,7 @@ try {
         await page.locator('.activity-page').waitFor()
         assert.equal(await page.locator('.tt-stream').count(), 0)
         await shot('activity-phone')
-        await page.getByRole('button', { name: 'Back from Activity' }).click()
+        await page.locator('.activity-return button').click()
         checks.push('phone Settings remains a sheet; Activity remains a full page with Back')
       } else {
         await preserved()

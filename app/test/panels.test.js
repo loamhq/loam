@@ -188,3 +188,27 @@ test('Latte paint follows panel interaction across threads, files and embedded a
   assert.match(stdout, /PASS 1440 light/); assert.match(stdout, /PASS 1440 dark/)
   t.diagnostic(stdout.trim())
 })
+
+test('side history truncates a forward branch, skips main, and ends when the pane closes', () => {
+  const { panels, main, side } = fixture()
+  const first = thread('one'), second = thread('two'), third = thread('three')
+  panels.openSide(first)
+  assert.equal(panels.canSideBack(), false)
+  panels.openSide(second); panels.openSide(third)
+  panels.openMain(second)
+  assert.ok(panels.goSide(-1))
+  assert.equal(itemKey(side.item()), itemKey(first))
+  assert.equal(itemKey(main.item()), itemKey(second))
+  assert.ok(panels.goSide(1))
+  assert.equal(itemKey(side.item()), itemKey(third))
+  panels.goSide(-1); panels.openSide(file('Notes/outline.md'))
+  assert.equal(panels.goSide(1), false)
+  panels.close(); panels.openSide(first)
+  assert.equal(panels.canSideBack(), false)
+})
+
+test('panel history restores reading positions in the browser and keeps edits behind the save guard', { skip: !process.env.LOAM_PLAYWRIGHT, timeout: 120000 }, async t => {
+  const { stdout } = await promisify(execFile)(process.execPath, ['test/panel-history-browser.mjs'], { timeout: 110000 })
+  assert.match(stdout, /390 dark passed/)
+  t.diagnostic(stdout.trim())
+})

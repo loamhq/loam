@@ -154,8 +154,7 @@ export function mount(host) {
     host.schedule()
   }
   function close() {
-    const wide = host.state.wide
-    host.closeSheet({ historyBack: wide })
+    host.closeSheet({ historyBack: true })
   }
   function toSettings() {
     const s = sheet()

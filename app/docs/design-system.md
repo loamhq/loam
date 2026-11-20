@@ -61,14 +61,17 @@ ring; inputs and textareas keep the 2px `--signal-crema` ring from
 
 ## Pane lead
 
-When the list column is hidden on a desktop (by the owner, or because two
-panels leave too little room), core draws **Show sidebar** absolutely at the
-top left of the main pane (`.showbar`, `style.css`). Core's own headers pad
-around it. Any other header in that pane (a plugin's viewer) reads
-`--pane-lead`: 62px on a pane holding Show sidebar, 0 otherwise (defined in
-`tokens.css`, set by `.pane:has(> .showbar)` in `style.css`). Use it as
-`padding-left: max(<your padding>, var(--pane-lead, 0px))`; the fallback
-keeps a page outside Loam (a share page) unchanged.
+The shell places Back at the leading edge of a panel whenever that panel has
+history. If the desktop list is hidden, Show sidebar shares that space, after
+Back. A phone uses the same slot for returning to the enclosing list on a
+direct link.
+
+Specialized file viewers inherit `--pane-lead` from their host. Use
+`padding-inline-start: max(<your padding>, var(--pane-lead, 0px))` on the
+header to leave space for these controls, including on a phone. The shell
+draws the chevron outside the viewer so a kept editor can survive Back and
+layout changes. A viewer can use `options.openFolder` for a separate folder
+action when the host supplies one.
 
 ## Reading surfaces
 

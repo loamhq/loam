@@ -60,9 +60,11 @@ test('document-only Back before the next redraw still reaches the document route
   assert.equal(f.pop(0).stopped, false)
   assert.equal(f.closed, 0)
 })
-test('under 1100 px existing routes and sheets do not acquire desktop modal history', () => {
+test('phone Settings returns to the same document through browser history', () => {
   const f = fixture(); f.narrow(); f.current = { kind: 'settings', page: 'agents' }; f.history.sync()
-  assert.equal(f.entries.length, 1)
+  assert.equal(f.entries.length, 2)
+  assert.equal(f.pop(0).stopped, true)
+  assert.equal(f.current, null)
   assert.equal(f.win.location.href, 'https://app.example/threads/notes')
 })
 test('typed modal link restores its destination and closes without requiring an earlier app entry', () => {

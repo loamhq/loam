@@ -100,3 +100,6 @@
 @media (prefers-reduced-motion:reduce) { .apps-row,.apps-row-actions,.apps-preview-image { transition:none; } }
 .apps-page .pillbtn,.apps-toolbar .pillbtn { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-height:44px; text-decoration:none; line-height:1; }
 .apps-toolbar .iconbtn { width:44px; height:44px; }
+
+.apps-list-heading { display:flex; align-items:center; gap:8px; margin-bottom:32px; }
+.apps-list-heading h1 { margin:0; }

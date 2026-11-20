@@ -41,7 +41,7 @@ function profileScreen() {
   return h(
     'section',
     { class: 'screen profile', key: 'screen:profile' },
-    h('div', { class: 'profile-head' }, h('button', { class: 'backbtn', onclick: host.goHome }, icon.chevronLeft(20), 'Back')),
+    h('div', { class: 'profile-head' }, host.backButton('main') ?? h('button', { class: 'backbtn', onclick: host.goChats }, icon.chevronLeft(20), 'Back')),
     host.registry.draw('app.overlay', { slot: 'player' }),
     h('div', { class: 'profile-body' }, ...profileBody(host.state.profileAgent)),
     nav(),
@@ -157,15 +157,18 @@ function setCollapsed(value) {
 
 function mainPane() {
   const empty = host.state.mainItem ? null : host.state.navigator === 'files' ? filesPane(true) : host.state.navigator === 'apps' ? host.apps.view({ empty: true }) : host.threads.pane({ empty: true })
-  return renderPanel({ host, item: host.state.mainItem, empty,
+  const at = host.state.mainItem
+  const back = !at || !['file', 'thread', 'profile', 'app'].includes(at.kind) || (at.kind === 'app' && !host.apps.st.selected) ? host.backButton('main') : null
+  return renderPanel({ host, item: at, empty, header: back ? h('header', { class: 'panel-history-head' }, back) : null,
     before: host.state.collapsed ? [h('button', { class: 'iconbtn showbar', key: 'show-sidebar', title: 'Show sidebar', onclick: () => setCollapsed(false) }, icon.panelLeft(18))] : [] })
 }
 
 function profilePane() {
+  const back = host.backButton('main')
   return h(
     'div',
     { class: 'pane-body', key: 'pane:profile' },
-    panelHeader({ back: h('button', { class: 'backbtn', onclick: backToChat }, icon.chevronLeft(20), host.state.backToThread ? 'Back to chat' : 'Back to chats') }),
+    panelHeader({ back, actions: back ? [] : [h('button', { class: 'iconbtn ghost', title: 'Close profile', 'aria-label': 'Close profile', onclick: backToChat }, icon.close(16))] }),
     host.registry.draw('app.overlay', { slot: 'player' }),
     h('div', { class: 'profile-body' }, ...profileBody(host.state.profileAgent)),
   )
@@ -190,7 +193,7 @@ function filesPane(empty = false) {
   return h(
     'div',
     { class: 'pane-body', key: 'pane:files' },
-    fileView(host.files, { close: null, closeLabel: '', wide: true, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onTool: host.applyTool, embed: host.embedFor, ...host.fileDictation() }),
+    fileView(host.files, { historyBack: host.backAction('main'), close: null, closeLabel: '', wide: true, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onTool: host.applyTool, embed: host.embedFor, ...host.fileDictation() }),
   )
 }
 

@@ -67,7 +67,7 @@ export function buildAppThread(threads, agents = []) {
 }
 
 export function createApps({ registry = createCoreRegistry(), api, redraw, wide, avatar, agentName, newThread,
-  openBrowser = url => globalThis.open(url, '_blank', 'noopener,noreferrer'), copy, side = () => null, navigate = null, isCurrent = () => true, leave = null }) {
+  openBrowser = url => globalThis.open(url, '_blank', 'noopener,noreferrer'), copy, side = () => null, navigate = null, isCurrent = () => true, leave = null, historyButton = () => null }) {
   const st = { details: null, media: new Map(), readyImages: new Set(), failedImages: new Set(), apps: [], loaded: false, loading: false, error: '', selected: null, copied: false, copyError: '' }
   let request = 0, returnTo = null, mediaRequest = 0, mediaTimer, pressTimer, press, suppressedURL, suppressedUntil = 0
   async function load() {
@@ -208,10 +208,11 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
     const app = empty ? null : st.selected
     if (!list && app && wide()) return h('div', { class: 'apps-frame', key: `app:${app.url}`, 'aria-label': app.name },
       h('div', { class: 'apps-toolbar' },
-        h('button', { class: 'iconbtn', 'aria-label': 'Back to apps', onclick: back }, icon.chevronLeft(18)),
+        historyButton(),
         h('span', { class: 'apps-frame-address', text: appAddress(app.url), title: app.url }),
         !appUnavailable(app) ? h('a', { class: 'pillbtn', href: appURL(app.url), target: '_blank', rel: 'noopener noreferrer', text: 'Open in browser' }) : null,
         h('button', { class: 'pillbtn', text: 'Copy link', onclick: () => copyLink(app) }),
+        h('button', { class: 'iconbtn ghost', title: 'Close app', 'aria-label': 'Close app', onclick: back }, icon.close(16)),
         h('span', { class: 'apps-copy-status', role: 'status', text: st.copyError || (st.copied ? 'Copied' : '') })),
       appUnavailable(app) ? h('div', { class: 'apps-empty', role: 'status' }, h('p', { text: `${app.name} · ${appUnavailable(app)}` }), h('p', { class: 'note', text: 'Manage this plugin in Settings › Plugins.' }))
         : h('iframe', { class: 'apps-embed', key: app.url, src: appURL(app.url), title: app.name, referrerpolicy: 'strict-origin-when-cross-origin', sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads' }))
@@ -226,7 +227,7 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
         h('div', { class: 'display', text: 'Pick an app' }),
         st.error ? h('div', { class: 'why', text: st.error }) : null))
     return h(list ? 'div' : 'main', { class: `apps-page${list ? ' apps-list' : ''}`, key: 'apps', 'aria-label': 'Apps' },
-      list ? h('div', { class: 'list-head' }, h('h1', { class: 'display', text: 'Apps' }), collapse) : h('h1', { class: 'display', text: 'Apps' }),
+      list ? h('div', { class: 'list-head' }, h('h1', { class: 'display', text: 'Apps' }), collapse) : h('header', { class: 'apps-list-heading' }, historyButton(), h('h1', { class: 'display', text: 'Apps' })),
       h('div', { class: list ? 'scroll apps-list-scroll' : 'apps-catalog' },
       st.error ? h('div', { class: 'apps-notice', role: 'alert' }, h('p', { text: st.error }), h('button', { class: 'pillbtn content-mark', text: 'Try again', disabled: st.loading, onclick: load })) : null,
       !st.loaded && st.loading ? h('p', { class: 'muted', role: 'status', text: 'Loading apps…' }) : null,

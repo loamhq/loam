@@ -92,7 +92,7 @@ export function chatHeader({ wide, back, face, identity, onIdentity, identityTit
         h('span', { class: wide ? 'display' : 'display headtitle-name', text: title }),
         subtitle ? h('span', { class: 'headtitle-who', text: subtitle }) : null),
       wide && editable ? icon.pencil(13) : null)
-  return h('div', { class: wide ? 'chat-head' : 'thread-head', ...props }, !wide ? back : null,
+  return h('div', { class: wide ? 'chat-head' : 'thread-head', ...props }, back,
     h('button', { class: wide ? 'agentbtn' : 'who', title: identityTitle, onclick: onIdentity }, face,
       wide && identity ? [h('span', { class: 'display', text: identity }), icon.chevronDown(12)] : null),
     wide && identity ? h('span', { class: 'sep', text: '/' }) : null,

@@ -26,7 +26,7 @@ test('a rail move never changes a panel: every ordered pair renders every main k
   for (const main of items) for (const from of ['chats', 'files', 'apps', 'notes']) for (const to of ['chats', 'files', 'apps', 'notes']) {
     const registry = createCoreRegistry(), side = items.find(item => item.kind !== main.kind)
     const host = { registry, panelId: 'main', state: { wide: true, screen: 'obsolete-screen', navigator: from, mainItem: main, collapsed: true },
-      store: { sidebarHidden: true }, closeSheet() {}, schedule() {},
+      store: { sidebarHidden: true }, backButton: () => null, closeSheet() {}, schedule() {},
       panels: { st: { side }, tucked: () => false },
       threads: { load() {} }, files: { st: { roots: { loaded: true } } }, apps: { st: { loaded: true } } }
     Object.assign(host, mountLayout(host))

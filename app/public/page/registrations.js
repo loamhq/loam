@@ -56,8 +56,8 @@ export function registerPage(loam) {
     if (section.open) return section.open()
     if (host.state.screen === 'files' && !host.files.guard(null)) { host.files.st.sheet.proceed = host.proceedThen(() => loam.commands.run('section.open', { id })); return }
     if (host.state.screen === 'files') host.files.closeFile()
-    if (host.herePath() !== '/') host.pushAddress(null, '', '/')
-    host.closeSheet(); host.threads.close(); host.closeThread()
+    if (host.state.screen !== `plugin:${id}`) host.pushAddress(null, '', '/?screen=' + encodeURIComponent(`plugin:${id}`))
+    host.closeSheet(); host.threads.close({ navigate: false }); host.state.mainItem = null; host.closeThread()
     host.state.screen = `plugin:${id}`; host.schedule()
   } })
 }
