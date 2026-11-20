@@ -3,6 +3,8 @@
 Each release's notes are written for the people who run Loam, in
 `docs/releases/<version>.md`. The app shows them when it offers an update.
 
+- [0.2.15](docs/releases/0.2.15.md), 2026-11-19: connect Syncthing to Loam
+  using the key it already has on your server.
 - [0.2.14](docs/releases/0.2.14.md), 2026-11-19: see where plugins came
   from, keep them up to date automatically, and review updates that ask
   for more access.
