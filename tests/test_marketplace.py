@@ -1,31 +1,5 @@
 #!/usr/bin/env python3
-"""lib/loam_marketplace.py, bin/loam-market and the marketplace repository's
-own build.py (docs/marketplace/ here) (2026-11-17).
-
-The list is served by a local HTTP server, so every answer a host can give
-is real: a list, an empty one, none at all (404), a server error, not JSON.
-Checks:
-
-  - the format: an entry that breaks a rule (an id, a kind, a link at no
-    ref, a long description) is left out with its reason and the rest are
-    drawn, sorted by name; the same id twice is listed once;
-  - reading: 404 and an empty list are `empty`, never an error; a 500 or a
-    list that is not one is `unreachable` with a sentence; an empty
-    `marketplace.list` turns it off; the answer is cached and `refresh`
-    fetches again;
-  - `listing` marks the entries a plugin of that id is installed for;
-  - asking to be listed: the entry is read from the plugin's own preview,
-    and the link is GitHub's new-file page in the marketplace repository
-    with `listings/<id>.json` holding exactly that entry; no description is
-    refused;
-  - build.py: listings in, list.json out, which the box reads with nothing
-    left out; a branch link, a file not named by its id and an unknown field
-    are refused by `--check`;
-  - the broker answers `GET /v1/marketplace` (the route is in the page's
-    relay registry, tests/test_settings.py).
-
-Run: python3 tests/test_marketplace.py
-"""
+"""Use a local HTTP catalog to check Marketplace lookup, empty and unavailable lists, malformed responses and the CLI."""
 
 from __future__ import annotations
 

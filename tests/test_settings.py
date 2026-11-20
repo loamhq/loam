@@ -93,8 +93,7 @@ for root, tid, mid in ((THEMES, "plain", "plain"),
 (THEMES / "README.md").write_text("not a theme")
 os.environ["LOAM_PLUGIN_SHIPPED"] = f"{THEMES}:{TMP / 'absent'}"
 os.environ["LOAM_PLUGINS_DIR"] = str(USER_THEMES)
-# As the live agent.json files are: `name` the lower-case id, `display` the
-# name. A line said "ada" until loam_threads.display read `display` first.
+# Render the display field even when the workspace ID is lower-case.
 for who in ("ada", "iris", "cleo"):
     (TMP / "ai-labs" / who).mkdir(parents=True)
     (TMP / "ai-labs" / who / "agent.json").write_text(

@@ -1,36 +1,5 @@
 #!/usr/bin/env python3
-"""Server plugins and the one package shape (2026-11-13):
-lib/loam_plugin_servers.py, the kinds and fields lib/loam_plugins.py gained,
-and bin/plugin-gateway.
-
-  - kinds: theme, extension, app, agent, skill; an agent or skill is a
-    package alone; an app with no server/ is broken; an agent carrying a
-    memory folder or a MEMORY.md, at any depth, is broken; a skill without
-    SKILL.md is a warning; agents and skills are listed with switch
-    "listed", never on, their PATCH a 409, and an install's preview says
-    `installable: false` and its confirm installs nothing
-  - `server: {run}`: read; a string is the same; a second line or no run is
-    refused; a missing server/ or nothing to run is a warning; the default
-    commands are server/main.py and server/main.js; `icon` kept when it is
-    a picture in the folder, else a warning, and served by the files route
-  - the supervisor, against a fake systemd: on starts one transient unit
-    with its port, memory cap, NoNewPrivileges, restart burst and the
-    plugin's environment (no token, only its file); off stops it; remove
-    stops it before the folder goes; an update restarts it fresh; a running
-    unit is not restarted by a second start; states from systemctl's
-    properties (running, starting, failing on failed or auto-restart,
-    stopped); a failing row carries its log; the port is kept across
-    restarts; reconcile starts the wanted unit that is not loaded, leaves a
-    failed one alone and stops an unwanted one; with Yours elsewhere and no
-    LOAM_PLUGIN_UNITS nothing is ever started
-  - the gateway, on loopback against a real upstream: /x/<id>/path reaches
-    the plugin as /path with X-Forwarded-Prefix and Connection: close, the
-    query kept; /x/<id> is a 308 to /x/<id>/; an unknown id is a 404; a
-    plugin whose port answers nothing is a 502 that says so; a keep-alive
-    client gets two answers from two plugins on separate connections
-
-Run: python3 tests/test_plugin_servers.py
-"""
+"""Check plugin package validation, server discovery and gateway routing against fixture installations."""
 
 import asyncio
 import importlib.machinery

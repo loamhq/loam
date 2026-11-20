@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""check-drift's config clause comparison, against a temp ai-labs.
-
-The seven config.md files are compared with each agent's own name masked.
-A fleet-wide sentence that names one agent (the per-cron grant, 2026-10-06:
-"Today's only grant: Ada's `infra-watch`") is identical in every raw copy
-and must not read as drift in the named agent's copy; a real divergence
-still must.
-
-The reviewer on another provider (Antigravity) is not compared with the
-newest Claude Code session on disk, which is from before the switch
-(2026-11-16: a "family mismatch" no run had); on Claude Code it still is.
-
-`--quiet` prints one line per finding saying what differs.
-
-Run: python3 tests/test_check_drift.py
-"""
+"""Verify shared-clause normalization, provider-specific session checks and concise findings."""
 
 from __future__ import annotations
 

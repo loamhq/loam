@@ -1,31 +1,4 @@
-"""The persona-side engineer server serves two briefs at once.
-
-Caused on 2026-09-07: two briefs from one conversation, to two projects with
-separate locks and free slots, ran one after the other because the tool's
-handler was ``async def`` around ``subprocess.run`` -- a call that never
-yields, so the server's one event loop was held for the length of the first
-job and the second request sat unread in the pipe. This test fails if that
-shape comes back.
-
-**Driven over real stdio, with the real server file.** The venv python is
-started exactly as a persona's ``.mcp.json`` starts it -- same interpreter,
-same module, same transport -- except that the module's ``LAUNCHER`` is
-pointed at a stand-in before ``mcp.run()``. The stand-in reads the brief,
-sleeps, and prints the launcher's reply shape with its own start and finish
-stamped in, so the two replies carry the same evidence a launcher record
-does. Two ``tools/call`` requests go down the pipe back to back; the
-assertion is that their windows overlap and that both come back in about
-one sleep rather than two. The in-memory transport would have proved the
-same thing about the library and nothing about this file's real entry
-point, which is what a persona's session actually spawns.
-
-The client is thirty lines of raw JSON-RPC rather than the library's
-``ClientSession``: it keeps this file on the system interpreter (the suite
-runs every test with ``python3``; only the server child needs the venv) and
-makes ``bin/`` reusable for a hand-driven probe of the same path.
-
-Run: python3 tests/test_engineer_server.py
-"""
+"""Independent briefs must progress concurrently while project-level locks serialize work on the same project."""
 
 from __future__ import annotations
 

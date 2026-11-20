@@ -1,34 +1,5 @@
 #!/usr/bin/env python3
-"""The same persona on both providers: the proof that stays (2026-10-01).
-
-The owner, 10-01: "just the provider changing does not compromise on the
-memories, the personalities, the soul, and the tools." This starts one
-persona on Claude Code and on Codex, each on its cheapest model, and holds
-them to three things:
-
-1. **Instruction sources identical.** Claude Code loads ``CLAUDE.md``, its
-   ``@`` imports in order, then ``_active.md`` as the conversation style.
-   The Codex instructions file must be built from exactly that list, in that
-   order, each file's text present verbatim (``_active.md`` without its
-   loader frontmatter), under the one added provider line.
-2. **MCP tool names identical.** Claude's from the CLI's own ``init`` event;
-   Codex's from ``mcpServerStatus/list`` on an app-server started the way
-   the broker starts one -- which needs no login.
-3. **Built-in tools differ only by the documented list**
-   (``loam_codex.CLAUDE_ONLY_TOOLS``): each of those is present on Claude
-   Code, and the provider line tells the Codex persona they are absent.
-
-Both models are also asked the question a person would ask -- "List the
-instruction files you loaded, in order, and the names of every tool you
-have" -- and their answers are printed for reading. With no Codex login on
-the box that half is SKIPPED with the reason; the first run after a sign-in
-is the one that asks it.
-
-Live and paid (one Haiku turn), so it runs only with ``--live``. The Claude
-half runs with ``LOAM_PROBE=1``, so its transcript is quarantined outside
-the vault. Usage: ``tests/test_codex_parity.py --live [agent]`` (default the
-lead agent, ``loam_config.LEAD_AGENT``).
-"""
+"""Check that a persona keeps its identity and configured capabilities when it changes provider."""
 
 from __future__ import annotations
 

@@ -1,35 +1,5 @@
 #!/usr/bin/env python3
-"""lib/loam_to_market.py (2026-11-18, 0.2.9): Dictation and Read aloud left
-Loam's core for the Market; a fresh install has neither, and an install that
-had one on keeps it.
-
-A local git repository stands in for each maker's repository
-(``LOAM_PLUGIN_GIT_BASE``), holding the release's own
-``plugins/_listed/<id>/`` copy at the tag ``v1.0.1``, and a local list.json
-stands in for the marketplace (``marketplace.list``), so the install is the
-real two calls from the real listing. Checks:
-
-  - the release: neither id is in any shipped folder (loam-ui's themes and
-    plugins, this runtime's plugins/); each is a listed copy whose page code
-    is there; the app server's own speech modules are the listed copy's;
-  - a fresh install lists neither, and the update installs nothing;
-  - one that was on is installed from its Market listing's link, an
-    installed plugin by `loam-update`, still on, and each agent's voice
-    (kept by id in `_settings/read-aloud/`) still answers;
-  - one that was off is not installed;
-  - one already in Yours is left alone; each id is settled once, and one
-    removed later is not put back;
-  - when the list cannot be read, the release's copy is put in the plugins
-    folder (built here), and it is on because its switch was;
-  - a failure is reported and tried again at the next start;
-  - (0.2.12) the app server has none of their server code; a copy older
-    than the one carrying its own server is brought up to the listing's
-    version once (a Market copy by the two calls, a copy built here by the
-    release's), an edited or side-loaded one is left and said so, and Read
-    aloud's `voices` setting is seeded once from `app.speech_voices`.
-
-Run: python3 tests/test_to_market.py
-"""
+"""Use local Git releases to check that migration preserves existing plugin choices and leaves fresh installs disabled."""
 
 from __future__ import annotations
 

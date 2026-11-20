@@ -1,47 +1,5 @@
 #!/usr/bin/env python3
-"""The plugin host (2026-11-12): lib/loam_plugins.py, its routes in
-bin/session-broker, and its three settings through `bin/settings`.
-
-  - the manifest reader: spec v0's own example reads as written; the YAML
-    subset (block and flow lists and mappings, `- key:` items, quotes, block
-    text, comments) reads as YAML would; everything outside it (tabs,
-    anchors, duplicate keys, unclosed brackets, stray indentation) is a
-    sentence naming the line; random text is never anything but a
-    ManifestError
-  - the manifest: every required field, every type, every enumerated value
-    refused with a sentence; what spec v0 does not name kept as a warning
-  - the layers: loam-ui's theme folders (manifest.json) and PLUGIN.md
-    plugins in Shipped; Yours shadows Shipped by id; a broken Yours copy
-    never does; a second shipped folder of one id, a folder named as no id,
-    a folder with no PLUGIN.md, malformed YAML, an id that is not the
-    folder's, an installed line whose folder is gone and an unreadable
-    installed list are each a row (or an `error`) and never break the list
-  - on and off: an extension's switch persists in installed.json; a
-    theme-only plugin has none (409) and is on where Appearance chose it; a
-    broken one has none; built here is off until turned on
-  - install from a link (a real git remote on disk): a tag and a commit
-    install, a branch and a short commit are refused with the commit to use,
-    a missing tag or folder is a 404, a folder that is not a plugin a 422;
-    the first call writes nothing; a wrong token is a 409 that writes
-    nothing; a later version declaring more shows exactly what it adds and
-    the earlier token no longer installs it; a tag moved between the two
-    calls is a 409; replacing an edited copy says so
-  - remove: Yours only; a shipped one is a 409; a theme in use goes back to
-    Latte where no shipped copy of it remains
-  - a theme's cover (image, image_position) and dark cover (image_dark,
-    image_position_dark, same rules): kept as named fields when
-    loam-ui's page would take them; a missing file, a path out of the
-    folder, a URL, another type and a bad position each a warning and the
-    field left out, never a broken theme
-  - files: page/, assets/, theme.css, PLUGIN.md and a theme's covers, with their types, from
-    the copy in force; server/, `..`, a link out of the folder and a
-    plugin not in force are 404s
-  - the routes on a loopback broker, as the page calls them; and the same
-    three settings through `bin/settings` as a persona, with `by`, refused
-    from a cron
-
-Run: python3 tests/test_plugins.py
-"""
+"""Exercise plugin manifests, the package host, its broker routes and settings together."""
 
 import asyncio
 import importlib.machinery

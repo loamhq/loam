@@ -1,37 +1,4 @@
-"""The mid-run death reporter, asserted end to end.
-
-Runs the real bin/wake and the real bin/wake-failed as subprocesses against
-a throwaway agent whose vault is a temp directory, so every path exercised
-is the one production uses and nothing fabricated reaches the real vault.
-
-The two cases are the whole contract, and they pull in opposite directions:
-
-  wrapper recorded it     -> wake-failed must stay SILENT. bin/wake exits
-                             non-zero on its own recorded refusals, so
-                             OnFailure= fires on the good path too; a
-                             reporter that always wrote would attribute
-                             every handled failure twice.
-  wrapper died mid-run    -> wake-failed must write. This is 2026-08-30,
-                             when the kernel killed Wren's wake and the
-                             night went missing rather than recorded.
-
-What separates them is the run marker, and case three is what makes that
-separation trustworthy. That a SIGKILL cannot run `finally` is an OS
-guarantee, not something worth asserting about Python. What IS ours, and is
-asserted here, is that the clear lives *only* in that `finally`: a run that
-exits by a path which skips it must leave the marker behind. If a later
-edit moved the clear anywhere that survives an abrupt exit -- an atexit
-hook, a signal handler, a second call on the error paths -- case two would
-silently degrade into case one, the mid-run death would go unreported
-again, and every assertion above would still pass.
-
-os._exit is used as the stand-in for the kill: it is the one in-process
-exit that skips `finally` exactly as SIGKILL does, and unlike killing a
-real wake it cannot race. The wake being tested dies in milliseconds, so
-signalling it is a coin toss, not a test.
-
-Run: python3 tests/test_wake_failed.py
-"""
+"""Exercise wake and its failure reporter against a temporary vault. A failure report must reflect the actual process outcome."""
 
 import json, os, shutil, signal, subprocess, sys, tempfile, time
 from pathlib import Path

@@ -1,34 +1,5 @@
 #!/usr/bin/env python3
-"""Comments & suggestions (plugins/doc-comments, 2026-11-16): the plugin
-through Loam's real interfaces, and the core hooks it added.
-
-  - the plugin's own suites: its model (plugins/doc-comments/test/
-    test_model.py: anchors, merge, sidecar, the operations) and its editor's
-    text handling (test/editor.test.mjs: byte-for-byte round trips through the
-    editor's state, CRLF, positions between server and page)
-  - against the real session broker over HTTP, on a scratch vault: a
-    persona's first note writes one id line and the broker's provenance stamp
-    names that persona (`by`, a core hook), the sidecar is made under
-    `<system>/Loam/data/doc-comments/`, a save made for an unknown persona is
-    refused, and the notes follow a rename done through Files
-  - Shared with me (test/test_withme.py): another Loam's door over real
-    https, the addresses refused, each failure named, the password never in
-    an answer, a log or the vault
-  - its look (test/test_look.py): every colour in its CSS a core token, every
-    pill corner core's, the share page's copy of Latte's tokens exact
-  - the plugin's HTTP server and its agent tool (stdio MCP) end to end: a
-    persona comments by quote and lists the doc's notes, under its own name
-  - the kept folder: `<system>/Loam/data/` survives the library being
-    replaced, is never counted as an edit to it, is not copied into an
-    update's backup, and is kept as it is now when an update is undone
-  - an agent tool is told its agent, lane, the vault, the workspaces and its
-    plugin server's address; a plugin server is told its vault folder
-  - plugin off: no contribution, no server wanted, no tool; and the page
-    module registers nothing on a page without `files.own` and takes its one
-    registration away when disposed
-
-Run: python3 tests/test_doc_comments.py
-"""
+"""Exercise the comments plugin through its model, editor, host integration and public routes."""
 
 import asyncio
 import importlib.machinery

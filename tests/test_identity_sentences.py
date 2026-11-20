@@ -1,35 +1,5 @@
 #!/usr/bin/env python3
-"""A line break is a sentence boundary for the identity preflight.
-
-Until 2026-09-05 ``_sentences`` in ``lib/loam_identity.py`` split only on
-whitespace after ``.``, ``!`` or ``?``. A heading has no terminal punctuation,
-so it was glued to the sentence beneath it, the piece carried a newline, and
-the length-and-no-newline filter dropped it: every soul lost its first
-sentence after each heading, usually the opening line of its identity
-section. This file asserts the replacement on strings alone; nothing here
-reads an agent's files or spends a model call.
-
-Asserted:
-
-  after a heading    the eligible sentence right under a heading is returned.
-  too short          a heading followed by a sentence under 45 characters
-                     returns nothing; the heading is not glued on to rescue it.
-  no newline         two lines with no terminal punctuation, each too short
-                     alone and in band together, yield nothing: the piece
-                     spanning both lines is never returned, and no returned
-                     piece anywhere contains a newline.
-  end of file        a sentence that ends the file with no trailing newline
-                     is returned.
-  within a line      several sentences on one line still split on their
-                     punctuation, in document order, and the band still holds.
-  hard wrap          a paragraph wrapped mid-sentence yields its lines as
-                     candidates. This is the recorded consequence of splitting
-                     on newlines and nothing cleverer, as one live soul does
-                     on the box; it is pinned here so a change to it is a
-                     decision and not a drift.
-
-Run: python3 tests/test_identity_sentences.py
-"""
+"""A line break separates sentences for the identity preflight, even without terminal punctuation."""
 
 from __future__ import annotations
 

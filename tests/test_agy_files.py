@@ -1,33 +1,5 @@
 #!/usr/bin/env python3
-"""Antigravity's per-conversation files for engineer jobs (2026-11-15).
-
-  the clearing     a conversation Loam's job records name is cleared 7 days
-                   after the last job naming it finished: its .db, its brain
-                   folder, the implicit files attributed to its jobs, and its
-                   rows in conversation_summaries.db (the summary, the search
-                   index, the parent link). A chain waits for its last job; a
-                   job with no verdict keeps it; a conversation no job names
-                   (a persona's, the owner's) is never touched. Recorded in
-                   each job's antigravity.json, once.
-  the attribution  implicit files that appeared during a run are the job's
-                   only when no conversation no job names was written then.
-  the reviewer     its runs on Antigravity (bin/review, since 2026-11-15) are
-                   cleared the same way: a run directory is a job directory,
-                   its verdict's time read from its run.json.
-  continue_job     of a cleared job: refused with a sentence that says so.
-  idle (11-16)     a conversation no job names is cleared once nothing has
-                   touched it for 7 days and no agy process is on it, its
-                   summary rows with it; one resumed within the week stays.
-                   Implicit files no job names go at 7 days old. The thread
-                   engine starts a fresh session for a member whose kept
-                   conversation was cleared.
-  the memory check leaves a job's own conversation out of its counts, so a
-                   job's growth posts nothing; since 2026-11-16 a persona's
-                   posts nothing either, and a new kind of entry under the
-                   tree is what is said.
-
-Run: python3 tests/test_agy_files.py
-"""
+"""Exercise per-conversation file accounting and cleanup for Antigravity engineer jobs."""
 
 from __future__ import annotations
 

@@ -1,37 +1,5 @@
 #!/usr/bin/env python3
-"""What an agent loads, per run kind and provider, with a map and without
-(2026-11-18, lib/loam_loading.py).
-
-On two throwaway agents in a temp directory, never a real one's files: each
-has a soul, a config, `_always.md`, `_active.md` (with the loader's
-frontmatter), `_reflection.md` and one cron, every file carrying a token of
-its own; one of them also has a `map.md`. Their CLAUDE.md, settings and
-output styles are rendered by bin/provision's own functions, and each run is
-assembled by the code that assembles it:
-
-  Claude Code  conversation: CLAUDE.md's imports, then the output style the
-               settings select (`_active.md` through the symlink, or the
-               empty `none`). Wake and cron: bin/wake's own `lane_input` and
-               `claude_argv` (`--settings outputStyle none`, and the file it
-               appends, if any).
-  Codex        conversation: `loam_codex.instructions`; wake and cron:
-               `loam_codex_wake.instructions` with bin/wake's `lane_input`.
-  Antigravity  conversation: `loam_antigravity.instructions` (its wakes run
-               on Claude Code; lib/loam_profile.py says why).
-
-For each, the tokens present are exactly those of
-`loam_loading.own_files(kind)`: with a map, soul, config and map (and a
-cron's own file in a cron), with Loam's text and the owner's shared page
-beside them; without one, exactly what loaded before.
-
-Then the switch: writing a map re-renders CLAUDE.md and the settings
-(`loam_loading.refresh`, and the persona's PostToolUse hook after a write
-made with the shell), removing it puts the old shape back, and the old
-files are never touched. And the readers: the identity gate's import check,
-lane-check, the size warning, the profile's file list.
-
-Run: python3 tests/test_loading_shapes.py
-"""
+"""Verify the instruction set each run kind receives from mapped and legacy workspaces on every provider."""
 
 from __future__ import annotations
 

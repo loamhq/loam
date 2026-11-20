@@ -1,32 +1,5 @@
 #!/usr/bin/env python3
-"""Making, archiving and restoring agents, and their faces (2026-11-14, first
-release L10), through a real broker listener on loopback and through
-`bin/settings` as a persona. lib/loam_agents.py holds the rules.
-
-  - New agent opens a thread with the starter agent, with a line saying how
-  - a draft: a persona's needs its thread; a name or id taken, a reserved id
-    and a missing face are `problems`; each revision is numbered and said in
-    the thread; souls can come from a file in a workspace, not from /etc
-  - confirm: refused without the person's yes, with a yes that is not the
-    owner's, older than the revision, from a thread the agent is not in, for
-    a stale revision, or from an unattended lane; on a good yes the agent is
-    made (files verbatim, agent.json's name and face, provisioned, its unit
-    on), on the roster, in /v1/agents, with a first thread; the yes is taken
-    once
-  - archive: out of /v1/agents, threads' roster and mentions, in
-    ?archived=1; its timers are removed and its records untouched; its
-    profile and files stay readable; a turn for it is refused with a mark;
-    an agent mid-turn waits; a persona's archive needs a fresh yes
-  - restore: the same timers back byte for byte, back in /v1/agents
-  - the face: multipart and a path, PNG/JPEG/WebP/GIF only, served back,
-    on the card; null goes back to the theme's; provision keeps face and the
-    archive mark
-  - the emoji face is retired (2026-11-16): a draft refuses it, a made
-    agent has none, and an older agent.json's is kept but never served
-  - no route deletes an agent
-
-Run: python3 tests/test_agents.py
-"""
+"""Exercise agent creation, approval, archiving, restoration and profile images through the broker and settings CLI."""
 
 import asyncio
 import importlib.machinery

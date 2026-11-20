@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
-"""A lane's effective model, read back from a transcript shaped like the CLI's.
-
-The alarm added 2026-09-25 after Ada's lane ran most of a conversation on
-Opus 4.8 while `ai-labs/ada/.claude/settings.json` said `fable`. The CLI's
-`switchModelsOnFlag` default retries a refused turn on another model and
-keeps the session there; nothing on this box compared what a lane was
-configured for against what it actually ran.
-
-Two readers ask this question -- `bin/check-drift` by hand and
-`bin/lane-check` every day for the check on a clock -- and both get it from
-lib/loam_session.py, so what is proved here is proved for both.
-
-The two strictnesses are the point and each has a case below: a family
-(`fable`) tolerates a point release, an explicit id (`claude-opus-5`) does
-not tolerate an older Opus. Without the second, "every Opus use is the
-latest Opus" is unenforceable -- a drop from Opus 5 to Opus 4.8 is a match
-on family.
-
-Run: python3 tests/test_session_model.py
-"""
+"""Read effective models from provider-shaped transcripts for drift and scheduled checks.
+A family setting allows a point release. An explicit model ID requires that version."""
 
 import json
 import os
@@ -52,7 +34,7 @@ def assistant(model: str, ts: str) -> str:
     })
 
 
-# The real record the CLI wrote into Ada's session, fields it is read for.
+# Fields the CLI records for a session-scoped fallback after a refusal.
 FALLBACK = json.dumps({
     "type": "system", "subtype": "model_refusal_fallback", "level": "warning",
     "timestamp": "2026-09-25T18:16:34.204Z", "trigger": "refusal",
@@ -66,7 +48,7 @@ saved = loam_session.SESSIONS_DIR
 try:
     loam_session.SESSIONS_DIR = root
 
-    # A lane that was switched mid-session, exactly as Ada's was.
+    # A provider fallback changes the effective model for the rest of the session.
     ws = Path("/home/loam/ai-labs/ada")
     d = root / str(ws).replace("/", "-")
     d.mkdir(parents=True)
@@ -155,12 +137,7 @@ try:
         assistant("claude-opus-4-8", "2026-09-25T18:16:24Z"),
     ]) + "\n", encoding="utf-8")
 
-    # A chat may pick a model from the broker's + menu, and that is the owner
-    # choosing rather than a lane drifting. ada already has a session
-    # recorded with `model: "opus"`, so a check that could not tell the two
-    # apart would have fired on a deliberate pick -- and an alarm that cries
-    # wolf is the one that gets ignored, which is the failure mode that let
-    # the 09-25 switch and the three before it go unnoticed for three weeks.
+    # A model chosen for a chat overrides its lane default.
     import loam_broker  # noqa: PLC0415
     saved_broker = loam_broker.SESSION_DIR
     loam_broker.SESSION_DIR = root / "broker"
@@ -246,11 +223,8 @@ try:
         return json.dumps({"type": "user", "timestamp": ts,
                            "message": {"role": "user", "content": body}})
 
-    # 1. THE RIGHT SESSION. The Remote Control server's own UUID-v5 file is
-    # touched at every start by an undated `atis-latch` record, so by mtime
-    # a session whose last turn was 09-17 became the newest on disk every
-    # night and outranked the real sessions of the night before. The shape
-    # here is juno's on 09-28: that file, touched after a newer real one.
+    # A background server can update an undated latch in an old session. File mtime
+    # then outranks the latest real turn; select by dated session events.
     rc = root / "rc-lane"
     rd = root / str(rc).replace("/", "-")
     rd.mkdir(parents=True)
@@ -279,10 +253,7 @@ try:
           loam_session.effective_model(rc).session, stale.name)
     stale.unlink()
 
-    # 2. A CHOSEN MODEL IS NOT DRIFT. Ada's 09-03 session, in the order its
-    # records came: a refusal moved it to Opus 4.8, then on 09-11 a /model
-    # chose Opus 5 and it ran there. The alarm named the refusal and the
-    # wrong model for three nights; the session's own record says chosen.
+    # A later explicit model choice supersedes an earlier refusal fallback.
     (rd / "ada.jsonl").write_text("\n".join([
         assistant("claude-fable-5", "2026-09-03T01:39:00.000Z"),
         FALLBACK.replace("2026-09-25T18:16:34.204Z", "2026-09-03T01:40:06.606Z"),

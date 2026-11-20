@@ -298,7 +298,7 @@ async def broker_checks():
     fake = FakeBroker()
     server.broker = fake
     server.threads = engine_mod.ThreadEngine(fake)
-    # A thread with Ada, through the route the app uses.
+    # Exercise the same thread route as the app.
     class Writer:
         def __init__(self):
             self.chunks = []

@@ -1,42 +1,5 @@
 #!/usr/bin/env python3
-"""One Loam engineer, with an app-only scope (2026-11-19).
-
-Until then the app (`app/` of Loam's checkout) had an engineer of its own,
-`loam-ui`. It is now the Loam engineer's `scope: app`, and every safeguard
-the folder project had is held here, through the same code:
-
-  the registry     the scope is in `projects()` (its jobs are found) and not
-                   in `engineers()` (Settings shows one engineer); built in on
-                   an install with an app and no record, the record read when
-                   one exists (the first install's, with its history); none
-                   without an app.
-  the brief        `Loam` + `scope: app`, the old name `loam-ui`, and `Loam`
-                   continuing one of the scope's jobs all run as the scope;
-                   `Loam` alone is the whole of Loam; a scope on another
-                   engineer, an unknown scope and `loam-ui` + `all` are
-                   refused before anything is minted. The header says whose
-                   job it is (`engineer: Loam`, `scope: app`).
-  who may brief    the scope is open to every persona, as the app engineer
-                   was; a full Loam brief is the briefers' alone, and its
-                   refusal names the scope.
-  the safeguards   its session in `app/`, its tests `cd app && npm test`, a
-                   landing that refuses a path outside `app/`, no deploy key
-                   asked, Loam's live lock, the app's deploy at landing
-                   (`bin/deploy loam-ui up <sha> --forward-only`: the app's
-                   unit, never the broker).
-  the provider     the scope runs on the Loam engineer's setting, not on its
-                   old row and not on the default; the old row is kept.
-  deploy toggle    Loam's row; absent, the old row's (migration); said off,
-                   off.
-  Settings         one Loam row with the app's toggle and its label; the old
-                   name reads Loam's row; a provider for the old name alone is
-                   refused with where it is set; its toggle lands on Loam.
-  Activity         a scope job reads as Loam's, `scope: app`.
-  provisioning     `app/`'s harness is the Loam engineer's role verbatim and
-                   the shipped app project file.
-
-Run: python3 tests/test_app_scope.py
-"""
+"""An app-scoped job belongs to the platform engineer and can land changes only within its project scope."""
 
 from __future__ import annotations
 

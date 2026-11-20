@@ -1,52 +1,5 @@
 #!/usr/bin/env python3
-"""Loam's layer, the same on every provider (2026-11-13).
-
-The owner, 11-13 (m247): what Loam builds -- the soul, the config, memory,
-the persona, Loam's own tools (the engineer among them), the conversation
-record -- is the same on every provider and must be used; above that each
-provider uses what it has, and the differences are a feature, not gaps. So
-this holds the providers to Loam's layer and to nothing above it. A
-provider's own extras (Codex's bundled skills and web search, Claude Code's
-workflows and built-in tools, Antigravity's own tools) are not checked and
-are not failures.
-
-On a throwaway persona built in a temp directory (its soul, config,
-``_always.md``, ``_active.md``, ``_reflection.md`` and one cron; its
-``.mcp.json``, ``.claude/settings.json``, ``.codex/config.toml`` and
-``.agents/mcp_config.json`` rendered by bin/provision's own functions), never
-a real persona's memory:
-
-Offline, always:
-
-  files      a conversation loads the same memory files on every provider, in
-             Claude Code's order (CLAUDE.md, its imports, ``_active.md``); a
-             wake and a cron load the same files on Claude Code and Codex
-             (CLAUDE.md, its imports, the lane's own file; no ``_active.md``).
-  tools      the same MCP servers, started the same way (command, arguments,
-             environment), on all three; the engineer among them.
-  record     a Codex or Antigravity subagent's words are never the persona's.
-  lanes      a wake and a cron run on the persona's provider: Claude Code and
-             Codex; Antigravity is on Claude Code and the profile says why.
-
-``--live`` (costs one Haiku turn and three short Codex turns):
-
-  Claude Code  a turn in the throwaway workspace: its MCP tool names from the
-               CLI's own ``init``, and the soul's token in its answer.
-  Codex        the MCP tool names a thread in the same workspace has (the
-               app-server's ``mcpServerStatus/list``), equal to Claude's; then a
-               real conversation through the broker's own ``CodexSession``:
-               the soul's and ``_active.md``'s tokens in the reply, and a
-               subagent's sentence never in the persona's message (read with
-               the thread engine's own ``Reply.of``).
-  Codex lanes  ``tests/test_codex_wake.py --live`` runs a real wake and cron.
-  Antigravity  only the offline half, unless it is signed in: no turn has
-               ever run, and it needs the owner's Google sign-in.
-
-Transcripts of the live turns are quarantined (``LOAM_PROBE=1``), never filed
-in the vault.
-
-Run: python3 tests/test_provider_parity.py [--live]
-"""
+"""Verify that the same instructions, tools and runtime conventions reach each supported provider."""
 
 from __future__ import annotations
 

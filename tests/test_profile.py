@@ -1,39 +1,5 @@
 #!/usr/bin/env python3
-"""Settings > Agents (2026-11-13): an agent's profile, the engineers, the
-nightly reviewer and a plugin's per-agent settings, through a real broker
-listener on loopback and through `bin/settings` as a persona.
-
-  - GET /v1/agents/<agent> answers identity, defaults (as set, as each lane
-    uses them, what is not honoured), the files of who it is, its schedule
-    rows with a label and plain words (the wake first), its status (turns in
-    flight, jobs it briefed, next wake) and the plugin rows for it
-  - PATCH: a display name (agent.json in its one order; an @ matches it; the
-    cards say it; another agent's name is a 409, a reserved word a 400; null
-    is the id's own), a face, a provider, a model and a thinking level
-    (checked as the provider takes them; a provider change clears both; a
-    Codex provider says wakes and crons are not honoured); nothing is
-    written on a refusal
-  - bin/agent.json: provision's renderer keeps what was set; lane_choice is
-    the wake's rule
-  - a persona's change through `bin/settings` reads back and is said in
-    General; from an unattended lane it is refused before any call
-  - engineers: Loam first, Claude Code until its own provider is set (since
-    2026-11-19 a provider like the others', never the default's, and back
-    with null); a project's own setting, the
-    default for every other, and back; what the launcher reads
-    (engineer_choice, choice_for, deploy_default); deploy_on_land refused
-    where there is nothing to deploy
-  - the reviewer: a schedule becomes its plugin's setting (its timer follows
-    it), the default puts it back, and with the plugin off it is a 409; the unit's own
-    schedule removes it; a bad schedule and another provider are 400s;
-    reviewer_choice is what bin/review reads
-  - plugins: `agent_settings` in a manifest, `agent.profile` a known place;
-    values per agent stored in Yours' _settings/<id>/agents.json, defaults
-    filled, a choice not offered and an undeclared key refused; a plugin
-    that declares nothing keeps any slug
-
-Run: python3 tests/test_profile.py
-"""
+"""Check the broker profile and settings routes for agents, engineers, the reviewer and per-agent plugins."""
 
 import asyncio
 import importlib.machinery

@@ -1,31 +1,5 @@
 #!/usr/bin/env python3
-"""Schedules: a record is live exactly when it says it is enabled.
-
-Against a real systemd user manager -- a private one, started for this test
-alone (tests/private_systemd.py, since 2026-11-16), never the box's own: a
-made-up agent in a temp `ai-labs`, its units in that manager's runtime unit
-directory, enabled with `--runtime`. Until 11-16 this ran in the live user
-manager's /run/user/<uid>/systemd/user, beside every persona's timers. Every
-unit is removed at the end, pass or fail, and the manager is stopped.
-
-What it proves, each against the timer the manager actually holds:
-  - a recurring record created, moved, paused, resumed, and deleted through
-    the path; the timer follows each, and the log has a line for each
-  - an agent's change with no reason is refused, logged, and changes nothing;
-    so is a change to another agent's record and a `tools:` key
-  - a direct edit of the file is picked up by the reconciler: refused with no
-    `reason:` header (the timer keeps its old time), applied with one
-  - the one-off caps: 10 minutes to 30 days ahead, five pending
-  - a one-off fires once from its real timer, is marked done, and its timer
-    is removed; a done record does not launch
-  - the migration: `approved:` becomes `enabled: true`
-  - the daily reflection (2026-11-19): its service and timer from its record,
-    the timer byte-identical to the one that stood; Loam's default for a
-    placeholder body; a persona's pause refused by every route and the
-    owner's accepted; archiving takes both units down
-
-Run: python3 tests/test_schedule.py
-"""
+"""Reconcile temporary schedule records against an isolated systemd user manager and check the resulting units."""
 
 from __future__ import annotations
 
@@ -237,8 +211,7 @@ try:
         check("one-off refused: a sixth pending", False, "accepted")
     except ls.Refused as exc:
         check("one-off refused: a sixth pending", True, str(exc)[:60])
-    # A paused one-off cannot fire, so it is not pending (2026-11-09: three
-    # paused one-offs refused Ada's five overnight ones).
+    # Paused one-offs cannot fire and do not consume a pending slot.
     ls.set_key(AGENT, "later-4", "enabled", "false", actor=AGENT, lane="wake",
                reason="r", systemd=SD)
     ls.change(AGENT, "later-5", one_off(now + timedelta(days=3)),

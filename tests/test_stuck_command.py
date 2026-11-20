@@ -1,33 +1,5 @@
 #!/usr/bin/env python3
-"""A command that never returns is stopped, and the job goes on (2026-11-17).
-
-Held here with real processes and stub engines, through the real
-``loam_agy_job.run`` and ``loam_codex_job.run``:
-
-  agy shape       a stub that writes Antigravity's events, starts a helper
-                  first (a language server's place) and then a command that
-                  sleeps in a process group of its own: after the silence the
-                  command's group is stopped, the helper and the engine are
-                  not, the stub gets the command's death back and finishes,
-                  and the stop is recorded and handed to `on_stop`.
-  codex shape     the same through Codex's events, with the command in the
-                  ENGINE's process group: it is stopped by its subtree, and
-                  the engine lives.
-  not busy        a silence after a command finished (a background server
-                  started in the last step, the model thinking) stops nothing.
-  the receipt     `receipt_text` names each stop; none, no paragraph.
-  the thread      the second stop on one job, and only the second, posts one
-                  system line to the thread that briefed it.
-  the status      `activity_of` and `quiet_words` (bin/engineer-job) say the
-                  last engine event, and NO ACTIVITY once the heartbeat says
-                  stalled; `transcript_last` counts a Claude session's
-                  subagent transcripts.
-
-The real-engine proof (agy 1.5.9 given a killed `sleep`, 2026-11-17) is in
-lib/loam_stuck.py's docstring and engineer/memory/MEMORY.md.
-
-Run: python3 tests/test_stuck_command.py
-"""
+"""Verify that the watchdog can stop an unresponsive command while its enclosing job continues."""
 
 from __future__ import annotations
 

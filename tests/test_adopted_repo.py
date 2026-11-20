@@ -1,31 +1,5 @@
 #!/usr/bin/env python3
-"""A project on a repository Loam does not own (since 2026-10-06).
-
-Three parts, each against a fake GitHub on loopback that checks the app JWT's
-signature, and against real git repositories in a temp directory standing in
-for the remote:
-
-  installations   the store holds more than one; a second is recorded only
-                  through a state this box issued and only if GitHub lists it
-                  among the connected user's own; a token for owner/name is
-                  minted from the installation on `owner` or not at all, and
-                  an installation nobody recorded is never asked for one.
-  adoption        bin/provision --adopt clones through the installation,
-                  renders the harness into the checkout and out of history,
-                  pushes nothing, maps the remote's default branch to `main`,
-                  and refuses a repository that already tracks a harness path.
-  landing         a job's token on such a repository has `contents: read`; the
-                  landing tests the branch (or says it is untested), never
-                  touches the remote's default branch, refuses a branch that
-                  commits the harness, and the broker's push takes a job's
-                  branch and nothing else -- `main` is refused by name.
-
-What a fake cannot prove is GitHub refusing a push made with a read-only
-token; that was caused against GitHub itself on 2026-10-06 and is recorded
-in broker/README.md, "A repository Loam does not own".
-
-Run: python3 tests/test_adopted_repo.py
-"""
+"""Exercise adopted repository installations and pull requests using a loopback GitHub fixture and real temporary Git repositories."""
 
 from __future__ import annotations
 

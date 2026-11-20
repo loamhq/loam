@@ -211,7 +211,7 @@ def wake_row(who, **row):
 
 
 async def turn(server, fake, tid, words):
-    """The prompt the broker handed ada for this one message."""
+    """Return the prompt dispatched for this message."""
     seen = {s.id: len(s.prompts) for s in fake.sessions.values()}
     await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": words})
     await settle(server, tid)
