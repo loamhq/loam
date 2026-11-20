@@ -50,6 +50,7 @@ sys.path.insert(0, str(AGENTS / "lib"))
 
 import loam_config as lc  # noqa: E402
 import loam_attention as la  # noqa: E402
+import loam_antigravity  # noqa: E402
 import loam_broker  # noqa: E402
 import loam_check as ck  # noqa: E402
 import loam_codex  # noqa: E402
@@ -109,6 +110,11 @@ def healthy() -> None:
 CREDS = TMP / "credentials.json"
 loam_broker.CREDENTIALS_PATH = CREDS
 loam_broker.login_source = lambda env=None: "file"
+# Automatic routing must see only the logins this test creates, including
+# when Claude expires and the selector tries the other providers.
+loam_codex.AUTH_PATH = TMP / "codex-auth.json"
+loam_antigravity.login_state = lambda fresh=False: {
+    "source": "none", "connected": False, "reason": "no login on the box"}
 
 FAILED = {"user": "", "system": ""}
 
@@ -261,7 +267,6 @@ check("availability: current login loss overrides the previous tick",
 ada_card = LABS / "ada" / "agent.json"
 original = json.loads(ada_card.read_text())
 ada_card.write_text(json.dumps({**original, "provider": "codex"}))
-loam_codex.AUTH_PATH = TMP / "codex-auth.json"
 loam_codex.AUTH_PATH.write_text(json.dumps({"tokens": {"refresh_token": "scratch"}}))
 check("availability: another provider can run while Claude is signed out",
       ck.current_run_status()["agents_can_run"] is True)
