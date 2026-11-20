@@ -54,13 +54,6 @@ import loam_skills  # noqa: E402
 import loam_deploy  # noqa: E402  the browser's URL and server name, one home
 import loam_provider_memory as provider_memory  # noqa: E402  L8: the memory pins
 import loam_contributions as contributions  # noqa: E402  L4: what plugins add
-from loam_memory import (  # noqa: E402
-    CONVERSATION_LAYER,
-    LIMIT_CHARS,
-    STYLE_NAME,
-    ALWAYS_LAYER,
-    REFLECTION_LAYER,
-)
 
 
 def die(msg: str) -> None:
@@ -101,87 +94,7 @@ def skills_line() -> str:
 
 
 def claude_md(display: str, workspace: Path) -> str:
-    """Render the workspace instructions for its loading format. Import the canonical soul
-    and config relative to the workspace. Imports are reread after compaction. A mapped
-    agent loads its map and shared instructions; a legacy agent loads its always-on file
-    and selects its lane separately."""
-    import loam_loading  # noqa: PLC0415
-    if loam_loading.mapped(workspace):
-        return claude_md_mapped(display, workspace)
-    return f"""You are {display}.
-
-@soul.md
-
-@config.md
-
-@{ALWAYS_LAYER}
-
----
-
-**Surface:** Claude Code
-
-You are running as a Claude Code session on the VPS that holds the vault.
-{lc.OWNER_NAME} reaches you in Loam's app, and on a schedule you wake by
-yourself with no one watching.
-
-Markdown renders — headers, bold, lists, tables, code blocks, links. Write
-with whatever structure the thought actually has. Wiki-links like
-[[Note Name]] stay as written; they are live links in Loam's Files and in
-any Markdown editor that opens the vault.
-
-This directory — `{workspace}/` — is your workspace, and it is where your
-own files live. `CLAUDE.md`, `agent.json`, `.mcp.json`, `.claude/` and `.codex/`
-here are the runtime's: they are how you are assembled.
-
-What you can reach and use (the vault, the shell, the browser, subdomains,
-threads, settings, the reviewer) is in the shared file below, which any agent
-may edit; what the owner's plugins add is at the end of this file:
-
-@{REACH}
-
-{skills_line()}
-
-**The files that load without you choosing to read them.** `{ALWAYS_LAYER}` is
-with you on every run. `{CONVERSATION_LAYER}` is with you when {lc.OWNER_NAME} is here,
-and `{REFLECTION_LAYER}` when you wake alone; each loads only on its own kind
-of run, and so does anything under `crons/`. Keep each under
-{LIMIT_CHARS:,} characters: they are paid for on every run, so the bulk
-belongs in a file you read when the topic arrives, with a line here pointing
-at it. An edit past the limit lands, and you are told the new count.
-
-`{CONVERSATION_LAYER}` reaches a conversation by being the target of the
-symlink at `.claude/output-styles/{STYLE_NAME}.md`, which is why it opens with
-a `---` frontmatter block. That block is the loader's, not yours, and without
-it the file loads nothing at all and says nothing about it. Edit below it.
-
-**If you are already a subagent, call `Agent` synchronously or not at all.**
-A background subagent that launches background children ends before they
-do and returns a hollow report; the work happens, and nobody hears of it.
-
-**Your own notes may describe a runtime you are no longer on.** Sub-agents,
-web search and skills are native here. Where your files assume machinery
-that is not in your tool list, they are describing something that no longer
-exists on this machine rather than something you have lost access to.
-Correcting them is yours to do when you next have reason to; there is
-nothing to migrate, only prose to retire.
-
-Both trees auto-commit every 15 minutes, so a bad edit is recoverable and is
-not worth being timid about.
-""" + _plugin_words(workspace)
-
-
-def claude_md_mapped(display: str, workspace: Path) -> str:
-    """``CLAUDE.md`` for an agent that has a map: the three things of its own
-    (soul, config, map) and Loam's paragraphs, short. The same file on every
-    lane: a conversation, a wake and a cron each add only their own input,
-    and no output style or appended lane file loads beside it.
-
-    Loam's text and the shared owner's page are imported by absolute path,
-    as ``reach.md`` is (trust grants the project external includes); the
-    soul, the agent's own config and the map by relative path, inside the
-    project root. Every import must resolve: provision makes the shared page
-    when it is missing, and lib/loam_identity.py refuses a wake whose import
-    does not."""
+    """Render the shared persona instructions and imports for every lane."""
     import loam_loading  # noqa: PLC0415
     return f"""You are {display}.
 
@@ -347,9 +260,7 @@ def settings(workspace: Path) -> dict:
         # touching the owner's own Claude usage anywhere else.
         "disableClaudeAiConnectors": True,
         "enableAllProjectMcpServers": True,
-        # The conversation style supplies its instructions when the broker launches without an
-        # appended prompt. Wakes select their lane explicitly.
-        "outputStyle": "none" if _mapped(workspace) else STYLE_NAME,
+        "outputStyle": "none",
         # Auto memory off. It gives nothing a plain file cannot: no relevance
         # recall fires on this build (the machinery is in the binary behind a
         # server-side flag that can switch on with no release), its index
@@ -357,9 +268,6 @@ def settings(workspace: Path) -> dict:
         # kept precisely because it supposedly could not outgrow its
         # transport -- it can, it just fails quietly rather than loudly.
         #
-        # `memory/` stays on disk and stays readable. Each agent folds its
-        # own prohibitions into `_always.md` in its own words; nobody else
-        # writes an agent's memory for it.
         "autoMemoryEnabled": False,
         # Register the hooks that apply the runtime's file boundary and workspace conventions.
         "hooks": {
@@ -369,11 +277,6 @@ def settings(workspace: Path) -> dict:
                 _hook("loading_size.py", 15)]}],
         },
     }
-
-
-def _mapped(workspace: Path) -> bool:
-    import loam_loading  # noqa: PLC0415
-    return loam_loading.mapped(workspace)
 
 
 def _hook(script: str, timeout: int) -> dict:
@@ -776,42 +679,6 @@ def ensure_trust(workspace: Path, *extra: Path) -> None:
     )
 
 
-ALWAYS_HEADER = (
-    f"This file loads into every run you have — with {lc.OWNER_NAME}, and alone. It is "
-    "yours: write it, cut it, restructure it however serves you.\n"
-    "Seeded {stamp} with your `memory/` index copied verbatim, because that "
-    "layer no longer loads by itself; the notes it points at are still on "
-    "disk under `memory/`.\n"
-)
-
-
-def seed_always(name: str, workspace: Path, stamp: str) -> None:
-    """Create `_always.md` once, from the agent's own memory index.
-
-    Copied verbatim under two lines of operator voice, and never composed.
-    An agent's prohibitions are its own writing about its own mistakes; the
-    executor's job is to move them onto a channel that loads, not to decide
-    what they should say. The header names `memory/` so the index's relative
-    links still resolve from their new home.
-
-    Written once. If the file exists, it belongs to the agent from then on
-    and nothing here touches it again -- including on a re-provision.
-    """
-    target = workspace / ALWAYS_LAYER
-    if target.exists():
-        print(f"  unchanged {target} (agent-owned)")
-        return
-    index = workspace / "memory" / "MEMORY.md"
-    body = ""
-    if index.is_file():
-        body = index.read_text(encoding="utf-8").strip()
-    text = ALWAYS_HEADER.format(stamp=stamp)
-    if body:
-        text += "\n" + body + "\n"
-    target.write_text(text, encoding="utf-8")
-    print(f"  seeded {target} ({len(text):,} chars)")
-
-
 NONE_STYLE = """\
 ---
 name: none
@@ -821,93 +688,16 @@ keep-coding-instructions: true
 """
 
 
-def output_styles(workspace: Path) -> tuple[Path, Path]:
-    """Link the conversation style to the agent's own file. Keep an empty style for
-    scheduled lanes that supply their own instructions."""
+def render_persona_loading(workspace: Path, display: str) -> None:
+    import loam_loading  # noqa: PLC0415
+    if loam_loading.ensure_owner_page():
+        print(f"  made {loam_loading.owner_page()}")
+    write_if_changed(workspace / "CLAUDE.md", claude_md(display, workspace))
     styles = workspace / ".claude" / "output-styles"
     styles.mkdir(parents=True, exist_ok=True)
-
-    link = styles / f"{STYLE_NAME}.md"
-    wanted = Path("../..") / CONVERSATION_LAYER
-    if link.is_symlink() and Path(os.readlink(link)) == wanted:
-        print(f"  unchanged {link}")
-    else:
-        if link.is_symlink() or link.exists():
-            link.unlink()
-        link.symlink_to(wanted)
-        print(f"  linked {link} -> {wanted}")
-
-    none = styles / "none.md"
-    write_if_changed(none, NONE_STYLE)
-    return link, none
-
-
-def style_frontmatter(display: str) -> dict[str, str]:
-    return {
-        "name": STYLE_NAME,
-        "description": f"{display}'s conversation lane.",
-        "keep-coding-instructions": "true",
-    }
-
-
-def ensure_style_frontmatter(display: str, workspace: Path) -> None:
-    """Add the style loader's required name and description while retaining the author's
-    remaining frontmatter and body."""
-    target = workspace / CONVERSATION_LAYER
-    if not target.is_file():
-        return
-    text = target.read_text(encoding="utf-8")
-    wanted = style_frontmatter(display)
-
-    match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.DOTALL)
-    if match:
-        block = match.group(1)
-        have = {
-            line.split(":", 1)[0].strip().lower()
-            for line in block.splitlines() if ":" in line
-        }
-        missing = [f"{k}: {v}" for k, v in wanted.items() if k not in have]
-        if not missing:
-            print(f"  unchanged {target} (style keys present)")
-            return
-        new = (
-            "---\n" + block + "\n" + "\n".join(missing) + "\n---\n"
-            + text[match.end():]
-        )
-    else:
-        new = (
-            "---\n"
-            + "\n".join(f"{k}: {v}" for k, v in wanted.items())
-            + "\n---\n\n" + text
-        )
-    target.write_text(new, encoding="utf-8")
-    print(f"  added style frontmatter to {target}")
-
-
-def report_readiness(name: str, workspace: Path) -> None:
-    """Report missing prerequisites after provisioning. Check the files required by the
-    workspace's actual loading format."""
-    import loam_loading  # noqa: PLC0415
-    if loam_loading.mapped(workspace):
-        # A mapped workspace needs its soul, config and map. An empty map is valid.
-        return
-    missing = [
-        layer for layer in (ALWAYS_LAYER, CONVERSATION_LAYER, REFLECTION_LAYER)
-        if not (workspace / layer).is_file()
-        or not (workspace / layer).read_text(encoding="utf-8").strip()
-    ]
-    if not missing:
-        return
-    print()
-    print(f"  NOT YET RUNNABLE. {name} is missing a non-empty "
-          f"{' and '.join(missing)} in {workspace}.")
-    print(f"  {name} will still start, still sound entirely like itself, and "
-          f"be carrying less than you think — every one of these fails by "
-          f"silence except {REFLECTION_LAYER}, which bin/wake refuses on.")
-    print(f"  {ALWAYS_LAYER}: every run. {CONVERSATION_LAYER}: conversations, "
-          f"via the output-style symlink. {REFLECTION_LAYER}: the wake.")
-    print(f"  Write them before enabling the units. bin/lane-check reports "
-          f"these to vault/00_INBOX/from-agents/loam-wake-failures.md every night.")
+    write_if_changed(workspace / ".claude" / "settings.json",
+                     json.dumps(settings(workspace), indent=2) + "\n")
+    write_if_changed(styles / "none.md", NONE_STYLE)
 
 
 # Platform engineer provisioning
@@ -1198,7 +988,7 @@ def provision_engineer(dry: bool = False) -> None:
     write_if_changed(ENGINEER / ".claude" / "settings.json",
                      json.dumps(engineer_settings(), indent=2) + "\n")
 
-    # Written once and then the engineer's. Same discipline as seed_always:
+    # Written once and then the engineer's.
     # if it exists it belongs to the engineer from then on.
     index = ENGINEER / "memory" / "MEMORY.md"
     if index.exists():
@@ -2305,6 +2095,20 @@ def main() -> None:
         pf = opt("--project-file")
         provision_project(name, repo_arg, Path(pf) if pf else None, dry)
         return
+    if "--migrate-persona-maps" in sys.argv:
+        if args or dry:
+            die("usage: provision --migrate-persona-maps")
+        import loam_agents  # noqa: PLC0415
+        import loam_map_migration  # noqa: PLC0415
+        import loam_profile  # noqa: PLC0415
+        import loam_schedule  # noqa: PLC0415
+        loam_map_migration.main()
+        for name in loam_agents.archived(AI_LABS):
+            workspace = AI_LABS / name
+            display = loam_profile.self_name(name, loam_agents.card(name, AI_LABS))
+            render_persona_loading(workspace, display)
+            loam_schedule.adopt_default(name)
+        return
     # Use the same engineer renderer that the drift check reads.
     if "--engineer" in sys.argv:
         if args:
@@ -2394,9 +2198,7 @@ def main() -> None:
         **(loam_profile.kept(existing) if isinstance(existing, dict) else {}),
     }), encoding="utf-8")
 
-    (workspace / "CLAUDE.md").write_text(claude_md(own_name, workspace), encoding="utf-8")
-    (workspace / ".claude" / "settings.json").write_text(
-        json.dumps(settings(workspace), indent=2) + "\n", encoding="utf-8")
+    render_persona_loading(workspace, own_name)
     (workspace / ".claude" / "settings.local.json").write_text(
         json.dumps({"autoMemoryDirectory": str(workspace / "memory")}, indent=2) + "\n",
         encoding="utf-8")
@@ -2412,16 +2214,6 @@ def main() -> None:
     # workspace, where Claude Code finds them and lets the persona's own
     # skill of the same name win (first release L7).
     loam_skills.render_claude_shelf()
-
-    # Add required style metadata before exposing the symlink to the loader.
-    import loam_loading  # noqa: PLC0415
-    if loam_loading.mapped(workspace):
-        if loam_loading.ensure_owner_page():
-            print(f"  made {loam_loading.owner_page()}")
-    else:
-        seed_always(name, workspace, datetime.now().strftime("%Y-%m-%d"))
-        ensure_style_frontmatter(own_name, workspace)
-    output_styles(workspace)
 
     ensure_trust(workspace)
     ensure_user_settings()
@@ -2453,7 +2245,6 @@ def main() -> None:
         print(f"  rewrote {VAULT}/{lc.vault_folder('projects')}/Loam/infrastructure/schedule.md")
 
     print(f"  provisioned {name}: project files; its daily wake is its record's")
-    report_readiness(name, workspace)
 
 
 if __name__ == "__main__":

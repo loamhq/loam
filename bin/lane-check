@@ -12,32 +12,8 @@ what it finds is printed (``--json`` for the check), and the check is what
 hands a problem to the agent that hears when Loam needs attention. It exits 0
 whatever it finds, 2 only when it could not read the agent at all.
 
-For an agent with a map (2026-11-18, lib/loam_loading.py) it sizes the map
-and nothing else: the map loads as a CLAUDE.md import, with no style to lose.
-For one without, the three things it can see, all of which fail by SILENCE
-at runtime:
-
-  over the limit     `_always.md` or `_active.md` past the character limit.
-                     Nothing at runtime says so; the cost is just paid.
-  missing            either file absent or empty. A dropped `@import` and a
-                     dangling style symlink both load nothing and say
-                     nothing (measured 2026-09-04: exit 0, no warning).
-  style unparseable   the conversation symlink is broken, or `_active.md`
-                     has lost the frontmatter keys the loader selects on. A
-                     `name:` that disagrees with the selected style loads
-                     NOTHING, silently -- indistinguishable from a missing
-                     file from inside the session.
-
-And one thing it warns about without calling it wrong (since 2026-09-07):
-
-  near the limit     either file past ``NEAR_LIMIT_CHARS`` but not over the
-                     limit: printed as a warning, never a fact. A file at
-                     9,900 is not a broken layer and must not read as one.
-
-This is the second instrument D4's 08-31 amendment asks for: the end-marker
-convention is a check the artifact performs on itself by being read, so it is
-structurally blind to the artifact being ABSENT. This one runs from outside
-the session and sees absence, which is the worse of the two failures.
+The map is optional. Report an unreadable or oversized map and warn when it
+approaches the size limit.
 
 Usage: lane-check [--json] <agent-project-dir>
 """
@@ -56,98 +32,29 @@ import loam_config as lc  # noqa: E402
 
 import loam_session as sess  # noqa: E402
 from loam_memory import (  # noqa: E402
-    CONVERSATION_LAYER,
     LIMIT_CHARS,
-    ALWAYS_LAYER,
-    STYLE_NAME,
+    MAP_LAYER,
     LayerError,
     load_config,
     near_limit,
     near_limit_reason,
     over_limit_reason,
-    style_frontmatter_intact,
 )
 
-CHECKED = (ALWAYS_LAYER, CONVERSATION_LAYER)
-
-
 def findings(workspace: Path) -> tuple[list[str], list[tuple[str, str]]]:
-    """``(problems, warnings)``.
-
-    A problem is something the session will silently run without; the
-    daily check makes it a fact. A warning is ``(key, text)`` for a file
-    that is within reach of the limit but not over it (since 2026-09-07);
-    it is printed and is never a fact.
-    """
-    out: list[str] = []
-    warnings: list[tuple[str, str]] = []
-
-    # An agent with a map (2026-11-18, lib/loam_loading.py) loads its map
-    # and none of the old files, and has no conversation style to lose. Its
-    # one loading file is sized; an empty map is a real map, and nothing it
-    # loads fails by silence (each is a CLAUDE.md import the wake's
-    # identity gate checks).
-    import loam_loading  # noqa: PLC0415
-    if loam_loading.mapped(workspace):
-        path = workspace / loam_loading.MAP
-        try:
-            size = len(path.read_text(encoding="utf-8"))
-        except OSError as exc:
-            return [f"`{loam_loading.MAP}` is unreadable: {exc}"], []
-        if size > LIMIT_CHARS:
-            out.append(over_limit_reason(loam_loading.MAP, size, path,
-                                         "every lane loads it as always"))
-        elif near_limit(size):
-            warnings.append((f"`{loam_loading.MAP}`",
-                             near_limit_reason(loam_loading.MAP, size, path)))
-        return out, warnings
-
-    for name in CHECKED:
-        path = workspace / name
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            out.append(
-                f"`{name}` is missing or unreadable. It loads nothing and "
-                f"says nothing; the session starts normally."
-            )
-            continue
-        if not text.strip():
-            out.append(f"`{name}` is empty.")
-            continue
-        if len(text) > LIMIT_CHARS:
-            out.append(over_limit_reason(name, len(text), path,
-                                         "every lane loads it as always"))
-        elif near_limit(len(text)):
-            warnings.append((f"`{name}`", near_limit_reason(name, len(text), path)))
-
-    link = workspace / ".claude" / "output-styles" / f"{STYLE_NAME}.md"
-    if not link.is_symlink() and not link.is_file():
-        out.append(
-            f"the conversation style at `{link}` does not exist, so no "
-            f"conversation layer loads at all."
-        )
-    elif not link.exists():
-        out.append(
-            f"the conversation style symlink at `{link}` is dangling "
-            f"(points at `{link.readlink()}`), so no conversation layer "
-            f"loads at all."
-        )
-    else:
-        try:
-            body = link.read_text(encoding="utf-8")
-        except OSError as exc:
-            out.append(f"the conversation style at `{link}` is unreadable: {exc}")
-        else:
-            if not style_frontmatter_intact(body):
-                out.append(
-                    f"the conversation style at `{link}` has lost its "
-                    f"frontmatter keys (name: {STYLE_NAME}, "
-                    f"keep-coding-instructions: true). The loader selects by "
-                    f"name and loads nothing when it disagrees — silently."
-                )
-
-    return out, warnings
+    """Return problems and near-limit warnings for the persona's map."""
+    path = workspace / MAP_LAYER
+    try:
+        size = len(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return [], []
+    except (OSError, UnicodeError) as exc:
+        return [f"`{MAP_LAYER}` is unreadable: {exc}"], []
+    if size > LIMIT_CHARS:
+        return [over_limit_reason(MAP_LAYER, size, path, "every lane goes ahead")], []
+    if near_limit(size):
+        return [], [(f"`{MAP_LAYER}`", near_limit_reason(MAP_LAYER, size, path))]
+    return [], []
 
 
 # Where the alarm remembers what it last reported, one file per lane. Runtime
@@ -281,9 +188,6 @@ def report(project: Path) -> dict:
     config = load_config(project)
     agent = config["name"]
     workspace = Path(config["workspace"])
-    # The shape on disk, rendered before it is read (2026-11-18).
-    import loam_loading  # noqa: PLC0415
-    loam_loading.quiet_refresh(workspace)
     problems, warnings = findings(workspace)
     model = model_problem(workspace)
     if model:

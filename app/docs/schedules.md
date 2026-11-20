@@ -17,8 +17,8 @@ editor and [historical closure checklist](schedules-contract-checklist.md).
 
 Tapping the row opens its exact `file` resource in the existing Files editor.
 The full list opens Files; the compact profile group edits timing inline. Files uses the host's `schedule`
-authority and `capabilities.write`, including `crons/reflection.md`;
-`_reflection.md` retains the agent's read-only authority. Folder creation
+authority and `capabilities.write`, including the instruction in
+`crons/reflection.md`. Folder creation
 capabilities stay with the host. New schedules still use the creation form
 and `POST /api/schedules/<agent>` with `name`, `schedule` or `at`, `body`,
 and one-off `note`. The broker validates PT grammar and timing limits, and

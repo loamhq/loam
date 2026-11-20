@@ -29,6 +29,7 @@ from pathlib import Path
 import loam_config as lc
 
 from loam_account import AccountRefused, refusal
+from loam_memory import MAP_LAYER
 
 CLAUDE = str(lc.CLAUDE_BIN)
 
@@ -41,24 +42,13 @@ IMPORT_RE = re.compile(r"^@(\S+)\s*$", re.MULTILINE)
 # projects, and the one thing that must never be shared is the soul.
 AI_LABS = lc.WORKSPACES
 
-# Phrases in soul.md that also appear in the agent's other auto-loaded files
-# would not prove the soul import resolved, so a candidate must be unique to
-# soul.md. `_always.md` joined this list on 2026-09-04 when it became a second
-# CLAUDE.md import: a phrase present in both would have let a dropped soul
-# import pass the gate, which is the exact failure this file exists to catch.
-# `map.md` joined it on 2026-11-18, with the map's shape (lib/loam_loading.py),
-# and Loam's text and the shared owner's page load beside it there, so a
-# phrase in any of them is not unique to the soul either (SHARED_TEXTS).
-SIBLING_FILES = ("config.md", "_always.md", "_active.md", "_reflection.md",
-                 "map.md")
-
+# A soul probe needs a phrase unique among the loaded persona files.
+SIBLING_FILES = ("config.md", MAP_LAYER)
 
 # Imports allowed from outside the project root: the shared reach.md
 # (2026-11-10), which Claude Code loads because provision and the launcher
 # approve external includes on the project's key. Anything else outside is
 # still dropped silently, so it is still refused here.
-# Since 2026-11-18 also Loam's text and the shared owner's page, the two
-# absolute imports of an agent with a map (lib/loam_loading.py).
 SHARED_IMPORTS = (
     AI_LABS / "_shared" / "reach.md",
     Path(__file__).resolve().parent.parent / "docs" / "persona" / "loam.md",
@@ -74,8 +64,7 @@ def _shared_imports() -> tuple[Path, ...]:
 
 
 def _shared_texts() -> str:
-    """Loam's text and the shared owner's page: loaded beside the soul in the
-    map's shape, so a phrase in either does not prove the soul arrived."""
+    """Text shared by personas beside their individual instructions."""
     out = ""
     for path in dict.fromkeys(_shared_imports()[1:]):
         try:
@@ -101,13 +90,15 @@ def assert_imports_resolve(project: Path) -> list[Path]:
         raise IdentityError(f"{project}/CLAUDE.md declares no @ imports")
     for path in paths:
         if not path.is_file():
+            if path == project / MAP_LAYER and not path.exists():
+                continue
             raise IdentityError(f"CLAUDE.md imports {path}, which does not exist")
         if not path.is_relative_to(project) and path not in _shared_imports():
             raise IdentityError(
                 f"CLAUDE.md imports {path}, which is outside the project root "
                 f"{project} — Claude Code drops such imports silently"
             )
-    return paths
+    return [path for path in paths if path.is_file()]
 
 
 def _sentences(text: str) -> list[str]:
@@ -194,7 +185,7 @@ def pick_decoy(
                 and project.resolve() == (AI_LABS / project.name).resolve()
                 and not any(p.parent != project for pattern in ("*/agent.json", "*/soul.md")
                             for p in AI_LABS.glob(pattern))):
-            loaded = mine + "".join(p.read_text(encoding="utf-8") for p in imported_paths(project))
+            loaded = mine + "".join(p.read_text(encoding="utf-8") for p in assert_imports_resolve(project))
             choices = [line for line in _sentences(loam_starter.read_hello()[1]) if line not in loaded]
             if choices:
                 return rng.choice(choices), "starter greeting"
@@ -265,12 +256,6 @@ def assert_soul_in_context(
     if ask is not None:
         judge(ask(prompt))
         return
-    # `--settings '{"outputStyle":"none"}'` composes this probe the way the
-    # wake it gates will be composed. Without it the probe would load the
-    # conversation lane (the project settings name it) and the wake would
-    # not -- a preflight that proves the soul arrives for a session shaped
-    # differently from the one that runs, which is the same class of mistake
-    # as running the preflight on a different model.
     argv = [
         CLAUDE, "-p", prompt, "--model", model,
         "--settings", json.dumps({"outputStyle": "none"}),

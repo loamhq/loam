@@ -3,10 +3,8 @@
 A blank Loam install ships one agent, Iris, and one thread: the hello
 thread, where the person lands after signing in. Everything here is copied
 into the install once, by `bin/library seed-starter` (lib/loam_starter.py),
-and from then on belongs to the person: Iris is an ordinary agent they can
-change, rename or archive, and nothing here is copied again. She is born in
-the map's shape (2026-11-18): soul, config and map load on every run, and no
-`_always.md`, `_active.md` or `_reflection.md` is made.
+and from then on belongs to the person. They can change, rename or archive
+Iris. Her soul, config and map load on every run.
 
 The words are the owner's approved starter (2026-11-16), which replaced the
 placeholders of 2026-11-14. The source is the design note "Starter Iris: soul

@@ -825,6 +825,15 @@ def reflection_record(hhmm: str) -> str:
             f"enabled: true\n---\n{loam_cron.reflection_default()}")
 
 
+REFLECTION_PLACEHOLDERS = (
+    "The nightly reflection wake. Its instruction is `_reflection.md`; this "
+    "record holds only when it runs and whether it is on.",
+    "The nightly reflection wake. Its instruction is `_reflection.md`, or "
+    "Loam's default once there is a `map.md`; this record holds only when it "
+    "runs and whether it is on.",
+)
+
+
 def adopt_default(agent: str, systemd: "Systemd | None" = None) -> dict | None:
     """A reflection record whose body is still a placeholder from when the
     record held only a time and a switch is given Loam's default as its body,
@@ -835,7 +844,7 @@ def adopt_default(agent: str, systemd: "Systemd | None" = None) -> dict | None:
     if text is None:
         return None
     body = loam_cron.strip_frontmatter(text).strip()
-    if body not in loam_cron.REFLECTION_PLACEHOLDERS:
+    if body not in REFLECTION_PLACEHOLDERS:
         return None
     head = text[:len(text) - len(loam_cron.strip_frontmatter(text))]
     return change(agent, REFLECTION, head + loam_cron.reflection_default(),

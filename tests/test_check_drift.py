@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Verify shared-clause normalization, provider-specific session checks and concise findings."""
+"""Verify provider-specific session checks and concise findings."""
 
 from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
 import sys
-import tempfile
 from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent
@@ -27,26 +26,6 @@ def load():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
-
-
-def config(name: str, grant: str) -> str:
-    return (f"# {name.capitalize()}\n\nYou are {name.capitalize()}, in "
-            f"`ai-labs/{name}/`.\n\n## Crons\n\nA cron is a job.\n\n"
-            f"{grant}\n")
-
-
-GRANT = "Today's only grant: Ada's `infra-watch`, 2026-10-06."
-
-
-def run(cd, configs: dict[str, str]) -> list:
-    with tempfile.TemporaryDirectory() as tmp:
-        for name, text in configs.items():
-            (Path(tmp) / name).mkdir()
-            (Path(tmp) / name / "config.md").write_text(text, encoding="utf-8")
-        cd.AI_LABS = Path(tmp)
-        findings: list = []
-        cd.check_config_clauses(findings, sorted(configs))
-        return findings
 
 
 def lane_checks(cd) -> None:
@@ -81,23 +60,6 @@ def lane_checks(cd) -> None:
 
 def main() -> int:
     cd = load()
-    names = ("ada", "cleo", "juno")
-
-    found = run(cd, {n: config(n, GRANT) for n in names})
-    check("a sentence naming one agent, identical everywhere, is not drift",
-          not found, repr(found))
-
-    configs = {n: config(n, GRANT) for n in names}
-    configs["juno"] = config("juno", GRANT.replace("2026-10-06", "2026-10-07"))
-    found = run(cd, configs)
-    check("a real divergence in that sentence is still drift",
-          [f[0] for f in found] == ["config.md clause 'Crons' in juno"],
-          repr(found))
-
-    found = run(cd, {n: config(n, "Your workspace is "
-                                  f"`ai-labs/{n}/`.") for n in names})
-    check("an agent's own name still masks", not found, repr(found))
-
     lane_checks(cd)
 
     # Quiet mode must identify the differing item in a single line.

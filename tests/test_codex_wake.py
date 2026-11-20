@@ -60,10 +60,8 @@ def persona(root: Path, name: str, provider: str | None = "codex",
         "# Soul\n\nI am a probe persona built for one test and then thrown "
         "away. The kestrel over the dry field is the image I keep.\n")
     (ws / "config.md").write_text("# Config\n\nKeep every answer short.\n")
-    (ws / "_always.md").write_text("# Always\n\nThe always-layer token is ALWAYS-OPAL.\n")
-    (ws / "_active.md").write_text("---\nname: c\ndescription: c\n---\n"
-                                   "The conversation-layer token is ACTIVE-JADE.\n")
-    (ws / "CLAUDE.md").write_text(f"# {name}\n\n@soul.md\n\n@config.md\n\n@_always.md\n")
+    (ws / "map.md").write_text("# Map\n\nThe map token is MAP-AGATE.\n")
+    (ws / "CLAUDE.md").write_text(f"# {name}\n\n@soul.md\n\n@config.md\n\n@map.md\n")
     return ws
 
 
@@ -71,19 +69,18 @@ def persona(root: Path, name: str, provider: str | None = "codex",
 
 def test_instructions(root: Path) -> None:
     ws = persona(root, "cwinstr")
-    (ws / "_reflection.md").write_text("---\nx: y\n---\nThe reflection token is REFL-RUBY.\n")
-    import loam_memory  # noqa: PLC0415
-    _, text, path = loam_memory.resolve_lane(ws, loam_memory.REFLECTION_LAYER)
-    got = cw.instructions(ws, "reflection wake", path, text)
-    names = [p.name for p in cw.instruction_sources(ws)]
-    check("instructions: Claude Code's wake sources, in order",
-          names == ["CLAUDE.md", "soul.md", "config.md", "_always.md"], names)
+    wake = load_wake()
+    path = ws / "crons" / "probe.md"
+    path.write_text("---\nx: y\n---\nThe cron token is CRON-TOPAZ.\n")
+    body, path = wake.lane_input(ws, "probe")
+    got = cw.instructions(ws, "cron probe", path, body)
+    names = [p.name for p in codex.instruction_sources(ws)]
+    check("instructions: shared files in order",
+          names == ["CLAUDE.md", "soul.md", "config.md", "map.md"], names)
     order = [got.find(t) for t in ("@soul.md", "kestrel", "Keep every answer",
-                                   "ALWAYS-OPAL", "REFL-RUBY")]
-    check("instructions: each source verbatim, the lane's file last",
-          all(i >= 0 for i in order) and order == sorted(order), order)
-    check("instructions: no conversation layer, no lane frontmatter",
-          "ACTIVE-JADE" not in got and "x: y" not in got)
+                                   "MAP-AGATE", "CRON-TOPAZ")]
+    check("instructions: each source verbatim, with the cron body last",
+          all(i >= 0 for i in order) and order == sorted(order) and "x: y" not in got, order)
     check("instructions: the wake's provider line opens them, saying unattended",
           got.startswith(cw.PROVIDER_LINE) and "unattended" in cw.PROVIDER_LINE
           and "spawn_agent" in cw.PROVIDER_LINE)
@@ -255,7 +252,8 @@ def wake_env(root: Path) -> None:
 def test_wake_stubbed(root: Path) -> None:
     wake_env(root)
     ws = persona(root, "cwstub", model="gpt-x")
-    (ws / "_reflection.md").write_text("Reflect.\n")
+    (ws / "crons" / "reflection.md").write_text(
+        "---\nlane: reflection\nschedule: daily at 05:00 PT\nenabled: true\n---\nReflect.\n")
     wake = load_wake()
     wake.LOG_DIR, wake.STATE_DIR = root / "logs", root / "state"
     asked, ran = [], []
@@ -285,7 +283,7 @@ def test_wake_stubbed(root: Path) -> None:
           code == 0 and len(ran) == 1 and len(asked) == 1, (code, ran, asked))
     check("wake: the identity gate asks a thread composed as the run's",
           asked and asked[0][0] == ran[0]["text"] and "kestrel" in asked[0][0]
-          and "Reflect." in asked[0][0])
+          and "MAP-AGATE" in asked[0][0] and "Reflect." in ran[0]["prompt"])
     check("wake: the persona's model, the lane's prompt and LOAM_WAKE",
           ran and ran[0]["model"] == "gpt-x" and "You're waking" in ran[0]["prompt"]
           and ran[0]["wake"] == "reflection", ran)
@@ -301,7 +299,6 @@ def test_wake_stubbed(root: Path) -> None:
 
     # The same persona on Claude Code never reaches the Codex half.
     ws2 = persona(root, "cwclaude", provider=None)
-    (ws2 / "_reflection.md").write_text("Reflect.\n")
     wake = load_wake()
     wake.LOG_DIR, wake.STATE_DIR = root / "logs", root / "state"
     touched = []
@@ -367,7 +364,8 @@ def live(root: Path) -> None:
                 ["-c", "user.name=probe", "-c", "user.email=probe@localhost",
                  "commit", "-q", "-m", "fixture", "--allow-empty"]):
         subprocess.run(["git", "-C", str(vault), *cmd], check=True)
-    (ws / "_reflection.md").write_text(
+    (ws / "crons" / "reflection.md").write_text(
+        "---\nlane: reflection\nschedule: daily at 02:00 PT\nenabled: true\n---\n"
         "# Reflection (probe)\n\nThis is a probe wake of a throwaway persona. Do exactly "
         "these steps and nothing else:\n"
         "1. Use spawn_agent to start one subagent whose whole task is to run the shell "
@@ -375,7 +373,7 @@ def live(root: Path) -> None:
         "2. Call the MCP tool `mcp__engineer__status` once (no arguments) and note how many "
         "jobs it lists.\n"
         "3. Write the file `wake-proof.txt` in your workspace with three lines: the token "
-        "REFL-RUBY, the always-layer token from your instructions, and what the subagent "
+        "REFL-RUBY, the map token from your instructions, and what the subagent "
         "reported.\n"
         "4. Reply with one line saying you did it.\n")
     (ws / "crons" / "probe.md").write_text(
@@ -397,8 +395,8 @@ def live(root: Path) -> None:
               bool(line.get("identity_canary")), line.get("identity_canary"))
     proof = (ws / "wake-proof.txt").read_text() if (ws / "wake-proof.txt").exists() else ""
     print(f"      wake-proof.txt: {proof!r}")
-    check("LIVE reflection: the lane's file and _always.md loaded (their tokens written)",
-          "REFL-RUBY" in proof and "ALWAYS-OPAL" in proof, proof)
+    check("LIVE reflection: the reflection instruction and map loaded (their tokens written)",
+          "REFL-RUBY" in proof and "MAP-AGATE" in proof, proof)
     check("LIVE reflection: a subagent ran (its output written, a subagent counted)",
           "sub-42" in proof and json.loads((root / "logs" / f"wake-{name}.jsonl")
                                            .read_text().splitlines()[0]).get("subagents", 0) >= 1,
@@ -416,7 +414,7 @@ def live(root: Path) -> None:
     check("LIVE reflection: Loam's subagent ask reached the thread as developer instructions",
           codex.SUBAGENT_ASK[:80] in text, str(path))
     check("LIVE reflection: the wake's own instructions were the thread's (its provider line)",
-          "through Loam's wake launcher" in text and "REFL-RUBY" in text)
+          "through Loam's wake launcher" in text and "MAP-AGATE" in text)
     canaries = [json.loads(x).get("identity_canary") for x in
                 (root / "logs" / f"wake-{name}.jsonl").read_text().splitlines()]
     soul = (ws / "soul.md").read_text()

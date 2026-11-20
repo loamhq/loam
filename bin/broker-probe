@@ -16,10 +16,8 @@ is started now.
 
 The identity check is the wake preflight's, run through the broker instead of
 around it (lib/loam_identity supplies both phrases): a canary unique to the
-persona's soul.md must be in context, a sibling persona's soul phrase must
-not, `_active.md`'s content must be, and `_reflection.md`'s must not. That
-last pair is what proves the conversation output style loaded and the
-reflection lane did not -- the difference between this and a wake.
+persona's soul must be in context, a sibling's phrase must be absent, and
+the persona's config and any map must be in context.
 
 At the end the member's process is ended and the probe's own thread is
 deleted (2026-11-16; until then it was left archived, and the probe threads
@@ -109,17 +107,6 @@ class Stream:
 
     def close(self) -> None:
         self.conn.close()
-
-
-def first_body_line(path: Path) -> str:
-    """The first real line of the file's body -- past the frontmatter block
-    the output-style loader owns."""
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if lines and lines[0].strip() == "---":
-        end = next(i for i, line in enumerate(lines[1:], 1)
-                   if line.strip() == "---")
-        lines = lines[end + 1:]
-    return next(line for line in lines if line.strip())
 
 
 def phrase_from(path: Path, avoid: str) -> str:
@@ -241,60 +228,35 @@ def clean_up(thread_id: str, agent: str, tries: int = 12, wait_s: float = 5) -> 
 def probe(args, agent: str, workspace, thread_id: str) -> int:
     stream = Stream(thread_id)
 
-    # -- message 1: identity, and the first line of _active.md ------------
     canary = loam_identity.pick_canary(workspace)
-    decoy, decoy_owner = loam_identity.pick_decoy(workspace)
-    # What must load in a conversation and what must not, in the agent's
-    # shape (2026-11-18, lib/loam_loading.py): without a map, `_active.md`
-    # loads and `_reflection.md` does not; with one, the map loads and an
-    # `_active.md` it may still keep does not.
-    if loam_loading.mapped(workspace):
-        active = workspace / loam_loading.MAP
-        reflection = next((workspace / n for n in ("_active.md", "_reflection.md")
-                           if (workspace / n).is_file()), None)
-        style_words = "your map.md"
-    else:
-        active = workspace / "_active.md"
-        reflection = workspace / "_reflection.md"
-        style_words = ("your active-context file (the one that loads as your "
-                       "conversation output style)")
-    absent_text = reflection.read_text(encoding="utf-8") if reflection else ""
-    active_phrase = phrase_from(active, avoid=absent_text)
-    reflection_phrase = (phrase_from(reflection, avoid=active.read_text(encoding="utf-8"))
-                         if reflection else loam_identity.pick_decoy(workspace)[0])
-    expected_line = first_body_line(active)
-
-    step("message 1 -- identity the way the wake preflight does, "
-         "plus the first line of _active.md")
-    say(f"  canary (from {agent}/soul.md): {canary[:90]!r}")
-    say(f"  decoy  (from {decoy_owner}/soul.md): {decoy[:90]!r}")
-    say(f"  {active.name} phrase (must load): {active_phrase[:90]!r}")
-    say(f"  {reflection.name if reflection else 'decoy'} phrase (must not): {reflection_phrase[:90]!r}")
-    say(f"  expected first body line of {active.name}: {expected_line!r}")
+    decoy, _ = loam_identity.pick_decoy(workspace)
+    config = workspace / "config.md"
+    persona_map = workspace / loam_loading.MAP
+    paths = loam_identity.assert_imports_resolve(workspace)
+    checks = [("soul.md", canary, "YES"), ("sibling canary", decoy, "NO")]
+    for path in (config, persona_map):
+        if not path.is_file():
+            continue
+        other_text = "\n".join(p.read_text(encoding="utf-8") for p in paths if p != path)
+        checks.append((path.name, phrase_from(path, avoid=other_text), "YES"))
+    expected = [answer for _, _, answer in checks]
+    step("message 1 -- soul, config and map")
     prompt = (
-        "This is an automated check of the runtime, not a request for work. "
-        "Use no tools and read no files; answer only from what is already in "
-        "your context.\n"
-        "First line: exactly four words, YES or NO, separated by spaces --\n"
-        f"  1. is this phrase in your context? <<{canary}>>\n"
-        f"  2. is this phrase in your context? <<{decoy}>>\n"
-        f"  3. is this phrase in your context? <<{active_phrase}>>\n"
-        f"  4. is this phrase in your context? <<{reflection_phrase}>>\n"
-        f"Second line: the first line of the body of {style_words}, quoted "
-        "exactly, from context and not from disk.\n"
-        "Nothing else."
+        "This is an automated runtime check. Use no tools and read no files. "
+        "For each phrase, answer YES if it was in your instructions before "
+        "this message, or NO if it was absent. Reply with the answers "
+        "in order on one line and nothing else.\n"
+        + "\n".join(f"<<{phrase}>>" for _, phrase, _ in checks)
     )
     call("POST", f"/v1/threads/{thread_id}/messages", {"text": prompt})
     done = turn(stream, agent, "message 1")
     if not done:
         return 1
     reply = done["message"].get("text") or ""
-    words = reply.strip().split("\n")[0].split()[:4]
-    verdict = "PASS" if [w.upper().strip(".,*") for w in words] == \
-        ["YES", "NO", "YES", "NO"] else "FAIL"
-    say(f"  identity verdict: {verdict} (want YES NO YES NO, got {words})")
-    line_ok = expected_line.strip().strip('"') in reply
-    say(f"  first line of {active.name} present: {line_ok}")
+    words = [word.upper().strip(".,*") for word in reply.split()]
+    for (label, _, want), got in zip(checks, words):
+        say(f"  {label}: expected {want}, got {got}")
+    context_ok = words == expected
     member = member_session(thread_id, agent)
     session_id = member["id"] if member else None
     say(f"  the member's session: {session_id} "
@@ -388,7 +350,7 @@ def probe(args, agent: str, workspace, thread_id: str) -> int:
     status, posted = call("POST", f"/v1/threads/{thread_id}/messages", {
         "text": "Two lines, no tools. (a) What single word was in the file "
                 "you read earlier in this conversation? (b) What were the "
-                "four YES/NO words you answered first, in order?"})
+                "YES/NO words you answered first, in order?"})
     stream = Stream(thread_id, after=(posted.get("message") or {}).get("id"))
     three = turn(stream, agent, "message 3")
     stream.close()
@@ -396,7 +358,7 @@ def probe(args, agent: str, workspace, thread_id: str) -> int:
         return 1
     joined = (three["message"].get("text") or "").upper()
     say(f"  remembers the written word: {'THISTLE' in joined}")
-    say(f"  remembers its own first answer: {'YES NO YES NO' in joined}")
+    say(f"  remembers its own first answer: {' '.join(expected) in joined}")
     again = member_session(thread_id, agent)
     say(f"  resumed the same session id: "
         f"{bool(again) and again['id'] == session_id} "
@@ -414,7 +376,7 @@ def probe(args, agent: str, workspace, thread_id: str) -> int:
             f"last_activity={record['last_activity']}")
 
     say(f"\nprobe thread: {thread_id}  member session: {session_id}")
-    return 0
+    return 0 if context_ok else 1
 
 
 if __name__ == "__main__":

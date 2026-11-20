@@ -72,7 +72,7 @@ vault = TMP / "vault"
 (vault / "00_INBOX" / "from-agents").mkdir(parents=True)
 (ws / "agent.json").write_text(json.dumps({"name": AGENT, "workspace": str(ws),
                                            "vault": str(vault)}))
-(ws / "_reflection.md").write_text("Reflect.\n")
+(ws / "map.md").write_text("Reflect.\n")
 (ws / "crons" / "watch.md").write_text("---\nschedule: daily at 09:00\n---\nWATCH-THE-BOX\n")
 cli = TMP / "claude-cli"
 cli.write_text(FAKE_CLI)
@@ -199,7 +199,7 @@ try:
           all(s in fresh for s in ("20261119-110000-0000cccc", "your reflection wake",
                                    "BOX-IS-SLOW", "its session file is gone",
                                    "/v/20261119-110000-0000cccc.md", "fresh run")), fresh)
-    check("...with the reflection's own file loaded", seen_lanes[0].strip() == "Reflect.", seen_lanes)
+    check("...the fresh reflection result uses the shared imports", seen_lanes[0] == "", seen_lanes)
     check("a session the CLI refuses: tried, then a fresh run in the same pass",
           "--resume" in got[1] and "--session-id" in got[2]
           and "could not find the session" in prompt(got[2])

@@ -378,25 +378,14 @@ def files(agent: str) -> dict:
                 continue
             if entry.is_dir() or entry.suffix == ".md":
                 names.append(entry.stem if entry.is_file() else entry.name)
-    # What loads, in the shape the agent is in (2026-11-18,
-    # lib/loam_loading.py): its map once it has one, else the three files
-    # it has always had. The old files of an agent with a map are ordinary
-    # files of its own and are not listed as loading.
-    if (ws / "map.md").is_file():
-        memory = {"map": _ref("spaces", f"{agent}/map.md", ws / "map.md")}
-    else:
-        memory = {
-            "always": _ref("spaces", f"{agent}/_always.md", ws / "_always.md"),
-            "active": _ref("spaces", f"{agent}/_active.md", ws / "_active.md"),
-            "reflection": _ref("spaces", f"{agent}/_reflection.md",
-                               ws / "_reflection.md"),
-        }
-    memory["folder"] = _ref("spaces", f"{agent}/memory", ws / "memory")
     return {
         "workspace": _ref("spaces", agent, ws),
         "soul": _ref("spaces", f"{agent}/soul.md", ws / "soul.md"),
         "config": _ref("spaces", f"{agent}/config.md", ws / "config.md"),
-        "memory": memory,
+        "memory": {
+            "map": _ref("spaces", f"{agent}/map.md", ws / "map.md"),
+            "folder": _ref("spaces", f"{agent}/memory", ws / "memory"),
+        },
         "skills": {**_ref("spaces", f"{agent}/skills", skills),
                    "count": len(names), "names": names},
     }

@@ -19,6 +19,7 @@ lib/loam_skills.py and docs/skills.md.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,6 +46,14 @@ def main(argv: list[str]) -> int:
             show_diff(diff)
         else:
             print(f"{sk.loam_dir()}: already the library")
+        # The updater is still running code from the previous checkout.
+        # Its library step calls this release's command after moving the tree.
+        import loam_update  # noqa: PLC0415
+        pending = loam_update.read_json("pending.json")
+        if pending and pending.get("to_commit") == loam_update.head():
+            provision = Path(__file__).with_name("provision")
+            subprocess.run([sys.executable, str(provision), "--migrate-persona-maps"],
+                           check=True)
         for line in sk.refresh():
             print(f"  {line}")
         return 0

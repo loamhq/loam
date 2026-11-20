@@ -1675,17 +1675,10 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   folder's git within minutes). Stub every new start task in both drivers.
 ## 2026-11-18 — three files load on every run: soul, config, map
 
-- **The shape is rendered, not chosen at launch.** Every conversation route
-  (the broker, Remote Control, the Claude Code app) reads the project's
-  `CLAUDE.md` and `.claude/settings.json` at start with no flag of Loam's,
-  and Codex and Antigravity compose from `CLAUDE.md`'s imports. So the
-  map's shape is rendered into those two files (`bin/provision`'s
-  `claude_md`/`settings`, branching on `map.md`), and `lib/loam_loading.py`'s
-  `refresh` re-renders them when the shape on disk and the one rendered
-  differ. It runs from every launcher (wake, broker start, rc-preflight,
-  each Codex/Antigravity instruction build) and from the persona's
-  PostToolUse hook after *every* tool call, because a map made with `echo >`
-  names no path the hook can see. A session already running keeps its shape.
+- **One generated instruction set serves every lane.** Provision renders
+  `CLAUDE.md` with the shared imports. Codex and Antigravity inline the same
+  imports. The map import stays in the generated file when a map is absent.
+  Launchers need no workspace rewrite when the agent creates or removes it.
 - **Loam's text resolves from the code's own tree** (`docs/persona/loam.md` beside
   `lib/`), not from `paths.root`: a landing tests a merged tree while the
   live checkout is still the old `main`, so a `paths.root` import of a new
@@ -2382,11 +2375,9 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   WantedBy=default.target`; it was never enabled (checked `is-enabled` on all
   seven), so dropping it left no stray wants link.
 - **The record's body is the instruction.** `loam_cron.reflection_default()`
-  is Loam's text, rendered with `lc.OWNER_NAME`; a body that is empty or one
-  of `REFLECTION_PLACEHOLDERS` is told the default, and `bin/provision`
-  replaces a placeholder body (`loam_schedule.adopt_default`), so every
-  install moves on its next update. Unmapped agents still get
-  `_reflection.md` appended as their lane file (what loads is batch A's).
+  is Loam's text, rendered with `lc.OWNER_NAME`. An empty body uses the
+  default. Provision applies that default to existing schedule placeholders
+  through `loam_schedule.adopt_default`.
 - **A refused direct pause must not stop the wake.** `enabled_now` read the
   workspace file, so a persona writing `enabled: false` (refused by the
   reconciler) would still have kept bin/wake from running. The reflection's

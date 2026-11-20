@@ -285,8 +285,8 @@ def fetch_models() -> list[dict]:
 # Added 2026-10-01, second Codex brief. The owner's rule: "just the provider
 # changing does not compromise on the memories, the personalities, the soul,
 # and the tools." On Claude Code a persona is assembled from files in its
-# workspace -- CLAUDE.md and its `@` imports, `_active.md` as the conversation
-# output style, `.mcp.json`, `.claude/`. On Codex the same files are read by
+# workspace -- CLAUDE.md and its `@` imports, `.mcp.json` and `.claude/`. On Codex
+# the same instructions are read by
 # the same rules, and two runtime-owned things carry them across:
 #
 # - the instructions file below, one per persona, written at every thread
@@ -374,37 +374,16 @@ def _imports(path: Path, depth: int, seen: set) -> list[Path]:
 
 
 def instruction_sources(workspace: Path) -> list[Path]:
-    """Bring CLAUDE.md up to date and load it, its imports, and the conversation output
-    style in order. An agent with a map loads it as an import and uses no additional
-    style.
-    """
-    from loam_memory import CONVERSATION_LAYER  # noqa: PLC0415
-    import loam_loading  # noqa: PLC0415
-    loam_loading.quiet_refresh(workspace)
-    sources = _imports(workspace / "CLAUDE.md", 0, set())
-    active = workspace / CONVERSATION_LAYER
-    if active.is_file() and not loam_loading.mapped(workspace):
-        sources.append(active)
-    return sources
+    """The workspace instructions and their imports in load order."""
+    return _imports(workspace / "CLAUDE.md", 0, set())
 
 
-def instructions(workspace: Path) -> str:
-    """The instructions a Codex thread for this persona starts with.
-
-    Shaped the way Claude Code presents the same files, so the persona reads
-    one layout on either provider: each memory file under a ``Contents of``
-    header with its path, ``CLAUDE.md`` as written (its ``@`` lines are the
-    imports, resolved by the blocks after it), and the output style last
-    with its loader frontmatter stripped."""
-    from loam_memory import CONVERSATION_LAYER, strip_frontmatter  # noqa: PLC0415
-    parts = [PROVIDER_LINE]
+def instructions(workspace: Path, provider_line: str = PROVIDER_LINE) -> str:
+    """Render the same instruction files for every lane on Codex."""
+    parts = [provider_line]
     for source in instruction_sources(workspace):
         text = source.read_text(encoding="utf-8")
-        if source.name == CONVERSATION_LAYER and source.parent == workspace:
-            parts.append(f"# Output style: conversation ({source})\n\n"
-                         f"{strip_frontmatter(text).strip()}")
-        else:
-            parts.append(f"Contents of {source}:\n\n{text.strip()}")
+        parts.append(f"Contents of {source}:\n\n{text.strip()}")
     return "\n\n".join(parts) + "\n"
 
 

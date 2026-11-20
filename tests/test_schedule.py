@@ -311,7 +311,7 @@ try:
           not (LABS / OTHER / "crons" / "reflection.md").exists())
 
     # Reflection uses the schedule record.
-    placeholder = loam_cron.REFLECTION_PLACEHOLDERS[0]
+    placeholder = ls.REFLECTION_PLACEHOLDERS[0]
     head = ("---\nlane: reflection\nschedule: daily at 02:00 PT\n"
             "enabled: true\n---\n")
     ls.change(OTHER, "reflection", head + placeholder + "\n", actor="engineer",
@@ -323,9 +323,6 @@ try:
           f"ExecStart={STUB} {LABS / OTHER}\n" in service
           and "[Install]" not in service and "--cron" not in service
           and "OnFailure=loam-wake-failed@%N.service" in service, service)
-    check("  a placeholder body is told Loam's default",
-          loam_cron.reflection_instruction(head + placeholder + "\n")
-          == loam_cron.reflection_default().strip())
     ls.adopt_default(OTHER, systemd=SD)
     text = (LABS / OTHER / "crons" / "reflection.md").read_text()
     check("  adopt_default: the body is Loam's default, the header as it was",

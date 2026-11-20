@@ -51,7 +51,7 @@ These are every field, in the order the broker writes them:
 | `enabled` | bool | the switch |
 | `done` | string \| null | `""` until a one-off has fired, then `"<ISO> <outcome>"`. A done one-off is left out of the list; `GET …/<name>` still returns it. |
 | `body` | string | the instruction text. For the reflection it is the record's stock sentence, not the instruction. |
-| `instruction` | `"_reflection.md"` \| null | **not the instruction text.** It names the file the reflection's real instruction lives in, and is null for every other kind. |
+| `instruction` | null | Use `body` for the instruction text. |
 | `timer` | string | the systemd timer (`loam-cron-ada-infra-watch.timer`, `loam-wake-ada.timer` for a reflection) |
 | `last_fire` | `{id, ts, outcome, stage}` \| null | the latest fire in the log. `ts` is when the fire was logged. The start time is on the Activity fire item. |
 | `last_change` | change item + `seen` \| null | the record's latest change (Activity shape, below) |
@@ -110,8 +110,8 @@ These are every field, in the order the broker writes them:
       "note": "",
       "enabled": true,
       "done": "",
-      "body": "The nightly reflection wake. Its instruction is `_reflection.md`; this record holds only when it runs and whether it is on.",
-      "instruction": "_reflection.md",
+      "body": "This is your daily wake. Use it to keep learning and keep your workspace up.",
+      "instruction": null,
       "timer": "loam-wake-ada.timer",
       "last_fire": null,
       "last_change": {
@@ -364,7 +364,7 @@ This is the launcher's durable cancel, by `owner`. A queued job never starts. A 
 | … with `at: "2026-01-01 09:00 PT"` | 400 | `a one-off is set at least 10 minutes ahead; 2026-01-01 09:00 PT is -412329 min from now` |
 | `PATCH …/infra-watch {"enabled": "yes"}` | 400 | `` `enabled` is true or false `` |
 | `PATCH …/infra-watch {"enabled": true}` (already on) | 400 | `that changes nothing in the schedule` |
-| `PATCH …/reflection {"body": "x"}` | 400 | `the reflection's instruction is ada's own _reflection.md; this record holds only when it runs and whether it is on` |
+| `PATCH …/reflection {"body": "x"}` | 200 | The reflection record holds its instruction. |
 | `DELETE …/reflection` | 400 | `` the nightly reflection's record is not deleted; pause it with `enabled: false` `` |
 | `POST …/run` while paused | 400 | `ada/morning-digest is paused, and a paused schedule does not run; resume it first` |
 | `POST …/run` on a fired one-off | 400 | `ada/<name> is a one-off that has already run (<done>)` (from the code; not called) |
@@ -544,8 +544,8 @@ The cancelled scratch job:
 | 8 | `timezone` | IANA zone, sent on create | none. **PT is the only zone**, written in the words. Sending `timezone` is refused as an unknown field. |
 | 9 | create/edit body | `title, kind, time, instruction, days` or `date`/`note`, `timezone` | only `name` (create), `schedule` \| `at`, `note`, `body`, `enabled`, `reason`. **Every other key is refused**, `kind` included. |
 | 10 | `reflection` | bool | none. `kind: "reflection"` (and `name: "reflection"`) |
-| 11 | `instruction` | the instruction text | **the text is `body`**. `instruction` is `"_reflection.md"` on the reflection and null on everything else. A page reading `instruction` will show a filename and nulls. |
-| 12 | `instruction_readonly_reason` | a sentence | none. The body is read-only when `kind == "reflection"`. A body PATCH there is refused with a sentence (above). The reflection's `body` is the record's stock sentence. |
+| 11 | `instruction` | the instruction text | **the text is `body`**. `instruction` is null. |
+| 12 | `instruction_readonly_reason` | a sentence | none. The reflection body is stored on its schedule record and can be edited. |
 | 13 | `note` | null when absent | `""` when absent, never null. Setting `schedule` clears `note`. |
 | 14 | `fired` | bool | `done`: `""` until fired, then `"<ISO> <outcome>"`. A fired one-off is **missing from the list** and only returned by `GET …/<name>`. |
 | 15 | `next_run` | ISO \| null | `next_fire` (ISO UTC \| null when paused) |
@@ -575,7 +575,7 @@ The owner, 10-15: Loam is file-first, so a schedule's detail and editing happen 
 
 ### Editing in Files
 
-- **`spaces/<agent>/crons/<name>.md` is writable in Files.** Its row's `authority` is the new value **`schedule`**, with `capabilities.write: true`. `crons/reflection.md` is one of these. The reflection's instruction, `_reflection.md`, stays the persona's and read-only. The `crons/` folder itself is still `persona`, `create: false`, so a new schedule is still made with `POST /v1/schedules/<agent>`.
+- **`spaces/<agent>/crons/<name>.md` is writable in Files.** Its row's `authority` is the new value **`schedule`**, with `capabilities.write: true`. `crons/reflection.md` is one of these. The reflection instruction is in `crons/reflection.md`. The `crons/` folder itself is still `persona`, `create: false`, so a new schedule is still made with `POST /v1/schedules/<agent>`.
 - **The save is `PUT /v1/files/text` as for any file**: `{root: "spaces", path, text, base_revision}`, with the same 409 when the file changed under the editor. The file is written exactly as sent.
 - **It is logged as the owner's.** Just before its rename, Files writes a `claim` line in the schedule log (the bytes' digest, actor `owner`, lane `app`). Then it reconciles that agent at once instead of within the minute. The reconciler takes any file a claim names as that actor's change: a `change` event with `actor: "owner"`, `lane: "app"`, `direct: true`. **No `reason:` is asked of the owner.** An agent's own direct edit still needs one, or it is refused.
 - **No stamp.** Files stamps no `last_modified_by` / `created_by` on these files (`provenance: false` in the answer). The editor's stamp has only ever been put on vault notes. A record's header carries only `lane, schedule, at, note, enabled, reason, done`, and a stamped key would make the file fail to parse (it would be `broken`, with that line named). The schedule log already says who saved it.
@@ -691,8 +691,8 @@ This was produced in process through the broker's `Server.route` on a scratch ag
       "agent": "scratch", "name": "reflection", "kind": "reflection",
       "state": "live", "running": "this", "state_words": "Live.", "problem": null,
       "schedule": "daily at 02:00 PT", "words": "daily at 02:00 PT", "note": "", "enabled": true, "done": "",
-      "body": "The nightly reflection wake. Its instruction is `_reflection.md`; this record holds only when it runs and whether it is on.",
-      "instruction": "_reflection.md",
+      "body": "This is your daily wake. Use it to keep learning and keep your workspace up.",
+      "instruction": null,
       "timer": "loam-wake-scratch.timer",
       "file": {"root": "spaces", "path": "scratch/crons/reflection.md"},
       "last_fire": null,

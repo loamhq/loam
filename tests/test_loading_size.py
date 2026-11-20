@@ -4,7 +4,7 @@
 Run as a subprocess on real PostToolUse payloads against a throwaway
 workspace, as the CLI runs it. Checks: an oversized loading file warns with
 its count and the limit; a small one and a file that does not load are
-silent; `_active.md` losing its frontmatter warns; an Android-illegal name
+silent; an Android-illegal name
 warns; Codex's apply_patch is read for the same paths; and the exit code is
 0 every time, because the write has already landed.
 
@@ -46,7 +46,7 @@ def main() -> int:
         ws.mkdir()
         (ws / "agent.json").write_text(json.dumps({
             "name": "probe", "workspace": str(ws), "vault": str(Path(tmp) / "vault")}))
-        big = ws / "_always.md"
+        big = ws / "map.md"
         big.write_text("x" * 10_500)
         code, ctx = run({"tool_name": "Edit", "tool_input": {"file_path": str(big)}}, ws)
         check("an oversized loading file warns with its count and the limit",
@@ -61,10 +61,6 @@ def main() -> int:
         code, ctx = run({"tool_name": "Write", "tool_input": {"file_path": str(other)}}, ws)
         check("a file that does not load is never capped", code == 0 and not ctx, ctx)
 
-        active = ws / "_active.md"
-        active.write_text("no frontmatter here\n")
-        code, ctx = run({"tool_name": "Edit", "tool_input": {"file_path": str(active)}}, ws)
-        check("_active.md without its frontmatter warns", code == 0 and "frontmatter" in ctx, ctx)
 
         code, ctx = run({"tool_name": "Write",
                          "tool_input": {"file_path": str(ws / "a?b.md")}}, ws)

@@ -18,15 +18,11 @@ vault: a heading and one line saying it is what the person's agents know
 about them, theirs to read and edit (the owner, 2026-11-16). From 2026-11-18
 to 2026-11-19 every agent in the map's shape was told of it by Loam's text
 (`docs/persona/loam.md`); the owner's shorter text of 2026-11-19 does not
-name it, and the library's `loam-how-it-works` does. Iris's `nights.md` keeps it.
-Until 2026-11-18 a new agent was given an `_always.md` with that line
-instead; an agent made then keeps it. After that the note is
-the person's and the agents'. Iris adds to it as she gets to know the person
-and keeps it accurate on her nightly wake.
+name it. The library's `loam-how-it-works` and Iris's `nights.md` point to it.
 
 `seed-starter` makes Iris from `docs/starter/iris/` through
 `loam_agents.make`, the same step L10's create route ends in: her workspace,
-her soul and config, the two loading files, `agent.json`, and provisioning on
+her soul, config and map, `agent.json`, and provisioning on
 every provider. On a box with other agents her
 config takes the fleet's clauses as any new agent's does; on a blank one
 there are none, and the starter's config is what she has. From then on she

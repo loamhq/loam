@@ -33,9 +33,8 @@ def note_bullets(vault):
     return [l for l in note.read_text().splitlines() if l.startswith("- `")]
 
 
-def make_project(tmp, with_reflection):
-    """A minimal agent. No _reflection.md means bin/wake refuses at preflight
-    -- a failure it records itself, which is exactly the silence case."""
+def make_project(tmp):
+    """A minimal agent with no cron file."""
     proj, vault = tmp / "proj", tmp / "vault"
     proj.mkdir(); (vault / "00_INBOX" / "from-agents").mkdir(parents=True)
     (proj / "agent.json").write_text(json.dumps({
@@ -43,8 +42,6 @@ def make_project(tmp, with_reflection):
         "workspace": str(proj), "vault": str(vault),
         "wake_schedule": "23:59", "wake_timezone": "America/Los_Angeles",
     }))
-    if with_reflection:
-        (proj / "_reflection.md").write_text("a self-model\n")
     return proj, vault
 
 
@@ -58,8 +55,8 @@ try:
     # --- 1. wrapper records its own failure, then wake-failed stays silent ---
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        proj, vault = make_project(tmp, with_reflection=False)
-        r = subprocess.run([str(AGENTS / "bin" / "wake"), str(proj)],
+        proj, vault = make_project(tmp)
+        r = subprocess.run([str(AGENTS / "bin" / "wake"), str(proj), "--cron", "missing"],
                            capture_output=True, text=True)
         check("bin/wake refuses at preflight (exit 3)", r.returncode == 3, f"exit={r.returncode}")
         check("wrapper wrote one log line", len(read_log()) == 1, str(read_log()))
@@ -77,7 +74,7 @@ try:
     # --- 2. wrapper dies mid-run: the marker survives and is reported ---
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        proj, vault = make_project(tmp, with_reflection=True)
+        proj, vault = make_project(tmp)
         STATE.parent.mkdir(parents=True, exist_ok=True)
         STATE.write_text(json.dumps({
             "ts": "2026-08-30T10:00:11Z", "pid": 3827846, "vault": str(vault)}))
@@ -98,7 +95,7 @@ try:
     # --- 3. the clear lives only in the finally ---
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        proj, vault = make_project(tmp, with_reflection=True)
+        proj, vault = make_project(tmp)
         probe = tmp / "probe.py"
         probe.write_text(
             "import importlib.machinery, importlib.util, os, sys\n"

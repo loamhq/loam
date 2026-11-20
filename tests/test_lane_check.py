@@ -30,9 +30,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 from loam_memory import LIMIT_CHARS, NEAR_LIMIT_CHARS  # noqa: E402
 
 AGENT = "lanechecktest"
-STYLE_HEADER = "---\nname: conversation\nkeep-coding-instructions: true\n---\n"
-WARNING = f"within {LIMIT_CHARS - NEAR_LIMIT_CHARS:,} characters of the"
-
 results: list[bool] = []
 
 
@@ -55,19 +52,17 @@ def padded(header: str, size: int) -> str:
     return header + "x" * (size - len(header))
 
 
-def build(root: Path, always: int, active: int) -> tuple[Path, Path]:
+def build(root: Path, size: int | None) -> tuple[Path, Path]:
     ws = root / "ai-labs" / AGENT
     vault = root / "vault"
-    styles = ws / ".claude" / "output-styles"
-    styles.mkdir(parents=True)
+    ws.mkdir(parents=True)
     (vault / "00_INBOX" / "from-agents").mkdir(parents=True)
     (ws / "agent.json").write_text(json.dumps({
         "name": AGENT, "display": "Lanechecktest",
         "workspace": str(ws), "vault": str(vault),
     }))
-    (ws / "_always.md").write_text(padded("Always.\n", always))
-    (ws / "_active.md").write_text(padded(STYLE_HEADER, active))
-    (styles / "conversation.md").symlink_to("../../_active.md")
+    if size is not None:
+        (ws / "map.md").write_text(padded("Map.\n", size))
     return ws, vault
 
 
@@ -84,10 +79,10 @@ def wrote_nothing(vault: Path) -> bool:
     return (not any(inbox.iterdir())) and not list(ATTENTION.glob("*.json"))
 
 
-def scenario(label: str, always: int, active: int, *, problem: str | None,
+def scenario(label: str, size: int | None, *, problem: str | None,
              warning: str | None) -> Path:
     root = Path(tempfile.mkdtemp(prefix="loam-lane-check-"))
-    ws, vault = build(root, always, active)
+    ws, vault = build(root, size)
     code, out, err = run(ws, "--json")
     found = json.loads(out)
     ok = code == 0 and found["agent"] == AGENT
@@ -102,22 +97,17 @@ def scenario(label: str, always: int, active: int, *, problem: str | None,
 
 roots = []
 try:
-    roots.append(scenario(
-        "both files clear of the warning: nothing found",
-        NEAR_LIMIT_CHARS - 1, NEAR_LIMIT_CHARS - 1, problem=None, warning=None))
-    roots.append(scenario(
-        "_always.md just over the warning: a warning only",
-        NEAR_LIMIT_CHARS + 1, NEAR_LIMIT_CHARS - 1, problem=None, warning="_always.md"))
-    roots.append(scenario(
-        "_active.md just under the limit: a warning only",
-        NEAR_LIMIT_CHARS - 1, LIMIT_CHARS - 1, problem=None, warning="_active.md"))
-    roots.append(scenario(
-        "_active.md just over the limit: a problem",
-        NEAR_LIMIT_CHARS - 1, LIMIT_CHARS + 1, problem="over the", warning=None))
+    roots.append(scenario("missing map", None, problem=None, warning=None))
+    roots.append(scenario("map just over warning", NEAR_LIMIT_CHARS + 1,
+                          problem=None, warning="map.md"))
+    roots.append(scenario("map just under limit", LIMIT_CHARS - 1,
+                          problem=None, warning="map.md"))
+    roots.append(scenario("map just over limit", LIMIT_CHARS + 1,
+                          problem="map.md", warning=None))
 
     root = Path(tempfile.mkdtemp(prefix="loam-lane-check-"))
     roots.append(root)
-    ws, vault = build(root, NEAR_LIMIT_CHARS - 1, LIMIT_CHARS + 1)
+    ws, vault = build(root, LIMIT_CHARS + 1)
     code, out, err = run(ws)
     check("by hand: the problem is printed, exit 0",
           code == 0 and "over the" in out and AGENT in out, out.strip()[:200])

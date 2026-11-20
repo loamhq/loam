@@ -60,7 +60,6 @@ from loam_memory import (  # noqa: E402
     is_auto_loaded,
     load_config,
     project_dir_from,
-    style_frontmatter_intact,
 )
 
 # Every tool that creates or mutates a file: the verb the agent reads back
@@ -213,14 +212,7 @@ def resolve(raw: str) -> Path:
 
 
 def literal(raw: str) -> Path:
-    """Absolute, symlinks NOT followed.
-
-    The pair matters. ``resolve()`` is what makes the workspace boundary
-    proof against symlink games; it is also what would hide a write aimed at
-    ``.claude/output-styles/conversation.md``, since that link resolves back
-    out to ``_active.md`` in the workspace root. So the ``.claude`` rule below
-    is applied to both readings and refuses if either lands there.
-    """
+    """Absolute path without following symlinks."""
     return Path(os.path.abspath(str(raw)))
 
 
@@ -299,7 +291,7 @@ def check_auto_loaded(
     tool_name: str, tool_input: dict, verb: str, raw: str,
     target: Path, workspace: Path,
 ) -> None:
-    """The size limit, and the style frontmatter `_active.md` cannot lose."""
+    """Enforce the size limit on guarded edits."""
     if not is_auto_loaded(target, workspace):
         return
 
@@ -324,24 +316,6 @@ def check_auto_loaded(
             f"smaller than it is now is always allowed, even over the limit."
         )
 
-    # The conversation lane reaches a phone-attached session by being the
-    # target of .claude/output-styles/conversation.md, and the loader selects
-    # by name. Measured 2026-09-04: a style whose `name:` disagrees with the
-    # selected style loads NOTHING, silently -- so losing these keys does not
-    # break loudly, it removes the whole conversation layer with no sign.
-    if target.name == "_active.md" and current is not None:
-        if style_frontmatter_intact(current) and not style_frontmatter_intact(result):
-            refuse(
-                f"{verb} of {str(raw)!r} removes or changes the frontmatter "
-                f"block at the top of the file. That block is not decoration: "
-                f"it is what makes this file load into a conversation at all, "
-                f"and the loader fails silently without it -- you would lose "
-                f"the whole layer with nothing to see. Keep the `---` block "
-                f"(name, description, keep-coding-instructions) exactly as it "
-                f"is and edit below it."
-            )
-
-
 # ---------------------------------------------------------------------------
 # The engineer's rule. Same hook, different party.
 #
@@ -359,7 +333,7 @@ def check_auto_loaded(
 #            files the generators own outright.
 #
 # **What this hook is, and what it is not.** The engineer has `Bash` and full
-# sudo, so this is not containment: `sed -i` on an agent's `_reflection.md`
+# sudo, so this is not containment: `sed -i` on an agent's `map.md`
 # never reaches this code, and nothing on this box would stop it. What it is
 # is the rule stated at the layer that acts, refusing the honest mistake in
 # the turn where it is one edit away from being fixed -- the same argument the
@@ -390,9 +364,7 @@ ENGINEER_WRITABLE_IN_WORKSPACE = frozenset({
 # The self-authored files, named only so the refusal can say WHICH rule it is.
 # The rule itself is the inverse of the set above, so a file an agent invents
 # tomorrow is covered today.
-ENGINEER_SELF_AUTHORED = (
-    "_always.md", "_active.md", "_reflection.md", "soul.md", "map.md",
-)
+ENGINEER_SELF_AUTHORED = ("soul.md", "map.md")
 
 
 def engineer_boundary(
@@ -472,7 +444,7 @@ def engineer_boundary(
             f"write only {', '.join(sorted(ENGINEER_WRITABLE_IN_WORKSPACE))} "
             f"at a workspace root -- what bin/provision renders, plus "
             f"config.md for an approved fleet-wide clause. Souls, "
-            f"`map.md`, `_always.md`, `_active.md`, `_reflection.md`, `crons/`, skills "
+            f"`map.md`, `crons/`, skills "
             f"and memory belong to the agent. Ask the persona who briefed you "
             f"to ask its owner."
         )

@@ -169,7 +169,7 @@ def build(root: Path, agent: str) -> Path:
     ws.mkdir(parents=True)
     (ws / "agent.json").write_text(json.dumps({
         "name": agent, "workspace": str(ws), "vault": str(root / "vault")}))
-    (ws / "_reflection.md").write_text("reflect\n")
+    (ws / "map.md").write_text("reflect\n")
     return ws
 
 
