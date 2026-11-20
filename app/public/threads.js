@@ -34,7 +34,7 @@ import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuot
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
-export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, openBoardFile, address = () => {}, viewAddress = () => {}, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
+export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, openBoardFile, address = () => {}, viewAddress = () => {}, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -109,6 +109,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
           if (st.open?.thread.id === id) {
             generation++; controller?.abort(); clearTimeout(retry)
             Object.assign(st.open, { loading: false, refreshing: false, readFailed: true, connection: '', error: 'This thread was deleted.' })
+            missing(id)
           }
           redraw(); return
         }

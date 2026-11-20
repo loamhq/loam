@@ -201,7 +201,7 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
     return true
   }
   // Expose a panel's save guard before routing can pause this navigation.
-  if (host.state.wide && ['settings', 'activity'].includes(host.state.sheet?.kind)) host.closeSheet()
+  if (navigation && push && ['settings', 'activity'].includes(host.state.sheet?.kind)) host.closeSheet()
   const beside = host.panels?.st.side
   const heldFile = beside?.kind === 'file' && beside.root === root && beside.path === path
   // The file already open in the main panel, opened again from a plugin's
@@ -224,6 +224,10 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
     // The page's own sheet asks; going on from it comes back here, clean.
     files.st.sheet.proceed = proceedThen(() => goFiles(hidden ? 'system' : root, path, { isFile, row, fragment, mode, list, push, routed, boardThread }))
     return false
+  }
+  if (navigation && routed && isFile === false) {
+    host.state.navigator = 'files'
+    if (push && host.state.wide && host.state.collapsed) host.setCollapsed(false)
   }
   host.state.mainItem = isFile !== false && root && path ? { kind: 'file', root, path } : null
   // Browsing a folder starts a Files navigation path of its own. Merely having

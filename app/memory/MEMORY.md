@@ -181,3 +181,9 @@ have never met.
   Plugins (`public/plugin-settings.js`) shows “Off-box backup is off” on the
   list and detail rows when Git backup is off. Turning it on there opens
   access to the plugin's repository setup.
+- **Back from profile files** (2026-11-20). Keep the profile tab on its source
+  history entry. A profile folder also gets its own entry on desktop. Restore
+  the destination modal after document routing during `popstate`; a microtask
+  queued in a capture listener can run before the document router. A confirmed
+  missing main thread replaces its current URL with Chats and keeps any app
+  modal that was open there. See `docs/agent-profiles.md` and `docs/wide-panels.md`.

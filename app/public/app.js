@@ -22,7 +22,7 @@ import { mount as mountSheets } from './page/sheets.js'
 import { mount as mountMarket } from './page/market.js'
 import { menuSurface, createMenuSurfaces } from './menu-surface.js'
 import { backTitle, createMainHistory, historyBackButton, historyShortcut } from './panel-history.js'
-import { createAppModalHistory } from './app-modal-history.js'
+import { createAppModalHistory, modalFromURL, modalURL } from './app-modal-history.js'
 import { settingsRow, agentProse, userBubble, messageFiles, stepFold, emptyConversation, panelHeader, settingsNav, segmentedControl, createMessageState, sheetHandle } from './chat-ui.js'
 import { setAvatarColours } from './sessions.js'
 import { authenticatedFetch as fetch, authExpired, expireAuth, failureSentence } from './auth.js'
@@ -404,6 +404,7 @@ const running = createRunning({ api, redraw: schedule, agents: () => state.agent
 })
 const threads = mountConversation(page, { messageState, dom: panelDOM('main'),
   navigate: (item) => panels.openMain(item),
+  missing: recoverMissingThread,
   side: () => panels,
   viewAddress: (view, { traverse = true } = {}) => {
     const url = new URL(globalThis.location?.href ?? threadHref(threads.st.open.thread.id), 'http://placeholder')
@@ -688,7 +689,7 @@ function goProfile(agent, { push = true } = {}) {
   state.profileTab = 'activity'
   profileActivity.st.kind = ''; profileActivity.st.project = ''
   profileActivity.filter('agent', agent)
-  profiles.load('agent', agent)
+  profiles.load('agent', agent, { tab: push ? undefined : restoredProfileTab(agent) })
   schedules.load(agent)
   schedule()
 }
@@ -973,8 +974,7 @@ function fitViewport() {
 }
 
 
-// Register overlay history before the document router: a modal-only Back must
-// never reach the thread opener and replace its in-memory conversation.
+// Run the history guard and modal-only traversal before the document router.
 const mainHistory = createMainHistory({
   itemAt: url => itemKey(itemFromURL(url)),
   sideKey: () => itemKey(panels.st.side),
@@ -990,9 +990,12 @@ const appModalHistory = createAppModalHistory({ push: mainHistory.push, wide: is
     if (sheet.kind === 'market') { modules.market.openMarket({ kind: sheet.k, q: sheet.q, id: sheet.id }); if (sheet.install) modules.market.openLinkInstall({ link: sheet.install }); return }
     page.openSheet(sheet)
     if (sheet.kind === 'activity') activity.load()
-    if (sheet.detail) modules.settings.goSettingsDetail(sheet.detail.kind, sheet.detail.id)
+    if (sheet.detail) modules.settings.goSettingsDetail(sheet.detail.kind, sheet.detail.id, { tab: restoredProfileTab(sheet.detail.id) })
   } })
 modules.files = mountFiles(page)
+// A cross-document Back routes the document first. Its enter handler closes
+// the old sheet, so restore any sheet in the destination after that handler.
+globalThis.addEventListener?.('popstate', appModalHistory.restore)
 modules.accounts = mountAccounts(page)
 modules.composer = mountComposer(page)
 modules.transcript = mountTranscript(page)
@@ -1048,6 +1051,23 @@ function syncSideAddress(side) {
   const href = withSide(location.href, side)
   if (href !== location.pathname + location.search + location.hash) history.replaceState(history.state, '', href)
 }
+function recoverMissingThread(id) {
+  const url = globalThis.location?.href
+  const modal = url && modalFromURL(url), sheet = state.sheet
+  threads.close({ navigate: false })
+  goHome()
+  if (modal && sheet?.kind === modal.kind) state.sheet = sheet
+  if (!url || threadFromPath(page.herePath()) !== id) return
+  // Repair this entry in place so Forward cannot reopen the dead address.
+  const home = modalURL(new URL('/', url), modal)
+  globalThis.history?.replaceState?.(globalThis.history.state, '', withSide(home, panels.st.side))
+}
+
+function restoredProfileTab(id) {
+  const profile = globalThis.history?.state?.profileReturn
+  return profile?.id === id ? profile.tab : undefined
+}
+
 const panels = createPanels({ main: mainPanel, side: sidePanel, changed: schedule, address: syncSideAddress })
 function backAction(panel) {
   if (panel === 'side') return panels.canSideBack() ? { title: backTitle(), go: () => panels.goSide(-1) } : null
@@ -1064,11 +1084,12 @@ function routePanels(value = globalThis.location?.href) {
   if (!value) return
   const url = new URL(value), item = itemFromURL(value)
   const entry = globalThis.history?.state
+  if (state.wide && entry?.profileReturn?.navigator) state.navigator = entry.profileReturn.navigator
   const at = parseFilesPath(url.pathname)
   if (at && (!state.wide || !item || entry?.folder || !entry?.files)) {
     if (itemKey(item) !== itemKey(mainPanel.item())) mainPanel.clear()
     if (state.wide && !item) state.navigator = 'files'
-    page.goFiles(at.root, at.path, { push: false, isFile: entry?.boardThread ? true : entry?.folder ? false : null, list: listFromURL(value), boardThread: entry?.boardThread })
+    page.goFiles(at.root, at.path, { push: false, routed: entry?.folder === true, isFile: entry?.boardThread ? true : entry?.folder ? false : null, list: listFromURL(value), boardThread: entry?.boardThread })
     return
   }
   if (item) {
@@ -1272,11 +1293,13 @@ loadHealth()
 loadAgentAvailability()
 running.start()
 const landedThread = threadFromPath(page.herePath())
-if (new URL(globalThis.location?.href ?? 'http://placeholder').searchParams.get('threads') === 'fixture') threads.preview()
+const landingURL = new URL(globalThis.location?.href ?? 'http://placeholder')
+const landingItem = itemFromURL(landingURL)
+if (landingURL.searchParams.get('threads') === 'fixture') threads.preview()
 else {
   const listing = threads.load()
   // Use the runtime's starter marker, never a browser-local setup flag. A
-  // finished hello conversation and installations without a starter stay put.
+  // A finished hello stays put, and an explicit address keeps its destination.
   await Promise.all([listing, loadProviders()])
   const hello = threads.st.threads.find(row => row.hello === true)
   if (hello) {
@@ -1285,19 +1308,22 @@ else {
       if (untouchedHello(record)) {
         onboarding.hello = hello.id
         onboarding.needed = !state.providers.some(p => ['claude-code', 'codex', 'antigravity'].includes(p.id) && p.connected)
-        if (!onboarding.needed) await threads.open(hello.id)
+        if (!onboarding.needed && landingURL.pathname === '/' && !landingURL.search && !landingURL.hash) await threads.open(hello.id)
       }
     } catch { /* An unavailable starter leaves ordinary Chats accessible. */ }
   }
-  if (!onboarding.hello && landedThread) {
+  if (landedThread) {
     threads.open(landedThread, { push: false, listing })
-    threads.setView(new URL(globalThis.location?.href ?? 'http://placeholder').searchParams.get('view') ?? (globalThis.history?.state?.board === landedThread ? 'board' : null))
+    threads.setView(landingURL.searchParams.get('view') ?? (globalThis.history?.state?.board === landedThread ? 'board' : null))
   }
-  else if (!onboarding.hello && itemFromURL(globalThis.location?.href ?? page.herePath())?.kind === 'app') { state.navigator = 'apps'; panels.openMain({ ...itemFromURL(location.href), push: false }) }
-  else if (!onboarding.hello && page.herePath() === '/apps') goApps({ push: false })
-  else if (!onboarding.hello && new URL(globalThis.location?.href ?? 'http://placeholder').searchParams.has('screen')) routePanels()
-  else if (!onboarding.hello && page.herePath() === '/panel') panels.openMain({ ...itemFromURL(location.href), push: false })
-  else if (!onboarding.hello) { const session = sessionFromAddress(globalThis.location?.href ?? page.herePath() + (globalThis.location?.search ?? '')) ?? (!parseFilesPath(page.herePath()) ? lastClassicSession : null); if (session) openImportedSession(session) }
+  else if (landingItem?.kind === 'app') { state.navigator = 'apps'; panels.openMain({ ...landingItem, push: false }) }
+  else if (landingURL.pathname === '/apps') goApps({ push: false })
+  else if (landingURL.searchParams.has('screen')) routePanels()
+  else if (landingURL.pathname === '/panel') panels.openMain({ ...landingItem, push: false })
+  else {
+    const session = sessionFromAddress(landingURL) ?? (!onboarding.hello && !parseFilesPath(landingURL.pathname) ? lastClassicSession : null)
+    if (session) openImportedSession(session)
+  }
 }
 onboarding.checking = false
 activity.load()
@@ -1312,9 +1338,9 @@ page.githubReturn()
 // imported thread above before the obsolete storage key is forgotten.
 const landedOn = parseFilesPath(page.herePath())
 if (landedOn) {
-  const boardThread = globalThis.history?.state?.boardThread
+  const { boardThread, folder } = globalThis.history?.state ?? {}
   state.navigator = 'files'
-  page.goFiles(landedOn.root, landedOn.path, { push: false, isFile: boardThread ? true : null, boardThread, list: listFromURL(globalThis.location?.search ?? '') })
+  page.goFiles(landedOn.root, landedOn.path, { push: false, routed: folder === true, isFile: boardThread ? true : folder ? false : null, boardThread, list: listFromURL(globalThis.location?.search ?? '') })
 }
 else render()
 // Initial main routing may finish after the saved side was mounted during

@@ -96,6 +96,8 @@ an entry carrying the current side. Resizing and rail browsing add no entries.
 Reload opens the two items in the address. Browser Back and Forward traverse
 main and carry the currently open side item into the destination URL. Its live
 chat, editor or iframe stays mounted. Modal-only entries preserve both mounts.
+When Back crosses from a document to an entry with Settings or another modal,
+the document routes first, then the modal restores over it.
 Copy-link actions use the item owning that action.
 The former main-app fallback in device storage becomes a one-time upgrade:
 old app/side identities are converted to URLs before the new store format is
@@ -114,6 +116,11 @@ The main button, browser buttons and native back gesture traverse the same
 session history entries. Cmd+[ and Cmd+] on Mac, or Ctrl+[ and Ctrl+] elsewhere,
 traverse the focused panel. Text fields, composers and editors retain their
 shortcuts. An embedded site handles keys within its own document.
+
+A confirmed missing thread falls back to Chats in main and closes an
+unavailable side panel. Main repairs the current history entry, so returning
+through it skips another read of the missing thread. This keeps an open Settings
+profile accessible even when the thread underneath it has been deleted.
 
 Opening a side item starts a trail for that pane. Side navigation replaces
 only its descriptor in the address. Closing side ends the trail. A new

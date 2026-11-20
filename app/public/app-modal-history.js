@@ -78,7 +78,6 @@ export function createAppModalHistory({ wide, push, sheet, restore, close, chang
     if (sameDocument && modalNavigation) { event.stopImmediatePropagation(); apply(); changed() }
     else {
       if (modalNavigation) close()
-      if (nextModal) queueMicrotask(apply)
       base = baseURL(win.location.href).href
     }
   }, true)

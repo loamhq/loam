@@ -89,6 +89,7 @@ export function mountSidePanel(base) {
   own.threads = mountConversation(host, {
     messageState, dom: own.root, sidePanel: true, side: () => base.panels,
     navigate: item => base.panels.openSide(item), address: () => {}, visible: () => base.panels.visible(),
+    missing: () => base.panels.close(),
     enter: item => { state.mainItem = item; host.files.closeFile(); state.screen = 'threads'; state.sheet = null; base.schedule() },
     leave: () => base.panels.close(),
   })

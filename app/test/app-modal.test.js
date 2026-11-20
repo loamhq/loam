@@ -98,5 +98,5 @@ test('Settings profile detail scopes Recent to its agent or engineer, including 
   assert.equal(host.engineerActivity.st.project, null)
   assert.equal(host.engineerActivity.st.kind, '')
   assert.equal(host.engineerActivity.st.agent, 'test-agent')
-  assert.deepEqual(loads, [['engineer', 'Notebook'], ['agent', 'test-agent']])
+  assert.deepEqual(loads, [['engineer', 'Notebook', undefined], ['agent', 'test-agent', undefined]])
 })
