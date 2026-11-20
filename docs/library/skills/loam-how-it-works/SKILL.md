@@ -48,7 +48,17 @@ the Loam release.
 thread's record into the vault as it happens (never edit one). A message
 that tags nobody goes to the thread's default agent; `@Name` gives that
 agent a turn. Each thread has a board, a Markdown file of items for the
-owner in the vault's inbox. The session host runs the provider and records its
+owner in the vault's inbox. Open **Board** in the thread header. In **Cards**,
+tap a note to edit its words, or use **Add an idea…** under a section heading.
+New cards show their date and author. Drag a card to reorder it (hold first
+on touch), or open its menu to move it, set an expiry or delete it. **Doc**
+opens the same file as one document. Both views preserve the file's metadata.
+If an agent edits the board during a save, the app keeps the draft and shows
+the latest board with a button to reapply the edit. The phone and desktop
+remember their views separately in `appearance.phone.board_view` and
+`appearance.desktop.board_view`.
+
+The session host runs the provider and records its
 output as it arrives. The thread worker turns that output into the reply the
 app shows. Before sending a turn, the worker saves the input, the bound
 session and where to read its output. A returning worker can use that

@@ -23,10 +23,13 @@ module usable by bin/thread without the broker's environment.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import re
 import secrets
+import stat
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -1368,18 +1371,55 @@ def unread(thread_id: str, msgs: list[dict]) -> int:
 
 def board_text(meta: dict, create_missing: bool = True) -> str:
     path = VAULT / meta["board"]
-    if not path.exists():
+    try:
+        return path.read_bytes().decode("utf-8")
+    except FileNotFoundError:
         if not create_missing:
             return ""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _write_atomic(path, f"# {meta['title']} — board\n\n")
-    return path.read_text("utf-8")
+        with locked(path):
+            if not path.exists():
+                _write_atomic(path, f"# {meta['title']} — board\n\n")
+            return path.read_bytes().decode("utf-8")
 
 
-def write_board(meta: dict, markdown: str) -> None:
-    if not isinstance(markdown, str):
-        raise ThreadError(400, "`markdown` is a string")
-    _write_atomic(VAULT / meta["board"], markdown)
+def _board_revision(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def board_snapshot(meta: dict, markdown: str | None = None) -> dict:
+    if markdown is None:
+        markdown = board_text(meta)
+    return {"path": meta["board"], "markdown": markdown,
+            "revision": _board_revision(markdown.encode("utf-8"))}
+
+
+def write_board(meta: dict, markdown: str, revision: str) -> dict:
+    if not isinstance(markdown, str) or not isinstance(revision, str) or not revision:
+        raise ThreadError(400, "A board save needs markdown and its base revision")
+    path = VAULT / meta["board"]
+    with locked(path):
+        try:
+            mode = stat.S_IMODE(path.stat().st_mode)
+        except FileNotFoundError:
+            raise ThreadError(409, "The board moved or was removed") from None
+        # File tools need not take the runtime lock. Stage the replacement
+        # first so the revision check sits immediately beside the rename.
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.",
+                                         delete=False) as handle:
+            tmp = Path(handle.name)
+        try:
+            tmp.write_bytes(markdown.encode("utf-8"))
+            tmp.chmod(mode)
+            try:
+                current = path.read_bytes()
+            except FileNotFoundError:
+                raise ThreadError(409, "The board moved or was removed") from None
+            if _board_revision(current) != revision:
+                raise ThreadError(409, "The board changed since you opened it")
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+        return board_snapshot(meta, markdown)
 
 
 def item_meta(line: str) -> list[str]:

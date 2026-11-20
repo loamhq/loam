@@ -275,10 +275,11 @@ async def main():
 
     # Board: PUT whole, swept by until.
     status, board = await call(server, "PUT", f"/v1/threads/{tid}/board",
-                               {"markdown": "# b\n\n- [ ] keep\n"
+                               {"base_revision": got["board"]["revision"],
+                                "markdown": "# b\n\n- [ ] keep\n"
                                             "- [ ] old <!-- Iris · new · until 2026-11-07 -->\n"
                                             "  - child of old\n"})
-    check("PUT board counts the new item", board["board_new"], 1)
+    check("PUT board counts the new item", (status, board["board_new"]), (200, 1))
     out = subprocess.run([sys.executable, str(AGENTS / "bin" / "sweep-boards"),
                           "--today", "2026-11-08"], capture_output=True, text=True,
                          env=os.environ)

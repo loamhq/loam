@@ -25,7 +25,7 @@ try {
       await page.locator('.tt-board-item').first().waitFor()
       await page.waitForFunction((scale) => document.documentElement.style.getPropertyValue('--ui-scale') === String(scale), size / 100)
       await page.evaluate(async () => { await document.fonts.ready; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame) })
-      const box = await page.getByRole('button', { name: 'Drag Gather the loose ends', exact: true }).boundingBox()
+      const box = await page.locator('.tt-item-copy').filter({ hasText: 'Gather the loose ends' }).boundingBox()
       const target = await page.locator('[data-board-section="heading:Someday:0"] .tt-board-list-end').boundingBox()
       const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 }, end = { x: target.x + target.width / 2, y: target.y + 2 }
       let touch

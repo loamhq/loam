@@ -1,3 +1,4 @@
+import { fileEditor } from '../file-editor.js'
 import { createFiles, listFromURL, renamedResource, uploadAccept, FILES_LOCATION_HIDDEN, filesHref, vaultUrlRef, missingSentence, resolveOf, isFolder, externalHref, parseFilesPath, downloadHref, nameOf as fileNameOf, formatText, drawnTypeOf, bytesAre, folderView, fileView, ROOT_LOOK } from "../files.js"
 import { h, kept, icon } from "../ui.js"
 import { setFileLinks, setVaultUrls } from "../markdown.js"
@@ -106,19 +107,10 @@ function chooseUpload() {
 // the person put it. Its value is set only when a different file is opened.
 // It saves itself after a pause in typing (`files.edit()`), when the caret
 // leaves it, and at once on Cmd/Ctrl-S.
-const fileField = h('textarea', {
-  class: 'fs-field',
-  spellcheck: 'true',
-  oninput: () => files.edit(fileField.value),
-  onblur: () => {
-    if (files.dirty() && !host.fieldActivity('file')) files.save()
-  },
-  onkeydown: (e) => {
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
-      e.preventDefault?.()
-      files.save()
-    }
-  },
+const fileField = fileEditor({
+  edit: text => files.edit(text),
+  save: () => files.save(),
+  blur: () => { if (files.dirty() && !host.fieldActivity('file')) files.save() },
 })
 
 fileField.__for = null

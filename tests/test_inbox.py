@@ -137,10 +137,14 @@ try:
         .replace("## Other\n", "## Other\n\n- a hand-written line with no date\n"),
         encoding="utf-8",
     )
+    with comms.open("ab") as handle:
+        handle.write(f"- {old} · review <!-- Ada · until {today} -->\r\n".encode())
     dropped = sweep.sweep_comms(comms, timedelta(days=14), today, False)
     after = comms.read_text(encoding="utf-8")
 
     check("comms: 15-day line dropped", "fifteen days" not in after)
+    check("comms: explicit expiry and original newline survive the legacy sweep",
+          f"- {old} · review <!-- Ada · until {today} -->\r\n".encode() in comms.read_bytes())
     check("comms: 13-day line survives", "thirteen days" in after)
     check("comms: undated line untouched", "a hand-written line with no date" in after)
     check("comms: all three headings stand, empty or not",

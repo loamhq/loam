@@ -1,3 +1,6 @@
+import { boardFilesEditor } from './board-files-editor.js'
+import { docText, applyDocText, cardText, applyCardText, setBoardExpiry, recoverBoard } from './board-document.js'
+import { fileEditor } from './file-editor.js'
 import { threadOutbox } from './thread-outbox.js'
 import { createAgentDrafts } from './agent-drafts.js'
 import { owner, isOwner } from './owner.js'
@@ -14,7 +17,7 @@ import { canReply, quoteLine, replyQuotes, replyGesture } from './thread-replies
 import { OPENING_MESSAGES, HISTORY_MESSAGES, openingContext, readingAnchor, restoreAnchor, mergeHistory, progressiveProse } from './thread-opening.js'
 import { follower } from './follow.js'
 import { layoutPixels } from './scale.js'
-import { modelPill, settingsRow, listHeading, personaGrid, rowTop, chatHeader, chatFrame, chatDock, agentProse, userBubble, messageFiles, replyImages, stepFold, thinkingLine, emptyConversation, panelHeader, composerHint, settingsNav, selectionMark, createMessageState, sheetHandle } from './chat-ui.js'
+import { modelPill, settingsRow, listHeading, personaGrid, rowTop, chatHeader, chatFrame, chatDock, agentProse, userBubble, messageFiles, replyImages, stepFold, thinkingLine, emptyConversation, panelHeader, segmentedControl, composerHint, settingsNav, selectionMark, createMessageState, sheetHandle } from './chat-ui.js'
 import { sendHint, isMac } from './keys.js'
 import { authenticatedFetch as fetch, authExpired, failureSentence } from './auth.js'
 import { createPermissionCards } from './permission-cards.js'
@@ -33,7 +36,7 @@ import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuot
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
-export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
+export function createThreads({ registry = createCoreRegistry(), appearance = null, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -76,8 +79,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   let awaitTimer = null, awaitDue = Infinity
   let returnTimer = null
   function clearReturn() { clearTimeout(returnTimer); returnTimer = null; st.returning = null }
-  let boardHintTimer = null
-  function clearBoardHint() { clearTimeout(boardHintTimer); boardHintTimer = null; if (st.open) st.open.boardHint = false }
+  let boardView = 'cards'
+  try { if (localStorage.getItem('loam.board.view') === 'doc') boardView = 'doc' } catch {}
   const awaitingSince = new Map()
   const visits = new Map()
   let transferred = null
@@ -159,7 +162,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (st.mention && e.target === compose.field() && !e.relatedTarget?.closest?.('.tt-mentions, .tt-mention-button')) { st.mention = null; redraw() }
   })
   document.addEventListener?.('selectionchange', () => { if (st.open && document.activeElement === compose.field()) leanFaces() })
-  const quick = h('input', { class: 'tt-quick', placeholder: 'Add an item…', 'aria-label': 'Add to the board', onkeydown: (e) => {
+  const quick = h('input', { class: 'tt-quick', placeholder: 'Add an idea…', 'aria-label': 'Add to the board', onkeydown: (e) => {
     if (e.isComposing) return
     if (e.key === 'Enter') { e.preventDefault(); addItem() }
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeQuick(true) }
@@ -175,11 +178,55 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     const o = st.open
     if (o?.boardMenu != null && !e.target.closest?.('.tt-item-actions')) { o.boardMenu = null; redraw() }
   })
-  const editor = h('textarea', { class: 'tt-board-editor', 'aria-label': 'Board markdown', spellcheck: 'false', oninput: () => {
-    if (!st.open) return
-    st.open.editText = st.open.editBase?.includes('\r\n') ? editor.value.replace(/\r?\n/g, '\r\n') : editor.value
+  function rememberBoard(o, record) {
+    const id = o.thread.id
+    if (record) st.boardDrafts.set(id, record)
+    else st.boardDrafts.delete(id)
+    try {
+      if (record) sessionStorage.setItem('loam.board.draft.' + id, JSON.stringify(record))
+      else sessionStorage.removeItem('loam.board.draft.' + id)
+    } catch {}
+  }
+  function storedBoard(id) {
+    try { return st.boardDrafts.get(id) ?? JSON.parse(sessionStorage.getItem('loam.board.draft.' + id)) } catch { return st.boardDrafts.get(id) }
+  }
+  const writeBoard = async (o, text, revision) => readThreadBoard(await transport('PUT', `${path(o.thread.id)}/board`, { markdown: text, base_revision: revision }))
+  const richDoc = boardFilesEditor({
+    registry, redraw, openRef, write: writeBoard,
+    draft: (o, base, text) => rememberBoard(o, text === base ? null : { base, text }),
+    conflict: async (o, base, text, error) => {
+      o.recovery = { base, text }; rememberBoard(o, o.recovery)
+      o.boardError = error.status === 409 ? '' : error.message
+      if (st.open === o) await refreshBoard(o)
+    },
+  })
+  function inputBoard(value) {
+    const o = st.open
+    if (!o?.editing) return
+    o.editText = o.inlineIndex == null ? applyDocText(o.editText, value, o.board.path) : applyCardText(o.editText, o.inlineIndex, value)
+    rememberBoard(o, o.editText === o.editBase ? null : { base: o.editBase, text: o.editText })
+  }
+  function finishBoardEdit() {
+    const o = st.open
+    if (!o?.editing || o.boardBusy) return
+    if (o.editText !== o.editBase) return saveBoard(o.editText)
+    o.editing = false; o.inlineIndex = null
+    if (o.boardChanged) { o.boardChanged = false; refreshBoard(o) }
     redraw()
-  } })
+  }
+  const editor = fileEditor({ edit: inputBoard, save: finishBoardEdit, blur: finishBoardEdit, label: 'Edit board document' })
+  const inlineField = h('textarea', { class: 'tt-inline-field', rows: '1', 'aria-label': 'Edit item',
+    oninput: () => inputBoard(inlineField.value), onblur: finishBoardEdit,
+    onkeydown: e => {
+      if (!e.isComposing && e.key === 'Enter') { e.preventDefault(); finishBoardEdit() }
+    } })
+  function beginBoardEdit(o, line = null) {
+    if (o.editing || o.boardBusy || o.boardRefreshing || !o.board.revision || o.recovery) return
+    o.editing = true; o.editBase = o.board.markdown; o.editText = o.editBase; o.inlineIndex = line?.index
+    if (line) inlineField.value = cardText(line.text)
+    else editor.value = docText(o.editBase)
+    o.focusEditor = true; o.boardMenu = null; redraw()
+  }
   const title = h('input', { class: 'tt-rename', 'aria-label': 'Thread title', onblur: () => finishRename(), onkeydown: (e) => {
     if (e.key === 'Escape') { e.preventDefault(); st.open.renaming = false; st.open.focusRename = false; redraw() }
     if (e.key === 'Enter') { e.preventDefault(); finishRename() }
@@ -310,10 +357,10 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     leave(); load()
   }
   function close({ navigate = true } = {}) {
+    richDoc.leave()
     st.personaMenu = null
     if (st.open) st.open.branch = null
     gesture.reset()
-    clearBoardHint()
     const pane = dom.querySelector?.('.tt-stream')
     authors.disconnect()
     clearTimeout(awaitTimer); awaitTimer = null; awaitingSince.clear()
@@ -358,7 +405,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   function unsentHere(o) {
     return Boolean(o?.madeHere && !o.creating && !o.createFailed && !o.sending && !o.readFailed && !pendingRows(o).length
       && !o.messages.some((m) => m.kind !== 'system') && !draft.value.trim() && !compose.files().length
-      && !String(o.board?.markdown ?? '').trim() && !(o.editing && String(o.editText ?? '').trim()))
+      && !o.recovery && !o.boardBusy && !storedBoard(o.thread.id)
+      && (!String(o.board?.markdown ?? '').trim() || o.board.markdown === `# ${o.thread.title} — board\n\n`) && !(o.editing && String(o.editText ?? '').trim()))
   }
   function dropUnsent(id) {
     st.threads = st.threads.filter((t) => t.id !== id); listingRequest++
@@ -435,11 +483,10 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       updateOpening(o)
       if (st.open.latestSummary) { st.open.thread = st.open.latestSummary; delete st.open.latestSummary }
       applyThreadEvent(o, { type: 'thread.snapshot', turns: threadTurns(body) })
-      const saved = st.boardDrafts.get(id)
-      if (saved) {
-        Object.assign(st.open, { editing: true, boardOpen: true, editText: saved.text, editBase: saved.base, boardChanged: saved.base !== body.board.markdown })
-        editor.value = saved.text
-      }
+      const saved = storedBoard(id)
+      if (saved && saved.text !== body.board.markdown) {
+        o.recovery = saved; o.boardOpen = true
+      } else if (saved) rememberBoard(o, null)
       for (const p of body.pending_permissions ?? []) applyThreadEvent(st.open, { ...p, type: 'broker.permission_request' })
       // The broker replays completions after this ID, including a reply that
       // arrived between the page read and stream attachment.
@@ -570,7 +617,10 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     o.boardRefreshing = true; redraw()
     try {
       const body = readThreadBoard(await transport('GET', `${path(o.thread.id)}/board`))
-      if (st.open === o && !o.editing && !o.boardBusy) { o.board = body; o.boardUnavailable = false }
+      if (st.open === o && !o.editing && !o.boardBusy) {
+        if (body.revision !== o.board.revision) o.boardMenu = null
+        o.board = body; o.boardUnavailable = false
+      }
     } catch (e) { o.boardError = e.message; o.boardUnavailable = true }
     finally {
       o.boardRefreshing = false
@@ -685,6 +735,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       if (ticket !== generation) { transport('DELETE', path(thread.id)).catch(() => {}).finally(() => refreshList()); return }
       o.thread = thread; o.board.path = thread.board ?? ''; o.creating = false; o.madeHere = true; o.ordered_submissions = thread.ordered_submissions
       attachReplySteps(o)
+      o.needsInitialBoard = true
       attachProse(o); if (!st.fixture) address(thread.id)
       attachQuotes(o)
       st.threads = [thread, ...st.threads.filter((t) => t.id !== thread.id)]
@@ -815,22 +866,26 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   async function saveBoard(text, after = null) {
     const o = st.open
     if (!o || o.loading || o.refreshing || o.readFailed || o.creating || o.createFailed || o.boardBusy || o.boardRefreshing || o.boardUnavailable) return
+    if (!o.board.revision) return
+    const base = o.board.markdown
+    const pending = { base, text }
+    rememberBoard(o, pending)
     o.boardBusy = true; o.boardError = ''; redraw()
     try {
-      const answer = readThreadBoard(await transport('PUT', `${path(o.thread.id)}/board`, { markdown: text }))
-      if (st.open === o || st.boardDrafts.get(o.thread.id)?.text === text) st.boardDrafts.delete(o.thread.id)
+      const answer = await writeBoard(o, text, o.board.revision)
+      if (storedBoard(o.thread.id)?.text === text) rememberBoard(o, null)
       if (st.open !== o) return
-      o.board = answer
-      o.editing = false; o.boardChanged = false; after?.(); refreshList()
+      o.board = answer; o.recovery = null; o.editing = false; o.inlineIndex = null
+      o.boardChanged = false; (after ?? o.recoveredAction)?.(); o.recoveredAction = null; refreshList()
     } catch (e) {
-      o.boardError = e.message
-      if (e.status === 409) { if (o.editing) o.boardChanged = true; else o.boardRefreshAfter = true }
+      o.recovery = pending; o.recoveredAction = after ?? o.recoveredAction; o.editing = false; o.inlineIndex = null
+      o.boardError = e.status === 409 ? '' : e.message
+      o.boardRefreshAfter = true
     } finally {
       o.boardBusy = false
-      if (o.boardRefreshAfter) {
-        o.boardRefreshAfter = false
-        if (o.editing) o.boardChanged = true
-        else if (st.open === o) refreshBoard(o)
+      if (o.boardRefreshAfter && st.open === o) {
+        o.boardRefreshAfter = false; o.boardChanged = false
+        await refreshBoard(o)
       }
       redraw()
     }
@@ -1568,63 +1623,115 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   }
   function board() {
     const o = st.open
-    if (!o.boardOpen) return null
-    const lines = boardLines(o.board.markdown), sections = boardSections(o.board.markdown), count = lines.filter((l) => l.unseen).length
-    const closeBoard = () => { drag.cancel(); o.boardOpen = false; o.focusChat = true; redraw() }
-    const changed = o.editText !== o.editBase
-    const leaveEdit = () => { o.editing = false; st.boardDrafts.delete(o.thread.id); o.focusBoardEdit = true; if (o.boardChanged) { o.boardChanged = false; refreshBoard(o) }; redraw() }
-    const cancelEdit = () => { if (o.editText === o.editBase || globalThis.confirm('Discard changes?')) leaveEdit() }
-    const doneEdit = () => { if (o.editText !== o.editBase) saveBoard(o.editText, () => { o.focusBoardEdit = true }); else leaveEdit() }
-    const busy = o.boardBusy || o.boardRefreshing
+    if (!o.boardOpen) { richDoc.leave(); return null }
+    const lines = boardLines(o.board.markdown), all = boardSections(o.board.markdown)
+    const sections = all.filter(s => s.key !== 'top' || all.length === 1 || s.blocks.some(b => b.item || b.text.trim()))
+    const count = lines.filter(l => l.unseen).length
+    const closeBoard = () => { finishBoardEdit(); drag.cancel(); o.boardOpen = false; o.focusChat = true; redraw() }
+    const busy = o.boardBusy || o.boardRefreshing || !o.board.revision || Boolean(o.recovery)
+    const closeMenu = () => { o.boardMenu = null; o.menuPage = null; redraw() }
+    const chooseView = view => {
+      if (o.editing) finishBoardEdit()
+      boardView = view; if (!st.fixture) appearance?.set({ board_view: view }); closeMenu(); drag.cancel()
+      try { localStorage.setItem('loam.board.view', view) } catch {}
+      redraw()
+    }
+    const dateLabel = day => formatCalendarDate(day, { month: 'short', day: 'numeric' })
     const taskCheck = (line) => {
       const checked = o.pendingTick?.index === line.index ? o.pendingTick.checked : line.checked
       return h('label', { class: 'tt-tick' }, h('input', { type: 'checkbox', checked, disabled: busy, 'aria-label': `Complete ${line.text}`, onchange: () => tickItem(line) }), selectionMark({ chosen: checked }))
     }
-    const item = (l) => h('div', { class: `tt-board-item${l.unseen ? ' is-new' : ''}${l.checked ? ' done' : ''}${o.removing === l.index ? ' removing' : ''}`, key: l.key, 'data-board-index': l.index, onpointerdown: (e) => {
-      if (!busy && e.pointerType === 'mouse' && !e.target.closest('button, input, label, a')) drag.start(e, l.index, o.board.markdown)
-    } },
-      button(icon.grip(14), (e) => { if (e.detail === 0) { o.boardMenu = l.index; o.moveChoices = true; o.focusBoardMenu = true; redraw() } }, { class: 'tt-grip content-mark', 'aria-label': `Drag ${l.text}`, title: 'Drag to move · hold on touch', 'aria-description': 'Hold then drag on touch, or press Enter to choose a list.', disabled: busy, onpointerdown: (e) => { if (!busy) drag.start(e, l.index, o.board.markdown) } }),
-      l.checked !== null ? taskCheck(l) : null,
-      h('div', { class: 'tt-item-body' },
-        h('div', { class: 'tt-item-copy' }, h('div', { class: 'md' }, ...renderText(l.text))),
-        l.unseen || l.until ? h('div', { class: 'tt-item-meta' },
-          l.unseen ? button(`new${l.author ? ` · ${name(l.author)}` : ''}`, () => saveBoard(editBoard(o.board.markdown, l.index, 'seen')), { class: 'quietlink tt-newtag content-mark', disabled: busy, 'aria-label': `Mark ${l.text} seen` }) : null,
-          l.until ? h('span', { class: 'tt-until', text: `${l.unseen ? '· ' : ''}until ${formatCalendarDate(l.until, { month: 'short', day: 'numeric' })}${!l.unseen && l.author ? ` · ${name(l.author)}` : ''}` }) : null) : null),
-      h('div', { class: 'tt-item-actions' }, round(`Actions for ${l.text}`, icon.dots(16), (e) => { o.boardMenu = o.boardMenu === l.index ? null : l.index; o.moveChoices = false; o.focusBoardMenu = true; redraw() }, { class: 'iconbtn content-mark', disabled: busy, 'aria-expanded': String(o.boardMenu === l.index) }),
-        o.boardMenu === l.index ? menuSurface(h('div', { class: 'tt-item-menu', role: 'group', 'aria-label': `Actions for ${l.text}`, onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); o.boardMenu = null; o.focusBoardItem = l.index; redraw() } } },
-          !o.moveChoices ? button('Move to…', () => { o.moveChoices = true; o.focusBoardMenu = true; redraw() }, { class: 'pillbtn content-mark' }) : h('div', { class: 'tt-move-choices' }, h('span', { class: 'tt-menu-label', text: 'Move to' }), ...sections.filter((s) => s.key !== 'top' || sections.length === 1 || s.lines.some((l) => l.item)).map((s) => button(boardListName(s), () => moveItem(l.index, s.key), { class: 'pillbtn content-mark' }))),
-          button('Remove item', () => { o.boardMenu = null; removeItem(l.index) }, { class: 'pillbtn content-mark tt-danger' })), { title: o.moveChoices ? 'Move item to' : 'Board item', width: 300, close: () => { o.boardMenu = null; redraw() } }) : null))
+    const item = (l) => {
+      const editing = o.editing && o.inlineIndex === l.index
+      const mine = l.author && (isOwner(l.author) || l.author.toLocaleLowerCase() === owner().name.toLocaleLowerCase())
+      const meta = [l.date && dateLabel(l.date), l.author && (mine ? 'You' : name(l.author)), l.until && 'expires ' + dateLabel(l.until)].filter(Boolean)
+      const edit = () => { if (!busy) beginBoardEdit(o, l) }
+      const setExpiry = day => { closeMenu(); saveBoard(setBoardExpiry(o.board.markdown, l.index, day)) }
+      return h('div', { class: `tt-board-item${l.unseen ? ' is-new' : ''}${l.checked ? ' done' : ''}${editing ? ' is-editing' : ''}${o.removing === l.index ? ' removing' : ''}`, key: l.key,
+        'data-board-index': l.index, onpointerdown: e => {
+          if (!busy && !o.editing && !e.target.closest('button,input,label,a,textarea')) drag.start(e, l.index, o.board.markdown)
+        } },
+        l.checked !== null ? taskCheck(l) : null,
+        h('div', { class: 'tt-item-body' },
+          editing ? kept(inlineField) : h('div', { class: 'tt-item-copy', tabindex: '0', role: 'group', 'aria-label': 'Edit ' + cardText(l.text),
+            onclick: e => { if (!e.target.closest('a,button')) edit() },
+            onkeydown: e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); edit() } } }, h('div', { class: 'md' }, ...renderText(l.text, { from: { root: 'vault', path: o.board.path } }))),
+          h('div', { class: `tt-item-meta${mine ? ' is-owner' : ''}` }, meta.join(' · '),
+            l.unseen ? button('New', () => saveBoard(editBoard(o.board.markdown, l.index, 'seen')), { class: 'quietlink tt-newtag', disabled: busy, 'aria-label': `Mark ${l.text} seen` }) : null)),
+        h('div', { class: 'tt-item-actions' }, round(`Actions for ${l.text}`, icon.dots(16), () => {
+          o.boardMenu = o.boardMenu === l.index ? null : l.index; o.menuPage = null; redraw()
+        }, { class: 'iconbtn content-mark', disabled: busy, 'aria-expanded': String(o.boardMenu === l.index) }),
+        o.boardMenu === l.index ? menuSurface(h('div', { class: 'tt-item-menu' },
+          o.menuPage === 'move' ? sections.map(s => button(boardListName(s), () => moveItem(l.index, s.key), { class: 'pillbtn content-mark' })) :
+          o.menuPage === 'expiry' ? h('label', { class: 'tt-expiry' }, 'Expires on', h('input', { type: 'date', value: l.until, onchange: e => setExpiry(e.target.value) })) :
+          [button(l.until ? 'Change expiry' : 'Set expiry', () => { o.menuPage = 'expiry'; redraw() }),
+            l.until ? button('Clear expiry', () => setExpiry('')) : null,
+            button('Move to…', () => { o.menuPage = 'move'; redraw() }),
+            button('Delete item', () => { closeMenu(); removeItem(l.index) }, { class: 'pillbtn tt-danger' })]),
+          { title: o.menuPage === 'move' ? 'Move to section' : o.menuPage === 'expiry' ? 'Set expiry' : 'Item actions', width: 280, close: closeMenu }) : null))
+    }
     const quickForm = () => h('form', { class: 'tt-board-add', key: 'board-add', onsubmit: (e) => { e.preventDefault(); addItem() }, onfocusout: (e) => {
       if (!e.currentTarget.contains(e.relatedTarget)) closeQuick()
     } }, kept(quick), h('div', { class: 'tt-board-add-foot' },
       h('div', { class: 'tt-durations', role: 'group', 'aria-label': 'Keep board item for' }, ...[[0, 'Stays'], [1, '1 day'], [7, '1 week'], [14, '2 weeks']].map(([n, label]) => button(label, () => { o.duration = n; o.focusQuick = true; redraw() }, { class: 'pillbtn content-mark', 'aria-pressed': String(Number(o.duration ?? 0) === n) }))), button('Add', addItem, { class: 'pillbtn content-mark', disabled: busy })))
-    const listEnd = (section) => h('div', { class: 'tt-board-list-foot', key: `add:${section.key}` }, h('div', { class: 'tt-board-list-end', 'aria-hidden': 'true' }),
-      o.addSection === section.key ? quickForm() : button([icon.plus(14), 'Add'], () => {
+    const listEnd = (section) => h('div', { class: 'tt-board-list-foot', key: `add:${section.key}` },
+      o.addSection === section.key ? quickForm() : button([icon.plus(15), 'Add an idea…'], () => {
         quick.setAttribute('aria-label', `New item in ${boardListName(section)}`); o.addSection = section.key; o.focusQuick = true; o.boardMenu = null; redraw()
-      }, { class: 'quietlink tt-list-add content-mark', disabled: busy, 'aria-label': `Add to ${boardListName(section)}`, 'data-add-section': section.key, 'aria-expanded': 'false' }))
+      }, { class: 'tt-list-add', disabled: busy, 'aria-label': `Add to ${boardListName(section)}`, 'data-add-section': section.key, 'aria-expanded': 'false' }))
     if (o.loading || o.refreshing || o.readFailed || o.boardUnavailable) return h('aside', { class: 'tt-board', 'aria-label': 'Thread board', onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeBoard() } } },
       panelHeader({ title: 'Board', actions: [round('Close board', icon.close(14), closeBoard)], props: { class: 'chat-head plain tt-board-head' } }),
       h('div', { class: 'tt-empty', role: 'status' }, o.loading || o.refreshing ? 'Opening your board…' : 'The board could not be loaded.',
         o.boardError ? h('p', { role: 'alert', text: o.boardError }) : null,
         o.readFailed || o.boardUnavailable ? button('Try again', () => open(o.thread.id)) : null))
-    return h('aside', { class: 'tt-board', 'aria-label': 'Thread board', onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); if (o.editing) { if (!busy) cancelEdit() } else closeBoard() } } },
-      panelHeader({ title: 'Board', actions: o.editing ? [changed ? button('Cancel', cancelEdit, { class: 'quietlink content-mark', key: 'board-cancel', disabled: busy }) : null, button(o.boardBusy ? 'Saving…' : 'Done', doneEdit, { class: 'pillbtn primary', key: 'board-done', disabled: busy || (changed && o.boardChanged) })] : [round('Edit board', icon.pencil(16), () => {
-        drag.cancel(); o.addSection = null; o.boardMenu = null; o.editing = true; editor.value = o.board.markdown; o.editText = o.board.markdown; o.editBase = o.board.markdown; o.focusEditor = true; redraw()
-      }, { disabled: busy }), round('Close board', icon.close(14), closeBoard)], props: { class: 'chat-head plain tt-board-head' } }),
-      !o.editing ? h('div', { class: `tt-seen-strip${count ? '' : ' cleared'}`, 'aria-live': 'polite' }, h('span', { class: 'tt-seen-count', text: count ? `${count} new from the agents` : 'All caught up' }), button('Mark seen', () => saveBoard(markBoardSeen(o.board.markdown)), { class: 'quietlink tt-mark-seen content-mark', disabled: busy || !count })) : null,
-      !o.editing && o.boardHint ? h('p', { class: 'tt-board-hint', role: 'note', text: st.wide ? 'Drag an item to move it between lists.' : 'Hold a grip, then drag to move an item.' }) : null,
+    const recovery = o.recovery && recoverBoard(o.recovery.base, o.recovery.text, o.board.markdown)
+    if (!st.fixture && !o.editing && appearance?.value.board_view) boardView = appearance.value.board_view
+    const doc = boardView === 'doc'
+    const rich = doc && !o.editing && !o.recovery && o.board.revision ? richDoc.mount(o) : undefined
+    if (!doc || o.recovery) richDoc.leave()
+    editor.readOnly = inlineField.readOnly = Boolean(o.boardBusy)
+    o.collapsed ??= new Set()
+    const sectionView = section => {
+      const items = section.lines.filter(l => l.item).length, closed = o.collapsed.has(section.key)
+      const toggle = () => { if (closed) o.collapsed.delete(section.key); else o.collapsed.add(section.key); redraw() }
+      return h('section', { class: 'tt-board-list', key: section.key, 'data-board-section': section.key, 'aria-label': boardListName(section) },
+        section.key === 'top' && !items ? null : h('h3', { class: 'tt-board-list-head' }, button([
+          h('span', { class: 'tt-board-list-title', text: boardListName(section) }),
+          h('span', { class: 'tt-board-list-count', text: String(items) }), closed ? icon.chevronRight(12) : icon.chevronDown(12)],
+          toggle, { class: 'tt-section-toggle', 'aria-expanded': String(!closed) })),
+        closed ? null : [listEnd(section), section.blocks.map(l => l.item ? item(l) : l.text.trim() ?
+          h('details', { class: 'tt-description', key: l.key, open: !o.closedDescriptions?.has(section.key),
+            ontoggle: e => {
+              o.closedDescriptions ??= new Set()
+              if (e.currentTarget.open) o.closedDescriptions.delete(section.key)
+              else o.closedDescriptions.add(section.key)
+            } }, h('summary', { text: 'Description' }),
+            h('div', { class: 'md' }, ...renderText(reflowBoardQuotes(l.text)))) : null), h('div', { class: 'tt-board-list-end' })])
+    }
+    return h('aside', { class: 'tt-board', 'aria-label': 'Thread board', onkeydown: e => {
+      if (e.key === 'Escape') { e.stopPropagation(); if (o.boardMenu != null) closeMenu(); else closeBoard() }
+    } },
+      panelHeader({ title: 'Board', actions: [segmentedControl({ label: 'Board view', value: boardView, choose: chooseView,
+        options: [{ id: 'cards', label: 'Cards' }, { id: 'doc', label: 'Doc' }] }),
+        round('Close board', icon.close(16), closeBoard)], props: { class: 'chat-head plain tt-board-head' } }),
       h('span', { class: 'sr-only tt-board-status', role: 'status', text: o.boardNotice ?? '' }),
       o.boardError ? h('div', { class: 'banner', role: 'alert', text: o.boardError }) : null,
-      o.boardChanged ? h('div', { class: 'banner' }, 'The board changed while you were editing. Copy your changes, then cancel to load the latest version.', button(o.copied ? 'Copied' : 'Copy draft', async () => { o.copied = await copyText(o.editText); redraw() })) : null,
-      o.editing ? h('div', { class: 'tt-board-edit' }, h('code', { class: 'tt-board-path', text: o.board.path }), kept(editor)) :
-        h('div', { class: 'tt-board-items' }, !lines.some((l) => l.item) && !o.board.markdown.replace(/^#+.*$/gm, '').trim() ? emptyState({ object: 'page', size: 'small', level: 'h3', title: 'Nothing on this board yet', body: 'A short list for this thread. You and the agents can edit it.', bodyClass: 'tt-board-caption', props: { key: 'board-empty' } }) : null,
-          ...sections.map((section) => h('section', { class: 'tt-board-list', key: section.key, 'data-board-section': section.key !== 'top' || sections.length === 1 || section.lines.some((l) => l.item) ? section.key : null, 'aria-label': boardListName(section) },
-          section.key !== 'top' ? h('div', { class: 'tt-board-list-head' },
-            h(section.level === 3 ? 'h3' : 'h2', { class: 'kicker tt-board-list-title', text: boardListName(section) }),
-            h('span', { class: 'tt-board-list-count', text: String(section.lines.filter((l) => l.item).length), 'aria-label': `${section.lines.filter((l) => l.item).length} items` })) : null,
-          ...section.blocks.map((l, i) => [l.item ? item(l) : l.text.trim() ? h('div', { class: 'tt-board-prose md', key: l.key }, ...renderText(reflowBoardQuotes(l.text))) : null,
-            l.item && !section.blocks.slice(i + 1).some((b) => b.item) ? listEnd(section) : null]),
-          !section.lines.some((l) => l.item) && (section.key !== 'top' || sections.length === 1) ? listEnd(section) : null))))
+      !o.board.revision ? h('div', { class: 'banner', role: 'status' }, 'Board editing will be available after the runtime updates.',
+        button('Refresh', () => refreshBoard(o))) : null,
+      recovery ? h('div', { class: 'tt-recovery', role: 'status' },
+        h('strong', { text: o.boardError ? 'Your edit is saved in this tab' : 'The board changed' }),
+        h('p', { text: recovery.both ? 'The same passage changed. Keep both versions to review them together.' : 'Your draft is safe. Apply it to the board shown below.' }),
+        button(recovery.both ? 'Keep both versions' : 'Reapply my edit', () => saveBoard(recovery.markdown), { disabled: o.boardBusy || o.boardRefreshing || !o.board.revision }),
+        button('Discard draft', () => { if (globalThis.confirm('Discard your saved board edit?')) { o.recovery = null; o.recoveredAction = null; rememberBoard(o, null); redraw() } }, { class: 'quietlink' })) : null,
+      !doc && count ? h('div', { class: 'tt-seen-strip' }, h('span', { text: count + ' new from the agents' }),
+        button('Mark seen', () => saveBoard(markBoardSeen(o.board.markdown)), { class: 'quietlink tt-mark-seen', disabled: busy })) : null,
+      rich !== undefined ? h('div', { class: 'tt-board-rich', key: 'rich-doc' }, rich ?? h('p', { class: 'fs-quiet', role: 'status', text: 'Opening document…' })) :
+      doc ? (o.editing && o.inlineIndex == null ? h('div', { class: 'tt-board-edit' }, kept(editor),
+        button('Done', finishBoardEdit, { class: 'pillbtn tt-doc-done', disabled: o.boardBusy })) :
+        h('div', { class: 'tt-board-doc' }, button([icon.pencil(14), 'Edit document'], () => beginBoardEdit(o), { class: 'quietlink tt-doc-action', disabled: busy }),
+          h('div', { class: 'md fs-preview' }, ...renderText(docText(o.board.markdown), { from: { root: 'vault', path: o.board.path } })))) :
+        h('div', { class: 'tt-board-items' }, !lines.some(l => l.item) && !sections.some(s => s.blocks.some(b => b.text.trim())) ?
+          emptyState({ object: 'page', size: 'small', level: 'h3', title: 'Room for your first idea', body: 'Keep a thought or a next step here.', props: { key: 'board-empty' } }) : null,
+          ...sections.map(sectionView)))
   }
   function emptyThread() {
     return h('div', { class: 'pane-body' }, registry.draw('app.overlay', { slot: 'player' }), emptyState({ object: 'speech', title: 'Good things start here.', body: 'Choose a conversation or start a new thread.' }))
@@ -1801,17 +1908,11 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (st.open?.focusReplyDraft) { compose.field().focus({ preventScroll: true }); st.open.focusReplyDraft = false }
     leanFaces()
     const boardOpen = st.open
-    if (!boardOpen?.boardOpen) { drag.cancel(); clearBoardHint() }
-    else if (!st.boardHintShown && !boardOpen.loading && !boardOpen.refreshing && !boardOpen.readFailed && !boardOpen.editing && boardLines(boardOpen.board.markdown).some((l) => l.item)) {
-      st.boardHintShown = true; boardOpen.boardHint = true
-      boardHintTimer = setTimeout(() => { boardOpen.boardHint = false; boardHintTimer = null; if (st.open === boardOpen) redraw() }, 7000)
-      redraw()
-    }
+    if (!boardOpen?.boardOpen) drag.cancel()
+    else if (boardOpen.needsInitialBoard) { boardOpen.needsInitialBoard = false; refreshBoard(boardOpen) }
     if (boardOpen?.focusQuick) { quick.focus(); quick.scrollIntoView?.({ block: 'nearest' }); boardOpen.focusQuick = false }
-    if (boardOpen?.focusEditor) { editor.focus(); boardOpen.focusEditor = false }
-    if (boardOpen?.focusBoardEdit) { const control = dom.querySelector('.tt-board [aria-label="Edit board"]:not(:disabled)'); if (control) { control.focus(); boardOpen.focusBoardEdit = false } }
+    if (boardOpen?.focusEditor) { const field = boardOpen.inlineIndex == null ? editor : inlineField; const at = boardOpen.inlineIndex == null ? 0 : field.value.length; field.focus(); field.setSelectionRange?.(at, at); boardOpen.focusEditor = false }
     if (boardOpen?.focusBoardAdd) { const control = dom.querySelector(`[data-add-section=${JSON.stringify(boardOpen.focusBoardAdd)}]:not(:disabled)`); if (control) { control.focus(); boardOpen.focusBoardAdd = null } }
-    if (boardOpen?.focusBoardMenu) { dom.querySelector('.tt-item-menu .tt-move-choices button, .tt-item-menu > button')?.focus(); boardOpen.focusBoardMenu = false }
     if (boardOpen?.focusBoardItem != null) { dom.querySelector(`[data-board-index="${boardOpen.focusBoardItem}"] .tt-item-actions > button`)?.focus(); boardOpen.focusBoardItem = null }
     if (boardOpen?.settleBoardItem != null && !boardOpen.boardBusy && !boardOpen.boardRefreshing) {
       const row = dom.querySelector(`[data-board-index="${boardOpen.settleBoardItem}"]`)
@@ -1910,7 +2011,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (!st.listLive && st.checked && Date.now() - st.refreshed > 15000 && !st.loading) load({ quiet: true })
   }
   function dirty() { return st.boardDrafts.size > 0 || Boolean(st.open?.editing && st.open.editText !== st.open.board.markdown) }
-  function pause() { generation++; gesture.reset(); clearBoardHint(); drag.cancel(); selection.disconnect(); clearReturn(); clearListeningTimers(st.open); clearTaskTimers(st.open); clearTimeout(st.open?.replyHighlightTimer); clearTimeout(st.open?.copyMessageTimer); if (st.open) st.open.copiedMessage = null; authors.disconnect(); st.open?.prose?.stop(); st.open?.replySteps?.watch(null); clearTimeout(awaitTimer); awaitTimer = null; controller?.abort(); clearTimeout(retry); stopList() }
+  function pause() { richDoc.leave(); generation++; gesture.reset(); drag.cancel(); selection.disconnect(); clearReturn(); clearListeningTimers(st.open); clearTaskTimers(st.open); clearTimeout(st.open?.replyHighlightTimer); clearTimeout(st.open?.copyMessageTimer); if (st.open) st.open.copiedMessage = null; authors.disconnect(); st.open?.prose?.stop(); st.open?.replySteps?.watch(null); clearTimeout(awaitTimer); awaitTimer = null; controller?.abort(); clearTimeout(retry); stopList() }
   const uploadPreview = (file, name) => transport('POST', `${path(st.open.thread.id)}/attachments`, { name, size: file.size, type: file.type })
   return { uploadPreview, st, load, agentDrafts, loadAgentDrafts, refreshAgents() { runtimeAgents = null; redraw() }, preview, open, close, create, list, showArchived, row: threadRow, activityRows, activityFace: t => threadFace(t, 36), activityInfo: t => {
     const state = threadSubtitle({ ...t, unread: 0 }, name, activityOptions(t))

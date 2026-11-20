@@ -47,6 +47,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
+import loam_threads as threads  # noqa: E402
 
 VAULT = lc.VAULT
 # The install's folders (`vault.inbox`, `vault.general_board`); on the first
@@ -111,7 +112,7 @@ def sweep_comms(path: Path, window: timedelta, today: date, dry_run: bool) -> in
         print(f"comms sweep: {path} does not exist, nothing to do")
         return 0
     try:
-        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        lines = path.read_bytes().decode("utf-8").splitlines(keepends=True)
     except OSError as exc:
         print(f"comms sweep: cannot read {path} ({exc})", file=sys.stderr)
         return 0
@@ -127,7 +128,9 @@ def sweep_comms(path: Path, window: timedelta, today: date, dry_run: bool) -> in
                 # A date-shaped string that is not a date. Not ours to judge.
                 kept.append(line)
                 continue
-            if when < cutoff:
+            # An explicit last day belongs to the board expiry sweep.
+            timed = any(threads.UNTIL_RE.fullmatch(part) for part in threads.item_meta(line.rstrip()))
+            if when < cutoff and not timed:
                 dropped += 1
                 print(f"  {'would drop' if dry_run else 'dropped'} "
                       f"({(today - when).days}d) {line.strip()[:110]}")
@@ -136,7 +139,7 @@ def sweep_comms(path: Path, window: timedelta, today: date, dry_run: bool) -> in
 
     if dropped and not dry_run:
         try:
-            path.write_text("".join(kept), encoding="utf-8")
+            threads._write_atomic(path, "".join(kept))
         except OSError as exc:
             print(f"comms sweep: cannot write {path} ({exc})", file=sys.stderr)
             return 0
@@ -160,8 +163,9 @@ def main() -> int:
 
     sweep_archive(args.vault / ARCHIVE, timedelta(days=args.archive_days),
                   now, args.dry_run)
-    sweep_comms(args.vault / COMMS, timedelta(days=args.comms_days),
-                today, args.dry_run)
+    with threads.locked(args.vault / COMMS):
+        sweep_comms(args.vault / COMMS, timedelta(days=args.comms_days),
+                    today, args.dry_run)
     return 0
 
 

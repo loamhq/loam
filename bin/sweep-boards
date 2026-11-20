@@ -30,15 +30,16 @@ def main() -> int:
     today = date.fromisoformat(args.today) if args.today else date.today()
     total = 0
     for path in threads.board_files():
-        text = path.read_text("utf-8")
-        kept, gone = threads.sweep_board(text, today)
-        if not gone:
-            continue
-        total += len(gone)
-        for line in gone:
-            print(f"{path.relative_to(threads.VAULT)}: {line.strip()}")
-        if not args.dry_run:
-            threads._write_atomic(path, kept)
+        with threads.locked(path):
+            text = path.read_bytes().decode("utf-8")
+            kept, gone = threads.sweep_board(text, today)
+            if not gone:
+                continue
+            total += len(gone)
+            for line in gone:
+                print(f"{path.relative_to(threads.VAULT)}: {line.strip()}")
+            if not args.dry_run:
+                threads._write_atomic(path, kept)
     print(f"sweep-boards: {total} line(s) {'would go' if args.dry_run else 'removed'}")
     return 0
 

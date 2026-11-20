@@ -250,6 +250,7 @@ def _fill(stored) -> dict:
             "theme": (row["theme"] if _theme_shaped(row.get("theme"))
                       else DEFAULT["theme"]),
             "options": _stored_options(row),
+            **({"board_view": row["board_view"]} if row.get("board_view") in ("doc", "cards") else {}),
         }
     out[LOCATION] = _stored_location(stored.get(LOCATION))
     return out
@@ -314,6 +315,9 @@ def validate(patch) -> dict:
                 if not isinstance(value, str) or value not in TRANSITIONS:
                     raise AppearanceError(
                         f"{kind} transition is fast, normal or long, not {value!r}")
+            elif name == "board_view":
+                if value not in ("cards", "doc"):
+                    raise AppearanceError("board_view must be cards or doc")
             elif name == "size":
                 if not _valid_size(value):
                     raise AppearanceError(
@@ -331,7 +335,7 @@ def validate(patch) -> dict:
             else:
                 raise AppearanceError(f"{kind}: {name!r} is not an appearance "
                                       f"field; they are mode, transition, size, "
-                                      f"theme and options")
+                                      f"theme, board_view and options")
         clean[kind] = dict(fields)
     return clean
 

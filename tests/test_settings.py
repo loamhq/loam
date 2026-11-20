@@ -352,6 +352,13 @@ async def main():
               out.get("ok") and tid and lines(tid) == ["Ada started this thread"],
               out)
 
+        board = (await cli(port, "get", "thread.board", "--target", tid))["value"]
+        board["markdown"] += "- settings edit\n"
+        saved = await cli(port, "set", "thread.board", json.dumps(board), "--target", tid)
+        check("settings can read and write a revisioned board",
+              saved.get("value", {}).get("markdown") == board["markdown"], saved)
+        stale = await cli(port, "set", "thread.board", json.dumps(board), "--target", tid)
+        check("settings refuses an intervening board revision", not stale.get("ok"), stale)
         out = await cli(port, "set", "thread.title", "Settings probe", "--target", tid)
         check("set thread.title: the value read back is the new title",
               out.get("ok") and out.get("value") == "Settings probe", out)
@@ -946,6 +953,10 @@ async def main():
               out.get("value") == "normal" and out2.get("value") == "normal"
               and out3.get("value") == "light", (out, out2, out3))
 
+        view = await cli(port, "set", "appearance.phone.board_view", "doc")
+        desktop = await cli(port, "get", "appearance.desktop.board_view")
+        check("persona can choose Doc on phone independently of desktop Cards",
+              view.get("value") == "doc" and desktop.get("value") == "cards", view)
         out = await cli(port, "describe", "appearance.desktop.theme")
         row = out.get("setting") or {}
         check("describe appearance.desktop.theme: the installed ids, live",

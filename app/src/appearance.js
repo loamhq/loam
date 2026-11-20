@@ -5,6 +5,7 @@ export function appearanceValues(value, themes = [{ id: 'latte' }, { id: 'plain'
   const clean = (v) => ({
     mode: ['light', 'dark', 'sun', 'system'].includes(v?.mode) ? v.mode : 'system',
     transition: ['fast', 'normal', 'long'].includes(v?.transition) ? v.transition : 'normal',
+    ...(['doc', 'cards'].includes(v?.board_view) ? { board_view: v.board_view } : {}),
     size: Number.isInteger(v?.size) && v.size >= 75 && v.size <= 150 && v.size % 5 === 0 ? v.size : 100,
     theme: themes.some(t => t.id === v?.theme) ? v.theme : 'latte',
     ...(themes.some(t => t.options?.length) ? { options: optionValues(v?.options, themes) } : {}),

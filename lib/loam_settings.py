@@ -95,6 +95,12 @@ class Entry:
     timeout: int = 60               # seconds the route may take (an install fetches)
 
 
+def _board_edit(value, member):
+    if not isinstance(value, dict) or not isinstance(value.get("markdown"), str) or not value.get("base_revision"):
+        raise SettingsError("Read thread.board first, then set its markdown and base_revision together")
+    return {"markdown": value["markdown"], "base_revision": value["base_revision"]}
+
+
 def _member_row(summary: dict, member: str) -> dict:
     for row in summary.get("members") or []:
         if row.get("persona") == member:
@@ -179,9 +185,9 @@ ENTRIES: list[Entry] = [
                "for a thread."),
     Entry("thread.board", "setting", "A thread's board (its markdown)",
           "PUT /api/threads/{thread}/board", route="PUT /v1/threads/{thread}/board",
-          target="thread id", values="the whole board as markdown",
-          body=lambda v, m: {"markdown": v}, read="GET /v1/threads/{thread}/board",
-          pick=lambda a, m: a.get("markdown"),
+          target="thread id", values="an object with markdown and base_revision from the last read",
+          body=_board_edit, read="GET /v1/threads/{thread}/board",
+          pick=lambda a, m: {"markdown": a["markdown"], "base_revision": a["revision"]},
           note="Editing the board's file directly is the same thing; it is "
                "here because the page does it too."),
     Entry("thread.create", "action", "Start a thread",
@@ -546,6 +552,7 @@ ENTRIES: list[Entry] = [
                "transition": "Sun mode transition: how long the shift "
                              "between light and dark takes",
                "size": "page size (zoom)",
+               "board_view": "thread board view",
                "theme": "theme (its look: Latte, Plain, ...)"}[field],
             "PATCH /api/settings/appearance",
             route="PATCH /v1/settings/appearance",
@@ -556,6 +563,7 @@ ENTRIES: list[Entry] = [
                              "own); default system",
                     "transition": "fast (3 s), normal (10 s) or long (20 s); "
                                   "default normal",
+                    "board_view": "cards or doc; default cards",
                     "size": "a whole percent, 75 to 150 in steps of 5; default 100",
                     "theme": "an installed theme's id (describe lists them); "
                              "default latte"}[field],
@@ -563,9 +571,9 @@ ENTRIES: list[Entry] = [
                      "transition": "transitions"}.get(field),
             body=(lambda v, m, kind=kind, field=field: {kind: {field: v}}),
             read="GET /v1/settings/appearance",
-            pick=(lambda a, m, kind=kind, field=field: a[kind][field]))
+            pick=(lambda a, m, kind=kind, field=field: a[kind].get(field, "cards") if field == "board_view" else a[kind][field]))
       for kind in ("phone", "desktop")
-      for field in ("mode", "transition", "size", "theme")],
+      for field in ("mode", "transition", "size", "theme", "board_view")],
     # The saved place Sun mode reads (2026-11-13; loam-ui 29a1506), one for
     # both device kinds so the phone and the desktop agree.
     Entry("appearance.location", "setting",

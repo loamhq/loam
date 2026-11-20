@@ -30,10 +30,10 @@ test('seen edits only new metadata, never removes or checks an item; remove is s
   assert.equal(editBoard(inline, 0, 'seen'), inline.replace(' · new', ''))
 })
 test('quick add uses UTC durations and keeps prior markdown and CRLF intact', () => {
-  assert.equal(addBoardItem(board, ' Walk\n outside ', 7, new Date('2026-11-08T23:59:00Z')), board + '- [ ] Walk  outside <!-- Sam · until 2026-11-15 -->\r\n')
-  assert.equal(addBoardItem('', 'Keep this'), '- [ ] Keep this <!-- Sam -->\n')
+  assert.equal(addBoardItem(board, ' Walk\n outside ', 7, new Date('2026-11-08T23:59:00Z')), board + '- [ ] 2026-11-08 · Walk  outside <!-- Sam · until 2026-11-15 -->\r\n')
+  assert.equal(addBoardItem('', 'Keep this'), `- [ ] ${new Date().toISOString().slice(0, 10)} · Keep this <!-- Sam -->\n`)
   assert.equal(addBoardItem(board, '  '), board)
-  assert.equal(addBoardItem('A note', 'A task', 1, new Date('2026-12-31T23:59:00Z')), 'A note\n- [ ] A task <!-- Sam · until 2027-01-01 -->\n')
+  assert.equal(addBoardItem('A note', 'A task', 1, new Date('2026-12-31T23:59:00Z')), 'A note\n- [ ] 2026-12-31 · A task <!-- Sam · until 2027-01-01 -->\n')
 })
 function open() { return { thread: { members: [] }, messages: [], seq: 0, typing: new Set(), permissions: new Map() } }
 test('runtime drafts replace text, reset at tool steps and reconnect only from durable messages', () => {
@@ -83,11 +83,11 @@ test('members use durable system lines and classic permissions normalize by requ
   assert.equal(o.permissions.size, 1)
   assert.equal(o.after, 'm100', 'harness seq cannot become the thread cursor')
 })
-test('General Stays is dated for the comms sweep, timed adds carry until; ordinary boards stay timeless', () => {
+test('General Stays is dated for the comms sweep, timed adds carry until; ordinary boards retain task checkboxes', () => {
   const date = new Date('2026-11-08T23:59:00Z'), path = '00_INBOX/from-agents/comms.md'
   assert.equal(addBoardItem('', 'Keep close', 0, date, path), '- 2026-11-08 · Keep close <!-- Sam -->\n')
-  assert.equal(addBoardItem('', 'Read soon', 7, date, path), '- [ ] Read soon <!-- Sam · until 2026-11-15 -->\n')
-  assert.equal(addBoardItem('', 'Keep close', 0, date, 'boards/one.md'), '- [ ] Keep close <!-- Sam -->\n')
+  assert.equal(addBoardItem('', 'Read soon', 7, date, path), '- [ ] 2026-11-08 · Read soon <!-- Sam · until 2026-11-15 -->\n')
+  assert.equal(addBoardItem('', 'Keep close', 0, date, 'boards/one.md'), '- [ ] 2026-11-08 · Keep close <!-- Sam -->\n')
 })
 test('recorded runtime responses parse for list, create, detail, history, patch, send, both board methods and SSE', async () => {
   const recorded = JSON.parse(await readFile(new URL('./fixtures/threads/runtime-34b5668.json', import.meta.url)))
