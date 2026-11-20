@@ -1,50 +1,7 @@
 #!/usr/bin/env python3
-"""Every loam-ui setting from a persona's hands (2026-11-10): the registry in
-lib/loam_settings.py, and `bin/settings` through a real broker listener.
-
-  - the page's relay (loam-ui src/server.js, its `api()` allowlist) has no
-    route family PAGE_RELAY does not classify, and PAGE_RELAY names none the
-    relay has lost: the day the page gains a settings route, this fails
-    until the registry has its entry. `LOAM_UI_SOURCE` points at another
-    checkout; `LOAM_UI_SOURCE=none` skips this part for a clone of this repo
-    with no loam-ui beside it, and nothing else does
-  - every entry the relay names exists; every persona entry with a route has
-    a body; every non-persona entry says why
-  - through a broker on loopback, as a persona: create a thread, rename it,
-    give it an icon, make Iris the default, bring in and take out a member,
-    switch a member's engine, pin it; each `get` reads the new value back,
-    and the thread carries one line per change naming the persona
-  - the owner's own PATCH (no `by`) still says "<owner> made ..." and leaves no
-    line for an icon, as before
-  - refused before any call: a device setting, a sign-in, a missing `by`,
-    an unknown persona; refused by the broker: a `by` naming nobody
-  - deleting a thread from an unattended lane is refused; from a
-    conversation it is done
-  - appearance (2026-11-11): the keys match loam-ui's handoff
-    (`docs/appearance-settings.registry.json`) in key, route, values and
-    defaults; GET fills defaults, PATCH merges and persists, every malformed
-    patch is a 400 sentence that writes nothing, and a persona's `set` reads
-    the new value back
-  - themes (2026-11-12): the installed ids are read from the theme folders
-    (the handoff's enum is what loam-ui's own folders give), a folder whose
-    manifest does not name it is not a theme, a second folder (the user
-    layer to come) adds its themes, a stored theme older records lack reads
-    as latte, a theme merges without touching mode or size, an uninstalled id
-    is a 400, and `describe` lists the live ids
-  - theme options (2026-11-12): a theme manifest's `options` are the
-    catalog; a reading fills each installed theme's options with the stored
-    choice or the default, a patch merges leaf by leaf (one option keeps the
-    other, the other kind and mode/size/theme), Plain and back keeps Latte's
-    choices, a choice the theme no longer offers reads as its default, a
-    stored entry for a gone theme is kept in the file and not shown, every
-    malformed map, theme, option or choice is a 400 that writes nothing, and
-    the registry lists `appearance.<kind>.options.<theme>.<option>` live from
-    the manifests: `describe` names them, `set`/`get` reach the same value
-  - GET /v1/settings answers the table; broker/settings.md has a row for
-    every key
-
-Run: python3 tests/test_settings.py
-"""
+"""Exercise the settings registry and CLI through a loopback broker.
+LOAM_UI_SOURCE selects the app checkout for the relay comparison. Set it to
+none to skip only that comparison."""
 
 import asyncio
 import importlib.machinery

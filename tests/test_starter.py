@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""lib/loam_starter.py: Iris and the hello thread on a blank install (first
-release L11).
-
-A throwaway install (LOAM_CONFIG names a scratch config before anything
-imports loam_config), with provisioning faked:
-the real ones are proved on a scratch root in the job that built this.
-
-Checks: the starter agent is made from docs/starter/ in the map's shape
-(2026-11-18: soul, config, map, the two files her map points at, agent.json,
-and none of `_always.md`, `_active.md`, `_reflection.md`), with the
-install's names filled in and no placeholder token left; the hello thread is pinned, marked
-`hello: true`, has the agent as its default and one message, the starter's
-text, posted as the agent and marked `"preset": true` in the record and in
-what the routes read; the agent's turn is told the opening was preset; the
-marker is written; a second seed does nothing; and an install that already
-has an agent of the starter's id (the owner's box) gets nothing at all, its
-soul untouched and no thread made.
-
-Run: python3 tests/test_starter.py
-"""
+"""Verify that a fresh install seeds its starter and preset thread once and can resume a failed provision."""
 
 from __future__ import annotations
 
@@ -89,9 +70,7 @@ def main() -> int:
     check("the hello message has no line break inside a paragraph",
           [p for p in hello.split("\n\n") if "\n" in p], [])
 
-    # A first try whose provisioning fails (first release L12): the half-made
-    # workspace is left with agent.json.failed, and the next run, with no
-    # hand clearing it, sets it aside and makes Iris properly.
+    # A retry sets aside the partial workspace left by a failed provision.
     def failing_provision(agent, wake):
         raise RuntimeError("the provider's CLI was not there yet")
     import loam_agents  # noqa: PLC0415

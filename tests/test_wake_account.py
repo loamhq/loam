@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
-"""A provider refusal is named ``account_refused``, not a soul-composition fault.
-
-On 2026-09-15 the account's monthly spend ceiling stopped the night, and the
-failure log read as six identity-preflight failures, one run cut off with a
-JSON envelope for a reason, and a reviewer line. The fixtures below are
-those lines, quoted from ``vault/00_INBOX/from-agents/loam-wake-failures.md``
-and, for Wren, from the session transcript that held the real cause.
-
-Two layers, each against the shipped code:
-
-  matcher   lib/loam_account.py over the 09-15 strings, the structured
-            category (transcript entry and stream-json api_retry event),
-            and answers that must NOT match.
-  wake      bin/wake end to end, with only the CLI stubbed: two preflight
-            refusals and one mid-run refusal go to the logs alone; a
-            genuine "NO NO" is still the identity's failure, logged and told
-            to nobody; a genuine non-zero exit is still the CLI's.
-
-Run: python3 tests/test_wake_account.py
-"""
+"""Distinguish provider account refusals from identity and CLI failures.
+Exercise the matcher and the wake launcher with a stub provider."""
 
 from __future__ import annotations
 
@@ -47,12 +29,7 @@ REAL_RUN = subprocess.run
 REAL_PREFLIGHT = loam_identity.preflight_identity
 REAL_SESSIONS = loam_session.SESSIONS_DIR
 
-# --- The 09-15 fixtures, verbatim ------------------------------------------
-
-# What the preflight got back, as the failure log quotes it (upper-cased and
-# cut at 120 characters by the old error string). Pax 09:40:50Z, Juno
-# 10:00:50Z, Ada 10:20:50Z, Otto 10:40:50Z, Iris 11:00:50Z and Ada's
-# market-watch cron 12:00:50Z all carried exactly this.
+# The refusal log can contain a truncated, capitalized provider response.
 PREFLIGHT_ANSWER_0915 = (
     "YOU'VE HIT YOUR MONTHLY SPEND LIMIT. SWITCH TO ANOTHER MODEL, OR MANAGE "
     "USAGE CREDITS AT CLAUDE.AI/SETTINGS/USAGE?FROM=C"
@@ -76,9 +53,7 @@ REVIEWER_LINE_0915 = (
     "continue.. Record: /home/loam/agents/state/reviewer/runs/"
     "20260915-042047/run.json."
 )
-# Wren's line in the log is the envelope cut at 400 characters and says
-# nothing about the account. The cause was in the session transcript, entry
-# at 2026-09-15T09:22:28.769Z of c8b933ba-6dfe-41a3-97a0-4b9112f09164:
+# The exit envelope omits the cause. The transcript retains the account refusal.
 WREN_LINE_0915 = (
     "reflection: claude exited 1 (subtype=success): {\"duration_api_ms\":"
     "94899,\"stop_reason\":\"stop_sequence\",\"session_id\":\"c8b933ba-6dfe-"
@@ -152,7 +127,7 @@ def test_matcher_leaves_real_answers_alone():
 # --- inbox -----------------------------------------------------------------
 
 def comms_of(vault: Path) -> str:
-    """The board: it must stay as it was (2026-11-19)."""
+    """Read the board to detect an unexpected notification."""
     path = vault / loam_inbox.COMMS
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
@@ -238,8 +213,7 @@ def test_wake_names_the_night():
         loam_session.SESSIONS_DIR = root / "sessions"
         (sessions / "c8b933ba.jsonl").write_text(json.dumps(WREN_TRANSCRIPT_0915) + "\n")
 
-        # Wren: preflight passes, the run is cut off. Exit 1, a `success`
-        # envelope, nothing on stderr -- the 09-15 shape.
+        # A successful preflight can precede a mid-run refusal with an empty stderr.
         wren = wake_once(root, "wren", "YES NO", Done(1, json.dumps({
             "subtype": "success", "session_id": "c8b933ba",
             "duration_api_ms": 94899, "total_cost_usd": 1.71136825}), ""))

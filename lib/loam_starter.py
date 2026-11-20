@@ -1,29 +1,7 @@
-"""The starter a blank install ships: Iris, and the hello thread (first
-release, L11; the owner's decision 4, 2026-11-14).
-
-``seed()`` makes the starter agent from ``docs/starter/iris/`` through the
-same ``loam_agents.make`` that L10's create route uses (the workspace,
-born in the map's shape since 2026-11-18: soul, config and map; provisioning
-on every provider), then the files her map points
-at (``OWN_FILES``, copied in once she is made), and then
-the hello thread: a thread with that agent, pinned and marked ``hello:
-true``, whose first message is ``docs/starter/hello.md``'s body, posted as
-the agent and marked ``"preset": true`` in its record.
-
-It runs once per install. It does nothing when a workspace of the starter's
-id already exists (an agent of that name is somebody's, and its soul is
-never written here), and nothing when the install's marker says it has run
-(``<state>/agents/starter.json``), so a person who archived or renamed their
-Iris, or deleted the hello thread, is never handed a second one.
-
-A preset message is the runtime's words in the agent's name, not a model's
-turn: no session, no engine, no cost. The agent's first real turn is handed
-it marked as Loam's (``loam_threads.transcript``), and answers the person's
-reply. The page contract is docs/starter.md.
-
-The words are the owner's approved starter (2026-11-16); docs/starter/README.md
-says which file holds which.
-"""
+"""Seed the starter agent and its pinned hello thread once per installation.
+The preset greeting is stored without opening a provider session. The seed
+marker lets a retry finish its own interrupted work and protects an existing
+agent or a deliberately removed thread. See docs/starter.md."""
 
 from __future__ import annotations
 
@@ -35,9 +13,7 @@ import loam_config as lc
 
 STARTER_DIR = Path(__file__).resolve().parent.parent / "docs" / "starter"
 MARKER = "starter.json"
-# The starter's own files beside the three that load: what her map points at
-# (2026-11-18). They were her `_active.md` and `_reflection.md`, word for
-# word; she reads them when her map says to.
+# Additional workspace files referenced by the starter’s map.
 OWN_FILES = ("how-i-am-here.md", "nights.md")
 
 
@@ -66,7 +42,7 @@ def read_hello(root: Path | None = None) -> tuple[str, str]:
 
 
 def draft(root: Path | None = None) -> dict:
-    """The starter agent as a draft of L10's shape."""
+    """Read the starter's draft and substitute the install's configured names."""
     src = (root or STARTER_DIR) / "iris"
     card = json.loads((src / "agent.json").read_text(encoding="utf-8"))
     out = {"id": card["id"], "name": card["name"], "provider": card.get("provider")}
@@ -144,17 +120,9 @@ def _set_aside(ws: Path) -> Path:
 
 
 def seed(*, root: Path | None = None, provision=None) -> dict:
-    """Make the starter agent and the hello thread, once. Returns what was
-    done: ``{"skipped": why}``, or the agent, its wake and the thread.
-
-    A run that fails part way is finished by the next one (first release
-    L12: the installer re-runs this step until it is done). The marker says
-    ``"state": "making"`` from before the agent is made until the thread is
-    written, so the next run knows the half-made workspace is its own: a
-    failed make (``agent.json.failed``, no ``agent.json``) is set aside under
-    ``<state>/agents/failed-starts/`` and made again; a made agent with no
-    thread yet gets its thread. A workspace with neither marker nor failure
-    is somebody's and is left alone, as before."""
+    """Create the starter workspace and hello thread, resuming an interrupted seed.
+    A making marker identifies a workspace awaiting its thread. Set a failed
+    provision aside before retrying and leave unrelated workspaces alone."""
     import loam_threads as threads  # noqa: PLC0415
     done = status()
     if done and done.get("state") != "making":
@@ -167,9 +135,7 @@ def seed(*, root: Path | None = None, provision=None) -> dict:
     failed_make = (ws / "agent.json.failed").exists() and not (ws / "agent.json").exists()
     if ws.exists():
         if failed_make:
-            # Ours whether or not a marker says so: a half-made agent is off
-            # the roster, and before the marker existed (L11) a failed make
-            # was the only way a workspace got this file.
+            # The failed-provision marker identifies a partial workspace even without a seed marker.
             resumed = f"set aside a failed start at {_set_aside(ws)}"
         elif not (done and done.get("agent") == agent and (ws / "agent.json").exists()):
             return {"skipped": f"{ws} exists: an agent named {agent} is already "
