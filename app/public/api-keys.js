@@ -49,7 +49,8 @@ export function providerWarn(p) {
 }
 
 export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
-  const st = { list: null, loading: false, error: '', busy: '', message: '', failure: '', editing: null, plugin: null, provider: null }
+  const st = { list: null, loading: false, error: '', busy: '', message: '', failure: '', editing: null, plugin: null, provider: null,
+    project: null, projectName: '', projectFeedback: false }
   let loadedAt = 0
 
   async function load(force = false) {
@@ -64,14 +65,16 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
     if (answer?.id && st.list) st.list = st.list.map(p => p.id === answer.id ? answer : p)
   }
 
-  async function act(slot, method, path, body, done) {
+  async function act(slot, method, path, body, done, project = false) {
     if (st.busy) return
+    st.projectFeedback = project
     st.busy = slot; st.failure = ''; st.message = ''; changed()
     try {
       const out = await api(method, path, body)
       keep(out)
       st.message = done(out) ?? ''
       st.editing = null; st.plugin = null
+      if (project) st.project = null
     } catch (e) { st.failure = e.body?.error || e.message }
     finally { st.busy = ''; changed() }
   }
@@ -99,6 +102,22 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
   const useShared = (p, u) => act(`shared:${u.id}`, 'DELETE', `/keys/${encodeURIComponent(p.id)}/plugins/${encodeURIComponent(u.id)}`, undefined, () => `${u.name} uses the shared key again.`)
   const recheck = p => act(`check:${p.id}`, 'POST', `/keys/${encodeURIComponent(p.id)}/check`, {}, out => out.checked?.why ?? '')
   const forget = p => act(`forget:${p.id}`, 'DELETE', `/keys/${encodeURIComponent(p.id)}`, undefined, out => out.set ? 'Forgotten here. The key set on this server is still used.' : 'Key forgotten.')
+
+  function openProject(id, name = '') {
+    st.project = id; st.projectName = name
+    st.message = ''; st.failure = ''; st.projectFeedback = true
+    changed()
+  }
+
+  function saveProject(form) {
+    const name = st.projectName.trim().toLowerCase()
+    const token = form.elements.projectToken
+    const value = token.value.trim()
+    token.value = ''
+    return act('project:save', 'PUT', `/keys/hetzner/projects/${encodeURIComponent(name)}`, { value }, () => `Key saved for ${name}.`, true)
+  }
+
+  const forgetProject = name => act('project:forget', 'DELETE', `/keys/hetzner/projects/${encodeURIComponent(name)}`, undefined, () => `Key forgotten for ${name}.`, true)
 
   function fields(p, prefix, busy) {
     return p.fields.map(f => h('label', { class: 'keys-field', key: f.name },
@@ -146,13 +165,54 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
             h('span', { class: `keys-badge${own ? ' own' : ''}${!u.has_key ? ' none' : ''}`, text: !u.has_key ? 'No key' : own ? 'Its own key' : 'Shared key' }),
             icon.chevronDown(12)),
           open ? h('div', { class: 'keys-user-detail' },
-            own ? h('p', { class: 'note', text: `${u.name} uses a key of its own, not the shared one.` })
+            u.shared_only ? h('p', { class: 'note', text: 'The shared key connects the personal project. Add a project key to connect another project.' })
+              : own ? h('p', { class: 'note', text: `${u.name} uses a key of its own, not the shared one.` })
               : h('p', { class: 'note', text: `${u.name} uses the shared ${p.name} key. Give it a different key to keep its use apart.` }),
             checkedLine(u.checked),
-            keyForm(p, { own: u }),
+            u.shared_only ? null : keyForm(p, { own: u }),
             own ? h('button', { class: 'pillbtn', type: 'button', disabled: Boolean(st.busy), text: st.busy === `shared:${u.id}` ? 'Switching…' : 'Use the shared key', onclick: () => useShared(p, u) }) : null,
             openPlugin ? h('button', { class: 'quietlink', type: 'button', text: `${u.name} settings`, onclick: () => openPlugin(u.id) }) : null) : null)
       })))
+  }
+
+  function projectForm(existing = false) {
+    const busy = Boolean(st.busy)
+    return h('form', { class: 'keys-form', onsubmit: e => { e.preventDefault(); saveProject(e.currentTarget) } },
+      existing ? null : h('label', { class: 'keys-field' },
+        h('span', { class: 'keys-field-label', text: 'Project name' }),
+        h('input', { class: 'field-input', name: 'projectName', value: st.projectName, maxlength: 48,
+          pattern: '[A-Za-z0-9][A-Za-z0-9\\-]{0,47}', placeholder: 'e.g. work',
+          oninput: e => { st.projectName = e.currentTarget.value },
+          required: true, disabled: busy, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' })),
+      h('label', { class: 'keys-field' },
+        h('span', { class: 'keys-field-label', text: 'Project API token' }),
+        h('input', { class: 'field-input', type: 'password', name: 'projectToken',
+          required: true, disabled: busy, autocomplete: 'off', placeholder: 'Paste a token' })),
+      h('div', { class: 'keys-actions' },
+        h('button', { class: 'pillbtn primary', type: 'submit', disabled: busy, text: st.busy === 'project:save' ? 'Checking…' : 'Save project key' }),
+        h('button', { class: 'pillbtn', type: 'button', disabled: busy, text: 'Cancel', onclick: () => openProject(null) }),
+        existing ? h('button', { class: 'pillbtn', type: 'button', disabled: busy, text: st.busy === 'project:forget' ? 'Forgetting…' : 'Forget key', onclick: () => forgetProject(st.project) }) : null))
+  }
+
+  function projectKeys(projects) {
+    const adding = st.project === ''
+    return h('section', { class: 'keys-users', 'aria-label': 'Project keys' },
+      h('h3', { class: 'kicker', text: 'Project keys' }),
+      h('div', { class: 'card keys-card' },
+        h('p', { class: 'note', text: 'Add a token from each additional Hetzner project. Agents use the project name when they call Hetzner.' }),
+        projects.length ? h('div', { class: 'rows' }, ...projects.map(project => {
+          const open = st.project === project.id
+          return h('div', { class: `keys-user${open ? ' open' : ''}`, key: project.id },
+            h('button', { class: 'setrow', type: 'button', disabled: Boolean(st.busy), 'aria-expanded': String(open),
+              onclick: () => openProject(open ? null : project.id, project.id) },
+            h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: project.id })),
+            h('span', { class: 'keys-badge', text: 'Key saved' }), icon.chevronDown(12)),
+            open ? h('div', { class: 'keys-user-detail' }, checkedLine(project.checked), projectForm(true)) : null)
+        })) : null,
+        adding ? projectForm() : h('div', { class: 'keys-actions' },
+          h('button', { class: 'pillbtn secondary', type: 'button', disabled: Boolean(st.busy), text: 'Add project', onclick: () => openProject('') })),
+        st.projectFeedback && st.message ? h('p', { class: 'note keys-done', role: 'status', text: st.message }) : null,
+        st.projectFeedback && st.failure ? h('p', { class: 'note warn', role: 'alert', text: st.failure }) : null))
   }
 
   function detail(p, { back }) {
@@ -162,8 +222,8 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
         h('div', { class: `icon-tile glyph keys-mark ${p.id}` }, mark(p.id)),
         h('div', { class: 'sheet-head' },
           h('div', { class: 'display sheet-title', role: 'heading', 'aria-level': '2', tabindex: '-1', text: p.name }),
-          h('div', { class: 'note', text: status(p) }))),
-      h('section', { class: 'card keys-card', 'aria-label': `${p.name} key` },
+          h('div', { class: 'note', text: p.projects ? `Personal project · ${status(p)}` : status(p) }))),
+      h('section', { class: 'card keys-card', 'aria-label': p.projects ? 'Personal project key' : `${p.name} key` },
         editing ? keyForm(p) : [
           h('div', { class: 'keys-checkrow' },
             checkedLine(p.checked) ?? h('p', { class: 'note keys-check', text: p.source === 'box' ? 'Set in this server’s own settings file.' : 'Not checked yet.' }),
@@ -172,8 +232,9 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
             h('button', { class: 'pillbtn secondary', type: 'button', disabled: Boolean(st.busy), text: 'Replace key', onclick: () => { st.editing = p.id; st.failure = ''; st.message = ''; changed() } }),
             p.source === 'saved' ? h('button', { class: 'pillbtn', type: 'button', disabled: Boolean(st.busy), text: st.busy === `forget:${p.id}` ? 'Forgetting…' : 'Forget', onclick: () => forget(p) }) : null)],
         p.refused?.why && p.refused.why !== p.checked?.why && editing ? h('p', { class: 'note warn', text: p.refused.why }) : null,
-        st.message ? h('p', { class: 'note keys-done', role: 'status', text: st.message }) : null,
-        st.failure ? h('p', { class: 'note warn', role: 'alert', text: st.failure }) : null),
+        !st.projectFeedback && st.message ? h('p', { class: 'note keys-done', role: 'status', text: st.message }) : null,
+        !st.projectFeedback && st.failure ? h('p', { class: 'note warn', role: 'alert', text: st.failure }) : null),
+      p.projects ? projectKeys(p.projects) : null,
       usedBy(p)]
   }
 
@@ -187,7 +248,7 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
     }
     return [head,
       st.error ? h('p', { class: 'reason', role: 'alert', text: st.error }) : null,
-      st.list ? h('div', { class: 'rows keys-list' }, ...st.list.map(p => h('button', { class: 'setrow', type: 'button', key: p.id, onclick: () => { st.editing = null; st.plugin = null; st.failure = ''; st.message = ''; open(p.id) } },
+      st.list ? h('div', { class: 'rows keys-list' }, ...st.list.map(p => h('button', { class: 'setrow', type: 'button', key: p.id, onclick: () => { st.editing = null; st.plugin = null; st.project = null; st.failure = ''; st.message = ''; open(p.id) } },
         h('div', { class: `icon-tile glyph keys-mark ${p.id}` }, mark(p.id)),
         h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: p.name }), h('div', { class: 'setrow-sub', text: providerLine(p) })),
         providerWarn(p) ? h('span', { class: 'navdot', title: 'Needs you' }) : null,

@@ -1605,6 +1605,10 @@ class Server:
                           file=sys.stderr, flush=True)
                 elif rest[1:] == ["check"] and method == "POST":
                     body = await asyncio.to_thread(loam_keys.recheck, rest[0], by)
+                elif len(rest) == 3 and rest[:2] == ["hetzner", "projects"] and method == "PUT":
+                    body = await asyncio.to_thread(loam_keys.set_hetzner_project, rest[2], payload, by)
+                elif len(rest) == 3 and rest[:2] == ["hetzner", "projects"] and method == "DELETE":
+                    body = await asyncio.to_thread(loam_keys.forget_hetzner_project, rest[2])
                 elif len(rest) == 3 and rest[1] == "plugins" and method == "PUT":
                     body = await asyncio.to_thread(loam_keys.set_own, rest[0], rest[2],
                                                    payload, by)
@@ -1617,7 +1621,8 @@ class Server:
                 else:
                     raise BrokerError(405, "GET /v1/keys[/<provider>]; PUT or DELETE "
                                            "/v1/keys/<provider>; POST …/<provider>/check; "
-                                           "PUT or DELETE …/<provider>/plugins/<id>")
+                                           "PUT or DELETE …/<provider>/plugins/<id> "
+                                           "or …/hetzner/projects/<project>")
                 writer.write(response(200, body, nocache))
             except loam_keys.KeyError_ as exc:
                 writer.write(response(exc.status, {"error": str(exc)}, nocache))

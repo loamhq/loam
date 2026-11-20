@@ -303,7 +303,7 @@ ENTRIES: list[Entry] = [
                  'two fields (cloudflare: CLOUDFLARE_API_KEY and CLOUDFLARE_EMAIL)',
           body=lambda v, m: dict(v) if isinstance(v, dict) else {"value": v},
           read="GET /v1/keys/{provider}",
-          pick=lambda a, m: {k: a.get(k) for k in ("set", "source", "checked", "plugins")},
+          pick=lambda a, m: {k: a[k] for k in ("set", "source", "checked", "plugins", "projects") if k in a},
           options="providers",
           note="Only when the owner gave you the key to save. The value is never "
                "read back by anyone; the answer says whether it was accepted."),
@@ -324,6 +324,14 @@ ENTRIES: list[Entry] = [
           "DELETE /api/keys/{provider}/plugins/{plugin}",
           route="DELETE /v1/keys/{provider}/plugins/{plugin}", target="provider/plugin",
           unattended=False, values="true", body=lambda v, m: {}),
+    Entry("keys.project.set", "action", "Save or replace a named Hetzner Cloud project token",
+          "PUT /api/keys/hetzner/projects/{project}", route="PUT /v1/keys/hetzner/projects/{project}",
+          target="project name", unattended=False, values="the token as text",
+          body=lambda v, m: {"value": v}, timeout=30,
+          note="Only when the owner gave you the token to save. Use keys.set for personal."),
+    Entry("keys.project.forget", "action", "Forget a named Hetzner Cloud project token",
+          "DELETE /api/keys/hetzner/projects/{project}", route="DELETE /v1/keys/hetzner/projects/{project}",
+          target="project name", unattended=False, values="true", body=lambda v, m: {}),
     Entry("integration.github", "action", "Connect or disconnect GitHub",
           "POST/DELETE /api/integrations/github/...", reach=OWNER,
           why=f"GitHub is authorised on {lc.OWNER_NAME}'s account, in their browser"),
@@ -887,6 +895,7 @@ PAGE_RELAY_AHEAD: dict[str, list[str] | str] = {
     "/^\\/keys(?:\\/([^/]+))?$/": ["keys.set", "keys.forget"],
     "/^\\/keys\\/([^/]+)\\/check$/": ["keys.check"],
     "/^\\/keys\\/([^/]+)\\/plugins\\/([^/]+)$/": ["keys.own", "keys.shared"],
+    "/^\\/keys\\/hetzner\\/projects\\/([^/]+)$/": ["keys.project.set", "keys.project.forget"],
 }
 
 

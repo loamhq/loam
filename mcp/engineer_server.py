@@ -296,10 +296,10 @@ SITE = str(lc.ROOT / "bin" / "site")
 THREAD = str(lc.ROOT / "bin" / "thread")
 
 
-async def _hand_off(argv: list[str]) -> str:
+async def _hand_off(argv: list[str], value_stdin: bytes | None = None) -> str:
     # The same rule as `brief`: a fresh process per call, today's code, and
     # its one JSON object back as it came.
-    result = await anyio.run_process(argv, check=False)
+    result = await anyio.run_process(argv, input=value_stdin, check=False)
     stdout = result.stdout.decode("utf-8", errors="replace").strip()
     if stdout:
         return stdout
@@ -500,6 +500,9 @@ async def settings(action: str = "describe", setting: str = "", value: str = "",
                         ("--by", by), ("--reason", reason)):
         if given:
             argv += [f"{flag}={given}"]
+    # Keep credentials out of the child process's argument list.
+    if action == "do" and setting.strip() in {"keys.set", "keys.own", "keys.project.set"} and value:
+        return await _hand_off([*argv, "--value-stdin", "--", action, setting], value.encode())
     # Positionals after `--`, so a title that starts with a dash is a title.
     argv += ["--", action]
     if setting:

@@ -4069,7 +4069,9 @@ API keys by provider, entered once, handed only to the plugins that
 declared the provider in `keys:`. Every rule, the routes and their answers
 are docs/plugins.md, "Keys"; the code is `lib/loam_keys.py`, the tests
 `tests/test_keys.py`. `GET /v1/keys`, `GET|PUT|DELETE /v1/keys/<provider>`,
-`POST /v1/keys/<provider>/check`, `PUT|DELETE /v1/keys/<provider>/plugins/<id>`.
+`POST /v1/keys/<provider>/check`, `PUT|DELETE /v1/keys/<provider>/plugins/<id>`,
+and `PUT|DELETE /v1/keys/hetzner/projects/<alias>` for named Hetzner
+projects.
 Unlike the per-plugin routes below, a `by` is accepted and attributed: a
 key is a setting, every setting is an agent's to change too (the owner,
 2026-11-10), and no route answers a value. The `/value` route below resolves
