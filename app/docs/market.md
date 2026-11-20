@@ -102,8 +102,11 @@ is the mock `market-store.html` the designer drew from the real covers.*
   Install. It shares the price line with a short excerpt. The first change
   takes precedence when the reviewer describes an update. Otherwise the
   line names declared network or server access, gives the reach of a
-  declarative theme, or uses the note’s summary. The full text stays in
-  the review sheet, including any words shortened to fit the button.
+  declarative theme, or uses the note’s summary. On desktop, access and
+  update details wrap at their normal reading size. An installed extension
+  shows a check and Installed in the same space as Install. An active
+  theme shows In use there, and an installed theme that can be selected
+  keeps its Use action. The sheet holds the full review.
   The creator row leads straight into the maker’s showcase, screenshots
   or README. Tapping **Loam’s note** opens a centered dialog on desktop or
   a bottom sheet on a phone. The title and Close stay in place while the
@@ -237,7 +240,7 @@ under reduced motion.
   review sheet and install preview at 390 and 1440 in both modes. It checks
   the note against its source, keyboard scrolling, dismissal and focus,
   update text, the pinned install request and a listing without a note.
-  [Review screenshots](evidence/market-note/README.md)
+  [Review screenshots](evidence/market-note/README.md) and [desktop install states](evidence/market-note-desktop/README.md)
 - `test/market-card.test.js`: the card's form (what is one and what is
   not, in order, three at most, never in code), an unknown id drawn as its
   words, and the agent's search ranking every query as this page does.

@@ -239,7 +239,11 @@ export function mount(host) {
   function action(entry, { size = '', from = 'card' } = {}) {
     const a = actionOf(entry, { installed: isInstalled(entry), themeInUse: host.theme.value.theme, trying: host.theme.trying })
     const label = `${a.label} ${entry.name}`
-    if (a.action === 'none') return h('span', { class: `market-state ${size}`, text: a.label, 'aria-label': `${entry.name}: ${a.label}` })
+    if (a.action === 'none') {
+      const inColumn = from === 'listing' && host.state.wide
+      return h('span', { class: `market-state ${inColumn ? 'market-owned' : size}`, role: inColumn ? 'status' : null, 'aria-label': `${entry.name}: ${a.label}` },
+        inColumn ? icon.check(15) : null, a.label)
+    }
     if (a.action === 'view') return from === 'listing' ? h('span', { class: `market-state ${size}`, text: 'Not installable yet' }) : button(a.label, e => { e.stopPropagation(); openListing(entry.id) }, `pillbtn market-act ${size}`.trim(), { 'aria-label': `See ${entry.name}` })
     const primary = from === 'listing' || from === 'lead'
     return button(a.label, e => { e.stopPropagation(); act(entry, a.action) }, `pillbtn market-act ${primary ? 'primary' : 'secondary'} ${size}`.trim(), { 'aria-label': label })

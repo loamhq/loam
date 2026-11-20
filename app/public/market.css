@@ -306,6 +306,11 @@
 :root .market .market-listing-acts .pillbtn.market-try:not(.primary):not(.secondary) { background: transparent; color: var(--paper-ink); border: 1px solid var(--paper-rule-strong); }
 @media (hover: hover) { :root .market .market-listing-acts .pillbtn.market-try:not(.primary):not(.secondary):not(:disabled):hover { background: var(--paper-hover); } }
 .market-listing-acts .market-state { justify-content: center; min-height: 52px; }
+.market-listing-acts .market-owned {
+  gap: 8px; border-radius: var(--radius-pill); background: var(--paper-raised); color: var(--paper-ink-2);
+  box-shadow: inset 0 0 0 1px var(--paper-rule); font-size: 16px;
+}
+.market-owned svg { color: var(--success); }
 .market-fine { margin: 0; text-align: center; font-size: 12.5px; color: var(--paper-ink-3); }
 /* The maker: their mark, name and links, between hairlines. */
 .market-maker { display: flex; align-items: center; gap: 16px; padding: 22px 0; border-bottom: 1px solid var(--paper-rule); }
@@ -345,8 +350,8 @@
 .market-readme-body blockquote { margin: 22px 0; padding: 2px 0 2px 20px; border-left: 2px solid var(--paper-rule-strong); font-family: var(--font-display); font-size: 20px; color: var(--paper-ink); }
 .market-readme-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 26px 0 10px; }
 .market-readme-img { display: block; width: 100%; max-width: 100%; height: auto; border-radius: 18px; }
-/* The whole review byline is a target. Only its excerpt yields space. */
-.market-listing-head .market-listing-acts:has(.market-note-link) { width: 310px; max-width: 100%; min-width: 0; }
+/* The whole review byline is a target. Desktop access and update details can wrap. */
+.market-listing-head .market-listing-acts:has(.market-note-link) { width: 352px; max-width: 100%; min-width: 0; }
 .market-phone .market-listing-head .market-listing-acts:has(.market-note-link) { width: 100%; }
 .market-note-link {
   display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 44px; margin: -6px 0 -10px;
@@ -360,6 +365,12 @@
 .market-note-excerpt { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .market-note-excerpt::before { content: '·  '; }
 .market-note-link.has-detail .market-note-excerpt { color: var(--paper-ink); }
+.market-wide .market-note-link.has-detail { display: block; text-align: center; text-wrap: balance; line-height: 1.4; }
+.market-wide .market-note-link.has-detail > :not(:first-child) { margin-inline-start: 6px; }
+.market-wide .market-note-link.has-detail svg { vertical-align: -.12em; }
+.market-wide .market-note-link.has-detail .market-note-excerpt {
+  overflow: visible; white-space: normal; overflow-wrap: anywhere; text-overflow: clip;
+}
 @media (hover: hover) { .market-note-link:hover { background: var(--paper-hover); color: var(--paper-ink); } }
 .market-note-link:focus-visible { outline: 2px solid var(--paper-ink-3); outline-offset: 2px; }
 
