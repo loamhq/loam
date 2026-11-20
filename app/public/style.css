@@ -20,14 +20,7 @@ body {
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
 }
-/* **No pull-to-refresh, anywhere in the app.** The owner, 2026-09-29: dragging on
- * a sheet "actually drags it down and refreshes the page". A phone's refresh
- * gesture is the viewport's overscroll, and it is started by a pull that
- * reaches the document — on the page itself, or chained up from a scroller
- * that is already at its end. So the root refuses it, and every scroller in
- * this file contains its own overscroll (`test/style.test.js` fails on one that
- * does not). The app is installed as a PWA and has its own way to reload
- * nothing: the streams reconnect by themselves. */
+/* Contain overscroll in each scroller and at the root so a swipe at the edge cannot refresh the app. */
 html { overscroll-behavior: none; }
 
 button, input, textarea { font: inherit; color: inherit; }
@@ -68,11 +61,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 @keyframes loamSpin { to { transform: rotate(360deg); } }
 @keyframes loamFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* A person who has asked for less movement gets the end of every movement and
- * none of the travel: no animation and **no transition either**, which is the
- * line this block grew on 2026-09-22 when the list column started sliding shut
- * rather than disappearing. A transition left running here would be the one
- * piece of motion the setting did not reach. */
+/* Reduced motion applies to both animations and transitions. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important; animation-iteration-count: 1 !important;
@@ -321,11 +310,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   font-weight: 800; font-size: 12px; line-height: 1;
 }
 .srow-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-/* The chat's own name is the row, and the agent's is the line under it —
- * the owner, 2026-09-22, "let's have the chat Title be the Title of the item and
- * the agent name be the subtitle, since the agent can already be identified via
- * the icon". The two slots are the design's and did not move; what changed is
- * which of them each name is drawn in. */
+/* Show the thread title above the agent name. */
 .srow-title { font-weight: 700; font-size: 17px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .srow-name { font-size: 14.5px; color: var(--paper-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .srow-meta { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; align-self: flex-start; padding-top: 2px; }
@@ -565,34 +550,11 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 .headtitle .titlefield { flex: 1; height: 36px; min-width: 0; max-width: none; padding: 0 12px; width: 100%; }
 .headtitle .titlefield input { font-size: 16px; }
 
-/* The transcript takes the whole of the screen below the header and the dock
- * floats over the foot of it, so the last message passes *behind* the composer
- * rather than stopping above a strip of empty ground. The owner, 2026-09-25:
- * "having the chat when scrolled through feel like it is going behind the input
- * box area without that gap on top of the box".
- *
- * The bottom padding here is the fallback and the real one is written by
- * `fitDock()` in app.js, measured off the dock itself: the composer grows with
- * the draft and with the attachment chips, so a constant is either a gap under
- * every short chat or a last line trapped under a long draft. This figure is
- * what stands until the first measurement, and it is a one-row composer plus the
- * phone's own bottom inset. */
+/* fitDock() measures the composer as drafts and attachments grow. Until then, reserve one row plus the safe-area inset. */
 .msgs { flex: 1; min-height: 0; overflow: auto; padding: 10px 14px 96px; display: flex; flex-direction: column; gap: 8px; overscroll-behavior: contain; }
 .screen.thread { position: relative; }
 
-/* What was said, on either side of the thread.
- *
- * **The two sides are not the same shape, and that is the point.** The owner,
- * 2026-09-25: "it might make sense for the agent responses in chat to not have a
- * bubble and take more advantage of a wider width." So the person's message is
- * the design's right-aligned bubble in a quiet theme surface, and the
- * agent's words are a page: no fill, no radius, no inset, the full width of the
- * reading column. **This is a deliberate departure from the design bundle**,
- * which draws the agent side as a surface bubble with the radius mirrored
- * (`design/README.md` "Message types", `design/desktop/README.md` "Messages").
- *
- * `.say` is the shared type and spacing; the class was `.bubble` until that day,
- * and it was renamed because a bubble is one of the two things it can be now. */
+/* Owner messages use a bubble. Agent replies use the full reading column. */
 .say { padding: 9px 14px; font-size: 16px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
 .line { display: flex; }
 .line.right { justify-content: flex-end; padding-left: 56px; }
@@ -637,16 +599,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   max-width: 62ch;
 }
 
-/* The person's own long message, folded. The owner, 2026-09-25: "my inputs, if
- * they are long, should be collapsed to a shorter height with the option to
- * expand." The height is `MINE_MAX_PX` in `app.js`, which is six lines of this
- * type, and the two figures are the same number on purpose: a message typed in
- * six lines reads back in six lines. Which messages are over it is measured
- * there, because only a browser knows how many lines a paragraph takes.
- *
- * The fade is the bubble's own fill over the last of the text rather than a mask
- * on the element, which would fade the fill itself and take the bubble's bottom
- * corner with it. */
+/* Keep the collapsed height in sync with MINE_MAX_PX. Fade the text with the bubble color so its rounded edge stays opaque. */
 /* hidden would still let focus/selection scroll the content and carry the
  * absolute fade/control upward with it. clip never creates an inner scroller. */
 .say.user.clamped { max-height: var(--mine-max); overflow: clip; }
@@ -710,14 +663,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   font-family: var(--font-mono); font-size: 13.5px;
   background: var(--paper-pane); border-radius: 6px; padding: 1px 5px; overflow-wrap: anywhere;
 }
-/* A code block scrolls sideways and never up and down. The owner, 2026-09-30: a
- * formatted block "is its own separate scrollable container, [so] copying
- * becomes hard." It was `overflow: auto` under a 360px ceiling with its
- * overscroll contained in both directions, so a long block was a box inside the
- * thread that took the vertical swipe and would not hand it on at its end — the
- * thread stopped scrolling wherever a finger landed on code. It is drawn whole
- * now, the sideways slide is its own, and a vertical swipe is the thread's. A
- * long-press still selects inside it: nothing here takes the touch. */
+/* Let code scroll horizontally while vertical swipes continue through the thread. */
 .md pre {
   margin: 8px 0; padding: 10px 12px; border-radius: 14px;
   background: var(--surface-code); color: var(--text-code);
@@ -766,18 +712,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 .md em { font-style: italic; }
 .md del { text-decoration: line-through; color: var(--paper-ink-3); }
 
-/* A table. The owner, 2026-09-22: "render tables in the chat beautifully".
- *
- * **The wrapper is the whole of how one behaves on a phone.** A table is the
- * one block that will not wrap: its columns are as wide as their widest cell,
- * so a three-column table of prose is wider than a 390px screen and would
- * otherwise push the bubble, the thread and the composer out past the edge of
- * it. `.tablewrap` is a scroller of its own — the table keeps its columns, the
- * bubble keeps its width, and what does not fit slides sideways *inside* the
- * bubble. `width: max-content` is what lets it be wider than the scroller at
- * all, and `min-width: 100%` is what keeps a narrow table from sitting in half
- * of one. The bubble sets `white-space: pre-wrap`, which a cell must not
- * inherit or every cell would be one line however long it is. */
+/* Wide tables scroll inside the bubble. Narrow tables fill it, and cell text can wrap independently of the bubble. */
 .md .tablewrap { max-width: 100%; overflow-x: auto; overflow-y: hidden; margin: 8px 0; border-radius: 12px; overscroll-behavior-x: contain; }
 .md table {
   border-collapse: collapse; width: max-content; min-width: 100%;
@@ -1017,15 +952,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 .answered .ahead { color: var(--paper-ink-2); }
 .answered .avals { overflow-wrap: anywhere; }
 
-/* The line under a turn: quiet by default, whole on a tap.
- *
- * The owner, 2026-09-22: "I want the design to be less visible and in my face and
- * more available easily if I want it, maybe with one click or something." So
- * the default is one 11px muted token — the model's short name — with no border
- * and no fill, and it opens in place. It is a `button` and not a hover target
- * on purpose: every `:hover` in this file is inside `@media (hover: hover)` and
- * a phone has none, so a reveal that needed a pointer would be a reveal a phone
- * could never get at. */
+/* Turn details open on tap or keyboard activation so they also work without hover. */
 .turn {
   align-self: flex-start; border: 0; background: transparent; text-align: left;
   font-size: 11px; color: var(--paper-ink-3); padding: 2px 6px; line-height: 1.4;
@@ -1114,21 +1041,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   background: var(--paper-page-glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
 }
 
-/* The notice row: the composer box's first row, or no row at all. The ladder
- * that decides which is `quietLine()` in sessions.js; this is 12.5px, muted,
- * left to right, and three tones — `quiet` for the things that are merely true,
- * `warn` for a sign-in that is about to go, `bad` for one that has gone and for
- * anything that just failed. The wake-cost and working lines are deliberately
- * not an error colour: neither is a problem.
- *
- * It was a centred line above the box until 2026-09-30, on the dock's frosted
- * ground, and the transcript scrolling under that ground made it a notch stuck
- * to the box. Inside the box it is part of the one floating object. The box's
- * own 6px padding plus this row's is the mock's 9px 16px.
- *
- * It grows in and shrinks out over 160ms — `NOTICE_MS` in app.js, which keeps
- * a leaving row drawn exactly that long. The reduced-motion block at the top of
- * this file takes the travel out of both. */
+/* quietLine() chooses the composer notice. Warn and bad signal problems, while activity uses the quiet color. */
 .noticerow {
   display: flex; align-items: center; gap: 8px; flex: none;
   padding: 3px 10px 0; font-size: 12.5px; line-height: 1.4; color: var(--paper-ink-3);
@@ -1212,12 +1125,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   position: relative;
 }
 
-/* One box, two rows: the text, then everything that acts on it. The owner,
- * 2026-09-22: "The box design should be a rectangle with rounded edges, not
- * half circles." 18px is the design's own card radius, which is what the rest
- * of this page is made of; 999px was the pill it replaces. The buttons moving
- * underneath is what gives row one the full width — a six-line draft beside a
- * send button is a column of four words. */
+/* Keep actions below the full-width draft so a long message can use the entire row. */
 .composer-box {
   display: flex; flex-direction: column; gap: 4px; position: relative;
   background: var(--paper-pane); border: 1px solid var(--paper-rule); border-radius: 18px;
@@ -1225,11 +1133,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   /* Row one scrolls inside this box rather than the box growing past it. */
   min-width: 0;
 }
-/* Row one. It is a `contenteditable` region and not a `<textarea>` since
- * 2026-09-22, because a textarea can only ever show its own characters and
- * the owner asked for the marks to be drawn as they are typed — so the rules
- * below are a textarea's rules plus what a list, a bold run and a code span
- * need. `compose.js` is the other half, and nothing outside it knows. */
+/* The editable draft renders inline formatting as the person types. */
 .composer-box .draft {
   width: 100%; border: 0; background: transparent; outline: none; resize: none;
   font-size: 16px; line-height: 1.35; color: var(--paper-ink);
@@ -1265,22 +1169,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   background: color-mix(in srgb, currentColor 14%, transparent);
   border-radius: 6px; padding: 1px 5px;
 }
-/* Row two, and its class is its own.
- *
- * It was `.actions` until 2026-09-22, which is also the class the action sheet
- * gives its card — and that rule, four hundred lines further down this file,
- * sets `flex-direction: column` on a white 28px card with a shadow. Same class,
- * later rule, so the composer's row two was a *column* on every width: the +,
- * the mic and the send stacked in a 150px block under the textarea, filling a
- * third of a phone screen. Seen in a real browser at 390px, 2026-09-22. It was
- * not a media query and there was nothing to delete — this file has exactly one
- * width query, `min-width: 1100px`, and no `max-width` query at all — so the
- * fix is the name: row two is `.composer-actions`, which nothing else in the
- * app is, and `test/style.test.js` holds the two classes apart.
- *
- * The gap between the left group and the send button is a node and not a
- * `justify-content`, so a button added to either side lands beside its own
- * group rather than in the middle of the row. */
+/* Scope the composer actions separately from the action sheet, whose actions stack vertically. */
 .composer-actions { display: flex; flex-direction: row; align-items: center; gap: 4px; }
 .composer-gap { flex: 1; min-width: 8px; }
 
@@ -1594,7 +1483,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   padding: 12px 16px 2px; text-align: center; font-size: 12.5px; color: var(--paper-ink-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* What the chat runs on, where the phone's header strip used to say it. */
+/* Session provider and model. */
 .actions-sub {
   padding: 0 16px 8px; text-align: center; font-size: 11px; color: var(--paper-ink-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1673,14 +1562,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 
 .banner { margin: 8px 20px 0; padding: 10px 14px; border-radius: 18px; background: var(--surface-danger); color: var(--text-inverse); font-size: 13.5px; line-height: 1.4; flex: none; }
 
-/* ------------------------------------------------ the sign-in, and when it goes
- *
- * A login that has run out stops every session the host can start, and only a
- * person can fix it. Inside a composer it is the top rung of the one notice row —
- * `.noticerow.warn` and `.noticerow.bad`, further up this file, where it used to
- * be a tinted bar of its own; here is the Providers list's own copy of it.
- * `--warning` is the amber the quota ring already warns in; expired is the
- * design's own error colour, and nothing new was invented for either. */
+/* The same sign-in state appears in the composer notice and in the providers list. */
 .loginwarn {
   margin: 0 0 6px; padding: 7px 12px; border-radius: 14px; flex: none;
   font-size: 12.5px; line-height: 1.4; text-align: center;
@@ -1759,17 +1641,7 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 }
 .setrow .navdot { margin: 0 4px; }
 
-/* ----------------------------------------------------- the draft, full screen
- *
- * The owner, 2026-09-25: "Have an option in the text box to open a bigger full
- * screen view to work on the message that makes it easier to work on longer
- * prompts." One layout at both widths, because the whole of it is the text with
- * room round it and there is nothing a wide window would want arranged
- * differently — only a measure, which the body below gives it.
- *
- * It covers everything, including the chat's header: there is one way out and it
- * is in this screen's own header, so a second header behind it would be two
- * backs to choose between. */
+/* The expanded composer uses the same layout on phone and desktop, with a bounded reading width. */
 .editor {
   position: absolute; inset: 0; z-index: 11;
   display: flex; flex-direction: column; background: var(--paper-page);
@@ -1829,10 +1701,7 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 /* The app's mark, public/icon.svg: its own fills and its own blob, so nothing
  * here colours or shapes it. */
 .brand { width: 42px; height: 42px; flex: none; display: block; }
-/* The rail's buttons are rounded squares (the owner, 2026-10-07: "would be nicer
- * if they were squares with rounded edges instead of circles"), on the app's
- * own scale: the account tile beside them is 14px on 40px, and the status
- * boxes' 16px and 18px are the same proportion at 48px and 56px. */
+/* Match the rail button corner radius to the account tile at each size. */
 .rail-tabs { display: flex; flex-direction: column; gap: 10px; }
 .railtab {
   width: 56px; height: 56px; border-radius: 18px; border: 0; background: transparent;
@@ -1855,17 +1724,7 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 }
 @media (hover: hover) { .accounttile:hover { background: var(--latte-espresso-hover); } }
 
-/* Hiding the column is a movement, not a cut. The owner, 2026-09-22: "The
- * collapsing of the middle column should happen with an elegant animation." The
- * column keeps its place in the tree while it is hidden — `app.js` draws it
- * either way — and the width and the opacity run down together over 220ms, the
- * pane beside it growing into the space because it is the flexible one. The
- * curve is `ease-out`, which is the one the design's own keyframes use; the
- * opacity is the shorter half of the two so the contents are gone before the
- * edge arrives, which is what keeps the text from squashing on the way out.
- *
- * `overflow: hidden` is load-bearing: the rows inside keep their own width
- * while the column narrows, and without it they would spill across the pane. */
+/* Clip the list as its column shrinks. Fade its contents first so the rows keep their width. */
 .listcol {
   width: 372px; flex: none; min-height: 0; display: flex; flex-direction: column;
   overflow: hidden;
@@ -2467,8 +2326,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 }
 .settings-section { display:flex; flex-direction:column; gap:var(--space-lg); margin:0; }
 .settings-place { margin-bottom:0; }
-/* Settings › Connections (2026-11-18): three groups on one page. The room
-   between groups is twice the room inside one, so each reads as its own. */
+/* Connection settings share row layouts across the three groups. */
 .connections-group { gap:var(--space-md); scroll-margin-top:var(--space-lg); }
 .connections-group + .connections-group { margin-top:var(--space-lg); }
 .connections-group-head { display:flex; flex-direction:column; gap:2px; padding:0 4px; }
@@ -2567,8 +2425,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-entry-settings .plugin-entry .setrow-title { white-space:normal; font-weight:500; font-size:14px; }
 .plugin-entry-settings .plugin-entry > .field-input { width:100%; }
 .plugin-entry-settings .plugin-entry-note { margin:0; font-size:13px; }
-/* Advanced (2026-11-18): the settings a person rarely needs, behind a quiet
-   line in the same rows. */
+/* Keep advanced settings in an expandable section. */
 .plugin-entry-advanced { border-top:1px solid var(--paper-rule); }
 .plugin-entry-advanced > summary { padding:12px 16px; min-height:44px; display:flex; align-items:center; cursor:pointer; font-size:13px; color:var(--paper-ink-2); }
 .plugin-entry-advanced > summary::before { content:'›'; display:inline-block; margin-right:8px; }
@@ -2674,9 +2531,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-remove-question { display:flex; flex-wrap:wrap; gap:10px; }
 .plugin-remove-question > p { flex-basis:100%; }
 .plugin-source { display:inline-flex; align-items:center; min-height:44px; }
-/* A plugin's own page, plain first (2026-11-19, plugin-settings.js): its
- * icon beside its name and promise, a picture, its own words, its controls,
- * and Details at the foot in a quieter voice. */
+/* Plugin details sit below its primary controls. */
 .plugin-hero { display:flex; align-items:center; gap:16px; margin:4px 0 4px; }
 .plugin-hero .plugin-icon { width:56px; height:56px; border-radius:16px; }
 .plugin-hero .plugin-icon-letter { font-size:26px; }
@@ -2863,8 +2718,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 
 .profile-menu-button { align-self:flex-start; flex:none; }
 
-/* Settings › Connections › API keys (2026-11-18): API keys by provider. One card for the
-   key, a list of the plugins that use it, each opening in place. */
+/* Group API keys by provider. */
 .icon-tile.glyph.keys-mark { background:var(--paper-card); color:var(--paper-card-ink); }
 .keys-mark .mark-letter { font-family:var(--font-display); font-size:18px; font-weight:700; line-height:1; }
 .keys-checkrow { display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; }
@@ -2900,7 +2754,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
   .keys-user > .setrow .setrow-sub { white-space:normal; }
 }
 
-/* An image seen full size (2026-11-18): public/image-view.js. */
+/* Full-size image viewer. */
 html.image-view-open, html.image-view-open body { overflow:hidden; }
 .image-view { position:fixed; inset:0; z-index:1000; display:grid; grid-template-rows:auto 1fr; background:var(--image-view-scrim); color:var(--image-view-ink); animation:image-view-in .16s ease-out; touch-action:pan-y pinch-zoom; }
 @keyframes image-view-in { from { opacity:0; } to { opacity:1; } }
@@ -2919,21 +2773,13 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
 .image-view-step.prev { left:max(8px, env(safe-area-inset-left)); }
 .image-view-step.next { right:max(8px, env(safe-area-inset-right)); }
 .image-view-step.next svg { transform:scaleX(-1); }
-/* An agent's files with no place in its words (a reply from before the evening
-   of 2026-11-18) sit under its words, a row of pictures, not the page's width. */
+/* Show files without inline positions below the reply. */
 .say .bubble-files { margin:10px 0 2px; }
 .say .bubble-files:has(.message-image) { max-width:560px; }
 .say .bubble-files:has(.message-image:only-child) { max-width:420px; }
 .say .message-image img { aspect-ratio:auto 4 / 3; max-height:320px; object-fit:contain; object-position:left top; }
 @media (max-width: 480px) { .image-view-save span { display:none; } .image-view-save { padding:0; } }
-/* An agent's images where it wrote them (2026-11-18, chat-ui.js replyImages):
- * part of the writing, not attachments. Each keeps its own shape, as wide as
- * the column allows and never taller than --figure-h; two or three in a row
- * share one height (each grows by its aspect ratio, --ratio, so the row's
- * height is the column over --ratio-sum). Under ~480px of column they stack.
- * The frame keeps the image's space before it loads (the host gives its
- * size), and the picture fades in. No filename; the alt text is a quiet
- * caption, and without one there is none. */
+/* Reserve each image’s aspect ratio before loading. Groups share a height until the column is narrow enough to stack them. */
 .reply-figures { --figure-h:min(440px, 62vh); --figure-gap:10px; container-type:inline-size; margin:12px 0 14px; }
 .tt-prose-content > .reply-figures:first-child { margin-top:2px; }
 .tt-prose-content > .reply-figures:last-child { margin-bottom:2px; }
@@ -2967,4 +2813,4 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
 /* A heading the page focuses when a sheet opens (tabindex -1, for screen
    readers) draws no box: nobody can tab to it, so there is nothing to show. */
 :is(.sheet-title, [role="heading"], h1, h2, h3)[tabindex="-1"]:focus { outline:none; box-shadow:none; }
-/* A plugin installed from a link someone shared (2026-11-18). */
+/* Plugin installed from a shared link. */

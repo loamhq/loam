@@ -49,8 +49,7 @@
   let token
   try { token = fragment.startsWith('token=') ? new URLSearchParams(fragment).get('token') : decodeURIComponent(fragment) } catch { token = '' }
   history.replaceState(null, '', location.pathname + location.search)
-  // The full link opened in a tab already on /claim changes only the fragment,
-  // which reloads nothing: read it again (found 2026-11-16, the first-day walk).
+  // A new claim link in the current tab changes only the fragment. Reload to read its token.
   addEventListener('hashchange', () => { if (location.hash.length > 1) location.reload() })
   const form = document.getElementById('claim-form'), error = document.getElementById('error'), submit = document.getElementById('submit'), password = document.getElementById('password'), next = document.getElementById('next'), settled = document.getElementById('settled')
   function problem(words) { error.textContent = words; error.hidden = false }

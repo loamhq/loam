@@ -1,8 +1,4 @@
-/* Settings › Market (2026-11-18): public/page/market.js. Every colour, face,
- * radius and motion here is a token, so the Market is at home in every theme,
- * light and dark and under Sun. Buttons take their paint from
- * button-tiers.css (espresso for the one finishing action, foam for a
- * secondary one, Newspaper otherwise); this sheet sets their size and place. */
+/* Market controls use the shared button tiers. Size and placement belong to this sheet. */
 
 /* ---------------------------------------------------------------- the frame */
 .market-scrim { z-index: 8; }
@@ -32,13 +28,7 @@
 .market-phone .market-page { padding: var(--space-xl) var(--space-lg) calc(96px + env(safe-area-inset-bottom, 0px)); gap: var(--space-lg); }
 .market-phone .market-crumb { display: none; }
 
-/* ------------------------------------------------- the store (2026-11-18)
- * The front page and a listing's page as a high-end store: restraint,
- * space and photography. Large pictures, hairline rules, the display face
- * for names, slow hover (an image eases to 1.05 over 1.2s), and nothing
- * else: no badges, counts or chips. Every colour is a token; the one
- * exception is the words over a photograph, white on a soft dark gradient
- * so they read on any picture. */
+/* Use theme colors for listings. Text over photography uses a dark gradient to stay readable. */
 .market { --market-slow: 1.2s cubic-bezier(.2,.7,.2,1); --market-photo-ink: var(--theme-cover-ink); --market-photo-ground: var(--theme-cover-shade); }
 
 /* --------------------------------------------------------------- masthead */
@@ -355,8 +345,7 @@
 .market-readme-body blockquote { margin: 22px 0; padding: 2px 0 2px 20px; border-left: 2px solid var(--paper-rule-strong); font-family: var(--font-display); font-size: 20px; color: var(--paper-ink); }
 .market-readme-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 26px 0 10px; }
 .market-readme-img { display: block; width: 100%; max-width: 100%; height: auto; border-radius: 18px; }
-/* Loam's note (2026-11-19): the reviewer's words, first in the body, above
-   the maker's README and as wide as it; Loam's mark says whose they are. */
+/* Place the review above the maker’s README and distinguish its author. */
 .market-listing-note-row { padding: 40px 0 0; max-width: 640px; }
 .market-loam-note { padding: 26px 28px 8px; border-radius: var(--radius-xl, 24px); background: var(--paper-raised); box-shadow: inset 0 0 0 1px var(--paper-rule); }
 .market-loam-note-head { display: flex; align-items: center; gap: 14px; }
@@ -510,12 +499,7 @@
 .market .theme-preview .pillbtn, .market .theme-preview .say { min-height: 0; min-width: 0; }
 
 /* ------------------------------------------- a listing card in a thread */
-/* (2026-11-18, page/market.js `marketCards`.) An agent's offer, in its own
- * words' column: a raised card with the listing's tile, a quiet "Market"
- * kicker so it never reads as the agent's own work, the name, one line, the
- * maker and how far it reaches, and the Market's own button. The whole card
- * opens the listing (the name's hit area stretches over it); the button sits
- * above that. */
+/* The card opens the listing. Its action button has its own hit target above the link. */
 .market-cards { display: flex; flex-direction: column; gap: var(--space-sm); max-width: 560px; margin: var(--space-sm) 0 var(--space-md); container-type: inline-size; }
 .market-card {
   position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-md);
@@ -571,9 +555,7 @@
 .market-back-from { max-width: min(46vw, 360px); min-width: 0; }
 .market-back-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Install from a link (2026-11-18): the same sheet as the Market's, asking
-   first for one thing, the link. It reads by itself; what it found is then
-   the Market's install sheet. */
+/* Resolve the submitted link before showing the standard install sheet. */
 .market-link { gap: var(--space-md); }
 .market-link-head { display: flex; align-items: center; gap: var(--space-md); }
 .market-link-head h2 { margin: 0; font-size: 26px; line-height: 1.12; }
@@ -611,12 +593,7 @@
 .market-card-name-plain { cursor: default; }
 .market-card-name-plain::after { content: none; }
 
-/* ---------------------------------------------------------------------------
- * A theme worn before it is got (2026-11-19, theme-showcase.js): the scene of
- * Loam in a frame with the page's own soft edge, its controls in a row under
- * it, and the palette as named chips. The same pieces draw on a theme's page
- * in Settings › Plugins, so none of this is the Market's alone.
- * ------------------------------------------------------------------------- */
+/* Market and plugin settings share the theme preview frame, controls and palette. */
 .theme-show { container: theme-show / inline-size; display: flex; flex-direction: column; gap: var(--space-lg); padding: 36px 0 32px; border-bottom: 1px solid var(--paper-rule); }
 .theme-show-stage { position: relative; aspect-ratio: 880 / 520; width: 100%; border-radius: var(--radius-xl); overflow: hidden; background: var(--paper-card);
   box-shadow: 0 0 0 1px var(--paper-rule), var(--shadow-float); transition: opacity var(--motion-normal) var(--ease-standard); }

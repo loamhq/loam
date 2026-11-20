@@ -1,7 +1,4 @@
-/* One empty state for the whole app (2026-11-18, `empty-state.js`).
- * Loam's blob in a quiet tint of the theme, one fine-line object in it, a
- * display-face title, one line of words, at most one action. Every paint is
- * a token, so it is right in every theme, light and dark, and under Sun. */
+/* Shared empty-state layout. Use theme tokens for the illustration, heading and optional action. */
 .empty-state {
   flex: 1 1 auto; align-self: stretch;
   display: flex; flex-direction: column; align-items: center; justify-content: center;

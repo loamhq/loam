@@ -1,7 +1,4 @@
-/* A theme's preview (2026-11-19): the scene theme-scene.js draws, laid out
- * like Loam at about half size, in tokens only, so the look it wears is the
- * whole of its colour and type. Faces, buttons, the user's bubble and the
- * pane's material are Loam's own classes (style.css, materials.css). */
+/* Use the active theme’s tokens and the app’s own components for the miniature preview. */
 html[data-scene], html[data-scene] body { height: 100%; overflow: hidden; }
 html[data-scene] body { zoom: 1; }
 #scene { height: 100%; }

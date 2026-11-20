@@ -5,12 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>Theme preview</title>
-    <!-- A theme's preview (2026-11-19): a small scene of Loam, framed by the
-         Market's listing and a theme's page in Settings, wearing one look.
-         It loads Loam's own stylesheets and the look's tokens, so it is what
-         the theme looks like when it is on. Nothing here reads a person's
-         data: the scene is invented. The app serves this one page with
-         `frame-ancestors 'self'` (src/server.js). See theme-scene.js. -->
+    <!-- Render a synthetic scene with the actual theme stylesheets. The app permits same-origin framing. -->
     <link rel="stylesheet" href="/fonts/fonts.css" />
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/threads.css" />

@@ -45,7 +45,7 @@
   --shadow-ink: rgba(28,28,28,.22);
   --shine: rgba(255,255,255,.45);
   --scrim: rgba(28,28,28,.45);
-  /* An image seen full size (2026-11-18): near-black in both modes, as a photo is shown. */
+  /* Keep the full-size image backdrop dark in either theme. */
   --image-view-scrim: rgba(12,12,12,.97);
   --image-view-ink: #f4f4f4;
   --mask-opaque: #000;
