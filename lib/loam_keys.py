@@ -44,12 +44,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 import loam_config as lc
+import loam_hetzner
 
 # ---------------------------------------------------------------------------
 # The providers Loam knows
@@ -85,6 +87,8 @@ FIELD_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 KEYS_MAX = 8                 # providers one plugin may declare
 WHY_MAX, LABEL_MAX = 300, 60
 VALUE_MAX = 4096
+PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
+HETZNER_PLUGIN = "hetzner-cloud"
 
 
 class KeyError_(Exception):
@@ -223,11 +227,13 @@ def _read_env(path: Path) -> dict[str, str]:
 def _write_private(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(text)
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 
 
 def _write_env(path: Path, values: dict[str, str], keep_other: bool = True,
@@ -365,15 +371,21 @@ def shared_source(pid: str, fields: list[dict]) -> str | None:
     return None
 
 
+def _shared_only(plugin_id: str, provider_id: str) -> bool:
+    return plugin_id == HETZNER_PLUGIN and provider_id == "hetzner"
+
+
 def resolve(plugin_id: str, pid: str, fields: list[dict]) -> tuple[dict[str, str], str | None]:
     """The values ``plugin_id`` gets for provider ``pid``, and where they come
     from: ``own``, ``saved`` (shared), ``box``, or nothing."""
-    own = own_values(plugin_id, fields)
+    own = {} if _shared_only(plugin_id, pid) else own_values(plugin_id, fields)
     if _complete(own, fields):
         return own, "own"
     shared = shared_values(pid, fields)
     if _complete(shared, fields):
         return shared, "saved"
+    if _shared_only(plugin_id, pid):
+        return {}, None
     box = box_values(fields)
     if _complete(box, fields):
         return box, "box"
@@ -464,6 +476,8 @@ def adopt(rows: list[dict] | None = None) -> list[str]:
     for pid, users in sorted(declared_by(rows).items()):
         fields = users[0]["fields"] if pid not in PROVIDERS else PROVIDERS[pid]["fields"]
         for u in users:
+            if _shared_only(u["id"], pid):
+                continue
             own = own_values(u["id"], fields)
             # A key given through "use a different key" is a choice, never
             # adopted: only a key from before shared keys has no record.
@@ -521,17 +535,19 @@ def listing() -> dict:
                             "why": u["why"], "optional": u["optional"],
                             "uses": "own" if used == "own" else "shared",
                             "has_key": used is not None,
-                            "checked": checks.get(f"{pid}@{u['id']}")})
+                            "checked": checks.get(f"{pid}@{u['id']}"),
+                            **({"shared_only": True} if _shared_only(u["id"], pid) else {})})
         out.append({"id": pid, "name": prov["name"], "where": prov["where"],
                     "checks": bool(prov["check"]),
                     "fields": [{k: f[k] for k in ("name", "label", "secret")}
                                | ({"optional": True} if f.get("optional") else {})
                                for f in fields],
                     "set": source is not None, "source": source,
-                    "shown": _shown_values(fields, values),
+                    "shown": _shown_values(fields, values) if pid != "hetzner" else {},
                     "checked": checks.get(pid) if source else None,
                     "refused": checks.get(f"{pid}:refused"),
-                    "plugins": plugins})
+                    "plugins": plugins,
+                    **({"projects": _hetzner_projects()} if pid == "hetzner" else {})})
     return {"providers": out}
 
 
@@ -647,6 +663,9 @@ def _user(pid: str, plugin_id: str) -> dict:
     if not any(k["provider"] == pid for k in plugin_keys(plugin_id)):
         raise KeyError_(f"{plugin_id} does not declare a {prov['name']} key, so it "
                         f"is never given one", 409)
+    if _shared_only(plugin_id, pid):
+        raise KeyError_("Hetzner Cloud uses the shared token for personal. "
+                        "Add a project token in API keys to connect another project.", 409)
     return prov
 
 
@@ -673,6 +692,73 @@ def use_shared(pid: str, plugin_id: str, by: str | None = None) -> dict:
     _record(f"{pid}@{plugin_id}", None)
     sync()
     return one(pid)
+
+
+# ---- Named Hetzner project tokens ------------------------------------------
+
+def hetzner_project_id(project: str) -> str:
+    name = project.strip().lower()
+    if not PROJECT_ID.fullmatch(name):
+        raise KeyError_("Use a project name of 1 to 48 letters, digits or dashes, "
+                        "starting with a letter or digit.")
+    return name
+
+
+def _project_dir() -> Path:
+    return keys_dir() / "hetzner-projects"
+
+
+def _project_record(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _hetzner_projects() -> list[dict]:
+    projects = []
+    for path in sorted(_project_dir().glob("*.json")):
+        if PROJECT_ID.fullmatch(path.stem) and path.stem != "personal":
+            record = _project_record(path)
+            if record.get("token"):
+                projects.append({"id": path.stem, "checked": record.get("checked")})
+    return projects
+
+
+def hetzner_project_token(project: str) -> str | None:
+    name = hetzner_project_id(project)
+    if name == "personal":
+        fields = PROVIDERS["hetzner"]["fields"]
+        return shared_values("hetzner", fields).get("HCLOUD_TOKEN")
+    return _project_record(_project_dir() / f"{name}.json").get("token")
+
+
+def _named_project_path(project: str) -> Path:
+    name = hetzner_project_id(project)
+    if name == "personal":
+        raise KeyError_("Use the shared Hetzner Cloud key for personal.")
+    return _project_dir() / f"{name}.json"
+
+
+def set_hetzner_project(project: str, body, by: str | None = None) -> dict:
+    path = _named_project_path(project)
+    fields = PROVIDERS["hetzner"]["fields"]
+    token = _clean(fields, {"value": body.get("value")})["HCLOUD_TOKEN"]
+    ok, why = hetzner(token)
+    if not ok:
+        raise KeyError_(why, 422)
+    checked = {"at": _now(), "ok": True, "why": why, "by": by}
+    _write_private(path, json.dumps({"token": token, "checked": checked}) + "\n")
+    return one("hetzner")
+
+
+def forget_hetzner_project(project: str) -> dict:
+    try:
+        _named_project_path(project).unlink()
+    except FileNotFoundError:
+        raise KeyError_("There is no saved key for that Hetzner project.", 404) from None
+    return one("hetzner")
 
 
 # ---------------------------------------------------------------------------
@@ -752,12 +838,12 @@ def openai(key: str) -> tuple[bool, str]:
 
 def hetzner(key: str) -> tuple[bool, str]:
     """Reads one location: any project token may, read-only or not."""
-    code, _, down = _get(f"{_base('LOAM_HETZNER_URL', 'https://api.hetzner.cloud/v1')}"
-                         f"/locations?per_page=1",
-                         {"Authorization": f"Bearer {key}"}, "Hetzner")
+    result = loam_hetzner.request(key, "GET", "/locations?per_page=1",
+                                 base=_base("LOAM_HETZNER_URL", loam_hetzner.API))
+    code = result.get("status")
     if code is None:
-        return False, down
-    if code < 300:
+        return False, "Could not reach Hetzner Cloud to check the key. Try again."
+    if result["ok"]:
         return True, "Hetzner accepted the token."
     if code in (401, 403):
         return False, "Hetzner says this is not a valid API token for a project."

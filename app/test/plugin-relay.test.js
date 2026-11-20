@@ -39,6 +39,25 @@ test('plugin bytes and HEAD stay bytes, encode segments, keep MIME/cache/nosniff
   assert.equal(broker.seen.length, 2)
 })
 
+test('named Hetzner project keys relay writes and cannot be read back', async t => {
+  const path = '/keys/hetzner/projects/example'
+  const body = { value: 'fixture-token' }
+  const broker = await fakeBroker({
+    [`PUT /v1${path}`]: (req, res, url, raw) => {
+      assert.deepEqual(JSON.parse(raw), body)
+      json(res, 200, { id: 'hetzner', projects: [{ id: 'example' }] })
+    },
+    [`DELETE /v1${path}`]: (req, res) => json(res, 200, { id: 'hetzner', projects: [] }),
+  }), app = await appAgainst(broker)
+  t.after(closing(app, broker))
+  for (const [method, status] of [['PUT', 200], ['GET', 405], ['DELETE', 200]]) {
+    const res = await fetch(app.url + '/api' + path, { method, ...(method === 'PUT' ? { body: JSON.stringify(body) } : {}) })
+    assert.equal(res.status, status)
+    assert.ok(!(await res.text()).includes(body.value))
+  }
+  assert.deepEqual(broker.seen.map(row => row.method), ['PUT', 'DELETE'])
+})
+
 test('threads permission cards retain their POST answer seam and host refusal sentences', async t => {
   const broker = await fakeBroker({ 'POST /v1/sessions/session id/permissions/request id': (req, res, url, raw) => json(res, 409, { error: 'This question has already been answered.', received: JSON.parse(raw) }) }), app = await appAgainst(broker)
   t.after(closing(app, broker))

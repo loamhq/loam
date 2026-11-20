@@ -105,6 +105,8 @@ own `thread.*` rows cover the same things.
 | `keys.check` | Check a provider's shared key again | POST /api/keys/{provider}/check | persona | — |
 | `keys.own` | Give one plugin a different key of a provider it declared | PUT /api/keys/{provider}/plugins/{plugin} | persona, conversation only | — |
 | `keys.shared` | Put a plugin back on the provider's shared key | DELETE /api/keys/{provider}/plugins/{plugin} | persona, conversation only | — |
+| `keys.project.set` | Check and save a named Hetzner Cloud project token | PUT /api/keys/hetzner/projects/{project} | persona, conversation only | — |
+| `keys.project.forget` | Forget a named Hetzner Cloud project token | DELETE /api/keys/hetzner/projects/{project} | persona, conversation only | — |
 | `agent.display` | An agent's display name; its id never changes (2026-11-13) | PATCH /api/agents/{agent} | persona, conversation only | no |
 | `agent.provider` | An agent's default provider: new threads, members brought in; wakes and crons only on Claude Code | PATCH /api/agents/{agent} | persona, conversation only | no (was `persona.provider`, the owner's hands) |
 | `agent.model` | An agent's default model, on its provider | PATCH /api/agents/{agent} | persona, conversation only | no |
