@@ -15,6 +15,8 @@ have never met.
   separately with its details. The review button can open before that second
   request finishes. A reviewer can use `note.changed` for a documentation
   edit, so its presence alone does not establish wider permissions.
+  When checking desktop wrapping, measure the rendered text range. The
+  enclosing review button can fit even while a child clips the warning.
 - **The domain is the install's.** Nothing in the app names a domain; the
   deploy layer hands the app its origins (`bin/deploy`, `service_env`).
 - **It runs on the host, not in a container** (since 2026-11-16): a systemd

@@ -77,6 +77,22 @@ try {
         assert.ok(await read.evaluate(el => el === document.activeElement), 'focus returns to Read')
       }
       await openListing(REVIEWED)
+      if (width === 1440) {
+        // The outer button can fit even when its excerpt has been ellipsized.
+        const layout = await read.evaluate(button => {
+          const excerpt = button.querySelector('.market-note-excerpt')
+          const range = document.createRange()
+          range.selectNodeContents(excerpt)
+          const box = button.getBoundingClientRect()
+          const fragments = [...range.getClientRects()]
+          return {
+            rows: new Set(fragments.map(r => r.top)).size,
+            visible: excerpt.scrollWidth <= excerpt.clientWidth && fragments.every(r =>
+              r.left >= box.left && r.right <= box.right && r.top >= box.top && r.bottom <= box.bottom),
+          }
+        })
+        assert.ok(layout.rows > 1 && layout.visible, 'the full update warning wraps within the desktop button')
+      }
       await read.click()
       assert.equal(await sheet.locator('.market-note-changed h3').innerText(), 'New since 1.0.0')
       const documentBody = sheet.getByRole('document')

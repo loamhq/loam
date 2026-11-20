@@ -134,7 +134,9 @@ try {
       assert.deepEqual(await page.locator('.market-touch-text').allTextContents(), ['Talks to your own devices', 'Runs a small program on your server'])
       await families(page, `${label} listing`)
       const posts = () => app.writes.filter(w => w.method === 'POST')
-      await page.locator('.market-listing-head .market-listing-acts .pillbtn', { hasText: 'Install' }).click()
+      const installAction = page.locator('.market-listing-head .market-listing-acts .pillbtn', { hasText: 'Install' })
+      const installBox = await installAction.boundingBox()
+      await installAction.click()
       await page.locator('.market-install .market-touch').first().waitFor()
       assert.equal(await page.locator('.market-yes-once').textContent(), 'You say yes once, here. A later version asks again only if it reaches further.')
       assert.deepEqual(posts().map(p => p.body), [{ url: 'https://github.com/ada-park/pocket-sync/tree/v0.4.0/pocket-sync' }], `${label}: the first call reads, it does not install`)
@@ -143,6 +145,13 @@ try {
       assert.equal(posts().at(-1).body.confirm, 'ok-pocket-sync', `${label}: the second call is the yes`)
       await page.locator('.market-install .pillbtn.primary', { hasText: 'Done' }).click()
       await page.locator('.market-listing-head .market-listing-acts .market-state', { hasText: 'Installed' }).waitFor()
+      if (width === 1440) {
+        const status = page.getByRole('status', { name: 'Pocket Sync: Installed', exact: true })
+        const box = await status.boundingBox()
+        assert.equal(box.width, installBox.width)
+        assert.equal(box.height, installBox.height)
+        assert.equal(await status.locator('svg').count(), 1)
+      }
 
       // A theme's own page: its cover, the maker with their links, the
       // README (made safe at the broker, drawn as nodes here), and no
