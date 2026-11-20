@@ -1,48 +1,10 @@
 #!/usr/bin/env python3
-"""OnFailure handler: record a wake that died before it could record itself.
+"""Record failures that outlive the wake, cron or engineer process that would report them.
 
-``bin/wake`` reports its own failures -- a preflight refusal, an identity
-refusal, a turn-cap hit, a non-zero exit from the CLI -- by appending to
-``logs/wake-<agent>.jsonl`` and to ``vault/00_INBOX/from-agents/loam-wake-failures.md``.
-Every one of those paths runs *inside* the wrapper, so every one of them
-assumes the wrapper is still alive to run it.
-
-On 2026-08-30 it was not. The kernel OOM-killed a persona's wake at 03:12 and
-systemd recorded ``code=killed, status=15/TERM``. Nothing reached either
-file: the night is not in ``wake-wren.jsonl`` as a failure, it is simply
-absent -- indistinguishable from a night the timer never fired. That is the
-gap [[state]] open item 1 names as "nothing watches for a wake that dies
-mid-run", and it is the same silence a credential expiry would produce, on
-all five agents at once.
-
-systemd observes the failure from outside the dying process, so this runs as
-``OnFailure=`` on each wake unit and cannot be the thing that was killed.
-
-It writes only when the wrapper did not. ``bin/wake`` drops a run marker
-before it starts and clears it in a ``finally``, so any Python-level exit --
-success, an exception, or one of its own recorded refusals -- removes it,
-and only a SIGKILL or SIGTERM leaves it behind. A surviving marker is
-therefore exactly the condition "died with its bookkeeping unfinished",
-which is the one case needing a second reporter. Everything else is already
-on the record, and a second entry would attribute one event twice.
-
-The append logic itself is imported from ``bin/wake`` -- which since Move 7
-re-exports it from ``lib/loam_inbox`` -- rather than copied.
-A second implementation of "how a wake failure is written" is the same
-defect as a second copy of a generated unit -- one artifact, one owner. For
-the same reason the vault path is read out of the marker rather than
-re-derived from agent.json: one source, and it is the one the dead run
-actually used.
-
-Since 2026-09-05 it handles two unit shapes, because there are two unattended
-lanes. ``loam-wake-<agent>`` is the reflection wake; ``loam-cron-<agent>-<name>``
-is one of that agent's crons, and the lane is read out of the unit name so the
-morning's line says which job died rather than only whose.
-
-Usage: wake-failed <failed-unit-name>
-       e.g. wake-failed loam-wake-loom
-            wake-failed loam-cron-ada-market-watch
-"""
+A wake or cron removes its marker when bookkeeping finishes. A surviving
+marker identifies an unfinished run and the vault it actually used. Import
+the wrapper's append logic so both paths write the same record. The engineer
+launcher has its own receipt recovery path."""
 
 from __future__ import annotations
 

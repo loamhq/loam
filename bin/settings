@@ -1,21 +1,10 @@
 #!/usr/bin/env python3
-"""Every loam-ui setting, from a persona's hands (2026-11-10).
+"""Read or change a setting through the same broker route the page uses.
 
-    settings describe [<setting>] [--target T] [--member P]
-    settings get <setting> [--target T] [--member P]
-    settings set <setting> <value> [--target T] [--member P] [--by P] [--reason R]
-    settings do <action> [<value>] [--target T] [--by P] [--reason R]
-
-The registry is lib/loam_settings.py: every setting the page can change,
-the broker route the page's relay sends it to, and whose hands it is in.
-`set` and `do` call that same route with `by` (``LOAM_AGENT`` or ``--by``),
-so the change is validated and written by the code the page's click runs,
-an open page draws it at once, and a thread gets a line saying who made it.
-A value is JSON when it reads as JSON (``true``, ``null``, ``["iris"]``),
-else text. `target` is a thread id, a session id, or ``<agent>/<name>`` for
-a schedule; `member` is the thread member whose engine or model it is.
-Prints one JSON object. ``mcp__engineer__settings`` calls this.
-"""
+The registry in lib/loam_settings.py supplies the route and scope. A target
+can identify a thread, session or schedule. A member selects whose provider
+or model to change. Decode JSON values when possible and pass other text
+through. Print the result as one JSON object for the settings tool."""
 
 from __future__ import annotations
 

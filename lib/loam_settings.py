@@ -1044,8 +1044,7 @@ def get(key: str, target: str = "", member: str = "") -> dict:
 
 
 def parse_value(raw: Any) -> Any:
-    """A value as the CLI or the tool hands it: JSON when it reads as JSON
-    (``true``, ``null``, ``["iris"]``), else the text itself."""
+    """Decode strings containing JSON. Pass other strings and already typed values through."""
     if not isinstance(raw, str):
         return raw
     try:

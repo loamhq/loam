@@ -1,61 +1,10 @@
-"""The thread turn engine (2026-11-08), the broker's half of threads.
+"""Run a queue for each thread member on its configured provider. Persist input
+before scheduling it. Bind dispatch to a session and journal position so a
+returning worker can file the reply without sending the input twice.
 
-A turn is one persona answering in one thread. It runs on that persona's
-configured harness through the broker's own ``start_session`` -- the same
-door every classic chat comes through, so the persona arrives with its soul,
-memory, skills, tools, subagents and shell exactly as a chat has them, and
-Codex and Claude Code are both engines because both are sessions there.
-
-**Same engine, same session, while it is small.** ``state/threads/sessions.json``
-remembers, per thread and persona, the harness session the last turn used,
-its engine, the last message id that session has seen and its last context
-size. A turn on the same engine resumes that session and is told what in the
-recent exchange is new; a changed engine, no session yet, or a session past
-the context threshold (``ROTATE_SHARE``/``ROTATE_TOKENS``, 2026-11-11) starts
-fresh, handed the persona's own summary of the thread (from its workspace,
-read and never written here), the recent exchange and the thread file's path.
-
-**Members answer in parallel (2026-11-10).** Each member of a thread has its
-own queue of turns: a message to Iris starts Iris at once while Ada is
-mid-turn. A second message to Ada is steered into Ada's turn in flight at
-its next safe boundary where the engine takes input mid-turn (2026-11-14,
-``STEER_FOLLOW_S`` and ``ThreadEngine._steer``), and otherwise waits behind
-Ada's own turn and has its own; a queued message the turn before it was
-already shown runs no second turn. Every turn reads the thread as it stands
-when it starts.
-
-**A member only waiting on background work is not mid-turn (2026-11-10).**
-A turn that has said its words and is parked on its background tasks hands
-the session over the moment a message for that member arrives (or is
-already queued when it parks): the parked turn ends quietly, and the next
-turn sends the message into the same live session at once. That turn then
-watches the session, so the background task's notification still comes in
-as its own reply. Claude Code and Codex take input while background work
-runs; an engine that cannot (``TAKES_INPUT_WHILE_BACKGROUND``) keeps the
-message queued and its member reads ``note`` "will answer when its
-background task returns". A member that is generating still queues. The sessions they use are classic sessions on the record, archived
-so that the Classic chats list stays the list it was.
-
-**A member's input is on disk, in order (2026-11-19, batch B step 2).**
-Every queued turn's input is written to that member's list
-(``lib/loam_thread_inputs.py``) before it is queued and removed once its
-turn has dealt with it; the broker's stop posts nothing for input it did
-not answer, and its next start gives it again, once and in order, saying
-when it was queued (``resume_inputs``). A job's result goes into the
-member's turn in flight when that turn briefed it (``joins``), takes over a
-turn parked on background work, and otherwise waits its turn.
-
-Mentions in a reply give the mentioned personas a turn too, up to
-``loam_threads.AGENT_CHAIN_CAP`` agent-triggered turns since the owner last
-spoke; past it the chain stops with one system line.
-
-**Seats (2026-11-09).** A member's session is ended ``cfg.THREAD_IDLE_S``
-after its turn by the broker's reaper, and the next turn resumes it by id.
-When the box has no free seat even after the broker has ended an idle
-session (``Broker.make_room``), the turn says so in the thread once, in a
-person's words, keeps asking for ``CAP_WAIT_S``, and then either answers or
-fails with a plain sentence -- never the broker's route-level 429 text.
-"""
+Members can answer concurrently. Within a member, compatible input can join
+the active turn or take over a session waiting on background work. Other
+input stays ordered. See the thread protocol in broker/README.md."""
 
 from __future__ import annotations
 
@@ -121,10 +70,7 @@ ROTATE_TOKENS = 150_000
 
 
 def reply_images(text: str, extra: dict) -> tuple[str, dict]:
-    """The images a reply shows (2026-11-18, lib/loam_threads.py), onto the
-    message as ``attachments``: at most three in all, in reading order --
-    what it said before its steps, then what it said last. The words are
-    left as they were; each reference is where its image is drawn."""
+    """Collect up to three images in reading order while retaining their positions in the reply text."""
     said = [seg["text"] for seg in extra.get("segments") or []
             if isinstance(seg, dict) and isinstance(seg.get("text"), str)]
     _, found = threads.reply_images("\n\n".join([*said, text or ""]))
@@ -316,15 +262,7 @@ def result_steer_text(turn: "Turn") -> str:
 
 
 def background_list(session, origins: dict | None = None) -> list[dict]:
-    """The background tasks out behind a session, as a page can name them
-    (2026-11-10): ``{id, description, started_at, message, launched_at_seq}``,
-    the description the harness gave the task (a subagent's own
-    ``description``), when the broker first saw it, and the reply that
-    launched it: ``message``, the thread message id of the reply whose
-    harness turn launched the task (None until that reply is written, and
-    for a task no thread turn saw launched), and ``launched_at_seq``, the
-    session event that first listed it. ``origins`` is the engine's
-    ``task_origins`` for this member. Empty for none."""
+    """Describe pending tasks with their first journal position, arrival time and originating thread message."""
     if session is None:
         return []
     out = []
@@ -429,8 +367,7 @@ def ended_sentence(persona: str, why: str) -> str:
 
 
 def quiet_turn(turn: "Turn") -> bool:
-    """A turn whose input is a job's result, not anyone's message: one that
-    ends with no words posts nothing at all (2026-11-18)."""
+    """A silent turn triggered by a job result has no thread message to post."""
     return str(getattr(turn, "reason", "")).startswith("job:")
 
 
@@ -445,9 +382,7 @@ def working_now(session) -> bool:
 
 
 def used_model(reply: "Reply", session, chosen: str | None) -> str | None:
-    """The model id a reply ran on (2026-11-10): what the engine said in the
-    reply's own events, else what the session's last `system/init` said,
-    else the model the turn asked for. Null only when none is known."""
+    """Prefer the model reported by the reply, then session init, then the requested model."""
     said = getattr(session, "_init_model", None)
     return reply.model or (said if isinstance(said, str) and said else None) or chosen
 
@@ -583,10 +518,7 @@ class Reply:
 
 
 class ThreadEngine:
-    """Owns every member's queue of turns and every open thread stream.
-
-    Keyed by (thread id, persona) since 2026-11-10: each member's turns run
-    one at a time, and different members' turns run at once."""
+    """Serialize turns per thread member while letting different members answer concurrently."""
 
     def __init__(self, broker) -> None:
         self.broker = broker
@@ -831,16 +763,9 @@ class ThreadEngine:
                     model: str | None = None,
                     reply_to: str | None = None, submission_id: str | None = None,
                     signature: str | None = None) -> dict:
-        """The owner's message: written, mentions joined, turns scheduled.
-
-        Tagged personas answer; untagged, the default does, and a thread
-        with no default (2026-11-09) records the message and nobody answers
-        -- whoever is tagged or made default later reads it in the history.
-        ``attachments`` are the stored files (the classic attachment
-        objects), named on the message and carried to the turns it starts;
-        ``model`` is those turns' model, over each member's own.
-        ``reply_to`` (2026-11-11) is the id of the earlier message this one
-        answers; ``threads.append`` refuses an id the thread does not hold."""
+        """Store the message and attachments before scheduling its recipients. Mentions
+        take precedence over the default member. A thread with neither retains the
+        message for future turns. A per-message model overrides the member choice."""
         text = (text or "").strip()
         attachments = attachments or []
         if not text and not attachments:
@@ -1034,13 +959,8 @@ class ThreadEngine:
 
     def joins(self, key: tuple[str, str], queued: Turn,
               model: str | None) -> bool:
-        """Whether a queued turn can go into the member's turn in flight: a
-        message's (``m<n>``) with no model of its own other than the running
-        turn's; or a job's result (2026-11-19, batch B step 2) when the turn
-        in flight is the one that briefed it -- under way since before the
-        brief was accepted, so about the same work. A result for a turn
-        about something else waits behind it, so an answer does not jump
-        topic. Every turn of a member here is of the same thread, by key."""
+        """Steer a message only when its model is compatible with the running turn.
+        A job result can join the turn that requested it, keeping unrelated results queued."""
         if threads.is_message_id(queued.reason):
             return queued.model in (None, model)
         if is_result(queued):
@@ -1081,15 +1001,8 @@ class ThreadEngine:
         self._ensure_worker(key)
 
     async def _steer(self, key: tuple[str, str]) -> bool:
-        """Send the messages queued for a member into its turn in flight.
-
-        The messages are claimed from the queue first, so the worker cannot
-        start a turn for them while the steer is on its way; on any refusal
-        they go back where they were and have their turn when this one ends.
-        Once the session has taken them, the turn's ``read_through`` moves
-        past them: its reply is their answer and its ``through`` says so,
-        and a message already shown to the turn (one its prompt read) is not
-        sent twice. True when something was steered."""
+        """Claim compatible messages before steering to exclude a second worker.
+        Restore their queue position on refusal. Advance read_through only after acceptance."""
         lock = self.steer_locks.setdefault(key, asyncio.Lock())
         async with lock:
             turn = self.turns.get(key)
@@ -1200,12 +1113,7 @@ class ThreadEngine:
             return True
 
     def already_heard(self, turn: Turn) -> bool:
-        """A queued turn whose message the member has been shown since it
-        was queued (2026-11-14): the turn before it read the thread as it
-        stood when it started, or the message was steered into that turn,
-        and that turn's answer was its answer. Before this, the turn ran
-        anyway with nothing new and said so -- m10 in t-232b9184, "Nothing
-        new has come in since my last reply", 2 s after m9."""
+        """Skip a queued message already covered by the previous turn’s prompt or accepted steering input."""
         if not threads.is_message_id(turn.reason):
             return False
         kept = threads.session_for(turn.thread_id, turn.persona) or {}
@@ -1218,12 +1126,7 @@ class ThreadEngine:
         return True
 
     def hand_over(self, key: tuple[str, str]) -> bool:
-        """A message waits for a member whose turn is parked on background
-        work: the turn is told to end so the message is answered now
-        (2026-11-10). True when it was told. A turn generating is left alone
-        -- its member's next message still waits behind it -- and so is one
-        on an engine that cannot take input while its background work runs,
-        whose member reads ``note`` instead."""
+        """Yield a background-only turn to new input if the provider can receive it while its tasks run."""
         turn = self.turns.get(key)
         watch = self.turn_watch.get(key)
         queue = self.queues.get(key)
@@ -1410,11 +1313,7 @@ class ThreadEngine:
         return None
 
     def mark_ended(self, session_id: str, by: str = threads.OWNER) -> str | None:
-        """Called before a person's DELETE stops a member's session: the turn
-        on it, if one is in flight, ends quietly with one system line ("Sam
-        ended Iris's turn") instead of "(no reply: ...)". Whatever it had
-        already said is kept as its message. The thread and the member's
-        session record stay, so the next mention resumes it by id."""
+        """Record who stopped an active turn so it can keep the partial reply and post the stop as a system line."""
         key = self.turn_key_of(session_id)
         if key is None:
             return None
@@ -2403,21 +2302,9 @@ class ThreadEngine:
             steps.log(f"system turns: the record could not be written ({exc})")
 
     def deliver_job(self, record: dict, note: str) -> str:
-        """A finished engineer job's result, back to the persona that briefed
-        it from this thread (2026-11-12; quiet since 2026-11-18, batch B):
-        a turn for that persona whose input ends with ``note`` -- the
-        receipt's path, the launcher's verdict, whether it landed
-        (``loam_waiters.handoff_text``). Nothing is posted in the thread and
-        nothing is shown to the owner; the persona speaks only if it has
-        something to say, and a turn with no words stays out of the thread.
-        Since 2026-11-19 (batch B step 2) it is written to the member's
-        input list on disk, so a restart does not lose it; it is steered
-        into the persona's turn under way when that turn is the one that
-        briefed it (``joins``), takes over a turn parked on background work
-        (``hand_over``), and otherwise waits behind the turn under way.
-        Delivered once per job (``system_turn_allowed``). Returns ``delivered``, or why not (``no
-        thread``, ``thread gone``, ``not a member``, ``already
-        delivered``)."""
+        """Deliver the result once to the briefing member in its originating thread.
+        Persist it as member input so a restart can recover it. It may join the requesting
+        turn or a session parked on background work. Otherwise it waits in order."""
         tid, persona = record.get("thread"), record.get("persona")
         if not tid or not persona:
             return "no thread"
@@ -2439,13 +2326,7 @@ class ThreadEngine:
         return "delivered"
 
     def deliver_note(self, note: dict) -> str:
-        """What an update left (2026-11-14, first release L13,
-        lib/loam_update.py). Since 2026-11-19 (batch B step 5) nothing is
-        posted in General and no thread is given a turn: the notice is a
-        fact for the system persona (lib/loam_attention.py), its ``line``
-        the fact and its ``note`` what it came with, told once per notice.
-        That persona tells the owner in General, in its own words, if it
-        should. Returns ``delivered`` or why not."""
+        """Record an update notice once for the system persona, which decides whether to notify the owner."""
         import loam_attention  # noqa: PLC0415
         text = note.get("line") or "Loam's update."
         said = loam_attention.tell(text, by="loam update",
@@ -2520,14 +2401,7 @@ class ThreadEngine:
         return msg
 
     def shown_draft(self, turn: Turn, reply: "Reply") -> dict | None:
-        """What a ``message.delta`` carries (2026-11-17): the draft as the
-        reader sees it. A reply's opening that may still be a ``↩ m12``
-        marker is held back (None: nothing is sent); a whole marker naming a
-        message of this thread comes off and its id rides along as
-        ``reply_to``, so the page quotes the message while the words come in
-        and the id is never on screen. Before, the draft went out raw and
-        the marker showed until the message was posted. ``text`` is what
-        the shown draft added since the last delta, as before."""
+        """Withhold an incomplete leading reply marker. Stream a valid target as reply_to and only the newly visible text as the delta."""
         if reply.mark is None:
             # The opening may be words already said: a reply whose first
             # words were the marker alone, then steps.
@@ -2552,12 +2426,7 @@ class ThreadEngine:
         return out
 
     def reply_mark(self, turn: Turn, text: str, extra: dict) -> tuple[str, dict]:
-        """A persona's reply that opens with ``↩ m12`` (2026-11-11) is a reply
-        to m12: the marker comes off and ``reply_to`` goes on. The opening is
-        the first thing the reply said -- its first text segment when it
-        spoke before working, else its text. An id this thread does not hold
-        leaves the words as they were, marker and all, and is logged: the
-        reply is posted, never lost to a bad id."""
+        """Extract a leading reply target from the first text segment. Preserve the original words if the target is absent from the thread."""
         segments = [dict(seg) for seg in extra.get("segments") or []]
         first = next((seg for seg in segments
                       if isinstance(seg.get("text"), str) and seg["text"].strip()), None)
@@ -2580,11 +2449,7 @@ class ThreadEngine:
 
     async def recover_late(self, turn: Turn, session, kept: dict, engine: str,
                      model: str | None, before: int | None = None) -> None:
-        """Replies the session made after the last turn's watcher let go: a
-        harness turn nobody was reading (a notification after a `result`
-        that `working_behind` called final). Each is posted as its own
-        message, marked ``late``, logged and counted -- before 2026-11-10 it
-        was simply never in the thread."""
+        """Post and count each reply journaled after the previous watcher finished as a separate late message."""
         since = kept.get("seq")
         replay = getattr(session, "replay", None)
         if not isinstance(since, int) or not callable(replay):
@@ -2625,17 +2490,8 @@ class ThreadEngine:
             self.publish(turn.thread_id, {"type": "message.done", "message": msg})
 
     def posted(self, thread_id: str, message_id: str, by: str) -> dict:
-        """A persona's message posted outside a turn's reply (``bin/thread
-        post``, the agents' ``thread`` tool), told to the broker after it is
-        in the record (0.2.1). Until then such a post gave nobody a turn: on
-        2026-11-17 one agent, from another thread, posted "@<other> …"
-        into a thread both were members of, and the other answered only
-        when the owner next wrote. Now the post is on the stream at once (it showed only
-        after a reload) and its mentions wake members as a reply's do,
-        under the same chain cap: the chain is the poster's turn in this
-        thread when it has one, or the agents' posts since the owner last
-        wrote here, whichever is longer. Each message is taken once.
-        Answers who was woken."""
+        """Broadcast an external post after it is durable. Schedule its mentions once under
+        the same chain cap as a reply, accounting for both the poster’s turn and intervening posts."""
         meta, msgs, _ = threads.read(thread_id)
         msg = next((m for m in msgs if m.get("id") == message_id), None)
         if msg is None:

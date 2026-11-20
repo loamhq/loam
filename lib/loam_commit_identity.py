@@ -49,13 +49,8 @@ PR_BODY_FILE = "pull-request.md"
 CLI_SETTINGS = {"attribution": {"commit": "", "pr": "", "sessionUrl": False},
                 "includeCoAuthoredBy": False}
 
-# Names that never appear in a person's commit, title or body. Words, not
-# substrings: "Claudette" passes; "loam-ui" does not. The tools' names, not
-# our own vocabulary (2026-10-06): "engineer" and the personas' names were
-# dropped, because words like "engineer" or "iris" are plausible in the
-# product's own code, and refusing an honest commit costs more than they
-# protect. A provider word a product might use ("OpenAI", "GPT") stays out
-# for the same reason.
+# Match whole tool names in attribution. Generic roles and provider vocabulary
+# occur in legitimate product work and would reject valid commits.
 MACHINE_WORDS = ("claude", "codex", "loam")
 TRAILER_RE = re.compile(r"^\s*(co-authored-by|claude-session|generated-by)\s*:",
                         re.IGNORECASE | re.MULTILINE)

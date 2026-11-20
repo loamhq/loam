@@ -1,55 +1,13 @@
-"""Making an agent by conversation, archiving it and restoring it, and its face.
+"""Create agents from versioned drafts, archive or restore them, and manage profile images.
 
-Decided 2026-11-14 (first release, decisions 6 and 7; job L10):
+A direct owner request confirms the action. A persona must cite a message from
+the owner in a shared thread. For a draft it must follow the revision shown,
+including in thread order when timestamps tie. For archive and restore it
+must fall within YES_WINDOW. Each confirmation can authorize one action.
 
-- **Created by conversation only.** An agent (Iris, or any other) drafts the
-  new agent's name, soul and config (the library skill
-  ``loam-making-an-agent`` says how: a character, never a job), shows them to the person, revises
-  on their word, and the agent is made only on their yes. The draft is a file
-  here (``<state>/agents/drafts/<id>.json``) with a revision number, so the
-  yes is tied to the version that was shown.
-- **Archive, never delete.** Archiving puts an agent to sleep: ``archived`` in
-  its ``agent.json`` takes it out of Chats, every picker and every mention;
-  the schedule reconciler takes its wake and cron timers down (its records
-  are untouched); a turn that would be its is refused with a line in the thread. Its threads stay readable and its
-  files stay where they are. Restore removes the key, and the reconciler puts
-  the same timers back from the same records. Nothing here deletes an agent.
-- **A face** is an uploaded image (PNG, JPEG, WebP or GIF) kept in the
-  agent's own workspace (``face.<ext>``) and named in ``agent.json``
-  (``face``). It is the agent's, so it holds through any theme; a theme's
-  faces apply only to agents without one.
-- **No emoji face** (the owner, 2026-11-16: "We should remove the concept
-  of persona face emoji. That was a legacy feature from the Telegram
-  days"). A draft takes none and a made agent's ``agent.json`` has none; an
-  older ``agent.json`` that still holds ``emoji`` is left as it is, and
-  nothing serves the key.
-- **Born in the map's shape** (2026-11-18, lib/loam_loading.py). A new
-  agent is made with a ``soul.md``, a ``config.md`` that is the draft's own
-  config as written (the owner's words for this agent, which may be one
-  line), and a ``map.md`` (the draft's, or ``loam_loading.MAP_SEED``), and
-  never ``_always.md``, ``_active.md`` or ``_reflection.md``. Loam's text and
-  the owner's shared page load beside its config without being copied into
-  it, so nothing of the fleet's configs is composed in any more. No line
-  about ``About me.md`` is written either (Loam's text named it from
-  2026-11-18 to 2026-11-19; the library's ``loam-how-it-works`` does).
-
-**The yes.** A person's own call (the page, which sends no ``by``) is the
-person's yes. An agent's call (``by``) must name the thread it is talking to
-the person in and the id of the person's message that said yes; the route
-checks, in the thread's record, that the agent is a member there, that the
-message is the owner's, and that it was written after the version it
-approves (for a draft: after it in the thread too, 2026-11-17, since a
-stamp is to the second) or within ``YES_WINDOW`` (for an archive or a
-restore), and it takes each yes once. The record is written by the runtime
-alone, and every agent's post is recorded under its own name, so an agent
-cannot write a message as the person through any route. That is a guard
-against a mistaken or unattended act, not a wall: every process on this box
-holds the broker's token, and a persona has a shell. An unattended lane is
-refused before the route (lib/loam_settings.py, ``unattended``).
-
-Stdlib only, and light at import: every roster on the box imports
-``is_archived``.
-"""
+Archiving preserves the workspace, threads and schedule records. Reconciliation
+withdraws the timers until restoration. A workspace image overrides theme defaults.
+Keep imports light because roster reads use is_archived()."""
 
 from __future__ import annotations
 
@@ -92,22 +50,12 @@ STARTER = lc.get("agents.starter", "iris")
 # Where the agent's soul and config come from, as fields of a draft.
 DRAFT_TEXT = ("soul", "config", "map")
 DRAFT_FIELDS = ("id", "name", "about", "provider", "wake", *DRAFT_TEXT)
-# The draft card's one plain line about who the agent is (2026-11-18): the
-# card showed the soul's opening, which is written to the agent ("You are
-# Juniper, …"). Written by the drafting agent for the person, in the third
-# person; never part of the soul, and not kept once the agent is made.
+# The draft card describes the agent in the third person. This text is discarded on creation.
 ABOUT_MAX = 200
-# Retired keys a draft may still carry from before 2026-11-16: never shown.
-# `active` and `reflection` since 2026-11-18: a new agent loads its map,
-# and has neither file.
+# Older drafts can carry these fields. Omit them when displaying the draft.
 RETIRED_DRAFT_KEYS = ("emoji", "active", "reflection")
 PROVIDERS = ("claude-code", "codex", "antigravity")
 
-# A new agent's loading files were seeded here until 2026-11-18
-# (`_active.md`, `_reflection.md`, and `_always.md` with a line about
-# `About me.md`). A new agent now has a map (lib/loam_loading.MAP_SEED when
-# the draft brings none); `About me.md` is named by the library's
-# loam-how-it-works (by Loam's text from 2026-11-18 to 2026-11-19).
 
 
 class AgentsError(Exception):
@@ -485,9 +433,7 @@ def shown(draft: dict) -> dict:
     out = {k: v for k, v in draft.items()
            if k != "id_given" and k not in RETIRED_DRAFT_KEYS}
     out["problems"] = [] if draft.get("made") else check_new(draft)
-    # What the made config.md adds to the draft's own: nothing since
-    # 2026-11-18. Loam's text and the owner's shared page load beside it and
-    # are not copied in (compose_config is no longer called by `make`).
+    # The draft config is used verbatim. Shared instructions load separately.
     if not draft.get("made"):
         out["fleet_clauses"] = []
     out["ready"] = not out["problems"] and not draft.get("made")
@@ -594,14 +540,7 @@ def discard(draft_id: str, by: str | None) -> dict:
     return shown(draft)
 
 
-# ---------------------------------------------------------------------------
-# The fleet's clauses. Every config.md carries the same protocol clauses
-# (Permission first, where things live, ...), operator-authored and held
-# byte-identical by bin/check-drift (`check_config_clauses`: a clause most
-# configs carry must be in every one). A new agent's config is those clauses,
-# copied verbatim from the configs on the box with its own name put in, then
-# what the draft says that is its own. Nothing is composed but the joins.
-# ---------------------------------------------------------------------------
+# Read and compose the clauses shared by existing agent configs.
 
 OWN_RULES = "Its own rules"
 
@@ -662,7 +601,7 @@ def compose_config(agent: str, own: str, root: Path | None = None,
     it. The draft's own clauses follow the fleet's; a clause of the draft
     with a fleet clause's title gives way to the fleet's."""
     fleet = fleet_clauses(root)
-    # The name the agent's own files use (2026-11-14, L9): the one it is made with.
+    # Workspace files use the original display name.
     display = name or agent.capitalize()
 
     def unmask(text: str) -> str:
@@ -773,9 +712,7 @@ def make(agent: str, draft: dict, wake: str, *, provision=None) -> dict:
     for sub in ("memory", "skills", "crons", "threads"):
         (ws / sub).mkdir()
     (ws / "soul.md").write_text(draft["soul"], encoding="utf-8")
-    # The map's shape (2026-11-18): soul, the draft's config as written, and
-    # a map. The map goes first of the three loading ones, so provisioning
-    # renders the new shape and seeds none of the old files.
+    # Write the map first so provisioning recognizes the loading format.
     import loam_loading  # noqa: PLC0415
     (ws / loam_loading.MAP).write_text(
         draft.get("map") or loam_loading.MAP_SEED, encoding="utf-8")
@@ -788,8 +725,7 @@ def make(agent: str, draft: dict, wake: str, *, provision=None) -> dict:
     if draft.get("provider"):
         config["provider"] = draft["provider"]
     if draft["name"] != agent.capitalize():
-        # Its own files say the name it is made with ("Old Sam", not the
-        # id's "Old-sam"); a later rename is the app's display only.
+        # The original display name in workspace files survives later display-only renames.
         config["self_name"] = draft["name"]
     _write_agent(agent, config)
     try:
@@ -806,9 +742,7 @@ def make(agent: str, draft: dict, wake: str, *, provision=None) -> dict:
             "fleet_clauses": fleet}
 
 
-# bin/provision holds Loam's live lock, and waits up to 20 minutes for it
-# behind a landing (lib/loam_lock.py, WAIT_SECONDS); found live 2026-11-14,
-# when a 10-minute ceiling here cut a provision that was only waiting.
+# Allow time for provision to acquire the live lock behind a landing, then finish its work.
 PROVISION_TIMEOUT = 1800
 
 
