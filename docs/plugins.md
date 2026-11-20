@@ -1454,9 +1454,14 @@ swatch scope added. A listing the list does not have, or a file it lacks, is
 ### Asking to be listed
 
 The repository holds one file per listing, `listings/<id>.json` (an entry
-as above), and `list.json`, which its workflow builds from them when a pull
-request is merged (`build.py`; `build.py --check` on every pull request,
-with the same rules a Loam applies). One file per listing is what lets a
+as above), the reviewer's `notes/<id>.json`, and `list.json`, which
+`build.py` builds from them (with the same rules a Loam applies). Every pull
+request that adds, moves or removes a listing is reviewed by the
+repository's own reviewer (2026-11-19; `review/README.md` there): one model
+run over the plugin's code at the pinned commit against
+`review/STANDARDS.md`, never running it. A pass merges by itself and writes
+the note that list.json carries as `review`; a refusal comments what to
+change. No person is in the path. One file per listing is what lets a
 request be one click: `loam market request <link> --description "…"` reads
 the plugin from its link (the first call of an install: nothing is written),
 and answers the entry and a link to
@@ -1466,9 +1471,10 @@ Propose; for someone who cannot write to the repository, GitHub makes the
 fork and the pull request. Nothing is sent from the box, and the owner's
 press is the yes.
 
-The repository's content (README with the review bar, the empty list,
-`build.py`, the workflow, the pull request template) is `docs/marketplace/` in
-this repository, until the repository exists.
+A copy of the repository's content (README, the empty list, `build.py`,
+the reviewer in `review/`, the workflows, the pull request template) is
+`docs/marketplace/` in this repository, for anyone who runs a marketplace of
+their own; its notes and listings are the live repository's.
 
 ### Finding things, for an agent: `loam market search` and the card
 

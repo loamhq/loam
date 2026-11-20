@@ -2689,3 +2689,21 @@ its two latest recorded scheduled outcomes, within 26 hours, both say
 and success. An interactive turn has no shared provider-outcome ledger.
 The app polls on its existing visible-page heartbeat and reuses the
 provider sign-in and archived-agent Settings routes for recovery.
+
+## 2026-11-19 — the marketplace reviewer, switched on
+
+- **The reviewer is not deterministic on borderline wording.** Five listed
+  themes carry the identical generated comment "from the approved roles";
+  on their first review four passed and one was refused for "claiming a
+  prior approval". A refusal of one of ours is reported, never re-run
+  until it passes. Listings that were live before the reviewer and refused
+  by it stay listed as they were through `review/kept.json`, an exact
+  link per id that no pull request can change.
+- **`build.py` must keep a note's lines as long as the reviewer writes
+  them**: it cut at 280 characters while the reviewer and Loam allow 400,
+  and a published note ended mid-sentence in the proof. Both are 400 now.
+- **The Market's address (`?modal=market&listing=<id>`) opens on a desktop
+  only**; a phone-width capture of the live page goes Settings › Market ›
+  the listing. A theme in "sun" mode is dark at night: pin the capture
+  browser's clock to midday for a light capture, never change the owner's
+  setting.

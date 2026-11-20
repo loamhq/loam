@@ -164,6 +164,17 @@ try:
     shutil.copytree(ROOT / "docs" / "marketplace", repo)
     (repo / "listings" / "pet.json").write_text(json.dumps(req["entry"]))
     (repo / "listings" / "dusk.json").write_text(json.dumps(entry("dusk", kind="theme")))
+    subprocess.run([sys.executable, str(repo / "build.py")], capture_output=True, text=True)
+    check("a listing the reviewer has not passed is left out of list.json",
+          json.loads((repo / "list.json").read_text())["plugins"], [])
+
+    def passed(pid: str) -> None:
+        """What the reviewer's decide.py writes on a pass (notes/<id>.json)."""
+        link = json.loads((repo / "listings" / f"{pid}.json").read_text())["link"]
+        (repo / "notes" / f"{pid}.json").write_text(json.dumps(
+            {"id": pid, "link": link, "commit": "c" * 40, "note": {"summary": f"{pid}, reviewed."}}))
+    passed("pet")
+    passed("dusk")
     built = subprocess.run([sys.executable, str(repo / "build.py")], capture_output=True,
                            text=True)
     check("build.py builds list.json", built.returncode, 0)
@@ -244,9 +255,13 @@ try:
     check("the README says Settings › Market reads it",
           "every Loam reads in Settings › Market" in (ROOT / "docs" / "marketplace" / "README.md").read_text(), True)
     readme_text = (ROOT / "docs" / "marketplace" / "README.md").read_text()
-    check("the README promises no review by hand, and keeps that listing is not an audit",
-          ("reviewed by hand" in readme_text, "by hand before" in readme_text,
-           "Being listed is not a security audit" in readme_text), (False, False, True))
+    check("the README points at the standards page, says the reviewer merges by itself, "
+          "and keeps that a pass is not a promise",
+          ("review/STANDARDS.md" in readme_text, "no person in the path" in readme_text,
+           "reviewed by hand" in readme_text, "not a promise" in readme_text), (True, True, False, True))
+    check("the reviewer's own tests pass in the shipped copy",
+          subprocess.run([sys.executable, str(ROOT / "docs" / "marketplace" / "review" / "test_review.py")],
+                         capture_output=True, text=True, timeout=120).returncode, 0)
     check("the shipped list is the empty one",
           json.loads((ROOT / "docs" / "marketplace" / "list.json").read_text()),
           {"version": 1, "plugins": []})

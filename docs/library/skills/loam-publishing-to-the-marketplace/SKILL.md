@@ -59,7 +59,14 @@ their shared shelf (`skills/` in the vault's system folder).
 ## Ask for a listing in the marketplace
 
 The list lives in the public repository `loamhq/marketplace`; a listing is a
-pull request there, merged when it meets the rules its README sets out. To ask:
+pull request there. Loam's reviewer reads it by itself within a few minutes,
+against the marketplace's standards page (`review/STANDARDS.md` there): the
+plugin's code at the exact commit, its listing and README. It never runs the
+code. A pass merges by itself and writes **Loam's note** (what it touches,
+what it may change, what is worth knowing), shown on its Market page; every
+Loam installs exactly the commit that was reviewed. A refusal says on the
+pull request what to change; the maker fixes it and pushes again, as often
+as they like. A new version is reviewed the same way. To ask:
 
 ```
 loam market request <a link to it> --description "One sentence on what it does."
@@ -74,6 +81,10 @@ file**, then **Create pull request**; GitHub makes the fork on their account.
 The repository must be public, and the plugin released at a tag (`share`
 does that): a listing is pinned, so a branch's link is filed at the commit
 it is on now and never follows it.
+
+Read the standards page with the owner before asking: what it refuses most
+is a host the plugin contacts that `touches` does not name, reading a key or
+login it was not given, and code it downloads and runs.
 
 A listing can carry more, and is worth it (the marketplace's README has the
 fields): a `cover`, a wide picture (at least 1500 pixels across, 3:2) in the
