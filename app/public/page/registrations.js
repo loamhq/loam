@@ -15,7 +15,7 @@ export function registerPage(loam) {
   }
   for (const entry of [
     { id: 'thread', render: ({ host }) => host.threads.pane() },
-    { id: 'file', render: ({ host, panel }) => panel === 'main' ? host.filesPane() : host.filePanelView() },
+    { id: 'file', render: ({ host, panel, fileTools }) => panel === 'main' ? host.filesPane() : host.filePanelView(fileTools) },
     { id: 'app', render: ({ host }) => host.apps.view() },
     { id: 'profile', render: () => host.profilePane() },
   ]) loam.places.panel.item.add(entry)

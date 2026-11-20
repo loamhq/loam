@@ -189,6 +189,12 @@ test('Latte paint follows panel interaction across threads, files and embedded a
   t.diagnostic(stdout.trim())
 })
 
+test('chat file links and HTML preview actions work on phone and desktop in Chromium', { skip: !process.env.LOAM_PLAYWRIGHT, timeout: 90000 }, async t => {
+  const { stdout } = await promisify(execFile)(process.execPath, ['test/chat-file-links-browser.mjs'], { timeout: 80000 })
+  assert.deepEqual(stdout.trim().split('\n'), ['390 light passed', '390 dark passed', '1440 light passed', '1440 dark passed'])
+  t.diagnostic(stdout.trim())
+})
+
 test('side history truncates a forward branch, skips main, and ends when the pane closes', () => {
   const { panels, main, side } = fixture()
   const first = thread('one'), second = thread('two'), third = thread('three')

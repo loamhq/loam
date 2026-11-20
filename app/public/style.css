@@ -2099,9 +2099,9 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-livehead .fs-back { width: 32px; min-width: 44px; }
 .desk.collapsed .fs-livehead { padding-left: 62px; min-height: 68px; }
 .fs-menu-download > svg { transform: rotate(180deg); }
-.fs-menu-copy, .fs-menu-download, .fs-menu-source, .fs-menu-folder { min-height: 48px; font: inherit; text-decoration: none; }
-.fs-sheet .fs-menu-copy, .fs-sheet .fs-menu-download, .fs-sheet .fs-menu-source, .fs-sheet .fs-menu-folder { padding-left: 24px; }
-.fs-menu-copy span, .fs-menu-download span, .fs-menu-source span, .fs-menu-folder span { font-size: 15.5px; font-weight: 600; }
+:is(.fs-menu-copy, .fs-menu-download, .fs-menu-source, .fs-menu-folder, .fs-menu-reload, .fs-menu-open) { min-height: 48px; font: inherit; text-decoration: none; }
+.fs-sheet :is(.fs-menu-copy, .fs-menu-download, .fs-menu-source, .fs-menu-folder, .fs-menu-reload, .fs-menu-open) { padding-left: 24px; }
+:is(.fs-menu-copy, .fs-menu-download, .fs-menu-source, .fs-menu-folder, .fs-menu-reload, .fs-menu-open) span { font-size: 15.5px; font-weight: 600; }
 .fs-shortcuts .fs-meta { overflow-wrap: anywhere; }
 .fs-note { font-size: 12px; color: var(--paper-ink-3); padding: 8px 14px; }
 .fs-sheet .sheetrow { display: flex; align-items: center; gap: 12px; padding: 10px; border: 0; background: transparent; border-radius: 20px; text-align: left; color: inherit; width: 100%; }

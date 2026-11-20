@@ -7,20 +7,26 @@ view state, with no broker route, server setting or deployment change.
 ## Navigation
 
 From **1180 layout pixels** (after UI scale), a thread row, a file row or file
-shortcut, a frameable app row, and a file link in prose offer a small panel
-action. Alt/Option-click does the same. Existing file menus and the thread
+shortcut, a frameable app row, and a file link in a document offer a small
+panel action. Alt/Option-click does the same. Existing file menus and the thread
 actions menu also offer **Open to the side**. Touch devices show the small
 action without requiring hover. Files folders continue to browse the list;
 only files open in a pane. External apps retain their existing browser-tab
 behaviour.
 
-A plain list click always opens in main. A plain file link navigates the panel
-containing it. Side gestures always target side, including from inside side.
+A plain list click opens in main. A file link in a chat message opens in the
+side panel when the layout has room. ⌘-click on Mac or Ctrl-click elsewhere
+opens it in main. On a phone the file fills the screen and Back returns to
+the chat. Ordinary web links open in a new tab. Links in a Files preview
+navigate the containing panel.
 Opening side's item in main moves it there and closes side. Sending main's
 item to an occupied side swaps; sending it to an empty side leaves main empty.
-The side header offers Promote, Swap, item actions and Close. Thread Board and
-Tasks are in its actions menu. Selected rows still mean main; a quiet panel
-mark identifies the visible side item.
+The side header offers Promote, Swap, item actions and Close. The file menu
+contains view modes, copy and download actions where available. For HTML
+previews it also offers **Reload**, plus **Open in new tab** when a live URL
+is available. On a phone these HTML actions are in **This file** when the preview
+was opened from chat. Thread Board and Tasks are in the thread actions menu.
+Selected rows still mean main. A quiet panel mark identifies the visible side item.
 
 Apps uses the same list column as Chats and Files. Its grouped inventory stays
 on the left while a chosen app fills main; with no app chosen, main says
@@ -229,3 +235,6 @@ The [panel history gallery](evidence/panel-history/README.md) pairs the original
 and current headers at desktop and phone widths in both color modes. The
 interactive checks run with `node test/panel-history-browser.mjs` when
 `LOAM_PLAYWRIGHT` and `LOAM_CHROME` point to Playwright and Chromium.
+
+The [chat link and preview gallery](evidence/chat-file-links/README.md) compares
+the chat links, file previews and file actions at phone and desktop widths.

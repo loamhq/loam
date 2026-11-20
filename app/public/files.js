@@ -970,8 +970,10 @@ export function createFiles({
     schedule()
   }
 
-  function resourceMenu(resource, home, { openFolder = null } = {}) {
+  function resourceMenu(resource, home, { openFolder = null, side = false, htmlActions = false } = {}) {
+    let file = null
     if (st.file?.root === resource.root && st.file.path === resource.path) {
+      file = st.file
       openFolder ??= st.file.openFolder
       resource.shareLink = st.file.shareLink
       resource.linkPromise = st.file.linkPromise
@@ -981,7 +983,8 @@ export function createFiles({
     prepareLink(resource)
     st.notice = ''
     if (!st.archive?.busy) st.archive = null
-    st.sheet = { kind: 'resource', resource, name: resource.name ?? nameOf(resource.path), on: home?.isShortcut(resource.root, resource.path), viewSource: st.file?.view === 'html' && st.file.root === resource.root && st.file.path === resource.path ? () => setMode('edit') : null, toggle: () => home?.toggleShortcut(resource.root, resource.path, resource.kind ?? 'file') }
+    st.sheet = { kind: 'resource', resource, name: resource.name ?? nameOf(resource.path), on: home?.isShortcut(resource.root, resource.path),
+      file, side, htmlActions, toggle: () => home?.toggleShortcut(resource.root, resource.path, resource.kind ?? 'file') }
     st.sheet.openFolder = openFolder
     schedule()
   }
@@ -1799,7 +1802,7 @@ export function fileView(files, options) {
   return files.registry.component('core.files.viewer', context)
 }
 
-function builtinFileView(files, { close, closeLabel, historyBack = null, wide, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null }) {
+function builtinFileView(files, { close, closeLabel, historyBack = null, wide, side = false, htmlActionsInMenu = false, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null }) {
   const back = backToThread ? { label: 'Back to board', title: historyBack?.title ?? 'Back to board',
     go: historyBack?.go ?? backToThread, shortcut: Boolean(historyBack) } : historyBack
   const context = { files, file: files.st.file, options: { close, closeLabel, wide, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
@@ -1836,7 +1839,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, f
   const modeLabel = f.mode === 'preview' ? (editable ? 'Edit' : 'Source') : 'Preview'
   const modeToggle = tabs ? h('button', { class: 'iconbtn fs-mode-toggle', title: modeLabel, 'aria-label': modeLabel, onclick: () => files.setMode(f.mode === 'preview' ? 'edit' : 'preview') }, f.mode === 'preview' ? icon.pencil(18) : icon.file(18)) : null
   // Live HTML has no title/path area, so its folder is reached through ⋯ too.
-  const openMenu = () => files.resourceMenu({ ...f.row, root: f.root, path: f.path, kind: 'file' }, home, { openFolder: returnBack ? close : null })
+  const openMenu = () => files.resourceMenu({ ...f.row, root: f.root, path: f.path, kind: 'file' }, home, { openFolder: returnBack ? close : null, htmlActions: htmlActionsInMenu })
   // The toolbar: in the header on a desktop, and on a phone in a bar of its
   // own under the field, which the viewport keeps above the keyboard.
   const tools =
@@ -1850,7 +1853,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, f
         )
       : null
 
-  const head = files.registry.reduce('files.action', { slot: 'toolbar', file: f, files, defaultView: () => h(
+  const head = side ? null : files.registry.reduce('files.action', { slot: 'toolbar', file: f, files, defaultView: () => h(
     'div',
     { class: `fs-head fs-edhead${wide && tools ? ' withtools' : ''}${close && !returnBack ? ' folder-back' : ''}` },
     historyBackButton(back) ?? returnBack ?? (close ? h('button', { class: 'backbtn fs-back', title: closeLabel, onclick: close }, icon.chevronLeft(20), h('span', { text: closeLabel })) : null),
@@ -1867,12 +1870,12 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, f
   ) }, null)
   const toolrow = wide && tools ? h('div', { class: 'fs-toolrow' }, tools) : null
 
-  const liveHead = htmlPreview ? h('div', { class: 'fs-htmlbar fs-livehead' },
+  const liveHead = htmlPreview && !side ? h('div', { class: 'fs-htmlbar fs-livehead' },
     historyBackButton(back) ?? returnBack ?? (close ? h('button', { class: 'iconbtn fs-back', title: `Back to ${closeLabel}`, 'aria-label': `Back to ${closeLabel}`, onclick: close }, icon.chevronLeft(18)) : null),
     h('span', { class: 'fs-htmlmark', text: 'HTML' }),
     renameTitle(files, f.row, name, 'fs-htmlname'),
-    h('button', { class: 'pillbtn fs-htmlreload', title: 'Reload page', disabled: f.liveLoading, text: 'Reload', onclick: () => files.loadLive(f) }),
-    f.liveUrl ? h('a', { class: 'pillbtn fs-htmlopen', href: f.liveUrl, target: '_blank', rel: 'noopener noreferrer', title: 'Open in new tab', 'aria-label': 'Open in new tab' }, icon.external(16)) : null,
+    htmlActionsInMenu ? null : h('button', { class: 'pillbtn fs-htmlreload', title: 'Reload page', disabled: f.liveLoading, text: 'Reload', onclick: () => files.loadLive(f) }),
+    !htmlActionsInMenu && f.liveUrl ? h('a', { class: 'pillbtn fs-htmlopen', href: f.liveUrl, target: '_blank', rel: 'noopener noreferrer', title: 'Open in new tab', 'aria-label': 'Open in new tab' }, icon.external(16)) : null,
     h('button', { class: 'iconbtn fs-filemenu', title: 'This file', 'aria-label': 'This file', onclick: openMenu }, icon.dots(18)),
   ) : null
 
@@ -1940,7 +1943,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, f
   return h(
     'div',
     { class: `fs-file${wide ? ' wide' : ''}${htmlPreview ? ' html-live' : ''}`, key: `fs:file:${f.root}:${f.path}` },
-    liveHead ?? head,
+    htmlPreview ? liveHead : head,
     audioBar,
     htmlPreview ? null : h(
       'div',
@@ -1948,7 +1951,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, f
       renameTitle(files, f.row, f.view === 'markdown' ? name.replace(/\.(?:md|markdown)$/i, '') : name, 'display fs-edtitle'),
       returnBack && close ? h('button', { class: 'fs-location', title: 'Open folder', 'aria-label': `Open folder: ${closeLabel}`, onclick: close }, icon.folder(14), h('span', { text: `${ROOT_LOOK[f.root]?.name ?? f.root}${parentOf(f.path) ? ` / ${parentOf(f.path)}` : ''}` })) : null,
       h('div', { class: 'fs-sub', text: metaOf(f.row) }),
-      wide ? null : h('div', { class: 'fs-filestate' }, saveWord, readOnly),
+      (!wide || side) && (saveWord || readOnly) ? h('div', { class: 'fs-filestate' }, saveWord, readOnly) : null,
       !editable && !f.loading && reason ? h('div', { class: 'fs-reason', text: reason }) : null,
       source,
     ),
@@ -2101,13 +2104,23 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
     const folderArchive = s.resource && isFolder(s.resource) && ['vault', 'spaces'].includes(s.resource.root) ? s.resource : null
     const archiveKey = folderArchive ? `${folderArchive.root}:${String(folderArchive.path ?? '').replace(/^\/+|\/+$/g, '')}` : null
     const archiveMatch = archiveKey && files.st.archive?.key === archiveKey ? files.st.archive : null
+    const f = s.file === files.st.file ? s.file : null
+    const htmlPreview = f?.view === 'html' && f.mode === 'preview' && !f.metadataLoading && !f.metadataError
+    const htmlActions = (s.side || s.htmlActions) && htmlPreview
+    const viewMode = f?.view === 'html'
+      ? s.side && f.mode === 'edit' ? 'Preview' : 'View source'
+      : s.side && f?.view === 'markdown' && !f.error && !f.loading && !f.owner
+        ? f.mode === 'edit' ? 'Preview' : f.caps.write ? 'Edit' : 'View source'
+        : null
     return [
       h('div', { class: 'display sheettitle', text: s.name }),
+      htmlActions ? h('button', { class: 'sheetrow fs-menu-reload', type: 'button', disabled: f.liveLoading, onclick: () => { close(); files.loadLive(f) } }, icon.refresh(18), h('span', { text: 'Reload' })) : null,
+      htmlActions && f.liveUrl ? h('a', { class: 'sheetrow fs-menu-open', href: f.liveUrl, target: '_blank', rel: 'noopener noreferrer', onclick: close }, icon.external(18), h('span', { text: 'Open in new tab' })) : null,
       ...(s.resource ? menuItems(files, s.resource, close) : []),
-      s.resource && !isFolder(s.resource) && files.side?.()?.available() ? h('button', { class: 'sheetrow', onclick: () => { const row = s.resource; files.st.sheet = null; files.side().openSide({ kind: 'file', root: row.root, path: row.path, row }) } }, icon.panelRight(18), 'Open to the side') : null,
+      !s.side && s.resource && !isFolder(s.resource) && files.side?.()?.available() ? h('button', { class: 'sheetrow', onclick: () => { const row = s.resource; files.st.sheet = null; files.side().openSide({ kind: 'file', root: row.root, path: row.path, row }) } }, icon.panelRight(18), 'Open to the side') : null,
       capsOf(s.resource).rename ? h('button', { class: 'sheetrow fs-menu-rename', onclick: () => files.beginRename(s.resource, s.renameSlot ?? 'row') }, icon.pencil(18), h('span', { text: 'Rename' })) : null,
       s.openFolder ? h('button', { class: 'sheetrow fs-menu-folder', onclick: () => { files.st.sheet = null; s.openFolder() } }, icon.folder(18), h('span', { text: 'Open folder' })) : null,
-      s.viewSource ? h('button', { class: 'sheetrow fs-menu-source', onclick: () => { files.st.sheet = null; s.viewSource() } }, icon.code(18), h('span', { text: 'View source' })) : null,
+      viewMode ? h('button', { class: 'sheetrow fs-menu-source', onclick: () => { close(); files.setMode(viewMode === 'Preview' ? 'preview' : 'edit') } }, icon[viewMode === 'Preview' ? 'file' : viewMode === 'Edit' ? 'pencil' : 'code'](18), h('span', { text: viewMode })) : null,
       s.resource?.capabilities?.download ? h('a', { class: 'sheetrow fs-menu-download', href: downloadHref(s.resource.root, s.resource.path), download: s.name }, icon.send(18), h('span', { text: 'Download' })) : null,
       folderArchive ? h('button', { class: 'sheetrow fs-menu-download fs-menu-archive', type: 'button', disabled: Boolean(files.st.archive?.busy), onclick: async () => {
         const out = await files.downloadArchive(folderArchive.root, folderArchive.path ?? '')

@@ -13,7 +13,7 @@ export function mount(host, options = {}) {
     visitId: () => host.panelId === 'side' ? host.panels.sideVisit() : globalThis.history?.state?.panelVisit ?? 'initial',
     historyButton: () => host.backButton(host.panelId),
     messageState: options.messageState ?? createMessageState(),
-    renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event) }),
+    renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event, { chat: extra.chatLinks }) }),
     openBoardFile: (path, id, close) => {
       const item = { kind: 'file', root: 'vault', path, mode: 'edit' }
       if (host.panels.available()) {

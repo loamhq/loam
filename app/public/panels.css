@@ -43,9 +43,8 @@
 .side-pane .tt-head .headspace { display:none; }
 .side-pane .apps-frame { min-height:0; }
 .side-pane .apps-toolbar { display:none; }
-.side-pane .fs-edtitle,.side-pane .fs-titles > .fs-sub,.side-pane .fs-htmlmark,.side-pane .fs-htmlname { display:none; }
-.side-pane .fs-titles { padding-top:0; padding-bottom:0; }
-.side-pane .fs-head .fs-filemenu,.side-pane .fs-livehead .fs-filemenu { display:none; }
+.side-pane .fs-edtitle,.side-pane .fs-titles > .fs-sub { display:none; }
+.side-pane .fs-file > .fs-titles { padding-block:0; }
 .row-side-action { opacity:0; transition:opacity 160ms; flex:none; color:var(--paper-ink-3); }
 .tt-row,.apps-row,.fs-entry { position:relative; }
 .tt-row > .row-side-action { position:absolute; right:12px; top:50%; transform:translateY(-50%); width:32px; height:36px; display:flex; align-items:center; justify-content:center; border-radius:10px; }
