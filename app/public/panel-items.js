@@ -57,10 +57,10 @@ export function migratePanelURL(value, saved) {
 
 // Both slots use this renderer. Sections supply lists; item kinds supply only
 // panel contents. The stable slot ancestors keep iframe documents mounted.
-export function renderPanel({ host, item, before = [], after = [], header = null, empty = null }) {
+export function renderPanel({ host, item, before = [], after = [], header = null, empty = null, context = {} }) {
   const side = host.panelId === 'side'
   const kind = host.registry.entries('panel.item').findLast(entry => entry.id === item?.kind)
-  const content = item ? kind ? host.registry.invoke(kind, 'render', { host, item, panel: host.panelId, wide: true })
+  const content = item ? kind ? host.registry.invoke(kind, 'render', { ...context, host, item, panel: host.panelId, wide: true })
     : h('div', { class: 'pane-nothing', role: 'status', text: 'This item is unavailable. Its plugin may be off.' }) : empty
   return h(side ? 'section' : 'main', { class: `pane${side ? ' side-pane' : ''}`, key: side ? 'side-pane' : 'main-pane', 'data-panel': host.panelId, ...(side ? { 'aria-label': 'Side panel' } : {}) },
     ...before, header, content, ...after)

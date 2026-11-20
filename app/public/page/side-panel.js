@@ -141,7 +141,7 @@ export function mountSidePanel(base) {
   function transfer(to, id) {
     own.threads.transferTo(to.threads, id)
   }
-  function header() {
+  function header(fileActions) {
     const at = item(), f = host.files.st.file
     // A plugin root's file is named by its row and placed by its `place`
     // (a doc on another Loam has no folder here, 2026-11-17).
@@ -152,24 +152,31 @@ export function mountSidePanel(base) {
     return h('header', { class: 'side-head' },
       base.backButton('side'), h('span', { class: 'side-face', 'aria-hidden': 'true' }, at?.kind === 'app' ? icon.apps(20) : icon.file(20)),
       h('div', { class: 'side-heading' }, h('strong', { text: label }), h('span', { text: location, title: location })),
-      controls[0], controls[1], h('button', { class: 'iconbtn ghost', title: 'Item actions', 'aria-label': 'Item actions', onclick: () => {
+      fileActions, controls[0], controls[1], h('button', { class: 'iconbtn ghost', title: 'Item actions', 'aria-label': 'Item actions', onclick: () => {
         if (f && ownRoot?.menu) host.files.itemsMenu(f.row, ownRoot.menu(f.path))
-        else if (f) host.files.resourceMenu(f.row, host.filesHome())
+        else if (f) host.files.resourceMenu(f.row, host.filesHome(), { side: true })
         else { state.appMenu = !state.appMenu; base.schedule() }
       } }, icon.dots(18)), controls[2])
   }
   function view() {
+    const f = host.files.st.file
+    const fileTools = f ? host.fileDictation() : null
+    const at = item()
+    const fileToolbar = f && !(f.view === 'html' && f.mode === 'preview')
+    const panelHeader = fileToolbar ? host.registry.reduce('files.action', { slot: 'toolbar', file: f, files: host.files,
+      defaultView: () => header([fileTools.readAloud?.glyph, ...host.registry.draw('files.action', { slot: 'action', file: f, files: host.files })]),
+    }, null) : at?.kind === 'thread' ? null : header()
     const app = own.apps.st.selected
     const appMenu = state.appMenu && app ? menuSurface(h('div', { class: 'popover side-app-menu' },
       !appUnavailable(app) ? h('a', { class: 'setrow', href: app.url, target: '_blank', rel: 'noopener noreferrer', text: 'Open in browser' }) : null,
       h('button', { class: 'setrow', text: own.apps.st.copied ? 'Copied' : 'Copy link', onclick: own.apps.copyLink }),
       own.apps.st.copyError ? h('span', { role: 'status', text: own.apps.st.copyError }) : null),
     { title: 'App actions', anchor: '[data-panel="side"] [aria-label="Item actions"]', close: () => { state.appMenu = false; base.schedule() } }) : null
-    return renderPanel({ host, item: item(), header: item()?.kind === 'thread' ? null : header(),
+    return renderPanel({ host, item: at, header: panelHeader, context: { fileTools },
       after: [appMenu, host.editorNodes(), ...host.sheetNodes()] })
   }
-  own.filePanelView = () => host.files.st.file ? fileView(host.files, { wide: true, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onLink: host.openFileRef,
-    onTool: host.applyTool, embed: host.embedFor, ...host.fileDictation() }) : folderView(host.files, { wide: true, go: host.goFiles, home: host.filesHome() })
+  own.filePanelView = fileTools => host.files.st.file ? fileView(host.files, { wide: true, side: true, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onLink: host.openFileRef,
+    onTool: host.applyTool, embed: host.embedFor, ...fileTools }) : folderView(host.files, { wide: true, go: host.goFiles, home: host.filesHome() })
 
   function afterRender() {
     if (state.screen === 'threads') own.threads.afterRender()

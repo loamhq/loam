@@ -296,9 +296,10 @@ function proceedThen(go) {
 // followed only if it is `http`, `https` or `mailto`, and one that leads
 // nowhere says what the host looked for. A published vault URL is read as the
 // vault path it names first.
-async function openFileRef(ref, from = null, event = null) {
-  if (navigation && event?.currentTarget?.closest?.('[data-panel]')?.getAttribute('data-panel') === 'side') return host.panels.sideHost.openFileRef(ref, from, event)
-  const toSide = host.panels?.available() && (event?.altKey || event?.openToSide || host.panelId === 'side')
+async function openFileRef(ref, from = null, event = null, { chat = false } = {}) {
+  if (navigation && event?.currentTarget?.closest?.('[data-panel]')?.getAttribute('data-panel') === 'side') return host.panels.sideHost.openFileRef(ref, from, event, { chat })
+  const fullView = chat && (event?.metaKey || event?.ctrlKey)
+  const toSide = !fullView && host.panels?.available() && (chat || event?.altKey || event?.openToSide || host.panelId === 'side')
   const published = vaultUrlRef(ref, vaultUrls)
   const asked = published?.ref ?? ref
   let answer
@@ -311,8 +312,13 @@ async function openFileRef(ref, from = null, event = null) {
   const fragment = answer.fragment ?? published?.fragment ?? null
   const go = (row) => {
     if (files.st.sheet?.kind === 'choose') files.st.sheet = null
-    if (toSide && !isFolder(row)) return host.panels.openSide({ kind: 'file', root: row.root, path: row.path, row, fragment })
-    return goFiles(row.root, row.path, { isFile: !isFolder(row), row, fragment })
+    const isFile = !isFolder(row)
+    if (isFile) {
+      const item = { kind: 'file', root: row.root, path: row.path, row, fragment }
+      if (toSide) return host.panels.openSide(item)
+      if (fullView && host.panelId === 'side') return host.panels.openMain(item)
+    }
+    return goFiles(row.root, row.path, { isFile, row, fragment })
   }
   if (answer.status === 'found') return go(answer.resource)
   if (answer.status === 'ambiguous') {
@@ -527,6 +533,7 @@ function filesScreen() {
         historyBack: host.backAction('main'),
         closeLabel: files.pluginRoot() ? files.pluginRoot().name : files.st.path === '' ? (ROOT_LOOK[f.root]?.name ?? f.root) : fileNameOf(files.st.path),
         wide: false,
+        htmlActionsInMenu: files.st.chatFile,
         field: fileFieldFor,
         home: filesHome(),
         go: goFiles,

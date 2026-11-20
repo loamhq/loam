@@ -74,7 +74,7 @@ try {
       const chatTop = await stream.evaluate(n => n.scrollTop)
       assert.ok(chatTop > 50)
       await capture('chat')
-      await link.click()
+      await link.click(wide ? { modifiers: ['Control'] } : {})
       await docReady()
       await capture('doc-from-chat')
       if (!before) {
@@ -115,7 +115,7 @@ try {
           await side.locator('.tt-head').waitFor()
           assert.equal(new URL(page.url()).pathname, path)
           await page.keyboard.press('Control+]')
-          await side.locator('.fs-livehead').waitFor()
+          await side.locator('.fs-htmlframe').waitFor()
           await side.locator('iframe').evaluate(n => { window.sideFrame = n.contentWindow })
           const mouse = await context.newCDPSession(page)
           const header = await side.locator('.side-head').boundingBox()
@@ -168,7 +168,7 @@ try {
           // The former main item now lives in side. The main arrow skips it.
           await main.getByRole('button', { name: 'Back', exact: true }).click()
           await docReady()
-          await page.locator('[data-panel=side] .fs-livehead').waitFor()
+          await page.locator('[data-panel=side] .fs-htmlframe').waitFor()
           await page.evaluate(() => testPage.panels.close())
         }
       }
@@ -246,7 +246,7 @@ try {
           // A fresh destination abandons the old Forward branch.
           await page.evaluate(() => testPage.panels.openSide({ kind: 'file', root: 'vault', path: 'Notes/page.html' }))
           await page.keyboard.press('Control+]')
-          await side.locator('.fs-livehead').waitFor()
+          await side.locator('.fs-htmlframe').waitFor()
           await main.getByRole('button', { name: 'Back', exact: true }).click()
           await main.locator('.tt-details-head').waitFor()
         }
