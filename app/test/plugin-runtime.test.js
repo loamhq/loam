@@ -15,7 +15,13 @@ test('server states, collapsed failure logs, listed packages and restart refusal
   const requests = [], loader = { st: { loaded: true, rows: [], failures: new Map(), writing: new Set() }, refresh: async () => {}, toggle() {} }
   let refused = false
   const ui = createPluginSettings({ loader, theme: { value: {} }, host: { settingsHead: text => h('h2', { text }), settingsBack() {},
-    api: async (...args) => { requests.push(args); if (refused) throw new Error('The plugin is off.'); loader.st.rows = [row('starting')]; return { plugin: row('starting') } } } })
+    api: async (...args) => {
+      requests.push(args)
+      if (args[0] === 'GET') return { plugin: loader.st.rows[0] }
+      if (refused) throw new Error('The plugin is off.')
+      loader.st.rows = [row('starting')]
+      return { plugin: row('starting') }
+    } } })
   for (const state of ['running', 'starting', 'failing', 'stopping', 'stopped']) {
     loader.st.rows = [row(state)]
     const view = tree(ui.view())
@@ -38,6 +44,11 @@ test('server states, collapsed failure logs, listed packages and restart refusal
   all(tree(ui.view()), 'pillbtn').find(n => text(n) === 'Restart').fire('click')
   await new Promise(resolve => setImmediate(resolve))
   assert.match(text(tree(ui.view())), /The plugin is off/)
+  loader.st.rows = [row('stopped', { on: false })]
+  assert.doesNotMatch(text(tree(ui.view())), /Server ·/)
+  await ui.open(loader.st.rows[0])
+  assert.doesNotMatch(text(tree(ui.view())), /Server ·|Its server/)
+  ui.st.selected = null
   loader.st.rows = [row('stopped', { switch: 'listed', service: null })]
   const listed = tree(ui.view())
   assert.equal(all(listed, 'plugin-switch').length, 0)

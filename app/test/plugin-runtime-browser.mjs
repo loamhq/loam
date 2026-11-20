@@ -27,8 +27,11 @@ try {
       await page.goto(app.url); await page.waitForFunction(() => globalThis.__runtime?.pluginLoader.st.loaded)
       await page.evaluate(() => __runtime.goSettings('plugins'))
       const pluginRow = state => page.locator('.plugin-list-item').filter({ has: page.getByRole('button', { name: `About Example ${state}`, exact: true }) })
-      for (const state of ['running', 'starting', 'failing', 'stopping', 'stopped']) {
+      for (const state of ['starting', 'failing', 'stopping']) {
         assert.equal(await pluginRow(state).locator('.plugin-service-state').innerText(), `Server · ${state[0].toUpperCase() + state.slice(1)}`)
+      }
+      for (const state of ['running', 'stopped']) {
+        assert.equal(await pluginRow(state).locator('.plugin-service-state').count(), 0)
       }
       assert.equal(await page.getByRole('button', { name: 'About Example skills', exact: true }).locator('.plugin-state').count(), 0)
       assert.equal(await page.locator('.plugin-list-item').filter({ has: page.getByRole('button', { name: 'About Example skills', exact: true }) }).getByRole('switch').count(), 0)

@@ -53,13 +53,13 @@ export function mount(host) {
   const showcase = createThemeShowcase({ schedule: () => host.schedule(), mode: () => host.theme.current === 'dark' ? 'dark' : 'light' })
 
   // ------------------------------------------------------------ the list
-  async function load(refresh = false) {
+  async function load(refresh = false, { prefetch = true } = {}) {
     if (st.loading && !refresh) return
     const ticket = ++st.listRequest
-    st.loading = true; host.schedule()
+    st.loadedAt = Date.now(); st.loading = true; host.schedule()
     try { const list = await host.api('GET', `/marketplace${refresh ? '?refresh=1' : ''}`); if (ticket === st.listRequest) st.list = list }
     catch (error) { if (ticket === st.listRequest) st.list = { state: [404, 405].includes(error.status) ? 'off' : 'unreachable', plugins: [], message: error.message } }
-    finally { if (ticket === st.listRequest) { st.loading = false; warm(); host.schedule() } }
+    finally { if (ticket === st.listRequest) { st.loading = false; if (prefetch || sheet()) warm(); host.schedule() } }
   }
   // What the front page draws from each listing's own link: the lead
   // story's cover and every theme's colours. The broker keeps them an hour.
@@ -122,7 +122,8 @@ export function mount(host) {
     st.drop = false; st.sel = 0; st.picking = false
     const view = id ? 'listing' : q ? 'results' : kind && kind !== 'all' ? 'kind' : 'front'
     host.openSheet({ kind: 'market', view, q: q ?? '', k: kind || 'all', id, back: backTo, trail: [], from: from?.label ? { label: String(from.label) } : null })
-    if (!st.list || Date.now() - (st.loadedAt ?? 0) > 60000) { st.loadedAt = Date.now(); load() }
+    if (!st.list || Date.now() - (st.loadedAt ?? 0) > 60000) load()
+    else if (!id) warm()
     if (id) detailsOf(id)
     if (install) openInstall(install)
     st.focus = id ? 'heading' : host.state.wide ? 'field' : 'heading'
@@ -143,8 +144,8 @@ export function mount(host) {
     const s = sheet()
     if (!s) return
     const prev = s.trail?.pop()
-    // Opened from a thread's card: the first page's way back is the thread.
-    if (!prev && s.from) return close()
+    // A linked listing can return to the thread or Settings page that opened it.
+    if (!prev && s.from) return s.back ? toSettings() : close()
     if (!prev) return go({ view: 'front' }, { push: false })
     Object.assign(s, { view: prev.view, q: prev.q, k: prev.k, id: prev.id })
     field.value = s.view === 'results' ? s.q : ''

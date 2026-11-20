@@ -120,6 +120,11 @@ step where there is one, and clears it when agents can run again. A fresh instal
 the owner's agents know about them: the agents add to it, and it is the
 owner's to read and edit.
 
+**Settings › Plugins** shows installed themes and extensions and where each
+copy came from. About opens the Market listing for a Market plugin and shows
+the folder for a locally made one. Use the Market to find more themes and
+extensions.
+
 **History and backup.** Every fifteen minutes the vault and AI Spaces are
 each committed to their own git history on the server, so a change anyone
 regrets can be got back from it; nothing leaves the machine. The Git backup

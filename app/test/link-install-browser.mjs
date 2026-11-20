@@ -111,11 +111,13 @@ try {
       await sheet.locator('.pillbtn', { hasText: 'See it in Plugins' }).click()
 
       // Its page says where it came from; the list marks it as from a link.
-      await page.locator('.plugin-from-link', { hasText: 'Installed from a link: github.com/loamhq/plugins/syncthing, at syncthing-v1.0.0' }).waitFor()
+      await page.locator('.plugin-about-origin', { hasText: 'From a link · Unreviewed by Loam' }).waitFor()
+      assert.match(await page.getByRole('link', { name: 'View source' }).getAttribute('href'), /github\.com\/loamhq\/plugins\/tree\//)
       await shot('9-detail')
       await page.getByRole('button', { name: 'Back to Plugins', exact: true }).click()
-      await page.locator('.plugin-mark-link').first().waitFor()
-      const marked = await page.locator('.plugin-list-item', { has: page.locator('.plugin-mark-link') }).locator('.setrow-title').allTextContents()
+      const fromLink = page.getByRole('region', { name: 'From a link', exact: true })
+      await fromLink.waitFor()
+      const marked = await fromLink.locator('.setrow-title').allTextContents()
       assert.deepEqual(marked, ['Syncthing'], `${label}: only the plugin from a link is marked`)
       await page.locator('.plugin-list-item', { hasText: 'Syncthing' }).scrollIntoViewIfNeeded()
       await shot('10-marked')

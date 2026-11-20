@@ -13,12 +13,19 @@ preserves that metadata; it neither scans host paths nor edits shipped files.
 Removing the personal copy reveals the shipped one. No user folder is mounted
 into the web container and no update process here writes Yours.
 
-Server packages show the host's service state in Settings › Plugins. Failure
-logs stay collapsed until opened; Restart posts to `/api/plugins/:id/restart`
-and refreshes the catalog. Agent and skill packages marked `switch: "listed"`
-have no enable switch. Plugin icons use the catalog's `files` base plus `icon`.
-Opening Plugins and returning focus refresh the catalog; the page does not
-manage processes or invent a second service state.
+Settings › Plugins groups installed extensions by origin and labels each theme
+card. The page derives origin from the broker's `layer` and `source`. A Market
+install records `source.via` as `market`. A link install also appears under
+From the Market when its id, repository and release match the listing, including
+a listing's reviewed commit. An explicit listing folder must match the installed
+folder. The About page links to the listing for Market plugins and shows the
+host folder for locally made plugins.
+
+Enabled server packages show a status on the list when their service needs
+attention and the current state in About. Failure logs stay collapsed until
+opened. Restart posts to `/api/plugins/:id/restart` and refreshes the catalog.
+Agent and skill packages marked `switch: "listed"` have no enable switch.
+Plugin icons load through the app's files relay and fall back to an initial.
 
 App plugins join Apps under their catalog source (Yours, Installed or Loam).
 Their `/x/:id/` address stays on the page's origin, served by the installation's
