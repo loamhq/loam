@@ -1,50 +1,11 @@
 #!/bin/sh
-# The wall around the session broker's port. Idempotent; run at boot and
-# whenever docker restarts, by loam-broker-firewall.service.
+# Install at boot and after Docker restarts. Traffic to an address on the host
+# traverses INPUT. The broker and app-preview ports share one access rule.
+# Accept allowed packets here so a later INPUT rule cannot drop them.
 #
-# Binding the broker to 172.31.0.1 is not by itself a wall. That address is
-# the host's, so every other container on this box -- another app on
-# 172.19.x, loam-ui's default network on 172.20.x, anything provisioned later
-# -- routes to it perfectly well. Traffic from a container to a host address
-# arrives on INPUT, not FORWARD, so DOCKER-USER (where the personas' sight
-# wall lives) never sees it and this rule has to be in INPUT.
-#
-# The rule is source-based and reads in one line: on the broker's port, the
-# broker's own bridge is allowed and everything else is dropped. DROP rather
-# than REJECT, because the one legitimate client is on the allowed side and a
-# scanner on the wrong side should learn nothing.
-#
-# ACCEPT, not RETURN, for the allowed side. This box's INPUT policy is DROP
-# and ufw's chains sit behind this one; a RETURN would hand the allowed
-# packet back to INPUT and ufw would drop it a few rules later. Caused
-# 2026-09-16: with RETURN, a container on the broker's own network could not
-# reach the broker either.
-#
-# Rendered nowhere: this file IS the source. There is no generator and no
-# installer script -- it is copied into place by hand, once, and again after
-# any edit here:
-#
-#   sudo install -o root -g root -m 755 broker/firewall.sh \
-#        /etc/loam/broker/firewall.sh
-#   sudo systemctl restart loam-broker-firewall.service
-#
-# What compares them is bin/check-drift (check_broker), two ways. It diffs
-# the live copy against this one byte for byte, so an edit here that was
-# never installed is a finding. And it asks the KERNEL whether the jump this
-# script inserts is in INPUT, built from lib/loam_broker.py's own
-# WALL_CHAIN, BIND_ADDR and PORT -- so those three drifting from the module
-# is caught by the kernel check rather than by reading a file. SUBNET is the
-# one value below that only this file asserts (check-drift compares the
-# module's SUBNET against the docker network, not against the rule inside
-# the chain), so it is the one to change in both places deliberately.
-#
-# The same chain holds a second port since 2026-11-15: Caddy's internal
-# route for the Apps section's previews (PREVIEW_PORT in lib/loam_deploy.py,
-# deploy/README.md "Previews for the Apps section"), which serves the apps
-# past the login and so must be exactly as walled as the broker: the box
-# itself and the broker's bridge, nobody else. One chain, two jumps, so the
-# two can never disagree about who is let in. check-drift asks the kernel for
-# both jumps.
+# Install this source as root-owned mode 0755 at /etc/loam/broker/firewall.sh.
+# check-drift compares the installed bytes and checks both INPUT jumps.
+# Keep SUBNET in sync with the broker network configuration.
 set -eu
 
 CHAIN=LOAM-BROKER-HOST
@@ -53,16 +14,10 @@ ADDR=172.31.0.1
 PORT=8932
 PREVIEW_PORT=8935
 
-# Rebuild the chain from empty every time. Appending to a chain that already
-# has the rule is how a wall grows a hundred copies of itself and how a
-# changed rule ends up behind its own older version.
+# Rebuild the chain so reruns replace stale rules and cannot duplicate them.
 iptables -N "$CHAIN" 2>/dev/null || true
 iptables -F "$CHAIN"
-# The box's own processes, which arrive on lo because the address is the
-# host's. Not a hole: a process on this box runs as the box's user or root, both
-# of whom can read the token file anyway, and bin/broker-probe is one of
-# them. Containers never arrive on lo -- they come in on the bridge -- so
-# this does not widen the container side by a byte.
+# Host clients reach this address on loopback. Containers arrive on the bridge.
 iptables -A "$CHAIN" -i lo -j ACCEPT
 iptables -A "$CHAIN" -s "$SUBNET" -j ACCEPT
 iptables -A "$CHAIN" -j DROP

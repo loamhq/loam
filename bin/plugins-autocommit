@@ -1,25 +1,7 @@
 #!/usr/bin/env bash
-#
-# Auto-commit the plugin host's Yours layer (2026-11-12). Designed for cron,
-# every 15 minutes, beside vault-autocommit and ai-labs-autocommit, whose
-# shape it keeps. The layer is its own folder and repository,
-# `paths.plugins` (lib/loam_plugins.py, docs/plugins.md); the owner,
-# 2026-11-12: plugins are not ai-labs, which "has a very specific usecase".
-#
-# Differences from the other two, each on purpose:
-#   - The folder appears on the first plugin change, not at install, so a
-#     run with no folder is a silent no-op, and a folder with no repository
-#     yet is made one here (`git init -b main`). History starts with the
-#     first run after the first change.
-#   - It pushes only when the repository has an `origin`. Since 2026-11-13
-#     it has one: a private repository of the owner's,
-#     reached as `git@github-plugins:…` through a deploy key scoped to that
-#     one repository (~/.ssh/github_personal_loam_plugins, the `github-plugins`
-#     host in ~/.ssh/config, as ai-labs and the vault are reached). Another
-#     install adds its own `origin` and this script needs no change.
-#
-# LOAM_PLUGINS_DIR overrides the folder (the tests, another install), as it
-# does for the host itself.
+# Back up the configured owner plugin directory, overridden by LOAM_PLUGINS_DIR.
+# A missing directory needs no backup. Initialize the repository on first use
+# and push pending commits only when it has an origin.
 
 set -euo pipefail
 

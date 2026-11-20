@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-#
-# Moved here from chassis/scripts/ on 2026-09-04 (Move 5, the chassis
-# retirement). The recovery floor cannot live inside the tree being removed:
-# if this stops committing there is no symptom, only a missing safety net.
-# Body is byte-identical to the chassis version; only this note was added.
-# Log stays at ~/logs/ so its history keeps one location.
+# Keep the backup job outside the repository it commits.
 # Auto-commit and push ai-labs changes. Designed for cron (every 15 min).
 # Symmetric with vault-autocommit; see that script for the design notes.
 #
