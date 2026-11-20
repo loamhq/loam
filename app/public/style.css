@@ -36,6 +36,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 
 /* The phone the design was drawn for, centred on anything wider. */
 #app {
+  --reading-ground: var(--paper-page);
   max-width: 460px;
   margin: 0 auto;
   height: 100%;
@@ -1759,8 +1760,9 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 }
 
 .pane {
+  --reading-ground: var(--paper-pane);
   flex: 1; min-width: 0; min-height: 0; margin: 12px 12px 12px 0; border-radius: 28px;
-  background: var(--paper-pane); position: relative; overflow: hidden; display: flex; flex-direction: column;
+  background: var(--reading-ground); position: relative; overflow: hidden; display: flex; flex-direction: column;
 }
 /* Positioned because the chat's loading card is laid over it. */
 .pane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
@@ -2019,13 +2021,12 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .fs-return { flex: none; }
 .fs-dl { transform: rotate(180deg); }
-.fs-field { flex: 1; margin: 0 12px 40px; border: 0; border-radius: 24px; background: var(--paper-pane); padding: 20px 22px; font-family: var(--font-body); font-size: 16px; line-height: 1.65; color: var(--paper-ink); outline: none; resize: none; min-height: calc(50vh / var(--ui-scale, 1)); }
+.fs-field { flex: 1; margin: 0 12px 40px; border: 0; border-radius: 24px; background: transparent; padding: 20px 22px; font-family: var(--font-body); font-size: 16px; line-height: 1.65; color: var(--paper-ink); outline: none; resize: none; min-height: calc(50vh / var(--ui-scale, 1)); }
 .fs-field.mono { font-family: var(--font-mono); font-size: 13px; line-height: 1.6; }
 .fs-file.wide .fs-field, .fs-file.wide .fs-preview { margin: 0 20px 24px; max-width: 860px; width: calc(100% - 40px); align-self: center; }
-.fs-preview { flex: 1; margin: 0 12px 40px; border-radius: 24px; background: var(--paper-pane); padding: 20px 22px; overflow: auto; overscroll-behavior: contain; font-size: 16px; line-height: 1.6; }
-.fs-media { flex: 1; margin: 4px 12px 40px; border-radius: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; background: var(--paper-pane); }
-.fs-stripes { background: repeating-linear-gradient(135deg, var(--paper-pane) 0 10px, var(--paper-page) 10px 20px); }
-.fs-chip { font-family: var(--font-mono); font-size: 12px; color: var(--paper-ink-3); background: var(--paper-pane); padding: 6px 12px; border-radius: 999px; }
+.fs-preview { flex: 1; margin: 0 12px 40px; border-radius: 24px; padding: 20px 22px; overflow: auto; overscroll-behavior: contain; font-size: 16px; line-height: 1.6; }
+.fs-media { flex: 1; margin: 4px 12px 40px; border-radius: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; }
+.fs-chip { font-family: var(--font-mono); font-size: 12px; color: var(--paper-card-ink-3); background: var(--paper-card); padding: 6px 12px; border-radius: 999px; }
 .fs-img { max-width: 100%; max-height: calc(70vh / var(--ui-scale, 1)); border-radius: 16px; }
 .fs-entry { display: flex; align-items: center; min-width: 0; border-radius: 20px; transition: background-color 180ms ease-out; }
 .fs-entry > .setrow { flex: 1; min-width: 0; background: transparent; }
@@ -2074,18 +2075,23 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
   .fs-edhead.folder-back .fs-mode-toggle { display: flex; }
 }
 .fs-preview { min-width: 0; }
+.fs-preview :is(:not(pre) > code, thead th, .table-frame .copyblk) { background: var(--paper-card); color: var(--paper-card-ink); }
 .fs-preview .tablewrap { width: 100%; }
 .fs-preview table { overflow-wrap: normal; word-break: normal; }
 .fs-preview .tablewrap[data-edges="right"] { mask-image: linear-gradient(to right, var(--mask-opaque) calc(100% - 28px), transparent); }
 .fs-preview .tablewrap[data-edges="left"] { mask-image: linear-gradient(to right, transparent, var(--mask-opaque) 28px); }
 .fs-preview .tablewrap[data-edges="both"] { mask-image: linear-gradient(to right, transparent, var(--mask-opaque) 28px, var(--mask-opaque) calc(100% - 28px), transparent); }
 .fs-file:not(.wide) .fs-copylink, .fs-file:not(.wide) .fs-dl { display: none; }
-.fs-htmlframe { flex: 1; min-height: 0; min-width: 0; width: 100%; background: var(--paper-pane); overflow: hidden; display: flex; flex-direction: column; }
+.fs-htmlframe { flex: 1; min-height: 0; min-width: 0; width: 100%; overflow: hidden; display: flex; flex-direction: column; }
 .fs-htmlbar { display: flex; flex: none; align-items: center; gap: 10px; min-height: 56px; padding: 0 14px; border-bottom: 1px solid var(--paper-pressed); }
 .fs-htmlmark { font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: .04em; color: var(--paper-ink-2); background: var(--paper-card); padding: 4px 6px; border-radius: 6px; }
 .fs-htmlname { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs-htmlbar .pillbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 10px; font-size: 12px; color: var(--latte-foam-ink); text-decoration: none; }
-.fs-iframe { flex: 1; min-height: 0; border: 0; width: 100%; background: var(--paper-raised); }
+.fs-iframe { flex: 1; min-height: 0; border: 0; width: 100%; background: var(--reading-ground); }
+/* Tell the browser what is behind transparent HTML, even when the app's
+ * appearance differs from the system. Light-only pages get a light canvas. */
+:is(.fs-iframe, .apps-embed) { color-scheme: light; }
+:root[data-theme="dark"] :is(.fs-iframe, .apps-embed) { color-scheme: dark; }
 .fs-file.html-live { overflow: hidden; }
 .screen.files .fs-file.html-live { padding-top: 0; }
 .fs-livehead { gap: 8px; }
@@ -2184,10 +2190,21 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .fs-tool-bold { font-weight: 700; }
 .fs-tool-italic { font-style: italic; }
 .fs-tool-heading { font-weight: 600; }
-.fs-pdf { flex: 1; margin: 4px 12px 40px; border-radius: 24px; background: var(--paper-pane); overflow: hidden; display: flex; flex-direction: column; min-height: calc(60vh / var(--ui-scale, 1)); }
+.fs-pdf { flex: 1; margin: 4px 12px 40px; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column; min-height: calc(60vh / var(--ui-scale, 1)); }
 .fs-file.wide .fs-pdf, .fs-file.wide .fs-media { margin: 0 20px 24px; }
-.fs-pdfframe { flex: 1; border: 0; width: 100%; min-height: calc(60vh / var(--ui-scale, 1)); background: var(--paper-page); }
+.fs-pdfframe { flex: 1; border: 0; width: 100%; min-height: calc(60vh / var(--ui-scale, 1)); background: var(--reading-ground); }
 .fs-note .fs-dlbtn { display: inline-flex; margin-left: 4px; }
+/* Comments & suggestions mounts its own editor. Match the Loam shell here;
+ * the standalone editor also mounts outside the app on share links. */
+#app .dc-host > .dc {
+  --dc-ul: color-mix(in srgb, var(--dc-accent-ink) 75%, transparent);
+  background: var(--reading-ground);
+}
+#app .dc-host .dc-props-keys { opacity: 1; }
+#app .dc-host .dc-margin .dc-card.on { background: var(--paper-raised); }
+:root[data-theme="light"] #app .dc-host .cm-selectionBackground {
+  background: color-mix(in srgb, var(--paper-highlight) 92%, var(--paper-ink)) !important;
+}
 .fs-leavetext { padding: 0 10px 14px; }
 .fs-sheet .fs-actions { padding: 0 6px 6px; }
 .dangertext { color: var(--danger); }

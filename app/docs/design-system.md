@@ -70,6 +70,14 @@ around it. Any other header in that pane (a plugin's viewer) reads
 `padding-left: max(<your padding>, var(--pane-lead, 0px))`; the fallback
 keeps a page outside Loam (a share page) unchanged.
 
+## Reading surfaces
+
+`--reading-ground` follows the shell, using `--paper-pane` inside a desktop
+pane and `--paper-page` on a phone. Use it for a viewer that needs an opaque
+backdrop, such as an iframe. Core file viewers can otherwise show the shell
+through. Use a local surface for document details such as inline code, table
+headers and floating comments.
+
 ## What checks it
 
 - `tools/colour-families.mjs`, run inside a page: no paper ink on a latte
