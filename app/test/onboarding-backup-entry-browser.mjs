@@ -97,6 +97,7 @@ try {
   await shot(`${entry}-hello`)
 
   if (entry === 'already-connected') {
+    if (width === 390) await page.getByRole('button', { name: 'Back to threads' }).click()
     await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
     await page.getByRole('button', { name: /^Plugins\b/ }).first().click()
     const backup = page.getByRole('button', { name: 'About Git backup' })
