@@ -16,7 +16,7 @@ runs, in order, `bin/library seed-vault` (docs/skills.md) and
 **About me.** `seed-vault` also writes `About me.md` at the top of the
 vault: a heading and one line saying it is what the person's agents know
 about them, theirs to read and edit (the owner, 2026-11-16). From 2026-11-18
-to 2026-11-19 every agent in the map's shape was told of it by Loam's text
+to 2026-11-19 Loam's text pointed agents to it
 (`docs/persona/loam.md`); the owner's shorter text of 2026-11-19 does not
 name it. The library's `loam-how-it-works` and Iris's `nights.md` point to it.
 

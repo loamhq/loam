@@ -6,9 +6,8 @@ since its last wake. Only reflection advances that checkpoint. A large diff goes
 in a file so the prompt fits in a single process argument. A cron loads its own
 record and leaves the checkpoint available for the next reflection.
 
-The launcher selects the instruction files for the workspace's loading format.
-Mapped agents use their map on both lanes. Legacy reflection uses its reflection
-file. Strip frontmatter before passing a lane file as system-prompt text.
+Both lanes load the shared persona instructions. A cron also appends the
+body of its own file to the system prompt.
 Both lanes use memory-based admission and the same failure and usage reporting."""
 
 from __future__ import annotations
