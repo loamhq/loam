@@ -115,6 +115,25 @@ def main() -> int:
     check("the soul is the starter's, word for word but the names",
           (ws / "soul.md").read_text(), st.fill((st.STARTER_DIR / "iris" / "soul.md").read_text()))
 
+    import loam_identity as identity
+    (ws / "CLAUDE.md").write_text("@soul.md\n@config.md\n@map.md\n")
+    decoy, source = identity.pick_decoy(ws)
+    check("a lone starter still probes its real soul against a held-out greeting phrase",
+          (source, decoy in st.read_hello()[1], decoy in texts,
+           identity.pick_canary(ws) in (ws / "soul.md").read_text()),
+          ("starter greeting", True, False, True))
+    other = lc.WORKSPACES / "second"
+    other.mkdir()
+    (other / "agent.json").write_text("{}")
+    try:
+        identity.pick_decoy(ws)
+        refused = False
+    except identity.IdentityError:
+        refused = True
+    check("a second agent missing its soul still refuses the wake", refused, True)
+    shutil.rmtree(other)
+    (ws / "CLAUDE.md").unlink()
+
     skill = "loam-bringing-context-from-another-ai"
     check("her how-i-am-here.md offers bringing context from another AI, by "
           "the library skill, and the seeded vault's library has that skill",
@@ -127,6 +146,15 @@ def main() -> int:
     check("the hello thread: titled, pinned, hello, Iris its default and member",
           (meta["title"], meta.get("pinned"), meta.get("hello"), meta["default"], meta["members"]),
           ("Hello", True, True, "iris", ["iris"]))
+    board = threads.board_snapshot(meta)
+    cards = [line for line in board["markdown"].splitlines() if line.startswith("- [ ] ")]
+    check("Hello seeds six ordinary Markdown checkboxes with the starter's exact words",
+          (board["markdown"], len(cards), st.status().get("first_weeks")),
+          ((st.STARTER_DIR / "hello-board.md").read_text(), 6, True))
+    ticked = board["markdown"].replace("- [ ]", "- [x]", 1)
+    check("...an ordinary board save can tick the first card",
+          threads.write_board(meta, ticked, board["revision"])["markdown"], ticked)
+    board = threads.board_snapshot(meta)
     check("...holding one message, by Iris, the starter's text, marked preset",
           [(m["id"], m["author"], m["kind"], m.get("preset"), m["text"]) for m in msgs],
           [("m1", "iris", "message", True, st.read_hello()[1])])
@@ -161,6 +189,8 @@ def main() -> int:
         check("a first tick missing for a full period raises the stopped warning",
               check_runtime.current_run_status()["why"], ["Loam's own check has stopped."])
 
+    personal = "## My move\n\n- [ ] Pack the kettle.\n"
+    threads.write_board(meta, personal, board["revision"])
     again = st.seed(provision=fake_provision)
     check("a second seed does nothing", ("skipped" in again, len(provisioned)), (True, 1))
 
@@ -177,6 +207,12 @@ def main() -> int:
     check("...one hello thread still, holding one message",
           (sum(1 for t in threads.rebuild_index() if threads.read(t)[0].get("hello")),
            len(threads.read(out["thread"])[1])), (1, 1))
+
+    check("retrying a seed preserves a person's board after they remove the list",
+          threads.board_text(meta), personal)
+    threads.delete(out["thread"])
+    st.seed(provision=fake_provision)
+    check("a deleted Hello stays deleted", out["thread"] in threads.index(), False)
 
     # An install whose agent of that id is its own (the owner's box): nothing.
     st.marker_path().unlink()

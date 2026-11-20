@@ -124,44 +124,50 @@ def seed(*, root: Path | None = None, provision=None) -> dict:
     A making marker identifies a workspace awaiting its thread. Set a failed
     provision aside before retrying and leave unrelated workspaces alone."""
     import loam_threads as threads  # noqa: PLC0415
-    done = status()
-    if done and done.get("state") != "making":
-        return {"skipped": f"the starter was seeded at {done.get('at')} "
-                           f"({done.get('agent')}, thread {done.get('thread')})"}
-    d = draft(root)
-    agent = d["id"]
-    ws = loam_agents.ai_labs() / agent
-    resumed = None
-    failed_make = (ws / "agent.json.failed").exists() and not (ws / "agent.json").exists()
-    if ws.exists():
-        if failed_make:
-            # The failed-provision marker identifies a partial workspace even without a seed marker.
-            resumed = f"set aside a failed start at {_set_aside(ws)}"
-        elif not (done and done.get("agent") == agent and (ws / "agent.json").exists()):
-            return {"skipped": f"{ws} exists: an agent named {agent} is already "
-                               f"this install's, and its files are its own"}
     with loam_agents.locked():
+        done = status()
+        if done and done.get("state") != "making":
+            return {"skipped": f"the starter was seeded at {done.get('at')} "
+                               f"({done.get('agent')}, thread {done.get('thread')})"}
+        d = draft(root)
+        agent = d["id"]
+        ws = loam_agents.ai_labs() / agent
+        resumed = None
+        failed_make = (ws / "agent.json.failed").exists() and not (ws / "agent.json").exists()
+        if ws.exists():
+            if failed_make:
+                # The failed-provision marker identifies a partial workspace even without a seed marker.
+                resumed = f"set aside a failed start at {_set_aside(ws)}"
+            elif not (done and done.get("agent") == agent and (ws / "agent.json").exists()):
+                return {"skipped": f"{ws} exists: an agent named {agent} is already "
+                                   f"this install's, and its files are its own"}
+        first_weeks = not done or done.get("first_weeks") is True
         if not ws.exists():
             wake = loam_agents.free_wake()
             loam_agents._write_json(marker_path(), {"state": "making", "agent": agent,
-                                                    "wake": wake, "at": loam_agents.now_iso()})
+                                                    "wake": wake, "first_weeks": first_weeks,
+                                                    "at": loam_agents.now_iso()})
             loam_agents.make(agent, d, wake, provision=provision)
-            for name, text in own_files(root).items():
-                if not (ws / name).exists():
-                    (ws / name).write_text(text, encoding="utf-8")
         else:
             import loam_schedule  # noqa: PLC0415
             wake = (done or {}).get("wake") or loam_schedule.wake_time(agent)
             resumed = resumed or "the agent was made by an earlier run; finishing its thread"
+        for name, text in own_files(root).items():
+            if not (ws / name).exists():
+                (ws / name).write_text(text, encoding="utf-8")
         title, text = read_hello(root)
         tid = _hello_thread(agent)
         if tid is None:
-            tid = threads.create(agent, title, pinned=True, extra={"hello": True})["id"]
+            board = ((root or STARTER_DIR) / "hello-board.md").read_text(encoding="utf-8") if first_weeks else None
+            tid = threads.create(agent, title, pinned=True, extra={"hello": True},
+                                 initial_board=board)["id"]
         _, msgs, _ = threads.read(tid)
         preset = next((m for m in msgs if m.get("preset")), None)
         msg_id = (preset or threads.append(tid, agent, text, preset=True))["id"]
         record = {"agent": agent, "thread": tid, "message": msg_id,
                   "at": loam_agents.now_iso()}
+        if first_weeks:
+            record["first_weeks"] = True
         loam_agents._write_json(marker_path(), record)
         loam_agents.log({"kind": "starter", "agent": agent, "thread": tid,
                          "by": "loam", "wake": wake, **({"resumed": resumed} if resumed else {})})

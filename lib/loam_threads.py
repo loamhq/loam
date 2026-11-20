@@ -581,7 +581,7 @@ def save_state(name: str, data: dict) -> None:
     _write_atomic(_state_path(name), json.dumps(data, indent=1, sort_keys=True))
 
 
-def rebuild_index() -> dict:
+def rebuild_index(*, save: bool = True) -> dict:
     """Every thread record in the vault, by id, read off its frontmatter."""
     index = {}
     for path in (VAULT / CONVERSATIONS).glob("*.md"):
@@ -595,7 +595,8 @@ def rebuild_index() -> dict:
         meta, _ = split_front(head if "\n---\n" in head[4:] else head + "\n---\n")
         if meta.get("kind") == "thread" and meta.get("id"):
             index[meta["id"]] = path.name
-    save_state("index.json", index)
+    if save:
+        save_state("index.json", index)
     return index
 
 
@@ -606,11 +607,12 @@ def index() -> dict:
     return data
 
 
-def record_path(thread_id: str) -> Path:
-    name = index().get(thread_id)
+def record_path(thread_id: str, *, save_index: bool = True) -> Path:
+    """Find the record. Read-only callers can leave index repair to the broker."""
+    name = load_state("index.json").get(thread_id)
     path = VAULT / CONVERSATIONS / name if name else None
     if path is None or not path.is_file():
-        name = rebuild_index().get(thread_id)
+        name = rebuild_index(save=save_index).get(thread_id)
         if not name:
             raise ThreadError(404, f"no thread {thread_id!r}")
         path = VAULT / CONVERSATIONS / name
@@ -718,7 +720,8 @@ def member_engine(meta: dict, persona: str) -> str | None:
 
 def create(persona: str | None = None, title: str | None = None, *,
            thread_id: str | None = None, members: list[str] | None = None,
-           pinned: bool = False, extra: dict | None = None) -> dict:
+           pinned: bool = False, extra: dict | None = None,
+           initial_board: str | None = None) -> dict:
     """Create a thread with optional extra frontmatter, including branch metadata. Without
     a persona it has no members or default. An untagged message is recorded without an
     answer.
@@ -741,6 +744,8 @@ def create(persona: str | None = None, title: str | None = None, *,
                 if thread_id == GENERAL_ID else _unique_path(title))
         if thread_id == GENERAL_ID and path.exists():
             raise ThreadError(409, "General exists")
+        if initial_board is not None and not (VAULT / meta["board"]).exists():
+            _write_atomic(VAULT / meta["board"], initial_board)
         _write_atomic(path, render_front(meta))
         idx = index()
         idx[thread_id] = path.name

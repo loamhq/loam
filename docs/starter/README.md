@@ -20,6 +20,7 @@ and hello". The hello greeting and guidance were revised on 2026-11-19.
 | `iris/map.md` | her `map.md`, the one file of her own that loads on every run: it points at the two below |
 | `iris/how-i-am-here.md` | how she is here, and the hello conversation's aims; her map tells her to read it before her first reply |
 | `iris/nights.md` | what she does with her nightly wake; her map tells her to read it when she wakes |
+| `hello-board.md` | the six things to try on Hello’s board, also available when the person asks for the list back |
 | `hello.md` | the hello thread's title (frontmatter) and Iris's first message (the body), which greets the owner by name |
 
 In the text, `{owner}` is the owner's name and `@VAULT@`, `@WORKSPACES@` and

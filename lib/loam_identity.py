@@ -34,7 +34,7 @@ CLAUDE = str(lc.CLAUDE_BIN)
 
 IMPORT_RE = re.compile(r"^@(\S+)\s*$", re.MULTILINE)
 
-# The decoy is drawn from a DIFFERENT agent's soul, not invented. An invented
+# Where a sibling exists, the decoy is drawn from that agent's soul. An invented
 # decoy only proves the model will say NO to something absent; a sibling's
 # soul proves this session is not carrying the wrong agent's identity — which
 # is the failure this whole move is written against. Five near-identical
@@ -174,7 +174,8 @@ def pick_decoy(
         except OSError:
             pass
     eligible: dict[str, list[str]] = {}
-    for owner, text in sibling_souls(project).items():
+    siblings = sibling_souls(project)
+    for owner, text in siblings.items():
         # dict.fromkeys dedupes while keeping order, so a sentence a soul
         # repeats is not drawn twice as often as its neighbours.
         sentences = [
@@ -182,6 +183,21 @@ def pick_decoy(
         ]
         if sentences:
             eligible[owner] = sentences
+    if not siblings:
+        # A fresh starter has no second identity to confuse with its own.
+        # The preset greeting lives in the thread, outside its loaded identity.
+        # It supplies a real negative control until there is a sibling.
+        import loam_starter  # noqa: PLC0415
+        seeded = loam_starter.status() or {}
+        if (isinstance(seeded, dict) and seeded.get("first_weeks") is True
+                and seeded.get("agent") == project.name
+                and project.resolve() == (AI_LABS / project.name).resolve()
+                and not any(p.parent != project for pattern in ("*/agent.json", "*/soul.md")
+                            for p in AI_LABS.glob(pattern))):
+            loaded = mine + "".join(p.read_text(encoding="utf-8") for p in imported_paths(project))
+            choices = [line for line in _sentences(loam_starter.read_hello()[1]) if line not in loaded]
+            if choices:
+                return rng.choice(choices), "starter greeting"
     if not eligible:
         raise IdentityError("no decoy could be drawn from a sibling soul")
     owner = rng.choice(sorted(eligible))

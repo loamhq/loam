@@ -37,6 +37,19 @@ member, pinned, with `hello: true` in its frontmatter, and one message, the
 body of `docs/starter/hello.md` with `{owner}` filled from the install's
 owner name. Loam posts it as Iris and marks it preset.
 
+Hello’s board opens with the six checkboxes in `docs/starter/hello-board.md`.
+Iris mentions the board once and waits for something the person says to make
+one idea relevant. When they try it, she ticks the card in their words.
+Her daily reflection runs even while she is the only agent. Its identity
+check compares a phrase from her soul with one from the preset greeting.
+Once there are other agents it draws the second phrase from a sibling.
+On her nightly reflection she checks for seven quiet days since both the last
+owner message in Hello and the last board edit. Her invitation in the thread
+and a note in her memory carry over to the next wake. Deleting or setting
+aside the list ends the invitations. The person can ask her to bring it back.
+A first-weeks starter marker identifies this Hello as the place for release
+news, even if renamed. Older starters keep their original routing.
+
 **Once per install.** A marker, `<state>/agents/starter.json` (the agent,
 the thread, the message, when), makes every later run a no-op, so a person
 who archived Iris or deleted the thread is not handed another. And it does

@@ -73,11 +73,12 @@ in order when the service returns.
 
 On a fresh install the owner lands in Hello with Iris. Loam posts a greeting
 as Iris using the name from setup, and Iris takes over on the first reply.
-She helps with whatever the owner came to do or offers a couple of ways to
-start and follows their choice. They can make an agent, change Loam by
-asking, build a page or tool at their own address, or just talk. Iris can
-also offer early to bring over context from another AI or service.
-`About me.md` fills in as they get to know each other.
+Hello’s board starts with six things to try in any order. Iris mentions it
+once, helps with what the owner came for, and offers an idea when it fits.
+As they try things she ticks the cards in their words. After a quiet week
+she may ask once about one they might like. They can set the list aside,
+delete it, or ask her to bring it back. Iris can also help bring over
+context from another AI. `About me.md` fills in as they get to know each other.
 
 **Wakes and crons.** An agent also runs by itself on a schedule, and each
 schedule is a file under its `crons/` saying when it runs (or once, at a set
@@ -105,7 +106,9 @@ update) goes to the one agent the owner chose in
 Settings › Agents (the first agent, unless they change it), as the input of
 a run of its own, told once. That agent decides what to do: it can brief
 the engineer, and it tells the owner in General, in its own words, only if
-they need to know. The failure log and Activity keep the quiet record.
+they need to know. On installs with the Things to try starter, release news
+worth sharing goes to the original Hello thread. If the owner deletes Hello,
+the chosen agent shares news in General. The failure log and Activity keep the quiet record.
 
 **Activity.** Open Activity from the desktop rail or from Settings on a phone.
 Server resources shows memory, the estimated number of additional sessions that

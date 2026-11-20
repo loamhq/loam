@@ -275,13 +275,16 @@ The update never shows the person a changelog. It leaves a notice in
   needs attention (Settings › Agents; the first agent on a fresh install),
   as a fact (`lib/loam_attention.py`): the notice's `line` is the fact and
   its `note` what it comes with. Nothing is posted in General or anywhere
-  else (since batch B step 5, 2026-11-19); that agent's run, with the
-  notice as its input, tells the owner in General in its own words if it
-  should.
+  else automatically. That agent decides what the owner needs to hear.
 
-The note names the notes file (`<state>/update/notes/<version>.md`) and
-asks the agent to tell the owner, briefly and in its own words, what the
-release means for them (`ThreadEngine.deliver_note`).
+For installs seeded with the Things to try board, available and applied
+release notices name the original Hello by its thread ID. Renaming Hello
+or deleting its list keeps news there. Deleting the thread sends subsequent
+news to General. Older installs keep their previous delivery instructions.
+The note names `<state>/update/notes/<version>.md`. The agent reads it and
+shares a brief account of what matters to this owner. A release can pass
+without a message. Update failures and other operational notices keep their
+usual handling.
 
 A notice is told once: its id is the fact's key, and a key already told
 is not told again (`lib/loam_attention.py`). A notice whose file cannot be

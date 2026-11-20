@@ -62,7 +62,8 @@ changelog. A notice (``<state>/update/notices/``) is left for the broker,
 which hands it to the agent chosen to hear of Loam's matters (Settings ›
 Agents; lib/loam_attention.py) as the input of a run, with nothing posted
 anywhere (2026-11-19); the notice names the notes to read, and the agent
-says in its own words, in General, what the update means for them. Four kinds: a newer
+decides what matters to the owner. On a first-weeks install release news belongs
+in the original Hello thread while it exists, otherwise in General. Notices: a newer
 release found (once per version), applied, refused, failed and rolled back.
 
 The broker's routes (``/v1/update``) and the CLI (``bin/loam-update``)
@@ -101,6 +102,8 @@ import loam_engineer
 import loam_lock
 import loam_signing
 import loam_skills as sk
+import loam_starter
+import loam_threads
 
 STATE = Path(os.environ.get("LOAM_UPDATE_STATE") or lc.STATE / "update")
 LOG = lc.LOGS / "update.jsonl"
@@ -721,15 +724,34 @@ def _owner() -> str:
     return lc.OWNER_NAME
 
 
+def _release_message(what: str) -> str:
+    """Keep legacy installs' destination. New starters identify their own Hello by ID."""
+    seeded = loam_starter.status() or {}
+    if not isinstance(seeded, dict) or seeded.get("first_weeks") is not True or not seeded.get("thread"):
+        return f"Tell {_owner()}, briefly and in your own words, {what}."
+    tid = seeded["thread"]
+    try:
+        loam_threads.record_path(tid, save_index=False)
+    except loam_threads.ThreadError as exc:
+        if exc.status != 404:
+            raise
+        where = "in General"
+    else:
+        where = f"in the starter Hello thread ({tid}), or in General if it has been deleted"
+    return (f"Decide whether this release matters to {_owner()}, based on what they do. "
+            f"If so, post {where}, briefly and in your own words, {what}. "
+            "If nothing matters to them, leave the release unannounced.")
+
+
 def tell_available(tag: str, current: str | None) -> None:
     path = save_notes(tag, tag_of(current))
     notice("available",
            f"Loam {bare(tag)} is available (this install runs {current}).",
            f"Loam {bare(tag)} is out; this install runs {current}. Its notes are "
-           f"in {path}. Read them and tell {_owner()}, briefly and in your own "
-           f"words, what this release would change for them, and that they can "
-           f"update from Settings › About Loam when they like. Do not paste the notes "
-           f"or list commits.",
+           f"in {path}. Read them. "
+           + _release_message("what this release would change for them and that they can "
+                              "update from Settings › About Loam when they like")
+           + " Do not paste the notes or list commits.",
            key=f"available:{bare(tag)}")
 
 
@@ -807,9 +829,9 @@ def tell_applied(rec: dict) -> None:
     notice("applied",
            f"Loam updated from {rec.get('from_version')} to {rec['to_version']}.",
            f"Loam was updated from {rec.get('from_version')} to "
-           f"{rec['to_version']}. Its notes are in {notes}. Tell {_owner()}, "
-           f"briefly and in your own words, what is new for them; do not paste "
-           f"the notes or list commits.{kept} If something is wrong with it, "
+           f"{rec['to_version']}. Its notes are in {notes}. "
+           + _release_message("what is new for them")
+           + f" Do not paste the notes or list commits.{kept} If something is wrong with it, "
            f"`{runtime()}/bin/loam-update rollback` puts "
            f"{rec.get('from_version')} back.{warn}")
 

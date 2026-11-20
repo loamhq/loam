@@ -2707,3 +2707,15 @@ provider sign-in and archived-agent Settings routes for recovery.
   the listing. A theme in "sun" mode is dark at night: pin the capture
   browser's clock to midday for a light capture, never change the owner's
   setting.
+
+## 2026-11-20 — the first wake on a one-agent install
+
+A private user manager showed the starter's reflection timer enabled and active.
+Firing its service still exited 5 before the provider ran. The identity probe
+needed a negative phrase from a sibling soul, and a new install had no sibling.
+New first-weeks starters use a phrase from the preset greeting while alone.
+That text lives in the Hello record, outside the loaded identity. The real
+provider still has to recognise its own soul and reject the held-out text.
+The wake log identifies the negative phrase's source. A scratch install's
+`bin/thread post` also needs its broker address and port to agree with the
+listener for immediate notification in an open page.

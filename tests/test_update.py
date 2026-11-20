@@ -685,6 +685,34 @@ async def broker_checks():
     up.notice_done(note, got)
     check("...and a delivered notice is gone", notices(), [])
 
+    # Available and applied share delivery policy. Use real notice files and a
+    # renamed starter thread; a thread the owner happens to call Hello is unrelated.
+    import loam_starter as starter
+    from unittest.mock import patch
+
+    hello = threads.create("iris", "Hello", extra={"hello": True})["id"]
+    threads.update(hello, title="Welcome home")
+    threads.create("iris", "Hello")
+    record = {"first_weeks": True, "thread": hello}
+    with patch.object(starter, "status", return_value=record), patch.object(
+            up, "save_notes", return_value=TMP / "release.md"):
+        up.tell_available("9.1.0", "9.0.0")
+        available = notices()[0]
+        check("available release news names the original Hello and allows silence",
+              (hello in available["note"], "leave the release unannounced" in available["note"],
+               "if it has been deleted" in available["note"]), (True, True, True))
+        up.notice_done(available, "delivered")
+        threads.delete(hello)
+        up.tell_applied({"to_tag": "9.1.0", "to_version": "9.1.0", "from_version": "9.0.0"})
+        applied = notices()[0]
+        check("applied release news after deleting Hello goes to General",
+              ("post in General" in applied["note"], hello in applied["note"],
+               "leave the release unannounced" in applied["note"]), (True, False, True))
+        up.notice_done(applied, "delivered")
+    with patch.object(starter, "status", return_value={"thread": hello}):
+        check("a legacy starter keeps the original notice",
+              up._release_message("what changed"), f"Tell {lc.OWNER_NAME}, briefly and in your own words, what changed.")
+
     # Repeated reads of a pending notice must not start duplicate turns.
     check("a notice delivered again is not told again",
           server.threads.deliver_note(note), "already delivered")
@@ -698,7 +726,6 @@ async def broker_checks():
     server.threads._system_turns = None   # as after a broker restart: read from disk
     check("...and the record outlives the broker",
           server.threads.deliver_note(note), "already delivered")
-    from unittest.mock import patch
 
     job = {"job": "j1", "thread": threads.GENERAL_ID, "persona": "iris"}
     # The provider matrix tests sign-in. This fixture exercises deduplication.
