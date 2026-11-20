@@ -1,4 +1,4 @@
-import { welcomeScreen, untouchedHello, createOnboardingBackup } from './onboarding.js'
+import { welcomeScreen, untouchedHello } from './onboarding.js'
 import { createDailyNotes } from './daily-notes.js'
 import { createSecretSettings } from './plugin-secrets.js'
 import { isOwner, ownerInitial, setOwner } from './owner.js'
@@ -849,32 +849,10 @@ function put(url, body, onProgress) {
   })
 }
 
-const onboarding = { checking: true, needed: false, hello: null, step: 'providers' }
-const onboardingBackup = createOnboardingBackup({
-  api,
-  request: fetch,
-  pluginLoader: { get st() { return pluginLoader?.st } },
-  changed: schedule,
-})
+const onboarding = { checking: true, needed: false, hello: null }
 async function continueWelcome() {
   if (!state.providers.some(p => ['claude-code', 'codex', 'antigravity'].includes(p.id) && p.connected)) return
   page.providerSignIn.cancel()
-  if (onboarding.step === 'providers' && onboardingBackup.offered()) {
-    onboarding.step = 'backup'
-    onboardingBackup.refresh()
-    schedule()
-    return
-  }
-  await finishWelcome()
-}
-async function skipBackupWelcome() {
-  onboardingBackup.skipCleanup()
-  await finishWelcome()
-}
-async function finishWelcome() {
-  if (!state.providers.some(p => ['claude-code', 'codex', 'antigravity'].includes(p.id) && p.connected)) return
-  page.providerSignIn.cancel()
-  onboardingBackup.stop()
   onboarding.needed = false
   await threads.open(onboarding.hello)
   schedule()
@@ -904,7 +882,7 @@ function render() {
   const content = !state.wide && section ? registry.invoke(section, 'render', { wide: false, screen: state.screen }) : null
   const welcoming = onboarding.checking || onboarding.needed
   const screen = authExpired() ? signInAgain()
-    : welcoming ? welcomeScreen({ checking: onboarding.checking, providers: state.providers, signIn: page.providerSignIn, continueWith: continueWelcome, retry: loadProviders, error: state.providersError, step: onboarding.step, backup: onboardingBackup, skipBackup: skipBackupWelcome })
+    : welcoming ? welcomeScreen({ checking: onboarding.checking, providers: state.providers, signIn: page.providerSignIn, continueWith: continueWelcome, retry: loadProviders, error: state.providersError })
     : state.wide ? page.desk(beside) : section?.frame === 'full' ? content : h('div', { class: 'screen plugin-screen' }, content, page.nav())
   const notice = state.editor || state.sheet?.kind === 'settings' ? null : runNotice()
   morph(root, authExpired() || welcoming ? [screen] : [notice, screen, ...registry.draw('app.overlay', { slot: 'overlay', screen: state.screen, wide: state.wide })])
@@ -1272,15 +1250,7 @@ else {
       const record = await api('GET', `/threads/${encodeURIComponent(hello.id)}`)
       if (untouchedHello(record)) {
         onboarding.hello = hello.id
-        await pluginsReady.catch(() => {})
         onboarding.needed = !state.providers.some(p => ['claude-code', 'codex', 'antigravity'].includes(p.id) && p.connected)
-        // A provider signed in before the first visit (a machine where Claude
-        // Code or Codex already was) skips the welcome, not the backup offer.
-        if (!onboarding.needed && onboardingBackup.offered()) {
-          onboarding.needed = true
-          onboarding.step = 'backup'
-          onboardingBackup.refresh()
-        }
         if (!onboarding.needed) await threads.open(hello.id)
       }
     } catch { /* An unavailable starter leaves ordinary Chats accessible. */ }
@@ -1315,7 +1285,6 @@ if ('serviceWorker' in navigator) {
 
 window.addEventListener('loam:signin', () => {
   clearInterval(pageHeartbeat); clearInterval(loginHeartbeat)
-  onboardingBackup.stop()
   running.stop(); threads.pause(); sidePanel.threads.pause(); registry.emit('page.leaving', {}); pluginLoader.dispose()
   schedule()
 })

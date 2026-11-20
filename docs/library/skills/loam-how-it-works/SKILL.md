@@ -150,11 +150,13 @@ same switch with `bin/settings set plugin.auto_update` and uses
 
 **History and backup.** Every fifteen minutes the vault and AI Spaces are
 each committed to their own git history on the server, so a change anyone
-regrets can be got back from it; nothing leaves the machine. The Git backup
-plugin (Settings › Plugins, off until the owner turns it on) sends that
-history to a private repository of the owner's own. In Files, **Download as
-zip** on the vault, AI Spaces or any folder gives the owner a copy of it as
-it is now, without git's history or anything secret-shaped.
+regrets can be got back from it; nothing leaves the machine. First setup
+goes straight from connecting an AI provider to Iris's hello thread.
+Settings › Plugins shows when off-box backup is off. Open Git backup there
+to turn it on and connect private repositories for the vault and AI Spaces.
+In Files, **Download as zip** on the vault, AI Spaces or any folder gives
+the owner a copy of it as it is now, without git's history or anything
+secret-shaped.
 
 **The engineer** builds and changes Loam itself and the owner's projects.
 An agent hands it a job as a brief, which returns at once; the engineer

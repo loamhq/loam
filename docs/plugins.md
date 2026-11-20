@@ -725,16 +725,15 @@ says so before the yes. An unreadable `installed.json` leaves the list drawn
 
 ## On and off
 
-- **The switch is the id's.** A shipped plugin is on until turned off. A
+- **The switch is the id's.** A shipped plugin starts on, unless its
+  manifest declares it off. A
   plugin installed from a link is on (the yes to install it was the yes); an
   update keeps whatever its switch was. A plugin built here is **off until
   turned on**: an agent writing a folder does not put code into the page by
   itself. Removing a Yours copy that shadowed a shipped one leaves the switch
-  for the shipped one; removing the last copy forgets it. A row with a
-  switch says `chosen: true` once that switch has been set either way, and
-  `false` while it still stands at its default; first setup offers Git
-  backup only while its switch is off and unchosen, and its *Skip for now*
-  sets it off, so the offer is made once (2026-11-19).
+  for the shipped one; removing the last copy forgets it. Saved switch
+  values in `installed.json` also keep their effect after an upgrade,
+  including an off value saved by the former first-setup backup step.
 - **A theme has no switch.** A plugin whose kind is only `theme` (and which
   overrides nothing) is on where Appearance has chosen it (`appearance.phone.theme`,
   `appearance.desktop.theme`; `lib/loam_appearance.py`): its row's `on` is

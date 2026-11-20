@@ -47,8 +47,9 @@ docs/host-history.md.
 
 ## The copy off the machine: the Git backup plugin
 
-Turned on in Settings › Plugins › Git backup. The person connects one
-private repository for the vault and one for AI Spaces, on any git host
+Settings › Plugins shows when off-box backup is off. Open Git backup there
+to turn it on and connect one private repository for the vault and one for
+AI Spaces, on any git host
 (GitHub, GitLab, Codeberg, Gitea, their own), and from then on each is
 pushed there on a schedule.
 

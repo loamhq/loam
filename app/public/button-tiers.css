@@ -88,7 +88,6 @@
 :root .plugin-secret-settings .primary,
 :root .welcome-providers .provider-sign-in:not(:has(.loginflow)) .primary,
 :root .welcome:has(.loginflow) .welcome-continue .primary,
-:root .welcome:has(.welcome-backup-flow) .welcome-continue :is(.primary,.secondary),
 :root .update-control:has(.update-rollback .primary) .update-release .primary {
   background:transparent; color:var(--paper-ink); border-color:transparent; box-shadow:none;
 }

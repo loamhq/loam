@@ -169,13 +169,9 @@ have never met.
   `extraHTTPHeaders` is not attached to Chrome DownloadManager requests, so
   `test/files-archive-browser.mjs` puts a local `authProxy` in front of `app`
   to model Caddy's `forward_auth`.
-- **First-setup backup step and Settings off state** (2026-11-19):
-  `public/onboarding.js` (`createOnboardingBackup`, `welcomeScreen`) adds an
-  optional second step ("Back up your Loam") after provider sign-in whenever
-  `git-backup` is in the host plugin catalog and not broken, using
-  `PATCH /api/plugins/git-backup` and `/x/git-backup/{status,connect,test}`
-  with portable repository guidance and a one-click `Skip for now` control
-  (no confirmation; turns `git-backup` back off if onboarding turned it on
-  with no remote saved). In Settings › Plugins (`public/plugin-settings.js`),
-  when `git-backup` is off, its list row and detail switch row plainly say
-  "Off-box backup is off"; when `git-backup` is on, Settings is unchanged.
+- **First setup and backup** (2026-11-20): The welcome screen opens the hello
+  thread after provider sign-in and skips welcome when a provider is already
+  connected. This path runs independently of the plugin catalog. Settings ›
+  Plugins (`public/plugin-settings.js`) shows “Off-box backup is off” on the
+  list and detail rows when Git backup is off. Turning it on there opens
+  access to the plugin's repository setup.

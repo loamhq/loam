@@ -1623,9 +1623,6 @@ def _rows(listed: dict | None = None) -> list[dict]:
             if row["layer"] == "shipped" and isinstance(row.get("default_on"), bool):
                 default = row["default_on"]
             row["on"] = row["effective"] and listed["on"].get(row["id"], default)
-            # Whether anyone has ever set this switch (2026-11-19): first setup
-            # offers Git backup only while nobody has, so a skip is the answer.
-            row["chosen"] = row["id"] in listed["on"]
         row["files"] = f"/v1/plugins/{row['id']}/files/" if row["effective"] else None
     return rows
 

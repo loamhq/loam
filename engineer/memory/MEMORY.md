@@ -2296,11 +2296,11 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 
 ## 2026-11-19 — backup offered once on every fresh install; Git backup assumes no host
 
-- **A plugin row's `chosen` says whether its switch was ever set**
-  (`installed.json`'s `on` map holds an id only once someone set it). First
-  setup's backup offer reads it: shown while Git backup is off and
-  unchosen, on both first-visit paths; *Skip for now* PATCHes it off, which
-  is the "shown, answered" mark: server-side, every device, no new setting.
+- **Git backup moved to Settings only on 2026-11-20.** The first-visit
+  app no longer reads the plugin catalog to route to the hello thread.
+  The plugin row's `chosen` flag was derived from the presence of its id
+  in `installed.json`'s `on` map and served only the former backup step.
+  The response drops the flag. Existing on/off values still apply.
 - **The installer signs in to no provider** (`docs/install.md`, "What an
   install leaves to others"), so a provider is connected before the first
   visit only when the owner signed the CLI in from a shell first, as on a
