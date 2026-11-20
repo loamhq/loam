@@ -1,0 +1,154 @@
+"""Compare the Python source that a running session service would load."""
+import ast
+import io
+from pathlib import PurePosixPath
+import tokenize
+
+import loam_update as update
+
+
+def source(rev, path):
+    """Read a regular Git blob with its mode. Links, missing paths and errors are opaque."""
+    entry = update.git("ls-tree", "--full-tree", "-z", rev, "--", path,
+                       check=False, text=False)
+    header, sep, name = entry.stdout.rstrip(b"\0").partition(b"\t")
+    parts = header.split()
+    if (entry.returncode or not sep or name != path.encode() or len(parts) != 3
+            or parts[0] not in {b"100644", b"100755"} or parts[1] != b"blob"):
+        return None
+    blob = update.git("cat-file", "blob", parts[2].decode("ascii"), check=False, text=False)
+    if blob.returncode:
+        return None
+    return parts[0], blob.stdout
+
+
+def syntax(raw, path, library):
+    # ast.parse alone accepts code that cannot run, such as a top-level return.
+    compile(raw, path, "exec", dont_inherit=True)
+    tree = compile(raw, path, "exec", ast.PyCF_ONLY_AST | ast.PyCF_TYPE_COMMENTS,
+                   dont_inherit=True)
+    for ignore in tree.type_ignores:
+        ignore.lineno = 0
+    docs = {}
+    if library:
+        # Only module documentation and directly callable top-level functions
+        # are eligible. Decorators, methods and class creation can consume docs.
+        functions = {}
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions.setdefault(node.name, []).append(node)
+        candidates = [(None, tree)]
+        candidates.extend((name, nodes[0]) for name, nodes in functions.items()
+                          if len(nodes) == 1 and not nodes[0].decorator_list)
+        for name, node in candidates:
+            if ast.get_docstring(node, clean=False) is not None:
+                docs[name] = node.body.pop(0).value.value
+    tokens = tokenize.tokenize(io.BytesIO(raw).readline)
+    encoding = next(tokens).string
+    shebang = raw.split(b"\n", 1)[0] if raw.startswith(b"#!") else b""
+    return (ast.dump(tree), encoding, shebang), docs
+
+
+def reads_module_filenames(node, parents):
+    """Recognize the two non-reflective uses of sys.modules in session diagnostics."""
+    method = parents.get(node)
+    call = parents.get(method)
+    if not isinstance(method, ast.Attribute) or not isinstance(call, ast.Call):
+        return False
+    if method.attr == "get" and len(call.args) == 1 and isinstance(call.args[0], ast.Constant):
+        return call.args[0].value == "__main__"
+    sequence = parents.get(call)
+    loop = parents.get(sequence)
+    if not (method.attr == "values" and isinstance(sequence, ast.Call)
+            and isinstance(sequence.func, ast.Name) and sequence.func.id == "list"
+            and isinstance(loop, ast.For) and loop.iter == sequence and isinstance(loop.target, ast.Name)):
+        return False
+    # A loop variable survives its loop. Check every load in the containing function.
+    scope = loop
+    while scope in parents and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        scope = parents[scope]
+    for use in ast.walk(scope):
+        if isinstance(use, ast.Name) and use.id == loop.target.id and isinstance(use.ctx, ast.Load):
+            read = parents[use]
+            if not (isinstance(read, ast.Call) and isinstance(read.func, ast.Name)
+                    and read.func.id == "getattr" and len(read.args) >= 2 and read.args[0] == use
+                    and isinstance(read.args[1], ast.Constant) and read.args[1].value == "__file__"):
+                return False
+    return True
+
+
+def direct_calls_only(rev, closure, owner, names):
+    """Trace simple named imports. Treat namespace escapes and reflection as observable."""
+    module = PurePosixPath(owner).stem
+    functions = names - {None}
+    namespaces = {module}
+    trees = {}
+    for path in closure:
+        text = update.show(rev, path)
+        if text is None:
+            return False
+        tree = ast.parse(text)
+        trees[path] = tree
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and any(a.name in functions for a in node.names):
+                namespaces.add(PurePosixPath(path).stem)
+
+    for path, tree in trees.items():
+        parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+        calls = {n.func for n in parents if isinstance(n, ast.Call)}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Attribute) and n.attr == "modules":
+                if not reads_module_filenames(n, parents):
+                    return False
+            if isinstance(n, ast.Import) and any(
+                    a.name.split(".")[0] in {"inspect", "gc", "pydoc", "doctest"} for a in n.names):
+                return False
+            if isinstance(n, ast.ImportFrom) and n.module in {"inspect", "gc", "pydoc", "doctest"}:
+                return False
+            if isinstance(n, ast.Name) and n.id in {"getattr", "hasattr"} and n not in calls:
+                return False
+            if isinstance(n, ast.Name) and n.id in {
+                    "__import__", "eval", "exec", "globals", "locals", "vars", "help"}:
+                return False
+            if isinstance(n, ast.Attribute) and n.attr in {
+                    "__doc__", "__dict__", "getdoc", "getmembers", "import_module", "__getattribute__", "_getframe", "f_globals"}:
+                return False
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in {
+                    "getattr", "hasattr"}:
+                if len(n.args) < 2 or not isinstance(n.args[1], ast.Constant):
+                    return False
+            if isinstance(n, ast.Import) and any(a.name in namespaces for a in n.names):
+                return False
+            if isinstance(n, ast.ImportFrom) and any(
+                    a.name in namespaces or a.name == "*" or (a.name in functions and a.asname)
+                    for a in n.names):
+                return False
+            if isinstance(n, ast.Name):
+                if n.id in functions and n not in calls:
+                    return False
+                if path == owner and None in names and n.id == "__doc__":
+                    return False
+            if isinstance(n, ast.Attribute) and n.attr in functions and n not in calls:
+                return False
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) and (
+                    n.value == "__doc__" or n.value in functions or n.value in namespaces):
+                return False
+    return True
+
+
+def same_python(old, target, path, closure, prefix):
+    """Skip replacement only for equivalent regular files."""
+    try:
+        before, after = source(old, path), source(target, path)
+        if before is None or after is None or before[0] != after[0]:
+            return False
+        library = path.startswith(prefix + "lib/") and path.endswith(".py")
+        old_syntax, old_docs = syntax(before[1], path, library)
+        new_syntax, new_docs = syntax(after[1], path, library)
+        if old_syntax != new_syntax:
+            return False
+        changed_docs = {n for n in old_docs.keys() | new_docs.keys()
+                        if old_docs.get(n) != new_docs.get(n)}
+        return not changed_docs or direct_calls_only(target, closure, path, changed_docs)
+    except (SyntaxError, UnicodeError, ValueError, LookupError, RecursionError, tokenize.TokenError):
+        return False

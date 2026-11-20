@@ -193,6 +193,12 @@ commits), plus the folders listed:
 
 - **The split session services** compare the running revision of each process
   with the target, including the imports in both trees and its unit template.
+  Comments and whitespace in regular Python files can leave a service running.
+  A changed library docstring can do so when its module and call sites show
+  that it is internal. CLI help, decorated functions, class metadata, opaque
+  lookups and unreadable inputs are treated as executable changes.
+  The revision in the live response identifies what the process loaded. It
+  can be older than the checkout after an equivalent change.
   An API change replaces the HTTP process while the provider keeps running.
   A host change closes admission across both units, checks for starts, active
   turns and pending provider work, then replaces the host. A busy install
