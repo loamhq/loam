@@ -1502,17 +1502,7 @@ class Session:
             self._last_result_ok = not (
                 bool(obj.get("is_error"))
                 or (obj.get("subtype") or "success") != "success")
-            # What this turn cost in context, the broker's own arithmetic on
-            # the CLI's own numbers: how full the window was at the turn's last
-            # request, and how big the window is for the model it ran on. It is
-            # on the turn record AND on the event that closes the turn, because
-            # a page drawing "used of window" as the answer arrives should not
-            # have to re-fetch a record to do it. The page renders; the broker
-            # does the arithmetic and neither number is a guess.
-            # Codex states a request's usage only after the message it
-            # answered has closed, so its assistant events carry the request
-            # before; the result's usage is the turn's last request
-            # (`tokenUsage.last`), measured 2026-10-01.
+            # Record the provider's latest context reading on the turn and on its closing event.
             if obj.get("provider") == "codex" and obj.get("usage"):
                 self._turn_usage = obj["usage"]
             context = {"used": context_used(self._turn_usage),

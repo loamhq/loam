@@ -57,7 +57,9 @@ def join_names(names: list[str]) -> str:
 
 
 def busy_clause(busy: list[dict]) -> str:
-    """Group distinct agent display names by the work that keeps their sessions busy."""
+    """Describe who holds the sessions in a person's words. For example: "A and B are
+    mid-turn, C is waiting on you".
+    """
     groups: dict[str, list[str]] = {}
     for row in busy:
         word = BUSY_WORDS.get(row.get("status"), "busy")

@@ -139,9 +139,7 @@ SIGHT_FIREWALL_SCRIPT = BROWSER_DIR / "firewall.sh"
 SIGHT_FIREWALL_UNIT = Path("/etc/systemd/system/loam-sight-firewall.service")
 SUDOERS = Path("/etc/sudoers.d/loam-deploy")
 DEPLOY_BIN = AGENTS / "bin" / "deploy"
-# Loam's own sign-in page (2026-11-16; deploy/login/README.md): its source in the
-# checkout, its render beside the login's other files, and the path on the
-# portal its assets answer on (Authelia uses nothing under /_loam/).
+# Render the login assets beside the portal configuration.
 LOGIN_SRC = Path(__file__).resolve().parent.parent / "deploy" / "login"
 LOGIN_DIR = ETC / "login"
 LOGIN_ASSETS = "/_loam/login"
@@ -154,45 +152,25 @@ MODES = {SUDOERS: 0o440, SIGHT_FIREWALL_SCRIPT: 0o755}
 # Pinned images. An upgrade is an edit here, a `gen-deploy`, and a line in
 # the receipt; never a `:latest` that moves under the box.
 AUTHELIA_IMAGE = "authelia/authelia:4.39.23"
-# The login's session store (added 2026-11-09). Without it Authelia kept
-# sessions in its own memory, so every reboot -- and a resize is two --
-# signed the owner out on every device at once. Redis keeps them in a volume:
-# an RDB snapshot every minute there was a change, and one on the SIGTERM a
-# shutdown sends, so a clean reboot loses nothing and a crash loses a minute.
+# Persist login sessions across container restarts. Configure the store to flush on
+# shutdown.
 AUTHELIA_REDIS_IMAGE = "redis:7.4.12-alpine"
-# v0.0.85 (2026-11-09; v0.0.84 never had an image): tool calls no longer
-# hang in their settling delay when page timers cannot run, and
-# browser_evaluate returns BigInt, NaN, Infinity and circular objects
-# readably (measured 2026-11-14: `10n ** 20n` was "Do not know how to
-# serialize a BigInt" on v0.0.83, `100000000000000000000n` here). Same 25
-# tool names and `--no-webmcp` as v0.0.83; new parameters stay in the page
-# (browser_tabs isolatedContext, browser_find maxResults,
-# browser_network_requests all). Rollback: pin v0.0.83 again and `gen-deploy`.
+# The pinned browser server supports page evaluation and timer-independent settling.
+# Keep its advertised tools aligned with the configured browser clients.
 BROWSER_IMAGE = "mcr.microsoft.com/playwright/mcp:v0.0.85"
 
 # Loopback ports the runtime's own containers publish on. Apps choose their
 # own in their compose file; the generator refuses a collision.
 AUTHELIA_PORT = 9091
-# Server plugins (2026-11-13): bin/plugin-gateway on 127.0.0.1, which passes
-# /x/<id>/ to each plugin's own port (lib/loam_plugin_servers.py). Every
-# record that says `app_shell` (Loam's page and its staging copy) sends /x/*
-# there, inside the same handles as the page, so the same login guards it.
+# Route server plugins through the loopback gateway.
 PLUGIN_GATEWAY_PORT = 8933
-# The gateway's share door (2026-11-16): `/s/*` on an `app_shell` host goes
-# here WITHOUT the login; bin/plugin-gateway answers only `/s/<token>…`, for
-# the one plugin that contributes `web.door` (docs/plugins.md).
+# Only the gateway handles token-scoped share requests on an app-shell host.
 PLUGIN_DOOR_PORT = 8936
 BROWSER_PORT = 8931
 BROWSER_URL = f"http://127.0.0.1:{BROWSER_PORT}/mcp"
 BROWSER_SERVER_NAME = "browser"   # the MCP server's name in every persona
 
-# The Playwright MCP server checks the request's Host header against the
-# host it was bound to, and bound to 0.0.0.0 inside the container it
-# accepts only `localhost:<port>`. A client dialling 127.0.0.1 -- which is
-# what every persona's .mcp.json does, and what the isolation probe did on
-# 2026-09-08 -- gets 403 "Access is only allowed at localhost:8931" and the
-# MCP client hangs on it. Both spellings of loopback are allowed and nothing
-# else; the publish address on the box is still 127.0.0.1 only.
+# Use a host header the browser server accepts for its loopback MCP endpoint.
 BROWSER_ALLOWED_HOSTS = f"127.0.0.1:{BROWSER_PORT},localhost:{BROWSER_PORT}"
 
 # The browser's own Docker network. Caddy lets a request from this subnet
@@ -205,28 +183,10 @@ BROWSER_ALLOWED_HOSTS = f"127.0.0.1:{BROWSER_PORT},localhost:{BROWSER_PORT}"
 SIGHT_NETWORK = "loam-sight"
 SIGHT_SUBNET = "172.30.0.0/24"
 
-# The wall around that network. The browser reaches the open web (a page's
-# fonts, scripts and images come from wherever the page says; the owner,
-# 2026-09-09: designs must render "correctly and without errors") and
-# nothing inside this box. Measured before the wall (2026-09-09, from
-# inside the container): sshd answered on the gateway, on every other
-# bridge's gateway and on the public address; a file-sync daemon's 22000 answered;
-# the provider's metadata service at 169.254.169.254 connected. The origin
-# flag was the only thing between a page and those, and it matches URLs,
-# not addresses: a public name that resolves inward walks past it. So the
-# kernel is the layer. Two chains in the filter table, both keyed on the
-# subnet: LOAM-SIGHT from DOCKER-USER (forwarded traffic: other bridges,
-# the provider's network, the internet) rejects every internal range;
-# LOAM-SIGHT-HOST from INPUT (traffic to this box itself, which never
-# passes FORWARD) rejects the same ranges, returns 80/443 so the domain's
-# own hosts answer at the public address, and rejects the rest (22, 22000,
-# the Caddy admin port, anything a future service binds). Reject, not
-# drop: a page's fetch fails at once instead of hanging to its timeout.
-# Replies to connections the host opened (docker-proxy dialling the MCP
-# port) are returned first, or the browser could not answer its clients.
-# The container's own loopback is inside its network namespace, where no
-# host rule reaches; there the origin flag and the MCP server's own Host
-# check are the layers (see browser_blocked_origins).
+# The browser needs public assets while rendering pages. Enforce the internal-network
+# boundary on resolved addresses, for both forwarded traffic and traffic to the host.
+# Allow established replies so the MCP connection remains usable. The container's own
+# loopback requires a separate browser-side policy.
 SIGHT_INTERNAL_RANGES = (
     ("10.0.0.0/8", "RFC 1918"),
     ("172.16.0.0/12", "RFC 1918; every Docker bridge on this box, and the gateway"),
@@ -242,31 +202,13 @@ SIGHT_WALL_HOST_CHAIN = "LOAM-SIGHT-HOST"
 SIGHT_WALL_SERVICE = "loam-sight-firewall.service"
 _REJECT = "-j REJECT --reject-with icmp-admin-prohibited"
 
-# The Apps section's previews (2026-11-15): an internal route to every app
-# in the Apps list, past the login, for loam-ui's preview renderer (headless
-# Chromium in the app's own container, empty profile, no credential). Every
-# app's public name is behind the login, so without this every preview is a
-# letter tile. Caddy serves one more site, plain HTTP, bound to the gateway
-# of the broker's bridge and nowhere else: no interface outside the box
-# carries that address, no DNS name points at it, and the broker's wall
-# (broker/firewall.sh, the same chain as the broker's port) lets only the
-# box itself and the `loam-broker` subnet reach the port -- the containers
-# that already reach the broker, loam-ui and its staging copy. The public
-# names and their login are untouched; see deploy/README.md, "Previews for
-# the Apps section".
-#
-# A preview is addressed by host, so a page's root-relative assets resolve
-# as they do on its real name: `http://<label>.<PREVIEW_SUFFIX>:<port>/`,
-# where <label> is the app's host label under the domain. `.internal` is
-# reserved for private use (ICANN, 2024) and resolves nowhere; the renderer
-# maps it to PREVIEW_ADDR itself (Chromium `--host-resolver-rules`).
+# Previews use an internal listener restricted to the host and broker network. Address
+# previews by hostname so root-relative assets resolve normally; the renderer supplies
+# the private hostname mapping.
 PREVIEW_ADDR = loam_broker.BIND_ADDR
 PREVIEW_PORT = 8935
-# And on loopback, for Loam's own app since it runs on the host
-# (2026-11-16): a host process that connects to PREVIEW_ADDR arrives with
-# the box's public address as its source (caused 2026-11-15 and again
-# 2026-11-16), which the route refuses. Loopback is not reachable from off
-# the box, so the route stays as internal as it was.
+# The host-run app uses a loopback preview listener so it need not connect through an
+# external interface.
 PREVIEW_LOCAL_ADDR = "127.0.0.1"
 PREVIEW_LOCAL_NET = "127.0.0.0/8"
 PREVIEW_SUFFIX = "preview.internal"
@@ -287,31 +229,12 @@ PREVIEW_SYSCTL_KEY = "net.ipv4.ip_nonlocal_bind"
 # told otherwise and has no path into this box anyway.
 FILES_ROOT = AI_LABS / "commons" / "www"
 
-# The agents' own sites (2026-11-08, the owner: behind the login agents stand
-# things up freely, on subdomains of their own). One TOML file per site,
-# written by bin/site and nothing else, outside the repo because a site is
-# an agent's working state, not a decision of the runtime's. Read here by
-# the generator and by check-drift alike, so the render is the same for both.
+# Load agent-owned sites from the site registry. Their records carry ownership, expiry
+# and explicit publication state.
 SITES_DIR = lc.STATE / "sites"
 
-# The one access-control rule that says two_factor, on a host that does not
-# exist. Authelia 4.39.23 offers second-factor enrolment (Settings -> Two-
-# Factor Authentication: the WebAuthn Credentials and One-Time Password
-# panels, with their Add buttons) only when at least one rule or the default
-# policy is `two_factor`: `handler_configuration.go` returns an empty
-# `available_methods` otherwise and the page says "There are no protected
-# applications that require a second factor method". With every app at
-# one_factor there was nowhere to enrol the passkey (found 2026-09-08).
-#
-# Apps stay at one_factor on purpose. A passkey login is a single factor in
-# Authelia's counting ("The user will be prompted for their password by
-# default if the request requires multi-factor authentication"), so a
-# two_factor app would cost passkey AND password on every new device unless
-# `experimental_enable_passkey_uv_two_factors` were set, which the docs mark
-# unsupported and say a future version will refuse at startup. One tap per
-# device per month is the promise, so the two_factor rule sits on this name
-# instead. No Caddy block, no DNS beyond the wildcard, no certificate: a
-# request to it fails the TLS handshake. A record may not take the name.
+# Authelia needs at least one two-factor rule to offer enrollment. Put it on a
+# reserved, unrouted hostname so actual apps keep their configured policy.
 SECOND_FACTOR_HOST = "second-factor"
 
 SHARE_COOKIE = "loam_share"
@@ -328,42 +251,8 @@ class DeployError(Exception):
     """A record or a live file is wrong in a way that must not be rendered."""
 
 
-# ---------------------------------------------------------------------------
-# An install's edge (first release L12, 2026-11-14)
-# ---------------------------------------------------------------------------
-#
-# A fresh install is one person's name, `<name>.<base domain>`, with its app
-# at that name itself. Its `[edge]` table in /etc/loam/loam.toml says so, and
-# a box without the table (the first install) renders exactly what it rendered before
-# the table existed:
-#
-#   [edge]
-#   name = "sam"                        # the label the installer was given
-#   domain = "sam.example.com"          # every host is under this
-#   address = "203.0.113.7"             # the box's public IPv4: DNS must say it
-#   app = "loam-ui"                     # the record served at the domain itself
-#   app_checkout = "@ROOT@"             # what it builds from, and the subfolder
-#   app_context = "app"                 #   of that tree that is the build context
-#   apps = ["loam-ui", "files", "vault"]   # the records this install serves
-#   resolver = "public"                 # how DNS is asked: "public" | "system"
-#   tls = "acme"                        # "internal": Caddy's own CA (rehearsals)
-#   dns_gate = true                     # no site block until the name resolves
-#   own_domain = true                   # the owner's own domain (0.2.8): only the
-#                                       #   installer's DNS check reads it
-#
-# Three things follow from the table and nothing else does:
-# - **No site block before DNS.** Until loam-await-dns has seen the name and
-#   `probe.<name>` resolve to `address` and written EDGE_STATE, the Caddyfile
-#   carries no host at all: Caddy would ask Let's Encrypt for every name it
-#   loads and fail, and failed validations are limited per host per hour.
-# - **The claim.** Until CLAIMED_FILE exists, the login has no user, and the
-#   app's host answers `/claim` from the claim service, outside the login,
-#   and sends every other path there. The claim writes CLAIMED_FILE and
-#   deletes the token (CLAIM_FILE).
-# - **The relay.** `/_loam/login-code` on the app's host goes through the
-#   gate to the same service, which hands the signed-in owner the one-time
-#   code the login has just written to its file notifier (deploy/README.md,
-#   "The claim and the relay").
+# Resolve the install's public edge from its configuration. Preserve support for
+# existing deployment records on installs without an edge definition.
 EDGE: dict = lc.get("edge") or {}
 EDGE_STATE = Path("/var/lib/loam/edge.json")     # root's; loam-await-dns writes it
 CLAIM_FILE = ETC / "claim"                       # root-only: the claim's token
@@ -371,9 +260,8 @@ CLAIMED_FILE = ETC / "claimed"                   # who claimed the install, and 
 CLAIM_PORT = 8934                                # the claim service, loopback
 CLAIM_PATH = "/claim"
 RELAY_PATH = "/_loam/login-code"
-# The signed-in person's own passkeys (2026-11-17): on every app-shell host,
-# through the gate to the same service, which asks the login's own API with
-# the person's own session (deploy/README.md, "The claim and the relay").
+# Relay the signed-in user's passkey operations through the app shell to the login
+# service.
 PASSKEYS_PATH = "/_loam/passkeys"
 # The login's session cookie: the one cookie the passkeys relay forwards.
 SESSION_COOKIE = "loam_auth"
@@ -430,28 +318,9 @@ def domain() -> str:
     return config()["domain"]
 
 
-# ---------------------------------------------------------------------------
-# Old names (2026-11-15, first release L14)
-# ---------------------------------------------------------------------------
-#
-# When the domain changes, the names under the old one can keep answering for
-# a while with nothing but a redirect to the same label under the new one.
-# deploy/loam.toml says which, and until when:
-#
-#   [moved]
-#   from = "example.net"
-#   until = 2026-12-15
-#   hosts = ["auth", "files", "vault", "loam-ui", ...]
-#
-# Each host renders one Caddy block with no login (it serves no byte of its
-# own, only `redir ... 308`, path and query kept) and its own certificate.
-# The apex app's old host goes to the domain itself. Each name also needs
-# its own DNS record once the old wildcard is gone, so the list is written
-# out, never derived: a name added here without a record would fail Let's
-# Encrypt on every load. Past `until` the blocks still render, and
-# check-drift says the redirects are due to be removed (the table here and
-# their DNS records), because dropping them on a date by itself would take
-# names away with nobody looking.
+# A moved hostname redirects the full path and query to its configured destination.
+# Keep rendering redirects past the review date until the operator removes the matching
+# DNS records.
 
 def moved() -> dict | None:
     """{"from", "until", "hosts"} from deploy/loam.toml's `[moved]`, or None.
@@ -515,22 +384,8 @@ def caddy_moved_block(old: str, new: str, until: dt.date) -> str:
     ]) + "\n"
 
 
-# An old name's paths can outlive `[moved]` (2026-11-15, first release
-# L15). A GitHub App's callback and setup URLs have no API, so an app
-# registered under the old domain calls back there until its owner types the
-# new URLs on GitHub. `[[forward]]` keeps those paths answering after the
-# 30 days are up:
-#
-#   [[forward]]
-#   host = "loam-ui.example.net"
-#   paths = ["/integrations/github/*"]
-#   why = "my-loam-app's callback and setup URLs name the old host"
-#
-# While `[moved]` still lists the host, its whole-host redirect already covers
-# these paths and nothing more renders. Once `[moved]` is gone (or lists it no
-# longer), the host renders one ungated block: the paths 308 to the same path
-# on `to` (the domain itself unless it says), and everything else 404s. Its
-# DNS record stays; check-drift's "due to go" list leaves it out.
+# Preserve registered callback URLs that cannot be updated through an API. Redirect
+# only the configured hosts and paths.
 
 def forwards() -> list[dict]:
     """[{"host", "paths", "to", "why"}] from deploy/loam.toml's
@@ -583,23 +438,8 @@ def caddy_forward_block(f: dict) -> str:
     ]) + "\n"
 
 
-# A public static page on a name outside the domain (2026-11-16): the bare
-# name above the owner's domain, say, holding a landing page while
-# `<owner>.<that name>` is the install. `[[landing]]` in deploy/loam.toml:
-#
-#   [[landing]]
-#   host = "example.net"
-#   root = "/srv/www/landing"
-#   public = "<dated approval from the owner>"
-#
-# One ungated block per entry: the folder, read by Caddy where it lies, so
-# an edit to it is live with no deploy; no directory listing, and `.git` and
-# `.env` hidden at any depth. `public` is the owner's yes quoted, and there
-# is no other way to write the table: an entry without one is refused, so no
-# missing line opens a host. A host under the domain is a site's or an
-# app's (bin/site, deploy records), and one `[moved]` or `[[forward]]`
-# already answers is refused, because Caddy loads one block per name. The
-# name needs its own DNS A record to this box. An install's edge has none.
+# A standalone landing host serves an explicitly configured directory. Require the
+# owner's approval in its record before generating an ungated public host.
 
 def landings() -> list[dict]:
     """[{"host", "root", "public"}] from deploy/loam.toml's `[[landing]]`,
@@ -720,28 +560,17 @@ class App:
     # caddy_content_block. None for an app without one.
     content_host: str | None = None
     record: dict = field(default_factory=dict)
-    # An agent's own site (2026-11-08), from `state/sites/<name>.toml`
-    # rather than a deploy record; see sites(). `site_owner` is the agent
-    # that stood it up, `site_expires` the last day it answers (UTC), and
-    # `site_public` the owner's yes, quoted, when they have said one. None on
-    # every deployment record.
+    # Identify a site by the agent recorded as its owner. Site records have a separate
+    # lifecycle from deployed apps.
     site_owner: str | None = None
     site_expires: dt.date | None = None
     site_public: str | None = None
-    # `app_shell = true` in a record (2026-11-12): this record serves Loam's
-    # own page (loam-ui, and its staging copy). Two things follow and
-    # nothing else: its origin is one an agent's static site may be framed
-    # by (frame_ancestors), and the Apps list leaves it out (lib/loam_apps).
+    # App-shell hosts receive the shell's relay routes and origin settings.
     app_shell: bool = False
-    # The app served at the domain itself: an install's `edge.app`, or a
-    # record's own `apex = true` on a box without an edge (the first install, since
-    # 2026-11-15). An install's may build from a subfolder of its checkout
-    # (`edge.app_context`).
+    # The edge app or a record with apex enabled serves the install domain itself.
     apex: bool = False
     context: str | None = None
-    # `[service]` in a record (2026-11-16): Loam's own app, run by Loam
-    # itself as `loam-app@<name>.service` from a release of its checkout,
-    # with no container; `port` is its loopback port (``service_unit``).
+    # Service records run the app under systemd from a release directory.
     service: bool = False
 
     @property
@@ -799,20 +628,8 @@ class App:
 FORBIDDEN_SERVICE_KEYS = ("privileged", "cap_add", "devices", "sysctls",
                           "userns_mode", "cgroup", "ipc")
 
-# Where an app container's stdout goes, which is where the app's own request
-# lines go. Every service of every app's compose file carries exactly this
-# block; the generator refuses one that does not, and check-drift asks the
-# running container, so the constant here and the copy in each compose file
-# are the two homes and the drift check is the proof they agree.
-#
-# journald and not the daemon's json-file default (added 2026-09-28). A
-# json-file log lives inside the container and is deleted with it, and
-# `bin/deploy <app> up <commit>` recreates the container on every new commit,
-# so a json-file history ends at the last deploy -- whatever its size cap.
-# journald keeps the lines across a restart AND a redeploy, under the box's
-# journal and its retention (deploy/README.md, docs/logs.md). The tag is the
-# container's name, so `journalctl -t <app>` reads one app; `docker logs`
-# and `bin/deploy <app> logs` still work, from Docker's local read cache.
+# Give every app service the same log driver and rotation settings so its request logs
+# have bounded retention.
 APP_LOGGING = {"driver": "journald", "options": {"tag": "{{.Name}}"}}
 
 # The runtime's own two containers, by the name each compose project and each
@@ -984,40 +801,14 @@ def _loopback_port(compose_path: Path, name: str, doc: dict) -> int:
     return ports[0]
 
 
-# ---------------------------------------------------------------------------
-# Loam's own app, run by Loam (2026-11-16)
-#
-# Until 2026-11-16 the app was a container like any project's. It is Node's
-# standard library and nothing else -- no dependency, no build -- so Docker
-# gave it a wall and little more, and the wall cost it: held to 128 MB and 64
-# pids, every page preview it took timed out (2026-11-15). Since the app
-# became part of Loam's own repository it runs the way the broker does, as a
-# systemd unit, from a RELEASE of the checkout: `bin/deploy <app> up <commit>`
-# unpacks `git archive <commit>:<context>` into SERVICE_RELEASES/<app>/<sha>/
-# (root's, read-only to the app), points `current` at it, and restarts
-# `loam-app@<app>.service`. A commit is still named, never the working tree,
-# so what runs is exactly what the record says, and a rollback is the same
-# command with the earlier commit; the release before is kept on disk.
-#
-# The unit is the wall the container was, from systemd's own sandbox: a
-# DynamicUser (no login, no home, a uid nothing else owns), the file system
-# read-only but its state directory, /home invisible, no capabilities, no
-# new privileges, its own /tmp and /dev. Its listener is loopback (APP_HOST).
-# Its environment -- the broker's token and the vendor key among it -- is
-# written by `bin/deploy <app> env` (ExecStartPre, as root) to
-# SERVICE_ENV_DIR, which is /run: memory, root-only, gone at boot and
-# written again at every start; never in the repository, never on disk.
-# No memory ceiling, like every agent run since 2026-11-16, and the core's
-# OOM score, beside the broker; its page previews' Chromium runs at the
-# agents' score (APP_PREVIEW_OOM_SCORE_ADJ), so a capture that balloons is
-# what the kernel ends, never the page.
-# ---------------------------------------------------------------------------
+# A service app runs an immutable release under a per-app systemd unit. Keep releases
+# and the current link separate from the canonical checkout so an update can switch or
+# roll back the running version.
 
 SERVICE_UNIT_PREFIX = "loam-app@"
 SERVICE_UNIT = Path("/etc/systemd/system/loam-app@.service")
-# Not under /var/lib/loam, which an install keeps root-only (its own state,
-# edge.json): the unit's uid could not enter it (caused in the 2026-11-16
-# rehearsal, CHDIR: Permission denied).
+# Put releases where the unprivileged service user can traverse their parent
+# directories.
 SERVICE_RELEASES = Path("/var/lib/loam-releases")
 SERVICE_ENV_DIR = Path("/run/loam/app")
 SERVICE_STATE = Path("/var/lib/loam-app")      # StateDirectory=loam-app/<app>
@@ -1235,19 +1026,13 @@ def records() -> list[App]:
                 f"{path}: {name} lands by pull request on a repository Loam does "
                 f"not own, and its owners deploy it their own way; it has no "
                 f"deploy lane here")
-        # Where bin/deploy builds from: the record may say, and otherwise it
-        # is the project engineer's checkout from the registry. A static host
-        # has no checkout and no build.
-        # The app at the domain itself: an install's `edge.app` names it, and
-        # where there is no edge (the first install, since 2026-11-15, L14) the
-        # record says `apex = true`. With an edge, the edge decides alone.
+        # Prefer the app record's build source, then the registered project checkout. Static
+        # hosts do not need a checkout.
         rec_apex = rec.get("apex", False)
         if not isinstance(rec_apex, bool):
             raise DeployError(f"{path}: apex is true or false")
         apex = (EDGE["app"] == name) if EDGE.get("app") else rec_apex
-        # The folder of the checkout the app is built from: an install's
-        # `edge.app_context` for its edge app, else the record's `context`
-        # (the first install's loam-ui and its staging copy, 2026-11-16).
+        # Use the edge app_context for the edge app, otherwise the record's context.
         context = ((EDGE.get("app_context") if apex and EDGE.get("app") else None)
                    or rec.get("context"))
         checkout = (EDGE.get("app_checkout") if apex else None) or rec.get("checkout")
@@ -1542,33 +1327,9 @@ GATE_SNIPPET = """\
 }
 """ % AUTHELIA_PORT
 
-# The access log: every host block imports this with its own hostname, so
-# each host writes one JSON file under one directory (added 2026-09-28, when
-# an audit could not count loam-ui's errors because nothing logged a web
-# request). Caddy rolls the file itself: a new file at ROLL_SIZE, at most
-# ROLL_KEEP rolled files (gzipped), none older than ROLL_KEEP_FOR. So a host
-# holds at most ~15 x 50 MiB before compression, and a rolled file older than
-# 14 days is deleted whatever the size.
-#
-# What a line carries is Caddy's access record: method, host, uri, proto,
-# remote and client address, the request headers, status, size, bytes read
-# and duration. Never a body; Caddy does not log one. What is taken OUT, by
-# the filter, is everything that can carry a credential:
-#   - the query string, replaced by `?redacted`: a share link is
-#     `/?share=<token>`, and a query is where any other token would ride;
-#   - the segment after a leading `/content/`, replaced by `redacted`: on a
-#     content host it is a signed read grant (2026-10-23, loam-ui's live
-#     HTML), and the rest of the path stays so a line still says which file;
-#   - Cookie, Authorization, Proxy-Authorization: the Authelia session, the
-#     share cookie, any bearer. (Caddy already redacts these unless a server
-#     sets `log_credentials`; deleted here so the log does not depend on it);
-#   - Referer, because a page opened from a share link sends that link,
-#     token and all, as the Referer of every request it makes after;
-#   - every response header, because Set-Cookie is the session itself and
-#     Location carries the login's `rd=` URL with its query.
-# The user agent stays, as `request.headers.User-Agent`.
-# Access lines go ONLY to these files: the adapter excludes them from the
-# default logger, so none reach the journal.
+# Rotate access logs per host. Strip the query, signed content grant, credential
+# headers, Referer and response headers before writing. Keep access lines out of the
+# default journal logger.
 ACCESS_LOG_DIR = Path("/var/log/caddy/access")
 ACCESS_LOG_ROLL_SIZE = "50MiB"
 ACCESS_LOG_ROLL_KEEP = 14
@@ -1607,13 +1368,7 @@ def access_log_line(fqdn: str) -> str:
     return f"\timport access_log {fqdn}\n\timport compress"
 
 
-# Compression (added 2026-11-09: loam-ui sent a 3.5 MB session list
-# uncompressed to a phone that asked for zstd and gzip, and every request
-# behind it queued). Every host imports it. The match list is Caddy's default
-# with ONE type taken out: text/event-stream. Caddy's default matches text/*,
-# which takes in an SSE stream, and a stream must reach the client event by
-# event; an encoder that holds bytes until its buffer fills is a stalled
-# stream. A matcher with several `header` lines on one field matches any.
+# Compress large responses when the client supports it.
 COMPRESS_TYPES = (
     "application/json*", "application/javascript*", "application/xhtml+xml*",
     "application/atom+xml*", "application/rss+xml*", "application/wasm*",
@@ -1641,24 +1396,9 @@ def _deadline_unix(expires: dt.date) -> int:
     return int(end.timestamp())
 
 
-# What the browser's subnet may do past the login (2026-11-18). The bypass
-# exists so the personas can SEE: read any private page, screenshot it, walk
-# the app on staging. It used to pass every request whole, so any page the
-# browser opened -- a stranger's, on the open web -- could send a cross-site
-# POST to the app's host and be treated as the signed-in owner (the plugin
-# gateway's /x/* had no origin check; a site with a backend had none of its
-# own). Now a request from the subnet that could change something -- any
-# method but GET, HEAD and OPTIONS, or any protocol upgrade (a WebSocket
-# reads AND writes) -- passes only when the browser itself says it came from
-# a page of the same origin: `Sec-Fetch-Site: same-origin`, or, where a
-# browser sends no fetch metadata, an `Origin` equal to this host. A page
-# cannot forge either; Chromium sends both on every https request. A request
-# that says neither is refused too: nothing in that container but Chromium
-# has any business writing here. So a walk that clicks through a page still
-# works (its own requests are same-origin) and a page from anywhere else is
-# refused before it reaches any backend. The login's identity headers are
-# taken off on this path: past the gate Authelia sets them, and here nobody
-# has, so a value arriving here is the client's own.
+# Browser previews may read gated pages. For writes or protocol upgrades, require
+# same-origin browser evidence, refuse ambiguous requests and strip client-supplied
+# identity headers before proxying.
 SIGHT_UNSAFE = (
     "({http.request.method} != \"GET\" && {http.request.method} != \"HEAD\""
     " && {http.request.method} != \"OPTIONS\" || {http.request.header.Upgrade} != \"\")"
@@ -1956,29 +1696,8 @@ def caddy_claim_block(fq: str) -> str:
     ]) + "\n"
 
 
-# ---------------------------------------------------------------------------
-# The sign-in page (2026-11-16)
-# ---------------------------------------------------------------------------
-#
-# The portal's own pages are Loam's, not Authelia's: deploy/login/ in the checkout,
-# rendered into LOGIN_DIR and served by Caddy on the portal host, in front of
-# Authelia's API, which is unchanged and still answers every /api/ request.
-# Authelia's theming reaches a logo, a favicon and its words (asset_path), not
-# its look, so it could not be made Loam's (the first-day walk, 2026-11-16).
-#
-# Which page answers is `login.page` in /etc/loam/loam.toml:
-#
-#   "loam"      Loam's page for the portal's own routes (LOGIN_ROUTES). The
-#               default, on every install.
-#   "authelia"  Authelia's page, as before 2026-11-16. The rollback: set it,
-#               `sudo bin/gen-deploy`, and the portal is what it was.
-#   "staged"    Authelia's page, except to a request that asks for Loam's:
-#               one whose `rd` is under `login.staged_host` (the staging copy,
-#               `next`), or that carries `page=loam`. How it was proven behind
-#               the owner's real login before it was the default.
-#
-# Either way `?authelia=1` on a route reaches Authelia's own page, which is
-# where what Loam's page leaves out (an authenticator app's set-up) still is.
+# The portal can serve Loam's sign-in UI, Authelia's UI or the staged selection.
+# Authelia continues to own its API and remains available for enrollment.
 
 LOGIN_MODES = ("loam", "authelia", "staged")
 # Every route of Authelia's portal a person lands on while signing in, out,
@@ -2289,28 +2008,18 @@ def authelia_config() -> str:
             "elevated_session": {"skip_second_factor": True},
         },
         "authentication_backend": {
-            # An install (an `[edge]`) has no one to read the file notifier's
-            # reset mail, so "Reset password?" on its sign-in page promised
-            # an email that never came (the first-day walk, 2026-11-16). Off
-            # there; the first install keeps it (its engineer reads the file).
+            # An install without mail delivery cannot offer working password-reset emails.
             "password_reset": {"disable": bool(EDGE)},
             "password_change": {"disable": False},
             "file": {"path": "/data/users_database.yml", "watch": True},
         },
         "access_control": {"default_policy": "deny", "rules": rules},
         "session": {
-            # loam_auth since 2026-11-15 (was loam_session). The L14 domain move
-            # left browsers holding a loam_session cookie on the old parent
-            # domain, which every request to a host under the new one (a name
-            # under the old) still carries; Authelia read it before the new one, so every login
-            # succeeded and then bounced back to the portal. A new name cannot
-            # collide. Rename it again on any future domain move.
+            # Use a distinct login cookie name so a cookie scoped to a former parent domain cannot
+            # shadow the new session.
             "name": SESSION_COOKIE,
             "same_site": "lax",
-            # 1d / 7d since 2026-11-09 (were 1h / 12h): the owner leaves phone
-            # tabs open all day, and their standing ask is that it works
-            # smoothly. With the sessions in Redis a restart no longer
-            # resets these clocks, so they are the only ones that sign out.
+            # Persist browser logins for the configured inactivity and remember-me intervals.
             "inactivity": "1d",
             "expiration": "7d",
             "remember_me": "1M",
@@ -2319,12 +2028,7 @@ def authelia_config() -> str:
             # domain per device (per month, with remember_me), and a passkey
             # is bound to the domain it was enrolled on.
             "cookies": cookies,
-            # The sessions outlive the container and the box (2026-11-09).
-            # Redis is the login project's own second container, reached by
-            # its service name on the project's default network, which no
-            # other container joins (network_findings says so if one does)
-            # and which publishes no port. No password, for that reason:
-            # the only thing that can reach it is Authelia.
+            # Persist Authelia sessions in the login stack's private Redis service.
             "redis": {"host": "redis", "port": 6379},
         },
         "regulation": {"max_retries": 5, "find_time": "2m", "ban_time": "10m"},
@@ -2366,10 +2070,7 @@ def authelia_compose() -> str:
                     "authelia-data:/data",
                 ],
                 "env_file": [str(AUTHELIA_SECRETS)],
-                # Not read_only: Authelia's startup checks fail on a read-only
-                # root even with /tmp and /var/tmp on tmpfs (caused 2026-09-08,
-                # bisected against cap_drop, which is fine). The root is the
-                # image's own layer, written by a capability-less remapped uid.
+                # Allow the filesystem operations required by Authelia's startup checks.
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
                 "mem_limit": "256m",
@@ -2381,14 +2082,8 @@ def authelia_compose() -> str:
                 "image": AUTHELIA_REDIS_IMAGE,
                 "container_name": AUTHELIA_REDIS,
                 "restart": "unless-stopped",
-                # The binary directly, as Authelia is run: the image's
-                # entrypoint chowns /data and drops to its own user, which
-                # needs capabilities this container does not have. So it
-                # starts as that user: the image's /data, copied into the
-                # volume when it was created, is owned by redis (999:1000),
-                # and the container's root with every capability dropped
-                # cannot write it (found 2026-11-09: "Failed opening the
-                # temp RDB file ... Permission denied", a restart lost all).
+                # Run the service binary directly under its configured user. Its image entrypoint
+                # expects ownership-changing privileges.
                 "user": "999:1000",
                 "entrypoint": ["redis-server"],
                 "command": ["--save", "60", "1", "--appendonly", "no",
@@ -2557,33 +2252,10 @@ def sight_wall_missing() -> list[str]:
     return missing
 
 
-# ---------------------------------------------------------------------------
-# The inbound wall: default-deny on this server's own ports (2026-11-19)
-# ---------------------------------------------------------------------------
-#
-# Every agent is root here and can start a server on 0.0.0.0; without a
-# firewall it is on the open web with no login in front of it. The first box
-# had ufw with INPUT DROP, set by hand; until 2026-11-19 a fresh install had
-# nothing. This wall lets in what Loam serves and nothing else: SSH (every
-# port sshd listens on, and 22), 80 and 443 (Caddy, with HTTP/3 on UDP 443),
-# ping and IPv6's neighbour discovery, replies to what the box itself
-# started, and the ports the owner lists in `firewall.open`. It drops the
-# rest, IPv4 and IPv6.
-#
-# - **It stands aside for a firewall the server already has.** Where ufw or
-#   firewalld is active, or a family's INPUT policy is already DROP, that
-#   family is left to it and this wall's own chain is taken out; ports are
-#   then opened there, not here. The first box is such a server.
-# - **It never locks out a session.** Established traffic is the first rule,
-#   so a running SSH session survives the switch; sshd's ports are read at
-#   every run (`sshd -T`, and what sshd listens on).
-# - **Loam's other walls come first.** The broker's and the sight's jumps are
-#   inserted at the top of INPUT and accept or reject their own traffic
-#   before it gets here; this one is appended last, so it is the default.
-#   Containers' published ports are FORWARD's, never INPUT's, and are
-#   untouched (Loam publishes on 127.0.0.1 only).
-# - `firewall.manage = false` in loam.toml takes it out and leaves inbound
-#   open, for a server whose provider's firewall does the job.
+# Apply the inbound policy after the broker and browser rules. Preserve established
+# connections, SSH listeners, web traffic, required network control traffic and
+# configured exceptions. Yield to an existing host firewall per address family.
+# Container forwarding follows a separate policy.
 
 INBOUND_DIR = ETC / "inbound"
 INBOUND_FIREWALL_SCRIPT = INBOUND_DIR / "firewall.sh"
@@ -2762,23 +2434,12 @@ def browser_compose() -> str:
                 "command": [
                     "--headless", "--browser", "chromium", "--no-sandbox",
                     "--isolated",
-                    # From v0.0.82 a page's WebMCP tools are listed as MCP
-                    # tools (`webmcp_<name>`, the page's own schema), and every
-                    # persona allows the browser server whole: a page could
-                    # hand a persona a tool it may call without a prompt. The
-                    # server reads them from `navigator.modelContext`, which
-                    # any page can define without a Chromium flag (proved
-                    # 2026-10-06: without this flag a test page's tool was
-                    # listed and ran; with it, none).
+                    # Keep page-advertised WebMCP tools out of the persona's browser tool set.
                     "--no-webmcp",
                     "--host", "0.0.0.0", "--port", str(BROWSER_PORT),
                     "--allowed-hosts", BROWSER_ALLOWED_HOSTS,
-                    # The open web is allowed; what is blocked is blocked by
-                    # the kernel (sight_firewall_script) and, as a second
-                    # layer that also covers the container's own loopback,
-                    # by this flag. Until 2026-09-09 this was --allowed-origins
-                    # <domain>;*.<domain>, which stopped every page's own
-                    # fonts, scripts and images at ERR_BLOCKED_BY_CLIENT.
+                    # Use the browser's origin restrictions alongside the kernel network boundary. The
+                    # browser policy also covers its own loopback.
                     "--blocked-origins", browser_blocked_origins(),
                 ],
                 "ports": [f"127.0.0.1:{BROWSER_PORT}:{BROWSER_PORT}"],
