@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Loam on a fresh Debian 12 (or Ubuntu 24.04) server, as root:
+# Install Loam on a fresh Debian 12 or 13, or Ubuntu 24.04 or 26.04 server, as root:
 #
 #   curl -fsSL https://<where the release is>/install.sh | sudo bash
 #

@@ -81,8 +81,8 @@ too.
 
 **What you need:**
 
-- **A server** running Debian 12 or Ubuntu 24.04, with a public IPv4 address,
-  at least 4 GB of memory and 15 GB of free disk.
+- **A server** running Debian 12 or 13, or Ubuntu 24.04 or 26.04, with a
+  public IPv4 address, at least 4 GB of memory and 15 GB of free disk.
 - **A name on the web**: a domain of your own whose DNS you can change, or
   a name from Loam's makers (above).
 - **An account with an AI provider**: Claude (Claude Code), ChatGPT (Codex)

@@ -410,8 +410,31 @@ def cases() -> int:
     claim.Handler.send(fake, 200, b"{}")
     check("...and JSON answers carry no CSP", "Content-Security-Policy" in fake.headers, False)
 
-    # Select a preview browser available on each supported distribution.
     inst = load_cmd("loam-install")
+    # Test the OS gate with a different, deterministic preflight failure next.
+    with patch.object(inst.Path, "read_text", return_value="MemTotal: 1024 kB\n"):
+        for distro, version in (("debian", "12"), ("debian", "13"),
+                                ("ubuntu", "24.04"), ("ubuntu", "26.04")):
+            with patch.object(inst, "os_release", return_value={"ID": distro, "VERSION_ID": version}):
+                try:
+                    inst.step_preflight(None, {})
+                except inst.Stop as stop:
+                    check(f"{distro} {version} passes the OS gate", stop.say.startswith("Loam needs a server"))
+                else:
+                    check(f"{distro} {version} still checks memory", False)
+        with patch.object(inst, "os_release", return_value={
+            "ID": "ubuntu", "VERSION_ID": "25.10", "PRETTY_NAME": "Ubuntu 25.10",
+        }):
+            try:
+                inst.step_preflight(None, {})
+            except inst.Stop as stop:
+                check("unsupported OS refusal names the four releases and the detected OS",
+                      stop.say, "Loam installs on Debian 12, Debian 13, Ubuntu 24.04, or Ubuntu 26.04. "
+                      "This server is Ubuntu 25.10.")
+            else:
+                check("Ubuntu 25.10 is refused", False)
+
+    # Select a preview browser available on each supported distribution.
     check("Debian takes the headless shell from its archive, Ubuntu does not ask for it",
           (inst.PREVIEW_BROWSER in inst.apt_packages("debian"),
            inst.PREVIEW_BROWSER in inst.apt_packages("ubuntu")), (True, False))

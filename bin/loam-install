@@ -189,6 +189,14 @@ def mark_done(n: int) -> None:
 # 1. Preflight
 # ---------------------------------------------------------------------------
 
+SUPPORTED_OS = {
+    ("debian", "12"): "Debian 12",
+    ("debian", "13"): "Debian 13",
+    ("ubuntu", "24.04"): "Ubuntu 24.04",
+    ("ubuntu", "26.04"): "Ubuntu 26.04",
+}
+
+
 def os_release() -> dict:
     out = {}
     for line in Path("/etc/os-release").read_text().splitlines():
@@ -205,12 +213,12 @@ def listeners(port: int) -> list[str]:
 
 def step_preflight(a, ans: dict) -> None:
     osr = os_release()
-    ok_os = (osr.get("ID") == "debian" and osr.get("VERSION_ID") == "12") or \
-            (osr.get("ID") == "ubuntu" and osr.get("VERSION_ID") == "24.04")
-    if not ok_os:
-        raise Stop(f"Loam installs on Debian 12 or Ubuntu 24.04. This server is "
+    if (osr.get("ID"), osr.get("VERSION_ID")) not in SUPPORTED_OS:
+        *earlier, last = SUPPORTED_OS.values()
+        supported = f"{', '.join(earlier)}, or {last}"
+        raise Stop(f"Loam installs on {supported}. This server is "
                    f"{osr.get('PRETTY_NAME', 'something else')}.",
-                   "make a new server with Debian 12, then run the install command on it")
+                   "make a new server with one of those versions and run the install command on it")
     mem_mb = int(re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text()).group(1)) // 1024
     if mem_mb < 3600:
         raise Stop(f"Loam needs a server with at least 4 GB of memory; this one has "
@@ -410,7 +418,8 @@ APT = ["git", "python3", "python3-yaml",
        # broker's /usr/bin/python3; missing on every install until 0.2.2.
        "python3-cryptography",
        "sqlite3", "ripgrep", "ffmpeg", "nftables",
-       "iptables", "curl", "ca-certificates", "gnupg", "sudo", "dnsutils", "iproute2",
+       # dnsutils was a transitional name removed in Debian 13 and Ubuntu 26.04.
+       "iptables", "curl", "ca-certificates", "gnupg", "sudo", "bind9-dnsutils", "iproute2",
        "unzip",
        # ssh-keygen: every update checks the release's signature with it
        # (lib/loam_signing.py). A box reached over SSH has it already.
@@ -423,7 +432,7 @@ APT = ["git", "python3", "python3-yaml",
        "fonts-noto-core", "util-linux"]
 
 # The previews' browser. Debian ships Chromium's headless shell as a package;
-# Ubuntu 24.04 has none (its `chromium-browser` is a snap, and a server has no
+# Ubuntu has none (its `chromium-browser` is a snap, and a server has no
 # snapd to give it), so there the same headless shell is fetched by Playwright
 # at a pinned version, with the libraries it needs, and given the Debian
 # package's command name, which is what the app is told to run (bin/deploy

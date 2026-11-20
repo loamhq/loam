@@ -10,8 +10,8 @@ table in `lib/loam_deploy.py`. Tests: `tests/test_install.py`,
 
 ## The command
 
-On a fresh Debian 12 (or Ubuntu 24.04) server with a public IPv4 address,
-at least 4 GB of memory and 15 GB of free disk, as root:
+Run as root on a fresh Debian 12 or 13, or Ubuntu 24.04 or 26.04 server
+with a public IPv4 address, at least 4 GB of memory and 15 GB of free disk.
 
 ```sh
 curl -fsSL https://<where the release is>/install.sh | sudo bash -s -- --domain loam.example.com
@@ -143,9 +143,9 @@ reads it).
 | # | Step | What it does |
 |---|---|---|
 | — | bootstrap (`install.sh`) | root; git, curl, Python and certificates if missing; finds the newest release tag (`git ls-remote`), clones it to `/var/lib/loam/install/release`; runs that release's `bin/loam-install` |
-| 1 | preflight | Debian 12 or Ubuntu 24.04; memory, disk; ports 80 and 443 free (Caddy itself excepted, for a re-run); the box's public IPv4 from its route; where it lives (`--domain`, `--name`, or asked) and the owner's name and the zone; writes `/etc/loam/loam.toml` (never rewritten after: it is the person's) |
+| 1 | preflight | Debian 12 or 13, or Ubuntu 24.04 or 26.04; memory, disk; ports 80 and 443 free (Caddy itself excepted, for a re-run); the box's public IPv4 from its route; where it lives (`--domain`, `--name`, or asked) and the owner's name and the zone; writes `/etc/loam/loam.toml` (never rewritten after: it is the person's) |
 | 2 | the name | a name: `lib/loam_install.name_check` (below). Taken: stop. Here: go on. Not yet: print the two records and go on. An own domain: `domain_check`; never stops; prints what is missing and the two records |
-| 3 | packages | git, python3 and python3-yaml, sqlite3, ripgrep, ffmpeg, nftables, iptables, sudo, dnsutils and the rest, with `fonts-noto-core` and a Chromium headless shell for the app's page previews (Debian's `chromium-headless-shell` package; on Ubuntu, which has none, Playwright's at a pinned version, linked as `/usr/local/bin/chromium-headless-shell`); Caddy, Docker CE (the login and the agents' browser run in it; the app does not) and Node 24 from their own apt repositories |
+| 3 | packages | git, python3 and python3-yaml, sqlite3, ripgrep, ffmpeg, nftables, iptables, sudo, bind9-dnsutils and the rest, with `fonts-noto-core` and a Chromium headless shell for the app's page previews (Debian's `chromium-headless-shell` package; on Ubuntu, which has none, Playwright's at a pinned version, linked as `/usr/local/bin/chromium-headless-shell`); Caddy, Docker CE (the login and the agents' browser run in it; the app does not) and Node 24 from their own apt repositories |
 | 4 | the user | `loam`, with lingering, `sudo` (NOPASSWD: the agents get the whole machine) and `docker`; the zone; `PYTHONPYCACHEPREFIX` for its services, shells and sudo, so Python never writes into the checkout; Docker's `daemon.json` before anything uses Docker |
 | 5 | Loam | the release cloned to `paths.root` (`/home/loam/loam`), `origin` set to the source; the vault, workspaces, projects and plugins folders (plugins a git repo); uv; the MCP servers' Python; `/usr/local/bin/loam` |
 | 6 | the vault | `bin/library seed-vault`; the vault and workspaces made git repos; **`<workspaces>/_shared/reach.md` written** (below) |
@@ -380,7 +380,26 @@ neither marker nor failure is somebody's and is left alone, as before.
 - **The base domain's DNS**: two A records per person, each one the owner's
   yes (it makes a name reachable on the open web).
 
-## How it was proved (2026-11-14)
+## Supported server releases (rehearsed 2026-11-20)
+
+One fresh amd64 Modal VM each for Debian 12, Debian 13, Ubuntu 24.04 and
+Ubuntu 26.04.1 ran all eleven steps, printed its claim link and served the
+claim page over HTTPS. The app's `/up` endpoint and the signed-in app over
+HTTPS returned 200 on each VM.
+The rehearsal passed a local Git bundle to the bootstrap with `--source`
+and used `/etc/hosts` and `--resolver system --local-certs` for a private
+`.test` name.
+
+Debian 13 (trixie) and Ubuntu 26.04 (resolute) dropped the transitional
+`dnsutils` package. Step 3 requests `bind9-dnsutils` on all four releases.
+The new codenames install Docker CE from Docker's own repositories, and
+both use Caddy's `any-version` and NodeSource's `nodistro` repositories.
+Debian 13 uses Python 3.13 and Debian's Chromium headless-shell package.
+Ubuntu 26.04 uses Python 3.14 and the existing Playwright pin. Both
+browsers rendered a test page and both VMs installed Loam's IPv4 and IPv6
+inbound rules through iptables' nftables backend.
+
+## How it was first proved (2026-11-14)
 
 On throwaway machines from the owner's sandbox plugin (Modal), a fresh
 `debian:12` and a fresh `ubuntu:24.04`, each with only what a cloud image
