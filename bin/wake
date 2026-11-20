@@ -1,104 +1,15 @@
 #!/usr/bin/env python3
-"""Run one unattended lane for an agent. Scheduled; nobody is watching.
+"""Launch one unattended reflection or named cron under the per-agent run lock.
 
-Since 2026-09-05 there are two lanes, not one, and this launches both. The
-reason is the owner's, 2026-09-04: *"the goal is to separate reflection from
-doing a task or a job… having that exist with the agents also trying to get
-async tasks done all in one wake was detrimental to reflections."* A
-reflection wake carrying a nightly research sweep is a reflection wake with
-somewhere to be.
+Reflection reads the instruction in its schedule record and the vault changes
+since its last wake. Only reflection advances that checkpoint. A large diff goes
+in a file so the prompt fits in a single process argument. A cron loads its own
+record and leaves the checkpoint available for the next reflection.
 
-    reflection   `wake <project>`               appends `_reflection.md`
-    cron         `wake <project> --cron <name>` appends `crons/<name>.md`
-
-**An agent with a map** (2026-11-18, lib/loam_loading.py) loads its soul,
-its config and its map through CLAUDE.md on both lanes, as in a
-conversation. Its reflection appends no file, and its cron appends the
-cron's own file, as before. The map is what its wake sizes.
-
-**The reflection's instruction is its record's** (2026-11-19): the body of
-`crons/reflection.md`, Loam's short default unless it has been changed,
-followed by where the vault stood at the last wake and what changed since
-(REFLECTION_PROMPT_TEMPLATE). The same reconciler that renders a cron's
-units renders the reflection's, and only the owner turns it off.
-
-Four differences and no more. Three are the lane: the file appended, the
-prompt (which names the cron, so the session knows which of its jobs this
-is), and the failure record. The fourth is the vault diff, which reflection
-gets and a cron does not -- **and that one is not cosmetic**. The diff is
-computed against a marker in `state/wake/<agent>.json` that says where
-reflection last read to; a cron sharing that marker would advance it and the
-next reflection wake would silently be shown an interval starting after
-everything the cron had already consumed. So the cron lane neither reads nor
-writes that marker. "Here is what changed since you were last here" is
-reflection's question anyway; a cron is awake for one job and its file says
-which.
-
-Everything else is identical by construction: same model, no turn cap and
-no wall clock (since 2026-11-10), same `outputStyle: none`, same `LOAM_WAKE` (so no transcript is
-filed under `15_CONVERSATIONS/`), the persona's own tools, same OnFailure
-handler, same log file.
-
-Both lanes take a lock. See lib/loam_lock.py: one run per agent at a time,
-and admission to the box by its memory (by a count of slots until
-2026-11-10). Until this move the
-grid held only because the seven reflection timers were twenty minutes apart;
-crons remove that spacing as a guarantee.
-
-Carried across from chassis/cron.py: the prompt body and the vault diff
-since the last wake -- inline only while it is small since 2026-11-18, and
-otherwise a count, a file and a git command (``vault_diff``), so no part of
-a launch grows with the vault. Dropped: the run ledger, per-wake cost accounting and
-the Langfuse export, all of which metered a metered API. On a subscription
-there is no per-wake bill to record -- but since 2026-09-30 the envelope's
-own usage and cost estimate are on every line that had an envelope, because
-which model a lane runs on is decided by them (lib/loam_usage.py,
-bin/usage-by-lane).
-
-**This is the launcher, so this is where the lane is chosen.** Since
-2026-09-04 the reflection layer is not injected by a hook; it is passed as
-``--append-system-prompt-file``, an undocumented but real flag that lands
-the file in the system prompt, survives a compaction whole, and has no
-size limit worth naming. The lanes are then mutually exclusive by
-construction rather than by a hook discriminating on an environment
-variable: a wake passes its own lane file and nothing else, and
-``--settings '{"outputStyle":"none"}'`` suppresses the conversation lane
-that the project settings would otherwise load. A cron is the third lane and
-arrives by the same route -- which is what makes "a cron loads `_always.md`
-and its own file, and nothing else" a property of the launcher rather than a
-promise in prose.
-
-One thing the flag does not do is strip frontmatter, so the text is written
-to a temp file already stripped. An output style is the opposite -- its
-frontmatter is required and consumed by the loader. The convention has to
-be restated per route; it does not carry.
-
-The preflight is still the part that matters. A ``SessionStart`` hook could
-not abort a session (measured 2026-08-25) and there is no longer a
-``SessionStart`` hook at all, so the loud failure D4 asks for happens before
-the session exists. If the reflection layer will not load, this refuses to
-launch -- a true abort on the one path that runs unattended. Its size never
-refuses (2026-11-18): an over-limit file is reported and the lane runs.
-
-Every way this file ends is on the record (2026-11-18): each refusal and
-failure above writes its own line, and an exception out of this file's own
-code is caught by ``main`` and written as a ``crash`` -- the lane's log line
-and the failure log, with the step it died at. A run killed from outside is
-bin/wake-failed's to report, from the marker it leaves.
-
-**Results come back as a run** (2026-11-19, batch B step 3). Every Claude
-run here has a ``--session-id`` of its own and ``LOAM_SESSION_ID`` set to it,
-so a brief made in it records the session (lib/loam_waiters.caller) and
-returns at once. When the job has a verdict, ``wake <dir> --results`` (a
-transient unit, ``loam-results-<agent>``, started by the job's launcher or
-the recovery sweep) drains what is owed to this agent, oldest first: each
-result is a new run that resumes the asking session with the result as its
-input and the asker's lane loaded again, or a fresh run with the result and
-what the asker was doing when it cannot be resumed (lib/loam_results.py).
-Its log line is its own (lane ``result:<job>``), and it posts nothing.
-
-Usage: wake <agent-project-dir> [--cron <name> | --results]
-"""
+The launcher selects the instruction files for the workspace's loading format.
+Mapped agents use their map on both lanes. Legacy reflection uses its reflection
+file. Strip frontmatter before passing a lane file as system-prompt text.
+Both lanes use memory-based admission and the same failure and usage reporting."""
 
 from __future__ import annotations
 
@@ -165,13 +76,7 @@ LANE_PROVIDER: str | None = "claude-code"
 MAX_TURNS = (int(os.environ["LOAM_WAKE_MAX_TURNS"])
              if os.environ.get("LOAM_WAKE_MAX_TURNS") else None)
 
-# The daily reflection's prompt (2026-11-19). Its instruction is its record's
-# body, `crons/reflection.md` (Loam's default, lib/loam_cron.reflection_default,
-# until the persona or the owner changes it); this adds the moment and where
-# the vault stood at the last wake, with the changes since inline when they
-# are few and by path when they are many (``vault_block``). Until 2026-11-19
-# the instruction was one of two templates here, chosen by the agent's shape,
-# and the record held only a time and a switch.
+# The schedule record supplies the instruction. Add the time and the reflection's vault interval.
 REFLECTION_PROMPT_TEMPLATE = """\
 You're waking. It's {timestamp}. Nobody is in a conversation with you.
 
@@ -258,16 +163,7 @@ def git(vault: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-# The changes reach the prompt inline only while they are small; past this
-# many characters the prompt names a file that holds them and the command
-# that lists them, and says how many there are (2026-11-18). Until then the
-# whole `git diff --name-status` went into the one `-p` argument, and the
-# night after a 1,033-file autocommit it was 183,749 bytes: over the
-# kernel's 128 KiB limit on one argument (MAX_ARG_STRLEN), so `execve`
-# failed with E2BIG and every reflection wake on the box died before the
-# model ran -- and, the marker never advancing, would have died every night
-# after. Nothing in a launch may grow with the vault; this cap is what
-# keeps the prompt's size a constant.
+# Bound the size of the single prompt argument. Above this limit, pass the diff by path.
 INLINE_CHANGES_MAX = 4_000
 
 
@@ -330,29 +226,10 @@ def vault_diff(vault: Path, since: str | None, agent: str | None = None,
 
 
 def mark_running(agent: str, started: str, vault: Path, lane: str) -> None:
-    """Drop a marker saying a wake is in flight and has recorded nothing yet.
-
-    Cleared in a ``finally``, so every Python-level exit removes it --
-    success, an exception, and each of the recorded refusals below. Only a
-    SIGKILL or SIGTERM leaves it, because neither runs ``finally``. A
-    surviving marker therefore means exactly one thing: this wake died with
-    its bookkeeping unfinished, and bin/wake-failed is the only reporter
-    left. See that file for the 2026-08-30 night this exists for.
-
-    It carries the vault path so the reporter needs nothing but the marker.
-    Re-deriving it from agent.json would give the reporter a second way to
-    be wrong, and would resolve the vault as it is at reporting time rather
-    than as the dead run actually had it. Since 2026-09-05 it carries the
-    lane too, for the same reason: "Ada's wake died" and "Ada's
-    market-watch cron died" are different mornings.
-
-    One marker per agent, not per lane, and the run lock is what makes that
-    safe -- two runs of one agent cannot exist, so two markers cannot either.
-
-    Written only AFTER the lock is held. A launch that waited its twenty
-    minutes and gave up never ran, so it must not leave the trace of a run
-    that died.
-    """
+    """Record the lane and the vault used by this run so its failure reporter can
+    finish bookkeeping after an abrupt exit. Normal exits remove the marker.
+    Write it after acquiring the per-agent lock. The lock serializes all lanes
+    and a launch that timed out waiting for it never ran."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     (STATE_DIR / f"{agent}.running").write_text(
         json.dumps({
@@ -402,9 +279,7 @@ def cgroup_memory() -> dict:
         return {}
 
 
-# Seconds this run waited for its agent lock and a run slot, set once the
-# wait is over (since 2026-10-13). `ts` is stamped before the wait, so
-# without this a wake held up by a full box looked like a wake that ran long.
+# The run timestamp precedes admission. Record wait time separately from execution.
 LOCK_WAIT_S: float | None = None
 # Set by run() when the lane's record says it is not enabled (or is a done
 # one-off): the fire is logged as skipped, not as a run.
@@ -858,14 +733,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
                          "lane": lane, "detail": why})
         return 0
 
-    # The size limit is a warning, never a refusal (the owner, 2026-11-08:
-    # runtime mechanisms are for capacity and recovery, never permission;
-    # this wake applied it on 2026-11-18). Until then an over-limit lane file
-    # refused the wake from 2026-09-11 -- the wake, the one run whose work is
-    # trimming that file -- and one persona's _reflection.md at 10,009
-    # characters kept it dark two nights running. The file loads whole (the
-    # append-file route has no cap near 10,000; see lib/loam_memory.py) and
-    # the failure log and comms say so, as the nightly lane check's do.
+    # The lane must still run to trim its own files. Report oversize input and load it whole.
     size = len(lane_path.read_text(encoding="utf-8"))
     if size > LIMIT_CHARS:
         reason = f"{lane}: " + over_limit_reason(
@@ -873,11 +741,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
         print(f"preflight warning: {reason}", file=sys.stderr)
         record_failure(agent, vault, reason)
     elif near_limit(size):
-        # The earlier warning (2026-09-07). The file that grows every night
-        # is told while there is still room to act; the log line is the
-        # whole of it -- no comms line, no refusal, once a night -- and the
-        # wake runs exactly as it would have. The number lives beside the
-        # limit in lib/loam_memory.py.
+        # Approaching the limit produces a log warning while the lane can still act.
         notice = near_limit_reason(lane_file, size, lane_path)
         print(f"preflight warning: {notice}", file=sys.stderr)
         record_notice(agent, vault, notice, key=f"`{lane_file}`")
