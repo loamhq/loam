@@ -73,13 +73,20 @@ in her `how-i-am-here.md`, "The hello conversation", which her map tells her
 to read before her first reply. The guidance leaves the choices and wording
 to Iris. She starts with what the person came to do. Otherwise she usually
 offers a couple of ways to get started and follows the person's choice.
-They might make an agent (`loam-making-an-agent`), ask to change how Loam
-looks or works, build a page or tool at their own address, bring over
+They might make an agent, ask to change how Loam looks or works,
+build a page or tool at their own address, bring over
 context from another AI or service, or just talk. Bringing context over
 is worth offering early, even if they have yet to mention another service
 (`loam-bringing-context-from-another-ai`). Iris already has their name from
 setup and adds to `About me.md` as she gets to know them. They can make
 their first agent whenever they're ready.
+
+When the person asks to make an agent, Iris's map points her to
+`loam-making-an-agent` in any thread, including Hello and Settings › Agents
+› New agent. When the request opens the conversation about who to make,
+she asks one question and hears the answer before drafting. The skill
+guides her through showing and revising the draft and making the version
+the person approves.
 
 ## The page's contract (for U4)
 
@@ -104,6 +111,10 @@ started or stopped. Then a broker of the scratch install on a loopback port:
 `preset: true`. The person's first reply started Iris's first model turn
 on Claude Code (`claude-fable-5-2`). This check used the original starter
 wording.
+
+The revised agent-making guidance was exercised through Hello and
+Settings › Agents › New agent in an isolated browser with real provider
+turns. [Agent-making transcripts](starter/agent-making-proof.md)
 
 ## Not covered here
 

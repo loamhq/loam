@@ -101,6 +101,11 @@ def main() -> int:
           ("`how-i-am-here.md`" in (ws / "map.md").read_text(),
            "`nights.md`" in (ws / "map.md").read_text(),
            "About me.md" in (ws / "nights.md").read_text()), (True, True, True))
+    making_skill = "loam-making-an-agent"
+    check("her map points to the installed agent-making skill for any thread",
+          (f"`{making_skill}`" in (ws / "map.md").read_text(),
+           loam_skills.seen_by(ws).get(making_skill)),
+          (True, ("loam", loam_skills.loam_dir() / "skills" / making_skill)))
     # The workspace loading map supplies the path to the owner's page.
     check("the owner's shared page is made, in this install's workspaces",
           loam_loading.owner_page(), lc.WORKSPACES / "_shared" / "owner.md")

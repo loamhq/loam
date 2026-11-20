@@ -69,6 +69,10 @@ in order when the service returns.
 
 On a fresh install the owner lands in Hello with Iris. Loam posts a greeting
 as Iris using the name from setup, and Iris takes over on the first reply.
+When the owner starts designing an agent in Hello or any other thread, Iris
+asks one question about what they're looking for and hears the answer
+before drafting.
+
 Hello’s board starts with six things to try in any order. Iris mentions it
 once, helps with what the owner came for, and offers an idea when it fits.
 As they try things she ticks the cards in their words. After a quiet week
