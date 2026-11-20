@@ -65,6 +65,16 @@ with tempfile.TemporaryDirectory() as td:
     (repo / path).write_text('"""Internal catalog."""\n' + definition)
     old = commit()
     check("unread internal module doc", {path: '"""Static catalog."""\n' + definition}, old, set())
+    (repo / entry).write_text('from loam_math import __doc__ as description\nprint(description)\n')
+    old = commit()
+    check("module documentation imported under a different name",
+          {path: '"""Help read by another module."""\n' + definition}, old, host)
+    (repo / entry).write_text(script)
+    old = commit()
+    (repo / path).write_text('@staticmethod\n' + definition)
+    decorated = commit()
+    check("decorator can consume function metadata", {path: '@staticmethod\n' + prose.replace('# Records.\n', '')},
+          decorated, host)
     check("unparseable source", {path: "return 1\n"}, old, host)
     (repo / path).write_text(definition)
     old = commit()
@@ -73,6 +83,15 @@ with tempfile.TemporaryDirectory() as td:
     assert services.selected({"host_revision": old, "api_revision": old}, new) == host
     (repo / path).unlink()
     (repo / path).symlink_to("elsewhere")
+    new = commit()
+    assert services.selected({"host_revision": old, "api_revision": old}, new) == host
+    (repo / path).unlink()
+    (repo / path).write_text(definition)
+    (repo / entry).write_text("import math, loam_math\n")
+    old = commit()
+    check("second module in an import list", {path: definition.replace("return 1", "return 2")}, old, host)
+    old = run("rev-parse", "HEAD")
+    (repo / path).rename(repo / "retired-module")
     new = commit()
     assert services.selected({"host_revision": old, "api_revision": old}, new) == host
     check("unit template", {"systemd/session/" + services.HOST: "# unit\n"}, new, host)

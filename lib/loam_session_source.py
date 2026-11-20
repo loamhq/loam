@@ -56,19 +56,27 @@ def reads_module_filenames(node, parents):
     if not isinstance(method, ast.Attribute) or not isinstance(call, ast.Call):
         return False
     if method.attr == "get" and len(call.args) == 1 and isinstance(call.args[0], ast.Constant):
-        return call.args[0].value == "__main__"
-    sequence = parents.get(call)
-    loop = parents.get(sequence)
-    if not (method.attr == "values" and isinstance(sequence, ast.Call)
-            and isinstance(sequence.func, ast.Name) and sequence.func.id == "list"
-            and isinstance(loop, ast.For) and loop.iter == sequence and isinstance(loop.target, ast.Name)):
-        return False
-    # A loop variable survives its loop. Check every load in the containing function.
-    scope = loop
+        assign = parents.get(call)
+        if (call.args[0].value != "__main__" or not isinstance(assign, ast.Assign)
+                or len(assign.targets) != 1 or not isinstance(assign.targets[0], ast.Name)):
+            return False
+        variable = assign.targets[0].id
+        scope = assign
+    else:
+        sequence = parents.get(call)
+        loop = parents.get(sequence)
+        if not (method.attr == "values" and isinstance(sequence, ast.Call)
+                and isinstance(sequence.func, ast.Name) and sequence.func.id == "list"
+                and isinstance(loop, ast.For) and loop.iter == sequence
+                and isinstance(loop.target, ast.Name)):
+            return False
+        variable = loop.target.id
+        scope = loop
+    # A binding can outlive the statement that introduces it.
     while scope in parents and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
         scope = parents[scope]
     for use in ast.walk(scope):
-        if isinstance(use, ast.Name) and use.id == loop.target.id and isinstance(use.ctx, ast.Load):
+        if isinstance(use, ast.Name) and use.id == variable and isinstance(use.ctx, ast.Load):
             read = parents[use]
             if not (isinstance(read, ast.Call) and isinstance(read.func, ast.Name)
                     and read.func.id == "getattr" and len(read.args) >= 2 and read.args[0] == use
@@ -77,18 +85,40 @@ def reads_module_filenames(node, parents):
     return True
 
 
-def direct_calls_only(rev, closure, owner, names):
+def import_trees(rev, entry, prefix):
+    """Read every static runtime import in this Git tree, including multi-name imports."""
+    trees = {}
+    pending = [prefix + entry]
+    while pending:
+        path = pending.pop()
+        if path in trees:
+            continue
+        text = update.show(rev, path)
+        tree = ast.parse(text) if text is not None else None
+        trees[path] = tree
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module] if node.module else []
+            else:
+                continue
+            for module in modules:
+                if module.startswith("loam_") and module.isidentifier():
+                    pending.append(prefix + "lib/" + module + ".py")
+    return trees
+
+
+def direct_calls_only(trees, owner, names):
     """Trace simple named imports. Treat namespace escapes and reflection as observable."""
     module = PurePosixPath(owner).stem
     functions = names - {None}
     namespaces = {module}
-    trees = {}
-    for path in closure:
-        text = update.show(rev, path)
-        if text is None:
+    for path, tree in trees.items():
+        if tree is None:
             return False
-        tree = ast.parse(text)
-        trees[path] = tree
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and any(a.name in functions for a in node.names):
                 namespaces.add(PurePosixPath(path).stem)
@@ -103,8 +133,16 @@ def direct_calls_only(rev, closure, owner, names):
             if isinstance(n, ast.Import) and any(
                     a.name.split(".")[0] in {"inspect", "gc", "pydoc", "doctest"} for a in n.names):
                 return False
-            if isinstance(n, ast.ImportFrom) and n.module in {"inspect", "gc", "pydoc", "doctest"}:
-                return False
+            if isinstance(n, ast.ImportFrom):
+                imported = {a.name for a in n.names}
+                if (n.module in {"inspect", "gc", "pydoc", "doctest"}
+                        or (n.module == module and None in names and "__doc__" in imported)
+                        or (n.module == "sys" and "modules" in imported)
+                        or (n.module == "importlib" and "import_module" in imported)
+                        or (n.module == "builtins" and imported & {
+                            "globals", "locals", "vars", "getattr", "hasattr", "eval", "exec",
+                            "__import__", "help"})):
+                    return False
             if isinstance(n, ast.Name) and n.id in {"getattr", "hasattr"} and n not in calls:
                 return False
             if isinstance(n, ast.Name) and n.id in {
@@ -136,7 +174,7 @@ def direct_calls_only(rev, closure, owner, names):
     return True
 
 
-def same_python(old, target, path, closure, prefix):
+def same_python(old, target, path, trees, prefix):
     """Skip replacement only for equivalent regular files."""
     try:
         before, after = source(old, path), source(target, path)
@@ -149,6 +187,6 @@ def same_python(old, target, path, closure, prefix):
             return False
         changed_docs = {n for n in old_docs.keys() | new_docs.keys()
                         if old_docs.get(n) != new_docs.get(n)}
-        return not changed_docs or direct_calls_only(target, closure, path, changed_docs)
+        return not changed_docs or (path in trees and direct_calls_only(trees, path, changed_docs))
     except (SyntaxError, UnicodeError, ValueError, LookupError, RecursionError, tokenize.TokenError):
         return False

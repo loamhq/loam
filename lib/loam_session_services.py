@@ -1,6 +1,7 @@
 """Replace the API independently; hold admission closed across a host replacement."""
 from contextlib import nullcontext
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -36,7 +37,9 @@ def selected(view, target):
         old = view.get(key + "_revision")
         if not old:
             raise Deferred(f"the running {key} has no revision")
-        changed = set(update.changed_files(old, target))
+        # A move out of the closure still removes a file that the process loaded.
+        delta = update.git("diff", "--no-renames", "--name-only", "-z", old, target, text=False)
+        changed = {os.fsdecode(p) for p in delta.stdout.split(b"\0") if p}
         if not changed:
             continue
         prefix = update.prefix()
@@ -47,13 +50,15 @@ def selected(view, target):
         if not any(p.startswith(prefix + "lib/") or p == prefix + entry for p in changed):
             continue
         try:
-            closure = update.import_closure(old, entry) | update.import_closure(target, entry)
+            current = source.import_trees(target, entry, prefix)
+            previous = source.import_trees(old, entry, prefix)
+            closure = current.keys() | previous.keys()
             if unit == HOST and prefix + "lib/loam_pins.py" in changed:
                 closure.add(prefix + "lib/loam_pins.py")
-            if any(not source.same_python(old, target, path, closure, prefix)
+            if any(not source.same_python(old, target, path, current, prefix)
                    for path in sorted(closure & changed)):
                 chosen.add(unit)
-        except UnicodeError:
+        except (SyntaxError, UnicodeError, ValueError, RecursionError):
             chosen.add(unit)
     return chosen
 
