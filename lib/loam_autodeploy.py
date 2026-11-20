@@ -1,51 +1,7 @@
-"""A project job that deploys itself when it lands (since 2026-11-12).
-
-Until this, every loam-ui change the owner asked for took two engineer jobs:
-the page job landed on `main`, then a separate Loam job ran
-`sudo -n bin/deploy loam-ui up <commit>`, because a project engineer's unit
-carries NoNewPrivileges and its sandbox has no Docker socket. That second
-job cost about six minutes and a round through a persona per fix.
-
-Now a brief may carry `deploy: true` (the brief tool's `deploy` parameter,
-written into the brief's header as `deploy: <app>`). After the launcher has
-merged the branch, passed the tests and pushed, it deploys the commit that
-landed with the same command a deploy job ran, in the form that never goes
-backwards:
-
-    sudo -n <root>/bin/deploy <app> up <sha> --forward-only
-
-**An explicit field, not the involvement's prose.** "Land and deploy", "Go
-and do it ... after it is live", "deploy once it's green" -- a parser of
-the owner's quoted words either misses a phrasing or fires on "do not deploy".
-`Read-only` is the one dial read from the involvement, and it is matched at
-the start of the string only for that reason. A deploy is a live change, so
-the persona sets it on purpose and the receipt shows it was set.
-
-**Who runs it.** Not the job's unit: NoNewPrivileges there is what keeps
-sudo from the engineer, and it holds for this launcher code too. The deploy
-runs in a transient user unit of its own (`systemd-run --user --wait
---pipe`), started by the box user's user manager, which does not inherit the
-flag -- the same way every engineer job's unit is started. The session is
-over by then: what runs is this file's fixed command line with a sha the
-landing produced, never anything the engineer wrote.
-
-**Which app.** The deployment record named after the project
-(`deploy/<project>/deploy.toml`) that runs a container, or, for Loam's own
-app (since 2026-11-16), a unit: `loam-ui`'s jobs deploy `loam-ui`. Staging
-(`loam-ui-next`) is never deployed this way: a brief that says "staging
-first" sets no `deploy`, lands only, and a persona asks for staging as a
-Loam deploy job, as before.
-
-**Two landings close together.** Each landing merges onto `main` as it is,
-so the later landing's sha carries the earlier one. `--forward-only` makes
-whichever deploy runs second a no-op when what runs already contains its
-commit, under the app's live lock, so the earlier commit is never put back.
-
-**A failed deploy never fails the landing.** `main` has already moved and
-been pushed; the deploy's outcome is reported in the receipt beside it.
-bin/deploy leaves what runs alone when the build fails, and puts the
-previous image (a container) or release (Loam's own app) back when the new
-one is not healthy.
+"""Deploy the landed revision when requested by the brief or project preference. Use
+the project's deployment record and the forward-only deploy path so a late job
+cannot roll back a newer landing. Record deploy failures separately from the
+already-pushed merge.
 """
 
 from __future__ import annotations

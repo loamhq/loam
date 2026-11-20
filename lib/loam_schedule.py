@@ -95,12 +95,11 @@ CONVERSATION_GRACE = timedelta(minutes=3)
 # Who may change a record. A persona is named by its agent name and may touch
 # its own records only. "loam" is the runtime itself (a one-off marked done).
 SYSTEM_ACTORS = tuple(dict.fromkeys((lc.OWNER_ID, *lc.LEGACY_OWNER_IDS, "engineer", "loam")))
-# `app` is the owner's page, through the broker's routes (2026-10-14).
+# The app lane records owner changes via the broker.
 LANES = ("conversation", "wake", "cron", "reconciler", "engineer", "app",
          "unknown")
 
-# The owner's defaults (design, 2026-10-14): a wake that schedules its own next
-# wake is the cost loop these exist to prevent.
+# Cap pending one-offs so a wake cannot repeatedly schedule its own next run.
 ONE_OFF_MAX_PENDING = 5
 ONE_OFF_MIN_AHEAD = timedelta(minutes=10)
 ONE_OFF_MAX_AHEAD = timedelta(days=30)
@@ -902,9 +901,7 @@ def _apply(agent: str, wanted: dict[str, str | None],
     return list(merged.values())
 
 
-# ---------------------------------------------------------------------------
-# The migration from `approved:` (2026-10-14), idempotent.
-# ---------------------------------------------------------------------------
+# Migrate legacy approvals through the normal change path.
 
 def reflection_record(hhmm: str) -> str:
     """A new persona's daily reflection: its time, on, and Loam's default."""

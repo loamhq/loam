@@ -208,13 +208,11 @@ def check_yes(by: str | None, thread: str | None, yes: str | None, *,
               after: str | None = None, window: timedelta | None = None,
               used: set[tuple[str, str]] | None = None,
               after_message: tuple[str, str | None] | None = None) -> dict | None:
-    """None when the call is the person's own (no ``by``). For an agent's
-    call: the person's message ``yes`` in ``thread``, which the agent is a
-    member of, written at or after ``after`` or within ``window`` of now,
-    and not taken before. ``after_message`` (2026-11-17) is ``(thread, the
-    id of its newest message when the draft's revision was written)``: a yes
-    in that thread must come after it, which decides what a one-second
-    stamp cannot. Answers ``{"thread", "message", "at"}``."""
+    """Verify a fresh, unused owner message in a thread the requesting agent belongs to.
+    When a revision records the latest message ID, require a later message even if their
+    timestamps are identical. Return the thread, message and time, or None for the
+    owner's own call.
+    """
     if not by:
         return None
     if not thread or not yes:

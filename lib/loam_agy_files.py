@@ -1,47 +1,7 @@
-"""Antigravity's per-conversation files, cleared after a week: an engineer
-job's a week after the job (2026-11-15), every other conversation once it has
-been idle a week (2026-11-16, ``clear_idle``).
-
-The owner, 2026-11-15 20:53 PT, on clearing Antigravity's per-conversation
-files a week after a job: "Sounds good." Every ``agy`` conversation leaves,
-under ``~/.gemini/antigravity-cli/`` (1.5.9, read 2026-11-15):
-
-- ``conversations/<id>.db``: the conversation itself, which a continuation
-  (``--conversation <id>``) resumes;
-- ``brain/<id>/``: its working files;
-- ``implicit/<uuid>.pb``: opaque files, named by no conversation (14 for 11
-  conversations when read), so they are tied to a job by when they appeared
-  (``attribute``) and never by name;
-- rows in ``conversation_summaries.db`` (``conversation_summaries``,
-  ``conversations_fts``, ``conversation_parents``): the ``/resume`` index.
-
-Tested by the lead persona 11-15: the CLI has no memory tools and nothing
-carries across conversations, so these are transcripts and an index, not a
-memory. An engineer job's are cleared ``KEEP_DAYS`` after the last job that
-names its conversation finished (a continuation appends to its parent's
-conversation, so a chain keeps it until a week after its last job), by
-``bin/clear-agy-files``, which the nightly housekeeping runs (``clear``,
-loam-tmp-sweep.service; until 2026-11-19 drift-watch's step, and before that
-the provider follower's last). A conversation no job names
-(a persona's thread session, a probe, the owner's) was never cleared until
-2026-11-16; since then it is cleared once nothing has touched it for a week,
-and a thread that comes back to it starts a fresh session (see
-``clear_idle`` below). The provider-memory check
-(lib/loam_provider_memory.py) leaves the same files out of its counts, and
-since 2026-11-16 says no growth of these per-conversation stores at all, a
-persona's conversation's included: only a new kind of entry under the tree.
-
-The reviewer's runs on Antigravity (since 2026-11-15, bin/review) are
-cleared the same way: its run directories (``<reviewer state>/runs/<id>``)
-are job directories here, each with a ``runtime`` file, an
-``antigravity.json`` and its ``run.json``, whose ``finished`` is the
-verdict's time.
-
-A job's record of its files is ``antigravity.json`` in its job directory,
-written by bin/engineer-job when the session ends: the conversations it ran
-(a quota retry is a second one) and the implicit files attributed to it. A
-job from before that file (the 11-15 trial's) is read from its
-``session-id``.
+"""Retain an engineer job's or review's Antigravity conversation for a week after the
+run. Clean other conversations after a week idle. Attribute opaque implicit files by
+the job's recorded file set. A continuation needs the conversation database until
+retention expires.
 """
 
 from __future__ import annotations

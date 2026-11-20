@@ -1,14 +1,6 @@
-"""The static systemd units, rendered for this install.
-
-``systemd/`` holds templates: every path in them is a token, filled from
-``lib/loam_config.py``. ``bin/gen-units`` writes the rendered units into the
-user unit directory, and ``bin/check-drift`` compares the installed ones
-against the same rendering, so the template is the truth and an installed
-unit is the drift. On a box whose config carries the values the units were
-written with, the rendering is byte-identical to the old static file.
-
-Added 2026-11-14 (first release, job L1). The tokens, longest path first so
-that a shorter one never eats a longer one's prefix:
+"""Render static user unit templates from installation paths. Generation and drift
+checks use the same bytes. Replace longer path tokens first to preserve nested
+paths.
 """
 
 from __future__ import annotations
@@ -50,8 +42,9 @@ def render(text: str) -> str:
 
 
 def templates(root: Path | None = None) -> list[Path]:
-    """The user units this repository ships (not ``system/``): services,
-    timers, and any `.path` a release ships (none since 2026-11-19)."""
+    """List the shipped user service, timer and path templates. System-level units are
+    handled separately.
+    """
     base = root or TEMPLATES
     return sorted(p for p in base.iterdir()
                   if p.suffix in (".service", ".timer", ".path") and p.is_file())

@@ -1,4 +1,4 @@
-"""Whose name a project's commits and pull requests carry (since 2026-10-06).
+"""Whose name a project's commits and pull requests carry.
 
 By default a project's commits are the engineer's (`<name> engineer
 <engineer+<name>@noreply.local>`, set by ``bin/provision`` in the checkout) and

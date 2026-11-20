@@ -1,56 +1,7 @@
-"""A result for a run with no thread: a new run of the persona that asked
-(2026-11-19, batch B step 3).
-
-Every brief returns at once. A brief from a thread gets its result back as
-a turn in that thread (the broker's, lib/loam_waiters.py). A brief from a
-wake, a cron, or a result run has no thread, so its result comes back by
-the route this file names: when the job has a verdict, ``bin/wake <workspace>
---results`` starts, takes the agent's run lock and the box's memory admission
-like any run, and hands the result to the persona as the input of a new run.
-
-**Resumed when it can be.** The asking run's CLI session is resumed
-(``claude -p --resume <id>``: the same session id, the whole run in front of
-the persona, measured 2026-11-19 on 2.1.328), with the asker's own lane
-loaded again (its cron's file, or ``_reflection.md``). bin/wake gives every
-Claude run a ``--session-id`` and ``LOAM_SESSION_ID`` for this, and the
-launcher records it in the brief (``loam_waiters.caller``).
-
-**Fresh when it cannot**: no session recorded (a Codex wake keeps its thread
-id where the brief cannot read it; a conversation the broker could not place
-in a thread; a record from before this change), the session's file is gone,
-or the CLI refused the resume. The fresh run's input (``fresh_text``) is the
-result, what the asker was doing (its lane, the instruction file that lane
-runs, when it asked), the brief the persona wrote, word for word up to
-``BRIEF_CHARS``, and the brief's path. Never a run that resumes a session
-the broker may be holding.
-
-**Once, and in order.** One drain per agent at a time (the unit
-``loam-results-<agent>``; the run lock besides), oldest verdict first, one
-run per result. The record is marked ``given`` just before the model starts
-and removed when the run ends; a ``given`` record found later belonged to a
-run that died after the input went in, and is logged and reported, not
-given twice (the same rule as a thread's sent result, step 2).
-
-**The system's facts** (lib/loam_attention.py, 2026-11-19) ride the same
-drain: when this agent is the system persona, every pending fact is heard
-in one fresh run after its results.
-
-**Started from three places**, none of them the broker: the job's own
-launcher the moment it writes the verdict (``kick_for``), the recovery
-sweep every five minutes (``kick_all``: a kick that met a drain still
-running, a drain that could not get the lock), and the broker when a
-thread's result finds its thread gone (``to_headless``).
-
-**No identity gate.** A result run does not ask the canary question a wake
-asks before it starts: it is one more turn of a session that already ran
-under that gate (or, fresh, of a lane that does on its next fire), and the
-question would cost a model call per result. Its lane's file is loaded as
-the asker's was.
-
-**Silent.** The run posts nothing; the persona speaks only if it chooses to,
-by the ordinary routes. Its record is its row in ``logs/wake-<agent>.jsonl``
-(lane ``result:<job>``) and a fire in the schedule log, separate from the
-run that asked.
+"""Deliver a threadless job result to the asking persona in its original lane. Resume
+its session when possible and fall back to a fresh run. Serialize delivery under the
+run lock and memory admission. A failed delivery remains queued. The persona decides
+whether to post anything.
 """
 
 from __future__ import annotations
