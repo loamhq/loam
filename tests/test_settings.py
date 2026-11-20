@@ -23,10 +23,7 @@ os.environ["LOAM_HOST_SETTINGS"] = str(TMP / "broker" / "settings.json")
 # names another id (broken, so not a theme), a folder with no manifest, a
 # stray file; and the Yours layer with a theme of its own.
 THEMES, USER_THEMES = TMP / "themes", TMP / "user-themes"
-# Latte's options as loam-ui's PLUGIN.md gives them (loam-ui 6100882,
-# 2026-11-12), and Latte a plugin-shaped folder (PLUGIN.md and theme.css) as
-# loam-ui ships it since 0adf959; the rest keep the older manifest.json shape,
-# which the host still reads.
+# Use the shipped theme's option schema and an isolated plugin directory.
 LATTE_OPTIONS = [
     {"id": "agent-colours", "label": "Agent colours",
      "choices": [{"id": "palette", "label": "Palette"},
@@ -53,9 +50,7 @@ CORE_TABLE.write_text("const slug = /^[a-z][a-z0-9-]*$/\nconst coreOptions = {\n
                       + "".join(f"  '{o['id']}': [{', '.join(repr(c['id']) for c in o['choices'])}],\n"
                                 for o in LATTE_OPTIONS) + "}\n")
 os.environ["LOAM_UI_CORE_OPTIONS"] = str(CORE_TABLE)
-# loam-ui's appearance handoff (docs/appearance-settings.registry.json): the
-# host reads the modes and the location's sources from it, never a copy.
-# This fixture is loam-ui's as of 29a1506 (Sun mode, 2026-11-13).
+# Read modes and locations from the app's appearance registry.
 HANDOFF = TMP / "appearance-settings.registry.json"
 HANDOFF_ROWS = [
     {"key": "appearance.location", "type": ["object", "null"], "default": None,
@@ -66,7 +61,7 @@ HANDOFF_ROWS = [
     *[{"key": f"appearance.{k}.mode", "type": "string",
        "enum": ["light", "dark", "sun", "system"], "default": "system"}
       for k in ("phone", "desktop")],
-    # The Sun transition (loam-ui's handoff of 2026-11-16).
+    # Sun transition
     *[{"key": f"appearance.{k}.transition", "type": "string",
        "enum": ["fast", "normal", "long"], "default": "normal"}
       for k in ("phone", "desktop")]]
@@ -153,9 +148,7 @@ else:
                 print(f"NOTE  the relay now passes {r}: move its line from "
                       f"PAGE_RELAY_AHEAD into PAGE_RELAY")
 
-    # Appearance (2026-11-11): loam-ui states the four keys it reads and
-    # writes in a machine-readable handoff; the registry and the broker's
-    # store must agree with it key for key, value for value.
+    # Validate the appearance settings against the app's handoff.
     handoff = Path(source) / "docs" / "appearance-settings.registry.json"
     check("loam-ui's appearance handoff is there to read", handoff.is_file(),
           str(handoff))
@@ -186,10 +179,8 @@ else:
             real_rows = loam_plugins.listing()["plugins"]
             live = {e.key: e for e in settings.option_entries()}
             real_declared = appearance.declared()
-            # Validated while the source's theme folders are the ones in
-            # force: `validate` reads the installed themes, and the
-            # fixture's hold only latte (2026-11-13, loam-ui 7f70057 shipped
-            # five more themes with options and this read the fixture's).
+            # Keep the theme directory override active during validation, which reads installed
+            # themes.
             refused = []
             for theme, opts_ in real_cat.items():
                 for opt, spec in opts_.items():
@@ -252,13 +243,12 @@ else:
               declared_opts == set(real_cat) and real_cat, (declared_opts, real_cat))
         check("every choice of every option loam-ui's themes declare validates",
               not refused, refused[:3])
-        # The app is Loam's `app/` folder since 2026-11-16: the shipped layer
-        # is wherever the box's app source is (lib/loam_plugins.ui_checkout).
+        # Use the app source as the shipped theme layer.
         import loam_plugins as _lp  # noqa: PLC0415
         ui = (_lp.ui_checkout() or Path("/nonexistent")) / "public"
         check("on the box the shipped layer is the loam-ui checkout's theme "
               "and plugin folders",
-              # and, since 2026-11-14 (L9), the runtime's own plugins/
+              # Include the runtime's first-party plugins.
               dirs[:2] == [ui / "themes", ui / "plugins"]
               and dirs[2:] == [Path(settings.lc.ROOT) / "plugins"]
               , dirs)
@@ -557,7 +547,7 @@ async def main():
               base(body)["desktop"] == {"mode": "light", "size": 90,
                                         "theme": "latte"}, body)
 
-        # -- Theme options (2026-11-12) ---------------------------------------
+        # Theme options
         def opts(colours="palette", shapes="distinct", mug="on", inside="pour"):
             return {"latte": {"agent-colours": colours, "agent-shapes": shapes,
                               "latte-mug": mug, "latte-inside": inside}}
@@ -685,11 +675,7 @@ async def main():
         check("the refusal names the one theme with options in a sentence",
               said and said.endswith("(the only installed theme with options "
                                      "is latte)"), said)
-        # The core table is read from loam-ui's file each time, not copied: a
-        # table without a choice Latte offers makes Latte's manifest one the
-        # page's loader refuses, so no theme has options (the 2026-11-12 bug,
-        # when the host's copy lacked `latte-art`), and the table restored
-        # brings them back with no change here.
+        # Read the app's current core table on every validation.
         table = CORE_TABLE.read_text()
         CORE_TABLE.write_text(table.replace(", 'latte-art'", ""))
         os.utime(CORE_TABLE, ns=(1, 1))
@@ -762,7 +748,7 @@ async def main():
         check("a cron may set appearance (it is a setting, not an end)",
               out.get("value") == 90, out)
 
-        # -- Sun mode and the saved place (2026-11-13; loam-ui 29a1506) -------
+        # Sun mode and saved location
         home = {"latitude": 37.8, "longitude": -122.4, "source": "geolocation",
                 "timeZone": "America/Los_Angeles"}
         status, body = await http(port, "GET", "/v1/settings/appearance")
@@ -890,7 +876,7 @@ async def main():
         out2 = await cli(port, "set", "appearance.desktop.mode", "light")
         check("...and the modes go back", out.get("value") == "system"
               and out2.get("value") == "light", (out, out2))
-        # -- The Sun transition (2026-11-16; loam-ui's sun-shift.js) ----------
+        # Sun transition
         status, body = await http(port, "GET", "/v1/settings/appearance")
         check("a reading carries each kind's transition, normal by default",
               body["phone"]["transition"] == "normal"
@@ -1005,9 +991,7 @@ async def main():
 
 asyncio.run(main())
 
-# The daily reflection is turned off only on the owner's word (2026-11-19):
-# schedule.enabled carries the cited message to the route, and a plain
-# true/false as before.
+# Disabling reflection requires a cited owner instruction.
 _on = settings.entry("schedule.enabled")
 check("schedule.enabled: a plain value is the switch",
       _on.body(False, "") == {"enabled": False})

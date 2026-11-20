@@ -1255,10 +1255,7 @@ class Server:
             await writer.drain()
             return
 
-        # Plugins (2026-11-12): the plugin host's one list, on and off,
-        # install from a link (two calls: what it declares, then a confirm),
-        # remove, and a plugin's page files for the page's loader. Every rule
-        # is lib/loam_plugins.py; docs/plugins.md is the interface.
+        # Plugin installs first show the manifest and then require confirmation. See docs/plugins.md.
         if parts == ["v1", "plugin-updates"]:
             import loam_plugin_updates
             if method not in ("GET", "POST"):
@@ -1272,10 +1269,7 @@ class Server:
             await self.plugins_route(method, parts[2:], payload, writer)
             return
 
-        # The marketplace (2026-11-17): the list Settings › Plugins draws
-        # above "Install from a link". A read; an install from it is the
-        # plugins route's, by the entry's link. Never an error for a list
-        # that is not there: lib/loam_marketplace.py says empty.
+        # Install a Market entry through the plugins route using its link. A missing list reads as empty.
         if parts == ["v1", "marketplace"]:
             if method != "GET":
                 writer.write(response(405, {"error": "use GET for the marketplace's list"},
@@ -1286,10 +1280,7 @@ class Server:
                 writer.write(response(200, body, "Cache-Control: no-store\r\n"))
             await writer.drain()
             return
-        # A listing's own page (2026-11-18, Settings › Market): what the
-        # plugin at its link declares, read as an install's first call reads
-        # it (nothing written), and its icon, covers, README pictures and
-        # theme.css for the Market to draw. Reads only; installing is the plugins route's.
+        # Read a listing's manifest and display assets without installing it.
         if parts[:2] == ["v1", "marketplace"] and len(parts) >= 3:
             nocache = "Cache-Control: no-store\r\n"
             try:
@@ -1318,12 +1309,7 @@ class Server:
             await writer.drain()
             return
 
-        # Shared keys (2026-11-18): Settings › Connections › API keys. API keys by provider,
-        # entered once; each plugin that declared a provider uses its shared
-        # key unless it has its own. Every rule is lib/loam_keys.py;
-        # docs/plugins.md, "Keys", is the interface. An agent may change them
-        # with `by` (the owner, 2026-11-10: every setting is an agent's too);
-        # no route here ever answers a whole value.
+        # Use the plugin's own key before its shared provider key. These routes never return a whole key.
         if parts[:2] == ["v1", "keys"]:
             nocache = "Cache-Control: no-store\r\n"
             rest = parts[2:]
@@ -3155,8 +3141,7 @@ class Server:
                     raise BrokerError(405, "use GET, PATCH or DELETE for a plugin")
                 writer.write(response(200, body, nocache))
             elif tail[1:] == ["restart"]:
-                # A server plugin's restart (2026-11-13): that plugin's own
-                # unit, fresh; lib/loam_plugin_servers.py. Never the broker.
+                # Restart only the plugin's unit.
                 if method != "POST":
                     raise BrokerError(405, "restart a plugin's server with POST")
                 by = author(payload)
@@ -3166,10 +3151,7 @@ class Server:
                       file=sys.stderr, flush=True)
                 writer.write(response(200, body, nocache))
             elif tail[1:2] == ["secrets"] and len(tail) in (2, 3, 4):
-                # A key the person pastes (2026-11-14, first release L9): the
-                # plugin's `settings.secret`, checked on entry and kept in its
-                # private secrets.env, never in Yours. lib/loam_contributions.py.
-                # A credential is the person's own: an agent's call is refused.
+                # Only the owner can set or check a credential. Store it in the plugin's private secrets.env.
                 import loam_contributions as contrib  # noqa: PLC0415
                 pid = tail[0]
                 if author(payload) is not None:
@@ -3192,10 +3174,7 @@ class Server:
                     elif tail[3:] == ["check"] and method == "POST":
                         body = await asyncio.to_thread(contrib.recheck_secret, pid, tail[2])
                     elif tail[3:] == ["value"] and method == "GET":
-                        # For the app's own server, which makes the provider's
-                        # call; the page's relay must never pass this route.
-                        # A field of a provider the plugin declared in `keys:`
-                        # (2026-11-18) resolves as shared keys do.
+                        # The app server uses this value to call the provider. The page relay must never expose this route.
                         import loam_keys  # noqa: PLC0415
                         if not await asyncio.to_thread(loam_keys.declares_field, pid, tail[2]):
                             await asyncio.to_thread(contrib._secret_entry, pid, tail[2])
@@ -3213,10 +3192,7 @@ class Server:
                     raise BrokerError(status, str(exc))
                 writer.write(response(200, body, nocache))
             elif tail[1:] == ["settings"]:
-                # A plugin's own settings (2026-11-14, first release L4):
-                # the `settings.entry` values it contributes, which
-                # bin/settings reaches as `plugin.<id>.<key>`.
-                # lib/loam_contributions.py.
+                # bin/settings addresses these entries as plugin.<id>.<key>.
                 import loam_contributions as contrib  # noqa: PLC0415
                 pid = tail[0]
                 if method == "GET":
@@ -3242,9 +3218,7 @@ class Server:
                     raise BrokerError(405, "GET or PATCH a plugin's settings")
                 writer.write(response(200, body, nocache))
             elif tail[1:2] == ["agents"] and len(tail) in (2, 3):
-                # A plugin's per-agent settings (2026-11-13): what it keeps
-                # for each agent and shows on the agent's profile (place
-                # `agent.profile`). lib/loam_plugins.py, `agent_values`.
+                # Expose the plugin's per-agent values on the agent profile.
                 pid = tail[0]
                 agent = tail[2] if len(tail) == 3 else None
                 if agent is not None and agent not in cfg.roster():

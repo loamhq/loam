@@ -443,10 +443,8 @@ for body, says in (
     ok, said = refuses(lambda b=body: P.install(b), says)
     check(f"install refused: {json.dumps(body)[23:80] or '{}'}", ok, said)
 
-# -- every shape a person pastes (2026-11-18) ---------------------------------
-# What the link leaves out is worked out: the newest release, the plugin's
-# folder, or the plugins to pick from; a branch is its commit now, said in a
-# line. Only first calls here: nothing is installed.
+# Resolve supported pasted links and derive missing package information from the
+# source.
 git("branch", "feature/x", C1, cwd=BARE)
 
 
@@ -967,7 +965,7 @@ check("with an origin added: the next change is committed and pushed",
       (done.stderr, (TMP / "autocommit.log").read_text()[-300:]))
 
 
-# -- a theme's options (2026-11-12), held to loam-ui's loader -----------------
+# Theme options
 
 OPT = {"id": "agent-shapes", "label": "Agent shapes",
        "choices": [{"id": "distinct", "label": "Each its own"},
@@ -1065,7 +1063,7 @@ check("theme_options: the themes in force with options, a PLUGIN.md one "
       and [o["id"] for o in cat["poured"]] == ["agent-shapes", "latte-mug"]
       and cat["poured"][0]["choices"][-1]["id"] == "latte-art", (cat, names))
 
-# -- a theme's cover (2026-11-13), held to loam-ui's themeImage ---------------
+# Theme cover
 
 COVER_ROOT = TMP / "covers"
 THEME = {"kind": ["theme"]}
@@ -1139,7 +1137,7 @@ check("files: a Yours theme's cover is served, as image/webp",
       (path, ctype))
 ok, said = refuses(lambda: P.file_for("lit", ["other.webp"]), "")
 check("files: another image beside it is not", ok, said)
-# -- a theme's dark-mode cover (2026-11-13), the light pair's rules ----------
+# Dark-mode cover
 
 got = cover_row("dusk", {"image": "c.webp", "image_position": "10% 20%",
                          "image_dark": "art/c-dark.webp",
@@ -1223,8 +1221,7 @@ check("files: and its light cover beside it", ctype == "image/webp", (path, ctyp
 ok, said = refuses(lambda: P.file_for("evening", ["e.webp"]), "")
 check("files: another image beside them is not", ok, said)
 
-# -- what a plugin says about itself (2026-11-19): description, screenshots,
-# a theme's palette; each wrong one left out with a warning, never broken ---
+# Invalid description, screenshot or palette metadata must be reported.
 
 got = P.read_folder(plugin(COVER_ROOT, "said", {
     "kind": ["extension"], "description": "Listen to your agents instead of reading them.",
@@ -1267,9 +1264,7 @@ ok, said = refuses(lambda: P.file_for("pictured", ["shots", "other.webp"]), "")
 check("files: a picture beside it that it does not name is not", ok, said)
 
 real_themes = (Path(__file__).resolve().parent.parent / "app") / "public" / "themes"
-# Held to the core table those themes ship beside, not this file's fixture:
-# loam-ui 05bcfb8 (2026-11-13) gave five themes `signature` and `face-content`,
-# which the fixture above does not know, and the check read them as broken.
+# Compare shipped theme options with the actual core table.
 real_table = real_themes.parent / "theme-css.js"
 if real_table.is_file():
     os.environ["LOAM_UI_CORE_OPTIONS"] = str(real_table)

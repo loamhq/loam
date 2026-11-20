@@ -104,10 +104,7 @@ def quote_body(kind="comment", quote="The first line", **kw):
 
 
 class WhatALinkReads(unittest.TestCase):
-    """Round 3 of the walk (2026-11-17), the owner's decisions: history is the
-    owner's; a visitor never sees or changes the frontmatter; a group
-    visitor cannot take a name in use here; one's own agent's note is one's
-    own; a suggestion can be withdrawn."""
+    """Share links expose only the document data allowed to their visitors. Revision history belongs to the owner."""
 
     def test_history_and_versions_are_not_found_for_every_mode(self):
         w = World()
@@ -178,10 +175,7 @@ class WhatALinkReads(unittest.TestCase):
 
 
 class VisitorsRoundFour(unittest.TestCase):
-    """Round 4 of the walk (2026-11-17): one identity per browser on a group
-    link, names that are not anyone else's here, the agent's key asked about
-    without being made, a reply answering with its note, a visitor's own
-    `---` block kept clear of the frontmatter."""
+    """Check distinct browser identities, visitor naming, reply attribution and document frontmatter on a group link."""
 
     def browser(self, w, tok, name):
         ans, _ = w.req("POST", tok, "/open", {"password": "right-password"})
@@ -520,9 +514,7 @@ class Limits(unittest.TestCase):
 
 
 class VisitorsRoundFive(unittest.TestCase):
-    """Round 5 (2026-11-17): a group visitor's name does not start with the
-    owner's first name or a persona's, nor say "owner"; and once named, a
-    browser stays that name."""
+    """Keep a group visitor's chosen name bound to its browser and distinct from owner and persona names."""
 
     browser = VisitorsRoundFour.browser
 
@@ -554,10 +546,7 @@ PERSONAS = re.compile(rb"\b(iris|ada)\b", re.I)
 
 
 class AgentsAppearAsOne(unittest.TestCase):
-    """The owner's agents shown to outsiders by their own names, or all as
-    one, "Sam's agent" (2026-11-17): per doc or by default, applied to every
-    answer the door gives, past notes included, while the sidecar and the
-    owner's own view keep who really wrote what."""
+    """Apply the owner's public attribution choice to existing and new notes while preserving actual authors in the private sidecar."""
 
     def busy(self, w):
         """Notes, a reply, a closed suggestion and a save, each by a persona."""
