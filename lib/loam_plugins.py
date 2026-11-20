@@ -1321,8 +1321,7 @@ def added(before: dict | None, after: dict) -> dict:
         return {}
     out: dict = {}
     bt, at = before.get("touches") or {}, after["touches"]
-    hosts = {h.get("host") for h in bt.get("network") or []}
-    new_hosts = [h for h in at["network"] if h["host"] not in hosts]
+    new_hosts = [h for h in at["network"] if h not in (bt.get("network") or [])]
     if new_hosts:
         out["network"] = new_hosts
     for field, order in (("record", RECORD), ("memory", MEMORY)):
@@ -1337,9 +1336,22 @@ def added(before: dict | None, after: dict) -> dict:
         out["overrides"] = new_over
     if after.get("page_code") and not before.get("page_code"):
         out["page_code"] = True
-    for k, v in at.items():
-        if k not in ("network", "record", "memory", "server") and bt.get(k) != v:
-            out[k] = v
+    for key, value in at.items():
+        if key in ("network", "record", "memory", "server"):
+            continue
+        previous = bt.get(key)
+        if isinstance(value, list) and isinstance(previous, list):
+            value = [item for item in value if item not in previous]
+            if value:
+                out[key] = value
+        elif key == "agents" and isinstance(previous, dict) and isinstance(value, dict) and all(
+                isinstance(items, list) and isinstance(previous.get(k, []), list) for k, items in value.items()):
+            delta = {k: [item for item in items if item not in previous.get(k, [])]
+                     for k, items in value.items()}
+            if any(delta.values()):
+                out[key] = delta
+        elif value != previous:
+            out[key] = value
     return out
 
 
@@ -1425,6 +1437,8 @@ def load_list(strict: bool = True) -> dict:
     on = data.get("on") if isinstance(data.get("on"), dict) else {}
     out = {"version": 1, "plugins": plugins,
            "on": {k: v for k, v in on.items() if isinstance(v, bool)}}
+    if isinstance(data.get("update_history"), list):
+        out["update_history"] = data["update_history"]
     if error:
         out["error"] = error
     return out
@@ -1469,7 +1483,8 @@ def fingerprint(folder: Path) -> str | None:
     h, total = hashlib.sha256(), 0
     for dirpath, dirnames, filenames in os.walk(folder):
         dirnames[:] = sorted(d for d in dirnames if d != ".git")
-        for name in sorted(filenames):
+        linked_dirs = [d for d in dirnames if (Path(dirpath) / d).is_symlink()]
+        for name in sorted(filenames + linked_dirs):
             p = Path(dirpath) / name
             rel = p.relative_to(folder).as_posix()
             try:
@@ -1478,7 +1493,7 @@ def fingerprint(folder: Path) -> str | None:
                 else:
                     data = p.read_bytes()
             except OSError:
-                data = b"\0unreadable"
+                return None
             total += len(data)
             if total > HASH_MAX:
                 return None
@@ -1500,6 +1515,62 @@ def _appearance_in_use() -> dict[str, list[str]]:
         if theme:
             used.setdefault(theme, []).append(kind)
     return used
+
+
+def copy_folder(pid: str) -> Path:
+    return yours_root() / "_copies" / pid
+
+
+def update_preference(pid: str, line: dict) -> dict:
+    """The saved preference plus the state of the exact folder it would replace."""
+    folder = yours_root() / pid
+    digest = fingerprint(folder) if folder.is_dir() and not folder.is_symlink() else None
+    edited = not digest or digest != line.get("files")
+    copied = copy_folder(pid).exists()
+    consent = line.get("update_consent") or {}
+    changed = edited or copied
+    approved = bool(digest) and consent == {"files": digest, "copy": copied}
+    paused = (changed and not approved) or line.get("updates_paused", False)
+    return {"auto_update": bool(line.get("auto_update", True) and not paused),
+            "updates_paused": bool(paused), "edited": bool(edited),
+            "custom_copy": copied, "digest": digest}
+
+
+def _remember_pauses(listed: dict) -> None:
+    dirty = False
+    for pid, line in listed["plugins"].items():
+        if not isinstance(line, dict) or not ID.fullmatch(pid) or not line.get("source"):
+            continue
+        pref = update_preference(pid, line)
+        if pref["updates_paused"] and not line.get("updates_paused"):
+            line.update(auto_update=False, updates_paused=True)
+            line.pop("update_consent", None)
+            dirty = True
+    if dirty:
+        _save_list(listed)
+
+
+def set_auto_update(pid: str, on, replace_changes=False) -> dict:
+    _need_id(pid)
+    if not isinstance(on, bool):
+        raise PluginError("`auto_update` is true or false")
+    with _lock:
+        listed = load_list()
+        line = listed["plugins"].get(pid)
+        if not line or (line.get("source") or {}).get("kind") != "link":
+            raise PluginError("Only a Market or link install has automatic updates.", 409)
+        pref = update_preference(pid, line)
+        line.pop("update_consent", None)
+        if on and (pref["edited"] or pref["custom_copy"]):
+            if replace_changes is not True:
+                raise PluginError("The next update replaces changes in the installed folder. "
+                                  "A separate custom copy stays yours. Confirm to resume.", 409)
+            if not pref["digest"]:
+                raise PluginError("Loam cannot verify this folder. Review the next update manually.", 409)
+            line["update_consent"] = {"files": pref["digest"], "copy": pref["custom_copy"]}
+        line.update(auto_update=on, updates_paused=False)
+        _save_list(listed)
+    return one(pid)
 
 
 def _row(folder: Path, layer: str, listed: dict) -> dict:
@@ -1531,8 +1602,11 @@ def _row(folder: Path, layer: str, listed: dict) -> dict:
             row["installed"] = {k: line.get(k) for k in
                                 ("installed_at", "installed_by", "version")}
             row["installed"]["confirmed"] = line.get("declaration")
-            fp = line.get("files")
-            row["edited"] = bool(fp) and fingerprint(folder) != fp
+            pref = update_preference(folder.name, line)
+            row.update({k: v for k, v in pref.items() if k != "digest"})
+            if folder == copy_folder(folder.name):
+                row.update(source={"kind": "built"}, upstream=src)
+
         else:
             row["source"] = {"kind": "built"}
     return row
@@ -1552,14 +1626,18 @@ def _rows(listed: dict | None = None) -> list[dict]:
             rows.append(row)
     yours = yours_root()
     present = set()
-    for folder in _folders(yours):
+    folders = {p.name: p for p in _folders(yours)}
+    folders.update({p.name: p for p in _folders(yours / "_copies")})
+    for folder in folders.values():
         present.add(folder.name)
         rows.append(_row(folder, "yours", listed))
     for pid, line in sorted(listed["plugins"].items()):
         if pid not in present and isinstance(line, dict):
-            rows.append({"id": pid, "layer": "yours", "folder": str(yours / pid),
-                         "broken": "it is in the installed list but its folder is gone",
-                         "warnings": [], "source": line.get("source") or {"kind": "link"}})
+            if not ID.fullmatch(pid):
+                continue
+            missing = _row(yours / pid, "yours", listed)
+            missing["broken"] = "it is in the installed list but its folder is gone"
+            rows.append(missing)
     # Which row is in force for each id: Yours over Shipped, never a broken one.
     effective: dict[str, dict] = {}
     for row in rows:
@@ -1791,17 +1869,19 @@ def remove(pid: str, by: str | None = None) -> dict:
                 raise PluginError(f"{pid} is shipped with Loam, and an update would "
                                   f"bring it back: turn it off instead", 409)
             raise PluginError(f"no plugin {pid!r} in either layer", 404)
-        folder = yours_root() / pid
+        folder = Path(yours["folder"])
         data = load_list()
+        _remember_pauses(data)
         # Its server stops before its folder goes (2026-11-13).
         _servers().stop(pid)
         if folder.exists() or folder.is_symlink():
             trash = Path(tempfile.mkdtemp(prefix="remove-", dir=_staging()))
             os.replace(folder, trash / pid)
             shutil.rmtree(trash, ignore_errors=True)
-        line = data["plugins"].pop(pid, None)
+        kept_original = folder == copy_folder(pid) and (yours_root() / pid).is_dir()
+        line = None if kept_original else data["plugins"].pop(pid, None)
         # The switch is the id's: it stays for the shipped copy that takes over.
-        stays = any(r["layer"] == "shipped" and not r["broken"] for r in rows)
+        stays = kept_original or any(r["layer"] == "shipped" and not r["broken"] for r in rows)
         if not stays:
             data["on"].pop(pid, None)
         _save_list(data)
@@ -2275,7 +2355,7 @@ def _token(pid: str, version: str, source: dict, decl: dict, replaces) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
-def install(body: dict, by: str | None = None) -> dict:
+def install(body: dict, by: str | None = None, *, automatic: dict | None = None) -> dict:
     """``POST /v1/plugins``: the first call answers what the plugin is and
     declares, and a ``confirm`` token; the second, with that token, installs.
 
@@ -2315,7 +2395,7 @@ def install(body: dict, by: str | None = None) -> dict:
         decl = declaration(manifest, found["has"])
         with _lock:
             listed = load_list()
-            rows = [r for r in _rows() if r["id"] == pid]
+            rows = [r for r in _rows(listed) if r["id"] == pid]
             mine = next((r for r in rows if r["layer"] == "yours"), None)
             shipped = next((r for r in rows if r["layer"] == "shipped"
                             and not r["broken"]), None)
@@ -2325,7 +2405,15 @@ def install(body: dict, by: str | None = None) -> dict:
                             "edited": mine.get("edited", mine["source"].get("kind")
                                                == "built"),
                             "broken": mine["broken"]}
-            prior = (listed["plugins"].get(pid) or {}).get("declaration")
+            previous = listed["plugins"].get(pid) or {}
+            if mine and mine.get("updates_paused"):
+                previous.update(auto_update=False, updates_paused=True)
+            if previous and mine and mine.get("edited"):
+                replaces["files"] = fingerprint(yours_root() / pid)
+            if previous and mine and mine.get("custom_copy"):
+                # Installs always target the original, beneath the custom copy.
+                replaces.update(source=previous.get("source"), version=previous.get("version"))
+            prior = previous.get("declaration")
             preview = {
                 "installed": False, "id": pid, "name": manifest["name"],
                 "version": manifest["version"], "author": manifest["author"],
@@ -2365,6 +2453,12 @@ def install(body: dict, by: str | None = None) -> dict:
                     f"{preview['confirm']}). Nothing was installed; read the "
                     f"answer under `preview` and confirm it if it is a yes", 409,
                     {"preview": preview})
+            if automatic is not None:
+                pref = update_preference(pid, previous)
+                if (pid != automatic["id"] or previous.get("source") != automatic["base"]
+                        or source["commit"] != automatic["commit"] or not prior
+                        or preview["added"] or not pref["auto_update"] or not pref["digest"]):
+                    raise PluginError("The install or its update preference changed. Review the update.", 409)
             files = fingerprint(folder)
             target = yours_root() / pid
             trash = None
@@ -2372,7 +2466,15 @@ def install(body: dict, by: str | None = None) -> dict:
             if target.exists() or target.is_symlink():
                 trash = work / "replaced"
                 os.replace(target, trash)
-            os.replace(folder, target)
+            try:
+                if automatic is not None and (not trash or fingerprint(trash) != pref["digest"]
+                        or copy_folder(pid).exists() != pref["custom_copy"]):
+                    raise PluginError("The plugin changed during the update. Your files were kept.", 409)
+                os.replace(folder, target)
+            except BaseException:
+                if trash:
+                    os.replace(trash, target)
+                raise
             # Where the yes was given (2026-11-18): `market` or `link`, so the
             # page can mark a plugin installed from a link someone shared.
             via = body.get("via") if body.get("via") in ("market", "link") else None
@@ -2381,15 +2483,34 @@ def install(body: dict, by: str | None = None) -> dict:
                 "version": manifest["version"],
                 "declaration": decl, "confirmed": preview["confirm"],
                 "installed_at": _now(), "installed_by": by or lc.OWNER_ID,
-                "files": files}
+                "files": files, "auto_update": previous.get("auto_update", True)}
+            if previous.get("updates_paused"):
+                listed["plugins"][pid]["updates_paused"] = True
+            if (not listed["plugins"][pid].get("updates_paused")
+                    and previous.get("update_consent") and copy_folder(pid).exists()):
+                listed["plugins"][pid]["update_consent"] = {"files": files, "copy": True}
+            if automatic is not None:
+                import uuid
+                listed.setdefault("update_history", []).append({
+                    "kind": "plugin-update", "id": uuid.uuid4().hex, "ts": _now(),
+                    "actor": "loam", "agent": "loam", "title": manifest["name"],
+                    "from_version": previous["version"], "version": manifest["version"],
+                    "plugin": pid, "source": source["url"],
+                    "outcome": f"updated automatically to {manifest['version']}"})
             if mine is None:
                 # A new copy in Yours is on: the yes to install it was the yes.
                 # An update keeps whatever its switch was.
                 listed["on"][pid] = True
-            _save_list(listed)
+            try:
+                _save_list(listed)
+            except BaseException:
+                os.replace(target, folder)
+                if trash:
+                    os.replace(trash, target)
+                raise
         server = _servers_follow(pid, restart=True)
         out = one(pid)
-        if (out.get("plugin") or {}).get("contributes"):
+        if (mine or {}).get("contributes") or (out.get("plugin") or {}).get("contributes"):
             _contributions_follow(f"{pid} installed")
         return {"installed": True, "id": pid, "plugin": out["plugin"],
                 "replaced": replaces, "source": source, "server": server}

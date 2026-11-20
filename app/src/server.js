@@ -260,6 +260,10 @@ export function createApp({
       res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'private, max-age=600', 'x-content-type-options': 'nosniff' })
       return res.end(method === 'HEAD' ? '' : css)
     }
+    if (rest === '/plugin-updates') {
+      if (method !== 'GET') return sendJson(res, 405, { error: 'Use GET for plugin updates.' })
+      return await relayJson(res, method, '/v1/plugin-updates', undefined, { signal: AbortSignal.timeout(420000) })
+    }
     if (rest === '/plugins') {
       if (!['GET', 'POST'].includes(method)) return sendJson(res, 405, { error: 'Use GET or POST for plugins.' })
       return await relayJson(res, method, '/v1/plugins', method === 'POST' ? await readBody(req) : undefined, { signal: AbortSignal.timeout(method === 'POST' ? 420000 : 5000) })

@@ -11,7 +11,7 @@ export function createCoreRegistry(options) {
   for (const slot of ['reply', 'branch', 'copy', 'row']) core.places.message.footer.action.add({ id: `core.footer.${slot}`, slot, when: context => context.slot === slot, render: context => context.defaultView() })
   for (const slot of ['attach', 'model', 'mention', 'send', 'expand']) core.places.composer.tool.add({ id: `core.composer.${slot}`, slot, when: context => context.slot === slot, render: context => context.defaultView() })
   core.places.files.action.add({ id: 'core.files.toolbar', slot: 'toolbar', when: context => context.slot === 'toolbar', render: context => context.defaultView() })
-  for (const kind of ['change', 'refused', 'fire', 'run', 'job']) core.places.activity.kind.add({ id: kind, when: context => context.item?.kind === kind, render: context => context.defaultView() })
+  for (const kind of ['change', 'refused', 'fire', 'run', 'job', 'plugin-update']) core.places.activity.kind.add({ id: kind, when: context => context.item?.kind === kind, render: context => context.defaultView() })
   for (const [id, title] of [['yours', 'Yours'], ['installed', 'Installed'], ['loam', 'Loam']]) core.places.apps.source.add({ id, title, render: context => context.defaultView(id, title) })
   return registry
 }

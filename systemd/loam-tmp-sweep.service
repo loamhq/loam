@@ -25,3 +25,4 @@ ExecStart=/usr/bin/python3 -I -X pycache_prefix=@PYCACHE@ @ROOT@/bin/sweep-tmp
 # read from its store by the check (lib/loam_check.py), not said here.
 ExecStart=-/usr/bin/python3 -X pycache_prefix=@PYCACHE@ @ROOT@/bin/clear-agy-files
 ExecStart=-/usr/bin/python3 -X pycache_prefix=@PYCACHE@ @ROOT@/bin/github-app check
+ExecStart=-/usr/bin/python3 -X pycache_prefix=@PYCACHE@ @ROOT@/bin/check-plugin-updates

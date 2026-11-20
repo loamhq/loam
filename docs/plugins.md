@@ -813,6 +813,25 @@ overrides, page code); the earlier token never installs it.
   (`loam_github_app.read_token`). The box's own git config (rewrites,
   helpers) is not used.
 
+### Plugin updates and local copies
+
+Opening Settings › Plugins reads `GET /api/plugin-updates`. The broker keeps
+the result for 24 hours across restarts. A Market install follows the listing’s
+reviewed commit when available. A link install follows its repository’s
+newest matching release tag. Housekeeping uses the same check and applies
+eligible updates with the installer’s confirmation token. The installed
+source, candidate commit, confirmed declaration and local files are checked
+again at replacement. An update asking for more access waits for approval
+in About and sends a fact to the system persona. Activity records each
+automatic update with its previous and new version.
+
+Market and link installs default to automatic updates. About and
+`bin/settings set plugin.auto_update` change that preference. Editing the
+installed folder or placing a same-id copy in `<plugins>/_copies/<id>/`
+pauses updates. The copy takes precedence and remains separate when the
+original updates. Removing the copy restores the original. A different-id
+plugin directly in the owner's plugins folder can run alongside the original.
+
 ## Server plugins (2026-11-13)
 
 The owner, m259: a plugin with server code **runs as its own program beside
@@ -1042,14 +1061,19 @@ its own row with `effective: false`, `shadowed_by: "yours"`. Draw the
 of that id>]}`; the row adds `guide`, the body of its `PLUGIN.md` (markdown,
 or `null`). 404 `{"error": "no plugin 'ghost' in either layer"}`.
 
-### `PATCH /api/plugins/<id>` — on and off
+### `PATCH /api/plugins/<id>` — plugin preferences
 
 Request `{"on": false}`; answer as `GET /api/plugins/<id>`. Refusals, each
 `{"error": "<a sentence>"}`:
 
 - 409 `"plain is a theme: it is on where Appearance has chosen it. Choose it with PATCH /v1/settings/appearance (appearance.desktop.theme, appearance.phone.theme)"`
 - 409 `"dusk is broken, so it cannot be turned on or off: …"`
-- 400 `"a plugin's one setting is `on`: {\"on\": true}"`; 404 for no such plugin.
+- 400 for an unknown setting, or 404 for an unknown id.
+
+A Market or link installation also accepts `{"auto_update": false}`. To
+resume after edits the owner confirms `{"auto_update": true,
+"replace_changes": true}`. The acknowledgement covers the current files.
+Another edit pauses updates again.
 
 ### `POST /api/plugins` — install from a link
 

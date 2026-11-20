@@ -53,7 +53,7 @@ WAKE_LOGS = eng.LOG_DIR
 FAILURE_LOG = eng.VAULT / loam_inbox.FAILURE_LOG
 
 ACTOR, LANE = lc.OWNER_ID, "app"
-KINDS = ("change", "refused", "fire", "run", "job")
+KINDS = ("change", "refused", "fire", "run", "job", "plugin-update")
 # The tests' seam: a Systemd pointed at a scratch unit directory.
 SYSTEMD: "ls.Systemd | None" = None
 
@@ -534,6 +534,8 @@ def items(store: dict | None = None) -> list[dict]:
     roster = set(loam_cron.roster())
     out = [ITEM_OF[e["kind"]](e) for e in ls.events()
            if e.get("kind") in ITEM_OF and e.get("agent") in roster]
+    import loam_plugins
+    out += loam_plugins.load_list(strict=False).get("update_history", [])
     out += finished_jobs()
     for item in out:
         item["seen"] = _is_seen(item, store)

@@ -12,6 +12,16 @@ turned off in one tap, and can be shared by link. A change to Loam's code
 stays on this install, has to be merged with every release, and may stop an
 update until someone sorts it out (`loam-filing-a-bug-or-feature`).
 
+**Customising someone else’s plugin starts with a copy.** Find its current folder
+in Settings › Plugins. For a shipped plugin, copy it to `<owner plugins>/<id>/`.
+For a Market or link install, copy it to `<owner plugins>/_copies/<id>/`.
+Keep the folder name and manifest id to take over. If the owner wants both
+side by side, use a new folder directly under the owner’s plugins folder
+and give its manifest the same new id. Edit the copy. Editing a Market or
+link install in place pauses automatic updates, and the next update would
+replace those edits. Tell the owner in one sentence, “Your copy won’t
+update by itself, and I’ll check the original for newer versions when you ask.”
+
 A plugin is a folder whose name is its id. Its `PLUGIN.md` is the manifest
 (frontmatter) and the guide (the body, for a person and an agent).
 
