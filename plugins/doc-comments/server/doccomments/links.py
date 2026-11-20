@@ -36,10 +36,7 @@ from pathlib import Path
 from .sidecar import NoteError, now_iso
 
 MODES = ("view", "comment", "edit")
-# How the owner's agents appear to people outside: each by its own name
-# ("Iris · Sam's agent"), or all as one ("Sam's agent"). The plugin's
-# `appear` setting is the default; a doc, or a doc in Shared with me, may
-# choose its own (2026-11-17).
+# Each document can override the default for showing individual or shared agent names.
 APPEAR = ("names", "one")
 PBKDF2_ROUNDS = 200_000
 DEFAULT_DAYS = 30

@@ -323,12 +323,8 @@ class Door:
         return bool(got) and len(json.dumps(got[0])) > links_mod.SIDECAR_MAX_BYTES
 
     def _who(self, link, visitor, agent=False, key=None, label=None):
-        """A visitor, or their agent. ``key`` is who they are on this link:
-        the link's name for a named link, the browser's own id on a group
-        link (two browsers that type one name are two people). ``label`` is
-        the agent's own name when the key is held by the visitor's Loam,
-        which says which of its agents is asking ("Iris · Sam's agent");
-        it is a name only, with the key's mode and nothing more."""
+        """Identify the visitor by the named link or the browser’s own key on a group link.
+        An agent label changes the displayed author while retaining the link’s access mode."""
         base = {"mode": link["mode"], "link": link["id"]}
         k = key or links_mod.slug(visitor)
         if agent and label:
@@ -384,8 +380,7 @@ class Door:
         people = list((self.svc.store.people() or {}).values())
         first = (key.split(" ") or [""])[0].strip(".,;:!?'’\"-")
         claimed = {_name_key(self.owner_name()).split(" ")[0]} if self.owner_name() else set()
-        # When the owner's agents appear as one, their names are not known
-        # here and are not claimed: refusing "Iris" would say there is one.
+        # Reserving hidden agent names would disclose them to visitors.
         if self.appear(link["did"]) == "one":
             people = [p for p in people if p.get("kind") != "agent"]
         claimed |= {_name_key(p.get("name", "")).split(" ")[0] for p in people if p.get("name")}

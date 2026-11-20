@@ -1,15 +1,4 @@
-/* The calm editor (round 4, Calm), on Loam's design system (2026-11-17).
-   Every colour, corner, shadow and face is one of core's tokens
-   (app/public/tokens.css and the active theme), so it follows whatever theme
-   is on, light and dark; the fallbacks are Latte's light values, for the
-   share page, which carries its own copy of Latte's tokens (share.css).
-   Buttons are core's three tiers (app/public/button-tiers.css): Newspaper
-   (no fill, paper ink, the hover fill) by default, foam for a secondary
-   action, espresso for the one action that finishes what is being done.
-   Selection is information, in paper ink, never a tier. The theme's signal
-   (crema) marks things (a passage with a note, a suggestion, something new),
-   and is never a button or a text ink on its own: as words it is mixed
-   toward the ink, which keeps its hue and reads at 4.5:1 in every theme. */
+/* Use the active theme’s core tokens for the editor. */
 
 .dc {
   --dc-ground: var(--paper-page, #EEEAE3);
@@ -599,11 +588,7 @@ body:has(.dc-dlg-scrim.on) .dc-sharebtn .dc-sf { box-shadow: 0 0 0 2px var(--pap
 .dc-sw-who b { font-size: 15px; font-weight: 600; }
 .dc-sw-who small.bad { color: var(--danger, #8D3D32); font-size: 12px; }
 
-/* On a phone (600px and less) the share sheet and Shared with me's add sheet
-   are bottom sheets, like the notes' sheet (2026-11-17): they rise from the
-   foot with the handle at the top, scroll inside when tall, keep clear of
-   the home bar, and stand on the keyboard (sheet.js, which also closes one
-   on a drag down). A wider screen keeps the centred card. */
+/* On phones, keep tall share sheets scrollable above the safe-area inset. */
 .dc-bs-grab { display: none; }
 /* A menu that would hang past the sheet's foot opens upward, and a sheet
    that does not scroll lets a menu show past its edge (sheet.js), at any
@@ -632,8 +617,7 @@ body:has(.dc-dlg-scrim.on) .dc-sharebtn .dc-sf { box-shadow: 0 0 0 2px var(--pap
 .dc-new { width: 6px; height: 6px; border-radius: 50%; background: var(--dc-accent); flex: none; }
 .dc.phone .dc-titlebar span { display: none; }
 
-/* Shared Docs, in Files: core's own file row (2026-11-17), plus who has a
-   link, what is new on the tile's corner, and a gentle exit. */
+/* Shared Docs extends the core file row with sharing and unread indicators. */
 .dc-sd-people { display: inline-flex; align-items: center; flex: none; padding-left: 4px; cursor: default; -webkit-touch-callout: none; user-select: none; }
 .dc-sd-face { width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; box-sizing: border-box; font-size: 10.5px; font-weight: 700; line-height: 1; color: var(--text-on-avatar, #FFFFFF); background: var(--paper-raised, #FAF8F4); box-shadow: 0 0 0 2px var(--paper-card, #E9E4DC); transition: transform .16s cubic-bezier(.2,.8,.2,1); }
 .dc-sd-face + .dc-sd-face { margin-left: -6px; }
@@ -724,9 +708,7 @@ body:has(.dc-dlg-scrim.on) .dc-sharebtn .dc-sf { box-shadow: 0 0 0 2px var(--pap
 /* A struck deletion's wrapper; a deleted paragraph sits on the line before. */
 .dc .dc-sg-live-delw { white-space: pre-wrap; }
 
-/* How the owner's agents appear to others (2026-11-17): a select that reads
-   as part of its sentence, at the foot of Shared Docs and of a doc's share
-   sheet, and a small sheet of three choices for a doc in Shared with me. */
+/* Fit the identity selector to the displayed label and preserve its native picker. */
 .dc-ap-pick { position: relative; display: inline-flex; align-items: center; gap: 3px; max-width: 100%; padding: 2px 5px; border-radius: var(--radius-sm, 8px); font-weight: 600; color: var(--paper-ink-2, #4B4741); }
 .dc-ap-pick:hover { background: var(--paper-hover, #E9E5DE); }
 .dc-ap-pick:focus-within { outline: 2px solid var(--paper-ink, #1C1B19); outline-offset: 1px; }
@@ -756,10 +738,7 @@ body:has(.dc-dlg-scrim.on) .dc-sharebtn .dc-sf { box-shadow: 0 0 0 2px var(--pap
 .dc-ap-note { margin-top: 2px; }
 @media (prefers-reduced-motion: reduce) { .dc-ap-opt .dc-ck { transition: none; } }
 
-/* The table of contents (page/editor/toc.js, 2026-11-17). Desktop: a dash
-   per heading at the text's left, centred in the pane, the one being read
-   darker; hovered or focused, the titles in a small card. Phone: the bar's
-   title is the section being read; the list is the bottom sheet. */
+/* Reveal heading titles on focus as well as hover in the desktop table of contents. */
 .dc-toc { position: absolute; z-index: 30; width: 0; display: none; pointer-events: none; }
 .dc-toc.on { display: block; }
 .dc.phone .dc-toc { display: none; }

@@ -1,8 +1,4 @@
-// How the owner's agents appear to people outside (2026-11-17): each by its
-// own name, or all as one, "<Owner>'s agent". One control, in three places:
-// the default at the foot of Shared Docs, a doc's own choice in its share
-// sheet, and a doc's own choice in Shared with me (its row menu). The server
-// does the hiding (server/doccomments/appear.py); this only asks and says.
+// Apply the per-document or default naming choice. The server enforces it when serving a visitor.
 
 import { bottomSheet, grab } from './sheet.js'
 import { h, icon } from './editor/dom.js'
@@ -14,20 +10,14 @@ export function how(choice, alias) {
   return choice === 'one' ? `as ${alias}` : 'by their own names'
 }
 
-// What a reader sees, for the line under a choice: a real agent's name when
-// the page knows one ("Iris · Sam's agent" on another Loam, "Iris" on the
-// owner's own doc), else plain words.
+// Show the agent name locally and add the owner-qualified label on a remote document.
 export function sample(choice, { alias, agent, there }) {
   if (choice === 'one') return alias
   if (!agent) return 'Each by its own name'
   return there ? `${agent} · ${alias}` : agent
 }
 
-// A select drawn as the words it has chosen, with a chevron (2026-11-17): a
-// native select is as wide as its longest choice, which left a gap before
-// the chevron and pushed past the edge of a narrow menu. The select is laid
-// over the words at opacity 0, so it still takes the keyboard and the
-// phone's own picker. `options` is [[value, words], …].
+// Overlay the native select on the rendered label to keep its keyboard and mobile picker within the menu width.
 export function wordSelect({ options, value, onChange, label, className = '' }) {
   const words = (v) => (options.find(o => o[0] === v) || options[0])[1]
   const s = h('select', { class: 'dc-ap-sel', 'aria-label': label },

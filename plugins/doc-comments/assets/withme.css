@@ -1,7 +1,4 @@
-/* Shared with me (2026-11-17): the section in Shared Docs, its add sheet, and
-   the editor's states on a doc that lives on another Loam. Colours, corners
-   and shadows are core's tokens (the fallbacks are Latte's light values),
-   and the buttons core's tiers, as in doc-comments.css. */
+/* Use core tokens for remote document views, with fallback values for the default theme. */
 
 .dc-sd-kicker { margin-top: 22px; }
 .dc-sd-kicker:first-child { margin-top: 2px; }

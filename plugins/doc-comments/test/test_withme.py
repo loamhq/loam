@@ -1,29 +1,7 @@
 #!/usr/bin/env python3
-"""Shared with me: this Loam opening a doc shared from another Loam.
-
-Two Loams in one process: "theirs" (a doc, its links, its door, served over
-real https on a local port with a throwaway certificate) and "mine" (the
-plugin server with Shared with me, reached over HTTP as the owner's page and
-a persona's tool reach it).
-
-  - addresses: only https ``/s/<token>``; loopback, private, link-local,
-    shared, multicast and this box's own addresses are refused before any
-    connection; no redirect is followed; an answer past the ceiling stops
-  - adding: a wrong password, a link turned off, a server that is not a Loam,
-    an older and a newer Loam, a server that cannot be reached, each says so
-    plainly; a group link asks for a name once; a whole invite fills both
-  - the password, the session and the agent key never appear in an answer,
-    in the server's log, or anywhere but the 0600 file in the private folder
-  - working on the doc: the owner shows on the other side as the name on the
-    link, a persona as "Iris · <name>'s agent", each with the link's mode
-    and no more; a lapsed session is renewed quietly; the dot follows what
-    the owner has looked at
-  - the other side says no: a link turned off greys the row, a changed mode
-    follows at the next look
-  - a link of this Loam's own is opened in-process, with no network
-
-Run: python3 plugins/doc-comments/test/test_withme.py
-"""
+"""Exercise shared document access between local test servers over HTTP and TLS.
+Check link validation, access modes, visitor identity, session renewal,
+private credential storage and opening same-install links in-process."""
 
 import io
 import json

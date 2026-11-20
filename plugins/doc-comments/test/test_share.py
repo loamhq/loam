@@ -626,7 +626,7 @@ class AgentsAppearAsOne(unittest.TestCase):
             w.links.set_appear(w.did, "nobody")
 
     def test_a_group_visitor_may_take_a_hidden_personas_name(self):
-        # Refusing "Iris" would tell a stranger there is an Iris.
+        # A visitor can choose a name that would otherwise identify a hidden agent.
         w = World()
         _, tok = w.link("comment", name=None)
         c = w.login(tok)

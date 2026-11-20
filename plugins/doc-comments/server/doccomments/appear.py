@@ -1,21 +1,7 @@
-"""How the owner's agents appear to people outside this Loam.
-
-Two ways, chosen by the owner (2026-11-17): **names**, each agent by its own
-name ("Iris · Sam's agent" on another Loam, "Iris" on the owner's own shared
-doc), or **one**, every agent as one identity, "Sam's agent", so nobody
-outside can tell which agents the owner has, or how many.
-
-The plugin's ``appear`` setting is the default; each shared doc (links.py)
-and each doc in Shared with me (withme.py) may choose its own.
-
-Hiding is done where an answer leaves this Loam, never in what is kept: the
-sidecar keeps the true persona on every note, reply and save, and the
-owner's own view still says which agent did what. On the owner's own docs
-the door masks every answer it gives a visitor or a visitor's agent
-(``mask``), so a change of choice applies to past notes too. On a doc in
-Shared with me, the agent's name is simply never sent (withme.py, ``_auth``);
-what was sent under a name before is the other Loam's and cannot be recalled.
-"""
+"""Choose the agent identity shown outside this install.
+Per-document choices override the default. Mask local replies as they leave
+so a change also affects older notes. Preserve the true author in storage.
+Remote documents retain the identity that was sent to their owner."""
 
 from __future__ import annotations
 
