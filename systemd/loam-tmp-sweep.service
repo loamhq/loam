@@ -14,9 +14,10 @@ TimeoutStartSec=30min
 Nice=10
 IOSchedulingClass=idle
 ExecStart=/usr/bin/python3 -I -X pycache_prefix=@PYCACHE@ @ROOT@/bin/sweep-tmp
-# The Python prefix cache outlives test scratch and job clones. Sweep it
-# independently so a failure still leaves the rest of housekeeping to run.
-ExecStart=-/usr/bin/python3 -IB @ROOT@/bin/sweep-pycache
+# The Python prefix cache outlives test scratch and job clones. Sudo keeps
+# the prefix for Python commands, so the user's cache can contain root-owned
+# directories. Pass the rendered prefix explicitly when sweeping as root.
+ExecStart=-/usr/bin/sudo -n /usr/bin/python3 -IB @ROOT@/bin/sweep-pycache --cache @PYCACHE@
 # Work that was a step of drift-watch until 2026-11-19, when the one check on
 # a clock (bin/loam-check) replaced it: work is not watching, so it is done
 # here. Each is its own process; the leading `-` keeps one that fails from

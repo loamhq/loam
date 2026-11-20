@@ -12,10 +12,6 @@ import sys
 import time
 from pathlib import Path
 
-sys.dont_write_bytecode = True
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-import loam_config as lc  # noqa: E402
-
 IDLE_DAYS = 14
 PARTIAL_WRITE = re.compile(r"\.pyc\.[0-9]+$")  # CPython's atomic write scratch file
 
@@ -82,7 +78,16 @@ def sweep(cache: Path, *, dry_run: bool) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
-    return sweep(lc.PYCACHE.resolve(), dry_run=parser.parse_args().dry_run)
+    parser.add_argument("--cache", type=Path, help="prefix directory (default: paths.pycache)")
+    args = parser.parse_args()
+    cache = args.cache
+    if cache is None:
+        sys.dont_write_bytecode = True
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+        import loam_config as lc  # noqa: PLC0415
+
+        cache = lc.PYCACHE
+    return sweep(cache.resolve(), dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

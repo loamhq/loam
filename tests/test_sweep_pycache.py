@@ -55,7 +55,7 @@ def test(root: Path) -> None:
     assert "would remove 3 files" in out, out
     assert gone_cache.is_dir() and stale.is_file() and partial.is_file()
 
-    out = subprocess.check_output(argv, env=env, text=True)
+    out = subprocess.check_output([*argv, "--cache", str(cache)], env=env, text=True)
     assert "removed 3 files" in out, out
     assert not gone_cache.exists() and not stale.exists() and not partial.exists()
     for kept in (live_pyc, recent_partial, sentinel, live_cache / "link.pyc", unrelated):
