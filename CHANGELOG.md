@@ -3,6 +3,9 @@
 Find each release's notes in `docs/releases/<version>.md`. Loam gives the
 notes to the person's agent, who decides what is worth sharing with them.
 
+- [0.2.16](docs/releases/0.2.16.md), 2026-11-20: a board of things to try
+  in Hello, simpler thread boards, Back and Forward for each panel, and
+  memory, CPU load, and disk space in Activity.
 - [0.2.15](docs/releases/0.2.15.md), 2026-11-19: connect Syncthing to Loam
   using the key it already has on your server.
 - [0.2.14](docs/releases/0.2.14.md), 2026-11-19: see where plugins came
