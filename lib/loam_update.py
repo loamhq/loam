@@ -739,7 +739,8 @@ def _release_message(what: str) -> str:
     else:
         where = f"in the starter Hello thread ({tid}), or in General if it has been deleted"
     return (f"Decide whether this release matters to {_owner()}, based on what they do. "
-            f"If so, post {where}, briefly and in your own words, {what}. "
+            f"If so, post {where}. In a short paragraph in your own words, explain {what}. "
+            "Use the destination quietly. Removing Hello is an ordinary choice for its owner. "
             "If nothing matters to them, leave the release unannounced.")
 
 
