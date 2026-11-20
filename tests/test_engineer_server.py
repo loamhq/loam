@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import select
+import queue
 import shutil
 import subprocess
 import sys
@@ -77,6 +77,17 @@ class Server:
         # Every frame read that answered nothing asked for, in case the
         # missing reply came back in a shape `replies` does not match.
         self.stray: list[dict] = []
+        # Read the text stream in one thread. select() on the underlying pipe
+        # cannot see complete lines already buffered by TextIOWrapper.
+        self._frames: queue.Queue[str | None] = queue.Queue()
+        def drain_stdout() -> None:
+            try:
+                for line in self.proc.stdout:
+                    self._frames.put(line)
+            finally:
+                self._frames.put(None)
+        self._stdout_drain = threading.Thread(target=drain_stdout, daemon=True)
+        self._stdout_drain.start()
         # The server logs at DEBUG (see `bootstrap`), so its stderr is
         # drained as it comes: a full pipe would stall the very server whose
         # stall it is there to explain.
@@ -104,10 +115,10 @@ class Server:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
-            ready, _, _ = select.select([self.proc.stdout], [], [], remaining)
-            if not ready:
+            try:
+                line = self._frames.get(timeout=remaining)
+            except queue.Empty:
                 return None
-            line = self.proc.stdout.readline()
             if not line:
                 return None
             line = line.strip()
@@ -146,6 +157,7 @@ class Server:
             self.proc.kill()
             self.proc.wait()
         self._drain.join(timeout=5)
+        self._stdout_drain.join(timeout=5)
         return "".join(self._stderr)
 
 
@@ -184,6 +196,21 @@ def main() -> int:
     if not VENV_PYTHON.is_file():
         print(f"SKIP  no venv python at {VENV_PYTHON}; nothing to drive")
         return 0
+
+    # Both lines arrive in one write while the producer stays alive. A
+    # buffered readline may consume both from the OS even though it returns
+    # only the first; the next read must still see the second immediately.
+    frames = Server([sys.executable, "-c",
+                     "import sys,time; sys.stdout.write("
+                     "'{\\\"id\\\": 1}\\n{\\\"id\\\": 2}\\n'); "
+                     "sys.stdout.flush(); time.sleep(2)"],
+                    os.environ.copy(), str(AGENTS))
+    try:
+        check("back-to-back buffered frames both arrive",
+              sorted(frames.replies({1, 2}, 1)), [1, 2])
+    finally:
+        frames.proc.terminate()
+        frames.close()
 
     sleep_s = 3
     root = Path(tempfile.mkdtemp(prefix="loam-engineer-server-test-"))
