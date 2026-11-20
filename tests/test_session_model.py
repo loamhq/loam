@@ -323,12 +323,7 @@ try:
     lane_cfg.mkdir()
     (lane_cfg / "agent.json").write_text(json.dumps({
         "name": "lane", "workspace": str(lane), "vault": str(vault)}))
-    for name in ("_always.md", "_active.md"):
-        (lane / name).write_text("---\nname: conversation\n"
-                                 "keep-coding-instructions: true\n---\nx\n")
-    (lane / ".claude" / "output-styles").mkdir()
-    (lane / ".claude" / "output-styles" / "conversation.md").symlink_to(
-        "../../_active.md")
+    (lane / "map.md").write_text("Map.\n")
     reported: list[str] = []
 
     def start() -> None:

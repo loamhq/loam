@@ -426,9 +426,9 @@ def lanes() -> int:
         name = json.loads((ws / "agent.json").read_text())["name"]
         try:
             loam_identity.assert_imports_resolve(ws)
-            loam_memory.resolve_lane(ws, loam_memory.REFLECTION_LAYER)
             for cron in sorted((ws / loam_memory.CRON_LANE_DIR).glob("*.md")):
-                loam_memory.resolve_lane(ws, f"{loam_memory.CRON_LANE_DIR}/{cron.name}")
+                if cron.stem != "reflection":
+                    loam_memory.resolve_lane(ws, f"{loam_memory.CRON_LANE_DIR}/{cron.name}")
         except Exception as exc:  # noqa: BLE001
             bad.append(f"{name}: {exc}")
         commands(ws / ".mcp.json")

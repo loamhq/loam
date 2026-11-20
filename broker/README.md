@@ -40,7 +40,7 @@ everything that makes the session that persona comes from the persona's own
 |---|---|---|
 | `CLAUDE.md` and its `@` imports | the working directory | canary from `soul.md` answered YES, a sibling's decoy NO |
 | the model | `settings.json` → `"model"`, which provision writes from the persona's profile (`agent.json`, Settings › Agents; `loam_profile.claude_model`, 2026-11-19) and a profile change rewrites: `fable` when it names none | result envelopes report `claude-fable-5-1` |
-| `_active.md` in context, `_reflection.md` not | `outputStyle: conversation` | a phrase from each, answered YES and NO |
+| `config.md` and `map.md` in context | the workspace imports | a phrase from each, answered YES |
 | the transcript record | `Stop`/`SessionEnd` hooks | three files appeared under the vault's `15_CONVERSATIONS/` |
 | the write boundary | `PreToolUse` → `boundary_guard.py` | a write into a sibling's workspace was refused, with the guard's own words |
 | the login | `~/.claude`, used in place | the session ran |
@@ -1768,9 +1768,8 @@ A Codex thread runs the persona Claude Code runs; only the provider differs.
 
 - **Instructions.** At every thread start and resume the broker writes
   `CODEX_HOME/instructions/<agent>.md` (`loam_codex.write_instructions`):
-  one provider line, then `CLAUDE.md`, its `@` imports in order, and
-  `_active.md` without its loader frontmatter -- the files Claude Code loads,
-  in its order. The persona's `.codex/config.toml` points
+  one provider line, then `CLAUDE.md` and its `@` imports in the order
+  Claude Code loads them. The persona's `.codex/config.toml` points
   `model_instructions_file` at it; a resume also passes it as
   `baseInstructions`, because a resumed thread otherwise keeps the
   instructions it started with.
@@ -3182,7 +3181,7 @@ text save in place; `create` (folders only) means new files and folders in it;
 | `user` | the vault outside `15_CONVERSATIONS/`; `spaces/<agent>/soul.md`, `config.md` | The owner writes text (`.md .markdown .txt .csv .tsv .json .jsonl .yaml .yml .toml .base .canvas .html .htm`) |
 | `transcripts` | `vault/15_CONVERSATIONS/**` | read-only: the transcript writer's |
 | `schedule` | `spaces/<agent>/crons/<name>.md` (added 2026-10-15) | The owner saves it in place (no create here); the save goes through the schedule log as their change -- see "Schedules and Activity" |
-| `persona` | everything else in a workspace (`_always.md`, `_active.md`, `_reflection.md`, `skills/`, `memory/`, notes, the `crons/` folder itself), and `commons/**` | read-only: the persona edits its own, with its own tools |
+| `persona` | everything else in a workspace (`map.md`, `skills/`, `memory/`, notes, the `crons/` folder itself), and `commons/**` | read-only: the persona edits its own, with its own tools |
 | `runtime` | `spaces/<agent>/CLAUDE.md`, `agent.json`, `.mcp.json`, `.claude/**`, `.codex/**`, `spaces/README.md`; all of `system` | read-only: rendered by `bin/provision` or kept by the runtime, so an edit here would be reverted |
 
 A persona's authority is not touched by any of this: Files writes are the
@@ -4183,8 +4182,7 @@ the persona's whole tool list, the engineer included (2026-11-09).
 
 **A row** is `agent, name, kind` (`recurring`, `one-off`, `reflection`),
 `schedule` as the file says it and `words` for the page, `note`, `enabled`,
-`done`, `body` (the reflection's instruction is `_reflection.md`, named in
-`instruction`, and its body is not editable here), `timer`, `next_fire` (the
+`done`, `body` (the schedule's instruction), `instruction` (null), `timer`, `next_fire` (the
 user manager's, ISO UTC; null when nothing runs; while a run is in flight,
 when systemd 252 blanks the timer's own, the next elapse of its
 `OnCalendar` by `systemd-analyze calendar`), `running_since` (added
@@ -4371,9 +4369,7 @@ relay should spell them `/^\/agents\/([^/]+)$/`, `rest === '/engineers'`,
     "workspace": {"root": "spaces", "path": "ada", "exists": true},
     "soul":   {"root": "spaces", "path": "ada/soul.md", "exists": true},
     "config": {"root": "spaces", "path": "ada/config.md", "exists": true},
-    "memory": {"always":     {"root": "spaces", "path": "ada/_always.md", "exists": true},
-               "active":     {"root": "spaces", "path": "ada/_active.md", "exists": true},
-               "reflection": {"root": "spaces", "path": "ada/_reflection.md", "exists": true},
+    "memory": {"map":        {"root": "spaces", "path": "ada/map.md", "exists": true},
                "folder":     {"root": "spaces", "path": "ada/memory", "exists": true}},
     "skills": {"root": "spaces", "path": "ada/skills", "exists": true,
                "count": 4, "names": ["essay-writing", "canvas-plans", "..."]}
@@ -4734,7 +4730,7 @@ Made: the workspace with `soul.md` (verbatim), `config.md` (the fleet's
 shared clauses, copied from the configs on the box with the new agent's
 name, then the draft's own text under "Its own rules" and its own `##`
 clauses; a clause of the draft that has a fleet clause's title gives way to
-the fleet's), `_active.md` and `_reflection.md`, `memory/`, `skills/`,
+the fleet's), `map.md`, `memory/`, `skills/`,
 `crons/`, `threads/`; `agent.json` with the name and face; then
 `bin/provision <id> <wake>` (Claude Code, Codex and Antigravity files, the
 reflection record and its timer). Provision holds Loam's live lock, so a confirm made while a landing

@@ -22,7 +22,6 @@ import loam_antigravity as agy  # noqa: E402
 import loam_codex as codex  # noqa: E402
 import loam_codex_wake as cw  # noqa: E402
 import loam_config as lc  # noqa: E402
-import loam_memory  # noqa: E402
 import loam_profile  # noqa: E402
 import loam_thread_engine  # noqa: E402
 
@@ -62,21 +61,16 @@ def build(root: Path) -> Path:
     (ws / "soul.md").write_text("# Soul\n\nI am a parity probe, built for one test. "
                                 "My token is SOUL-QUARTZ.\n")
     (ws / "config.md").write_text("# Config\n\nThe config token is CONFIG-BERYL.\n")
-    (ws / "_always.md").write_text("# Always\n\nThe always token is ALWAYS-OPAL.\n")
-    (ws / "_active.md").write_text(
-        "---\nname: conversation\ndescription: probe's conversation lane.\n"
-        "keep-coding-instructions: true\n---\nThe conversation token is ACTIVE-JADE.\n")
-    (ws / "_reflection.md").write_text("The reflection token is REFL-RUBY.\n")
+    (ws / "map.md").write_text("# Map\n\nThe map token is MAP-AGATE.\n")
     (ws / "crons" / "probe.md").write_text(
         "---\nschedule: daily at 05:00 PT\nenabled: true\napproved: 2026-11-13\n---\n"
         "The cron token is CRON-TOPAZ.\n")
-    (ws / "CLAUDE.md").write_text("# Parityprobe\n\n@soul.md\n\n@config.md\n\n@_always.md\n")
+    (ws / "CLAUDE.md").write_text("# Parityprobe\n\n@soul.md\n\n@config.md\n\n@map.md\n")
     (ws / ".mcp.json").write_text(json.dumps(prov.mcp_config(NAME, ws), indent=2))
     (ws / ".claude").mkdir()
     (ws / ".claude" / "settings.json").write_text(json.dumps(prov.settings(ws), indent=2))
     styles = ws / ".claude" / "output-styles"
     styles.mkdir()
-    (styles / "conversation.md").symlink_to(Path("../..") / "_active.md")
     (styles / "none.md").write_text("---\nname: none\ndescription: none\n---\n")
     (ws / ".codex").mkdir()
     (ws / ".codex" / "config.toml").write_text(prov.codex_config(NAME, ws))
@@ -101,37 +95,25 @@ def in_order(text: str, bodies: list[str]) -> bool:
 def files_cases(ws: Path) -> None:
     claude_conv = codex.instruction_sources(ws)
     names = [str(p.relative_to(ws)) for p in claude_conv]
-    check("files: Claude Code's conversation sources are CLAUDE.md, its imports, _active.md",
-          names == ["CLAUDE.md", "soul.md", "config.md", "_always.md", "_active.md"], names)
-    settings = json.loads((ws / ".claude" / "settings.json").read_text())
-    check("files: ...and _active.md reaches Claude Code as its conversation style",
-          settings.get("outputStyle") == "conversation"
-          and (ws / ".claude" / "output-styles" / "conversation.md").resolve()
-          == (ws / "_active.md").resolve(), settings.get("outputStyle"))
-    bodies = [p.read_text() if p.name != "_active.md"
-              else loam_memory.strip_frontmatter(p.read_text()) for p in claude_conv]
+    check("files: conversation sources are CLAUDE.md, soul, config and map",
+          names == ["CLAUDE.md", "soul.md", "config.md", "map.md"], names)
+    bodies = [path.read_text() for path in claude_conv]
     for label, text in (("Codex", codex.instructions(ws)),
                         ("Antigravity", agy.instructions(ws))):
-        check(f"files: {label}: a conversation is given every one, verbatim, in that order",
-              in_order(text, bodies) and "keep-coding-instructions" not in text)
+        check(f"files: {label}: conversation gets each file verbatim in order",
+              in_order(text, bodies))
 
     wake = load("wake_parity", AGENTS / "bin" / "wake")
-    for lane, lane_file in (("reflection", loam_memory.REFLECTION_LAYER),
-                            ("cron:probe", "crons/probe.md")):
-        _, lane_text, lane_path = loam_memory.resolve_lane(ws, lane_file)
+    for lane, cron in (("reflection", None), ("cron:probe", "probe")):
+        lane_text, path = wake.lane_input(ws, cron)
+        lane_path = path if lane_text is not None else None
         argv = wake.claude_argv(NAME, lane, "p", lane_path, model="m")
-        claude_wake = ([p.name for p in cw.instruction_sources(ws)]
-                       + [Path(argv[argv.index("--append-system-prompt-file") + 1]).name])
         style = json.loads(argv[argv.index("--settings") + 1]).get("outputStyle")
-        text = cw.instructions(ws, lane, lane_path, lane_text)
-        wake_bodies = [p.read_text() for p in cw.instruction_sources(ws)] + [lane_text]
-        check(f"files: a {lane} on Claude Code loads CLAUDE.md, its imports, its lane file "
-              f"and no _active.md",
-              claude_wake[:4] == ["CLAUDE.md", "soul.md", "config.md", "_always.md"]
-              and style == "none", (claude_wake, style))
-        check(f"files: ...and on Codex the same files, verbatim, in that order, "
-              f"no _active.md",
-              in_order(text, wake_bodies) and "ACTIVE-JADE" not in text)
+        check(f"files: Claude Code {lane} uses the shared context and appends only a cron body",
+              ("--append-system-prompt-file" in argv) == bool(cron) and style == "none")
+        wake_bodies = bodies + ([lane_text] if cron else [])
+        check(f"files: Codex {lane} gets the same files verbatim in order",
+              in_order(cw.instructions(ws, lane, lane_path, lane_text), wake_bodies))
 
 
 # --- tools ------------------------------------------------------------------
@@ -210,8 +192,8 @@ def claude_live(ws: Path) -> list[str]:
     env = {k: v for k, v in os.environ.items() if k not in ("LOAM_WAKE", "LOAM_SESSION_ID")}
     env.update({"CLAUDE_PROJECT_DIR": str(ws), "LOAM_PROBE": "1", "DISABLE_AUTOUPDATER": "1"})
     done = subprocess.run(
-        [CLAUDE, "-p", "Without using any tool, reply with the four tokens your "
-         "instructions give (soul, config, always, conversation), space-separated.",
+        [CLAUDE, "-p", "Without using any tool, reply with the three tokens your "
+         "instructions give (soul, config, map), space-separated.",
          "--model", CLAUDE_MODEL, "--output-format", "stream-json", "--verbose",
          "--max-turns", "1"],
         cwd=str(ws), env=env, capture_output=True, text=True, timeout=300)
@@ -226,9 +208,8 @@ def claude_live(ws: Path) -> list[str]:
         if event.get("type") == "result":
             answer = event.get("result") or ""
     print(f"      Claude Code answered: {answer[:200]!r}")
-    check("LIVE Claude Code: soul, config, _always.md and _active.md loaded",
-          all(t in answer for t in ("SOUL-QUARTZ", "CONFIG-BERYL", "ALWAYS-OPAL",
-                                    "ACTIVE-JADE")), answer or done.stderr[-400:])
+    check("LIVE Claude Code: soul, config and map loaded",
+          all(t in answer for t in ("SOUL-QUARTZ", "CONFIG-BERYL", "MAP-AGATE")), answer or done.stderr[-400:])
     return sorted(t for t in tools if t.startswith("mcp__"))
 
 
@@ -263,7 +244,7 @@ async def codex_conversation_live(ws: Path, root: Path) -> None:
             "Two things, in order. First, use spawn_agent to start one sub-agent whose "
             "whole task is to reply with exactly the sentence 'SUBAGENT-SPEAKS-7.' and "
             "nothing else; wait for it with wait_agent. Then reply yourself with the "
-            "tokens your instructions give for your soul and your conversation layer, "
+            "tokens your instructions give for your soul and your map, "
             "and the word ROOT-DONE. Do not repeat the sub-agent's sentence.")
         events, deadline = [], time.monotonic() + 300
         while time.monotonic() < deadline:
@@ -283,8 +264,8 @@ async def codex_conversation_live(ws: Path, root: Path) -> None:
         print(f"      Codex persona said: {said[:300]!r}")
         print(f"      subagent message events: {len(spoke)}, their parents: "
               f"{sorted({str(e.get('parent_tool_use_id')) for e in spoke})}")
-        check("LIVE Codex conversation: soul and _active.md loaded (their tokens said)",
-              "SOUL-QUARTZ" in said and "ACTIVE-JADE" in said, said)
+        check("LIVE Codex conversation: soul and map loaded (their tokens said)",
+              "SOUL-QUARTZ" in said and "MAP-AGATE" in said, said)
         check("LIVE Codex conversation: a subagent spoke, nested under its call",
               spoke and all(e.get("parent_tool_use_id") for e in spoke),
               [e.get("parent_tool_use_id") for e in spoke])

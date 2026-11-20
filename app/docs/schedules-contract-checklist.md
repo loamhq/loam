@@ -27,7 +27,7 @@ authenticated broker, service start, real job cancellation or deployment.
 | 9 | Closed | Create sends name, schedule or at, body, note as applicable. PATCH sends changed allowed fields; toggle sends enabled. Exact payload tests. |
 | 10 | Closed | Reflection protection/order checks kind, without a boolean reflection field. DOM/browser tests. |
 | 11 | Closed | Instruction field reads/writes body; instruction is only the broker's file reference. Body edit test. |
-| 12 | Closed | Reflection body read-only with `_reflection.md` explanation; omitted from PATCH. Host refusal and DOM/browser checks. |
+| 12 | Closed | Reflection instruction lives in the editable schedule record. |
 | 13 | Closed | Note is a string, including empty; schedule/at edits follow host normalization on the next read. One-off edit test. |
 | 14 | Closed | Done one-off disappears on a later list read while detail and Activity remain. Fire/visible refresh tests and browser. |
 | 15 | Closed | Reads next_fire, null when paused. Pause/list tests and screenshots. |

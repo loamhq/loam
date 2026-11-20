@@ -32,7 +32,7 @@ for who, emoji in (("ada", "🧱"), ("iris", "🪻"), ("cleo", "🪐")):
     (ws / "skills" / "a-skill").mkdir(parents=True)
     (ws / "skills" / "notes.md").write_text("a skill\n")
     (ws / "skills" / "_private.md").write_text("not a skill\n")
-    for f in ("soul.md", "config.md", "_always.md", "_active.md", "_reflection.md"):
+    for f in ("soul.md", "config.md", "map.md"):
         (ws / f).write_text(f"{who} {f}\n")
     (ws / "agent.json").write_text(json.dumps({
         "name": who, "display": who.capitalize(), "emoji": emoji,
@@ -247,8 +247,8 @@ async def main():
         f = body["files"]
         check("files: soul, config, three memory files, as Files paths",
               f["soul"] == {"root": "spaces", "path": "ada/soul.md", "exists": True}
-              and f["memory"]["always"]["path"] == "ada/_always.md"
-              and f["memory"]["reflection"]["exists"], f)
+              and f["memory"]["map"]["path"] == "ada/map.md"
+              and f["memory"]["map"]["exists"], f)
         check("files: skills counted (a folder and a file; _ is not one)",
               f["skills"]["count"] == 2 and f["skills"]["path"] == "ada/skills",
               f["skills"])

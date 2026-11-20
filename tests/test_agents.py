@@ -30,7 +30,7 @@ os.environ.pop("LOAM_WAKE", None)
 for who, emoji in (("ada", "🧱"), ("iris", "🪻")):
     ws = LABS / who
     (ws / "crons").mkdir(parents=True)
-    for f in ("soul.md", "config.md", "_always.md", "_active.md", "_reflection.md"):
+    for f in ("soul.md", "config.md", "map.md"):
         (ws / f).write_text(f"{who} {f}\n")
     (ws / "agent.json").write_text(json.dumps({
         "name": who, "display": who.capitalize(), "emoji": emoji,
@@ -558,15 +558,6 @@ async def main():
               and "Ask the owner before editing juniper's soul." in text
               and "ai-labs/juniper" in text and "No trades" not in text
               and "mine" not in text and text.endswith("Never prune unasked.\n"), text)
-        (fleet_root / "juniper").mkdir()
-        (fleet_root / "juniper" / "agent.json").write_text('{"name": "juniper"}')
-        (fleet_root / "juniper" / "config.md").write_text(text)
-        drift = loam_agents._drift_module()
-        drift.AI_LABS = fleet_root
-        found = []
-        drift.check_config_clauses(found, ["ash", "birch", "cedar", "juniper"])
-        check("check-drift finds nothing in the made config", found == [], found)
-
         # -- provision: no emoji to derive, and an older file's is kept ----------
         loader = importlib.machinery.SourceFileLoader("provision", str(AGENTS / "bin" / "provision"))
         pspec = importlib.util.spec_from_loader("provision", loader)

@@ -5,8 +5,8 @@ description: What an agent can reach and use on its Loam server - its workspace,
 
 # What you can reach
 
-Your always-loading instructions name this box's own paths and domain;
-this page says what each thing is for.
+The shared reach page that loads beside your soul, config and map names
+this box's paths and domain. This page describes what you can use.
 
 **Your reach.** Your workspace is the directory you run in. The vault, the
 other agents' workspaces and the shared `commons/` beside them are yours to

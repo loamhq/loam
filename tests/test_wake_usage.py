@@ -169,7 +169,7 @@ def run_wake(root: Path, envelope: dict, started: str,
     (vault / "00_INBOX" / "from-agents").mkdir(parents=True)
     (ws / "agent.json").write_text(json.dumps({
         "name": AGENT, "workspace": str(ws), "vault": str(vault)}))
-    (ws / "_reflection.md").write_text("reflect\n")
+    (ws / "map.md").write_text("reflect\n")
     wake = load_wake()
     wake.LOG_DIR = root / "logs"
     wake.STATE_DIR = root / "state"

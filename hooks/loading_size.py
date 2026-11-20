@@ -6,19 +6,8 @@ Since 2026-11-08 (the owner's word, "the authority move") a persona's reach is
 the whole box -- shell, sudo, every path -- and what it should and should not
 do lives in its config, which loads on every run. Runtime mechanisms are for
 capacity and recovery, never for permission. This hook replaced
-hooks/boundary_guard.py on the persona lanes. The guard refused writes by
-path and refused an edit that took a loading file over the limit; this one
-runs AFTER the write, so the write has landed, and puts three things in front
-of the agent in the turn where acting on them is one more edit away:
-
-- the size of a loading file past LIMIT_CHARS, with the limit;
-- a filename Android cannot store (it would never reach the phone);
-- `_active.md` losing the frontmatter that makes it load at all (the loader
-  fails silently without it), for an agent with no map.
-
-And since 2026-11-18 it keeps the shape rendered: an agent that has made or
-removed its `map.md` has its CLAUDE.md and settings re-rendered here
-(lib/loam_loading.py), so its next run loads soul, config and map.
+hooks/boundary_guard.py on the persona lanes. It runs after the edit and
+warns when a loading file exceeds the limit or Android cannot store its name.
 
 It reads the file as it now is on disk rather than modelling the edit, so
 every tool that writes is covered the same way, on both providers: Claude
@@ -38,12 +27,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 from loam_memory import (  # noqa: E402
     LIMIT_CHARS,
-    MAP_LAYER,
     LayerError,
     is_auto_loaded,
     load_config,
     project_dir_from,
-    style_frontmatter_intact,
 )
 
 # Each tool that leaves content at a path, and the field naming that path.
@@ -113,13 +100,6 @@ def warnings_for(raw: str, workspace: Path | None) -> list[str]:
             f"run. The edit landed. This file's size is paid on every run: "
             f"move the bulk to a file you read on demand and leave an index "
             f"line pointing at it, or cut.")
-    if (path.name == "_active.md" and not (workspace / MAP_LAYER).is_file()
-            and not style_frontmatter_intact(text)):
-        out.append(
-            f"{raw!r} no longer opens with the frontmatter block (name, "
-            f"description, keep-coding-instructions) that makes it load into "
-            f"a conversation. Without it the whole layer silently stops "
-            f"loading. Put the `---` block back exactly as it was.")
     return out
 
 
@@ -132,17 +112,6 @@ def main() -> None:
         workspace = Path(load_config(project_dir_from(payload))["workspace"])
     except (LayerError, KeyError, OSError, ValueError):
         workspace = None
-    # The shape (2026-11-18, lib/loam_loading.py), after every tool call and
-    # not only a write this hook can name: a map made with the shell counts
-    # too. When the agent has made or removed its map since CLAUDE.md was
-    # rendered, the two files are re-rendered now, so the next run of any
-    # kind loads the shape on disk. Two small reads when nothing changed.
-    if workspace is not None:
-        try:
-            import loam_loading  # noqa: PLC0415
-            loam_loading.quiet_refresh(workspace)
-        except Exception:  # noqa: BLE001 -- a hook never stops a session
-            pass
     paths = written_paths(payload)
     if not paths:
         sys.exit(0)

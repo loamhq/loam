@@ -727,10 +727,7 @@ def _row(agent: str, name: str, text: str | None, log: list[dict],
         "enabled": enabled,
         "done": cron.done if cron else None,
         "body": strip_frontmatter(text).strip(),
-        # The reflection's instruction is its body (2026-11-19); an agent
-        # without a map also has its own `_reflection.md` loaded with it.
-        "instruction": ("_reflection.md" if kind == "reflection"
-                        and not (_ai_labs_ws(agent) / "map.md").is_file() else None),
+        "instruction": None,
         "timer": _timer(agent, name, kind),
         "file": {"root": "spaces", "path": f"{agent}/{CRON_LANE_DIR}/{name}.md"},
         "last_fire": ({k: fires[-1].get(k) for k in ("id", "ts", "outcome")}

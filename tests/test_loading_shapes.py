@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the instruction set each run kind receives from mapped and legacy workspaces on every provider."""
+"""Verify the instruction set each run kind receives with and without a map on every provider."""
 
 from __future__ import annotations
 
@@ -92,7 +92,8 @@ def render(ws: Path) -> None:
     (ws / "CLAUDE.md").write_text(prov.claude_md(ws.name.capitalize(), ws))
     (ws / ".claude" / "settings.json").write_text(
         json.dumps(prov.settings(ws), indent=2) + "\n")
-    prov.output_styles(ws)
+    (ws / ".claude" / "output-styles").mkdir()
+    (ws / ".claude" / "output-styles" / "none.md").write_text(prov.NONE_STYLE)
 
 
 def imports_text(ws: Path) -> str:
@@ -113,7 +114,7 @@ def claude_conversation(ws: Path) -> str:
 
 
 def claude_lane(ws: Path, cron: str | None) -> tuple[str, list[str]]:
-    _, text, _path = wake.lane_input(ws, cron)
+    text, _path = wake.lane_input(ws, cron)
     lane_file = None
     if text is not None:
         lane_file = TMP / f"{ws.name}-lane.md"
@@ -127,16 +128,12 @@ def claude_lane(ws: Path, cron: str | None) -> tuple[str, list[str]]:
 
 
 def codex_lane(ws: Path, cron: str | None) -> str:
-    _, text, path = wake.lane_input(ws, cron)
+    text, path = wake.lane_input(ws, cron)
     return cw.instructions(ws, "lane", path if text is not None else None, text)
 
 
 def tokens_in(text: str) -> set[str]:
     return {name for name, tok in TOKENS.items() if tok in text}
-
-
-def expected(ws: Path, kind: str, cron: str | None = None) -> set[str]:
-    return {str(p.relative_to(ws)) for p in loam_loading.own_files(ws, kind, cron)}
 
 
 def main() -> int:
@@ -146,137 +143,56 @@ def main() -> int:
           page == LABS / "_shared" / "owner.md" and page.is_file(), page)
     page.write_text(page.read_text() + f"\n- 2026-11-18: token {OWNER_TOKEN}.\n")
 
-    old = build("oldshape", mapped=False)
-    new = build("newshape", mapped=True)
-
-    # -- what loads, per run kind and provider --------------------------------
+    without = build("withoutmap", mapped=False)
+    with_map = build("withmap", mapped=True)
     runs = {
-        "Claude Code conversation": (lambda ws: claude_conversation(ws), "conversation", None),
-        "Claude Code wake": (lambda ws: claude_lane(ws, None)[0], "wake", None),
-        "Claude Code cron": (lambda ws: claude_lane(ws, "probe")[0], "cron", "probe"),
-        "Codex conversation": (lambda ws: codex.instructions(ws), "conversation", None),
-        "Codex wake": (lambda ws: codex_lane(ws, None), "wake", None),
-        "Codex cron": (lambda ws: codex_lane(ws, "probe"), "cron", "probe"),
-        "Antigravity conversation": (lambda ws: agy.instructions(ws), "conversation", None),
+        "Claude Code conversation": (claude_conversation, None),
+        "Claude Code wake": (lambda ws: claude_lane(ws, None)[0], None),
+        "Claude Code cron": (lambda ws: claude_lane(ws, "probe")[0], "probe"),
+        "Codex conversation": (codex.instructions, None),
+        "Codex wake": (lambda ws: codex_lane(ws, None), None),
+        "Codex cron": (lambda ws: codex_lane(ws, "probe"), "probe"),
+        "Antigravity conversation": (agy.instructions, None),
     }
-    for label, (assemble, kind, cron) in runs.items():
-        for ws, shape in ((new, "with a map"), (old, "without a map")):
+    for label, (assemble, cron) in runs.items():
+        for ws in (with_map, without):
+            want = {"soul.md", "config.md"}
+            if ws == with_map:
+                want.add("map.md")
+            if cron:
+                want.add("crons/probe.md")
             text = assemble(ws)
-            got, want = tokens_in(text), expected(ws, kind, cron)
-            check(f"{label}, {shape}: exactly {sorted(want)}", got == want,
-                  f"got {sorted(got)}")
-            mapped = ws is new
-            check(f"{label}, {shape}: Loam's text and the owner's page "
-                  f"{'load' if mapped else 'do not load'}",
-                  ((LOAM_HEADING in text) == mapped) and ((OWNER_TOKEN in text) == mapped),
-                  (LOAM_HEADING in text, OWNER_TOKEN in text))
+            check(f"{label}, {ws.name}: exactly {sorted(want)}", tokens_in(text) == want)
+            check(f"{label}, {ws.name}: shared instructions load",
+                  LOAM_HEADING in text and OWNER_TOKEN in text)
 
-    check("the shapes, stated: with a map, soul, config and map on every kind",
-          all(expected(new, k) == {"soul.md", "config.md", "map.md"}
-              for k in ("conversation", "wake")), "")
-    check("...and a cron adds only its own file",
-          expected(new, "cron", "probe") == {"soul.md", "config.md", "map.md", "crons/probe.md"})
+    for ws in (with_map, without):
+        _, argv = claude_lane(ws, None)
+        check(f"{ws.name}: reflection appends no file",
+              "--append-system-prompt-file" not in argv)
+        check(f"{ws.name}: identity preflight resolves the shared imports",
+              ("map.md" in {p.name for p in loam_identity.assert_imports_resolve(ws)})
+              == (ws == with_map))
 
-    _, argv_new = claude_lane(new, None)
-    _, argv_old = claude_lane(old, None)
-    check("a mapped agent's reflection appends no file; an unmapped one's does",
-          ("--append-system-prompt-file" not in argv_new,
-           "--append-system-prompt-file" in argv_old), (True, True))
-    check("a mapped agent's wake is sized by its map",
-          wake.lane_input(new, None)[0] == "map.md" and wake.lane_input(new, None)[2] == new / "map.md")
-    check("the reflection's prompt, either shape: its record's instruction and the vault",
-          "{instruction}" in wake.REFLECTION_PROMPT_TEMPLATE
-          and "{vault_block}" in wake.REFLECTION_PROMPT_TEMPLATE
-          and not hasattr(wake, "MAPPED_PROMPT_TEMPLATE")
-          and not hasattr(wake, "PROMPT_TEMPLATE"))
-    check("the mapped cron's prompt does not claim `_always.md` loaded",
-          "_always.md" not in wake.MAPPED_CRON_PROMPT_TEMPLATE
-          and "_always.md" in wake.CRON_PROMPT_TEMPLATE)
-
-    # -- rendered files ---------------------------------------------------------
-    s_new = json.loads((new / ".claude" / "settings.json").read_text())
-    s_old = json.loads((old / ".claude" / "settings.json").read_text())
-    check("settings: a mapped agent's conversation selects the empty style",
-          (s_new["outputStyle"], s_old["outputStyle"]) == ("none", "conversation"),
-          (s_new["outputStyle"], s_old["outputStyle"]))
-    claude_new = (new / "CLAUDE.md").read_text()
-    claude_old = (old / "CLAUDE.md").read_text()
-    check("CLAUDE.md with a map: soul, Loam's text, owner's page, config, map, in that order",
-          [l for l in claude_new.splitlines() if l.startswith("@")][:5]
-          == ["@soul.md", f"@{loam_loading.LOAM_TEXT}", f"@{page}", "@config.md", "@map.md"],
-          [l for l in claude_new.splitlines() if l.startswith("@")])
-    check("...and tells the agent its old files no longer load",
-          "no longer loads" in claude_new and "output-styles" not in claude_new)
-    check("CLAUDE.md without a map is the old shape, word for word",
-          "@_always.md" in claude_old and "@map.md" not in claude_old
-          and "output-styles/conversation.md" in claude_old)
-    check("Loam's text is under 2,000 characters",
-          len(loam_loading.LOAM_TEXT.read_text()) < 2000,
-          len(loam_loading.LOAM_TEXT.read_text()))
-    check("the identity gate accepts the mapped CLAUDE.md's imports",
-          len(loam_identity.assert_imports_resolve(new)) >= 5)
-    canary = loam_identity.pick_canary(new)
-    check("...and its canary is a soul sentence found in none of the others",
-          canary in (new / "soul.md").read_text()
-          and canary not in loam_loading.LOAM_TEXT.read_text(), canary)
-
-    # -- the switch ------------------------------------------------------------
-    sw = build("switcher", mapped=False)
-    before = {n: (sw / n).read_bytes() for n in ("_always.md", "_active.md", "_reflection.md")}
-    check("no map: refresh changes nothing", loam_loading.refresh(sw) is False)
-    (sw / "map.md").write_text(f"# Map\n\nToken {TOKENS['map.md']}.\n")
-    check("a map written: refresh re-renders", loam_loading.refresh(sw) is True)
-    check("...CLAUDE.md imports the map, settings select `none`",
-          loam_loading.rendered_mapped(sw) is True
-          and json.loads((sw / ".claude" / "settings.json").read_text())["outputStyle"] == "none")
-    check("...and its conversation now loads soul, config and map only",
-          tokens_in(claude_conversation(sw)) == {"soul.md", "config.md", "map.md"},
-          sorted(tokens_in(claude_conversation(sw))))
-    check("...the old files are untouched, byte for byte",
-          all((sw / n).read_bytes() == b for n, b in before.items()))
-    check("a second refresh changes nothing", loam_loading.refresh(sw) is False)
-    (sw / "map.md").unlink()
-    check("the map removed: the old shape comes back",
-          loam_loading.refresh(sw) is True and loam_loading.rendered_mapped(sw) is False
-          and tokens_in(claude_conversation(sw)) == {"soul.md", "config.md", "_always.md", "_active.md"})
-
-    # The hook, after a write it cannot name (a map made with the shell).
-    (sw / "map.md").write_text("# Map\n")
-    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(sw)}
-    proc = subprocess.run(
-        [sys.executable, str(AGENTS / "hooks" / "loading_size.py")],
-        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo > map.md"},
-                          "cwd": str(sw)}),
-        text=True, capture_output=True, env=env)
-    check("the PostToolUse hook re-renders after a Bash write, exit 0",
-          proc.returncode == 0 and loam_loading.rendered_mapped(sw) is True,
-          proc.stderr[-400:])
-
-    # -- the readers -----------------------------------------------------------
-    check("the size warning follows the shape: the map loads, `_always.md` does not",
-          loam_memory.is_auto_loaded(new / "map.md", new)
-          and not loam_memory.is_auto_loaded(new / "_always.md", new)
-          and loam_memory.is_auto_loaded(old / "_always.md", old)
-          and not loam_memory.is_auto_loaded(old / "map.md", old))
-    rc = load("lane_check_shapes", AGENTS / "bin" / "lane-check")
-    (new / "_active.md").write_text("no frontmatter at all\n")
-    problems, _ = rc.findings(new)
-    check("lane-check with a map: no style finding for an `_active.md` that no longer loads",
-          problems == [], problems)
-    (new / "map.md").write_text("x" * (loam_memory.LIMIT_CHARS + 5))
-    problems, _ = rc.findings(new)
-    check("...and the map over the guideline is reported, not refused",
-          len(problems) == 1 and "map.md" in problems[0] and "Reported, not refused" in problems[0],
-          problems)
-    import loam_profile  # noqa: PLC0415
-    loam_profile._ai_labs = lambda: LABS  # noqa: SLF001
-    check("the profile lists the map for a mapped agent, the three for the other",
-          (set(loam_profile.files("newshape")["memory"]),
-           set(loam_profile.files("oldshape")["memory"]))
-          == ({"map", "folder"}, {"always", "active", "reflection", "folder"}),
-          (loam_profile.files("newshape")["memory"].keys(),))
-
-    print(f"\n{'OK' if not FAILURES else f'{FAILURES} FAILED'}")
+    before = {name: (without / name).read_bytes()
+              for name in ("_always.md", "_active.md", "_reflection.md")}
+    map_file = without / "map.md"
+    existing = (with_map / "map.md").read_bytes()
+    runner = [sys.executable, str(AGENTS / "lib" / "loam_map_migration.py")]
+    done = subprocess.run(runner, check=True, text=True, capture_output=True)
+    seeded = map_file.read_text()
+    check("migration creates only the missing map",
+          "Created 1 (withoutmap)" in done.stdout
+          and existing == (with_map / "map.md").read_bytes(), done.stdout)
+    check("migration points to the old files by run kind",
+          all(line in seeded for line in (
+              "Read `_always.md` at the start of every run.",
+              "Read `_active.md` at the start of a conversation.",
+              "Read `_reflection.md` at the start of a reflection wake.")))
+    check("migration leaves the old files byte-identical",
+          all((without / name).read_bytes() == body for name, body in before.items()))
+    done = subprocess.run(runner, check=True, text=True, capture_output=True)
+    check("migration is idempotent", "Created 0." in done.stdout and map_file.read_text() == seeded)
     return 1 if FAILURES else 0
 
 

@@ -49,6 +49,13 @@ install and is never updated this way.
 It must keep install state outside that checkout, apart from the generated
 engineer harnesses. A tarball cannot be updated.
 
+## Persona maps
+
+The incoming release creates a map for each persona that has none during
+the library step. The map points
+to any existing instruction files by the runs on which the agent should
+read them. Existing maps and the files they point to keep their contents.
+
 ## A change to Loam's own parts (2026-11-17)
 
 An install's agent can brief its own engineer to change Loam itself. What

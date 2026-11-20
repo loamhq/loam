@@ -27,7 +27,7 @@ export async function profileHost({ appOverrides = {} } = {}) {
   const profiles = new Map(app.f.agents.map(agent => [agent.id,{
     agent, identity:{id:agent.id,display:agent.name},
     defaults:{provider:null,model:null,effort:null,effective:{provider:'claude-code',model:'fable',effort:null},applies:'New threads and members brought in start on this provider. Model and thinking apply from the next turn unless the thread chose its own.',not_honoured:[]},
-    files:{workspace:ref(''),soul:ref('soul.md'),config:ref('config.md'),memory:{always:ref('_always.md'),active:ref('_active.md'),reflection:ref('_reflection.md'),folder:ref('memory')},skills:{...ref('skills'),count:4}},
+    files:{workspace:ref(''),soul:ref('soul.md'),config:ref('config.md'),memory:{map:ref('map.md'),folder:ref('memory')},skills:{...ref('skills'),count:4}},
     schedule:[structuredClone(schedule)],status:{threads:[{thread:'a-quieter-week'}],jobs:[{job:'build-notes'}],queued:[],run:null,next_wake:schedule.next_fire,box_read:true},
     plugins:[{id:'read-aloud',name:'Read aloud',on:true,fields:plugin.agent_settings,values:{voice:'Charon'}},{id:'off',name:'Hidden plugin',on:false,fields:plugin.agent_settings,values:{voice:'Kore'}}],
   }]))

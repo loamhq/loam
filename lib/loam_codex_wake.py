@@ -6,13 +6,9 @@ provider and must be used. A persona's wakes and crons are Loam's layer, so
 they run on the persona's own provider (``agent.json`` ``provider``), not on
 Claude Code whatever it is set to. bin/wake chooses; this is the Codex half.
 
-**The same inputs as a Claude wake.** Claude Code's wake loads ``CLAUDE.md``
-with its ``@`` imports (soul, config, ``_always.md``, reach.md), no
-conversation style (``outputStyle: none``), and the lane's own file
-(``_reflection.md`` or ``crons/<name>.md``) appended to the system prompt.
-``instructions`` builds exactly that list, in that order, in the layout the
-Codex conversation lane uses (``loam_codex.instructions``), with the lane's
-file last where the conversation's ``_active.md`` would be. The tools are the
+**The same inputs as a Claude wake.** Codex uses the conversation's shared
+instructions. The reflection record supplies the wake prompt; a cron adds
+its own file to the instructions. The tools are the
 persona's own ``.codex/config.toml`` (the five MCP servers, the engineer
 among them, every one approved; full access; Codex's live web search), the
 same file a Codex conversation runs on, and the runtime's hooks are trusted
@@ -92,27 +88,11 @@ def lane_block(lane_label: str, lane_path: Path, lane_text: str) -> str:
 
 def instructions(workspace: Path, lane_label: str, lane_path: Path | None,
                  lane_text: str | None) -> str:
-    """The wake's instructions: the provider line, ``CLAUDE.md`` and its
-    imports in Claude Code's order, each under ``Contents of <path>`` as the
-    Codex conversation lane presents them, then the lane's own file
-    (frontmatter already stripped by ``loam_memory.resolve_lane``). No
-    ``_active.md``: a wake has no conversation layer on either provider.
-
-    ``lane_text`` is None for the reflection wake of an agent with a map
-    (2026-11-18): no lane file, as on Claude Code; its instruction is the
-    prompt, and what loads is what its conversations load."""
-    parts = [PROVIDER_LINE]
-    for source in codex._imports(workspace / "CLAUDE.md", 0, set()):  # noqa: SLF001
-        parts.append(f"Contents of {source}:\n\n"
-                     f"{source.read_text(encoding='utf-8').strip()}")
+    """Use the shared instructions and append the cron body when present."""
+    base = codex.instructions(workspace, PROVIDER_LINE)
     if lane_text is not None and lane_path is not None:
-        parts.append(lane_block(lane_label, lane_path, lane_text))
-    return "\n\n".join(parts) + "\n"
-
-
-def instruction_sources(workspace: Path) -> list[Path]:
-    """The memory files a wake loads before its lane file, in order."""
-    return codex._imports(workspace / "CLAUDE.md", 0, set())  # noqa: SLF001
+        return f"{base}\n{lane_block(lane_label, lane_path, lane_text)}\n"
+    return base
 
 
 def unattended_answer(method: str, params: dict) -> dict | None:

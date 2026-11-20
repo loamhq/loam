@@ -77,7 +77,7 @@ def build_agent(root: Path, vault: Path) -> Path:
         "name": AGENT, "display": "Wakelaunchtest",
         "workspace": str(ws), "vault": str(vault),
     }))
-    (ws / "_reflection.md").write_text("Reflect.\n")
+    (ws / "map.md").write_text("Reflect.\n")
     return ws
 
 

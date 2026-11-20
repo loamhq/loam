@@ -36,36 +36,9 @@ NEAR_LIMIT_CHARS = 9_000
 # refusal outlived it by ten days, keeping one persona's wake dark two nights
 # over 9 characters. Every reporter now warns and the run goes ahead.
 
-ALWAYS_LAYER = "_always.md"
-CONVERSATION_LAYER = "_active.md"
-# The map (2026-11-18, lib/loam_loading.py): the one file of the agent's own
-# that loads, on every run, once the agent has one. Its presence is the
-# switch between the two shapes; without it the three files above load as
-# they always have.
 MAP_LAYER = "map.md"
-REFLECTION_LAYER = "_reflection.md"
 CRON_LANE_DIR = "crons"
 
-# The files that load on every run, whatever the lane.
-UNIVERSAL_LAYERS = (ALWAYS_LAYER, CONVERSATION_LAYER, REFLECTION_LAYER)
-
-# The output style is selected by name, and the name must match. Measured
-# 2026-09-04 on 2.1.260: a style file whose `name:` disagrees with the
-# selected style loads NOTHING, silently -- the same shape as a missing file,
-# which also loads nothing and exits 0. `name:` may be omitted, in which case
-# the filename decides; it may not be present and wrong. So the key is
-# written explicitly and the guard refuses an edit that changes it.
-STYLE_NAME = "conversation"
-STYLE_REQUIRED = {
-    "name": STYLE_NAME,
-    "keep-coding-instructions": "true",
-}
-
-# Defence-in-depth strip, mirroring the chassis. `_always.md` and the lane
-# files are stored without frontmatter by convention, and the append-file
-# route does no stripping of its own -- a stray block would reach the model as
-# literal ---bracketed YAML it would read as content. `_active.md` is the
-# exception: its frontmatter is REQUIRED and is consumed by the style loader.
 FRONTMATTER_RE = re.compile(r"\A---\r?\n(?:.*?\r?\n)?---\r?\n*", re.DOTALL)
 
 
@@ -101,12 +74,8 @@ def is_auto_loaded(target: Path, workspace: Path) -> bool:
         workspace = workspace.resolve()
     except OSError:
         return False
-    if target.parent == workspace:
-        if (workspace / MAP_LAYER).is_file():
-            if target.name == MAP_LAYER:
-                return True
-        elif target.name in UNIVERSAL_LAYERS:
-            return True
+    if target == workspace / MAP_LAYER:
+        return True
     lanes = workspace / CRON_LANE_DIR
     return target.is_relative_to(lanes) and target.suffix == ".md"
 
@@ -144,7 +113,7 @@ def over_limit_reason(name: str, size: int, path: Path,
     )
 
 
-def resolve_lane(project_dir: Path, lane: str = REFLECTION_LAYER) -> tuple[str, str, Path]:
+def resolve_lane(project_dir: Path, lane: str) -> tuple[str, str, Path]:
     """Return ``(agent_name, lane_text, lane_path)`` or raise LayerError.
 
     The text comes back with leading frontmatter stripped, because the caller
@@ -190,20 +159,3 @@ def front_matter(text: str) -> dict[str, str]:
         if sep and key.strip():
             out[key.strip()] = value.strip().strip("\"'")
     return out
-
-
-def style_keys(text: str) -> dict[str, str]:
-    """The frontmatter keys the output-style loader reads, case-folded.
-
-    The loader matches its selector case-insensitively, so the comparison the
-    guard makes has to as well. A cron header cannot be read this way -- an
-    approval date survives lower-casing but a schedule read back for a receipt
-    should be the agent's own text -- which is why the case-preserving reading
-    above is the one that is shared.
-    """
-    return {k.lower(): v.lower() for k, v in front_matter(text).items()}
-
-
-def style_frontmatter_intact(text: str) -> bool:
-    keys = style_keys(text)
-    return all(keys.get(k) == v for k, v in STYLE_REQUIRED.items())

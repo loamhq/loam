@@ -115,24 +115,9 @@ def reflection_default() -> str:
             f"has: the whole box, subagents and the engineer included.\n")
 
 
-# Recognize legacy schedule-only reflection bodies when reading or provisioning a
-# record.
-REFLECTION_PLACEHOLDERS = (
-    "The nightly reflection wake. Its instruction is `_reflection.md`; this "
-    "record holds only when it runs and whether it is on.",
-    "The nightly reflection wake. Its instruction is `_reflection.md`, or "
-    "Loam's default once there is a `map.md`; this record holds only when it "
-    "runs and whether it is on.",
-)
-
-
 def reflection_instruction(text: str | None) -> str:
-    """What a reflection record tells its run: its body, or Loam's default
-    when the body is empty or a placeholder."""
-    body = strip_frontmatter(text or "").strip()
-    if not body or body in REFLECTION_PLACEHOLDERS:
-        return reflection_default().strip()
-    return body
+    """Read the wake instructions from its schedule record."""
+    return strip_frontmatter(text or "").strip() or reflection_default().strip()
 
 # Reject unknown header keys so an ignored setting cannot appear to have taken effect.
 HEADER_KEYS = ("lane", "schedule", "at", "note", "enabled", "reason", "done",
@@ -632,10 +617,8 @@ left in that persona's commons inbox.
   memory for it (2 GB or 12% of RAM kept free, as the session broker
   admits a chat); one that finds no room waits 20 minutes and then skips,
   the same way. No run has a wall clock or a round-trip cap.
-- A cron loads `_always.md` and its own file. It does not load
-  `_reflection.md`, and reflection does not load any cron's file.
-- An agent with a `map.md` loads its soul, config and map on every run,
-  and a cron adds its own file.
+- Every run loads the agent's soul, config and map when present. A cron adds
+  its own instruction file.
 - **Every persona wakes once a day**, by its reflection record: its body is
   what the wake is told (Loam's default to start with), and only the owner
   turns it off. The persona moves its time and keeps any other schedules.

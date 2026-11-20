@@ -24,7 +24,6 @@ import loam_antigravity as agy
 import loam_broker as cfg
 import loam_clock
 import loam_codex as codex
-import loam_loading
 import loam_questions as questions_fmt
 import loam_skills
 import loam_transcript
@@ -733,8 +732,6 @@ class Session:
         # Claude shelf above the workspaces and this persona's view. Never
         # fails a start (lib/loam_skills.py).
         await asyncio.to_thread(loam_skills.quiet_refresh, self.workspace)
-        # Refresh loading instructions before launch in case the agent has changed its map.
-        await asyncio.to_thread(loam_loading.quiet_refresh, self.workspace)
         env = dict(os.environ)
         env["DISABLE_AUTOUPDATER"] = "1"
         env["CLAUDE_PROJECT_DIR"] = str(self.workspace)

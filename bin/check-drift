@@ -14,7 +14,6 @@ import os
 import re
 import subprocess
 import sys
-from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
@@ -32,7 +31,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_broker as brk  # noqa: E402
 import loam_profile  # noqa: E402
 import loam_cron  # noqa: E402
-import loam_memory  # noqa: E402
 import loam_schedule  # noqa: E402
 import loam_session as sess  # noqa: E402
 import loam_units  # noqa: E402
@@ -137,106 +135,6 @@ def compare(findings: list, label: str, live_path: Path, expected: str) -> None:
         )
     )
     findings.append((label, str(live_path), diff))
-
-
-def config_clauses(text: str, name: str, display: str,
-                   keep: set[str] = frozenset()) -> dict[str, str]:
-    """Split a config.md into H2 clauses, with the agent's own identity masked.
-
-    `config.md` has no generator -- it is operator-authored and provision only
-    refuses when it is absent -- so nothing has ever compared the seven copies
-    of the shared clauses to each other. That is the same two-homes defect as
-    a stale generator, arriving from the other direction: a clause added to
-    six configs and missed on the seventh leaves that agent quietly working to
-    a different protocol, and no artifact on this box disagrees with itself.
-
-    Masking is what makes the copies comparable: every legitimate difference
-    between them is the agent's own name or its own workspace path. What is
-    left over is either identical or it is drift.
-    """
-    def mask(line: str) -> str:
-        if line in keep:
-            return line
-        line = re.sub(rf"\b{re.escape(display)}\b", "<Agent>", line)
-        return re.sub(rf"\b{re.escape(name)}\b", "<agent>", line)
-    masked = "\n".join(mask(line) for line in text.splitlines())
-    clauses: dict[str, str] = {}
-    title, buf = "(preamble)", []
-    for line in masked.splitlines():
-        if line.startswith("## "):
-            clauses[title] = "\n".join(buf).strip()
-            title, buf = line[3:].strip(), []
-        else:
-            buf.append(line)
-    clauses[title] = "\n".join(buf).strip()
-    return clauses
-
-
-def _own_name(name: str) -> str:
-    """The name an agent's own files use (loam_profile.self_name)."""
-    try:
-        cfg = json.loads((AI_LABS / name / "agent.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        cfg = {}
-    return loam_profile.self_name(name, cfg)
-
-
-def check_config_clauses(findings: list, names: list[str]) -> None:
-    """Every shared clause must be byte-identical, and present everywhere.
-
-    A clause carried by a MAJORITY of the roster is a shared clause: missing
-    from one agent is a finding. A clause carried by a minority is a
-    deliberate per-agent rule -- one persona's own clause is the only one
-    today -- and is left alone. The roster is derived, so this cannot go
-    stale as agents are added or retired.
-    """
-    raw = {}
-    for name in names:
-        path = AI_LABS / name / "config.md"
-        if not path.exists():
-            findings.append((f"{name} config.md", str(path), "MISSING on disk"))
-            continue
-        if (AI_LABS / name / "map.md").is_file():
-            # The map's shape (2026-11-18, lib/loam_loading.py): the shared
-            # rules are Loam's text and the owner's shared page, and this
-            # config holds only the owner's words for this one agent, so it
-            # has no shared clause to carry.
-            continue
-        raw[name] = path.read_text(encoding="utf-8")
-    if len(raw) < 2:
-        return
-
-    # Compare majority-identical lines before masking. A shared clause that names
-    # one agent would otherwise appear to differ only in that agent's copy.
-    lines = Counter(l for t in raw.values() for l in set(t.splitlines()))
-    shared = {l for l, n in lines.items() if n >= len(raw) // 2 + 1}
-    per_agent = {name: config_clauses(text, name, _own_name(name), shared)
-                 for name, text in raw.items()}
-
-    titles = sorted({t for c in per_agent.values() for t in c})
-    majority = len(per_agent) // 2 + 1
-    for title in titles:
-        present = {n: c[title] for n, c in per_agent.items() if title in c}
-        missing = sorted(set(per_agent) - set(present))
-        if len(present) < majority:
-            continue  # a deliberate per-agent clause, not a shared one
-        if missing:
-            findings.append((
-                f"config.md clause '{title}'", "ai-labs/*/config.md",
-                f"carried by {len(present)} of {len(per_agent)} configs but "
-                f"missing from: {', '.join(missing)}. A shared clause on some "
-                f"agents and not others is a protocol only some of them know.",
-            ))
-        modal, _ = Counter(present.values()).most_common(1)[0]
-        for agent in sorted(n for n, body in present.items() if body != modal):
-            findings.append((
-                f"config.md clause '{title}' in {agent}",
-                str(AI_LABS / agent / "config.md"),
-                "\n".join(difflib.unified_diff(
-                    present[agent].splitlines(), modal.splitlines(),
-                    fromfile=f"live:{agent}", tofile="the other configs",
-                    lineterm="", n=1)),
-            ))
 
 
 def check_crons(findings: list, names: list[str]) -> list[str]:
@@ -1198,56 +1096,12 @@ def main() -> int:
         })
         compare(findings, f"{name} agent.json", ws / "agent.json", expected_agent)
 
-        # The conversation lane, which is three artifacts that have to agree
-        # and which all fail SILENTLY when they do not: settings names a
-        # style, the style file is a symlink, and the file it points at
-        # carries the frontmatter the loader selects on. Break any one and
-        # the session starts normally carrying no conversation layer. Nothing
-        # at runtime says so, which is exactly the class this file exists for.
-        styles = ws / ".claude" / "output-styles"
-        link = styles / f"{prov.STYLE_NAME}.md"
-        wanted_link = f"../../{prov.CONVERSATION_LAYER}"
-        if not link.is_symlink():
-            findings.append((
-                f"{name} conversation style", str(link),
-                "not a symlink. It must point at the agent's own "
-                f"{prov.CONVERSATION_LAYER}; a real file here would be text "
-                "the agent cannot edit, in its own system prompt.",
-            ))
-        elif str(link.readlink()) != wanted_link:
-            findings.append((
-                f"{name} conversation style", str(link),
-                f"points at {link.readlink()}, expected {wanted_link}",
-            ))
-        elif not link.exists():
-            findings.append((
-                f"{name} conversation style", str(link),
-                f"dangling: {prov.CONVERSATION_LAYER} does not exist, so no "
-                "conversation layer loads at all.",
-            ))
-
-        compare(findings, f"{name} none style", styles / "none.md",
-                prov.NONE_STYLE)
-
-        active = ws / prov.CONVERSATION_LAYER
-        if active.is_file():
-            body = active.read_text(encoding="utf-8")
-            missing = [
-                k for k in prov.style_frontmatter(display)
-                if k not in loam_memory.style_keys(body)
-            ]
-            if missing:
-                findings.append((
-                    f"{name} {prov.CONVERSATION_LAYER} frontmatter", str(active),
-                    f"missing style key(s): {', '.join(missing)}. The loader "
-                    f"selects by name and loads NOTHING when the key is "
-                    f"absent or disagrees — with no error. Re-run provision.",
-                ))
+        compare(findings, f"{name} empty output style",
+                ws / ".claude" / "output-styles" / "none.md", prov.NONE_STYLE)
 
         # The daily wake's service and timer are its reflection record's,
         # compared with every other record's in check_crons (2026-11-19).
 
-    check_config_clauses(findings, names)
     check_user_settings(findings, prov)
     check_managed_settings(findings, prov)
     model_notes = check_lane_models(findings, names, prov)

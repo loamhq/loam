@@ -55,7 +55,7 @@ def load_wake():
     return mod
 
 
-def build(root: Path, reflection: str) -> tuple[Path, Path]:
+def build(root: Path, reflection: str | None) -> tuple[Path, Path]:
     ws = root / "ai-labs" / AGENT
     vault = root / "vault"
     ws.mkdir(parents=True)
@@ -64,7 +64,8 @@ def build(root: Path, reflection: str) -> tuple[Path, Path]:
         "name": AGENT, "display": "Wakelimittest",
         "workspace": str(ws), "vault": str(vault),
     }))
-    (ws / "_reflection.md").write_text(reflection)
+    if reflection is not None:
+        (ws / "map.md").write_text(reflection)
     return ws, vault
 
 
@@ -99,7 +100,7 @@ def inbox(vault: Path) -> tuple[str, str]:
     return out[0], out[1] + told
 
 
-def scenario(label: str, reflection: str, today: date, expect_code,
+def scenario(label: str, reflection: str | None, today: date, expect_code,
              expect_note, expect_comms: bool | None = None):
     """Run a wake with one lane file and check the warning it produces."""
     if expect_comms is None:
@@ -156,7 +157,7 @@ results = [
              "the reflection lane went ahead"),
     scenario("9 over (11-17's case): runs", "o" * (LIMIT_CHARS + 9), after,
              0, "over the 10,000-character limit"),
-    scenario("missing lane file", "", after, 3, "is empty"),
+    scenario("missing map", None, after, 0, None),
 ]
 
 # The warning names the count, and it is written once a night: a second wake
@@ -169,14 +170,14 @@ try:
     stub(wake, launched, before)
     first = wake.run(ws, AGENT, vault, "2026-09-04T00:00:00Z")
     text1, _ = inbox(vault)
-    (ws / "_reflection.md").write_text("w" * (NEAR_LIMIT_CHARS + 2))
+    (ws / "map.md").write_text("w" * (NEAR_LIMIT_CHARS + 2))
     second = wake.run(ws, AGENT, vault, "2026-09-04T00:00:00Z")
     text2, comms2 = inbox(vault)
     warning_lines = [l for l in text2.splitlines() if WARNING in l]
     checks = [
         ("the warning names the count",
          f"{NEAR_LIMIT_CHARS + 1:,} characters" in text1),
-        ("the warning names the file", "`_reflection.md`" in text1),
+        ("the warning names the file", "`map.md`" in text1),
         ("the warning says it is not a refusal",
          "A warning, not a refusal" in text1),
         ("both wakes ran", first == 0 and second == 0 and len(launched) == 2),
@@ -192,11 +193,13 @@ finally:
     shutil.rmtree(root, ignore_errors=True)
     loam_memory.date = date
 
-# The lane text reaches the CLI stripped, through the file flag, alongside the
-# style override -- the three facts that make the wake a lane of its own.
+# A cron body reaches the CLI through the file flag with its frontmatter stripped.
 root = Path(tempfile.mkdtemp(prefix="loam-wake-argv-"))
 try:
-    ws, vault = build(root, "---\nstray: yaml\n---\n\nLANE BODY\n")
+    ws, vault = build(root, "Map.\n")
+    (ws / "crons").mkdir()
+    (ws / "crons" / "probe.md").write_text(
+        "---\nschedule: daily at 05:00 PT\nenabled: true\n---\n\nLANE BODY\n")
     wake = load_wake()
     loam_identity.preflight_identity = lambda project, model=None: ("c", "o")
     seen = {}
@@ -208,13 +211,13 @@ try:
         return FakeCompleted()
 
     wake.subprocess.run = only_claude(capture)
-    wake.run(ws, AGENT, vault, "2026-09-04T00:00:00Z")
+    wake.run(ws, AGENT, vault, "2026-09-04T00:00:00Z", cron="probe")
     argv = seen["argv"]
     checks = [
         ("passes --append-system-prompt-file", "--append-system-prompt-file" in argv),
-        ("lane text is frontmatter-stripped", "stray" not in seen["lane"]),
+        ("lane text is frontmatter-stripped", "schedule:" not in seen["lane"]),
         ("lane text carries the body", "LANE BODY" in seen["lane"]),
-        ("suppresses the conversation style",
+        ("uses the empty output style",
          json.loads(argv[argv.index("--settings") + 1]).get("outputStyle") == "none"),
         ("temp lane file is cleaned up",
          not Path(argv[argv.index("--append-system-prompt-file") + 1]).exists()),

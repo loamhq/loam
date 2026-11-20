@@ -28,11 +28,8 @@ Two calls made in building it, not by decision:
 
 - **The person's shelf wins a name over Loam's.** The person's own version
   of one of Loam's skills should not need copying into every agent.
-- **The pointer line is in the rendered `CLAUDE.md`, not `_always.md`.**
-  `CLAUDE.md` is the always-loading file Loam renders (and Codex's and
-  Antigravity's instructions are made from it); `_always.md` is the agent's
-  own to write, and a line put back into it on every provisioning would be a
-  line it could not cut.
+- **Loam renders the pointer in `CLAUDE.md`.** Codex and Antigravity also
+  use its instructions. Each agent keeps control of its own map.
 
 ## The starter vault
 

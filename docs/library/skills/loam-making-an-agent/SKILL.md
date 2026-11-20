@@ -19,4 +19,4 @@ description: How to make a new agent with the owner: build it from a character (
 
 **The config is the owner's words for this agent alone**, in their words and dated: often a single line saying so, because Loam's own text and the page every agent shares load beside it. Do not copy rules into it from other agents.
 
-**The map is the agent's.** A new agent starts with a one-line `map.md` (the draft's `map`, if you give one) and shapes its workspace itself. The map loads on every run, so it points to things and does not hold them.
+**The map is the agent's.** A new agent starts with `soul.md`, `config.md` and a one-line `map.md` (the draft's `map`, if you give one) and shapes its workspace itself. The map loads on every run, so it points to things and does not hold them.

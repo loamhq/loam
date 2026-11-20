@@ -80,7 +80,7 @@ def build(root: Path, agent: str, cron: str) -> Path:
         "name": agent, "display": agent.capitalize(),
         "workspace": str(ws), "vault": str(root / "vault"),
     }))
-    (ws / "_reflection.md").write_text("Reflect.\n")
+    (ws / "map.md").write_text("Reflect.\n")
     (ws / "crons" / f"{cron}.md").write_text(
         "---\nschedule: daily at 05:00 PT\napproved: 2026-09-05\n---\n\n"
         "Sleep, and report having slept.\n")

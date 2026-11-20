@@ -155,16 +155,10 @@ try:
     big = "y" * (LIMIT_CHARS + 500)
     bigger = "z" * (LIMIT_CHARS + 5000)
 
-    (ws / "_always.md").write_text(small)
-    (ws / "_reflection.md").write_text(bigger)          # already over
+    (ws / "map.md").write_text(small)
+    (ws / "crons" / "nightly.md").write_text(bigger)
     (ws / "notes.md").write_text(small)
     (ws / "over-source.md").write_text(big)
-    (ws / "_active.md").write_text(
-        "---\nname: conversation\ndescription: d\n"
-        "keep-coding-instructions: true\n---\n\nbody line\n"
-    )
-    link = ws / ".claude" / "output-styles" / "conversation.md"
-    link.symlink_to("../../_active.md")
     # Skills as provision lays them out: `.claude/skills -> ../skills`. Two
     # links inside `skills/` that must not become a way through the first:
     # one out of the workspace to a place otherwise writable, one back into
@@ -177,21 +171,22 @@ try:
     (ws / "skills" / "up").symlink_to("../notes.md")
     CS = f"{ws}/.claude/skills"
 
-    A = f"{ws}/_always.md"
-    R = f"{ws}/_reflection.md"
-    AC = f"{ws}/_active.md"
+    A = f"{ws}/map.md"
+    R = f"{ws}/crons/nightly.md"
+    link = ws / ".claude" / "settings-link"
+    link.symlink_to("../notes.md")
 
     LIMIT_CASES = [
         # (label, tool, input, expect_allowed)
-        ("write under limit -> _always",   "Write",
+        ("write under limit -> map",   "Write",
          {"file_path": A, "content": small * 2}, True),
-        ("write OVER limit -> _always",    "Write",
+        ("write OVER limit -> map",    "Write",
          {"file_path": A, "content": big}, False),
         ("write over limit -> notes.md",   "Write",
          {"file_path": f"{ws}/notes.md", "content": bigger}, True),
         ("write OVER limit -> crons lane", "Write",
-         {"file_path": f"{ws}/crons/nightly.md", "content": big}, False),
-        # The shrink exemption, both sides. _reflection.md is already over.
+         {"file_path": f"{ws}/crons/other.md", "content": big}, False),
+        # The cron is already over the limit.
         ("SHRINK an over-limit file",      "Write",
          {"file_path": R, "content": big}, True),
         ("grow an over-limit file",        "Write",
@@ -211,23 +206,13 @@ try:
          {"source": f"{ws}/over-source.md", "destination": A}, False),
         ("move over-limit file AWAY",      "mcp__loam__move_file",
          {"source": R, "destination": f"{ws}/_body.md"}, True),
-        # The style frontmatter _active.md cannot lose.
-        ("edit below the frontmatter",     "Edit",
-         {"file_path": AC, "old_string": "body line", "new_string": "new body"}, True),
-        ("edit that drops frontmatter",    "Edit",
-         {"file_path": AC, "old_string": "name: conversation\n", "new_string": ""}, False),
-        ("edit that renames the style",    "Edit",
-         {"file_path": AC, "old_string": "name: conversation",
-          "new_string": "name: active"}, False),
-        ("write that drops frontmatter",   "Write",
-         {"file_path": AC, "content": "just a body\n"}, False),
         # A move into provider settings must obey the same restrictions as an edit.
         ("move INTO .claude",              "mcp__loam__move_file",
          {"source": f"{ws}/notes.md",
           "destination": f"{ws}/.claude/settings.json"}, False),
-        ("move onto the style SYMLINK",    "mcp__loam__move_file",
+        ("move onto a .claude SYMLINK",    "mcp__loam__move_file",
          {"source": f"{ws}/notes.md", "destination": str(link)}, False),
-        ("write onto the style symlink",   "Write",
+        ("write onto the .claude symlink",   "Write",
          {"file_path": str(link), "content": "hi"}, False),
         ("move into a SIBLING .claude",    "mcp__loam__move_file",
          {"source": f"{ws}/notes.md",

@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import loam_codex as codex  # noqa: E402
 import loam_config as lc  # noqa: E402
-from loam_memory import strip_frontmatter  # noqa: E402
 
 QUESTION = ("List the instruction files you loaded, in order, and the names "
             "of every tool you have.")
@@ -189,22 +188,17 @@ def main() -> int:
     # A source outside the workspace (Loam's own persona text, under the
     # runtime's docs/persona/ since cf8cc3c) is named by its full path.
     names = [str(p.relative_to(ws)) if p.is_relative_to(ws) else str(p) for p in sources]
-    check("Claude Code's sources: CLAUDE.md first, _active.md last",
-          names[0] == "CLAUDE.md" and names[-1] == "_active.md", str(names))
-    check("the provider line opens the Codex file",
-          text.startswith(codex.PROVIDER_LINE))
-    cursor, ordered = 0, True
+    check("Claude Code's sources include soul, config and map in order",
+          names[0] == "CLAUDE.md" and all(n in names for n in ("soul.md", "config.md", "map.md"))
+          and names.index("soul.md") < names.index("config.md") < names.index("map.md"), str(names))
+    check("the provider line opens the Codex file", text.startswith(codex.PROVIDER_LINE))
+    cursor = 0
     for path in sources:
-        body = path.read_text(encoding="utf-8")
-        if path.name == "_active.md":
-            body = strip_frontmatter(body)
-        at = text.find(body.strip(), cursor)
-        ordered &= at >= cursor
-        cursor = at if at >= 0 else cursor
-    check("every source verbatim in the Codex file, in Claude Code's order",
-          ordered, " > ".join(names))
-    check("no frontmatter from _active.md reaches Codex",
-          "keep-coding-instructions:" not in text)
+        body = path.read_text(encoding="utf-8").strip()
+        pos = text.find(body, cursor)
+        check(f"same text reaches Codex in order: {path.name}", pos >= cursor)
+        if pos >= 0:
+            cursor = pos + len(body)
 
     # 2. MCP tool names.
     claude_tools, claude_answer = claude_half(ws)

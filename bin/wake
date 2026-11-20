@@ -91,15 +91,9 @@ You're waking. It's {timestamp}. Nobody is in a conversation with you.
 # name WHICH cron this is -- an agent may have several, they all arrive by
 # this route, and the file cannot tell the session it is the one that loaded.
 CRON_PROMPT_TEMPLATE = """\
-You're waking. It's {timestamp}. This is cron `{cron}` — a task lane, not a reflection wake. You're up for one job.
-
-The job is in the instructions appended to this prompt. That file and `_always.md` are what loaded; `_reflection.md` did not, and reflection is not this lane's work. You have what a conversation has: the shell, sudo, subagents, and every engineer tool, `brief` included. When the job is done, stop.
-"""
-
-MAPPED_CRON_PROMPT_TEMPLATE = """\
 You're waking. It's {timestamp}. This is cron `{cron}`: a task lane, not a reflection wake. You're up for one job.
 
-The job is in the instructions appended to this prompt, the cron's own file; your soul, your config and your map loaded as on every run. You have what a conversation has: the shell, sudo, subagents, and every engineer tool, `brief` included. When the job is done, stop.
+The job is in the instructions appended to this prompt, the cron's own file; your soul, your config and your map (if present) load as on every run. You have what a conversation has: the shell, sudo, subagents, and every engineer tool, `brief` included. When the job is done, stop.
 """
 
 NO_CHANGES = "No changes since last wake."
@@ -115,10 +109,6 @@ NO_CHANGES = "No changes since last wake."
 # with the persona's own settings and `.mcp.json`, as a conversation does.
 # The flag is not passed at all: an empty `--disallowed-tools` is a usage
 # error (exit 1, measured 2026-09-05).
-#
-# What the lane still sets is its lane, not a permission: `outputStyle:
-# none` keeps the conversation layer (`_active.md`) off a wake, which loads
-# its own file through --append-system-prompt-file instead.
 LANE_SETTINGS = {"outputStyle": "none"}
 
 
@@ -132,8 +122,7 @@ def claude_argv(agent: str, lane: str, prompt: str, lane_file: Path | None,
     runs the same flags the lane does, with only the prompt its own. The
     model and effort default to this run's (LANE_MODEL, LANE_EFFORT).
 
-    ``lane_file`` is None for the reflection wake of an agent with a map
-    (2026-11-18): it appends nothing, and loads what its conversations load.
+    Reflection loads the shared instructions and receives its record in the prompt.
     ``session_id`` names a new session; ``resume`` continues one, under the
     same id (a result run, 2026-11-19)."""
     model = model or LANE_MODEL
@@ -517,19 +506,17 @@ def main() -> int:
 
 
 def lane_prompt(agent: str, vault: Path, started: str, cron: str | None,
-                mapped: bool = False, project: Path | None = None
+                project: Path | None = None
                 ) -> tuple[str, str | None, Path]:
     """(prompt, vault head to advance to or None, the marker's path).
 
     The vault diff, and the marker it advances, are reflection's alone. See
     the module docstring: a cron sharing the marker would eat the interval
-    the next reflection wake is owed. ``mapped``: the agent has a map, and
-    a cron's prompt is the map's shape's. A reflection's is its record's
+    the next reflection wake is owed. A reflection uses its record's
     instruction (``project``'s `crons/reflection.md`) and the vault block."""
     state_path = STATE_DIR / f"{agent}.json"
     if cron:
-        template = MAPPED_CRON_PROMPT_TEMPLATE if mapped else CRON_PROMPT_TEMPLATE
-        return template.format(timestamp=started, cron=cron), None, state_path
+        return CRON_PROMPT_TEMPLATE.format(timestamp=started, cron=cron), None, state_path
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -569,7 +556,7 @@ def advance_marker(state_path: Path, head: str | None, finished: str) -> None:
 
 def run_codex(project: Path, agent: str, vault: Path, started: str,
               cron: str | None, lane: str, lane_text: str | None,
-              lane_path: Path | None, mapped: bool = False) -> int:
+              lane_path: Path | None) -> int:
     """The lane on Codex (2026-11-13), from the identity gate on. Everything
     before it ran above, unchanged; the failures are recorded the way the
     Claude half records them, with the same stages and exit codes.
@@ -606,8 +593,7 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
         return 5
 
     step("prompt")
-    prompt, head, state_path = lane_prompt(agent, vault, started, cron, mapped,
-                                            project)
+    prompt, head, state_path = lane_prompt(agent, vault, started, cron, project)
     step("launch")
     try:
         out = cw.run(project, text, prompt, model=LANE_MODEL, effort=LANE_EFFORT,
@@ -656,31 +642,19 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
         **common, "ok": True, "vault_ref": head,
         "num_turns": None, "max_turns": None, "hit_turn_cap": False,
         "identity_canary": canary, "identity_decoy_from": decoy_owner,
-        "lane_chars": len(lane_text or ""), "mapped": mapped,
+        "lane_chars": len(lane_text or ""),
     })
     print(out.reply)
     return 0
 
 
-def lane_input(project: Path, cron: str | None
-               ) -> tuple[str, str | None, Path]:
-    """``(file name, text to append or None, the file it is sized by)``.
-
-    Reflection appends `_reflection.md` and a cron its own file. The
-    reflection of an agent with a map (2026-11-18, lib/loam_loading.py)
-    appends nothing: its instruction is its record's, in the prompt,
-    and the file it is sized by is the map. Raises LayerError when a lane
-    file it needs is missing or empty."""
-    import loam_loading  # noqa: PLC0415
-    from loam_memory import CRON_LANE_DIR, REFLECTION_LAYER, resolve_lane  # noqa: PLC0415
-    if cron:
-        name = f"{CRON_LANE_DIR}/{cron}.md"
-    elif loam_loading.mapped(project):
-        return loam_loading.MAP, None, project / loam_loading.MAP
-    else:
-        name = REFLECTION_LAYER
-    _, text, path = resolve_lane(project, name)
-    return name, text, path
+def lane_input(project: Path, cron: str | None) -> tuple[str | None, Path]:
+    """Return the cron body to append and the file to size for this lane."""
+    from loam_memory import CRON_LANE_DIR, MAP_LAYER, resolve_lane  # noqa: PLC0415
+    if cron is None:
+        return None, project / MAP_LAYER
+    _, body, path = resolve_lane(project, f"{CRON_LANE_DIR}/{cron}.md")
+    return body, path
 
 
 def run(project: Path, agent: str, vault: Path, started: str,
@@ -689,29 +663,18 @@ def run(project: Path, agent: str, vault: Path, started: str,
     # without its self-model.
     from loam_identity import IdentityError, preflight_identity  # noqa: PLC0415
     from loam_memory import (  # noqa: PLC0415
-        CRON_LANE_DIR,
         LIMIT_CHARS,
-        REFLECTION_LAYER,
         LayerError,
         near_limit,
         near_limit_reason,
         over_limit_reason,
-        resolve_lane,
     )
 
-    import loam_loading  # noqa: PLC0415
-
     lane = f"cron:{cron}" if cron else "reflection"
-    lane_file = f"{CRON_LANE_DIR}/{cron}.md" if cron else REFLECTION_LAYER
 
     step("preflight")
-    # The shape first (2026-11-18): an agent that wrote its map since its
-    # CLAUDE.md was rendered is re-rendered now, so this run loads soul,
-    # config and map, and the identity gate below checks those imports.
-    loam_loading.quiet_refresh(project)
-    mapped = loam_loading.mapped(project)
     try:
-        lane_file, lane_text, lane_path = lane_input(project, cron)
+        lane_text, lane_path = lane_input(project, cron)
     except LayerError as exc:
         reason = f"{lane} preflight refused: {exc}"
         print(reason, file=sys.stderr)
@@ -734,7 +697,13 @@ def run(project: Path, agent: str, vault: Path, started: str,
         return 0
 
     # The lane must still run to trim its own files. Report oversize input and load it whole.
-    size = len(lane_path.read_text(encoding="utf-8"))
+    try:
+        size = len(lane_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        if cron:
+            raise
+        size = 0
+    lane_file = lane_path.name if cron is None else f"crons/{lane_path.name}"
     if size > LIMIT_CHARS:
         reason = f"{lane}: " + over_limit_reason(
             lane_file, size, lane_path, f"the {lane} lane went ahead")
@@ -751,24 +720,12 @@ def run(project: Path, agent: str, vault: Path, started: str,
     # project root, and an agent with no soul in context still sounds
     # entirely like itself. Assert the content, not the file.
     #
-    # It is asserted on the cron lane too, unchanged. The lane composes the
-    # same way -- CLAUDE.md's @ imports, `_always.md`, one appended file --
-    # so the failure it catches (an import silently dropped, the agent
-    # running with no soul and sounding entirely like itself) is available on
-    # exactly the same terms. Verified on this lane rather than assumed to
-    # carry over. One thing it does NOT vary by lane: which sibling's soul
-    # supplies the decoy. That is a property of the decoy chooser in
-    # lib/loam_identity.py, not of this lane. Until 2026-09-05 it was the
-    # first sibling in sorted order, the same persona's for six of seven agents; it is
-    # sampled now, and `identity_decoy_from` below records the owner drawn.
-    #
     # The account is asked about before the soul (lib/loam_account.py): a
     # spend limit answers the probe in the model's place, and on 2026-09-15
     # that was read six times as a missing soul.
     if LANE_PROVIDER == "codex":
         return run_codex(project, agent, vault, started, cron, lane,
-                         lane_text, lane_path if lane_text is not None else None,
-                         mapped)
+                         lane_text, lane_path if cron else None)
 
     step("identity")
     try:
@@ -784,8 +741,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
         return 5
 
     step("prompt")
-    prompt, head, state_path = lane_prompt(agent, vault, started, cron, mapped,
-                                            project)
+    prompt, head, state_path = lane_prompt(agent, vault, started, cron, project)
 
     # The shared skills, current for this run (first release L7): the Claude
     # shelf above the workspaces and this persona's view. Never fails a wake.
@@ -805,10 +761,6 @@ def run(project: Path, agent: str, vault: Path, started: str,
     # one: the inline flag is capped by MAX_ARG_STRLEN at 128 KiB and fails
     # with an error naming the wrong component entirely (`Argument list too
     # long` attributed to /usr/bin/timeout).
-    #
-    # --settings is what makes the exclusion hold in the other direction. The
-    # project settings name the conversation style; this overrides it to an
-    # empty operator-owned one, so a wake carries its own lane and no other.
     lane_temp = None
     if lane_text is not None:
         with tempfile.NamedTemporaryFile(
@@ -937,7 +889,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
         "total_cost_usd": cost,
         "identity_canary": canary,
         "identity_decoy_from": decoy_owner,
-        "lane_chars": len(lane_text or ""), "mapped": mapped,
+        "lane_chars": len(lane_text or ""),
         "session_id": envelope.get("session_id"),
         **spent,
         **memory,
@@ -1141,7 +1093,7 @@ def _deliver(project: Path, agent: str, vault: Path, record: dict, lane: str,
     job = str(record["job"])
     record_name = cron or loam_cron.REFLECTION
     try:
-        _, lane_text, lane_path = lane_input(project, cron)
+        lane_text, lane_path = lane_input(project, cron)
     except LayerError:
         lane_text, lane_path = None, None
     session, why = lr.resumable(record, project, LANE_PROVIDER)

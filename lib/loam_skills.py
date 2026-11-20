@@ -64,10 +64,7 @@ SKILL_FILE = "SKILL.md"
 LOAM_DIR = "Loam"
 # The person's own shared shelf, beside it.
 OWN_DIR = "skills"
-# What the owner's agents know about them, at the top of the vault (the
-# owner, 2026-11-16): seeded on a new install, and every agent made on it is
-# pointed at it from its `_always.md` (until 2026-11-18; Loam's text named it until 2026-11-19, and the library's
-# loam-how-it-works does).
+# The starter vault seeds this page for the owner and their agents.
 ABOUT_ME = "About me.md"
 ABOUT_ME_TEXT = """# About me
 

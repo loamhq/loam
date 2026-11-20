@@ -459,13 +459,6 @@ def _newest_message(thread: str | None) -> str | None:
 
 
 def _refuse_retired(fields) -> None:
-    old = sorted({"active", "reflection"} & set(fields))
-    if old:
-        raise AgentsError(
-            f"`{'`, `'.join(old)}` retired on 2026-11-18: a new agent loads its "
-            f"soul, its config and its map (`map`, optional; it points to "
-            f"things and does not hold them), and has no _active.md or "
-            f"_reflection.md")
     if "emoji" in fields:
         raise AgentsError("`emoji` is retired: an agent's face is the one the theme "
                           "draws, or an image uploaded once it is made (agent.face)")
@@ -543,21 +536,31 @@ def discard(draft_id: str, by: str | None) -> dict:
 OWN_RULES = "Its own rules"
 
 
-def _drift_module():
-    import importlib.machinery  # noqa: PLC0415
-    import importlib.util  # noqa: PLC0415
-    path = _runtime_bin("check-drift")
-    loader = importlib.machinery.SourceFileLoader("loam_check_drift", str(path))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
+def config_clauses(text: str, name: str, display: str,
+                   keep: set[str] = frozenset()) -> dict[str, str]:
+    """Split config clauses and normalize persona-specific names."""
+    def mask(line: str) -> str:
+        if line in keep:
+            return line
+        line = re.sub(rf"\b{re.escape(display)}\b", "<Agent>", line)
+        return re.sub(rf"\b{re.escape(name)}\b", "<agent>", line)
+    masked = "\n".join(mask(line) for line in text.splitlines())
+    clauses: dict[str, str] = {}
+    title, buf = "(preamble)", []
+    for line in masked.splitlines():
+        if line.startswith("## "):
+            clauses[title] = "\n".join(buf).strip()
+            title, buf = line[3:].strip(), []
+        else:
+            buf.append(line)
+    clauses[title] = "\n".join(buf).strip()
+    return clauses
 
 
 def fleet_clauses(root: Path | None = None) -> list[tuple[str, str]]:
     """[(title, masked body)] of every clause a majority of the configs on the
     box carry, each in its most common form, in the order the configs give
-    them; ``(preamble)`` first. Masked as check-drift masks: ``<Agent>`` and
+    them; ``(preamble)`` first. Names are masked as ``<Agent>`` and
     ``<agent>`` for each agent's own name."""
     from collections import Counter  # noqa: PLC0415
     root = root or ai_labs()
@@ -569,13 +572,12 @@ def fleet_clauses(root: Path | None = None) -> list[tuple[str, str]]:
             continue
     if not raw:
         return []
-    drift = _drift_module()
     lines = Counter(l for text in raw.values() for l in set(text.splitlines()))
     # A single config cannot establish a shared clause. Keep its persona-specific lines masked.
     shared = ({l for l, n in lines.items() if n >= len(raw) // 2 + 1}
               if len(raw) > 1 else set())
     import loam_profile  # noqa: PLC0415
-    per = {n: drift.config_clauses(text, n, loam_profile.self_name(n, card(n, root)), shared)
+    per = {n: config_clauses(text, n, loam_profile.self_name(n, card(n, root)), shared)
            for n, text in raw.items()}
     majority = len(per) // 2 + 1
     order: list[str] = []
@@ -710,7 +712,6 @@ def make(agent: str, draft: dict, wake: str, *, provision=None) -> dict:
     for sub in ("memory", "skills", "crons", "threads"):
         (ws / sub).mkdir()
     (ws / "soul.md").write_text(draft["soul"], encoding="utf-8")
-    # Write the map first so provisioning recognizes the loading format.
     import loam_loading  # noqa: PLC0415
     (ws / loam_loading.MAP).write_text(
         draft.get("map") or loam_loading.MAP_SEED, encoding="utf-8")
