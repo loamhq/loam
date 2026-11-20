@@ -3,6 +3,9 @@
 Each release's notes are written for the people who run Loam, in
 `docs/releases/<version>.md`. The app shows them when it offers an update.
 
+- [0.2.14](docs/releases/0.2.14.md), 2026-11-19: see where plugins came
+  from, keep them up to date automatically, and review updates that ask
+  for more access.
 - [0.2.13](docs/releases/0.2.13.md), 2026-11-19: a firewall on every
   server and history kept from the first minute, plain words that agents
   and plugins have full control of the server, and an update from an
