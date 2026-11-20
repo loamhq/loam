@@ -1,27 +1,7 @@
 #!/usr/bin/env python3
-"""Who, what and where for every job and session (2026-11-12), and the
-record of a result owed to whoever asked.
+"""Check job, session and caller identity in Activity and result delivery.
 
-  1. **lib/loam_waiters.py**: a lane as a run kind; the calling session from
-     the environment, an ancestor's environment, or an ancestor Claude CLI's
-     argv (fake /proc); its thread from the session marker or sessions.json;
-     a brief's record registered, settled, and owed once its job has a
-     verdict, by the thread's route or by a run's; the persona's input.
-  2. **bin/engineer-job**: the model read off a Claude and a Codex command
-     line; a job's label carries engine, model, caller, thread and title,
-     and the job it continues with the chain's first job; an older job
-     without the new files says null, not a guess.
-  3. **The broker**: a session row's `run_kind`, `engine_label`, the model
-     the CLI said it runs (`model`) beside the one asked (`model_asked`);
-     `deliver_job` posts nothing (since 2026-11-18) and gives the persona a
-     turn whose input names the receipt's path, once, and refuses a thread
-     the persona is not in; a turn the restart cuts off says so.
-  4. **lib/loam_live.restart_blockers** (2026-11-17): only `idle` lets a
-     planned restart go; `working`, `asking`, `background`, a thread turn in
-     flight and a failed read hold it.
-
-Run: python3 tests/test_activity_who.py
-"""
+Run: python3 tests/test_activity_who.py"""
 
 import asyncio
 import importlib.machinery
@@ -356,9 +336,7 @@ async def broker_checks():
     check("...delivered once: the same job again is not",
           server.threads.deliver_job(record, "x"), "already delivered")
 
-    # A turn the restart cuts before a word posts nothing, job or no job
-    # (`delivery_follows` went with the blocking call, 2026-11-18), and its
-    # input is kept on disk for the next start (2026-11-19, batch B step 2).
+    # A turn interrupted before its first word keeps its input for recovery.
     async def boom(t):
         fake.stopping = True      # the restart lands mid-turn
         raise RuntimeError("cut")
@@ -389,9 +367,7 @@ asyncio.run(broker_checks())
 
 rows = [{"agent": "ada", "id": "a" * 10, "state": "background"},
         {"agent": "iris", "id": "b" * 10, "state": "idle"}]
-# 2026-11-17: only `idle` lets a planned restart go; background holds it
-# (a subagent dies with its session, a waiting call is cut), and so does a
-# thread turn in flight. tests/test_restart_ceiling.py has the rest.
+# A planned restart requires idle sessions, including those waiting on background work.
 check("idle does not hold a restart", loam_live.restart_blockers(rows[1:]), [])
 check("background, working and asking do",
       loam_live.restart_blockers(rows + [{"agent": "ada", "id": "c" * 10, "state": "working"},

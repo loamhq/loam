@@ -25,10 +25,7 @@ spec = importlib.util.spec_from_loader("provision", loader)
 prov = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prov)
 
-# Project engineers are rendered from the shared engineer role in the vault,
-# by substitution tables written for the developing install's role. An
-# install without that role (any install made by install.sh, 2026-11-18)
-# cannot render one, and provision says so; there is nothing here to test.
+# Use the shared role that the development substitution tables describe.
 _shipped = prov.ENGINEER_SHIPPED / "role.md"
 if not prov.ENGINEER_ROLE_SRC.is_file() or (_shipped.is_file() and prov.ENGINEER_ROLE_SRC.read_text(
         encoding="utf-8") == _shipped.read_text(encoding="utf-8")):
@@ -93,9 +90,7 @@ except prov.CraftError as exc:
     check("a new Loam line refuses the render", "names Loam" in str(exc)
           or "Loam" in str(exc), True)
 
-# The memory sentences (2026-10-01): a new project's harness is excluded
-# from its repository, so its role must not say the memory is committed; a
-# checkout that still tracks its harness keeps the sentence that is true of it.
+# Describe project memory consistently with whether the repository tracks its harness.
 check("untracked: never says committed", "committed with the code" in craft, False)
 check("untracked: memory not promised to cloners",
       "your own memory of the project" in craft, False)
@@ -187,9 +182,7 @@ finally:
     import shutil
     shutil.rmtree(root, ignore_errors=True)
 
-# Retire refuses while a deployment record exists (2026-09-08): the two
-# teardowns are separate and deploy goes first. Pointed at a temp deploy
-# directory so the live agents/deploy/ is never read here.
+# Refuse retirement while a deployment record still exists.
 with tempfile.TemporaryDirectory() as tmp:
     deploy_dir = Path(tmp)
     check("no record: retire may proceed",

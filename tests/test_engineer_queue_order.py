@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
-"""The run-slot queue is first in, first out, for a new job too (2026-10-13).
-
-Until then `take_slot` let a job's FIRST try for a slot ignore the queue.
-The queued head polls every QUEUE_POLL_SECONDS, so a job launched at the
-moment a slot was free took it ahead of everyone waiting: on 2026-10-13 two
-automatic continuations, each dispatched as its parent let go of its slot,
-started at 16:49:04Z and 16:54:11Z ahead of four jobs queued since 16:26Z.
-This drives the launcher's own `take_slot` with the slot lock stubbed (a slot
-is always free), against a temp jobs root:
-
-  a queue is waiting      a new job does not take the free slot: it joins
-                          the back and says how many are ahead of it.
-  the queue empties       it takes the slot, and its queue.log says when.
-  nobody is waiting       a new job takes the slot at once and never queues.
-
-Nothing outside a temporary directory is written; no unit is launched.
+"""Verify FIFO admission when a newly arriving job competes with a queued job for
+available memory.
 
 Run: python3 tests/test_engineer_queue_order.py
 """

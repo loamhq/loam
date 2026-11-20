@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""A change to Loam's own parts on a release install, and what an update
-does to it (2026-11-17).
-
-Real git repositories in a temp directory, made the way an install is made:
-a bare `origin` (Loam's public repository) whose `main` has moved past the
-release, a clone of it at the release tag (install.sh's), and a clone of that
-as the checkout (bin/loam-install's), detached at the tag with no branch at
-all. Then, through lib/loam_worktree.py exactly as bin/engineer-job uses it:
-
-  - before: a job's tree cannot be made from such a checkout (the premise
-    this fixes: "Remote branch main not found");
-  - the first Loam job makes the install's own `main` at the release, with
-    nothing in the tree moved, and marks it local; a checkout that has a
-    `main` already is left alone and never marked;
-  - a job's change lands on that `main`, is never pushed, and the canonical
-    is never fast-forwarded to `origin/main`'s unreleased development; the
-    receipt says the change stayed on the install;
-  - `loam update`'s rules on that checkout: a release that touches other
-    files merges, keeping the local change; one that changes the same lines
-    is refused before anything moves, naming the file, and the note for the
-    agent says to offer sending it upstream and a revert, never a discard.
+"""Exercise release updates with local changes in real temporary Git repositories.
 
 Run: python3 tests/test_local_changes.py
 """

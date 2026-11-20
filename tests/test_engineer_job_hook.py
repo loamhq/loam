@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
-"""A plugin's `engineer.job` hook at a job's launch (2026-11-14, first release
-L6): what it prints reaches the job's unit through the job's own 0600
-environment file; a name the launcher sets itself stays the launcher's; why
-anything offered was not used is written to the job folder's
-`plugin-env.log`; and a project job's launch no longer reads its registry
-record for anything (the record's `gcp` block was the last reader).
-
-The hooks themselves are lib/loam_contributions.py's and are tested in
-tests/test_contributions.py; here they are replaced by what they return, and
-`systemd-run` by a recorder. Nothing is launched; nothing outside a temporary
-directory is written.
+"""Check which values a plugin job hook passes to the launched job and how hook errors
+are reported.
 
 Run: python3 tests/test_engineer_job_hook.py
 """

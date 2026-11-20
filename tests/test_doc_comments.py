@@ -38,11 +38,8 @@ def check(label, got, want):
 
 # -- the plugin's own suites ------------------------------------------------------
 
-# Each is its own process and its own temp folders, so they run at once
-# (2026-11-19: one after another they were 119 s, the whole suite's floor;
-# page.test.mjs and browser.test.mjs also ran twice). Python suites end on
-# "OK"; node's pass on exit 0. The browser suite is skipped unless
-# LOAM_PLAYWRIGHT names a Playwright install (the plugin's README).
+# Each suite owns its process and temporary directory, so the suites can run
+# concurrently.
 SUITES = [
     ("py", "test_model.py", 300, "the model's suite passes (anchors, merge, sidecar, operations)"),
     ("node", "editor.test.mjs", 300, "the editor's suite passes (round trips byte for byte, positions)"),

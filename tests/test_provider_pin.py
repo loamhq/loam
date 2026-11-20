@@ -162,8 +162,7 @@ for unit in ("loam-session-broker.service", "loam-reviewer.service"):
     check(f"{unit}: both updaters off",
           "Environment=DISABLE_AUTOUPDATER=1" in static[unit]
           and f"Environment={AGY_OFF}" in static[unit])
-# A wake's and a cron's service are both the reconciler's (lib/loam_cron.py)
-# since 2026-11-19; bin/provision renders no unit of a persona's.
+# Compare both reflection and cron services against the reconciler's renderer.
 import loam_cron  # noqa: E402
 for kind, name in (("reflection", "reflection"), ("recurring", "digest")):
     service = loam_cron.render_units(loam_cron.Cron(

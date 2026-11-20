@@ -1,31 +1,6 @@
 #!/usr/bin/env python3
-"""A planned broker restart goes only on positive evidence of idle, and
-defers at its ceiling (2026-11-17).
-
-On 11-16 `restart-broker --when-idle` reached its 1800 s ceiling, stopped
-waiting for silent turns, and restarted: four turns were cut, three of them
-waiting on engineer jobs. The rule now (lib/loam_live.restart_blockers,
-bin/restart-broker): every live row reads exactly `idle` and no thread turn
-is in flight or queued, on three clear reads in a row, and again under the
-live lock just before the restart. Anything else holds it, and at the
-ceiling it defers (exit 75, nothing restarted). Without `--when-idle` the
-restart is the operator's explicit one and is unchanged.
-
-Everything here runs on a fake clock, a fake live list, a fake lock and a
-fake restart. Nothing reads the broker or restarts anything.
-
-  1. Busy past the ceiling: a silent `working` turn holds it; at the
-     ceiling it defers, and the restart is never called.
-  2. Waiting on an engineer job: a silent `working` turn (its call waits on
-     the job), a `background` session, and an idle session whose thread
-     turn is queued or in flight all hold it.
-  3. A failed status read (None, a reader that raises, a row with no or an
-     unknown state, a malformed turns list) is busy, never idle.
-  4. All idle: three clear reads, the lock, three more, then the restart.
-  5. A stale read: idle before the lock, busy once the lock is ours: it
-     defers, and the restart is never called.
-  6. The explicit emergency restart (no `--when-idle`) reads nothing and
-     restarts under the lock, whatever is running.
+"""Require positive evidence of idle before restarting. Defer at the ceiling when a
+session is busy or state cannot be read.
 
 Run: python3 tests/test_restart_ceiling.py
 """

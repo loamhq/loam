@@ -1,18 +1,6 @@
 #!/usr/bin/env python3
-"""A public static folder on a name outside the domain (`[[landing]]`,
-deploy/loam.toml, 2026-11-16).
-
-What earns a case here:
-
-  - an entry renders one ungated block that serves its folder in place, with
-    no directory listing and `.git`/`.env` hidden, and the owner's quoted yes
-    in its comment; Caddy itself adapts it (`caddy adapt`, when Caddy is here);
-  - no entry, or an install's edge, renders nothing;
-  - an entry without its yes, a host under the domain, a host `[moved]` or
-    `[[forward]]` already answers, a relative root, or a stray key is refused.
-
-Runs against a throwaway deploy config with the module pointed at it and
-restored after. Nothing on the box is read or written.
+"""Render approved static landing hosts and reject invalid records or conflicting
+hostnames.
 
 Run: python3 tests/test_deploy_landing.py
 """

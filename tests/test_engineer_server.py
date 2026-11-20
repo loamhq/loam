@@ -213,9 +213,7 @@ def main() -> int:
             brief = next((t for t in tools if t["name"] == "brief"), None)
             check("the tools are `brief`, `cancel`, `market`, `status`, `settings`, `site`, `thread` (capacity and sandboxes are plugins' since 2026-11-14; `market` since 2026-11-18)",
                   sorted(t["name"] for t in tools), ["brief", "cancel", "market", "settings", "site", "status", "thread"])
-            # `market` (2026-11-18) hands off to bin/loam-market search: the
-            # flags, then `--` and the words, so words that start with a dash
-            # are words.
+            # Separate search terms from flags so a leading dash is literal.
             rid = server.send("tools/call", {"name": "market", "arguments": {
                 "query": "sync with -my phone", "kind": "extension"}})
             got = tool_result(server.replies({rid}, 30).get(rid) or {})
@@ -224,8 +222,7 @@ def main() -> int:
             check("`market` hands bin/loam-market search its words and kind",
                   got.get("argv"), ["search", "--json", "--limit", "8", "--kind", "extension",
                                     "--", "sync", "with", "-my", "phone"])
-            # `settings` (2026-11-10) hands off to bin/settings: flags first,
-            # then `--`, so a value that starts with a dash is a value.
+            # Pass settings values after the option terminator.
             rid = server.send("tools/call", {"name": "settings", "arguments": {
                 "action": "set", "setting": "thread.title", "value": "-a dash",
                 "target": "t-1", "by": "ada"}})
@@ -235,8 +232,7 @@ def main() -> int:
             check("`settings` hands bin/settings its arguments",
                   got.get("argv"), ["--target=t-1", "--by=ada", "--",
                                     "set", "thread.title", "-a dash"])
-            # `thread` action `branch` (2026-11-11) hands off to bin/thread:
-            # the source and the message, then only the flags it was given.
+            # Forward the branch source, message and explicitly supplied options.
             rid = server.send("tools/call", {"name": "thread", "arguments": {
                 "action": "branch", "thread": "t-1", "message": "m4",
                 "persona": "ada", "text": "Opening:", "by": "iris"}})
@@ -257,9 +253,7 @@ def main() -> int:
             schema = (brief or {}).get("inputSchema", {})
             check("its parameters are unchanged",
                   sorted(schema.get("properties", {})),
-                  # `tier` since 2026-11-15: which of the engineer's three
-                  # models, optional. `scope` since 2026-11-19: `app` for the
-                  # Loam engineer's app-only work, optional.
+                  # Tier and app scope are optional launcher arguments.
                   ["brief", "continue_job", "deploy", "involvement",
                    "max_minutes", "project", "scope", "tier", "title"])
             check("`tier` is optional",
@@ -296,11 +290,7 @@ def main() -> int:
             check(f"second launcher started within a second of the first ({gap:.2f}s)",
                   gap < 1.0, True)
 
-            # `continue_job` (2026-09-22) crosses to the launcher verbatim,
-            # and is the empty string when the caller omits it. The server
-            # decides nothing about it; that it ARRIVES is the whole of its
-            # part, and the rules are tested against the launcher in
-            # tests/test_engineer.py.
+            # Forward the continuation ID unchanged. Only the launcher validates it.
             args = brief_args("gamma")
             args["arguments"]["continue_job"] = "20260922-010101-abcd1234"
             rid = server.send("tools/call", args)

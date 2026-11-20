@@ -100,12 +100,8 @@ def tool_result(text, ts):
 
 
 def stamped(entries: list, prefix: str) -> list:
-    """The entries with the uuid the CLI puts on each of them.
-
-    The prefix is the CONVERSATION's and not the file's, deliberately: a
-    fork's session file carries its parent's uuids unchanged (measured on
-    this box 2026-09-22 -- only `sessionId` is rewritten), and that is the
-    whole of how a scan recognises a copy of something it already holds.
+    """Stamp each fixture entry with a conversation-specific UUID. Related sessions share a
+    prefix only when they represent the same conversation.
     """
     return [dict(entry, uuid=f"{prefix}-{i:04d}")
             for i, entry in enumerate(entries)]

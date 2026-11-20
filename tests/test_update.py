@@ -354,7 +354,7 @@ check("...and no rollback offered for an apply that did not land", up.status()["
 
 
 class DeferringBox(FakeBox):
-    """restart-broker --when-idle deferred (2026-11-17): never restarted."""
+    """Simulate a busy host deferring restart without replacing the process."""
 
     def broker(self):
         self.calls.append("broker")
@@ -678,9 +678,7 @@ async def broker_checks():
     up.notice_done(note, got)
     check("...and a delivered notice is gone", notices(), [])
 
-    # The 0.2.0 walk (2026-11-17): a notice its source could not remove was
-    # posted and given a turn every 30 s. A notice is told once (its id is
-    # the fact's key), however often it is delivered.
+    # Repeated reads of a pending notice must not start duplicate turns.
     check("a notice delivered again is not told again",
           server.threads.deliver_note(note), "already delivered")
     up.notice("refused", "Loam's update did not run: X.", "Fix X.")
@@ -730,7 +728,7 @@ async def broker_checks():
 asyncio.run(broker_checks())
 
 
-# -- run as root; bare `loam update` (the 0.2.0 walk, 2026-11-17) -----------------
+# Run the updater from a root login environment.
 
 drop = up.as_install_user(["apply", "--yes"], euid=0)
 check("as root, loam-update re-runs itself as the install's user",

@@ -90,8 +90,7 @@ class FakeWriter:
 
 
 async def start(broker, agent):
-    """A start as a thread turn makes one (POST /v1/sessions, which the
-    classic view used, retired 2026-11-12), answered as a route would."""
+    """Start through the thread-turn path and return its session."""
     try:
         session = await broker.start_session(agent)
     except broker_mod.BrokerError as exc:

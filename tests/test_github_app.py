@@ -1,19 +1,6 @@
 #!/usr/bin/env python3
-"""GitHub as a GitHub App: the broker's routes, the tokens, the helper, the
-nightly check. Added 2026-09-30 with lib/loam_github_app.py.
-
-Everything runs against a fake GitHub on loopback that answers the six calls
-the integration makes -- the manifest conversion, the OAuth token endpoint
-(code and refresh), the installation, the user, and installation-token
-minting -- and that CHECKS the app JWT's RS256 signature against the public
-half of a key generated for this run. The broker is the shipped
-bin/session-broker, loaded as a module with its state in a temp directory;
-requests go through its real `_handle`, header parsing and bearer check
-included. The store, its lock and the nightly date file are in the same temp
-directory. Nothing here touches the box's broker, its store or GitHub.
-
-What a fake cannot prove is which real token GitHub accepts for
-`POST /user/repos`; that is in broker/README.md, "GitHub".
+"""Exercise GitHub App credentials, installation state and repository access against a
+local HTTP fixture.
 
 Run: python3 tests/test_github_app.py
 """
@@ -45,9 +32,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Isolate memory admission from the host running the suite.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_github  # noqa: E402
@@ -278,8 +263,7 @@ async def main(root: Path, fake_url: str) -> None:
     check("...every part null", (view["app"], view["installed"], view["user"]),
           (None, None, None))
     check("...and the uses listed", view["uses"], ["provisioning", "engineer pushes"])
-    # The personal-token fallback is gone (2026-10-01): a token in the
-    # environment is not a credential, and not connected is an error.
+    # An environment token must not turn a disconnected GitHub App into a connected one.
     os.environ["GITHUB_TOKEN"] = "ghp_should_never_be_read"
     try:
         loam_github.token()
@@ -299,8 +283,7 @@ async def main(root: Path, fake_url: str) -> None:
     check("...name Loam, private, oauth on install, setup on update",
           (m["name"], m["public"], m["request_oauth_on_install"], m["setup_on_update"]),
           ("Loam", False, True, True))
-    # The app's address is its deploy record's: the domain itself since
-    # 2026-11-15 (L14, `apex = true`), loam-ui.<domain> before.
+    # Use the deployment record to derive the app's address.
     import loam_deploy  # noqa: PLC0415
     app_base = "https://" + next(a.fqdn for a in loam_deploy.records() if a.name == "loam-ui")
     check("...redirect_url on the app's public address",
@@ -411,8 +394,7 @@ async def main(root: Path, fake_url: str) -> None:
           "administration", last[2],
           {"repositories": ["loam-ui"],
            "permissions": {"contents": "write", "metadata": "read", "workflows": "write"}})
-    # The 2026-10-01 case: the app widened to Issues, Pull requests and Actions,
-    # and the installation accepted it. The old fixed set never asked for them.
+    # Refresh the installation's recorded permissions after its owner accepts new scopes.
     Fake.permissions = {**Fake.permissions, "issues": "write",
                         "pull_requests": "write", "actions": "read"}
     status, _ = await request(server, "POST", f"{base}/token",
@@ -542,7 +524,7 @@ async def main(root: Path, fake_url: str) -> None:
     check("test_nightly_silent_when_healthy",
           (gh.daily_check(today="2026-10-03"), told()), ([], ""))
 
-    # -- test_accounts (2026-11-13): one account at a time -----------------
+    # Account-specific actions
     original = store()
     data = store()
     data["added_installations"] = [{"installation_id": 555, "account": "side-org",

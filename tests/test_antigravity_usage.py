@@ -1,31 +1,7 @@
 #!/usr/bin/env python3
-"""Antigravity's quota on the providers row (2026-11-15): ``agy -p /quota``
-and ``/credits`` read on demand, kept on disk, and served as the
-``antigravity`` row's ``usage`` in the shape the other two rows use.
+"""Read and cache provider quota and credits on demand, using recorded CLI output.
 
-What is proved, offline. No CLI is started: ``loam_antigravity._run`` and
-``login_state`` are replaced, and the answers are agy 1.5.9's own from the
-box's login on 2026-11-15, verbatim apart from the long descriptions:
-
-  1. the structured answer maps every pool's window into ``buckets``, keyed by
-     Antigravity's id, ``utilization`` USED (``1 - remaining_fraction``) like
-     the other rows, the shorter window first in each pool, labelled
-     ``<pool> · <window>``
-  2. the printed fallback reads the same, keeps a line it cannot read under
-     ``unparsed``, and never raises on garbage; an answer naming no bucket
-     is None, and so is a turn that ran (``num_turns`` above 0)
-  3. credits in Codex's shape: a balance of 0 is ``hasCredits`` false (the
-     page draws no line), any other balance is true
-  4. ``read_quota`` keeps the reading; a failed ``/quota`` leaves the file
-     alone, a failed ``/credits`` alone is a reading with ``credits`` null,
-     and no login is no read
-  5. the row serves it only on the login the box holds, and says why not
-  6. the refresh loop knows the reader (it has ``read``), counts an
-     ``antigravity`` job as spending this meter, and a fresh broker's
-     first in-line reads run side by side
-
-Run: python3 tests/test_antigravity_usage.py
-"""
+Run: python3 tests/test_antigravity_usage.py"""
 
 import importlib.machinery
 import importlib.util

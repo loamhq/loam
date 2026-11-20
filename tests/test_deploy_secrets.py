@@ -124,18 +124,13 @@ def main() -> int:
     check("no Google-shaped key literal anywhere in agents/deploy/",
           not leaked, ", ".join(leaked) or "clean")
 
-    # And the app's unit is handed what the allowlist gives it, by name, and
-    # nothing more (since 2026-11-16 the app is a unit, not a container: the
-    # compose file that interpolated the key is gone, and bin/deploy's
-    # service_env is its environment). Read as text: the point is that the
-    # key comes from app_secrets and from nowhere else.
+    # The app unit must receive only explicitly allowed secret names.
     source = (AGENTS / "bin" / "deploy").read_text(encoding="utf-8")
     body = source[source.index("def service_env("):source.index("def env_file_text(")]
-    # Optional since 2026-11-14: dictation ships off and a blank install has
-    # no key until its person pastes one (first release, decision 2).
+    # Dictation can be unconfigured on a fresh install.
     check("loam-ui's environment takes its keys from app_secrets, the allowlist",
           "env.update(app_secrets(app))" in body and "GEMINI_API_KEY" not in body)
-    # Retired 2026-10-01 with the app's POST /api/dictate.
+    # The retired dictation endpoint no longer needs this key.
     check("...and nothing hands it DICTATION_TOKEN", "DICTATION_TOKEN" not in body)
 
     print(f"\n{sum(results)}/{len(results)} passed")

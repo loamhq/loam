@@ -1,25 +1,6 @@
 #!/usr/bin/env python3
-"""Provider usage on demand (2026-10-14): one reader contract, one refresh
-loop, Codex and Claude Code each with a ``read()``.
-
-What is proved, offline -- no CLI is started; each provider's one process
-call (``codex.app_server_call``, ``cfg.claude_control_call``) is replaced by
-the answer the live login gave on 2026-10-14:
-
-  1. a Codex read replaces a reading that held a stale plan -- the window
-     the plan no longer has goes, ``planType`` and ``credits`` move -- and
-     is stamped ``source: "read"``
-  2. an event merges over a read and keeps what it does not carry, stamped
-     ``source: "event"``, for Codex and for Claude Code
-  3. extra Codex limits are kept, named by their id, in the window shape
-  4. Claude Code's ``get_usage`` maps percent to the row's fraction, names a
-     model's weekly limit, and an answer it does not know is a failed read
-     that leaves the kept reading alone
-  5. a provider without ``read()`` answers None and its row says why
-  6. the loop reads on a fetch (once a minute), on the five-minute tick
-     while a session is live or a job runs, and once as a job ends -- and
-     not otherwise
-  7. a broker's ``providers()`` is a fetch: it reads, and serves the read
+"""Exercise on-demand usage caching, stale reads and background refresh across
+providers.
 
 Run: python3 tests/test_provider_usage_refresh.py
 """
@@ -39,9 +20,7 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 os.environ["LOAM_USAGE_READS"] = "off"  # no real CLI reads; see loam_provider_usage
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Control admission independently of real host memory.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_codex as codex  # noqa: E402
@@ -274,8 +253,7 @@ def loop_cases(jobs_root: Path) -> None:
     check("...behind the fetch, on a thread, not in it",
           (refresh.last_thread.name, sorted(reads[-2:])), ("provider-usage-read", ["a", "b"]))
 
-    # A read that takes seconds does not hold the fetch (2026-11-09: the
-    # first app open of every minute waited 2.3 s for its rows).
+    # Return cached usage while a slow refresh runs in the background.
     gate = threading.Event()
     slow = usage_store.Refresh([usage_store.Reader(
         "s", observe=lambda e: None, kept=lambda: None,

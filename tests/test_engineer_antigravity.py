@@ -1,27 +1,6 @@
 #!/usr/bin/env python3
-"""A project engineer on Antigravity (since 2026-11-15), against a stubbed `agy`.
-
-What the launcher promises an Antigravity job, held here without a model:
-
-  the setting       `antigravity` is a runtime a project engineer and the
-                    default can take, and the platform engineer by its own
-                    setting (2026-11-19; without one it is Claude Code
-                    whatever its record says); nothing defaults to it.
-  the models        `agy models`' tab-separated lines are read as ids; an id
-                    that ends in its level carries it, and `--effort` is not
-                    passed beside it (agy refuses the pair).
-  the command line  print mode, stream-json, no approvals, the job directory
-                    added, `--conversation` for a continuation.
-  the instructions  the Claude engineer's CLAUDE.md and its imports, under
-                    Antigravity's line, at the head of the one message.
-  the stream        written line by line to the job directory; the
-                    conversation id reported the moment it arrives; an ERROR
-                    result, a missing result and a resume onto another
-                    conversation are each a failure.
-  the cap, clock    as Codex's: ended by process group.
-  the wall          the harness held read-only by the mount namespace.
-  a continuation    refused before anything starts when the conversation's
-                    file is gone, because agy itself would start a new one.
+"""Exercise project-engineer launch, provider errors and continuation against a stub
+Antigravity CLI.
 
 Run: python3 tests/test_engineer_antigravity.py
 """
@@ -84,7 +63,7 @@ def event(obj: dict) -> str:
     return "echo '" + json.dumps(obj) + "'\n"
 
 
-# `agy models` as 1.5.9 printed it on 2026-11-15 (a cut of its 22 lines).
+# Sample of the model list emitted by provider version 1.5.9.
 MODELS_TEXT = ("Fetching available models...\n"
                "gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)\n"
                "gemini-4-hydrogen-xhigh\tGemini 4 Hydrogen (XHigh)\n"
@@ -118,8 +97,7 @@ try:
     check("a setting moves a Codex record to agy, with its model",
           (choice["runtime"], choice["model"], choice["source"]),
           ("antigravity", "gemini-4-hydrogen-xhigh", "own"))
-    # Loam's own setting is a provider like the others' (2026-11-19); the
-    # default for every other project is never Loam's.
+    # The platform provider is independent of the project default.
     choice = eng.engineer_choice(loam, {"projects": {"Loam": {"provider": "antigravity"}}})
     check("Loam's own setting: antigravity", (choice["runtime"], choice["model"]),
           ("antigravity", eng.AGY_ENGINEER_MODEL))
@@ -268,8 +246,7 @@ try:
         + "exit 1\n")
     rc, run, _ = aj.run([str(quota)], str(ws), 30, jd, jd / "err")
     check("a quota error is named as one", run.quota, True)
-    # A side call's 503 on another model (2026-11-19, the job that ran on a
-    # Claude model and was reported ERROR for Gemini's capacity).
+    # An unrelated side call's failure must not override the job model's result.
     side = ("API error (attempt 1): UNAVAILABLE (code 503): No capacity available "
             "for model gemini-4-hydrogen-high on the server")
     check("side call: a 503 naming another model is the side call's",

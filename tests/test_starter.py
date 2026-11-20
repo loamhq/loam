@@ -63,9 +63,8 @@ def main() -> int:
     loam_skills.seed_vault(lc.VAULT)
     check("...and never writes it again", about.read_text(), "# About me\n\nSam's own words.\n")
 
-    # The page draws a single newline as a line break, so the hello message
-    # is one line per paragraph: hard-wrapped, it broke mid-sentence on a
-    # phone (the first-day walk, 2026-11-16).
+    # Each paragraph needs one source line because the page renders single newlines as
+    # breaks.
     _, hello = st.read_hello()
     check("the hello message has no line break inside a paragraph",
           [p for p in hello.split("\n\n") if "\n" in p], [])
@@ -102,8 +101,7 @@ def main() -> int:
           ("`how-i-am-here.md`" in (ws / "map.md").read_text(),
            "`nights.md`" in (ws / "map.md").read_text(),
            "About me.md" in (ws / "nights.md").read_text()), (True, True, True))
-    # Loam's text no longer names About me.md (the owner's short text,
-    # 2026-11-19); her nights.md does, checked above.
+    # The workspace loading map supplies the path to the owner's page.
     check("the owner's shared page is made, in this install's workspaces",
           loam_loading.owner_page(), lc.WORKSPACES / "_shared" / "owner.md")
     check("...and exists", loam_loading.owner_page().is_file(), True)

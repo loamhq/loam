@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
-"""The chats a broker restart ended, as a job's receipt lists them.
-
-Since 2026-10-13. A Loam job that restarts the broker ends every resident
-chat, and until now the receipt named them only if the engineer chose to
-write them out (the 10-07 22:13Z deploy, job 20261007-151253-50a6668a, did
-by hand). `lib/loam_broker.ended_by_restart` reads the unit's stop out of
-the journal and each chat's `broker.exit` out of its event log; bin/engineer-
-job renders one line per chat in the launcher's half.
-
-The fixture is that restart, copied in shape: the journal's Stopping /
-Stopped / Started stamps to the microsecond, the two chats it ended with
-their titles, persona, provider, exit stamps and turns -- and a third chat
-the idle reaper ended eight minutes earlier, which is the same event and
-must not be listed. Each record carries turns AFTER the restart too, as the
-live ones do (both chats were resumed that evening), so "last turn" has to
-be the last one before the exit and not the record's last.
+"""Check a receipt's closed-chat list against journal fixtures and the job's time
+interval.
 
 Run: python3 tests/test_ended_chats.py
 """

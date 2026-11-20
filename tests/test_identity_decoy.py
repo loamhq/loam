@@ -1,28 +1,6 @@
 #!/usr/bin/env python3
-"""The identity preflight's decoy is sampled, not deterministic.
-
-Until 2026-09-05 ``pick_decoy`` returned the first usable sentence of the
-first sibling in sorted order: Cleo's soul for six of seven agents, every
-night, and five souls that were never anyone's decoy. This file asserts the
-replacement against a throwaway ``ai-labs`` of fake souls, by pointing the
-module's ``AI_LABS`` at it. Nothing here reads a real agent's files or spends
-a model call; the probe in ``assert_soul_in_context`` is not exercised.
-
-Asserted, each by drawing:
-
-  spread          with a fixed seed, repeated draws name more than one owner;
-                  in fact every sibling with an eligible sentence is drawn.
-  the filter      no draw is a sentence present in the project's own files,
-                  and a sibling whose every sentence is in those files never
-                  appears as an owner. It drops out of the draw.
-  attribution     the sentence drawn really is in the soul of the owner named,
-                  which is what makes ``identity_decoy_from`` diagnostic.
-  reproducible    the same seed gives the same sequence; a different seed
-                  gives a different one.
-  the refusal     when no sibling has an eligible sentence, ``IdentityError``.
-  the contract    ``preflight_identity``'s signature is unchanged, so the two
-                  existing stubs of it keep fitting, and ``pick_decoy`` still
-                  returns ``(sentence, owner)`` with no ``rng`` passed.
+"""Sample decoys from eligible sibling souls. Shared lines cannot identify an
+individual, and the selection must vary across calls.
 
 Run: python3 tests/test_identity_decoy.py
 """
@@ -59,14 +37,8 @@ def sentence(tag: str, n: int) -> str:
 SHARED = "This sentence sits in the project's own files, so it can never be a decoy."
 assert 45 <= len(SHARED) <= 110
 
-# Sibling souls. `stray` has one eligible sentence; `hollow` only the shared
-# one, so it must drop out; `verbose` has many, to prove a long soul does not
-# crowd out the short ones. Each soul opens with a heading, as the real ones
-# do. Until 2026-09-05 `_sentences` split only after sentence punctuation, so
-# the heading swallowed the first sentence after it, and the shared sentence
-# was put first to be the one swallowed. A line break is a boundary now
-# (tests/test_identity_sentences.py), so the order no longer matters; the
-# shared sentence stays first because nothing here depends on it moving.
+# Include siblings with both shared and distinctive sentences so only genuine
+# alternatives can be chosen.
 SIBLINGS = {
     "stray": [SHARED, sentence("stray", 1)],
     "hollow": [SHARED, SHARED],
@@ -147,9 +119,7 @@ try:
           (isinstance(s, str), o in ELIGIBLE, s in ELIGIBLE[o]),
           (True, True, True))
 
-    # `ask` joined it on 2026-11-13, keyword with a default, for a Codex
-    # wake's gate; the Claude path still calls (project, model=...), so the
-    # stubs of that shape keep fitting.
+    # A decoy must come from an eligible sibling.
     check("preflight_identity signature is unchanged but for the Codex ask",
           str(inspect.signature(li.preflight_identity)),
           "(project: 'Path', model: 'str' = 'fable', ask=None) -> 'tuple[str, str]'")

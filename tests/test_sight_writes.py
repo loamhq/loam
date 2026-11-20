@@ -1,30 +1,6 @@
 #!/usr/bin/env python3
-"""A page the agents' browser opens cannot act as the owner (2026-11-18).
-
-The browser's subnet passes the login on every private host so the personas
-can see; it used to pass every request whole, so any page the browser opened
-could send a cross-site POST to the app's host -- to a plugin server under
-/x/*, to a site's backend -- and be treated as the signed-in owner. Held here,
-through real Caddy running the generated host block, with the subnet set to
-loopback so this test's requests take the path the browser's network takes,
-in front of the real plugin gateway and a stand-in for the app:
-
-  refused     a cross-site POST to a plugin route (/x/<id>/…) and to an app
-              route (/api/…); a POST that says nothing of where it came from;
-              a POST whose Origin is another site's; a cross-site WebSocket
-              upgrade. None reaches a backend.
-  accepted    the same POSTs from the same origin (Sec-Fetch-Site:
-              same-origin, or only an Origin equal to the host); a cross-site
-              GET (reading is what sight is for); a cross-site OPTIONS.
-  unchanged   the share door, /s/*, takes a cross-site POST as before; it
-              is ahead of the subnet's handles and not the gateway's rule.
-  headers     a Remote-User sent on this path is taken off before a backend.
-  gateway     on its own, without Caddy (the owner's browser's path):
-              a cross-site POST to /x/<id>/ is a 403 that never reaches the
-              plugin; same-origin, no fetch metadata at all, and a
-              cross-site GET reach it.
-
-Caddy is needed for the first four; without it they are skipped and said so.
+"""Verify that browser-subnet access to gated pages permits viewing while refusing
+owner-only actions.
 
 Run: python3 tests/test_sight_writes.py
 """

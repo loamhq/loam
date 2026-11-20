@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""The Images plugin (2026-11-18): built into Loam since 0.2.10, in
-plugins/images/ (it was listed in the Market from plugins/_listed/ before).
-
-  - its own tests pass (a fake OpenAI and a fake Google)
-  - its manifest reads with no warning, declares both keys as optional, and
-    is a shipped plugin that is off by default (tests/test_built_in_images.py
-    holds the switch and the take-over of a Market copy)
-  - the core's own tools still carry no image tool: the composition server
-    has no generate_image; the plugin's tool is the one
+"""Exercise the Images plugin with fixture credentials and provider responses.
 
 Run: python3 tests/test_images_plugin.py
 """

@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
-"""No code names the first box's vault folders as string literals.
-
-A fresh vault says `Conversations/`, `Inbox/`, `System/` (docs/config.md,
-`[vault]`); the first box says `15_CONVERSATIONS/`, `00_INBOX/`,
-`99_SYSTEM/`. A literal of the box's name in a deny rule or an exclusion
-fences a folder a fresh vault does not have, and fails open (caused: until
-2026-11-19 the files tree, the reviewer's exclusion and two MCP servers named
-`15_CONVERSATIONS`). Code reads `lc.vault_folder(...)`. Comments and
-docstrings may name the box's folders; string literals in code may not,
-except the one that quotes the role file's own words.
+"""Check that runtime code uses configured vault folders instead of install-specific
+string literals.
 
 Run: python3 tests/test_no_box_folder_literals.py
 """

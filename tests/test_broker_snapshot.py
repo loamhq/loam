@@ -81,13 +81,8 @@ def running(agent: str = "probe", session_id: str | None = None):
 
 
 def broker_for(*sessions):
-    """A Broker with none of the box in it: `Broker.__init__` would mint a
-    token into the real state directory, and this test touches nothing real.
-
-    The real methods, bound to a namespace, rather than stand-ins that behave
-    roughly like them -- `load` has resolved an id off disk since 2026-09-18
-    and refreshes an adopted record since 2026-09-21, and a test that
-    reimplemented either would stop testing the thing that shipped.
+    """Build an isolated broker without minting a token or reading installed session
+    records.
     """
     stand_in = types.SimpleNamespace(
         sessions={s.id: s for s in sessions},
@@ -113,8 +108,7 @@ def assistant(text: str, model: str = "claude-fable-5-1",
 
 
 async def conversation(session) -> None:
-    """Two turns and a person's line, so the log has a real shape and a real
-    last event -- which is the one that used to go missing."""
+    """Give the log a final event distinct from its starting position."""
     await session.send_message("read /etc/hostname")
     await session._handle({"type": "system", "subtype": "init"})
     await session._handle(assistant("The file contains one line."))

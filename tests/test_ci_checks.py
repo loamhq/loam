@@ -1,24 +1,8 @@
 #!/usr/bin/env python3
-"""A landing that reports GitHub's checks instead of running its own (since 2026-10-13).
+"""Read GitHub checks for a pull request head through a loopback fixture, including
+pending and failed checks.
 
-lib/loam_ci.py, against a fake GitHub that answers what the real one answered
-for acme-co/acme PR #8 that day:
-
-  setting      a registered project with `github_checks` lands by pull request
-               and has no `test_command` (none need set it: since 2026-11-14 no
-               project on the first box does).
-  wait         a run that is in progress, then completes, is waited for and
-               reported passed, with each check and the run's link; a failed
-               check ends the wait at once and is reported failed; a run still
-               going at the bound is "running"; a 403 is "unavailable", read
-               no other way; a check suite with no runs (Vercel's) is ignored.
-  receipt      the landing line carries the CI clause in place of
-               "untested", for an opened and for an updated pull request.
-  launcher     the wait is a phase of the slotless landing (since 2026-10-13,
-               tests/test_engineer_slot_release.py), marked on its record.
-
-Run: python3 tests/test_ci_checks.py
-"""
+Run: python3 tests/test_ci_checks.py"""
 
 from __future__ import annotations
 
@@ -147,9 +131,7 @@ def main() -> int:
                               {k: v for k, v in opened.items() if k != "ci"})
     check("**untested**" in text and "CI" not in text, "a project without the setting is unchanged")
 
-    # launcher: since 2026-10-13 every landing runs with the slot let go at
-    # the session's end (tests/test_engineer_slot_release.py), and the CI
-    # wait is a phase of that landing, not a release of its own.
+    # Landing releases admission before it waits for remote CI.
     src = (AGENTS / "bin" / "engineer-job").read_text()
     body = src[src.index("def report_checks"):src.index("def receipt_summary")]
     check('mark_landing(p, "ci"' in body, "the CI wait marks its phase on the landing record")

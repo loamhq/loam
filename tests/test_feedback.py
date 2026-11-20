@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
-"""lib/loam_feedback.py and bin/loam-report: a report to Loam's makers,
-with what is personal taken out (2026-11-17).
-
-A scratch config names an owner, a user, a domain and agents, and a scratch
-checkout has a release tag and one commit of its own. Checks:
-
-  - scrub takes out the owner's name, an agent's name (not the starter's),
-    the server's user, the install's address and any host under it, every
-    path of the install (and anyone's home), e-mail and IP addresses (not
-    loopback), keys by shape and by keyword, a link's query and a note's
-    name; and keeps commit hashes and long code names;
-  - draft: the link is GitHub's new-issue page on the upstream repository
-    with the scrubbed title, body and label, and decodes back to exactly what
-    the owner is shown; a body too long for a link is pasted instead;
-  - a patch: the diff of the checkout's own commits since the release,
-    scrubbed too; none to send is refused;
-  - the command: `loam report bug` prints what would go and the link, and
-    sends nothing; `--json` is the same as data; a missing title is exit 2;
-    `loam report idea` is a kind of its own with the same link; there is
-    no `send` (the private route of 0.2.7 was taken out in 0.2.11).
+"""Generate a diagnostic report from a scratch installation and check that private
+identifiers are removed.
 
 Run: python3 tests/test_feedback.py
 """

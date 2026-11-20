@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
-"""The inbox outlet and its sweep, both halves proven against a temp vault.
-
-Since 2026-11-19 nothing of Loam's writes on General's board: a failure is
-the log's line, and a fault that is no one persona's is a fact for the
-system persona (lib/loam_attention.py). The sweeps stay, because the
-personas still post on the board. Two things here can destroy something the
-owner wanted: the archive sweep deletes files, and the comms sweep rewrites
-a file line by line. Both are
-bounded by a date, and a date boundary is exactly the kind of thing that is
-off by one and looks fine. So both are tested at the boundary from both
-sides, plus the cases where the sweep must do nothing at all.
+"""Check failure and status reporting in an isolated inbox, including delivery across
+repeated runs.
 
 Run: python3 tests/test_inbox.py
 """
@@ -37,8 +28,7 @@ os.environ.setdefault("LOAM_WAITERS_DIR", str(ATTENTION / "waiters"))
 import json  # noqa: E402
 import loam_inbox  # noqa: E402
 
-# General's board as the personas keep it; the sweep still sweeps it, and
-# nothing of Loam's writes on it since 2026-11-19.
+# Keep the board fixture independent of runtime notifications.
 SECTIONS = ("Urgent", "Important", "Other")
 COMMS_HEADER = """\
 # From the agents

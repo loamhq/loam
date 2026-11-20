@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-"""A classic chat is told the time (2026-11-09), as a thread turn is.
+"""Verify the clock line in the provider prompt and the words stored in the session
+journal.
 
-The text the harness receives opens with a ``<loam-clock>`` line -- the
-weekday, date and time in America/Los_Angeles -- while the broker's own log
-keeps what the person typed. A slash command is sent as typed. The
-transcript writer and the adoption replay take the line back out of the
-harness's file, and a thread session (whose prompt carries its own) sends
-none.
-
-Run: python3 tests/test_classic_clock.py
-"""
+Run: python3 tests/test_classic_clock.py"""
 
 import asyncio
 import importlib.machinery
@@ -24,9 +17,7 @@ from pathlib import Path
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
-# Admission reads no real box here: a fixture session must not be refused
-# because the machine running the suite is short of memory (a landing
-# got 429 for one, 2026-11-09). test_broker_seats is where admission is tested.
+# Use fixture admission so available host memory cannot change the result.
 cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 import loam_clock  # noqa: E402

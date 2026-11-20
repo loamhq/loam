@@ -151,9 +151,7 @@ async def broker_cases() -> None:
 
 
 def window_cases() -> None:
-    """``models[].context_window`` out of Codex's catalogue, which is what a
-    turn on that model states: 272000 at 95% is 258400 (session a9c8ec2c,
-    2026-10-07, every turn on gpt-6-luna and gpt-6-astra)."""
+    """Read context windows from the catalog entry for the model actually used."""
     codex.write_models([{"id": i, "displayName": i} for i in
                          ("gpt-6-astra", "gpt-6-luna", "gpt-new")])
     row = broker_mod.Server.codex_row()

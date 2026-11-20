@@ -1207,8 +1207,7 @@ async def serve(server, ready: dict) -> None:
 
 
 def test_rename(c: Client, t: dict) -> None:
-    """POST /v1/files/rename (2026-11-13): a vault file or folder, to a free
-    name in its folder (`name`) or a free path in the vault (`to`)."""
+    """Rename a vault file or folder to a free name within its parent."""
     v = t["vault"]
     (v / "Renames" / "sub").mkdir(parents=True)
     note = v / "Renames" / "draft.md"

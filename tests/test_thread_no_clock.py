@@ -204,10 +204,9 @@ def session_of(fake, persona):
 
 
 async def until(predicate, timeout=20.0):
-    """Wait for what the engine does next, however loaded the box is: the
-    fixed sleeps this test had (50 ms for a turn to start, 20 ms for an exit
-    to land) failed it in landings while other jobs ran (2026-11-18). True
-    once it holds; False at the deadline, which the check then reports."""
+    """Wait for an observable engine transition so scheduler delays cannot change the
+    result.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:

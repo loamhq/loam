@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
-"""Three model tiers per engineer (2026-11-15), held without a model.
-
-  the setting      `tiers` on an engineer's row (a project's or `default`'s):
-                   any of quick / standard / hard, each checked as `model` is;
-                   null unsets one; a provider change drops them; the view
-                   shows `own.tiers` and `effective.tiers` with each one's
-                   source; the settings tool has a key per tier.
-  the resolution   a tier set runs on its model; unset, on `engineer.model`,
-                   else the built-in -- so an engineer nobody set is as before;
-                   a continuation keeps its parent's model unless it names a
-                   tier; a tier is `standard` when left out.
-  the brief        `tier` is accepted, written into the header, read back;
-                   an unknown one is refused with the three named.
-  the quota retry  out of quota on an Antigravity job: once, on the tier
-                   below, said in the receipt's `model` row; never past
-                   `quick`, never onto the same model, never twice.
+"""Resolve engineer model tiers for new jobs and continuations without launching a
+model.
 
 Run: python3 tests/test_engineer_tiers.py
 """

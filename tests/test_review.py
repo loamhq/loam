@@ -22,8 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent
-# The reviewer is a first-party plugin (2026-11-14, L9), on by default: this
-# tree's own, with a scratch Yours holding no choice.
+# Use the first-party reviewer plugin with scratch user plugin state.
 os.environ["LOAM_PLUGIN_SHIPPED"] = str(AGENTS / "plugins")
 os.environ["LOAM_PLUGINS_DIR"] = tempfile.mkdtemp(prefix="review-test-yours-")
 
@@ -163,7 +162,7 @@ def main() -> int:
         # --- refusals: every one is a line in the failure log
         refusals_reach_the_failure_log(rv, tmp, check)
 
-        # --- a run on Antigravity (2026-11-15)
+        # Run on Antigravity
         on_antigravity(rv, tmp, check)
 
         print(f"\n{'ALL PASSED' if not failures else f'{failures} FAILED'}")
@@ -178,10 +177,7 @@ def main() -> int:
 
 
 def refusals_reach_the_failure_log(rv, tmp: Path, check) -> None:
-    """Cause each of bin/review's refusals through main(), twice on one date,
-    and read the failure log: one line per refusal, agent `reviewer`, in the
-    shape bin/wake's lines have. Until 2026-10-13 the second refusal of a
-    UTC date was dropped as a repeat (the 09-09 20:36Z pair)."""
+    """Drive each refusal through main twice on the same day and inspect the failure record."""
     rv.VAULT = tmp / "vault"
     rv.LOG = tmp / "logs" / "reviewer.jsonl"
     rv.REVIEWER = tmp / "reviewer"
@@ -205,8 +201,7 @@ def refusals_reach_the_failure_log(rv, tmp: Path, check) -> None:
     check(codes == [3, 3] and len(got) == 2 and all("preflight refused" in l for l in got),
           "two preflight refusals on one date are two failure-log lines")
 
-    # recycle: nothing refuses a run at 01:30 since 2026-11-10, so there is
-    # no refusal branch left to cause; the reviewer has no clock either.
+    # A reviewer run can cross the reflection window without a time-based refusal.
     (rv.REVIEWER / "CLAUDE.md").write_text("instructions\n")
     (rv.REVIEWER / ".claude").mkdir()
     (rv.REVIEWER / ".claude" / "settings.json").write_text("{}\n")

@@ -1,25 +1,6 @@
 #!/usr/bin/env python3
-"""A wake starts whatever the vault did, and a wake that dies is recorded.
-
-The night of 2026-11-18 every reflection wake on the box died in `execve`
-with E2BIG: bin/wake put the whole `git diff --name-status` since the last
-wake into the one `-p` argument, and after a 1,033-file autocommit it was
-183,749 bytes, over the kernel's 128 KiB limit on a single argument
-(MAX_ARG_STRLEN). The crash ran the `finally` that clears the `.running`
-marker, so neither `wake-<agent>.jsonl` nor the failure log said anything.
-
-1. **A launch against a vault whose changes are larger than the per-argument
-   limit starts.** A real git vault, a real `execve` of a stand-in CLI (a
-   shell script that reports its argument sizes and answers with a success
-   envelope) -- nothing about the launch is stubbed but the identity probe
-   and the skills refresh. The same changes put inline, the old shape, are
-   shown to fail on this kernel, so the state is proved big enough.
-2. The prompt is bounded: it names the file that holds the list and the
-   git command, the file holds every line, and a small diff is still inline.
-3. A marker no longer in the vault's history is said, not read as "no
-   changes".
-4. **A crash before the model runs is recorded**: exit 8, a `crash` row in
-   the wake's own log with the cause, and a failure-log line naming the step.
+"""Start a wake with small or large vault changes and record a failure when the launch
+cannot complete.
 
 Run: python3 tests/test_wake_launch.py
 """

@@ -1,29 +1,6 @@
 #!/usr/bin/env python3
-"""A job lets its admission go when its session ends (since 2026-10-13).
-
-Admission was a run slot until 2026-11-10 and is the box's memory since
-(lib/loam_lock.py): a job holds a run record for its session, and the
-status lists every record, with no count and so no free rows.
-
-Until then a job held its slot through the landing -- the live-lock wait,
-the suite, the merge, the push, the receipt -- and the 10-13 audit found
-11.5% of slot-hours spent there, with jobs queued behind it. This drives the
-real `run_inner` of this tree's bin/engineer-job, as a probe job (the sleep
-stands where the session would), against a repository in a temp directory
-and a lock table of its own, and looks from inside the landing:
-
-  released        the job's run record is gone while the job lands,
-                  and `resume_queued` ran after the session and before it.
-  once            the admission's context is exited exactly once, on a normal
-                  landing and on a refused one; a second free_slot is a no-op.
-  lease           the tree lock -- the lease the recovery sweep reads -- is
-                  still held while the job lands.
-  status          `box_status` lists the job under `landing`, not as idle,
-                  with its title and briefer; nothing shows as running.
-  after           the `landing` record is gone once the verdict is written.
-  dead landing    a landing record whose pid is gone reads as nothing.
-
-Nothing outside a temporary directory is written; no unit is launched.
+"""Verify that the session releases admission before landing, including when the landing
+or its process stalls.
 
 Run: python3 tests/test_engineer_slot_release.py
 """
@@ -209,8 +186,7 @@ try:
 finally:
     (job.loam_lock.LOCK_DIR, job.loam_broker.AI_LABS) = saved
 
-# A dead landing's record reads as nothing (the waiter that read it went
-# on 2026-11-19; the recovery sweep and the status still read it).
+# Ignore stale landing state after the owning process dies.
 try:
     d = root / "wait"
     d.mkdir()

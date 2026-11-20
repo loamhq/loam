@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
-"""Classic chats imported as archived threads (2026-11-11).
+"""Import classic sessions into archived threads, then read their records and resume
+through the thread API.
 
-``bin/import-classic-chats`` on fixtures, then through the broker's routes:
-
-  - a chat the broker ran: the owner's messages (clock envelope off, time from
-    the transcript, an attachment kept), one persona message per harness
-    turn, the full record from the session log, `segments` for words said
-    before the tools
-  - an adopted chat whose app file is gone: its transcript is the record,
-    and a logged reply's steps go to the turn whose words contain it
-  - a broker log from before `broker.user_message`: the transcript wins
-  - a thread's own engine session and an empty session are not imported
-  - the record: same title, the persona the only member and default,
-    archived, `imported_from` and `source`, read up to its end
-  - the original transcript and session files untouched
-  - a second run imports nothing
-  - GET /v1/threads?archived=1, /v1/threads/imported, /v1/threads/<id>,
-    /v1/threads/<id>/steps
-  - the owner writing in one: out of the archive, answered by its persona;
-    a thread archived by hand stays archived when written in
-
-Run: python3 tests/test_classic_import.py
-"""
+Run: python3 tests/test_classic_import.py"""
 
 import asyncio
 import hashlib
@@ -436,9 +417,8 @@ async def main():
     meta, msgs, _ = threads.read(tid)
     check("the owner writing in it takes it out of the archive",
           (status, meta["archived"], meta["imported_from"]), (200, False, A))
-    # A fresh session is handed the recent exchange and the file, not the
-    # imported history (2026-11-11): the chat was long ago, so the window is
-    # The owner's new message, and the rest is the file's.
+    # A fresh provider session should receive recent context and the thread file after
+    # import.
     first = fake.sessions[fake.starts and "s1"].prompts[0]
     check("...and its persona answers, in a fresh session pointed at the history",
           ([m["author"] for m in msgs[-2:]], msgs[-1]["text"], fake.starts[-1][0],

@@ -1,33 +1,8 @@
 #!/usr/bin/env python3
-"""The Apps list (2026-11-12): lib/loam_apps.listing and `GET /v1/apps`.
+"""Check which deployments and agent sites appear in the broker's Apps list and how
+their URLs are presented.
 
-What earns a case here:
-
-  - every agent site is a row with its name, URL, owner, access, expiry,
-    what it serves and whether Loam's page may frame it; public only when
-    the site's record quotes the owner's yes;
-  - a deployment record with a container is a `project` row owned by
-    the owner, with its extra hostnames under `also_at`, `shared` when its
-    record says so, `public` when the operator file names it;
-  - a static host of the runtime's own (files, vault) and a record that says
-    `app_shell` (Loam's page) are not rows;
-  - every site's and project's source is `yours`, and `sources` says what
-    the list can hold (yours, installed, loam);
-  - an app plugin (kind app, 2026-11-13) in force is a `plugin` row at
-    `/x/<id>/` with its icon from the files route; a plugin that is not an
-    app is not a row;
-  - an agent's static site is framed by itself and the app_shell origins
-    only (the header Caddy sends), a port site and a deployment are left to
-    their own headers, and `frame` says which;
-  - the route answers 200 with no-store through the real parser and bearer
-    check, 405 to a write, 401 without the token, and 503 naming the record
-    when one is unreadable.
-
-Runs against throwaway directories with the module's paths pointed at them.
-Nothing on the box is read or written.
-
-Run: python3 tests/test_apps.py
-"""
+Run: python3 tests/test_apps.py"""
 
 from __future__ import annotations
 

@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
-"""The agents' own sites (2026-11-08), against lib/loam_deploy.sites.
-
-What earns a case here is what "private by default" rests on:
-
-  - a site record with nothing said about access renders gated, with the
-    browser's subnet ahead of the gate like every private host, and the
-    live-file parser check-drift uses reads it as gated;
-  - only a record carrying `public` (the owner's yes, quoted) renders without
-    the gate, and an empty `public` is refused, not read as a yes;
-  - a site cannot take a deployment record's name or host, its content
-    host, the login portal, the two_factor name, or a runtime port;
-  - an expiry renders a 410 ahead of everything, the browser included;
-  - a static site hides `.git` and `.env`.
-
-Runs against throwaway directories with the module's paths pointed at them.
-Nothing on the box is read or written.
+"""Verify private-by-default site rendering, explicit publication, expiry and
+name-collision handling.
 
 Run: python3 tests/test_sites.py
 """

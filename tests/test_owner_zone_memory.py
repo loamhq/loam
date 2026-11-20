@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""First release L2, L3 and L8 (2026-11-14): the owner on the wire, the
-schedules' zone token, provider memory pinned off, and a timer-fired run
-held to its own calendar (lib/loam_due.py).
+"""Check configured owner identity, schedule time zone and provider memory across
+install layouts.
 
 Run: python3 tests/test_owner_zone_memory.py
 """

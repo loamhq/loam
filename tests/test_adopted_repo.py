@@ -43,10 +43,8 @@ def load_script(name: str, path: Path):
 
 prov = load_script("provision_adopt", AGENTS / "bin" / "provision")
 
-# Project engineers are rendered from the shared engineer role in the vault,
-# by substitution tables written for the developing install's role. An
-# install without that role (any install made by install.sh, 2026-11-18)
-# cannot render one, and provision says so; there is nothing here to test.
+# Use the development role and its substitution tables together when rendering the
+# fixture.
 _shipped = prov.ENGINEER_SHIPPED / "role.md"
 if not prov.ENGINEER_ROLE_SRC.is_file() or (_shipped.is_file() and prov.ENGINEER_ROLE_SRC.read_text(
         encoding="utf-8") == _shipped.read_text(encoding="utf-8")):
@@ -339,8 +337,8 @@ try:
            if c[1] == "/app/installations/555/access_tokens"][-1],
           {"contents": "read", "metadata": "read"})
 
-    # Inside an engineer job the live registry is read-only (the wall); the
-    # record goes to the job's tree instead and lands with it (2026-10-07).
+    # Registration in a job stages the record in its tree because the live registry is
+    # read-only.
     remotes["acme-health/frontend"] = remote_for("frontend", "main")
     job_tree = root / "job-tree"
     saved_tree = os.environ.get("LOAM_JOB_TREE")
@@ -466,8 +464,7 @@ try:
     again = gh.open_pull_request("acme-backend", f"job/{job}", "Fix", "")
     check("...a second landing of the same branch finds the open pull request",
           (again["created"], again["number"]), (False, pr["number"]))
-    # Rebuilt on their develop after the pull request was closed (2026-10-21):
-    # a fresh `job/<id>-2` and a new pull request, the old branch untouched.
+    # A rebuilt contribution gets a fresh branch after the previous pull request closed.
     pr["state"] = "closed"
     rebuilt = git(project.root, "commit-tree", "-p", their_develop, "-m", "Rebuilt",
                   f"{their_develop}^{{tree}}")
@@ -491,9 +488,7 @@ try:
     check("...their default branch by its own name too", "only a job's branch" in (said or ""),
           True)
 
-    # A detached HEAD is not the branch (caused 2026-10-12, acme-foundation
-    # job 20261012-181315-4e672864): the branch at the base, HEAD on a
-    # commit the job checked out, nothing committed. No pull request.
+    # Inspect the job branch even when the working tree has a detached HEAD.
     jobd = "20261006-120050-dddddddd"
     recd = start(jobd)
     elsewhere = commit(recd, "app.py", "print('their pull request')\n")

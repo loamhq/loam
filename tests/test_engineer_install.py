@@ -1,21 +1,6 @@
 #!/usr/bin/env python3
-"""The platform engineer on a fresh install, and across updates (2026-11-18).
-
-Until 0.2.2 `provision --engineer` copied its role and project file from the
-vault, where only the first install had them, and the installer never ran
-it. Now Loam ships both (`engineer/install/`), provision seeds them into the
-vault, and the vault copy stays the source. In a temp install (a git checkout
-with this tree's shipped files, a vault, a state folder), through the real
-`bin/provision --engineer`:
-
-  - a fresh install: both seeded into the vault, rendered beside the code
-    verbatim, the rendered files in `info/exclude`, and the update's
-    clean-tree rule still reads the stock checkout as clean;
-  - a re-run changes nothing;
-  - a newer shipped text replaces a vault copy still as seeded;
-  - a vault copy the owner changed is kept, and is what the engineer reads;
-  - a vault copy provision never seeded (the first install's own) is kept;
-  - neither shipped file names a path or a particular vault's layout.
+"""Provision the platform engineer on a clean install and verify that updates preserve
+its configuration.
 
 Run: python3 tests/test_engineer_install.py
 """

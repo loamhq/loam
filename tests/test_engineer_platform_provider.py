@@ -1,26 +1,6 @@
 #!/usr/bin/env python3
-"""The Loam engineer's provider is its owner's to set (since 2026-11-19).
-
-The owner, in chat: "Please make the Loam engineer's provider editable by me
-and other users." "It should be like the others." Until then the platform
-engineer ran on Claude Code whatever was set. What is held here:
-
-  the setting   Loam's own setting picks its CLI, as a project engineer's
-                does; with none it is Claude Code (an upgrade moves nobody),
-                and the default for every other project is never Loam's.
-  the line      a platform job on Codex has no Codex sandbox (it would take
-                the platform engineer's sudo away), keeps --strict-config
-                and the rest of a project job's line; a project job's line
-                is unchanged.
-  the words     the platform engineer is told it is the platform engineer,
-                on each CLI; a project engineer's words are unchanged.
-  the wall      on Codex or Antigravity the wall holds read-only what the
-                Claude settings deny (the untracked harness, the transcripts,
-                the list of public apps) and adds the directories those
-                settings add; nothing changes for a Claude job.
-  the real wall raised around a shell, when this box's sudo answers without
-                a password: sudo works inside it, the tree is writable, the
-                harness, the transcripts and the canonical checkout are not.
+"""Check provider selection and filesystem boundaries for the platform engineer on each
+supported runtime.
 
 Run: python3 tests/test_engineer_platform_provider.py
 """
@@ -175,9 +155,7 @@ try:
     # -- the real wall -----------------------------------------------------
     sudo = subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0
     if not sudo:
-        # A box without passwordless sudo cannot raise the platform's wall
-        # at all. Inside a job's own wall it can (caused 2026-11-19): the
-        # paths here are all scratch, so no remount meets the job's.
+        # Detect an unavailable filesystem wall before starting the session.
         print("SKIP  the real platform wall: no passwordless sudo")
     else:
         old_vault, old_worktrees = eng.VAULT, wt.WORKTREES

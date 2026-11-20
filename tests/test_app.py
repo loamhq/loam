@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
-"""The app's own suite, as part of Loam's (since 2026-11-16).
+"""Run the app's npm test suite as part of the repository landing suite.
 
-The app is Loam's `app/` folder: one repository, so a landing that touches
-the app is tested on the app. This runs its `npm test` (Node's own test
-runner over `app/test/` and `app/tools/`; no dependency to install) and
-fails with it. The browser checks inside it skip themselves unless a
-Chromium is named (`APP_PREVIEW_CHROME`), as they always have.
-
-Run: python3 tests/test_app.py
-"""
+Run: python3 tests/test_app.py"""
 
 from __future__ import annotations
 

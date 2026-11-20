@@ -54,8 +54,7 @@ cfg.memory = lambda: {"available": None, "cgroup_room": None,
                       "reserve": cfg.MEMORY_RESERVE_MB}
 cfg.AI_LABS = LABS
 cfg.VAULT = TMP / "vault"
-# And the install's vault as loam_agents reads it: a fresh install's has an
-# About me.md, which the make would read (found 2026-11-18).
+# Supply the same vault structure that a fresh install gives the agent creator.
 import loam_config  # noqa: E402
 loam_config.VAULT = TMP / "vault"
 import loam_threads as threads  # noqa: E402
@@ -326,10 +325,7 @@ async def main():
         check("the soul is the draft's, verbatim",
               (ws / "soul.md").read_text() == "# Juniper\n\nI am Juniper. I tend things.\n")
         made_config = (ws / "config.md").read_text()
-        # Born in the map's shape (2026-11-18): the config is the draft's
-        # own, as written (the owner's words for this agent; Loam's text and
-        # the shared page load beside it), and a map, and none of the three
-        # old loading files.
+        # The new workspace must retain the draft's exact config and use mapped loading.
         check("the config is the draft's own, verbatim (no fleet clauses)",
               made_config == "Juniper's own config.\n", made_config)
         check("a map, seeded with its one line",
@@ -375,10 +371,7 @@ async def main():
         check("a yes is taken once", not out.get("ok")
               and "taken once" in out.get("error", ""), out)
 
-        # -- the skill's order: write the draft, show it, one yes (2026-11-17)
-        # A scratch run on 11-16 showed the person a summary before any
-        # draft existed, so their yes came before the draft and they had to
-        # say it twice. loam-making-an-agent now says: draft, then show.
+        # One approval applies to the revision shown in the thread.
         status, body = await http(port, "POST", "/v1/agents/new", {})
         t1 = body["id"]
         out = await cli(port, "do", "agent.draft",

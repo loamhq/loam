@@ -177,9 +177,7 @@ try:
           flagged(), False)
     (root / "broker" / "adopted.json").unlink()
 
-    # The model is the persona's profile's (2026-11-19, agent.json, Settings
-    # > Agents), not settings.json's: one persona set to Opus had every Opus
-    # wake reported as drift because settings.json said `fable` for all.
+    # Read the configured model from the agent's profile.
     (lane / "agent.json").write_text(json.dumps({"name": "lane", "model": "opus"}))
     ran("claude-opus-5-5")
     check("profile opus, a session on Opus nobody asked for is not a finding",
@@ -213,7 +211,7 @@ try:
     check("it names both models",
           "`fable`" in line and "`claude-opus-4-8`" in line, True)
 
-    # --- 2026-09-28: the right session, a choice is a choice, and once. ---
+    # Session selection, explicit choice and deduplication
 
     def set_model(text: str, ts: str, kind: str = "user") -> str:
         body = f"<local-command-stdout>Set model to {text}</local-command-stdout>"
@@ -380,8 +378,7 @@ try:
           "claude-haiku-4-5-20251001" in reported[-1], True)
     (ld / "t.jsonl").unlink()
 
-    # A scheduled lane runs on agent.json's model (2026-11-19): a session on
-    # it is configured, not drift; on neither model it still is.
+    # A scheduled lane running its configured model must not report drift.
     shutil.rmtree(rcp.MODEL_MEMORY, ignore_errors=True)
     (ld / "u.jsonl").write_text(assistant("claude-opus-5-5", "2026-09-28T09:00:00Z") + "\n",
                                 encoding="utf-8")

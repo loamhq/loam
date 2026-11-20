@@ -59,13 +59,7 @@ CASES = [
     ("delete file w/ illegal name", "mcp__loam__delete_file", {"path": f'{V}/00_INBOX/Jobs "Plan".md'}, True),
     ("generate_pdf sibling",        "mcp__composition__generate_pdf", {"target_path": f"{L}/pax/x.pdf"}, False),
     ("unrelated tool ignored",      "Read", {"file_path": "/etc/passwd"}, True),
-    # generate_image was extended on 2026-09-02 -- one tool now covering
-    # from-scratch, edit, style-reference, combine and masked region edit.
-    # A rebuilt MCP tool that writes files inherits no enforcement, so the
-    # guard is re-asserted against the NEW argument shape rather than
-    # assumed to still match. The output field is still target_path, which
-    # is what keeps these cases meaningful: if a later edit renames it,
-    # these fail loudly instead of the boundary going quiet.
+    # Apply the same destination boundary to all image-generation modes.
     ("gen_image own workspace",     "mcp__images__generate_image", {"target_path": f"{W}/art/x.png"}, True),
     ("gen_image sibling",           "mcp__images__generate_image", {"target_path": f"{L}/ada/x.png"}, False),
     ("gen_image outside roots",     "mcp__images__generate_image", {"target_path": f"{H}/x.png"}, False),
@@ -78,20 +72,14 @@ CASES = [
     # must not start policing them because they appear in the same call.
     ("gen_image sibling as SOURCE", "mcp__images__generate_image", {"target_path": f"{W}/x.png", "source_images": [f"{L}/ada/cover.png"], "mask": f"{L}/ada/m.png"}, True),
     ("gen_image bad target ok src", "mcp__images__generate_image", {"target_path": f"{L}/ada/x.png", "source_images": [f"{W}/mine.png"]}, False),
-    # The Images plugin takes a path relative to the vault (2026-11-18): it is
-    # checked where it writes, not under the agent's working folder.
+    # Resolve the Images plugin's relative output path against the vault.
     ("gen_image vault-relative",    "mcp__images__generate_image", {"target_path": "Images/x.png"}, True),
     ("gen_image relative 15_CONV",  "mcp__images__generate_image", {"target_path": "15_CONVERSATIONS/x.png"}, False),
     ("gen_image no target at all",  "mcp__images__generate_image", {"prompt": "a fox"}, True),
     # A session started before Images left composition still has the old
     # tool; the guard keeps checking it.
     ("old gen_image sibling",       "mcp__composition__generate_image", {"target_path": f"{L}/ada/x.png"}, False),
-    # delete_file was extended on 2026-09-03 to remove EMPTY directories.
-    # The argument shape did not change -- still one `path` -- but the kind
-    # of thing that path names did, and a changed write tool gets its
-    # boundary re-asserted rather than assumed to carry over. A directory
-    # target has to hit exactly the same walls a file target does; the
-    # emptiness rule is the server's alone, and lives below this layer.
+    # Directory deletion and file deletion use the same target argument and boundary check.
     ("delete DIR own workspace",    "mcp__loam__delete_file", {"path": f"{W}/outbox/juno"}, True),
     ("delete DIR sibling",          "mcp__loam__delete_file", {"path": f"{L}/ada/outbox/juno"}, False),
     ("delete DIR 15_CONVERSATIONS", "mcp__loam__delete_file", {"path": f"{V}/15_CONVERSATIONS/2026"}, False),
@@ -99,8 +87,7 @@ CASES = [
     ("delete DIR traversal escape", "mcp__loam__delete_file", {"path": f"{W}/../ada/outbox"}, False),
     ("delete DIR in commons",       "mcp__loam__delete_file", {"path": f"{L}/commons/scratch"}, True),
     ("delete DIR trailing slash",   "mcp__loam__delete_file", {"path": f"{L}/ada/outbox/"}, False),
-    # Codex's apply_patch (2026-10-01): one body, paths relative to the cwd,
-    # unpacked into the calls above. Every hunk is held to the same rule.
+    # Check every path in a patch relative to the caller's working directory.
     ("codex add own workspace",     "apply_patch", {"command": "*** Begin Patch\n*** Add File: notes/x.md\n+hi\n*** End Patch"}, True),
     ("codex add vault",             "apply_patch", {"command": f"*** Begin Patch\n*** Add File: {V}/00_INBOX/x.md\n+hi\n*** End Patch"}, True),
     ("codex add 15_CONVERSATIONS",  "apply_patch", {"command": f"*** Begin Patch\n*** Add File: {V}/15_CONVERSATIONS/x.md\n+hi\n*** End Patch"}, False),
@@ -234,8 +221,7 @@ try:
           "new_string": "name: active"}, False),
         ("write that drops frontmatter",   "Write",
          {"file_path": AC, "content": "just a body\n"}, False),
-        # .claude/ is the runtime's. The deny rule covers Edit; move_file was
-        # gated by neither it nor this hook until 2026-09-04.
+        # A move into provider settings must obey the same restrictions as an edit.
         ("move INTO .claude",              "mcp__loam__move_file",
          {"source": f"{ws}/notes.md",
           "destination": f"{ws}/.claude/settings.json"}, False),
@@ -246,8 +232,7 @@ try:
         ("move into a SIBLING .claude",    "mcp__loam__move_file",
          {"source": f"{ws}/notes.md",
           "destination": f"{labs}/other/.claude/settings.json"}, False),
-        # Skills are the agent's own at the path the CLI shows them, and the
-        # link is the only thing excused: where it lands decides (2026-10-13).
+        # Allow the generated skill link while protecting its runtime-owned parent.
         ("edit skill via .claude/skills",  "Edit",
          {"file_path": f"{CS}/x/SKILL.md", "old_string": "x", "new_string": "y"}, True),
         ("write new skill file via link",  "Write",

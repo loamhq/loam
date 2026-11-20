@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""A persona is told, once, that its last scheduled run failed (2026-11-18).
-
-When the last run of a persona's reflection or of one of its crons did not
-run to the end, the next thread turn the broker starts for it carries one
-line at the top: which run, when, the cause as recorded, the file to read.
-Driven through the real ThreadEngine with a stand-in broker (the harness of
-tests/test_thread_context.py), against a scratch wake log:
-
-  - a failed reflection: the first turn says so, quoted below;
-  - the next turn does not say it again;
-  - a good run clears it: a failure followed by a good run is never told;
-  - a new failure after a told one is told, on a resumed session too;
-  - a cron's failure is named as that cron; a not-enabled fire is no run;
-  - a broker on scratch workspaces with the live logs tells nothing.
+"""Deliver a scheduled-run failure once when the persona next receives a turn.
 
 Run: python3 tests/test_lane_notice.py
 """

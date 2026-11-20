@@ -1,26 +1,6 @@
 #!/usr/bin/env python3
-"""The launcher's timeout path, and the stall label, against a stubbed CLI.
-
-Since 2026-09-30. Job dd7958fd (09-25) ran silent for 41 minutes and was cut
-at its wall clock, and its receipt-less record said "the CLI wrote nothing to
-stderr" -- on the one path where bin/engineer-job had thrown stderr away. This
-file holds the three things that replaced that sentence:
-
-  the timeout keeps its stderr   a stub that writes to stderr and then hangs
-                                 is run through `run_session` with a short
-                                 clock, and the saved file and the record's
-                                 wording are read back.
-  a stall is labelled            `beat_once` against a fixture transcript
-                                 whose mtime is set, and `read_beat` against
-                                 a fixture heartbeat file.
-  a timeout is not a failure     the inner exits TIMEOUT_EXIT, and
-                                 bin/wake-failed agrees on the number and
-                                 finds a dead job's marker by its job id.
-
-One case runs the whole inner (`run_inner`) against the stub, with the lock,
-the vault, the log and the job directory pointed at a throwaway tree, so
-result.json is read as a real job writes it. No session runs and nothing
-outside the temporary tree is written.
+"""Exercise timeouts and silent sessions with a stub CLI. Preserve partial output and
+distinguish a stall warning from a timeout verdict.
 
 Run: python3 tests/test_engineer_timeout.py
 """
@@ -140,9 +120,7 @@ try:
           "the CLI wrote nothing to stderr" in
           job.no_receipt_body(p, None, False, job.read_beat(p)), True)
 
-    # A job that ends early with its receipt said rather than written: the
-    # session closes on its account and receipt.md is never made, as
-    # f6ea1313 did (2026-09-30). The launcher keeps what was said.
+    # Recover a receipt returned as the session's closing message.
     said = ("The deploy and restart are done.\n\n**Evidence**\n"
             "- `bin/deploy loam-ui up c0730da` answered 0.")
     p = job_paths("said-not-written")
@@ -164,9 +142,7 @@ try:
           "last message" in job.no_receipt_body(
               p, None, False, job.read_beat(p), None), False)
 
-    # A job that lost a process to the OOM killer (2026-10-14; no ceiling of
-    # its own since 2026-11-16, so a kill is the box out of memory): the
-    # no-receipt text says so first, and the record row names the kill.
+    # Preserve the provider's error detail when its envelope contains no result.
     killed = {"oom_kill": 1}
     text = job.no_receipt_body(p, None, False, job.read_beat(p), None, killed)
     print("\n--- the no-receipt text for a job killed for memory ---\n"
@@ -232,7 +208,7 @@ try:
     check("stall: a probe (no session) is never stalled",
           job.beat_once(p, None, started, now)["stalled_since"], None)
 
-    # A heartbeat written before 2026-09-30 is one line; it still reads.
+    # Accept the older timestamp-only heartbeat.
     fixture = job_paths("fixture-heartbeat")
     fixture["heartbeat"].write_text("2026-09-25T22:47:50Z")
     check("fixture heartbeat, old one-line form",
@@ -246,12 +222,7 @@ try:
           job.read_beat(fixture)["stalled_since"], "2026-09-25T22:06:31Z")
     loam_session.SESSIONS_DIR = real_sessions
 
-    # -----------------------------------------------------------------------
-    # 3. The whole inner against the stub: result.json and the exit code.
-    # -----------------------------------------------------------------------
-    # A repository of its own, because every job runs in a worktree of its
-    # project's repository (since 2026-10-02) and this one must not be the
-    # live agents/ -- the first version of that change made its tree there.
+    # Drive the full inner launcher against the stub CLI.
     repo = root / "agents"
     (repo / "engineer").mkdir(parents=True)
     (repo / "engineer" / "role.md").write_text("role\n")

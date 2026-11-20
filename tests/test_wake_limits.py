@@ -101,11 +101,7 @@ def inbox(vault: Path) -> tuple[str, str]:
 
 def scenario(label: str, reflection: str, today: date, expect_code,
              expect_note, expect_comms: bool | None = None):
-    """One wake against one lane file.
-
-    ``expect_comms`` is whether anything reaches the board or the system
-    persona: since 2026-11-19 never, for a persona's own run.
-    """
+    """Run a wake with one lane file and check the warning it produces."""
     if expect_comms is None:
         expect_comms = False
     root = Path(tempfile.mkdtemp(prefix="loam-wake-test-"))
@@ -235,12 +231,7 @@ finally:
     ):
         stray.unlink(missing_ok=True)
 
-# The turn cap, both sides. A capped envelope is a failure with its own exit
-# code and its own line; a finished one logs the CLI's `num_turns` beside the
-# round trips read back from the session file, and only the second is what
-# `--max-turns` counts (measured 2026-09-07; see lib/loam_session.py). The
-# fixture session has the transcript's real shape: one entry per content
-# block, one id per response, one user entry per tool result.
+# Distinguish a provider-reported turn cap from a successful envelope.
 import loam_session  # noqa: E402
 
 SID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"

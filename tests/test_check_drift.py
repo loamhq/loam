@@ -100,7 +100,7 @@ def main() -> int:
 
     lane_checks(cd)
 
-    # --quiet says what differs in one line, never a bare heading (2026-11-19).
+    # Quiet mode must identify the differing item in a single line.
     diff = ("rendered from role.md @ aaa; the source is now @ bbb. Re-render.\n"
             "--- live:x\n+++ generator\n@@ -24,2 +24,3 @@\n same\n+- **New line.**")
     line = cd.one_line(diff)

@@ -1,11 +1,5 @@
-"""Self-dispatched continuations and the run-slot queue (stage two, 2026-10-02).
-
-The launcher's own functions, against a temp jobs root, asserting what lands
-on disk and the words a receipt carries: a conflict claims a continuation job
-whose brief continues this one and counts itself; the second automatic
-continuation is the last, and the receipt after it says the chain ends with
-the branch kept; a landing or an incomplete job dispatches nothing; and the
-queue is ordered by when each job joined, whichever project it belongs to.
+"""Exercise queued admission and automatic continuations using temporary project and job
+state.
 
 Run: python3 tests/test_engineer_dispatch.py
 """

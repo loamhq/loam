@@ -34,9 +34,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-# This tree's lib, not the canonical checkout's: from a job's worktree the
-# canonical path tested main's code and passed a branch that broke it
-# (2026-11-09, caught only by the landing's merged run).
+# Import the worktree under test so a passing result certifies this revision.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_deploy as dep  # noqa: E402
 
@@ -99,8 +97,7 @@ try:
     dep.SHARE_DIR.mkdir()
     dep.AGENTS = root / "agents"           # so no real project registry is read
     (dep.AGENTS / "projects").mkdir(parents=True)
-    # Nor the box's real sites: a live `light` site (2026-11-10) made every
-    # count of gated blocks one too many.
+    # Use an isolated sites registry for deterministic host counts.
     dep.SITES_DIR = root / "sites"
 
     def record(name: str, toml: str, compose: str | None = None) -> Path:
@@ -394,9 +391,8 @@ try:
     check("authelia cookie domain and portal from the domain",
           "domain: example.test" in authelia and "authelia_url: https://auth.example.test" in authelia)
     check("authelia default rule one_factor on *.domain", "domain: '*.example.test'" in authelia)
-    # Without one two_factor rule Authelia 4.39 renders no enrolment panel
-    # at all (found 2026-09-08); the sentinel host carries it, first, and
-    # every app host stays at one factor so a passkey login is enough.
+    # Authelia needs a two-factor rule to offer enrollment. Only the sentinel host should
+    # match this rule.
     rules = authelia.split("rules:", 1)[1].split("session:", 1)[0]
     check("authelia: sentinel two_factor rule first, apps one_factor",
           rules.strip().startswith(f"- domain: {dep.SECOND_FACTOR_HOST}.example.test\n    policy: two_factor")
@@ -463,7 +459,7 @@ try:
     check("own domain: unresolved check names hosts and portal",
           {n for n, _ in dep.unresolved_hosts(list(apps.values()))} >= {"owner.me", "www.owner.me", "auth.owner.me"}
           or not dep.box_addresses())   # offline box: getaddrinfo may still answer
-    # -- one request past the login (2026-09-28) ----------------------------
+    # Request routing after sign-in
     for label, toml, needle in [
         ("bypass: a path with a dot segment", '[[bypass]]\nmethod = "POST"\npath = "/api/../x"\n', "literal path"),
         ("bypass: a path with a query", '[[bypass]]\nmethod = "POST"\npath = "/api/x?a=1"\n', "literal path"),
@@ -492,7 +488,7 @@ try:
     check("bypass: only on the record that asks", "@bypass" not in text[text.index("pages.example.test {"):])
     check("bypass: Authelia's configuration does not change", "bypass" not in dep.authelia_config())
 
-    # -- a content host (2026-10-23) ----------------------------------------
+    # Content origin
     for label, toml, needle, static in [
         ("content host: not a label", 'content_host = "Bad.Host"\n', "not a valid label", False),
         ("content host: on a static host", 'content_host = "pages-content"\n', "static host", True),
@@ -550,7 +546,7 @@ try:
         dep.PREVIEW_SYSCTL, dep.SERVICE_UNIT,
         *(dep.LOGIN_DIR / n for n in ("index.html", "login.css", "login.js", "icon.svg"))})
 
-    # -- Loam's sign-in page in front of Authelia (2026-11-16) ---------------
+    # Sign-in page routing
     real_get = dep.lc.get
 
     def login_as(**values):

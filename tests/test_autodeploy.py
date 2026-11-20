@@ -1,25 +1,8 @@
 #!/usr/bin/env python3
-"""A project job that deploys itself when it lands (lib/loam_autodeploy.py,
-bin/deploy `up --forward-only`, since 2026-11-12).
+"""Verify that a requested deployment uses the landed revision and cannot roll a newer
+release back.
 
-Three layers, none of which touches Docker, sudo or a real job:
-
-  bin/deploy's `up`     with its Docker and git calls replaced: a commit
-                        already carried by what runs changes nothing; a
-                        healthy up reports before/after; an unhealthy one
-                        puts the previous image back; a failed build leaves
-                        the running container alone. Every path that read
-                        what runs prints one `deploy-result:` line.
-  the library           which landings deploy, which app a project means,
-                        the command (fixed, `--forward-only`, in its own
-                        user unit), and the receipt's paragraph and row.
-  the launcher's door   `accept` writes `deploy: loam-ui` into the header
-                        on an explicit yes only, and refuses it on a
-                        read-only brief and on Loam, before a directory is
-                        claimed.
-
-Run: python3 tests/test_autodeploy.py
-"""
+Run: python3 tests/test_autodeploy.py"""
 
 from __future__ import annotations
 

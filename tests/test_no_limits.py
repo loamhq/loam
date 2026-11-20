@@ -1,22 +1,6 @@
 #!/usr/bin/env python3
-"""No clock and no round-trip cap (since 2026-11-10).
-
-The owner, 2026-11-10: "Please remove any limitations on how long a turn or
-session can run. I don't want any limitations at all." Asserted here, by
-calling the shipped functions:
-
-  job clock       no default and no upper bound: `max_minutes` absent, 0,
-                  negative or not a number is None; 500 stays 500. A brief's
-                  header writes `none` and reads back as None, and the
-                  session's kill clock is then None.
-  the unit        a job's transient unit carries TimeoutStartSec=infinity
-                  with no ceiling, and the ceiling plus grace with one.
-  the cap         no engineer, wake or reviewer `--max-turns` by default.
-  the waiter      there is none (2026-11-19): a brief returns at once.
-  the recycle     there is none (Remote Control, which it restarted, was
-                  retired 2026-11-19): no recycle-rc, and no recycle timer.
-
-Nothing outside a temporary directory is written; no unit is launched.
+"""Verify that an ordinary lane has no implicit clock or round-trip cap and honors an
+explicitly requested job limit.
 
 Run: python3 tests/test_no_limits.py
 """
@@ -109,8 +93,8 @@ try:
     check("no unattended job clock left",
           hasattr(eng, "UNATTENDED_MAX_MINUTES"), False)
 
-    # Nothing waits on a job (2026-11-19): no waiter and no ceiling of its
-    # own, and the engineer tool's transport timeout is no longer four hours.
+    # The brief transport returns after launch. Its timeout cannot limit the job's
+    # lifetime.
     check("no waiter and no waiter ceiling",
           (hasattr(job, "wait_for"), hasattr(job, "WAITER_CEILING_SECONDS")),
           (False, False))

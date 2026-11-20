@@ -5,15 +5,12 @@ from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent
 AGENT = "wakefailedselftest"
-# Where bin/wake writes: the runtime's state and log folders as
-# lib/loam_config names them, outside the checkout since 2026-11-14.
+# Use the same runtime state and log layout as the wake launcher.
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_config as lc  # noqa: E402
 STATE = lc.STATE / "wake" / f"{AGENT}.running"
 LOG = lc.LOGS / f"wake-{AGENT}.jsonl"
-# The schedule log is not: bin/wake and bin/wake-failed write their fire
-# lines where LOAM_SCHEDULE_STATE says (lib/loam_schedule.py), and until
-# 2026-10-14 this test's fires landed in the box's own log, read by Activity.
+# Put the schedule fire log in the fixture's schedule state directory.
 os.environ["LOAM_SCHEDULE_STATE"] = tempfile.mkdtemp(prefix="loam-wake-failed-sched-")
 
 fails = 0

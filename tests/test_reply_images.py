@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-"""An agent's reply can show images (2026-11-18): `![words](path)` in what it
-says, a file in the vault or the workspaces, up to three, onto the message
-as attachments. Since that evening the reference stays in the text, where
-the page draws its image, and each attachment carries the destinations that
-named it (`refs`) and, where the header says, its pixel size.
+"""Resolve images embedded in agent replies into attachments while preserving their
+positions.
 
 Run: python3 tests/test_reply_images.py
 """

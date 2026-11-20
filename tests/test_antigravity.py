@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Antigravity, the third provider (2026-11-09), held to the other two.
-
-No login and no turn: the translation is fed the documented stream-json
-shapes (https://antigravity.google/docs/cli/headless) plus the one result
-this box has actually seen, the unauthenticated one; the persona's
-instructions are held to the same sources Codex is given; its MCP servers to
-the ones ``.mcp.json`` names; and threads accept the engine.
-"""
+"""Translate provider stream fixtures and check login state without starting a turn."""
 
 from __future__ import annotations
 
@@ -26,7 +19,7 @@ import loam_codex as codex  # noqa: E402
 import loam_config as lc  # noqa: E402
 import loam_threads as threads  # noqa: E402
 
-# Seen on this box, 1.5.3, with no login (stdin piped).
+# CLI 1.5.3 unauthenticated response with piped stdin.
 UNAUTH = {"event": "result", "result": {
     "conversation_id": "", "status": "ERROR", "response": "",
     "error": "authentication failed or timed out", "duration_seconds": 0,
@@ -156,8 +149,7 @@ def test_prompt_arg_spills_long_text() -> None:
 
 
 def test_login_cache_serves_and_reasks_behind() -> None:
-    """Past the minute the kept login is served at once and the CLI asked
-    behind the call; the next call has the new answer (2026-11-09)."""
+    """After expiry, serve cached login state immediately and refresh it for the next read."""
     import threading
     import time
     saved = (agy._probe, agy._login_cache)

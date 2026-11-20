@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
-"""No test reaches a real external service (lib/loam_offline.py).
-
-  guards    every credentialed call site in the runtime refuses in a test.
-            (The 2026-11-10 outage's replay, the move's DNS step, and the
-            guards of the modules that moved to the owner's plugins on
-            2026-11-14 are those plugins' own tests now.)
-  network   under tests/run-all, no socket leaves loopback, in this process
-            and in one it spawns.
-  ranges    a record is never pointed at a documentation or private IPv4.
+"""Verify offline test isolation for credentials and network calls while allowing local
+fixture servers.
 
 Run: python3 tests/test_offline.py
 """

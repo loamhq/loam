@@ -1,33 +1,8 @@
 #!/usr/bin/env python3
-"""A persona's wake and cron on Codex (2026-11-13): lib/loam_codex_wake.py
-and bin/wake's Codex half.
+"""Exercise reflection and cron launches with a stub Codex provider and isolated
+workspace.
 
-Offline, always:
-
-  instructions   a Codex wake loads what a Claude wake loads: CLAUDE.md and
-                 its imports in order, then the lane's file; no _active.md.
-  answers        every approval granted, a question answered with nothing,
-                 anything else refused.
-  drive          a replayed run: the root's reply is the root's words, never
-                 a subagent's; a subagent ending after the root's turn is
-                 handed back in a second root turn; usage summed over every
-                 thread; a failed turn is a failure with Codex's sentence.
-  wake           bin/wake end to end with the app-server stubbed: a persona
-                 on Codex takes the Codex lane, the line says provider,
-                 model, thread and usage, the marker advances, and a
-                 persona on Claude Code never touches it.
-
-``--live``: real bin/wake, real Codex, on a throwaway persona built in a
-temp directory (its own soul, _always.md, _reflection.md and cron, its
-.codex/config.toml rendered by bin/provision's own codex_config), with the
-log, the marker, the locks and the schedule log pointed at the temp
-directory. Not a real persona's memory. Runs one reflection wake and one
-cron, each of which writes a file only its lane's instructions name, uses a
-subagent and calls Loam's MCP tools; then reads what the run left behind.
-Costs two short turns on the ChatGPT login.
-
-Run: python3 tests/test_codex_wake.py [--live]
-"""
+Run: python3 tests/test_codex_wake.py [--live]"""
 
 from __future__ import annotations
 

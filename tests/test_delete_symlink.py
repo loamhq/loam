@@ -1,16 +1,6 @@
-"""delete_file removes a symlink, never what it points at.
-
-Caused on 2026-10-02: the vault root's README.md was a symlink to
-40_PROJECTS/Loam/architecture/overview.md, a persona asked delete_file to
-remove README.md, and the tool resolved the path before acting -- so it
-unlinked overview.md and reported that path back with `kind: "file"`, leaving
-the link dangling. This test fails if that shape comes back: a link is the
-target, and its referent is untouched wherever it lies.
+"""Deleting a symlink must unlink the directory entry while preserving its target.
 
 Run: mcp/.venv/bin/python tests/test_delete_symlink.py
-
-NOT bare `python3`: this imports mcp/read_epub_server.py, which imports the
-`mcp` package, which lives only in mcp/.venv.
 """
 
 import asyncio
@@ -93,8 +83,7 @@ link.symlink_to(V / "nowhere.md")
 r = delete(link)
 check("dangling link: removed", r.get("ok") is True and not link.is_symlink(), str(r))
 
-# No path boundary since 2026-11-08 ("the authority move"): a link anywhere
-# is removed as a link, and its referent is still never touched.
+# The referent survives unlinking even outside the workspace.
 link = Path(ROOT, "ai-labs", "ada", "into-vault")
 link.symlink_to(note)
 r = delete(link)

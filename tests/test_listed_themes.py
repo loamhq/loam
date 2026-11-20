@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""lib/loam_listed_themes.py (2026-11-18, 0.2.5): the first-party looks that
-left the shipped set are kept for whoever was using or had chosen one.
-
-A local git repository stands in for loamhq/plugins (``LOAM_PLUGIN_GIT_BASE``),
-holding the release's own ``plugins/_listed/<id>/`` folders at the tags
-``<id>-v<version>``, so the install is the real two calls. Checks:
-
-  - which looks are wanted: one in use on a device kind, one with saved
-    option choices, none for Latte or a look nobody touched;
-  - each wanted look is installed from its link, an installed plugin with
-    that link and its tag, and Appearance lists it again;
-  - a look already in force is left alone, and each id is tried once: a
-    look removed after it was kept is not put back at the next start;
-  - when the link cannot be read, the release's copy is put in the plugins
-    folder (built here) and Appearance wears it;
-  - an installed theme serves its fonts.css and font files (and no other
-    top-level file);
-  - every MOVED id is a listed folder whose version is its MOVED version,
-    and none is in the shipped themes any more.
+"""Check that a theme in use remains available when its source moves to the Market.
 
 Run: python3 tests/test_listed_themes.py
 """

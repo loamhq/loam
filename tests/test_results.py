@@ -1,31 +1,6 @@
 #!/usr/bin/env python3
-"""A run with no thread gets its result back (2026-11-19, batch B step 3).
-
-A wake or a cron that briefs the engineer returns at once; when the job has
-a verdict, `bin/wake <ws> --results` hands the result to the persona as a
-new run (lib/loam_results.py). Driven here against a scratch workspace,
-records, locks, logs and a stand-in CLI that records each command line and
-answers like `claude -p --output-format json`:
-
-  1. **Resumed.** A cron's record whose session file is there: the run
-     resumes that session (`--resume <id>`, no `--session-id`), with the
-     cron's own file appended again and the result as its prompt; its own
-     row in `wake-<agent>.jsonl` (lane `result:<job>`, `resumed`), a fire
-     in the schedule log, the record gone, the delivery logged once.
-  2. **In order, once each.** Two results for one asker, the later-finished
-     one written first: two runs, oldest verdict first, each once.
-  3. **The fallback.** No session file, and a session the CLI refuses: a
-     fresh run (`--session-id`, a new one) whose prompt carries the result,
-     the asker's lane, its brief word for word and why it was not resumed.
-  4. **Given, then dead.** A record already marked given is not handed over
-     again; it is logged and said in the failure log.
-  5. **The lock.** While another run of the agent holds its lock, nothing is
-     given and the record stays for the next pass.
-  6. **Kicks.** Off under a scratch records directory; `kick_for` starts a
-     drain only for a record that goes by a run; every Claude wake now
-     names its own session id.
-
-Nothing outside a temporary directory is written; no unit is started.
+"""Deliver completed jobs to the calling run when it has no thread. Recover pending
+deliveries without starting duplicate runs.
 
 Run: python3 tests/test_results.py
 """

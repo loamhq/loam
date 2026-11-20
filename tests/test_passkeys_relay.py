@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
-"""The signed-in person's passkeys, relayed from the login (2026-11-17).
-
-The app's Settings > Sign-in reads ``GET /_loam/passkeys`` for
-``{passkeys: [{id, description, created_at, last_used_at}]}``
-(app/public/passkey.js). Held here:
-
-  the route       every app-shell host (the app and its staging copy) carries
-                  it, through the gate, ahead of the personas' browser subnet,
-                  to the claim service; Caddy itself orders it so.
-  the relay       bin/loam-claim asks the login's own API with the person's
-                  own session cookie and nothing else, on the portal of the
-                  cookie domain the request came in on; the answer is the
-                  four fields, no key material; a login that refuses is a
-                  403; no gate user or no session cookie is a 401 and the
-                  login is never asked.
-  the removal     DELETE /_loam/passkeys/<id> is the login's own DELETE,
-                  passed through; a malformed id is a 404 and asks nothing.
-
-The contract is docs/install.md, "The page contract for the passkeys"; the
-route, deploy/README.md, "An install's edge, the claim and the relay".
+"""Check the authenticated passkey relay and how upstream success and failure appear to
+the signed-in user.
 
 Run: python3 tests/test_passkeys_relay.py
 """

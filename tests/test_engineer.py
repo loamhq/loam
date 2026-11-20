@@ -1,22 +1,5 @@
-"""The engineer's boundary, and the clocks that refuse a job before it starts.
-
-Two halves, both asserted against the real thing.
-
-**The boundary** runs hooks/boundary_guard.py as a subprocess fed a real
-PreToolUse payload, exactly as tests/test_boundary_guard.py does, because what
-matters is the exit code Claude Code acts on. Exit 0 allow, exit 2 refuse.
-
-The cases that earn their place are the ones where the engineer's rule is the
-INVERSE of a persona's. A persona may write its own workspace under ai-labs
-and nothing else there; the engineer may write all of `agents/` -- which is
-outside a persona's reach entirely -- and almost nothing under ai-labs. So
-every case here that passes would fail for a persona, or the reverse, and a
-guard that quietly applied the persona rule to the engineer would fail this
-file loudly rather than merely being wrong.
-
-**The clocks**: since 2026-11-10 a job has no default clock or round-trip
-cap, and since 2026-11-19 there is no recycle to compute; both are asserted
-below.
+"""Verify the engineer's project boundary and brief admission through the tool and
+launcher.
 
 Run: python3 tests/test_engineer.py
 """
@@ -200,10 +183,7 @@ print()
 LAUNCHER = str(Path(__file__).resolve().parent.parent / "bin" / "engineer-job")
 JOBS = eng.lc.JOBS  # outside the checkout since 2026-11-14 (bin/move-state)
 
-# Who may brief the platform engineer is the install's config since
-# 2026-11-14 (`engineer.briefers`). The launcher runs here under a copy of
-# the box's config that names one persona alone, the box's lead agent, whatever
-# else the box names, so the refusals below are this file's and not the box's.
+# Configure the allowed platform briefers through the scratch install's config.
 BRIEFER = eng.lc.LEAD_AGENT
 _cfg_dir = tempfile.mkdtemp(prefix="test-engineer-config-")
 CONFIG = Path(_cfg_dir) / "loam.toml"
@@ -217,11 +197,7 @@ CONFIG.write_text(_live if eng.lc.get("engineer.briefers") == [BRIEFER]
 def launcher(argv: list[str], stdin: str = "",
              agent: str = BRIEFER,
              lane: str = "") -> subprocess.CompletedProcess:
-    """`LOAM_AGENT` is set because a persona's server always sets it (every
-    one of the seven carries it in its `.mcp.json`), and since 2026-09-25 the
-    launcher compares it to the project: a brief to `Loam` from anyone but
-    the briefer is refused, so a test of any OTHER refusal has to be a brief
-    the briefer could have sent, or it is testing the new rule by accident."""
+    """Invoke the launcher with the caller identity the persona's MCP server would supply."""
     return subprocess.run(
         [LAUNCHER, *argv], input=stdin, capture_output=True, text=True,
         check=False, timeout=60,
@@ -280,18 +256,8 @@ check("tool, stdin not JSON: exit 2", code, 2)
 code, reply = tool("[1, 2]")
 check("tool, stdin a list: refused, as JSON", reply.get("ok"), False)
 
-# --- continuing a previous job (2026-09-22) ---
-#
-# `continue_job` names the job whose CLI session this brief resumes. Every
-# way that can fail is refused before a directory is claimed, so all of it is
-# testable here without running anything. The happy path is not: it costs a
-# model session, and it was caused by hand at build time instead (the two
-# receipts are quoted in the build's own receipt).
-#
-# The fixture is a job directory made under the REAL jobs root and removed
-# again, because "is there a job with this id" is a question about that root
-# and a temp tree would answer a different question. It holds no brief and is
-# never launched.
+# Reject invalid continuations before claiming a new job. A live job and a finished job
+# without a session need different remedies.
 def cont(extra: dict) -> str:
     _, reply = tool({"project": "Loam", "title": "t", "brief": "do a thing",
                      "involvement": "go", **extra})
@@ -362,16 +328,7 @@ else:
 
 print()
 
-# ---------------------------------------------------------------------------
-# Who may brief which project (2026-09-25). The owner's rule of 2026-09-11:
-# only one persona briefs the platform engineer; project engineers are open to every
-# persona; and a `Deploy <project>` title is the one Loam brief anyone may
-# send, because a deploy is sudo and therefore Loam's.
-#
-# The pure function first, then the same rule caused through the launcher's
-# two doors -- the tool form with `LOAM_AGENT`, and the positional form with
-# the header, which is the door a hand-written brief comes through.
-# ---------------------------------------------------------------------------
+# Check caller authorization at both the tool and launcher entry points.
 
 platform = eng.platform_project()
 other_name = others[0].name if others else None
@@ -459,11 +416,7 @@ code, reply = tool({"project": "Loam", "title": "", "brief": "",
 check("tool, Loam from another persona: authority before hygiene",
       f"briefed by {BRIEFER}" in reply.get("error", ""), True)
 
-# --- every lane may brief (2026-11-09) ---
-# Until that day only one persona's infra-watch cron could; reflection, other crons
-# and other personas' wakes were refused at the launcher. Nothing refuses a
-# lane now. Each call below is sent with an empty title, so it is answered
-# after the lane would have been read and before a directory is claimed.
+# Exercise briefs from each supported calling lane.
 for lane in ("reflection", "cron:strategic-watch", "cron:first-resize", "review:1"):
     code, reply = tool({"project": "Loam", "title": "", "brief": "do a thing",
                         "involvement": "go"}, lane=lane)
@@ -504,8 +457,7 @@ check("receipt row: a project engineer's job is never a deploy brief",
       launch.deploy_row(others[0], {"title": f"Deploy {other_name} at 90496b3"})
       if others else "—", "—")
 
-# A read-only brief (since 2026-10-13): the involvement opens with "Read-only",
-# the shape acme-foundation job 20261012-181315-4e672864 already used.
+# Only the involvement header selects read-only landing.
 check("read-only: the involvement the 10-12 job carried",
       launch.is_read_only("Read-only. Change nothing, commit nothing, open no PR."), True)
 check("read-only: any case, any punctuation after it",

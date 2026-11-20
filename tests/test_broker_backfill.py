@@ -73,8 +73,9 @@ def asked(text, seq=0):
 
 
 def tool_result(content, seq=0):
-    """A `user` event, which is what the CLI calls a tool result. Every one
-    of them in three real sessions read end to end on 2026-09-16."""
+    """A provider user event can carry a tool result. It must not become a message from the
+    person.
+    """
     return {"type": "user", "seq": seq,
             "message": {"role": "user",
                         "content": [{"tool_use_id": "toolu_01",

@@ -1,19 +1,6 @@
-"""move_file refuses a symlink at either end, and never touches what it points at.
-
-delete_file resolved its path before acting and so unlinked the vault's
-README.md referent on 2026-10-02 (tests/test_delete_symlink.py). move_file
-resolved both endpoints the same way: moving the README.md link would have
-carried overview.md away and left the link dangling, and a destination under
-a linked directory landed the file wherever that directory pointed. This test
-fails if either comes back: a link as source, a source or destination reached
-through a linked directory, and a destination that is itself a link are each
-refused with `error: symlink`, the referent is where and what it was, and the
-link still points where it did.
+"""Refuse to move through a symlink at either endpoint and preserve the target.
 
 Run: mcp/.venv/bin/python tests/test_move_symlink.py
-
-NOT bare `python3`: this imports mcp/read_epub_server.py, which imports the
-`mcp` package, which lives only in mcp/.venv.
 """
 
 import asyncio

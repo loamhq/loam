@@ -1,24 +1,8 @@
 #!/usr/bin/env python3
-"""Images built into Loam (2026-11-18, 0.2.10), and lib/loam_built_in.py.
+"""Verify built-in Images defaults and one-time migration of an unmodified Market copy.
+Preserve the owner's settings, keys and edited copies.
 
-Images ships in this runtime's ``plugins/images/``, no longer in the Market.
-Checks:
-
-  - a fresh install lists it built in (shipped, by Loam), in force, and
-    **off**; turning it on in Settings › Plugins is the normal switch, and
-    its agents' tool is in the lanes only while it is on;
-  - an install that had it from the Market (a copy in Yours from
-    loamhq/plugins, on, with its own settings, a key of its own and a key
-    choice) has that copy step aside once: the built-in copy is in force, it
-    is still on, and its settings, keys and key choice are where they were;
-  - a second start does nothing; an install without it records nothing to
-    do; a copy edited since it was installed, one built here and one from
-    another repository are the person's own and stay in force;
-  - a release that does not ship it leaves the Market copy alone and
-    settles nothing, so the release that does ship it still takes over.
-
-Run: python3 tests/test_built_in_images.py
-"""
+Run: python3 tests/test_built_in_images.py"""
 
 from __future__ import annotations
 

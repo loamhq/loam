@@ -274,7 +274,7 @@ try:
     check("...once", [g for g in grew if g.startswith("antigravity")], [])
     del base
 
-    # -- every other conversation: cleared once idle a week (2026-11-16) -----
+    # Other conversations expire after a week idle.
     def age(path: Path, days: float) -> None:
         when = NOW - days * DAY
         for p in [path, *path.rglob("*")] if path.is_dir() else [path]:

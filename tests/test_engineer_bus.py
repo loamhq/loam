@@ -1,21 +1,6 @@
 #!/usr/bin/env python3
-"""The launcher finds the user bus whatever environment called it.
-
-Codex starts its stdio MCP servers with a short environment allow-list, and
-XDG_RUNTIME_DIR is not on it. `systemd-run --user` without it answers
-"Failed to connect to bus: No medium found", so every brief from a Codex
-thread came back `launch_failed` (job 20261001-170601-22043567, 2026-10-01).
-
-Caused, not read: the launcher's own `main` runs under `env -i HOME PATH
-USER`, the shape of a Codex-started server, against a fixture project, with a
-stand-in `systemd-run` first on PATH. The stand-in asks the box user's REAL user
-manager `systemctl --user is-system-running` with the environment it was
-handed and then fails on purpose, so no unit is started and the answer comes
-back in the launcher's own `launch_failed` text. Under a landing's wall
-there is no user manager to answer (lib/loam_worktree.py `sealed_paths`), so
-that the real manager answers is asked by tests/live_user_bus.py, by hand. A control run with the
-launcher's default switched off must show "No medium found", or this test is
-not testing anything.
+"""Verify that the launcher and generated tool environment can reach the user bus from a
+minimal environment.
 """
 
 from __future__ import annotations
@@ -83,7 +68,7 @@ try:
     bin_dir.mkdir()
     (bin_dir / "systemd-run").write_text(STAND_IN)
     (bin_dir / "systemd-run").chmod(0o755)
-    # This tree's launcher, so a branch's pass proves the branch (2026-11-09).
+    # Use this checkout's launcher.
     (root / "harness.py").write_text(HARNESS.replace(
         "@LAUNCHER@", str(Path(__file__).resolve().parent.parent / "bin" / "engineer-job")))
 
@@ -129,9 +114,7 @@ try:
     check("a caller's XDG_RUNTIME_DIR is kept", out.stdout.strip(),
           "/tmp/caller-chose unset")
 
-    # The second wall: Codex is told to pass both through to `engineer`.
-    # Rendered by provision, the generator, not read from an agent's live
-    # file (sealed, 2026-11-19).
+    # Check the bus variables in generated provider settings.
     loader = importlib.machinery.SourceFileLoader(
         "provision_bus_test", str(AGENTS / "bin" / "provision"))
     spec = importlib.util.spec_from_loader("provision_bus_test", loader)
@@ -139,7 +122,7 @@ try:
     loader.exec_module(provision)
     config = provision.codex_config(lc.LEAD_AGENT, lc.WORKSPACES / lc.LEAD_AGENT)
     engineer = config.split("[mcp_servers.engineer]", 1)[1].split("\n[", 1)[0]
-    # Read as a list, not a line: LOAM_WAKE joined it on 2026-11-13.
+    # Compare environment variable names as a list.
     import tomllib  # noqa: PLC0415
     passed = tomllib.loads("[e]\n" + engineer).get("e", {}).get("env_vars") or []
     check("codex: engineer passes XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS",

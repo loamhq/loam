@@ -1,25 +1,5 @@
-"""The recovery sweep (`engineer-job --recover`, since 2026-10-02).
-
-The launcher's own sweep against temp projects with real git repositories
-and a local bare remote, systemd stubbed (unit states are given, launches are
-recorded rather than made) -- deterministic fault injection: every "worker
-died" below is a job directory left exactly as a SIGKILLed inner leaves it.
-
-  - a queued job whose unit is gone is relaunched once, and not again while
-    its new unit runs;
-  - a cancelled queued job is finalized and never relaunched;
-  - a cancelled job whose unit died with no verdict is finalized as
-    cancelled, saying how long it ran, and never resumed;
-  - an interrupted job whose worker still holds its tree lock is untouched;
-  - an interrupted job with an unlanded branch is continued once, inside the
-    bounded chain, and a second sweep does nothing more;
-  - a crash after the canonical advanced is recorded as landed, and the push
-    left pending is completed;
-  - a crash after the receipt was published becomes that receipt's verdict;
-  - a deploy-lane job and one at the end of its chain are surfaced, not run;
-  - a job with no lease (before this mechanism) is reported as legacy and
-    left alone; a finished job is never touched;
-  - two sweeps at once: the second stands down.
+"""Recover interrupted jobs from their receipts, leases and Git state without
+duplicating an external action.
 
 Run: python3 tests/test_engineer_recover.py
 """

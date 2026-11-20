@@ -230,9 +230,8 @@ try:
     ls.change(AGENT, "nudge", one_off(fire_at, "did the PR merge?"),
               actor=AGENT, lane="conversation", reason="follow up on the PR",
               now=fire_at - timedelta(minutes=11), systemd=SD)
-    # And a recurring record due the same minute, so that after it has fired
-    # it can be moved: a re-cut of a timer that has triggered before must not
-    # fire it (the migration of 2026-10-14 did, through a `restart`).
+    # Include a recurring timer due in the same minute so rearming can expose an accidental
+    # second firing.
     ls.change(AGENT, "tick", record(f"daily at {fire_at.astimezone(loam_cron.pt_zone()):%H:%M} PT"),
               actor=AGENT, lane="conversation", reason="a daily tick",
               systemd=SD)
@@ -247,9 +246,7 @@ try:
         time.sleep(2)
     check("one-off fired and was marked done", head.get("done", "").endswith(" ran"),
           head.get("done"))
-    # `done` is written before the reconcile that removes the timer, inside
-    # the same change(), so the poll above can see the record between the two
-    # (2 runs in 2 on 2026-11-08). Wait for the removal, as for the fire.
+    # Observe completion before checking that reconciliation removed the one-off timer.
     deadline = time.monotonic() + 30
     while (UNITS / f"{nunit}.timer").exists() and time.monotonic() < deadline:
         time.sleep(0.5)
@@ -295,8 +292,7 @@ try:
                  "OnCalendar=*-*-* 02:00:00 America/Los_Angeles\nPersistent=false\n"
                  f"Unit=loam-wake-{OTHER}.service\n\n[Install]\n"
                  "WantedBy=timers.target\n")
-    # The units as they stood before 2026-11-19: the timer the record
-    # rendered, the service bin/provision wrote.
+    # Exercise existing units written by the older split renderers.
     (UNITS / f"loam-wake-{OTHER}.timer").write_text(old_timer)
     (UNITS / f"loam-wake-{OTHER}.service").write_text(
         "[Unit]\nDescription=provision's service, before the record had it\n\n"
@@ -314,7 +310,7 @@ try:
     check("  migrate no longer makes a reflection record",
           not (LABS / OTHER / "crons" / "reflection.md").exists())
 
-    # -- the daily reflection: an ordinary record (2026-11-19) --------------------
+    # Reflection uses the schedule record.
     placeholder = loam_cron.REFLECTION_PLACEHOLDERS[0]
     head = ("---\nlane: reflection\nschedule: daily at 02:00 PT\n"
             "enabled: true\n---\n")

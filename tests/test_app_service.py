@@ -1,30 +1,8 @@
 #!/usr/bin/env python3
-"""Loam's own app, run by Loam (since 2026-11-16): a `[service]` record,
-bin/deploy's release, `up`, rollback and prune, and the unit's environment.
+"""Exercise service-app release selection, health, rollback and cleanup against a
+temporary installation.
 
-Nothing here touches systemd, Docker or sudo. A real git repository stands
-in for the checkout, a scratch directory for /var/lib/loam-releases, and the
-unit's state and health are answered in memory:
-
-  the record     `[service]` is a kind of its own: one key, a loopback
-                 port; never beside a compose.yaml; `context` names the
-                 folder of the checkout the app is.
-  the release    `git archive <commit>:app` and nothing else of the repo,
-                 once per commit; a commit that has no src/server.js is
-                 not the app and is refused.
-  up             points `current` at the release, restarts the unit, and
-                 keeps `previous`; unhealthy, it puts the release before
-                 back; forward-only leaves a later commit alone; the
-                 container it replaces is stopped, kept, and started again
-                 if the unit fails; prune keeps current and previous.
-  the env        every value the compose file handed the container, under
-                 the same names, and an EnvironmentFile line that survives
-                 quotes, spaces and JSON.
-  the unit       the template's wall: a dynamic user, no capability, the
-                 core's OOM score, no memory ceiling, its env from /run.
-
-Run: python3 tests/test_app_service.py
-"""
+Run: python3 tests/test_app_service.py"""
 
 from __future__ import annotations
 

@@ -1,27 +1,5 @@
 #!/usr/bin/env python3
-"""The Apps section's previews (2026-11-15): lib/loam_deploy.caddy_preview_block.
-
-An internal route past the login, so loam-ui's preview renderer (headless
-Chromium in its own container, no credential) sees each app as it renders.
-What earns a case here is what "internal only, and nothing else changes"
-rests on:
-
-  - the route is one plain-HTTP site bound to the broker bridge's gateway
-    and nothing else, refusing any client outside the broker's subnet
-    before any app is served, and answering 404 for a name it does not know;
-  - it lists exactly what the Apps list shows with a host of its own: every
-    agent's site and every container record that is not Loam's page; never
-    the vault, the commons' files, the login or the page itself;
-  - each app is served exactly as its public block serves it past the gate
-    (the same root and hidden names, or the same loopback upstream), and an
-    expired site is a 410 here too;
-  - the public blocks are byte-identical with and without it, and check-drift's
-    live-file reader sees no new host block;
-  - the kernel wall holds the port in the same chain as the broker's, and
-    bin/deploy hands the page the two values of the contract.
-
-Runs against throwaway directories with the module's paths pointed at them.
-Nothing on the box is read or written.
+"""Render internal preview routes and verify their access boundaries for gated apps.
 
 Run: python3 tests/test_previews.py
 """
@@ -191,8 +169,7 @@ check("bin/deploy hands the base and the address",
       env.get("LOAM_PREVIEW_BASE") == f"http://{dep.PREVIEW_SUFFIX}:{dep.PREVIEW_PORT}"
       and env.get("LOAM_PREVIEW_ADDR") == brk.BIND_ADDR, str({k: v for k, v in env.items()
                                                               if "PREVIEW" in k}))
-# The app is a unit since 2026-11-16, its staging copy too, and both are
-# handed the same environment by bin/deploy's service_env.
+# Hand both the app and its staging service the preview environment.
 source = (AGENTS / "bin" / "deploy").read_text(encoding="utf-8")
 body = source[source.index("def service_env("):source.index("def env_file_text(")]
 check("the app's environment passes both to the page",

@@ -10,9 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-# The box's own plugin layer stays out of the renders compared here (as in
-# every other test): a plugin turned on live (the owner's Cloudflare, 2026-11-14)
-# adds its MCP server to every persona and is not what this test is about.
+# Isolate the plugin directories so the comparison sees only declared fixtures.
 import tempfile  # noqa: E402
 os.environ["LOAM_PLUGINS_DIR"] = tempfile.mkdtemp(prefix="loam-parity-yours-")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
@@ -100,16 +98,11 @@ def codex_mcp_status(ws: Path, binary: str | None = None) -> tuple[dict, list[di
         rpc(0, "initialize", {"clientInfo": {"name": "parity", "version": "1"}})
         proc.stdin.write('{"jsonrpc":"2.0","method":"initialized"}\n')
         proc.stdin.flush()
-        # Listed for a thread in the workspace, as the persona has them. With
-        # no thread the list is the app-server's global config only, from
-        # 0.163 on (#51872): `codex_apps` and none of the project's servers
-        # (measured on 0.167.0, 2026-11-09). 0.159.3 read the launch cwd.
+        # List capabilities in a workspace thread to exercise the same environment as a
+        # persona.
         started = rpc(1, "thread/start", {"cwd": str(ws)})
         thread_id = (started.get("thread") or {}).get("id")
-        # Read until no server is still `starting`: a list taken at once can
-        # catch a server mid-handshake with its tools already listed, on
-        # either build (0.167.0 and 0.167.1, 2026-11-11), which reads as a
-        # server that failed to connect when it had not finished.
+        # Wait for every server handshake before comparing the advertised tools.
         deadline, ident = time.monotonic() + 30, 2
         while True:
             status = rpc(ident, "mcpServerStatus/list", {"threadId": thread_id})
@@ -140,9 +133,7 @@ def config_cases() -> None:
     rendered = tomllib.loads(provision.codex_config(lc.LEAD_AGENT, ws))
     check("the login's connector apps are off in the rendered config",
           rendered.get("features", {}).get("apps") is False)
-    # What Claude Code runs without a prompt, Codex runs without one
-    # (2026-10-01: every MCP call in a persona's thread 01a0f8a0 was asked and
-    # refused). Read back per tool, the way Codex resolves it.
+    # Verify equivalent tool approval behavior on both providers.
     allow = provision.settings(ws)["permissions"]["allow"]
     servers = rendered.get("mcp_servers", {})
 
@@ -169,9 +160,7 @@ def config_cases() -> None:
           sorted(servers) == sorted(mcp)
           and set(servers) - plugin == {"browser", "composition", "engineer", "loam"},
           str(sorted(servers)))
-    # Every server approved whole since 2026-11-12, as Claude Code runs
-    # every tool unasked under bypassPermissions: a tool a server adds
-    # later must not ask on Codex either.
+    # Check that every registered server receives its declared tool policy.
     check("every server is approved whole",
           all(spec.get("default_tools_approval_mode") == "approve"
               for spec in servers.values()), str(sorted(servers)))
@@ -231,9 +220,8 @@ def main() -> int:
           not only_claude and not only_codex,
           f"only Claude: {only_claude}; only Codex: {only_codex}")
 
-    # 3. Built-ins differ only by the documented list.
-    # The CLI's init event still names the subagent tool `Task`; the model is
-    # shown it as `Agent` (measured 2026-10-01, Haiku listed "Agent").
+    # Allow the documented differences in provider built-ins, including the subagent tool
+    # name.
     builtins = ["Agent" if t == "Task" else t
                 for t in claude_tools if not t.startswith("mcp__")]
     missing = [t for t in codex.CLAUDE_ONLY_TOOLS if t not in builtins]

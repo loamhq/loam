@@ -91,14 +91,8 @@ async def until(predicate, seconds: float = 3.0) -> bool:
 
 
 def lines(tag: str = "") -> list[str]:
-    """The fixture conversation, with every entry's uuid under ``tag``.
-
-    One fixture stands in for three separate conversations here, and a real
-    session file's entry uuids are its own: two files carrying one set of
-    them is what a **fork** of a conversation looks like, and since
-    2026-09-22 the scan passes those over rather than adopting the same
-    conversation twice (`loam_adopt.candidates`). Tagging is what keeps these
-    three the three separate sessions they are meant to be.
+    """Give the conversation a stable event prefix so fixtures can model shared and
+    unrelated histories.
     """
     out = []
     for line in FIXTURE.read_text(encoding="utf-8").splitlines():

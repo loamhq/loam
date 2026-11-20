@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""mcp/files_server.py: the reviewer's listing and search on Antigravity
-(2026-11-15). Read-only, held to its roots, the excluded path unreachable
-by name, by `..` and by symlink.
+"""Check read-only file listing and search within allowed roots, including excluded
+paths and symlinks.
 
 Run: mcp/.venv/bin/python tests/test_files_server.py
 """

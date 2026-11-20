@@ -1,21 +1,6 @@
 #!/usr/bin/env python3
-"""No memory ceiling on any agent run, and an OOM order that keeps Loam's
-core (2026-11-16).
-
-The owner: "remove all of these limits on the different agents, whether
-personas or engineers." A job had been OOM-killed at its cgroup's
-MemoryMax (20% of RAM) on a box with over 20 GB free. So every generator
-that renders an agent run renders no MemoryMax, MemoryHigh or MemorySwapMax
-and the agents' OOMScoreAdjust (lib/loam_config.py), and the core units
-render the core's, below it:
-
-  agent runs   an engineer job (bin/engineer-job's systemd-run line), a
-               wake (provision), a cron (lib/loam_cron.py), the reviewer's
-               runs (static templates), a chat (the broker's `choom`).
-  core         the session broker's unit and the plugins gateway's.
-
-Rendered here from the generators themselves, so a ceiling that comes back
-in any of them fails this test before it reaches a box. Nothing is started.
+"""Verify the systemd OOM priorities of agents and core services and the absence of
+agent memory ceilings.
 
 Run: python3 tests/test_memory_order.py
 """

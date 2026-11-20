@@ -178,8 +178,7 @@ def main() -> int:
               words, "NO ACTIVITY FOR 13 h 9 min (last engine event 2026-11-16T22:51:00Z); "
                      "it may be stuck; the launcher stopped 1 command that never returned")
 
-        # The second stop on one job is one fact for the system persona
-        # (2026-11-19), and nothing in any thread.
+        # A repeated watchdog stop produces one fact for the system persona.
         told, posted = [], []
         fake = type(sys)("loam_attention")
         fake.tell = lambda text, **kw: told.append((text, kw)) or "told"

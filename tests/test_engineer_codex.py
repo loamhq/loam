@@ -1,28 +1,5 @@
 #!/usr/bin/env python3
-"""A project engineer on Codex (since 2026-10-07), against a stubbed `codex`.
-
-What the launcher promises a Codex job, held here without a model:
-
-  the setting       `runtime` in the record picks the CLI, per project; the
-                    platform engineer is Claude Code whatever its record says
-                    until its own setting names another (2026-11-19);
-                    a record without one, or with an unknown one, is Claude
-                    Code, and check-drift names both.
-  the command line  the model and effort from their one home, the sandbox
-                    with the tree's `.git` and the job directory writable, no
-                    connector apps, the user config ignored, and `exec fork`
-                    for a continuation.
-  the instructions  the Claude engineer's CLAUDE.md and its imports, in order.
-  the stream        written line by line to the job directory; the thread id
-                    reported the moment it arrives; usage summed over turns.
-  the cap           a stub that keeps calling tools is ended at MAX_TURNS
-                    round trips, by process group.
-  the wall clock    a stub that hangs is ended at its timeout.
-  the stall         the heartbeat reads the stream's mtime.
-  a continuation    runs on the CLI its parent ran on.
-
-The wall itself is proved from inside a real Codex job; see the receipt of
-job 20261007-140926-204597f5 and engineer/memory.
+"""Exercise the project engineer's Codex invocation and event handling with a stub CLI.
 
 Run: python3 tests/test_engineer_codex.py
 """
@@ -119,7 +96,7 @@ try:
               project({"runtime": "codex"}),
               [{"id": eng.CODEX_ENGINEER_MODEL, "efforts": ["low"]}])[0], True)
 
-    # Every registered project is set, and to codex (the owner, 2026-10-07).
+    # Exercise registered project settings with the Codex runtime.
     for path in sorted((AGENTS / "projects").glob("*.json")):
         check(f"registry {path.stem}: runtime",
               json.loads(path.read_text()).get("runtime"), "codex")

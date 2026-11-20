@@ -74,11 +74,7 @@ try:
     check("missing session id gives None",
           loam_session.round_trips(None), None)
 
-    # A forked session (2026-09-22): `claude --resume <id> --fork-session`
-    # writes a new transcript that OPENS WITH A COPY of the parent's entries.
-    # Counting them all reported a continued job's three round trips as the
-    # parent's four plus its own. The fork here inherits all three of the
-    # parent's ids and adds two.
+    # Forked transcripts begin with copied history. Count only the new turns.
     FORK = "99999999-8888-7777-6666-555555555555"
     forked = lines + [
         entry("user", message={"role": "user", "content": "carry on"}),

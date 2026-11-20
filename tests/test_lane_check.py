@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
-"""bin/lane-check against the two thresholds, through the real code path.
-
-The lane check is a report, never a gate (see the script's own docstring):
-since 2026-11-19 it writes nothing and tells nobody, and the one check on a
-clock (lib/loam_check.py) reads its ``--json`` and makes each problem a fact.
-This proves the line between its two kinds of finding:
-
-  over the limit    a problem: in ``problems``, which the check tells.
-  near the limit    a warning: in ``warnings``, never a problem.
-
-And that it writes no log line and no fact itself.
-
-Driven on both sides of ``NEAR_LIMIT_CHARS`` and both sides of ``LIMIT_CHARS``
-by running ``main()`` of the shipped script against a throwaway workspace
-that carries everything the check reads: agent.json, the two auto-loaded
-files, and the conversation-style symlink with its frontmatter.
+"""Exercise both lane-size thresholds through the reporting path. Warnings must leave
+the lane runnable.
 
 Run: python3 tests/test_lane_check.py
 """

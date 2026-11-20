@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
-"""A job's scratch is its own and goes when it ends (since 2026-10-21).
-
-Jobs left ~30 GB of scratch in /tmp and `/` filled. This drives the real
-`run_inner` of this tree's bin/engineer-job as a probe job (the sleep stands
-where the session would), against a repository in a temp directory, with the
-scratch root moved into that directory too, and checks:
-
-  during      the session runs with TMPDIR set to `loam-job-<id>`, which
-              exists, is private (0700) and starts empty even if a dead run
-              left one behind; the prompt names it.
-  success     it is gone once the job has finished, and TMPDIR with it.
-  failure     it is gone when the session raises, too.
-  read-only   a read-only directory inside it (Go's module cache) does not
-              stop the removal.
-  recovery    `recover_interrupted` removes a killed job's scratch.
-  sweep       bin/sweep-tmp removes what is stale and ours, and keeps what is
-              recent, live, a running job's, the system's or not a plain
-              file or directory.
-
-Nothing outside a temporary directory is written; no unit is launched.
+"""Run the real inner launcher with a probe session. The job must receive its own
+temporary directory and clean it on exit.
 
 Run: python3 tests/test_job_scratch.py
 """
@@ -70,10 +52,7 @@ seen: dict = {}
 
 
 class Session:
-    """Stands in for the `time` module inside the launcher: the probe's
-    sleep is where the session would run, so that is where it looks. The
-    probe is a `sleep` child since 2026-11-10 (`probe_session`), which is
-    pointed back at this object's `sleep`."""
+    """Replace the probe sleep with a check of the session's scratch environment."""
 
     def __init__(self, fail: bool = False):
         self.fail = fail

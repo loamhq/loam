@@ -1,30 +1,7 @@
 #!/usr/bin/env python3
-"""A project whose commits and pull requests are a person's (since 2026-10-06).
+"""Check commit attribution and pull-request branch handling in temporary repositories.
 
-lib/loam_commit_identity.py. Against a fake GitHub on loopback and real git
-repositories in a temp directory standing in for the remote:
-
-  commits     a job's clone of a project with `commit_identity` commits as
-              that person, author and committer; a project without one keeps
-              the engineer's identity; the CLI is handed attribution off.
-  refusal     a branch with a Co-Authored-By trailer, another author, or a
-              message naming the tools is refused at landing and again by
-              the broker, before any push; ordinary words pass, "engineer"
-              and the personas' names among them.
-  pull        the broker pushes and opens the pull request with the person's
-  request     user token after checking its login, never the installation's;
-              its body is the job's own `pull-request.md` plus how it was
-              tested, never the receipt; none written, or one naming the
-              machinery, is refused. The job's own token only reads.
-  provision   --commit-as reads the account's id and name and writes the
-              noreply address.
-
-What GitHub then displays (author, committer, `author.login`, the PR's
-`user.login`, any app badge) a fake cannot say; that was caused against
-GitHub on 2026-10-06 and is recorded in broker/README.md.
-
-Run: python3 tests/test_commit_identity.py
-"""
+Run: python3 tests/test_commit_identity.py"""
 
 from __future__ import annotations
 
@@ -292,8 +269,7 @@ try:
            "\"Claude\"", "\"Codex\"", "\"loam\"",
            "a job id (20261006-180000-aaaaaaaa)"])
 
-    # The clone's commit-msg hook (since 2026-11-18, lib/loam_git_identity.py)
-    # takes the trailer out as the commit is made...
+    # The commit hook removes provider attribution as the commit is created.
     commit(rec, "app.py", "print('hooked')\n",
            message="Tidy\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
     check("test_hook_strips_the_trailer_at_commit",
@@ -330,9 +306,7 @@ try:
     git(tree, "reset", "-q", "--hard", "HEAD~1")
     own_tip = git(tree, "rev-parse", "HEAD")
 
-    # The remote's default branch moves during the job (2026-10-20, acme
-    # #29): someone else's commit and GitHub's merge commit land on it after
-    # the job's setup fetched, and the job merges it from GitHub directly.
+    # Advance upstream during the job so landing must handle another author's commit.
     other = root / "other"
     subprocess.run(["git", "clone", "-q", "-b", "develop", str(bare), str(other)],
                    check=True)
@@ -446,10 +420,7 @@ try:
     check("...a title with no words still names a branch",
           gh._slug("!!!"), "change")
 
-    # == a continuation and the pull request it had (2026-10-21) ===========
-    # acme-foundation: a continuation rebuilt its work on a newer main after
-    # #46 was closed, and three landings pushed it at #46's branch and were
-    # rejected as non-fast-forward.
+    # Continue a job whose pull request already exists.
     first = Fake.pulls["acme-health/backend:fix-the-reminder-2"]
     n_cont = iter(range(10, 99))
 
@@ -528,8 +499,7 @@ try:
           (result["pull_request"]["head"], result["pull_request"]["created"],
            (result["pull_request"].get("replaces") or {}).get("why")),
           ("follow-up", True, "merged"))
-    # #46 on 2026-10-22: closed, then its branch deleted before the next
-    # landing; the name is not reused for the new pull request.
+    # A closed pull request with a deleted branch must receive a fresh branch name.
     Fake.pulls["acme-health/backend:follow-up"]["state"] = "closed"
     git(bare, "branch", "-D", "follow-up")
     rec, job_dir = cont(job_dir)

@@ -1,18 +1,6 @@
 #!/usr/bin/env python3
-"""Nothing a test or a probe makes stays in the owner's threads (2026-11-16).
-
-By 11-12 four `broker-probe <hex>` threads, made by bin/broker-probe against
-the live broker, sat in the owner's Archived list: the probe archived its
-thread and deleted nothing.
-
-  1. broker-probe's clean-up ends the member's process, then deletes the
-     thread it created; a turn still finishing (409) is waited for; a
-     thread that cannot be deleted is archived and said, as before.
-  2. The suite's runner gives every test a scratch thread store and vault
-     unless the caller named one (tests/run-all), so a test that forgets
-     its own never writes the owner's.
-
-A fake broker; nothing here talks to the running one.
+"""Ensure that temporary probe threads, sessions and records are removed after
+execution.
 
 Run: python3 tests/test_probe_cleanup.py
 """

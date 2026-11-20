@@ -1,18 +1,5 @@
-"""A walled job's receipt is the file the launcher reads (2026-10-02).
-
-Drives the real `run_inner` of bin/engineer-job, with the real wall
-(lib/loam_worktree.walled, the project route a test can raise), against a
-repository in a temp directory. Only the CLI is a stub: a shell script that,
-from inside the wall, tries to write the canonical checkout, commits a change
-in its own tree, and writes `receipt.md` in its job directory -- exactly the
-three things a session does. The assertions read what the launcher read back:
-the engineer's half of the receipt in result.json, the wall's refusal as the
-stub saw it, and the landing.
-
-Caused by job 20261001-175221-8c963ca0, whose record said "The engineer wrote
-no receipt": its session had never written one (its transcript has no Write to
-that path), but nothing proved the other reading -- that a walled job CANNOT
-write where the launcher reads -- false until this.
+"""Run a job inside its filesystem boundary and verify that the launcher can read the
+receipt the session wrote.
 
 Run: python3 tests/test_engineer_walled.py
 """

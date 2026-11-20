@@ -1,25 +1,6 @@
 #!/usr/bin/env python3
-"""The vault folders the machinery writes by name are the install's own.
-
-The first-day walk (2026-11-16) found the first install's layout written as
-literals where an install's agents would meet it: `00_INBOX/from-agents` in
-lib/loam_inbox.py and the activity page's failure log, `40_PROJECTS` in
-engineer receipts, RENAME_PINNED and SYSTEM_VAULT_SOURCES. Each now reads
-`vault.*` from the install's configuration (lib/loam_config.py).
-
-What earns a case here, under two configurations, each in a fresh process
-(loam_config reads its file at import):
-
-  - the first install's (`[vault]` naming 00_INBOX, 40_PROJECTS, 99_SYSTEM):
-    every path is exactly what it was before, so the owner's box is unchanged;
-  - an install's (no `[vault]` table, so loam_config's defaults: Inbox,
-    Projects, System): no path names the first install's folders, and the
-    failure log is not put in the boards folder, where it would be read as
-    a board;
-  - a failure written through loam_inbox lands at those paths in a scratch
-    vault.
-
-Runs on throwaway paths; nothing on the box is read or written.
+"""Exercise the configured vault folder names across the runtime paths that read and
+write them.
 
 Run: python3 tests/test_vault_layout.py
 """

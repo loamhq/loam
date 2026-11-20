@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""First-party plugins (2026-11-14, first release L9): the reviewer and daily
-notes, this runtime's own `plugins/`; and a plugin's pasted key.
-
-  - default_on is a shipped plugin's default and nothing more: the reviewer
-    is on and daily notes off with no saved choice, and a saved choice wins
-    both ways
-  - the reviewer: its timer and its words come and go with its switch; the
-    timer follows its `schedule` setting (an invalid one falls back to the
-    manifest's); bin/review --dry-run runs on and refuses off
-  - daily notes: on makes its folder, a new folder setting makes the new
-    one, off makes nothing and removes nothing
-  - settings.secret: a pasted key is checked (a plugin's own check and the
-    host's builtin:gemini against a fake Google), kept only when good, 0600,
-    in the plugin's private folder; the list never shows a value; the routes
-    answer the same and refuse an agent's call; a key with no check is kept
-  - the declaration names the secret and the folder
+"""Check first-party plugin defaults, disabling and provisioning on a scratch install.
 
 Run: python3 tests/test_first_party.py
 """

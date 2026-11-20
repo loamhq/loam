@@ -46,14 +46,8 @@ AGENT = "wakeusagetest"
 REAL_RUN = subprocess.run
 results: list[bool] = []
 
-# The result envelope of a `claude -p` run on CLI 2.1.281, 2026-09-30, with
-# the wake's own flags (--model fable --permission-mode acceptEdits
-# --output-format json, the outputStyle override, the disallowed tools) in a
-# scratch directory, asked to read two files outside it and run one command.
-# All three were refused, which is what -p does with no grant and no one to
-# ask. Trimmed: `result`, the timing fields, `subagent_stats` and the
-# per-request `iterations` are dropped; every usage and denial field is
-# verbatim.
+# Use the provider's result envelope, including cache writes and reads, to calculate
+# totals.
 REAL_ENVELOPE = {
     "type": "result", "subtype": "success", "is_error": False,
     "num_turns": 4, "terminal_reason": "completed",

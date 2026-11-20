@@ -100,8 +100,7 @@ def cases() -> int:
     plain = dep.caddyfile(today)
     check("no [edge]: no claim, local certs or gate comment",
           [w for w in ("/claim", "local_certs", "No host yet") if w in plain], [])
-    # The owner's box since 2026-11-15 (L14): loam-ui says `apex = true`, so it
-    # is the domain itself and carries the relay, with no edge at all.
+    # An apex app can provide the relay without an edge record.
     apex = [a for a in dep.records() if a.apex]
     check("no [edge]: the record that says apex is the domain itself",
           [(a.name, a.fqdn) for a in apex], [("loam-ui", dep.domain())])
@@ -408,10 +407,7 @@ def cases() -> int:
     claim.Handler.send(fake, 200, b"{}")
     check("...and JSON answers carry no CSP", "Content-Security-Policy" in fake.headers, False)
 
-    # -- step 3: the previews' browser on each distribution ---------------------
-    # Ubuntu 24.04 has no chromium-headless-shell package (found by the
-    # 2026-11-16 fresh install: step 3 stopped on it); there Playwright's
-    # pinned headless shell is linked under the Debian package's name.
+    # Select a preview browser available on each supported distribution.
     inst = load_cmd("loam-install")
     check("Debian takes the headless shell from its archive, Ubuntu does not ask for it",
           (inst.PREVIEW_BROWSER in inst.apt_packages("debian"),
@@ -451,10 +447,7 @@ def cases() -> int:
           ('id -u sam' in unit, "@USER@" in unit, "After=systemd-logind.service" in unit,
            "WantedBy=multi-user.target" in unit), (True, False, True, True))
 
-    # -- `loam status` reads the app as a unit, not a container ---------------
-    # A fresh install's status read "App: absent" with the app up (found by
-    # the 2026-11-16 first-day walk): it asked Docker, and the app has run as
-    # loam-app@<name>.service since that day.
+    # Status must recognize a healthy service app.
     import http.server  # noqa: PLC0415
     import threading  # noqa: PLC0415
 
@@ -506,8 +499,7 @@ def cases() -> int:
     res = subprocess.run([str(ROOT / "bin" / "loam"), "claim"], capture_output=True, text=True, check=False)
     check("`loam claim` is not a verb", res.returncode, 2)
 
-    # -- how long it says it takes (2026-11-16: it said "about fifteen
-    # minutes"; both rehearsals took about two) ------------------------------
+    # Installation time estimate
     for f in ("install.sh", "README.md", "docs/install.md"):
         check(f"{f} no longer promises fifteen minutes",
               "fifteen minutes" in (ROOT / f).read_text(encoding="utf-8"), False)

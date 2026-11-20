@@ -1,18 +1,6 @@
 #!/usr/bin/env python3
-"""bin/gen-units: --help is help, and a timer it writes for the first time is armed.
-
-  - `--help` prints the docstring and writes nothing (it used to run live);
-    an unknown flag is refused;
-  - a first run into an empty unit folder arms every timer it writes, as the
-    installer does, so an update run by an older release's code still
-    leaves a box with a new release's timers armed;
-  - a second run arms nothing: a timer already installed is left as it
-    stands, armed or disarmed by its owner;
-  - with a hand-made crontab commit, loam-autocommit.timer is written and
-    not armed (lib/loam_autocommit.py: a hand-made routine wins).
-
-systemctl is a fake on PATH that records its calls; the home is scratch
-(`LOAM_CONFIG` paths.home). Nothing on the box is read or written.
+"""Help and invalid flags must leave units untouched. Arm a newly generated timer on its
+first render.
 
 Run: python3 tests/test_gen_units.py
 """

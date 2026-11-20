@@ -128,9 +128,8 @@ try:
     write("one-off-no-note", "---\nat: 2026-10-20 14:30 PT\nenabled: true\n---\n")
     write("reflection", "---\nschedule: daily at 05:00 PT\nenabled: true\n---\n\nx\n")
 
-    # Since 2026-10-14 a record without `enabled:` is not refused: it is a
-    # record that is not live. A legacy `approved:` with a value reads as
-    # enabled so the migration cannot stop a cron mid-step.
+    # A record without enabled is inactive. Preserve compatibility with legacy approval
+    # metadata.
     for label, name, want in (
         ("legacy `approved:` date reads as enabled", "good", True),
         ("no `enabled:` and no `approved:`: not live", "no-approval", False),
@@ -175,8 +174,7 @@ try:
     check("service carries the lane's TimeoutStartSec",
           f"TimeoutStartSec={loam_cron.unit_timeout_s('testagent', 'cron:good')}" in service)
 
-    # No lane has a clock (2026-11-10): the wake passes no timeout and the
-    # unit never times the run out, whichever lane it is.
+    # Neither the launcher nor the generated unit imposes an implicit wall clock.
     for agent, lane in (("ada", "cron:infra-watch"), ("ada", "reflection"),
                         ("iris", "cron:strategic-watch")):
         check(f"{agent} {lane}: no wall clock",

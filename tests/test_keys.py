@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Shared keys (2026-11-18): Settings › Connections › API keys, lib/loam_keys.py.
-
-  - the manifest's `keys:`: a provider Loam knows takes Loam's fields; another
-    needs its name and fields; a wrong one breaks the row with a sentence;
-    the declaration shows it beside `touches`, and a later version that adds
-    a provider asks again
-  - a key is checked before it is kept (a fake OpenAI), 0600, never in a
-    listing whole; a refusal keeps nothing
-  - resolution: a plugin's own key, then the shared one, then the box's
-    secrets file; a plugin that declared no provider is handed nothing
-  - keys.env: each declaring plugin's resolved keys and nothing else, 0600,
-    rewritten on a change, gone when the plugin stops declaring
-  - adopt: a key a plugin kept before shared keys becomes the shared one
-  - the broker's routes, an agent's `by` accepted and logged, and the app
-    server's /value route resolving a declared field
-  - read aloud and dictation declare Google
+"""Validate shared provider-key declarations, storage and access for plugins.
 
 Run: python3 tests/test_keys.py
 """
@@ -66,8 +51,7 @@ plugin("odd", "keys:\n  - provider: replicate\n    name: Replicate\n    why: run
               "    fields: [{name: REPLICATE_API_TOKEN, label: API token}]\n")
 plugin("wrong", "keys:\n  - provider: replicate\n    why: no fields\n")
 plugin("twice", "keys: [openai, openai]\n")
-# Read aloud 1.0.1's shape: its provider's key, and a pasted secret of the
-# same name kept for old brokers (the listing said it both ways, 2026-11-19).
+# A manifest can declare a provider key alongside the legacy secret with the same name.
 plugin("both", layer=TMP / "loose", head="keys:\n  - provider: google\n    why: speaks\n"
                'contributes: {"settings.secret":[{"name":"GEMINI_API_KEY","label":"Gemini API key"},'
                '{"name":"OWN_TOKEN","label":"Its own service"}]}\n')

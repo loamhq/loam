@@ -1,29 +1,6 @@
 #!/usr/bin/env python3
-"""Cancel stops a job, and a cancelled job never lands (since 2026-11-10).
-
-Until then `engineer-job --cancel` only wrote the `cancelled` marker, nothing
-on the run or landing path read it, so a running job would still have
-landed, and its verdict said "Nothing ran" of a job that ran (the cancel
-receipt of job 20261110-164402-2c74b933). This drives the real `run_inner`
-of this tree's bin/engineer-job as a probe job -- a `sleep` child stands
-where the session would -- against a repository in a temp directory and a
-lock table of its own, and the real `cancel`:
-
-  queued    a queued job's cancel stops its unit; its verdict says it never
-            ran; it is out of the queue.
-  running   the cancel stops the session (the `sleep` child is signalled),
-            the inner records `stage: cancelled` with how long it ran and the
-            commit it had made, nothing lands, the branch and tree are kept,
-            no continuation is dispatched, and the unit is not stopped by
-            hand (the inner ends it).
-  landing   a cancel that arrives while the job lands kills nothing and the
-            landing stops at its check after the live lock; a cancel that
-            arrives after that check, during the branch's tests, is caught
-            by the check immediately before `main` moves. `main` never moves.
-  status    `box_status` drops a cancelled job's run record at once.
-
-Nothing outside a temporary directory is written; no unit is launched (the
-unit's state is stubbed, and `systemctl` is never called for a running job).
+"""Cancel queued, running and landing jobs. Once cancellation wins, recovery must leave
+the job stopped.
 
 Run: python3 tests/test_engineer_cancel.py
 """

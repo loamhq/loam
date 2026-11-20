@@ -1,28 +1,6 @@
 #!/usr/bin/env python3
-"""A second GitHub App, owned by an organization (since 2026-10-06).
-
-Against a fake GitHub on loopback holding two apps, each with its own key,
-client id, installations and user tokens. Like GitHub, it mints a token for
-an installation only with a JWT signed by the app that owns it, and lists
-under GET /user/installations only the installations of the app whose user
-token asks.
-
-  store       the box's store as it is, with no org app, still answers;
-              registering an org's app leaves the first app's part of the
-              store byte-for-byte as it was.
-  manifest    an org's manifest posts to the org's create page, private,
-              with ORG_PERMISSIONS (no administration); its state is one the
-              code before org apps refuses.
-  install     the org app's installation is recorded only on the org, only
-              through its state (or GitHub's update redirect for it), and
-              only when authorized by the user Loam is connected as.
-  routing     a token for acme-co/* comes from the org app alone, even with
-              the first app holding an installation on acme-co; a token for
-              octo-owner/* never comes from the org app.
-  adoption    bin/provision --adopt acme-co/acme-platform clones through the
-              org app, and still refuses a repository that tracks the harness.
-  the CLI     bin/github-app refuses to mint while the broker is on the code
-              from before org apps, and its data: URL carries the form.
+"""Route GitHub requests and credentials to the correct account or organization using
+two loopback GitHub App fixtures.
 
 Run: python3 tests/test_org_app.py
 """
@@ -65,10 +43,7 @@ def load_script(name: str, path: Path):
 
 prov = load_script("provision_org", AGENTS / "bin" / "provision")
 
-# Project engineers are rendered from the shared engineer role in the vault,
-# by substitution tables written for the developing install's role. An
-# install without that role (any install made by install.sh, 2026-11-18)
-# cannot render one, and provision says so; there is nothing here to test.
+# Render the shared role using matching substitution tables.
 _shipped = prov.ENGINEER_SHIPPED / "role.md"
 if not prov.ENGINEER_ROLE_SRC.is_file() or (_shipped.is_file() and prov.ENGINEER_ROLE_SRC.read_text(
         encoding="utf-8") == _shipped.read_text(encoding="utf-8")):
@@ -487,7 +462,7 @@ try:
     check("...and the state it carries is the org's",
           gh.load()["states"][started["state"]]["purpose"], "register-org")
 
-    # == a state that waits for a later click (2026-11-15) ==================
+    # An installation may await a subsequent user action.
     page_dir = root / "page"
     started = cli.write_page("acme-co", None, cli.duration("48h"), page_dir)
     html_page = (page_dir / "index.html").read_text()

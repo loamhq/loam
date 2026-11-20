@@ -1,31 +1,8 @@
 #!/usr/bin/env python3
-"""A problem goes to a persona (2026-11-19, batch B step 5).
+"""Route system facts to the responsible persona and drain outstanding facts through a
+simulated run.
 
-lib/loam_attention.py and the drain in ``bin/wake --results``, against a
-scratch install, records, locks and logs and a stand-in CLI that records each
-command line and answers like ``claude -p --output-format json``:
-
-  1. **Which persona.** The first agent (the install's lead agent while it is
-     awake, else the first by name) unless the owner chose one; a choice of
-     an agent that is archived falls back; ``validate`` refuses an agent not
-     awake and stores null for the default.
-  2. **Once.** The same fact (the same key, or the same first sentence with
-     its numbers out) is told once and counted after; a different fact is
-     told; a key quiet for ``QUIET_DAYS`` is told again.
-  3. **Heard.** The system persona's drain hands every pending fact to it in
-     one fresh run whose input is the facts (what, when, who says so, where
-     the evidence is) and says nothing was posted; its own row in
-     ``wake-<agent>.jsonl`` (lane ``attention``) and a fire in the schedule
-     log; the records gone. Another persona's drain does not take them.
-  4. **Never twice.** A record already given (its run died) is not given
-     again: it is logged and removed. A run that failed told nobody: its
-     facts stay pending and are handed over after the retry wait.
-  5. **The seam for plugins.** ``loam tell`` prints told, then repeat.
-
-Nothing outside a temporary directory is written; no unit is started.
-
-Run: python3 tests/test_attention.py
-"""
+Run: python3 tests/test_attention.py"""
 
 from __future__ import annotations
 
@@ -194,7 +171,7 @@ try:
           calls() == [] and records() == []
           and "a fact whose run died" in log.read_text(), (calls(), records()))
 
-    # -- 4b: a run that failed told nobody (2026-11-19, batch B step 6) -------
+    # A failed notification run must remain recoverable.
     CALLS.unlink(missing_ok=True)
     refusing = TMP / "claude-refusing"
     refusing.write_text(FAKE_CLI.replace('"subtype": "success"', '"subtype": "error_during_execution"')

@@ -1,10 +1,5 @@
-"""`gen-deploy --help` prints its usage and does nothing (2026-11-19).
-
-Until then any argument it did not know fell through to a live render: on
-2026-11-17 `gen-deploy --help` wrote the Caddyfile, reloaded Caddy and ran
-`compose up`. Each form is run as the script, with `sudo` on PATH replaced
-by a stub that records it was called and fails, so a form that slipped
-through to the live path would be seen calling it and could do nothing.
+"""Help and unknown arguments must never start a live render. A sudo stub records any
+attempted side effect.
 
 Run: python3 tests/test_gen_deploy_args.py
 """

@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
-"""A project that is one folder of a larger repository (since 2026-11-16):
-the app, `app/` of Loam's own checkout, briefed by any persona to its own
-engineer, which may change that folder and nothing around it.
-
-  the record     `"subdir": "app"`; a path that climbs out, or is absolute,
-                 is no folder; the platform never has one.
-  the tree       the session runs in the folder; its memory is the folder's
-                 `memory/MEMORY.md`, tracked by the repository; its harness
-                 is the folder's CLAUDE.md, role.md, project.md, .claude.
-  the landing    a branch that changes only the folder lands; one that
-                 touches anything outside it is refused before it is merged
-                 or tested, naming the paths (`outside_scope`, reason
-                 `scope`); a folder of Loam's checkout takes Loam's live
-                 lock, because the two land on one `main`.
-  the launcher   no deploy key is asked of it: it pushes Loam's `main`.
-  provisioning   excludes the folder's harness, never its memory.
+"""Check app-scoped jobs rooted in a subdirectory of the platform repository, including
+their landing boundaries.
 
 Run: python3 tests/test_folder_project.py
 """

@@ -138,8 +138,7 @@ email = "loam@{name}.test"
         self.state_file.write_text(json.dumps(s))
 
     def board(self) -> str:
-        """What the system persona was told (lib/loam_attention.py): the
-        board itself must stay untouched (2026-11-19)."""
+        """Return the system persona's recorded notification without reading a board post."""
         p = self.vault / "Inbox" / "boards" / "general.md"
         assert not p.exists() or "backup of your" not in p.read_text(), "nothing on the board"
         told = sorted((self.home / "attention").glob("2*.json"))
@@ -415,9 +414,7 @@ class Plugin(unittest.TestCase):
         self.assertEqual(status["trees"][0]["last_pushed_ago"], "just now")
 
     def test_a_push_moves_origin_main_when_origin_is_that_repository(self):
-        # The push goes to the address, so a tree whose `origin` is the same
-        # repository read "ahead N" for ever (2026-11-19). Another remote is
-        # left alone.
+        # Refresh a matching origin after pushing directly to the remote address.
         git(self.i.vault, "remote", "add", "origin", str(self.rv))
         git(self.i.vault, "remote", "add", "elsewhere", str(self.rs))
         self.connect_both()

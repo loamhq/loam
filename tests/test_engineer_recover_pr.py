@@ -1,13 +1,5 @@
-"""The recovery sweep's pending push and a project that lands by pull request.
-
-Found on 2026-10-13: the sweep fetched acme and acme-foundation, which land by
-pull request, without the job's credential, and logged `fetch failed` for each
-every five minutes from 10-07. Their `main` mirrors the remote and is never
-pushed, so the sweep has nothing to do there; it skips them. A push project
-whose fetch really fails still produces its line, with git's reason.
-
-Loads this tree's bin/engineer-job and lib/, not the live ones, so it tests
-the change it ships with.
+"""Verify that pending-push recovery skips repositories whose changes require a pull
+request.
 
 Run: python3 tests/test_engineer_recover_pr.py
 """
