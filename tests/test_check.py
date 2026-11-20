@@ -1,28 +1,6 @@
 #!/usr/bin/env python3
-"""The one check on a clock (lib/loam_check.py, bin/loam-check; batch B
-step 6, 2026-11-19), against a scratch install: its own agents, ledgers,
-pressure reading, memory history, login file and a broker on loopback, and a
-stand-in ``systemctl``.
-
-  1. **All true.** Every fact true writes the state file and tells nobody:
-     the attention folder stays empty, and agents can run.
-  2. **Each fact false, once.** Each fact forced false on its own is told
-     through the real seam (lib/loam_attention.py) as one record, and the
-     next tick tells nothing more (``repeat``).
-  3. **Unreadable is not true.** A fact whose reading raises is ``ok: null``
-     and told as a fact of its own.
-  4. **The crash.** ``bin/loam-check`` with a crash forced writes
-     ``crashed`` into the state file, tells it, and exits 2.
-  5. **Once a day.** check-drift and the lane checks are read at the first
-     tick at or after 01:40 local, not again that date, and their result is
-     carried between.
-  6. **Whether agents can run.** A gone Claude Code login, or nobody awake
-     to hear, makes ``agents_can_run`` false with the reason; a broker that
-     does not answer stops conversations only.
-  7. **A failed run told nobody.** The drain's failed run puts its facts
-     back to pending, due again after the retry wait.
-
-Nothing outside the scratch folder is read or written; no unit is started.
+"""Exercise scheduled health checks on a scratch installation, including failure
+reporting and recovery.
 
 Run: python3 tests/test_check.py
 """

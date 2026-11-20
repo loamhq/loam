@@ -75,7 +75,7 @@ BAD_SCHEDULES = [
     "",
     "daily",                       # no time
     "daily at 05:00",              # no zone
-    "daily at 05:00 XYZ",          # not a zone (any IANA zone is, since 2026-11-14)
+    "daily at 05:00 XYZ",          # unknown time zone
     "daily at 25:00 PT",           # impossible hour
     "daily at 05:61 PT",           # impossible minute
     "fortnightly at 05:00 PT",     # not in the grammar

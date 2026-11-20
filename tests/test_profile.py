@@ -19,8 +19,7 @@ os.environ["LOAM_AI_LABS"] = str(LABS)
 os.environ["LOAM_THREADS_STATE"] = str(TMP / "state")
 os.environ["LOAM_HOST_SETTINGS"] = str(TMP / "broker" / "settings.json")
 os.environ["LOAM_SCHEDULE_STATE"] = str(TMP / "schedules")
-# The runtime's own first-party plugins too (2026-11-14, L9): the reviewer is
-# one, and its schedule is its plugin's setting.
+# Use scratch plugin state while including first-party plugin definitions.
 os.environ["LOAM_PLUGIN_SHIPPED"] = f"{TMP / 'shipped'}:{AGENTS / 'plugins'}"
 os.environ["LOAM_PLUGINS_DIR"] = str(TMP / "yours")
 os.environ["LOAM_UI_CORE_OPTIONS"] = "none"
@@ -40,8 +39,7 @@ for who, emoji in (("ada", "🧱"), ("iris", "🪻"), ("cleo", "🪐")):
         "workspace": str(ws), "vault": str(TMP / "vault"),
         "wake_schedule": "03:20", "wake_timezone": "America/Los_Angeles"},
         indent=2, ensure_ascii=False) + "\n")
-    # What provision writes beside it: the conversational model a chat with
-    # none chosen reads (2026-11-19, follows the profile's).
+    # Seed the conversation model the same way as provisioning.
     (ws / ".claude").mkdir()
     (ws / ".claude" / "settings.json").write_text(json.dumps(
         {"model": "fable", "permissions": {"defaultMode": "acceptEdits"}},
@@ -414,8 +412,7 @@ async def main():
               rows["webapp"]["effective"] == {"provider": "codex",
                                               "model": eng.CODEX_ENGINEER_MODEL,
                                               "effort": eng.CODEX_ENGINEER_EFFORT,
-                                              # Since 2026-11-15: no tier set,
-                                              # each runs on the model.
+                                              # With no tier override, use the configured model.
                                               "tiers": {t: {"model": eng.CODEX_ENGINEER_MODEL,
                                                             "from": "model"}
                                                         for t in eng.TIERS},
@@ -423,7 +420,7 @@ async def main():
               and rows["webapp"]["deploy_on_land"] is False
               and rows["prproj"]["deploy_on_land"] is None
               and rows["webapp"]["jobs_running"] == 1, rows.get("webapp"))
-        # Loam's engineer's provider is its owner's to set (2026-11-19).
+        # The platform engineer has its own configurable provider.
         status, body = await http(port, "PATCH", "/v1/engineers/Loam",
                                   {"provider": "codex"})
         loam = eng.engineer_choice(eng.platform_project())
@@ -491,8 +488,7 @@ async def main():
                                   {"deploy_on_land": True})
         check("deploy_on_land on a project with an app: what the launcher reads",
               status == 200 and eng.deploy_default(eng.projects()["webapp"]), body)
-        # Antigravity (2026-11-15): a choice for a project engineer and the
-        # default, its level in its model id (Loam's own too since 2026-11-19).
+        # For Antigravity, the model ID encodes the effort level.
         status, body = await http(port, "PATCH", "/v1/engineers/webapp",
                                   {"provider": "antigravity"})
         web = eng.projects()["webapp"]
@@ -519,8 +515,7 @@ async def main():
                                    ("webapp", {"speed": 1}, "a setting there is none of")):
             status, body = await http(port, "PATCH", f"/v1/engineers/{name}", patch)
             check(f"refused: {label}", status == 400, body)
-        # Loam's deploy toggle is its app-only scope's (2026-11-19): refused
-        # only where the scope has no app to deploy, as here.
+        # App-scoped work uses the app's deploy setting.
         status, body = await http(port, "PATCH", "/v1/engineers/Loam", {"deploy_on_land": True})
         check("refused: Loam's deploy toggle with no app to deploy", status == 409, body)
         status, body = await http(port, "PATCH", "/v1/engineers/nope", {"provider": None})
@@ -535,8 +530,7 @@ async def main():
               out.get("ok") and out.get("value") == "medium"
               and "Ada changed the prproj engineer's effort to medium" in general_lines(),
               out)
-        # A persona sets Loam's engineer's provider through the same route
-        # (2026-11-19), and it reads back as the others' does.
+        # Verify the platform provider change through the same route a persona uses.
         out = await cli(port, "set", "engineer.provider", "codex", "--target", "Loam")
         check("bin/settings set engineer.provider for Loam: read back, its next job codex",
               out.get("ok") and out.get("value") == "codex"
@@ -573,8 +567,7 @@ async def main():
             status, body = await http(port, "PATCH", "/v1/system/reviewer", patch)
             check(f"refused: {label}", status == 400, body)
 
-        # Antigravity as the reviewer's provider (2026-11-15): offered, and
-        # its model is one `agy models` lists (the login probe's list).
+        # A reviewer model must appear in the selected provider's catalog.
         import loam_antigravity as agy_mod  # noqa: PLC0415
         import time as _time  # noqa: PLC0415
         saved_login = agy_mod._login_cache

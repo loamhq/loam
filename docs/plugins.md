@@ -592,6 +592,17 @@ when that provider has none yet (`adopt`, run with the five-minute reconcile
 and when API keys are read); one equal to the shared key is dropped; a
 different one stays that plugin's own.
 
+The built-in Hetzner Cloud plugin uses the shared Settings token for
+`personal`. Each additional project has an alias and a separate token in
+`<state>/plugins/keys/hetzner-projects/<alias>.json` (0600). The owner adds,
+replaces and forgets these under **Project keys** on the Hetzner Cloud key
+page. A persona in conversation can use `keys.project.set` and
+`keys.project.forget` with the alias as target. The save checks the token
+against Hetzner and accepts it only on success. Aliases have up to 48
+letters, digits or dashes and are stored in lower case. `personal` is
+reserved for the shared key. These tokens are routed by the built-in tool
+on each call. Other plugins use the standard provider-key resolution above.
+
 **What a plugin's process reads**: `LOAM_PLUGIN_KEYS`, the path of
 `<private>/keys.env`, which Loam writes with every field of every provider
 the plugin declared, resolved as above, and nothing else. It is written
@@ -625,6 +636,8 @@ plugins that use it.
 | `POST /v1/keys/<provider>/check` | check the key in force again |
 | `PUT /v1/keys/<provider>/plugins/<id>` | give one plugin its own key of that provider, checked the same way; 409 when it did not declare the provider |
 | `DELETE /v1/keys/<provider>/plugins/<id>` | put it back on the shared key |
+| `PUT /v1/keys/hetzner/projects/<alias>` | check and save a named project token, as `{"value": "…"}` |
+| `DELETE /v1/keys/hetzner/projects/<alias>` | forget a named project's token |
 
 Every write takes `by` like any other setting route.
 

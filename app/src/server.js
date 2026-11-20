@@ -275,9 +275,10 @@ export function createApp({
     const keysAll = /^\/keys(?:\/([^/]+))?$/.exec(rest)
     const keysCheck = /^\/keys\/([^/]+)\/check$/.exec(rest)
     const keysPlugin = /^\/keys\/([^/]+)\/plugins\/([^/]+)$/.exec(rest)
-    if (keysAll || keysCheck || keysPlugin) {
+    const keysProject = /^\/keys\/hetzner\/projects\/([^/]+)$/.exec(rest)
+    if (keysAll || keysCheck || keysPlugin || keysProject) {
       if (rest.split('/').some(part => /[/\\\x00]/.test(dec(part)))) return sendJson(res, 400, { error: 'Invalid key path.' })
-      const allowed = keysCheck ? ['POST'] : keysPlugin ? ['PUT', 'DELETE'] : keysAll[1] ? ['GET', 'PUT', 'DELETE'] : ['GET']
+      const allowed = keysCheck ? ['POST'] : keysPlugin || keysProject ? ['PUT', 'DELETE'] : keysAll[1] ? ['GET', 'PUT', 'DELETE'] : ['GET']
       if (!allowed.includes(method)) return sendJson(res, 405, { error: 'This operation is not available for keys.' })
       const target = '/v1' + rest.split('/').map(part => encodeURIComponent(dec(part))).join('/')
       return await relayJson(res, method, target, ['POST', 'PUT'].includes(method) ? await readBody(req) : undefined, { signal: AbortSignal.timeout(30000) })

@@ -23,6 +23,7 @@ def main() -> int:
     ap.add_argument("action", choices=("describe", "get", "set", "do"))
     ap.add_argument("setting", nargs="?", default="")
     ap.add_argument("value", nargs="?", default=None)
+    ap.add_argument("--value-stdin", action="store_true", help="read the value from standard input")
     ap.add_argument("--target", default="")
     ap.add_argument("--member", default="")
     ap.add_argument("--by", default=os.environ.get("LOAM_AGENT", ""))
@@ -41,9 +42,12 @@ def main() -> int:
             if args.action == "do" and e.kind != "action":
                 raise settings.SettingsError(
                     f"{e.key} is a setting: `set` it to a value")
-            if args.action == "set" and args.value is None:
+            if args.value_stdin and args.value is not None:
+                raise settings.SettingsError("give the value as an argument or on stdin")
+            raw_value = sys.stdin.read() if args.value_stdin else args.value
+            if args.action == "set" and raw_value is None:
                 raise settings.SettingsError(f"{e.key} needs a value ({e.values})")
-            value = True if args.value is None else args.value
+            value = True if raw_value is None else raw_value
             out = settings.change(args.setting, value, args.by, args.target,
                                   args.member, args.reason)
             print(f"settings: {out['by']} {args.action} {args.setting}"

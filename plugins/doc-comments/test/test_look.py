@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""The plugin wears Loam's design system (2026-11-17): its stylesheets name
-core's tokens and nothing of their own, and the share page's copy of Latte's
-tokens is Latte's.
-
-  - every colour in the plugin's CSS is a core token: a literal colour may
-    stand only as a `var(--token, fallback)` fallback, and every pill corner
-    is `--radius-pill` (Foundry's pill is 8px), the share page's token block
-    apart
-  - every core token the CSS reads is one core defines (app/public/tokens.css
-    or a shipped theme), so a misspelt name cannot fall back silently
-  - the share page's token block (page/share/share.css), light and dark, is
-    exactly Latte's (app/public/themes/latte/theme.css over tokens.css)
-  - a person's face is one of core's persona hues, never a hex of the
-    plugin's own
-  - the signal as words (`--dc-accent-ink`: the theme's crema mixed toward
-    the ink in oklab) reads at 4.5:1 on every paper in every shipped theme,
-    light and dark; Latte's crema alone does not (3.6:1)
-
-Run: python3 plugins/doc-comments/test/test_look.py
-"""
+"""Check the plugin styles against Loam's design tokens and the share page's copy of the default theme."""
 
 import re
 import unittest

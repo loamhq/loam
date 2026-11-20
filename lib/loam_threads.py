@@ -67,17 +67,15 @@ GENERAL_ID = "general"
 GENERAL_TITLE = "General"
 GENERAL_BOARD = lc.vault_folder("general_board")
 
-# Capacity hygiene, not permission (brief, 2026-11-08): how many turns agents
-# may give each other by @mention before the owner says something again. A
-# chain past this stops with a system line. Change it here; nothing else
-# holds the number.
+# Limit chains of agent mentions between owner messages. Report the limit in the
+# thread.
 AGENT_CHAIN_CAP = 3
 
 # The page size of GET /v1/threads/<id>, newest first.
 PAGE = 50
 
-# The owner, as an author (lib/loam_config.py). Compare with is_owner():
-# records written before 2026-11-14 say the legacy id (LEGACY_OWNER_IDS).
+# Use is_owner() when comparing authors so older records with legacy owner IDs still
+# match.
 OWNER = lc.OWNER_ID
 is_owner = lc.is_owner
 KINDS = ("message", "system", "bulletin")
@@ -117,9 +115,8 @@ def display(persona: str) -> str:
         return lc.OWNER_NAME
     try:
         card = json.loads((AI_LABS / persona / "agent.json").read_text("utf-8"))
-        # `display` first, as loam_broker.agent_card reads it: every live
-        # agent.json has `name` as the lower-case id and `display` as the
-        # name ("Sam brought in cleo" until 2026-11-10).
+        # Prefer the display name from the agent profile, consistent with the broker's agent
+        # cards.
         shown = card.get("display")
         if isinstance(shown, str) and shown.strip():
             return shown.strip()
@@ -148,8 +145,8 @@ def mentions(text: str, people: list[str] | None = None) -> list[str]:
     return out
 
 
-# `@all` and `@everyone` (2026-11-10): from the owner, a turn for every member;
-# from a persona, plain text. Not names a persona can have.
+# The owner can address every member with @all or @everyone. A persona's mention of
+# either is ordinary text.
 ALL_WORDS = ("all", "everyone")
 
 
@@ -228,22 +225,18 @@ def render_front(meta: dict) -> str:
         lines.append("pinned: true")
     if meta.get("archived"):
         lines.append("archived: true")
-    # A thread imported from a classic chat (2026-11-11): the broker session
-    # it was, and the transcript the writer filed it under, which stays where
-    # it is. Written only when set, like the keys above.
+    # Preserve the imported session ID and original transcript location on imported
+    # threads.
     if meta.get("imported_from"):
         lines.append(f"imported_from: {meta['imported_from']}")
     if meta.get("source"):
         lines.append(f"source: {json.dumps(meta['source'], ensure_ascii=False)}")
-    # A thread branched from a message of another (2026-11-11): the source
-    # thread's id, the message it was branched from, and the ids of the
-    # window its first turns are handed (`branch_window`).
+    # Preserve the source thread, message and starting window on a branch.
     if meta.get("branched_from"):
         lines.append(f"branched_from: {meta['branched_from']}")
         lines.append(f"branched_message: {meta.get('branched_message') or ''}".rstrip())
         lines.append(f"branched_window: {_yaml_list(meta.get('branched_window') or [])}")
-    # The hello thread a blank install starts with (2026-11-14, first
-    # release L11, lib/loam_starter.py): where the person lands first.
+    # Mark the starter thread used for the first visit to a blank install.
     if meta.get("hello"):
         lines.append("hello: true")
     lines.append(f"created: {meta['created']}")
@@ -296,11 +289,7 @@ def parse_messages(body: str) -> list[dict]:
     return out
 
 
-# A reply to one earlier message (2026-11-11). The record's `loam` comment
-# carries `reply_to: <id>`; the readable markdown opens the message with one
-# quote line naming who, the referenced message's own heading time and id,
-# and its first QUOTE_CHARS characters. The parser drops that line again, so
-# a message's `text` is only what its author wrote.
+# Store reply_to in metadata and a readable quote in the Markdown message.
 QUOTE_CHARS = 80
 QUOTE_PREFIX = "> ↩ "
 # How a persona replies from a turn: its reply opens with `↩ m12` (an ASCII
@@ -334,9 +323,7 @@ def take_reply_mark(text: str) -> tuple[str, str | None]:
     return text[match.end():].lstrip(), match.group(1)
 
 
-# A reply's opening that may still become a marker while it streams: an
-# arrow, an id still being written, nothing after it yet (2026-11-17). The
-# stream holds such an opening back rather than flash `↩ m1` on the page.
+# Hold a partial reply marker until the stream distinguishes it from ordinary text.
 PARTIAL_MARK_RE = re.compile(r"^\s*(?:(?:↩|<-?)\s*(?:m\d*)?[ \t]*[:.,—-]?[ \t]*)?$")
 
 
@@ -385,26 +372,9 @@ def check_reply_to(msgs: list[dict], reply_to, thread_id: str) -> dict:
     return target
 
 
-# -- images in an agent's reply (2026-11-18) -------------------------------------
-#
-# An agent shows an image in its reply by writing `![a few words](path)` where
-# it wants it, usually on a line of its own: a file in the vault or the
-# workspaces, an absolute path or one relative to the vault. Up to three ride
-# on the message as `attachments`, the shape the owner's own files have, plus
-# `root` (`vault` or `spaces`, the Files root the page reads them from).
-# Every engine can do it: it is words, not a tool. A reference that is not
-# such a file is just text, as it was written.
-#
-# The reference stays in the text (since the evening of 2026-11-18): it is
-# where the image goes. Each attachment carries `refs`, the destinations as
-# written that named it, and the page draws the image at the reference whose
-# destination is one of them -- in the message, in its full record (built
-# from the raw events, where the reference always was) and while it streams,
-# one rule for all three. The morning's version took the references off the
-# text and the place was lost; a message stored then has attachments without
-# `refs`, and the page still draws those under the words. `width`/`height`,
-# read off the file's header where the format says them, let the page keep
-# the image's space before it loads.
+# Keep inline image references in the message. Attach matching workspace or vault
+# files with their original destinations and dimensions when available. Older
+# attachments without refs render after the text. Unresolved references remain text.
 REPLY_IMAGES_MAX = 3
 REPLY_IMAGE_BYTES = 40 * 1024 * 1024
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -563,21 +533,9 @@ def render_message(msg: dict, quoted: dict | None = None) -> str:
         meta["reply_to"] = msg["reply_to"]
     if msg.get("did"):
         meta["did"] = msg["did"]
-    # `segments` (2026-11-09): a reply that spoke, worked and spoke again,
-    # in order -- `{"text"}` and `{"did": [{"label"}]}` -- up to the text
-    # below, which is the last thing it said. `attachments` are the files a
-    # message carried; `model` the model a turn ran on when it was chosen.
-    # `late` (2026-11-10): a reply recovered from the session log because no
-    # turn was watching when it was made.
-    # `link` (2026-11-11): a system line that points at another thread --
-    # `{"thread", "message"?, "title"}` -- as a branch's two lines do.
-    # `after`: the message a line was placed under rather than appended
-    # after the last (`insert_after`).
-    # `steered` (2026-11-14): the ids of messages sent into the turn while
-    # it worked, which this reply took in.
-    # `preset` (2026-11-14, first release L11): the runtime's words posted in
-    # an agent's name -- the hello thread's first message -- not a model's
-    # turn (docs/starter.md).
+    # Preserve ordered text and tool steps in segments. Carry attachments and chosen
+    # models, recovered late replies, branch links, insertion anchors, steered message IDs
+    # and runtime-authored presets through serialization.
     for key in ("persona", "engine", "model", "segments", "attachments", "late",
                 "link", "after", "steered", "preset", "journal_reply", "submission_id", "submission_hash"):
         if msg.get(key):
@@ -754,8 +712,7 @@ def _rename_board(thread_id: str, old_rel: str, title: str) -> str:
     return new_rel
 
 
-# The engines a thread member can run on: the broker's wired providers
-# (Antigravity joined 2026-11-09).
+# Thread members use the broker's available provider engines.
 ENGINES = ("claude-code", "codex", "antigravity")
 
 
@@ -936,8 +893,7 @@ def append_once(thread_id: str, author: str, text: str, kind: str = "message",
                                  and m.get(field) == extra[field]), None)
                 if existing is not None:
                     return existing, False
-        # Checked under the lock, against the record as written: a reply to
-        # a message of another thread, or to none, is refused (2026-11-11).
+        # Validate reply targets against this thread's current record under the lock.
         quoted = (check_reply_to(msgs, extra["reply_to"], thread_id)
                   if "reply_to" in extra else None)
         last = max((int(m["id"][1:]) for m in msgs
@@ -1123,12 +1079,8 @@ def title_from_first(thread_id: str, text: str) -> None:
             update(thread_id, title=line)
 
 
-# -- branching (2026-11-11) ---------------------------------------------------
-#
-# A conversation branched off at one message into a thread of its own: the
-# new thread's first line links back to that message, the source gets a line
-# under it linking forward, and the persona's first turn in the branch is
-# handed the window around that message, not the whole source thread.
+# A branch records its source message and starting window so either thread can point
+# back to the other.
 
 # The window ending at the chosen message: back to the last real pause (a
 # gap over BRANCH_PAUSE_S between two messages), or BRANCH_MAX messages,
@@ -1349,9 +1301,8 @@ def branch(source_id: str, msg_id: str, persona: str | None = None, *,
                         link={"thread": meta["id"], "title": meta["title"]})
     if draft and draft.strip():
         set_draft(meta["id"], draft)
-    # Branching is the owner (or a persona) reading the source; the line under
-    # the message is not news to them (2026-11-11): when the source was read
-    # through its last message, it stays read.
+    # A branch notice inserted under an already read source must not mark the thread
+    # unread.
     seen = load_state("threads.json").get(source_id, {}).get("seen")
     last_before = max((_num(m.get("id")) for m in smsgs), default=0)
     if seen and _num(seen) >= last_before:
@@ -1547,9 +1498,7 @@ def summary(thread_id: str, running=None) -> dict:
     return {
         "id": meta["id"], "title": meta["title"], "default": meta["default"],
         "icon": meta.get("icon"),
-        # `model`: the member's own choice for this thread, null for the
-        # persona's default (2026-11-09). `busy` is `running`'s other name,
-        # the one the app reads.
+        # A null model uses the persona's default. The app reads busy as an alias for running.
         "members": [{"persona": p, "engine": member_engine(meta, p),
                      "engine_override": meta["engines"].get(p),
                      "model": (meta.get("models") or {}).get(p),
@@ -1565,19 +1514,15 @@ def summary(thread_id: str, running=None) -> dict:
         "archived": bool(meta.get("archived")) and meta["id"] != GENERAL_ID,
         "general": meta["id"] == GENERAL_ID,
         "created": meta.get("created"),
-        # The classic chat this thread was imported from, and its transcript
-        # (2026-11-11); null for every thread made as one.
+        # Return the source session and transcript for an imported thread.
         "imported_from": meta.get("imported_from"),
         "source": meta.get("source"),
-        # A branch (2026-11-11): where it came from, null for every other
-        # thread; `draft` the opening its composer starts with until the owner
-        # sends a message or clears it.
+        # Include the branch origin and its opening draft until sent or cleared.
         "branched_from": ({"thread": meta["branched_from"],
                            "message": meta.get("branched_message")}
                           if meta.get("branched_from") else None),
         "draft": draft_for(thread_id),
-        # The hello thread (2026-11-14, first release L11): the one a blank
-        # install starts with, where the page lands the person first.
+        # Identify the starter thread used for the first visit.
         "hello": bool(meta.get("hello")),
     }
 
@@ -1623,8 +1568,7 @@ def page(thread_id: str, before: str | None = None, limit: int = PAGE) -> dict:
             "has_more": len(msgs) > len(window)}
 
 
-# The owner's clock, which is the box's (lib/loam_clock.py). A thread turn is
-# told the time in it (2026-11-09).
+# Render the current time in the install's time zone.
 PACIFIC = loam_clock.PACIFIC
 local_stamp = loam_clock.local_stamp
 
@@ -1637,8 +1581,7 @@ def clock_line(now: datetime | None = None) -> str:
 
 
 def _said(m: dict) -> str:
-    # What a reply said before its steps is part of what it said
-    # (`segments`, 2026-11-09).
+    # Include earlier text segments as well as the reply's closing words.
     said = [seg["text"].strip() for seg in (m.get("segments") or [])
             if isinstance(seg, dict) and isinstance(seg.get("text"), str)
             and seg["text"].strip()]
@@ -1703,14 +1646,8 @@ def transcript(msgs: list[dict], record: list[dict] | None = None,
     return "\n\n".join(out)
 
 
-# -- what a persona carries into a turn (2026-11-11) ---------------------------
-#
-# The owner, 2026-11-11: "it doesn't make sense for the entire history of the
-# thread to be uploaded or added to the context ... if they ever need
-# information from earlier on in the conversation, they can always go refer to
-# the file." A turn is handed (a) the persona's own summary of the thread, (b)
-# the recent exchange, (c) any message a message in it replies to, whole, and
-# (d) the thread file's path. Nothing else from the thread.
+# Give the member its own summary, recent exchange, quoted reply targets and the
+# thread file path.
 
 # The recent exchange: from the newest message back to the last real pause --
 # a gap of more than PAUSE_S between two consecutive messages in the record --
@@ -1797,9 +1734,7 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
         else:
             head += (f"You have no summary of this thread yet ({mine} does not "
                      f"exist): write one before you end this turn.\n\n")
-        # A branch's first turn (2026-11-11): the window it came from, and the
-        # source file for the rest -- not the whole source thread. It ends
-        # with its own heading for this thread's messages.
+        # A branch's first prompt includes its source window and points to the full record.
         branched = branch_context(meta)
         head += branched or (
             "The recent exchange (back to the last pause of more than "

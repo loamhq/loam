@@ -1,59 +1,7 @@
-"""When something in Loam needs attention: a fact, handed to one persona.
-
-Decided 2026-11-18 (batch B, "knowing it works"): a problem goes to a
-persona, never to the owner and never from an engineer or a program. No
-program writes a line into a thread's record or onto the General board.
-The persona that hears of the system's problems is one the owner chooses
-(``system.persona``, Settings › Agents; the first agent on a new install).
-It decides what to do: brief the engineer, say it in General in its own
-words, or nothing.
-
-**Which faults come here.** A fault that belongs to no one persona: drift,
-memory pressure, the account refusing runs, a check that failed, a plugin's
-event, an update's notes, a job that hung. A persona's own failed run is
-not one of them: it is told to that persona at the top of its next turn
-(lib/loam_lane_notice.py), as before.
-
-**How it is heard.** ``tell`` writes one record under ``STATE`` and starts
-the system persona's drain (``loam-results-<agent>``, the same unit and
-runner as a job's result for a run with no thread, lib/loam_results.py).
-The drain hands every pending fact to the persona as the input of one new,
-fresh run (``input_text``), under the agent's run lock and the box's memory
-admission. Nothing is posted anywhere. The run's record is its row in
-``logs/wake-<agent>.jsonl`` (lane ``attention``) and a fire in the schedule
-log, which Activity shows.
-
-**Once, not once per occurrence.** A fact has a key: the caller's, or the
-fact's first sentence with its numbers taken out, so "RAM at 91%" and "RAM
-at 93%" are the same fact. A key is told once. Each later occurrence only
-moves its ``last`` time, and tells nobody, until the key has been quiet for
-``QUIET_DAYS`` (no occurrence at all): then it is a new fact, told again.
-A wake failing the same way every night is told once; the same failure a
-week after it stopped is told again.
-
-**Addressed when heard, not when told.** A record does not name its
-persona. The drain of whichever persona is the system persona when it runs
-takes it, so changing the setting moves what is still pending.
-
-**A run that failed did not tell** (2026-11-19, batch B step 6). When the
-run handed the facts fails (the account refusing it, the CLI erroring), the
-records stay pending and are handed over again by a later drain, after
-``RETRY_MIN`` minutes doubling each try up to ``RETRY_MAX_H`` hours
-(``failed``, ``due``). Only a run that succeeded removes them. A run that
-died after its input went in is the other case (``given``): it is not handed
-over twice.
-
-**When nobody can run** (the account refused, every persona archived), a
-fact waits here and its runs keep failing into the failure log at that
-pace. The app shows an install-wide status line when the session host
-reports that agents cannot run (lib/loam_check.py).
-
-For a plugin: ``loam_attention.tell("what happened", by="<plugin id>")`` in
-Python with the runtime's ``lib/`` on the path, or ``loam tell "what
-happened" --by <plugin id>`` from anywhere (docs/plugins.md).
-
-Stdlib and loam_config only, and every write is best-effort: telling must
-never be what fails a wake, a check or a plugin.
+"""Queue system faults for the configured system persona. Deduplicate facts by key and
+acknowledge them only after successful delivery. A persona's own failed run goes to
+its next turn. When no persona can run, retain the fact for retry. A reporting
+failure must never fail the caller.
 """
 
 from __future__ import annotations

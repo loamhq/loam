@@ -89,18 +89,10 @@ def lane_choice(config: dict, wake_model: str, pinned: bool = False) -> dict:
 
 
 def claude_model(config: dict | None) -> str:
-    """The model a Claude Code session of this persona runs on when nothing
-    chose one: its own default when that is a Claude Code one (Settings >
-    Agents > its profile, "Runs on"), else ``WAKE_MODEL_DEFAULT``.
-
-    The one rule (2026-11-19). bin/provision writes it as the ``model`` of
-    the persona's ``.claude/settings.json``, which is what a chat the broker
-    starts with no model and a bare ``claude`` in the workspace read;
-    ``update_agent`` rewrites that key when the profile changes; bin/wake
-    reaches the same value through ``lane_choice``; bin/lane-check compares
-    sessions against it. Before, settings.json said ``fable`` for every
-    persona whatever the profile said, so a persona set to Opus ran its wakes
-    and thread turns on Opus and its other chats on Fable."""
+    """Use the persona's Claude Code model when its profile selects that provider,
+    otherwise use WAKE_MODEL_DEFAULT. Provisioning and the providers row share this
+    default.
+    """
     config = config if isinstance(config, dict) else {}
     if (config.get("provider") or "claude-code") != "claude-code":
         return WAKE_MODEL_DEFAULT
@@ -462,8 +454,9 @@ def schedule(agent: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _choice_row(provider, model, effort, tiers=None) -> dict:
-    """An engineer's own setting as the page reads it. ``tiers`` (since
-    2026-11-15) is always the three keys, null where unset."""
+    """Read an engineer's own settings. Include all three tier keys with null for each
+    unset override.
+    """
     tiers = tiers if isinstance(tiers, dict) else {}
     return {"provider": provider, "model": model, "effort": effort,
             "tiers": {t: tiers.get(t) or None for t in ("quick", "standard", "hard")}}
@@ -592,13 +585,10 @@ def engineer(name: str, running: dict | None = None) -> dict:
 
 
 def update_engineer(name: str, patch: dict, check) -> dict:
-    """One engineer's setting, or ``default``'s. ``provider`` null clears the
-    engineer's own setting (it follows the default again); ``model`` and
-    ``effort`` null go back to the provider's built-in. ``tiers`` (since
-    2026-11-15) is an object of any of ``quick``, ``standard``, ``hard``,
-    each a model the provider lists or null to unset that one (it then
-    runs on ``model``); the tiers not named are kept. ``deploy_on_land``
-    is a project with an app's own. Answers ``engineers()``."""
+    """Apply a partial engineer settings update. A null provider restores inheritance. Null
+    model or effort restores the provider default. Patch only named tiers, with null
+    clearing that override. Return the updated engineers view.
+    """
     import loam_appearance  # noqa: PLC0415
     import loam_autodeploy  # noqa: PLC0415
     import loam_engineer as eng  # noqa: PLC0415
@@ -755,8 +745,9 @@ def _systemd():
 
 
 def dropin_dir() -> Path:
-    """The legacy static timer's drop-in folder (until 2026-11-14), removed by
-    ``apply_reviewer_schedule``."""
+    """Locate the legacy static review timer's drop-in directory for removal when applying
+    the plugin schedule.
+    """
     import loam_cron  # noqa: PLC0415
     return loam_cron.UNIT_DIR / f"{LEGACY_REVIEWER_TIMER}.d"
 
@@ -778,8 +769,9 @@ def dropin_text(spec: str, words: str) -> str:
 
 
 def reviewer_schedule() -> str:
-    """The plugin's `schedule` setting; before 2026-11-14 the host settings'
-    `reviewer.schedule`, read while nothing has been moved; else the default."""
+    """Read the plugin schedule, falling back to the legacy reviewer.schedule setting until
+    migration and then to the default.
+    """
     import loam_contributions  # noqa: PLC0415
     value = loam_contributions.setting_values(REVIEWER_PLUGIN).get("schedule")
     if not (isinstance(value, str) and value.strip()):
@@ -838,12 +830,10 @@ def apply_reviewer_schedule() -> None:
 
 
 def update_reviewer(patch: dict, check) -> dict:
-    """The reviewer's ``schedule`` (the schedules' grammar, ``daily at 04:20
-    PT``), ``provider`` (Claude Code or, since 2026-11-15, Antigravity),
-    ``model`` and ``effort``. A change of provider drops the other
-    provider's model and effort unless the same patch names them. On
-    Antigravity the model id carries the level, so ``effort`` is refused.
-    Null puts each back. Answers ``reviewer()``."""
+    """Update the reviewer and return its settings. Changing provider clears incompatible
+    model and effort unless supplied together. Antigravity encodes effort in the model
+    ID. A null field restores its default.
+    """
     import loam_appearance  # noqa: PLC0415
     import loam_cron  # noqa: PLC0415
     if not isinstance(patch, dict):

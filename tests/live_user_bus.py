@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
-"""LIVE: the launcher's user-bus default reaches this box's real user manager.
-
-Not a landing test (it asks the box): run by hand with
-`python3 tests/run-all --live`. tests/test_engineer_bus.py proves, sealed,
-that the launcher hands `systemd-run` /run/user/<uid> under Codex's bare
-environment; this proves that on this box that value is a manager that
-answers. Split out of test_engineer_bus on 2026-11-19, when a landing's
-tests stopped seeing the box's user manager.
-
-Run: python3 tests/live_user_bus.py
+"""Check the launcher's user-bus selection against the installed user manager.
+Run by hand with python3 tests/run-all --live.
 """
 
 import subprocess

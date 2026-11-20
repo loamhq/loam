@@ -188,7 +188,7 @@ try:
     check("and the box reads them back (image as the cover)",
           {k: next(e for e in mk.parse((repo / "list.json").read_text())[0] if e["id"] == "dusk").get(k)
            for k in ("featured", "cover")}, {"featured": True, "cover": "cover.webp"})
-    # The creator with links, the cover and the README (2026-11-18).
+    # Creator links, cover and README
     (repo / "listings" / "dusk.json").write_text(json.dumps(entry(
         "dusk", kind="theme", cover="cover-large.webp", cover_dark="https://pics.example/dusk.webp",
         readme="docs/ABOUT.md",
@@ -289,7 +289,7 @@ try:
           mk.share("dusk", "sam/loam-dusk")["tag"], "v1.1.0")
     os.environ.pop("LOAM_SHARE_GIT_BASE")
 
-    # -- a listing's own page (2026-11-18, Settings › Market) ---------------------
+    # Listing detail
     check("featured and an image in the plugin's folder are kept (image is the cover)",
           {k: mk.check_entry(entry("dusk", featured=True, image="cover.webp"))[0].get(k)
            for k in ("featured", "cover")}, {"featured": True, "cover": "cover.webp"})
@@ -297,7 +297,7 @@ try:
           [k for k in ("featured", "cover", "image")
            if k in mk.check_entry(entry("dusk", featured="yes", image="../x.png"))[0]], [])
 
-    # -- Loam's note (2026-11-19): the reviewer's record, read from list.json ------
+    # Read the review note from the catalog record.
     sha = "a" * 40
     note = {"summary": "  Counts   words. ", "touches": ["Nothing off the page.", 7, ""],
             "may_change": ["x" * 900], "worth_knowing": [], "changed": ["Now reads threads."],
@@ -322,7 +322,7 @@ try:
         check(f"a review with {what} is left out, never the listing",
               (why, "review" in got, "pinned_link" in got), (None, False, False))
 
-    # -- the creator, the cover and the README (2026-11-18) ----------------------
+    # Creator, cover and README
     old_style, why = mk.check_entry(entry("pet"))
     check("an old listing is still valid: a plain-string author, no cover, no readme",
           (why, old_style["author"], old_style["creator"], "cover" in old_style, "readme" in old_style),
@@ -594,9 +594,7 @@ try:
     check("loam market list, nothing listed: calm", (cli.returncode, cli.stdout.strip()),
           (0, "Nothing is listed in the marketplace yet."))
 
-    # -- finding things, for an agent (2026-11-18) ----------------------------------
-    # The ranking is the page's own, run in Node; app/test/market-card.test.js
-    # holds it equal to the page's over the fixture list. Here: the states.
+    # Run the page's own ranking code so tool search and page search agree.
     ANSWERS.pop("/list.json", None)
     found = mk.search("anything", refresh=True)
     check("search, nothing listed: no results, said plainly",
