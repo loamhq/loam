@@ -40,7 +40,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="test-install-"))
@@ -508,9 +511,33 @@ def cases() -> int:
     check("the finale says what it took",
           [li.took(s) for s in (40, 70, 130, 900)],
           ["under a minute", "about a minute", "about 2 minutes", "about 15 minutes"])
-    inst = (ROOT / "bin" / "loam-install").read_text(encoding="utf-8")
+    installer_source = (ROOT / "bin" / "loam-install").read_text(encoding="utf-8")
     check("...and only a run that did every step says it",
-          "finale(time.time() - began if start == 1 else None)" in inst)
+          "finale(time.time() - began if start == 1 else None)" in installer_source)
+
+    # Exercise the installed command's closing instructions with scratch claim state.
+    domain = EDGE["domain"]
+    link = f"https://{domain}/claim?token=fixture"
+    stages = (
+        ("waiting for DNS", True, {}, "This is your link to make your sign-in"),
+        ("ready to claim", True, {"ready_at": "now"}, "Open this link in your browser"),
+        ("already claimed", False, {"ready_at": "now"}, f"Open https://{domain}/ and sign in."),
+    )
+    with (patch.object(inst, "LOG", TMP / "install-finale.log"),
+          patch.object(inst, "config_values", return_value={"root": str(ROOT), "edge": EDGE}),
+          patch.object(li, "claim_link", return_value=link)):
+        for label, unclaimed, state, instruction in stages:
+            output = StringIO()
+            with (patch.object(dep, "edge_state", return_value=state),
+                  patch.object(dep, "unclaimed", return_value=unclaimed),
+                  redirect_stdout(output)):
+                inst.finale()
+            words = " ".join(output.getvalue().split())
+            check(f"the installer finale ({label}) points to sign-in and status",
+                  (instruction in words, link in words, "loam status" in words),
+                  (True, unclaimed, True))
+            check(f"the installer finale ({label}) has no backup recommendation",
+                  not any(phrase in words.lower() for phrase in ("backup", "back up", "back them up")))
 
     print(f"\n{'OK' if not FAILURES else f'{FAILURES} FAILED'}")
     return 1 if FAILURES else 0

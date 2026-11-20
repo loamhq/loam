@@ -17,12 +17,19 @@ synthetic conversation and file contents.
 | Embedded app beside a conversation | [1440 light](side-chat-1440-light.webp) | [1440 dark](side-chat-1440-dark.webp) | — | — |
 | Empty main after moving its file to side | [1440 light](empty-1440-light.webp) | [1440 dark](empty-1440-dark.webp) | — | — |
 | Thread board | [1440 light](board-1440-light.webp) | [1440 dark](board-1440-dark.webp) | [390 light](board-390-light.webp) | [390 dark](board-390-dark.webp) |
+| Board document in Files | [1440 light](board-file-1440-light.webp) | [1440 dark](board-file-1440-dark.webp) | [390 light](board-file-390-light.webp) | [390 dark](board-file-390-dark.webp) |
 | Thread details | [1440 light](thread-details-1440-light.webp) | [1440 dark](thread-details-1440-dark.webp) | [390 light](thread-details-390-light.webp) | [390 dark](thread-details-390-dark.webp) |
 | Profile | [1440 light](profile-1440-light.webp) | [1440 dark](profile-1440-dark.webp) | [390 light](profile-390-light.webp) | [390 dark](profile-390-dark.webp) |
 | Settings | [1440 light](settings-1440-light.webp) | [1440 dark](settings-1440-dark.webp) | [390 light](settings-390-light.webp) | [390 dark](settings-390-dark.webp) |
 | Phone Activity | — | — | [390 light](activity-390-light.webp) | [390 dark](activity-390-dark.webp) |
 | Phone folder | — | — | [390 light](folder-390-light.webp) | [390 dark](folder-390-dark.webp) |
 | Phone Chats list | — | — | [390 light](chats-list-390-light.webp) | [390 dark](chats-list-390-dark.webp) |
+
+The two board rows compare the cards-only board at `9dff3ff` (left) with the
+merged panel history behavior (right). On desktop, Open in Files reveals the
+chat and opens the document beside it. Back can reopen the board while the
+side editor stays mounted. On the phone, the document’s single Back to board
+arrow uses the same history entry as browser Back.
 
 The chat link and Files row both open the same document. The single arrow on
 the phone returns to the conversation or the folder according to how the

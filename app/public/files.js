@@ -1,4 +1,5 @@
 import { historyBackButton } from './panel-history.js'
+import { boardProjection } from './board-document.js'
 import { noteDateParts } from './time.js'
 import { fileShortcuts } from './store.js'
 import { createCoreRegistry } from './core-registrations.js'
@@ -784,6 +785,7 @@ export function createFiles({
       path,
       row: r,
       view,
+      projection: view === 'markdown' ? boardProjection(root, path) : null,
       caps: capsOf(r),
       text: '',
       saved: '',
@@ -871,11 +873,12 @@ export function createFiles({
     try {
       const got = readOf(await api('GET', `/files/read?${q({ root: file.root, path: file.path })}`))
       if (st.file !== file) return
-      file.text = got.text
-      file.saved = got.text
+      file.rawText = got.text
+      file.text = file.projection?.show(got.text) ?? got.text
+      file.saved = file.text
       file.revision = got.revision
       file.textLoaded = true
-      if (file.mode === 'edit' && file.draft === null) file.draft = got.text
+      if (file.mode === 'edit' && file.draft === null) file.draft = file.text
       if (got.row) {
         file.row = got.row
         file.caps = capsOf(got.row)
@@ -1195,12 +1198,14 @@ export function createFiles({
     file.failed = false
     schedule()
     try {
-      const got = readOf(await api('PUT', '/files/text', { root: file.root, path: file.path, text, base_revision: over ?? file.revision }))
+      const storedText = file.projection?.write(file.rawText, text) ?? text
+      const got = readOf(await api('PUT', '/files/text', { root: file.root, path: file.path, text: storedText, base_revision: over ?? file.revision }))
       if (st.file !== file) return done()
       // What the host stored — not what was sent — is what the page holds and
       // what the field shows. Anything typed while the save was in flight is a
       // newer edit and stays on top of it.
-      const stored = got.text
+      file.rawText = got.text
+      const stored = file.projection?.show(got.text) ?? got.text
       file.text = stored
       file.saved = stored
       if (file.draft === text) file.draft = stored
@@ -1794,7 +1799,9 @@ export function fileView(files, options) {
   return files.registry.component('core.files.viewer', context)
 }
 
-function builtinFileView(files, { close, closeLabel, historyBack = null, wide, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null }) {
+function builtinFileView(files, { close, closeLabel, historyBack = null, wide, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null }) {
+  const back = backToThread ? { label: 'Back to board', title: historyBack?.title ?? 'Back to board',
+    go: historyBack?.go ?? backToThread, shortcut: Boolean(historyBack) } : historyBack
   const context = { files, file: files.st.file, options: { close, closeLabel, wide, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
   const custom = files.registry.entries('files.viewer', context).findLast(entry => !entry.component && entry.slot === 'viewer')
   if (custom) {
@@ -1802,10 +1809,10 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, f
     // A kept editor may outlive a history entry or a phone/desktop resize.
     // The shell owns this slot so neither change requires remounting it.
     const up = close && { title: `Back to ${closeLabel}`, go: close, label: `Back to ${closeLabel}` }
-    const back = historyBackButton(historyBack ?? up)
+    const leading = historyBackButton(back ?? up)
     const content = files.registry.invoke(custom, 'render', { ...context, options: { ...context.options, close: null, returnBack: null, openFolder: close } })
     return h('div', { class: 'fs-custom-view', key: `viewer:${files.st.file.root}:${files.st.file.path}` },
-      back, h('div', { class: 'fs-custom-content', key: 'viewer-content' }, content))
+      leading, h('div', { class: 'fs-custom-content', key: 'viewer-content' }, content))
   }
   const f = files.st.file
   if (!f) return null
@@ -1846,7 +1853,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, f
   const head = files.registry.reduce('files.action', { slot: 'toolbar', file: f, files, defaultView: () => h(
     'div',
     { class: `fs-head fs-edhead${wide && tools ? ' withtools' : ''}${close && !returnBack ? ' folder-back' : ''}` },
-    historyBackButton(historyBack) ?? returnBack ?? (close ? h('button', { class: 'backbtn fs-back', title: closeLabel, onclick: close }, icon.chevronLeft(20), h('span', { text: closeLabel })) : null),
+    historyBackButton(back) ?? returnBack ?? (close ? h('button', { class: 'backbtn fs-back', title: closeLabel, onclick: close }, icon.chevronLeft(20), h('span', { text: closeLabel })) : null),
     h('div', { class: 'headspace' }),
     wide ? saveWord : null,
     tabs,
@@ -1861,7 +1868,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, f
   const toolrow = wide && tools ? h('div', { class: 'fs-toolrow' }, tools) : null
 
   const liveHead = htmlPreview ? h('div', { class: 'fs-htmlbar fs-livehead' },
-    historyBackButton(historyBack) ?? returnBack ?? (close ? h('button', { class: 'iconbtn fs-back', title: `Back to ${closeLabel}`, 'aria-label': `Back to ${closeLabel}`, onclick: close }, icon.chevronLeft(18)) : null),
+    historyBackButton(back) ?? returnBack ?? (close ? h('button', { class: 'iconbtn fs-back', title: `Back to ${closeLabel}`, 'aria-label': `Back to ${closeLabel}`, onclick: close }, icon.chevronLeft(18)) : null),
     h('span', { class: 'fs-htmlmark', text: 'HTML' }),
     renameTitle(files, f.row, name, 'fs-htmlname'),
     h('button', { class: 'pillbtn fs-htmlreload', title: 'Reload page', disabled: f.liveLoading, text: 'Reload', onclick: () => files.loadLive(f) }),

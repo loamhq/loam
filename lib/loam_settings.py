@@ -552,7 +552,6 @@ ENTRIES: list[Entry] = [
                "transition": "Sun mode transition: how long the shift "
                              "between light and dark takes",
                "size": "page size (zoom)",
-               "board_view": "thread board view",
                "theme": "theme (its look: Latte, Plain, ...)"}[field],
             "PATCH /api/settings/appearance",
             route="PATCH /v1/settings/appearance",
@@ -563,7 +562,6 @@ ENTRIES: list[Entry] = [
                              "own); default system",
                     "transition": "fast (3 s), normal (10 s) or long (20 s); "
                                   "default normal",
-                    "board_view": "cards or doc; default cards",
                     "size": "a whole percent, 75 to 150 in steps of 5; default 100",
                     "theme": "an installed theme's id (describe lists them); "
                              "default latte"}[field],
@@ -571,9 +569,9 @@ ENTRIES: list[Entry] = [
                      "transition": "transitions"}.get(field),
             body=(lambda v, m, kind=kind, field=field: {kind: {field: v}}),
             read="GET /v1/settings/appearance",
-            pick=(lambda a, m, kind=kind, field=field: a[kind].get(field, "cards") if field == "board_view" else a[kind][field]))
+            pick=(lambda a, m, kind=kind, field=field: a[kind][field]))
       for kind in ("phone", "desktop")
-      for field in ("mode", "transition", "size", "theme", "board_view")],
+      for field in ("mode", "transition", "size", "theme")],
     # The saved place Sun mode reads (2026-11-13; loam-ui 29a1506), one for
     # both device kinds so the phone and the desktop agree.
     Entry("appearance.location", "setting",

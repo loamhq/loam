@@ -61,20 +61,32 @@ function bodyStart(text) {
 export function createDocEditor(opts) {
   const {
     api, face = defaultFace, embed = null, openLink = null, settings = null,
-    fileMenu = null, onText = null, onState = null,
+    fileMenu = null, onText = null, onState = null, projection = null,
   } = opts
   // The editor's working text is "editor space" (textdiff.js, posMap): a file
   // whose lines all end in CRLF is held with one position per line break.
   // What is sent is always the file's own text (sliceDoc), and every position
   // to or from the server goes through `st.pm`.
-  const CRLF = lineSeparatorOf(opts.doc.text) === '\r\n'
-  const ed = (t) => editorText(t, CRLF)
-  const raw = (t) => (CRLF ? t.replace(/\r?\n/g, '\r\n') : t)
+  const visible = t => projection?.show(t) ?? t
+  const opening = visible(opts.doc.text)
+  const CRLF = lineSeparatorOf(opening) === '\r\n'
+  const ed = t => editorText(t, CRLF)
+  const raw = t => CRLF ? t.replace(/\r?\n/g, '\r\n') : t
+  function positions(text) {
+    if (!projection) return posMap(text, CRLF)
+    const { fromSource, toSource } = projection.offsets(text)
+    const source = posMap(text, false)
+    return {
+      toEditor: offset => fromSource(source.toEditor(offset)),
+      toServer: (offset, assoc) => source.toServer(toSource(offset, assoc)),
+      slice: (from, to) => text.slice(toSource(from, 1), toSource(to, -1)),
+    }
+  }
   const st = {
     server: { text: opts.doc.text, revision: opts.doc.revision },
-    pm: posMap(opts.doc.text, CRLF),
-    mapBase: ed(opts.doc.text),
-    sinceBase: ChangeSet.empty(ed(opts.doc.text).length),
+    pm: positions(opts.doc.text),
+    mapBase: ed(opening),
+    sinceBase: ChangeSet.empty(ed(opening).length),
     notes: [], me: opts.doc.me, can: opts.doc.can || {}, id: opts.doc.id, resolved: 0,
     // Every doc opens in Editing; a mode lasts while that doc is open and is
     // never remembered (a remembered Suggesting made a doc never opened
@@ -297,10 +309,10 @@ export function createDocEditor(opts) {
   const view = new EditorView({
     parent: col,
     state: EditorState.create({
-      doc: opts.doc.text,
-      selection: { anchor: bodyStart(opts.doc.text) },
+      doc: opening,
+      selection: { anchor: bodyStart(opening) },
       extensions: [
-        EditorState.lineSeparator.of(lineSeparatorOf(opts.doc.text)),
+        EditorState.lineSeparator.of(lineSeparatorOf(opening)),
         markdownLanguage,
         modeField.init(() => st.mode),
         focusField,
@@ -372,6 +384,42 @@ export function createDocEditor(opts) {
 
   // -- the server's answers ----------------------------------------------------------
 
+  function notePassage(from, to, replacement) {
+    const start = st.pm.toServer(from, 1)
+    const end = Math.max(start, st.pm.toServer(to, -1))
+    if (!projection || replacement == null) return {
+      start, end, quote: st.pm.slice(from, to),
+      ...(replacement == null ? {} : { replacement: raw(replacement) }),
+    }
+    const base = st.server.text
+    const visibleBase = st.mapBase
+    const changed = projection.write(base, visibleBase.slice(0, from) + replacement + visibleBase.slice(to))
+    const source = posMap(base, false)
+    // Preserve the original selection where possible, widening only when the
+    // proposed edit changes an adjacent marker or creates a new board item.
+    const selectedStart = source.toEditor(start), selectedEnd = source.toEditor(end)
+    let first = 0, tail = 0
+    while (first < selectedStart && first < changed.length && base[first] === changed[first]) first++
+    while (tail < base.length - selectedEnd && tail < changed.length - first
+      && base[base.length - tail - 1] === changed[changed.length - tail - 1]) tail++
+    const last = base.length - tail
+    return {
+      start: source.toServer(first), end: source.toServer(last), quote: base.slice(first, last),
+      replacement: changed.slice(first, changed.length - (base.length - last)),
+    }
+  }
+
+  function suggestionText(note) {
+    const replacement = note.replacement || ''
+    const start = note.where?.start, end = note.where?.end
+    if (!projection || start == null || end == null) return ed(replacement)
+    const base = st.server.text, source = posMap(base, false)
+    const a = source.toEditor(start), b = source.toEditor(end)
+    const suggested = ed(visible(base.slice(0, a) + replacement + base.slice(b)))
+    const from = st.pm.toEditor(start), tail = st.mapBase.length - st.pm.toEditor(end)
+    return suggested.slice(from, suggested.length - tail)
+  }
+
   function people_(author) {
     if (!author) return { name: 'Someone', kind: 'owner' }
     return { ...author, ...(people[author.id] || {}) }
@@ -384,7 +432,7 @@ export function createDocEditor(opts) {
     if (st.destroyed || !ans) return
     st.lastAns = ans
     const T = ans.text
-    const ET = ed(T)
+    const ET = ed(visible(T))
     let userOver, editorUnchanged = false
     if (view.state.field(draftsField).on) {
       ;({ userOver, editorUnchanged } = rebaseDrafts(ans, ET))
@@ -417,7 +465,7 @@ export function createDocEditor(opts) {
     }
     st.server = { text: T, revision: ans.revision }
     if ('notes_revision' in ans) st.notesRev = ans.notes_revision
-    st.pm = posMap(T, CRLF)
+    st.pm = positions(T)
     st.mapBase = ET
     st.sinceBase = userOver
     st.id = ans.id
@@ -519,7 +567,7 @@ export function createDocEditor(opts) {
     const list = []
     for (const n of st.notes) {
       if (n.state !== 'open' || n.from == null) continue
-      list.push({ id: n.id, kind: draftIds.has(n.id) ? 'draft' : n.kind, from: n.from, to: n.to, replacement: n.replacement, focus: st.focus === n.id, peek: st.peek === n.id, changed: n.where?.state === 'changed' })
+      list.push({ id: n.id, kind: draftIds.has(n.id) ? 'draft' : n.kind, from: n.from, to: n.to, replacement: projection ? suggestionText(n) : n.replacement, focus: st.focus === n.id, peek: st.peek === n.id, changed: n.where?.state === 'changed' })
     }
     if (st.compose) list.push({ id: '__new', kind: 'comment', from: st.compose.from, to: st.compose.to, focus: true })
     view.dispatch({ effects: setNotes.of(list), annotations: remote.of(true) })
@@ -623,12 +671,12 @@ export function createDocEditor(opts) {
   async function saveNow() {
     if (st.sinceBase.empty || st.destroyed) return
     keepFinalNewline()
-    const text = view.state.sliceDoc()
+    const text = projection?.write(st.server.text, view.state.sliceDoc()) ?? view.state.sliceDoc()
     const body = { base_revision: st.server.revision, base_text: st.server.text, text }
     // The edit as the editor made it, in the stored text's positions: the
     // server carries every note through it exactly (a diff of the two texts
     // cannot tell which of two equal words was typed).
-    if (st.mapBase === ed(st.server.text)) {
+    if (!projection && st.mapBase === ed(st.server.text)) {
       const changes = []
       st.sinceBase.iterChanges((fromA, toA, _fb, _tb, ins) => changes.push([st.pm.toServer(fromA), st.pm.toServer(toA), raw(ins.toString())]))
       body.changes = changes
@@ -653,7 +701,7 @@ export function createDocEditor(opts) {
     } catch (err) {
       st.saving = false
       // Put the unsent change back on top: nothing typed is lost.
-      st.mapBase = ed(st.server.text)
+      st.mapBase = ed(visible(st.server.text))
       st.sinceBase = ChangeSet.of(diffChanges(st.mapBase, view.state.doc.toString()), st.mapBase.length, '\n')
       st.word = 'Couldn’t save'
       st.error = err?.message || String(err)
@@ -667,7 +715,7 @@ export function createDocEditor(opts) {
   // A file that ended with a line break keeps it, and a new (empty) one gets
   // one, even when the last words were typed on its last, empty line.
   function keepFinalNewline(force = false) {
-    const was = st.server.text
+    const was = visible(st.server.text)
     if (was !== '' && !/\n$/.test(was)) return
     const doc = view.state.doc
     // Not while the caret is on the last line being typed: added under it
@@ -822,7 +870,9 @@ export function createDocEditor(opts) {
         if (done.has(r.d.key)) return false
         if (!p) return r.d.sent !== r.text
         const n = notes.get(r.d.ids[0])
-        return !n || n.state !== 'open' || r.d.sent !== r.text || n.where?.start !== st.pm.toServer(p.start) || n.where?.end !== st.pm.toServer(p.end) || ed(n.replacement || '') !== p.replacement
+        if (!n || n.state !== 'open' || r.d.sent !== r.text) return true
+        const proposed = notePassage(p.start, p.end, p.replacement)
+        return n.where?.start !== proposed.start || n.where?.end !== proposed.end || (n.replacement || '') !== proposed.replacement
       })
       if (!next) break
       const { r, p } = next
@@ -832,8 +882,7 @@ export function createDocEditor(opts) {
       if (!p) { mark({ sent: text }); continue }          // nothing to anchor on yet
       const body = {
         kind: 'suggestion', text: '', revision: st.server.revision,
-        quote: st.pm.slice(p.start, p.end), replacement: raw(p.replacement),
-        start: st.pm.toServer(p.start), end: st.pm.toServer(p.end),
+        ...notePassage(p.start, p.end, p.replacement),
       }
       if (r.d.ids[0]) body.supersedes = r.d.ids[0]
       try {
@@ -914,7 +963,7 @@ export function createDocEditor(opts) {
     return notes.filter(n => n.kind === 'suggestion' && n.state === 'open' && n.author?.id === st.me?.id && n.where?.state === 'attached' && n.where.start != null)
       .map(n => {
         const s = Math.max(0, Math.min(base.length, st.pm.toEditor(n.where.start))), e = Math.max(s, Math.min(base.length, st.pm.toEditor(n.where.end)))
-        const quote = base.slice(s, e), rep = ed(n.replacement || '')
+        const quote = base.slice(s, e), rep = suggestionText(n)
         // Whole words shared at either end are left out, never letters: a
         // suggestion of "forty-three" for "forty-one" is "one" → "three", not
         // "on" → "thre" with an "e" between.
@@ -1022,10 +1071,7 @@ export function createDocEditor(opts) {
         const back = st.sinceBase.invertedDesc
         const from = back.mapPos(tracked?.from ?? c.from, 1)
         const to = back.mapPos(tracked?.to ?? c.to, -1)
-        body.start = st.pm.toServer(from)
-        body.end = st.pm.toServer(to)
-        body.quote = st.pm.slice(from, to)
-        if (body.replacement != null) body.replacement = raw(body.replacement)
+        Object.assign(body, notePassage(from, to, body.replacement))
         body.revision = st.server.revision
         return api.add(body)
       })
@@ -1084,7 +1130,7 @@ export function createDocEditor(opts) {
     await call(async () => {
       const back = st.sinceBase.invertedDesc
       const from = back.mapPos(r.from, 1), to = back.mapPos(r.to, -1)
-      return api.reattach(note.id, { start: st.pm.toServer(from), end: st.pm.toServer(to), quote: st.pm.slice(from, to), revision: st.server.revision })
+      return api.reattach(note.id, { ...notePassage(from, to), revision: st.server.revision })
     })
     st.focus = note.id
     pushNotes()
@@ -1705,8 +1751,11 @@ export function createDocEditor(opts) {
   // What a suggestion does, in words: an insertion says what it adds, a
   // deletion what it takes out, anything else what the passage becomes.
   function suggestionLine(n) {
-    const from = n.anchor?.quote ?? ''
-    const shape = suggestionShape(from, n.replacement ?? '')
+    const from = projection && n.where?.start != null && n.where?.end != null
+      ? st.mapBase.slice(st.pm.toEditor(n.where.start), st.pm.toEditor(n.where.end))
+      : visible(n.anchor?.quote ?? '')
+    const replacement = projection ? suggestionText(n) : (n.replacement ?? '')
+    const shape = suggestionShape(from, replacement)
     // Paragraphs made, joined, added or taken away are said as such: a
     // line break quoted is nothing to read ("Replace with “”").
     const gone = from.slice(shape.from, shape.to), came = shape.insert
@@ -1717,15 +1766,15 @@ export function createDocEditor(opts) {
     if (shape.kind === 'delete' && para.test(gone)) return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete a paragraph ' }), h('del', { text: `“${clip(gone)}”` }))
     // A space turned into a line break, or a line break into a space: the
     // paragraph is split or joined, and no space is struck.
-    if (!from.trim() && !(n.replacement ?? '').trim() && from !== (n.replacement ?? '')) {
-      const nlA = /\n/.test(from), nlB = /\n/.test(n.replacement ?? '')
+    if (!from.trim() && !replacement.trim() && from !== replacement) {
+      const nlA = /\n/.test(from), nlB = /\n/.test(replacement)
       if (nlB && !nlA) return h('div', { class: 'dc-stl' }, h('span', { text: 'Split the paragraph' }))
       if (nlA && !nlB) return h('div', { class: 'dc-stl' }, h('span', { text: 'Join two paragraphs' }))
     }
-    if (shape.kind === 'replace' && !n.replacement?.trim()) return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete ' }), h('del', { text: `“${clip(from)}”` }))
+    if (shape.kind === 'replace' && !replacement.trim()) return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete ' }), h('del', { text: `“${clip(from)}”` }))
     if (shape.kind === 'insert') return h('div', { class: 'dc-stl' }, h('span', { text: 'Add ' }), h('ins', { text: `“${clip(shape.insert)}”` }))
     if (shape.kind === 'delete') return h('div', { class: 'dc-stl' }, h('span', { text: 'Delete ' }), h('del', { text: `“${clip(from.slice(shape.from, shape.to))}”` }))
-    return h('div', { class: 'dc-stl' }, h('span', { text: 'Replace with ' }), h('ins', { text: `“${clip(n.replacement)}”` }))
+    return h('div', { class: 'dc-stl' }, h('span', { text: 'Replace with ' }), h('ins', { text: `“${clip(replacement)}”` }))
   }
 
   function clip(s, n = 90) {
@@ -1763,7 +1812,7 @@ export function createDocEditor(opts) {
     if (full && n.where?.state === 'changed') {
       // What the passage says now, in quotation marks of its own (not a
       // style's): "It now reads “lixght”".
-      const now = n.now ?? (n.from != null ? view.state.sliceDoc(n.from, n.to) : '')
+      const now = (!projection ? n.now : null) ?? (n.from != null ? view.state.sliceDoc(n.from, n.to) : '')
       out.push(h('div', { class: 'dc-chgl' }, 'The words changed since. It now reads ', h('span', { class: 'dc-chgq', text: `“${clip(now, 120)}”` })))
     }
     if (!full) {
@@ -2266,7 +2315,7 @@ export function createDocEditor(opts) {
       // not the whole doc), then word by word inside the changed lines; the
       // frontmatter is left out, and unchanged lines between become "…".
       const body_ = (t) => t.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/, '')
-      const groups = lineChanges(body_(st.server.text), body_(p.text))
+      const groups = lineChanges(body_(visible(st.server.text)), body_(visible(p.text)))
       const pre = h('pre')
       if (!groups.some(g => g.kind !== 'same')) pre.append('The same as now.')
       else groups.forEach((g, i) => {

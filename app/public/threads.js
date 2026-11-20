@@ -1,6 +1,4 @@
-import { boardFilesEditor } from './board-files-editor.js'
-import { docText, applyDocText, cardText, applyCardText, setBoardExpiry, recoverBoard } from './board-document.js'
-import { fileEditor } from './file-editor.js'
+import { cardText, applyCardText, setBoardExpiry, recoverBoard } from './board-document.js'
 import { threadOutbox } from './thread-outbox.js'
 import { createAgentDrafts } from './agent-drafts.js'
 import { owner, isOwner } from './owner.js'
@@ -17,7 +15,7 @@ import { canReply, quoteLine, replyQuotes, replyGesture } from './thread-replies
 import { OPENING_MESSAGES, HISTORY_MESSAGES, openingContext, readingAnchor, restoreAnchor, mergeHistory, progressiveProse } from './thread-opening.js'
 import { follower } from './follow.js'
 import { layoutPixels } from './scale.js'
-import { modelPill, settingsRow, listHeading, personaGrid, rowTop, chatHeader, chatFrame, chatDock, agentProse, userBubble, messageFiles, replyImages, stepFold, thinkingLine, emptyConversation, panelHeader, segmentedControl, composerHint, settingsNav, selectionMark, createMessageState, sheetHandle } from './chat-ui.js'
+import { modelPill, settingsRow, listHeading, personaGrid, rowTop, chatHeader, chatFrame, chatDock, agentProse, userBubble, messageFiles, replyImages, stepFold, thinkingLine, emptyConversation, panelHeader, composerHint, settingsNav, selectionMark, createMessageState, sheetHandle } from './chat-ui.js'
 import { sendHint, isMac } from './keys.js'
 import { authenticatedFetch as fetch, authExpired, failureSentence } from './auth.js'
 import { createPermissionCards } from './permission-cards.js'
@@ -36,7 +34,7 @@ import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuot
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
-export function createThreads({ registry = createCoreRegistry(), appearance = null, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, viewAddress = () => {}, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
+export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, openBoardFile, address = () => {}, viewAddress = () => {}, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -79,8 +77,6 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
   let awaitTimer = null, awaitDue = Infinity
   let returnTimer = null
   function clearReturn() { clearTimeout(returnTimer); returnTimer = null; st.returning = null }
-  let boardView = 'cards'
-  try { if (localStorage.getItem('loam.board.view') === 'doc') boardView = 'doc' } catch {}
   const awaitingSince = new Map()
   const visits = new Map()
   const readingPlaces = new Map()
@@ -192,19 +188,10 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     try { return st.boardDrafts.get(id) ?? JSON.parse(sessionStorage.getItem('loam.board.draft.' + id)) } catch { return st.boardDrafts.get(id) }
   }
   const writeBoard = async (o, text, revision) => readThreadBoard(await transport('PUT', `${path(o.thread.id)}/board`, { markdown: text, base_revision: revision }))
-  const richDoc = boardFilesEditor({
-    registry, redraw, openRef, write: writeBoard,
-    draft: (o, base, text) => rememberBoard(o, text === base ? null : { base, text }),
-    conflict: async (o, base, text, error) => {
-      o.recovery = { base, text }; rememberBoard(o, o.recovery)
-      o.boardError = error.status === 409 ? '' : error.message
-      if (st.open === o) await refreshBoard(o)
-    },
-  })
   function inputBoard(value) {
     const o = st.open
     if (!o?.editing) return
-    o.editText = o.inlineIndex == null ? applyDocText(o.editText, value, o.board.path) : applyCardText(o.editText, o.inlineIndex, value)
+    o.editText = applyCardText(o.editText, o.inlineIndex, value)
     rememberBoard(o, o.editText === o.editBase ? null : { base: o.editBase, text: o.editText })
   }
   function finishBoardEdit() {
@@ -215,17 +202,15 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     if (o.boardChanged) { o.boardChanged = false; refreshBoard(o) }
     redraw()
   }
-  const editor = fileEditor({ edit: inputBoard, save: finishBoardEdit, blur: finishBoardEdit, label: 'Edit board document' })
   const inlineField = h('textarea', { class: 'tt-inline-field', rows: '1', 'aria-label': 'Edit item',
     oninput: () => inputBoard(inlineField.value), onblur: finishBoardEdit,
     onkeydown: e => {
       if (!e.isComposing && e.key === 'Enter') { e.preventDefault(); finishBoardEdit() }
     } })
-  function beginBoardEdit(o, line = null) {
+  function beginBoardEdit(o, line) {
     if (o.editing || o.boardBusy || o.boardRefreshing || !o.board.revision || o.recovery) return
-    o.editing = true; o.editBase = o.board.markdown; o.editText = o.editBase; o.inlineIndex = line?.index
-    if (line) inlineField.value = cardText(line.text)
-    else editor.value = docText(o.editBase)
+    o.editing = true; o.editBase = o.board.markdown; o.editText = o.editBase; o.inlineIndex = line.index
+    inlineField.value = cardText(line.text)
     o.focusEditor = true; o.boardMenu = null; redraw()
   }
   const title = h('input', { class: 'tt-rename', 'aria-label': 'Thread title', onblur: () => finishRename(), onkeydown: (e) => {
@@ -358,7 +343,6 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     leave(); load()
   }
   function close({ navigate = true } = {}) {
-    richDoc.leave()
     st.personaMenu = null
     if (st.open) st.open.branch = null
     gesture.reset()
@@ -420,8 +404,8 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     const o = st.open
     if (unsentHere(o)) globalThis.fetch?.(`/api${path(o.thread.id)}`, { method: 'DELETE', keepalive: true, credentials: 'same-origin' })?.catch?.(() => {})
   })
-  async function open(id, { push = true, listing = null, routed = false } = {}) {
-    if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing })
+  async function open(id, { push = true, listing = null, routed = false, board = false } = {}) {
+    if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing, board })
     close({ navigate: false }); enter({ kind: 'thread', id })
     clearReturn()
     const ticket = generation
@@ -431,7 +415,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
       savedAnchor: savedVisit?.atEnd === false ? savedVisit.anchor : null, landing: !savedVisit,
       atEnd: savedVisit ? savedVisit.atEnd : !(summary?.unread > 0), refreshing: true,
       typing: new Set(), permissions: new Map(), after: null, steps: new Map(), has_more: savedVisit?.has_more ?? false,
-      board: savedVisit?.board ?? { markdown: '', path: '' }, boardBusy: false, boardOpen: false }
+      board: savedVisit?.board ?? { markdown: '', path: '' }, boardBusy: false, boardOpen: board, focusBoard: board }
     const o = st.open
     if (push && !st.fixture) address(id)
     attachReplySteps(st.open)
@@ -1603,9 +1587,9 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     st.manage = view === 'details'; o.boardOpen = view === 'board'; o.choice = null
     redraw()
   }
-  function chooseView(view) {
+  function chooseView(view, options) {
     if (currentView() === view) return
-    setView(view); viewAddress(view)
+    setView(view); viewAddress(view, options)
   }
   function showDetails() { chooseView('details') }
   function details() {
@@ -1648,7 +1632,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
   }
   function board() {
     const o = st.open
-    if (!o.boardOpen) { richDoc.leave(); return null }
+    if (!o.boardOpen) return null
     const lines = boardLines(o.board.markdown), all = boardSections(o.board.markdown)
     const sections = all.map((section, i) => {
       const items = section.lines.filter(line => line.item).length
@@ -1663,12 +1647,6 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     const closeBoard = () => chooseView(null)
     const busy = o.boardBusy || o.boardRefreshing || !o.board.revision || Boolean(o.recovery)
     const closeMenu = () => { o.boardMenu = null; o.menuPage = null; redraw() }
-    const chooseBoardLayout = view => {
-      if (o.editing) finishBoardEdit()
-      boardView = view; if (!st.fixture) appearance?.set({ board_view: view }); closeMenu(); drag.cancel()
-      try { localStorage.setItem('loam.board.view', view) } catch {}
-      redraw()
-    }
     const dateLabel = day => formatCalendarDate(day, { month: 'short', day: 'numeric' })
     const taskCheck = (line) => {
       const checked = o.pendingTick?.index === line.index ? o.pendingTick.checked : line.checked
@@ -1709,13 +1687,13 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
       h('div', { class: 'tt-durations', role: 'group', 'aria-label': 'Keep board item for' }, ...[[0, 'Stays'], [1, '1 day'], [7, '1 week'], [14, '2 weeks']].map(([n, label]) => button(label, () => { o.duration = n; o.focusQuick = true; redraw() }, { class: 'pillbtn content-mark', 'aria-pressed': String(Number(o.duration ?? 0) === n) }))), button('Add', addItem, { class: 'pillbtn content-mark', disabled: busy })))
     const listAdd = (section) => {
       const name = boardListName(section)
-      const label = section.key === 'top' ? 'Add an item…' : /^ideas$/i.test(name) ? 'Add an idea…' : `Add to ${name}…`
+      const label = 'Add a note'
       return h('div', { class: 'tt-board-list-foot', key: `add:${section.key}` },
         o.addSection === section.key ? quickForm() : button([icon.plus(15), label], () => {
           quick.setAttribute('placeholder', label)
           quick.setAttribute('aria-label', `New item in ${name}`)
           o.addSection = section.key; o.focusQuick = true; o.boardMenu = null; redraw()
-        }, { class: 'tt-list-add', disabled: busy, 'aria-label': `Add to ${name}`, 'data-add-section': section.key, 'aria-expanded': 'false' }))
+        }, { class: 'tt-list-add', disabled: busy, 'aria-label': label, 'title': `Add a note to ${name}`, 'data-add-section': section.key, 'aria-expanded': 'false' }))
     }
     const description = (section, block) => {
       const key = `${section.key}:${block.key}`
@@ -1734,11 +1712,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
         o.boardError ? h('p', { role: 'alert', text: o.boardError }) : null,
         o.readFailed || o.boardUnavailable ? button('Try again', () => open(o.thread.id)) : null))
     const recovery = o.recovery && recoverBoard(o.recovery.base, o.recovery.text, o.board.markdown)
-    if (!st.fixture && !o.editing && appearance?.value.board_view) boardView = appearance.value.board_view
-    const doc = boardView === 'doc'
-    const rich = doc && !o.editing && !o.recovery && o.board.revision ? richDoc.mount(o) : undefined
-    if (!doc || o.recovery) richDoc.leave()
-    editor.readOnly = inlineField.readOnly = Boolean(o.boardBusy)
+    inlineField.readOnly = Boolean(o.boardBusy)
     o.collapsed ??= new Set()
     const sectionView = section => {
       const { items, group, level } = section, closed = o.collapsed.has(section.key)
@@ -1757,8 +1731,16 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     return h('aside', { class: 'tt-board', 'aria-label': 'Thread board', onkeydown: e => {
       if (e.key === 'Escape') { e.stopPropagation(); if (o.boardMenu != null) closeMenu(); else closeBoard() }
     } },
-      panelHeader({ title: 'Board', back: historyButton(), actions: [segmentedControl({ label: 'Board view', value: boardView, choose: chooseBoardLayout,
-        options: [{ id: 'cards', label: 'Cards' }, { id: 'doc', label: 'Doc' }] }),
+      panelHeader({ title: 'Board', back: historyButton(), actions: [
+        o.board.path && openBoardFile ? button([side()?.available() ? icon.panelRight(15) : icon.folder(15), 'Open in Files'],
+          () => {
+            finishBoardEdit()
+            drag.cancel()
+            closeMenu()
+            // Opening the file in the other pane reveals this chat. Record that
+            // location so Back can reopen its board with the file still mounted.
+            openBoardFile(o.board.path, o.thread.id, () => chooseView(null, { traverse: false }))
+          }, { class: 'tt-board-files ghost' }) : null,
         round('Close board', icon.close(16), closeBoard)], props: { class: 'chat-head plain tt-board-head' } }),
       h('span', { class: 'sr-only tt-board-status', role: 'status', text: o.boardNotice ?? '' }),
       o.boardError ? h('div', { class: 'banner', role: 'alert', text: o.boardError }) : null,
@@ -1769,14 +1751,9 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
         h('p', { text: recovery.both ? 'The same passage changed. Keep both versions to review them together.' : 'Your draft is safe. Apply it to the board shown below.' }),
         button(recovery.both ? 'Keep both versions' : 'Reapply my edit', () => saveBoard(recovery.markdown), { disabled: o.boardBusy || o.boardRefreshing || !o.board.revision }),
         button('Discard draft', () => { if (globalThis.confirm('Discard your saved board edit?')) { o.recovery = null; o.recoveredAction = null; rememberBoard(o, null); redraw() } }, { class: 'quietlink' })) : null,
-      !doc && count ? h('div', { class: 'tt-seen-strip' }, h('span', { text: count + ' new from the agents' }),
+      count ? h('div', { class: 'tt-seen-strip' }, h('span', { text: count + ' new from the agents' }),
         button('Mark seen', () => saveBoard(markBoardSeen(o.board.markdown)), { class: 'quietlink tt-mark-seen', disabled: busy })) : null,
-      rich !== undefined ? h('div', { class: 'tt-board-rich', key: 'rich-doc' }, rich ?? h('p', { class: 'fs-quiet', role: 'status', text: 'Opening document…' })) :
-      doc ? (o.editing && o.inlineIndex == null ? h('div', { class: 'tt-board-edit' }, kept(editor),
-        button('Done', finishBoardEdit, { class: 'pillbtn tt-doc-done', disabled: o.boardBusy })) :
-        h('div', { class: 'tt-board-doc' }, button([icon.pencil(14), 'Edit document'], () => beginBoardEdit(o), { class: 'quietlink tt-doc-action', disabled: busy }),
-          h('div', { class: 'md fs-preview' }, ...renderText(docText(o.board.markdown), { from: { root: 'vault', path: o.board.path } })))) :
-        h('div', { class: 'tt-board-items' }, !lines.some(l => l.item) && !sections.some(s => s.blocks.some(b => b.text.trim())) ?
+      h('div', { class: 'tt-board-items' }, !lines.some(l => l.item) && !sections.some(s => s.blocks.some(b => b.text.trim())) ?
           emptyState({ object: 'page', size: 'small', level: 'h3', title: 'Room for your first idea', body: 'Keep a thought or a next step here.', props: { key: 'board-empty' } }) : null,
           ...sections.map(sectionView)))
   }
@@ -1958,7 +1935,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     if (!boardOpen?.boardOpen) drag.cancel()
     else if (boardOpen.needsInitialBoard) { boardOpen.needsInitialBoard = false; refreshBoard(boardOpen) }
     if (boardOpen?.focusQuick) { quick.focus(); quick.scrollIntoView?.({ block: 'nearest' }); boardOpen.focusQuick = false }
-    if (boardOpen?.focusEditor) { const field = boardOpen.inlineIndex == null ? editor : inlineField; const at = boardOpen.inlineIndex == null ? 0 : field.value.length; field.focus(); field.setSelectionRange?.(at, at); boardOpen.focusEditor = false }
+    if (boardOpen?.focusEditor) { const at = inlineField.value.length; inlineField.focus(); inlineField.setSelectionRange?.(at, at); boardOpen.focusEditor = false }
     if (boardOpen?.focusBoardAdd) { const control = dom.querySelector(`[data-add-section=${JSON.stringify(boardOpen.focusBoardAdd)}]:not(:disabled)`); if (control) { control.focus(); boardOpen.focusBoardAdd = null } }
     if (boardOpen?.focusBoardItem != null) { dom.querySelector(`[data-board-index="${boardOpen.focusBoardItem}"] .tt-item-actions > button`)?.focus(); boardOpen.focusBoardItem = null }
     if (boardOpen?.settleBoardItem != null && !boardOpen.boardBusy && !boardOpen.boardRefreshing) {
@@ -2068,7 +2045,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     if (!st.listLive && st.checked && Date.now() - st.refreshed > 15000 && !st.loading) load({ quiet: true })
   }
   function dirty() { return st.boardDrafts.size > 0 || Boolean(st.open?.editing && st.open.editText !== st.open.board.markdown) }
-  function pause() { richDoc.leave(); generation++; gesture.reset(); drag.cancel(); selection.disconnect(); clearReturn(); clearListeningTimers(st.open); clearTaskTimers(st.open); clearTimeout(st.open?.replyHighlightTimer); clearTimeout(st.open?.copyMessageTimer); if (st.open) st.open.copiedMessage = null; authors.disconnect(); st.open?.prose?.stop(); st.open?.replySteps?.watch(null); clearTimeout(awaitTimer); awaitTimer = null; controller?.abort(); clearTimeout(retry); stopList() }
+  function pause() { generation++; gesture.reset(); drag.cancel(); selection.disconnect(); clearReturn(); clearListeningTimers(st.open); clearTaskTimers(st.open); clearTimeout(st.open?.replyHighlightTimer); clearTimeout(st.open?.copyMessageTimer); if (st.open) st.open.copiedMessage = null; authors.disconnect(); st.open?.prose?.stop(); st.open?.replySteps?.watch(null); clearTimeout(awaitTimer); awaitTimer = null; controller?.abort(); clearTimeout(retry); stopList() }
   const uploadPreview = (file, name) => transport('POST', `${path(st.open.thread.id)}/attachments`, { name, size: file.size, type: file.type })
   return { uploadPreview, st, load, agentDrafts, loadAgentDrafts, refreshAgents() { runtimeAgents = null; redraw() }, preview, open, close, create, list, showArchived, row: threadRow, activityRows, activityFace: t => threadFace(t, 36), activityInfo: t => {
     const state = threadSubtitle({ ...t, unread: 0 }, name, activityOptions(t))

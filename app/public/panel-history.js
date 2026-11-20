@@ -71,9 +71,10 @@ export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, s
 
 export function historyBackButton(action) {
   if (!action) return null
+  const shortcut = action.shortcut ?? !action.label
   const mac = isMac(globalThis.navigator)
   return h('button', { key: 'panel-history-back', class: 'iconbtn ghost panel-history-back', type: 'button',
-    title: action.title, 'aria-label': action.label ?? 'Back', 'aria-keyshortcuts': action.label ? null : mac ? 'Meta+[' : 'Control+[', onclick: action.go }, icon.chevronLeft(20))
+    title: action.title, 'aria-label': action.label ?? 'Back', 'aria-keyshortcuts': shortcut ? (mac ? 'Meta+[' : 'Control+[') : null, onclick: action.go }, icon.chevronLeft(20))
 }
 
 export function backTitle() {

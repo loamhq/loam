@@ -6,7 +6,7 @@ import { createMessageState } from '../chat-ui.js'
 // The same live conversation mount is used in either slot. Fields and steps
 // are services of this mount; audio and host residency remain app services.
 export function mount(host, options = {}) {
-  return createThreads({ registry: host.registry, appearance: host.theme, api: host.api, redraw: host.schedule,
+  return createThreads({ registry: host.registry, api: host.api, redraw: host.schedule,
     changedAgent: agent => host.changedAgent?.(agent), agents: () => host.state.agents.list, agentsReady: () => host.state.agentsReady, providers: () => host.state.providers,
     running: host.running, rail: host.rail, nav: host.nav, openProfile: host.goProfile, openSettings: (page, provider) => host.goSettings?.(page, provider),
     listIsMain: () => ['home', 'threads'].includes(host.state.screen),
@@ -14,6 +14,15 @@ export function mount(host, options = {}) {
     historyButton: () => host.backButton(host.panelId),
     messageState: options.messageState ?? createMessageState(),
     renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event) }),
+    openBoardFile: (path, id, close) => {
+      const item = { kind: 'file', root: 'vault', path, mode: 'edit' }
+      if (host.panels.available()) {
+        if (host.panels[options.sidePanel ? 'openMain' : 'openSide'](item)) close()
+      } else {
+        globalThis.history?.replaceState?.({ ...globalThis.history.state, board: id }, '')
+        host.panels.openMain({ ...item, boardThread: id })
+      }
+    },
     openRef: (ref, from, event) => host.openFileRef(ref, from, event),
     // A listing card in an agent's reply (page/market.js).
     marketCards: (refs, context) => host.marketCards?.(refs, context) ?? null,

@@ -405,11 +405,11 @@ const running = createRunning({ api, redraw: schedule, agents: () => state.agent
 const threads = mountConversation(page, { messageState, dom: panelDOM('main'),
   navigate: (item) => panels.openMain(item),
   side: () => panels,
-  viewAddress: view => {
+  viewAddress: (view, { traverse = true } = {}) => {
     const url = new URL(globalThis.location?.href ?? threadHref(threads.st.open.thread.id), 'http://placeholder')
     if (view) url.searchParams.set('view', view)
     else url.searchParams.delete('view')
-    if (!view && globalThis.history?.state?.threadView) mainHistory.go(-1)
+    if (!view && traverse && globalThis.history?.state?.threadView) mainHistory.go(-1)
     else page.pushAddress({ threadView: Boolean(view) }, '', url.pathname + url.search)
   },
   address: (id) => {
@@ -1017,12 +1017,12 @@ const mainPanel = {
   open: item => {
     if (item.kind === 'thread') {
       files.closeFile(); apps.st.selected = null
-      const pending = threads.open(item.id, { routed: true, push: item.push !== false, listing: item.listing })
+      const pending = threads.open(item.id, { routed: true, push: item.push !== false, listing: item.listing, board: item.board })
       if (item.view) threads.setView(item.view)
       if (item.message && threads.st.open) Object.assign(threads.st.open, { replyJump: item.message, jumpKind: 'quote' })
       return pending
     }
-    if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false, list: item.list })
+    if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false, list: item.list, boardThread: item.boardThread })
     if (item.kind === 'app' && !state.wide && item.push === false) return goApps({ push: false })
     if (item.kind === 'profile') return goProfile(item.id, { push: item.push !== false })
     const ticket = ++importRequest
@@ -1063,16 +1063,17 @@ if (globalThis.location?.href) {
 function routePanels(value = globalThis.location?.href) {
   if (!value) return
   const url = new URL(value), item = itemFromURL(value)
+  const entry = globalThis.history?.state
   const at = parseFilesPath(url.pathname)
-  if (at && (!state.wide || !item || history.state?.folder || !history.state?.files)) {
+  if (at && (!state.wide || !item || entry?.folder || !entry?.files)) {
     if (itemKey(item) !== itemKey(mainPanel.item())) mainPanel.clear()
     if (state.wide && !item) state.navigator = 'files'
-    page.goFiles(at.root, at.path, { push: false, isFile: history.state?.folder ? false : null, list: listFromURL(value) })
+    page.goFiles(at.root, at.path, { push: false, isFile: entry?.boardThread ? true : entry?.folder ? false : null, list: listFromURL(value), boardThread: entry?.boardThread })
     return
   }
   if (item) {
-    panels.openMain({ ...item, list: listFromURL(value), push: false })
-    if (item.kind === 'thread') threads.setView(url.searchParams.get('view'))
+    panels.openMain({ ...item, list: listFromURL(value), boardThread: entry?.boardThread, push: false })
+    if (item.kind === 'thread') threads.setView(url.searchParams.get('view') ?? (entry?.board === item.id ? 'board' : null))
     return
   }
   mainPanel.clear()
@@ -1290,7 +1291,7 @@ else {
   }
   if (!onboarding.hello && landedThread) {
     threads.open(landedThread, { push: false, listing })
-    threads.setView(new URL(globalThis.location?.href ?? 'http://placeholder').searchParams.get('view'))
+    threads.setView(new URL(globalThis.location?.href ?? 'http://placeholder').searchParams.get('view') ?? (globalThis.history?.state?.board === landedThread ? 'board' : null))
   }
   else if (!onboarding.hello && itemFromURL(globalThis.location?.href ?? page.herePath())?.kind === 'app') { state.navigator = 'apps'; panels.openMain({ ...itemFromURL(location.href), push: false }) }
   else if (!onboarding.hello && page.herePath() === '/apps') goApps({ push: false })
@@ -1310,7 +1311,11 @@ page.githubReturn()
 // choices, and a pre-retirement stored session is resolved once into its
 // imported thread above before the obsolete storage key is forgotten.
 const landedOn = parseFilesPath(page.herePath())
-if (landedOn) { state.navigator = 'files'; page.goFiles(landedOn.root, landedOn.path, { push: false, list: listFromURL(globalThis.location?.search ?? '') }) }
+if (landedOn) {
+  const boardThread = globalThis.history?.state?.boardThread
+  state.navigator = 'files'
+  page.goFiles(landedOn.root, landedOn.path, { push: false, isFile: boardThread ? true : null, boardThread, list: listFromURL(globalThis.location?.search ?? '') })
+}
 else render()
 // Initial main routing may finish after the saved side was mounted during
 // startup. With no interaction yet, the restored side owns attention.
