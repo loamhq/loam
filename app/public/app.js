@@ -369,6 +369,7 @@ const activityOptions = { registry, api, redraw: schedule, agents: () => state.a
   chatFace: record => threads.activityFace(record),
   chatInfo: record => threads.activityInfo(record),
   openChat: record => openActivityThread(record.id),
+  resources: () => running.resourcesView(),
   currentWork: jobs => running.inlineView(jobs),
   providers: () => state.providers,
   openThread: id => openActivityThread(id),
@@ -1243,7 +1244,7 @@ const pageHeartbeat = setInterval(() => {
     activity.tick(state.screen === 'activity' || state.sheet?.kind === 'activity')
     if (state.screen === 'profile') { profileActivity.tick(true); profiles.refresh() }
     if (state.sheet?.detail?.kind === 'agent') settingsProfiles.refresh()
-    if (state.sheet?.detail?.kind === 'engineer') engineerActivity.tick(true)
+    if (state.sheet?.detail?.kind === 'engineer' || state.sheet?.detail?.kind === 'agent' && settingsProfiles.st.tab === 'Activity') engineerActivity.tick(true)
     schedules.tick(state.screen === 'profile' && profiles.st.manageSchedules || state.sheet?.detail?.kind === 'agent' && settingsProfiles.st.manageSchedules)
   }
   schedule()

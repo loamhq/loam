@@ -60,6 +60,7 @@ import loam_memory  # noqa: E402
 import loam_thread_engine  # noqa: E402
 import loam_thread_steps as thread_steps  # noqa: E402
 import loam_live  # noqa: E402
+import loam_storage  # noqa: E402
 import loam_settings  # noqa: E402
 import loam_appearance  # noqa: E402
 import loam_git_identity  # noqa: E402
@@ -1813,7 +1814,9 @@ class Server:
         mi = loam_live.meminfo_mb()
         room = broker.room()
         total, avail = mi.get("MemTotal"), mi.get("MemAvailable")
-        box = {"ram_total_mb": total,
+        box = {"cpu": loam_live.cpu_load(),
+               "storage": loam_storage.storage(threads_rec.VAULT),
+               "ram_total_mb": total,
                "ram_used_mb": (total - avail) if total and avail is not None else None,
                "ram_available_mb": room.get("available_mb"),
                "reserve_mb": room.get("reserve_mb"),

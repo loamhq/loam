@@ -256,3 +256,18 @@ test('agent drafts and profile face controls never draw or edit emoji regardless
     }
   }
 })
+
+test('the profile Activity tab opens its own embedded history', () => {
+  installDom()
+  const data = { identity: { display: 'Test' }, status: {}, files: { memory: {} } }
+  const st = { target: { kind: 'agent', id: 'test' }, data, tab: 'Threads', page: 1 }
+  const requested = []
+  const host = { profiles: { st }, state: { agents: createAgents([{ id: 'test', name: 'Test' }]), providers: [] },
+    threads: { st: { threads: [] } }, schedule() {} }
+  const profile = mountProfile(host, { activity: { view(options) { requested.push(options); return null } } })
+  const tab = all(profile.body('test')[0], 'profile-tab').find(button => text(button) === 'Activity')
+  tab.fire('click')
+  profile.body('test')
+  assert.equal(st.tab, 'Activity')
+  assert.deepEqual(requested, [{ embedded: true }])
+})

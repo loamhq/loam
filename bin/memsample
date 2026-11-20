@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
+import loam_storage  # noqa: E402
 
 CG = lc.USER_SLICE / "app.slice"
 OUT = lc.LOGS / "memsample.jsonl"
@@ -159,6 +160,7 @@ def main() -> int:
         append(line)
         return 1
     append(line)
+    loam_storage.refresh(at)
     return 0
 
 

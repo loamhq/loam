@@ -71,7 +71,7 @@ export function elapsed(start, now = Date.now()) {
 
 export function createActivity({ registry = createCoreRegistry(), api, redraw, agents, avatar, openRef,
   chats = () => ({ pinned: [], recent: [] }), chatFace = () => null, chatInfo = () => ({}), openChat = () => {},
-  currentWork = () => null, openThread = () => {}, providers = () => [], scoped = false }) {
+  resources = () => null, currentWork = () => null, openThread = () => {}, providers = () => [], scoped = false }) {
   const st = { items: [], now: null, total: null, next: null, jobsError: null, agent: '', kind: '',
     project: '', loaded: false, loading: false, error: '', actions: new Map(),
     confirm: null, detail: null, lastFetch: 0 }
@@ -317,25 +317,35 @@ export function createActivity({ registry = createCoreRegistry(), api, redraw, a
     const own = slots.filter(job => ['wake', 'cron', 'reviewer'].includes(job.run_kind) || job.kind === 'wake')
     const engineers = slots.filter(job => !own.includes(job))
     const jobs = [...engineers, ...(st.now?.landing || []), ...(st.now?.queue || [])]
+    const showFilters = limit === null && !project
+    const agentFilter = showFilters && !scoped ? choices('Agent', 'agent', [['', 'All agents'], ...agents().map(a => [a.id, a.name])]) : null
     return h(embedded ? 'div' : 'main', { class: `activity-page${embedded ? ' activity-embedded' : ''}`, key: 'activity', 'aria-label': 'Activity' },
       embedded ? null : h('header', { class: 'activity-head' }, h('h1', { class: 'display', text: 'Activity' })),
       st.error ? h('div', { class: 'activity-notice', role: 'alert' }, h('p', { text: st.error }), h('button', { class: 'pillbtn content-mark', text: 'Try again', disabled: st.loading, onclick: () => load() })) : null,
       st.message ? h('p', { class: 'activity-notice', role: 'status', text: st.message }) : null,
+      embedded ? null : resources(),
       embedded ? null : h('section', { class: 'activity-now', 'aria-labelledby': 'activity-now-title' },
-        h('h2', { id: 'activity-now-title', class: 'display', text: 'Now' }),
+        h('div', { class: 'activity-section-head' },
+          h('h2', { id: 'activity-now-title', class: 'display', text: 'Running now' }),
+          h('button', { class: 'activity-jump', type: 'button', onclick: event => {
+            const heading = event.currentTarget.closest('.activity-page').querySelector('#activity-feed-title')
+            heading.focus({ preventScroll: true })
+            heading.scrollIntoView({ block: 'start' })
+          } }, 'View history', icon.chevronDown(12))),
         currentWork(st.now ? [...jobs, ...own] : null),
         st.now ? [
-          jobs.length ? h('h3', { class: 'kicker activity-group-title', text: 'Engineers' }) : null,
+          jobs.length ? h('h3', { class: 'kicker activity-group-title', text: 'Engineer jobs' }) : null,
           engineers.length ? h('ol', { class: 'activity-slots', 'aria-label': 'Engineer jobs' }, engineers.map(job => jobRow(job))) : null,
           st.now.landing.length ? h('div', {}, h('h3', { class: 'activity-subtitle', text: 'Landing' }), h('ol', { class: 'activity-landings' }, st.now.landing.map(job => jobRow(job)))) : null,
           st.now.queue.length ? h('div', {}, h('h3', { class: 'activity-subtitle', text: 'Queue' }), h('ol', { class: 'activity-queue', 'aria-label': 'Engineer queue' }, st.now.queue.map((job, i) => jobRow(job, true, i)))) : null,
-          own.length ? h('section', { class: 'activity-independent' }, h('h3', { class: 'kicker activity-group-title', text: 'On their own' }), h('ol', { class: 'activity-slots' }, own.map(job => jobRow(job)))) : null,
+          own.length ? h('section', { class: 'activity-independent' }, h('h3', { class: 'kicker activity-group-title', text: 'Independent runs' }), h('ol', { class: 'activity-slots' }, own.map(job => jobRow(job)))) : null,
         ] : h('p', { class: 'activity-empty', text: st.jobsError || (st.loading ? 'Loading current work…' : 'Current jobs are unavailable.') })),
-      h('section', { class: 'activity-feed', 'aria-label': 'Earlier', 'aria-busy': String(st.loading) },
-        embedded ? null : h('h2', { id: 'activity-feed-title', class: 'display', text: 'Earlier' }),
-        limit !== null || project ? null : h('div', { class: 'activity-filters' },
-          segmentedControl({ label: 'Activity filters', options: ACTIVITY_FILTERS.map(([id, label]) => ({ id, label })), value: st.kind, choose: value => filter('kind', value), props: { class: 'activity-chips' } }),
-          !scoped ? choices('Agent', 'agent', [['', 'All agents'], ...agents().map((a) => [a.id, a.name])]) : null),
+      h('section', { class: 'activity-feed', 'aria-label': 'History', 'aria-busy': String(st.loading) },
+        embedded && !agentFilter ? null : h('div', { class: 'activity-feed-head' },
+          embedded ? null : h('h2', { id: 'activity-feed-title', tabindex: '-1', class: 'display', text: 'History' }),
+          agentFilter),
+        !showFilters ? null : h('div', { class: 'activity-filters' },
+          segmentedControl({ label: 'Activity filters', options: ACTIVITY_FILTERS.map(([id, label]) => ({ id, label })), value: st.kind, choose: value => filter('kind', value), props: { class: 'activity-chips' } })),
         ...feedRows({ embedded, limit, project }),
         limit === null && st.kind !== 'chat' && st.loaded && st.next !== null && st.next !== undefined
           ? h('button', { class: 'pillbtn content-mark activity-more', text: st.loading ? 'Loading…' : 'Load earlier', disabled: st.loading, onclick: () => load({ more: true }) }) : null))

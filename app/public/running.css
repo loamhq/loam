@@ -1,6 +1,8 @@
 /* Live sessions in Activity, with shared thread identity and End controls. */
 .run-group + .run-group { margin-top: 16px; }
-.run-group > .kicker { margin: 0 0 6px; }
+.run-group-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.run-group-head .kicker { margin:0; }
+.run-group-head .pillbtn { font-size:12px; }
 .run-row { border-bottom: 1px solid var(--paper-hover-alpha); }
 .run-row:last-child { border-bottom: 0; }
 .run-row-main { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
@@ -11,7 +13,7 @@
 .run-agent { font-size: 12px; color: var(--paper-ink-2); }
 .run-title { font-size: 15px; font-weight: 600; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
 .run-state, .run-mb { font-size: 12px; color: var(--paper-ink-2); }
-.run-row-end { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; }
+.run-row-end { display: flex; align-items: center; gap: 14px; flex: none; }
 .run-row-end .pillbtn { min-width: 56px; min-height: 44px; padding: 7px 13px; }
 .run-confirm { margin: 0 0 12px 52px; padding: 12px; border-radius: 16px; background: var(--paper-card); font-size: 14px; }
 .run-confirm p { margin: 0 0 12px; line-height: 1.5; }
@@ -27,10 +29,9 @@
   .tt-list .list-head { gap: 5px; }
   .tt-list .list-head .display { font-size: 28px; }
 }
-.run-memory-line { font-size:13px; }
-.run-memory-details > summary { cursor:pointer; }
-.run-memory-details[open] { margin-bottom:20px; }
-.run-footer { padding: 20px 0 0; display: flex; justify-content: flex-end; }
+@media (max-width:600px) {
+  .run-row-end { flex-direction:column; align-items:flex-end; gap:2px; }
+}
 .run-stale { color: var(--paper-ink-3); font-size: 12px; margin: 0 0 16px; }
 .run-agent, .run-state, .run-mb { color: var(--paper-ink-3); }
 

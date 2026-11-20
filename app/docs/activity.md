@@ -4,7 +4,7 @@ Activity opens from the first row of the phone Settings sheet, or from its
 own button at the foot of the desktop rail. The phone row uses the shared
 Settings row component, with a clock and a current work summary (for example
 “2 working” or “Nothing running”), separated from the seven settings sections.
-Back returns to the previous destination. It shows **Now**, then **Earlier**.
+Back returns to the previous destination. It shows **Server resources**, **Running now** and **History**, in that order.
 On desktop (1100 px and wider), every Activity entry uses the centered
 960 × 720 dialog, matching Settings. There is no desktop Activity page.
 Widening an open phone Activity screen restores its previous destination and
@@ -19,14 +19,31 @@ residency totals cannot say which sessions are working and do not enter the
 summary. The complete
 [application shape](app-shape.md) describes navigation, Settings and Files.
 
-Now embeds the shared [live session service](running.md): a machine memory and
-capacity line, sessions with their thread, state/age, supplied memory and End,
+The shared [live session service](running.md) supplies the resource panel.
+Memory shows used and total RAM and the estimated number of additional
+sessions admission would allow. CPU compares the one-minute Linux load average
+with the online vCPU count. It includes tasks waiting for I/O. Storage shows
+allocated bytes, filesystem capacity and space available to an ordinary user.
+Filesystem-reserved blocks account for the difference. Below 10 GiB free or
+at 90% of writable capacity used, the panel explains the risk to saving work.
+
+The disk is the filesystem containing the configured vault. Storage breakdown
+sorts allocated space by size, with the time of the survey. The vault excludes
+its conversation records, which are grouped with thread and broker session
+records. Workspaces and the standard Docker and containerd data directories
+count only on this disk. System and
+other files is the remainder at survey time. Every 30 minutes the existing
+low-priority memory sampler refreshes a small, atomically replaced cache in the
+log directory. The live route reads that cache and samples filesystem totals
+independently, including before the first breakdown is ready.
+
+Running now shows sessions with their thread, state/age, supplied memory and End,
 then occupied job slots, landing work and a nonempty queue. Idle endings recheck
 the host; working/asking/background endings require confirmation. End all idle
 uses the existing atomic host action. Memory/admission calculations stay on the
 host. Free slots and empty Queue headings are omitted.
 
-Earlier combines thread activity and the host history, newest first. One filter
+History combines thread activity and the host history, newest first. One filter
 row has All / Chats / Runs / Jobs / Changes chips and an agent menu. Runs requests
 `kind=fire,run`; Changes requests `kind=change,refused`. Threads use the same event-row shape as every other history entry, with a
 36px face, title, state or last line, trailing local time and divider. Chats
@@ -41,8 +58,8 @@ window in batches of at most 200. Generation checks reject stale filter reads.
 The host's jobs error does not hide a successful history feed.
 
 Event titles wrap to two lines. Outcome and local 24-hour time span/duration
-share the secondary line; failed or cut-off outcomes use the danger token,
-while landed stays quiet. Threads use a trailing local time. Every day heading
+share the secondary line. Failed or cut-off outcomes use a heavier
+weight, with their reasons in secondary text. Threads use a trailing local time. Every day heading
 uses the same small-caps section-label style as the live groups. Browser time
 zones are honored, verified in Los Angeles and Tokyo.
 Day headings are Today, Yesterday, then weekday/day. Jobs have `started` and a

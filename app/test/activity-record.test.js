@@ -4,6 +4,7 @@ import { foldJobChains, jobContext, engineLabel } from '../public/activity-recor
 import { integrationCatalog } from '../public/integration-catalog.js'
 import { SHAPES, ORG_SHAPES, withOrgs } from './fixtures/github.js'
 import { createActivity } from '../public/activity.js'
+import { serverResources } from '../public/server-resources.js'
 import { createRunning } from '../public/running.js'
 import { createAgents } from '../public/sessions.js'
 import { installDom } from './fakedom.js'
@@ -52,7 +53,7 @@ test('Now pairs a thread with its engineer, separates independent runs, and uses
     { ...job, id: 'first', kind: 'job', chain: 'chain', outcome: 'failed', ts: '2026-11-12T01:00:00Z' },
   ]
   const view = activity.view()
-  assert.match(text(view), /Conversations.*The plan.*Waiting on an engineer.*Opus 5.5.*Engineers.*Build the plan.*On their own.*Review the changes/s)
+  assert.match(text(view), /Conversations.*The plan.*Waiting on an engineer.*Opus 5.5.*Engineer jobs.*Build the plan.*Independent runs.*Review the changes/s)
   assert.equal(all(view, 'activity-engineer-mark').length, 2)
   assert.equal(all(view, 'activity-briefing-face').length, 2)
   assert.equal(all(view, 'activity-engineer').length, 1)
@@ -61,7 +62,7 @@ test('Now pairs a thread with its engineer, separates independent runs, and uses
   all(view, 'activity-thread-link')[0].fire('click', { stopPropagation() {} })
   assert.deepEqual(opened, ['thread'])
   running.st.liveRecords.clear(); activity.st.now.slots = []
-  assert.match(text(activity.view()), /NowNothing runningEarlier/)
+  assert.match(text(activity.view()), /Running nowView historyNothing runningHistory/)
   activity.st.items = [{ id: 'old', kind: 'job', title: 'Older work', outcome: 'completed' }]
   assert.doesNotMatch(text(activity.view()), /unknown/i)
   activity.open(activity.st.items[0])
@@ -73,4 +74,20 @@ test('agent role and short description survive the catalog adapter without inven
   assert.equal(agents.byId.get('sprout').role, 'Keeps projects moving')
   assert.equal(agents.byId.get('sprout').description, 'A little room to think')
   assert.equal('role' in agents.byId.get('quill'), false)
+})
+
+test('resource meters distinguish demand, unavailable readings, and both disk warning thresholds', () => {
+  installDom()
+  const GiB = 2 ** 30
+  function panel(used, free) {
+    return serverResources({ cpu: { load_1m: 20, vcpus: 16 },
+      storage: { used_bytes: used * GiB, free_bytes: free * GiB, total_bytes: (used + free + 3) * GiB } },
+      { 'storage-breakdown': true }, () => {})
+  }
+  assert.match(text(panel(80, 12)), /MemoryUnavailable.*20 of 16 vCPUsHeavy load.*12 GiB free/s)
+  assert.doesNotMatch(text(panel(80, 12)), /Low space/)
+  assert.match(text(panel(4, 9)), /9 GiB free · Low space/)
+  assert.match(text(panel(180, 20)), /20 GiB free · Low space/)
+  assert.match(text(panel(4, 9)), /waiting for a disk sample.*3 GiB in reserve/s)
+  assert.doesNotMatch(text(serverResources({}, {}, () => {})), /NaN|Low space|undefined/)
 })

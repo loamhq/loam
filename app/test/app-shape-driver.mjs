@@ -87,7 +87,7 @@ try {
     assert.equal(button.childNodes.length, 1, `${label} contains only its icon`)
     assert.equal(button.firstChild.nodeName.toLowerCase(), 'svg')
   }
-  assert.match(text(root), /Now[\s\S]*16 GB of 32 GB used · Room for about 12 more[\s\S]*A quieter week[\s\S]*256 MB[\s\S]*Earlier/)
+  assert.match(text(root), /Server resources[\s\S]*16 GiB of 32 GiB[\s\S]*Room for about 12 more sessions[\s\S]*Running now[\s\S]*A quieter week[\s\S]*256 MB[\s\S]*History/)
   for (const cls of ['activity-count', 'activity-unread', 'tt-unread']) assert.equal(find(find(root, 'activity-page'), cls), null)
   assert.doesNotMatch(text(root), /Mark all seen|unseen/)
   click(all(root, 'pillbtn').find(node => text(node) === 'End'))

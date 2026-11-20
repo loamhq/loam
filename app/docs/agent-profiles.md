@@ -10,7 +10,8 @@ keeps the face, editable name, current status, quoted first two soul sentences,
 Read soul, Change by talking and primary New thread above the tabs. Threads
 opens first and pages all matching thread summaries twelve at a time. The host
 currently supplies the complete summary list; this is display pagination, not
-conversation-history paging. Threads in archives remain readable.
+conversation-history paging. Threads in archives remain readable. Activity
+shows the same history filters as the main Activity page, scoped to this agent.
 
 Schedules contains wakes/crons and Manage schedules. Settings contains execution
 defaults and enabled plugin profile contributions, including voice. Files opens

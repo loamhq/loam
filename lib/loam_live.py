@@ -203,6 +203,15 @@ def started_ts(pid: int | None, proc: Path = PROC) -> float | None:
         return None
 
 
+def cpu_load() -> dict | None:
+    """One-minute Linux load compared with the number of online processors."""
+    try:
+        count = os.cpu_count()
+        return {"load_1m": os.getloadavg()[0], "vcpus": count} if count else None
+    except OSError:
+        return None
+
+
 def meminfo_mb(proc: Path = PROC) -> dict:
     out = {}
     try:

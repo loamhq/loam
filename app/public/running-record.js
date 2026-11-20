@@ -46,6 +46,6 @@ export function readLiveSession(record) {
 export function readBox(box) {
   if (!box) return null
   const unit = (kind) => ({ count: box.units?.[kind]?.count, memoryMb: box.units?.[kind]?.mb })
-  return { usedMb: box.ram_used_mb, totalMb: box.ram_total_mb, room: box.can_start,
+  return { cpu: box.cpu ?? null, storage: box.storage ?? null, usedMb: box.ram_used_mb, totalMb: box.ram_total_mb, room: box.can_start,
     jobs: unit('engineer_jobs'), wakes: unit('wakes') }
 }

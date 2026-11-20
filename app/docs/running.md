@@ -1,15 +1,11 @@
 # Running now
 
-Live sessions now live in **Activity → Now**, beside jobs and the queue.
-The duplicate Chats header button and Settings section are removed. On the
-phone Activity has its own utility beside the tab bar; desktop uses the rail
-foot. The icon shows a small live dot while a session or job runs, with no count.
-See [application shape](app-shape.md).
-
-The machine's one line shows used/total memory and the runtime's “room for
-about N more”. When supplied, job/wake memory totals remain available by
-expanding that line. Unknown memory or capacity is hidden; the page never
-calculates admission capacity or estimates session RAM.
+Open **Activity** from the desktop rail or phone Settings. Server resources
+shows memory, one-minute CPU load and vault disk capacity above Running now.
+The memory note estimates how many additional sessions can start. When the
+broker reports occupied jobs or wakes, open that note for their memory totals.
+Storage breakdown lists the sampled groups and filesystem reserve. See
+[Activity](activity.md) for storage accounting, thresholds and cache timing.
 
 Rows group **Working** (including background work), **Waiting on you**, then
 **Idle**. Permission requests and questions outrank other activity. Each row
@@ -46,7 +42,9 @@ Each live row carries `id`, `agent`, `engine`, `model`, `kind`, `thread_id`,
 `thread_title`, `title`, `state` (`working`, `asking`, `background`, `idle`),
 `last_active`, `idle_since`, `started_at`, `rss_mb`, and `ending:{loses_work,text}`.
 Thread mapping is explicit; no title matching, agent matching or CLI id inference
-is used for navigation. The gauge reads `box.ram_used_mb`, `ram_total_mb`,
+is used for navigation. The resource panel also consumes optional `box.cpu:{load_1m,vcpus}` and
+`box.storage:{used_bytes,free_bytes,total_bytes,breakdown}`. The breakdown
+holds `sampled_at` and byte counts keyed by group. The memory gauge reads `box.ram_used_mb`, `ram_total_mb`,
 `can_start`, `sessions.live`, and `units.engineer_jobs`/`wakes` (`count`, `mb`).
 Reserve and admission arithmetic stay on the host. The interface does not yet
 supply an idle timeout/deadline, so the page does not invent “steps out at 10”.

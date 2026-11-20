@@ -96,6 +96,14 @@ a run of its own, told once. That agent decides what to do: it can brief
 the engineer, and it tells the owner in General, in its own words, only if
 they need to know. The failure log and Activity keep the quiet record.
 
+**Activity.** Open Activity from the desktop rail or from Settings on a phone.
+Server resources shows memory, the estimated number of additional sessions that
+can start, one-minute CPU load against the shared CPU count, and used and free
+space on the vault disk. Open Storage breakdown to see which groups use the
+space and when they were measured. Running now lists conversations and jobs.
+History lets you filter earlier work by kind and agent. The Activity tab on an
+agent’s profile opens that agent’s history.
+
 **How Loam watches itself.** One check runs every fifteen minutes, and it is
 the only thing in Loam that watches Loam on a clock. It reads a fixed list
 of facts: every agent that is not archived finished its daily reflection in

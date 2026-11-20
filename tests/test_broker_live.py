@@ -261,6 +261,12 @@ async def main():
     check("each row has started_at, rss_mb and model (None with no process)",
           all(k in rows["c-idle"] for k in ("started_at", "rss_mb", "model", "engine")), True)
     box = view["box"]
+    check("live route supplies one-minute CPU demand and online capacity",
+          box["cpu"]["load_1m"] >= 0 and box["cpu"]["vcpus"] == os.cpu_count(), True)
+    disk = box["storage"]
+    check("live route supplies used, writable free and total on the vault filesystem",
+          0 <= disk["used_bytes"] + disk["free_bytes"] <= disk["total_bytes"] and
+          "breakdown" in disk, True)
     check("the box: reserve, start size, how many more could start",
           (box["reserve_mb"], box["start_mb"], box["can_start"]),
           (3_792, 450, min(36, cfg.MAX_SESSIONS - 5)))

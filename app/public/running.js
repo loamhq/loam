@@ -1,4 +1,5 @@
 import { h, icon } from './ui.js'
+import { serverResources } from './server-resources.js'
 import { avatar } from './chat-ui.js'
 import { agentLook, createAgents } from './sessions.js'
 import { createLink } from './link.js'
@@ -140,31 +141,26 @@ export function createRunning({ api, redraw, agents, openPanel, openConversation
     } catch (e) { await load(); st.actionError = failureSentence(e.message) }
     finally { st.bulk = false; redraw() }
   }
-  function memoryGauge() {
-    const m = st.memory
-    if (!m || !Number.isFinite(m.usedMb) || !Number.isFinite(m.totalMb) || m.totalMb <= 0) return null
-    const gb = (mb) => `${(mb / 1024).toFixed(1).replace(/\.0$/, '')} GB`
-    const text = `${gb(m.usedMb)} of ${gb(m.totalMb)} used${Number.isFinite(m.room) ? ` · Room for about ${m.room} more` : ''}`
-    const extras = [['engineer job', m.jobs], ['wake', m.wakes]].filter(([, value]) => value?.count > 0)
-      .map(([label, value]) => `${value.count} ${label}${value.count === 1 ? '' : 's'}${Number.isFinite(value.memoryMb) ? ` · ${Math.round(value.memoryMb)} MB` : ''}`)
-    return extras.length ? h('details', { class: 'run-memory-details' },
-      h('summary', { class: 'run-memory-line', text }), h('p', { class: 'activity-meta', text: extras.join(' · ') }))
-      : h('p', { class: 'run-memory-line', text })
+  const expanded = { 'storage-breakdown': false, 'memory-details': false }
+  function resourcesView() {
+    return serverResources(st.memory, expanded, id => { expanded[id] = !expanded[id]; redraw() })
   }
 
   function inlineView(jobs = []) {
     const jobsKnown = Array.isArray(jobs)
     jobs = jobs || []
     const sessions = rows()
-    return h('div', { class: 'run-inline' }, memoryGauge(),
+    return h('div', { class: 'run-inline' },
       st.phase === 'retrying' ? h('p', { class: 'run-stale', role: 'status', text: 'Reconnecting…' }) : st.phase === 'stopped' ? h('p', { class: 'run-stale', role: 'status' }, 'Live updates paused. ', h('button', { class: 'quietlink', onclick: reconnect, text: 'Reconnect' })) : null,
       st.error || st.actionError ? h('div', { class: 'banner', role: 'alert' }, st.actionError || st.error, h('button', { class: 'quietlink', onclick: () => { st.actionError = ''; reconnect() }, text: 'Try again' })) : null,
       !st.ready && !st.error ? h('p', { class: 'muted', role: 'status', text: 'Checking what’s running…' }) : null,
       st.ready && jobsKnown && !sessions.length && !jobs.length ? h('p', { class: 'activity-empty', text: 'Nothing running' }) : null,
-      sessions.length ? h('section', { class: 'run-group' }, h('h3', { class: 'kicker', text: 'Conversations' }), ...sessions.map(row => rowView(row, jobs))) : null,
-      sessions.filter(row => row.state === 'idle').length >= 2 ? h('div', { class: 'run-footer' }, h('button', { class: 'pillbtn content-mark', disabled: st.bulk || st.pending.size > 0, onclick: endIdle, text: st.bulk ? 'Ending idle sessions…' : 'End all idle' })) : null)
+      sessions.length ? h('section', { class: 'run-group' },
+        h('div', { class: 'run-group-head' }, h('h3', { class: 'kicker', text: 'Conversations' }),
+          sessions.filter(row => row.state === 'idle').length >= 2 ? h('button', { class: 'pillbtn content-mark', disabled: st.bulk || st.pending.size > 0, onclick: endIdle, text: st.bulk ? 'Ending idle sessions…' : 'End all idle' }) : null),
+        ...sessions.map(row => rowView(row, jobs))) : null)
   }
-  return { st, rows, receive, load, start, subscribe, end, requestEnd, inlineView, liveDot, endIdle,
+  return { st, rows, receive, load, start, subscribe, end, requestEnd, resourcesView, inlineView, liveDot, endIdle,
     syncDialog: () => { if (!st.focusConfirm) return; const node = document.querySelector('.run-inline .run-confirm'); if (node) { st.focusConfirm = false; node.scrollIntoView?.({ block: 'nearest' }); node.querySelector('button')?.focus?.({ preventScroll: true }) } },
     getSession: (id) => rows().find((r) => r.id === id),
     forMember: (threadId, agent) => rows().find((r) => r.kind === 'thread' && r.threadId === threadId && r.agent === agent),

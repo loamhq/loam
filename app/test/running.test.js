@@ -107,7 +107,7 @@ test('the exact live route supplies thread identity, asking state, memory, and l
   assert.equal(row.state, 'waiting'); assert.equal(row.losesWork, true); assert.equal(row.mapped, true)
   assert.equal(readLiveSession(live({ rss_mb: null })).memoryMb, null)
   assert.equal(readLiveSession({ kind: 'engineer-job', id: 'job' }), null)
-  assert.deepEqual(readBox(box), { usedMb: 18432, totalMb: 32768, room: 20, jobs: { count: 1, memoryMb: 700 }, wakes: { count: 2, memoryMb: 80 } })
+  assert.deepEqual(readBox(box), { cpu: null, storage: null, usedMb: 18432, totalMb: 32768, room: 20, jobs: { count: 1, memoryMb: 700 }, wakes: { count: 2, memoryMb: 80 } })
 })
 test('rich live snapshots replace the whole resident set and open the exact thread member', async () => {
   const running = controller({ redraw() {}, agents: () => [], api: async () => ({ sessions: [live()], box }) })
