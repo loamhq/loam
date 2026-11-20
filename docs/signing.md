@@ -136,9 +136,10 @@ release carries a key, the landing signs the tag as part of that step:
   bin/sign-release 0.3.0 <commit> --key ~/.ssh/loam_release.pub
   ```
 
-  It checks the commit is on `main` and its manifest says `0.3.0`, shows
-  what it is about to sign, and asks. On a yes it signs, checks the
-  signature as the installs will, and pushes the tag.
+  It checks the commit is on `main`, its manifest says `0.3.0`, and its
+  release notes have a section for the agent (`CONTRIBUTING.md`). It shows
+  what it is about to sign and asks. On a yes it signs, checks the signature
+  as the installs will, and pushes the tag.
 
 A project whose tree has no `docs/releases/signers` tags as it always did.
 

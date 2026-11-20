@@ -396,19 +396,33 @@ try:
     def origin_has(tag: str) -> bool:
         return bool(git(REL, "ls-remote", "origin", f"refs/tags/{tag}"))
 
+    def agent_notes(version: str) -> dict:
+        return {f"docs/releases/{version}.md": "# Loam\n\n## For your agent\n\nA change.\n"}
+
     res = landed("1.5.0")
-    out = wt.cut_release(REL, res, "1.5.0")
+    out = wt.cut_release(REL, res, "1.5.0", require_notes=True)
+    check("Loam release step: missing notes refuse the tag before signing",
+          (out["state"], "docs/releases/1.5.0.md" in out["detail"],
+           origin_has("1.5.0"), git(REL, "tag", "-l", "1.5.0")),
+          ("refused", True, False, ""))
+    res = landed("1.5.0", {"docs/releases/1.5.0.md":
+                         "## For your agent\n\n<!-- Fill this in -->\n\n## Developer details\nBuild.\n"})
+    out = wt.cut_release(REL, res, "1.5.0", require_notes=True)
+    check("Loam release step: a placeholder and developer notes refuse the tag",
+          (out["state"], origin_has("1.5.0")), ("refused", False))
+    res = landed("1.5.0", agent_notes("1.5.0"))
+    out = wt.cut_release(REL, res, "1.5.0", require_notes=True)
     check("release step, no signing key here: waits for sign-release, pushes nothing",
           (out["state"], "bin/sign-release 1.5.0" in out["detail"], origin_has("1.5.0"),
            "waiting to be signed" in wt.release_section(out)),
           ("to-sign", True, False, True))
     git(REL, "config", "user.signingKey", str(KEY_A))
-    out = wt.cut_release(REL, res, "1.5.0")
+    out = wt.cut_release(REL, res, "1.5.0", require_notes=True)
     check("release step, a key the previous release does not trust: refused, no tag",
           (out["state"], origin_has("1.5.0"), git(REL, "tag", "-l", "1.5.0")),
           ("refused", False, ""))
     git(REL, "config", "user.signingKey", str(KEY_B))
-    out = wt.cut_release(REL, res, "1.5.0")
+    out = wt.cut_release(REL, res, "1.5.0", require_notes=True)
     git(REL, "fetch", "-q", "origin", "+refs/tags/1.5.0:refs/tags/1.5.0")
     check("release step, the right key: signed in the same step, pushed, verifies",
           (out["state"], "signed by loam-release" in out["detail"],
@@ -438,7 +452,13 @@ try:
     git(REL, "reset", "-q", "--hard", "origin/main")
     git(REL, "config", "--unset", "user.signingKey")
     res = landed("2.1.0")
-    out = wt.cut_release(REL, res, "2.1.0")
+    missing = run(sys.executable, ROOT / "bin/sign-release", "2.1.0", "--key", KEY_B,
+                  "--yes", cwd=device, check_=False)
+    check("sign-release: missing agent notes refuse the tag before signing",
+          (missing.returncode != 0, "For your agent" in missing.stderr, origin_has("2.1.0")),
+          (True, True, False))
+    res = landed("2.1.0", agent_notes("2.1.0"))
+    out = wt.cut_release(REL, res, "2.1.0", require_notes=True)
     check("the landing hands 2.1.0 to sign-release", out["state"], "to-sign")
     bad = run(sys.executable, ROOT / "bin/sign-release", "2.2.0", "--key", KEY_B, "--yes",
               cwd=device, check_=False)

@@ -96,10 +96,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import loam_agents
+import loam_attention
 import loam_broker as cfg
 import loam_config as lc
 import loam_engineer
 import loam_lock
+import loam_release_notes
 import loam_signing
 import loam_skills as sk
 import loam_starter
@@ -113,7 +115,7 @@ VERSION_FILE = "manifest.json"
 # Release notes, in the release's own tree: `<version>.md`. With none, the
 # annotated tag's message; with neither, the commit subjects between the two
 # releases, as material for the agent and never shown to the person as is.
-NOTES_DIR = "docs/releases"
+NOTES_DIR = loam_release_notes.DIRECTORY
 KEEP_BACKUPS = 5
 BROKER_UNIT = "loam-session-broker.service"
 GATEWAY_UNIT = "loam-plugins-gateway.service"
@@ -580,11 +582,12 @@ def running() -> bool:
 
 # -- notices for the person's agent ------------------------------------------------------
 
-def notes_for(tag: str, old: str | None) -> str:
+def notes_for(tag: str, old: str | None, commit: str | None = None) -> str:
     """The release's notes: its notes file, its tag message, or the commit
     subjects since ``old``."""
-    text = show(f"refs/tags/{tag}", f"{prefix()}{NOTES_DIR}/{bare(tag)}.md") or \
-        show(f"refs/tags/{tag}", f"{NOTES_DIR}/{bare(tag)}.md")
+    ref = commit or f"refs/tags/{tag}"
+    text = show(ref, f"{prefix()}{NOTES_DIR}/{bare(tag)}.md") or \
+        show(ref, f"{NOTES_DIR}/{bare(tag)}.md")
     if text:
         return text.strip()
     kind = git("cat-file", "-t", f"refs/tags/{tag}", check=False).stdout.strip()
@@ -603,14 +606,15 @@ def notes_for(tag: str, old: str | None) -> str:
             "for you, not for pasting:\n\n" + subjects) if subjects else ""
 
 
-def save_notes(tag: str, old: str | None) -> Path:
+def save_notes(tag: str, old: str | None, commit: str | None = None) -> Path:
     path = _path(f"notes/{bare(tag)}.md")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(notes_for(tag, old) + "\n", encoding="utf-8")
+    path.write_text(notes_for(tag, old, commit) + "\n", encoding="utf-8")
     return path
 
 
-def notice(kind: str, line: str, note: str, key: str | None = None) -> dict | None:
+def notice(kind: str, line: str, note: str, key: str | None = None, *,
+           release_commit: str | None = None) -> dict | None:
     """Leave a notice for the broker to deliver: ``line`` the fact and
     ``note`` what it comes with, handed to the system persona
     (lib/loam_attention.py; nothing is posted in General since 2026-11-19).
@@ -621,6 +625,8 @@ def notice(kind: str, line: str, note: str, key: str | None = None) -> dict | No
     rec = {"id": f"{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}",
            "kind": kind, "line": line, "note": note, "at": now_iso(),
            "thread": None, "persona": None}
+    if release_commit:
+        rec["release_commit"] = release_commit
     # "Told" is written first (2026-11-17): if it cannot be, no notice is
     # left, rather than a new one on every check that cannot record it.
     if key:
@@ -631,15 +637,91 @@ def notice(kind: str, line: str, note: str, key: str | None = None) -> dict | No
     return rec
 
 
+def crossed_release_notes(old: str, version: str, commit: str) -> list[tuple[str, str, str]]:
+    """Read skipped versions' revised notes from the commit this apply used."""
+    folder = f"{prefix()}{NOTES_DIR}/"
+    files = git("ls-tree", "-r", "--name-only", commit, "--", folder,
+                check=False).stdout.splitlines()
+    older, newer = version_key(old), version_key(version)
+    releases = []
+    for path in files:
+        name = Path(path).stem
+        key = version_key(name)
+        if not path.endswith(".md") or not key or not older < key < newer:
+            continue
+        editorial = loam_release_notes.for_agent(show(commit, path) or "")
+        if editorial:
+            releases.append((key, name, editorial, f"{commit}:{path}"))
+    return [(name, text, source) for _, name, text, source in sorted(releases, reverse=True)]
+
+
+def release_notice_detail(rec: dict) -> str:
+    """Add the agent's reading at delivery, including applies written by old code."""
+    line, detail = rec.get("line") or "", rec.get("note") or ""
+    old = None
+    if rec["kind"] == "applied":
+        match = re.fullmatch(r"Loam updated from (v?\d+\.\d+\.\d+) to (\d+\.\d+\.\d+)\.", line)
+        if not match:
+            return detail
+        old, version = match.groups()
+    else:
+        match = re.match(r"Loam (\d+\.\d+\.\d+) is available ", line)
+        if not match:
+            return detail
+        version = match[1]
+    path = _path(f"notes/{version}.md")
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return detail
+
+    instructions = (
+        f"Use the release notes to decide what matters to {_owner()}, based on what "
+        "they use and what they have asked for. If a major change matters to them, "
+        "share one short message about the most relevant change in your own words. "
+        "Usually stay quiet about small changes. Give one line only if a small change "
+        "touches something they use. Leave behind-the-scenes fixes unannounced. "
+        "Skip Developer details. Never send a list of changes. Follow the posting "
+        "directions below only if you decide to share."
+    )
+    detail = f"{instructions}\n\n{detail}"
+    target = loam_release_notes.for_agent(raw)
+    if not target:
+        return detail  # the notice already names the legacy notes file
+
+    commit = rec.get("release_commit")
+    if old and not commit:
+        # An apply can start on the previous release and finish under a
+        # broker with this code. The old updater records the target here.
+        run = read_json("apply.json") or {}
+        if (run.get("action"), run.get("from_version"), run.get("to_version")) == (
+                "apply", old, version):
+            commit = run.get("to_commit")
+    crossed = crossed_release_notes(old, version, commit) if old and commit else []
+    inline = [f"\n\nLoam {name} · For your agent\n\n{body}"
+              for name, body, _ in [(version, target, ""), *crossed]]
+    if len(detail) + sum(map(len, inline)) <= loam_attention.DETAIL_CHARS:
+        return detail + "".join(inline)
+    detail += "\n\nRead the For your agent section in the saved notes file above."
+    if crossed:
+        detail += (f" For versions skipped by this update, use git show in {runtime()} "
+                   "with these sources: " + ", ".join(source for _, _, source in crossed))
+    return detail
+
+
 def owed_notices() -> list[dict]:
     folder = _path("notices")
     out = []
     for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
         try:
-            out.append({**json.loads(path.read_text(encoding="utf-8")),
-                        "_path": str(path)})
+            rec = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("kind") in ("available", "applied"):
+            rec["note"] = release_notice_detail(rec)
+        out.append({**rec, "_path": str(path)})
     return out
 
 
@@ -744,8 +826,8 @@ def _release_message(what: str) -> str:
             "If nothing matters to them, leave the release unannounced.")
 
 
-def tell_available(tag: str, current: str | None) -> None:
-    path = save_notes(tag, tag_of(current))
+def tell_available(tag: str, current: str | None, commit: str | None = None) -> None:
+    path = save_notes(tag, tag_of(current), commit)
     notice("available",
            f"Loam {bare(tag)} is available (this install runs {current}).",
            f"Loam {bare(tag)} is out; this install runs {current}. Its notes are "
@@ -822,7 +904,7 @@ def tell_refused(tag: str | None, refusal: Refusal) -> None:
 
 
 def tell_applied(rec: dict) -> None:
-    notes = save_notes(rec["to_tag"], rec.get("from_tag"))
+    notes = save_notes(rec["to_tag"], rec.get("from_tag"), rec.get("to_commit"))
     edits = rec.get("library_edits") or {}
     kept = (f" System/Loam had edits; they were replaced, and the copy is "
             f"kept at {rec['backup']}." if edits.get("any") else "")
@@ -834,7 +916,8 @@ def tell_applied(rec: dict) -> None:
            + _release_message("what is new for them")
            + f" Do not paste the notes or list commits.{kept} If something is wrong with it, "
            f"`{runtime()}/bin/loam-update rollback` puts "
-           f"{rec.get('from_version')} back.{warn}")
+           f"{rec.get('from_version')} back.{warn}",
+           release_commit=rec.get("to_commit"))
 
 
 def tell_failed(rec: dict, why: str) -> None:
@@ -922,7 +1005,7 @@ def check(tell: bool = True) -> dict:
                     out["blocked"] = block.as_dict() if block else None
                     out["changes"] = library_changes("HEAD", f"refs/tags/{tag}")
                     if tell:
-                        tell_available(tag, cur["version"])
+                        tell_available(tag, cur["version"], out["signature"]["commit"])
         out["library"] = library_edits("HEAD")
     except Refusal as r:
         out["error"] = r.as_dict()

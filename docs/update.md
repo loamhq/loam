@@ -282,9 +282,12 @@ release notices name the original Hello by its thread ID. Renaming Hello
 or deleting its list keeps news there. Deleting the thread sends subsequent
 news to General. Older installs keep their previous delivery instructions.
 The note names `<state>/update/notes/<version>.md`. The agent reads it and
-shares a brief account of what matters to this owner. A release can pass
-without a message. Update failures and other operational notices keep their
-usual handling.
+gets the **For your agent** section inline when the release has one. It
+looks at what the owner uses and has asked for, then shares one short
+message about the most relevant major change if there is one. A small
+change gets a line only if it touches something the owner uses. Developer
+details can be skipped, and the owner gets no list of changes. Update
+failures and other operational notices keep their usual handling.
 
 A notice is told once: its id is the fact's key, and a key already told
 is not told again (`lib/loam_attention.py`). A notice whose file cannot be
@@ -293,9 +296,12 @@ broker's journal) with the `chown` that fixes it. Until 0.2.1 a notice a
 root run had left was posted, and given a paid turn, every 30 seconds.
 
 The notes come from the release's own `docs/releases/<version>.md`. If
-there is none, the annotated tag's message is used. If neither exists, the
-commit subjects since the running release are used, labelled as material
-for the agent.
+an update skips versions, its applied notice also includes agent sections
+for those versions from the incoming commit, where available. This lets a
+later tag carry revised notes for older tags. Long notes can be read from
+the saved file or the Git sources named in the notice. For older releases
+without a notes file the fallback is the annotated tag's message, then the
+commit subjects since the running release as background for the agent.
 
 | Notice | When | Once? |
 |---|---|---|

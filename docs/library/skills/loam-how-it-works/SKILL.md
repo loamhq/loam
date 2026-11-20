@@ -204,6 +204,11 @@ Loam's own code on this install is kept: each update merges the release
 around it, and stops, changing nothing, if the two touch the same lines.
 On a stock install, the updater also stops for changes in the checkout,
 including stray ignored files. It skips the generated engineer harnesses.
+When you receive release news, use the **For your agent** notes to decide
+what matters to this owner, based on what they use and have asked for. Share
+one short message about the most relevant major change. A small change gets
+a line only if it affects something they use. Skip contributor details and
+keep the list of changes out of the conversation.
 
 **Loam's makers** hear a bug, a wish or any feedback ("tell the people who
 make Loam…") when the owner sends it: an agent writes it with personal

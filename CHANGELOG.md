@@ -1,7 +1,7 @@
 # Changelog
 
-Each release's notes are written for the people who run Loam, in
-`docs/releases/<version>.md`. The app shows them when it offers an update.
+Find each release's notes in `docs/releases/<version>.md`. Loam gives the
+notes to the person's agent, who decides what is worth sharing with them.
 
 - [0.2.15](docs/releases/0.2.15.md), 2026-11-19: connect Syncthing to Loam
   using the key it already has on your server.

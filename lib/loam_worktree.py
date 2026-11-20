@@ -25,6 +25,7 @@ import loam_ci
 import loam_commit_identity
 import loam_git_identity
 import loam_lock
+import loam_release_notes
 import loam_signing
 
 WORKTREES = lc.STATE / "worktrees"
@@ -1841,7 +1842,8 @@ def _land_once(project: eng.Project, record: dict, message: str, *,
             if release:
                 say(f"landing: release tag {release}")
                 try:
-                    result["release"] = cut_release(repo, result, release)
+                    result["release"] = cut_release(repo, result, release,
+                                                    require_notes=project.platform)
                 except (WorktreeError, OSError,
                         subprocess.SubprocessError) as exc:
                     # Not the landing's failure: `main` has already moved.
@@ -1914,7 +1916,7 @@ def tree_versions(repo: Path, sha: str) -> dict[str, str]:
     return found
 
 
-def cut_release(repo: Path, result: dict, tag: str) -> dict:
+def cut_release(repo: Path, result: dict, tag: str, *, require_notes: bool = False) -> dict:
     """Tag what landed as `tag` and push the tag, or say why not. Never
     raises and never touches `main`: a refused tag leaves the merge landed.
 
@@ -1948,6 +1950,10 @@ def cut_release(repo: Path, result: dict, tag: str) -> dict:
         said = ", ".join(f"{name} says {v}" for name, v in wrong.items())
         return release_refused(tag, f"the landed tree's version is not "
                                     f"{tag}: {said}", sha)
+    if require_notes:
+        missing = loam_release_notes.requirement(repo, sha, tag)
+        if missing:
+            return release_refused(tag, missing, sha)
     local = rev(repo, f"refs/tags/{tag}")
     if local and local != sha:
         return release_refused(tag, f"the tag already exists here, at "

@@ -340,7 +340,11 @@ clear_notices()
 
 # -- a failed apply ------------------------------------------------------------------------
 
-release("1.2.0", {"lib/loam_threads.py": "import loam_config\n# 1.2.0\n"})
+release("1.2.0", {
+    "lib/loam_threads.py": "import loam_config\n# 1.2.0\n",
+    "docs/releases/1.1.0.md": "## For your agent\n\nFind the updated library in Files.\n",
+}, notes="## For your agent\n\nOpen Files to read the thread's notes.\n\n"
+         "## Developer details\n\nInternal migration details.\n")
 box = FakeBox(fail={"broker": 1})
 rec = up.apply(box=box)
 check("a failed broker restart: failed, and the record says 1.0.0 is back",
@@ -435,6 +439,18 @@ check("...clean, it merges: applied, on its branch, its local commit kept",
       (rec["outcome"], up.branch(), git(DEV, "merge-base", "--is-ancestor", local, "HEAD") == "",
        up.running_version(), "Sam's line." in (DEV / "docs" / "logs.md").read_text()),
       ("applied", "mike", True, "1.2.0", True))
+applied_news = next(n for n in notices() if n["kind"] == "applied")
+check("applied news includes the incoming and crossed agent sections only",
+      ("Open Files to read" in applied_news["note"],
+       "Find the updated library" in applied_news["note"],
+       "Internal migration details" in applied_news["note"],
+       "Better words in the library" in applied_news["note"],
+       "Never send a list of changes" in applied_news["note"]),
+      (True, True, False, False, True))
+old_notice = json.loads(Path(applied_news["_path"]).read_text())
+old_notice.pop("release_commit")
+check("a notice queued by the old updater uses the release commit from the apply record",
+      "Find the updated library" in up.release_notice_detail(old_notice), True)
 
 DEVC = TMP / "devc"
 install(DEVC)
@@ -661,8 +677,7 @@ async def broker_checks():
     check("...a `to` that is not a version a 400", code, 400)
 
     clear_notices()
-    up.notice("applied", "Loam updated from 1.0.0 to 1.2.0.", "Read /x/notes.md and say it.")
-    note = notices()[0]
+    note = applied_news
     sent = []
 
     def schedule(turn):
@@ -679,7 +694,12 @@ async def broker_checks():
     check("deliver_note: a fact for the system persona, the line and its note",
           (got, [(f["fact"], f["by"], f["detail"]) for f in told]),
           ("delivered", [("Loam updated from 1.0.0 to 1.2.0.", "loam update",
-                          "Read /x/notes.md and say it.")]))
+                          applied_news["note"])]))
+    prompt = up.loam_attention.input_text(told)
+    check("the agent's input contains the editorial and sharing instructions",
+          ("Open Files to read" in prompt, "Find the updated library" in prompt,
+           "Internal migration details" in prompt, "what they have asked for" in prompt),
+          (True, True, False, True))
     check("...nothing posted in General and no turn given (2026-11-19)",
           (len(threads.read(threads.GENERAL_ID)[1]) - general_before, len(sent)), (0, 0))
     up.notice_done(note, got)

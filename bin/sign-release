@@ -9,6 +9,7 @@ then checks, before it signs anything:
 
   - COMMIT (default: the remote's `main`) is on the remote's `main`;
   - its manifest.json says VERSION;
+  - its release notes have a nonempty section for the agent;
   - no tag VERSION is on the remote yet (or the one there is this same
     signed release, and there is nothing to do);
 
@@ -35,6 +36,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_release_notes  # noqa: E402
 import loam_signing  # noqa: E402
 
 
@@ -89,6 +91,9 @@ def main() -> int:
     if git("rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
         sys.exit(f"There is a local tag {tag} that is not on {remote}: "
                  f"`git tag -d {tag}`, then run this again.")
+    missing = loam_release_notes.requirement(repo, sha, tag)
+    if missing:
+        sys.exit(missing)
     if not need:
         print("Note: neither the previous release nor this one carries a key in "
               f"{loam_signing.SIGNERS_FILE}, so no install will check this "

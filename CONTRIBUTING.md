@@ -60,6 +60,32 @@ by a landing that asks for one (`release-tag` in the job's directory). An
 install updates by moving its checkout to the newest release tag on its
 `origin` (`docs/update.md`).
 
+Before requesting the tag, write `docs/releases/<version>.md` and link it
+from `CHANGELOG.md`. The Loam landing and `bin/sign-release` check the
+commit being tagged for a nonempty `## For your agent` section.
+
+Write this section for the agent who knows the person and decides whether
+to tell them. For each noticeable change, say in plain words who it matters
+to, what they will see or can do, and how to try it. Give the words they can
+say to their agent or the place to click. Mark each change **Major** if it
+is worth a message for the people it affects, or **Small** if it is worth
+a line only when it affects something they use. Group fixes people will
+never notice into one short **Behind the scenes** line. A release with
+one real change takes a few lines. Put any contributor detail under
+`## Developer details`, which the agent can skip. Use generic descriptions
+of the people and agents involved.
+
+For example:
+
+```markdown
+# Loam 1.2.3
+
+## For your agent
+
+- **Major · People who use Files to share folders.** Download a whole
+  folder as one ZIP. In Files, open the folder's menu and choose Download.
+```
+
 Once `docs/releases/signers` holds a key, a release must be an SSH-signed
 tag, and installs refuse one that does not verify against the keys they
 already hold. The landing signs it when the checkout has a signing key, and
