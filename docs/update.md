@@ -24,6 +24,8 @@ with (`provider-pin apply`, `lib/loam_pins.py`: each build installed beside
 the others under `~/.local/share/<cli>/versions/` and the link in
 `~/.local/bin/` moved; sign-ins and provider homes untouched), the
 providers' memory pins (`provider-memory pin`).
+An installed reviewer is also regenerated from the incoming reviewer plugin's
+instructions during the library step.
 
 ## The two kinds of install
 

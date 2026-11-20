@@ -54,6 +54,11 @@ def main(argv: list[str]) -> int:
             provision = Path(__file__).with_name("provision")
             subprocess.run([sys.executable, str(provision), "--migrate-persona-maps"],
                            check=True)
+            reviewer = lc.ROOT / "reviewer"
+            source = lc.ROOT / "plugins" / "reviewer" / "instructions.md"
+            if (reviewer / "CLAUDE.md").is_file() and source.is_file():
+                subprocess.run([sys.executable, str(provision), "--reviewer"],
+                               check=True)
         for line in sk.refresh():
             print(f"  {line}")
         return 0

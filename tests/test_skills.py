@@ -23,10 +23,12 @@ Run: python3 tests/test_skills.py
 from __future__ import annotations
 
 import os
+import runpy
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="test-skills-"))
@@ -74,6 +76,34 @@ def tree(root: Path) -> list[str]:
 
 def main() -> int:
     check("the scratch config is the one read", lc.VAULT, TMP / "vault")
+
+    # An update still runs the old updater process after moving the checkout.
+    # Exercise the incoming library command it invokes at that point.
+    import loam_update  # noqa: PLC0415
+    incoming = TMP / "incoming"
+    reviewer = incoming / "reviewer"
+    source = incoming / "plugins" / "reviewer" / "instructions.md"
+    reviewer.mkdir(parents=True)
+    (reviewer / "CLAUDE.md").write_text("stale instructions\n")
+    source.parent.mkdir(parents=True)
+    source.write_text("new instructions\n")
+    library = runpy.run_path(str(ROOT / "bin" / "library"))
+    with patch.object(lc, "ROOT", incoming), \
+         patch.object(loam_update, "read_json", return_value={"to_commit": "new"}), \
+         patch.object(loam_update, "head", return_value="new"), \
+         patch.object(sk, "install_library", return_value={}), \
+         patch.object(sk, "refresh", return_value=[]), \
+         patch.object(subprocess, "run") as invoked:
+        library["main"](["install"])
+        check("an update regenerates an installed reviewer",
+              [call.args[0][-1] for call in invoked.call_args_list],
+              ["--migrate-persona-maps", "--reviewer"])
+        (reviewer / "CLAUDE.md").unlink()
+        invoked.reset_mock()
+        library["main"](["install"])
+        check("an update leaves an uninstalled reviewer alone",
+              [call.args[0][-1] for call in invoked.call_args_list],
+              ["--migrate-persona-maps"])
 
     # -- the starter vault, from a blank config --------------------------------
     out = subprocess.run([sys.executable, str(ROOT / "bin" / "library"), "seed-vault"],
