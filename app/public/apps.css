@@ -42,7 +42,7 @@
 .apps-frame-address { flex:1; min-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--paper-ink-2); font-size:14px; }
 .apps-copy-status { font-size:12px; color:var(--paper-ink-2); }
 .apps-copy-status:empty { display:none; }
-.apps-frame iframe { flex:1; width:100%; min-height:0; border:0; background:var(--paper-raised); }
+.apps-frame iframe { flex:1; width:100%; min-height:0; border:0; background:var(--reading-ground); }
 .apps-page :focus-visible,.apps-toolbar :focus-visible { outline:2px solid var(--signal-crema); outline-offset:2px; }
 .apps-entry .apps-row:focus-visible { outline-offset:-2px; }
 .apps-row:active { background:var(--paper-pressed); }

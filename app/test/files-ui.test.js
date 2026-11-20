@@ -350,9 +350,9 @@ test('an image is drawn from checked bytes through an object URL, and given back
 
 test('a file whose bytes are not the picture its name says is not drawn', async () => {
   click(rowNamed('fake.png'))
-  await until(() => find(root, 'fs-stripes'))
+  const fallback = await until(() => find(root, 'fs-media'))
   assert.equal(find(root, 'fs-img'), null)
-  assert.match(text(find(root, 'fs-stripes')), /not the picture its name says/)
+  assert.match(text(fallback), /not the picture its name says/)
   assert.ok(find(root, 'fs-dlbtn'))
   click(find(root, 'fs-back'))
   await until(() => !find(root, 'fs-file'))
@@ -375,8 +375,8 @@ test('a binary file is a download; a text file the host cannot read as text says
   if (find(root, 'fs-more')) click(find(root, 'fs-more'))
   await until(() => rowNamed('sheet.bin'))
   click(rowNamed('sheet.bin'))
-  await until(() => find(root, 'fs-stripes'))
-  assert.ok(find(find(root, 'fs-stripes'), 'fs-dlbtn'))
+  const fallback = await until(() => find(root, 'fs-media'))
+  assert.ok(find(fallback, 'fs-dlbtn'))
   assert.ok(!broker.seen.some((s) => s.path === '/v1/files/read' && s.search.includes('sheet.bin')), 'a binary is not read as text')
   click(find(root, 'fs-back'))
   await until(() => !find(root, 'fs-file'))

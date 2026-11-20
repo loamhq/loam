@@ -1884,7 +1884,7 @@ function builtinFileView(files, { close, closeLabel, wide, field, onLink = null,
   else if (f.view === 'image' || f.view === 'pdf' || f.view === 'other')
     body = h(
       'div',
-      { class: 'fs-media fs-stripes' },
+      { class: 'fs-media' },
       h('span', { class: 'fs-chip', text: `${tileOf(name).label} file` }),
       f.blobError ? h('div', { class: 'fs-quiet', text: f.blobError }) : null,
       f.caps.download ? downloadButton(f) : h('div', { class: 'fs-quiet', text: 'The host does not offer this file for download.' }),
