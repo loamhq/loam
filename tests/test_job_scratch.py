@@ -192,7 +192,13 @@ try:
         (tmp / name / "f").write_text("x")
     (tmp / "old-file.log").write_text("x")
     sock = socket.socket(socket.AF_UNIX)
-    sock.bind(str(tmp / "a.sock"))
+    # Bind through a directory descriptor so a long job TMPDIR does not
+    # exceed the Unix socket address length limit.
+    dir_fd = os.open(tmp, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        sock.bind(f"/proc/self/fd/{dir_fd}/a.sock")
+    finally:
+        os.close(dir_fd)
     later = time.time() + 3 * 86400
     doomed, kept = sweep.candidates(
         48, root=tmp, live={"live-one"}, jobs={"20261021-190000-0a0b0c0d"},
