@@ -55,21 +55,12 @@ def recovered_status(stored: str | None, turns: list) -> str:
     if stored in UNFINISHED:
         return "failed"
     if stored == "waiting":
-        # Not UNFINISHED, and the difference is the whole point of the word
-        # (2026-09-25). A record stored `waiting` is a record whose last turn
-        # ENDED -- `result` arrived, it succeeded, the answer is there to read
-        # -- and the only thing outstanding was a background child of a
-        # process that no longer exists. Nothing more is coming, which is what
-        # `done` says. Calling it `failed` would put the red ring on a
-        # conversation that answered, which is the 09-22 defect in a new
-        # place; calling it `waiting` would park a row forever on work that
-        # died with its process. A turn that was still in flight was stored
-        # `working`, not `waiting`, and is still answered `failed` above.
+        # A stored waiting turn already received its result. Its background work ended with
+        # the process.
         return "done"
     if stored in STATUSES:
         return stored
-    # A record written before statuses existed (2026-09-18). It has turns or
-    # it does not, and that is the whole of what can honestly be said.
+    # Without a stored status, only the presence of turns distinguishes a completed session.
     return "done" if turns else "idle"
 
 
@@ -230,30 +221,20 @@ class BrokerError(Exception):
         self.detail = detail or {}
 
 
-# -- the card a pending request draws ---------------------------------------
-#
-# Every pending request is one of two kinds (2026-10-01): an `approval` (may
-# this run? Allow/Deny, as every card was before) or a `question` (the person
-# picks or types an answer). A question's request carries `questions` in the
-# one shape lib/loam_questions.py makes from the provider's own, and the event
-# carries them, with the provider's sentence as `message`. The rest of the
-# event is unchanged, so a page that predates `kind` still draws a card.
+# Pending requests are approvals or questions. Keep the original provider message alongside
+# structured questions.
 
 async def configure_thread(session, title, model, effort):
-    # Ended by the reaper soon after this turn, not after the hour a
-    # classic chat keeps (2026-11-09); the next turn resumes it by id.
+    # Thread sessions resume by ID after the shorter thread idle timeout.
     session.idle_timeout_s = cfg.THREAD_IDLE_S
     # The prompt opens with its own clock line; the broker's would be a
     # second copy of the same sentence.
     session.tell_time = False
-    # The model this turn runs on: the turn's, else the member's, else
-    # the persona's own (null). A running process is told by
-    # `set_choices`, as a classic chat's PATCH tells it; clearing goes
-    # back to the persona's at the next launch (2026-11-09).
+    # Apply a new model to the running process. Clearing the override restores the persona
+    # default on its next launch.
     if getattr(session, "model", None) != model and hasattr(session, "set_choices"):
         await session.set_choices({"model": model})
-    # The persona's thinking level (2026-11-13) the same way; a level
-    # cleared since stays on a running process until its next launch.
+    # A cleared effort override also takes effect on the next launch.
     if effort and getattr(session, "effort", None) != effort \
             and hasattr(session, "set_choices"):
         await session.set_choices({"effort": effort})
@@ -303,14 +284,8 @@ def _request_event(event: dict, req: dict) -> dict:
     return event
 
 
-# How a pending request closed (2026-10-05). `allow` and `deny` are a
-# person's answers; the rest are the ways a request closes with nobody
-# answering, and every one of them is written to the log, so no log is ever
-# left holding a request that never closes -- a page replaying one would draw
-# it as a live card forever. `expired`: the broker denied it after
-# PERMISSION_WAIT_S (lib/loam_broker.py) and the process lives on. `cancelled`:
-# the provider withdrew it. `ended`: the process ended with it open, for any
-# reason -- the reaper, DELETE, a crash, the broker's own shutdown.
+# Journal every unanswered close so replay cannot leave a live prompt. Expiration keeps the
+# process running, cancellation comes from the provider, and an exit ends all open requests.
 CLOSED_UNANSWERED = ("expired", "cancelled", "ended")
 
 
@@ -441,23 +416,15 @@ class Session:
         # been forked yet. See `argv`.
         self.cli_session_id: str | None = None
         self.forked_from: str | None = None
-        # The provider's own name for this conversation when it is not the
-        # record's id. Codex mints a thread id at `thread/start` and resumes
-        # by it (2026-10-01); a Claude Code session runs under the record's
-        # own id and leaves this null.
+        # Codex resumes by provider thread ID. Claude Code normally uses the record ID.
         self.thread_id: str | None = None
         # What status() reads. A turn is in flight from the moment a person's
         # message goes in -- or the CLI writes the `system`/`init` that opens
         # one -- until its result comes back out.
         self._turn_active = False
-        # How long this session may sit idle before the reaper ends it, when
-        # it is not `cfg.CLASSIC_IDLE_S`. The thread engine sets
-        # `cfg.THREAD_IDLE_S` on the sessions its turns use (2026-11-09).
-        # Held in memory only: a broker restart ends every process anyway.
+        # Thread sessions override the classic idle timeout for the lifetime of the process.
         self.idle_timeout_s: float | None = None
-        # Whether a message this session sends its harness opens with the
-        # clock line (lib/loam_clock.py, 2026-11-09). A thread turn's prompt
-        # carries its own, so the thread engine turns this off.
+        # Thread prompts supply their own clock line.
         self.tell_time = True
         # The background tasks the CLI says are live behind this session right
         # now, as it states them (`system`/`background_tasks_changed`): a list
@@ -465,9 +432,7 @@ class Session:
         # the stream carries both. Never restored from the file: a background
         # task is a child of a process, and this object has no process yet.
         self.background_tasks: list[dict] = []
-        # When the broker first saw each background task, by task id
-        # (2026-11-10): the CLI's events carry no time, and a page saying
-        # "waiting on 2 background tasks" says since when.
+        # Time each task from its first event because the provider omits the start timestamp.
         self._task_seen: dict[str, str] = {}
         # Task ids that have left that list without their notification having
         # arrived yet, against the moment each left. The session is still
@@ -475,12 +440,8 @@ class Session:
         # wakes the persona for another turn -- and `_settle` is the backstop
         # that stops one that never comes from pinning the row on `waiting`.
         self._awaiting: dict[str, float] = {}
-        # Tasks whose notification has already landed (2026-11-10): the CLI
-        # sends it BEFORE the list empties as often as after (396 of 684
-        # tasks in this box's logs), and a task notified first must not be
-        # awaited -- it held `working_behind` for the whole settle window
-        # after the reply, and a thread turn read its last `result` as "more
-        # to come" and waited on nothing.
+        # A completion notification can precede removal from the task list. Remember it so
+        # the turn does not wait for finished work.
         self._notified: dict[str, float] = {}
         # A task notification has fired and no result has closed a turn since,
         # which means another turn is on its way whether or not it has started.
@@ -519,23 +480,14 @@ class Session:
         self.on_record_change = None
         self._write_lock = asyncio.Lock()
         cfg.SESSION_DIR.mkdir(parents=True, exist_ok=True)
-        # A resumed session is the SAME session, so it is the same event log
-        # and the same numbering. Starting from zero over an existing log
-        # produced two events numbered 19 and a client that asked for
-        # everything after 24 and was handed turn one again -- caused
-        # 2026-09-16, and it is the failure that makes reconnection worthless,
-        # because seq is the only thing a client has to say where it was.
-        # The turn records are carried across for the same reason: they are
-        # the session's, not the process's.
+        # Resume the existing journal sequence and turn list so replay cursors remain valid
+        # across processes.
         if self.meta_path.exists():
             try:
                 prior = json.loads(self.meta_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 prior = {}
-            # ``seq`` is what records written before 2026-09-16 called it;
-            # reading both is what keeps a session started under the old name
-            # from restarting its numbering at zero, which is the defect the
-            # comment above describes.
+            # Older records store the last journal position as seq.
             self.seq = int(prior.get("record_seq") or prior.get("seq") or 0)
             self.turns = list(prior.get("turns") or [])
             self.created = prior.get("created") or self.created
@@ -549,12 +501,8 @@ class Session:
             self.archived = bool(prior.get("archived"))
             self.seen_seq = int(prior.get("seen_seq") or 0)
             self.provider = provider or prior.get("provider") or self.provider
-            # The chat's model and effort survive the process, which is the
-            # whole point of storing them on the record: a session ended
-            # yesterday on opus comes back on opus. An argument given now
-            # outranks the file -- that is a person picking on the launch --
-            # and a record written before 2026-09-21 says neither, which
-            # reads as the persona's default and is what it was.
+            # Explicit launch choices override stored model and effort. Unset choices inherit
+            # the persona defaults.
             self.model = model or prior.get("model") or None
             self.effort = effort or prior.get("effort") or None
             self.last_message = prior.get("last_message") or None
@@ -566,9 +514,7 @@ class Session:
             self.source = prior.get("source") or None
             replayed = prior.get("replayed")
             self.replayed = int(replayed) if replayed else None
-            # What the file behind it looked like when it was last read. A
-            # record written before 2026-09-21 says neither, which reads as
-            # "never measured" and is refreshed once on the next read.
+            # Missing source measurements require a fresh read.
             size, mtime = prior.get("source_size"), prior.get("source_mtime")
             self.source_size = int(size) if isinstance(size, int) else None
             self.source_mtime = int(mtime) if isinstance(mtime, int) else None
@@ -579,20 +525,12 @@ class Session:
             self.cli_session_id = prior.get("cli_session_id") or None
             self.forked_from = prior.get("forked_from") or None
             self.thread_id = prior.get("thread_id") or None
-            # When this session was last active is a fact about the session,
-            # and the listing is sorted by it. Left at "now" -- which is what
-            # a fresh object gets -- a PATCH would rewrite it, and pinning a
-            # session from July would jump it to the top of the home screen
-            # as though somebody had just spoken to it. Caused on the live
-            # broker, 2026-09-18, by pinning a two-day-old session.
+            # Restore activity time so a metadata edit cannot move an old session to the top
+            # of the list.
             self.last_activity = parse_iso(prior.get("last_activity"),
                                            self.last_activity)
-            # A session is done being named when its name came from the vault
-            # or from a person. A record wearing the stand-in opening words is
-            # not: the writer may have filed it since, and the next turn's
-            # result looks again. Before title_source existed (2026-09-22) any
-            # title counted, which is why a session that ran before its
-            # transcript was written kept the opening words forever.
+            # Opening words are provisional until a person or the transcript gives the
+            # session a title.
             self._titled = self.title_source in ("vault", "person")
             # No process of ours is behind this record until start() says so,
             # so the session is not running whatever the file says.
@@ -806,26 +744,8 @@ class Session:
             return self._restored_status
         elif (self.state == "exited" and not self._stop_requested
                 and self._last_result_ok is None):
-            # It ended before it ever answered anything, and nobody asked it
-            # to. That is a failure and there is nothing else it could be.
-            #
-            # **What is NOT a failure, since 2026-09-22: a process ended from
-            # outside while the session was idle with a good answer on it.**
-            # A persona's reply answered at
-            # 19:27:13Z, sat idle, and had its process killed at 19:49:02Z when
-            # systemd restarted the broker -- the unit sets no KillMode, so
-            # SIGTERM goes to every process in the cgroup and the CLI child
-            # gets it at the same instant the broker does. `_reap` ran before
-            # `stop()` had recorded that the end was asked for, so this branch
-            # answered `failed` and the home screen drew the red ring on a
-            # conversation that was complete and fine.
-            #
-            # It is the same rule the README already states for an ended
-            # session -- "it has an answer to read and its id resumes" -- and
-            # the exception here was contradicting it. A turn that was in
-            # flight when the process went is still `failed`: `_reap` sets
-            # `_last_result_ok` False for it, because the person sent a message
-            # and got no answer.
+            # An unexpected exit before a reply fails the turn. An idle process can exit
+            # after a successful reply without changing its result.
             return "failed"
         if self._last_result_ok is None:
             return "idle"
@@ -841,10 +761,7 @@ class Session:
         off each caller is what keeps the live list from silently missing the
         next field somebody adds.
         """
-        # Announced even when the write fails (a full disk, 2026-10-22): the
-        # record in memory is the truth a page should see, and a `failed`
-        # turn that stayed unsaid because the disk was full would be the
-        # stranded chat over again. The error still goes to the caller.
+        # Publish in-memory state even if persistence fails, then propagate the write error.
         try:
             self.meta_path.write_text(json.dumps(self.meta(), indent=2),
                                       encoding="utf-8")
@@ -890,12 +807,8 @@ class Session:
         way, and reading it back is the one answer that cannot be wrong. See
         ``_handle``.
         """
-        # The flags are cfg.CLAUDE_STREAM_FLAGS, their one authority
-        # (2026-11-11). Among them,
-        # --permission-prompt-tool stdio routes a permission prompt onto the
-        # control channel instead of auto-denying it. Without it the CLI
-        # denies anything that would prompt and reports it in
-        # permission_denials -- caused 2026-09-16.
+        # The shared stream flags send permission prompts over stdio so the client can
+        # answer.
         argv = [cfg.CLAUDE, *cfg.CLAUDE_STREAM_FLAGS]
         if self.model:
             argv += ["--model", self.model]
@@ -935,24 +848,15 @@ class Session:
         # Claude shelf above the workspaces and this persona's view. Never
         # fails a start (lib/loam_skills.py).
         await asyncio.to_thread(loam_skills.quiet_refresh, self.workspace)
-        # The shape this agent is in (2026-11-18, lib/loam_loading.py): an
-        # agent that wrote its map since CLAUDE.md was rendered starts this
-        # session in the map's shape. Never fails a start.
+        # Refresh loading instructions before launch in case the agent has changed its map.
         await asyncio.to_thread(loam_loading.quiet_refresh, self.workspace)
         env = dict(os.environ)
         env["DISABLE_AUTOUPDATER"] = "1"
         env["CLAUDE_PROJECT_DIR"] = str(self.workspace)
-        # No compaction window is set: the CLI's own automatic compaction,
-        # near the model's window being full, is the only automatic one, and
-        # anything earlier is a person pressing compact (the owner, 2026-09-30,
-        # undoing the 400k of the same morning). See "Compaction" in
-        # broker/README.md.
-        # LOAM_WAKE is not set. See the module docstring: absent means
-        # "conversation" to hooks/transcript_capture.py, and this is one.
+        # Use the provider’s automatic compaction policy. Leave LOAM_WAKE unset so capture
+        # treats this as a conversation.
         env.pop("LOAM_WAKE", None)
-        # Which broker session this CLI is, for what it calls: the engineer's
-        # brief reads it to say which thread a job came from (2026-11-12,
-        # lib/loam_waiters.py). The same on every engine.
+        # Tools use the broker session ID to associate their work with the initiating thread.
         env[loam_waiters.SESSION_ENV] = self.id
         # Which surface this conversation is being held on, for the transcript
         # the writer files. Nothing in the session file says: a broker session
@@ -1091,8 +995,7 @@ class Session:
         self.save()
         return event["seq"]
 
-    # Whether this engine takes a person's words into a turn in flight
-    # (2026-11-14). See `steer`.
+    # Whether this provider accepts steering during a turn.
     STEERS = True
 
     async def steer(self, text: str,
@@ -1201,10 +1104,8 @@ class Session:
                     "message": {"role": "user",
                                 "content": f"{command} {value}"}})
                 sent.append(f"{command} {value}")
-        # last_activity is deliberately left alone, as it is for a pin or a
-        # rename: picking a model for a session from Tuesday is not the
-        # session having been spoken to, and the home screen is sorted by
-        # when it was. Caused by a pin, 2026-09-18; the same trap.
+        # Model changes leave activity time alone so the session keeps its position in the
+        # list.
         self.save()
         return sent
 
@@ -1468,11 +1369,7 @@ class Session:
             try:
                 await self._handle(obj)
             except OSError as exc:
-                # A record that could not be written (`save` on a full disk)
-                # is the same failure as an event that could not be, and it
-                # must not end the reader either: the process would go on
-                # answering into a pipe nobody reads (2026-10-22). The event
-                # itself has been handled as far as it got.
+                # Keep draining the provider even if a journal or record write fails.
                 print(f"pump: {self.id[:8]}: {exc}", file=sys.stderr,
                       flush=True)
                 if self._unsaved is None:
@@ -1500,23 +1397,9 @@ class Session:
                     and said != self.cli_session_id):
                 self.cli_session_id = said
                 self.forked_from = self.id
-                # Not saved here: `system` is one of the two kinds that save
-                # below, after the event is on the stream, and one write is
-                # enough.
-            # **And where a turn opens.** The CLI writes an `init` ahead of
-            # every turn in `--input-format stream-json` mode, not once per
-            # process: a turn a person started, and equally a turn the CLI
-            # opens by itself to hand the persona a task notification. Read off
-            # this box's own logs, 2026-09-22 -- 26 inits across five processes
-            # of one session, one before each turn and none at a launch nobody
-            # had spoken to yet, which is why this cannot make an untouched
-            # session read `working`.
-            #
-            # It is load-bearing for more than the resumed turn. A session that
-            # was handed a notification emitted `result` at seq 1579 and opened
-            # the real turn at `init` 1580, with the next result 900 events
-            # later (session 940380fd): without this the row said `done` for
-            # the whole of it.
+                # The system event is saved after it reaches the stream.
+            # Stream init opens every turn, including a turn the provider starts to deliver a
+            # task notification.
             self._turn_active = True
         # The background tasks behind this turn, and the two events that end
         # one. See `working_behind` for what each means to a row on a screen.
@@ -1564,10 +1447,7 @@ class Session:
                 self.save()
             return
         if kind == "control_cancel_request":
-            # The CLI withdrew a prompt (the turn was interrupted, or the tool
-            # call went away). Drop it rather than leave a request the client
-            # could still answer into nothing. Said on the stream, so the
-            # card a page drew for it goes too (2026-10-05).
+            # Close a withdrawn prompt on the stream so the client cannot answer it later.
             request_id = obj.get("request_id", "")
             req = self.pending.pop(request_id, None)
             if req is not None:
@@ -1596,16 +1476,8 @@ class Session:
                 model = (obj.get("message") or {}).get("model")
                 if isinstance(model, str) and model:
                     self._turn_model = model
-                # And the only place the context is stated. Each top-level
-                # assistant message is a request the model answered, and its
-                # `usage` says what that request's context held; the last one
-                # of a turn is therefore the turn's high-water mark. The result
-                # envelope's own `usage` is NOT this and cannot be used for it:
-                # it is the turn's requests added up, so a three-request turn
-                # on this box reported 101,905 where the last request's context
-                # was 35,271 (session 49db688c, 2026-09-22), and a twenty-round
-                # turn would have reported three million tokens in a one
-                # million token window.
+                # Each top-level assistant message reports an individual request. Use the
+                # latest reading instead of summing a multi-round turn.
                 usage = (obj.get("message") or {}).get("usage")
                 if isinstance(usage, dict):
                     self._turn_usage = usage
@@ -1646,13 +1518,8 @@ class Session:
             context = {"used": context_used(self._turn_usage),
                        "window": context_window(obj, self._turn_model)}
             if self._turn_usage is None and self._compacted_to is not None:
-                # A `/compact` turn states no usage of its own: no assistant
-                # message answers it. What the context holds after it is the
-                # marker's `post_tokens`, and the window is the one the `init`
-                # after the marker named, read out of this envelope's
-                # `modelUsage` like any other. Until 2026-10-01 this turn said
-                # `{used: null}` and the record went on reading as full as the
-                # turn before it (fac1b2dc: 446,773 after compacting to 12,954).
+                # Compaction has no assistant usage reading. Use its boundary so the record
+                # reflects the smaller context.
                 context = {"used": self._compacted_to,
                            "window": context_window(obj, self._init_model)}
             obj["context"] = dict(context)
@@ -1684,10 +1551,8 @@ class Session:
             obj["working_behind"] = self.working_behind()
         await self.emit(obj)
         if kind == "result" and self._unsaved is not None:
-            # Something this turn said is not in the log -- its own result
-            # included, possibly -- so a page that opens it later is shown
-            # less than happened. That is a failed turn whatever the CLI
-            # thought of it, and the record says why (2026-10-22).
+            # A missing journal event makes the turn incomplete even when the provider
+            # reports success.
             self._last_result_ok = False
             self.turns[-1]["not_saved"] = self._unsaved
             self._unsaved = None
@@ -1715,12 +1580,7 @@ class Session:
                 self._titling = True
                 asyncio.create_task(self._title())
 
-    # -- the tasks running behind a turn ------------------------------------
-    #
-    # Added 2026-09-22. The owner watched a chat go to its done state with the
-    # persona still working: it had launched a background subagent, its own
-    # turn had ended, and the answer arrived twenty minutes later. The CLI says
-    # all of this on its own stream and the broker was not reading it.
+    # Track provider background tasks that can outlive the turn that launched them.
 
     def _set_background_tasks(self, tasks) -> bool:
         """The CLI's live list of background tasks, taken as stated. True if
@@ -1802,12 +1662,8 @@ class Session:
             return
         self._awaiting.clear()
         self._resuming = False
-        # Written without asking whether it changed anything. `working_behind`
-        # has already stopped ANSWERING `waiting` for an entry this old, so the
-        # comparison would say "no change" and leave the last record a client
-        # was handed saying `waiting` for good -- which is the whole failure
-        # this backstop exists to prevent, arrived at by a shortcut. It fires
-        # only when a notification never came, which is never on this box.
+        # Persist the timeout transition even if checking pending work has already updated
+        # the in-memory state.
         self.save()
 
     def _clear_background(self) -> None:
@@ -1848,11 +1704,8 @@ class Session:
                 await asyncio.sleep(wait)
                 if self._titled:        # a person renamed it while we waited
                     return
-                # The CLI session the writer files under, which is this
-                # record's own id unless this session was forked out of an
-                # adopted one -- then the turns are in the fork's file and
-                # the transcript is filed under the fork's id. A Codex
-                # thread is filed under its thread id (2026-10-01).
+                # Look up the transcript under the fork or provider thread ID when it differs
+                # from the record ID.
                 title = await asyncio.to_thread(
                     adoption.transcript_title,
                     self.cli_session_id or self.thread_id or self.id)
@@ -1939,23 +1792,8 @@ class Session:
             bases.add(total(priced[-1]))   # the process before this one
         return bases
 
-    # The model of the turn being read right now: the last top-level
-    # ``assistant`` message's, reset to None when the turn's result is
-    # recorded. A turn record's ``model`` is always this key and is never
-    # absent; ``null`` means no top-level assistant message of that turn
-    # named a model, which is the honest answer and not a gap to fill.
-    #
-    # What is deliberately NOT consulted, and the reason the rule is written
-    # down at all: the result envelope's ``modelUsage`` is a dict of every
-    # model the PROCESS billed, including the CLI's own small-model calls. A
-    # real turn as ada came back
-    # ``{"claude-haiku-4-5-20251001": ..., "claude-fable-5-1": ...}``
-    # (caused 2026-09-16); picking out of that is a guess, and picking
-    # alphabetically -- which this once did -- answered "fable" only because
-    # f sorts before h, and would have called an Opus session Haiku. The
-    # persona's settings are not consulted either: "the settings say fable"
-    # and "this turn ran on fable" are different claims, and only the second
-    # is evidence.
+    # Attribute a turn to the model reported for its top-level reply. Settings and per-model
+    # usage can include models that did not answer.
     _turn_model: str | None = None
 
     async def _pump_stderr(self) -> None:
@@ -1976,9 +1814,7 @@ class Session:
         # A turn cut off here is failed below on its own account; what it
         # could not write down is not carried into the next process.
         self._unsaved = None
-        # Every request still open is closed on the stream before
-        # `broker.exit`, so the log never holds one that a replay would draw
-        # as a live card (2026-10-05). A crash reaches this, as does a stop.
+        # Close pending requests before publishing exit so replay shows their final state.
         await self.close_pending("ended")
         had_tasks = bool(self.background_tasks)
         self._clear_background()
@@ -2014,9 +1850,8 @@ class Session:
                     await self.proc.wait()
             except TimeoutError:
                 self.proc.kill()
-        # Here as well as in `_reap`, because the broker's own shutdown calls
-        # this and may exit before the pump reads the closed pipe: the
-        # closing events must be on the log by then (2026-10-05).
+        # Shutdown may finish before the pump reads EOF. Journal request closures here as
+        # well.
         await self.close_pending("ended")
         self.state = "exited"
         # Whatever it was running behind the turn went with it. `_reap` says
@@ -2025,15 +1860,8 @@ class Session:
         self._clear_background()
         self.save()
 
-    # -- staying in step with the app's own file ----------------------------
-    #
-    # Added 2026-09-21. An adopted record is a reading of a file this broker
-    # does not write, and the owner goes on talking to the persona in the app,
-    # so the reading goes stale the moment it is taken: they found a persona's
-    # conversation drawn as it had been hours earlier. Three things keep it
-    # current and all three are the same read of the same file -- a refresh on
-    # every read of the record, a poll while somebody has the thread open, and
-    # the scan for files nobody has adopted yet (`Broker.scan_for_new`).
+    # Refresh adopted records from the provider file on reads, while watching an open thread,
+    # and when scanning for new sessions.
 
     def followable(self) -> bool:
         """Is this record's history a file somebody else may still be writing.
@@ -2335,15 +2163,8 @@ class CodexSession(Session):
     # `subagent-completed` item, which lands between a subagent's idle and its
     # `turn/completed`, to arrive first.
     WAKE_GATHER_S = 1.0
-    # Every server request that asks a person something, each a permission
-    # card on the page (`_server_request`). Anything else is refused, so a
-    # turn is told no rather than left waiting on an answer nobody will
-    # give. The elicitation was missing until 2026-10-01: it is how Codex
-    # asks before an MCP tool call, and refusing it on the client's behalf
-    # reached the model as "user rejected MCP tool call" with no card ever
-    # drawn (a persona's thread 01a0f8a0, four calls). The two names without a
-    # slash are the v1 protocol's, sent only to a v1 conversation; they are
-    # here so that a change of protocol cannot reopen the same hole.
+    # Route supported approval and elicitation requests to the client, including legacy
+    # protocol names. Refuse unknown requests so the provider does not wait indefinitely.
     APPROVALS = ("item/commandExecution/requestApproval",
                  "item/fileChange/requestApproval",
                  "item/permissions/requestApproval",
@@ -2393,9 +2214,8 @@ class CodexSession(Session):
         # directory, and the writer files the surface the broker states.
         env["CLAUDE_PROJECT_DIR"] = str(self.workspace)
         env[loam_transcript.SURFACE_ENV_VAR] = loam_transcript.SURFACE_LOAM_UI
-        # The persona, assembled (2026-10-01): its instructions regenerated
-        # from its own files, and its workspace trusted so the generated
-        # `.codex/config.toml` -- tools, hooks, sandbox -- loads at all.
+        # Refresh the persona instructions and trust its workspace so the provider loads its
+        # project configuration.
         if not (self.workspace / ".codex" / "config.toml").is_file():
             raise BrokerError(409, f"{self.agent} has no .codex/config.toml; "
                                    f"run bin/provision --codex {self.agent}")
@@ -2451,9 +2271,7 @@ class CodexSession(Session):
                     "baseInstructions": codex.instructions(self.workspace),
                     "developerInstructions": codex.SUBAGENT_ASK})
             else:
-                # Subagents on (2026-11-13): Loam's explicit ask, which is
-                # what Codex's own multi-agent rule waits for
-                # (loam_codex.SUBAGENT_ASK).
+                # Use the shared explicit request for provider subagents.
                 opened = await self.request("thread/start", {
                     "cwd": ws, "model": self.model,
                     "developerInstructions": codex.SUBAGENT_ASK})
@@ -2545,8 +2363,7 @@ class CodexSession(Session):
             if params.get("threadId"):
                 self._agent_parents.setdefault(item["agentThreadId"],
                                                params["threadId"])
-            # The call that spawned it: what the subagent's own events are
-            # nested under (2026-11-13, see `subagent_parent`).
+            # Nest subagent events under the call that spawned them.
             if item.get("id") and item.get("kind") in (None, "started"):
                 self._agent_calls.setdefault(item["agentThreadId"], item["id"])
         thread = params.get("threadId")
@@ -3066,9 +2883,8 @@ class AntigravitySession(Session):
         self.state = "running"
         self.save()
 
-    # One `agy -p` process per turn: nothing reads its stdin once the turn
-    # is under way, so a message for a member on Antigravity waits for the
-    # turn to end and has a turn of its own (2026-11-14).
+    # Each turn runs in a separate process without an interactive stdin. Queue incoming
+    # messages for the next turn.
     STEERS = False
 
     async def steer(self, text: str,
