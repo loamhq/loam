@@ -55,10 +55,7 @@ export function appLetter(app, catalog = []) {
   return (part[position] || part[0]).toLocaleUpperCase()
 }
 
-// "Build an app" opens a thread with an agent already in it and a word on
-// what to say, never an empty room: Iris, the agent every install starts with,
-// else the first agent awake. The words are the empty thread's own, so
-// nothing is sent until the person writes.
+// Start the draft with the starter agent or the first awake agent. Send only when the person writes.
 export function buildAppThread(threads, agents = []) {
   const awake = agents.filter((agent) => !agent.archived)
   const agent = awake.find((a) => a.id === 'iris') ?? awake[0] ?? null

@@ -1,7 +1,4 @@
-// Real browser, synthetic day-one records: the first-day polish (2026-11-17),
-// each item at 390 and 1440, light and dark. The same file run from a checkout
-// of the commit before is the "before" pictures; nothing in it depends on the
-// change.
+// Capture first-visit scenes at phone and desktop widths in light and dark themes.
 //
 //   FIRST_DAY_EVIDENCE=<dir> LOAM_PLAYWRIGHT=<playwright index.mjs> \
 //   LOAM_CHROME=/usr/bin/chromium-headless-shell node test/first-day-polish-browser.mjs
@@ -108,7 +105,7 @@ async function day(vault) {
 }
 
 const scenes = {
-  // 1: the agent review where Iris says it is.
+  // Agent review from the starter conversation.
   async 'agent-review'({ page, go, shot }) {
     await go.thread(threads.meal.row.id)
     const opener = page.getByRole('button', { name: 'Review agent', exact: true })

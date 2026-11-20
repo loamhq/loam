@@ -1,10 +1,5 @@
-// The first-day polish (2026-11-17): what a new person met on a fresh install's
-// first day (the first-day walk of 2026-11-16), item by item. The words the
-// broker writes are copied from `bin/session-broker` as it writes them.
-//
-// Every thread opened here is closed in `t.after`, and every live-updates
-// request answers a stream that ends when it is aborted: a thread left open
-// reconnects its stream every 2.5 s for ever, and the file never exits.
+// Exercise first-visit flows against broker-shaped responses. Close every thread
+// and abort its update stream during teardown to prevent reconnects.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -419,9 +414,7 @@ test('10. Build an app opens a thread with an agent in it and a short prompt ask
   }
 })
 
-// The 0.2.0 walk: "Build an app" left an empty "New thread with Iris" in Recent
-// when the person never sent. Leaving a thread this page made, with nothing in
-// it, deletes it (0.2.1); a draft or a message keeps it.
+// Leaving an empty new thread discards it. A draft or message preserves it.
 test('an unsent new thread does not linger: leaving it empty deletes it', async (t) => {
   const field = h('textarea')
   const calls = []

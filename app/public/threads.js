@@ -354,11 +354,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (navigate && !st.fixture) address(null)
     if (drop) dropUnsent(id)
   }
-  // A thread this page made and the person left without a word (0.2.1; the
-  // 0.2.0 walk: "Build an app" left an empty "New thread with Iris" in Recent
-  // when nothing was sent). Leaving it deletes it, so an unsent new thread
-  // never lingers as a chat; one with any message, draft, file or board text
-  // stays.
+  // On leaving a new thread, discard it only if its messages, draft, files and board are all empty.
   function unsentHere(o) {
     return Boolean(o?.madeHere && !o.creating && !o.createFailed && !o.sending && !o.readFailed && !pendingRows(o).length
       && !o.messages.some((m) => m.kind !== 'system') && !draft.value.trim() && !compose.files().length
@@ -680,8 +676,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       messages: [], loading: false, creating: true, typing: new Set(), permissions: new Map(), steps: new Map(),
       board: { markdown: '', path: '' }, boardBusy: false, boardOpen: false,
       promptTitle: options.promptTitle ?? null, promptBody: options.promptBody ?? null, promptPlaceholder: options.placeholder ?? null }
-    // Words already in the composer, unsent (2026-11-18: the Market's
-    // "Ask one of your agents to build it"). The person sends them, or not.
+    // Pre-fill the composer and leave sending to the person.
     if (typeof options.draft === 'string' && options.draft) draft.value = options.draft
     redraw(); setTimeout(() => { draft.focus(); if (options.draft) draft.setSelectionRange(draft.value.length) }, 0)
     return transport('POST', '/threads', persona ? { persona } : {}).then((body) => {
@@ -1273,9 +1268,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     // Live prose is already formatted. Completion must not send it through
     // the plain-text opening placeholder and replace it a second time.
     const prose = (text, slot) => st.open.prose && !m.streaming && !m.viewKey ? kept(st.open.prose.node(text, `${m.id}:${slot}`, pictures)) : mentionMarkdown(pictures ? pictures.live(text) : text, pictures)
-    // A listing card in an agent's words (2026-11-18, market-card.js): its
-    // line is cut out of the prose and drawn live in its place, so the card
-    // follows what is installed while the words around it stay cached.
+    // Render the listing card separately so installation changes can update it while the reply stays cached.
     const said = (text, slot) => {
       const pieces = splitCards(text)
       if (pieces.length === 1 && pieces[0].text !== undefined) return prose(text, slot)

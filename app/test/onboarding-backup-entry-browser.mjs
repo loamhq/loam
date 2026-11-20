@@ -1,7 +1,4 @@
-// A fresh install whose AI provider was signed in before the first visit
-// (2026-11-19) skips the provider step, not the backup offer: the offer is
-// shown once before Hello, skipped in one tap, and never shown again; an
-// install with Git backup on (or its switch ever set) sees nothing.
+// Offer backup once on a fresh install with a signed-in provider. A prior backup choice skips the offer.
 //
 //   LOAM_PLAYWRIGHT=<playwright> LOAM_CHROME=<chromium> node test/onboarding-backup-entry-browser.mjs
 //
@@ -16,9 +13,7 @@ await mkdir(out, { recursive: true })
 const hardStop = setTimeout(() => { console.error('the walk took over 4 minutes: stopped'); process.exit(2) }, 240000)
 const WAIT = { timeout: 15000 }
 
-// A blank install as the browser meets it: Iris, the untouched Hello thread,
-// and Claude Code already signed in (the shared release fixtures above
-// oneProductFixture still expect read-aloud in core, which left in e45f685).
+// Start with the starter agent, an untouched Hello thread and a signed-in provider.
 async function freshInstall() {
   const app = await oneProductFixture()
   const json = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)) }

@@ -14,9 +14,7 @@ export function replyLabels(message, providers = []) {
 export function replyChip(message, providers = []) {
   if (message.preset === true) return { provider: null, model: null, fullModel: null }
   const labels = replyLabels(message, providers)
-  // Claude Code names its own error replies' model "<synthetic>" (a login that
-  // could not be refreshed, a refused request); it is not a model a person
-  // chose, and the chip drew it raw (the first-day walk, 2026-11-16).
+  // Hide the provider’s synthetic error model from the model chip.
   const named = /^<.*>$/.test(message.model ?? '') ? null : message.model
   const model = modelLabel(providers.find((p) => p.id === message.engine), named)
   return { ...labels, model: model.name, fullModel: model.fullName }
@@ -72,9 +70,7 @@ export function threadBackground(thread, now = Date.now()) {
       ...jobs.map((job) => ({ ...job, id: job.job, persona: job.briefed_by, kind: 'job' }))] }
 }
 
-// A running job's last real activity: the engine's newest event, read by the
-// host (`last_activity`), and `quiet_since` once there has been none for 15
-// minutes. A job frozen for 13 hours read as plain "Running" (2026-11-16).
+// Use host activity timestamps to distinguish quiet jobs from active work.
 export function jobActivity(job, now = Date.now()) {
   if (job.state !== 'running') return null
   if (job.quiet_since) {
@@ -179,12 +175,7 @@ export function ordinalDraft(rev) {
   return `${n}${suffix} draft`
 }
 
-// A turn that failed before the agent said anything is the provider's error,
-// not the agent's words. The broker records it two ways: Claude Code's own
-// stand-in reply (`model: "<synthetic>"`, its text the raw error), and a Loam
-// line ("Iris's turn failed: …") when the engine itself gave up. Either is
-// drawn as a system line that says what happened and what to do; the raw
-// error stays behind Details.
+// Both provider error replies and engine failures render as system messages. Keep the raw error in Details.
 const PROVIDER_ERROR_RE = /^(?:Failed to authenticate|OAuth\b|API Error|Invalid API key|Authentication\b|Not logged in|Unauthorized\b|Credit balance|Rate limit|Could not reach)/i
 const AUTH_ERROR_RE = /authenticat|oauth|expired|unauthori[sz]ed|\b401\b|\b403\b|api[_ ]?key|not logged in|log ?in again|sign ?in again|credential/i
 const QUOTA_ERROR_RE = /rate[_ ]?limit|quota|\b429\b|credit balance|usage limit|billing/i
