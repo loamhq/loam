@@ -345,27 +345,52 @@
 .market-readme-body blockquote { margin: 22px 0; padding: 2px 0 2px 20px; border-left: 2px solid var(--paper-rule-strong); font-family: var(--font-display); font-size: 20px; color: var(--paper-ink); }
 .market-readme-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 26px 0 10px; }
 .market-readme-img { display: block; width: 100%; max-width: 100%; height: auto; border-radius: 18px; }
-/* Place the review above the maker’s README and distinguish its author. */
-.market-listing-note-row { padding: 40px 0 0; max-width: 640px; }
-.market-loam-note { padding: 26px 28px 8px; border-radius: var(--radius-xl, 24px); background: var(--paper-raised); box-shadow: inset 0 0 0 1px var(--paper-rule); }
-.market-loam-note-head { display: flex; align-items: center; gap: 14px; }
-.market-loam-mark { flex: none; width: 34px; height: 34px; }
-.market-loam-note-title { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 24px; line-height: 1.1; color: var(--paper-ink); }
-.market-loam-note-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--paper-ink-3); }
-.market-loam-note-summary { margin: 18px 0 6px; font-size: 16.5px; line-height: 1.6; color: var(--paper-ink); }
-.market-note-group { padding: 16px 0; border-top: 1px solid var(--paper-rule); }
-.market-note-groups > .market-note-group:first-child { margin-top: 10px; }
-.market-note-group-title { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--paper-ink-3); }
-.market-note-list { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 6px; }
+/* The whole review byline is a target. Only its excerpt yields space. */
+.market-listing-head .market-listing-acts:has(.market-note-link) { width: 310px; max-width: 100%; min-width: 0; }
+.market-phone .market-listing-head .market-listing-acts:has(.market-note-link) { width: 100%; }
+.market-note-link {
+  display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 44px; margin: -6px 0 -10px;
+  padding: 4px 6px; background: transparent; border: none; border-radius: var(--radius-sm);
+  font: inherit; font-size: 13px; color: var(--paper-ink-2); text-align: start; cursor: pointer;
+}
+.market-note-link svg, .market-note-label, .market-note-price { flex: none; }
+.market-note-price { color: var(--paper-ink-3); }
+.market-note-price::after { content: '·'; margin-left: 6px; }
+.market-note-label { font-weight: 600; }
+.market-note-excerpt { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.market-note-excerpt::before { content: '·  '; }
+.market-note-link.has-detail .market-note-excerpt { color: var(--paper-ink); }
+@media (hover: hover) { .market-note-link:hover { background: var(--paper-hover); color: var(--paper-ink); } }
+.market-note-link:focus-visible { outline: 2px solid var(--paper-ink-3); outline-offset: 2px; }
+
+.market-note-overlay { position: fixed; inset: 0; z-index: 10; }
+.market-review-sheet[data-menu-surface][data-menu-layout] {
+  gap: 0; padding: 0; overflow: hidden; bottom: auto; height: fit-content;
+}
+.market-review-sheet .market-review-grip { display: none; }
+.market-review-sheet[data-menu-layout="sheet"] .market-review-grip { display: flex; margin: 0; height: 18px; }
+.market-review-grip .grip { margin-top: 6px; }
+.market-loam-note-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 20px 24px; border-bottom: 1px solid var(--paper-rule); }
+.market-loam-note-head .iconbtn { margin-left: auto; flex: none; width: 44px; height: 44px; }
+.market-loam-mark { flex: none; width: 36px; height: 36px; }
+.market-note-heading { min-width: 0; overflow-wrap: anywhere; }
+.market-loam-note-title { margin: 0; font-size: 26px; font-weight: 400; line-height: 1.1; }
+.market-loam-note-sub { margin: 4px 0 0; font-size: 13px; line-height: 1.4; color: var(--paper-ink-3); }
+.sheet.market-review-sheet > .market-note-scroll {
+  flex: 0 1 auto; min-height: 0; max-height: 65dvh; overflow: auto; overscroll-behavior: contain;
+  padding: 20px 28px 24px; overflow-wrap: anywhere;
+}
+.market-note-scroll > :first-child { margin-top: 0; }
+.market-loam-note-summary { margin: 10px 0 20px; font-size: 16.5px; line-height: 1.55; color: var(--paper-ink); }
+.market-note-group { padding: 14px 0; border-top: 1px solid var(--paper-rule); }
+.market-note-group:last-child { padding-bottom: 0; }
+.market-note-group-title { margin: 0 0 8px; font-size: 15px; font-weight: 600; color: var(--paper-ink); }
+.market-note-list { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 8px; }
 .market-note-list li { font-size: 15px; line-height: 1.55; color: var(--paper-ink-2); }
 .market-note-list li::marker { color: var(--paper-ink-3); }
-/* What a new version reaches that the last did not: set apart, above the rest. */
-.market-note-changed { margin: 14px 0 4px; padding: 14px 18px; border: 0; border-radius: var(--radius-lg); background: var(--paper-card); }
-.market-note-changed .market-note-group-title { color: var(--paper-ink-2); }
-.market-note-changed .market-note-list li { color: var(--paper-ink); }
-.market-phone .market-listing-note-row { padding-top: var(--space-xl); }
-.market-phone .market-loam-note { padding: 20px 18px 4px; }
-.market-phone .market-loam-note-title { font-size: 22px; }
+.market-note-changed { margin-bottom: 14px; padding: 14px 18px; border: 0; border-radius: var(--radius-lg); background: var(--paper-card); }
+.market-review-sheet[data-menu-layout="sheet"] .market-loam-note-head { padding: 6px 18px 14px; }
+.market-review-sheet[data-menu-layout="sheet"] .market-note-scroll { padding: 18px 22px calc(22px + env(safe-area-inset-bottom, 0px)); }
 .market-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 28px; min-width: 0; }
 .market-side-title { margin: 0 0 10px; color: var(--paper-ink-3); }
 .market-touch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }

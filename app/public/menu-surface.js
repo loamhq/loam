@@ -189,7 +189,9 @@ export function createMenuSurfaces(root) {
       e.preventDefault(); e.stopImmediatePropagation(); dismiss(node); return
     }
     const editing = document.activeElement?.matches('input, textarea, select, [contenteditable="true"]')
-    if (!editing && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+    // A focusable document inside a dialog uses these keys to scroll its text.
+    const reading = document.activeElement?.matches('[role="document"]')
+    if (!editing && !reading && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
       e.preventDefault(); e.stopPropagation()
       rows[e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : (at + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length]?.focus({ preventScroll: true })
       revealOption(node)

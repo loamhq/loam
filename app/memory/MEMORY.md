@@ -11,6 +11,10 @@ have never met.
   session broker's narrow, authenticated interface (`broker/README.md` at
   the repository's root); it never sees a path of the server or a
   credential.
+- **Market reviews** arrive in the list. A plugin’s declaration arrives
+  separately with its details. The review button can open before that second
+  request finishes. A reviewer can use `note.changed` for a documentation
+  edit, so its presence alone does not establish wider permissions.
 - **The domain is the install's.** Nothing in the app names a domain; the
   deploy layer hands the app its origins (`bin/deploy`, `service_env`).
 - **It runs on the host, not in a container** (since 2026-11-16): a systemd
