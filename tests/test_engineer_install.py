@@ -17,6 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SHIPPED = ROOT / "engineer" / "install"
+TEMPLATE = ROOT / "engineer-template" / "repo"
 TMP = Path(tempfile.mkdtemp(prefix="test-engineer-install-"))
 INSTALL, VAULT, HOME, STATE = TMP / "install", TMP / "vault", TMP / "home", TMP / "state"
 CONFIG = TMP / "loam.toml"
@@ -96,7 +97,10 @@ try:
     (TMP / "agents" / "_shared" / "reach.md").write_text("# Reach\n")
     (INSTALL / "engineer" / "memory").mkdir(parents=True)
     shutil.copytree(SHIPPED, INSTALL / "engineer" / "install")
+    shutil.copytree(TEMPLATE, INSTALL / "engineer-template" / "repo")
     (INSTALL / "engineer" / "memory" / "MEMORY.md").write_text("# Memory\n")
+    (INSTALL / "app").mkdir()
+    (INSTALL / "app" / "package.json").write_text("{}\n")
     git("init", "-q", "-b", "main")
     git("add", "-A")
     git("commit", "-qm", "A release")
@@ -133,12 +137,24 @@ try:
     check("fresh: git status shows nothing", git("status", "--porcelain"), "")
     ignored = git("status", "--porcelain", "--ignored", "--untracked-files=all")
     check("fresh: the rendered files are there, ignored", "!! engineer/role.md" in ignored, True)
+    check("fresh: the app-only harness is rendered and ignored",
+          [line for line in ignored.splitlines() if line.startswith("!! app/")],
+          ["!! app/.claude/settings.json", "!! app/CLAUDE.md", "!! app/project.md",
+           "!! app/role.md"])
     check("fresh: the update's clean-tree rule reads the stock checkout as clean",
           stock_dirt(), [])
     (INSTALL / "stray.txt").write_text("x\n")
+    extra_settings = INSTALL / "app" / ".claude" / "settings.local.json"
+    extra_settings.write_text("{}\n")
     check("fresh: anything else in the tree is still dirt",
-          stock_dirt(), ["?? stray.txt"])
+          stock_dirt(), ["?? stray.txt", "!! app/.claude/settings.local.json"])
     (INSTALL / "stray.txt").unlink()
+    extra_settings.unlink()
+
+    git("add", "-f", "app/project.md")
+    check("a staged change at a harness path still blocks an update",
+          stock_dirt(), ["A  app/project.md"])
+    git("reset", "--", "app/project.md")
 
     # -- again, nothing changed --------------------------------------------------
     before = ROLE.stat().st_mtime_ns

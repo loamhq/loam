@@ -20,8 +20,8 @@ provisioned files) is the generators' to write, as on any install.
 
 **The clean-tree rule** (the plan's §2). The update refuses, and hands the
 job to the person's agent, when (a) on a stock install
-``git status --porcelain --ignored`` is not empty (state leaked into the
-tree, or someone edited it), or (b) on a development install the merge with
+``git status --porcelain --ignored`` lists anything besides Loam's rendered
+engineer harnesses, or (b) on a development install the merge with
 the tag conflicts (found by ``git merge-tree`` before anything moves; a
 development tree must also have no uncommitted change, since a merge would
 mix it in). A refusal names what it found.
@@ -97,6 +97,7 @@ from pathlib import Path
 import loam_agents
 import loam_broker as cfg
 import loam_config as lc
+import loam_engineer
 import loam_lock
 import loam_signing
 import loam_skills as sk
@@ -377,19 +378,20 @@ def local_commits(current: str | None) -> list[str]:
 
 def dirt(kind: str) -> list[str]:
     """What `git status` says is in the tree: with ignored files on a stock
-    install (rule a), without them on a development one. The engineer's
-    rendered files (``lc.ENGINEER_HARNESS``) are not dirt: provision writes
-    them on every install, no release carries them, and an update never
-    touches them (2026-11-18)."""
+    install (rule a), without them on a development one. Provision renders
+    the platform and app-only engineer harnesses beside the code."""
     args = ["status", "--porcelain", "--untracked-files=all"]
     if kind == "stock":
         args.append("--ignored")
-    harness = tuple(prefix() + name for name in lc.ENGINEER_HARNESS)
+    pre = prefix()
+    platform_harness = tuple(pre + name for name in lc.ENGINEER_HARNESS)
+    app_harness = {f"{pre}{loam_engineer.APP_SCOPE}/{name}" for name in
+                   ("CLAUDE.md", "role.md", "project.md", ".claude/settings.json")}
 
     def ours(line: str) -> bool:
         path = line[3:].strip().strip('"')
-        return untracked(line) and any(
-            path == h or path.startswith(h + "/") for h in harness)
+        return untracked(line) and (path in app_harness or any(
+            path == h or path.startswith(h + "/") for h in platform_harness))
     return [ln for ln in git(*args).stdout.splitlines() if ln.strip() and not ours(ln)]
 
 

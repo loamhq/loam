@@ -46,8 +46,8 @@ install and is never updated this way.
 
 **What the installer must leave** (L12): a git clone of `loam`, with its
 `origin` set to where releases come from, checked out at the release tag.
-It must leave nothing in the tree that the release did not put there. A
-tarball cannot be updated.
+It must keep install state outside that checkout, apart from the generated
+engineer harnesses. A tarball cannot be updated.
 
 ## A change to Loam's own parts (2026-11-17)
 
@@ -102,15 +102,23 @@ and proves each line above.
 
 The update refuses, and hands the job to the person's agent, when:
 
-- **(a) stock:** `git status --porcelain --ignored` is not empty. Anything
-  there means state leaked into the tree or someone edited it. Refusal
-  code `dirty`; the files are listed.
+- **(a) stock:** `git status --porcelain --ignored` lists a file outside
+  the generated harness exceptions, or a staged or tracked change.
+  The exceptions cover the platform engineer's harness and these four
+  generated app files: `app/CLAUDE.md`, `app/role.md`, `app/project.md`,
+  and `app/.claude/settings.json`. The refusal lists the files under code
+  `dirty`.
 - **(b) development:** the merge with the tag would conflict. This is found
   with `git merge-tree` before anything moves. Code `conflict`; the files
   are listed.
 - **Development, uncommitted:** `git status --porcelain` (ignored files
   allowed) is not empty, because a merge would mix those changes in. Code
   `uncommitted`.
+
+An updater from 0.2.13 through 0.2.15 can list the generated app harness
+itself in a `dirty` refusal. If those four paths are the only blockers,
+move those files aside outside the checkout, apply the update, and put
+back any harness file the new release did not regenerate.
 
 Other refusals:
 

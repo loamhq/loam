@@ -269,6 +269,10 @@ check("...and no refusal notice: the person is looking at the diff", notices(), 
 
 # -- apply and rollback ------------------------------------------------------------------
 
+app_settings = INSTALL / "app" / ".claude" / "settings.json"
+write(app_settings, "{}\n")
+with (INSTALL / ".git" / "info" / "exclude").open("a") as exclude:
+    exclude.write("/app/.claude/\n")
 rec = up.apply(accept_library_edits=True, box=box)
 check("apply: applied, the checkout at the tag's commit, detached",
       (rec["outcome"], git(INSTALL, "rev-parse", "HEAD"),
@@ -287,7 +291,8 @@ check("...only what reads what changed ran: the library and the units (systemd/)
 check("...the others recorded as skipped, with why",
       [s["name"] for s in rec["steps"] if s["status"] == "skipped"],
       ["agents", "providers", "provider-memory", "broker", "gateway", "deploy", "app", "host"])
-check("...the tree is clean after it", git(INSTALL, "status", "--porcelain", "--ignored"), "")
+check("...the generated app settings survived and the updater sees a clean tree",
+      (app_settings.read_text(), up.dirt("stock")), ("{}\n", []))
 told = notices()
 check("...a notice that it applied, naming the notes and the kept copy",
       ([n["kind"] for n in told], str(backup) in told[0]["note"],
@@ -303,6 +308,8 @@ rec = up.rollback(box=box)
 check("rollback: one call puts 1.0.0 back",
       (rec["outcome"], git(INSTALL, "rev-parse", "HEAD"), up.running_version()),
       ("rolled-back", v100, "1.0.0"))
+check("...the generated app settings survived rollback", app_settings.read_text(), "{}\n")
+app_settings.unlink()
 check("...System/Loam as it was before the update, Sam's edit included",
       ("Sam's own line." in readme.read_text(), (sk.loam_dir() / "mine.md").exists()),
       (True, True))

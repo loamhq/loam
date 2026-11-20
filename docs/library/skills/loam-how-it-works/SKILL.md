@@ -173,6 +173,8 @@ providers' CLIs at the release's versions, and nothing else: agents, the
 vault, settings, sign-ins and plugins stay. A change the engineer made to
 Loam's own code on this install is kept: each update merges the release
 around it, and stops, changing nothing, if the two touch the same lines.
+On a stock install, the updater also stops for changes in the checkout,
+including stray ignored files. It skips the generated engineer harnesses.
 
 **Loam's makers** hear a bug, a wish or any feedback ("tell the people who
 make Loam…") when the owner sends it: an agent writes it with personal
