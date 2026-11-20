@@ -60,6 +60,8 @@ through `contributes:`. The whole interface, field by field, is
 `docs/examples/plugins/echo/`, and a real one with keys, an agent tool and
 settings is Images, built into Loam at `plugins/images/`.
 
+For the Syncthing plugin, `keys.source` names Syncthing’s settings file on this server. Loam shows the read before install and supplies the key through `LOAM_PLUGIN_KEYS` after confirmation.
+
 **How it introduces itself.** `description:` is its promise, one plain line
 about what someone gets from it; `screenshots:` are up to six pictures of it
 at work in its folder (`{src, src_dark, caption}`); a theme's `palette:`
