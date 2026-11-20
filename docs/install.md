@@ -23,9 +23,10 @@ It asks for anything not given (where it lives, `--owner "Sam"`,
 down a pipe.
 It takes a few minutes (about two on a fresh Debian 12 or
 Ubuntu 24.04 server in the rehearsals of 2026-11-16), and says how long it
-took when it is done. Every line it prints is meant for someone
-who has never used a terminal; what it runs goes to
-`/var/log/loam-install.log` (root, 0600).
+took when it is done. During longer steps, one line shows what is happening
+and how long the step has been running. A check mark stays in the scrollback
+as each part finishes. Redirected output uses plain lines. The commands and
+their output go to `/var/log/loam-install.log` (root, 0600).
 
 **What it checks** (docs/signing.md): the release it clones must be a tag
 signed by one of the maintainer keys written into `install.sh`, checked

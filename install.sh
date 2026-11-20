@@ -63,6 +63,54 @@ while [ $# -gt 0 ]; do
 done
 
 say() { printf '%s\n' "$*"; printf '%s SAY %s\n' "$(date -Is)" "$*" >>"$LOG" 2>/dev/null || true; }
+
+# Before Python is available, keep the same single-line display for the
+# handful of commands that fetch the release or get the tools to fetch it.
+progress_pid=
+clear_progress() {
+  if [ -n "$progress_pid" ]; then
+    kill "$progress_pid" 2>/dev/null || true
+    wait "$progress_pid" 2>/dev/null || true
+    progress_pid=
+    printf '\r\033[K'
+  fi
+}
+progress() {
+  local label=$1 done_message=$2 status=0
+  shift 2
+  if [[ -t 1 && ${TERM:-} != dumb ]]; then
+    (
+      local frames='|/-\' frame=0 seconds prefix size cols
+      size=$(stty size <&1 2>/dev/null) || size='0 80'
+      cols=${size#* }
+      (( cols > 0 )) || cols=80
+      while :; do
+        seconds=$((SECONDS - progress_start))
+        printf -v prefix '  %s %d:%02d  ' "${frames:frame++%4:1}" "$((seconds / 60))" "$((seconds % 60))"
+        if (( cols > ${#prefix} + 2 )); then
+          printf '\r\033[K%s%.*s…' "$prefix" "$((cols - ${#prefix} - 2))" "$label"
+        else
+          printf '\r\033[K%s%s…' "$prefix" "$label"
+        fi
+        sleep 1
+      done
+    ) &
+    progress_pid=$!
+    trap clear_progress EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+  else
+    say "  $label…"
+  fi
+  "$@" >>"$LOG" 2>&1 || status=$?
+  clear_progress
+  trap - EXIT INT TERM
+  if [ "$status" = 0 ]; then
+    say "  ✓ $done_message"
+  fi
+  return "$status"
+}
+
 stop() {
   echo
   say "The install stopped before it began: $1"
@@ -133,6 +181,7 @@ fi
 
 echo
 say "Installing Loam. This takes a few minutes; you can watch it go."
+progress_start=$SECONDS
 
 # What the fetch itself needs. A fresh server usually has curl and Python;
 # git and the certificates are made sure of here (step 3 installs the rest).
@@ -141,9 +190,10 @@ for tool in git curl python3; do command -v "$tool" >/dev/null 2>&1 || need+=("$
 command -v ssh-keygen >/dev/null 2>&1 || need+=(openssh-client)
 [ -f /etc/ssl/certs/ca-certificates.crt ] || need+=(ca-certificates)
 if [ ${#need[@]} -gt 0 ]; then
-  say "  Getting what the installer needs first (${need[*]})…"
-  DEBIAN_FRONTEND=noninteractive apt-get update -q >>"$LOG" 2>&1 || stop "the package lists could not be read (is the internet reachable?)"
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${need[@]}" >>"$LOG" 2>&1 || stop "could not install ${need[*]}"
+  progress "Checking for the installer's tools" "Software list refreshed." \
+    env DEBIAN_FRONTEND=noninteractive apt-get update -q || stop "the package lists could not be read (is the internet reachable?)"
+  progress "Installing the tools to get Loam" "Installer tools ready." \
+    env DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${need[@]}" || stop "could not install ${need[*]}"
 fi
 
 # The install token, for a private repository: an HTTP header that lives in
@@ -156,10 +206,14 @@ if [ -n "${LOAM_INSTALL_TOKEN:-}" ]; then
 fi
 export GIT_TERMINAL_PROMPT=0
 
-if [ -z "$VERSION" ]; then
+find_version() {
   VERSION=$(git ls-remote --tags --refs "$SOURCE" 2>>"$LOG" | sed 's#.*refs/tags/##' \
             | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
-  [ -n "$VERSION" ] || stop "no release of Loam could be found at $SOURCE (while the repository is private, LOAM_INSTALL_TOKEN must be set)"
+  [ -n "$VERSION" ]
+}
+if [ -z "$VERSION" ]; then
+  progress "Looking for the latest Loam release" "Found Loam's latest release." find_version \
+    || stop "no release of Loam could be found at $SOURCE (while the repository is private, LOAM_INSTALL_TOKEN must be set)"
 fi
 
 have=""
@@ -167,9 +221,9 @@ if [ -d "$RELEASE/.git" ]; then
   have=$(git -C "$RELEASE" describe --tags --exact-match 2>/dev/null || true)
 fi
 if [ "$have" != "$VERSION" ]; then
-  say "  Fetching Loam $VERSION…"
   rm -rf "$RELEASE.new"
-  git "${gitargs[@]}" clone --quiet --branch "$VERSION" "$SOURCE" "$RELEASE.new" >>"$LOG" 2>&1 \
+  progress "Downloading Loam $VERSION" "Loam $VERSION downloaded." \
+    git "${gitargs[@]}" clone --quiet --branch "$VERSION" "$SOURCE" "$RELEASE.new" \
     || stop "Loam $VERSION could not be fetched from $SOURCE"
   verify_release "$RELEASE.new" "$VERSION" || { rm -rf "$RELEASE.new"; refuse; }
   rm -rf "$RELEASE" && mv "$RELEASE.new" "$RELEASE"
