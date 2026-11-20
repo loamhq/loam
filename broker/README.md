@@ -268,7 +268,9 @@ line says "Sam ended Iris's turn". `POST /v1/sessions/end-idle` ends every
 
 **Restarting the split services.** Landings and release updates run
 `bin/session-services reconcile`. It checks the running revision and the
-target for each service. An API-only change replaces the HTTP process while
+target for each service. A running revision can lag the checkout after a
+source-equivalent edit. See the split service rules in `docs/update.md`.
+An API-only change replaces the HTTP process while
 provider children keep generating. A host change takes the exclusive
 admission lock, verifies both services see it closed, checks sessions and
 thread turns, and keeps the lock through replacement and health checks.

@@ -54,10 +54,10 @@ app shows. Before sending a turn, the worker saves the input, the bound
 session and where to read its output. A returning worker can use that
 record to finish filing the same reply. The provider runs in its own service.
 When only the API changes, it reconnects to that service and reads from its
-saved position while the provider continues. A planned change to the host
-closes admission and proceeds only when sessions and queued turns are idle.
-During a brief
-outage the app keeps submitted messages in this browser and delivers them
+saved position while the provider continues. A service may keep its loaded
+revision after edits to comments or unused documentation. A planned change
+to the host closes admission and proceeds only when sessions and queued
+turns are idle. During a brief outage the app keeps submitted messages in this browser and delivers them
 in order when the service returns.
 
 On a fresh install the owner lands in Hello with Iris. Loam posts a greeting

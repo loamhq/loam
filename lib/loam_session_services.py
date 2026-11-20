@@ -8,6 +8,7 @@ import time
 import loam_config as lc
 import loam_live
 import loam_session_fence as fence
+import loam_session_source as source
 import loam_units as units
 import loam_update as update
 
@@ -39,17 +40,20 @@ def selected(view, target):
         if not changed:
             continue
         prefix = update.prefix()
-        paths = {prefix + "systemd/session/" + unit}
-        if unit == HOST:
-            paths.add(prefix + "lib/loam_pins.py")
-        if unit == API and any(p.startswith(prefix + "plugins/") for p in changed):
+        if (prefix + "systemd/session/" + unit in changed
+                or (unit == API and any(p.startswith(prefix + "plugins/") for p in changed))):
             chosen.add(unit)
             continue
-        if not changed.intersection(paths) and not any(
-                p.startswith(prefix + "lib/") or p == prefix + entry for p in changed):
+        if not any(p.startswith(prefix + "lib/") or p == prefix + entry for p in changed):
             continue
-        paths |= update.import_closure(old, entry) | update.import_closure(target, entry)
-        if paths & changed:
+        try:
+            closure = update.import_closure(old, entry) | update.import_closure(target, entry)
+            if unit == HOST and prefix + "lib/loam_pins.py" in changed:
+                closure.add(prefix + "lib/loam_pins.py")
+            if any(not source.same_python(old, target, path, closure, prefix)
+                   for path in sorted(closure & changed)):
+                chosen.add(unit)
+        except UnicodeError:
             chosen.add(unit)
     return chosen
 
