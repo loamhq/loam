@@ -1,3 +1,4 @@
+import { boardProjection } from './board-document.js'
 import { noteDateParts } from './time.js'
 import { fileShortcuts } from './store.js'
 import { createCoreRegistry } from './core-registrations.js'
@@ -769,6 +770,7 @@ export function createFiles({
       path,
       row: r,
       view,
+      projection: view === 'markdown' ? boardProjection(root, path) : null,
       caps: capsOf(r),
       text: '',
       saved: '',
@@ -856,11 +858,12 @@ export function createFiles({
     try {
       const got = readOf(await api('GET', `/files/read?${q({ root: file.root, path: file.path })}`))
       if (st.file !== file) return
-      file.text = got.text
-      file.saved = got.text
+      file.rawText = got.text
+      file.text = file.projection?.show(got.text) ?? got.text
+      file.saved = file.text
       file.revision = got.revision
       file.textLoaded = true
-      if (file.mode === 'edit' && file.draft === null) file.draft = got.text
+      if (file.mode === 'edit' && file.draft === null) file.draft = file.text
       if (got.row) {
         file.row = got.row
         file.caps = capsOf(got.row)
@@ -1179,12 +1182,14 @@ export function createFiles({
     file.failed = false
     schedule()
     try {
-      const got = readOf(await api('PUT', '/files/text', { root: file.root, path: file.path, text, base_revision: over ?? file.revision }))
+      const storedText = file.projection?.write(file.rawText, text) ?? text
+      const got = readOf(await api('PUT', '/files/text', { root: file.root, path: file.path, text: storedText, base_revision: over ?? file.revision }))
       if (st.file !== file) return done()
       // What the host stored — not what was sent — is what the page holds and
       // what the field shows. Anything typed while the save was in flight is a
       // newer edit and stays on top of it.
-      const stored = got.text
+      file.rawText = got.text
+      const stored = file.projection?.show(got.text) ?? got.text
       file.text = stored
       file.saved = stored
       if (file.draft === text) file.draft = stored
@@ -1778,8 +1783,8 @@ export function fileView(files, options) {
   return files.registry.component('core.files.viewer', context)
 }
 
-function builtinFileView(files, { close, closeLabel, wide, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null }) {
-  const context = { files, file: files.st.file, options: { close, closeLabel, wide, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
+function builtinFileView(files, { close, closeLabel, wide, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null }) {
+  const context = { files, file: files.st.file, options: { close, closeLabel, wide, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home, backToThread }, slot: 'viewer' }
   const custom = files.registry.entries('files.viewer', context).findLast(entry => !entry.component && entry.slot === 'viewer')
   if (custom) return files.registry.invoke(custom, 'render', context)
   const f = files.st.file

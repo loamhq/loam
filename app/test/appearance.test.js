@@ -155,7 +155,7 @@ test('the registry handoff covers every manifest option and the UI limits', asyn
   const registry = JSON.parse(await readFile(new URL('../docs/appearance-settings.registry.json', import.meta.url)))
   assert.equal(registry.route, '/v1/settings/appearance')
   assert.deepEqual(registry, appearanceRegistry((await loadThemes()).themes))
-  assert.equal(registry.settings.length, 19)
+  assert.equal(registry.settings.length, 17)
   for (const kind of ['phone', 'desktop']) {
     const mode = registry.settings.find((s) => s.key === `appearance.${kind}.mode`)
     const transition = registry.settings.find((s) => s.key === `appearance.${kind}.transition`)
