@@ -1179,8 +1179,12 @@ def share(pid: str, repository: str) -> dict:
     import loam_plugins  # noqa: PLC0415
     if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repository or ""):
         raise ShareError(f"{repository!r} is not a repository: owner/name")
-    folder = loam_plugins.yours_root() / pid
-    if not ID.match(pid or "") or not folder.is_dir():
+    if not ID.fullmatch(pid or ""):
+        raise ShareError(f"{pid!r} is not a plugin id")
+    folder = loam_plugins.copy_folder(pid)
+    if not folder.is_dir():
+        folder = loam_plugins.yours_root() / pid
+    if not folder.is_dir():
         raise ShareError(f"there is no plugin {pid!r} in the plugins folder "
                          f"({loam_plugins.yours_root()})")
     try:

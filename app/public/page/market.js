@@ -682,9 +682,9 @@ export function mount(host) {
   }
 
   // ------------------------------------------------------------ the install sheet
-  async function openInstall(id) {
-    if (!st.list) await load()
-    const entry = entryOf(id)
+  async function openInstall(id, candidate = null) {
+    if (!candidate && !st.list) await load()
+    const entry = candidate ?? entryOf(id)
     if (!entry) { st.install = { id, phase: 'gone' }; host.schedule(); return }
     st.install = { id, entry, phase: 'reading', preview: null, error: '' }
     host.schedule()
@@ -847,7 +847,8 @@ export function mount(host) {
     const home = KIND_HOME[kind]
     const done = job.phase === 'done'
     const verb = update ? 'Update' : theme ? 'Get' : 'Install'
-    const lines = p ? plainTouches(update && p.added && Object.keys(p.added).length ? { touches: p.added, overrides: p.added.overrides, page_code: p.added.page_code } : p.declaration, kind) : []
+    const additions = Boolean(update && Object.keys(p.added ?? {}).length)
+    const lines = p ? plainTouches(additions ? { touches: p.added, overrides: p.added.overrides, page_code: p.added.page_code } : p.declaration, kind, additions) : []
     const description = entry?.description ?? p?.description
     const from = link && p?.source ? `from github.com/${p.source.repo}` : null
     const card = h('div', { class: `sheet market-install${link ? ' market-link-found' : ''}`, key: `install:${job.id}` }, sheetHandle(closeInstall),
@@ -867,6 +868,7 @@ export function mount(host) {
         h('h3', { class: 'market-facts-title', text: update ? (Object.keys(p.added ?? {}).length ? 'New in this version' : 'Nothing new in what it touches') : 'Before you say yes' }),
         job.phase === 'reading' ? h('p', { class: 'note market-reading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading what it declares, from its own link…')
           : p ? touchList(lines) : null) : null,
+      !done && update?.edited ? h('p', { class: 'note', text: 'This update replaces your edits in the installed folder.' }) : null,
       p?.installable === false ? h('p', { class: 'note market-why', text: `${p.why}. It is listed so you can see it.` }) : null,
       job.error ? h('p', { class: 'plugin-notice err', role: 'alert', text: job.error }) : null,
       !done && p && p.installable !== false && !(theme && !p.declaration?.page_code) ? h('p', { class: 'note market-root', text: ROOT_LINE }) : null,

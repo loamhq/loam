@@ -64,10 +64,60 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   const failedIcons = new Set()
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, text, onclick, ...props })
   const notice = (text, bad = true) => text ? h('p', { class: `plugin-notice${bad ? ' err' : ''}`, role: bad ? 'alert' : 'status', text }) : null
-  const marketEntry = row => host.marketState?.list?.plugins?.find(entry => entry.id === row.id)
-  const awaitingMarket = row => host.marketState && !host.marketState.list && row.source?.kind === 'link' && row.source.via !== 'market'
-  const reviewKnown = () => ['listed', 'empty'].includes(host.marketState?.list?.state)
-  const originOf = row => pluginOrigin(row, marketEntry(row))
+  let updates = null, checking = null, updateWrite = null, resume = null
+  async function checkUpdates() {
+    if (checking) return checking
+    checking = host.api('GET', '/plugin-updates').then(out => {
+      updates = out
+    }).catch(error => {
+      if (error.status !== 404) st.error = error.message
+    }).finally(() => { checking = null; changed() })
+    return checking
+  }
+  const marketEntry = row => updates?.entries?.[row.id] ?? host.marketState?.list?.plugins?.find(entry => entry.id === row.id)
+  const reviewKnown = () => ['listed', 'empty'].includes(updates?.market_state ?? host.marketState?.list?.state)
+  const status = row => {
+    const info = updates?.plugins?.[row.id]
+    return info?.version && info.version !== (row.installed?.version ?? row.version) ? info : null
+  }
+  const originOf = row => row.source?.kind === 'link' && updates?.plugins?.[row.id]?.via === 'market'
+    ? 'market' : pluginOrigin(row, marketEntry(row))
+  function updateLine(row) {
+    const info = status(row)
+    const words = []
+    if (row.updates_paused) words.push('Changed here · updates paused')
+    if (info) words.push(info.held ? 'Update needs your yes' : 'Update available', info.version)
+    return words.join(' · ')
+  }
+  async function setAuto(row, replace = false) {
+    if (updateWrite) return
+    const on = !row.auto_update
+    if (on && (row.edited || row.custom_copy) && !replace) { resume = row.key; changed(); return }
+    updateWrite = row.key; resume = null; st.error = ''; changed()
+    try {
+      const out = await host.api('PATCH', `/plugins/${encodeURIComponent(row.id)}`,
+        { auto_update: on, ...(replace ? { replace_changes: true } : {}) })
+      loader.st.rows = loader.st.rows.map(current => current.key === row.key ? { ...current, ...out.plugin } : current)
+    } catch (error) { st.error = error.message }
+    finally { updateWrite = null; changed() }
+  }
+  function updateControls(row) {
+    if (typeof row.auto_update !== 'boolean') return null
+    const info = status(row), words = updateLine(row)
+    const review = () => info.via === 'market'
+      ? host.openMarketInstall(row.id, { ...marketEntry(row), id: row.id, name: row.name, kind: row.kind, pinned_link: info.link })
+      : host.openLinkInstall({ link: info.link })
+    return h('section', { class: 'rows plugin-updates', 'aria-label': 'Plugin updates' },
+      info || words ? h('div', { class: 'setrow' }, h('span', { class: 'setrow-who', text: words }),
+        info ? button(info.held ? 'Review update' : 'Update', review, 'pillbtn content-mark') : null) : null,
+      h('div', { class: 'setrow' }, h('div', { class: 'setrow-who' },
+        h('div', { class: 'setrow-title', text: 'Update automatically' }),
+        h('div', { class: 'setrow-sub', text: row.custom_copy ? 'Updates apply to the original. Your copy stays yours.' : 'Updates that ask for more access wait for your yes.' })),
+        h('button', { type: 'button', class: 'schedule-switch', role: 'switch', 'aria-label': 'Update automatically',
+          'aria-checked': String(row.auto_update), disabled: updateWrite === row.key, onclick: () => setAuto(row) }, h('span'))),
+      resume === row.key ? h('div', { class: 'plugin-resume' }, h('p', { class: 'note', text: 'The next update replaces changes in the installed folder. A separate custom copy stays yours.' }),
+        button('Keep paused', () => { resume = null; changed() }), button('Resume updates', () => setAuto(row, true), 'pillbtn primary')) : null)
+  }
   const originText = origin => origin === 'link' && reviewKnown() ? `${ORIGINS.link} · ${UNREVIEWED}` : ORIGINS[origin]
   const meta = (row, origin) => [row.author, row.version, originText(origin)].filter(Boolean).join(' · ')
   const declarations = (declaration, title = 'What it touches') => h('section', { class: 'plugin-declaration', 'aria-label': title }, h('h3', { class: 'kicker', text: title }),
@@ -77,7 +127,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     if (row?.on) host.registry?.emit('plugin.settings.opened', { id: row.id })
   }
   async function open(row) {
-    hostSettings = null; secretSettings = null
+    hostSettings = null; secretSettings = null; resume = null
     st.selected = row; st.detail = null; st.detailError = ''; st.opening = true; st.guide = false; st.remove = false; st.error = ''; st.focusDetail = true; changed()
     opened()
     // Whether its keys are saved, for whether it is set up (below).
@@ -159,7 +209,9 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   function rowNotices(row) {
     const overrides = [...new Set([...(row.overrides ?? []), ...(host.registry?.overrides(row.id) ?? [])])]
     const broken = row.broken || loader.st.failures.get(row.id)
+    const update = updateLine(row)
     return [
+      update ? h('span', { class: 'plugin-update-line', text: update }) : null,
       row.shadows ? h('span', { class: 'plugin-mark', text: 'Changes a shipped plugin' }) : null,
       overrides.length ? h('span', { class: 'plugin-mark', text: `Replaces ${overrides.map(label).join(', ')}` }) : null,
       broken ? h('span', { class: 'plugin-row-error', text: broken }) : row.warnings?.length ? h('span', { class: 'plugin-row-warning', text: `${row.warnings.length} ${row.warnings.length === 1 ? 'warning' : 'warnings'}` }) : null,
@@ -254,7 +306,6 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   }
   function aboutOrigin(row) {
     const line = (...words) => h('p', { class: 'plugin-about-origin' }, ...words)
-    if (awaitingMarket(row)) return line('Checking Market listings…')
     const origin = originOf(row)
     if (origin === 'market') {
       const author = marketEntry(row)?.author || row.author
@@ -309,7 +360,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       theme ? picture(row) : null,
       ready ? null : how,
       row.shadows ? h('p', { class: 'plugin-mark', text: 'Changes a shipped plugin.' }) : null,
-      row.edited ? h('p', { class: 'note', text: 'Edited here since it was installed.' }) : null,
+      updateControls(row),
       notice(st.error), notice(st.detailError),
       st.opening ? h('p', { class: 'note', role: 'status', text: 'Reading plugin details…' }) : null,
       row.switch === 'plugin' && row.id !== 'daily-notes' && !row.broken ? h('div', { class: 'rows plugin-enable' }, h('div', { class: 'setrow' },
@@ -345,15 +396,9 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   function view({ back = true } = {}) {
     if (st.selected && loader.st.loaded && !loader.st.rows.some(row => row.key === st.selected.key)) { st.selected = null; st.detail = null; st.done = 'This copy was removed.' }
     const rows = loader.st.rows.filter(row => row.effective || row.broken)
-    const waiting = rows.some(awaitingMarket)
-    const market = host.marketState
-    if (market && !market.loading && Date.now() - (market.loadedAt ?? 0) > 60000 && rows.some(row => row.source?.kind === 'link')) {
-      host.loadMarket(false, { prefetch: false })
-    }
     if (st.selected) return detail()
     const themes = [], groups = new Map(Object.keys(ORIGINS).map(origin => [origin, []]))
     for (const row of rows) {
-      if (awaitingMarket(row)) continue
       if (row.kind?.includes('theme')) themes.push(row)
       else groups.get(originOf(row)).push(row)
     }
@@ -366,7 +411,6 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         ...Array.from(groups, ([origin, rows]) => rows.length ? h('section', { class: 'plugin-origin-group', 'aria-labelledby': `plugin-origin-${origin}`, key: origin },
           h('h4', { class: 'plugin-origin-title', id: `plugin-origin-${origin}`, text: ORIGINS[origin] }),
           h('div', { class: 'rows' }, ...rows.map(row => rowView(row, origin)))) : null))) : null,
-      waiting ? h('p', { class: 'note', role: 'status', text: 'Checking Market listings…' }) : null,
       // Settings › Market (2026-11-18) holds what can be got; this page shows
       // what is installed, and ends with the way there and the way in from a
       // link (one row, opening the Market's own install sheet: page/market.js).
@@ -383,5 +427,5 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       }
     }
   }
-  return { st, view, open, opened, sync }
+  return { st, view, open, opened, sync, checkUpdates }
 }

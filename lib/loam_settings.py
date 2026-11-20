@@ -607,6 +607,15 @@ ENTRIES: list[Entry] = [
           values="true or false; a theme is chosen with appearance.*.theme instead",
           body=lambda v, m: {"on": v}, read="GET /v1/plugins/{plugin}",
           pick=lambda a, m: a["plugin"]["on"]),
+    Entry("plugin.auto_update", "setting", "Update this Market or link plugin automatically",
+          "PATCH /api/plugins/{plugin}", route="PATCH /v1/plugins/{plugin}",
+          target="plugin id", options="plugins", unattended=False,
+          values='true or false. After local changes, explain that the next update replaces '
+                 'edits in the installed folder. On the owner’s yes send '
+                 '{"auto_update":true,"replace_changes":true}.',
+          body=lambda v, m: v if isinstance(v, dict) and set(v) <= {"auto_update", "replace_changes"}
+          and "auto_update" in v else {"auto_update": v},
+          read="GET /v1/plugins/{plugin}", pick=lambda a, m: a["plugin"].get("auto_update")),
     Entry("plugin.install", "action", "Install a plugin from a GitHub link",
           "POST /api/plugins", route="POST /v1/plugins", unattended=False,
           values='any GitHub link to it (the repository\'s address or owner/repo '
@@ -784,8 +793,9 @@ PAGE_RELAY: dict[str, list[str] | str] = {
         "appearance.location"],
     # Plugins (2026-11-12; docs/plugins.md), passed by loam-ui's relay
     # since its plugin host (moved up from PAGE_RELAY_AHEAD).
+    "rest === '/plugin-updates'": "read installed plugin update status",
     "rest === '/plugins'": ["plugin.install"],
-    "/^\\/plugins\\/([^/]+)$/": ["plugin.on", "plugin.remove"],
+    "/^\\/plugins\\/([^/]+)$/": ["plugin.on", "plugin.auto_update", "plugin.remove"],
     "/^\\/plugins\\/([^/]+)\\/files\\/(.+)$/":
         "a read: a plugin's page/ and assets/ files, theme.css and PLUGIN.md",
     "rest === '/apps'": "a read: the Apps section's list, GET /v1/apps "

@@ -225,6 +225,7 @@ function goSettings(page, provider = null) {
   host.registry.emit('sheet.changing', { previous: host.state.sheet, sheet })
   host.state.sheet = sheet
   if (page === 'plugins') {
+    host.pluginSettingsUI?.checkUpdates?.()
     if (provider) {
       const openPlugin = () => {
         if (host.state.sheet?.kind !== 'settings' || settingsHome(host.state.sheet.page) !== 'plugins') return

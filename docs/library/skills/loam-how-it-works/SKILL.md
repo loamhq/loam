@@ -123,7 +123,12 @@ owner's to read and edit.
 **Settings › Plugins** shows installed themes and extensions and where each
 copy came from. About opens the Market listing for a Market plugin and shows
 the folder for a locally made one. Use the Market to find more themes and
-extensions.
+extensions. Loam checks the Market listing or the linked repository’s release
+tags daily. About lets you review an update and turn automatic updates on or
+off. Nightly updates are on by default and appear in Activity. An update
+that asks for more access waits for the owner’s yes. An agent changes the
+same switch with `bin/settings set plugin.auto_update` and uses
+`plugin.install` to preview and confirm a specific update on the owner’s word.
 
 **History and backup.** Every fifteen minutes the vault and AI Spaces are
 each committed to their own git history on the server, so a change anyone
@@ -156,7 +161,10 @@ Loam.
 **Plugins** add themes, page code, tools and servers. Loam's own ship with
 it; the owner's live in their own folder, which updates never touch (see
 `loam-building-a-plugin`). A customisation is a plugin wherever one can do
-it. Plugins are shared by link, and the Market (Settings › Market)
+it. To customise someone else’s plugin, first make a copy in the owner’s
+plugins folder. Keep its id to take over, or use a new id to keep both.
+Tell the owner the copy no longer updates by itself and you’ll check the
+original for newer versions when asked. Plugins are shared by link, and the Market (Settings › Market)
 lists what others made (`loam-publishing-to-the-marketplace`).
 
 **Updates** replace Loam's code and this library (`System/Loam/` in the

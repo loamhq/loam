@@ -1521,6 +1521,15 @@ class Server:
         # install from a link (two calls: what it declares, then a confirm),
         # remove, and a plugin's page files for the page's loader. Every rule
         # is lib/loam_plugins.py; docs/plugins.md is the interface.
+        if parts == ["v1", "plugin-updates"]:
+            import loam_plugin_updates
+            if method not in ("GET", "POST"):
+                raise BrokerError(405, "Use GET to check for plugin updates.")
+            body = await asyncio.to_thread(loam_plugin_updates.check, method == "POST")
+            writer.write(response(200, body, "Cache-Control: no-store\r\n"))
+            await writer.drain()
+            return
+
         if parts[:2] == ["v1", "plugins"]:
             await self.plugins_route(method, parts[2:], payload, writer)
             return
@@ -3516,13 +3525,13 @@ class Server:
                 elif method == "PATCH":
                     by = author(payload)
                     fields = {k: v for k, v in payload.items() if k != "by"}
-                    if set(fields) != {"on"}:
-                        raise BrokerError(400, "a plugin's one setting is `on`: "
-                                               "{\"on\": true}")
-                    body = await asyncio.to_thread(loam_plugins.set_on, pid,
-                                                   fields["on"], by)
-                    print(f"plugins: {pid} on={fields['on']} by {by or lc.OWNER_ID}",
-                          file=sys.stderr, flush=True)
+                    if set(fields) == {"on"}:
+                        body = await asyncio.to_thread(loam_plugins.set_on, pid, fields["on"], by)
+                    elif "auto_update" in fields and set(fields) <= {"auto_update", "replace_changes"}:
+                        body = await asyncio.to_thread(loam_plugins.set_auto_update, pid,
+                                                       fields["auto_update"], fields.get("replace_changes"))
+                    else:
+                        raise BrokerError(400, "Send `on` or `auto_update` as a boolean.")
                 elif method == "DELETE":
                     by = author(payload)
                     body = await asyncio.to_thread(loam_plugins.remove, pid, by)

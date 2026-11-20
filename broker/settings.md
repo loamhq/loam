@@ -139,6 +139,7 @@ own `thread.*` rows cover the same things.
 | `appearance.location` | The saved place Sun mode times sunrise and sunset by, one for both kinds: `{latitude, longitude, source, timeZone}` rounded to 0.1°, or null | PATCH /api/settings/appearance | persona | no |
 | `appearance.{phone,desktop}.options.<theme>.<option>` | A theme's option on that device kind, one key per installed theme option, read live from the manifests (on 2026-11-12 Latte's four: `agent-colours`, `agent-shapes`, `latte-mug`, `latte-inside`) | PATCH /api/settings/appearance | persona | no |
 | `plugin.on` | A plugin on or off (not a theme-only plugin: that is `appearance.*.theme`) | PATCH /api/plugins/{id} | persona, conversation only | no |
+| `plugin.auto_update` | Apply updates with previously approved access at night. Resuming after edits requires confirmation that the installed folder may be replaced. | PATCH /api/plugins/{id} | persona, conversation only | no |
 | `plugin.install` | Install from a GitHub link: a preview, then the same link with its `confirm` | POST /api/plugins | persona, conversation only | no |
 | `plugin.remove` | Remove a plugin from the Yours layer | DELETE /api/plugins/{id} | persona, conversation only | no |
 | `plugin.restart` | Restart a server plugin's own unit (2026-11-13) | POST /api/plugins/{id}/restart | persona, conversation only | no |

@@ -354,7 +354,9 @@ export function createActivity({ registry = createCoreRegistry(), api, redraw, a
       words.reason ? h('p', { class: 'activity-error', text: words.reason }) : null,
       item.kind === 'change' || item.kind === 'refused'
         ? scheduleChange(item, { ...st.actions.get(item.id), undo: item.kind === 'change' ? () => undo(item) : null })
-        : h('p', { class: 'muted', text: 'No receipt or output was supplied for this item.' }),
+        : item.kind === 'plugin-update'
+          ? h('p', { class: 'muted', text: `Version ${item.from_version} → ${item.version}. Its declared access stayed within what you approved.` })
+          : h('p', { class: 'muted', text: 'No receipt or output was supplied for this item.' }),
       item.stage ? h('p', { class: 'activity-meta', text: `Stage: ${item.stage}` }) : null,
       item.landing ? h('p', { class: 'activity-meta', text: `Landing: ${item.landing}` }) : null,
       item.kind === 'fire' && item.started && !item.finished ? h('p', { class: 'activity-meta', text: 'No finish time was supplied.' }) : null,

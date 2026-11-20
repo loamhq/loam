@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Let the broker apply eligible plugin updates in nightly housekeeping."""
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+from loam_settings import call
+
+if __name__ == "__main__":
+    result = call("POST", "/v1/plugin-updates", {}, timeout=1700)
+    print(json.dumps(result))
+    sys.exit(bool(result.get("errors")))

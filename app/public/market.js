@@ -261,7 +261,7 @@ export const ROOT_LINE = 'Like your agents, a plugin has full control of this se
 // install sheet: `{ glyph, text, sub }`. Read from the declaration an
 // install's first call answers (lib/loam_plugins.declaration).
 const PLACE = { 'core.message': 'the message bubble', 'core.thread-list': 'the thread list', 'core.composer': 'the composer', 'core.files.viewer': 'the Files viewer', 'core.files.editor': 'the Files editor', 'core.rail': 'the navigation rail', 'core.activity': 'Activity', 'core.apps': 'Apps', 'core.settings': 'Settings' }
-export function plainTouches(declaration, kind = null) {
+export function plainTouches(declaration, kind = null, additionsOnly = false) {
   const d = declaration ?? {}, t = d.touches ?? {}, out = []
   const network = t.network ?? []
   for (const n of network) out.push({ glyph: 'out', text: n.host === 'browser-managed' ? 'Uses your browser’s own speech service' : `Talks to ${n.host}`, sub: n.why || '' })
@@ -274,6 +274,9 @@ export function plainTouches(declaration, kind = null) {
   if (t.memory === 'read') out.push({ glyph: 'memory', text: 'Reads what your agents keep for themselves', sub: '' })
   if (t.memory === 'write') out.push({ glyph: 'memory', text: 'Adds to what your agents keep for themselves', sub: '' })
   if (t.agents?.tools?.length) out.push({ glyph: 'tool', text: `Gives your agents ${t.agents.tools.length === 1 ? 'a new tool' : `${t.agents.tools.length} new tools`}`, sub: t.agents.tools.map(x => x.replace(/ \(.*\)$/, '')).join(', ') })
+  if (t.agents?.prompt?.length) out.push({ glyph: 'tool', text: 'Adds instructions for agents', sub: t.agents.prompt.join(', ') })
+  if (t.settings?.length) out.push({ glyph: 'tool', text: 'Adds settings', sub: t.settings.join(', ') })
+  if (t.drift_check) out.push({ glyph: 'server', text: 'Runs a check on your server', sub: '' })
   for (const key of t.keys ?? []) out.push({ glyph: 'key', text: `Uses your ${key.name} key${key.optional ? ' if you have one' : ''}`, sub: key.why || 'From API keys, in Settings › Connections.' })
   if (t.secrets?.length) out.push({ glyph: 'key', text: 'Asks for a key of its own', sub: 'You paste it in its settings; agents never see it.' })
   if (t.vault?.length) out.push({ glyph: 'record', text: 'Writes files into your vault', sub: t.vault.join(', ') })
@@ -281,7 +284,7 @@ export function plainTouches(declaration, kind = null) {
   if (t.inbound?.length) out.push({ glyph: 'server', text: 'Listens for connections on your server', sub: t.inbound.join(', ') })
   if (t.engineer_env?.length || t.engineer_job?.length) out.push({ glyph: 'tool', text: 'Changes how your engineers work', sub: [...(t.engineer_env ?? []), ...(t.engineer_job ?? [])].join(', ') })
   for (const id of d.overrides ?? []) out.push({ glyph: 'page', text: `Replaces ${PLACE[id] ?? id}`, sub: '' })
-  if (!network.length && !t.open_web && !t.server && !t.inbound?.length) {
+  if (!additionsOnly && !network.length && !t.open_web && !t.server && !t.inbound?.length) {
     out.unshift(kind === 'theme' && !d.page_code
       ? { glyph: 'safe', text: 'Only colours and type', sub: 'No code, so it cannot change how anything works.' }
       : { glyph: 'safe', text: 'Sends nothing off your Loam', sub: '' })
