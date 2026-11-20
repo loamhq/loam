@@ -14,7 +14,7 @@ usage: logs                          the list of names, and where each lives
   wake <agent>         one persona's wake and cron runs, one JSON line each
   wake-journal <agent> the wake service's stderr, from the journal
   cron <agent-name>    one cron's service log, from the journal, e.g.
-                       `cron ada-infra-watch`
+                       `cron <agent>-<cron>`
   reviewer             the reviewer's runs, one JSON line each
   engineer [job-id]    engineer jobs, one JSON line each; with an id, that
                        job's session stderr and, after it, its journal

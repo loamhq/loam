@@ -1,154 +1,16 @@
 #!/usr/bin/env python3
-"""Run one engineer job. A brief goes in, a receipt comes out, and the facts
-in it that matter are written by this file rather than by the model.
+"""Launch and recover engineer jobs. The outer process accepts a brief and returns its
+job ID. A transient systemd unit owns the session so it can outlive the caller.
+Admission is by memory. A brief may supply its own time limit.
 
-Move 9 (phase-5 closing plan, decisions 1-7). The persona's tool calls this
-and gets the job id back at once; everything below is what stands between "a persona asked" and "a
-receipt the owner can read in the vault without opening a terminal".
+The inner process writes the engineer's receipt and independently records the
+outcome, elapsed time, heartbeat and repository revisions. Publish the verdict
+atomically before notifying the asking thread or unattended run. A continuation
+resumes a completed job's provider session with a new job ID, brief and receipt.
 
-**Two processes, and the split is the whole design.**
-
-    outer   runs inside the MCP server, which is a child of the persona's
-            session. It refuses what should not start, records who asked
-            (lib/loam_waiters.py), launches the inner as a TRANSIENT SYSTEMD
-            UNIT, and returns. Until 2026-11-19 it then waited.
-    inner   runs inside that unit, owned by systemd and by nothing else. It
-            is admitted by the box's memory, ticks a heartbeat, runs the
-            session, and writes the receipt to disk before anybody is told
-            about it.
-
-The reason they are separate is that the session which asked can end before
-the job does, and the runtime is explicit about what that does to work the
-session owns: *"it does not survive exiting this session."* So the work is
-not the session's to own, and nothing waits on it: the receipt lands on disk
-and the result goes back to whoever asked when it does -- a turn in the
-thread it was asked from, or a run of the asking persona that resumes its
-session (lib/loam_results.py, batch B step 3, 2026-11-19).
-
-**No count, no clock, no cap (since 2026-11-10).** The owner that day: "why do
-we have limits on the number of engineering tasks?" and "Please remove any
-limitations on how long a turn or session can run. I don't want any
-limitations at all." So:
-
-    admission   by memory, the session broker's rule: a job starts while
-                the box keeps 2 GB or 12% of RAM free after the 450 MB it
-                needs to start (lib/loam_lock.py). Until then a job took one
-                of three run slots shared with every wake and cron, and a
-                fourth waited. A job with no room queues with no deadline
-                (four hours until then), and ``--status`` says what it waits
-                on.
-    clock       none, unless the brief sets ``max_minutes``. Until then 60
-                minutes by default, 180 at most, 90 from a lane nobody is in,
-                and a brief that would cross 01:30 Pacific was refused.
-    cap         none. Until then 300 API round trips (``--max-turns``, and
-                counted by lib/loam_codex_job.py for a Codex job).
-    memory      none. Until 2026-11-16 ``MemoryMax`` 20% of RAM and
-                ``MemorySwapMax`` 512M; a job now sits at the agents' place
-                in the kernel's OOM order instead.
-
-**A command that never returns is stopped, not the job (since 2026-11-17).**
-An Antigravity job sat 13 hours on a test that never exited, its heartbeat
-ticking. Now a Codex or Antigravity engine silent for 30 minutes while its
-own last event says a command runs has that command stopped, gets the error
-back and carries on; the receipt says so, and a second stop on one job posts
-one line to its thread (lib/loam_stuck.py). A Claude engine needs nothing:
-its Bash tool has its own timeout. And ``--status`` says each running job's
-last engine event, not only its start, so a stuck job reads as stuck.
-
-What stays: the project's live lock around the steps that change live
-state. (The waiter's ceiling under the tool call's four-hour timeout went
-on 2026-11-19 with the waiter.)
-
-**The receipt has two halves and they are not written by the same author.**
-The engineer writes the body: what changed, linked to evidence. This file
-appends what only it knows -- start and end, exit status, turns, duration,
-cost, the last heartbeat, and the three trees' git HEADs before and after.
-That split is not tidiness. Measured 2026-09-05: after a session was killed
-mid-tool-call and resumed, it reported in good faith that *"there was only
-one attempt, and no permission prompt occurred at all -- it ran clean"*, and
-both readings were what its own transcript showed. The eleven minutes it had
-actually spent hanging existed only in a log written from outside it. An
-agent's account of a turn it did not survive is unreliable in a way that has
-nothing to do with honesty, so the facts a persona has to be able to trust
-are collected by a process that is not the one being reported on.
-
-**A job may continue the one before it (since 2026-09-22).** A brief that
-carries ``continue_job: <a previous job id>`` resumes that job's CLI session
-instead of starting a fresh one: same project, same tree, the previous
-session's context still in the window, and its own job id, brief and
-receipt. It existed first for the round-trip cap (gone since 2026-11-10) -- a
-capped job's successor spent its first twenty round trips re-reading the
-code the capped one had already read -- and serves now for a job that did
-not land, was killed at its memory cap or was cut at a ceiling it was given. The mechanism is ``--resume <id>
---fork-session``, and the id is one this launcher chose and wrote into the job
-directory before the run, so a job killed without printing an envelope is
-still continuable. Three refusals guard it, all before anything is minted:
-another project's job, a job still running, and a job with no session
-recorded (everything before this date, and every probe and refusal).
-
-**Who may brief which project (since 2026-09-25).** The owner's rule of
-2026-09-11: only one persona briefs the platform engineer; project engineers are open
-to every persona. It is enforced here, at both doors -- ``accept`` from
-``LOAM_AGENT``, ``preflight`` from the header ``accept`` wrote -- and not in
-the tool's description, because a description is a request and all seven
-personas carry the tool unscoped. The one exception is the deploy lane: a
-``Loam`` brief titled ``Deploy <project>`` for a provisioned project engineer's
-project is accepted from anyone, because a deploy is sudo and therefore Loam's,
-and the recorded Move 10 default is that the platform engineer runs it on a
-persona's brief. The rule, its sentence and the lane are one function in
-``lib/loam_engineer.py``; the receipt's ``deploy brief`` row says when the lane
-was the reason a job ran.
-
-**What this does NOT do.** No identity preflight -- the engineer has no soul
-to canary, and asserting one would be asserting a property it was built not
-to have. Its preflight is that its two imports resolve and that the brief
-exists and is non-empty.
-
-**Project engineers (since 2026-09-07, Move 9 build two).** The first argument
-is a project name from ``lib/loam_engineer.projects()`` -- ``Loam`` for the
-platform engineer, or a name registered by ``bin/provision --project`` -- and
-a path is still accepted for callers older than the registry. A project
-engineer's job differs from the platform engineer's in exactly the ways its
-repo must not know about: it runs in the repo's checkout with the job
-directory added at launch (``--add-dir``), it is given the project's deploy
-key and NOT the account token, and its unit carries ``NoNewPrivileges`` so
-the box's sudo grant to this unix user does not reach it.
-
-**The tool form, ``--brief`` (since 2026-09-07, later the same day).** The
-persona-side MCP server is spawned once per conversation and lives as long
-as the conversation does, so any decision it holds is frozen at whatever
-this repo said when the conversation opened. Caused that morning: a
-conversation opened before the project registry existed refused a brief to
-a project provisioned hours later, because its server still held the old
-map. So the server now holds NOTHING. It hands the tool's arguments to this
-file as one JSON object on stdin and prints back the one JSON object this
-file writes to stdout, and everything it used to decide -- which projects
-exist, whether the brief and its fields are non-empty, the clock's default
-and ceiling, the job id and its directory, the brief's header, the error a
-persona reads -- is decided here, in a fresh process, from today's code.
-
-    stdin   {"project", "title", "brief", "involvement", "max_minutes",
-             "continue_job", "deploy"} -- the tool's parameters by name,
-            nothing else (`deploy` since 2026-11-12, absent from older
-            servers, which is a brief that lands only).
-            LOAM_AGENT in the environment says who is briefing.
-    stdout  {"ok", "error"}                              refused before a job
-            {"ok", "job_id", "receipt_path", "receipt"}  a job was minted
-
-What crosses that boundary is deliberately something no future change to
-this repo should need to alter: the names of the tool's own parameters and
-the shape of the reply the persona already reads. The positional form below
-stays, byte for byte, because servers started before this paragraph still
-call it (by path, even, from before the registry), and a launcher that
-rejects an older server's call is the seam this form exists to close.
-
-Usage: engineer-job --brief                                  (JSON on stdin)
-       engineer-job --land                     (inside a job, from its tree)
-       engineer-job --recover                  (loam-job-recovery.timer)
-       engineer-job --cancel <job-id> [--by <name>]   (stops it if running)
-       engineer-job <project-name-or-dir> <job-id>
-       engineer-job <project-name-or-dir> <job-id> --in-unit   (systemd only)
-"""
+The JSON interface is engineer-job --brief. Keep the positional project and job ID
+form for older callers. Use --land from a job checkout, --recover from the recovery
+timer and --cancel <job-id> to cancel."""
 
 from __future__ import annotations
 
@@ -163,9 +25,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Before it, this file's own lib (2026-11-09; appended after it since
-# 2026-10-07): run from a job's worktree, as its tests do, the launcher uses
-# the branch's lib, so a branch's pass proves the branch. Live, one path.
+# Prefer this checkout's library so a job tests its own launcher changes.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
 import loam_contributions as contributions  # noqa: E402
@@ -190,55 +50,28 @@ CLAUDE = str(lc.CLAUDE_BIN)
 AGENTS = eng.AGENTS
 STATE_DIR = lc.STATE / "wake"
 
-# What a job's unit is given past the ceiling its brief set (`max_minutes`),
-# for the inner to assemble and copy its receipt after cutting the session.
-# Ninety seconds is generous for that. A job with no ceiling -- every job
-# since 2026-11-10 unless its briefer set one -- has no unit timeout at all.
+# Give a timed job time to publish its receipt after stopping the session.
 GRACE_SECONDS = 90
 
 # systemd-run returns once the job is enqueued, not once it is running. A
 # record younger than this is never read as "died before it started".
 STARTUP_GRACE_SECONDS = 15
 
-# How long a session may go without a line landing in its transcript before
-# the heartbeat calls it stalled (since 2026-09-30). Job dd7958fd (09-25) sat
-# silent for 41 minutes and nothing said so until the wall clock cut it. The
-# label is a reading, not a verdict: a twenty-minute build inside one Bash
-# call writes no transcript line either. So nothing ends a job on it -- only
-# a ceiling its briefer set does -- and it goes into the heartbeat, result.json and a
-# receipt-less record so the reader can tell a quiet job from a busy one.
+# Transcript silence is a status observation. A long-running tool may still be making
+# progress.
 STALL_MINUTES = 15
 
-# The inner's exit code when a briefer's ceiling cut the session (since
-# 2026-09-30; a wall clock every job had until 2026-11-10). A timeout is a job outcome with its own record, not a unit
-# failure: `launch` declares this code a success to systemd, so OnFailure no
-# longer fires for every timed-out job, and bin/wake-failed ignores it too in
-# case a unit started before this line is the one reporting. 124 is
-# timeout(1)'s code for the same event.
+# A briefer's timeout has its own verdict. Treat it as a successful unit exit so
+# OnFailure does not report it twice.
 TIMEOUT_EXIT = 124
 
-# A job that is a sleep of this many seconds instead of a session, for probes
-# of the launcher itself. The seam exists because the persona-side server is
-# now concurrent (2026-09-07, evening) and the only proof of that worth
-# having is two REAL launcher records overlapping in time -- which means two
-# real jobs, and a real job costs a model session, writes a receipt into the
-# vault and a line into the log. A probe job runs the whole path except the
-# session: it is minted, preflighted, launched as a unit, locked, ticked and
-# recorded, and then its receipt STAYS in the job directory -- no vault copy,
-# no log line -- so a probe leaves nothing behind that is not gitignored.
-# Same rule as LOAM_LOCK_WAIT_S: the operative value is
-# the default (unset, so no probe), nothing in a unit or generator sets it,
-# and the outer passes it into the unit by hand because systemd-run does not
-# inherit the caller's environment.
+# Probes exercise unit launch, admission and bookkeeping with a sleep in place of a
+# paid session. Keep their receipts local. Forward the opt-in explicitly because a
+# transient unit does not inherit the caller's environment.
 PROBE_SECONDS_VAR = "LOAM_ENGINEER_PROBE_SECONDS"
 
-# The write boundary, handed to a project engineer's session per job with
-# `--settings` (since 2026-10-02). Its repository's settings are portable and
-# name no hook; the rule that a job writes its own tree and not the canonical
-# checkout or another job's is this box's, so it arrives the way the job
-# directory does. The platform engineer's settings register the same hook,
-# with the same `onFailure: "block"` (provision's `_guard_hook` says why: a
-# guard that times out refuses the call instead of letting it through).
+# Inject the local write guard at launch so project settings remain portable. Guard
+# failure must refuse the tool call.
 GUARD_SETTINGS = {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{
     "type": "command",
     "command": f"/usr/bin/python3 {AGENTS}/hooks/boundary_guard.py",
@@ -277,13 +110,7 @@ If you write no receipt, this job reports as having finished with nothing to \
 show, which is the one outcome that helps nobody.
 {release_note}"""
 
-# The prompt for a continued job (since 2026-09-22). This arrives as the next
-# message in the session the previous job ran in, so the one thing it must not
-# do is re-introduce the work: everything the previous session read and did is
-# above it. What it has to say instead is which files are THIS job's -- a new
-# brief and a new receipt, in a new directory -- and that the previous
-# receipt is already filed, because a session that still has the old receipt
-# path in its window will otherwise write there and nobody will read it.
+# Continue in the existing session, identifying the new brief and its separate receipt.
 CONTINUE_PROMPT = """\
 This is a new job, and it continues job {continue_job} — the session you are \
 in. Everything above is yours: what you read, what you changed, what you had \
@@ -310,8 +137,7 @@ show, which is the one outcome that helps nobody.
 {release_note}"""
 
 
-# How a job asks for a release (since 2026-10-02). A job's clone cannot push
-# a tag, so the landing pushes it; see lib/loam_worktree.py `cut_release`.
+# Only the landing can push the release tag after the tested commit reaches main.
 RELEASE_NOTE = """
 If this job is a release, write the version tag alone (e.g. `1.2.0`) to \
 {release}. Once your branch has merged, the tests have passed and `main` is \
@@ -322,9 +148,7 @@ without it; the receipt says which. Do not make or push a tag yourself.
 """
 
 
-# Where the session works (since 2026-10-02). Said in the prompt because it is
-# the one fact about this job neither the role file nor the brief can know,
-# and because the cost of getting it wrong is a commit nobody lands.
+# The checkout and branch belong to this job and must be supplied at launch.
 TREE_NOTE = """\
 You are working in {tree}, a clone of the project's repository on the \
 branch `{branch}`, made from `main` for this job alone{opened}; its `main` is \
@@ -345,16 +169,8 @@ LIVE_NOTE = (
     "rules.")
 
 
-# A read-only brief (since 2026-10-13). Its shape is the one personas were
-# already writing: the `involvement` header opens with "Read-only" -- the owner's
-# dial for the job, quoted in the receipt, e.g. `involvement: Read-only.
-# Change nothing, commit nothing, open no PR.` (an adopted project's job,
-# 20261012-181315-4e672864). The launcher honours it whatever the tree holds:
-# nothing is merged, pushed or proposed, and the tree is removed. The body's
-# own "Read-only job: ..." sentences are prose and decide nothing, and neither
-# does `pull-request.md`. Caused 2026-10-12: that job checked out a pull
-# request's commit detached, and its landing asked GitHub for a pull request
-# from a branch still at the base.
+# The involvement header can declare a read-only brief. Tell the session which work
+# product to return.
 READ_ONLY_RE = re.compile(r"\s*read-only\b", re.IGNORECASE)
 
 READ_ONLY_NOTE = """
@@ -365,11 +181,8 @@ request, and removes your tree whatever is in it; there is nothing to commit \
 and no `pull-request.md` to write. Your receipt is the deliverable."""
 
 
-# The session's scratch (since 2026-10-21; see loam_engineer.scratch_dir).
-# TMPDIR carries it to every tool that asks; this carries it to the session,
-# which until then named its own `/tmp/<job>-pnpm-store` and left it there.
-# The quota retry's word to the session (2026-11-15): a first attempt ran on
-# another model and stopped out of quota, so the tree may hold its work.
+# Name the job's scratch directory in the prompt as well as TMPDIR. Literal paths in
+# tool calls bypass TMPDIR.
 QUOTA_RETRY_NOTE = """
 
 A first attempt at this job, on `{model}`, stopped out of quota, and this is
@@ -400,8 +213,7 @@ def is_read_only(involvement: str | None) -> bool:
     return bool(READ_ONLY_RE.match(involvement or ""))
 
 
-# A project that lands by pull request (since 2026-10-06) is told so instead:
-# its `main` mirrors a remote it does not own, and nothing it does reaches it.
+# A pull-request project mirrors upstream main and lands changes through review.
 PR_TREE_NOTE = """\
 You are working in {tree}, a clone of the project's repository on the \
 branch `{branch}`, made for this job alone{opened} from `main`, which is the \
@@ -569,15 +381,8 @@ def paths(project: eng.Project, job_id: str) -> dict[str, Path]:
 
 
 def write_result(p: dict[str, Path], payload: dict, deliver: bool = True) -> None:
-    """Atomic, because the broker and bin/wake read this file's existence as
-    the job's verdict. A partial read would hand a persona a truncated
-    receipt and call it the answer.
-
-    A verdict owed to a run with no thread starts that run's delivery now
-    (2026-11-19, lib/loam_results.py): the persona that asked gets a run
-    resuming its session with this as its input. A thread's is the
-    broker's to deliver, within thirty seconds. ``deliver`` False: the
-    brief call itself is answering (a refusal, a failed launch)."""
+    """Publish the verdict atomically. Readers treat its existence as completion. Dispatch
+    an owed result only after the whole record is readable."""
     tmp = p["result"].with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(tmp, p["result"])
@@ -591,11 +396,7 @@ def write_result(p: dict[str, Path], payload: dict, deliver: bool = True) -> Non
 
 
 def mark_landing(p: dict[str, Path], phase: str, **extra) -> None:
-    """Say that this job's session is over and its landing is running with
-    no run slot (since 2026-10-13): `phase` is "landing", or "ci" while it
-    reads GitHub's checks, with `until` the bound of that wait. Read by
-    `--status` and by the waiter; the pid is the inner's, checked against
-    /proc by every reader, so a killed unit's file reads as nothing."""
+    """Record the landing or CI phase after releasing the session's admission."""
     try:
         since = json.loads(p["landing"].read_text(encoding="utf-8"))["since"]
     except (OSError, ValueError, KeyError, TypeError):
@@ -623,8 +424,7 @@ def read_landing(p: dict[str, Path]) -> dict | None:
 
 
 def job_runtime(p: dict[str, Path]) -> str:
-    """The CLI a job ran on: its `runtime` file, and `claude` for a job
-    from before the file existed (2026-10-07), which is every one of them."""
+    """Return the saved runtime. Older jobs without a runtime file used Claude."""
     try:
         value = p["runtime"].read_text(encoding="utf-8").strip()
     except OSError:
@@ -673,7 +473,7 @@ def preflight(project: eng.Project, p: dict[str, Path], brief_meta: dict) -> str
             f"project was retired, the record should have gone with it."
         )
     try:
-        # A folder project's harness is in its folder (2026-11-16).
+        # Resolve a folder project's harness relative to its folder.
         assert_imports_resolve(project.root / project.subdir if project.subdir else project.root)
     except (IdentityError, OSError) as exc:
         fix = ("`agents/bin/provision --engineer`" if project.platform or project.lane_of
@@ -692,9 +492,7 @@ def preflight(project: eng.Project, p: dict[str, Path], brief_meta: dict) -> str
             f"integration, and the integration is not installed. Connect "
             f"GitHub from the app's Integrations screen."
         )
-    # A folder of Loam's own checkout (the app, since 2026-11-16) has no key
-    # of its own: its landing pushes Loam's `main`, through Loam's remote and
-    # its push gate, as the platform's landing does.
+    # A folder project in Loam uses the parent repository's remote and push gate.
     if not project.platform and not lands_by_pr(project) and not project.subdir and (
         project.deploy_key is None or not project.deploy_key.is_file()
     ):
@@ -722,12 +520,7 @@ def preflight(project: eng.Project, p: dict[str, Path], brief_meta: dict) -> str
     if refusal:
         return refusal
 
-    # No per-project
-    # exclusivity since 2026-10-02: each job edits its own worktree and lands
-    # by a tested merge (lib/loam_worktree.py), so a second brief to a busy
-    # project runs beside the first. What is still rationed is the box's
-    # memory -- admission, taken by the inner -- and the steps that change
-    # live state, each under its project's live lock for that step alone.
+    # Jobs edit isolated trees. Serialize the tested merge at landing.
     return None
 
 
@@ -756,17 +549,8 @@ def still_running(p: dict[str, Path]) -> bool:
 
 
 def resolve_continuation(project: eng.Project, continue_job: str) -> tuple[str | None, str | None]:
-    """(session id to resume, refusal). Exactly one of the two is set.
-
-    Since 2026-09-22. A job that hit its cap used to be followed by a brief
-    that spent its first twenty round trips re-reading the code the capped
-    session had already read. `continue_job` names that job instead: its CLI
-    session is resumed, so what it read and found is still in the window, and
-    only the new brief is new.
-
-    Three ways this cannot be done, and each gets its own sentence because
-    each has a different next step. The checks run before anything is minted.
-    """
+    """Return the session to resume or a refusal. Require a finished job in the same project
+    with an available provider session. A continuation owns its own receipt."""
     try:
         d = eng.job_dir(project, continue_job)
     except eng.BriefError:
@@ -814,16 +598,11 @@ def resolve_continuation(project: eng.Project, continue_job: str) -> tuple[str |
             f"failed launch, a probe). Send the brief without `continue_job`; "
             f"an unrecorded id cannot be recovered after the fact."
         )
-    # The parent's CLI keeps the transcript: Claude's under ~/.claude, a Codex
-    # thread's rollout under CODEX_HOME (since 2026-10-07).
-    # An Antigravity conversation's file under ~/.gemini (since 2026-11-15):
-    # the CLI does not refuse an id it does not know, it starts a new
-    # conversation, so the refusal has to be here.
+    # Look for the parent session in its provider's transcript store.
     parent_runtime = job_runtime(p)
     codex = parent_runtime == "codex"
     if parent_runtime == "antigravity":
-        # Cleared a week after its last job (2026-11-15,
-        # lib/loam_agy_files.py): said as that, not as a file gone missing.
+        # Distinguish expiry under the retention policy from a missing session file.
         refusal = agy_files.cleared_refusal(p["dir"], continue_job, session_id)
         if refusal:
             return None, refusal
@@ -846,11 +625,8 @@ def resolve_continuation(project: eng.Project, continue_job: str) -> tuple[str |
 
 
 def clamp_minutes(value) -> int | None:
-    """The job's ceiling from whatever a caller sent: None -- no clock --
-    when it sent nothing usable (absent, empty, `none`, zero, negative, not a
-    number), the minutes when it asked for some. No upper bound since
-    2026-11-10. One function for both entry forms, so the tool and a
-    hand-written brief mean the same thing."""
+    """Return the requested positive minute limit. Missing, invalid or nonpositive values
+    leave the job untimed at either entry point."""
     try:
         minutes = int(value)
     except (TypeError, ValueError):
@@ -872,9 +648,7 @@ def read_brief_meta(p: dict[str, Path]) -> dict:
         "involvement": head.get("involvement") or "",
         # True when the involvement opens with "Read-only" (READ_ONLY_RE).
         "read_only": is_read_only(head.get("involvement")),
-        # The app this job's landing deploys (since 2026-11-12), or "": the
-        # brief tool's `deploy`, which `accept` resolved to an app name and
-        # wrote into the header. lib/loam_autodeploy.py.
+        # Acceptance resolves the deploy parameter before recording it in the brief.
         "deploy": head.get("deploy") or "",
         "max_minutes": max_minutes,
         "project": head.get("project") or "",
@@ -887,99 +661,33 @@ def read_brief_meta(p: dict[str, Path]) -> dict:
         # brief a persona sent.
         "auto_continuation": int(head.get("auto_continuation") or 0)
         if str(head.get("auto_continuation") or "0").isdigit() else 0,
-        # Who called (since 2026-11-12, lib/loam_waiters.caller): the run
-        # kind, the broker session and the thread, or "" when unknown (every
-        # brief before that day, and a hand-written one).
+        # Older briefs can lack caller metadata.
         "caller": head.get("caller") or "",
         "caller_session": head.get("caller_session") or "",
         "thread": head.get("thread") or "",
-        # The asking run's lane, and the job that asked (2026-11-19): what
-        # a result run reloads, and whom a job's brief answers to.
+        # Preserve the asking lane and parent job for result delivery.
         "caller_lane": head.get("caller_lane") or "",
         "asked_by_job": head.get("asked_by_job") or "",
         "lane": head.get("lane") or "",
-        # The tier the brief named (2026-11-15), or "": `standard` on a
-        # fresh job, the parent's model on a continuation (`job_choice`).
+        # An omitted tier uses the fresh-job default or inherits the parent's model on
+        # continuation.
         "tier": (head.get("tier") or "").strip().lower()
         if (head.get("tier") or "").strip().lower() in eng.TIERS else "",
         "body": text,
     }
 
 
-# A job's memory: no ceiling (2026-11-16). The owner, on the loam-ui job
-# 20261114-185520-3e7737f6 OOM-killed at 20% of RAM (~6.3 GB) with its 512M
-# of swap full eleven times, on a box with over 20 GB free: "Part of why we
-# moved to this new infrastructure ... was so that we would remove all of
-# these limits on the different agents, whether personas or engineers." So
-# a job takes what it needs; admission by memory (lib/loam_lock.py) decides
-# only when it may start, and if the box truly runs out the kernel's OOM
-# order (lib/loam_config.py) takes a job's process before the broker, Caddy,
-# the login and the app.
-#
-# History, so nobody re-derives it: 2026-10-14 MemoryMax 960M + SwapMax 128M
-# on the 8 GB CX33, sized for three slots; raised that day to 1536M + 512M
-# so heavy jobs finish; 2026-11-06 a share, 20% of RAM; kept when the slots
-# went (11-10), and removed here. There was never a MemoryHigh, on purpose:
-# a throttle with swap full does not kill, it hangs (caused 2026-10-14 in a
-# scratch unit: 10292 `high` events in 90 s and no progress). That finding
-# stands -- do not add one back.
+# Jobs participate in kernel OOM ordering. Admission reserves free memory at startup.
 
 
 def launch(project: eng.Project, job_id: str, p: dict[str, Path],
            minutes: int | None) -> None:
-    """Start the inner as a transient unit that outlives this process.
+    """Start a transient unit so the job survives the caller. Send diagnostics to the
+    journal and let OnFailure recover an unreported process death. Give timed sessions a
+    grace period to write their verdict.
 
-    Every property here has a cause behind it:
-
-      OOMScoreAdjust   the agents' place in the kernel's OOM order
-                       (lib/loam_config.py). No MemoryMax or MemorySwapMax
-                       since 2026-11-16: a job takes what it needs, and if
-                       the box truly runs out its process goes before Loam's
-                       core.
-      OOMPolicy        continue. A kill takes one process -- the CLI or a
-                       tool it ran -- and leaves this launcher alive to say
-                       so in the receipt (`oom_kills`). The default, stop,
-                       would end the launcher with it and leave a job with no
-                       record but the failure log.
-      StandardOutput   null. Measured 2026-09-05: a server started without
-                       it wrote roughly a line a second to the journal and the
-                       user journal reached 2.4 GB. Nothing in this job's
-                       stdout is information -- the receipt is on disk.
-      StandardError    journal. A crash, an auth failure or a refusing MCP
-                       server prints there, and that is why anyone opens a
-                       log at all.
-      OnFailure        the same handler every wake and cron carries. It fires
-                       only for the one case the inner cannot report on
-                       itself -- a SIGKILL, which runs no `finally`.
-      EnvironmentFile  wake.env for the OAuth token, secrets.env for the keys
-                       a job is given at job time. Mounted, never copied: the
-                       role file forbids writing a credential into a repo, an
-                       image or the vault, and this is what "mounted at job
-                       time" means mechanically.
-      TimeoutStartSec  infinity, or a briefer's ceiling plus the grace: systemd
-                       is never the thing that decides a job is over.
-
-    A PROJECT engineer's unit differs in three properties, and each is the
-    mechanical form of a line in its role:
-
-      no secrets.env   the account token is the platform engineer's and never
-                       a project's (decision 20). wake.env still mounts,
-                       because the session cannot start without it.
-      GIT_SSH_COMMAND  the project's own deploy key, IdentitiesOnly, so a push
-                       can reach one repository and no other.
-      NoNewPrivileges  /etc/sudoers.d/loam-engineer grants this unix user
-                       NOPASSWD sudo, and a project engineer has Bash. Caused
-                       2026-09-07: with this flag a user-level transient unit
-                       gets "sudo: The 'no new privileges' flag is set", and
-                       without it `sudo -n true` succeeds. (InaccessiblePaths
-                       was tried the same minute and is silently ignored by a
-                       user manager on systemd 252, so it is NOT here: a
-                       property that reads as a wall and is not one is worse
-                       than no wall.) This bounds escalation only; the
-                       engineer still runs as the box's user and Bash reaches
-                       whatever that user can. Decision 5's container is the
-                       wall for that, and it comes with Move 10.
-    """
+    Mount credentials at launch. Project jobs get credentials scoped to their repository
+    and NoNewPrivileges so they cannot inherit the platform engineer's sudo access."""
     argv = [
         "systemd-run", "--user", "--collect",
         f"--unit={unit_name(job_id)}",
@@ -1016,19 +724,10 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
         if project.deploy_key is not None:
             argv.append(f"--setenv=GIT_SSH_COMMAND="
                         f"{loam_github.ssh_command(project.deploy_key)}")
-        # The GitHub integration, when it is installed (2026-09-30): the push
-        # goes over https with an installation token for this one repo, asked
-        # of the broker by bin/git-credential-loam at the moment git needs
-        # it. The deploy key above stays as the path while it is not.
+        # An installed GitHub App supplies a short-lived HTTPS credential for this repository.
         argv += [f"--setenv={k}={v}"
                  for k, v in loam_github.helper_env(project.repo).items()]
-    # Outside the project branch above (2026-11-14, L10): L4 had put this
-    # between its `else:` and the rest of its body, so a platform job crashed
-    # reading projects/Loam.json whenever a plugin gave engineers env, and a
-    # project job without plugin env lost its deploy key.
-    # What plugins that are on give this project's jobs (2026-11-14, first
-    # release L4): a file of the job's own, 0600, mounted like the others,
-    # so a secret is never on a command line or in `systemctl show`.
+    # Forward optional integration settings for both platform and project jobs.
     plugin_env = plugin_job_env(project, job_id, p, argv)
     if plugin_env:
         env_file = p["dir"] / "plugin.env"
@@ -1043,15 +742,11 @@ def launch(project: eng.Project, job_id: str, p: dict[str, Path],
         # must find the project the outer did.
         argv.append(f"--setenv=LOAM_PROJECTS_DIR={eng.PROJECTS_DIR}")
     if os.environ.get("LOAM_HOST_SETTINGS"):
-        # Fixture settings (2026-11-19, lib/loam_engineer.py
-        # host_settings_path): the inner must choose the provider the outer
-        # was asked about, so a probe proves a setting without the box's
-        # own being changed. Nothing in a unit or generator sets it.
+        # The inner must read the same provider settings as the outer, including on a fixture
+        # install.
         argv.append(f"--setenv=LOAM_HOST_SETTINGS={os.environ['LOAM_HOST_SETTINGS']}")
     if os.environ.get("LOAM_CONFIG"):
-        # A scratch install (2026-11-19): the inner reads the config the
-        # outer did, so its records, logs and the result's run are that
-        # install's. Nothing in a unit or generator sets it.
+        # Forward the install configuration so child records and results stay on that install.
         argv.append(f"--setenv=LOAM_CONFIG={os.environ['LOAM_CONFIG']}")
     argv += [str(AGENTS / "bin" / "engineer-job"), project.name, job_id, "--in-unit"]
     subprocess.run(argv, check=True, capture_output=True, text=True)
@@ -1067,12 +762,7 @@ LAUNCHER_ENV = frozenset({"PATH", "HOME", "USER", "TMPDIR", "LOAM_WAKE",
 
 def plugin_job_env(project, job_id: str, p: dict[str, Path],
                    argv: list[str]) -> dict[str, str]:
-    """The variables plugins give this job: `engineer.env`'s fixed ones, then
-    what each `engineer.job` hook prints at this launch (2026-11-14, first
-    release L6: how a project's cloud credentials reach its jobs from a
-    plugin; docs/plugins.md). A name the launcher sets is kept the
-    launcher's. Why anything a plugin offered was not used goes to the job
-    folder's `plugin-env.log`, beside its receipt; no value is written there."""
+    """Combine enabled plugins' fixed environment values with per-launch hook output."""
     env = contributions.engineer_env(project.name)
     hooked, notes = contributions.engineer_job_env(
         project.name, job_id, p["dir"], eng.scratch_dir(job_id))
@@ -1101,12 +791,8 @@ def last_beat(p: dict[str, Path]) -> str | None:
 
 
 def read_beat(p: dict[str, Path]) -> dict:
-    """The heartbeat file as a record: `tick`, and `transcript_last` and
-    `stalled_since` when the tick wrote them.
-
-    The file is the tick's time on its first line -- which is all it held
-    before 2026-09-30, and all `last_beat` reads -- then `key: value` lines.
-    """
+    """Read heartbeat time, latest transcript activity and stall onset. Accept the older
+    timestamp-only form."""
     beat = {"tick": None, "transcript_last": None, "stalled_since": None}
     try:
         lines = p["heartbeat"].read_text(encoding="utf-8").splitlines()
@@ -1132,10 +818,8 @@ def transcript_last(session_id: str | None,
     except OSError:
         return None
     if newest is not None and stream is None:
-        # A Claude session's subagents write transcripts of their own beside
-        # it (`<id>/subagents/*.jsonl`), and the main one is silent while it
-        # waits on them: their lines are the session's activity too
-        # (2026-11-17).
+        # Include subagent transcripts when measuring activity. The parent can be quiet while
+        # its children work.
         try:
             for sub in path.with_suffix("").joinpath("subagents").glob("*.jsonl"):
                 newest = max(newest, sub.stat().st_mtime)
@@ -1207,13 +891,8 @@ def ceiling_seconds(meta: dict) -> int | None:
 
 def run_session(argv: list[str], cwd: str, timeout: int | None,
                 p: dict[str, Path]) -> tuple[int, dict, bool]:
-    """Run the CLI: (returncode, envelope, timed_out).
-
-    Both ends keep what the CLI printed. Until 2026-09-30 the timeout path
-    kept nothing, and the receipt-less record then said the CLI "wrote nothing
-    to stderr" -- on the one path where the launcher had thrown it away
-    (job dd7958fd, 09-25).
-    """
+    """Run the CLI and return its exit code, envelope and timeout flag. Preserve partial
+    output on timeout so a failed run can be diagnosed."""
     try:
         result = subprocess.run(
             argv, cwd=cwd, capture_output=True, text=True, check=False,
@@ -1260,24 +939,14 @@ def no_receipt_body(p: dict[str, Path], ran_as: str | None, timed_out: bool,
     killed = memory_ceiling_text(ceiling or {})
     if killed:
         body += f"\n\n**Killed for memory.** {killed}"
-    # What the engineer said last, when the CLI's envelope carries it. A
-    # receipt written as the session's closing message instead of to the
-    # file is still the engineer's account, and dropping it is what made
-    # f6ea1313 (2026-09-30, a deploy) read as a job with nothing to show:
-    # its whole receipt was this text. Quoted under its own name, because
-    # it was not written where a receipt goes.
+    # The closing message can recover a receipt that the engineer returned in its envelope.
     if isinstance(last_message, str) and last_message.strip():
         quoted = "\n".join("> " + line if line else ">"
                            for line in last_message.strip().splitlines())
         body += ("\n\n**The engineer's last message**, from the CLI's result "
                  "envelope, not written to `receipt.md`:\n\n" + quoted)
-    # Why, when the CLI knows. A session that dies of an API error
-    # (2026-09-08: HTTP 429, "out of usage credits") exits 1 with a
-    # `success` envelope and an EMPTY stderr; the only record of the
-    # cause is a synthetic assistant entry in its transcript. Quote
-    # that, and the last stderr line if there is one, so the next such
-    # death names itself instead of reading as a session that simply
-    # stopped.
+    # Keep provider errors even when the outer envelope reports success with an empty
+    # result.
     cause = loam_session.api_error(ran_as)
     lines = stderr_lines(p)
     if cause:
@@ -1368,12 +1037,8 @@ def deploy_row(project: eng.Project, meta: dict) -> str:
 
 def ended_chats(project: eng.Project, started_at: datetime,
                 finished_at: datetime, chats: list[dict] | None = None) -> str:
-    """The chats a broker restart inside this job ended, one line each, or
-    nothing at all when there was no restart. Read from systemd's record of
-    the stop and the broker's event logs (lib/loam_broker.ended_by_restart),
-    not from what the engineer says it restarted: on 10-07 the list was in
-    the receipt only because the engineer chose to write it. Loam's jobs
-    only; a project engineer cannot restart the broker."""
+    """Read session closures from the service journal for this job's interval so the receipt
+    can identify affected conversations."""
     if chats is None:
         if not project.platform:
             return ""
@@ -1432,12 +1097,7 @@ def peak_memory() -> int | None:
 
 
 def oom_kills() -> dict:
-    """`oom_kill`: processes in this unit the kernel's OOM killer took
-    (`memory.events`). Empty outside a unit. A job has no memory ceiling
-    (2026-11-16), so a kill means the box itself ran out and the OOM order
-    (lib/loam_config.py) put this job's process first. Under
-    OOMPolicy=continue the kill takes one process -- the CLI, or a test it
-    ran -- and this launcher lives to read the count."""
+    """Read the unit's kernel OOM kill count from memory.events when available."""
     try:
         for line in (own_cgroup() / "memory.events").read_text().splitlines():
             key, _, value = line.partition(" ")
@@ -1543,11 +1203,8 @@ def cancelled_landing(record: dict, cancelled: dict) -> dict:
 
 
 def report_checks(project: eng.Project, landing: dict, p: dict[str, Path]) -> dict:
-    """GitHub's checks on the pull request's head, waited for at most
-    loam_ci.WAIT_SECONDS. The `landing` record says "ci" and until when, for
-    `--status`; the waiter waits on any live landing whatever its phase.
-    Until 2026-10-13 this had a file of its own, `ci-wait`, and was the only
-    part of a landing that ran without the slot."""
+    """Wait for the pull request head's checks up to the CI deadline, recording the phase
+    for status readers."""
     pr = landing.get("pull_request") or {}
     sha = pr.get("sha") or landing.get("sha") or ""
     mark_landing(p, "ci", sha=sha, until=time.time() + loam_ci.WAIT_SECONDS)
@@ -1577,21 +1234,8 @@ def receipt_summary(p: dict[str, Path], limit: int = 3000) -> str:
     return out if len(out) <= limit else out[:limit].rsplit("\n", 1)[0] + "\n\n(…)"
 
 
-# ---------------------------------------------------------------------------
-# The queue (stage two). A job that finds no room on the box -- by memory
-# since 2026-11-10 (lib/loam_lock.py, admission), by a free run slot until
-# then -- waits as its own unit instead of being refused; the brief that
-# started it has already returned. The queue is the job directories
-# themselves: a `queued` file in each, holding when it joined. Order is by
-# that time, so a later job never overtakes an earlier one -- and a job that
-# has not joined yet is later than all of them: it asks for room only when
-# nobody is waiting (since 2026-10-13, `take_slot`). There is no deadline
-# (QUEUE_MAX_HOURS, four hours, until 2026-11-10): a queued job waits until
-# the box has room or it is cancelled. Durable because
-# nothing is in memory: a queued unit that is killed leaves its file and no
-# verdict, and the next launcher to run -- any brief, any job finishing, or
-# the waiter of that very job -- launches it again.
-# ---------------------------------------------------------------------------
+# Queue jobs in admission order while memory is scarce. Release admission before
+# landing so a slow merge or CI wait cannot block a new session.
 
 QUEUE_POLL_SECONDS = 5
 
@@ -1629,23 +1273,15 @@ def queued_ahead(job_id: str) -> int:
 
 
 def take_slot(project: eng.Project, job_id: str, lane: str, p: dict[str, Path]):
-    """The job's admission (a context already entered), or None when it was
-    cancelled while it waited -- in which case its verdict is written. The
-    name is from when admission was a run slot; it is memory since
-    2026-11-10, and the wait has no deadline."""
+    """Return an acquired admission context, or finalize cancellation if the job was
+    cancelled while waiting."""
     joined = None
     while True:
         if p["cancelled"].is_file():
             p["queued"].unlink(missing_ok=True)
             write_cancelled(p, job_id)
             return None
-        # Only the head of the queue asks for room, and a job that has
-        # not joined yet is behind everyone already waiting. Until
-        # 2026-10-13 a new job's first try ignored the queue, so a job
-        # started the moment a slot was free beat the queued head, which
-        # polls every QUEUE_POLL_SECONDS: twice that day an automatic
-        # continuation, dispatched as its parent let go of its slot, took
-        # that slot ahead of four jobs queued since 16:26Z.
+        # Only the head may claim admission. A new arrival must join behind existing waiters.
         ahead = queued_ahead(job_id)
         if ahead == 0:
             try:
@@ -1679,14 +1315,8 @@ def take_slot(project: eng.Project, job_id: str, lane: str, p: dict[str, Path]):
 
 def job_choice(project: eng.Project, runtime: str, meta: dict,
                continue_job: str | None) -> dict:
-    """``{"tier", "model", "effort", "from"}`` this job runs on (2026-11-15).
-
-    A fresh job: the brief's tier (`standard` when it names none), its
-    model as set, else the engineer's model (lib/loam_engineer.py
-    ``tier_choice``). A continuation that names no tier keeps the model its
-    parent ran on (``from`` ``parent``), and the parent's tier, so a hard
-    job continued is still on the hard model; one that names a tier runs on
-    that tier's model. The thinking level is the engineer's, as before."""
+    """Resolve tier, model and effort. A continuation with no explicit tier inherits its
+    parent's model and tier. A fresh job defaults to the standard tier."""
     if continue_job and not meta.get("tier"):
         parent = job_engine(paths(project, continue_job))
         if parent.get("model"):
@@ -1730,12 +1360,8 @@ def quota_fallback(project: eng.Project, runtime: str, choice: dict) -> tuple[di
 
 
 def stuck_stopped(p: dict[str, Path], meta: dict, job_id: str):
-    """The callback lib/loam_stuck.py calls after it stops a command that
-    did not return (since 2026-11-17). The stop is already in the job
-    directory's record, which the receipt reads; the second stop on one job
-    is also a fact for the system persona (lib/loam_attention.py; until
-    2026-11-19 a line in the briefing thread), because a job that hangs
-    twice is likely to hang again and someone should look."""
+    """Record the command stopped by the watchdog so status and the receipt can explain the
+    interruption."""
     def on_stop(record: dict, count: int) -> None:
         print(f"engineer-job: stopped a command that did not return "
               f"(pid {record['pid']}, {record['quiet_minutes']} min quiet): "
@@ -1761,15 +1387,8 @@ def stuck_stopped(p: dict[str, Path], meta: dict, job_id: str):
 def run_antigravity(project: eng.Project, runtime: str, choice: dict, argv_for,
                     argv: list[str], workdir: str, meta: dict, p: dict[str, Path],
                     resume_from: str | None, prompt: str):
-    """One Antigravity session, and at most one retry (2026-11-15): out of
-    quota (lib/loam_agy_job.py QUOTA_RE) on the tier's model, it runs once
-    more on the tier below (``quota_fallback``), never a loop, and never
-    after a cancel or a ceiling, which are somebody's decision. ``choice``
-    gains ``retry`` (or ``no_retry`` and why) for the receipt. Afterwards
-    the job directory's ``antigravity.json`` names the conversations it ran
-    and the files it left, for the clearing a week on
-    (lib/loam_agy_files.py). Returns (returncode, run, timed_out, argv,
-    model, effort) as the last attempt ran."""
+    """Run one Antigravity session. On a qualifying quota error retry once on the fallback
+    tier and record the model actually used."""
     job_model, job_effort = choice["model"], choice["effort"]
 
     def on_thread(cid: str) -> None:
@@ -1809,9 +1428,7 @@ def run_antigravity(project: eng.Project, runtime: str, choice: dict, argv_for,
 
 
 def job_engine(p: dict[str, Path]) -> dict:
-    """{"engine", "model"} the job's session was launched with: its
-    `engine.json` (since 2026-11-12), else the `runtime` file's engine and no
-    model (an older job), else {} (a job that never launched)."""
+    """Read the saved engine and model. Older jobs record only the engine."""
     try:
         data = json.loads(p["engine"].read_text(encoding="utf-8"))
         if isinstance(data, dict):
@@ -1878,12 +1495,7 @@ def chain_root(project: eng.Project, job_id: str, depth: int = 20) -> str:
 
 
 def job_label(project: eng.Project | None, job_id: str) -> dict:
-    """Who a job is, as the status and Activity say it: id, project, title,
-    briefer; and since 2026-11-12 what it runs on (`engine`, `model`, as
-    launched), who called (`caller`: conversation, wake, cron, reviewer or
-    job; `caller_session`; `thread` and `thread_title`), and the job it
-    continues (`continues`, `chain`: the chain's first job). A field this
-    job has no answer for is null."""
+    """Describe the job, caller and launch settings for status and Activity."""
     title, briefed_by = "—", "unknown"
     out = {"engine": None, "model": None, "caller": None,
            "caller_session": None, "thread": None, "thread_title": None,
@@ -1905,8 +1517,7 @@ def job_label(project: eng.Project | None, job_id: str) -> dict:
             pass
         out.update(job_engine(p))
         out["thread_title"] = thread_title(out["thread"])
-    # The Loam engineer's app-only scope (2026-11-19) reads as Loam's, with
-    # its scope beside it: one engineer in Activity, its tasks and here.
+    # Keep app-scoped jobs under the platform engineer and expose their scope separately.
     return {"job": job_id,
             "project": (project.lane_of or project.name) if project else "?",
             "scope": eng.APP_SCOPE if project is not None and project.lane_of else None,
@@ -1914,11 +1525,7 @@ def job_label(project: eng.Project | None, job_id: str) -> dict:
 
 
 def current_lock():
-    """lib/loam_lock as `box_status` needs it. The session broker loads this
-    file in process and reloads it when it changes (lib/loam_activity.py),
-    but keeps the modules it imported: a broker started before 2026-11-10
-    holds a loam_lock with slots and no `running`. Reloaded once, in place,
-    so Activity keeps working without a broker restart."""
+    """Load the current lock implementation for the long-lived broker process."""
     if not hasattr(loam_lock, "running"):
         import importlib  # noqa: PLC0415
         importlib.reload(loam_lock)
@@ -1926,22 +1533,11 @@ def current_lock():
 
 
 def box_status() -> dict:
-    """What is running on the box, which jobs are landing with no admission
-    held, who is queued, and the memory admission reads (since 2026-10-13;
-    by memory since 2026-11-10). The one source for `--status` and for the
-    engineer MCP server's `status` tool, so the two cannot say different
-    things. Read the way a waiter reads it: every holder's pid is checked
-    against /proc, so a dead holder is not running.
-
-    `slots` keeps its name and its row shape for the readers built on it
-    (lib/loam_activity.py, and loam-ui's Activity page through the broker):
-    one row per run, numbered, every one `free: False`. There is no count, so
-    there is no free row."""
+    """Report admitted, landing and queued jobs alongside the memory reading that controls
+    admission."""
     lock = current_lock()
     slots = []
-    # A cancelled job is dropped at once (since 2026-11-10): its admission
-    # and its landing record may outlive the cancel by the seconds its inner
-    # takes to record it, and it is not running in any sense a reader means.
+    # Hide cancelled jobs immediately while their admission and landing records clear.
     holders = [h for h in lock.running()
                if not (str(h.get("lane") or "").startswith("job:")
                        and is_cancelled(str(h["lane"])[len("job:"):]))]
@@ -1960,10 +1556,7 @@ def box_status() -> dict:
             agent = str(holder.get("agent") or "")
             name = lane.removeprefix("cron:")
             who = loam_broker.agent_card(agent)["name"] if agent else "?"
-            # `kind` stays "wake" for the readers built on it; `run_kind`
-            # (since 2026-11-12) tells a wake, a cron and the reviewer
-            # apart, and `engine`/`model` are what the run's own lock
-            # record says it started (bin/wake, bin/review), or null.
+            # Preserve kind for older readers and expose the specific lane in run_kind.
             slot.update(kind="wake", agent=holder.get("agent"), lane=lane,
                         name=name, label=f"{who} · {name or '?'}",
                         project=None, briefed_by=None,
@@ -2005,13 +1598,7 @@ def box_status() -> dict:
 
 
 def activity_of(project: eng.Project | None, job_id: str) -> dict:
-    """A running job's last real activity (since 2026-11-17): the engine's
-    newest event as the heartbeat last read it -- the Claude transcript's
-    last line (its subagents' included), or the Codex or Antigravity
-    stream's -- and, once there has been none for STALL_MINUTES, when the
-    silence began; with the commands the launcher stopped for never
-    returning. The job's start alone made a job frozen for 13 hours read
-    like one at work (11-16). All null for a job with no heartbeat yet."""
+    """Return the most recent engine event observed by the heartbeat for the running job."""
     out = {"last_activity": None, "quiet_since": None, "child_stops": 0}
     if project is None:
         return out
@@ -2120,37 +1707,14 @@ def resume_queued() -> list[str]:
     return resumed
 
 
-# ---------------------------------------------------------------------------
-# Recovery (since 2026-10-02). Until then a stranded job was picked up only
-# when another launcher happened to run: a queued unit killed with nothing
-# else finishing stayed queued forever, and an inner killed mid-run left a
-# directory with no verdict that nothing ever looked at again. `--recover` is
-# the sweep that looks, run by loam-job-recovery.timer at boot and every
-# few minutes, owned by the runtime and by no persona.
+# Recover from durable job state. A result is final. A cancellation is finalized, and a
+# queued job can relaunch if its unit vanished. An owner record with a free tree lock
+# identifies an interrupted inner process. Leave unknown legacy state for review.
 #
-# What it reads is what the inner already writes, plus one lease:
-#
-#   result.json        a verdict: the job is over and is never touched again.
-#   cancelled          durable cancellation: finalized, never started again.
-#   queued             waiting for a slot: relaunched if its unit is gone.
-#   owner.json         an inner took the job's tree lock. With no verdict and
-#                      the lock FREE, the inner is dead: the job was
-#                      interrupted. The flock is the lease -- the kernel
-#                      drops it with the process, and a surviving worker
-#                      still holds it, so a sweep cannot take a job from one.
-#   none of these      a job from before this mechanism (or one refused
-#                      before it ran): classified as legacy and reported,
-#                      never launched -- its intent is not known any more.
-#
-# An interrupted job is reconciled, not repeated: a receipt it had already
-# published becomes its verdict; a branch already on `main` is recorded as
-# landed (the crash came after the canonical advanced) and the push is
-# completed; otherwise one automatic continuation resumes its session in its
-# tree, inside the same bounded chain as a conflict's. A deploy-lane job is
-# never redispatched on its own -- a deploy is an external side effect whose
-# outcome is for a persona to read. `recovery.claim` (O_EXCL), the tree lock
-# and the sweep's own lock make two sweeps act once.
-# ---------------------------------------------------------------------------
+# Reconcile a published receipt or a merge that already advanced main before resuming
+# work. A deployment may already have taken effect, so never redispatch one
+# automatically. An exclusive recovery claim and the tree lock prevent duplicate
+# recovery.
 
 RECOVERY_LOG = lc.LOGS / "engineer-recovery.jsonl"
 RECOVERY_STATE = lc.STATE / "engineer-recovery.json"
@@ -2228,12 +1792,7 @@ def ran_for(p: dict[str, Path]) -> tuple[str | None, str | None]:
 
 def write_cancelled(p: dict[str, Path], job_id: str,
                     project: eng.Project | None = None) -> None:
-    """The verdict of a cancelled job whose own inner did not write one: one
-    that never ran (queued, or cancelled before it started), or one whose
-    inner was stopped with its unit. A job that ran says so -- since when, for
-    how long, what it had committed -- and its receipt goes to the vault.
-    Until 2026-11-10 this said "Nothing ran" of every job, a running one too
-    (the cancel receipt of job 20261110-164402-2c74b933)."""
+    """Finalize cancellation for a job whose inner process could not write its own verdict."""
     why = read_cancelled(p)
     since, minutes = ran_for(p)
     who = f"at {why.get('at', '?')} ({why.get('by') or 'unknown'})"
@@ -2282,8 +1841,8 @@ CANCEL_KILL_SECONDS = 10
 
 
 def descendants(pid: int) -> list[int]:
-    """Every live process below `pid`, read from /proc's parent links (the
-    kernel's per-task `children` file is not built on this box)."""
+    """Find live descendants by their /proc parent links; the kernel's per-task children
+    file is optional."""
     kids: dict[int, list[int]] = {}
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
@@ -2368,11 +1927,7 @@ def run_cancel(job_id: str, by: str | None = None) -> int:
 
 
 def cancel_facts(verdict: dict | None) -> str:
-    """What a cancel's sentence says of a job that ran (2026-11-11): how long
-    it ran and what it had committed, out of its cancelled verdict. Until
-    then the sentence said how long, or only "nothing landed", and never
-    whether there was work on the branch (the cancel of job
-    20261110-213654-85df5cd2 at 05:38Z, which had committed 835719f)."""
+    """Summarize elapsed time and committed work from the cancelled job's verdict."""
     verdict = verdict or {}
     ran = verdict.get("ran_for") or verdict.get("duration") or "?"
     commits = verdict.get("commits") or []
@@ -2387,27 +1942,9 @@ def cancel_facts(verdict: dict | None) -> str:
 
 
 def cancel(job_id: str, by: str, wait: float | None = None) -> tuple[int, str]:
-    """Cancel a job durably, and stop it if it is running (since 2026-11-10;
-    until then a running job was only marked, and nothing on the run or
-    landing path read the mark, so it would still have landed).
-
-      queued, or not started   its unit is stopped; it never runs.
-      running (its session)    the session is stopped (`stop_session`); its
-                               inner records it as cancelled -- how long it
-                               ran, what it had committed -- lands nothing,
-                               and ends its unit. If no verdict comes within
-                               CANCEL_WAIT_SECONDS the unit is stopped here
-                               and the verdict written here.
-      landing                  nothing is killed: the landing reads the marker
-                               after it takes the live lock and again right
-                               before it moves `main` or pushes, and lands
-                               nothing. A merge already past that check
-                               completes, and the sentence says so.
-
-    The recovery sweep never resumes a cancelled job (`classify`), and the
-    status drops it at once (`box_status`). (exit code, sentence): the
-    broker's cancel route (2026-10-14), `--cancel` and the engineer MCP
-    server's `cancel` tool all call this."""
+    """Mark cancellation durably before stopping a queued or running session. Let an active
+    landing check the marker under the live lock. If the merge already passed its final
+    check, report what landed. Recovery honors the marker."""
     wait = CANCEL_WAIT_SECONDS if wait is None else wait
     project = eng.locate_job(job_id) if job_id else None
     if project is None:
@@ -2499,15 +2036,8 @@ def publish(project: eng.Project, job_id: str, meta: dict, text: str) -> Path:
 
 
 def push_pending(project: eng.Project) -> dict | None:
-    """Complete a push a landing advanced `main` for and did not finish.
-    Idempotent: does nothing unless origin is strictly behind main.
-
-    A project that lands by pull request has no such push: its landing never
-    advances `main`, which only mirrors the remote (wt.sync_adopted), and a
-    `main` ahead of the remote there must never be pushed past review. So it
-    is skipped, not fetched. Until 2026-10-13 it was fetched without the job's
-    credential, and `fetch failed` for the first adopted project every five
-    minutes from 10-07 hid any real failure among them."""
+    """Finish a pending push only when the remote is behind main. Skip pull-request projects
+    because their local main mirrors upstream and must never bypass review."""
     if lands_by_pr(project):
         return None
     repo = wt.canonical(project)
@@ -2635,11 +2165,8 @@ def classify(project: eng.Project, job_id: str) -> str:
 
 
 def died_unheard(project: eng.Project, job_id: str, p: dict[str, Path]) -> bool:
-    """A job whose brief returned at once (every brief since 2026-11-19) and whose unit ended
-    before its inner ever took the job -- no lease, no verdict, nothing
-    queued -- has no waiter to say it died. Its verdict is written here, the
-    waiter's own "died", so the broker hands it to the persona that briefed
-    it. True when one was written."""
+    """Find an exited unit with no lease or verdict so the caller gets an outcome even if
+    the inner never started."""
     try:
         record = json.loads(loam_waiters._path(job_id).read_text(encoding="utf-8"))  # noqa: SLF001
         since = datetime.strptime(record["since"], "%Y-%m-%dT%H:%M:%SZ").replace(
@@ -2706,9 +2233,7 @@ def sweep() -> dict:
         if pushed:
             report["pushes"].append(pushed)
     report["requeued"] = resume_queued()
-    # The backstop for results owed to a run (2026-11-19,
-    # lib/loam_results.py): a verdict whose kick met a drain still running,
-    # or a drain that could not get its lock, is started again here.
+    # Retry delivery of recorded results that a busy or interrupted drain missed.
     try:
         import loam_results  # noqa: PLC0415
         report["results"] = {a: o for a, o in loam_results.kick_all().items()
@@ -2756,8 +2281,7 @@ def run_recover() -> int:
 # that loop; every receipt in the chain still lands in the vault.
 # ---------------------------------------------------------------------------
 
-# `gate` and `rewritten` since 2026-11-16: the branch's own commits are
-# rewritten in the tree, which the job can do and nobody else needs to.
+# Only the job can rewrite its own unpushed commits in the job tree.
 AUTO_REASONS = ("conflict", "merged_tests", "branch_tests", "interrupted",
                 "gate", "rewritten")
 MAX_AUTO = 2
@@ -2857,9 +2381,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                              "receipt_text": refusal})
             return 3
 
-    # Which CLI runs this job (since 2026-10-07): the project's, except that
-    # a continuation runs on the CLI its parent ran on, because it resumes
-    # the parent's session and a session belongs to one CLI.
+    # Resume a continuation with the provider that owns its parent session.
     runtime = (job_runtime(paths(project, continue_job)) if continue_job
                else project.runtime)
     if runtime is None:
@@ -2878,9 +2400,8 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         write_cancelled(p, job_id)
         return 0
 
-    # A slot only, since 2026-10-02: the job's tree is its own, so nothing
-    # about its PROJECT can be busy. A full box queues the job rather than
-    # refusing it (stage two); its result goes back when it has run.
+    # Memory pressure queues the job. Its checkout is independent of other jobs in the
+    # project.
     lock = take_slot(project, job_id, lane, p)
     if lock is None:
         return 0
@@ -2921,10 +2442,8 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             f"be two sessions in one tree. Wait for that one's receipt.")})
         return 0
 
-    # The lease recovery reads (since 2026-10-02): this job has a live inner
-    # exactly while the tree lock above is held, and a job with this file and
-    # no verdict whose lock is free was interrupted. Written after the lock,
-    # so the file never names a job that has no holder yet.
+    # The tree lock is the inner's lease. Recovery can take an unfinished job only after
+    # the kernel releases it.
     p["owner"].write_text(json.dumps({
         "pid": os.getpid(), "unit": unit_name(job_id), "tree": str(tree),
         "since": loam_lock.now_iso(), "boot_id": boot_id(),
@@ -2973,8 +2492,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     session_id = eng.new_session_id()
     probe = probe_seconds()
     codex = runtime == "codex"
-    # Antigravity since 2026-11-15 (lib/loam_agy_job.py): Codex's shape, a
-    # stream the launcher writes and an id the CLI chooses.
+    # Capture the provider's event stream and save its chosen session ID.
     antigravity = runtime == "antigravity"
     p["runtime"].write_text(runtime + "\n", encoding="utf-8")
     # A Codex thread's id is Codex's to choose, so the stall is read off the
@@ -3010,10 +2528,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             brief=p["brief"], receipt=p["receipt"], owner=owner, tree_note=note,
             release_note=release_note)
 
-    # The model and thinking level (since 2026-11-13): the engineer's
-    # setting for this CLI (Settings > Agents > Engineers), else the
-    # built-in. Since 2026-11-15 the brief's tier picks which of the
-    # engineer's three models (`job_choice`); unset, it is the model above.
+    # Use the engineer's provider settings and the tier resolved for this job.
     choice = job_choice(project, runtime, meta, continue_job)
     job_model, job_effort = choice["model"], choice["effort"]
     argv = [
@@ -3024,7 +2539,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         "--output-format", "json",
         "--session-id", session_id,
     ]
-    # No `--max-turns` since 2026-11-10 unless a probe set one (eng.MAX_TURNS).
+    # Only a probe may supply a turn limit.
     if eng.MAX_TURNS:
         argv += ["--max-turns", str(eng.MAX_TURNS)]
     if resume_from:
@@ -3044,21 +2559,14 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         # this box's rule, so it arrives with the job, as the job directory
         # does. The platform engineer's settings already carry it.
         settings = dict(GUARD_SETTINGS)
-        # No provider attribution on any job's commits or pull requests
-        # (2026-11-18, the owner: agents' work is under the owner's name, not
-        # the provider's; lib/loam_git_identity.py). Until then only a
-        # person-authored project's job had it off.
+        # Apply repository attribution to commits and pull requests.
         import loam_commit_identity  # noqa: PLC0415
         settings.update(loam_commit_identity.CLI_SETTINGS)
         argv += ["--settings", json.dumps(settings)]
-    # What plugins that are on give an engineer (2026-11-14, first release
-    # L4): their MCP servers and their words, at launch, so the committed
-    # harness in the tree never names a plugin.
+    # Supply enabled plugins' servers and instructions at launch.
     plugin_words = contributions.lane_prompt("engineer")
-    # The platform engineer on Codex or Antigravity (since 2026-11-19, its
-    # provider its owner's to set): no Claude settings hold its harness or
-    # what they deny it, so the wall holds them read-only (lib/loam_codex_job.py,
-    # PLATFORM_LINE), and it is given the directories its Claude settings add.
+    # Non-Claude platform sessions receive the platform instructions and write boundaries
+    # at launch.
     protect, platform_dirs = platform_walls(project, runtime, tree, workdir)
     if runtime == "claude":
         plugin_mcp = contributions.lane_mcp_file("engineer")
@@ -3116,17 +2624,11 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         argv = (wt.walled(project, record, p["dir"], argv, protect=protect)
                 if protect else wt.walled(project, record, p["dir"], argv))
     os.environ.update(wt.wall_env())
-    # What this session is started on, read off the command line it is
-    # started with (since 2026-11-12), so Activity says the engine and model
-    # a job ran on rather than what is configured today.
+    # Record the engine and model actually passed to the provider.
     if not probe:
         write_engine(p, runtime, argv, choice.get("tier"))
 
-    # The session's scratch (since 2026-10-21): TMPDIR for everything it runs,
-    # removed below when the session ends however it ends. The prompt names it
-    # too, because a path a session types by hand (`/tmp/<project>-...-pnpm-store`)
-    # does not ask TMPDIR. /tmp is not behind the wall, so both runtimes'
-    # sessions can write it.
+    # Give every child process the job's temporary directory and remove it at session end.
     try:
         os.environ["TMPDIR"] = str(eng.make_scratch(job_id))
     except OSError:
@@ -3139,15 +2641,11 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     agy_run = None
     try:
         if p["cancelled"].is_file():
-            # Cancelled between taking its admission and starting the
-            # session: no session is started (since 2026-11-10).
+            # Honor a cancellation that arrived while acquiring admission.
             returncode = -signal.SIGTERM
         elif probe:
-            # A probe job: the sleep stands where the session would, and the
-            # engineer's half of the receipt is written by this file, saying
-            # so. Everything around it -- lock, heartbeat, record -- is real.
-            # A child process since 2026-11-10, as a session is, so that a
-            # cancel stops a probe the way it stops a session.
+            # Substitute a sleep only for the session. Exercise the same launch and record paths as
+            # a real job.
             returncode = probe_session(probe)
             p["receipt"].write_text(
                 f"**Probe job.** No session ran; this file slept {probe} s "
@@ -3186,15 +2684,8 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         eng.remove_scratch(job_id)
         os.environ.pop("TMPDIR", None)
 
-    # The session is over, and with it the job's admission (since 2026-10-13;
-    # a run slot until 2026-11-10, its memory admission since). The slot rations sessions -- the CLI and what it spawns,
-    # which is where a job's memory goes -- and what follows is the landing:
-    # a live-lock wait, a test suite, a merge, a push, the receipt. The audit
-    # of 10-13 found 11.5% of slot-hours (2.25 h of 19.6 since 10-06) spent
-    # there, with jobs queued behind it. The landing goes on in this process,
-    # so in this unit and its memory cgroup, under the tree lock that is the
-    # job's lease (recovery reads it); `landing` says so to `--status` and to
-    # the waiter, which waits past the job's clock while it is there.
+    # Release admission once the session ends. Landing and CI no longer consume session
+    # capacity.
     p["landing"].unlink(missing_ok=True)   # an earlier attempt's, if any
     mark_landing(p, "landing")
     free_slot()
@@ -3278,10 +2769,8 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     else:
         outcome = "completed"
 
-    # A cancelled job (since 2026-11-10): its session was stopped by the
-    # cancel (`stop_session`), or it ended on its own as the cancel came.
-    # Either way nothing lands; the record says how long it ran and what it
-    # had committed, and the branch and tree are kept.
+    # Recheck cancellation before landing because the session may have finished while it
+    # was being stopped.
     cancelled = read_cancelled(p) if p["cancelled"].is_file() else None
     if cancelled is not None:
         outcome = (f"cancelled at {cancelled.get('at', '?')} by "
@@ -3388,8 +2877,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                  f"${envelope['total_cost_usd']:.2f}"
                  if envelope.get("total_cost_usd") is not None else "—"),
         "runtime": runtime,
-        # The tier and the model it resolved to (2026-11-15), and a quota
-        # retry on the tier below when there was one.
+        # Record the requested tier and the model used after any quota retry.
         "model_row": ("—" if probe else model_text(choice, continue_job)),
         "tier": choice.get("tier"), "resolved_model": job_model,
         "quota_retry": choice.get("retry"),
@@ -3443,8 +2931,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         "deploy_brief": deploy_row(project, meta),
         "git_rows": git_rows(before, after),
         "ended_chats": ended_chats(project, started_at, finished_at),
-        # The commands the launcher stopped because they never returned
-        # (lib/loam_stuck.py, since 2026-11-17): a paragraph, and how many.
+        # Include watchdog stops in the receipt.
         "child_stops": loam_stuck.receipt_text(p["dir"]),
         "child_stops_count": len(loam_stuck.read_stops(p["dir"])),
         "git_before": before, "git_after": after,
@@ -3501,9 +2988,8 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             "landing": landing.get("state"), "landed_sha": facts["landed_sha"],
             "release_tag": facts["release_tag"],
             "peak_rss_bytes": peak, "landing_timing": landing.get("timing"),
-            # Since 2026-11-16 a landing tests outside the live lock: how
-            # many times `main` moving made it test again, and whether the
-            # run that decided it held the lock (the fallback).
+            # Report whether testing held the live lock and how often a moved main required a
+            # retest.
             "landing_retests": landing.get("retests"),
             "landing_tested_under_lock": landing.get("tested_under_lock"),
             "dispatched": (dispatch or {}).get("job_id"),
@@ -3517,18 +3003,15 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         send_dispatch(project, p, dispatch, meta["max_minutes"])
     resume_queued()
     if cancelled is not None:
-        # A cancel is somebody's decision, not a failure: exit 0, so the
-        # unit's OnFailure handler (loam-wake-failed@) does not fire for it
-        # (it did for the first live cancel, 2026-11-10).
+        # A deliberate cancellation has its own verdict and should not trigger the unit failure
+        # handler.
         return 0
     if timed_out:
         return TIMEOUT_EXIT
     return 0 if ok else 1
 
 
-# ---------------------------------------------------------------------------
-# Accepting a brief: what the persona-side tool used to decide, in one place.
-# ---------------------------------------------------------------------------
+# Accepting a brief
 
 def unknown_project(name: str) -> str:
     return (
@@ -3544,12 +3027,8 @@ def unknown_project(name: str) -> str:
 
 def platform_walls(project: eng.Project, runtime: str, tree: Path,
                    workdir: Path) -> tuple[list[Path], list[Path]]:
-    """(protect, dirs) for the platform engineer on a CLI other than Claude
-    Code (since 2026-11-19): what the wall holds read-only that its Claude
-    settings deny it -- the harness in its tree where the tree does not
-    track it, the transcripts, the list of public apps -- and the directories
-    those settings add (bin/provision, `additionalDirectories`). Empty for a
-    Claude job and for a project engineer, whose own rules are unchanged."""
+    """Return read-only paths and added directories for non-Claude platform sessions. They
+    need the same filesystem boundaries that Claude's project settings enforce."""
     if not project.platform or runtime == "claude":
         return [], []
     protect = [workdir / name for name in codex_job.PLATFORM_HARNESS
@@ -3579,25 +3058,13 @@ def one_line(text) -> str:
 
 
 def accept(args: dict, briefed_by: str):
-    """Turn the tool's arguments into a claimed job directory with a brief in
-    it, or into the sentence the persona reads instead.
-
-    Returns (project, job_id, paths) or a str. Every string here is read by a
-    persona, so each says what to do next. Every check runs BEFORE the
-    directory is claimed, so a rejected brief leaves nothing on disk.
-
-    Until 2026-09-07 this function was the body of the tool in
-    `mcp/engineer_server.py`, and its checks were whatever the server had
-    loaded when its conversation opened. The order and the sentences are
-    kept; what changed is where they run.
-    """
+    """Validate the tool arguments before claiming a job directory. Return the accepted
+    project, job ID and paths or the reason for refusal."""
     if not isinstance(args, dict):
         return "The tool handed the launcher something that is not an object of arguments."
     project_name = str(args.get("project") or "")
-    # The Loam engineer's app-only scope (2026-11-19): `Loam` with `scope:
-    # app`, or `loam-ui` by its name from before, or `Loam` continuing one of
-    # its jobs. lib/loam_engineer.py `brief_target` says which and refuses a
-    # scope that means nothing.
+    # Normalize app-only briefs and continuations under the platform project while
+    # preserving their scope.
     project, refusal = eng.brief_target(
         project_name, one_line(args.get("scope")),
         one_line(args.get("continue_job")))
@@ -3615,8 +3082,7 @@ def accept(args: dict, briefed_by: str):
     # the deploy lane is carried by it, so it is read a few lines early and
     # validated for emptiness below, where it always was.
     title = one_line(args.get("title"))
-    # Every lane may brief, unattended ones included (2026-11-09); the lane
-    # goes into the brief's header.
+    # Record the caller's lane in the brief.
     lane = os.environ.get("LOAM_WAKE") or ""
     refusal = eng.brief_refusal(project, briefed_by, title)
     if refusal:
@@ -3641,15 +3107,10 @@ def accept(args: dict, briefed_by: str):
             f"which is how {lc.OWNER_NAME} finds this job in a folder listing. A short "
             "noun phrase naming the work."
         )
-    # No clock unless the briefer set one, attended or not (2026-11-10: the
-    # 90-minute hold on a brief from an unattended lane went with the lane's
-    # own clock). The lane goes into the header so the brief and its receipt
-    # say nobody was present.
+    # Apply a clock only when the briefer requests one.
     max_minutes = clamp_minutes(args.get("max_minutes"))
     extra = {"lane": lane} if eng.unattended(lane) else None
-    # Who is calling, for Activity (since 2026-11-12): the lane as a run
-    # kind, and for a conversation the broker session and its thread
-    # (lib/loam_waiters.caller). Only what is known is written.
+    # Carry the caller's run kind, session and thread into Activity.
     try:
         extra = {**(extra or {}), **loam_waiters.caller()}
     except Exception:  # noqa: BLE001 -- a brief never fails for want of it
@@ -3662,8 +3123,7 @@ def accept(args: dict, briefed_by: str):
         _, refusal = resolve_continuation(project, continue_job)
         if refusal:
             return refusal
-    # Which of the engineer's three models (2026-11-15): a tier, never a
-    # model. Left out: `standard`, or on a continuation the job's own model.
+    # A brief selects an engineer tier. Continuations can inherit the parent's choice.
     tier = one_line(args.get("tier")).lower()
     if tier and tier not in eng.TIERS:
         return (f"tier {tier!r} is not one of the engineer's tiers: quick "
@@ -3682,15 +3142,7 @@ def accept(args: dict, briefed_by: str):
     refusal = pr_target_refusal(project, title)
     if refusal:
         return refusal
-    # Deploy at landing (since 2026-11-12, lib/loam_autodeploy.py): the
-    # persona's explicit yes, never read from the involvement's prose. Refused
-    # here, before a directory is claimed, when there is nothing to deploy or
-    # the job could not land.
-    # A brief that does not say (`deploy` absent or null; the brief tool
-    # sends null since 2026-11-13) takes the engineer's "Deploy when a job
-    # lands" setting, and where that default cannot apply -- a read-only
-    # brief, a landing by pull request, no app -- it lands only, quietly:
-    # a default is not a request to refuse.
+    # A deploy requires the explicit tool argument. Validate it before creating the job.
     deploy_said = args.get("deploy")
     if deploy_said is None or deploy_said == "":
         if eng.deploy_default(project) and not is_read_only(involvement) \
@@ -3749,10 +3201,7 @@ def write_brief(directory: Path, project: eng.Project, title: str,
 # ---------------------------------------------------------------------------
 
 def run_outer(project: eng.Project, job_id: str, p: dict[str, Path]) -> tuple[int, dict]:
-    """Refuse or launch. (exit code, verdict): `stage` `launched` or
-    `queued` once the job is its own unit, and no `receipt_text`; a refusal
-    or a failed launch is final, with its sentence. Nobody waits on the job
-    (since 2026-11-19, batch B step 3; from a thread since 2026-11-18)."""
+    """Refuse the brief or launch its independent unit and return its job ID."""
     p["dir"].mkdir(parents=True, exist_ok=True)
     meta = read_brief_meta(p)
     refusal = preflight(project, p, meta)
@@ -3761,14 +3210,7 @@ def run_outer(project: eng.Project, job_id: str, p: dict[str, Path]) -> tuple[in
         write_result(p, verdict, deliver=False)
         return 3, verdict
 
-    # Any result.json here is from an earlier attempt at this same job id, and
-    # it is stale by construction: a job id is minted per brief, so a verdict
-    # that already exists was written before this launch. Found by causing on
-    # 2026-09-05 -- the first real job failed to launch, was fixed and relaunched,
-    # and the waiter returned the FAILED verdict in under a second while the
-    # relaunched job ran happily behind it for eleven minutes. A verdict
-    # older than the run it stands for is worse than none, because it looks
-    # like an answer.
+    # A retry must not mistake an earlier attempt's result for the new unit's verdict.
     p["result"].unlink(missing_ok=True)
     p["heartbeat"].unlink(missing_ok=True)
 
@@ -3797,15 +3239,8 @@ def returns_how(meta: dict) -> str:
 
 
 def run_tool() -> int:
-    """The `--brief` form. One JSON object in on stdin, one out on stdout,
-    and nothing else ever reaches stdout in this mode.
-
-    Returns once the job is launched or queued, on every lane (2026-11-19,
-    batch B step 3). The record of what is owed is written first
-    (lib/loam_waiters.py), and the result goes back to whoever asked: a
-    thread's as a turn in it (the broker), anyone else's as a run of the
-    persona that resumes the asking session (lib/loam_results.py). Until
-    then a wake, a cron or a job blocked here for up to four hours."""
+    """Read one brief request as JSON and return one JSON response after launch. Keep
+    diagnostics off stdout."""
     def reply(payload: dict) -> None:
         print(json.dumps(payload))
 
@@ -3852,15 +3287,8 @@ def run_tool() -> int:
 
 
 def user_bus_env() -> None:
-    """Find the box user's user manager whatever environment called us.
-
-    `systemd-run --user` and `systemctl --user` reach the manager through
-    XDG_RUNTIME_DIR (and the bus address under it). Codex starts its stdio
-    MCP servers with a short environment allow-list that has neither, so
-    every brief from a Codex thread failed at launch with "Failed to connect
-    to bus: No medium found" (job 20261001-170601-22043567, 2026-10-01).
-    Defaulted here, not demanded of the caller, as bin/check-drift does.
-    """
+    """Locate the user's systemd bus even when the caller did not inherit a login
+    environment."""
     runtime = os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
     bus = Path(runtime) / "bus"
     if bus.exists():
