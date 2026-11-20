@@ -73,12 +73,14 @@ in order when the service returns.
 
 On a fresh install the owner lands in Hello with Iris. Loam posts a greeting
 as Iris using the name from setup, and Iris takes over on the first reply.
-Hello’s board starts with six things to try in any order. Iris mentions it
-once, helps with what the owner came for, and offers an idea when it fits.
-As they try things she ticks the cards in their words. After a quiet week
-she may ask once about one they might like. They can set the list aside,
-delete it, or ask her to bring it back. Iris can also help bring over
-context from another AI. `About me.md` fills in as they get to know each other.
+Hello’s board starts with six things to try. The owner can explore now, at
+their own pace, or only when they ask. Iris can make a small visible change
+if it fits, and says how to undo changes. She keeps what the owner wants to
+try later beside the six. When they finish the things they wanted, she turns
+the completed cards into a short record of what they did and when. The owner
+can delete the list or ask her to bring it back. If they leave the pace open,
+Iris may ask once after a quiet week. She can also help bring over context
+from another AI. `About me.md` fills in as they get to know each other.
 
 **Wakes and crons.** An agent also runs by itself on a schedule, and each
 schedule is a file under its `crons/` saying when it runs (or once, at a set
