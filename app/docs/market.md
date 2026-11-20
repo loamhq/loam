@@ -98,16 +98,20 @@ is the mock `market-store.html` the designer drew from the real covers.*
   things that it might change, what are some of the things that are in the
   code that might be interesting to the user", and an update is reviewed
   and the note rewritten. A listing whose list entry carries `review`
-  (docs/plugins.md, "The list") shows it right after the maker's row, above a
-  theme's showcase, the screenshots and the README, as wide as the README
-  (`loamNote`): Loam's own mark,
-  "Loam's note", "Loam's review of version N · date. Not the maker's
-  words.", the summary, then **New since N** set apart on a quiet plate for
-  an update, then What it touches, What it may change and Worth knowing.
-  The side column's touches are then titled **What it declares**, since
-  they are the plugin's own declaration. A listing without a review shows
-  none of this. Its Get or Install asks for the reviewed commit
-  (`pinned_link`), not the tag.
+  (docs/plugins.md, "The list") puts a single review button under Get or
+  Install. It shares the price line with a short excerpt. The first change
+  takes precedence when the reviewer describes an update. Otherwise the
+  line names declared network or server access, gives the reach of a
+  declarative theme, or uses the note’s summary. The full text stays in
+  the review sheet, including any words shortened to fit the button.
+  The creator row leads straight into the maker’s showcase, screenshots
+  or README. Tapping **Loam’s note** opens a centered dialog on desktop or
+  a bottom sheet on a phone. The title and Close stay in place while the
+  reader scrolls the review, date, version and any **New since** section.
+  Closing returns to the same place on the listing. The facts column labels
+  the plugin’s permissions **What it declares**. Without a note the listing
+  keeps its ordinary price and reach line. Get and Install continue to
+  request the reviewed commit when the listing supplies a `pinned_link`.
 - **On a phone** every page is one column. The lead story is taller and its
   name smaller, theme tiles are full width, and a listing's buttons sit
   under its words, then stay docked at the foot of the screen once they
@@ -229,11 +233,11 @@ under reduced motion.
   whole-page captures of the front page and of a theme's and an
   extension's listing, a lead story with a photograph, and a phone's docked
   buttons.
-- `tools/capture-market-note.mjs`: Loam's note on a listing's page and its
-  install sheet at 390 and 1440, light and dark, in Latte and Autumn, with a
-  note from the reviewer's test set (`REVIEWED` in the fixture); it checks the
-  note opens the body, says whose words it is, shows New since for an
-  update, and that Install asks for the reviewed commit.
+- `tools/capture-market-note.mjs` photographs the listing, maker content,
+  review sheet and install preview at 390 and 1440 in both modes. It checks
+  the note against its source, keyboard scrolling, dismissal and focus,
+  update text, the pinned install request and a listing without a note.
+  [Review screenshots](evidence/market-note/README.md)
 - `test/market-card.test.js`: the card's form (what is one and what is
   not, in order, three at most, never in code), an unknown id drawn as its
   words, and the agent's search ranking every query as this page does.

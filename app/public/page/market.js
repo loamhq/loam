@@ -469,7 +469,7 @@ export function mount(host) {
     const cover = coverOf(entry)
     const frame = cover ? coverImg(entry, cover) : theme && themeState(id) !== 'error' ? livePreview(entry, true) : null
     const version = body?.version || entry.version
-    const article = readme(entry, body), note = loamNote(entry)
+    const article = readme(entry, body)
     return [h('div', { class: `market-listing${frame ? ' has-cover' : ' no-cover'}`, key: `listing:${id}` },
       frame ? h('div', { class: 'market-listing-cover' }, frame) : null,
       h('header', { class: 'market-listing-head' },
@@ -480,43 +480,59 @@ export function mount(host) {
           entry.description ? h('p', { class: 'market-listing-desc', text: entry.description }) : null),
         listingActs(entry, body, kind)),
       maker(entry, body),
-      // Loam's note comes first after the maker, before the showcase, the
-      // screenshots and the README: it is what a deciding owner reads first.
-      note ? h('div', { class: 'market-listing-note-row' }, note) : null,
       theme && body?.theme && themeState(id) !== 'error' ? showcase.view({ key: `market-${id}`, look: id, name: entry.name, options: body.theme.options ?? [], palette: body.theme.palette ?? [], from: themeInstalled(id) ? 'installed' : 'market' }) : null,
       gallery(entry, body),
       h('div', { class: `market-listing-body${article ? '' : ' market-listing-body-facts'}` }, article, facts(entry, d, kind)))]
   }
-  // Loam's note (2026-11-19): what Loam's reviewer wrote of the version this
-  // listing delivers, from the list itself (`review`), never from the
-  // plugin's own files. It comes right after the maker's row, above the
-  // showcase, the screenshots and the README, so it is the first thing read
-  // after the name and the button; it carries
-  // Loam's own mark and says whose words they are. A listing without a
-  // review shows nothing here.
-  const NOTE_GROUPS = [['touches', 'What it touches'], ['may_change', 'What it may change'], ['worth_knowing', 'Worth knowing']]
-  function loamNote(entry) {
-    const review = entry.review, note = review?.note
+  // The review comes from the Market list. The declaration arrives with the
+  // listing details, so keep the review available while those are loading.
+  function noteLink(entry, declaration) {
+    const note = entry.review?.note
     if (!note?.summary) return null
+    const touches = declaration?.touches
+    const network = touches?.network?.length || touches?.open_web
+    const access = network && touches.server ? 'Network and server access'
+      : network ? 'Network access' : touches?.server ? 'Runs on your server' : null
+    const appearance = kindOf(entry) === 'theme' && declaration && !declaration.page_code
+    const excerpt = note.changed?.[0] || access || (appearance ? reachOf(declaration, 'theme').text : note.summary)
+    return h('button', { class: `market-note-link${access || note.changed?.length ? ' has-detail' : ''}`,
+      type: 'button', 'aria-haspopup': 'dialog', 'aria-label': `Read Loam’s note on ${entry.name}. ${excerpt}`, title: note.changed?.[0] || note.summary,
+      onclick: () => { sheet().noteFor = entry.id; host.schedule() } },
+      h('span', { class: 'market-note-price', text: 'Free' }),
+      h('span', { class: 'market-note-label', text: 'Loam’s note' }),
+      h('span', { class: 'market-note-excerpt', text: excerpt }),
+      icon.chevronRight(12))
+  }
+
+  const NOTE_GROUPS = [['touches', 'What it touches'], ['may_change', 'What it may change'], ['worth_knowing', 'Worth knowing']]
+  function noteSheet(entry, close) {
+    const { review } = entry, { note } = review
     const when = review.reviewed_at ? new Date(`${review.reviewed_at}T12:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : null
     const sub = ['Loam’s review of', review.version ? `version ${review.version}` : 'this version', when ? `· ${when}` : null].filter(Boolean).join(' ')
     const group = (key, title, extra = '') => note[key]?.length ? h('section', { class: `market-note-group${extra}`, key: `g:${key}` },
       h('h3', { class: 'market-note-group-title', text: title }),
       h('ul', { class: 'market-note-list' }, ...note[key].map((line, i) => h('li', { key: `${key}:${i}`, text: line })))) : null
-    return h('section', { class: 'market-loam-note', 'aria-labelledby': 'market-loam-note-title', key: `note:${entry.id}:${review.commit}` },
+    const card = h('section', { class: 'sheet market-review-sheet', key: `note:${entry.id}:${review.commit}`, 'aria-modal': 'true' },
+      h('div', { class: 'sheet-top market-review-grip', 'aria-hidden': 'true' }, h('div', { class: 'grip' })),
       h('header', { class: 'market-loam-note-head' },
         h('img', { class: 'market-loam-mark', src: '/icon.svg', alt: '' }),
-        h('div', {},
-          h('h2', { class: 'market-loam-note-title', id: 'market-loam-note-title', text: 'Loam’s note' }),
-          h('p', { class: 'market-loam-note-sub', text: `${sub}. Not the maker’s words.` }))),
-      h('p', { class: 'market-loam-note-summary', text: note.summary }),
-      note.changed?.length ? group('changed', note.since ? `New since ${note.since}` : 'New in this version', ' market-note-changed') : null,
-      h('div', { class: 'market-note-groups' }, ...NOTE_GROUPS.map(([key, title]) => group(key, title))))
+        h('div', { class: 'market-note-heading' },
+          h('h2', { class: 'display sheet-title market-loam-note-title', tabindex: '-1', text: 'Loam’s note' }),
+          h('p', { class: 'market-loam-note-sub', text: entry.name })),
+        button(icon.close(14), close, 'iconbtn ghost', { 'aria-label': 'Close Loam’s note' })),
+      h('div', { class: 'market-note-scroll', tabindex: '0', role: 'document', 'aria-label': `Review of ${entry.name}` },
+        h('p', { class: 'market-loam-note-sub', text: `${sub}. Not the maker’s words.` }),
+        h('p', { class: 'market-loam-note-summary', text: note.summary }),
+        group('changed', note.since ? `New since ${note.since}` : 'New in this version', ' market-note-changed'),
+        ...NOTE_GROUPS.map(([key, title]) => group(key, title))))
+    return menuSurface(card, { title: `Loam’s note on ${entry.name}`, close, heading: false, width: 580,
+      anchor: '.market-note-link', centered: matchMedia('(min-width: 700px)').matches, initialFocus: 'heading' })
   }
   function listingActs(entry, body, kind, { dock = false } = {}) {
+    const note = dock ? null : noteLink(entry, body?.declaration)
     return h('div', { class: `market-listing-acts${dock ? ' market-dock-acts' : ''}`, key: dock ? 'dock-acts' : 'acts' },
       action(entry, { from: 'listing' }), tryButton(entry, '', { first: true }),
-      !dock && body ? h('p', { class: 'market-fine', text: fineLine(body.declaration, kind) }) : null)
+      note ?? (!dock && body ? h('p', { class: 'market-fine', text: fineLine(body.declaration, kind) }) : null))
   }
   // Its screenshots (2026-11-19, `screenshots` in its PLUGIN.md, read at its
   // link by the broker as `shot/<n>` and `shot/<n>-dark`).
@@ -547,7 +563,7 @@ export function mount(host) {
       h('section', { class: 'market-touches', 'aria-labelledby': 'market-touches-title' },
         // Beside Loam's note, which says what it touches in the reviewer's
         // words, this column is what the plugin itself declares.
-        h('h2', { class: 'kicker market-side-title', id: 'market-touches-title', text: entry.review?.note ? 'What it declares' : 'What it touches' }),
+        h('h2', { class: 'kicker market-side-title', id: 'market-touches-title', text: entry.review?.note?.summary ? 'What it declares' : 'What it touches' }),
         d.state === 'loading' ? h('p', { class: 'note market-reading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading what it declares, from its own link…')
           : d.state === 'error' ? h('p', { class: 'note', role: 'status', text: `Its declaration could not be read just now (${d.error}). Installing shows it before you say yes.` })
           : touchList(touches),
@@ -604,10 +620,12 @@ export function mount(host) {
 
   function marketNodes(s) {
     const view = s.view === 'listing' && s.id ? listing(s.id) : s.view === 'results' && s.q ? results(s.q, s.k) : s.view === 'kind' && s.k !== 'all' ? kindPage(s.k) : front()
+    const reviewed = s.view === 'listing' && s.noteFor === s.id ? entryOf(s.id) : null
+    const note = reviewed?.review?.note?.summary ? noteSheet(reviewed, () => { s.noteFor = null; host.schedule() }) : null
     const inner = s.view === 'listing' || s.view === 'results'
     const backLabel = s.view === 'listing' ? (s.trail?.at(-1)?.view === 'results' ? 'Results' : s.trail?.at(-1)?.view === 'kind' ? KIND_MANY[s.trail.at(-1).k] : 'Market') : 'Market'
     const root = h('div', { class: `market${host.state.wide ? ' market-wide' : ' market-phone'}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Market', key: 'sheet:market', 'data-view': s.view,
-      onkeydown: keys },
+      inert: Boolean(note), onkeydown: keys },
       h('header', { class: 'market-top' },
         s.from && !s.trail?.length ? h('button', { type: 'button', class: 'backbtn market-back market-back-from', onclick: back, title: s.from.label, 'aria-label': `Back to ${s.from.label}` }, icon.chevronLeft(18), h('span', { class: 'market-back-words', text: s.from.label }))
           : inner || s.view === 'kind' ? h('button', { type: 'button', class: 'backbtn market-back', onclick: back }, icon.chevronLeft(18), backLabel)
@@ -617,7 +635,8 @@ export function mount(host) {
         h('button', { type: 'button', class: 'iconbtn ghost market-close', 'aria-label': 'Close the Market', title: 'Close', onclick: close }, icon.close(14))),
       h('div', { class: 'market-body', key: `market-body`, onscroll: watchDock }, h('div', { class: `market-page market-page-${s.view}` }, ...view)),
       dock(s))
-    return [h('button', { class: 'scrim market-scrim', key: 'scrim:market', 'aria-label': 'Close the Market', tabindex: '-1', onclick: close }), root]
+    return [h('button', { class: 'scrim market-scrim', key: 'scrim:market', 'aria-label': 'Close the Market', tabindex: '-1', onclick: close }), root,
+      note ? h('div', { class: 'market-note-overlay', key: 'market-note-overlay' }, note) : null]
   }
   function keys(e) {
     if (e.key === 'Escape') {
