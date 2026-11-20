@@ -1,182 +1,16 @@
 #!/usr/bin/env python3
-"""The session broker: persona sessions, started on the host, reached by an app.
+"""Serve the authenticated HTTP API for persona sessions, threads and installation
+settings. In split mode the provider host owns live processes and journals; replacing
+the API reconnects to that host. The combined broker implements the same interface
+locally.
 
-**Why this is a runtime component and not an app's code.** It holds the same
-authority bin/wake holds -- it launches a persona in that persona's own
-workspace with the real login at ``~/.claude``, subject to that persona's own
-settings and hooks. An unprivileged project engineer's job must never be able
-to change how a persona is launched, so the launcher lives here, under the
-platform engineer, and an app gets a narrow authenticated interface to it and
-nothing else.
+Numbered provider and broker events can be replayed from their sequence. A
+broker.session snapshot carries record_seq, the last journal position, so
+reconnecting clients cannot mistake the snapshot for a delivered event. Store user
+input durably because a provider may never echo it.
 
-**What a broker session is.** Exactly what a conversation is today, and
-nothing added: ``claude -p`` with the persona's workspace as the working
-directory, no ``--settings`` override, no appended system prompt, and no
-``--model`` unless this chat has asked for one (the + menu, 2026-09-21; the
-default is still nothing on the launch line). That is the whole trick. The
-persona's ``.claude/settings.json``
-then supplies the model, ``outputStyle: conversation`` (so ``_active.md``
-loads and ``_reflection.md`` does not; for an agent with a map, since
-2026-11-18, ``none``, and its map loads as a CLAUDE.md import on every
-lane: lib/loam_loading.py), the permission rules, and the three
-hooks -- transcript capture on Stop and SessionEnd, the boundary guard on
-every PreToolUse. ``LOAM_WAKE`` is deliberately NOT set: the transcript hook
-defaults to "conversation" when it is absent, and a session a person is
-talking to is a conversation.
-
-**The turn shape: one process per session, not one per turn.** With
-``--input-format stream-json`` the CLI reads newline-delimited user messages
-from stdin for as long as it is alive and emits its events on stdout, so a
-second message goes into the same live process with its context already in
-memory. The alternative -- one ``claude -p --resume`` per turn -- re-reads
-the session file, re-loads CLAUDE.md and the MCP servers, and pays a cold
-start every turn; measured elsewhere on this box, MCP startup alone is
-seconds. It also cannot stream a partial message back while the turn is
-running in any useful way. Cost: a live process holds ~450 MB, which is what
-MAX_SESSIONS exists to bound, and a session that outlives the client's
-interest is ended on the idle timer rather than held forever.
-
-**Permission prompts** ride the same channel. ``--permission-prompt-tool
-stdio`` (the flag the Agent SDK passes when a host supplies ``canUseTool``;
-it is not in ``--help`` and was found by causing it) turns a prompt into a
-``control_request`` with subtype ``can_use_tool`` on stdout, which this
-forwards to the client and answers with a ``control_response`` carrying the
-client's decision. Nothing about the persona's own permission settings
-changes: they are what decides whether a prompt happens at all, and the
-request carries the CLI's own ``decision_reason``.
-
-**The event vocabulary is the CLI's.** Every message the CLI emits is passed
-through verbatim with ``seq`` added, which is what makes reconnection
-possible -- and, on a ``result`` only, ``context``, the turn's two token
-figures, which are the broker's arithmetic on the CLI's own numbers and are
-on the event that closes a turn so a page can draw them as the answer lands.
-The broker adds six types of its own, all prefixed ``broker.``:
-``broker.session`` (the session's own facts, sent first on every stream),
-``broker.user_message`` (what a person sent, which the CLI never echoes),
-``broker.permission_request``, ``broker.permission_resolved``,
-``broker.background_tasks``, ``broker.exit``.
-Inventing a second vocabulary for messages the CLI already emits would mean
-maintaining a translation forever.
-
-**``broker.session`` is a snapshot and not an event**, which is the one
-distinction on this stream worth stating twice. It is not numbered, not
-logged, and carries no ``seq``: its position field is ``record_seq``. It
-used to carry ``seq``, meaning the number of the last event already in the
-log -- and a client that treats ``seq`` as an event's identity (which is
-what it is, and what the README tells a client to do) then discarded the
-real event bearing that number, losing the last event of every session it
-opened, and reconnected at the END of the log after dropping mid-replay.
-Found by counterfactual 2026-09-16 on a real 144-event log. So every ``seq``
-on this stream is an event's identity and nothing else, and the snapshot
-says where the session is under a name that cannot be mistaken for one.
-It is re-sent whenever a turn record is written, so a live client sees the
-turn's ``cost_delta_usd`` and ``model`` without re-fetching the record.
-
-**What a row on a screen is made of** (2026-09-18). The record grew the
-fields the designed home screen draws from: ``title`` (the transcript
-writer's own titler, so the app and the record agree on one name for one
-conversation, standing in on the first message's opening words until it
-answers), ``status`` (``working`` / ``waiting`` / ``needs_input`` / ``done`` /
-``failed`` / ``idle`` -- what the session *is*, where ``state`` is only
-whether a process exists), ``last_message``, ``last_event_at``, ``pinned``, ``archived`` and
-``provider``, ``model`` and ``effort``. Pin and archive live here rather than in a browser so they
-follow a person between devices, and ``PATCH /v1/sessions/<id>`` answers for
-a session whose process ended weeks ago, which is most of a home screen.
-``GET /v1/sessions/events`` is the live list: the same snapshot, whenever any
-record is written, fed from ``Session.save()`` so that no field added later
-can be silently left out of it. ``GET /v1/providers`` says which vendor
-accounts exist, which are connected, what the quota is -- read from the
-``rate_limit_event`` the CLI volunteers mid-turn, which is the only place it
-is stated -- and what each offers a chat: its models and its effort levels.
-All of it, and why, is in broker/README.md.
-
-**A record older than those fields is filled from its own log** (2026-09-18,
-the same evening). ``normalise`` fills the keys and cannot fill the content,
-so every session started before that morning drew as "New chat" with no
-status box -- caused in a real browser. The durable log holds both sides of
-the conversation, so ``backfill_records()`` reads a title, a last message
-and a status out of it once, at start, and writes them back. It also moves a
-record whose position is behind its own log up to the log's end, because a
-record that says less than its log renumbers from there on a resume.
-
-**The conversations the owner had in the app are sessions on this box**
-(2026-09-20). Claude Code on claude.ai/code and on their phone was the Remote
-Control servers here, until they were retired on 2026-11-19: same login, same persona workspace, same hooks, same
-session file under ``~/.claude/projects/``. So they are not imported, they
-are adopted -- a record is written for each and the conversation stays in
-the CLI's own file, which is read and never written to
-(``lib/loam_adopt.py``).
-
-**And that file is what such a session replays** (2026-09-20, the same day).
-``adoption.iter_events`` translates it into this interface's own event
-vocabulary -- ``broker.user_message`` for each turn a person typed, one
-``assistant`` event per content block the way the CLI streams them, ``user``
-for a tool result, and a ``result``-shaped boundary per turn carrying what
-the file knows and ``null`` where it knows no cost. Thinking and subagent
-traffic are excluded. The translation is a pure function of the file and is
-written down nowhere: the app's file stays the only copy of that
-conversation on this box, and opening the chat re-reads it. The record's
-``replayed`` says how many events came from it, and ``record_seq`` is that
-same number, so the first turn taken here later is numbered after the
-history rather than on top of it. See ``Session.replay``.
-
-**And sending into one forks it** (2026-09-20, the same day again). An
-adopted session is never resumed in place: its id is the app's session id,
-and ``claude --resume`` on it would put a second process on a file the
-Remote Control server could still have been writing. So the first launch of such a
-record is ``claude -p --resume <the app's id> --fork-session``, which reads
-that file and writes to a new one of the CLI's own. The record keeps the
-app's id as its identity -- the row, the log, the URL and the replayed
-history are all under it -- and gains two fields: ``cli_session_id``, the id
-the CLI minted for the fork and the one every later launch resumes, and
-``forked_from``, the app session it was forked out of. The app's own file is
-read and never written to, before the fork and after it. See
-``Session.argv`` and ``Session.start``.
-
-**Working means working, and a turn is not over while something is still
-coming** (2026-09-22). The owner watched a chat go to its done state with the
-persona still working. The cause, read off this box's own logs: the persona
-launched a background subagent, the CLI closed the turn with ``result``, and
-twenty minutes later the subagent's notification opened another turn with no
-message from anybody. So the session is held off ``done`` while a background
-task is live, while one has left the CLI's list without notifying yet, and
-from a notification until the result that answers it; ``system``/``init``
-reopens the turn, because the CLI writes one ahead of every turn and not once
-per process. ``background_tasks`` on the record is the count, and
-``broker.background_tasks`` says when it changes. See ``working_behind``.
-
-**And the held state has its own word: ``waiting``** (2026-09-25). The hold
-above was right and stays; what it got wrong was calling both halves of it
-``working``. The owner watched their own chat while its agent had ended its turn
-and was blocked on two background jobs: nothing was being generated, the
-page's working cues had stopped, and the row read as finished. An agent that
-is generating and an agent that has finished its turn and is only waiting on
-its children are two states a person reads differently. So ``working`` is the
-CLI's turn being open, ``waiting`` is the turn's ``result`` having arrived
-with background work still outstanding, and ``done`` is nothing further
-coming. One field, not a count the page has to interpret: ``background_tasks``
-is separate and says what is being waited on. See ``Session.status``.
-
-**Which chats are in RAM, and how many may be** (2026-09-25). A session's
-process holds ~450 MB and the box allows four of them, so "is this
-conversation resident right now" is a question only this broker can answer
-and the app has to be able to ask: the owner wanted the chat list filterable
-to the sessions that are actually running. Each record carries ``live`` --
-read off the process table (``Session.is_live``), true while a process of
-this broker's is behind the session and false for every record off disk --
-and the list route carries ``live_count`` and ``cap`` beside the rows, so a
-page draws "2 of 4 live" without counting a list that ``?agent=`` may have
-narrowed. It is residency and not turn state: a ``done`` session with a warm
-idle process is live, a ``waiting`` one is live by definition, and an
-``exited`` one is not. ``broker.residency`` on the live list says when the
-count moves.
-
-**The agents have names.** ``GET /v1/agents`` answers objects -- ``id``,
-``name``, ``face``, read from each persona's ``agent.json`` -- and not the
-bare strings it answered until 2026-09-18. A page draws an agent's name and
-mark, and both are facts about the agent that only the box can state.
-
-Usage:  session-broker [--addr ADDR] [--port PORT] [--foreground]
+See broker/README.md for routes, event shapes, permissions, provider sign-in and
+recovery.
 """
 
 from __future__ import annotations
@@ -202,24 +36,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
 import loam_broker as cfg
 import loam_provider_defaults as provider_defaults  # noqa: E402
-# Sessions the owner had in the Claude Code app, which are Claude Code sessions
-# on this box and were simply unknown to the broker. See lib/loam_adopt.py.
+# Import sessions created outside the broker from the provider's local records.
 import loam_adopt as adoption  # noqa: E402
 # The vault's titler, used here so that the name a session wears in the app
 # and the name its transcript wears in the record are made by the same thing.
 # Two titlers would be two names for one conversation.
 import loam_transcript  # noqa: E402
 import loam_github_app as github_app  # noqa: E402
-# Codex, the second provider (2026-10-01): its binary, home, login, models and
-# the translation of its app-server notifications into this file's events.
+# Codex provider integration
 import loam_codex as codex  # noqa: E402
-# Antigravity, the third (2026-11-09): binary, login probe, instructions and
-# the translation of `agy -p` stream-json.
+# Antigravity provider integration
 import loam_antigravity as agy  # noqa: E402
 import loam_engineer as eng  # noqa: E402
 import loam_provider_usage as usage_store  # noqa: E402
 import loam_files as files_api  # noqa: E402
-# Schedules and Activity (2026-10-14): every read and write is the module's.
+# Schedules and Activity share the schedule module's read and write paths.
 import loam_activity as activity  # noqa: E402
 import loam_schedule  # noqa: E402
 import loam_threads as threads_rec  # noqa: E402
@@ -284,7 +115,7 @@ def running_model(session) -> str | None:
     return None
 
 
-# The most turns a list row carries (2026-11-09). See `list_row`.
+# Bound the turn history sent with a session list.
 LIST_TURNS_MAX = 10
 
 
@@ -318,13 +149,10 @@ def _tail_turns(turns: list) -> list:
 
 
 def list_row(meta: dict) -> dict:
-    """A record as the listing and the live list carry it (2026-11-09): every
-    field but `turns`, which is cut to its tail (`_tail_turns`), with
-    `turns_total` saying how many the record has. The whole of `turns` is on
-    `GET /v1/sessions/<id>` and the session's own stream; `?turns=all` on
-    the list routes answers it there too, for a client that read it whole.
-    Before this `GET /v1/sessions` was 3.5 MB on this box, 2.1 MB of it
-    turns."""
+    """Return a bounded turn tail and its original count. For example, a row may carry two
+    recent turns and turns_total=80. The session detail and lists requested with
+    turns=all retain the full record.
+    """
     turns = meta.get("turns")
     if not isinstance(turns, list):
         return meta
@@ -362,26 +190,10 @@ def _without_image_bytes(blocks: list) -> tuple[list, int]:
 
 
 def for_the_wire(event: dict) -> dict:
-    """An event as a client is sent it: the log's copy, less image bytes.
-
-    **A tool result can carry megabytes of base64 pictures** -- `Read` of a
-    PDF hands the model each page as a JPEG -- and the log keeps them, because
-    the log is the record. No client draws them: the page shows a tool's
-    result as text, and a picture the persona looked at is a file it named.
-    They were still sent, and that is the 2026-10-15 chat that showed none of
-    its replies: a persona read a course's PDFs, seven `user` events of 0.6-3.2 MB
-    put 16 MB of a 17 MB log in front of both replies, and a phone opening
-    the chat gave up on the window before it got past the pictures.
-
-    So the `data` of a base64 image inside a `user` event is cut here, on the
-    way out, and only here. The block keeps its type and `media_type` and says
-    `omitted_chars`, so a reader can tell a picture was there and how big.
-    The same picture's second copy goes too: `Read` of an image file also
-    puts it in `tool_use_result.file.base64`, which no client reads and which
-    was 34 MB of one 75 MB persona's log. That key becomes `base64_omitted_chars`.
-    The event is copied when there is something to cut and is otherwise the
-    same object: the log, the live subscribers' queues and every other
-    stream's copy are untouched.
+    """Omit large base64 images from outgoing tool results while retaining their media types
+    and omitted lengths. A tool may also copy the same image into
+    tool_use_result.file.base64. Modify only the outgoing copy so the journal and other
+    subscribers keep the original event.
     """
     if event.get("type") != "user":
         return event
@@ -404,7 +216,7 @@ def for_the_wire(event: dict) -> dict:
 class ApiServices:
     def __init__(self) -> None:
         self.token = cfg.read_token()
-        # Each provider's usage reader and when to read it (2026-10-14).
+        # Associate each provider with its usage reader and refresh cadence.
         self.usage = usage_store.Refresh(
             [cfg.usage_reader(), codex.reader(), agy.reader()],
             live=self.live_providers,
@@ -453,36 +265,8 @@ class SocketBroker(RemoteRegistry, ApiServices):
     pass
 
 
-# -- making the login again ------------------------------------------------
-#
-# The one thing on this box a person cannot do from the app and cannot do
-# without: when the refresh token in ``~/.claude/.credentials.json`` expires,
-# every session this broker starts stops working, and the only cure is a
-# human signing in again. This is that, as three routes.
-#
-# **What the CLI actually does, measured on this box 2026-09-22** (2.1.270,
-# pinned 09-16), because the route is built around what it does and not
-# around what it might:
-#
-#   * With stdin at /dev/null and stdout a pipe, ``claude auth login
-#     --claudeai`` prints NOTHING and hangs until it is killed. There is no
-#     headless flag and no device-code branch. A route that shelled out to it
-#     the ordinary way would hang forever with nothing to show.
-#   * Under a pty it prints, in order: ``Opening browser to sign in…``, then
-#     ``If the browser didn't open, visit: <url>`` with the URL written twice
-#     (an OSC-8 hyperlink target and visible coloured text), then ``Paste code
-#     here if prompted >`` -- and blocks on a person.
-#   * A code pasted back that is wrong answers ``Login failed: Request failed
-#     with status code 400`` and the process exits.
-#   * **Starting the flow does not disturb the login already on the box.**
-#     Proved with a decoy credentials file under CLAUDE_CONFIG_DIR: started,
-#     given a bad code, failed -- and the file was byte-identical afterwards.
-#     So this route is safe to call on a login that still works, which is the
-#     only way anybody would ever call it.
-#
-# So: a pty, one flow at a time, and the URL parsed out of what was drawn.
-# No token, and no piece of one, is ever answered; the page gets a URL, a
-# state and a sentence.
+# Provider sign-in runs on the host. Return the instructions the CLI actually issues
+# and keep credentials out of the page and session journal.
 
 
 def _make_controlling_tty() -> None:
@@ -520,10 +304,9 @@ class LoginFlow:
     # -- what a route answers ---------------------------------------------
 
     def snapshot(self) -> dict:
-        """The whole of what leaves this box about a flow. The instruction is
-        written here rather than in the app so that one sentence describes
-        what the CLI on this box actually asks for; an app that wrote its own
-        would be guessing at another version's flow."""
+        """Return the public progress of this login flow, including the instruction required by
+        the CLI.
+        """
         out = {"provider": "claude-code", "kind": "paste-code",
                "state": self.state, "url": self.url, "code": None,
                "accepts_code": self.state == "pending",
@@ -729,10 +512,7 @@ class LoginFlow:
 
     async def _kill(self) -> None:
         proc, self.proc = self.proc, None
-        # Not the task this runs in: `_expire` is one of `_tasks` and calls
-        # this, and a flow cancelling itself is why the wait below once caught
-        # `CancelledError` -- which swallowed the broker's own stop as well
-        # (2026-10-14). Skipped, a cancel here is only ever a real one.
+        # Do not cancel the task performing expiry or it can interrupt its own process cleanup.
         here = asyncio.current_task()
         for task in self._tasks:
             if task is not here:
@@ -753,24 +533,8 @@ class LoginFlow:
 
 
 class CodexLoginFlow:
-    """One ``codex login --device-auth``, and what a page can do to it:
-    start it, read it, cancel it (2026-10-01).
-
-    **What the CLI does, measured on this box** (0.159.3, 2026-10-01): with
-    stdin at /dev/null and stdout a pipe -- no pty, unlike ``claude auth
-    login`` -- it prints a banner, then "Open this link in your browser and
-    sign in to your account" with ``https://auth.openai.com/codex/device``,
-    then "Enter this one-time code (expires in 15 minutes)" with the code,
-    then a warning to continue only if you started this login, and polls
-    until the code is entered or expires. Nothing is pasted back here: the
-    person enters the code on OpenAI's page, and the CLI writes
-    ``auth.json`` under ``CODEX_HOME`` and exits 0. So there is no code
-    route; reading the flow is reading its state.
-
-    States as ``LoginFlow``'s: ``idle``, ``pending`` (URL and code are out),
-    ``done``, ``failed``. One flow at a time; a second start answers the
-    first, because a second code would leave the first one entered for
-    nothing.
+    """Own one Codex device login. Parse the verification URL and device code for the page,
+    and reap the child on completion, cancellation or expiry.
     """
 
     def __init__(self) -> None:
@@ -913,14 +677,8 @@ class CodexLoginFlow:
 
 
 class AntigravityLoginFlow:
-    """One ``agy acp --login``, and the four things a page can do to it:
-    start it, read it, hand it the code, cancel it (2026-11-11).
-
-    The CLI prints a Google link and reads one line -- the code the landing
-    page shows, or that page's whole URL -- from a pipe; no pty (see
-    ``loam_antigravity`` "signing in" for what was measured). States as
-    ``LoginFlow``'s. One flow at a time: each start mints its own PKCE
-    verifier, so a second would void the code being pasted.
+    """Own one Antigravity login process. Expose its authorization link and accept the
+    returned code while the original process is still waiting.
     """
 
     provider = "antigravity"
@@ -1093,8 +851,7 @@ BAD = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"
 # was told once in a document. Silence longer than this plus a margin is a
 # connection that has gone, which is a thing a client can see and fix.
 KEEPALIVE_S = 15
-# The live-sessions stream (2026-11-10): a refresh for the memory numbers, and
-# the wait that folds a burst of record changes into one send.
+# Refresh memory readings periodically and coalesce bursts of session changes.
 LIVE_REFRESH_S = 10
 LIVE_DEBOUNCE_S = 1
 
@@ -1152,9 +909,9 @@ def choices(payload: dict, provider: str | None = None) -> dict:
 
 
 def with_steps(thread_id: str, messages: list[dict]) -> list[dict]:
-    """Messages with their full record as ``steps`` (2026-11-10), for
-    ``?steps=full``. A message with none (a person's, a system line, a
-    reply from before the full record) has ``steps: null``."""
+    """Attach recorded steps by message ID for requests with steps=full. A message without a
+    step record receives steps: null.
+    """
     entries = thread_steps.read(thread_id)
     return [{**m, "steps": (entries.get(m.get("id")) or {}).get("steps")}
             for m in messages]
@@ -1201,14 +958,9 @@ def persona_changes(who: str, before: dict, after: dict) -> list[str]:
 
 
 def author(payload: dict) -> str | None:
-    """Who made a change, when it was not the owner on the page (2026-11-10).
-
-    `by` on a thread, session or schedule write names the persona that made
-    it through the same route the page uses (`bin/settings`, the `settings`
-    tool; lib/loam_settings.py). Absent, empty or an id of the owner's is the owner, which
-    is every write the page sends; anything else is a persona on this box or
-    a 400. It is attribution, not authority: the token is what lets a caller
-    in, and every caller holding it is a process on this box."""
+    """Return the named local persona, or None for the owner. The token authenticates the
+    caller; this field attributes the write. Reject unknown identities.
+    """
     by = payload.get("by")
     if by is None or by == "":
         return None
@@ -1310,8 +1062,7 @@ def response(status: int, body: dict | list, extra: str = "") -> bytes:
 class Server:
     def __init__(self, broker: Broker) -> None:
         self.broker = broker
-        # Threads (2026-11-08): the record is lib/loam_threads.py, the turns
-        # lib/loam_thread_engine.py; see broker/README.md, "Threads".
+        # Thread records and per-member dispatch live in loam_threads and loam_thread_engine.
         self.threads = loam_thread_engine.ThreadEngine(broker)
 
     async def handle(self, reader: asyncio.StreamReader,
@@ -1457,51 +1208,38 @@ class Server:
             await writer.drain()
             return
 
-        # Who this install is for (2026-11-14, first release L2): the id the
-        # runtime writes for the owner and the ids it accepts as the owner's
-        # (`owner.id`, plus the legacy id for this release), and the name to
-        # show. The page reads it once and never assumes an id.
+        # Return the configured owner ID and the aliases recognized in existing records.
         if parts == ["v1", "owner"] and method == "GET":
             writer.write(response(200, lc.owner()))
             await writer.drain()
             return
 
 
-        # Files (2026-10-02): the vault, the agents' spaces and the runtime's
-        # documents, by root and relative path only. lib/loam_files.py holds
-        # every rule; this only decodes the query once and writes the answer.
+        # Resolve Files requests by registered root and relative path through loam_files.
         if parts[:2] == ["v1", "files"]:
             await self.files_route(method, parts[2:], params, payload, writer,
                                    raw, content_type)
             return
 
-        # Threads and boards (2026-11-08). Beside the sessions, not instead of
-        # them: every /v1/sessions route is unchanged and is Classic chats.
+        # Thread and board routes
         if parts[:2] == ["v1", "threads"]:
             await self.threads_route(method, parts[2:], params, payload, writer,
                                      raw, content_type)
             return
 
-        # Schedules, Activity and the engineer's jobs (2026-10-14): see
-        # lib/loam_activity.py and broker/README.md, "Schedules and Activity".
+        # Schedules, Activity and engineer jobs
         if parts[:2] in (["v1", "schedules"], ["v1", "activity"], ["v1", "jobs"]):
             await self.activity_route(method, parts[1:], params, payload, writer)
             return
 
-        # The settings registry (2026-11-10): every setting the page can
-        # change, the route it goes to and whose hands it is in, read from
-        # lib/loam_settings.py -- the table `bin/settings` works from, so a
-        # client can draw from the one source. Words and routes, no values.
+        # The settings registry maps each setting to its route and identifies who can change it.
         if parts == ["v1", "settings"] and method == "GET":
             writer.write(response(200, {"settings": loam_settings.table()}))
             await writer.drain()
             return
 
-        # Apps (2026-11-12): the Apps section's list -- the agents' own sites
-        # and the projects' deployed containers, read from the deployment
-        # layer each time (lib/loam_apps.py; broker/README.md, "Apps").
-        # Read-only; a record the generator would refuse is a 503 that says
-        # which, since the list cannot be told without it.
+        # Read app and site entries from deployment records so changes are visible on the next
+        # listing.
         if parts == ["v1", "apps"]:
             nocache = "Cache-Control: no-store\r\n"
             if method != "GET":
@@ -1624,18 +1362,13 @@ class Server:
             await writer.drain()
             return
 
-        # Updates (2026-11-14, first release L13): Settings › About Loam reads
-        # the state, checks, applies and rolls back. Every rule is
-        # lib/loam_update.py; docs/update.md is the page contract.
+        # Update state, checks, apply and rollback use the same implementation as the CLI.
         if parts[:2] == ["v1", "update"]:
             await self.update_route(method, parts[2:], payload, writer)
             return
 
-        # Appearance (2026-11-11): mode and size for the phone and the
-        # desktop, kept on the host in state/broker/settings.json so every
-        # browser agrees and a persona can set it (lib/loam_appearance.py).
-        # GET fills defaults; PATCH merges named fields in one write and
-        # answers the whole value. `by` is the one field beside the kinds.
+        # Store appearance preferences on the host so devices and authorized setting changes
+        # share them.
         if parts == ["v1", "settings", "appearance"]:
             nocache = "Cache-Control: no-store\r\n"
             if method not in ("GET", "PATCH"):
@@ -1660,14 +1393,8 @@ class Server:
             await writer.drain()
             return
 
-        # Whose name agents' commits carry (2026-11-18, lib/loam_git_identity.py):
-        # the owner's GitHub account (its name and no-reply address, read once
-        # from GitHub with the connection's own token) or a typed name and
-        # address; unset is the default (the one connected account), and
-        # "neutral" opts out. GET answers the choice, what commits carry now
-        # and, when that is the engineer's by no choice of the owner's, the
-        # prompt; PATCH takes {"identity": "github" | {"name", "email"} |
-        # "neutral" | null}. The address is never logged.
+        # Validate the chosen commit identity and expose only the account metadata required by
+        # the page.
         if parts == ["v1", "settings", "git"]:
             nocache = "Cache-Control: no-store\r\n"
             if method not in ("GET", "PATCH"):
@@ -1710,12 +1437,7 @@ class Server:
             await writer.drain()
             return
 
-        # Making an agent by conversation, archiving and restoring it, and
-        # its uploaded face (2026-11-14, first release L10): every rule is
-        # lib/loam_agents.py; broker/README.md, "Making, archiving and
-        # restoring agents", is the contract. Before the profile's route,
-        # whose `/v1/agents/<agent>` would otherwise take `drafts` and `new`
-        # as agents' names (both are reserved ids).
+        # Agent creation, archive, restoration and face changes use the shared lifecycle checks.
         if parts[:2] == ["v1", "agents"] and (
                 parts[2:3] in (["drafts"], ["new"])
                 or (len(parts) == 4 and parts[3] in ("archive", "restore", "face"))):
@@ -1723,11 +1445,7 @@ class Server:
                                     raw, content_type)
             return
 
-        # Which agent hears when something in Loam needs attention
-        # (2026-11-19, batch B step 5; lib/loam_attention.py): GET the
-        # choice, PATCH {"persona": id | null}. Settings › Agents, or a
-        # persona through bin/settings (`system.persona`). Nothing is said
-        # anywhere when it changes; the journal has the line.
+        # Read or change which persona handles installation problems.
         if parts == ["v1", "system", "persona"]:
             import loam_attention as attention_mod  # noqa: PLC0415
             import loam_appearance as appearance_mod  # noqa: PLC0415
@@ -1759,9 +1477,7 @@ class Server:
             await writer.drain()
             return
 
-        # An agent's profile, the engineers and the reviewer (2026-11-13):
-        # lib/loam_profile.py holds every rule; broker/README.md, "Agent
-        # profiles, engineers and the reviewer", is the contract.
+        # Agent, engineer and reviewer profile routes
         if (len(parts) == 3 and parts[:2] == ["v1", "agents"]) or \
                 parts[:2] == ["v1", "engineers"] or \
                 parts == ["v1", "system", "reviewer"]:
@@ -1769,11 +1485,7 @@ class Server:
             return
 
         if parts == ["v1", "agents"] and method == "GET":
-            # Objects since 2026-09-18, not the bare strings this answered
-            # before: the page draws each agent's name and mark, and both are
-            # stated in the persona's own agent.json. See cfg.agent_card.
-            # `?archived=1` (2026-11-14): the archived ones instead, each
-            # with its `archived` mark (Settings › Agents › Archived).
+            # Build roster entries from the configured display name and appearance of each agent.
             if truthy(params.get("archived")):
                 writer.write(response(200, {"agents": await asyncio.to_thread(
                     loam_agents.archived_cards)}))
@@ -1794,13 +1506,7 @@ class Server:
             await writer.drain()
             return
 
-        # Making the login again, from the app. Three routes on the one wired
-        # provider, and a fourth to call the whole thing off. Named under the
-        # provider rather than at the top level because that is what it is
-        # about -- and because a second provider will one day need its own.
-        # See LoginFlow above for what the CLI does and what was measured.
-        # Sign-out (2026-11-11): removes the login from the box, on the
-        # providers whose row carries `sign_in.sign_out`.
+        # Sign-in flows run under their provider and can be cancelled from the page.
         if (len(parts) == 4 and parts[:2] == ["v1", "providers"]
                 and parts[3] == "logout" and method == "POST"):
             provider = parts[2]
@@ -1810,9 +1516,7 @@ class Server:
                     f"{provider!r} is not signed out from the app; its row's "
                     f"`sign_in.sign_out` is null. GET /v1/providers says "
                     f"which are.")
-            # Never under a turn (2026-11-11): a chat on this provider that
-            # is working, asking or waiting on its children would lose its
-            # login mid-flight, so the sign-out waits for it.
+            # Keep credentials in place while turns on this provider are active or waiting for work.
             if remote:
                 await broker.synchronize()
             busy = [s for s in broker.sessions.values()
@@ -1882,10 +1586,7 @@ class Server:
             await self.github(method, parts[3:], params, payload, writer)
             return
 
-        # `/v1/integrations/<id>` for a plugin's integration was forwarded to
-        # the plugin's server from 2026-11-14 (L5) until loam-ui 1c4ec9b moved
-        # the page to `/x/<id>/`; retired the same day (L11). It is answered
-        # now as any unknown route is.
+        # Plugin-owned routes are handled by the plugin gateway.
 
         if parts == ["v1", "sessions"] and method == "GET":
             # A conversation started in the Claude Code app becomes a row here
@@ -1893,37 +1594,20 @@ class Server:
             # adopted runs on a read of the list, at most that often, and the
             # records already held are brought into step by `known` itself.
             rows, residency = await self.catalog(params.get("agent"))
-            # `?archived=1` is still accepted and changes nothing: since the
-            # classic view retired (2026-11-12) every record is listed, which
-            # is what Running now, the one reader, always asked for.
+            # Include all records even when an older client sends archived=1.
             if params.get("turns") != "all":
                 rows = [list_row(r) for r in rows]
             writer.write(response(200, {
                 "sessions": rows,
-                # `live_count` and `cap`: the resident count and the ceiling,
-                # for "2 of 4 live". `live` is what that count was called
-                # before each session carried its own `live` boolean
-                # (2026-09-25), and it is kept because removing it would be a
-                # silent break of a client reading it -- but one word cannot
-                # mean a number here and a boolean there, so `live_count` is
-                # the name from now on and this one is the compatibility copy.
+                # Return residency totals separately from each session row's live flag.
                 **residency, "live": residency["live_count"]}))
             await writer.drain()
             return
 
-        # `POST /v1/sessions` (start or resume a classic chat), `PATCH` on a
-        # session, `POST /v1/sessions/seen` and a session's `events`,
-        # `messages`, `attachments` and `compact` retired with the classic
-        # chat view on 2026-11-12 (the owner, 2026-11-11). A thread starts and
-        # resumes its members' sessions itself (lib/loam_thread_engine.py),
-        # and a thread is what a person talks in. broker/README.md, "The
-        # classic chat routes, retired".
+        # Classic session mutation routes are retired. Thread turns manage their provider
+        # sessions.
 
-        # The live sessions (2026-11-10): what is in RAM now, thread members
-        # and classic chats alike, with the box's totals for a small gauge;
-        # its stream; and "end all idle". Fixed paths, checked before the
-        # per-session block, which would otherwise read `live` as an id
-        # (ids are UUIDs the broker mints). broker/README.md, "Live sessions".
+        # Report resident sessions and host totals independently of archived session records.
         if parts == ["v1", "sessions", "live"] and method == "GET":
             if remote:
                 await broker.synchronize()
@@ -1982,9 +1666,8 @@ class Server:
                 if by:
                     print(f"sessions: {session_id} ended by {by}",
                           file=sys.stderr, flush=True)
-                # A thread member's session mid-turn: the turn ends with one
-                # quiet line in the thread, and the next mention resumes the
-                # session by id (2026-11-10). The thread itself is untouched.
+                # Mark the turn as explicitly stopped before ending its process so partial output
+                # survives.
                 thread_id = self.threads.mark_ended(session_id)
                 await session.stop()
                 record = session.meta()
@@ -2009,7 +1692,7 @@ class Server:
         writer.write(response(405, {"error": f"no route for {method} {path}"}))
         await writer.drain()
 
-    # -- the live sessions (2026-11-10) --------------------------------------
+    # Live sessions
 
     def _thread_of(self) -> dict[str, tuple[str, str]]:
         """Session id -> (thread id, persona), for every member session the
@@ -2037,11 +1720,7 @@ class Server:
         def stamp(ts):
             return (datetime.fromtimestamp(ts, timezone.utc)
                     .strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None)
-        # `model` is the model the session is running on as its CLI said it
-        # (Claude's `system/init`, Codex's thread start), else the one it was
-        # asked for; `model_asked` is the ask (null: the persona's default).
-        # Since 2026-11-12, for Activity: until then `model` was only the
-        # ask, so a thread on its persona's default read `opus`.
+        # Prefer the provider's reported model, then the model requested at launch.
         asked = getattr(session, "model", None)
         provider = getattr(session, "provider", None)
         engine = loam_waiters.engine_id(provider) or provider or "claude-code"
@@ -2051,8 +1730,7 @@ class Server:
                "model": running_model(session) or asked,
                "model_asked": asked,
                "state": state, "last_active": stamp(last),
-               # The newest event the session wrote (2026-11-16; since
-               # 11-17 it no longer lets a restart go: loam_live).
+               # Last event time is diagnostic. Restart admission uses session and turn state.
                "last_event_at": getattr(session, "last_event_at", None),
                "idle_since": stamp(last) if state == "idle" else None,
                "started_at": stamp(started),
@@ -2075,16 +1753,9 @@ class Server:
         return row
 
     async def deliver_owed(self) -> None:
-        """Every `DELIVER_EVERY_S`, the engineer results owed to a thread
-        (lib/loam_waiters.py): every brief from a thread returns at once
-        (since 2026-11-18). Once its job has a verdict, the persona that
-        sent it gets a turn in the thread it briefed from whose input is the
-        result; nothing is posted (`ThreadEngine.deliver_job`). Oldest
-        verdict first. A result whose thread is gone, or whose persona left
-        it, goes by a run of that persona instead (lib/loam_results.py,
-        2026-11-19), never dropped. Results for runs with no thread are not
-        this pass's: bin/wake delivers them, broker or no broker.
-        Fail-soft: never the reason a broker is down."""
+        """Deliver completed engineer results to their originating threads. Retry from durable
+        waiter records when the API restarts or delivery fails.
+        """
         await asyncio.sleep(DELIVER_FIRST_S)
         while not self.broker.stopping:
             with fence.admission() as admitted:
@@ -2121,9 +1792,7 @@ class Server:
         except Exception as exc:  # noqa: BLE001
             print(f"deliver: the pass failed ({exc!r})", file=sys.stderr,
                   flush=True)
-        # What an update left for the person's agent (2026-11-14, first
-        # release L13, lib/loam_update.py): one line in General and a
-        # turn for General's default agent, to say it in its own words.
+        # Deliver the pending update notice to the system persona.
         try:
             for note in await asyncio.to_thread(loam_update.owed_notices):
                 outcome = self.threads.deliver_note(note)  # on the loop, as deliver_job
@@ -2166,10 +1835,8 @@ class Server:
                             "mb": sum(r["rss_mb"] or 0 for r in rows),
                             "idle": sum(1 for r in rows if r["state"] == "idle")},
                "units": loam_live.units()}
-        # Thread turns in flight (2026-11-17), with or without a session
-        # yet: a planned restart goes only when this is empty and every row
-        # is idle (loam_live.restart_blockers), so a turn that has been
-        # taken but whose session is still starting is not cut.
+        # Include turns that have not opened a provider session yet when deciding if the host
+        # is idle.
         engine = self.threads
         turns = [{"thread_id": tid, "persona": persona,
                   "queued": key not in engine.turns}
@@ -2263,10 +1930,7 @@ class Server:
             self.broker.record_subscribers.discard(queue)
 
     def thread_model(self, persona: str, engine: str, model) -> str | None:
-        """A member's or a turn's model, checked against what its engine
-        offers (2026-11-09): Claude Code's aliases and full ids and Codex's
-        `model/list`, as a classic chat's are (`choices`), and the models
-        Antigravity's CLI lists. Null is the persona's own."""
+        """Validate the requested turn or member model against that provider's supported choices."""
         if model is None:
             return None
         if not engine:
@@ -2301,9 +1965,7 @@ class Server:
                 await writer.drain()
                 return
             if method == "POST":
-                # `persona` is optional since 2026-11-09: a thread with no
-                # default records what is written and nobody answers until a
-                # default is set or someone is tagged.
+                # A thread can have no default member. Keep its messages until someone is addressed.
                 persona = payload.get("persona") or None
                 by = author(payload)
                 meta = threads_rec.create(persona, payload.get("title"))
@@ -2325,18 +1987,12 @@ class Server:
             await self.thread_list_stream(writer, truthy(params.get("archived")))
             return
         if tail == ["writer"] and method == "GET":
-            # The record writer's own counts (2026-11-10): a reply dropped,
-            # carried or recovered late, and a full record that failed to
-            # write, are numbers here and lines in the broker's log.
+            # Report recovery and step-write counters from the record writer.
             writer.write(response(200, dict(thread_steps.COUNTS)))
             await writer.drain()
             return
         if tail == ["imported"] and method == "GET":
-            # Classic chats imported as archived threads (2026-11-11,
-            # `bin/import-classic-chats`): session id -> thread id, read off
-            # the records' frontmatter, so a link or bookmark to a classic
-            # chat can be sent to its thread. `?session=<id>` asks for one,
-            # and a session never imported is a 404.
+            # Resolve an imported classic session to its archived thread using the import metadata.
             mapping = threads_rec.imported()
             sid = params.get("session")
             if sid:
@@ -2353,18 +2009,13 @@ class Server:
             got = threads_rec.page(thread_id, params.get("before") or None, limit)
             meta = got["meta"]
             messages = got["messages"]
-            # A read of the newest page is the owner looking at the thread, and
-            # marks it seen; `?seen=0` (2026-11-10) is a read that is not --
-            # a page's own refresh behind the view -- and writes nothing.
+            # Reading the newest page marks it seen unless the caller opts out with seen=0.
             if messages and not params.get("before") \
                     and truthy(params.get("seen", "1")):
                 threads_rec.mark_seen(thread_id, messages[-1]["id"])
             if params.get("steps") == "full":
                 messages = with_steps(thread_id, messages)
-            # The engineer jobs briefed from this thread (2026-11-13): queued,
-            # running, landing, and finished in the last ten minutes, read
-            # from the launcher's job state, never from the persona's session
-            # (lib/loam_activity.job_rows; contract in broker/README.md).
+            # Include active jobs and recently finished jobs briefed from this thread.
             summary = engine.summary(thread_id)
             try:
                 summary["jobs"] = await asyncio.to_thread(
@@ -2377,12 +2028,10 @@ class Server:
                 "thread": summary,
                 "messages": messages, "has_more": got["has_more"],
                 "ordered_submissions": True,
-                # `turns` (2026-11-10): every member's turn in flight, earliest
-                # first; `turn` is the earliest, for the clients that read one.
+                # Return all active turns in start order. Older clients read the first as turn.
                 "turn": engine.active.get(thread_id),
                 "turns": engine.live_turns(thread_id),
-                # `marks` (2026-11-19): what a turn that could not run or
-                # ended without a reply shows; never in `messages`.
+                # Keep incomplete-turn markers separate from messages.
                 "marks": engine.marks_for(thread_id),
                 "pending_permissions": engine.pending(thread_id),
                 "board": {"path": meta["board"],
@@ -2390,8 +2039,7 @@ class Server:
             await writer.drain()
             return
         if not rest and method == "DELETE":
-            # The record and its board leave the vault. The owner's explicit
-            # action only: the app confirms before it sends this (2026-11-09).
+            # Deleting the thread and its board requires the owner's explicit request.
             if engine.live_turns(thread_id):
                 raise BrokerError(409, "a turn is running in this thread; "
                                        "delete it when the turn has finished")
@@ -2429,8 +2077,7 @@ class Server:
                     if model is not None:
                         engines[persona] = chosen
             if "draft" in payload:
-                # A branch's prepared opening (2026-11-11), cleared (null or
-                # "") or replaced; the page clears it once it holds its own.
+                # Clear or replace a branch's prepared opening as the page adopts it.
                 if payload["draft"] is not None and not isinstance(payload["draft"], str):
                     raise BrokerError(400, "`draft` is a string or null")
                 threads_rec.read(thread_id)
@@ -2447,11 +2094,7 @@ class Server:
                                archived=payload.get("archived"), **changes)
             after = threads_rec.read(thread_id)[0]
             if after["default"] != before["default"]:
-                # Said in the thread (2026-11-09). The default changes only
-                # when the owner changes it, and an untagged message goes to
-                # it; a change nobody can see afterwards was how a reply
-                # from someone other than the header's default could not be
-                # explained from the record.
+                # Changing the default changes who receives unaddressed messages.
                 said = (f"{who} made {threads_rec.display(after['default'])} "
                         f"the default" if after["default"] else
                         f"{who} set no default: untagged messages are kept "
@@ -2473,10 +2116,7 @@ class Server:
                                                "by": by or lc.OWNER_ID})
                     engine.publish(thread_id, {"type": "message.done", "message": line})
             if by:
-                # A persona's change says itself in the thread (2026-11-10),
-                # the ones the page leaves no line for included: the owner knows
-                # what they clicked, and nobody else's change to their thread
-                # should be one he can only find by noticing it.
+                # Record a persona's settings change in the affected thread.
                 for said in persona_changes(who, before, after):
                     line = threads_rec.append(thread_id, "system", said,
                                               kind="system")
@@ -2495,11 +2135,7 @@ class Server:
             await writer.drain()
             return
         if rest == ["branch"] and method == "GET":
-            # Branching (2026-11-11), the sheet's first read: the window a
-            # branch at `?message=` carries (`threads_rec.branch_window`),
-            # who it can be with (members first), the summarizer's prompt
-            # for the draft and title, and a plain fallback for when the
-            # summarizer fails. Reads only.
+            # Return the context around the selected message for the branch preview.
             meta, msgs, path = threads_rec.read(thread_id)
             window = threads_rec.branch_window(msgs, params.get("message") or "",
                                                thread_id)
@@ -2541,9 +2177,8 @@ class Server:
             await writer.drain()
             return
         if rest == ["attachments"] and method == "POST":
-            # The bytes into the vault, the attachment objects back, nothing
-            # started (a classic chat's own upload route retired 2026-11-12).
-            # The next message names them in `attachments`.
+            # Save attachments before returning their handles. Uploading alone does not start a
+            # turn.
             threads_rec.read(thread_id)          # 404 for a thread nobody has
             if not content_type.split(";")[0].strip().lower() == "multipart/form-data":
                 raise BrokerError(415, "send the file as multipart/form-data in a "
@@ -2586,8 +2221,7 @@ class Server:
                 for p in threads_rec.mentions(payload.get("text") or "") or (
                         [meta["default"]] if meta.get("default") else []):
                     self.thread_model(p, threads_rec.member_engine(meta, p), model)
-            # `reply_to` (2026-11-11): the id of the earlier message this
-            # one answers; a 400 / 404 from the record when it isn't one.
+            # Validate reply_to against the thread before appending the reply.
             reply_to = payload.get("reply_to") or None
             msg = engine.post_person(thread_id, payload.get("text") or "",
                                      attachments=carried, model=model,
@@ -2627,8 +2261,7 @@ class Server:
             await writer.drain()
             return
         if rest == ["steps"] and method == "GET":
-            # The full record (2026-11-10): every step of every reply, for
-            # one message (`?message=m4`) or the whole thread.
+            # Read full recorded steps for one message or the whole thread.
             threads_rec.read(thread_id)          # 404 for a thread that isn't
             entries = thread_steps.read(thread_id, params.get("message") or None)
             if params.get("message") and not entries:
@@ -2645,13 +2278,10 @@ class Server:
 
     async def thread_list_stream(self, writer: asyncio.StreamWriter,
                                  archived: bool = False) -> None:
-        """The thread list, live (2026-11-09): ``threads.snapshot`` with the
-        rows and the agents, then ``thread.changed {summary}`` whenever a
-        row moves and ``thread.removed {thread}`` when one is deleted. The
-        engine pushes what it does; a post by ``bin/thread`` or an edit in
-        Obsidian is seen by stat-ing the records every two seconds, as a
-        thread's own stream does. An archived row is sent like any other,
-        with ``archived: true``, so a list can drop it."""
+        """Start with threads.snapshot, then send changed summaries and removals. Poll for edits
+        made outside the broker. An archived row still needs a change event so the list can
+        remove it.
+        """
         engine = self.threads
         queue = engine.listen_list()
         self._open_stream(writer)
@@ -2784,8 +2414,7 @@ class Server:
                         meta, fresh, path = threads_rec.read(thread_id)
                     except threads_rec.ThreadError:
                         return
-                    # A rename moves the board with the record (2026-11-10);
-                    # watch it where it went, not where it was.
+                    # Follow a renamed board to its current path.
                     board = threads_rec.VAULT / meta["board"]
                     await catch_up(fresh)
                 if now_board != board_at:
@@ -2807,22 +2436,17 @@ class Server:
 
     async def github(self, method: str, tail: list[str], params: dict,
                      payload: dict, writer: asyncio.StreamWriter) -> None:
-        """GitHub as a GitHub App (2026-09-30). The whole flow and its store
-        are lib/loam_github_app.py; these routes only dispatch, each GitHub
-        call on a worker thread so a slow GitHub never parks the loop. See
-        broker/README.md, "GitHub"."""
+        """Dispatch GitHub App operations through the shared integration and credential store."""
         def text(name: str) -> str | None:
             value = payload.get(name)
             return value.strip() if isinstance(value, str) and value.strip() else None
 
         calls = {
             ("GET", ()): lambda: github_app.public_view(),
-            # `org` (2026-10-06), in the query or the body: that
-            # organization's app alone; without it, everything, as before.
+            # Select the organization named by the caller, when supplied.
             ("DELETE", ()): lambda: github_app.forget(
                 text("org") or (params.get("org") or "").strip() or None),
-            # `org` (2026-10-06): an app owned by that organization, which
-            # answers for its repositories alone; see the module.
+            # An organization installation can act only on that organization's repositories.
             ("POST", ("manifest",)): lambda: github_app.start_manifest(
                 text("name"), text("org")),
             ("POST", ("register",)): lambda: github_app.register(
@@ -2834,20 +2458,17 @@ class Server:
             ("POST", ("refresh",)): lambda: github_app.check(force_refresh=True),
             ("POST", ("token",)): lambda: github_app.installation_token(
                 text("repository")),
-            # A pull-request project's landing (2026-10-06): the job cannot
-            # push, so the broker pushes its job/<id> branch and opens the PR.
+            # The broker pushes the reviewed head for a pull-request project.
             ("POST", ("pull-request",)): lambda: github_app.open_pull_request(
                 text("project") or "", text("branch") or "",
                 text("title") or "", payload.get("body") if isinstance(
                     payload.get("body"), str) else ""),
-            # A job whose brief names the pull request it updates
-            # (2026-10-09): fast-forward that PR's head, then post the reply.
+            # Update an explicitly targeted pull request only by fast-forwarding its head.
             ("POST", ("pull-request-update",)): lambda: github_app.update_pull_request(
                 text("project") or "", text("branch") or "", payload.get("number"),
                 payload.get("reply") if isinstance(payload.get("reply"), str) else ""),
         }
-        # One account at a time (2026-11-13): the list, refresh one,
-        # disconnect one, add another. lib/loam_github_app.py, "Accounts".
+        # Scope account actions to the selected connection.
         if tail[:1] == ["accounts"]:
             from urllib.parse import unquote  # noqa: PLC0415
             rest = [unquote(t) for t in tail[1:]]
@@ -2873,11 +2494,7 @@ class Server:
 
     async def activity_route(self, method: str, tail: list[str], params: dict,
                              payload: dict, writer: asyncio.StreamWriter) -> None:
-        """Schedules and Activity (2026-10-14). Every write is
-        loam_schedule.change() as the owner on lane `app`, inside
-        lib/loam_activity.py; a refusal is that path's own sentence, as a
-        400 (a 404 when the thing named is not there). Each call on a worker
-        thread: a write reconciles timers, a read asks the user manager."""
+        """Route schedule writes through the reconciler under the caller's identity and lane."""
         def q(name: str) -> str | None:
             from urllib.parse import unquote_plus  # noqa: PLC0415
             return unquote_plus(params[name]) if params.get(name) else None
@@ -3097,13 +2714,10 @@ class Server:
             except ValueError:
                 pass      # still running on its thread (a cancelled task)
 
-    # -- Agent profiles, engineers, the reviewer (2026-11-13) -----------------
+    # Agent, engineer and reviewer profiles
 
     def say_in_general(self, text: str) -> None:
-        """A persona's change of a setting that belongs to no thread, said in
-        General, as a persona's change of a thread is said in that thread
-        (2026-11-10). The owner's own clicks say nothing: they know what they
-        clicked. A General that cannot be written is the journal's line only."""
+        """Announce a persona's change in General when the setting belongs to no thread."""
         try:
             threads_rec.ensure_general()
             line = threads_rec.append(threads_rec.GENERAL_ID, "system", text,
@@ -3729,30 +3343,10 @@ class Server:
 
     async def stream_records(self, writer: asyncio.StreamWriter,
                              full: bool = False) -> None:
-        """The live list: every session's record, whenever any of them changes.
-
-        The same ``broker.session`` snapshot the per-session stream leads
-        with, and for the same reason it is not an event: it carries no
-        ``seq``, it is never logged, and a client applies whichever one
-        arrives last per ``session_id``. There is nothing to reconnect *at*,
-        so there is no ``?from=`` here -- reopening the stream re-sends the
-        whole list, which is by definition current.
-
-        It opens with the listing as it stands, so a page that connects
-        before it fetches anything already has the screen. Every record is in
-        it, archived or not (``?archived=1`` is accepted and changes nothing
-        since 2026-11-12).
-
-        The one other item here is ``broker.residency`` (2026-09-25): the
-        resident count and the cap, sent once at the end of the opening burst
-        and again whenever the count moves. Each row carries its own ``live``
-        on its record, so a client filtering to what is in RAM needs nothing
-        more; this exists because the total against the cap is a fact about
-        the box and not about any row, and a narrowed list cannot be counted
-        for it.
-        After that, **every** record change goes out, archived or not: a page
-        that filters archived rows still has to be told the moment a row
-        becomes archived, or it keeps drawing one.
+        """Send a fresh snapshot of each record on connection and after changes, including rows
+        that became archived. Snapshots carry no event sequence and require no replay cursor.
+        Publish residency totals separately because a filtered client list can never infer
+        them.
         """
         queue: asyncio.Queue = asyncio.Queue()
         self.broker.record_subscribers.add(queue)
@@ -3763,9 +3357,7 @@ class Server:
             # client that never sees a new conversation appear.
             rows, residency = await self.catalog()
             self._open_stream(writer)
-            # Rows as the listing answers them (`list_row`), here and for
-            # every change after: the whole `turns` is the session's own
-            # stream's, unless `?turns=all` asked for it (2026-11-09).
+            # Bound the turns in streamed list rows in the same way as the initial listing.
             row = (lambda r: r) if full else list_row
             for record in rows:
                 await self._send_event(writer, {"type": "broker.session",
@@ -3793,30 +3385,9 @@ class Server:
             self.broker.record_subscribers.discard(queue)
 
     def providers(self, agent: str | None = None) -> list[dict]:
-        """Every provider the app draws a row for, connected or not, and what
-        each one offers a chat: its models and its effort levels.
-
-        One is wired. The others are named here rather than left out because
-        the page has a row for each and "Codex — not wired" is an answer,
-        where a missing row is a bug report. `usage` is on the wired one only,
-        and is `null` until a rate limit reading has been seen: the CLI
-        volunteers those mid-turn, so a box that has not taken a turn since
-        the file was last written has nothing to say and says so.
-
-        `models` and `efforts` (2026-09-21) are what the + menu is drawn
-        from, and an unwired provider carries both as empty lists -- not as
-        absent keys, so a client reads "nothing on offer here" without a
-        branch. `default: true` marks the model the persona's own settings
-        name, which is what a session runs on when nobody picks: it is read
-        off that persona's settings.json when `agent` says whose, and off the
-        fleet when it does not. No row is marked when the personas disagree,
-        which is honest and is what a fleet mid-change looks like.
-
-        `login` (2026-09-22) is on the wired one only and is read from the
-        credential itself on every call, never cached: when it expires, how
-        many whole days that is, and which credential the sessions are
-        actually running on. It is what lets the page say "Claude Code login
-        expires in 3 days" without knowing that a login is a file.
+        """Return every provider with its connection state and available choices. Use the
+        requested persona's default when available. Disconnected providers still supply empty
+        choice lists so clients can render their rows.
         """
         # A read for each provider that has one, at most once a minute: this
         # is a thread (the route's to_thread), and a read is a short-lived
@@ -3826,8 +3397,7 @@ class Server:
         connected, reason = provider_defaults.available("claude-code", login)
         usage = cfg.read_usage()
         default_model = cfg.persona_model(agent)
-        # The persona's own default model (2026-11-13, its profile), when it
-        # is a Claude Code one, is the row ticked: it is what a turn runs on.
+        # Use the agent profile for its provider-specific default.
         if agent and agent in cfg.roster():
             mine = provider_defaults.agent_choice(threads_rec.provider_card(agent), "claude-code")
             if mine["provider"] == "claude-code" and mine["model"]:
@@ -3851,10 +3421,7 @@ class Server:
                     None if usage is not None else
                     "no reading yet: the read failed and no turn has run")
                 row["login"] = cfg.claude_code_row_login(login)
-                # `resolves_to` (2026-11-10): the concrete id each alias
-                # runs on with the installed CLI, read from its build
-                # (cfg.alias_table), so a pill can say "Fable 5.2" before
-                # anyone has replied on it. `cli_version` is that build.
+                # Resolve model aliases from the pinned provider catalog.
                 table = cfg.alias_table()
                 row["cli_version"] = table["version"]
                 row["models"] = []
@@ -3867,9 +3434,7 @@ class Server:
                         model["resolves_to_after_plan"] = after
                     row["models"].append(model)
                 row["efforts"] = list(cfg.EFFORTS)
-            # `sign_in.account` (2026-11-11) is the row's own
-            # `login.account` while it is connected, so the card can say
-            # "Signed in as …" from the one object it draws.
+            # Include the connected account in sign-in state while it is available.
             row["sign_in"] = cfg.sign_in(
                 provider, (row.get("login") or {}).get("account")
                 if row["connected"] else None)
@@ -3878,14 +3443,9 @@ class Server:
 
     @staticmethod
     def antigravity_row() -> dict:
-        """The Antigravity row (2026-11-09), in the Claude row's shape. The
-        login is read by asking the CLI (``loam_antigravity.login_state``,
-        cached a minute). ``usage`` (2026-11-15) is the CLI's own ``/quota``
-        and ``/credits``, read on the cadence the other two are
-        (``loam_antigravity.read_quota``): every pool's window under
-        ``buckets`` with ``utilization`` USED, as the others', and
-        ``credits`` in Codex's shape. Null until a read has succeeded on the
-        login the box holds."""
+        """Format the Antigravity provider row using cached login data, available models and
+        supported effort levels.
+        """
         state = agy.login_state()
         usage = agy.row_usage()
         connected, reason = provider_defaults.available("antigravity", state)
@@ -3896,8 +3456,7 @@ class Server:
             "usage_reason": None if usage is not None else
             "no reading yet: /quota has not answered on this login",
             "login": agy.row_login(state),
-            # A model whose id ends in its level takes no other
-            # (loam_antigravity.LEVEL_RE, 2026-11-15).
+            # A model whose ID includes its reasoning level already fixes its effort.
             "models": [{"id": m["id"], "name": m["name"], "default": False,
                         "efforts": ([] if agy.carries_level(m["id"])
                                     else list(agy.EFFORTS)),
@@ -3908,28 +3467,8 @@ class Server:
 
     @staticmethod
     def codex_row() -> dict:
-        """The Codex row's own fields (2026-10-01), in the Claude row's shape.
-
-        ``login`` adds three keys the Claude row does not have: ``account``
-        and ``plan`` out of the login's id token, and ``status``, the line
-        ``codex login status`` prints. ``expires_at`` and ``days_left`` are
-        null and always will be on this login -- see
-        ``loam_codex.login_state``.
-
-        ``usage`` (2026-10-01, the evening) is the last
-        ``account/rateLimits/updated`` kept on disk, in the Claude row's shape
-        with ``credits`` and ``planType`` beside the windows -- see
-        ``loam_codex.usage_from_rate_limits``. It is null until a Codex turn
-        has run on the login the box holds, and ``usage_reason`` then says so.
-
-        ``models`` is what ``model/list`` answered, each with its own
-        ``efforts`` (the levels differ by model), and ``efforts`` on the row
-        is their union. ``default`` marks the model Codex itself calls the
-        default, because a persona's settings name no Codex model.
-        ``context_window`` is the window a turn on that model would state,
-        out of Codex's own catalogue (``loam_codex.context_windows``;
-        ``model/list`` states none), and null when the catalogue does not
-        carry it. It is the page's fallback until a turn states its own.
+        """Return Codex login state, catalog choices and capabilities in the common provider-row
+        format.
         """
         state = codex.login_state()
         usage = codex.row_usage()
@@ -4014,9 +3553,7 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
     except (OSError, ValueError) as exc:
         print(f"starter: could not update the hello thread ({exc})",
               file=sys.stderr, flush=True)
-    # Each thread member's input still on disk from before this start (the
-    # owner's messages, job results; 2026-11-19, batch B step 2,
-    # lib/loam_thread_inputs.py), scheduled again once each and in order.
+    # Recover persisted member inputs before accepting new thread work.
     try:
         counts = server.threads.resume_inputs()
         print(f"inputs: {counts['scheduled']} scheduled again for "
@@ -4031,9 +3568,7 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
     # Codex's model list, so the + menu has a Codex row before any Codex
     # session has run. Off the loop, and fail-soft: the cached list stays.
     asyncio.create_task(fetch_codex_models())
-    # The first-party looks that left the shipped set in 0.2.5 (2026-11-18):
-    # one the person was using or had chosen is installed from its Market
-    # link, once (lib/loam_listed_themes.py). Off the loop, and fail-soft.
+    # Preserve a selected theme when its first-party package has moved to the Market.
     asyncio.create_task(keep_listed_themes())
     # Market plugins that became part of Loam (Images, 0.2.10): the copy the
     # Market installed steps aside for the built-in one, once, keeping its
