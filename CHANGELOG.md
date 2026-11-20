@@ -3,6 +3,8 @@
 Find each release's notes in `docs/releases/<version>.md`. Loam gives the
 notes to the person's agent, who decides what is worth sharing with them.
 
+- [0.2.17](docs/releases/0.2.17.md), 2026-11-20: the first-weeks
+  wording on new installs returns to its earlier form.
 - [0.2.16](docs/releases/0.2.16.md), 2026-11-20: a board of things to try
   in Hello, simpler thread boards, Back and Forward for each panel, and
   memory, CPU load, and disk space in Activity.
