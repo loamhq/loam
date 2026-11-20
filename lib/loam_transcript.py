@@ -142,13 +142,7 @@ def is_subagent(entry: dict) -> bool:
     return bool(entry.get("isSidechain") or entry.get("parent_tool_use_id"))
 
 
-# The session file says who a prompt came from: ``origin: {"kind": "human"}``
-# is a person typing, and a wake, a cron, a probe or a broker-driven turn
-# carries no origin at all. Read off this box's own session files 2026-09-20,
-# across 855 sessions: every wake and cron prompt has `promptSource: "sdk"`
-# and `origin: null`, and the two other kinds that appear --
-# `task-notification` (a subagent reporting back) and `peer` (another session
-# writing in) -- are machinery a person did not type.
+# Adoption requires an explicit human origin because it also scans unattended sessions.
 HUMAN_ORIGIN = "human"
 
 
@@ -172,31 +166,12 @@ def is_person(entry: dict) -> bool:
 
 # ---------- what a person typed, and nothing else ----------
 
-# The session file uses the `user` role for two different things: what somebody
-# typed, and whatever the harness needed to hand the model next. Measured across
-# all 42 project directories on this box 2026-09-23: of 1,722 user entries
-# carrying a promptSource, 139 are task notifications (a background subagent
-# reporting back, whole engineer receipts inside) and 20 are peer messages from
-# another Claude session. Both state what they are in `origin.kind`, so the
-# writer asks the field rather than guessing at the text.
-#
-# The Loam interface is why this cannot be done the other way round -- by
-# keeping `origin.kind == "human"` and dropping the rest. A turn the broker
-# sends into a live CLI has no origin at all (1,038 of those entries), and that
-# is the owner typing in the browser. Absence of the field means nothing; the
-# machinery kinds are named.
+# The provider also uses the user role for harness messages. Exclude named machinery
+# origins while accepting browser turns that the broker sends without an origin.
 HARNESS_ORIGIN_KINDS = frozenset({"task-notification", "peer"})
 
-# Harness-injected content wrapped around or beside a person's own words. Each
-# pattern matches a COMPLETE envelope, opening tag to closing tag, and an
-# unterminated tag is left exactly where it is: a person writing about a
-# `<task-notification>` in prose is a shape that exists on this box (one
-# message, 2.5 KB, 2026-09-05), and a rule that ran from an opening tag to the
-# end of the text would have eaten all of it.
-#
-# The peer envelope carries harness framing outside its tags -- a preamble line
-# before it and a paragraph of instruction after it, neither of which anybody
-# typed -- so both are part of the envelope here.
+# Remove complete harness envelopes, including peer framing outside the tags.
+# An unmatched opening tag can be part of a person’s own text.
 _HARNESS_ENVELOPES = tuple(
     re.compile(pattern, re.S)
     for pattern in (
@@ -720,16 +695,8 @@ def parse_file_turns(path: Path) -> list[str]:
 
 # ---------- reconciling a written transcript with its session ----------
 
-# The Stop hook races the CLI's own write of the turn's last assistant entry.
-# Measured 2026-09-17 with a hook that polled the session file it had just
-# been handed: at t+0.003s the file held only the sentence said before the
-# tool calls, and the answer said after them appeared on disk at t+0.056s.
-# The transform was reading a turn the CLI had not finished writing, which is
-# why two Iris conversations were filed holding an opening line and no answer.
-#
-# Two defences, because either alone is lossy. This one waits for the file to
-# stop growing before anything is parsed; ``plan_update`` below repairs a turn
-# that grew after it was written, for the run where the wait was not enough.
+# Stop can arrive before the final reply reaches disk. Wait for a quiet file.
+# plan_update can still complete a reply that grows after this read.
 SETTLE_QUIET_S = 0.3
 SETTLE_LIMIT_S = 5.0
 SETTLE_POLL_S = 0.05

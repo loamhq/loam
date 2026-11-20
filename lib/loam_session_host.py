@@ -57,8 +57,7 @@ def join_names(names: list[str]) -> str:
 
 
 def busy_clause(busy: list[dict]) -> str:
-    """``Ada and Iris are mid-turn, Pax is waiting on you``: who holds the
-    seats, by what they are doing, in a person's words."""
+    """Group distinct agent display names by the work that keeps their sessions busy."""
     groups: dict[str, list[str]] = {}
     for row in busy:
         word = BUSY_WORDS.get(row.get("status"), "busy")
@@ -72,10 +71,7 @@ def busy_clause(busy: list[dict]) -> str:
 
 
 def cap_sentence(agent: str, busy: list[dict], reason: str = "memory") -> str:
-    """What a person reads when a start cannot be admitted (2026-11-09): the
-    box is short of memory and every session on it is busy, so nothing idle
-    could be ended for it. No route and no id: the `hint` beside it carries
-    those for an API caller."""
+    """Explain the admission limit and identify the sessions holding it."""
     who = cfg.agent_card(agent)["name"]
     clause = busy_clause(busy)
     n = len(busy)
@@ -91,28 +87,16 @@ def cap_sentence(agent: str, busy: list[dict], reason: str = "memory") -> str:
 class SessionHost:
     def __init__(self) -> None:
         self.sessions: dict[str, Session] = {}
-        # When a scan for app sessions last ran, so that a read of the list can
-        # trigger one without paying for it on every read. Set by the scan
-        # itself, which is also what makes the start-up scan count.
+        # Throttle list-triggered scans, including the scan at startup.
         self._scanned = 0.0
-        # Starts that have been admitted and whose process is not up yet:
-        # each counts SESSION_START_MB against the memory it was admitted to,
-        # and one against the backstop, so two starts that arrive together
-        # cannot both take the last room (2026-11-09).
+        # Reserve memory and a seat until each admitted process finishes starting.
         self._starting: set[str] = set()
         self._opening: dict[str, tuple[str, str, asyncio.Task]] = {}
-        # Everyone watching the live list. Sessions come and go; a subscriber
-        # here is watching the whole box, so it is held by the broker and not
-        # by any one session.
+        # Subscribers watch the whole catalog across session arrivals and departures.
         self.record_subscribers: set[asyncio.Queue] = set()
-        # The resident count this broker has last told the live list about,
-        # so that `broker.residency` is sent when the number moves and not on
-        # every record write -- a title, a pin and a seen mark are all saves
-        # and none of them is a session arriving in or leaving RAM. Zero is
-        # the truth at start: a broker with no processes.
+        # Publish a residency event only when the resident count changes.
         self._announced_live = 0
-        # Set by the first SIGTERM or SIGINT (2026-11-10): from then on no
-        # session starts, and a thread turn queued behind says so.
+        # Reject new starts once shutdown begins.
         self.stopping = False
         cfg.SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -237,7 +221,6 @@ class SessionHost:
                             model: str | None = None,
                             effort: str | None = None) -> Session:
         if self.stopping:
-            # The 11-10 stop hung on a start begun after SIGTERM (2026-11-10).
             raise BrokerError(503, "the broker is stopping; start the session "
                                    "again once it is back")
         if agent not in cfg.roster():
@@ -294,9 +277,7 @@ class SessionHost:
             if owner != agent or (requested and requested != engine):
                 raise BrokerError(409, "session is starting for another agent or provider")
             return await asyncio.shield(task)
-        # Its own process, if it has one, before admission: a session that is
-        # already in RAM needs no room to be used (2026-11-09; a thread member
-        # whose session was live was refused at the cap the other way round).
+        # Reusing a resident process needs no new admission.
         if session_id and session_id in self.sessions:
             existing = self.sessions[session_id]
             if existing.agent != agent or (requested and requested != existing.provider):
@@ -409,16 +390,8 @@ class SessionHost:
                      effort: str | None) -> Session:
         session = self.adopt(session_class(provider)(
             agent, session_id, provider=provider, model=model, effort=effort))
-        # In the table BEFORE the process starts, and this is load-bearing
-        # (caused 2026-09-25). The resident count is read off this table, and
-        # `start()` writes the record -- which fans the new session's own
-        # arrival out to the live list. Registered afterwards, as it was,
-        # that fan-out ran while the table still said the session was not
-        # there, and every count an open list was told was one behind: four
-        # starts against a cap of four announced 1, 2, 3.
-        #
-        # A start that fails leaves the table exactly as it found it. A
-        # session whose process never started is not one the broker has.
+        # Register before start publishes the record so subscribers see the new count.
+        # Restore the prior entry if the process fails to start.
         prior = self.sessions.get(session.id)
         self.sessions[session.id] = session
         try:
@@ -457,13 +430,7 @@ class SessionHost:
                               file=sys.stderr, flush=True)
                     continue
                 idle = now - session.last_activity
-                # Idle and not busy past its time -- `THREAD_IDLE_S` for a
-                # thread member's, `CLASSIC_IDLE_S` for a chat -- a session
-                # leaves memory, and its id resumes at the next message.
-                # A busy one -- mid-turn, waiting on work it launched -- is
-                # never ended here, however long since its last event: the
-                # hour backstop that ended every session went 2026-11-10
-                # ("a turn has no clock").
+                # Reap only idle sessions. Quiet time cannot expire active work.
                 short = session.idle_timeout_s or cfg.CLASSIC_IDLE_S
                 if idle > short and session.busy() is None:
                     print(f"idle: ending {session.agent}/{session.id}",
@@ -499,16 +466,11 @@ class SessionHost:
 
     def prepare_records(self) -> None:
         """Repair and adopt the catalog once at host startup, before serving."""
-        # Before a byte is served: every record the box has, filled from its own
-        # log. A record written before 2026-09-18 has no title and no last
-        # message, and a home screen drawn from those records is a list of rows
-        # all reading "New chat" with no status box -- which is what it was.
+        # Recover missing catalog fields before serving the first listing.
         seen, changed = backfill_records()
         print(f"backfill: {changed} of {seen} records filled from their logs",
               file=sys.stderr, flush=True)
-        # And every record's title made the vault's title, for the records the
-        # broker's own titler named before it was taken out (2026-09-22). Once,
-        # here, because a name is not something that keeps changing.
+        # Preserve person-set titles while syncing the others from transcript sidecars.
         try:
             seen, renamed = sync_titles()
             print(f"titles: {len(renamed)} of {seen} records took the vault's title",
@@ -518,9 +480,7 @@ class SessionHost:
                       file=sys.stderr, flush=True)
         except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
             print(f"titles: the sync failed ({exc!r})", file=sys.stderr, flush=True)
-        # And the records a scan made of this broker's own forks, before the scan
-        # below runs: between 09-20 and 09-22 a reply into an adopted session left
-        # a second record of the same conversation, and the home screen drew both.
+        # Remove duplicate fork records before scanning for new sessions.
         try:
             gone = prune_fork_duplicates()
             print(f"prune: {len(gone)} duplicate records of a fork removed",
@@ -530,12 +490,7 @@ class SessionHost:
                       file=sys.stderr, flush=True)
         except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
             print(f"prune: the pass failed ({exc!r})", file=sys.stderr, flush=True)
-        # And every session the owner had in the Claude Code app, which are Claude
-        # Code sessions on this box that the broker simply did not know about.
-        # At start as well as on the route, because the app is still where some
-        # of his conversations happen and a restart is the cheapest moment to
-        # catch up. Fail-soft: a scan that goes wrong is reported and the broker
-        # still serves, because everything it already holds is unaffected.
+        # Catch up on provider sessions at startup. A failed scan leaves the catalog available.
         try:
             report = self.adopt_app_sessions()
             per_agent = ", ".join(f"{agent} {n}"
@@ -847,11 +802,7 @@ class SessionHost:
                     # This broker did not start it, so it is not running now.
                     meta["state"] = "exited"
                 if "seq" in meta:
-                    # A record written before 2026-09-16 calls the position
-                    # `seq`; a file is only rewritten when its session is
-                    # resumed, so the listing answers under one name rather
-                    # than handing a client two spellings of one field and
-                    # a None for the sessions it has not touched since.
+                    # Normalize the legacy sequence key on read.
                     meta["record_seq"] = meta.pop("seq")
                 meta = normalise(meta)
             out[meta["session_id"]] = meta

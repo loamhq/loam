@@ -634,10 +634,7 @@ def fleet_clauses(root: Path | None = None) -> list[tuple[str, str]]:
         return []
     drift = _drift_module()
     lines = Counter(l for text in raw.values() for l in set(text.splitlines()))
-    # Lines most configs carry word for word are kept unmasked. One config
-    # proves nothing is shared: on a new install, whose only agent is Iris,
-    # every line counted, nothing was masked, and the next agent's config
-    # said "# Iris — Config" and named her workspace (found 2026-11-16).
+    # A single config cannot establish a shared clause. Keep its persona-specific lines masked.
     shared = ({l for l, n in lines.items() if n >= len(raw) // 2 + 1}
               if len(raw) > 1 else set())
     import loam_profile  # noqa: PLC0415
