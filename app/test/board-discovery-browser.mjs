@@ -78,7 +78,7 @@ try {
       await page.getByRole('button', { name: 'Close board', exact: true }).click()
       await page.getByRole('button', { name: 'Board', exact: true }).click()
       await adds.first().waitFor(); assert.equal(await page.locator('.tt-board-hint').count(), 0, 'hint appears once per page visit')
-      await page.getByRole('button', { name: 'Add to Ideas', exact: true }).click()
+      await page.getByRole('region', { name: 'Ideas', exact: true }).getByRole('button', { name: 'Add a note', exact: true }).click()
       const input = page.locator('.tt-quick'); await input.fill('Make room for one experiment')
       assert.equal(await input.evaluate((n) => n === document.activeElement), true)
       assert.equal(await input.evaluate((n) => n.closest('[data-board-section]').dataset.boardSection), 'heading:Ideas::0')

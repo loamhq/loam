@@ -45,34 +45,29 @@ test('headings honor fenced examples, closing hashes and literal hash names', ()
 
 function setup({ fail = false, markdown = source, width = 390 } = {}) {
   installDom(); globalThis.innerWidth = width
-  const calls = [], row = { id: 'sample', title: 'A board', members: [], default: null }
+  const calls = [], opened = [], row = { id: 'sample', title: 'A board', members: [], default: null }
   const threads = createThreads({ api: async (method, route, body) => {
     if (method === 'GET' && route.endsWith('/board')) return { path: 'boards/sample.md', revision: 'v1', markdown }
     calls.push({ method, route, body })
     if (fail) throw new Error('Board write refused.')
     return { path: 'boards/sample.md', revision: 'v2', markdown: body.markdown }
-  }, redraw() {}, agents: () => [], rail: () => null, nav: () => null,
+  }, openBoardFile: (path, id, close) => { opened.push({ path, id }); close() }, redraw() {}, agents: () => [], rail: () => null, nav: () => null,
   compose: { field: () => ({ value: '' }), render: () => h('div'), dictating: () => false, files: () => [], dragProps: () => ({}) } })
   threads.st.open = { thread: row, boardOpen: true, board: { path: 'boards/sample.md', revision: 'v1', markdown }, messages: [], permissions: new Map(), typing: new Set() }
   const root = h('div')
   const view = () => { morph(root, [threads.view(width === 1440)]); return find(root, 'tt-board') }
   const labelled = (label) => buttons(view()).find((n) => n.getAttribute('aria-label') === label)
+  const addIn = name => find(all(view(), 'tt-board-list').find(list => list.getAttribute('aria-label') === name), 'tt-list-add')
   const named = (name) => buttons(view()).find((n) => text(n) === name)
-  return { threads, calls, view, labelled, named }
+  return { threads, calls, opened, view, addIn, labelled, named }
 }
-test('Doc uses the Files field and writes the original metadata through the revisioned route', async (t) => {
+test('Cards opens the board file by path', (t) => {
   const f = setup(); t.after(() => f.threads.pause())
-  f.named('Doc').fire('click')
-  f.named('Edit document').fire('click')
-  const field = find(f.view(), 'fs-field')
-  assert.ok(field)
-  assert.doesNotMatch(field.value, /<!--|until 2027/)
-  field.value = field.value.replace('Second', 'Updated')
-  field.fire('input')
-  f.named('Done').fire('click')
-  await new Promise(setImmediate)
-  assert.deepEqual(f.calls[0].body, { base_revision: 'v1', markdown: source.replace('Second', 'Updated') })
-  assert.equal(f.threads.st.open.editing, false)
+  assert.equal(f.named('Doc'), undefined)
+  f.named('Open in Files').fire('click')
+  assert.deepEqual(f.opened, [{ path: 'boards/sample.md', id: 'sample' }])
+  assert.equal(f.threads.st.open.boardOpen, false)
+  assert.deepEqual(f.calls, [])
 })
 
 const unheadedIdeas = readFileSync(new URL('./fixtures/threads/board-unheaded-ideas.md', import.meta.url), 'utf8')
@@ -80,21 +75,21 @@ for (const width of [390, 1440]) test(`${width}: every list offers quick add bef
   const f = setup({ markdown: unheadedIdeas, width }); t.after(() => f.threads.pause())
   const lists = all(f.view(), 'tt-board-list').filter((n) => n.getAttribute('data-board-section'))
   assert.deepEqual(lists.map((n) => all(n, 'tt-board-item').length), [4, 2])
-  for (const [i, list] of lists.entries()) {
+  for (const list of lists) {
     assert.equal(all(list, 'tt-list-add').length, 1)
-    assert.equal(text(find(list, 'tt-list-add')), i === 0 ? 'Add an item…' : 'Add an idea…')
+    assert.equal(text(find(list, 'tt-list-add')), 'Add a note')
     assert.ok(list.childNodes.indexOf(find(list, 'tt-board-list-foot')) < list.childNodes.indexOf(find(list, 'tt-board-item')))
   }
   assert.equal(text(all(f.view(), 'tt-board-list-title').at(-1)), 'Ideas')
   assert.equal(text(all(f.view(), 'tt-board-list-count').at(-1)), '2')
   assert.equal(f.threads.st.open.board.markdown, unheadedIdeas, 'colon removal is display-only')
-  f.labelled('Add to Board').fire('click')
+  f.addIn('Board').fire('click')
   const input = find(f.view(), 'tt-quick'); input.value = 'A first-list item'
-  assert.equal(input.getAttribute('placeholder'), 'Add an item…')
+  assert.equal(input.getAttribute('placeholder'), 'Add a note')
   input.fire('keydown', { key: 'Enter', preventDefault() {} }); await new Promise(setImmediate)
   assert.equal(f.calls[0].body.markdown, unheadedIdeas.replace('\n### Ideas:', '- [ ] ' + today + ' · A first-list item <!-- Sam -->\n\n### Ideas:'))
-  f.labelled('Add to Ideas').fire('click')
-  assert.equal(find(f.view(), 'tt-quick').getAttribute('placeholder'), 'Add an idea…')
+  f.addIn('Ideas').fire('click')
+  assert.equal(find(f.view(), 'tt-quick').getAttribute('placeholder'), 'Add a note')
 })
 for (const markdown of ['', '# Board\n', '# Board\n\n- [ ] First\n', '## Empty:\n']) test(`Add remains available for empty/heading-free lists: ${JSON.stringify(markdown)}`, (t) => {
   const f = setup({ markdown }); t.after(() => f.threads.pause())
@@ -116,18 +111,18 @@ test('Cards uses Markdown heading levels to show groups and keeps add and move o
   assert.deepEqual(lists.map(list => list.getAttribute('aria-label')), ['Urgent', 'Later', 'Backlog', 'Standalone'])
   assert.deepEqual(lists.map(list => text(find(list, 'tt-board-list-count'))), ['1', '0', '0', '0'])
   assert.equal(lists[0].childNodes[0].nodeName, 'H4')
-  assert.equal(text(find(lists[0], 'tt-list-add')), 'Add to Urgent…')
-  f.labelled('Add to Urgent').fire('click')
-  assert.equal(find(f.view(), 'tt-quick').getAttribute('placeholder'), 'Add to Urgent…')
+  assert.equal(text(find(lists[0], 'tt-list-add')), 'Add a note')
+  f.addIn('Urgent').fire('click')
+  assert.equal(find(f.view(), 'tt-quick').getAttribute('placeholder'), 'Add a note')
   f.labelled('Actions for Review the draft').fire('click'); f.named('Move to…').fire('click')
   assert.ok(f.named('Backlog'))
   assert.equal(f.named('Planning'), undefined)
 })
 test('a refused edit keeps the draft and exposes a single retry', async (t) => {
   const f = setup({ fail: true }); t.after(() => f.threads.pause())
-  f.named('Doc').fire('click'); f.named('Edit document').fire('click')
-  const editor = find(f.view(), 'fs-field'); editor.value += 'Keep my draft'; editor.fire('input')
-  f.named('Done').fire('click'); await new Promise(setImmediate)
+  find(f.view(), 'tt-item-copy').fire('click', { target: { closest: () => null } })
+  const editor = find(f.view(), 'tt-inline-field'); editor.value += ' Keep my draft'; editor.fire('input')
+  editor.fire('keydown', { key: 'Enter', preventDefault() {} }); await new Promise(setImmediate)
   assert.match(f.threads.st.open.recovery.text, /Keep my draft/)
   assert.ok(f.named('Reapply my edit'))
   assert.match(text(f.view()), /Board write refused/)
@@ -136,7 +131,7 @@ test('a refused edit keeps the draft and exposes a single retry', async (t) => {
 test('each heading opens its own add field and Move to uses the same file route', async (t) => {
   const f = setup(); t.after(() => f.threads.pause())
   assert.equal(all(f.view(), 'tt-quick').length, 0)
-  f.labelled('Add to First').fire('click')
+  f.addIn('First').fire('click')
   const input = find(f.view(), 'tt-quick'); input.value = 'A new item'
   input.fire('keydown', { key: 'Enter', preventDefault() {} }); await new Promise(setImmediate)
   assert.match(f.calls[0].body.markdown, /Second <!-- Sam -->\r\n- \[ \] \d{4}-\d{2}-\d{2} · A new item <!-- Sam -->\r\n\r\n### Later/)
@@ -149,7 +144,7 @@ test('each heading opens its own add field and Move to uses the same file route'
 })
 test('refused adds retain their input; refused moves leave the original file intact', async (t) => {
   const f = setup({ fail: true }); t.after(() => f.threads.pause())
-  f.labelled('Add to Empty').fire('click')
+  f.addIn('Empty').fire('click')
   const input = find(f.view(), 'tt-quick'); input.value = 'Keep this draft'
   input.fire('keydown', { key: 'Enter', preventDefault() {} }); await new Promise(setImmediate)
   assert.equal(find(f.view(), 'tt-quick').value, 'Keep this draft')

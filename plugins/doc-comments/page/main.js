@@ -108,7 +108,7 @@ export function activate(loam) {
       }) : null
       if (sharing) sharing.links = doc.links
       ed = createDocEditor({
-        api, doc, face,
+        api, doc, face, projection: file.projection,
         headEnd: () => (sharing ? [sharing.button()] : []),
         phone: !options.wide,
         settings: loam.settings,
@@ -118,7 +118,8 @@ export function activate(loam) {
           host.openFileRef?.(ref, { root: file.root, path: file.path }, event)
         },
         crumbs: crumbs(file, entry.options.go || host.goFiles),
-        back: entry.options.close ? { label: entry.options.closeLabel || 'Back', go: entry.options.close } : null,
+        back: entry.options.backToThread ? { label: 'Back to board', go: entry.options.backToThread }
+          : entry.options.close ? { label: entry.options.closeLabel || 'Back', go: entry.options.close } : null,
         fileMenu: files.resourceMenu ? () => files.resourceMenu({ ...file.row, root: file.root, path: file.path, kind: 'file' }, entry.options.home, { openFolder: entry.options.returnBack ? entry.options.close : null }) : null,
         headExtras: () => [entry.options.readAloud?.glyph || null].filter(Boolean),
         // Dictation's mic: the editor draws it only while the doc takes typed
@@ -189,7 +190,8 @@ export function activate(loam) {
           { label: (known()?.owner ? `${known().owner} · ` : '') + (known()?.host || '') },
           { label: titleOf() },
         ],
-        back: entry.options.close ? { label: entry.options.closeLabel || 'Back', go: entry.options.close } : null,
+        back: entry.options.backToThread ? { label: 'Back to board', go: entry.options.backToThread }
+          : entry.options.close ? { label: entry.options.closeLabel || 'Back', go: entry.options.close } : null,
         menuExtras: () => [{ label: 'Copy link', icon: 'link', run: () => copyText(known()?.url, 'Link copied. Its password stays with your Loam.') }],
         headExtras: () => [entry.options.readAloud?.glyph || null].filter(Boolean),
         // Dictation's mic only while the doc takes the owner's typed text (the

@@ -1,6 +1,6 @@
 import { h } from './ui.js'
 
-// The built-in Files text editor, also mounted in the thread board's Doc view.
+// The built-in Files text editor.
 // A host owns its draft and revision. The field owns its caret and save keys.
 export function fileEditor({ edit, save, blur, label }) {
   const field = h('textarea', {

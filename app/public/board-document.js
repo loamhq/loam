@@ -1,5 +1,6 @@
 // Views project the same Markdown. Keep each surviving line's hidden metadata,
 // original marker and line ending alongside its visible text.
+import { installation } from './installation.js'
 import { boardLines, addBoardItem } from './thread-record.js'
 
 const ending = line => line.raw.slice(line.line.length)
@@ -14,6 +15,43 @@ function changedRange(a, b) {
 
 export function docText(markdown) {
   return boardLines(markdown).filter(line => !line.hidden).map(line => visible(line) + (ending(line) ? '\n' : '')).join('')
+}
+
+// The editor's visible offsets are UTF-16 with LF. Map them back to the
+// raw Markdown for note anchors. At a hidden span, a start belongs to the
+// visible character on its right and an end to the one on its left.
+function docOffsets(markdown) {
+  const spans = []
+  let source = 0, at = 0
+  function keep(from, length) {
+    if (length) { spans.push({ from, at, length }); at += length }
+  }
+  for (const line of boardLines(markdown)) {
+    if (!line.hidden) {
+      if (line.item) {
+        keep(source, line.marker.length)
+        keep(source + line.prefix.length, line.text.length)
+      } else keep(source, line.line.length)
+      if (ending(line)) keep(source + line.raw.length - 1, 1)
+    }
+    source += line.raw.length
+  }
+  return {
+    fromSource: offset => {
+      const span = spans.find(x => offset < x.from + x.length)
+      return span ? span.at + Math.max(0, offset - span.from) : at
+    },
+    toSource: (offset, assoc) => {
+      const span = spans.find(x => offset < x.at + x.length || (assoc < 0 && offset === x.at + x.length))
+      return span ? span.from + Math.max(0, offset - span.at) : source
+    },
+  }
+}
+
+export function boardProjection(root, path) {
+  const { boards, generalBoard } = installation()
+  if (root !== 'vault' || !(path === generalBoard || (path.startsWith(boards + '/') && /^[^/]+\.md$/i.test(path.slice(boards.length + 1))))) return null
+  return { show: docText, write: (base, value) => applyDocText(base, value, path), offsets: docOffsets }
 }
 
 export function applyDocText(markdown, value, path, now = new Date()) {
@@ -39,15 +77,17 @@ export function applyDocText(markdown, value, path, now = new Date()) {
   const matched = middleRows.map(raw => positions.get(raw.replace(/\n$/, ''))?.shift())
   const used = new Set(matched)
   const remaining = removed.filter((line, i) => !used.has(i))
-  let cursor = 0
+  const remainingItems = remaining.filter(line => line.item)
+  const remainingText = remaining.filter(line => !line.item)
+  let itemCursor = 0, textCursor = 0
   const parsedRows = boardLines(value)
   const middle = middleRows.map((raw, i) => {
     const same = matched[i] != null
-    const previous = same ? removed[matched[i]] : remaining[cursor++]
+    const parsed = parsedRows[start + i]
+    const previous = same ? removed[matched[i]] : parsed?.item ? remainingItems[itemCursor++] : remainingText[textCursor++]
     const line = raw.replace(/\n$/, '')
     const nl = raw.endsWith('\n') ? (previous && ending(previous)) || eol : ''
     if (same) return previous.line + nl
-    const parsed = parsedRows[start + i]
     if (parsed?.item && previous?.item && (previous.text || previous.date || previous.metadata)) {
       return parsed.marker + previous.prefix.slice(previous.marker.length) + line.slice(parsed.marker.length) + previous.metadata + nl
     }

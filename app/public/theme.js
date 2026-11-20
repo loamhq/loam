@@ -150,7 +150,7 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
   function set(changes) {
     const patch = { ...changes }
     if (!Object.keys(patch).length) return
-    if (Object.keys(patch).some(k => !['mode', 'transition', 'size', 'theme', 'options', 'location', 'board_view'].includes(k))) return
+    if (Object.keys(patch).some(k => !['mode', 'transition', 'size', 'theme', 'options', 'location'].includes(k))) return
     if (patch.options !== undefined) {
       if (!patch.options || typeof patch.options !== 'object' || Array.isArray(patch.options)) return
       if (!Object.keys(patch.options).length) return
@@ -163,7 +163,6 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
         }
       }
     }
-    if (patch.board_view !== undefined && !['cards', 'doc'].includes(patch.board_view)) return
     if (patch.theme !== undefined && themeId(patch.theme) !== patch.theme) return
     if (patch.mode !== undefined && !['light', 'dark', 'sun', 'system'].includes(patch.mode)) return
     if (patch.transition !== undefined && !['fast', 'normal', 'long'].includes(patch.transition)) return
@@ -204,7 +203,7 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
       if (at !== revision || read !== reading || saving || Object.keys(pending).length || !out?.[kind]) return
       const next = out[kind]
       if (!['light', 'dark', 'sun', 'system'].includes(next.mode) || !Number.isInteger(next.size) || next.size < 75 || next.size > 150 || next.size % 5) return
-      value = { ...(['cards', 'doc'].includes(next.board_view) ? { board_view: next.board_view } : {}), mode: next.mode, transition: transitionId(next.transition), size: next.size, theme: themeId(next.theme), ...(sun.location(out.location) ? { location: sun.location(out.location) } : {}), ...draft, ...(withOptions ? { options: optionValues(next.options, installed) } : {}) }; error = null; apply({ keepActiveShift: true }); changed()
+      value = { mode: next.mode, transition: transitionId(next.transition), size: next.size, theme: themeId(next.theme), ...(sun.location(out.location) ? { location: sun.location(out.location) } : {}), ...draft, ...(withOptions ? { options: optionValues(next.options, installed) } : {}) }; error = null; apply({ keepActiveShift: true }); changed()
     } catch (e) { if (at === revision && read === reading) { error = e.message; changed() } }
   }
   media?.addEventListener?.('change', () => { if (value.mode === 'system') { apply(); changed() } })

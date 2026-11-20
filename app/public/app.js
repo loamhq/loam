@@ -991,11 +991,11 @@ const mainPanel = {
   open: item => {
     if (item.kind === 'thread') {
       files.closeFile(); apps.st.selected = null
-      const pending = threads.open(item.id, { routed: true, push: item.push !== false, listing: item.listing })
+      const pending = threads.open(item.id, { routed: true, push: item.push !== false, listing: item.listing, board: item.board })
       if (item.message && threads.st.open) Object.assign(threads.st.open, { replyJump: item.message, jumpKind: 'quote' })
       return pending
     }
-    if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false, list: item.list })
+    if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false, list: item.list, boardThread: item.boardThread })
     if (item.kind === 'profile') return goProfile(item.id, { push: item.push !== false })
     const ticket = ++importRequest
     threads.close({ navigate: false }); files.closeFile(); closeThread(); page.closeSheet()
@@ -1032,7 +1032,7 @@ if (globalThis.location?.href) {
 }
 function routePanels(value = globalThis.location?.href) {
   if (!value) return
-  const item = itemFromURL(value), side = sideFromURL(value)
+  const item = itemFromURL(value), side = sideFromURL(value), entry = globalThis.history?.state
   const apply = () => {
     const sideChanges = JSON.stringify(itemDescriptor(panels.st.side)) !== JSON.stringify(side)
     const mainChanges = itemKey(item) !== itemKey(mainPanel.item())
@@ -1048,7 +1048,7 @@ function routePanels(value = globalThis.location?.href) {
         if (side?.kind === 'thread' && itemKey(side) === itemKey(mainPanel.item())) mainPanel.transfer(sidePanel, side.id)
         if (!panels.close()) return
       }
-      if (item) panels.openMain({ ...item, ...(item.kind === 'file' ? { list: listFromURL(value) } : {}), push: false })
+      if (item) panels.openMain({ ...item, ...(item.kind === 'file' ? { list: listFromURL(value), boardThread: entry?.boardThread } : { board: entry?.board === item.id }), push: false })
       else { mainPanel.clear(); state.screen = 'home'; schedule() }
       if (sideChanges && side && itemKey(side) !== itemKey(mainPanel.item())) {
         panels.st.side = side; panels.st.loaded = false; panels.restore()
@@ -1272,7 +1272,11 @@ page.githubReturn()
 // choices, and a pre-retirement stored session is resolved once into its
 // imported thread above before the obsolete storage key is forgotten.
 const landedOn = parseFilesPath(page.herePath())
-if (landedOn) { state.navigator = 'files'; page.goFiles(landedOn.root, landedOn.path, { push: false, list: listFromURL(globalThis.location?.search ?? '') }) }
+if (landedOn) {
+  const boardThread = globalThis.history?.state?.boardThread
+  state.navigator = 'files'
+  page.goFiles(landedOn.root, landedOn.path, { push: false, isFile: boardThread ? true : null, boardThread, list: listFromURL(globalThis.location?.search ?? '') })
+}
 else render()
 // Initial main routing may finish after the saved side was mounted during
 // startup. With no interaction yet, the restored side owns attention.
