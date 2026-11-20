@@ -268,23 +268,26 @@ finally:
     shutil.rmtree(root, ignore_errors=True)
 
 # ---------------------------------------------------------------------------
-# The engineer's rule, against the LIVE engineer project (its agent.json says
-# `kind: engineer`, which is what selects the branch). The operator's file of
-# public apps (Move 10) is outside the engineer's three roots, so the guard
-# refuses it before the settings deny ever gets a say; both are asserted to
-# hold, this one here and the deny by provision's render.
+# The engineer's rule against a scratch project. Its workspace and its
+# runtime root must agree, including when the test runs from a job worktree.
 # ---------------------------------------------------------------------------
 print()
-ENGINEER = f"{RUNTIME}/engineer"
-if os.path.isfile(f"{ENGINEER}/agent.json"):
+with tempfile.TemporaryDirectory(prefix="loam-guard-engineer-") as tmp:
+    runtime = Path(tmp) / "agents"
+    engineer = runtime / "engineer"
+    engineer.mkdir(parents=True)
+    (engineer / "agent.json").write_text(json.dumps({
+        "kind": "engineer", "workspace": str(engineer), "vault": V,
+        "ai_labs": L,
+    }))
     ENGINEER_CASES = [
         ("engineer: Write /etc/loam/public",  "Write", {"file_path": "/etc/loam/public", "content": "x\n"}, False),
         ("engineer: Edit /etc/loam/public",   "Edit",  {"file_path": "/etc/loam/public", "old_string": "a", "new_string": "b"}, False),
-        ("engineer: Write under agents/",     "Write", {"file_path": f"{RUNTIME}/deploy/x/deploy.toml", "content": "x\n"}, True),
+        ("engineer: Write under agents/",     "Write", {"file_path": f"{runtime}/deploy/x/deploy.toml", "content": "x\n"}, True),
         ("engineer: Edit a soul",             "Edit",  {"file_path": f"{L}/ada/soul.md", "old_string": "a", "new_string": "b"}, False),
     ]
     for label, tool, inp, expect in ENGINEER_CASES:
-        allowed, err = run_case(tool, inp, ENGINEER)
+        allowed, err = run_case(tool, inp, str(engineer))
         ok = allowed == expect
         fails += not ok
         mark = "PASS" if ok else "FAIL"

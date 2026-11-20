@@ -2,6 +2,7 @@
 
 import json
 import os
+import select
 import stat
 import subprocess
 import sys
@@ -181,12 +182,35 @@ class HetznerTest(unittest.TestCase):
                                 "clientInfo": {"name": "test", "version": "1"}}},
                     {"jsonrpc": "2.0", "method": "notifications/initialized"},
                     {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}]
-        proc = subprocess.run([spec["command"], *spec["args"]],
-                              input="\n".join(map(json.dumps, messages)) + "\n",
-                              env={**os.environ, **spec["env"]}, timeout=15,
-                              text=True, capture_output=True, check=True)
-        replies = {r["id"]: r for r in map(json.loads, proc.stdout.splitlines())}
-        tool = replies[2]["result"]["tools"][0]
+        # Keep stdin open until each response arrives. EOF can shut down the
+        # MCP server while its asynchronous tools/list handler is still running.
+        proc = subprocess.Popen([spec["command"], *spec["args"]],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True,
+                                env={**os.environ, **spec["env"]})
+        try:
+            def send(message):
+                proc.stdin.write(json.dumps(message) + "\n")
+                proc.stdin.flush()
+
+            def receive(expected):
+                ready, _, _ = select.select([proc.stdout], [], [], 15)
+                self.assertTrue(ready, f"MCP response {expected} timed out")
+                line = proc.stdout.readline()
+                self.assertTrue(line, f"MCP server exited before response {expected}")
+                reply = json.loads(line)
+                self.assertEqual(reply.get("id"), expected, reply)
+                return reply
+
+            send(messages[0])
+            receive(1)
+            send(messages[1])
+            send(messages[2])
+            reply = receive(2)
+            tool = reply["result"]["tools"][0]
+        finally:
+            proc.kill()
+            proc.communicate(timeout=5)
         self.assertEqual(tool["name"], "hetzner_api")
         self.assertEqual(set(tool["inputSchema"]["required"]), {"project", "method", "path"})
 
