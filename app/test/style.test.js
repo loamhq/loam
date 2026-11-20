@@ -705,11 +705,7 @@ test('the ring’s classes are its own: no rule for some other block can land on
   assert.equal(RULES.some((r) => /(^|[\s,])\.empty(?![\w-])/.test(r.selector)), true, 'the block the ring collided with is still there; this test guards against it')
 })
 
-// Ada, 2026-10-04, live at 1280px: the Read aloud menu's line under Listen cut
-// at "takes ab…", hiding how long the take takes to make — the one thing that
-// says whether a tap makes or plays. The shared row line is one line with an
-// ellipsis, which is right in Settings; in the menu it wraps, and the menu keeps
-// its own width rather than growing to fit.
+// Allow the read-aloud menu explanation to wrap inside its fixed width.
 test('the read-aloud menu’s line under its word wraps and is never cut with an ellipsis', () => {
   const sub = /\n\.speakmenu \.setrow-sub\s*\{([^}]*)\}/.exec(CSS)
   assert.notEqual(sub, null, 'the menu’s row line has no rule of its own and takes the shared one-line ellipsis')

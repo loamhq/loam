@@ -26,8 +26,7 @@ export function profileStatus(status = {}) {
 
 // One controller for host-owned settings. Tickets prevent a late answer for
 // another agent/page from replacing the page the person is now reading.
-// An archive or restore answer names its agent as an id ("juniper") or, in an
-// older shape, as a row ({ id, name, ... }).
+// An archive or restore response may identify the agent by ID or by an older agent row.
 const agentId = agent => typeof agent === 'string' ? agent : agent?.id
 const agentRow = agent => agent && typeof agent === 'object' ? agent : {}
 

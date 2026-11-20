@@ -127,7 +127,7 @@ test('the vault’s terms: the host’s parsed list as it is, once each and capp
 
 test('the merged terms: the person’s list first, the seed after it, once each, up to Gemini’s thousand', () => {
   const terms = dictationVocabulary({ agentName: 'Juno', agentId: 'juno', title: 'Loam deploy', extra: ['MuseBot', 'juno', 'Okafor'] })
-  // Juno was the person's already, in their case; the seed does not add it twice.
+  // Keep the person's original casing when a seed duplicates an existing term.
   assert.deepEqual(terms, ['MuseBot', 'juno', 'Okafor', 'Loam'])
 
   // A list longer than Gemini takes: every term sent is the person's, all

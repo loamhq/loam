@@ -365,12 +365,8 @@ function brokerSession(state, event) {
   // kept, so a request replayed *after* this snapshot — the opening window, a
   // page of earlier history — is judged by the same rule on arrival.
   //
-  // **The host's list is of request ids — strings — and not of requests.**
-  // Read as objects, every id came out `undefined`, the set was empty, and the
-  // first snapshot at or past a live request took its card away while the row
-  // said "Needs your input" (2026-10-06). An object entry is still read by its
-  // `request_id`, and is the only kind a card can be drawn from here; an id
-  // alone has nothing to draw, so its card comes from the logged request.
+  // The host can report bare request IDs. Keep the logged card for each ID; only a full
+  // request includes enough information to construct a card from the snapshot.
   if (Array.isArray(rec.pending_permissions)) {
     const ids = new Set(rec.pending_permissions.map(pendingId).filter(Boolean))
     const at = typeof rec.record_seq === 'number' ? rec.record_seq : null
@@ -1039,17 +1035,8 @@ function assistant(state, event) {
   return state
 }
 
-// A `user` event is a tool result coming back. It is never a person speaking:
-// the broker does not pass the CLI's echo flag, and what a person sent is on
-// the record as `broker.user_message`.
-//
-// **A result whose call this page never saw is still a step.** A chat opens at
-// `?last=<n>` and a page of history ends where it ends, so a window can begin
-// above the call a result belongs to — and until 2026-09-25 that result was
-// dropped, which is the one way a thing that happened was on no line at all. It
-// is now a step of its own, with the output it came back with and nothing else,
-// at the place in the conversation it arrived: a fold may open with a result
-// whose call is above the window.
+// Provider user events carry tool results. A person's input has its own broker event.
+// A history page can start after the call, so retain an unmatched result as a step.
 function user(state, event) {
   const content = event.message?.content
   if (!Array.isArray(content)) return state
@@ -1303,9 +1290,7 @@ function price(node, turn) {
   if (typeof turn.effort === 'string' && turn.effort !== '') node.effort = turn.effort
 }
 
-// **The turn record a compaction leaves** carries a context of two nulls — the
-// host's contract, 2026-09-30. A turn from before contexts were recorded carries
-// no context object at all, so the two do not meet.
+// A compaction marks both context fields null. Older records omit the context object altogether.
 export function compactionTurn(turn) {
   const c = turn?.context
   return Boolean(c && typeof c === 'object' && c.used === null && c.window === null)
@@ -1331,29 +1316,9 @@ export function contextWords(raw) {
   return `${used} of ${tokens(context.window)} (${share < 0.1 ? '<0.1' : share.toFixed(1)}%)`
 }
 
-// The composer's top edge: how full the chat's context is, as a share and a
-// level, out of the record's latest reading. The owner, 2026-09-30, on the line
-// that used to say it in words above the box: "I like the one line design
-// philosophy, but the UI design can be better" — so it is a hairline fill and
-// the words wait for a tap.
-//
-// **The bar's length is the model's window; the warning point only colours
-// it.** The owner, 2026-10-07: "the full bar should represent the full context of
-// the model that we're using … The number that I put in settings … should
-// determine the coloring of that bar." So the fill is `used` over the window
-// and keeps growing past the warning point, all the way to the window; with W
-// the person's point (Settings, `warnAt`: tokens, or `'window'` for the model's
-// own length) it is calm below 75% of W, amber from 75% of W and red from W.
-// W above the window is the window. The window is the turn's own
-// `context.window`, else `fallbackWindow` (the provider row's figure for the
-// chat's model); with neither, the bar measures W, as it did before the window
-// was the scale, and the words do not claim a window they do not know.
-//
-// Nothing compacts at the warning point (the owner, 2026-09-30: "Do not
-// automatically compact at 400k"), and the record's `compact_window` is not
-// read here at all. `null` — nothing drawn — for a chat with no turn that has a
-// reading, which is every new chat and every imported one, and for `'window'`
-// with no window.
+// Scale the fill against the model window. The warning setting controls colour only: amber
+// at three quarters of the warning point, red at the point. Prefer the reported window,
+// then the provider default. A numeric warning point can supply a scale when both are unknown.
 export const CONTEXT_WARN = 0.75
 
 // What the context holds now: the latest turn's reading, walking back past
@@ -1553,43 +1518,9 @@ function planSteps(plan) {
   return words === '' ? [] : [{ text: words, state: 'todo' }]
 }
 
-// A run of consecutive steps, and the one line drawn over it.
-//
-// A **step** is a tool call or a block of the agent's thinking: the machinery of
-// a turn, as against what the turn said to the person. An agent working through
-// a task calls four or five tools in a row and reasons between them, and a
-// thread that draws all of that is a thread where the sentence before it has
-// scrolled off a phone. So a run folds, and what is left on the screen is what
-// the agent actually said.
-//
-// **Every step is inside the fold**, which is the owner, 2026-09-25: "still some
-// of the tool calls are showing outside of the steps drop down and in the chat.
-// Please fix." Two used to be kept out — the call running now and the call that
-// failed — on the rule that a fold may hide what happened but never what is
-// happening or what went wrong. Both of those are still true and neither needs a
-// row of its own to be true: the fold's own header says them, which is what the
-// three numbers below are for. A run of one folds too (the owner, 2026-09-22:
-// "Even when there is only one step, the action should be in a collapsable step
-// design").
-//
-// - `count` — how many rows the fold holds, which is what "n steps" says.
-// - `failed` — how many of them came back an error. A failure is kept and said
-//   quietly rather than drawn in the thread: the owner, 2026-09-25, "it should be
-//   a very very discrete thing since it is usually not a big deal".
-// - `running` — a call with no result yet, which includes one paused on a
-//   permission, or a block of thinking still being written. It is what makes the
-//   header breathe instead of ticking, and what makes it read its live line.
-// - `thinking` — the latest line of the agent's own reasoning, for the header to
-//   read while the work is going on, so a closed fold still shows progress.
-//
-// Nothing here knows what a row looks like — that is the page's — and nothing
-// here is Claude Code's dialect either; it is a fact about a list.
-// **A closed approval's line is a step**, of the timeline's own lines the one:
-// "Allowed · Read · …" is about the call beside it, so it folds with the calls
-// around it, where the request stood, and the fold counts it. Drawn between
-// folds, every past approval broke a run in two, and a busy chat reopened as
-// folds and lines in turn. A question's line (it has a `header`) is what the
-// person said, and stays in the thread as the Answered line does.
+// Group consecutive work steps, even a single step. The closed header reports failures,
+// running calls and the latest reasoning so progress stays visible. A closed tool approval
+// belongs with its call; a reply to a question stays in the transcript.
 export function foldsAsStep(node) {
   return node?.kind === 'permission' && node.header === null
 }

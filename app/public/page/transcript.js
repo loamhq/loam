@@ -10,15 +10,6 @@ import { listedModelName } from "../providers.js"
 export function mount(host) {
 
 
-// The pill that says what a chat runs as and opens the Model-and-Effort menu.
-//
-// One component, two places: row two of the composer, where it names the open
-// chat's model, and the New-chat sheet, where it names what the chat about to
-// be started will run as. It was the composer's alone until 2026-09-23, when
-// the sheet's "Juno's default model · default effort  Change" line was replaced
-// by it — a person who has learnt the pill in a chat has learnt it before the
-// chat exists, and two components saying the same thing in two shapes was the
-// thing to avoid.
 
 // Which line of the transcript this is, for the reconciler.
 //
@@ -85,14 +76,7 @@ function fitMine() {
 
 
 
-// ------------------------------------------------------------------ copying
-//
-// **One copy, everywhere a button copies.** Every code block and table in a
-// reply (2026-09-30) and the Dictation page's old terms go through
-// `copyWithCue()`: the text onto the clipboard, and the button that was pressed
-// reading "Copied" for a moment. Which button that was is an id — `oldterms`,
-// or a block's own source — held here and not on a node, because
-// the next redraw builds the button again and has to be told what it says.
+// Keep the copy confirmation against the source ID so it survives rebuilding the button.
 const COPIED_MS = 1500
 
 let copied = null
@@ -112,13 +96,7 @@ async function copyWithCue(id, text) {
 
 
 
-// The button in a code block's or a table's corner. The owner, 2026-09-30: "when
-// a text or code box is formatted in the AI output, it doesn't have an easy copy
-// text or code button and because it is its own separate scrollable container,
-// copying becomes hard." It copies the block's **source**: the code as written,
-// and a table as the markdown it was written in — not the drawn cells. A ghost
-// in the corner; the stylesheet shows it on hover where there is one, and
-// always, muted, where there is not.
+// Copy the original code or Markdown table source, including formatting.
 function copyButton(source, what) {
   const done = copied === `block:${source}`
   return h(
@@ -164,10 +142,7 @@ function stepItems(items) {
         if ((block.text ?? '').trim() === '') continue
         out.push({ what: 'text', block })
       } else if (block.type === 'thinking') {
-        // **The agent's thinking is machinery, not what it said**, so it is a
-        // step inside the fold like a tool call. It was an italic paragraph of
-        // its own in the thread until 2026-09-25, between the sentences a person
-        // is reading.
+        // Reasoning belongs with tool steps so it can fold separately from the reply.
         if ((block.text ?? '').trim() === '') continue
         out.push({ what: 'step', block })
       } else if (block.type === 'tool') {

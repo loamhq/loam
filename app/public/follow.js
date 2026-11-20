@@ -1,32 +1,8 @@
-// The transcript follows new output while the reader is at its end.
-//
-// The owner, 2026-09-22: "please autoscroll when I am fully at the bottom of the
-// page and there is new content coming in. Don't autoscroll if I am not fully
-// at the bottom." And 2026-10-07, on their phone: "when I send out a message… the
-// scroll stays at the chat, so I would have to manually scroll to go and see
-// the latest responses."
-//
-// **Being at the end is remembered, not re-measured.** Until 2026-10-07 the
-// page asked "is the pane at the bottom?" at the start of every draw, and
-// anything that moved the bottom between two draws answered "no" for good: a
-// phone keyboard coming up shortens the pane under a scroll position that does
-// not move (Android lays the page out again before any script hears of it), an
-// image arriving late or a step's fold growing pushes the end down with no draw
-// at all. The reader had not moved; the end had. So the page now keeps the
-// scroll position it last left at the end, and a pane still at that position is
-// following whatever happened to the content under it. A reader who scrolls
-// moves `scrollTop` off it, and is then following only if they are at the end.
-//
-// Growth that is not a draw is heard through a `ResizeObserver` on the pane and
-// on each of its children: the pane for a keyboard or a window, the children
-// for an image, a fold, a card, the awaiting line.
-//
-// No DOM is reached for here beyond the pane handed in, so the rule runs the
-// same under the tests' fake DOM, in a real browser in a test, and on a phone.
+// Remember the position at which the reader last followed the transcript. A keyboard resize,
+// late image or expanding fold can move the end without the reader scrolling. Observe both
+// the pane and its children so these layout changes can keep a pinned reader at the end.
 
-// What "fully" at the bottom means once a browser's sub-pixel scroll positions
-// are allowed for; anything wider is a threshold deciding for the person where
-// the bottom is (it was 80px until 2026-09-22, and a line up still followed).
+// Allow for fractional scroll positions when testing whether the pane is at its end.
 export const AT_BOTTOM_PX = 2
 
 export function follower({ Observer = globalThis.ResizeObserver } = {}) {

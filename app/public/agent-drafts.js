@@ -8,12 +8,8 @@ const stripFrontmatter = (text = '') => String(text ?? '').replace(/^---\s*\n[\s
 // The name is the card's title; a soul that opens by repeating it as a heading starts below it.
 const withoutTitle = (text, name) => { const [first, ...rest] = text.split('\n'); return /^#\s/.test(first) && first.replace(/^#+\s*/, '').trim().toLowerCase() === name.toLowerCase() ? rest.join('\n').trim() : text }
 
-// The card's one plain line about who the agent is (2026-11-18). A soul is
-// written to the agent ("You are Juniper, Sam's kitchen companion…"), so its
-// opening is instructions, not a description. The draft's own `about` line,
-// written for the person, comes first; else a soul that opens "You are
-// <name>, <who>" gives "<Who>", and one that opens in the third person gives
-// its first two sentences, as before. Anything else said to the agent is never shown here.
+// Prefer the draft’s description for the person. Fall back to a description from the
+// opening of the soul, keeping instructions addressed to the agent off the card.
 const firstSentence = text => {
   const prose = String(text ?? '').replace(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/, '').split('\n').filter(line => !/^\s*#/.test(line)).join(' ').replace(/\s+/g, ' ').trim()
   return (prose.match(/^.+?[.!?](?=\s|$)/)?.[0] ?? prose).trim()

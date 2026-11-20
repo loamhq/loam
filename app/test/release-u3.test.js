@@ -207,9 +207,7 @@ test('profile status refresh preserves the selected tab and cannot overwrite a l
 })
 
 test('archive and restore tell Chats by id when the host answers the agent as a string', async () => {
-  // The host's real answers (lib/loam_agents): {"agent": "juniper", "archived": {...}} and
-  // {"agent": "juniper", "event": {...}}. Found by the 2026-11-16 first-day walk: spread as
-  // an object, the id was lost and Chats kept the archived agent until a reload.
+  // Archive and restore responses can carry a string ID. The Chats list must update immediately.
   const changed = [], calls = []
   const api = async (method, path) => {
     calls.push([method, path])
