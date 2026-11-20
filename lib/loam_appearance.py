@@ -1,122 +1,7 @@
-"""Appearance: a theme, a mode and the page's size per device kind, and one saved place.
-
-Decided 2026-11-11 (the owner, to a persona): Settings -> Appearance with a mode and a
-zoom ("I really enjoy it at a 90% zoom"), kept on the host so that every
-browser he opens agrees and a persona can change it on his ask (his 11-10
-rule: every setting the page can change, a persona can too). The page half is
-loam-ui's (`docs/appearance.md`); this is the host half it asked for.
-
-The value is two device kinds, each a mode, a Sun transition (2026-11-16),
-a size, a theme and the options of every theme that has any (2026-11-12)::
-
-    {"phone":   {"mode": "system", "transition": "normal", "size": 100,
-                 "theme": "latte",
-                 "options": {"latte": {"agent-colours": "palette",
-                                       "agent-shapes": "distinct"}}},
-     "desktop": {"mode": "system", "transition": "normal", "size": 90,
-                 "theme": "latte",
-                 "options": {"latte": {...}}}}
-
-``mode`` is one of the modes loam-ui declares (``light``, ``dark``, ``sun``
-and ``system`` on 2026-11-13; see *Modes are loam-ui's* below); ``size`` an
-integer percent from 75 to 150 in steps of 5; ``theme`` the id of an
-installed theme; ``transition`` one of ``fast``, ``normal`` and ``long``.
-A missing field reads as its default (``system``, ``normal``, 100,
-``latte``). A patch names any of the kinds' fields, and ``location``, and
-merges them in one write; anything else -- an unknown kind or field, an empty
-patch, a value out of range, a boolean for a size, a theme that is not
-installed -- is refused whole with a sentence and nothing is written.
-
-**Sun mode and the saved place** (2026-11-13; the owner asked a persona that
-morning for a sunrise/sunset mode; loam-ui ``29a1506``, its contract in
-loam-ui's ``docs/appearance.md``, *Sun mode*). ``sun`` is light from 30
-minutes before sunrise to 30 minutes after sunset at a saved place, which
-the page computes; the host only keeps the mode and the place. The place is
-one value beside the two kinds, **shared**, so the phone and the desktop
-agree on where home is rather than each taking its own GPS reading::
-
-    {"phone": {...}, "desktop": {"mode": "sun", ...},
-     "location": {"latitude": 37.8, "longitude": -122.4,
-                  "source": "geolocation", "timeZone": "America/Los_Angeles"}}
-
-``latitude`` is -90 to 90 and ``longitude`` -180 to 180, both rounded here to
-tenths of a degree the way the page rounds them (``Math.round(x * 10) / 10``,
-half up); ``source`` is one of the sources loam-ui declares (``geolocation``
-or ``timezone``); ``timeZone`` an IANA zone this machine knows. All four are
-required and nothing else is taken; ``"location": null`` clears it. A reading
-always carries ``location``, ``null`` when none is saved; with Sun chosen and
-no place saved, the page uses its time-zone fallback without asking the
-browser for one.
-
-**The Sun transition** (2026-11-16; the owner asked a persona that evening
-for a Sun-mode Transition setting, loam-ui's ``sun-shift.js``). Each kind
-also keeps ``transition``, how long the page takes to shift between light
-and dark at a Sun boundary: ``fast`` (3 s), ``normal`` (10 s, the default)
-or ``long`` (20 s). The durations are the page's; the host keeps the id. It
-sits beside ``mode`` in each kind, so a phone and a desktop may differ, and
-a write of anything else is refused like any bad field. The three ids are
-fixed here like the size's range, and the tests hold them to loam-ui's
-handoff (the enum of ``appearance.<kind>.transition``); a stored id outside
-them reads as ``normal``.
-
-**Modes are loam-ui's** (2026-11-13). The modes a write may choose, and the
-location sources, are read from loam-ui's machine-readable handoff
-``docs/appearance-settings.registry.json`` (the enum of
-``appearance.<kind>.mode`` and of ``appearance.location``'s ``source``), the
-file loam-ui generates from its own source and drift-checks in its tests, in
-the checkout the page is built from (``LOAM_UI_APPEARANCE_REGISTRY``
-overrides it; ``none`` for no file), cached by mtime -- never a copy here,
-the way 2026-11-12 taught for theme options. When the file cannot be read
-the modes are the three the page has always had and a location is refused.
-A stored mode is kept on read as long as it is shaped like an id, declared
-or not, so a briefly unreadable handoff does not turn Sun into System on the
-next write of anything else; only a write is held to the declared list.
-
-**Theme options** (2026-11-12; the owner, to a persona: "Every theme should be able
-to have its own different variants"). A theme's manifest may declare
-options, each with its choices and a default (``loam_plugins.options_of``,
-loam-ui's ``docs/appearance.md``); Latte's are whatever its ``PLUGIN.md``
-declares (four on 2026-11-12), Plain has none. Each device kind keeps a choice per option per
-theme, so switching to Plain and back keeps Latte's. A reading gives every
-installed theme with options, each option its stored choice or, when there
-is none or the theme no longer offers it, the manifest's default; a stored
-entry for a theme or option no longer installed is kept in the file (it
-comes back with the theme) but not shown. A patch names only the leaves it
-changes, ``{"desktop": {"options": {"latte": {"agent-shapes": "circle"}}}}``,
-and they merge leaf by leaf: never the whole map, never a whole theme's
-options. An options map that is not an object, empty, or names a theme
-without options, an option the theme does not have, or a choice it does not
-offer, is refused like any other bad field.
-
-**Themes are learned, not listed** (2026-11-12). The themes a write may
-choose are the theme plugins of the plugin host's one list
-(``lib/loam_plugins.py``, ``themes()``): loam-ui's shipped theme folders,
-read the way loam-ui's ``src/themes.js`` reads them, and any theme plugin in
-the Yours layer (``paths.plugins``), which wins over a shipped one of the
-same id. They are read each time a theme is written or the list is asked
-for, so a theme added to either layer is settable with no change here. A
-theme is on where this file has chosen it: the plugin list derives a theme's
-on/off from here, and has no switch of its own for one, so there is one
-truth. When no folder can be read the list is the two the page always has,
-``latte`` and ``plain``.
-
-A stored theme is kept on read as long as it is shaped like an id, installed
-or not: the page draws Latte for an id it does not have, and the choice comes
-back when the theme does, instead of being lost to a folder that was briefly
-unreadable. Only a write is held to the installed list.
-
-**Where it lives.** ``state/broker/settings.json`` (``LOAM_HOST_SETTINGS``
-overrides it, for the tests), beside the broker's other state
-(``provider-usage.json``, ``codex-models.json``, the session records). It is
-the broker's settings file, keyed by section, and ``appearance`` is its first
-section: the next host-kept setting gets a key beside it rather than a second
-file. Before this, every host setting lived on the thing it set (a thread's
-record, a session's record, a schedule file); there was no place for one that
-belongs to nobody but the owner, so this is that place.
-
-Writes are atomic (a temp file and ``os.replace``) and serialised by a lock,
-so two patches cannot interleave a read and a write; the broker is one
-process, and nothing else writes this file.
+"""Store host-wide phone and desktop appearance settings and an optional shared
+location for Sun mode. Validate modes and theme options against the app and
+installed plugins. Preserve stored theme IDs when a plugin is unavailable. Serialize
+patches under the shared settings lock.
 """
 
 from __future__ import annotations
@@ -507,11 +392,9 @@ def update(patch) -> dict:
 
 
 def mutate(key: str, change) -> object:
-    """Replace one top-level key of the host settings file with
-    ``change(current)`` in one write, under the same lock as Appearance's
-    (2026-11-13: the engineers' and the reviewer's settings,
-    lib/loam_profile.py, live beside it). ``change`` may raise to write
-    nothing; a value of None removes the key. Answers the new value."""
+    """Change one top-level settings key under the shared file lock. A callback exception
+    leaves the file intact. Returning None removes the key. Return the new value.
+    """
     with _lock:
         data = _load_all()
         value = change(data.get(key))

@@ -181,7 +181,7 @@ print()
 # ---------------------------------------------------------------------------
 
 LAUNCHER = str(Path(__file__).resolve().parent.parent / "bin" / "engineer-job")
-JOBS = eng.lc.JOBS  # outside the checkout since 2026-11-14 (bin/move-state)
+JOBS = eng.lc.JOBS  # job state lives outside the checkout
 
 # Configure the allowed platform briefers through the scratch install's config.
 BRIEFER = eng.lc.LEAD_AGENT

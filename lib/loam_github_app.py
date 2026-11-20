@@ -1,83 +1,6 @@
-"""GitHub as a GitHub App: the integration the owner connects from the app.
-
-Added 2026-09-30 to replace the one account-level personal token
-(``GITHUB_TOKEN`` in ``agents/secrets.env``, a classic token that expires
-2026-10-07) with something that does not expire on him while he uses Loam and
-that he controls from the app instead of by pasting.
-
-The shape is GitHub's own, "registering a GitHub App from a manifest":
-
-  1. manifest   the page posts ``manifest()``'s JSON to GitHub; the owner
-                clicks Create; GitHub redirects the browser to
-                ``<app>/integrations/github/registered?code=..&state=..``.
-  2. register   ``register(code, state)`` exchanges the one-hour code at
-                ``POST /app-manifests/{code}/conversions`` for the app's id,
-                slug, private key, client id and secret. Stored here.
-  3. install    the page sends him to ``install_url()`` (a GitHub screen,
-                "All repositories"). Because the manifest asks for
-                ``request_oauth_on_install``, GitHub authorizes him as a user
-                in the same click and redirects to
-                ``<app>/integrations/github/installed?code=..&installation_id=
-                ..&setup_action=install&state=..``.
-  4. callback   ``callback(...)`` exchanges that code for a user token and a
-                refresh token, verifies the installation with an app JWT and
-                the user with the user token, and stores both.
-
-After that two kinds of token exist, and each is used for what only it can
-do. **The user token** (eight hours, refreshed here for up to six months of
-use, each refresh issuing a new pair) acts as the owner: creating a repository
-on their personal account is a ``/user`` call, and an installation is not a
-user. **Installation tokens** (one hour, minted from the private key, never
-written to disk, and never cached: see ``installation_token``) act as the app
-on one repository: a project engineer's push.
-
-**The store is one file**, ``state/github/integration.json``, mode 600, owned
-by the user the broker runs as, outside git (``state/`` is ignored) and never
-mounted into the app's container. Every read-modify-write holds an ``flock``
-on ``integration.lock`` beside it, because three processes may touch it --
-the broker, ``bin/provision`` and ``bin/lane-check`` -- and a user refresh
-token is single-use: two processes refreshing the same pair at once would
-leave one of them holding a dead token, and the store holding whichever wrote
-last. Under the lock the store is re-read before a refresh, so the second
-process finds the first one's fresh pair and does not refresh at all.
-
-**More than one installation** (since 2026-10-06). The first is
-``installation``, on the account Loam was connected from; any installed since
-on another account (an organization the owner owns, selected repositories) is in
-``added_installations``. Each covers the repositories of its own account, and
-a token for ``owner/name`` is minted from the one whose account is ``owner``
-(``installation_for``) or not at all. An installation is recorded only through
-a state this box issued, and, once a user is authorized, only if GitHub lists
-it among that user's own installations (``GET /user/installations``): an app
-that is public can be installed by anyone, and GitHub then redirects the
-stranger to our setup URL with an installation id of their own. GitHub's own
-stateless update redirect is accepted for an installation already recorded,
-and for nothing else.
-
-**More than one app** (since 2026-10-06, the same day). The app Loam was
-connected with stays where it always was, at the top of the store. An app
-owned by an organization -- registered from a manifest posted to that
-organization's create page, private, installed there on selected
-repositories -- is one entry of ``org_apps``, keyed by the organization's
-login, with its own ``app``, ``installation``, ``user`` and ``health``. It
-answers for that organization's repositories and for nothing else: a token
-for ``owner/name`` comes from ``org_apps[owner]`` when there is one, and then
-never from the first app, whatever the first app has recorded; and an org
-app installed on any other account records nothing. The reason is GitHub's:
-permissions are set per app, so an organization can widen, narrow or delete
-its own app without touching the personal one. Its states have purposes of
-their own (``register-org``, ``install-org``), so a broker still running the
-code from before this refuses them instead of writing an org app over the
-first one.
-
-**A project that lands by pull request** (``"landing": "pull_request"`` in its
-registry record, a repository Loam does not own) gets job tokens with
-``contents: read``: its engineer fetches, and cannot push at all. The job's
-branch reaches the remote through ``open_pull_request``, which the landing
-asks the broker for, and which pushes ``job/<id>`` and nothing else.
-
-Nothing here logs a token, a key or a secret. ``public_view()`` is the only
-thing a route returns about the store, and it carries none of them.
+"""Manage GitHub App installations, user authorization and short-lived repository
+tokens. Keep operational credentials in local state. Resolve access for the owning
+account and repository on each request.
 """
 
 from __future__ import annotations
@@ -762,14 +685,9 @@ def user_token(force_refresh: bool = False, org: str | None = None) -> str:
 
 
 def project_permissions(installation: dict) -> dict:
-    """What a project token asks for: every permission the installation has
-    accepted, less ``PROJECT_WITHHELD``. Read live, because a widened app
-    reaches tokens only once the installation accepts it, and asking for a
-    permission the installation lacks is GitHub's 422 for the whole mint.
-
-    Until 2026-10-01 this was a fixed contents/metadata/workflows set, so
-    Issues, Pull requests and Actions, once the owner added them to the app,
-    could never have reached a project engineer however they were accepted."""
+    """Read permissions the live installation has accepted and subtract PROJECT_WITHHELD
+    before minting. Asking for even one ungranted permission fails the whole request.
+    """
     granted = installation.get("permissions") or {}
     return {k: v for k, v in sorted(granted.items()) if k not in PROJECT_WITHHELD}
 
@@ -816,19 +734,9 @@ def _mint(data: dict, inst_id: int, body: dict) -> dict:
 
 
 def installation_token(repository: str | None = None) -> dict:
-    """An installation token, scoped to one repository when one is named
-    (``owner/name``), minted from the recorded installation on ``owner``,
-    with ``job_permissions`` of that installation as it is live.
-
-    Minted fresh on every call. Until 2026-10-01 these were cached for most
-    of their hour, and the cache was wrong in a way no expiry check sees:
-    GitHub resolves ``repositories: [name]`` to a repository id when it
-    mints, so a token cached before a repo was deleted and recreated under
-    the same name kept answering for the dead id -- ``GET
-    /installation/repositories`` 0, the new repo 404 -- for up to 55 minutes.
-    The deleting and the recreating happen in ``bin/provision``, a different
-    process from the broker that held the cache. One JWT-signed POST per git
-    operation is the price."""
+    """Mint a fresh token with the installation's current job permissions, scoped to the
+    named repository when supplied. Changes to accepted grants must reach the next job.
+    """
     data = load()
     if not repository:
         inst = (data.get("installation") or {}).get("installation_id")
@@ -928,31 +836,10 @@ def open_pull_request(project_name: str, branch: str, title: str,
 
 def settle_head(project, branch: str, title: str, base: str, sha: str,
                 head: str, token: str, env: dict, plain_names: bool) -> tuple[str, dict]:
-    """``(head, replaces)``: the remote branch a job's commit goes to, when
-    the name it would use is already on the remote (since 2026-10-21).
-
-    A continuation is pushed to the head its first landing used, so its
-    pull request is updated. That holds only while the commit fast-forwards
-    that head and the pull request is still open. Caused 2026-10-21 on an
-    adopted project: a continuation rebuilt its work on a newer main after
-    its owner closed #46, and three landings in a row pushed it at #46's
-    branch and were rejected as non-fast-forward. So:
-
-    - no pull request from it was ever closed or merged, and it is not on
-      the remote or the commit fast-forwards it: the same head, ``replaces``
-      empty (an open one is then updated, today's path);
-    - a pull request from it is open and the commit does not fast-forward
-      it: refused, ``replaces["refused"] == "open_pr_diverged"``, with
-      nothing pushed. An open pull request is never forked silently;
-    - otherwise (its pull request closed or merged, whether or not its
-      branch was deleted since, or none and the commit rebuilt): a fresh
-      head (``fresh_head``), recorded for ``branch`` so the next
-      continuation finds it, and ``replaces`` names the old one. The old
-      branch is left exactly as it was, or absent if it was. The name of a
-      closed pull request's deleted branch is not reused: on 2026-10-21 it
-      was, and #49 was opened from #46's old name.
-
-    Never force-pushes and never deletes a branch."""
+    """Choose a remote branch for the job and report any PR it replaces. Reuse a
+    continuation's previous head only when it can fast-forward. Preserve unrelated or
+    diverged remote work.
+    """
     root = str(project.root)
     listed = subprocess.run(
         ["git", "-C", root, "ls-remote", "--heads", project.remote, f"refs/heads/{head}"],
@@ -1163,20 +1050,9 @@ def _pr_token(project, branch: str, sha: str, title: str, body: str) -> str:
 
 def update_pull_request(project_name: str, branch: str, number,
                         reply: str = "") -> dict:
-    """The landing of a job whose brief names the pull request it updates
-    (since 2026-10-09; the title form is lib/loam_pr_target.py): push the
-    job's branch to that pull request's head branch, fast-forward only, then
-    post ``reply`` on it as a comment, with the same token.
-
-    Fast-forward only, checked twice: here, against the head GitHub reports
-    and fetched from the remote, and by the remote itself, since the push is
-    never forced. A head that is not an ancestor of the job's commit is
-    answered ``{"pushed": False, "refused": "not_fast_forward"}`` with
-    nothing pushed and nothing posted. A pull request that is not open, or
-    whose head is on another repository, is refused before anything is
-    fetched. The reply is posted only after the push; GitHub refusing it
-    (403/404, the app or the user lacking a permission) is answered in
-    ``reply`` with what to grant, never retried another way."""
+    """Update the named PR's head by fast-forward only, then post the response with the
+    same token. Refuse a divergent head so intervening work is preserved.
+    """
     project, base, sha = _pr_job(project_name, branch)
     try:
         number = int(number)
@@ -1466,11 +1342,10 @@ def _org_view(own: dict) -> dict:
 
 def _check_slot(slot: dict, org: str | None, force_refresh: bool,
                 only: int | None = None) -> None:
-    """One app: its installations with its JWT, its user with its token.
-    Each installation checked gets its own health (2026-11-13, one account
-    refreshed at a time); the app's health is the first error among all its
-    installations' own, or the user's. ``only`` checks that installation
-    alone, and the user, whose token all of one app's installations share."""
+    """Check installations with the app JWT and the shared user with its token. When only
+    is set, check that installation and the user. Aggregate installation or user errors
+    for the app's health.
+    """
     errors: dict[int, str] = {}
     user_error = None
     name = f"{org}'s app" if org else "the Loam app"
@@ -1745,13 +1620,9 @@ def nightly_warnings(view: dict | None = None) -> list[str]:
 
 
 def daily_check(today: str | None = None) -> list[str] | None:
-    """The day's one call to GitHub, from the nightly housekeeping
-    (``github-app check``, loam-tmp-sweep.service; until 2026-11-19 a step
-    of drift-watch's lane checks). It is work, not watching: the call
-    refreshes the user token when it is due, which is what keeps the
-    six-month refresh token rolling while nobody touches GitHub, and records
-    the outcome as health, which the check on a clock reads. Once a date
-    (``CHECKED_PATH``); None when it already ran today, else the warnings."""
+    """Run the housekeeping check and refresh the user token when due. Regular use keeps
+    the refresh credential current even in periods without jobs.
+    """
     from datetime import date  # noqa: PLC0415
     today = today or date.today().isoformat()
     try:

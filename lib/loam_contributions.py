@@ -1,5 +1,4 @@
-"""What a plugin adds to the machine's side: the plugin-host seams (2026-11-14,
-first release L4).
+"""Read enabled plugins’ host contributions from their manifests.
 
 A plugin says what it adds under `contributes:` in its manifest, one list per
 place. Every entry is in force exactly while the plugin is on (in force, its
@@ -8,10 +7,10 @@ switch on); turning it off takes every entry away. The places:
 | place | an entry | where it lands |
 |---|---|---|
 | `agent.tool` | `{name, run, lanes?, agents?}`: a stdio MCP server, `run` by `/bin/sh -c` in the plugin's folder | the lanes' MCP servers |
-| `agent.prompt` | `{text \\| file, lanes?, agents?}`: what the plugin lets an agent do, in words | the lanes' instructions |
+| `agent.prompt` | `{text \| file, lanes?, agents?}`: what the plugin lets an agent do, in words | the lanes' instructions |
 | `schedule.kind` | `{name, schedule, run}`: a run on Loam's schedule grammar (`daily at 05:00 PT`) | a timer, `loam-plugin-<id>-<name>` |
 | `settings.entry` | `{key, label, choices?, default?, labels?, note?, advanced?, setup?}`: a value an agent may read and set | the settings registry, `plugin.<id>.<key>` |
-| `engineer.env` | `{name, value \\| setting \\| secret, projects?}` | an engineer job's environment |
+| `engineer.env` | `{name, value \| setting \| secret, projects?}` | an engineer job's environment |
 | `engineer.job` | `{run, projects?, timeout?}`: a command run at each job's launch, in the plugin's folder; each `NAME=value` line it prints is the job's environment | an engineer job's environment, and files in its folder |
 | `drift.check` | `{run, timeout?}`: exit 0 is "nothing wrong", else each line of its output is a finding | `check-drift` |
 | `box.listener` | `{process, why}`: a process allowed to answer off loopback | `check-drift`'s listener check |
@@ -20,8 +19,7 @@ switch on); turning it off takes every entry away. The places:
 
 A `schedule.kind` entry may also name `setting:`, one of its own
 `settings.entry` keys: the timer then follows that value when it is a valid
-schedule, and `schedule` is its default (2026-11-14, first release L9: the
-reviewer's schedule is a setting on its page).
+schedule, and `schedule` is its default.
 
 **Lanes** are `persona` (a persona's conversation, wakes and crons: they
 share one workspace and so one set of tools and instructions), `engineer`
@@ -418,10 +416,7 @@ def declared(contrib: dict) -> dict:
 
 
 def door_owner(plugins: list[dict] | None = None) -> str | None:
-    """The plugin in force that holds the share door, `/s/` (2026-11-16):
-    the first by id that contributes `web.door`, or None. A second one is
-    left without it (and `check-drift` is not needed to see it: the
-    gateway answers for the first only)."""
+    """Return the first enabled plugin by ID that supplies web.door for /s/, or None."""
     for p in sorted(active() if plugins is None else plugins, key=lambda p: p["id"]):
         if p["contributes"].get("web.door"):
             return p["id"]
@@ -462,11 +457,9 @@ def _targets(entry: dict, lane: str, agent: str | None) -> bool:
 
 
 def private_dir(pid: str) -> Path:
-    """A plugin's machine-local folder (2026-11-14, first release L5):
-    credentials, caches, binaries, operational state. Under the runtime's
-    state, never in Yours, so never in a repository or its backup. 0700.
-    Beside the plugin servers' own state (LOAM_PLUGIN_STATE moves both, for
-    a test)."""
+    """Keep the plugin's local credentials, caches and operational state in a mode-0700
+    directory outside the backed-up Yours layer.
+    """
     import loam_plugin_servers  # noqa: PLC0415
     return loam_plugin_servers.state_dir() / "private" / pid
 
@@ -515,13 +508,9 @@ def lane_servers(lane: str, agent: str | None = None,
 
 
 def _tool_env(plugin: dict, lane: str, agent: str | None) -> dict[str, str]:
-    """What an agent's tool is told besides what every plugin process is
-    (2026-11-16, for doc-comments; any plugin's tool gets it): which agent
-    and lane it serves (`LOAM_AGENT` on the persona lane, `LOAM_LANE`), where
-    the vault and the workspaces are (`LOAM_VAULT`, `LOAM_WORKSPACES`, so a
-    tool can take the absolute paths an agent knows), and, for a plugin with
-    a server, that server's loopback address (`LOAM_PLUGIN_URL`), so a tool
-    can be a thin client of the one process that writes the plugin's data."""
+    """Supply the tool's agent, lane, vault and workspace paths. For a plugin with a
+    server, include its loopback URL so the tool can use the same writer.
+    """
     env = {"LOAM_LANE": lane, "LOAM_VAULT": str(lc.VAULT),
            "LOAM_WORKSPACES": str(lc.WORKSPACES)}
     if agent and lane == "persona":
@@ -831,11 +820,10 @@ def _secret_in(path: Path, name: str) -> str | None:
 
 
 def secret_for(pid: str, name: str) -> str | None:
-    """A plugin's secret. A field of a provider it declared in `keys:`
-    (2026-11-18) resolves as shared keys do: its own key, the shared one,
-    the box's secrets file (lib/loam_keys.py). Any other name: its own
-    private `secrets.env` first, then the box's secrets file, as since L9.
-    The value goes where asked and nowhere else."""
+    """For a declared provider field, resolve the plugin's own key, then the shared key,
+    then the host secret. For other secrets check the plugin's private file and then the
+    host.
+    """
     import loam_keys  # noqa: PLC0415
     if loam_keys.declares_field(pid, name):
         return loam_keys.secret_for(pid, name)
@@ -1030,11 +1018,9 @@ def live_units() -> dict[str, str]:
 
 
 def real_layer() -> bool:
-    """Whether the plugins in force are the box's own: Yours is the real
-    Yours. A test points Yours at a scratch folder, and then nothing here may
-    touch the box's unit folder or re-render its personas (2026-11-14: a
-    test's reconcile removed the live plugin timers, which reappeared at the
-    next real reconcile)."""
+    """Identify the installed Yours layer before touching live units or rendering personas.
+    A scratch layer must reconcile only its own state.
+    """
     import loam_plugins  # noqa: PLC0415
     return loam_plugins.yours_root() == loam_plugins.YOURS_DEFAULT
 

@@ -1,42 +1,6 @@
-"""Shared keys: API keys by provider, entered once, handed only to the
-plugins that declared that provider (2026-11-18; the owner, m444 and m446).
-
-**The model.** Settings › Connections › API keys holds one key per provider (OpenAI,
-Google, Hetzner, …). A plugin's ``PLUGIN.md`` says which providers' keys it
-uses (``keys:``, docs/plugins.md, "Keys"), and that declaration is shown
-before it is installed, beside ``touches``. A plugin uses the shared key of
-each provider it declared, unless it has a key of its own for that provider
-("use a different key"), which wins for that plugin alone. A key is handed
-to no plugin that did not declare its provider.
-
-**Where keys are.** All machine-local, under the plugins' state, never in
-Yours, a repository, an image or the vault:
-
-- the shared key of a provider: ``<state>/plugins/keys/<provider>.env``
-  (0600, in a 0700 folder), ``NAME=value`` lines, one per field;
-- a plugin's own key: its private ``secrets.env`` (the file a
-  ``settings.secret`` has used since L9), the same names;
-- before any of this, the box's own secrets file (``paths.secrets_env``),
-  read last, so an install that set ``GEMINI_API_KEY`` there keeps working.
-
-**What a plugin's process reads.** ``LOAM_PLUGIN_KEYS`` names a file the
-host writes for it, ``<private>/keys.env``, holding the resolved value of
-every field of every provider it declared and nothing else; it is written
-again whenever a key, a plugin's own key or the plugins in force change
-(``sync``). A process that was not given the variable finds the same file
-at ``$LOAM_PLUGIN_PRIVATE/keys.env``. The app's own server asks the broker
-(``GET /v1/plugins/<id>/secrets/<name>/value``), which resolves the same
-way. Plugins run as the install's user, so this is a declaration kept, not
-a wall: what Loam hands a plugin is what it declared.
-
-**Who may change them.** The owner on the page, and an agent through
-``bin/settings`` (the owner, 2026-11-10: every setting is an agent's to
-change too). Nobody reads a value back through any route but the app
-server's ``/value``, which the page's relay never passes.
-
-The host's own checks of a pasted key live here too (``check``): each
-answers ``(ok, sentence)``, the sentence shown as it is, never repeating the
-key, which goes in a header to the provider's own host and nowhere else.
+"""Resolve shared provider keys for plugins that declare the provider. A plugin's own
+key takes precedence. Store credentials in restricted local state and return only
+metadata to settings clients.
 """
 
 from __future__ import annotations

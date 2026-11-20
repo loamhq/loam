@@ -1,68 +1,6 @@
-"""The auto-loaded agent files: which ones there are, and how big they may be.
-
-This module used to resolve a memory layer for a SessionStart hook to inject.
-That hook is retired. Identity now composes from three native routes and this
-file holds what survived them:
-
-  ``_always.md``      a second ``@import`` in CLAUDE.md, on every run.
-  ``_active.md``      the conversation lane, reached through the output-style
-                      symlink at ``.claude/output-styles/conversation.md``.
-  ``_reflection.md``  the reflection lane, passed by bin/wake as
-                      ``--append-system-prompt-file``.
-  ``crons/<lane>.md`` a cron lane, passed the same way by the same wrapper.
-                      Named here before the lane existed; built 2026-09-05,
-                      and the guard needed no change to cover it because
-                      ``is_auto_loaded`` was written structurally rather than
-                      as a list of names. Re-proved against the live path
-                      that day rather than assumed.
-
-All four load without anybody choosing to read them, which is what makes a
-size limit worth having: the cost lands on every run, and nothing in any of
-the three transports announces itself when a file grows. So one constant,
-here, is the authority -- ``bin/provision`` renders it into every CLAUDE.md so
-the agent can read the number, ``hooks/boundary_guard.py`` enforces it at edit
-time (on the engineer and reviewer lanes; a persona's hook only reports),
-and ``bin/wake`` and ``bin/lane-check`` report one -- neither refuses a run
-over it (since 2026-11-18 for the wake). Since 2026-09-07 a second, lower number sits beside it:
-``NEAR_LIMIT_CHARS``, at which the same two reporters write a warning line
-and change nothing else.
-
-The 10,000 is no longer a transport number, and none of the three routes
-above has a cap anywhere near it -- the append-file route loaded 600,111
-characters whole. It stays for two reasons that have nothing to do with a
-transport: it is the number every agent has already internalised, and at
-seven agents paying it on every run it is the right hygiene number on its
-own account.
-
-*One number in the history of this file is wrong and is retracted here,
-because it travelled into four documents before anyone tested it.* The
-SessionStart cap was reported as having moved from 10,000 to ~33,800 with the
-2.1.259 release of 2026-09-03. **It did not move.** Settled 2026-09-04 by
-running the original harness against all three binaries in one sitting:
-
-    payload   2.1.245   2.1.259   2.1.260
-      9,900    inline    inline    inline
-      9,990    inline    inline    inline
-     10,010     spill     spill     spill
-     33,792     spill     spill     spill
-
-The mechanism of the error is the part worth keeping. Over the limit the
-model is not given less -- it is given a 2 KB preview *and a path*, and it
-may read the rest. The original table's outcome column recorded whether the
-model could produce the tail token, so at 33 KB it recorded a success the
-model had achieved by reading the spill file the notice pointed it at. Its
-own transcripts show the `Read` call. Two intermediate diagnoses were also
-wrong and are retracted with it: that the cap is content-dependent rather
-than fixed, and that the two versions had been run against different
-payloads. They were the same payloads, from the same generator, on the same
-evening. **What differed was not the binary and not the input, but whether
-the model went and fetched what it had been told was missing** -- so the
-measurement never discriminated between the two readings, and the observed
-effect that made the story feel confirmed could not have.
-
-None of this changes anything built here: the hook is retired, and the limit
-never rested on the cap. The rule every agent had already internalised was
-right the whole time.
+"""Identify automatically loaded Markdown files and their size limits. The boundary
+guard enforces the limit in guarded lanes. Wake and lane checks report oversized
+files and warn near the limit.
 """
 
 from __future__ import annotations
@@ -155,16 +93,8 @@ def strip_frontmatter(text: str) -> str:
 
 
 def is_auto_loaded(target: Path, workspace: Path) -> bool:
-    """Does this path load into context without anyone choosing to read it?
-
-    Deliberately structural rather than a list of names to keep in sync: the
-    three universal layers in the workspace root, plus every ``.md`` under the
-    cron lane folder, whatever lanes turn out to exist. A cron lane added
-    later is covered the day it is added, with nothing to remember.
-
-    In the map's shape (2026-11-18) the root's loading file is the map alone:
-    an agent with a ``map.md`` loads none of the three, so a write to one of
-    them is a write to an ordinary file.
+    """Identify automatic context by its position in the workspace. Include the universal
+    loading files and Markdown instructions in the cron lane folder.
     """
     try:
         target = target.resolve()

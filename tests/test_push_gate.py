@@ -373,7 +373,7 @@ try:
         tree = Path(record["path"])
         git(tree, "fetch", "-q", "origin", "+main:main")
         if not hasattr(wt, "replay_plan"):
-            return "no dry check"     # code from before 2026-11-16's second fix
+            return "no dry check"     # older checkout without replay_plan
         fresh = wt.read_record(project.jobs / record["job"])
         plan = wt.replay_plan(project.root, tree, fresh, git(tree, "rev-parse", "main"),
                               git(tree, "rev-parse", record["branch"]))
