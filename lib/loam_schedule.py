@@ -1,66 +1,11 @@
-"""Schedules: the one path a record changes by, the log, and the reconciler.
+"""Validate schedule changes, append an audit event and reconcile accepted records
+to systemd timers. A persona edits its own records and gives a reason. The
+digest in an owner's claim attributes a direct file edit to that owner.
 
-A schedule is a record, ``ai-labs/<agent>/crons/<name>.md`` (grammar and
-shapes in lib/loam_cron.py), and **a record is live exactly when it says it is
-enabled**. Nobody installs anything: whenever a record changes, the reconciler
-here installs, moves, pauses or removes its timer, within a minute. Decided by
-the owner 2026-10-14 (design: loam-ui's ``design/schedules-and-activity.md``),
-replacing ``approved:`` plus a hand ``bin/install-cron``, after Iris's
-``vocabulary-audit`` sat approved and uninstalled for six days.
-
-Three things live here and nowhere else:
-
-**The path.** ``change()`` is how a record is written by anyone who can say
-who they are: the broker's routes, the agent's tool, ``bin/schedule`` for an
-operator, ``bin/wake`` marking a one-off done. It validates (``validate()``),
-writes, logs, and reconciles at once. An agent may change only its own
-records and must give a reason; the one-off caps are enforced here, not in a
-page. A record has no key for tools (loam_cron.HEADER_KEYS): every lane has
-the persona's whole tool list, engineer included (2026-11-09).
-
-**The log.** ``state/schedules/events.jsonl``, append-only, one JSON object a
-line. ``kind`` is ``change`` (actor, lane, record, before -> after, reason),
-``refused`` (the same, with why), ``claim`` (a direct write's author, see
-below), ``timer`` (what the reconciler did to the box), ``fire`` (a run's
-outcome: ran, failed, skipped while another run of the persona was live,
-missed, or killed -- by its wall clock in bin/wake, by a signal in
-bin/wake-failed) or ``run`` (the owner's Run now, from the broker). The
-broker's routes read and write it through lib/loam_activity.py.
-
-**The reconciler.** ``reconcile()``, run by ``loam-schedules.timer`` every
-minute and by ``change()`` straight after a write. It keeps a copy of each
-record as last accepted (``state/schedules/applied/``) and renders the timers
-from those copies, never from a file it has not accepted. A record that
-changed without coming through ``change()`` -- an agent editing its own file,
-as every agent did before this path existed -- is validated as that agent's
-change, and its ``reason:`` header is the reason; without one it is refused,
-logged once, and the timer stays as it was. One exception, applied rather
-than refused: a cron's file deleted outright, because keeping its timer would
-fire a lane whose file is gone.
-
-**A claim** is how a writer that is not the agent says a direct write is
-its own: loam-ui's Files editor (lib/loam_files.py) logs ``kind: claim``
-with the bytes' digest, actor ``owner.id``, lane ``app``, just before its
-rename, and the reconciler takes a file whose digest a claim names as that
-actor's change -- no ``reason:`` asked of the owner, the rules otherwise the
-same. A file that does not parse is refused as theirs, logged once, and the
-version accepted before it keeps running (decided 2026-10-15: a schedule's
-detail and editing are its file, opened in Files).
-
-**The daily reflection** (2026-11-19, the owner's decision of 11-18) is an
-ordinary record, ``crons/reflection.md``: its time, its switch and its
-instruction, from which the reconciler renders ``loam-wake-<agent>.service``
-and ``.timer`` as it renders any cron's pair. It differs in two rules, both
-here: it is never deleted, and **only the owner turns it off** -- a persona's
-own pause, by any route, is refused with the sentence REFLECTION_OWNERS, and
-the accepted copy keeps the wake running (``enabled_now``). The owner does it
-from the app (the switch, or the file in Files) and through the settings
-route, where a persona acting on the owner's word cites that message
-(lib/loam_activity.py, ``edit``). A persona moves its time and edits its
-instruction like any record of its own.
-
-One run of a persona at a time is unchanged: that is bin/wake's run lock, and
-a fire that finds it held waits, skips, and logs ``fire`` / ``skipped``.
+Reconcile immediately after change() and on the periodic sweep. Render from the
+accepted copy so a malformed direct edit cannot move a running timer. Remove a
+deleted cron's timer so it cannot fire without instructions. The daily reflection
+record is permanent. Only the owner can disable it.
 """
 
 from __future__ import annotations
@@ -265,13 +210,9 @@ def parse(agent: str, name: str, text: str) -> Cron:
 
 def pending_one_offs(agent: str, excluding: str,
                      now: datetime | None = None) -> list[str]:
-    """The one-offs that can still fire: not done, enabled, moment ahead.
-
-    A paused one-off, or one whose moment has passed, cannot fire without
-    being changed again, and that change is validated against this cap then.
-    Counting them refused a persona's five overnight one-offs on 2026-11-09: three
-    paused one-offs from that morning made every new one see seven pending.
-    A header that does not parse is counted, as the cautious reading."""
+    """Count enabled, unfinished one-offs whose time is still ahead. Count malformed
+    headers conservatively. Re-enabling or moving a one-off checks the cap again.
+    """
     now = now or now_utc()
     folder = loam_cron.AI_LABS / agent / CRON_LANE_DIR
     out = []
@@ -504,9 +445,9 @@ def reflection_text(workspace: Path) -> str | None:
 
 
 def wake_time(agent: str) -> str | None:
-    """The HH:MM an agent's daily reflection runs at, read off its record
-    (since 2026-11-19 the one place it is; agent.json's `wake_schedule` was
-    a copy). None for an agent without a readable daily one."""
+    """Return the daily reflection's HH:MM from its schedule record, or None if it lacks a
+    readable daily time.
+    """
     text = reflection_text(loam_cron.AI_LABS / agent)
     if text is None:
         return None
@@ -540,18 +481,10 @@ class Systemd:
         self.run("daemon-reload")
 
     def arm(self, timer: str) -> None:
-        """A NEW timer only. `enable` alone does not arm a timer in the
-        running manager (measured 2026-09-05), so it is started too; a timer
-        that has never triggered does not fire on start.
-
-        A timer that already stands is never restarted, stopped or started
-        here: the daemon-reload is what moves it. Measured 2026-10-14, the
-        hard way: the migration's reconcile `restart`ed a persona's two re-cut
-        cron timers, both of which had fired before, and both services
-        started on the spot (00:16:31Z; stopped by hand 27 s later). Iris's,
-        never triggered, did not. A probe the same evening showed
-        daemon-reload alone re-arming a triggered timer's changed OnCalendar
-        with no fire. The suffix is always written."""
+        """Enable and start a newly installed .timer. Use daemon-reload alone to move an
+        existing timer's OnCalendar: restarting an already triggered timer can fire its
+        service immediately.
+        """
         assert timer.endswith(".timer")
         # Never a plain start of a timer that has stood before: that fires it
         # (lib/loam_due.py). loam_units.arm_timer leaves a standing timer to
@@ -576,20 +509,10 @@ class Systemd:
         return "" if value in ("", "n/a", "0") else value
 
     def timers(self, timers: list[str]) -> dict[str, dict]:
-        """{timer: {"next": iso | None, "last": iso | None,
-        "running_since": iso | None}}, in two asks of the manager: the
-        timers, then the services they fire. A timer it does not hold reads
-        as none of them.
-
-        ``running_since`` is when the timer's service, in flight now, began
-        (a wake is a oneshot, so in flight reads ``activating``, and its
-        ActiveEnterTimestamp stays empty until it ends: the start is
-        InactiveExitTimestamp). A timer whose service it fired is still
-        running has no next elapse at all in systemd 252 -- `show` and
-        `list-timers` both blank it, and TimersCalendar's ``next_elapse``
-        is the trigger just past (measured 2026-10-23 on a transient
-        timer). Its next is then the calendar's own, after now, which is
-        what the manager arms when the run ends."""
+        """Read next, last and running_since for each timer and service. A oneshot starts at
+        InactiveExitTimestamp. When its active service leaves the next elapse blank, compute
+        the next calendar occurrence after now.
+        """
         out: dict[str, dict] = {t: {"next": None, "last": None,
                                     "running_since": None} for t in timers}
         if not timers:
@@ -685,14 +608,9 @@ def reconcile(names: list[str] | None = None, now: datetime | None = None,
 
 
 def running_lane(agent: str, now: datetime | None = None) -> str:
-    """Best attribution for a record edited outside the path: the lane of the
-    agent's run in flight, if any; else `conversation` when the broker's own
-    record of one of the agent's chats says it is mid-turn or spoke within
-    CONVERSATION_GRACE; else unknown, said as such. A wake's marker wins over
-    a chat: the wake holds the run lock and a chat does not, so both can be
-    live, and the marker names a run where a chat's record names only a
-    window. (Closed 2026-10-14; step 1 attributed every chat's edit as
-    unknown.)"""
+    """Attribute a direct edit to the active run's lane first, then to a conversation
+    mid-turn or active within CONVERSATION_GRACE. Otherwise report unknown.
+    """
     try:
         lane = json.loads((WAKE_STATE / f"{agent}.running").read_text(
             encoding="utf-8")).get("lane", "")
@@ -764,11 +682,9 @@ def _accept(agent: str, name: str, current: str | None, previous: str | None,
 
 
 def desired_units(agent: str, name: str, text: str) -> dict[str, str | None]:
-    """{unit filename: content, or None for absent}, for an accepted record.
-
-    An archived agent (lib/loam_agents.py, 2026-11-14) wants none of its
-    timers: they come down with the archive and back with the restore, from
-    the same accepted record, which the archive never touches."""
+    """Map each unit filename to its accepted contents, or None for removal. Archive
+    removes timers while preserving the records needed to restore them.
+    """
     cron = loam_cron.parse_record(agent, name, text, check_systemd=False)
     import loam_agents  # noqa: PLC0415
     if loam_agents.is_archived(agent, loam_cron.AI_LABS):
@@ -930,13 +846,8 @@ def adopt_default(agent: str, systemd: "Systemd | None" = None) -> dict | None:
 
 def migrate(names: list[str] | None = None, systemd: Systemd | None = None,
             reason: str = "migration from approved: to enabled:") -> list[dict]:
-    """Every record onto the path, each through change() as the engineer.
-
-    An `approved:` record becomes `enabled: true` (the approval date stays in
-    the log's `before`); a record already enabled is adopted as it stands.
-    Until 2026-11-19 it also gave each agent `crons/reflection.md` at
-    agent.json's `wake_schedule`; every agent has had one since 2026-10-14,
-    bin/provision makes a new agent's, and that copy of the time is gone.
+    """Adopt existing records through change() as the engineer. Convert approved records to
+    enabled and preserve their original approval in the event log.
     """
     out = []
     names = names if names is not None else loam_cron.roster()

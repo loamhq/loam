@@ -1,44 +1,23 @@
-"""Threads and boards (2026-11-08): the record, its index, and the boards.
+"""Read and write Markdown thread and board records. Opening a thread reads its
+record. The member's provider session supplies a turn and can be resumed or replaced.
 
-A thread is a markdown file in the vault, written by the runtime and by
-nobody else -- the broker for a person's message and a persona's reply,
-``bin/thread post`` for an agent posting from a wake or a turn. A harness
-session is only the engine a persona used for one turn, so opening a thread
-reads this file and never replays a session.
+A thread's frontmatter identifies its default, members, engines and board::
 
-The record, under ``15_CONVERSATIONS/<title>.md``::
+    default: agent-a
+    members: [agent-a, agent-b]
+    engines: {agent-a: claude-code, agent-b: codex}
 
-    ---
-    kind: thread
-    id: t-3f9c2a1b
-    title: Planning the garden
-    default: ada
-    members: [ada, iris]
-    engines: {ada: claude-code, iris: codex}
-    board: 00_INBOX/boards/Planning the garden — board.md
-    created: 2026-11-08T17:40:02Z
-    ---
+Each message starts with a heading and a metadata comment on the next line::
 
-    ### Sam · 2026-11-08 17:40
-    <!-- loam {"id": "m1", "author": "owner", "at": "...", "kind": "message"} -->
+    ### Agent A · 2030-01-09 17:40
+    <!-- loam {"id":"m1","author":"agent-a","at":"2030-01-09T17:40:00Z","kind":"message"} -->
 
     The message text.
 
-Every message is a ``###`` heading followed on the next line by its ``loam``
-comment; the comment is what the parser reads (id, author, time, kind and
-the "What I did" steps), and the heading is there for a person reading the
-file in Obsidian. A message's text runs to the next such pair.
-
-Boards are ordinary markdown under ``00_INBOX/boards/``, except General's,
-which is the inbox's ``from-agents/comms.md``. An item's metadata is an
-end-of-line comment: ``- [ ] text <!-- Ada · new · until 2026-11-22 -->``.
-
-What the runtime keeps beside the vault (``state/threads/``) is a cache:
-which file holds which id, each persona's harness session per thread, and
-how far the owner has read. Losing it loses nothing the files do not say,
-except those three conveniences; ``rebuild_index`` reads the ids back.
-
-Stdlib only, so ``bin/thread`` runs without the broker or its venv.
+Its text runs to the next heading and metadata pair. A board item's metadata
+appears at the end of the item line. Runtime state holds file locations, member
+sessions and read positions. Rebuild the index from the records. Keep this
+module usable by bin/thread without the broker's environment.
 """
 
 from __future__ import annotations
@@ -205,10 +184,9 @@ def _parse_flow(value: str):
 
 
 def render_front(meta: dict) -> str:
-    """The frontmatter. ``default`` is written empty when the thread has
-    none (2026-11-09): untagged messages are then recorded and nobody
-    answers. ``icon``, ``archived`` and ``models`` (a member's model, when
-    it is not the persona's own) are written only when set."""
+    """Write an empty default when untagged messages should receive no answer. Emit the
+    icon, archive flag and model overrides only when set.
+    """
     lines = ["---", "kind: thread", f"id: {meta['id']}",
              f"title: {json.dumps(meta['title'], ensure_ascii=False)}",
              f"default: {meta.get('default') or ''}".rstrip()]
@@ -338,11 +316,9 @@ def streamed_opening(draft: str) -> tuple[str | None, str | None]:
 
 
 def unmark_steps(entry_steps: list, reply_to: str | None) -> list:
-    """A reply's full record as it is shown (2026-11-17): the ``↩ m12`` its
-    first top-level words opened with comes off when ``reply_to`` names that
-    same id -- the marker the writer already took off the message. Any other
-    words, ids and markers stay as written; the file itself is never
-    changed."""
+    """Remove a leading reply marker such as ↩ m12 from the displayed steps only when
+    reply_to names the same message. Keep the stored record intact.
+    """
     if not reply_to or not isinstance(entry_steps, list):
         return entry_steps
     for index, step in enumerate(entry_steps):
@@ -669,10 +645,9 @@ def read(thread_id: str) -> tuple[dict, list[dict], Path]:
 
 
 def _copy_meta(meta: dict) -> dict:
-    """A caller's own copy, members and engines included: ``update`` appends
-    to ``members``, and a shallow copy shared that list with the cache and
-    with every other caller's copy, so a PATCH's ``before`` already held the
-    member it was adding (found 2026-11-09)."""
+    """Copy mutable member and engine fields as well as the outer mapping. A pending update
+    must never mutate the cached record or the caller's before snapshot.
+    """
     out = dict(meta)
     out["members"] = list(meta.get("members") or [])
     out["engines"] = dict(meta.get("engines") or {})
@@ -694,10 +669,9 @@ def _unique_path(title: str, own: Path | None = None) -> Path:
 
 
 def _rename_board(thread_id: str, old_rel: str, title: str) -> str:
-    """The board's new name for a renamed thread, its file moved there
-    (2026-11-10). A name another thread's board already holds gets
-    `` (2)``: before, the rename pointed this thread at that board and left
-    its own behind, unlinked."""
+    """Move a renamed thread's board with it. If another board owns the name, choose a free
+    suffix such as (2).
+    """
     new_rel = board_rel(thread_id, title)
     if new_rel == old_rel:
         return old_rel
@@ -742,10 +716,10 @@ def member_engine(meta: dict, persona: str) -> str | None:
 def create(persona: str | None = None, title: str | None = None, *,
            thread_id: str | None = None, members: list[str] | None = None,
            pinned: bool = False, extra: dict | None = None) -> dict:
-    """A new thread. With no ``persona`` (2026-11-09) it has no default and
-    no members: what is written untagged is recorded and nobody answers,
-    until a default is set or someone is tagged. ``extra`` is frontmatter
-    written with it (a branch's ``branched_*`` keys)."""
+    """Create a thread with optional extra frontmatter, including branch metadata. Without
+    a persona it has no members or default. An untagged message is recorded without an
+    answer.
+    """
     if persona is not None and persona not in roster():
         raise ThreadError(404, f"no persona named {persona!r}")
     thread_id = thread_id or "t-" + secrets.token_hex(4)
@@ -775,13 +749,9 @@ def create(persona: str | None = None, title: str | None = None, *,
 
 
 def write_imported(meta: dict, msgs: list[dict]) -> Path:
-    """A whole thread record written at once, its messages with the ids and
-    times they are given (2026-11-11, for ``bin/import-classic-chats``).
-
-    ``create`` and ``append`` stamp now; an imported chat keeps the times
-    it was had. ``meta`` is ``create``'s shape plus ``imported_from`` and
-    ``source``. The read mark is set at the last message, so a chat already
-    read in the classic view does not arrive with all of it unread."""
+    """Write all messages with their supplied IDs and timestamps. Record the source and
+    mark the last imported message as read.
+    """
     with locked(VAULT):
         path = _unique_path(meta["title"])
         meta = {**meta, "board": board_rel(meta["id"], meta["title"])}
@@ -907,13 +877,9 @@ def append_once(thread_id: str, author: str, text: str, kind: str = "message",
 
 
 def replace_message(thread_id: str, msg_id: str, new: list[dict]) -> list[dict]:
-    """Put ``new`` where message ``msg_id`` is, touching no other message's
-    bytes (2026-11-10, for ``bin/backfill-thread-steps --force-placeholder``).
-
-    The first of ``new`` keeps ``msg_id``; the rest take the next free ids,
-    in order, and sit after it. An empty ``new`` removes the message. Only
-    that message's block of the file is rewritten: the rest is copied as it
-    is, not parsed and rendered again."""
+    """Replace only the specified message's bytes. The first replacement keeps its ID and
+    subsequent entries take free IDs in order. An empty replacement removes it.
+    """
     with locked(VAULT):
         _, msgs, path = read(thread_id)
         if not any(m.get("id") == msg_id for m in msgs):
@@ -957,11 +923,10 @@ def update(thread_id: str, *, title: str | None = None, default=_UNSET,
            engines: dict | None = None, models: dict | None = None,
            icon=_UNSET, pinned: bool | None = None,
            archived: bool | None = None) -> dict:
-    """Change a thread's frontmatter. ``default=None`` clears the default
-    (nobody answers untagged messages); ``models`` maps a member to a model
-    or None (the persona's own), checked by the caller against what its
-    engine lists. General keeps its name, its pin and its place: renaming or
-    archiving it is refused (2026-11-09)."""
+    """Change the frontmatter. Clearing the default leaves untagged messages unanswered. A
+    null member model restores its own default. General keeps its name and stays pinned
+    and unarchived.
+    """
     people = roster()
     general = thread_id == GENERAL_ID
     if general and title is not None:
@@ -1044,9 +1009,9 @@ def update(thread_id: str, *, title: str | None = None, default=_UNSET,
 
 
 def delete(thread_id: str) -> dict:
-    """Remove a thread's record and its board from the vault, and its
-    runtime state (2026-11-09). The owner's explicit action only: the app
-    confirms first. General is never deleted. Returns what was removed."""
+    """Remove the thread, board and runtime state on the owner's confirmed action. Preserve
+    General and report what was removed.
+    """
     if thread_id == GENERAL_ID:
         raise ThreadError(400, "General can't be deleted")
     with locked(VAULT):
@@ -1152,10 +1117,9 @@ def _excerpt(window: list[dict]) -> str:
 
 
 def branch_prompt(meta: dict, window: list[dict], persona: str | None) -> dict:
-    """What the summarizer is asked, so every caller asks the same thing:
-    ``system_instruction`` and ``input`` for one text call, whose answer is
-    one JSON object ``{"title", "draft"}``. The app sends it to the model it
-    already writes read-aloud briefs with (2026-11-11)."""
+    """Build system_instruction and input for a branch summary. Expect a single JSON object
+    with title and draft.
+    """
     to = display(persona) if persona else "the agent"
     instruction = "\n".join([
         f"{lc.OWNER_NAME} is branching part of a conversation off into a new thread of "
@@ -1348,11 +1312,9 @@ def session_for(thread_id: str, persona: str) -> dict | None:
 def remember_session(thread_id: str, persona: str, session_id: str,
                      engine: str, through: str, seq: int | None = None,
                      context: dict | None = None, watch: bool | None = None) -> None:
-    """``seq`` (2026-11-10) is how far into the broker's session log the
-    thread has recorded; the next turn posts any reply past it that nobody
-    was watching (``ThreadEngine.recover_late``). ``context`` (2026-11-11)
-    is the session's last ``{used, window}``, what the next turn's rotation
-    reads when the session is no longer resident."""
+    """Save the last recorded session sequence so the next turn can recover a late reply.
+    Keep the last context usage and window for rotation after the session leaves memory.
+    """
     with locked(VAULT):
         data = load_state("sessions.json")
         row = {"session_id": session_id, "engine": engine, "through": through}
@@ -1484,11 +1446,9 @@ def last_spoke(msgs: list[dict]) -> dict[str, str]:
 
 
 def summary(thread_id: str, running=None) -> dict:
-    """One thread's row. ``running`` is the member whose turn is in flight,
-    or a list of them (members answer in parallel since 2026-11-10), which
-    only the broker's engine knows. Each member carries
-    ``last_spoke_at`` (null if never) and ``running`` (2026-11-09), so a
-    header can draw who is actually in the room."""
+    """Build a thread row with each member's last_spoke_at and running state. Parallel
+    turns may put more than one member in the running field.
+    """
     meta, msgs, _ = read(thread_id)
     live = {running} if isinstance(running, str) else set(running or ())
     shown = [m for m in msgs if m.get("kind") != "system"] or msgs
@@ -1548,13 +1508,9 @@ def listing(running: dict | None = None,
 
 
 def page(thread_id: str, before: str | None = None, limit: int = PAGE) -> dict:
-    """The last ``limit`` messages, in record order, of those earlier in the
-    record than ``before`` (all of them without it).
-
-    ``before`` is a position in the record, not a number (2026-11-10): a
-    recovered late reply is appended where it was recovered, so m17 can sit
-    between m10 and m11, and a cut on ``id < before`` paged it above m3. An
-    id the record does not hold falls back to the number cut."""
+    """Page back from the position of before in record order. A recovered m17 can precede
+    m11. Use the numeric fallback only when the record lacks the requested ID.
+    """
     meta, msgs, _ = read(thread_id)
     if before:
         at = next((i for i, m in enumerate(msgs) if m.get("id") == before), None)
@@ -1590,10 +1546,9 @@ def _said(m: dict) -> str:
 
 def replied_block(m: dict, record: list[dict] | None,
                   record_file: str | None = None) -> str:
-    """The message ``m`` replies to, as the prompt shows it right above
-    ``m``'s own words (2026-11-11): who said it, when, its id, and its whole
-    text -- or its first PROMPT_QUOTE_CHARS characters and where the rest
-    is. Shown whether or not the referenced message is also in the window."""
+    """Quote the referenced message above the reply, even outside the prompt window.
+    Include its author, time, ID and text, with a pointer to the rest of a long quote.
+    """
     if not m.get("reply_to"):
         return ""
     who = display(m["author"])
@@ -1618,10 +1573,9 @@ def replied_block(m: dict, record: list[dict] | None,
 
 def transcript(msgs: list[dict], record: list[dict] | None = None,
                record_file: str | None = None) -> str:
-    """Messages as one persona reads them in its next turn's prompt, each
-    with its id (2026-11-11: what a reply names). ``record`` is the whole
-    thread, where a message's ``reply_to`` is looked up; without it, the
-    window itself."""
+    """Format the member's next prompt window with message IDs. Resolve reply targets
+    against the full record when available.
+    """
     record = msgs if record is None else record
     out = []
     for m in msgs:
@@ -1775,12 +1729,9 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
 def steer_prompt(meta: dict, persona: str, msgs: list[dict],
                  now: datetime | None = None,
                  record: list[dict] | None = None) -> str:
-    """What a member's turn in flight is handed when messages for it arrive
-    while it works (2026-11-14, ``ThreadEngine._steer``): only the new
-    messages, said to be new mid-turn, with the thread named so a session
-    with more than one thread in its history knows which. Its reply is
-    still the turn's one message; the summary line of ``turn_prompt`` is
-    not repeated."""
+    """Deliver only the new messages and identify their thread to a member already
+    mid-turn. Its eventual response still belongs to the same turn.
+    """
     try:
         record_file = str(record_path(meta["id"]))
     except (ThreadError, KeyError, OSError):

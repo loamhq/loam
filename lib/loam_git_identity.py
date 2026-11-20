@@ -1,72 +1,13 @@
-"""Whose name an agent's commits carry, by default (since 2026-11-18).
+"""Resolve commit attribution in order: project identity, explicit checkout identity,
+owner setting, then the engineer fallback. For example, an explicit owner setting
+can be {"source": "typed", "name": "Example Author", "email": "author@example.org"}.
+The setting {"source": "neutral"} opts out of owner attribution.
 
-The owner, 2026-11-18: "Whatever gets developed by their agents should be
-under their name and not the provider they are using." So the work an
-engineer job commits is authored and committed as the install's owner, and
-no provider (Claude Code, Codex, Antigravity) adds itself as a co-author.
-
-**The setting** is one value in the host settings file
-(``state/broker/settings.json``, key ``git``), changed by the same route from
-the page (Settings, under GitHub) and from a persona (`settings set
-git.identity …`, ``bin/settings``)::
-
-    {"source": "github", "login": "ada", "name": "Ada Lovelace",
-     "email": "123+ada@users.noreply.github.com"}       # from GitHub
-    {"source": "typed", "name": "Ada Lovelace", "email": "ada@example.org"}
-
-**Unset is the default** (since 2026-11-18, the owner: "make sure the same
-is true for other Loam users as well unless they change it"): the owner's
-connected GitHub account, its profile name and its no-reply address, when
-the connection says clearly which account that is (``default``, below).
-``{"source": "neutral"}`` is the opt-out: commits carry the engineer's name
-and no prompt asks for more.
-
-``github`` takes the connected GitHub account's profile name and GitHub's own
-no-reply address for it (``<id>+<login>@users.noreply.github.com``), which
-GitHub attributes to the account and which keeps the person's real address
-out of every commit. It is read once from GitHub when it is chosen, with the
-connection's existing token; no scope is added. ``typed`` is a name and an
-address the owner gave. Nothing else: Loam never guesses an address, and
-there is no built-in person.
-
-**Which identity a job commits as** (``resolve``), first that applies:
-
-1. ``project`` -- the project record's ``commit_identity``, a person who
-   answers for every commit in a shared repository
-   (lib/loam_commit_identity.py, stricter rules of its own);
-2. ``repo`` -- the canonical checkout's own ``user.name``/``user.email``,
-   when someone set them on purpose: any identity that is not the default
-   ``<name> engineer <engineer+<name>@noreply.local>`` that bin/provision
-   writes, and always on a checkout with the push gate on
-   (``loam.pushGate``), whose gate *is* that identity;
-3. ``owner`` -- the setting above, or with nothing set the default:
-   a. the one GitHub account every authorized connection here is signed in
-      as (lib/loam_github_app.owner_profile), with its no-reply address;
-   b. with no connection at all, the box's own global git identity
-      (``git config --global``), only when its address is already a GitHub
-      no-reply, so no private address is ever newly published;
-   never a guess between two accounts, a new scope or a sign-in;
-4. ``engineer`` -- the opt-out, or no default could be found: the
-   checkout's engineer identity, as before this module, never a provider.
-   Unless the owner opted out, ``prompt()`` says what to do, and the job's
-   receipt carries it.
-
-The default is commit metadata and nothing more. It does not change who
-pushes or opens a pull request (a deploy key or the Loam app, as before);
-only the explicit ``github`` choice lets the owner's own token open one
-(lib/loam_github_app.owner_token).
-
-**Provider attribution.** Each harness is told not to add itself: Claude
-Code by ``CLI_SETTINGS`` (lib/loam_commit_identity), Codex by
-``CODEX_CONFIG``; Antigravity 1.5 adds none. As a backstop the landing
-re-makes the job's own unpushed commits that an agent made (``agent_made``)
-with the identity resolved here and ``strip_provider`` applied to the
-message. Only lines that name a provider are taken out: a co-author trailer
-whose address is a provider's (``PROVIDER_EMAILS``, a provider bot's GitHub
-no-reply), a ``Claude-Session`` trailer and a "Generated with Claude Code /
-Codex" line. A person's co-author trailer, a commit someone else made and a
-signed commit are left exactly as they are, and nothing already on a remote
-is ever rewritten.
+With no setting, use an unambiguous connected account's no-reply address. With
+no connection, use the global identity only when it already has a GitHub no-reply
+address. Clean provider attribution only on the job's unsigned, unpublished
+commits. Preserve human co-authors and upstream history. Commit metadata and the
+credentials used to push are separate choices. See docs/attribution.md.
 """
 
 from __future__ import annotations
@@ -320,11 +261,9 @@ def effective(raw=None, profile=None, global_git=None) -> tuple[dict | None, str
 
 
 def public(raw=None, profile=None, global_git=None) -> dict:
-    """What ``GET /v1/settings/git`` answers: ``identity``, the choice as
-    ``settings set`` takes it (null is the default); ``effective``, what new
-    commits carry now; ``status``; and, when nothing would carry the owner's
-    name and they did not opt out, ``prompt``. The owner's own page and
-    personas on this box may see the address; it never goes to a log."""
+    """Return the configured and effective identity, status and any prompt to choose
+    attribution. Local settings callers may see the address. Never log it.
+    """
     raw = _raw() if raw is None else raw
     choice = NEUTRAL if opted_out(raw) else stored(raw)
     if choice:

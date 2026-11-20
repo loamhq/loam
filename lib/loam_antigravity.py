@@ -1,33 +1,6 @@
-"""Antigravity as a third provider for persona sessions (2026-11-09).
-
-Google's Antigravity CLI, ``agy``, driven in its documented headless print
-mode (https://antigravity.google/docs/cli/headless): one ``agy -p=<text>
---output-format stream-json`` process per turn, resumed by the
-``conversation_id`` the first turn states (``--conversation <id>``). Its
-NDJSON events -- ``init``, ``step_update``, ``result`` -- are translated onto
-the Claude CLI's ``stream-json`` shapes the page already draws, by
-``Translator`` below, a pure object with no process in it.
-
-Why a process per turn and not ``--input-format stream-json``: the shape of
-an input line is not documented, and before a login nothing can be learnt
-from the binary about it (a piped stdin fails at authentication before any
-line is parsed, 1.5.3, 2026-11-09). A turn per process needs no input shape
-at all. The cost is a cold start per turn (~0.2 s to the auth check).
-
-What is here, one authority each:
-
-- the binary (``AGY``) and the environment a child runs in (``env``);
-- the login, read by asking the CLI (``login_state``): ``agy models`` answers
-  "Please sign in" in well under a second with no login, so it is the probe;
-- the persona's instructions, rendered to a workspace rule file
-  (``write_instructions``), because Antigravity reads ``AGENTS.md``,
-  ``GEMINI.md`` and ``.agents/rules/*.md`` and not ``CLAUDE.md``;
-- the launch line (``argv``);
-- the translation (``Translator``).
-
-The broker's half -- the session subclass and the provider row -- is in
-``bin/session-broker``; the persona's ``.agents/`` (MCP servers, skills) is
-rendered by ``bin/provision --antigravity``.
+"""Run one headless agy process per turn and resume with the conversation ID reported
+by the CLI. Translate init, step_update and result events into the broker stream.
+Render workspace instructions in the format this provider loads.
 """
 
 from __future__ import annotations
@@ -175,11 +148,7 @@ def _account() -> str | None:
 
 
 def parse_models(text: str) -> list[dict]:
-    """``agy models`` as a list. Each model is one line, its id and its name
-    separated by a tab (1.5.9, 2026-11-15: ``gemini-4-hydrogen-high\tGemini
-    4 Hydrogen (High)``), under a "Fetching available models..." line. Until
-    2026-11-15 the line was split on a space, so the id came out joined to
-    the name by the tab, matched nothing, and every list was empty."""
+    """Parse model rows as tab-separated ID and display name. Skip the CLI's progress line."""
     out = []
     for line in text.splitlines():
         parts = line.strip().split(None, 1)
@@ -230,12 +199,9 @@ def _refresh() -> dict:
 
 
 def login_state(fresh: bool = False) -> dict:
-    """The login, by asking the CLI (~0.5 s), at most once a LOGIN_CACHE_S.
-
-    Past the minute the kept answer is served and the CLI is asked behind
-    the call (2026-11-09), so ``/v1/providers`` never waits on it; a sign-in
-    shows on the first fetch after the re-ask, about a minute at most when
-    the app is open. ``fresh`` (and the very first call) asks in line."""
+    """Probe the CLI on the first read or when fresh is requested. Serve a cached reading
+    during background refresh so the providers route can return immediately.
+    """
     now = time.monotonic()
     if fresh or not _login_cache or _login_cache[1] != _login_key():
         return _refresh()
@@ -601,10 +567,9 @@ def write_instructions(workspace: Path) -> Path:
 
 def argv(prompt: str, conversation: str | None, model: str | None,
          effort: str | None) -> list[str]:
-    """One turn's launch line. ``--dangerously-skip-permissions`` is the
-    authority move's (2026-11-08) on this provider: ``permission_mode``
-    ``always-proceed``, so nothing is soft-denied for want of a person to
-    ask -- Antigravity's headless mode has no channel to ask one on."""
+    """Build a headless turn with the configured permission mode. This invocation has no
+    interactive approval channel.
+    """
     out = [AGY, f"--print={prompt}", "--output-format", "stream-json",
            "--dangerously-skip-permissions"]
     if conversation:

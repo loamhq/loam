@@ -113,16 +113,8 @@ class SessionHost:
         return [s for s in self.sessions.values() if s.is_live()]
 
     def residency(self) -> dict:
-        """How many sessions are in RAM right now and how many may be.
-
-        Two fields, so a page can draw "2 live" without counting rows --
-        which it could not do correctly anyway: `?agent=` narrows the rows and
-        the count is the whole box's. Since 2026-11-09 `cap` is only the
-        sanity backstop (`cfg.MAX_SESSIONS`, 30 on 8 GB, 123 on 32 GB):
-        admission is by memory (`Broker.room`), so a page should not draw
-        "of 30" as a limit anybody meets. `cap` is answered rather than configured
-        into the app for the same reason: one number on this box, read from
-        `lib/loam_broker.py`, and no copy anywhere that could disagree.
+        """Report resident sessions across all agents, even when the listing is filtered. The
+        cap is a backstop. Available memory governs admission.
         """
         return {"live_count": len(self.live()), "cap": cfg.MAX_SESSIONS}
 
@@ -182,22 +174,8 @@ class SessionHost:
         self.announce_residency()
 
     def load(self, session_id: str) -> Session:
-        """A session as an object, live if it is and off disk if it is not.
-
-        Pin, archive and rename have to work on a session whose process ended
-        weeks ago -- that is most of what is on the home screen -- so they
-        cannot be routes that only a running session answers.
-
-        **And it is where an adopted record is brought up to date** (added
-        2026-09-21): every route that reaches a record comes through here, so
-        one call refreshes it against the app's own file for all of them --
-        `GET` on the record, the listing, and opening the thread's stream. It
-        costs a stat on an adopted record and nothing at all on any other; the
-        file is only re-read when it has grown. See
-        `Session.refresh_from_source`.
-
-        A session an object already exists for gets that object. Building a
-        second one for a running id would be two writers of one record file.
+        """Reuse the resident object so one session has only one writer. Load ended sessions
+        from their records and refresh adopted history when its source file changes.
         """
         session = self.sessions.get(session_id)
         if session is not None:
@@ -340,14 +318,10 @@ class SessionHost:
                 "need_mb": need}
 
     async def make_room(self, agent: str) -> None:
-        """Admission (2026-11-09): nothing while there is room (`room`).
-        Short of it, end the least recently used live session that is idle
-        (`Session.busy` is None and nothing for `cfg.EVICT_GRACE_S`), thread
-        or classic -- its id resumes, so ending it costs its next turn a
-        respawn -- and ask again. Only when nothing idle is left is the start
-        refused, in a person's sentence (`error`), with the route-level
-        advice in `hint`, the box's numbers in `memory` and who holds it in
-        `busy`."""
+        """While admission is short of memory, reclaim the least recently active idle session
+        outside the grace period. Its ID can resume. If all remaining sessions are busy,
+        return the reason, advice, memory reading and who holds them.
+        """
         while True:
             room = self.room()
             if room["ok"]:
@@ -414,15 +388,9 @@ class SessionHost:
                     await self.reap_once(time.time())
 
     async def reap_once(self, now: float) -> None:
-        """One pass of the reaper. **A session that is asking is not idle**
-        (2026-10-05): one with a request pending is never ended here, however
-        old its `last_activity`; a request that has waited
-        `PERMISSION_WAIT_S` is denied instead, and the idle clock runs again
-        from that answer. Until then a raised card was the last sign of life
-        the reaper saw, and it ended the chat an hour later.
-
-        One session's failure is printed and the pass goes on: an exception
-        out of here would end the reaper task for the life of the broker."""
+        """Preserve sessions waiting on a decision. Deny an expired request and restart its
+        idle clock from the answer. Log each session's failure and continue the pass.
+        """
         for session in self.live():
             try:
                 if session.pending:
@@ -447,10 +415,9 @@ class SessionHost:
             print(f"pressure: {exc!r}", file=sys.stderr, flush=True)
 
     async def relieve(self, now: float) -> Session | None:
-        """Under pressure, one idle session leaves memory per pass
-        (2026-11-09): when the box's MemAvailable is below the reserve,
-        sessions growing has eaten what the system was kept, and the least
-        recently used idle one is ended before the kernel has to choose."""
+        """Under memory pressure, release at most one session per pass. Choose the least
+        recently active idle one.
+        """
         mem = cfg.memory()
         available = mem.get("available")
         if available is None or available >= mem.get("reserve", cfg.MEMORY_RESERVE_MB):
@@ -505,28 +472,9 @@ class SessionHost:
             print(f"adopt: the scan failed ({exc!r})", file=sys.stderr, flush=True)
 
     def _settled(self) -> set[str]:
-        """Ids the adoption scan must leave exactly as they are.
-
-        Everything the broker started itself, and every adopted session that
-        has somehow been written into since -- a record with a log of this
-        broker's own has numbering that is load-bearing, and a rescan that
-        re-counted the file under it would renumber events a client has
-        already seen. Since the fork landed (2026-09-20) that is no longer
-        hypothetical: the first message into an adopted session gives it a
-        log of this broker's own, and from that moment the app's file is its
-        history and nothing else.
-
-        **The log, not the position field.** `record_seq` was what this asked
-        until the replay landed on 2026-09-20; since then an adopted record
-        carries the translated count there from the moment it is made, so
-        asking `record_seq` would have settled every adopted session at its
-        first scan and frozen it. The existence of a log of our own is the
-        question that was always meant.
-
-        An adopted record nobody has written into is deliberately NOT here:
-        rescanning it is how a conversation the owner is still having in the
-        app keeps its last message, its place on the home screen and the
-        turns he has taken since.
+        """Exclude broker-created sessions and adopted sessions with a broker journal.
+        Recounting their source would change sequence numbers already delivered to clients.
+        An adopted session without its own journal can still refresh.
         """
         settled = set()
         for path in sorted(cfg.SESSION_DIR.glob("*.json")):
@@ -544,29 +492,9 @@ class SessionHost:
         return settled
 
     def _forks_and_heads(self) -> tuple[set[str], dict[str, str]]:
-        """The two things a scan needs so it does not adopt a fork of its own.
-
-        Added 2026-09-22, after the home screen drew one conversation twice.
-        A reply into an adopted session forks it, the CLI writes the fork into
-        a session file of its own in the same folder, and that file has a
-        person in it and today's date on it -- so the scan adopted it as a
-        second conversation wearing the first one's title and history.
-
-        - **the fork ids**: every record's ``cli_session_id``. Free, read out
-          of records the scan is opening anyway.
-        - **the heads**: the first uuid of the file behind each record with a
-          source (``loam_adopt.first_uuid``), against the id of the record it
-          belongs to, because a fork copies its parent's entries verbatim,
-          uuids and all. This is the net under a fork whose id no record
-          carries -- one the CLI minted for a turn that died before the broker
-          read the id back. The id is kept beside the uuid so that a record's
-          own file, which a full rescan re-reads on purpose, is not read as a
-          copy of itself.
-
-        Measured on this box 2026-09-22: 49 records, 30 of them with a source,
-        **24 ms** warm and 41 ms cold, against the 240 ms of the cheapest scan
-        it runs inside. The heads it built collided on exactly four pairs, and
-        those four were the four duplicate records this landed to remove.
+        """Detect forks by recorded CLI session ID or by the first copied entry UUID. Keep the
+        original record ID beside each UUID so a rescan recognizes its own source. This also
+        catches a fork whose turn ended before its ID was saved.
         """
         forks: set[str] = set()
         heads: dict[str, str] = {}
@@ -627,25 +555,8 @@ class SessionHost:
                                  meta.get("source_mtime"))
 
     def scan_for_new(self) -> dict | None:
-        """Look for app sessions the broker has never seen, on a read of the
-        list, at most once a minute. None if it was not due.
-
-        The owner started a conversation on their phone (Remote Control, until
-        2026-11-19) and expected to find it in Loam UI; before this it appeared at the next broker restart, which
-        could be days (2026-09-21). A read of the list is the moment to look,
-        because it is the moment somebody is looking.
-
-        **Only what is unknown**, which is what makes it affordable on a read:
-        `_recorded` holds every id back, so nothing already adopted is
-        re-parsed -- the refresh on read does that job now, and better, per
-        record and only when its file moved. Measured on this box 2026-09-21:
-        0.24 s over 576 session files, against 0.93 s for the full rescan the
-        route and the restart still run.
-
-        Fail-soft and on the loop. A scan that goes wrong is reported and the
-        list is answered anyway; 0.24 s once a minute is a pause every open
-        stream pays and no reader can see, and a thread would buy that back at
-        the price of writing records from one.
+        """On a list read, periodically scan for unknown app sessions. Existing records refresh
+        on access. Report a scan failure and still serve the listing.
         """
         if time.time() - self._scanned < cfg.SCAN_INTERVAL_S:
             return None
@@ -658,26 +569,9 @@ class SessionHost:
             return None
 
     def adopt_app_sessions(self, new_only: bool = False) -> dict:
-        """Every persona's Claude Code app sessions, as records of this box.
-
-        Idempotent, which is what makes it safe both at start and on the
-        route: a session already held is either settled (left alone) or
-        refreshed from its file, and nothing is ever adopted twice.
-
-        **A fork of an adopted session is never adopted**, which is the other
-        half of "nothing is adopted twice" and was missing until 2026-09-22:
-        the fork is a session file like any other, and the conversation in it
-        is one this broker already holds. `_forks_and_heads` is the two nets.
-
-        `new_only` narrows it to files no record exists for, which is what a
-        read of the list triggers (`scan_for_new`): the records that do exist
-        are kept in step by the refresh on read. Without it this is the full
-        rescan -- every adopted record nobody has written into re-read from its
-        file -- which is what the route and every broker start still do.
-
-        The records are written through `Session.save()` rather than straight
-        to disk, so the live list hears about them the moment they exist --
-        a page open while this runs gains the rows without reloading.
+        """Import app conversations once, skipping forks and records with a broker journal. A
+        full scan refreshes eligible sources. A list read requests new IDs only. Save
+        through the session so subscribers see new records.
         """
         self._scanned = time.time()
         settled = self._recorded() if new_only else self._settled()
@@ -768,21 +662,9 @@ class SessionHost:
                      "last_event_at": session.last_event_at}
 
     def known(self, agent: str | None = None) -> list[dict]:
-        """Every session this broker has a record of, live or not, archived
-        or not (the classic list's archive filter retired with it on
-        2026-11-12; Running now always asked for the archive too), newest
-        activity first. Read off disk so a restarted broker still lists what
-        it started before it restarted -- those processes are gone, but their
-        ids resume, and a client that cannot see them cannot resume them.
-
-        **An adopted record is stat'ed here and re-read if it has grown**
-        (2026-09-21). The rows the owner is still talking to in the Claude Code
-        app are exactly the rows whose last message goes stale, and the home
-        screen is where he reads them. Measured on this box: 27 adopted
-        records, 0.36 ms of stats for the lot of them, against 0.69 s to
-        re-read all 27 files -- which is why the stat decides and the parse
-        happens only for the file that moved. See
-        `Session.refresh_from_source`.
+        """List all recorded sessions, including archived and ended sessions, newest activity
+        first. Refresh changed adopted sources on read so an ongoing app conversation keeps
+        its place.
         """
         out: dict[str, dict] = {}
         for path in sorted(cfg.SESSION_DIR.glob("*.json")):

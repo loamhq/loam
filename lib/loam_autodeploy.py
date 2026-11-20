@@ -112,13 +112,9 @@ def run(app: str, sha: str, job_id: str, say=None, runner=subprocess.run) -> dic
 
 def went_live(checkout: Path | None, before: str | None, after: str | None,
               limit: int = 30) -> list[str]:
-    """The commits a deploy put live: `before..after` in the app's checkout,
-    one `<short> <subject>` each, newest first. A landing's sha carries every
-    commit landed before it, including another job's that said "do not
-    deploy" or "staging first" -- so the receipt names all of them, not only
-    this job's (found 2026-11-12: the plugin host, landed for staging only,
-    sat under every later loam-ui commit). [] when nothing changed or the
-    range cannot be read."""
+    """List commits in the deployed checkout's before..after range, newest first, for the
+    receipt.
+    """
     if not checkout or not before or not after or before == after:
         return []
     if not all(len(c) == 40 for c in (before, after)):

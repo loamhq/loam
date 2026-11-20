@@ -73,21 +73,9 @@ context_used = cfg.context_used
 
 
 def context_window(envelope: dict, model: str | None) -> int | None:
-    """The context window of the model a turn ran on, as the CLI states it.
-
-    Read out of the result envelope's ``modelUsage`` **by name**, which is the
-    one thing that dict can be asked without guessing: it lists every model the
-    process billed, including the CLI's own small-model calls, and a real turn
-    on this box answered
-    ``{"claude-haiku-4-5-20251001": {contextWindow: 200000},
-       "claude-fable-5-1": {contextWindow: 1000000}}``
-    (session 49db688c, 2026-09-22). Picking out of that without a name would
-    have called a 1M session a 200k one, which is the same trap `model` on a
-    turn record documents.
-
-    ``None`` when the turn named no model or the envelope carries no row for
-    it. The persona's settings are not consulted: "the settings say fable" and
-    "this turn ran on fable with a 1M window" are different claims.
+    """Look up contextWindow for the model that answered this turn. One envelope may bill
+    both a helper with a 200k window and the answering model with a 1M window. Return
+    None if that model or its row is missing.
     """
     rows = envelope.get("modelUsage")
     if not model or not isinstance(rows, dict):
@@ -102,15 +90,8 @@ def context_window(envelope: dict, model: str | None) -> int | None:
 
 
 def compaction_event(session_id: str, boundary: dict) -> dict:
-    """The log entry a page draws a compaction divider from.
-
-    Read off the CLI's own ``system``/``compact_boundary``, whose shape on
-    2.1.281 was taken from a probe on this box (2026-09-30), not from the
-    docs: ``compact_metadata`` carries ``trigger`` ("manual" for ``/compact``,
-    "auto" when the window is reached), ``pre_tokens``, ``post_tokens``,
-    ``cumulative_dropped_tokens`` and ``duration_ms``, beside the uuids of the
-    messages it kept. A number the marker does not carry is null here rather
-    than a guess. ``seq`` is the log's own, added by ``emit``.
+    """Translate a provider compact_boundary event into a divider using its reported token
+    counts.
     """
     meta = boundary.get("compact_metadata")
     meta = meta if isinstance(meta, dict) else {}
@@ -152,10 +133,7 @@ def history_bytes(origin: str | None, cli_session_id: str | None,
 
 
 def with_context(turn: dict) -> dict:
-    """One turn record, answered with the context keys whether or not it was
-    written with them. Turns taken before 2026-09-22 carry neither figure, and
-    a page must not have to ask whether `context` is missing because the turn
-    spent no tokens."""
+    """Supply the context keys on older turn records too. Missing readings remain unknown."""
     context = turn.get("context")
     if not isinstance(context, dict):
         context = {}
@@ -198,11 +176,9 @@ CHOOM = "/usr/bin/choom"
 
 
 def first_to_go(argv: list[str]) -> list[str]:
-    """A chat's command line, run at `cfg.CHILD_OOM_SCORE_ADJ` (2026-11-09):
-    ``choom`` sets the score and execs, so the pid is the CLI's and every MCP
-    server it starts inherits it. Under a memory emergency the kernel then
-    ends a chat before the broker, a job or the system. Without
-    ``choom`` on the box the line is unchanged and the unit's 500 holds."""
+    """Launch the provider with the child OOM score and preserve its PID across exec so the
+    ordering also applies to its descendants.
+    """
     if not os.access(CHOOM, os.X_OK):
         return list(argv)
     return [CHOOM, "-n", str(cfg.CHILD_OOM_SCORE_ADJ), "--", *argv]
@@ -320,14 +296,8 @@ def _not_saved_reason(exc: OSError) -> str:
 
 
 class Session:
-    """One persona session and the process behind it.
-
-    The id is chosen HERE, before the process starts, and passed as
-    ``--session-id``. The CLI would otherwise mint one and only reveal it in
-    the ``system/init`` message, which means a client that asked for a session
-    could not name the thing it had just asked for until the model answered.
-    Choosing it up front also makes the resume path the same id, not a second
-    one to map.
+    """Own one session and its provider process. Choose its ID before launch so
+    clients can address it immediately and use the same ID to resume it.
     """
 
     def __init__(self, agent: str, session_id: str | None = None,
@@ -575,15 +545,9 @@ class Session:
                 and self.proc.returncode is None)
 
     def meta(self) -> dict:
-        """The session record: what the listing answers and what the snapshot
-        spreads flat.
-
-        The position field is ``record_seq`` and not ``seq``. Same number,
-        same meaning -- the last event's number -- under a name that cannot
-        be read as this item's own identity, because the record is sent on
-        the event stream as ``broker.session`` and a client that applied a
-        `seq` once dropped the real event wearing it. See the module
-        docstring.
+        """Build the session record for a list row or broker.session snapshot. Its
+        record_seq is the last journal position. Only an actual event carries seq,
+        so receiving a snapshot cannot consume the next event.
         """
         return {
             "session_id": self.id,
@@ -658,30 +622,9 @@ class Session:
                                .strftime("%Y-%m-%dT%H:%M:%SZ"))
 
     def working_behind(self) -> bool:
-        """Is something still coming that no result has accounted for.
-
-        True is what makes `status` answer `waiting` rather than `done` once
-        the turn's own result has landed; with the turn still open it changes
-        nothing, because a turn in flight is `working` either way.
-
-        The three shapes, and each one of them is a chat the owner watched go to
-        its done state while the persona was still working (2026-09-22):
-
-        - **a live background task.** The persona launched a subagent with
-          ``run_in_background``, its own turn ended and the CLI emitted
-          ``result`` -- minutes or tens of minutes before the subagent
-          finishes and the answer arrives.
-        - **a task that has left the CLI's list without notifying yet.** The
-          list empties one event before the notification, and a status
-          computed in between would flicker to `done` and back inside a
-          millisecond.
-        - **a notification that has fired.** It is the CLI handing the persona
-          another turn; the turn's own `system`/`init` follows it. Cleared by
-          the `result` that ends that turn.
-
-        Stale entries are dropped here as well as by `_settle`, so a record
-        read after the backstop's window has passed answers the truth even if
-        nothing has saved it since.
+        """Count unfinished background work even between a task leaving the provider's list and
+        its notification arriving. The notification starts another turn; its result clears
+        the wait. Expire stale entries when reading status.
         """
         if self._awaiting:
             cutoff = time.monotonic() - cfg.BACKGROUND_SETTLE_S
@@ -690,9 +633,7 @@ class Session:
         return bool(self.background_tasks or self._awaiting or self._resuming)
 
     def busy(self) -> str | None:
-        """Why this live session may not be ended to make room, or None when
-        it may (2026-11-09): mid-turn, asking a person, or waiting on work it
-        launched. What admission's eviction and the idle stops ask."""
+        """Return the reason this resident session cannot be reclaimed, or None when it can."""
         if self.pending:
             return "needs_input"
         if self._turn_active:
@@ -702,35 +643,9 @@ class Session:
         return None
 
     def status(self) -> str:
-        """One word for what this session is doing, which is what the home
-        screen draws a row from. The vocabulary is STATUSES above.
-
-        ``needs_input`` outranks ``working`` deliberately: a paused turn is
-        in flight, and a page that drew a spinner for it would hide the one
-        thing the person has to do for it to continue.
-
-        ``working`` is the CLI's turn being open: the model is generating.
-
-        ``waiting`` is what sits between that and ``done`` (2026-09-25). The
-        turn's ``result`` has arrived and something is still coming -- a
-        background task the session launched, or a notification that has not
-        landed yet -- so `working_behind` is true and the session is parked
-        until its children report. Until today both of those answered
-        ``working``, which held the row off ``done`` correctly and then told a
-        small untruth about what the session was doing: the owner watched their
-        own chat sit on a state that says "generating" while its agent had
-        ended its turn and was blocked on two background jobs, and read the
-        row as finished, because the cues that say "generating" are the
-        page's and are keyed to the live stream, not to this word. An agent
-        that is writing and an agent that is waiting on its children are two
-        things a person reads differently, so they are two words.
-        `background_tasks` is unchanged and stays a separate field: it says
-        what is being waited ON, and the count is not the state.
-
-        ``state`` is not this and stays beside it: ``state`` is whether a
-        process exists, ``status`` is what the session is. An exited session
-        is ``done`` if its last turn succeeded -- it has an answer to read
-        and its id resumes -- and ``failed`` only if something went wrong.
+        """Give a pending user decision priority over an open turn. Once the turn ends, report
+        waiting while its background work remains. Process residency is separate from status:
+        a successful exited session can still be done.
         """
         if self.pending:
             return "needs_input"
@@ -772,40 +687,10 @@ class Session:
     # -- the process -------------------------------------------------------
 
     def argv(self, resume: bool) -> list[str]:
-        """The launch line, and every flag on it is load-bearing.
-
-        Not here, on purpose: --settings (the persona's own settings must
-        load, and an override would silence outputStyle),
-        --append-system-prompt-file (that is a wake's lane, not a
-        conversation's), --disallowed-tools (a conversation has the owner in it;
-        the unattended restrictions are bin/wake's and do not belong on a
-        surface someone is watching).
-
-        **--model and --effort are here only when this chat asked for them**
-        (2026-09-21). They were in the paragraph above until then, and the
-        reason they left it is unchanged: the persona's settings name the
-        model, so a session nobody has chosen for passes neither flag and the
-        CLI reads that file. What a person picks in the + menu is on the
-        record, and a record that names one is a person having overridden it
-        for this chat and no other.
-
-        **Three endings, and an adopted session has two of them.** A session
-        of the broker's own is started under an id chosen here
-        (``--session-id``) and resumed under it. A session adopted from the
-        Claude Code app is never resumed under its own id at all: the first
-        launch is ``--resume <the app's id> --fork-session``, which reads that
-        conversation and continues it in a NEW session file of the CLI's own,
-        leaving the app's untouched; every launch after that resumes the id
-        the CLI minted for the fork. ``resume`` is not consulted for an
-        adopted session because there is only one way to drive one and it is
-        this, whichever way the route was called.
-
-        The fork's id is not asked for. ``--session-id`` alongside
-        ``--resume --fork-session`` is accepted by the CLI's parser, and what
-        it does with it is not documented and not something to find out by
-        assuming: the id arrives in the ``system``/``init`` message either
-        way, and reading it back is the one answer that cannot be wrong. See
-        ``_handle``.
+        """Build the conversation invocation using the persona's own workspace settings. Pass
+        model and effort overrides only when the session requests them. Keep the provider's
+        prompt-response channel open and stream numbered events from the same process across
+        turns.
         """
         # The shared stream flags send permission prompts over stdio so the client can
         # answer.
@@ -933,40 +818,10 @@ class Session:
     async def send_message(self, text: str,
                            attachments: list[dict] | None = None, *,
                            dispatch_id: str | None = None) -> int:
-        """A person's words, into the process AND into the durable log.
-
-        ``broker.user_message`` exists because the CLI does not echo what a
-        person sent: ``--replay-user-messages`` is deliberately not passed
-        (see ``argv``), and a ``user`` event on this stream is a tool result.
-        So without this event the log holds one side of a conversation, and a
-        client replaying a session it did not watch live shows answers with
-        no questions -- caused 2026-09-16 by reopening a session in the app.
-        A client must still render the message it just typed; this is not an
-        echo for the sender, it is the record for everyone else and for
-        later.
-
-        Emitted BEFORE the text reaches the CLI's stdin, so the replay reads
-        in the order the conversation happened: the person's line, then
-        whatever the session did about it. The refusal send_raw would make is
-        made here first, because a message the CLI never received must not be
-        in the log as one a person sent.
-
-        Returns the event's own seq, which is what the route answers with.
-        Reading self.seq after the fact would be a lie under load: the CLI's
-        pump is a task on this loop and may number an event of its own
-        between the emit and the reply, and a sender told the wrong number
-        cannot recognise its own line on the stream.
-
-        **Attachments are named, and images are also shown.** Every attached
-        file is named by its vault path in the text, because a path is what a
-        persona can act on: it reads a PDF, a CSV or a file of code with Read,
-        in its own time, and a big file does not have to cross this pipe to be
-        useful. An image is different -- the persona cannot see a PNG by
-        reading it -- so an image is ALSO base64'd into the message as an
-        image content block, the shape the CLI's stream-json input takes
-        (`content` as a list of blocks; verified against the CLI 2.1.270).
-        The path is still named for an image, so the persona can say where the
-        picture it is looking at lives.
+        """Validate that the session can receive input, then journal the user's words before
+        sending them so replies follow their question during replay. Return the sequence of
+        that specific event; another event may have advanced the session cursor. Name
+        attachments by path and include image blocks for the provider.
         """
         if self.proc is None or self.proc.stdin is None or self.state != "running":
             raise BrokerError(409, f"session {self.id} is not running")
@@ -1001,19 +856,9 @@ class Session:
     async def steer(self, text: str,
                     attachments: list[dict] | None = None, *,
                     dispatch_id: str | None = None) -> int | None:
-        """Words for the turn in flight, at its next safe boundary; the seq
-        of the ``broker.user_message`` (``steered: true``) that records them,
-        or None when there is no turn in flight to take them (the caller
-        then starts a turn of its own, as for any message).
-
-        Claude Code reads stdin while a turn runs (verified on 2.1.325,
-        2026-11-14): a user message written while a tool runs is taken in
-        after that tool's result and answered in the same turn, one
-        ``result``; one written after the model's last words and before its
-        ``result`` opens a second harness turn of its own (``init`` 0.1 s
-        after the first ``result``). Either way the running tool is never
-        cut and nothing is dropped; the thread engine watches for the
-        second shape (``STEER_FOLLOW_S``)."""
+        """Send input to the current turn at its next safe boundary. Return the journal sequence
+        of accepted input or None if the session cannot steer.
+        """
         if (not self._turn_active or self.proc is None or self.proc.stdin is None
                 or self.state != "running"):
             return None
@@ -1033,13 +878,8 @@ class Session:
         return event["seq"]
 
     def _content(self, text: str, attachments: list[dict]) -> str | list[dict]:
-        """What goes to the CLI as the user message's `content`.
-
-        A string when there is nothing attached -- which is every message this
-        interface carried before 2026-09-21, and the shape stays exactly as it
-        was rather than becoming a one-block list for no reason. Otherwise the
-        blocks: the person's words, the paths, and an image block per image
-        small enough for the API to take.
+        """Send plain text when there are no attachments. Otherwise include their paths and any
+        supported image content in the provider's message blocks.
         """
         if not attachments:
             return text
@@ -1066,31 +906,9 @@ class Session:
         return [{"type": "text", "text": "\n".join(lines)}] + blocks
 
     async def set_choices(self, changes: dict) -> list[str]:
-        """This chat's model and effort, changed where the change has to
-        land: on the record, and -- while a process is up -- in the process.
-
-        A running CLI does not re-read its launch flags, so telling it is the
-        only way a change takes effect before the next launch, and the CLI's
-        own way of being told is its slash commands. ``/model opus`` and
-        ``/effort high`` are sent as a user message on the same stdin a
-        person's words go down, value and all, which is what the headless
-        docs say those commands take in ``-p`` mode. Verified by causing
-        2026-09-21 on this box: a session started on sonnet, PATCHed to opus,
-        answered the next message with ``claude-opus-5`` on its turn record.
-
-        Not through ``send_message``: a command is not something a person
-        said, and putting it in the event log as ``broker.user_message``
-        would draw "/model opus" in the transcript as though the owner had
-        typed it into the chat. The record's own change is how a client
-        learns, and it arrives on the live list as ``broker.session``.
-
-        **Clearing goes back to the persona's setting at the next launch,
-        not now.** ``/model`` with no value opens a picker, and there is
-        nobody at this end of the pipe to pick; the record says null from
-        here and the next process simply carries no flag. The caller says so
-        in the answer rather than leaving it to be discovered.
-
-        Returns the commands actually sent, which is what the route reports.
+        """Persist model and effort overrides and send supported changes to a running CLI as
+        control commands. Keep these commands out of the user's message history. Clearing a
+        launch override restores the default on a later launch.
         """
         sent = []
         for field, command in (("model", "/model"), ("effort", "/effort")):
@@ -1208,11 +1026,9 @@ class Session:
     # -- the stream --------------------------------------------------------
 
     async def _raise_request(self, req: dict, event: dict) -> None:
-        """Put a pending request's event on the stream, and keep it on the
-        broker's copy of the request as it went out (2026-11-08). A session's
-        own stream replays it from the log; a thread's stream has no log, and
-        its opening ``thread.snapshot`` carries ``pending_events()`` instead,
-        so a page opened after the question was asked can still draw it."""
+        """Retain the emitted request on the pending entry so the same request can be replayed
+        to a reconnecting client.
+        """
         req["event"] = event
         await self.emit(event)
 
@@ -1272,16 +1088,8 @@ class Session:
             queue.put_nowait(event)
 
     def _append(self, event: dict) -> None:
-        """One event, one line, and the line starts at the start of a line.
-
-        **A write that fails can leave half a line behind.** On 2026-10-22
-        `/` filled mid-stream and the log of session f3069d8e was left ending
-        `{"type": "stream_event", "ev` with no newline; the next event,
-        the owner's message, was appended onto it, and every replay since has
-        skipped the pair as one unparsable line. So until a write is known to
-        have finished, the next one looks at the file's last byte first and
-        starts a fresh line if it has to. It costs one read per session after
-        each failure, and one at the first write after a broker start.
+        """Append one JSON event per line. After startup or a failed write, check the final
+        byte: a partial line must never consume the next valid event.
         """
         data = (json.dumps(event) + "\n").encode("utf-8")
         with self.log_path.open("ab") as handle:
@@ -1296,20 +1104,9 @@ class Session:
         self._log_ends_clean = True
 
     def _not_saved(self, event: dict, exc: OSError) -> None:
-        """An event the log could not take. Never fatal to the session.
-
-        Until 2026-10-22 this raised out of `emit` and killed the reader
-        that called it: with `/` full, session f3069d8e's `_pump_stdout` died
-        on one event, the persona went on answering into a pipe nobody read,
-        and the record sat on `working` for the hour until the reaper. Now the
-        event still goes to every page that is watching -- it is lost only to
-        a later replay -- the reader goes on reading, and the turn it belongs
-        to is marked failed at its `result` with a sentence a page can show.
-
-        The first failure in a turn also puts ``broker.write_failed`` on the
-        live stream: the reason, and the ``seq`` it started at. Like
-        ``broker.session`` it is not an event and is never logged, because
-        the log is the thing that is failing.
+        """Keep reading provider output after a journal failure. Notify live subscribers once
+        per turn with the first missed sequence, and mark the turn failed when its result
+        arrives. Later replay can recover only what reached disk.
         """
         reason = _not_saved_reason(exc)
         print(f"log: {self.id[:8]}: seq {event.get('seq')} not written ({exc})",
@@ -1331,20 +1128,9 @@ class Session:
         return {"type": "broker.session", **self.meta()}
 
     def broadcast_snapshot(self) -> None:
-        """Hand the current record to everyone watching, without logging it.
-
-        Called when a turn record is written, because the turn's real cost
-        (``cost_delta_usd``) and the model it ran on live in the record and
-        not in the CLI's ``result`` envelope -- the broker computes the first
-        and reads the second back. Without this a page that wants to price
-        the turn that just ended has to re-fetch the record and match it to
-        an event by hand; asked for by the app's engineer 2026-09-16.
-
-        Deliberately not ``emit``: a snapshot in the log would be replayed as
-        a stale record in the middle of a transcript, and numbering it would
-        put back the collision that removing ``seq`` just fixed. A client
-        that was not connected loses nothing, because the snapshot it gets
-        at connect is by definition newer.
+        """Send subscribers the current session record without logging a new event. Its
+        record_seq is a position; reusing it as a new event's seq would hide a real journal
+        entry.
         """
         event = self.snapshot()
         for queue in list(self.subscribers):
@@ -1669,26 +1455,7 @@ class Session:
         self._resuming = False
 
     async def _title(self) -> None:
-        """Take this session's name from the transcript the writer filed.
-
-        The vault's title IS the title. It was not always: this called the
-        same titler the writer calls, on the reasoning that one function is
-        one name -- and it is not, because the two calls read different text
-        at different moments and answer differently. Caused 2026-09-22: one
-        conversation was "Household note and image attachment" on the home
-        screen and "Attachment check" in the vault. Two names for one
-        conversation is two conversations to anybody reading, and there is no
-        arbitrating between two model calls, so one of them had to stop. The
-        writer's stays, because the vault is the record and the file is named
-        once and never renamed; this one reads its answer.
-
-        Polled rather than read once, because the writer is filing this same
-        conversation on the same Stop hook and its titler has a 45s budget.
-        Exhausting the waits is not a failure: the stand-in stays on the row
-        and the next turn's result tries again. Fail-soft throughout -- a
-        title is a convenience, and a session that cannot be named is not a
-        session that has gone wrong.
-        """
+        """Adopt the transcript writer's title when available. Preserve an explicit human title."""
         try:
             for wait in cfg.TITLE_POLL_WAITS:
                 await asyncio.sleep(wait)
@@ -1712,42 +1479,9 @@ class Session:
             self._titling = False
 
     def _cost_delta(self, total: float | None) -> float | None:
-        """What THIS turn cost, which ``total_cost_usd`` does not say.
-
-        ``total_cost_usd`` is the process's running total and it resets at a
-        resume, because a resume is a new process. Measured 2026-09-16: turn
-        one $0.34253275, turn two $0.35690825 -- turn two cost the $0.0144
-        difference, not $0.357 -- then a resume, and turn three reported
-        $0.01428225. A client that subtracts for itself has to know where
-        each process began, and nothing in the turn records says: the records
-        carry across a resume on purpose, because they are the session's.
-        The broker is the only party that knows, because it started the
-        processes, so the subtraction is made here.
-
-        **And a resume does not always reset it** (found 2026-10-13). The CLI
-        now restores a resumed session's saved total, sometimes: of 99 first
-        turns after a start in the broker's records, 86 reported the
-        session's earlier total plus the turn (f3069d8e: $81.57, then $82.79
-        on the first turn after a resume), and 13 started over from zero or
-        from an older saved total (940380fd: $28.41, then $16.46, which is the
-        $15.76 an earlier process ended at plus the turn). Until then the
-        first turn after a start was recorded as its own delta, so each
-        restore booked the whole session again: a week's deltas summed to
-        about 7x what was spent. So the first turn of a process subtracts the
-        largest base it could have started from that is not above its total:
-        zero, or the total the session stood at when one of its earlier
-        processes ended (see _cost_bases). That is exact for a restore and a
-        reset alike; it undercounts only a reset whose single turn cost more
-        than an earlier process's whole running total, which is the rare
-        case where the other reading overcounted every time.
-
-        Rounded to ten places to keep binary floating point out of a number
-        displayed as money: 0.35690825 - 0.34253275 is 0.014375500000000018
-        in doubles and $0.0143755 in fact. Ten places is two more than the
-        CLI reports, so it rounds representation and never a real digit.
-
-        ``None`` when the envelope did not report a total, because a cost the
-        CLI did not state is not one to invent.
+        """Convert the provider's cumulative process cost to a per-turn delta. On the first
+        result after restart, use the largest compatible saved process total as the baseline.
+        A new process may start at zero or resume an earlier total.
         """
         if not isinstance(total, (int, float)) or isinstance(total, bool):
             return None
@@ -1760,12 +1494,9 @@ class Session:
     _process_cost: float | None = None   # the previous turn's total, THIS process
 
     def _cost_bases(self) -> set[float]:
-        """Every running total a new process of this session could resume
-        from: zero, and the last total of each earlier process, which is what
-        the CLI saves when a process ends. Read off the turn records, which
-        carry across a resume and a fork: a turn is a process's first when it
-        says ``process_start``, or, before that key (2026-10-13), when its
-        delta equals its total, which the old rule wrote for exactly those."""
+        """Return zero and the final total from each earlier process. Older records mark a
+        process start implicitly when that turn's delta equals its cumulative total.
+        """
         def total(t: dict) -> float | None:
             v = t.get("total_cost_usd")
             return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
@@ -1883,38 +1614,10 @@ class Session:
             return True
 
     def refresh_from_source(self) -> int:
-        """Read the app's file again if it has grown, and hand what is new to
-        whoever is listening. Returns how many events that was.
-
-        The whole of point 1 and most of point 2 of this job. A stat decides:
-        the record keeps the size and the mtime it last read, and
-
-        - **both unchanged** -- nothing has touched the file, and that is the
-          answer for 25 of the 26 adopted records on any given read.
-        - **mtime moved, size the same** -- something on this box stamps old
-          session files (`loam_adopt.last_timestamp` says what was measured
-          and when), and a touch is not a turn. The new mtime is written down
-          so the next read compares against what the file says now; nothing is
-          parsed.
-        - **the size moved** -- the conversation went on, and the record is
-          made again out of the file: title, last message, activity and the
-          count of what the file replays. That count is `replayed` and
-          `record_seq` together, exactly as the scan sets them, because a
-          record that promised a different number than the stream delivers is
-          a record whose next turn overwrites the end of its own history.
-
-        `save()` puts the new record on the live list, so a home screen open
-        in a browser redraws the row without asking. The events past what has
-        already been handed out go to this session's own listeners, numbered
-        from where the record had reached -- so an open thread gains the turns
-        the owner took in the app, in the same shapes as the replay and
-        continuous with it.
-
-        They are handed out and **not logged**. Writing them to the session's
-        own log would give this record a log of the broker's own, which is the
-        one thing that settles it against the scan and stops the follow: the
-        file would stop being the only copy of that conversation and the next
-        turn taken here would number on top of it.
+        """Return the number of new events read from the adopted source. A timestamp-only touch
+        updates the stored mtime. When size changes, refresh the record and send newly
+        numbered events to listeners. Keep the external file as the sole source for this
+        prefix so replay cannot double-count it.
         """
         if not self.followable():
             return 0
@@ -1977,9 +1680,7 @@ class Session:
             queue.put_nowait(event)
 
     def watch(self, queue: asyncio.Queue) -> None:
-        """Register a listener. (An adopted record nobody had written into
-        was followed against the app's own file while a classic chat had it
-        open; that follower retired with the classic view on 2026-11-12.)"""
+        """Register a listener for this session's live events."""
         self.subscribers.add(queue)
 
     def unwatch(self, queue: asyncio.Queue) -> None:
@@ -1989,34 +1690,10 @@ class Session:
         return list(self.iter_replay(since))
 
     def iter_replay(self, since: int):
-        """Everything numbered above `since`; 0 is the session from the
-        beginning. Since the classic chat view retired (2026-11-12) nothing
-        on the wire streams a session -- a thread is what is read -- but this
-        is still the one reading of a session's whole numbered history, both
-        halves of an adopted one, and what the suite reads the log through.
-
-        **An adopted session has two halves and this is where they are one
-        stream** (2026-09-20). The first `replayed` events are translated out
-        of the CLI's own session file -- the conversation the owner had in the
-        app, which this broker never logged because it never ran it -- and
-        the broker's own log carries everything after that, numbered from
-        `replayed + 1` because that is where `Session.seq` was left. So a
-        session adopted today and taken a turn in tomorrow reads as one
-        conversation, and a client that reconnects at `?from=` lands in the
-        right place in whichever half it had reached.
-
-        The translated half is read at every replay and written down nowhere:
-        the file is the only copy of that conversation on this box and it
-        stays that way. It is cut to `replayed` deliberately -- the app may
-        have gone on writing to that file since the record was last read, and
-        an extra translated event would wear a number the broker's own log has
-        already given to something else. What the app has said since is
-        picked up by the refresh this replay is preceded by (`load` calls it),
-        so `replayed` is current as of a moment ago rather than as of the last
-        broker start. Once the session has been forked and sent into, that
-        stops: the conversation continues in the fork's own file, the app's
-        file is the first `replayed` events and nothing more, and anything
-        said in the app after that is a branch this record does not follow.
+        """Replay events above since, with zero starting at the beginning. An adopted session
+        has one sequence space across the provider file and the broker journal. Cap the
+        translated prefix at replayed so later writes to the source cannot reuse numbers
+        already assigned in the local journal.
         """
         if self.origin == adoption.ORIGIN_APP and self.source:
             limit = self.replayed
@@ -2088,63 +1765,10 @@ def command_description(command, limit: int = 60) -> str:
 
 
 class CodexSession(Session):
-    """A persona session on Codex (2026-10-01): ``codex app-server`` over
-    stdio in the persona's workspace, in place of ``claude -p``.
-
-    Everything a record is -- the log, the numbering, the status, the turn
-    records, the title, the seen mark, pin and archive -- is ``Session``'s and
-    unchanged. What differs is the wire. The app-server speaks JSON-RPC 2.0, so
-    this keeps a table of requests in flight and answers the server's own
-    requests (approvals); and its notifications are translated by
-    ``loam_codex.Translator`` into the Claude CLI's event shapes and handed to
-    ``Session._handle``, which does the bookkeeping exactly as it does for a
-    Claude turn. One translation, and the page draws a Codex thread with the
-    code that draws every other.
-
-    The handshake is ``initialize`` / ``initialized``, then ``model/list``
-    (kept, so the + menu is the list this binary offers), then
-    ``thread/start`` with the workspace as ``cwd`` -- or ``thread/resume`` by
-    the record's ``thread_id`` when it has one. One ``turn/start`` per
-    message, carrying this chat's model and effort when it has picked them.
-
-    **The persona is the same person here** (second Codex brief,
-    2026-10-01): its instructions are regenerated from its own files at
-    every start (``loam_codex.write_instructions``), and its tools, hooks and
-    sandbox come from ``.codex/config.toml``, rendered by ``bin/provision
-    --codex`` from the sources of ``.mcp.json`` and ``.claude/``. The
-    workspace and the runtime's hooks are trusted in ``CODEX_HOME`` before
-    the thread starts, because Codex loads neither otherwise. The transcript
-    is the Claude one's writer, called by Codex's Stop hook on the rollout.
-
-    **A subagent's thread is a background task, not the conversation**
-    (2026-10-02). The root thread can spawn subagents, and the app-server
-    puts their notifications on this same stream, each with its own
-    ``threadId``. Until today every one of them was read as the root's: a
-    subagent's ``turn/started`` reopened the row's turn, its
-    ``turn/completed`` closed it while the root was still working, and the
-    root's own ``turn/completed`` read as the session done while a subagent
-    still held a tool call open. The owner watched exactly that on a persona's chat
-    7bcccd28: the root ended its turn at 15:24:09Z saying the work was sent,
-    its subagent sat on an engineer call for the next half hour, and the
-    row said ``done`` with ``background_tasks`` 0 the whole time. So a turn on
-    any thread but the record's is a background task -- in
-    ``background_tasks`` from its ``turn/started`` to its ``turn/completed``
-    -- which is the Claude mapping unchanged: ``waiting`` with the count once
-    the root's turn is over, ``done`` when the last one ends. The subagent's
-    items are still drawn as they always were. See ``_subagent_turn``.
-
-    **And one that ends after the root's turn wakes the root** (2026-10-09).
-    Codex hands a finished subagent's report to a root turn in flight, and
-    to nothing otherwise: the report sat unread until the owner's next message
-    (proved 10-02), so a persona could not brief from a subagent and hear
-    the receipt the way a Claude persona hears its task notification. Now
-    the broker does what the Claude CLI does: a ``system``/``task_notification``
-    on the stream, then a root turn carrying the subagent's last message in
-    a ``<task-notification>`` envelope (which the transcript writer drops,
-    as it drops Claude's). The same holds for an MCP call the root left
-    running when its turn ended -- a persona's a9c8ec2c, where a ``brief`` ran on
-    for 23 minutes behind a row that said ``done`` -- and for a command the
-    root left running (probe f35cc554's ``sleep 30``). See ``_wake``.
+    """Run a Codex app-server in the persona workspace and translate its RPC events into the
+    common session journal. The root thread owns the turn; child threads remain
+    background work, with their items nested under the spawning call. Deliver late child
+    results to the root so a finished root turn cannot strand a report.
     """
 
     REQUEST_TIMEOUT_S = 60
@@ -2428,16 +2052,9 @@ class CodexSession(Session):
             await self._task_ended(late_call["id"], content)
 
     def subagent_parent(self, thread: str) -> str:
-        """The ``parent_tool_use_id`` a subagent thread's events carry
-        (2026-11-13): the id of the call that spawned it, or a stand-in
-        naming the thread when that call has not been seen (a resumed
-        session's child, an event ahead of its spawn). Never null: a null
-        parent is the persona speaking, and the thread engine posts a
-        top-level message as the persona's reply. Until today every Codex
-        subagent event went out with a null parent, so a subagent's
-        sentence could post in a thread under the persona's name (receipt
-        20261113-075745, gap 2). A grandchild's spawn arrives on its
-        parent's thread, so its call id nests it under that child."""
+        """Return the spawning call's ID for nesting, or a stable synthetic ID until the
+        provider supplies the call.
+        """
         return self._agent_calls.get(thread) or f"codex-subagent:{thread}"
 
     async def _subagent_turn(self, thread: str, running: bool) -> None:
@@ -2724,18 +2341,9 @@ class CodexSession(Session):
     async def steer(self, text: str,
                     attachments: list[dict] | None = None, *,
                     dispatch_id: str | None = None) -> int | None:
-        """``turn/steer`` into the root's open turn (2026-11-14, Codex
-        0.169.0), guarded by ``expectedTurnId``: Codex refuses it when that
-        turn is no longer the active one, so a steer racing the turn's end
-        is refused, never lost, and the caller starts a turn of its own.
-        Accepted, Codex takes the words as a user message at the turn's
-        next sampling boundary -- after a running command's result, which
-        is kept -- and answers in the same turn (probed mid-command and
-        after the last agent message: both answered, one
-        ``turn/completed``). The ``broker.user_message`` (``steered:
-        true``) is logged once Codex has accepted, because a message it
-        refused must not be in the log as one it heard. None when refused
-        or when no turn is open."""
+        """Steer only the expected root turn. Journal the input once the provider accepts it. A
+        racing turn completion returns None so the caller can send the input as a new turn.
+        """
         turn_id = self._codex.turn_id
         if (not self._turn_active or not turn_id or not self.thread_id
                 or self.proc is None or self.state != "running"):
@@ -2825,22 +2433,10 @@ class CodexSession(Session):
 
 
 class AntigravitySession(Session):
-    """A persona session on Antigravity (2026-11-09): one ``agy -p``
-    process per turn in stream-json, translated by
-    ``loam_antigravity.Translator`` onto the Claude CLI's event shapes. The
-    conversation is Antigravity's own, named by the ``conversation_id`` the
-    first turn states and kept as ``thread_id``; every later turn passes
-    ``--conversation`` with it.
-
-    Between turns nothing runs, so the session is resident (``is_live``)
-    only while a turn is: an open Antigravity chat holds no memory and no
-    slot under the cap. The persona's instructions are rendered into
-    ``.agents/rules/`` at every start; its MCP servers and skills are the
-    ``.agents/`` that ``bin/provision --antigravity`` writes.
-
-    Approvals: none. Antigravity's headless mode has no channel to ask a
-    person on, so the turn runs ``--dangerously-skip-permissions``, which is
-    the authority move's posture on the other two providers."""
+    """Launch one Antigravity process per turn. Resume the provider's conversation ID on
+    later turns and translate the stream into session events. Between turns the session
+    has no resident process.
+    """
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)

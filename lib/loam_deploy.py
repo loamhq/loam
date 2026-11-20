@@ -1,93 +1,11 @@
-"""The deployment layer: what the box exposes, generated from one directory.
+"""Render deployment configuration from the install and app records. bin/gen-deploy
+installs the rendered files. bin/check-drift compares the live copies against the
+same renderers. See deploy/README.md for formats and procedures.
 
-Move 10 of the phase-5 closing plan (decisions 8-10), built 2026-09-08.
-Everything the internet can reach on this box is rendered here from
-``agents/deploy/`` and nowhere else:
-
-  deploy/loam.toml          the domain, the one place its name lives
-  deploy/<app>/deploy.toml  the app's record: its exposure, its host, its share,
-                            and any hostnames it also answers on under a
-                            domain of its own (``[domains."<domain>"]``)
-  deploy/<app>/compose.yaml how the app runs (image, loopback publish, limits)
-                            -- or, for Loam's own app, a `[service]` table in
-                            the record: run by systemd from a release of the
-                            checkout, no container (``service_unit`` below)
-  /etc/loam/public          OPERATOR-authored, outside every repo: the apps
-                            that are public. Read here, written by the owner.
-
-and rendered into the live files ``bin/gen-deploy`` writes and
-``bin/check-drift`` diffs:
-
-  /etc/caddy/Caddyfile                 one host block per app, always gated
-  /etc/docker/daemon.json              the daemon's loopback-by-default publish
-  /etc/loam/authelia/configuration.yml the login, minus its secrets
-  /etc/loam/authelia/compose.yaml      the login's container
-  /etc/loam/browser/compose.yaml       the personas' shared headless browser
-  /etc/loam/browser/firewall.sh        the wall around the browser's network
-  /etc/systemd/system/loam-sight-firewall.service   raises it after docker
-  /etc/sudoers.d/loam-deploy           bin/deploy, per app, and nothing else
-  /etc/systemd/system/loam-app@.service   Loam's own app, an instance per record
-
-**Exposure has two values and the generator has no third.** ``private`` is a
-host block behind ``forward_auth``; ``shared`` is the same block plus a
-matcher that lets a request carrying the share token, or the cookie the
-tokened request set, through. A host block without a gate is emitted for
-exactly one reason: its name is in ``/etc/loam/public``, a file the engineer
-is denied ``Edit`` and ``Write`` on and that the owner writes themselves. That is
-what "content leaves the box only by an operator act" is enforced by
-(boundary 6 of the charter), together with check-drift reporting any live
-host block that has no gate and is not named there.
-
-**An app may answer on a domain of its own** (2026-09-10, for the owner's
-personal site: he wants to see it on his real domain, with a real
-certificate, behind the login, before it is public). The record says::
-
-    [domains."owner-site.example"]
-    hosts = ["owner-site.example", "www.owner-site.example"]
-
-and every listed host renders as one more host block on the same upstream,
-gated exactly like ``<host>.<domain>``: private is private on every name,
-shared is shared on every name, and the operator's public file ungates every
-name at once. The key is the cookie domain, spelled out rather than derived,
-because Authelia needs it as a value: a session cookie is scoped to one
-registrable domain, so each extra domain gets its own entry in
-``session.cookies`` with its own portal at ``<auth_host>.<domain>`` (one
-more Caddy block, one more A record), and its hosts get an access-control
-rule at the record's policy. Authelia keeps one session PER cookie domain;
-the same user and the same users file, but a login on one domain is not a
-login on the other, and a passkey is bound to the domain it was enrolled on.
-
-**A private host may let one exact request past its login** (2026-09-28, for
-a phone plugin that posts dictation to loam-ui and cannot hold a passkey).
-The record says::
-
-    [[bypass]]
-    method = "POST"
-    path = "/api/dictate"
-
-and each entry renders as one more ``handle`` ahead of the gate, matched by
-an expression on the method and the request URI as the client sent it,
-compared whole: no query, no prefix, no case folding, no ``..``. Every other
-path and method on the host stays behind the login. The app behind it is
-expected to check its own credential on that route; the proxy lets the
-request reach it and does nothing else. It is not an exposure: the host is
-still private, and still gated for everything else.
-
-**An app may have a content host** (2026-10-23, for loam-ui's live HTML
-previews, which must run on an origin that is not the app's). The record
-says ``content_host = "<label>"`` and one more host block renders at
-``<label>.<domain>``: only ``/content/*`` reaches the app, with the Host
-preserved and Cookie and Authorization stripped; every other path is a 404
-before the login is asked; no response from it may set a cookie. It is
-always gated like a private host, whatever the app's exposure. The app
-does its own dispatch on the Host and checks its own signed grant there.
-
-Secrets are never rendered by anything here. Authelia's three secrets and
-the users file are written once by ``gen-deploy --init-login`` into
-root-owned files outside every repo, and a share token lives in
-``/etc/loam/share/<app>.token``; this module reads them, and reads them as
-root or through ``sudo -n cat``, so that check-drift running as the box's user
-can compute the same Caddyfile the generator did.
+App aliases inherit the app's exposure policy. Each cookie domain needs its own login
+portal and session. An explicitly shared route still enforces its token. A content
+host serves only signed content on a separate origin and strips credentials on both
+sides of the proxy. Keep secrets in their provisioned files outside the checkout.
 """
 
 from __future__ import annotations
@@ -656,37 +574,9 @@ RUNTIME_NETWORKS = (SIGHT_NETWORK, loam_broker.NETWORK)
 
 
 def _compose_networks(compose_path: Path, name: str, doc: dict) -> dict[str, tuple[str, ...]]:
-    """{container: the real Docker networks that service joins}, having
-    refused any network but the app's own `default` and the broker's.
-
-    **Why this is a refusal and not a note** (added 2026-09-25, on a persona's
-    brief). Caddy lets a request from the browser's subnet through a private
-    host's gate -- the personas' sight cannot hold the owner's passkey, so the
-    bypass is keyed on `loam-sight` and is exactly one container wide. It is
-    one container wide because no other container joins that network, and
-    until this function existed nothing checked: an app's compose file is in
-    this repo, `bin/deploy` runs it as root, and a line joining `loam-sight`
-    would have put the app's own container inside the bypass. Same shape for
-    `loam-authelia_default`, where the login's own container lives.
-
-    So the list is two long and both entries are earned: the app's own project
-    default, which is the proxy's route to it, and `loam-broker`, which is the
-    whole of how an app reaches the session broker (deploy/README.md, "How an
-    app reaches the session broker"). Everything else -- a third network of
-    the app's own included -- is refused by name, because "the two known
-    networks" is the rule and an app with a bridge nobody has asked for is a
-    shape to settle before it is running rather than after.
-
-    **Aliases are resolved, not trusted.** A service's `networks:` entries are
-    keys into the file's own top-level table, and that table decides what the
-    network is really called: `name:` spells it out, `external: true` with no
-    `name:` means the key IS the network's name (which is how a compose file
-    joins something the runtime created), and anything else is Docker's
-    `<project>_<key>`. So `default` can be pointed at `loam-sight` with three
-    words, and checking the keys would have missed it. A network the file
-    declares but no service joins is refused too: `docker compose up` creates
-    or looks it up either way, and a declaration that reads as authorised is
-    not a thing to leave lying in the file.
+    """Resolve each Compose network alias to its actual Docker network name before
+    validating it. Permit only the project's default network and the broker network.
+    Check even unused declarations because compose up can create or look them up.
     """
     project = str(doc.get("name") or name)
     own_default = f"{project}_default"
@@ -908,9 +798,9 @@ def service_apps(apps: list[App] | None = None) -> list[App]:
 
 
 def service_findings(apps: list[App] | None = None) -> list[tuple[str, str]]:
-    """(app, what is wrong) for each service app the box is not running as
-    its record says: its unit not active, or a container still holding its
-    name (the app left Docker on 2026-11-16)."""
+    """Report service apps whose expected unit is inactive or whose old container still owns
+    the app name.
+    """
     out = []
     for app in service_apps(apps):
         res = _sudo(["systemctl", "is-active", app.unit])
@@ -1064,10 +954,9 @@ def records() -> list[App]:
 
 
 def frame_ancestors(apps: list[App] | None = None) -> tuple[str, ...]:
-    """The origins an agent's static site may be framed by: the page's own,
-    every record that says `app_shell`, on its host under the runtime's
-    domain (2026-11-12, for the Apps section opening a site in the main
-    pane). Sorted, so the render is deterministic."""
+    """Return the origins allowed to frame an agent site, including the site itself and the
+    install's app shells.
+    """
     apps = records() if apps is None else apps
     return tuple(sorted(f"https://{a.fqdn}" for a in apps if a.app_shell))
 
@@ -1092,19 +981,16 @@ SITE_PORTS = range(1024, 65536)
 
 
 def sites(apps: list[App] | None = None) -> list[App]:
-    """The agents' own sites, `state/sites/<name>.toml`, as Apps sorted by
-    name. Private unless the record carries `public`, which bin/site writes
-    only with the owner's yes quoted in it: forgetting a line renders a gated
-    host, because there is no line whose absence opens one. A record that
-    collides with a deployment record, a reserved name or another site is
-    refused, and so is the whole render: a bad site is a generator error, as
-    a bad deployment record is, so check-drift names it.
+    """Read state/sites/<name>.toml as Apps sorted by name. A private static site can
+    use a record like this::
 
-        owner = "ada"                   # who stood it up
-        root = "/abs/dir"               # a directory Caddy serves; or
-        port = 8090                     # a loopback port Caddy proxies to
-        expires = 2026-11-09            # optional: gone after this date, UTC
-        public = "Sam, 2026-11-08, in chat: \"yes\""   # optional
+        owner = "agent-a"
+        root = "/srv/example"
+
+    A proxied site specifies a loopback port instead of a root. An optional expires
+    date is in UTC. Public access requires a record carrying the owner's quoted
+    approval. Refuse the whole render if a site conflicts with a reserved name,
+    another site or a deployment.
     """
     apps = records() if apps is None else apps
     out: list[App] = []
@@ -1285,8 +1171,9 @@ def unresolved_hosts(apps: list[App] | None = None) -> list[tuple[str, str]]:
 
 
 def _lands_by_pull_request(name: str) -> bool:
-    """Whether agents/projects/<name>.json says `"landing": "pull_request"`
-    (since 2026-10-06): such a project has no deploy lane."""
+    """Return whether this project lands through pull requests and therefore has no direct
+    deployment lane.
+    """
     path = AGENTS / "projects" / f"{name}.json"
     try:
         return json.loads(path.read_text(encoding="utf-8")).get("landing") == "pull_request"
@@ -1546,19 +1433,9 @@ def caddy_host_block(app: App, public: bool, today: dt.date,
 
 
 def caddy_content_block(app: App) -> str:
-    """The app's content host: a second origin for bytes the app will not
-    serve on its own (loam-ui's live HTML previews, 2026-10-23). Only
-    `/content/*` reaches the app; anything else is a 404 here, before the
-    login, so the host never shows the app's shell, API or assets. The Host
-    goes through as the client sent it, because the app dispatches on it,
-    and Caddy replaces any client X-Forwarded-Host with its own. Cookie and
-    Authorization are stripped on the way up: the login's cookie is sent by
-    the browser (it is a parent-domain cookie and the gate reads it) and
-    goes no further than Authelia. No response here may set a cookie.
-
-    Always gated, whatever the app's exposure: no share matcher (the share
-    cookie is host-only and never arrives here) and no operator-public
-    form. The browser's subnet passes as it does on every private host."""
+    """Serve signed content from a distinct origin. Authenticate the request, forward only
+    the content path, strip credentials and suppress response cookies.
+    """
     fq = app.content_fqdn
     proxy = "\n".join([
         f"reverse_proxy 127.0.0.1:{app.port} {{",
@@ -1937,10 +1814,9 @@ def _live_blocks(text: str) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 def daemon_json() -> str:
-    """Hand-written on 2026-09-07, generated since 2026-09-08. The values
-    and their reasons are in deploy/README.md; the one that carries the
-    exposure story is `ip`: a port published without an address binds to
-    loopback, so "nothing leaves the box" is the daemon's default."""
+    """Configure Docker's default port publishing on loopback. See deploy/README.md for the
+    daemon settings.
+    """
     return json.dumps({
         "ip": "127.0.0.1",
         "userns-remap": "default",

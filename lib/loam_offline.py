@@ -1,26 +1,6 @@
-"""No test reaches a real external service. One guard, called at every place
-the runtime spends a real credential off the box.
-
-**Why** (2026-11-10, 02:29:24Z): a test of the box move ran
-``move_step`` with the box's real IPv4 as the "old" address and 5.6.7.8 as
-the "new" one, before its stub of ``repoint_after_move`` was written. The
-real DNS call read an account key from ``secrets.env`` by its
-absolute path and repointed all five A records of the product domain and
-the owner's own site to 5.6.7.8; every site was down for 1 h 56 min. A landing's
-tests already ran with no credential in their *environment*
-(lib/loam_worktree.py); that did nothing for a key read from a file.
-
-Two layers, so a missing stub is a failed test and never a write:
-
-* ``guard(what)`` raises ``Offline`` when this process is a test: the
-  environment says so (``LOAM_OFFLINE``, set by ``tests/run-all`` and by a
-  landing's ``run_tests``, and inherited by everything a test spawns), or the
-  main script is a ``tests/test_*.py`` run on its own. Every call site that
-  reads a real credential or sends a request off the box calls it first.
-* ``block_network()`` makes every socket connect to anything but loopback or
-  a Unix socket fail. ``tests/offline/sitecustomize.py`` calls it in every
-  Python process of a test run, so a call site this module was never wired
-  into still cannot leave the box.
+"""Guard external operations during tests, including callers that read credentials from
+a file. The suite also installs a process-level socket guard in Python children so a
+missing stub fails before any request can leave the box.
 """
 
 from __future__ import annotations

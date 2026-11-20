@@ -1,60 +1,7 @@
-"""Every provider's own memory, pinned off, and checked (first release L8).
-
-Memory is Loam's on every provider (the owner, 2026-11-14): the soul, the
-config, the loading files, the thread summaries. A provider's native memory
-would be a second memory nobody reads and nothing governs, so each one is
-turned off by its own setting and its store is checked for growth.
-
-What each provider has, as read on this box (2026-11-14):
-
-- **Claude Code 2.1.325.** Auto memory (`autoMemoryEnabled`, read and write
-  of `~/.claude/projects/<cwd>/memory/`), and background consolidation
-  ("auto-dream", `autoDreamEnabled`, "When set, overrides the server-side
-  default", so unset is not off). Both pinned false in the user settings,
-  and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` as a second lock, in the settings'
-  `env` and in the user manager's environment (every lane's process).
-- **Codex 0.169.0.** The `memories` feature (stable, default false),
-  `chronicle` and `external_agent_memory_import` (under development, false),
-  the `[memories]` table's `generate_memories` / `use_memories`, and the
-  prompt history (`history.persistence`). All pinned in `CODEX_HOME/config.toml`,
-  which every Codex lane shares (lib/loam_codex.trust_config renders it).
-  Codex ignores a key it does not know, so a pin that a later Codex renames
-  does nothing silently; the store check below is what notices.
-- **Antigravity 1.5.9.** Its binary carries knowledge items and agent
-  memory, and no setting its help, its bundled guide, its changelog or its
-  live CLI reference names turns them off. **Here "pinned off" means
-  "checked empty"**: nothing is written, and the check reads its stores.
-  The check runs at every session start, and after `provider-pin apply`
-  moves a CLI to a new release's pin.
-
-The check counts each store and compares it with the count first seen,
-kept in `<state>/provider-memory.json`, and says so once per growth
-(the new count becomes the one compared). A store that grew is a provider
-writing memory of its own, and the caller says so: as a fact for the
-system persona (lib/loam_attention.py), by the broker at a session start
-(and `provider-pin apply` says it after moving a CLI).
-
-Antigravity's stores leave out what Loam's engineer jobs' own
-conversations made (2026-11-15, lib/loam_agy_files.py): the lead persona
-tested 11-15 that the CLI has no memory tools and nothing carries across
-conversations, so a job's `brain/<id>/`, its summary row and the implicit
-files that appeared while it ran are its transcript and a `/resume` index,
-cleared a week after the job. Everything else in those stores is counted,
-and its growth is said, as before. (Since 2026-11-16 every other
-conversation is cleared too, once idle a week.)
-
-Then not even that (2026-11-16): the owner read three such lines, posted in
-a fresh chat after his first message to a persona on Antigravity, as an
-error. Every Antigravity conversation, a persona's as much as a job's, makes
-the same per-conversation files, and the owner's 11-15 decision made them
-accepted working state. So the three per-conversation stores (``WORKING``)
-are still counted, for the log, and their baseline kept current, but their
-growth is never said. What the check says for Antigravity now is anything
-under its tree that is none of the kinds known on 2026-11-16
-(``AGY_KNOWN``): a new store a later build adds is the one thing a memory of
-its own would look like. And nothing it says goes into a conversation: the
-broker hands a growth to the system persona as a fact, never a line in the
-session's thread or on the board (2026-11-19).
+"""Disable native provider memory and monitor its stores. Compare counts with
+the saved baseline. Known Antigravity conversation files are working state:
+count them for diagnostics and report unfamiliar stores to the system persona.
+See loam_agy_files for the retention policy.
 """
 
 from __future__ import annotations

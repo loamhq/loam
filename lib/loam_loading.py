@@ -1,46 +1,7 @@
-"""What an agent loads on every run, and the one switch between two shapes.
-
-Decided 2026-11-18 with the owner (the vault's *decisions, batch A: what
-loads, memory, config*). An agent loads three things of its own on every
-kind of run, the same in a conversation, at a wake and in a cron, on every
-provider: its **soul**, its **config** and its **map**. A run adds only its
-own input: a thread's summary and recent messages, a wake's instruction and
-the list of what changed in the vault, a cron's body.
-
-**Config has two parts that load together.**
-
-- *Loam's text* (``LOAM_TEXT``, ``docs/persona/loam.md`` in the checkout): short,
-  the same on every install, replaced by an update. No agent edits it.
-- *The owner's words*: the owner's rules, verbatim and dated. One shared
-  page every agent on the install loads (``OWNER_PAGE``,
-  ``<workspaces>/_shared/owner.md``), and the agent's own ``config.md`` for
-  the rules that are only its. An update never touches either: neither is in
-  the checkout or the vault's ``System/Loam/``. An agent adds to them when
-  the owner states a rule.
-
-**The map** (``MAP``, ``map.md`` in the workspace) is the agent's own and
-the only file of its own that loads. Loam says nothing about what is in it.
-Over ``loam_memory.LIMIT_CHARS`` it is reported and still loads; nothing
-refuses a run over it. It has no frontmatter that belongs to a loader and no
-symlink to break: it reaches every provider as a ``CLAUDE.md`` import.
-
-**The presence of the map is the switch.** An agent with no ``map.md``
-loads exactly as before (``_always.md`` on every run, ``_active.md`` in a
-conversation through the output style, ``_reflection.md`` at a wake, a
-cron's file in a cron), so nothing breaks before an agent moves, and moving
-is the agent's own act: it writes ``map.md``. Loam never deletes or moves
-the old files; an agent with a map simply stops loading them.
-
-The shape is rendered into the two files every conversation route reads at
-start (the broker, the wake, the engineer and reviewer launchers, and Codex
-and Antigravity, which compose from ``CLAUDE.md``'s imports): ``CLAUDE.md`` and
-``.claude/settings.json``, by ``bin/provision``'s ``claude_md`` and
-``settings``. Because the agent can make or remove its map at any moment,
-``refresh`` re-renders those two whenever the shape on disk and the shape
-rendered disagree. It is called by every launcher before a run and by the
-persona's PostToolUse hook after every write, so the next run is in the new
-shape whichever route starts it. A session already running keeps what it
-started with.
+"""Assemble the agent's soul, configuration and map for every provider and lane. Add
+the input of the particular run. The owner's shared and per-agent rules belong to
+the configuration. Refresh the rendered loading files for the next start while an
+existing session keeps its context.
 """
 
 from __future__ import annotations

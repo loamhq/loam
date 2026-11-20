@@ -1,7 +1,7 @@
 """A question a provider asks the person, in one shape, and the answer back in
 the provider's.
 
-Added 2026-10-01. A permission card asks "may this run?"; a question asks
+A permission card asks "may this run?"; a question asks
 "which one?" or "what should it be called?", and an Allow with no answer is a
 question answered with nothing. Three vendor formats ask questions, and the
 page draws one card for all of them, so the broker owns every format both

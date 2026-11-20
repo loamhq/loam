@@ -1,4 +1,4 @@
-"""The shared skills library and the starter vault (first release, L7).
+"""The shared skills library and the starter vault.
 
 Three shelves of skills, all in the Agent Skills format (a folder holding a
 ``SKILL.md`` whose frontmatter has ``name`` and ``description``):
@@ -18,10 +18,10 @@ one of the same name, and the person's shelf wins over Loam's. A copy is not
 updated by its original: it is a different folder. The shadowing is computed
 here rather than left to each provider, because the providers disagree:
 Claude Code keeps the closer of two same-named skills, but Codex 0.169 lists
-both, side by side, with nothing to tell them apart (measured 2026-11-14 with
+both, side by side, with nothing to tell them apart (verified with
 ``skills/list``; engineer/memory).
 
-**What each provider is shown** (each measured 2026-11-14):
+**What each provider is shown**:
 
 - Claude Code reads ``.claude/skills`` in the working directory and in every
   parent above it, and the closest of two same-named skills wins. The

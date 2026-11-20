@@ -180,9 +180,9 @@ def render_agent(config: dict) -> str:
 
 
 def self_name(agent: str, config: dict | None) -> str:
-    """The name an agent's own files call it by ("You are Old Sam"): the name
-    it was made with (`self_name`, lib/loam_agents.py, 2026-11-14), else its
-    id's. A rename is the app's display and never changes this."""
+    """Return the name used in the persona's own files, falling back to its ID. Changing
+    the display name leaves that identity intact.
+    """
     value = (config or {}).get("self_name") if isinstance(config, dict) else None
     return value.strip() if isinstance(value, str) and value.strip() else agent.capitalize()
 

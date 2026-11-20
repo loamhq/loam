@@ -1,17 +1,5 @@
-"""The time as a persona is told it (2026-11-09), in one place.
-
-The owner's clock is the box's, America/Los_Angeles. A harness gives a turn
-less than that: Claude Code's context says ``Today's date is 2026-11-09.``
-with no weekday and no time, Codex's ``<environment_context>`` gives the
-date and the zone. On Monday 11-09 two personas' first thread replies said
-"Sunday afternoon". So every turn the broker sends -- a classic chat's
-message and a thread's prompt -- carries the weekday, date and time here.
-
-A classic chat's line goes to the harness inside a ``<loam-clock>`` envelope
-at the head of the person's text. The broker's own log
-(``broker.user_message``) keeps what the person typed; the transcript writer
-and the adoption replay strip the envelope (``strip``) where they read the
-harness's own file. Stdlib only.
+"""Format an install-local clock for each provider using the configured time zone. Keep
+the clock envelope out of the person's stored message.
 """
 
 from __future__ import annotations

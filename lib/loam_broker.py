@@ -1,14 +1,6 @@
-"""Constants and small helpers for the session broker. One authority each.
-
-The broker itself is bin/session-broker; this module holds the values that
-more than one file needs -- the server, the firewall script, the probe,
-check-drift -- so that a number never exists twice on this box.
-
-The shape, and why it is this shape, is in broker/README.md. What matters
-here: the broker is a host-side component with the same authority as
-bin/wake (it launches a persona in its own workspace with the real login),
-so it lives in the runtime, not in an app's repo, and an app reaches it
-only across a narrow authenticated interface.
+"""Shared broker configuration, state paths and public row formats. The host launches
+sessions with the persona's workspace and login. Apps use the authenticated broker
+interface described in broker/README.md.
 """
 
 from __future__ import annotations
@@ -67,28 +59,9 @@ TOKEN_PATH = STATE_DIR / "token"
 
 
 def chosen_model(session_id: str) -> str | None:
-    """The model this chat ASKED for, or None if it asked for nothing.
-
-    A chat may pick a model from the + menu (2026-09-21) and the broker puts
-    it on the launch line; the record keeps it under ``model``. That is
-    the owner choosing a model for one conversation, which is the one
-    legitimate way a lane runs something its config does not name.
-
-    The model check in ``bin/check-drift`` reads this
-    to tell a choice from a drift. It has to: one agent already has a session
-    recorded with ``model: "opus"``, so without this the check would report a
-    deliberate pick as an unintended switch. An alarm that cries wolf is the
-    one that gets ignored -- which is how the 2026-09-25 switch, and the three
-    before it, survived unnoticed for three weeks.
-
-    ``session_id`` is a TRANSCRIPT's name, and for an adopted session that is
-    not the record's name: the broker drives a fork, whose id it keeps as
-    ``cli_session_id``. So a miss on the direct lookup is followed by a scan
-    for the record that drives this transcript (2026-09-28).
-
-    Best-effort: a record that cannot be read is not a choice, because the
-    safe direction here is to REPORT (a false alarm is read and dismissed; a
-    missed switch is what this whole check exists for).
+    """Return the model explicitly requested for this conversation, or None. For adopted
+    sessions, look up the transcript's CLI fork ID as well as the record ID. An
+    unreadable record cannot establish that a model discrepancy was intentional.
     """
     try:
         rec = json.loads(
@@ -810,17 +783,8 @@ def epoch_iso(seconds) -> str | None:
 
 
 def login_source(env: dict | None = None) -> str:
-    """Which credential a session this broker starts would actually
-    authenticate with -- read off the broker's OWN environment, because that
-    environment is the one a child inherits (bin/session-broker, Session.start,
-    copies ``os.environ``). Not a constant: a constant would keep saying
-    ``credentials-file`` on the day somebody puts a token in the unit.
-
-    The order is the CLI's: an API key first, then the long-lived OAuth token
-    ``bin/wake`` runs the nightly wakes on, then the login file. Measured on
-    this box 2026-09-22: the broker's environment holds neither variable, so
-    the sessions run on the file and the file's expiry is the one that can
-    take loam-ui dark.
+    """Identify the credential a child inherits from the broker. The CLI checks the API key
+    first, then the OAuth token, then the login file.
     """
     env = os.environ if env is None else env
     if env.get("ANTHROPIC_API_KEY"):
@@ -833,24 +797,9 @@ def login_source(env: dict | None = None) -> str:
 
 
 def login_state(env: dict | None = None) -> dict:
-    """The whole state of the one wired provider's login, read from the file
-    every time and never cached, because the CLI rewrites that file whenever
-    it refreshes an access token.
-
-    ``{"source", "expires_at", "days_left", "connected", "reason"}``. The
-    expiry is the **refresh** token's: the access token is refreshed whenever
-    the CLI runs, so an expired access token is an ordinary Tuesday, and an
-    expired refresh token is a login a person has to make again. That is the
-    date a page counts down to and the date a notification fires on.
-
-    ``days_left`` is whole days, rounded DOWN, so "3" means at least three
-    full days remain and a page that warns at ``<= 3`` warns early rather
-    than late. Negative when the login has already expired; ``None`` when
-    there is no date to count to -- which is every source but the file, since
-    nothing on this box can read an expiry out of a token in an environment
-    variable.
-
-    No token, and no substring of one, is returned, logged or kept.
+    """Read the current login file on every call because the CLI refreshes it in place.
+    Report refresh-token expiry in whole days rounded down, negative after expiry and
+    unknown for sources without an expiry. Keep token values out of the result and logs.
     """
     source = login_source(env)
     if source in (LOGIN_SOURCE_API_KEY, LOGIN_SOURCE_TOKEN):
@@ -938,14 +887,10 @@ LOGOUT_TIMEOUT_S = 60
 
 
 def claude_code_sign_out() -> dict:
-    """``claude auth logout``: the CLI removes ``CREDENTIALS_PATH`` and the
-    account from its settings file (2.1.322, measured under a decoy
-    ``CLAUDE_CONFIG_DIR`` 2026-11-11; it also calls Anthropic, and succeeds
-    on a token the server refuses). Every app chat on Claude Code stops
-    authenticating from its next turn; the wakes, crons and engineer jobs
-    run on the token in wake.env and are untouched. ``removed`` is whether
-    the file was there and is gone; ``message`` is the CLI's words when it
-    failed."""
+    """Run claude auth logout for app sessions. Wakes, crons and jobs using a separately
+    supplied token retain it. Report whether the credential file disappeared and include
+    the CLI's message on failure.
+    """
     existed = CREDENTIALS_PATH.is_file()
     message = None
     env = {k: v for k, v in os.environ.items()
@@ -1001,15 +946,8 @@ def keep_usage_event(event: dict, session_id: str | None = None) -> dict | None:
 
 
 def usage_from_event(event: dict, session_id: str | None = None) -> dict | None:
-    """A ``rate_limit_event`` as the interface answers it, or None if the
-    event carries no windows.
-
-    The shape below was read off real events in this box's own session logs
-    on 2026-09-18 and not guessed; ``broker/README.md`` prints one verbatim.
-    The windows are copied by name rather than enumerated, because a fourth
-    one appeared mid-session on a real log (``seven_day_overage_included``,
-    absent at seq 4 and present at seq 41 of one session) and a reader that
-    lists the windows it knows would have dropped it.
+    """Return the rate-limit windows by name, or None if there are none. Copy unfamiliar
+    names too so new provider windows reach clients.
     """
     info = event.get("rate_limit_info")
     if not isinstance(info, dict):
@@ -1173,10 +1111,9 @@ def usage_reader() -> usage_store.Reader:
 
 
 def read_token() -> str:
-    """The shared secret, created on first read. Never in the repo: state/ is
-    gitignored, and the only copy an app gets is handed to it at deploy time
-    as an environment variable, the way every other credential on this box is
-    mounted at job time rather than baked in."""
+    """Read the shared broker secret from runtime state, creating it on first use. The
+    deployment supplies it to the app separately.
+    """
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not TOKEN_PATH.exists():
@@ -1186,12 +1123,9 @@ def read_token() -> str:
 
 
 def roster(archived: bool = False) -> list[str]:
-    """Every persona with an agent.json, derived from disk the way
-    bin/gen-units derives it. Rosters drift, patterns don't.
-
-    An archived agent (lib/loam_agents.py, 2026-11-14) is left out: it is
-    not in Chats, any picker, a ``by`` or a new session. ``archived=True``
-    is every agent, for a reader of files (Files, the profile)."""
+    """Return workspace IDs with an agent.json. Exclude archived agents from pickers and
+    new sessions. Use archived=True for file and profile readers.
+    """
     names = sorted(
         d.name for d in AI_LABS.iterdir()
         if d.is_dir() and (d / "agent.json").is_file()
@@ -1203,20 +1137,8 @@ def roster(archived: bool = False) -> list[str]:
 
 
 def agent_card(name: str) -> dict:
-    """One agent as the interface answers it: ``{"id", "name", "face"}``.
-
-    The name is READ from the persona's own ``agent.json``, which the
-    runtime renders and which is the one place it is stated -- ``display``. Capitalising the id would
-    produce "Ai" for an agent named ``ai`` and would silently disagree with
-    the record the moment the owner renames one, so it is the fallback and
-    never the answer when the file has one.
-
-    ``face`` is an uploaded image, or ``null``: then the client draws the
-    theme's face. The emoji face is retired (the owner, 2026-11-16): an
-    older file's ``emoji`` is not served. Nothing else from ``agent.json``
-    leaves this box -- the file also holds the
-    workspace, the vault path and the wake schedule, and none of that is an
-    app's business.
+    """Return id, name and face only. Prefer the configured display name and use the
+    capitalized ID as fallback. A null face tells the client to use its theme.
     """
     try:
         config = json.loads(
@@ -1235,12 +1157,7 @@ def agent_card(name: str) -> dict:
 
 
 def roster_cards() -> list[dict]:
-    """The roster as objects, which is what ``GET /v1/agents`` answers.
-
-    It answered a list of bare strings until 2026-09-18, and a page that
-    draws an agent's name and mark then had to invent both. A name is a
-    fact about the agent and facts about the agent come from the box.
-    """
+    """Return the roster as the objects served by GET /v1/agents."""
     return [agent_card(name) for name in roster()]
 
 
@@ -1251,22 +1168,9 @@ def workspace(agent: str) -> Path:
 
 
 def persona_model(agent: str | None = None) -> str | None:
-    """The model a session runs on when nobody picks one: the persona's own
-    from its profile (agent.json, Settings > Agents) when that is a Claude
-    Code one, else the wake's default -- ``loam_profile.claude_model``, the
-    one rule (2026-11-19).
-
-    bin/provision writes the same value into the persona's
-    ``.claude/settings.json`` and a profile change rewrites it there, so a
-    session started with no ``model`` is not defaulted here at all: no
-    ``--model`` goes on the launch line and the CLI reads the setting
-    itself. This function exists so the providers route can say which row
-    of the menu is already ticked. (Until 2026-11-19 it read settings.json,
-    which said ``fable`` for every persona whatever its profile said.)
-
-    With no agent named, the fleet's answer: the value every persona shares,
-    or ``None`` when they disagree, because "the default" is then a question
-    only an agent's name can answer.
+    """Return the selected persona's Claude default for the provider menu. With no persona,
+    return the common default or None when they differ. The CLI reads the provisioned
+    setting when a launch omits --model.
     """
     if agent is None:
         found = {persona_model(name) for name in roster()}

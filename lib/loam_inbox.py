@@ -1,37 +1,6 @@
-"""The failure log: where the machinery records what went wrong, quietly.
-
-``vault/<General's board folder>/loam-wake-failures.md`` (``00_INBOX/from-
-agents/`` on the first install) is one appended line per failed wake or
-broken layer: a log, every occurrence, a repeat included. Activity and the
-failure log are the one quiet record (batch B, 2026-11-18).
-
-**Nothing here writes on the General board any more** (2026-11-19, batch B
-step 5): "I don't want the engineers posting on Threads. If something is
-wrong, they should pass it to a persona that then decides what to do and how
-to communicate with me if necessary." Until then this module paired each
-failure with a line under Urgent in ``comms.md``. Now:
-
-- a persona's own failed run is logged here and told to that persona at the
-  top of its next turn (lib/loam_lane_notice.py), and nowhere else;
-- a fault that is no one persona's (such as a vault write refused three nights
-  running) is logged here and
-  handed to the system persona as a fact (lib/loam_attention.py), which
-  decides whether the owner hears of it, in its own words;
-- individual account refusals stay in the failure log and wake ledger. The
-  app reads recent ledger outcomes to identify when no agent can run;
-- ``append_comms`` is kept only so an older plugin that still calls it does
-  not break: it writes nothing on the board and hands its line to the system
-  persona as a fact.
-
-``record_notice`` (a warning, once a night) and ``record_ledger`` (every
-time, no dedupe) are log-only, as they always were.
-
-**Three callers of the log**: ``bin/wake`` records its own failures,
-``bin/wake-failed`` the ones that killed the wrapper before it could, and
-``bin/lane-check`` what is wrong with a lane's files, nightly. Everything
-here is stdlib (and loam_config, for the folder's name) and takes the vault
-as an argument, so a test can point it at a temp tree and nothing in it can
-fail a wake: every write is best-effort and swallows OSError.
+"""Record each failed wake or broken layer in the failure log. Direct actionable
+notices through the appropriate persona while retaining repeated occurrences in the
+log.
 """
 
 from __future__ import annotations
@@ -106,9 +75,9 @@ def append_comms(
     vault: Path, agent: str, text: str, link: str,
     section: str = "Urgent", when: date | None = None,
 ) -> bool:
-    """Kept for an older plugin that still calls it (2026-11-19): nothing is
-    written on the board. The line is handed to the system persona as a
-    fact (lib/loam_attention.py), told once. True if it was told."""
+    """Support callers of the legacy entry point by handing the line to the system persona
+    as a deduplicated fact. Return whether it was told.
+    """
     import loam_attention  # noqa: PLC0415
     return loam_attention.tell(text, by=agent, evidence=link or None) == "told"
 
@@ -128,9 +97,9 @@ def _append_log(vault: Path, agent: str, reason: str, stamp: str) -> None:
 
 
 def record_failure(agent: str, vault: Path, reason: str) -> None:
-    """A failed run, in the log. Since 2026-11-19 that is all: the persona
-    whose run it was hears of it at the top of its next turn
-    (lib/loam_lane_notice.py), and the board hears nothing."""
+    """Append the failure to the log. The lane notice delivers it separately to the
+    persona's next turn.
+    """
     _append_log(vault, agent, reason, now_iso())
 
 

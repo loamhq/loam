@@ -1,20 +1,6 @@
-"""What an engineer job is: where it lives, and who may brief it.
-
-Two readers, one authority. ``bin/provision`` renders the engineer's
-settings from ``ENGINEER_MODEL``; ``bin/engineer-job`` passes the same value
-on the command line and (since 2026-09-07) writes the brief into the
-directory shape defined here and reads the receipt back out of it.
-``mcp/engineer_server.py`` imports nothing from here on purpose: it lives as
-long as a conversation does, and anything it read from this file would be
-frozen at whatever the file said when the conversation opened. A constant
-with two homes is the defect this whole repo is built against, so none of
-them define anything twice.
-
-**A job has no clock and no round-trip cap since 2026-11-10** (the owner: "I
-don't want any limitations at all"); ``max_minutes`` is a ceiling a briefer
-may set and nothing sets by default. From 2026-09-05 to 2026-11-10 a brief
-that would cross the 01:30 Remote Control recycle was refused; the recycle
-went with Remote Control on 2026-11-19.
+"""Define the engineer job layout, provider defaults and permitted briefers. The
+launcher and provisioner share these settings. The long-lived MCP server dispatches
+to the launcher so changes apply without reopening a conversation.
 """
 
 from __future__ import annotations
@@ -277,12 +263,7 @@ def session_id_file(engineer, job_id: str) -> Path:
 
 
 def recorded_session(engineer, job_id: str) -> str | None:
-    """The session id of a job that has already run, or None.
-
-    None for every job run before 2026-09-22, which is why the refusal that
-    reads this says what it says: the id was not recorded then and cannot be
-    recovered now.
-    """
+    """Return the recorded provider session ID, or None when an older job did not save one."""
     try:
         value = session_id_file(engineer, job_id).read_text(encoding="utf-8").strip()
     except (OSError, BriefError):
@@ -309,16 +290,9 @@ def locate_job(job_id: str) -> "Project | None":
 
 
 def slug_for(text: str, limit: int = 48) -> str:
-    """A filename fragment from the brief's own first line.
-
-    The receipt is a file the owner finds in a folder, so its name has to say
-    what the job was without being opened. Taken from the brief rather than
-    asked for separately, because a second field is a second thing to get
-    wrong and the first line of a brief is already its title.
-
-    A title is one line and is taken whole. The colon test below is for a
-    brief's body, where a `key: value` line is header rather than prose; on a
-    title it turned `Probe: an unattended lane ...` into `job` (2026-10-06).
+    """Derive a filename fragment from the brief. Keep a one-line title whole, including
+    colons. In a multiline brief, skip key-value headers before choosing the first line
+    of prose.
     """
     if "\n" not in text.strip():
         line = text.strip().lstrip("#").strip() or "job"
@@ -397,12 +371,10 @@ class Project:
 
     @property
     def subdir(self) -> str | None:
-        """The folder of its checkout this project is, when it is one folder
-        of a larger repository (`"subdir"` in the record, since 2026-11-16):
-        the app, `app/` of Loam's own checkout. Its jobs run in that folder of
-        their tree, and a landing refuses a commit that touches anything
-        outside it, so an engineer every persona may brief changes the app
-        and never the runtime around it. None for a whole-repository project."""
+        """Return the folder this project owns in a shared checkout, or None for a whole-repo
+        project. Jobs run inside the folder and the landing checks every changed path
+        against it.
+        """
         if self.platform:
             return None
         value = self.record.get("subdir")
@@ -415,12 +387,10 @@ class Project:
 
     @property
     def lane_of(self) -> str | None:
-        """The engineer this project is a scope of, or None for an engineer
-        of its own (2026-11-19). The app is the Loam engineer's app-only
-        scope: a folder of Loam's own checkout, so its jobs keep every
-        safeguard of a folder project (the folder, its tests, no sudo, the
-        app's deploy at landing) but are the Loam engineer's work, on its
-        provider, listed under it, and not a second engineer in Settings."""
+        """Return the engineer responsible for a scoped project, or None for a separate
+        engineer. A scope inherits the engineer's provider and keeps its own path, tests and
+        deployment boundaries.
+        """
         if self.platform or not self.subdir:
             return None
         if self.root.resolve() != lc.ROOT.resolve():
@@ -438,9 +408,9 @@ class Project:
 
     @property
     def pull_request(self) -> bool:
-        """Lands by pull request on a repository Loam does not own
-        (`"landing": "pull_request"` in the record, since 2026-10-06): no
-        merge into `main`, no push of it, no deploy lane, no deploy key."""
+        """Check whether the project lands by pull request. Such projects use the
+        installation's PR path and skip the local main merge and deployment.
+        """
         return not self.platform and self.record.get("landing") == "pull_request"
 
     @property
@@ -524,12 +494,9 @@ def engineer_settings() -> dict:
 
 
 def settings_project(project: "Project") -> "Project":
-    """The engineer whose setting a job of ``project`` runs on: the Loam
-    engineer for its app-only scope (2026-11-19: one engineer, one provider
-    setting, set by the owner on its page and by a persona through the same
-    settings route), the project itself otherwise. The scope's own row from
-    before, `projects.loam-ui`, is kept in the file and read by nothing, so
-    putting the scope back is the record's and this function's to undo."""
+    """Return the engineer whose provider setting governs the job, following a scoped
+    project to its owning engineer.
+    """
     return platform_project() if project.lane_of == "Loam" else project
 
 
@@ -654,12 +621,10 @@ def tier_choice(project: "Project", runtime: str, tier: str | None,
 
 
 def deploy_default(project: "Project") -> bool:
-    """Whether a brief that does not say `deploy` deploys at landing: the
-    engineer's "Deploy when a job lands" (2026-11-13), off unless set. For
-    the Loam engineer's app-only scope it is Loam's own row's (since
-    2026-11-19: "Deploy the app when an app-only job lands"), and, until
-    that row says either way, the scope's old row's, so an install that had
-    turned it on for the separate app engineer keeps it on."""
+    """Read the engineer's deploy-on-landing preference, defaulting to off. An app-only
+    scope inherits its former project setting until the owner sets an explicit
+    preference on its engineer.
+    """
     rows = engineer_settings().get("projects") or {}
     names = ([settings_project(project).name, project.name]
              if project.lane_of else [project.name])
@@ -779,15 +744,10 @@ def display_name(project: "Project | None") -> str:
 
 def brief_target(name: str, scope: str = "",
                  continue_job: str = "") -> "tuple[Project | None, str | None]":
-    """(project, None) a brief to ``name`` with ``scope`` runs as, or
-    (None, the sentence refusing it).
-
-    `Loam` with `scope: app` is the app-only scope. `loam-ui` by name is
-    the same (a persona, a cron or a thread written before 2026-11-19 still
-    says it), as is `Loam` continuing one of the scope's jobs, because a job
-    continues in the tree it ran in. A scope on any other engineer is
-    refused rather than ignored: it would read as a safeguard that is not
-    there."""
+    """Resolve a brief's engineer and optional scope or return a refusal. Accept the legacy
+    app project name and keep continuations in their original scope. Refuse unsupported
+    scopes.
+    """
     scope = (scope or "").strip().lower()
     if scope not in SCOPES:
         return None, (f"scope {scope!r} is not one the Loam engineer has: "

@@ -1,66 +1,7 @@
-"""The plugin host, the machine's side: manifests, two layers, the list,
-on and off, install from a link, and a plugin's page files (2026-11-12).
-
-The interface is `docs/plugins.md` in this repo (the spec it implements is
-the plugin interface, v0, build-order steps 2 and 5). In short:
-
-**A plugin is a folder with a ``PLUGIN.md``.** The file's YAML frontmatter
-is the manifest; its body is the guide, for a person and for an agent. The
-frontmatter is read by ``parse_frontmatter`` below, a small strict reader of
-the YAML a manifest uses (mappings, lists, quoted and plain scalars, block
-text), with no dependency: anything outside that subset is a sentence naming
-the line, never a guess. A folder holding loam-ui's older theme shape (a
-``manifest.json`` with ``schemaVersion`` 1, the rule of loam-ui's
-``src/themes.js``) is read as a theme plugin too, so Latte and Plain are in
-the list as they are today.
-
-**Two layers.** *Shipped* is what comes with Loam and is replaced by its
-updates: the theme folders of the loam-ui checkout both copies of the page
-are built from, and ``public/plugins`` beside them for the first plugin with
-code (``shipped_roots``). *Yours* is one folder that updates never touch:
-``paths.plugins`` (``yours_root``), a top-level folder beside the
-vault and ai-labs and its own git repository, committed every 15 minutes by
-``bin/plugins-autocommit`` (the owner, 2026-11-12: not ai-labs, which "has a
-very specific usecase"). It is not a Files root; the app reaches it through
-Settings > Plugins. A plugin's settings and data, when they are built, live
-in it too (``_settings/<id>/``, ``_data/<id>/``). A plugin in Yours with the
-id of a shipped one wins;
-a broken one never does, so a bad copy cannot take a plugin away.
-
-**One list.** ``listing()`` is every plugin folder in both layers, each with
-its manifest, layer, source, on or off, what it shadows and what it
-touches. A malformed manifest is a row marked ``broken`` with the reason;
-nothing about one folder can stop another from being listed. Appearance's
-installed themes are this list's theme rows (``themes()``).
-
-**On and off, install and remove** are writes of ``installed.json`` in
-Yours, which is the installed list: a line per plugin installed from a link
-(its repository, ref, commit and the declaration that was confirmed), and
-the on/off of every plugin anyone has switched. A theme that is only a
-theme has no switch of its own: it is on where Appearance has chosen it, so
-"which theme is on" stays one truth.
-
-**Install from a link** fetches a repository (or a folder in one) at a tag or
-a commit, answers what it declares it touches, and installs only on a second
-call that names that exact answer's ``confirm`` token. Side-loaded plugins
-have no rules (the owner, 2026-11-12): nothing is refused for what it
-declares; the list says where each came from.
-
-**One package shape** (2026-11-13, the owner m261/m263): everything the
-marketplace shares is this folder, and ``kind`` names what it is: ``theme``,
-``extension``, ``app`` (a server plugin that also lists itself in Apps),
-``agent`` and ``skill``. Agents and skills are read and listed only; nothing
-installs them yet, and an agent package that carries a memory folder is
-broken ("a shared agent never carries its memory").
-
-**Server code runs beside Loam, never in the broker** (2026-11-13, the owner
-m259). A plugin that is on and has ``server/`` is one supervised process,
-a transient user unit; ``lib/loam_plugin_servers.py`` starts, stops and
-reads it, and ``bin/plugin-gateway`` reaches it at ``/x/<id>/``. This module
-says what should run (``server_spec``) and calls that one on each switch,
-install and removal. A plugin's ``page/`` and ``assets/`` files and its
-``theme.css`` are served at ``/v1/plugins/<id>/files/<path>`` for the page's
-loader to import.
+"""Read manifests from the Shipped and Yours layers, resolve enabled plugins, and serve
+their page files. Inspect an install link before confirmation. Server contributions
+run in separate units. See docs/plugins.md for the manifest, update and settings
+contracts.
 """
 
 from __future__ import annotations
@@ -685,7 +626,7 @@ def options_of(value) -> list[dict]:
 
 def agent_settings_of(value) -> list[dict]:
     """A plugin's ``agent_settings``: the fields it keeps for each agent and
-    shows on the agent's profile (2026-11-13), e.g. Read aloud's voice::
+    shows on the agent's profile, e.g. Read aloud's voice::
 
         agent_settings:
           - id: voice
@@ -698,7 +639,8 @@ def agent_settings_of(value) -> list[dict]:
     text of at most 48 characters, since a voice's name is its id) and a
     ``default`` (one of them, or text). A field without choices takes text
     of at most 200 characters. Absent is none: such a plugin may still keep
-    undeclared values per agent (``set_agent_values``)."""
+    undeclared values per agent (``set_agent_values``).
+    """
     if value is None:
         return []
 
@@ -930,13 +872,14 @@ def _in_folder(image, folder: Path | None) -> bool:
 
 def words_of(data: dict, kind: list[str], folder: Path | None,
              warnings: list[str]) -> dict:
-    """What a plugin says about itself to a person (2026-11-19): its
+    """What a plugin says about itself to a person: its
     ``description``, one plain line of at most 160 characters, what someone
     gets from it; its ``screenshots``, at most six pictures in its folder,
     each ``{src, src_dark?, caption}``; and, for a theme, its ``palette``,
     at most eight of its colours by token, each with a name from the theme's
     story (``{token, name, name_dark?}``). Each wrong one is left out with a
-    warning; none of them ever breaks the plugin."""
+    warning; none of them ever breaks the plugin.
+    """
     out: dict = {}
     desc = data.get("description")
     if desc is not None:
@@ -1360,10 +1303,9 @@ def added(before: dict | None, after: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def ui_checkout() -> Path | None:
-    """Where the app's source is: the app project's record when this box
-    develops the app as a project of its own, else the release's own
-    ``app/`` folder (2026-11-15, the cut: an install has no project records,
-    and without this its Shipped layer had no themes or page plugins)."""
+    """Resolve app source from the app's project record when present and from the release's
+    app/ tree on other installs.
+    """
     record = cfg.AGENTS_ROOT / "projects" / f"{UI_PROJECT}.json"
     try:
         data = json.loads(record.read_text(encoding="utf-8"))
@@ -1379,11 +1321,10 @@ def ui_checkout() -> Path | None:
 
 
 def shipped_roots() -> list[Path]:
-    """The Shipped layer's folders, first wins: ``LOAM_PLUGIN_SHIPPED``
-    (paths joined by ``:``), or the loam-ui checkout's ``public/themes`` and
-    ``public/plugins``, then this runtime's own ``plugins/`` (2026-11-14,
-    first release L9: the reviewer and daily notes, first-party plugins
-    whose halves are the machine's)."""
+    """Return Shipped roots in precedence order. Honor the colon-separated
+    LOAM_PLUGIN_SHIPPED override, otherwise use the app's themes and plugins followed by
+    the runtime's first-party plugins.
+    """
     env = os.environ.get("LOAM_PLUGIN_SHIPPED")
     if env is not None:
         return [Path(p) for p in env.split(":") if p]
@@ -2238,10 +2179,9 @@ def _choice(folder: Path, rel: str) -> dict:
 
 
 def _folder_of(base: Path, path: str) -> str:
-    """The folder a link's path names: a file's own folder when the path is
-    a file. GitHub serves a file under `/tree/` as well as `/blob/`
-    (`/tree/main/README.md`), and until 2026-11-19 that read as a folder
-    named README.md that the repository did not have."""
+    """Determine the plugin folder named by a link. A file URL can use either /tree/ or
+    /blob/, and both refer to its parent directory.
+    """
     if path and (base / path).is_file():
         return path.rsplit("/", 1)[0] if "/" in path else ""
     return path

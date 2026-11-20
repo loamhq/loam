@@ -1,32 +1,7 @@
-"""Schedules and Activity, as the page reads and changes them.
-
-Step 2 of loam-ui's ``design/schedules-and-activity.md`` (agreed with the owner
-2026-10-14). The broker's ``/v1/schedules``, ``/v1/activity`` and
-``/v1/jobs`` routes only dispatch to the functions here; everything they say
-is derived, at the moment of asking, from sources that already exist:
-
-  - the records, ``ai-labs/<agent>/crons/*.md`` (lib/loam_cron.py);
-  - the schedule log, ``state/schedules/events.jsonl`` (lib/loam_schedule.py):
-    changes, refusals, fires, and the owner's Run now;
-  - the timers the user manager holds (next and last fire);
-  - each wake's own log line, ``logs/wake-<agent>.jsonl``, for what a fire
-    produced;
-  - the engineer launcher's ``box_status()`` and ``cancel()``, called in
-    process from ``bin/engineer-job`` itself, so this and
-    ``mcp__engineer__status`` (``engineer-job --status``) read one function
-    and cannot disagree; and each job's ``result.json`` for the finished.
-
-**Every write is ``loam_schedule.change()``** with actor ``owner.id`` and lane
-``app``. A refusal is ``loam_schedule.Refused`` and its message is the
-sentence the page shows. A record has no key for tools: every lane has the
-persona's whole tool list, the engineer included (2026-11-09).
-
-**Seen** is the one piece of state of this module's own:
-``state/schedules/seen.json``, the ids the owner has seen and the moment the
-store began (everything before it counts as seen, so the first read is not
-three hundred old jobs unread). An item done by the owner themselves is born
-seen. A schedule row's marker and an Activity item are one id, so marking
-either clears both.
+"""Build schedules, activity and job rows from accepted records, schedule events, live
+timers and launcher state. Send schedule writes through change() with actor and lane
+so validation and audit apply to every route. Keep the owner's seen markers
+separately.
 """
 
 from __future__ import annotations
@@ -508,10 +483,10 @@ def thread_jobs(thread_id: str, rows: list[dict] | None = None) -> list[dict]:
 
 
 def cancel_job(job_id: str) -> str:
-    """The launcher's durable cancel, by the owner. A queued job never starts;
-    a running one is stopped (since 2026-11-10) and records itself as
-    cancelled, and nothing lands, continues or recovers it. Blocking for up
-    to the launcher's CANCEL_WAIT_SECONDS; the broker runs it in a thread."""
+    """Request durable cancellation as the owner. Queued jobs must never start, and running
+    jobs must stop without landing or recovery. Run the bounded launcher wait off the
+    broker's event loop.
+    """
     if not eng.JOB_ID_RE.match(job_id or ""):
         raise NotFound(f"{job_id!r} is not a job id")
     code, sentence = launcher().cancel(job_id, ACTOR)
@@ -828,10 +803,9 @@ def _reason(fields: dict) -> str | None:
 
 
 def _actor(fields: dict | None) -> tuple[str, str]:
-    """Who is writing, and from which lane (2026-11-10). The page sends
-    neither and is the owner on `app`; a persona through `bin/settings` sends
-    `by` and the lane it is in, and loam_schedule.validate() holds it to its
-    own records and to a reason, exactly as it holds the persona's own tool."""
+    """Use the owner and app lane for a page edit. For an agent call, carry its identity
+    and lane into schedule validation, which checks ownership and the reason.
+    """
     by = (fields or {}).get("by")
     if by is None or (isinstance(by, str) and (not by.strip() or lc.is_owner(by))):
         return ACTOR, LANE
@@ -891,20 +865,11 @@ OWNERS_WORD_WINDOW = timedelta(hours=1)
 
 def owners_word(agent: str, name: str, fields: dict, previous: str,
                 text: str) -> dict | None:
-    """The settings route's one way for a persona to turn its daily
-    reflection off (2026-11-19): on the owner's word, cited. The persona
-    passes ``thread`` and ``yes``, the id of the owner's message asking; it
-    must be the owner's own message (the broker writes those only from his
-    signed-in app), in a thread the persona is in, under an hour old, from a
-    conversation, and not already taken for another change. The change is
-    then the owner's, logged with who relayed it and the message.
-
-    What it cannot tell: whether that message asked for this. A persona can
-    cite an unrelated message of the owner's from the last hour; the check
-    is that he spoke to it, recently, in a conversation, and the event names
-    the message so it can be read back. Without ``yes`` the call is the
-    persona's own, and the pause is refused (loam_schedule.REFLECTION_OWNERS).
-    None when the fields carry no owner's word."""
+    """Verify the cited owner message before disabling a reflection for a persona. Require
+    conversation context, thread membership, freshness and single use. Record the
+    message and relaying persona. Verification establishes authorship and timing, while
+    the relay interprets the owner's words.
+    """
     if not (fields.get("yes") or fields.get("thread")):
         return None
     by, lane = _actor(fields)

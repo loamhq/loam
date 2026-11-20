@@ -1,13 +1,5 @@
 """Each provider's usage reading, and the one loop that keeps them fresh.
 
-Added 2026-10-14. Until then both readings were observe-only: a reading
-existed when a session happened to emit one (Claude's ``rate_limit_event``,
-Codex's ``account/rateLimits/updated``), so nothing refreshed it between
-turns, a project engineer on ``codex exec`` spent the shared meter and the
-row never moved, and Codex's sparse merge kept a five-hour window at 80% for
-two days after a plan change had removed that window altogether (the
-diagnostic in receipt 20261014-122554-e7908820).
-
 The contract, one per provider (``Reader``):
 
 - ``observe(event)``: what a session volunteers, merged over the kept reading
@@ -159,16 +151,9 @@ class Refresh:
             return None
 
     def on_fetch(self) -> list[str]:
-        """A ``/v1/providers`` fetch: each provider read at most once a
-        minute. Answers who was read, for the tests and the log.
-
-        The read happens BEHIND the fetch (2026-11-09), not in it: a read is
-        a CLI process (~1 s Codex, ~2-3.5 s Claude Code), and in it, the
-        first app open of every minute waited 2.3 s for its rows, measured on
-        the box; the next fetch, 6 ms. So the fetch serves what is kept and
-        the fresh reading lands for the next one, which is at most the
-        minute this already allowed. Only a provider never read by this
-        process is read in line, so a fresh broker's first row is not empty."""
+        """Start due provider reads in the background, at most once per provider per minute.
+        Return which providers were scheduled without delaying the request.
+        """
         done = [p for p in self.readers if self._claim(p, FETCH_EVERY_S)]
         inline = [p for p in done if p not in self.ever_read]
         behind = [p for p in done if p in self.ever_read]

@@ -1,32 +1,6 @@
-"""Codex as a second provider for persona sessions: everything the broker
-needs to know about it that is not the broker's own machinery.
-
-Added 2026-10-01. Codex is driven through its own long-lived protocol,
-``codex app-server`` over stdio (JSON-RPC 2.0, one object per line), not
-through a shared adapter: the vendor documents ``thread/start``,
-``thread/resume``, ``turn/start``, ``turn/interrupt`` and the item
-notifications, and the broker translates those onto the vocabulary its page
-already draws -- the Claude CLI's own ``stream-json`` shapes. The translation
-is ``Translator`` below, a pure object with no process in it, so it can be
-tested from recorded notifications.
-
-What is here, one authority each:
-
-- where the binary is and where its home is (``CODEX``, ``CODEX_HOME``);
-- the environment a Codex child runs in (``env``), which is where the login
-  it uses is decided;
-- the login, read from ``auth.json`` (``login_state``) and from
-  ``codex login status`` (``status_line``);
-- the model list, read from the app-server and cached (``models``);
-- what ``codex login --device-auth`` prints, parsed (``device_url``,
-  ``device_code``);
-- the quota, kept from ``account/rateLimits/updated`` (``keep_rate_limits``)
-  and read on demand with ``account/rateLimits/read`` (``read_rate_limits``),
-  served by ``row_usage``;
-- the translation (``Translator``).
-
-The broker's half -- the session subclass, the login flow, the routes -- is
-in ``bin/session-broker``. ``broker/README.md`` says what a client sees.
+"""Drive Codex sessions through its line-delimited app-server protocol. Read its login,
+model catalog and limits from the configured provider home. Translate notifications
+into broker events independently of the process.
 """
 
 from __future__ import annotations
@@ -106,15 +80,9 @@ CODE_RE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4,8}\b")
 
 
 def kill_group(pid: int, sig: int = signal.SIGKILL) -> None:
-    """Signal a Codex process AND the native binary it runs.
-
-    ``codex`` is a node wrapper that spawns the platform binary as its child.
-    The wrapper forwards SIGTERM, but nothing can forward SIGKILL, so killing
-    the wrapper leaves the real process orphaned and running -- caused
-    2026-10-01 by this module's own tests, which left two device-code logins
-    polling after their flows were "killed". Every Codex process this runtime
-    starts is therefore the leader of its own session (``start_new_session``)
-    and is ended by group."""
+    """Signal the wrapper and native child together by process group. Launch each provider
+    process in a new session so the group belongs to it.
+    """
     try:
         os.killpg(pid, sig)
     except (ProcessLookupError, PermissionError):
@@ -152,20 +120,9 @@ def _jwt_claims(token) -> dict:
 
 
 def login_state() -> dict:
-    """Codex's login as the provider row answers it, read from ``auth.json``
-    every time and never cached, because Codex rewrites that file when it
-    refreshes a token in use.
-
-    ``{"source", "connected", "reason", "account", "plan", "expires_at",
-    "days_left"}``. ``expires_at`` and ``days_left`` are always null, and that
-    is a stated limit rather than a gap: the ChatGPT login's refresh token
-    carries no expiry in the file (the access token's ``exp`` is in its JWT,
-    and it is refreshed in use, which makes it the wrong date to count down to
-    for the same reason the Claude row counts to the refresh token). Nothing
-    on this box can say when a Codex login stops being renewable.
-
-    ``account`` and ``plan`` come from the id token's claims when the file
-    holds one -- an email and ``chatgpt_plan_type`` -- and are null otherwise.
+    """Read auth.json on every call so CLI refreshes are visible. Return account and plan
+    from ID-token claims when present. Leave expiry and days_left unknown because the
+    refresh token supplies no expiry.
     """
     base = {"source": "none", "connected": False, "reason": None,
             "account": None, "plan": None, "expires_at": None,
@@ -210,8 +167,9 @@ def _auth_key() -> tuple:
 
 
 def status_line() -> str | None:
-    """What ``codex login status`` prints, one line, or None if it could not
-    be run. ``"Not logged in"`` with no login (0.159.3, 2026-10-01)."""
+    """Return one line from codex login status, such as "Not logged in", or None if the
+    command could not run.
+    """
     global _status_cache
     key = _auth_key()
     if _status_cache is not None and _status_cache[0] == key:
@@ -231,12 +189,9 @@ def status_line() -> str | None:
 
 
 def sign_out() -> dict:
-    """``codex logout`` in ``CODEX_HOME``: removes ``auth.json`` (0.167.1,
-    measured under a decoy home 2026-11-11, no network on that run; a second
-    run prints "Not logged in" and exits 0). Every Codex chat stops
-    authenticating from its next turn. ``removed`` is whether the file was
-    there and is gone; ``message`` is the CLI's words when it failed. The
-    caller builds the row's login afresh."""
+    """Run codex logout in the session's CODEX_HOME. Report whether auth.json was removed
+    and return the CLI's message on failure. The caller reads fresh login state.
+    """
     existed = AUTH_PATH.is_file()
     message = None
     try:
@@ -419,14 +374,10 @@ def _imports(path: Path, depth: int, seen: set) -> list[Path]:
 
 
 def instruction_sources(workspace: Path) -> list[Path]:
-    """The files a persona's conversation loads, in order: ``CLAUDE.md``,
-    its imports, then the conversation output style (``_active.md``).
-
-    An agent with a map (2026-11-18, lib/loam_loading.py) has no
-    conversation style: its map is one of the imports, as on Claude Code,
-    whose settings select the empty style for it. ``CLAUDE.md`` is brought
-    to the shape on disk first, so the thread loads what the next Claude
-    Code session would."""
+    """Bring CLAUDE.md up to date and load it, its imports, and the conversation output
+    style in order. An agent with a map loads it as an import and uses no additional
+    style.
+    """
     from loam_memory import CONVERSATION_LAYER  # noqa: PLC0415
     import loam_loading  # noqa: PLC0415
     loam_loading.quiet_refresh(workspace)
@@ -814,14 +765,10 @@ def app_server_call(method: str, params: dict | None = None,
 
 
 def read_rate_limits() -> dict | None:
-    """``read``: ``account/rateLimits/read`` on a short-lived app-server,
-    kept on disk in place of whatever was there, and answered. None, and the
-    file untouched, when there is no login or the read fails.
-
-    It costs nothing against the meter: it is no turn and no model call, and
-    the weekly ``usedPercent`` stood at 4 across the reads of 2026-10-14. It
-    can run beside a live session -- a second app-server on one home, as
-    ``fetch_models`` has done at every broker start since 10-01."""
+    """Request account/rateLimits/read on a short-lived app-server without starting a model
+    turn. Replace cached limits on success. A failed read or missing login leaves the
+    cache intact and returns None.
+    """
     state = login_state()
     if not state["connected"]:
         return None
@@ -1111,13 +1058,9 @@ class Translator:
 
     def feed(self, method: str, params: dict, parent: str | None = None
              ) -> list[dict]:
-        """The events one notification becomes. ``parent`` is the id of the
-        call that spawned the thread this notification came on, for a
-        subagent's thread (2026-11-13): every event it makes carries it as
-        ``parent_tool_use_id``, as a Claude subagent's events carry their
-        ``Agent`` call's id. Without it a subagent's message was a top-level
-        ``assistant`` event, and the thread engine posts top-level text as
-        the persona's own words (``loam_thread_engine.Reply.of``)."""
+        """Translate a notification into broker events. Set parent_tool_use_id on events from a
+        spawned thread so a subagent's text cannot become the persona's top-level reply.
+        """
         events = self._feed(method, params)
         if parent:
             for event in events:

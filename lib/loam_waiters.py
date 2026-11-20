@@ -1,50 +1,6 @@
-"""Who briefed a job, and the receipt a waiting call could not carry
-(2026-11-12).
-
-Two things the brief call did not know until now, both for the same page
-(Activity, the owner 11-12: "I also can't easily tell which persona started
-them and what thread they are for"):
-
-**The caller** (``caller()``): which lane the brief came from --
-``conversation`` (a thread turn or a chat), ``wake`` (a reflection),
-``cron``, ``reviewer``, or ``job`` (an engineer job briefing another) -- and,
-for a conversation, the broker session that made the call and the thread
-that session is a member's turn in. The broker puts ``LOAM_SESSION_ID`` in
-every CLI it starts (all three engines); an MCP server may not pass its
-environment on (Codex's `env_vars` whitelist does not), so the launcher
-also walks its own ancestors and reads each one's environment, and for a
-Claude CLI started before the variable existed, its ``--session-id`` /
-``--resume`` argument. The thread is the session's marker
-(``state/threads/steps/sessions/<id>``, written before a turn's first
-message is sent) or else ``sessions.json``. Unknown is left out, never
-guessed.
-
-**The record of what is owed** (``register`` / ``owed`` / ``done``): every
-brief returns at once (since 2026-11-19, batch B step 3; from a thread since
-2026-11-18, step 1) and leaves a record in
-``state/engineer-waiters/<job>.json`` at accept. It is owed the moment its
-job has a ``result.json`` verdict, and it goes back to whoever asked by one
-of two routes:
-
-- **A thread** (``route(record) == "thread"``): the broker hands the result
-  to the briefing persona as input to a turn in that thread, posting
-  nothing (``Server.deliver_owed``, ``ThreadEngine.deliver_job``). The input
-  is ``handoff_text``: the receipt's path, the launcher's one-line verdict
-  (``verdict_line``), whether it landed. The owner's words, 11-18: he does
-  not want to be "spammed in my chat section".
-- **A run** (``"run"``): a wake, a cron, a result run, or a thread that has
-  gone. ``bin/wake --results`` starts a new run of the persona that resumes
-  the asking CLI session with the result as its input, or, when that
-  session cannot be resumed, a fresh run carrying the result and what the
-  asker was doing (lib/loam_results.py). Nothing here needs the broker.
-
-A record is removed when it is delivered (``done``), and every outcome is a
-line in ``logs/engineer-deliveries.jsonl``. Until 2026-11-19 a caller with
-no thread blocked in the launcher's ``wait_for`` for up to four hours, and
-this file also kept that waiter's pid; a record whose waiter died was owed.
-
-Nothing here talks to the network or delivers anything; the broker and
-bin/wake do.
+"""Persist who briefed a job and where its result is owed. The broker delivers thread
+results and bin/wake handles threadless ones. Remove pending records after delivery
+and record each outcome in the delivery log.
 """
 
 from __future__ import annotations
@@ -187,18 +143,9 @@ def thread_of(session_id: str | None, persona: str | None = None,
 
 def caller(env: dict | None = None, pid: int | None = None,
            proc: Path = PROC, state: Path | None = None) -> dict:
-    """{"caller": run kind, "caller_session"?: id, "thread"?: id,
-    "caller_lane"?: lane} for the brief being accepted now. Only what is
-    known is there.
-
-    Every lane records the CLI session that made the call (since
-    2026-11-19): a wake or a cron runs with ``--session-id`` and
-    ``LOAM_SESSION_ID`` set by bin/wake, so its result can resume it. A
-    conversation adds the thread it is a turn in. An unattended lane adds
-    ``caller_lane``, its ``LOAM_WAKE`` (``reflection``, ``cron:<name>``),
-    which is what a result run reloads and what a fresh one names. A job
-    briefing a job answers to whoever asked the asking job (``asked_by_job``
-    and that job's own caller fields)."""
+    """Record the calling lane and whichever session and thread IDs are known when the job
+    is accepted.
+    """
     env = os.environ if env is None else env
     lane = env.get("LOAM_WAKE") or ""
     kind = lane_kind(lane)
@@ -221,10 +168,9 @@ CALLER_FIELDS = ("caller", "caller_session", "thread", "caller_lane")
 
 
 def _job_caller(job_id: str) -> dict:
-    """A job that briefs a job (2026-11-19): the result goes to whoever
-    asked the asking job -- its persona, by its thread or its run -- since
-    the asking job has ended by then and resuming it would be a whole new
-    engineer job to read one receipt. Its own brief says who that was."""
+    """When an engineer job briefs another job, inherit the original persona's delivery
+    address from the calling job's brief.
+    """
     out: dict = {"caller": "job", "asked_by_job": job_id}
     try:
         import loam_engineer as eng  # noqa: PLC0415
@@ -406,10 +352,9 @@ def verdict_line(result: dict, limit: int = 240) -> str:
 
 
 def handoff_text(record: dict, title: str | None = None) -> str:
-    """The input of the briefing persona's delivery turn, after the thread:
-    which job, where its receipt is, the launcher's verdict, whether it
-    landed -- and that nothing was posted, so it may end its turn without
-    a word. Never shown in the thread (batch B, 2026-11-18)."""
+    """Build the private delivery-turn input with the job ID, receipt location, verdict and
+    landing status. Posting a public reply is the persona's choice.
+    """
     result = record.get("result") or {}
     named = f" (\"{title.strip()}\")" if title and title.strip() else ""
     # When it finished (2026-11-19): a result given after a long outage says

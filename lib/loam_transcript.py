@@ -1,22 +1,6 @@
-"""Transform a Claude Code session JSONL into a vault transcript.
-
-The output has to be indistinguishable from what the chassis writes into
-``vault/15_CONVERSATIONS/`` -- same frontmatter fields in the same order,
-same ``<!-- turn ... -->`` markers, same speaker headers, same wiki-links.
-A header is the agent's plain name (2026-11-17): the emoji face is retired,
-and an older ``agent.json`` that still holds ``emoji`` no longer prefixes
-the headers written from now on. Files already written keep theirs. A human reading the folder should not be able to tell
-which runtime produced a given file.
-
-Upstream calls the session JSONL schema internal and version-unstable, so
-this module is a pin-walk-class dependency: it is built against a saved
-golden fixture (``fixtures/golden-session.jsonl``) and the test beside it
-is what will tell us when the schema moves.
-
-Idempotency is keyed on session id plus turn index, held in a sidecar
-under ``agents/state/transcripts/``. Deliberately NOT recorded in the
-transcript itself: extra attributes on the turn markers would be exactly
-the tell this transform exists to avoid.
+"""Render Claude Code session JSONL with the established frontmatter, turn markers and
+plain speaker names. The golden-session fixture guards the upstream format. Track
+session ID and turn index in a sidecar so repeated runs never duplicate turns.
 """
 
 from __future__ import annotations
@@ -112,13 +96,8 @@ def _text_of(content) -> str:
 
 
 def iter_entries(jsonl_path: Path):
-    """Every entry of a session file, in order, skipping what will not parse.
-
-    The one reader of the CLI's session JSONL on this box. Everything that
-    reads one -- the transcript transform below, the broker's adoption of a
-    session started in the Claude Code app -- comes through here, so the
-    schema upstream calls internal and version-unstable is understood in one
-    place and moves in one place when it moves.
+    """Yield parseable session entries in file order. Share this reader with app-session
+    adoption so both consumers follow the same upstream schema.
     """
     with jsonl_path.open(encoding="utf-8") as handle:
         for line in handle:
@@ -216,14 +195,9 @@ def person_text(text: str) -> str:
 
 
 def is_harness_prompt(entry: dict) -> bool:
-    """A user-role entry the harness delivered, that no person typed.
-
-    ``isMeta`` is how the CLI marks its own interjections (the local-command
-    caveat, an image's dimensions) and ``isCompactSummary`` how it marks the
-    summary it writes when a conversation is compacted. Neither carries a
-    promptSource in any session file on this box, so both are already dropped;
-    they are named here so that the day one of them does carry one, it is still
-    not filed as something the owner said.
+    """Identify runtime-generated user entries, including compaction summaries and
+    metadata, so transcript authorship stays accurate even when an entry has
+    promptSource.
     """
     origin = entry.get("origin")
     kind = origin.get("kind") if isinstance(origin, dict) else None
@@ -233,33 +207,10 @@ def is_harness_prompt(entry: dict) -> bool:
 
 
 def parse_session(jsonl_path: Path, agent: str) -> list[Turn]:
-    """Extract the conversation from a session JSONL, in order.
-
-    A real user turn carries ``promptSource``; a ``user`` entry without it
-    is a tool result being fed back to the model, not something a person
-    said. Carrying one is necessary and no longer sufficient: a task
-    notification and a peer message carry one too, and ``is_harness_prompt``
-    above refuses them. What survives goes through ``person_text``, so a
-    typed message that arrived with reminders wrapped around it is filed as
-    the sentence the owner typed. A harness entry still ENDS the agent's turn:
-    the reply that follows it is a separate thing the person read, with its
-    own timestamp, and merging it into the reply before would file two
-    messages minutes apart as one.
-
-    Consecutive assistant entries are coalesced into a single turn,
-    because one reply is often split across several entries by interleaved
-    tool calls -- the chassis writes one turn per reply and so must this.
-    Every top-level text block of a turn belongs to the record, in order:
-    the sentence said before the tools and the answer said after them are
-    both things the agent said to the person, and what happened between
-    them is not.
-
-    Subagent traffic never appears. ``isSidechain`` is how the CLI's own
-    session file marks it; ``parent_tool_use_id`` is how the same traffic
-    is marked on the SDK's event stream, and is checked here so that a
-    writer pointed at a stream-shaped file cannot file a subagent's words
-    as the persona's. (Zero of the 54 session files on this box in
-    2026-09 carry it; it costs nothing to refuse it before one does.)
+    """Extract human prompts and top-level assistant replies in order. Exclude tool results
+    and harness-generated prompts, and strip injected reminders from human text. A
+    harness entry still ends the preceding reply so a later response keeps its own
+    timestamp.
     """
     turns: list[Turn] = []
     pending: list[str] = []
@@ -604,16 +555,8 @@ def _title_debug(message: str) -> None:
 
 
 def generate_title(turns: list[Turn], agent: str) -> str | None:
-    """A short human title for a conversation, or None if anything goes wrong.
-
-    Sessions outside the broker never produced an ``ai-title`` entry (measured
-    2026-08-25, on Remote Control: 0 of the agent's sessions against 413 chassis-era ones), so
-    without this every transcript keeps a truncated first prompt as its
-    filename -- the one remaining tell that a file came from this runtime.
-
-    Fail-soft by contract: every failure path returns None and the caller
-    keeps the existing filename. A title is a convenience; the transcript is
-    the record, and no titling problem may ever cost or corrupt one.
+    """Return a short title if available. If any step fails, keep the existing filename so
+    titling cannot prevent a transcript from being filed.
     """
     if len(turns) < TITLE_MIN_TURNS:
         return None

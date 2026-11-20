@@ -1,29 +1,7 @@
-"""The install's configuration: where everything is, who it is for, and when.
-
-One file, ``/etc/loam/loam.toml`` (or ``$LOAM_CONFIG``), read once at import.
-Every path, the user, the owner, the vault's folder names, the time zone and
-the commit identity the runtime uses come from here, so a second install is
-a second file and not a fork. ``lib/loam_broker`` and ``lib/loam_engineer``
-re-export the paths under their historical names, so the ~40 modules that
-import those two need no change at their call sites.
-
-Added 2026-11-14 (first release, job L1). The rule for a missing key is the
-fresh install's layout, below in ``_DEFAULTS``; a box that predates the file
-carries its own values in it, so that on that box no value moved when this
-module landed (the file came first, the code second). On the first install the
-state paths in the file are the checkout's ``state/``, ``logs/`` and the rest
-until ``bin/move-state`` has run; the move rewrites the file, and from then
-on nothing the runtime writes is inside the checkout.
-
-The checkout itself (``paths.root``) is named in the file rather than taken
-from ``__file__`` on an install that has one, because code running in an
-engineer job's tree must still mean the live runtime when it says "the
-runtime" (provision run from a tree writes the live agents' configs, and
-those must point at the live checkout, never at a tree that is deleted when
-the job ends). With no file, it is this file's own checkout.
-
-Nothing here is a secret. ``paths.secrets_env`` and ``paths.wake_env`` name
-the files that hold them; their values are never read by this module.
+"""Read the installation layout, owner, time zone and vault folders from
+/etc/loam/loam.toml or LOAM_CONFIG. Missing settings take the fresh-install
+defaults. The configured root also works when code is running from a job checkout.
+Store paths to credentials here, never their values.
 """
 
 from __future__ import annotations

@@ -1,53 +1,7 @@
-"""Server plugins, supervised beside Loam and never inside the broker
-(2026-11-13; the owner, m259: "its own program beside Loam ... a crash, install
-or update touches only that plugin, never a conversation").
-
-**One plugin, one transient user unit**, ``loam-plugin-<id>.service``, made
-by ``systemd-run --user`` exactly as an engineer job is (bin/engineer-job),
-so it is the box's existing pattern: its own cgroup under the user manager,
-never the broker's (loam-session-broker.service), so a plugin's crash, its
-memory and its restart are its own. Started when the plugin is on and has a
-server; stopped when it is turned off; stopped before its folder is removed;
-started fresh after an update. ``loam_plugins`` calls this module at each of
-those; ``reconcile()`` (``bin/plugin-servers reconcile``, on
-``loam-plugins-reconcile.timer`` at boot and every five minutes) starts what
-should run and is not loaded (after a reboot or a user-manager restart),
-and stops what runs and should not. It never restarts a unit that failed:
-a crash loop stays visible until someone acts.
-
-**What a unit gets**: its command (the manifest's ``server.run``, or
-``python3 server/main.py`` / ``node server/main.js``) run by ``/bin/sh -c``
-in the plugin's folder; a loopback port of its own, kept across restarts
-(``state/plugins/ports.json``); and this environment:
-
-  PORT, LOAM_PLUGIN_PORT   the port to listen on, on 127.0.0.1
-  LOAM_PLUGIN_ID           its id
-  LOAM_PLUGIN_DIR          its folder
-  LOAM_PLUGIN_BASE         /x/<id>/, where the app reaches it
-  LOAM_PLUGIN_DATA         Yours/_data/<id>/, its own files (made here)
-  LOAM_PLUGIN_SETTINGS     Yours/_settings/<id>/<its settings file>
-  LOAM_BROKER_URL          the broker, as the app reaches it
-  LOAM_BROKER_TOKEN_FILE   the file holding the broker's token (a path, so
-                           the token is never a unit property anyone can
-                           read with `systemctl show`)
-  LOAM_API                 the plugin interface version
-
-**Limits**: ``MemoryMax=512M`` and no swap each (``MEMORY_MAX``; the box is
-32 GB and a plugin server is a small program; a wake is 1.5 GB), 256 tasks,
-``NoNewPrivileges`` (this user has sudo; a plugin never does), and an OOM
-score between the agents' and the core's, so the kernel takes a plugin
-after any agent run and before the broker.
-``Restart=always`` after 2 s; five starts within 60 s and systemd gives up,
-which is ``failing`` with the last log lines on the plugin's row.
-
-**The address**: Caddy sends ``/x/*`` on the app's host, behind the same
-login, to ``bin/plugin-gateway`` (127.0.0.1:8933, its own unit), which reads
-the port table and passes the request to the plugin's port with the prefix
-taken off. The broker never carries a plugin's traffic.
-
-``LOAM_PLUGIN_UNITS=1`` turns the units on wherever Yours is; by default
-they are managed only when Yours is the box's own folder, so a test run with
-``LOAM_PLUGINS_DIR`` in a temporary folder never starts a unit.
+"""Supervise each enabled server plugin in its own transient user unit. Give it a
+loopback port, plugin-specific state and resource limits. The authenticated gateway
+routes requests to that unit. Confine fixture reconciliation to its isolated
+environment.
 """
 
 from __future__ import annotations

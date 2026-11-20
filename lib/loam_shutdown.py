@@ -15,12 +15,8 @@ import loam_broker as cfg
 
 
 def loaded_source(entry) -> dict[str, list[str]]:
-    """This repo's source as the process loaded it: this file and every
-    module imported from ``lib/``, read once while the broker starts.
-
-    For the shutdown dump. A broker runs for days while the checkout moves on,
-    and ``traceback`` reads a frame's line from the file as it is *now*: the
-    10-14 dump printed a docstring under ``line 5639, in dump`` (2026-10-14).
+    """Capture the executable and imported library source at startup. Use these lines for
+    shutdown traces even when the checkout has advanced.
     """
     root = Path(__file__).resolve().parent.parent
     files = {str(Path(entry)), str(Path(__file__))}
@@ -41,29 +37,9 @@ LOADED_SOURCE = {}
 
 
 class ShutdownWatch:
-    """What the broker is doing, written to the journal, when a stop hangs.
-
-    Added 2026-10-13. Four stops between 10-07 and 10-09 ignored SIGTERM for
-    systemd's full 90 s and were SIGKILLed with nothing captured: at +15 s
-    the main thread sat idle in ``epoll_wait`` and a second thread in
-    ``futex_wait_queue``, which fits an idle loop waiting on something that
-    never finishes -- a task that will not end when cancelled, or
-    ``asyncio.run`` joining a worker thread still inside a ``to_thread``
-    call (Python 3.11 joins it with no timeout) -- and does not say which.
-
-    Armed by the first SIGTERM or SIGINT, on a thread of its own and not on
-    the loop, because the loop is the thing that may be stuck and because
-    ``asyncio.run`` has stopped running it by the time it joins the executor.
-    ``cfg.SHUTDOWN_DUMP_S`` later, if the process is still here, it writes
-    one line per live session, every thread's stack by name and every
-    asyncio task still pending; then the stop goes on as before. A stop that
-    finishes in time takes the daemon thread with it and writes nothing.
-
-    Not ``faulthandler`` alone, though it is armed too: on 3.11 it names a
-    thread only by a hex ident, and the thread names and the tasks are what
-    tell the two suspects apart. ``faulthandler`` needs no GIL, so it is the
-    fallback at ``cfg.SHUTDOWN_FALLBACK_S`` for a stop where Python cannot
-    run at all, and the first dump cancels it.
+    """On the first stop signal, start an independent watchdog to journal where shutdown
+    stalls. It must run even if the event loop blocks or the interpreter is waiting for
+    a worker.
     """
 
     def __init__(self, broker: "Broker",
@@ -220,8 +196,9 @@ def hard_exit(code: int) -> None:
 
 
 async def shutdown(broker: "Broker", server: "Server") -> None:
-    """The stop, bounded (2026-11-10; see ``cfg.SHUTDOWN_*``). Each step that
-    runs out of time names what it left in the journal and the stop goes on."""
+    """Bound each shutdown step. Journal unfinished work when a step times out and continue
+    draining.
+    """
     def say(line: str) -> None:
         print(f"shutdown: {line}", file=sys.stderr, flush=True)
 
