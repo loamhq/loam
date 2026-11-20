@@ -80,9 +80,9 @@ for (const width of [390, 1440]) test(`${width}: every list offers quick add bef
   const f = setup({ markdown: unheadedIdeas, width }); t.after(() => f.threads.pause())
   const lists = all(f.view(), 'tt-board-list').filter((n) => n.getAttribute('data-board-section'))
   assert.deepEqual(lists.map((n) => all(n, 'tt-board-item').length), [4, 2])
-  for (const list of lists) {
+  for (const [i, list] of lists.entries()) {
     assert.equal(all(list, 'tt-list-add').length, 1)
-    assert.equal(text(find(list, 'tt-list-add')), 'Add an idea…')
+    assert.equal(text(find(list, 'tt-list-add')), i === 0 ? 'Add an item…' : 'Add an idea…')
     assert.ok(list.childNodes.indexOf(find(list, 'tt-board-list-foot')) < list.childNodes.indexOf(find(list, 'tt-board-item')))
   }
   assert.equal(text(all(f.view(), 'tt-board-list-title').at(-1)), 'Ideas')
@@ -90,16 +90,38 @@ for (const width of [390, 1440]) test(`${width}: every list offers quick add bef
   assert.equal(f.threads.st.open.board.markdown, unheadedIdeas, 'colon removal is display-only')
   f.labelled('Add to Board').fire('click')
   const input = find(f.view(), 'tt-quick'); input.value = 'A first-list item'
+  assert.equal(input.getAttribute('placeholder'), 'Add an item…')
   input.fire('keydown', { key: 'Enter', preventDefault() {} }); await new Promise(setImmediate)
   assert.equal(f.calls[0].body.markdown, unheadedIdeas.replace('\n### Ideas:', '- [ ] ' + today + ' · A first-list item <!-- Sam -->\n\n### Ideas:'))
   f.labelled('Add to Ideas').fire('click')
-  assert.ok(find(f.view(), 'tt-quick'))
+  assert.equal(find(f.view(), 'tt-quick').getAttribute('placeholder'), 'Add an idea…')
 })
-for (const markdown of ['', '# Board\n', '# Board\n\n- [ ] First\n', '## Empty:\n\n### Later:\n']) test(`Add remains available for empty/heading-free lists: ${JSON.stringify(markdown)}`, (t) => {
+for (const markdown of ['', '# Board\n', '# Board\n\n- [ ] First\n', '## Empty:\n']) test(`Add remains available for empty/heading-free lists: ${JSON.stringify(markdown)}`, (t) => {
   const f = setup({ markdown }); t.after(() => f.threads.pause())
   const lists = all(f.view(), 'tt-board-list').filter((n) => n.getAttribute('data-board-section'))
-  assert.equal(lists.length, markdown.includes('## Empty') ? 2 : 1)
-  for (const list of lists) assert.equal(all(list, 'tt-list-add').length, 1)
+  assert.equal(lists.length, 1)
+  assert.equal(all(lists[0], 'tt-list-add').length, 1)
+})
+test('Cards uses Markdown heading levels to show groups and keeps add and move on lists', (t) => {
+  const markdown = '# Incoming\n\n> Read the newest items first.\n\n## Urgent:\n- [ ] Review the draft\n\n### Later\n\n# Planning\n\n#### Backlog\n\n# Standalone\n'
+  const f = setup({ markdown }); t.after(() => f.threads.pause())
+  const view = f.view()
+  const groups = all(view, 'tt-board-group')
+  assert.deepEqual(groups.map(group => text(group.childNodes[0])), ['Incoming', 'Planning'])
+  assert.ok(groups.every(group => !all(group, 'tt-list-add').length && !all(group, 'tt-board-list-count').length))
+  const intro = find(groups[0], 'tt-description')
+  assert.equal(intro.hasAttribute('open'), false)
+  assert.equal(text(intro.childNodes[0]), 'About this section')
+  const lists = all(view, 'tt-board-list')
+  assert.deepEqual(lists.map(list => list.getAttribute('aria-label')), ['Urgent', 'Later', 'Backlog', 'Standalone'])
+  assert.deepEqual(lists.map(list => text(find(list, 'tt-board-list-count'))), ['1', '0', '0', '0'])
+  assert.equal(lists[0].childNodes[0].nodeName, 'H4')
+  assert.equal(text(find(lists[0], 'tt-list-add')), 'Add to Urgent…')
+  f.labelled('Add to Urgent').fire('click')
+  assert.equal(find(f.view(), 'tt-quick').getAttribute('placeholder'), 'Add to Urgent…')
+  f.labelled('Actions for Review the draft').fire('click'); f.named('Move to…').fire('click')
+  assert.ok(f.named('Backlog'))
+  assert.equal(f.named('Planning'), undefined)
 })
 test('a refused edit keeps the draft and exposes a single retry', async (t) => {
   const f = setup({ fail: true }); t.after(() => f.threads.pause())

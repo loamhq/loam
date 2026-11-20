@@ -59,12 +59,12 @@ export function boardLines(markdown) {
     }
     const item = !fence && /^(\s*[-*+]\s+)(?:\[([ xX])\]\s+)?(.*?)(\s*<!--([^<>]*)-->\s*)?$/.exec(line)
     if (!item) {
-      const heading = !fence && /^ {0,3}(#{1,3})[ \t]+(.+?)[ \t]*$/.exec(line)
-      if (heading?.[1] === '#' && firstTitle) {
-        firstTitle = false
-        return { raw, index, line, title: true }
-      }
-      return { raw, index, line, fenced: Boolean(fence), ...(heading ? { heading: heading[2].replace(/[ \t]+#+[ \t]*$/, '').trim(), level: heading[1].length } : {}) }
+      const heading = !fence && /^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*$/.exec(line)
+      if (!heading) return { raw, index, line, fenced: Boolean(fence) }
+      const level = heading[1].length, name = heading[2].replace(/[ \t]+#+[ \t]*$/, '').trim()
+      const title = level === 1 && firstTitle
+      firstTitle = false
+      return { raw, index, line, fenced: false, ...(title ? { title: true, titleText: name } : { heading: name, level }) }
     }
     const parts = (item[5] ?? '').split('·').map((s) => s.trim())
     const dated = /^(\d{4}-\d{2}-\d{2})([ \t]+·[ \t]+)(?:\*\*([^*]+)\*\*[ \t]+·[ \t]+)?/.exec(item[3])

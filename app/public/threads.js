@@ -162,7 +162,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     if (st.mention && e.target === compose.field() && !e.relatedTarget?.closest?.('.tt-mentions, .tt-mention-button')) { st.mention = null; redraw() }
   })
   document.addEventListener?.('selectionchange', () => { if (st.open && document.activeElement === compose.field()) leanFaces() })
-  const quick = h('input', { class: 'tt-quick', placeholder: 'Add an idea…', 'aria-label': 'Add to the board', onkeydown: (e) => {
+  const quick = h('input', { class: 'tt-quick', onkeydown: (e) => {
     if (e.isComposing) return
     if (e.key === 'Enter') { e.preventDefault(); addItem() }
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeQuick(true) }
@@ -1625,7 +1625,15 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     const o = st.open
     if (!o.boardOpen) { richDoc.leave(); return null }
     const lines = boardLines(o.board.markdown), all = boardSections(o.board.markdown)
-    const sections = all.filter(s => s.key !== 'top' || all.length === 1 || s.blocks.some(b => b.item || b.text.trim()))
+    const sections = all.map((section, i) => {
+      const items = section.lines.filter(line => line.item).length
+      const title = section.lines.find(line => line.title)?.titleText
+      const level = section.level ?? (title ? 1 : 0)
+      // The following heading starts a subsection only when its level is deeper.
+      const group = !items && level > 0 && all[i + 1]?.level > level
+      return { ...section, name: group && title ? title : section.name, level, items, group }
+    }).filter(s => s.key !== 'top' || s.group || all.length === 1 || s.blocks.some(b => b.item || b.text.trim()))
+    const lists = sections.filter(s => !s.group)
     const count = lines.filter(l => l.unseen).length
     const closeBoard = () => { finishBoardEdit(); drag.cancel(); o.boardOpen = false; o.focusChat = true; redraw() }
     const busy = o.boardBusy || o.boardRefreshing || !o.board.revision || Boolean(o.recovery)
@@ -1662,7 +1670,7 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
           o.boardMenu = o.boardMenu === l.index ? null : l.index; o.menuPage = null; redraw()
         }, { class: 'iconbtn content-mark', disabled: busy, 'aria-expanded': String(o.boardMenu === l.index) }),
         o.boardMenu === l.index ? menuSurface(h('div', { class: 'tt-item-menu' },
-          o.menuPage === 'move' ? sections.map(s => button(boardListName(s), () => moveItem(l.index, s.key), { class: 'pillbtn content-mark' })) :
+          o.menuPage === 'move' ? lists.map(s => button(boardListName(s), () => moveItem(l.index, s.key), { class: 'pillbtn content-mark' })) :
           o.menuPage === 'expiry' ? h('label', { class: 'tt-expiry' }, 'Expires on', h('input', { type: 'date', value: l.until, onchange: e => setExpiry(e.target.value) })) :
           [button(l.until ? 'Change expiry' : 'Set expiry', () => { o.menuPage = 'expiry'; redraw() }),
             l.until ? button('Clear expiry', () => setExpiry('')) : null,
@@ -1674,10 +1682,27 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
       if (!e.currentTarget.contains(e.relatedTarget)) closeQuick()
     } }, kept(quick), h('div', { class: 'tt-board-add-foot' },
       h('div', { class: 'tt-durations', role: 'group', 'aria-label': 'Keep board item for' }, ...[[0, 'Stays'], [1, '1 day'], [7, '1 week'], [14, '2 weeks']].map(([n, label]) => button(label, () => { o.duration = n; o.focusQuick = true; redraw() }, { class: 'pillbtn content-mark', 'aria-pressed': String(Number(o.duration ?? 0) === n) }))), button('Add', addItem, { class: 'pillbtn content-mark', disabled: busy })))
-    const listEnd = (section) => h('div', { class: 'tt-board-list-foot', key: `add:${section.key}` },
-      o.addSection === section.key ? quickForm() : button([icon.plus(15), 'Add an idea…'], () => {
-        quick.setAttribute('aria-label', `New item in ${boardListName(section)}`); o.addSection = section.key; o.focusQuick = true; o.boardMenu = null; redraw()
-      }, { class: 'tt-list-add', disabled: busy, 'aria-label': `Add to ${boardListName(section)}`, 'data-add-section': section.key, 'aria-expanded': 'false' }))
+    const listAdd = (section) => {
+      const name = boardListName(section)
+      const label = section.key === 'top' ? 'Add an item…' : /^ideas$/i.test(name) ? 'Add an idea…' : `Add to ${name}…`
+      return h('div', { class: 'tt-board-list-foot', key: `add:${section.key}` },
+        o.addSection === section.key ? quickForm() : button([icon.plus(15), label], () => {
+          quick.setAttribute('placeholder', label)
+          quick.setAttribute('aria-label', `New item in ${name}`)
+          o.addSection = section.key; o.focusQuick = true; o.boardMenu = null; redraw()
+        }, { class: 'tt-list-add', disabled: busy, 'aria-label': `Add to ${name}`, 'data-add-section': section.key, 'aria-expanded': 'false' }))
+    }
+    const description = (section, block) => {
+      const key = `${section.key}:${block.key}`
+      return h('details', { class: 'tt-description', key: block.key, open: o.openDescriptions?.has(key),
+        ontoggle: e => {
+          if (!e.currentTarget.isConnected) return
+          o.openDescriptions ??= new Set()
+          if (e.currentTarget.open) o.openDescriptions.add(key)
+          else o.openDescriptions.delete(key)
+        } }, h('summary', {}, icon.chevronRight(14), 'About this section'),
+        h('div', { class: 'md tt-description-copy' }, ...renderText(reflowBoardQuotes(block.text))))
+    }
     if (o.loading || o.refreshing || o.readFailed || o.boardUnavailable) return h('aside', { class: 'tt-board', 'aria-label': 'Thread board', onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeBoard() } } },
       panelHeader({ title: 'Board', actions: [round('Close board', icon.close(14), closeBoard)], props: { class: 'chat-head plain tt-board-head' } }),
       h('div', { class: 'tt-empty', role: 'status' }, o.loading || o.refreshing ? 'Opening your board…' : 'The board could not be loaded.',
@@ -1691,21 +1716,18 @@ export function createThreads({ registry = createCoreRegistry(), appearance = nu
     editor.readOnly = inlineField.readOnly = Boolean(o.boardBusy)
     o.collapsed ??= new Set()
     const sectionView = section => {
-      const items = section.lines.filter(l => l.item).length, closed = o.collapsed.has(section.key)
+      const { items, group, level } = section, closed = o.collapsed.has(section.key)
+      const name = boardListName(section)
+      const heading = `h${Math.min(6, Math.max(3, level + 2))}`
+      const blocks = () => section.blocks.map(l => l.item ? item(l) : l.text.trim() ? description(section, l) : null)
+      if (group) return h('div', { class: 'tt-board-group', key: section.key }, h(heading, { text: name }), blocks())
       const toggle = () => { if (closed) o.collapsed.delete(section.key); else o.collapsed.add(section.key); redraw() }
-      return h('section', { class: 'tt-board-list', key: section.key, 'data-board-section': section.key, 'aria-label': boardListName(section) },
-        section.key === 'top' && !items ? null : h('h3', { class: 'tt-board-list-head' }, button([
-          h('span', { class: 'tt-board-list-title', text: boardListName(section) }),
+      return h('section', { class: 'tt-board-list', key: section.key, 'data-board-section': section.key, 'aria-label': name },
+        section.key === 'top' && !items ? null : h(heading, { class: 'tt-board-list-head' }, button([
+          h('span', { class: 'tt-board-list-title', text: name }),
           h('span', { class: 'tt-board-list-count', text: String(items) }), closed ? icon.chevronRight(12) : icon.chevronDown(12)],
           toggle, { class: 'tt-section-toggle', 'aria-expanded': String(!closed) })),
-        closed ? null : [listEnd(section), section.blocks.map(l => l.item ? item(l) : l.text.trim() ?
-          h('details', { class: 'tt-description', key: l.key, open: !o.closedDescriptions?.has(section.key),
-            ontoggle: e => {
-              o.closedDescriptions ??= new Set()
-              if (e.currentTarget.open) o.closedDescriptions.delete(section.key)
-              else o.closedDescriptions.add(section.key)
-            } }, h('summary', { text: 'Description' }),
-            h('div', { class: 'md' }, ...renderText(reflowBoardQuotes(l.text)))) : null), h('div', { class: 'tt-board-list-end' })])
+        closed ? null : [listAdd(section), blocks(), h('div', { class: 'tt-board-list-end' })])
     }
     return h('aside', { class: 'tt-board', 'aria-label': 'Thread board', onkeydown: e => {
       if (e.key === 'Escape') { e.stopPropagation(); if (o.boardMenu != null) closeMenu(); else closeBoard() }

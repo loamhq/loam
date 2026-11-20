@@ -282,14 +282,24 @@
 .tt-board-list-title { font:600 17px/1.4 var(--font-body); }
 .tt-board-list-count { color:var(--paper-ink-3); font:500 12px/1.5 var(--font-body); }
 .tt-board-list + .tt-board-list { margin-top:14px; }
+.tt-board-group { padding:4px 2px 0; overflow-wrap:anywhere; }
+.tt-board-list + .tt-board-group { margin-top:20px; padding-top:16px; border-top:1px solid var(--paper-rule); }
+.tt-board-group + .tt-board-group { margin-top:8px; }
+.tt-board-group > :is(h3,h4,h5,h6) { margin:0; color:var(--paper-ink); font:650 20px/1.35 var(--font-body); }
 .tt-board-list-foot { min-width:0; }
 .tt-list-add { display:flex; align-items:center; gap:8px; width:100%; min-height:44px; padding:8px 14px; background:transparent; color:var(--paper-ink-3); border:1px dashed var(--paper-rule); border-radius:14px; font:500 14px/1.4 var(--font-body); text-align:left; cursor:text; }
+.tt-list-add svg { flex:none; }
 .tt-board-list-end { height:4px; }
 .tt-item-actions { position:absolute; bottom:1px; right:4px; }
 .tt-item-actions > .iconbtn { width:44px; height:36px; color:var(--paper-ink-3); }
-.tt-description { margin:4px 0 10px; color:var(--paper-ink-3); font-size:14px; }
-.tt-description summary { cursor:pointer; }
-.tt-description blockquote { margin:6px 0; }
+.tt-description { margin:2px 0 6px; color:var(--paper-ink-3); }
+.tt-description > summary { display:flex; align-items:center; gap:6px; width:fit-content; min-height:36px; padding:0 8px; border-radius:8px; cursor:pointer; list-style:none; font:500 13px/1.4 var(--font-body); }
+.tt-description > summary::-webkit-details-marker { display:none; }
+.tt-description > summary:hover,.tt-description > summary:focus-visible { background:var(--paper-card); color:var(--paper-ink); }
+.tt-description[open] > summary svg { transform:rotate(90deg); }
+.tt-description-copy { padding:2px 8px 8px; font:400 14px/1.6 var(--font-body); overflow-wrap:anywhere; }
+.tt-description-copy blockquote { margin:0 0 8px; border:0; padding:0; color:inherit; }
+.tt-description-copy > blockquote:last-child { margin-bottom:0; }
 .tt-expiry { display:grid; gap:8px; padding:12px; }
 .tt-expiry input { color:var(--paper-ink); background:var(--paper-card); border:1px solid var(--paper-rule); border-radius:10px; min-height:44px; padding:8px; font:inherit; }
 .tt-recovery { background:var(--paper-card); margin:0 16px 10px; border-radius:14px; padding:12px; font-size:14px; }
@@ -323,7 +333,7 @@
   .tt-board { inset:8px; width:auto; }
   .tt-item-actions > .iconbtn { height:44px; }
   .tt-newtag { align-items:flex-start; }
-  .tt-list-add,.tt-default-chip,.tt-icon-choice,.tt-member .iconbtn,.tt-durations .pillbtn,.tt-board-add-foot > button { min-height:44px; min-width:44px; }
+  .tt-list-add,.tt-description > summary,.tt-default-chip,.tt-icon-choice,.tt-member .iconbtn,.tt-durations .pillbtn,.tt-board-add-foot > button { min-height:44px; min-width:44px; }
 }
 @media (prefers-reduced-motion:reduce) { .tt-board,.tt-board-scrim { animation:none; } .tt-board-item.removing,.tt-list-add { transition:none; } }
 

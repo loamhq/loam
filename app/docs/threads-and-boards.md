@@ -868,10 +868,13 @@ settings route (`appearance.phone.board_view` and `appearance.desktop.board_view
 
 **Cards.** Tap the words to edit a card. Enter or leaving the field saves it.
 Links, emphasis and wiki-links render in the card. Dates, authors and deadlines
-sit below the words. Each section opens with **Add an idea…**. Hold a card
-before dragging on touch, or drag with a mouse. The item menu can move a card
-to a section, change or clear its expiry, or delete it. Section headings
-collapse, and descriptions open below them. The board’s properties stay in the file.
+sit below the words. Each list starts with an add control that names the
+section, such as **Add to Urgent…**. Hold a card before dragging on touch,
+or drag with a mouse. The item menu can move a card to another list, change
+or clear its expiry, or delete it. List headings collapse. A heading followed
+by deeper headings reads as a group title when it has no cards of its own.
+**About this section** opens the section’s notes, which start collapsed.
+The board’s properties stay in the file.
 
 **Doc.** The installed Files Markdown editor opens the same board as a continuous
 document. When the rich Files viewer is unavailable, Doc uses the built-in Files
