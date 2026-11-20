@@ -10,7 +10,7 @@ const record = () => ({ thread: structuredClone(row), messages: [{ id: 'm1', aut
 const listing = (rows = [row]) => ({ threads: structuredClone(rows), agents: [{ id: 'sprout' }] })
 const missing = () => Object.assign(new Error('Thread not found'), { status: 404 })
 
-async function setup(t) {
+async function setup(t, { onMissing } = {}) {
   installDom(); document.querySelector = () => null
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const originalFetch = globalThis.fetch, streams = [], calls = [], field = { value: '' }
@@ -29,7 +29,7 @@ async function setup(t) {
     if (path === '/threads?archived=1') return f.list()
     if (path.includes('/steps?')) throw missing()
     return f.read()
-  }, redraw() {}, enter() {}, agents: () => listing().agents,
+  }, redraw() {}, enter() {}, agents: () => listing().agents, missing: onMissing,
   compose: { field: () => field, restore() {}, files: () => [], leave() {} } })
   t.after(() => { threads.pause(); threads.close(); globalThis.fetch = originalFetch })
   await threads.load(); await threads.open('one'); await settle()
@@ -182,6 +182,20 @@ test('an opening 404 still reports a truly deleted thread after confirmation', a
   assert.equal(f.threads.st.open.error, undefined)
   await f.advance()
   assert.equal(f.threads.st.open.error, 'This thread was deleted.')
+})
+
+test('the panel recovers once after a missing opening is confirmed', async (t) => {
+  const recovered = []
+  const f = await setup(t, { onMissing: id => { recovered.push(id); f.threads.close({ navigate: false }) } })
+  f.read = () => { throw missing() }; f.list = () => listing([])
+  await f.threads.open('one'); await settle()
+  assert.deepEqual(recovered, [], 'a single absent listing leaves the opening in place')
+  await f.advance()
+  assert.deepEqual(recovered, ['one'])
+  assert.equal(f.threads.st.open, null)
+  const calls = f.calls.length
+  await f.advance()
+  assert.equal(f.calls.length, calls, 'the repaired visit schedules no more reads')
 })
 
 test('an event-stream 404 reconnects from the completed message and does not imply deletion', async (t) => {

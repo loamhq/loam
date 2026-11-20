@@ -359,9 +359,9 @@ function settingsFiles({ back = true } = {}) {
 
 // The personas the host has, and how many chats this screen knows of each.
 // Tapping one opens its profile, which is where its chats are.
-function goSettingsDetail(kind, id) {
+function goSettingsDetail(kind, id, options) {
   host.state.sheet = { kind: 'settings', page: 'agents', detail: { kind, id } }
-  host.settingsProfiles.load(kind, id)
+  host.settingsProfiles.load(kind, id, options)
   if (kind === 'agent' || kind === 'engineer' && id !== 'default') {
     host.engineerActivity.st.agent = kind === 'agent' ? id : ''
     host.engineerActivity.st.kind = kind === 'engineer' ? 'job' : ''

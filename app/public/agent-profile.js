@@ -30,6 +30,8 @@ export function profileStatus(status = {}) {
 const agentId = agent => typeof agent === 'string' ? agent : agent?.id
 const agentRow = agent => agent && typeof agent === 'object' ? agent : {}
 
+const profileTabs = ['Threads', 'Activity', 'Schedules', 'Settings', 'Files']
+
 export function createProfiles({ api, redraw, changedAgent = () => {} }) {
   const st = { target: null, data: null, loading: false, busy: false, error: '', edit: null, activity: false, tab: 'Threads', page: 1, soul: '', soulError: '', archived: null, directoryBusy: false,
     engineers: null, reviewer: null, attention: null, attentionBusy: false, attentionError: '', directoryError: '', directoryLoading: false }
@@ -45,9 +47,9 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
     st.directoryError = results.filter(r => r.status === 'rejected').map(r => r.reason.message).join(' ')
     st.directoryLoading = false; redraw()
   }
-  async function load(kind, id) {
+  async function load(kind, id, { tab } = {}) {
     const current = ++ticket
-    st.lastRead = Date.now(); st.refreshing = false; st.tab = 'Threads'; st.page = 1; st.soul = ''; st.soulError = ''; st.menu = false; st.faceMenu = false; st.confirmArchive = false; st.focusField = null; st.manageSchedules = false; st.target = { kind, id }; st.data = null; st.edit = null; st.error = ''; st.activity = false; st.busy = false; st.loading = true; redraw()
+    st.lastRead = Date.now(); st.refreshing = false; st.tab = profileTabs.includes(tab) ? tab : 'Threads'; st.page = 1; st.soul = ''; st.soulError = ''; st.menu = false; st.faceMenu = false; st.confirmArchive = false; st.focusField = null; st.manageSchedules = false; st.target = { kind, id }; st.data = null; st.edit = null; st.error = ''; st.activity = false; st.busy = false; st.loading = true; redraw()
     try { const data = await api('GET', path(st.target)); if (current === ticket) {
       st.data = kind === 'engineer' ? { ...data, applies: data.applies || st.engineers?.applies } : data
       if (kind === 'agent' && data.files?.soul?.root && data.files.soul.exists !== false) {
@@ -162,7 +164,14 @@ export function mountProfile(host, { controller = host.profiles, activity = host
   const c = controller, { st } = c
   const providerName = id => host.state.providers.find(p => p.id === id)?.name || id
   const group = (title, rows, foot = null, limitNote = null) => h('section', { class: 'profile-group', 'aria-label': title }, h('h3', { class: 'kicker', text: title }), h('div', { class: 'rows' }, rows), foot ? h('p', { class: 'footnote', text: foot }) : null, limitNote ? h('p', { class: 'footnote profile-limit-note', text: limitNote }) : null)
-  const open = (ref, { folder = false } = {}) => { if (ref?.root && ref.exists !== false) host.goFiles(ref.root, ref.path || '', { isFile: !folder }) }
+  const open = (ref, { folder = false } = {}) => {
+    if (!ref?.root || ref.exists === false) return
+    if (st.target?.kind === 'agent') {
+      const history = globalThis.history
+      history?.replaceState?.({ ...history.state, profileReturn: { id: st.target.id, tab: st.tab, navigator: host.state.navigator } }, '')
+    }
+    host.goFiles(ref.root, ref.path || '', folder ? { isFile: false, routed: true } : { isFile: true })
+  }
   const file = (title, ref, sub = null, right = null, { folder = false, unavailable = 'Not reachable from Files' } = {}) => ref?.root && ref.exists !== false
     ? settingsRow({ title, sub, right, lead: (folder ? icon.folder : icon.file)(18), onclick: () => open(ref, { folder }) })
     : h('div', { class: 'setrow profile-file-unavailable' }, h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: title }), h('div', { class: 'setrow-sub', text: ref?.exists === false ? 'Not available' : unavailable })))
@@ -249,7 +258,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     const threads = host.threads.st.threads.filter(t => t.default === agent || t.members?.some(m => m.persona === agent))
     const pageSize = 12, pages = Math.max(1, Math.ceil(threads.length / pageSize))
     st.page = Math.min(st.page, pages)
-    const tabs = ['Threads', 'Activity', 'Schedules', 'Settings', 'Files']
+    const tabs = profileTabs
     const chooseTab = tab => { st.tab = tab; st.edit = null; st.faceMenu = false; st.menu = false; host.schedule() }
     const faceSrc = data.identity.face === null ? null : data.identity.face?.url?.replace(/^\/v1\//, '/api/') || look.imageSrc
     const upload = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', hidden: true, 'aria-label': 'Upload face', onchange: e => { const f = e.target.files[0]; if (f) c.face(f); e.target.value = '' } })
