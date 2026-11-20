@@ -1,7 +1,6 @@
 import { layoutPixels } from './scale.js'
 
-// One pointer path for mouse and held touch. Only the grip suppresses native
-// touch scrolling; the rest of a board remains a normal scrolling document.
+// A touch scrolls normally until the hold lifts a card.
 export function boardDrag({ drop, announce }) {
   let active = null
   function cancel() {
@@ -9,16 +8,19 @@ export function boardDrag({ drop, announce }) {
     if (!a) return
     active = null; clearTimeout(a.timer); cancelAnimationFrame(a.frame)
     a.row.classList.remove('is-dragging'); a.ghost?.remove(); a.indicator?.remove()
+    document.removeEventListener('touchmove', heldTouch)
     document.removeEventListener('pointermove', move)
     document.removeEventListener('pointerup', finish)
     document.removeEventListener('pointercancel', cancel)
     document.removeEventListener('keydown', key, true)
   }
+  function heldTouch(e) { if (active?.lifted && e.cancelable) e.preventDefault() }
   function key(e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); announce('Move cancelled.') } }
   function lift() {
     const a = active
     if (!a || !a.row.isConnected) return cancel()
     a.lifted = true
+    a.row.setPointerCapture?.(a.pointer)
     const box = a.row.getBoundingClientRect()
     a.box = box
     a.ghost = a.row.cloneNode(true)
@@ -55,7 +57,7 @@ export function boardDrag({ drop, announce }) {
       if (section) {
         const rows = [...section.querySelectorAll('[data-board-index]')].filter((n) => n !== a.row)
         const next = rows.find((n) => { const r = n.getBoundingClientRect(); return a.y < r.top + r.height / 2 })
-        const end = section.querySelector('.tt-board-list-end').getBoundingClientRect()
+        const end = (section.querySelector('.tt-board-list-end') ?? section).getBoundingClientRect()
         const rect = (next ?? rows.at(-1))?.getBoundingClientRect()
         const y = next ? rect.top : rect ? rect.bottom : end.top
         Object.assign(a.indicator.style, { left: `${layoutPixels(viewport.left + 8)}px`, top: `${layoutPixels(Math.max(viewport.top, Math.min(viewport.bottom - 3, y)))}px`, width: `${layoutPixels(viewport.width - 16)}px` })
@@ -81,6 +83,11 @@ export function boardDrag({ drop, announce }) {
     const a = active
     if (!a || e.pointerId !== a.pointer) return
     if (a.lifted) { cancelAnimationFrame(a.frame); a.x = e.clientX; a.y = e.clientY; paint() }
+    if (a.lifted) {
+      const suppress = e => { e.preventDefault(); e.stopImmediatePropagation() }
+      document.addEventListener('click', suppress, { once: true, capture: true })
+      setTimeout(() => document.removeEventListener('click', suppress, true), 0)
+    }
     const target = a.lifted && a.target
     cancel()
     if (target) drop(a.index, target.section, target.before, a.base)
@@ -92,7 +99,7 @@ export function boardDrag({ drop, announce }) {
       const row = e.currentTarget.closest('.tt-board-item'), panel = row.closest('.tt-board')
       active = { row, panel, scroller: panel.querySelector('.tt-board-items'), index, base, pointer: e.pointerId,
         touch: e.pointerType !== 'mouse', startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY }
-      e.currentTarget.setPointerCapture(e.pointerId)
+      if (active.touch) document.addEventListener('touchmove', heldTouch, { passive: false })
       document.addEventListener('pointermove', move, { passive: false })
       document.addEventListener('pointerup', finish)
       document.addEventListener('pointercancel', cancel)

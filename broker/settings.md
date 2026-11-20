@@ -79,7 +79,7 @@ own `thread.*` rows cover the same things.
 | `thread.pinned` | Pinned | PATCH /api/threads/{id} | persona | no |
 | `thread.archived` | Archived | PATCH /api/threads/{id} | persona | no |
 | `thread.seen` | Marked read (the page: opening it) | GET /api/threads/{id} | persona | no |
-| `thread.board` | The board's markdown | PUT /api/threads/{id}/board | persona | yes, as a file |
+| `thread.board` | The board's Markdown and base_revision from its last read | PUT /api/threads/{id}/board | persona | yes, as a file |
 | `thread.create` | Start a thread | POST /api/threads | persona | no |
 | `thread.delete` | Delete a thread and its board | DELETE /api/threads/{id} | persona, conversation only | no |
 | `session.end` | Running now: End | DELETE /api/sessions/{id} | persona, conversation only | no |
@@ -136,6 +136,8 @@ own `thread.*` rows cover the same things.
 | `appearance.desktop.mode` | The desktop's mode: light, dark, sun or system (the modes loam-ui's handoff declares) | PATCH /api/settings/appearance | persona | no (was `device.theme`) |
 | `appearance.desktop.transition` | The desktop's Sun mode transition: fast (3 s), normal (10 s) or long (20 s) | PATCH /api/settings/appearance | persona | no |
 | `appearance.desktop.size` | The desktop's page size, 75–150 % in 5s | PATCH /api/settings/appearance | persona | no |
+| `appearance.phone.board_view` | Phone board view (cards or doc) | PATCH /api/settings/appearance | persona | no |
+| `appearance.desktop.board_view` | Desktop board view (cards or doc) | PATCH /api/settings/appearance | persona | no |
 | `appearance.phone.theme` | The phone's theme (Latte, Plain, any installed) | PATCH /api/settings/appearance | persona | no |
 | `appearance.desktop.theme` | The desktop's theme (Latte, Plain, any installed) | PATCH /api/settings/appearance | persona | no |
 | `appearance.location` | The saved place Sun mode times sunrise and sunset by, one for both kinds: `{latitude, longitude, source, timeZone}` rounded to 0.1°, or null | PATCH /api/settings/appearance | persona | no |

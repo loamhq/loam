@@ -317,7 +317,7 @@ The following paths are relative to `/v1/threads` on the runtime and
 | --- | --- |
 | `GET /` | `{threads, agents}`; summaries carry `id`, `title`, `default`, `members[{persona,engine,model,last_spoke_at,busy,running,background,background_tasks,working}]`, `background` (sum), `working` (members mid-turn), `last`, `unread`, `board_new`, `board` (path), `pinned`, `icon`, `archived`, `general`, `created` |
 | `POST /` | `{persona?, text?, title?}` → 201 and a bare summary |
-| `GET /:id?limit=50` | `{thread, messages, has_more, turn, turns, board:{path,markdown}}`; messages carry `id`, `author`, `at`, `kind`, `text`, `did[{label}]`, and optional `engine`, `model`, `attachments`, prefix `segments` |
+| `GET /:id?limit=50` | `{thread, messages, has_more, turn, turns, board:{path,markdown,revision}}`; messages carry `id`, `author`, `at`, `kind`, `text`, `did[{label}]`, and optional `engine`, `model`, `attachments`, prefix `segments` |
 | `GET /:id?before=<message id>&limit=30` | Same envelope, earlier messages, with `has_more` controlling the next page |
 | `GET /:id/steps?message=<message id>` | `{thread, steps:[entry]}`; one reply's full ordered record, or 404 when none exists |
 | `GET /:id?steps=full` | Optional bulk reading, with `message.steps` arrays (null for messages without a full record); the page keeps its initial read light |
@@ -325,8 +325,8 @@ The following paths are relative to `/v1/threads` on the runtime and
 | `POST /:id/messages` | `{text, attachments?:[path], model?}` → `{accepted:true, message}`; the runtime parses mentions and schedules turns |
 | `DELETE /:id` | Delete the thread after confirmation |
 | `POST /:id/attachments` | Multipart `file` parts, forwarded unchanged → `{attachments:[{path,name,size,type}]}`; present since `7dcd478` |
-| `GET /:id/board` | `{path, markdown, board_new}` |
-| `PUT /:id/board` | `{markdown}` → `{path, markdown, board_new}` |
+| `GET /:id/board` | `{path, markdown, revision, board_new}` |
+| `PUT /:id/board` | `{markdown, base_revision}` → `{path, markdown, revision, board_new}`, or HTTP 409 on a stale revision |
 | `GET /events?archived=1` | List SSE: `threads.snapshot`, `thread.changed`, `thread.removed` |
 | `GET /:id/events?after=<message id>[&steps=full]` | Live SSE; reconnect from the last completed message ID; the optional flag adds `message.steps` to completed replies |
 
@@ -862,89 +862,37 @@ current protected URL, letting the portal preserve the return destination.
 
 ## Boards
 
-The board opens from the header icon as a dismissible panel inside the shared
-chat card, with house panel chrome and close/edit controls in list view. It is not a third ruled
-column. The title/details page can open it too.
+The header’s **Board** button opens the thread’s Markdown file. Cards is the
+default. A phone and a desktop each remember their view through the appearance
+settings route (`appearance.phone.board_view` and `appearance.desktop.board_view`).
 
-The panel header is the title. The file's H1 is hidden in presentation, never
-deleted from the markdown. Section headings have a quiet hierarchy. Items use
-a soft background for newness, an inline author/new tag beside the item menu, and a small lifetime/author line only for time-bound items. Plain notes have no decorative bullet; an empty board explains “A short list for this thread. You and the agents can edit it.” in muted text. Header quotes reflow in presentation. See the [six-item browser audit at both widths](evidence/thread-punch-list/README.md). Section spacing survives the shared markdown first-child rule. Checkboxes
-are rounded custom controls. Duration choices (Stays / 1 day / 1 week /
-2 weeks) use bare ink, with the selected choice underlined. Item menus, Add,
-grips, new/seen actions and section counts are quiet Marks; only the header's
-edit and close buttons have Control fills. The new-items strip and item tint ease away on Mark seen.
-Removing an item slides it out and restores it if saving fails. Motion follows
-reduced-motion preferences.
+**Cards.** Tap the words to edit a card. Enter or leaving the field saves it.
+Links, emphasis and wiki-links render in the card. Dates, authors and deadlines
+sit below the words. Each section opens with **Add an idea…**. Hold a card
+before dragging on touch, or drag with a mouse. The item menu can move a card
+to a section, change or clear its expiry, or delete it. Section headings
+collapse, and descriptions open below them. The board’s properties stay in the file.
 
-Every write sends the whole markdown file. Tick changes only the checkbox;
-Remove deletes only that line; Mark seen removes only `new` from the final
-metadata comment. Unknown metadata, prose, fenced examples and line endings
-survive. Raw editing shows the returned board path and preserves refused
-drafts. An unreadable board cannot be saved as an empty file. An update
-observed during raw editing blocks Done and offers Copy draft.
-
-Every list ends with a quiet, visible **+ Add**, on desktop and phone. This
-includes the first list before any heading, empty headed lists and boards with
-no headings. It opens the focused inline field in that list; Enter adds and
-keeps it ready for the next item, Escape returns focus to Add, and leaving the
-field and its duration controls closes it. There is no permanent bottom composer.
-Duplicate heading names are distinct lists. Fenced examples never become lists.
-
-`##`/`###` headings use the section-heading treatment: uppercase, 12px, bold,
-with the item count beside them in a faint tone and spacing separating lists.
-A trailing colon is omitted in presentation (including Add and Move labels);
-the original heading and its identity remain intact in every file write.
-
-Desktop rows show a grab cursor and can be dragged by their text or the grip;
-the grip appears on hover/focus. On phone the grip stays visible: hold it for
-380 ms and it lifts with a soft scale pulse. Reduced motion omits that pulse.
-The first board with items in a page visit shows a seven-second drag hint;
-closing or pausing clears its timer, and it does not recur in that page visit.
-
-The rest of the panel scrolls normally. A floating card and
-insertion line locate the drop; the panel scrolls near its edges. Drop within
-or between lists, including empty ones. Escape, touch cancellation or dropping
-outside the panel cancels without a write. The item menu's **Move to…** lists
-the headings, including the current list (move to its end), for keyboard use;
-Enter on the grip also opens those choices. Successful moves announce their
-destination, focus the moved item and settle over 220 ms, without motion when
-reduced motion is requested. A known source change blocks a stale drag.
-
-Raw markdown editing initially offers only **Done**, the view's Primary. It
-closes without a write when unchanged. Editing the text reveals **Cancel** as
-a quiet text Mark; restoring the original text hides it again. Done saves a
-changed draft and returns to the list. Cancel or Escape asks **“Discard changes?”**
-once before leaving a changed draft; declining keeps the draft open. Escape on
-an unchanged draft closes directly. A failed save leaves the draft and refusal
-visible. There is no competing X. Stable action keys keep Done's target intact
-when Cancel appears, and click handlers read the current text even before a
-scheduled redraw. The original CRLF/LF convention survives textarea newline
-normalization. [Browser captures and before/after file bytes](evidence/content-marks/README.md)
-prove save, discard, undo, failure and reload behavior at both widths and modes.
-
-All additions carry `<!-- Sam -->`; timed ones add a UTC
-`· until YYYY-MM-DD` inside that comment. A **Stays** addition
-to General's returned `00_INBOX/from-agents/comms.md` path instead uses
-`- YYYY-MM-DD · text`, so its 14-day legacy sweep can age it. Other boards use
-ordinary checkboxes for Stays. The app runs no expiry sweep. The whole-file
-API has no revision/compare-and-swap field: detecting known changes prevents
-known stale saves, but simultaneous writers still need runtime versioning for
-atomic conflict protection.
+**Doc.** The installed Files Markdown editor opens the same board as a continuous
+document. When the rich Files viewer is unavailable, Doc uses the built-in Files
+field. Both receive a view of the document with board metadata removed. The board
+adapter restores that metadata and each original line ending on save. Board saves
+use the thread route for both editors.
 
 ### Agent access to the same file
 
-Adding and moving use the existing whole-file `GET /v1/threads/:id/board` and
-`PUT /v1/threads/:id/board` contract, relayed as `/api/threads/:id/board` for the
-page. An agent reads the current markdown, inserts under the intended heading
-or relocates the original item line with its metadata and checkbox, then PUTs
-`{markdown}`. There is no separate UI-only mutation or board record.
+Agents can edit the Markdown directly. For HTTP edits, open the thread or
+GET `/v1/threads/:id/board`. Both readings return newline-preserving
+`markdown` and a `revision` derived from the exact UTF-8 bytes. PUT the
+edited `markdown` and that `base_revision` to the board route. Success returns
+the saved bytes as Markdown and their new revision. HTTP 409 means another
+writer changed the file. Read it again and apply the intended change to that
+reading. The settings tool’s `thread.board` value carries both fields.
 
-This repository does not contain the host's settings-tool registry, and no
-settings registry/tool is available to the page engineer. Its coverage for
-adding to a heading and moving an item cannot be verified here. The external
-registry needs to expose/document the board read/write contract for both
-operations; neither a registry change nor a host capability is claimed by this
-page change. See [board-list evidence](evidence/board-lists/README.md).
+The page retains a refused edit in the tab across reloads. It displays the
+newer file and offers to reapply the edit. When the edited passage itself
+changed, it can keep both versions for review. A broker that predates the
+revision field can still display the board until it restarts.
 
 ## Verification and deployment
 

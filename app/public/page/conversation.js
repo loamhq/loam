@@ -6,13 +6,13 @@ import { createMessageState } from '../chat-ui.js'
 // The same live conversation mount is used in either slot. Fields and steps
 // are services of this mount; audio and host residency remain app services.
 export function mount(host, options = {}) {
-  return createThreads({ registry: host.registry, api: host.api, redraw: host.schedule,
+  return createThreads({ registry: host.registry, appearance: host.theme, api: host.api, redraw: host.schedule,
     changedAgent: agent => host.changedAgent?.(agent), agents: () => host.state.agents.list, agentsReady: () => host.state.agentsReady, providers: () => host.state.providers,
     running: host.running, rail: host.rail, nav: host.nav, openProfile: host.goProfile, openSettings: (page, provider) => host.goSettings?.(page, provider),
     listIsMain: () => ['home', 'threads'].includes(host.state.screen),
     messageState: options.messageState ?? createMessageState(),
     renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event) }),
-    openRef: ref => host.openFileRef(ref),
+    openRef: (ref, from, event) => host.openFileRef(ref, from, event),
     // A listing card in an agent's reply (page/market.js).
     marketCards: (refs, context) => host.marketCards?.(refs, context) ?? null,
     stepUI: { fold: host.foldCard, tool: host.toolNode, item: item => host.itemNode({ what: item.kind, item }),

@@ -45,8 +45,11 @@ export function createThreadFixture({ modern = true } = {}) {
       records.delete(id); for (const fn of listListeners) fn({ type: 'thread.removed', thread: id }); return { deleted: true }
     }
     if (action === 'attachments') return { attachments: [{ path: `${installation().attachments}/preview/${body.name}`, name: body.name, size: body.size, type: body.type }] }
+    r.board.revision ??= 'fixture-0'
     if (action === 'board') {
       if (method === 'GET') return { ...copy(r.board), board_new: r.thread.board_new }
+      if (body.base_revision != null && body.base_revision !== r.board.revision) throw Object.assign(new Error('The board changed'), { status: 409 })
+      r.board.revision = 'fixture-' + ++counter
       r.board.markdown = body.markdown
       r.thread.board_new = (body.markdown.match(/· new/g) ?? []).length
       emit(id, { type: 'board.changed', board_new: r.thread.board_new }); return { ...copy(r.board), board_new: r.thread.board_new }

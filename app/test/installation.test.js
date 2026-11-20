@@ -74,7 +74,7 @@ test('renamed owner and aliases drive schedule labels, board attribution and thr
   setOwner(identity)
   assert.equal(isOwner('stranger'), false)
   assert.equal(actorName('stranger'), 'Stranger')
-  assert.equal(addBoardItem('', 'Keep this'), '- [ ] Keep this <!-- Alex -->\n')
+  assert.equal(addBoardItem('', 'Keep this'), `- [ ] ${new Date().toISOString().slice(0, 10)} · Keep this <!-- Alex -->\n`)
   const pending = { text: 'Same words' }, o = { messages: [], thread: { members: [] }, typing: new Set(), steps: new Map(), pending }
   applyThreadEvent(o, { type: 'message.done', message: { id: 'm1', author: 'stranger', text: 'Same words' } })
   assert.equal(o.pending, pending)

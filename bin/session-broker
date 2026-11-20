@@ -2028,8 +2028,7 @@ class Server:
                 # Keep incomplete-turn markers separate from messages.
                 "marks": engine.marks_for(thread_id),
                 "pending_permissions": engine.pending(thread_id),
-                "board": {"path": meta["board"],
-                          "markdown": threads_rec.board_text(meta)}}))
+                "board": threads_rec.board_snapshot(meta)}))
             await writer.drain()
             return
         if not rest and method == "DELETE":
@@ -2242,16 +2241,17 @@ class Server:
             meta = threads_rec.read(thread_id)[0]
             if method == "PUT":
                 by = author(payload)
-                threads_rec.write_board(meta, payload.get("markdown"))
+                board = threads_rec.write_board(meta, payload.get("markdown"), payload.get("base_revision"))
                 if by:
                     print(f"threads: {thread_id} board written by {by}",
                           file=sys.stderr, flush=True)
-            markdown = threads_rec.board_text(meta)
+            else:
+                board = threads_rec.board_snapshot(meta)
+            board["board_new"] = threads_rec.board_new(board["markdown"])
             if method == "PUT":
                 engine.publish(thread_id, {"type": "board.changed",
-                                           "board_new": threads_rec.board_new(markdown)})
-            writer.write(response(200, {"path": meta["board"], "markdown": markdown,
-                                        "board_new": threads_rec.board_new(markdown)}))
+                                           "board_new": board["board_new"]})
+            writer.write(response(200, board))
             await writer.drain()
             return
         if rest == ["steps"] and method == "GET":

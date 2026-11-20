@@ -64,6 +64,15 @@
       "default": "normal"
     },
     {
+      "key": "appearance.phone.board_view",
+      "type": "string",
+      "enum": [
+        "cards",
+        "doc"
+      ],
+      "default": "cards"
+    },
+    {
       "key": "appearance.phone.size",
       "type": "integer",
       "minimum": 75,
@@ -138,6 +147,15 @@
         "long"
       ],
       "default": "normal"
+    },
+    {
+      "key": "appearance.desktop.board_view",
+      "type": "string",
+      "enum": [
+        "cards",
+        "doc"
+      ],
+      "default": "cards"
     },
     {
       "key": "appearance.desktop.size",

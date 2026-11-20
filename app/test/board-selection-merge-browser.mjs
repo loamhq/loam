@@ -17,8 +17,8 @@ try {
       await page.goto(app.url)
       await page.getByTitle('A little room for the week', { exact: true }).click()
       await page.getByRole('button', { name: 'Board', exact: true }).click()
-      const grip = page.locator('.tt-grip').first(); await grip.waitFor()
-      const box = await grip.boundingBox(), start = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+      const card = page.locator('.tt-item-copy').first(); await card.waitFor()
+      const box = await card.boundingBox(), start = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
       let touch
       if (width === 390) {
         touch = await context.newCDPSession(page)
