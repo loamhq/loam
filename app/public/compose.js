@@ -464,13 +464,13 @@ export function richField(el, { sends = () => false, changed = () => {}, send = 
       send()
       return
     }
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter') {
       const point = caretPoint(el)
       if (!point) return
       const read = readField(el, point)
       if (read.caret === null) return
       event.preventDefault?.()
-      const next = enterAt(read.md, read.caret)
+      const next = event.shiftKey ? insertAt(read.md, read.caret, '\n') : enterAt(read.md, read.caret)
       setMarkdown(el, next.md, next.caret)
       changed()
       return
