@@ -943,6 +943,33 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     } catch (e) { o.historyError = e.message; o.needsContext = false; o.gapBefore = null; o.landing = false }
     finally { o.moreBusy = false; redraw() }
   }
+  const pinRequests = new Set()
+  let press, ignoreRowClick
+  function endRowPress() { clearTimeout(press?.timer); press = null }
+  async function pinRow(t) {
+    if (isGeneral(t) || pinRequests.has(t.id)) return
+    const selector = `[data-pin-row="${CSS.escape(t.id)}"]`
+    const before = dom.querySelector(selector)?.getBoundingClientRect()
+    const focusPin = dom.activeElement?.classList?.contains('tt-row-pin')
+    pinRequests.add(t.id); st.rowMenu = null; redraw()
+    try {
+      if (st.open?.thread.id === t.id) await patch({ pinned: !t.pinned })
+      else {
+        const row = readThreadSummary(await transport('PATCH', path(t.id), { pinned: !t.pinned }))
+        if (row.id !== t.id || row.pinned === t.pinned) throw new Error('The pin could not be changed.')
+        listingRequest++; updateRow(row)
+      }
+      requestAnimationFrame(() => {
+        const el = dom.querySelector(selector)
+        if (focusPin) el?.querySelector('.tt-row-pin')?.focus({ preventScroll: true })
+        if (el && before && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          const offset = Math.max(-32, Math.min(32, before.top - el.getBoundingClientRect().top))
+          el.animate([{ transform: `translateY(${offset}px)`, opacity: .7 }, { transform: 'none', opacity: 1 }], { duration: 170, easing: 'ease-out' })
+        }
+      })
+    } catch (error) { st.error = error.message }
+    finally { pinRequests.delete(t.id); redraw() }
+  }
   function threadRow(t, { unread = true } = {}) {
     if (!unread) t = { ...t, unread: 0 }
     const options = activityOptions(t), activity = threadActivity(t, options)
@@ -951,7 +978,22 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const quiet = subtitle === 'Quiet'
     const current = st.wide && st.open?.thread.id === t.id
     const selected = current || (!st.wide && st.returning === t.id)
-    return h('button', { class: `srow tt-row${quiet ? ' tt-quiet' : ''}${selected ? ' on' : ''}`, 'data-activity': live, key: t.id, title: t.title || 'New thread', 'aria-current': current ? 'page' : null, 'aria-description': subtitle, onclick: event => event.altKey && side()?.available() ? side().openSide({ kind: 'thread', id: t.id }) : open(t.id) },
+    const pinLabel = t.pinned ? 'Unpin thread' : 'Pin thread'
+    const actions = () => { endRowPress(); st.rowMenu = t.id; redraw() }
+    const row = h('button', { class: `srow tt-row${quiet ? ' tt-quiet' : ''}${selected ? ' on' : ''}`, 'data-activity': live, key: t.id, title: t.title || 'New thread', 'aria-current': current ? 'page' : null, 'aria-description': subtitle,
+      oncontextmenu: e => { if (!isGeneral(t)) { e.preventDefault(); actions() } },
+      onpointerdown: e => {
+        endRowPress(); ignoreRowClick = null
+        if (e.pointerType !== 'touch' || isGeneral(t)) return
+        press = { x: e.clientX, y: e.clientY, timer: setTimeout(() => { ignoreRowClick = t.id; actions() }, 500) }
+      },
+      onpointermove: e => { if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) endRowPress() },
+      onpointerup: endRowPress, onpointercancel: endRowPress,
+      onclick: event => {
+        if (ignoreRowClick === t.id || st.rowMenu === t.id) { ignoreRowClick = null; return }
+        if (event.altKey && side()?.available()) side().openSide({ kind: 'thread', id: t.id })
+        else open(t.id)
+      } },
       rowTop({ face: h('div', { class: 'avatar-wrap' }, threadFace(t, 52)), title: t.title || 'New thread', subtitle: quiet ? null : subtitle,
         meta: [h('span', { class: 'srow-time' },
           (t.last?.at ?? t.created) ? h('time', { datetime: t.last?.at ?? t.created, title: formatDateTime(t.last?.at ?? t.created), text: when(t.last?.at ?? t.created) }) : null),
@@ -963,6 +1005,12 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       side()?.visible() && side().st.side?.kind === 'thread' && side().st.side.id === t.id ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
       registry.draw('thread.list.decoration', { thread: t, open: () => open(t.id) }),
       t.default ? h('span', { class: 'sr-only', text: `Default: ${name(t.default)}` }) : null)
+    if (isGeneral(t)) return row
+    return h('div', { key: t.id, class: 'tt-row-wrap', 'data-pin-row': t.id }, row,
+      round(pinLabel, icon.pin(16), () => pinRow(t), { class: 'iconbtn tt-row-pin', disabled: pinRequests.has(t.id), 'aria-label': `${pinLabel}: ${t.title}` }),
+      st.rowMenu === t.id ? menuSurface(h('div', { class: 'popover', role: 'menu' },
+        settingsRow({ title: pinLabel, lead: icon.pin(18), onclick: () => pinRow(t), props: { role: 'menuitem' } })),
+      { title: t.title, anchor: `[data-pin-row="${CSS.escape(t.id)}"] .tt-row`, close: () => { st.rowMenu = null; redraw() } }) : null)
   }
   function rememberReading(o) {
     if (o.atEnd !== false) return

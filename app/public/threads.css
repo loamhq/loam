@@ -431,3 +431,13 @@
 .tt-agent-note { max-width: 52ch; margin: .5rem auto 1rem; color: var(--paper-ink-2); font-size: .87rem; line-height: 1.5; }
 .tt-agent-note p { margin: .4rem 0; }
 .tt-agent-note .pillbtn { gap: .4rem; }
+
+.tt-row-wrap { position: relative; }
+.tt-row-wrap > .tt-row { width: 100%; }
+.tt-row-wrap .tt-row-pin { position: absolute; inset-inline-end: 8px; top: 50%; transform: translateY(-50%); opacity: 0; pointer-events: none; background: var(--paper-pane); }
+.tt-row-wrap:has(.row-side-action) .tt-row-pin { inset-inline-end: 48px; }
+.tt-row-wrap:hover .tt-row-pin, .tt-row-wrap:focus-within .tt-row-pin { opacity: 1; pointer-events: auto; }
+@media (hover: none) {
+  .tt-row-wrap .tt-row-pin:not(:focus-visible) { opacity: 0; pointer-events: none; }
+  .tt-row-wrap .tt-row { -webkit-touch-callout: none; user-select: none; }
+}
