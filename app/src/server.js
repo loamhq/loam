@@ -637,8 +637,9 @@ export function createApp({
     if (rest === '/files/download' && (method === 'GET' || method === 'HEAD')) {
       const query = filesQuery(url, FILES_PARAMS.download)
       if (query.error) return sendJson(res, 400, { error: query.error })
-      if (req.headers.range) query.set('range', String(req.headers.range))
-      return await relayDownload(res, `/v1/files/download${query.search}`)
+      const params = new URLSearchParams(query.search)
+      if (req.headers.range) params.set('range', req.headers.range)
+      return await relayDownload(res, `/v1/files/download?${params}`)
     }
     if (rest === '/files/archive') {
       if (!['GET', 'HEAD'].includes(method)) return sendJson(res, 405, { error: 'Use GET or HEAD to download an archive.' })

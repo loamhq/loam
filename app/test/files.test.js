@@ -45,6 +45,10 @@ const broker = await fakeBroker({
   'GET /v1/files/resolve': (req, res, url) => json(res, 200, { status: 'found', resource: row('vault', 'x.md'), fragment: null, echo: url.search }),
   'GET /v1/files/download': (req, res, url) => {
     const p = url.searchParams.get('path')
+    if (p === 'clip.webm' && url.searchParams.get('range') === 'bytes=0-1') {
+      res.writeHead(206, { 'content-type': 'video/webm', 'content-range': 'bytes 0-1/8', 'accept-ranges': 'bytes', 'content-length': 2 })
+      return res.end(Buffer.from([0x1a, 0x45]))
+    }
     if (p === 'evil.html') {
       res.writeHead(200, { 'content-type': 'text/html', 'content-disposition': 'inline' })
       return res.end('<script>alert(document.cookie)</script>')
@@ -150,6 +154,14 @@ test('a download is always an attachment, never HTML on this origin, and sandbox
   assert.equal(pic.headers.get('content-disposition'), "attachment; filename*=UTF-8''pic.png")
   assert.deepEqual([...new Uint8Array(await pic.arrayBuffer())], [0x89, 0x50, 0x4e, 0x47])
   assert.equal((await get('/api/files/download?root=vault&path=nope')).status, 404)
+})
+
+test('inline video relays a media player’s byte range and partial response', async () => {
+  const video = await get('/api/files/download?root=vault&path=clip.webm', { headers: { range: 'bytes=0-1' } })
+  assert.equal(video.status, 206)
+  assert.equal(video.headers.get('content-type'), 'video/webm')
+  assert.equal(video.headers.get('content-range'), 'bytes 0-1/8')
+  assert.deepEqual([...new Uint8Array(await video.arrayBuffer())], [0x1a, 0x45])
 })
 
 test('page scripts stay same-origin while file previews retain their isolated policy', async () => {

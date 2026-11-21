@@ -1482,7 +1482,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       o.note.teach ? h('p', { text: 'A thread can have an agent who answers by default. Tag anyone with @, or keep a thread for notes and conversations with several agents.' }) : null,
       o.note.teach || o.note.expanded ? [
         h('p', { text: 'Who should answer this message?' }),
-        h('div', { class: 'profile-actions' }, ...catalog().map(a => button([avatar(a.id, 20), name(a.id)], () => choose(a.id), { disabled: o.noteBusy })),
+        h('div', { class: 'profile-actions' }, ...catalog().map(a => button([avatar(a.id, 20), name(a.id)], () => choose(a.id), { disabled: o.noteBusy, 'aria-label': name(a.id) })),
           button('Keep as a note', () => { o.note = null; redraw() }, { class: 'quietlink' }))] :
         button('Ask an agent to answer', () => { o.note.expanded = true; redraw() }, { class: 'quietlink' }))
   }

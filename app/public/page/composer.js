@@ -242,7 +242,7 @@ function attachStrip() {
     ...items.map((item) =>
       h(
         'div',
-        { class: `attachment-chip${item.error ? ' bad' : ''}${item.path ? '' : ' going'}`, key: item.id },
+        { class: `attachment-chip${item.type?.startsWith('video/') ? ' video-chip' : ''}${item.error ? ' bad' : ''}${item.path ? '' : ' going'}`, key: item.id },
         item.kind === 'image' ? icon.image(13) : icon.file(13),
         h(
           'span',

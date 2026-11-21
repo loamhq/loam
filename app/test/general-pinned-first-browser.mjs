@@ -29,6 +29,11 @@ const routes = {
   'GET /v1/providers': (req, res) => json(res, { providers: f.providers }),
   'GET /v1/sessions': (req, res) => json(res, { sessions: [], live: 0, cap: 2 }),
   'GET /v1/threads': (req, res) => json(res, { threads: structuredClone(rows), agents: f.agents }),
+  'PATCH /v1/threads/plain': (req, res, url, raw) => {
+    const thread = rows.find(t => t.id === 'plain')
+    thread.pinned = JSON.parse(raw).pinned
+    json(res, thread)
+  },
   'GET /v1/threads/events': (req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' })
     res.write(`: open ping=15000\n\ndata: ${JSON.stringify({ type: 'threads.snapshot', threads: structuredClone(rows), agents: f.agents })}\n\n`)
@@ -60,6 +65,23 @@ try {
     const live = await order(page)
     assert.deepEqual(live, [['General', 'Pinned three', 'Newest pinned', 'Pinned two'], ['General', 'An ordinary thread']], `${width}: after live activity`)
     await page.screenshot({ path: path.join(out, `general-first-live-${width}.png`) })
+    const plain = page.locator('[data-pin-row="plain"]')
+    for (const pinned of [true, false]) {
+      const action = pinned ? 'Pin thread' : 'Unpin thread'
+      if (width === 390) {
+        await plain.locator('.tt-row').dispatchEvent('pointerdown', { pointerType: 'touch', clientX: 20, clientY: 20 })
+        await page.getByRole('menuitem', { name: action, exact: true }).click()
+      } else {
+        await plain.locator('.tt-row-pin').focus()
+        await plain.locator('.tt-row-pin').press('Enter')
+      }
+      await page.waitForFunction(want => {
+        const group = document.querySelector('[data-pin-row="plain"]')?.closest('.tt-section')
+        return group?.previousElementSibling?.textContent === (want ? 'Pinned' : 'Recent')
+      }, pinned)
+      assert.equal(rows.find(t => t.id === 'plain').pinned, pinned)
+    }
+    assert.equal(await page.locator('[data-pin-row="general"]').count(), 0)
     assert.deepEqual(errors, [])
     results.push({ width, load: expected, live })
     await context.close()
