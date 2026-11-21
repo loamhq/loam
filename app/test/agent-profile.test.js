@@ -29,6 +29,25 @@ test('all profile relays preserve bearer, by, encoded ids, error sentences and n
   }
 })
 
+test('reviewer instructions open in Settings even though the System folder is hidden', async t => {
+  let present = true
+  const broker = await fakeBroker({ 'GET /v1/files/read': (req, res, url) => {
+    assert.equal(url.searchParams.get('root'), 'system')
+    assert.equal(url.searchParams.get('path'), 'Reviewer/CLAUDE.md')
+    res.writeHead(present ? 200 : 404, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(present ? { text: 'Read one workspace.' } : { error: 'missing' }))
+  } })
+  const app = await appAgainst(broker)
+  t.after(closing(app, broker))
+  const read = () => fetch(app.url + '/api/system/reviewer/instructions?path=elsewhere')
+  assert.equal((await fetch(app.url + '/api/files/stat?root=system&path=Reviewer%2FCLAUDE.md')).status, 404)
+  assert.deepEqual(await (await read()).json(), { text: 'Read one workspace.' })
+  present = false
+  const gone = await read()
+  assert.equal(gone.status, 200)
+  assert.deepEqual(await gone.json(), { text: null })
+})
+
 test('late profile loads and writes never replace a newly opened profile; conflicts preserve edit', async () => {
   let answerLoad,answerWrite,fail=false
   const changes=[]

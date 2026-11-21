@@ -1,3 +1,4 @@
+import { markdown } from './markdown.js'
 import { menuSurface } from './menu-surface.js'
 import { h, icon, blob } from './ui.js'
 import { emptyState } from './empty-state.js'
@@ -85,6 +86,14 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
     } catch (e) { if (current === ticket) st.error = e.message; return false }
     finally { if (current === ticket) { st.busy = false; redraw() } }
   }
+  async function reviewerInstructions() {
+    if (st.edit?.field === 'reviewer-instructions') { st.edit = null; redraw(); return }
+    const reading = st.edit = { field: 'reviewer-instructions', loading: true }
+    redraw()
+    try { reading.text = (await api('GET', '/system/reviewer/instructions')).text }
+    catch { reading.text = null }
+    finally { reading.loading = false; if (st.edit === reading) redraw() }
+  }
   async function refresh() {
     if (!st.data || st.loading || st.busy || st.edit || st.refreshing || Date.now() - st.lastRead < 15000) return
     const current = ticket, version = mutation, target = st.target
@@ -157,7 +166,7 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
     catch (e) { st.attentionError = e.message }
     finally { st.attentionBusy = false; redraw() }
   }
-  return { st, load, directory, patch, refresh, face, archive, archived, restore, hears }
+  return { st, load, directory, patch, refresh, reviewerInstructions, face, archive, archived, restore, hears }
 }
 
 export function mountProfile(host, { controller = host.profiles, activity = host.profileActivity } = {}) {
@@ -180,6 +189,16 @@ export function mountProfile(host, { controller = host.profiles, activity = host
   const file = (title, ref, sub = null, right = null, { folder = false, unavailable = 'Not reachable from Files' } = {}) => ref?.root && ref.exists !== false
     ? settingsRow({ title, sub, right, lead: (folder ? icon.folder : icon.file)(18), onclick: () => open(ref, { folder }) })
     : h('div', { class: 'setrow profile-file-unavailable' }, h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: title }), h('div', { class: 'setrow-sub', text: ref?.exists === false ? 'Not available' : unavailable })))
+  function reviewerDocument(ref) {
+    if (ref?.exists === false) return file('Reviewer instructions', ref)
+    const reading = st.edit?.field === 'reviewer-instructions' ? st.edit : null
+    return [
+      settingsRow({ title: 'Reviewer instructions', lead: icon.file(18), onclick: c.reviewerInstructions, props: { 'aria-expanded': Boolean(reading) } }),
+      reading && (typeof reading.text === 'string'
+        ? h('div', { class: 'md reviewer-document' }, markdown(reading.text))
+        : h('p', { class: 'note', role: 'status', text: reading.loading ? 'Reading instructions…' : 'Instructions are unavailable.' })),
+    ]
+  }
   function select(label, value, choices, choose, { fixed = false, hint = null, hintId = null } = {}) {
     if (fixed) return h('div', { class: 'profile-choice', key: label }, h('span', { class: 'setrow-title', text: label }), h('span', { class: 'profile-fixed', text: choices.find(o => o.id === value)?.name || value }))
     return h('label', { class: `profile-choice${label === 'Provider' ? ' profile-choice-provider' : ''}${hint ? ' profile-choice-hinted' : ''}`, key: label }, h('span', { class: 'setrow-title', text: label }),
@@ -327,7 +346,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
           data.on === false ? h('p', { class: 'note', text: 'The nightly reviewer is off. You can turn it on in Settings → Plugins.' })
             : !host.state.providers.some(p => p.connected && p.id === data.effective?.provider)
               ? h('p', { class: 'note', role: 'status', text: 'The reviewer needs Claude Code or Antigravity. Connect one in Settings → Connections and select it below.' }) : null,
-          runs(data, 'reviewer'), group('Last run', h('p', { class: 'note profile-empty', text: when(data.last_fire, true) || 'No run yet' })), group('Instructions', file('Reviewer instructions', data.instructions)),
+          runs(data, 'reviewer'), group('Last run', h('p', { class: 'note profile-empty', text: when(data.last_fire, true) || 'No run yet' })), group('Instructions', reviewerDocument(data.instructions)),
         ])])]
   }
   return { body, settingsDetail, syncFocus() {

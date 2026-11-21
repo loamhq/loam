@@ -260,6 +260,8 @@ overwrites a change of theirs. A job that changes how Loam works updates
 this library in the same job, so these pages stay the one description of
 Loam.
 
+Read the nightly reviewer’s instructions in Settings › Agents › Nightly reviewer.
+
 Each project engineer works with one repository. Provisioning keeps the registry
 in local runtime state. A project can be given write access to its own folder in
 the vault's projects area. Its briefs can name deliverables there, including
