@@ -4,7 +4,9 @@ import loam_plugins as plugins
 
 # Each tuple is (plugin id, owner/repository, plugin folder, reviewed full SHA).
 # Only the fresh-install starter step consumes this list.
-PINS = ()
+PINS = (
+    ("garden", "loamhq/garden", "garden", "f157bba6cf8a7d353dc1713b1786d1f4fddc195b"),
+)
 
 
 def install(pins=PINS):

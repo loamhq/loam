@@ -3,6 +3,8 @@
 Find each release's notes in `docs/releases/<version>.md`. Loam gives the
 notes to the person's agent, who decides what is worth sharing with them.
 
+- [0.2.20](docs/releases/0.2.20.md), 2026-11-21: fresh installs start with
+  Garden enabled, and Chats shows its rows while a returning plugin line loads.
 - [0.2.19](docs/releases/0.2.19.md), 2026-11-21: support for Garden, an empty
   Hello board, Iris’s first week, safer plugin updates, and speech fixes.
 - [0.2.18](docs/releases/0.2.18.md), 2026-11-20: a new first minute

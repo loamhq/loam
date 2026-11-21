@@ -12,7 +12,9 @@ The greeting was revised on 2026-11-20 and the first-week guidance on
 
 One agent, Iris, and one thread with her, the hello thread. The installer
 runs, in order, `bin/library seed-vault` (docs/skills.md) and
-`bin/library seed-starter`.
+`bin/library seed-starter`. It then runs `bin/preinstall-plugins` to install
+and enable the reviewed Garden release. A retry preserves the existing
+plugin and its switch.
 
 **About me.** `seed-vault` also writes `About me.md` at the top of the
 vault: a heading and one line saying it is what the person's agents know

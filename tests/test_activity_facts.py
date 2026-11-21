@@ -38,6 +38,16 @@ class ActivityFacts(unittest.TestCase):
             with self.assertRaises(ValueError):
                 facts.for_plugin("example")
 
+    def test_fresh_install_confirms_the_reviewed_garden_pin(self):
+        commit = "f157bba6cf8a7d353dc1713b1786d1f4fddc195b"
+        request = dict(url="loamhq/garden", ref=commit, path="garden", via="market")
+        preview = dict(id="garden", source=dict(repo=request["url"], path="garden", commit=commit),
+                       confirm="reviewed release")
+        with patch.object(plugins, "install", return_value=preview) as install:
+            initial.install()
+            self.assertEqual([call.args[0] for call in install.call_args_list],
+                             [request, {**request, "confirm": preview["confirm"]}])
+
     def test_pin_and_retry(self):
         sha = "a"*40
         pin = ("test", "owner/pkg", "test", sha)
@@ -47,7 +57,7 @@ class ActivityFacts(unittest.TestCase):
             self.assertEqual(install.call_count,2)
             self.assertEqual(install.call_args.args[0]["confirm"],"pinned")
             install.reset_mock()
-            initial.install()
+            initial.install([])
             self.assertFalse(install.called)
             preview["replaces"] = {"version":"1.0.0"}
             initial.install([pin])

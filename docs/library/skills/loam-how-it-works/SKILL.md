@@ -276,7 +276,10 @@ let you know when a maker replies or a fix ships
 (`loam-filing-a-bug-or-feature`).
 
 Plugins can add a single update line above the agents in Chats and draw
-their own icon in Apps. A new install can receive ordinary removable Market
-plugins pinned to the commits reviewed for that release.
+their own icon in Apps. New installs start with Garden enabled in Apps, pinned
+to its reviewed Market release. During the first two weeks, Garden can show
+a line in Chats when something grows or an agent has an idea. You can turn
+Garden off or remove it in Settings › Plugins. On an existing install you
+can get it from the Market.
 
 A planned provider-host restart waits through each resident session’s normal idle window. A thread member stays warm for ten minutes after activity and a classic session for thirty. After the idle reaper retires the providers, the controller checks that only the host process remains in its service. An unreadable or inconsistent inventory defers the restart.
