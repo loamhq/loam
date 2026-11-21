@@ -726,7 +726,7 @@ def run(pinned: str | None) -> int:
             (run_dir / "runtime").write_text("codex\n", encoding="utf-8")
             returncode, codex_run, timed_out = codex_job.run(
                 codex_argv(prompt, outbox), str(workdir), WALL_SECONDS, run_dir,
-                run_dir / "session-stderr.log", max_turns=MAX_TURNS or 0)
+                run_dir / "session-stderr.log", max_turns=MAX_TURNS or 0, record_stream=False)
             envelope = {"session_id": codex_run.thread_id, "num_turns": codex_run.turns}
         else:
             result = subprocess.run(

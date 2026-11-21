@@ -219,6 +219,8 @@ def general_lines():
 
 async def main():
     # This profile fixture has a connected Claude Code account.
+    connected = {"claude-code"}
+    profile.providers.available = lambda provider: (provider in connected, None)
     profile.providers.automatic = lambda eligible=profile.PROVIDERS: (
         "claude-code" if "claude-code" in eligible else None)
     server = broker_mod.Server.__new__(broker_mod.Server)
@@ -562,7 +564,7 @@ async def main():
               body.get("plain") == "Mondays at 5:00 AM"
               and profile.reviewer_choice("fable") == ("fable", "high"), body)
         for patch, label in (({"schedule": "sometimes"}, "a schedule that does not parse"),
-                             ({"provider": "codex"}, "another provider"),
+                             ({"provider": "unknown"}, "an unknown provider"),
                              ({"model": "gpt-6"}, "a model Claude Code does not take")):
             status, body = await http(port, "PATCH", "/v1/system/reviewer", patch)
             check(f"refused: {label}", status == 400, body)
@@ -573,10 +575,11 @@ async def main():
         saved_login = agy_mod._login_cache
         agy_mod._login_cache = (_time.monotonic() + 3600, agy_mod._login_key(), {"models": [
             {"id": "gemini-4-hydrogen-high"}, {"id": "claude-opus-5-5-high"}]})
+        connected.update(("codex", "antigravity"))
         try:
             status, body = await http(port, "GET", "/v1/system/reviewer")
-            check("the reviewer's providers: Claude Code and Antigravity, on Claude Code",
-                  status == 200 and body["providers"] == ["claude-code", "antigravity"]
+            check("the reviewer supports all three providers and keeps Claude Code",
+                  status == 200 and body["providers"] == ["claude-code", "codex", "antigravity"]
                   and body["effective"]["provider"] == "claude-code", body)
             status, body = await http(port, "PATCH", "/v1/system/reviewer",
                                       {"provider": "antigravity"})
@@ -596,12 +599,17 @@ async def main():
                                  ({"effort": "high"}, "an effort beside an Antigravity id")):
                 status, body = await http(port, "PATCH", "/v1/system/reviewer", patch)
                 check(f"refused on Antigravity: {label}", status == 400, body)
+            out = await cli(port, "set", "reviewer.provider", "codex")
+            check("bin/settings set reviewer.provider: a persona can choose Codex",
+                  out.get("ok") and out.get("value") == "codex"
+                  and profile.reviewer_stored() == {"provider": "codex"}, out)
             out = await cli(port, "set", "reviewer.provider", "claude-code")
             check("bin/settings set reviewer.provider: back on Claude Code, its model dropped",
                   out.get("ok") and out.get("value") == "claude-code"
                   and profile.reviewer_stored() == {"provider": "claude-code"}
                   and profile.reviewer_choice("fable") == ("fable", None), out)
         finally:
+            connected.difference_update(("codex", "antigravity"))
             agy_mod._login_cache = saved_login
             profile.update_reviewer({"provider": None}, server.profile_check)
         status, body = await http(port, "PATCH", "/v1/system/reviewer",
