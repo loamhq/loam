@@ -324,6 +324,9 @@ export function mountProfile(host, { controller = host.profiles, activity = host
           group('Schedule', [settingsRow({ title: data.plain || data.schedule, sub: data.next_fire ? `Next ${when(data.next_fire)}` : 'No next run', onclick: () => edit('reviewer-time', /at (\d\d:\d\d)/.exec(data.schedule)?.[1] || '04:20') }),
             editor('reviewer-time', '', value => c.patch({ schedule: data.schedule.replace(/at \d\d:\d\d/, `at ${value}`) }), { time: true, label: 'Time (PT)' }),
             settingsRow({ title: 'Recurrence', sub: data.schedule, onclick: () => edit('reviewer-schedule', data.schedule) }), editor('reviewer-schedule', '', value => c.patch({ schedule: value }), { label: 'Schedule (PT)', help: 'Daily, weekdays, weekends, or Mondays and Thursdays at 05:00 PT.' })]),
+          data.on === false ? h('p', { class: 'note', text: 'The nightly reviewer is off. You can turn it on in Settings → Plugins.' })
+            : !host.state.providers.some(p => p.connected && p.id === data.effective?.provider)
+              ? h('p', { class: 'note', role: 'status', text: 'The reviewer needs Claude Code or Antigravity. Connect one in Settings → Connections and select it below.' }) : null,
           runs(data, 'reviewer'), group('Last run', h('p', { class: 'note profile-empty', text: when(data.last_fire, true) || 'No run yet' })), group('Instructions', file('Reviewer instructions', data.instructions)),
         ])])]
   }

@@ -774,6 +774,9 @@ def expected_dropin() -> str | None:
 
 
 def reviewer(persona_fallback: str = "fable") -> dict:
+    import loam_files as files_api
+    instructions = "Reviewer/CLAUDE.md"
+    source = Path(files_api.SYSTEM_BASE) / files_api.SYSTEM_FILES[instructions]
     stored = reviewer_stored()
     provider = reviewer_provider()
     model, effort = reviewer_choice(persona_fallback, provider=provider)
@@ -797,7 +800,8 @@ def reviewer(persona_fallback: str = "fable") -> dict:
         "providers": list(REVIEWER_PROVIDERS),
         "model": choices["model"], "effort": choices["effort"],
         "effective": {"provider": provider, "model": model, "effort": effort},
-        "instructions": {"root": "system", "path": "Reviewer/CLAUDE.md"},
+        "instructions": {"root": "system", "path": instructions,
+                         "exists": source.is_file() and not source.is_symlink()},
         "applies": "From the next run.",
     }
 
