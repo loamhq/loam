@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -139,18 +138,7 @@ def _from_release(pid: str) -> None:
     source = release_copy(pid)
     if not (source / "PLUGIN.md").is_file():
         raise FileNotFoundError(f"{source} is not in this release")
-    target = loam_plugins.yours_root() / pid
-    target.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=f"to-market-{pid}-", dir=target.parent))
-    try:
-        shutil.copytree(source, staging / pid)
-        # A copy already there (bring_up's case) steps aside first, so the
-        # folder is never half one and half the other.
-        if target.exists():
-            os.replace(target, staging / f"{pid}.old")
-        os.replace(staging / pid, target)
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
+    loam_plugins.seed_release_copy(source, pid)
 
 
 def keep(install=None, from_release=None, link_of=None) -> dict:
@@ -209,12 +197,11 @@ def bring_up(install=None, from_release=None, link_of=None) -> dict:
     """Install the listing's version over a moved plugin's copy that predates
     its own server, once each. Answers ``{id: {"how": ...}}`` for the ids it
     settled or failed this time: ``link`` (from the listing), ``release``
-    (a copy built here, replaced by this release's), ``current``, ``kept``
+    (an absent plugin seeded from this release), ``current``, ``kept``
     (installed from elsewhere, or edited: left as it is, with ``why``),
     ``absent`` or ``failed`` (tried again at the next start)."""
     import loam_plugins  # noqa: PLC0415
     install = install or loam_plugins.install
-    from_release = from_release or _from_release
     link_of = link_of or market_link
     record = _read_record()
     done = record.setdefault("servers", {})
@@ -244,10 +231,18 @@ def bring_up(install=None, from_release=None, link_of=None) -> dict:
             except Exception as exc:  # noqa: BLE001 - reported, tried again next start
                 entry.update(how="failed", error=str(exc)[:300])
         elif source.get("kind") in (None, "built"):
+            # Older release copies had no fingerprint. A home-built plugin can
+            # have the same id and version, so they all go through review.
             try:
-                from_release(pid)
-                entry.update(how="release", was=row.get("version"))
-            except Exception as exc:  # noqa: BLE001
+                import loam_plugin_review as review
+                first = install({"url": link_of(pid)}, by=BY)
+                if first.get("id") != pid or _version(first.get("version")) < since:
+                    raise loam_plugins.PluginError("The listing does not name the expected update.")
+                base = review.original(loam_plugins.load_list(), pid)
+                review.offer(pid, base, {"id": pid, "version": first["version"],
+                             "source": {**first["source"], "via": "market"}})
+                entry.update(how="kept", why="personal copy awaiting review")
+            except (loam_plugins.PluginError, OSError, LookupError) as exc:
                 entry.update(how="failed", error=str(exc)[:300])
         else:
             entry.update(how="kept", why=f"installed from {source.get('kind')}, not the Market")

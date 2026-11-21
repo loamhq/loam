@@ -1817,7 +1817,7 @@ def set_on(pid: str, on, by: str | None = None) -> dict:
     return one(pid)
 
 
-def remove(pid: str, by: str | None = None) -> dict:
+def remove(pid: str, by: str | None = None, *, retiring_source: dict | None = None) -> dict:
     """``DELETE /v1/plugins/<id>``: the Yours copy goes (its history stays in
     the folder's git); a shipped plugin cannot be removed, only turned off. A
     theme Appearance had chosen goes back to Latte on that device kind,
@@ -1835,11 +1835,22 @@ def remove(pid: str, by: str | None = None) -> dict:
         folder = Path(yours["folder"])
         data = load_list()
         _remember_pauses(data)
+        if retiring_source is not None:
+            line = data["plugins"].get(pid) or {}
+            if (yours.get("source") != retiring_source or yours.get("edited")
+                    or yours.get("personal") or os.path.lexists(copy_folder(pid))):
+                raise PluginError("Your copy changed and was kept.", 409)
         # Its server stops before its folder goes (2026-11-13).
         _servers().stop(pid)
         if folder.exists() or folder.is_symlink():
             trash = Path(tempfile.mkdtemp(prefix="remove-", dir=_staging()))
             os.replace(folder, trash / pid)
+            if retiring_source is not None and (
+                    not line.get("files") or fingerprint(trash / pid) != line["files"]
+                    or os.path.lexists(copy_folder(pid))):
+                os.replace(trash / pid, folder)
+                _servers_follow(pid)
+                raise PluginError("Your copy changed and was kept.", 409)
             shutil.rmtree(trash, ignore_errors=True)
         data.get("copies", {}).pop(pid, None)
         kept_original = folder == copy_folder(pid) and (yours_root() / pid).is_dir()
@@ -1864,6 +1875,17 @@ def remove(pid: str, by: str | None = None) -> dict:
             "appearance_reset": reset,
             "plugin": next((r for r in after if r["effective"]), None),
             "installed_line": bool(line)}
+
+
+def seed_release_copy(source: Path, pid: str) -> None:
+    from loam_files import _renameat2
+
+    with _lock, tempfile.TemporaryDirectory(dir=_staging()) as tmp:
+        if os.path.lexists(copy_folder(pid)):
+            raise PluginError("Your copy is already here.", 409)
+        staged = Path(tmp) / pid
+        shutil.copytree(source, staged, symlinks=True)
+        _renameat2(-100, str(staged), -100, str(yours_root() / pid))
 
 
 def _staging() -> Path:

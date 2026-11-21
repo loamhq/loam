@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -116,14 +115,7 @@ def _from_release(pid: str) -> None:
     source = lc.ROOT / "plugins" / "_listed" / pid
     if not (source / "PLUGIN.md").is_file():
         raise FileNotFoundError(f"{source} is not in this release")
-    target = loam_plugins.yours_root() / pid
-    target.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=f"kept-{pid}-", dir=target.parent))
-    try:
-        shutil.copytree(source, staging / pid)
-        os.replace(staging / pid, target)
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
+    loam_plugins.seed_release_copy(source, pid)
 
 
 def keep(install=None, from_release=None) -> dict:

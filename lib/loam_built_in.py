@@ -82,7 +82,7 @@ def look(pid: str) -> dict:
         return {"how": "kept", "why": "built here"}
     if src.get("repo") not in GRADUATED[pid]["repos"]:
         return {"how": "kept", "why": f"installed from {src.get('repo')}"}
-    if yours.get("edited"):
+    if yours.get("edited") or yours.get("personal"):
         return {"how": "kept", "why": "edited since it was installed"}
     return {"how": "replace", "was": {"version": yours.get("version"), "source": src}}
 
@@ -92,7 +92,6 @@ def take_over(remove=None) -> dict:
     ``{id: {"how": "replaced"|"absent"|"kept"|"failed", ...}}`` for the ids
     it looked at this time. ``remove`` is for tests."""
     import loam_plugins  # noqa: PLC0415
-    remove = remove or loam_plugins.remove
     record = _read_record()
     done = record.setdefault("settled", {})
     out: dict[str, dict] = {}
@@ -104,7 +103,10 @@ def take_over(remove=None) -> dict:
             if entry["how"] == "waiting":
                 continue
             if entry["how"] == "replace":
-                remove(pid, by=BY)
+                if remove:
+                    remove(pid, by=BY)
+                else:
+                    loam_plugins.remove(pid, by=BY, retiring_source=entry["was"]["source"])
                 entry["how"] = "replaced"
         except Exception as exc:  # noqa: BLE001 - reported, tried again next start
             entry = {"how": "failed", "error": str(exc)[:300]}

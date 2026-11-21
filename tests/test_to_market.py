@@ -233,9 +233,16 @@ try:
                                              (target / "PLUGIN.md").read_text(), count=1))
     shutil.rmtree(target / "server")
     out = moved.bring_up()
-    check("a copy built here is replaced by the release's own", (out["dictation"]["how"], out["read-aloud"]["how"]),
-          ("release", "absent"))
-    check("...which carries the server", (target / "server" / "main.js").is_file(), True)
+    check("a copy built here stays for review", (out["dictation"]["how"], out["read-aloud"]["how"]),
+          ("kept", "absent"))
+    check("the updater never writes its server into a personal copy", (target / "server").exists(), False)
+    check("the exact Market version is offered", loam_plugins.load_list()["copies"]["dictation"]["offer"]["version"], "1.1.0")
+    try:
+        moved._from_release("dictation")
+    except FileExistsError:
+        pass
+    check("the offline fallback also preserves an existing folder", (target / "server").exists(), False)
+
 
     reset()
     switches({"dictation": True})
