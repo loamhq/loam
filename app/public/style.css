@@ -609,7 +609,8 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 /* Prose continues behind the mark. The body clips at the bubble's bottom,
  * never at the start of a separate control band. */
 .say.user.clamped > .user-message-body { max-height: calc(var(--mine-max) - 9px); overflow: clip; }
-.say.user.with-files.clamped { max-height:none; padding-bottom:0; }
+/* Quotes and attachments sit above the text allowance inside the bubble. */
+.say.user.clamped:has(> .tt-quote), .say.user.with-files.clamped { max-height:none; padding-bottom:0; }
 .say.user.with-files.clamped > .user-message-body { max-height:calc(var(--mine-max) - 18px); }
 .say.user.clamped::after {
   content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 4.05em;

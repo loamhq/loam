@@ -55,7 +55,18 @@
 /* A non-stretched flex child otherwise sizes itself from the quote's nowrap
  * line (or a code block), escaping the right-aligned message column. */
 .tt-bubble { min-width:0; max-width:100%; }
-.tt-reply-highlight { border-radius:12px; background:var(--paper-card); box-shadow:0 0 0 8px var(--paper-card); outline:1px solid var(--signal-crema); outline-offset:8px; }
+.tt-message:focus { outline:none; border-radius:12px; }
+.tt-message:focus-visible { outline:2px solid var(--signal-crema); outline-offset:8px; }
+.tt-reply-highlight {
+  --reply-wash:color-mix(in srgb,var(--signal-crema) 17%,transparent);
+  border-radius:12px; background-color:var(--reply-wash); box-shadow:0 0 0 8px var(--reply-wash);
+  animation:tt-reply-wash 1800ms ease-out both;
+}
+@keyframes tt-reply-wash {
+  28% { background-color:var(--reply-wash); box-shadow:0 0 0 8px var(--reply-wash); }
+  to { background-color:transparent; box-shadow:0 0 0 8px transparent; }
+}
+@media (prefers-reduced-motion:reduce) { .tt-reply-highlight { animation:none; } }
 .tt-author-run { position:relative; display:flex; flex-direction:column; gap:8px; min-width:0; padding-top:20px; }
 .tt-author-anchor { position:absolute; top:20px; left:0; width:1px; height:1px; pointer-events:none; }
 .tt-speaker { position:sticky; top:0; z-index:2; align-self:stretch; margin:0 0 4px; font-size:12px; color:var(--paper-ink-3); font-weight:600; pointer-events:none; }
@@ -157,7 +168,7 @@
 .tt-reply-chip > .iconbtn { flex:none; width:40px; height:40px; }
 .desk .tt-reply-chip { width:100%; }
 .tt-you-face { display:grid; place-items:center; flex:none; width:22px; height:22px; border-radius:50%; background:var(--latte-espresso); color:var(--latte-espresso-ink); font:12px var(--font-display); }
-.tt-quote { display:flex; flex-direction:column; align-items:stretch; gap:2px; border:0; border-left:2px solid var(--paper-rule-strong); border-radius:0; background:none; padding:3px 10px; margin:0 0 5px; max-width:100%; min-width:0; text-align:left; text-decoration:none; color:var(--paper-ink-3); font:12px/1.4 var(--font-body); cursor:pointer; }
+.tt-quote { display:flex; flex-direction:column; align-items:stretch; gap:2px; border:0; border-left:2px solid var(--paper-rule-strong); border-radius:0; background:none; padding:3px 10px; margin:0 0 5px; max-width:100%; min-width:0; text-align:left; text-decoration:none; color:var(--paper-ink-3); font:12px/1.4 var(--font-body); cursor:pointer; -webkit-tap-highlight-color:transparent; }
 .tt-quote strong { color:var(--paper-ink); font-size:11px; font-weight:600; }
 .tt-quote-thread { color:var(--paper-ink-3); font:inherit; font-weight:400; }
 .tt-quote span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

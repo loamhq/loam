@@ -1030,7 +1030,7 @@ const mainPanel = {
     if (item.push !== false) recordMain(item)
     if (item.kind === 'thread') {
       files.closeFile(); apps.st.selected = null
-      const pending = threads.open(item.id, { routed: true, push: false, listing: item.listing, board: item.board, message: item.message })
+      const pending = threads.open(item.id, { routed: true, push: false, listing: item.listing, board: item.board, message: item.message, focusMessage: item.focusMessage })
       if (item.view) threads.setView(item.view)
       return pending
     }
@@ -1253,7 +1253,7 @@ function followPanelAddress(value, surface) {
   if (at) return host.goFiles(at.root, at.path, { fragment: url.hash.slice(1) || null, list: listFromURL(url.href), panelLink: Boolean(surface) })
   const item = itemFromURL(url) ?? (surface && url.pathname === '/apps' ? { kind: 'catalog', id: 'apps' } : null)
   if (!item) return openPlace(placeFromURL(url))
-  return panels[surface === 'side' ? 'openSide' : 'openMain']({ ...item, view: url.searchParams.get('view'), message: url.searchParams.get('message') })
+  return panels[surface === 'side' ? 'openSide' : 'openMain']({ ...item, view: url.searchParams.get('view'), message: url.searchParams.get('message'), focusMessage: true })
 }
 
 panels.sideHost = sidePanel.host

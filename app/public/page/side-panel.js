@@ -131,7 +131,7 @@ export function mountSidePanel(base, activityOptions) {
     state.mainItem = itemDescriptor(item); state.appMenu = false
     own.apps.st.selected = null
     if (item.kind === 'thread') {
-      const pending = own.threads.open(item.id, { routed: true, push: false, message: item.message })
+      const pending = own.threads.open(item.id, { routed: true, push: false, message: item.message, focusMessage: item.focusMessage })
       if (item.view) own.threads.setView(item.view)
       return pending
     }

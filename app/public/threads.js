@@ -395,8 +395,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     const o = st.open
     if (unsentHere(o)) globalThis.fetch?.(`/api${path(o.thread.id)}`, { method: 'DELETE', keepalive: true, credentials: 'same-origin' })?.catch?.(() => {})
   })
-  async function open(id, { push = true, listing = null, routed = false, board = false, message = null } = {}) {
-    if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing, board, message })
+  async function open(id, { push = true, listing = null, routed = false, board = false, message = null, focusMessage = false } = {}) {
+    if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing, board, message, focusMessage })
     close({ navigate: false }); enter({ kind: 'thread', id })
     clearReturn()
     const ticket = generation
@@ -408,7 +408,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       typing: new Set(), permissions: new Map(), after: null, steps: new Map(), has_more: savedVisit?.has_more ?? false,
       board: savedVisit?.board ?? { markdown: '', path: '' }, boardBusy: false, boardOpen: board, focusBoard: board }
     const o = st.open
-    if (message) Object.assign(o, { replyJump: message, jumpKind: 'quote', savedAnchor: null, landing: false, atEnd: false })
+    if (message) Object.assign(o, { replyJump: message, replyJumpFocus: focusMessage, jumpKind: 'quote', savedAnchor: null, landing: false, atEnd: false })
     if (push && !st.fixture) address(id)
     attachReplySteps(st.open)
     attachProse(o, savedVisit?.proseCache)
@@ -651,11 +651,11 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   }
   async function followThreadLink(e, link) {
     if (e.altKey && side()?.available()) {
-      e.preventDefault(); side().openSide({ kind: 'thread', id: link.thread, message: link.message }); return
+      e.preventDefault(); side().openSide({ kind: 'thread', id: link.thread, message: link.message, focusMessage: true }); return
     }
     if (e.button > 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     e.preventDefault()
-    await open(link.thread, { message: link.message })
+    await open(link.thread, { message: link.message, focusMessage: true })
   }
   function create(persona = null, options = {}) {
     if (st.creating) return
@@ -1054,7 +1054,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     closeTasks()
     o.focusTasksReturn = false
     clearTimeout(o.replyHighlightTimer)
-    Object.assign(o, { replyJump: id, jumpKind: kind, highlightedReply: null, savedAnchor: null, landAt: null,
+    Object.assign(o, { replyJump: id, replyJumpFocus: true, jumpKind: kind, highlightedReply: null, savedAnchor: null, landAt: null,
       openingBoundary: null, replyAnchor: null, taskReplyAnchor: null, landing: false, atEnd: false, needsContext: false, historyError: '', error: '' })
     follow.release()
     redraw()
@@ -1295,7 +1295,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
         ? marketCards?.(piece.cards, { from, key: `${m.id}:${slot}:${j}` }) ?? h('p', { class: 'market-card-plain', key: `cards:${m.id}:${slot}:${j}`, text: piece.cards.map(plainWords).join(', ') })
         : prose(piece.text, `${slot}:${j}`))
     }
-    const body = mine ? h('div', { class: 'line right' }, h('div', { class: 'mine' }, userBubble({ class: `${(m.queued || m.id === 'pending-send') ? 'pending ' : ''}tt-bubble${files ? ' with-files' : ''}${long ? ' foldable' : ''}${long && !shown ? ' clamped' : ''}`, 'data-mine': key }, files, h('div', { class: 'user-message-body' }, messageQuote(m), prose(m.text, 'person')),
+    const body = mine ? h('div', { class: 'line right' }, h('div', { class: 'mine' }, userBubble({ class: `${(m.queued || m.id === 'pending-send') ? 'pending ' : ''}tt-bubble${files ? ' with-files' : ''}${long ? ' foldable' : ''}${long && !shown ? ' clamped' : ''}`, 'data-mine': key }, files, messageQuote(m), h('div', { class: 'user-message-body' }, prose(m.text, 'person')),
       long ? button(shown ? 'Show less' : 'Show more', () => { if (shown) openMessages.delete(key); else openMessages.add(key); redraw() }, { class: 'morebtn', 'aria-expanded': String(shown) }) : null), footer))
       : segments.map((part, index) => {
         if (part.text !== undefined) return h('div', { class: 'line left', key: `text:${index}` }, agentProse([
@@ -1963,7 +1963,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       if (restoreAnchor(pane, anchor)) {
         const target = [...pane.querySelectorAll('[data-message-id]')].find((n) => n.getAttribute('data-message-id') === anchor.id)
         o.taskReplyAnchor = anchor; o.readingPosition = anchor; o.replyAnchor = null; o.highlightedReply = anchor.id; o.replyJump = null
-        target?.focus({ preventScroll: true })
+        // Following a control hands off its focus. An address-bar visit just lands at the message.
+        if (o.replyJumpFocus) target?.focus({ preventScroll: true })
         o.replyHighlightTimer = setTimeout(() => { if (st.open === o) { o.highlightedReply = null; redraw() } }, 2000)
         redraw()
       } else if (!o.moreBusy && !o.loading && !o.refreshing && (o.historyError || (!o.has_more && !o.gapBefore))) {

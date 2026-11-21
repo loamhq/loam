@@ -251,8 +251,11 @@ source quote above it. Use **Remove quote** to send as a plain new thread.
 A quoted opening needs text before Send is enabled.
 
 The first message shows the same quote treatment as an in-thread reply, with
-the source thread's name beside the author. Opening it loads the source
-thread and highlights the message. Back returns to the branch. In the source
+the source thread's name beside the author. Quotes sit above the text area
+that collapses on long messages. Following a quote in either thread shows a
+brief, padded wash in the current theme. Keyboard activation moves focus to
+the target and keeps a visible outline there. A direct message URL scrolls to
+the target and shows the same wash. Back returns to the branch. In the source
 thread, **branched →** links appear beneath the message for every accepted
 branch. They follow destination titles and disappear when the destination
 is deleted. Older branches still display their saved system links.
@@ -262,7 +265,7 @@ The page opens the composer through `POST /api/threads/:id/branch` with
 The ordinary ordered send carries `reply_to` and `reply_thread` while the
 quote is attached. The thread-list stream supplies the destination summaries
 for the source markers. See the [broker contract](../../broker/README.md#branching-a-thread)
-and `test/thread-branch-browser.mjs` for the browser journey.
+and the [browser journey and captures](evidence/thread-quote-polish/README.md).
 
 ## Runtime contract
 
