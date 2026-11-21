@@ -276,11 +276,12 @@ function chipSub(item) {
   if (item.error) return item.error
   if (item.path && (item.type?.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(item.name))) {
     const thread = activeThread()?.thread
-    const agents = host.state.agents.list
+    const agents = host.threads.catalog()
+    const engine = id => thread.members.find(m => m.persona === id)?.engine ?? agents.find(a => a.id === id)?.engine
     const recipients = thread ? listeningRecipients(thread, draft.value || ' ', true, agents) : []
-    const unable = recipients.filter(id => ['codex', 'claude-code'].includes(thread.members.find(m => m.persona === id)?.engine))
+    const unable = recipients.filter(id => ['codex', 'claude-code'].includes(engine(id)))
     if (unable.length) return `${unable.map(id => agents.find(a => a.id === id)?.name || id).join(', ')} cannot watch this video. The file stays in Files.`
-    return recipients.length && recipients.every(id => thread.members.find(m => m.persona === id)?.engine === 'antigravity')
+    return recipients.length && recipients.every(id => engine(id) === 'antigravity')
       ? 'Ready to watch with Antigravity' : 'Antigravity can watch. Other agents receive the file.'
   }
   if (item.path) return bytes(item.size)

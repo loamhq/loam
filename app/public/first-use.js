@@ -5,9 +5,9 @@ const pending = new Set()
 let save
 
 export function syncFirstUse(controls, persist) {
+  save = persist
   if (!Array.isArray(controls)) return
   active = true
-  save = persist
   for (const key of controls) { used.add(key); pending.delete(key) }
   for (const key of pending) persistUse(key)
 }
@@ -16,7 +16,7 @@ function persistUse(key) {
   save(key).then(() => pending.delete(key)).catch(() => pending.add(key))
 }
 
-export function firstThreadLesson() {
+export async function firstThreadLesson() {
   const key = 'Agentless thread'
   if (used.has(key)) return false
   try {
@@ -24,8 +24,8 @@ export function firstThreadLesson() {
     localStorage.setItem('loam.thread-lesson', '1')
   } catch { /* Memory still covers this visit. */ }
   used.add(key)
-  if (active) persistUse(key)
-  return true
+  try { return (await save?.(key))?.first !== false }
+  catch { return true }
 }
 
 export function firstUseActive() { return active }

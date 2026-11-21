@@ -126,18 +126,29 @@ def first_use() -> list[str] | None:
     return used if isinstance(used, list) else None
 
 
-def use_control(control: str) -> None:
+def use_control(control: str) -> bool:
     if not isinstance(control, str) or not re.fullmatch(r"[A-Za-z][A-Za-z -]{0,63}", control):
         raise ValueError("Use a short control name.")
     with loam_agents.locked():
         marker = status()
         used = marker.get("used_controls") if isinstance(marker, dict) else None
-        if not isinstance(used, list) or control in used:
-            return
+        if not isinstance(used, list):
+            # Legacy installs have no onboarding marker. Remember the thread
+            # lesson there too without enabling new-owner captions.
+            if control != "Agentless thread":
+                return False
+            try:
+                (loam_agents.state() / "thread-lesson-seen").touch(exist_ok=False)
+            except FileExistsError:
+                return False
+            return True
+        if control in used:
+            return False
         if len(used) >= 128:
             raise ValueError("The list of used controls is full.")
         used.append(control)
         loam_agents._write_json(marker_path(), marker)
+        return True
 
 
 def inherit_legacy_hello() -> bool:

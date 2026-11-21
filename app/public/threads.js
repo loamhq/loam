@@ -1457,7 +1457,10 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
   }
   function receivedNote(o, message) {
     if (message?.unaddressed && !o.thread.default && o.note?.id !== message.id) {
-      o.note = { id: message.id, teach: firstThreadLesson() }
+      const note = o.note = { id: message.id, teach: false }
+      firstThreadLesson().then(first => {
+        if (first && o.note === note) { note.teach = true; redraw() }
+      })
     }
     if (message?.first_tag) o.firstTag = message.id
   }
@@ -2173,5 +2176,5 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const groups = threadActivity(t, activityOptions(t))
     return { status: groups.asking.length ? 'Needs your input' : groups.working.length ? 'Working' : groups.waiting.length ? 'Waiting' : 'Quiet',
       secondary: state === 'Quiet' ? t.last?.text || 'Quiet' : state }
-  }, view, pane, currentView, setView, afterRender, tick, dirty, send, saveCompose, transferTo, receiveVisit: (id, visit) => visits.set(id, visit), mention, mentionKey, pause, defaultName: () => name(st.open?.thread.default) }
+  }, catalog, view, pane, currentView, setView, afterRender, tick, dirty, send, saveCompose, transferTo, receiveVisit: (id, visit) => visits.set(id, visit), mention, mentionKey, pause, defaultName: () => name(st.open?.thread.default) }
 }

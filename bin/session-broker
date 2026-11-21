@@ -911,6 +911,11 @@ def choices(payload: dict, provider: str | None = None) -> dict:
     return out
 
 
+def thread_agent_cards() -> list[dict]:
+    """Include the engine a newly tagged agent would use before they join."""
+    return [{**card, "engine": threads_rec.default_engine(card["id"])} for card in cfg.roster_cards()]
+
+
 def with_steps(thread_id: str, messages: list[dict]) -> list[dict]:
     """Attach recorded steps by message ID for requests with steps=full. A message without a
     step record receives steps: null.
@@ -1223,8 +1228,12 @@ class Server:
 
         if parts == ["v1", "owner", "used-controls"] and method == "POST":
             try:
-                await asyncio.to_thread(loam_starter.use_control, payload.get("control"))
-                writer.write(response(200, {"saved": True}))
+                control = payload.get("control")
+                first = await asyncio.to_thread(loam_starter.use_control, control)
+                answer = {"saved": True}
+                if control == "Agentless thread":
+                    answer["first"] = first
+                writer.write(response(200, answer))
             except ValueError as exc:
                 writer.write(response(400, {"error": str(exc)}))
             await writer.drain()
@@ -2001,7 +2010,7 @@ class Server:
                 threads_rec.ensure_general()
                 body = {"threads": engine.listing(
                             archived=truthy(params.get("archived"))),
-                        "agents": cfg.roster_cards()}
+                        "agents": thread_agent_cards()}
                 writer.write(response(200, body))
                 await writer.drain()
                 return
@@ -2335,7 +2344,7 @@ class Server:
             await self._send_event(writer, {
                 "type": "threads.snapshot",
                 "threads": engine.listing(archived=archived),
-                "agents": cfg.roster_cards()})
+                "agents": thread_agent_cards()})
             while True:
                 try:
                     async with asyncio.timeout(2):

@@ -782,7 +782,7 @@ class ThreadEngine:
                    "attachments": attachments, "submission_id": submission_id, "named": named,
                    "recipients": recipients, "fanout": fanout,
                    "first": not any(threads.is_owner(m.get("author")) for m in msgs)}
-        if not meta.get("default") and named and not fanout and not any(m.get("first_tag") for m in msgs):
+        if not meta.get("default") and named and not any(m.get("first_tag") for m in msgs):
             request["first_tag"] = named[0]
         if not recipients and not fanout:
             request["unaddressed"] = True

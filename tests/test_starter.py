@@ -300,6 +300,9 @@ def main() -> int:
     (ws / "soul.md").write_text("their own soul\n")
     st.use_control("Board")
     check("an existing install never acquires a first-use marker", st.status(), None)
+    check("the thread lesson is claimed once across devices on a legacy install",
+          [st.use_control("Agentless thread") for _ in range(2)], [True, False])
+    check("the legacy thread lesson leaves captions off", st.first_use(), None)
     before = sorted(threads.index())
     third = st.seed(provision=fake_provision)
     check("an existing agent of the starter's id is left alone",
