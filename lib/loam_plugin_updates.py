@@ -117,7 +117,7 @@ def check(nightly=False):
             cache = json.loads(path.read_text())
         except (OSError, ValueError):
             cache = {}
-        with plugins._lock:
+        with plugins.locked():
             listed = plugins.load_list()
             for pid, line in listed["plugins"].items():
                 if (plugins.ID.fullmatch(pid) and isinstance(line, dict)
@@ -155,7 +155,7 @@ def check(nightly=False):
                     record = inspect(upstream_id, line, entry, catalogue["state"])
                     cache["plugins"][pid] = record
                     if record["via"] == "market" and not (line["source"].get("via") or line.get("update_via")):
-                        with plugins._lock:
+                        with plugins.locked():
                             current = plugins.load_list()
                             same = current["plugins"].get(pid) or {}
                             if same.get("source") == line["source"]:

@@ -135,7 +135,7 @@ def track(data, pid, origin, link=None):
 
 def offer(pid, base, candidate, *, skip=False):
     """Persist a decision by upstream version. Retry a failed attention write."""
-    with p._lock:
+    with p.locked():
         data = p.load_list()
         if original(data, pid) != base or not target(pid).is_dir():
             refuse("The local copy changed. Check for updates again.")
@@ -352,7 +352,7 @@ def finish(data, pid, record, confirm):
 def action(pid, fields):
     p._need_id(pid)
     op = fields.get("review")
-    with p._lock:
+    with p.locked():
         data = p.load_list()
         try:
             if op == "track":

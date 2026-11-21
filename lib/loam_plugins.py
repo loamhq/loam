@@ -6,6 +6,7 @@ contracts.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -17,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import loam_config as lc
@@ -154,7 +156,27 @@ TYPES = {".js": "text/javascript; charset=utf-8",
          ".ogg": "audio/ogg", ".mp4": "video/mp4", ".webm": "video/webm",
          ".wasm": "application/wasm"}
 
-_lock = threading.RLock()
+_threads = threading.RLock()
+_owner = threading.local()
+
+
+@contextmanager
+def locked():
+    """Serialize installed.json writers across broker threads and installer processes."""
+    with _threads:
+        if getattr(_owner, "locked", False):
+            yield
+            return
+        root = yours_root()
+        root.mkdir(parents=True, exist_ok=True)
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            _owner.locked = True
+            yield
+        finally:
+            _owner.locked = False
+            os.close(fd)
 
 
 class PluginError(Exception):
@@ -1520,7 +1542,7 @@ def set_auto_update(pid: str, on, replace_changes=False) -> dict:
     _need_id(pid)
     if not isinstance(on, bool):
         raise PluginError("`auto_update` is true or false")
-    with _lock:
+    with locked():
         listed = load_list()
         line = listed["plugins"].get(pid)
         if not line or (line.get("source") or {}).get("kind") != "link":
@@ -1790,7 +1812,7 @@ def set_on(pid: str, on, by: str | None = None) -> dict:
     _need_id(pid)
     if not isinstance(on, bool):
         raise PluginError("`on` is true or false")
-    with _lock:
+    with locked():
         rows = [r for r in _rows() if r["id"] == pid]
         if not rows:
             raise PluginError(f"no plugin {pid!r} in either layer", 404)
@@ -1824,7 +1846,7 @@ def remove(pid: str, by: str | None = None, *, retiring_source: dict | None = No
     unless a shipped plugin of the same id takes its place. The id's switch
     stays when a shipped copy takes over, and goes with the last copy."""
     _need_id(pid)
-    with _lock:
+    with locked():
         rows = [r for r in _rows() if r["id"] == pid]
         yours = next((r for r in rows if r["layer"] == "yours"), None)
         if yours is None:
@@ -1880,7 +1902,7 @@ def remove(pid: str, by: str | None = None, *, retiring_source: dict | None = No
 def seed_release_copy(source: Path, pid: str) -> None:
     from loam_files import _renameat2
 
-    with _lock, tempfile.TemporaryDirectory(dir=_staging()) as tmp:
+    with locked(), tempfile.TemporaryDirectory(dir=_staging()) as tmp:
         if os.path.lexists(copy_folder(pid)):
             raise PluginError("Your copy is already here.", 409)
         staged = Path(tmp) / pid
@@ -2378,7 +2400,7 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
         manifest = found["manifest"]
         pid = manifest["id"]
         decl = declaration(manifest, found["has"])
-        with _lock:
+        with locked():
             listed = load_list()
             rows = [r for r in _rows(listed) if r["id"] == pid]
             mine = next((r for r in rows if r["layer"] == "yours"), None)
@@ -2454,21 +2476,24 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                 import loam_plugin_review
                 loam_plugin_review.snapshot(folder, pid)
             target = yours_root() / pid
-            trash = None
-            if target.exists() or target.is_symlink():
-                trash = work / "replaced"
-                os.replace(target, trash)
-            try:
-                if ((trash is not None) != bool(mine)
-                        or trash and (not previous.get("files")
-                                      or fingerprint(trash) != previous["files"])
+            from loam_files import _renameat2
+            import loam_plugin_review as review
+            replaced = bool(mine)
+            if os.path.lexists(copy_folder(pid)):
+                raise PluginError("Your copy changed during the update.", 409)
+            if replaced:
+                # Keep both trees named throughout the swap and inspect the exact
+                # old inode before recording this update or discarding anything.
+                review.exchange(folder, target)
+                if (not previous.get("files") or fingerprint(folder) != previous["files"]
                         or os.path.lexists(copy_folder(pid))):
+                    review.exchange(folder, target)
                     raise PluginError("Your changes stay yours. Review this version with your agent.", 409)
-                os.replace(folder, target)
-            except BaseException:
-                if trash:
-                    os.replace(trash, target)
-                raise
+            else:
+                try:
+                    _renameat2(-100, str(folder), -100, str(target))
+                except FileExistsError:
+                    raise PluginError("A local copy appeared during the update. Your files were kept.", 409)
             # Where the yes was given (2026-11-18): `market` or `link`, so the
             # page can mark a plugin installed from a link someone shared.
             via = body.get("via") if body.get("via") in ("market", "link") else None
@@ -2495,9 +2520,10 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
             try:
                 _save_list(listed)
             except BaseException:
-                os.replace(target, folder)
-                if trash:
-                    os.replace(trash, target)
+                if replaced:
+                    review.exchange(folder, target)
+                else:
+                    os.replace(target, folder)
                 raise
         if any(k.get("source") for k in manifest.get("keys", [])):
             import loam_keys  # noqa: PLC0415
@@ -2625,7 +2651,7 @@ def set_agent_values(pid: str, agent: str, values, by: str | None = None) -> dic
     if not isinstance(values, dict) or not values:
         raise PluginError("`values` is an object of the fields to change, "
                           "like {\"voice\": \"Kore\"}")
-    with _lock:
+    with locked():
         row = _in_force(pid)
         fields = {f["id"]: f for f in row.get("agent_settings") or []}
         for key, value in values.items():
