@@ -3,6 +3,7 @@ import { createSecretSettings } from './plugin-secrets.js'
 import { pluginGallery } from './plugin-gallery.js'
 import { createThemeShowcase } from './theme-showcase.js'
 import { themePreview } from './theme-preview.js'
+import { themeImageURL, themeImagePosition } from './theme-image.js'
 import { listingAddress, personalUpdate, skippedUpdate } from './market-card.js'
 const label = id => ({ 'core.message': 'the message bubble', 'core.thread-list': 'the thread list', 'core.composer': 'the composer', 'core.files.viewer': 'the Files viewer', 'core.files.editor': 'the Files editor', 'core.rail': 'the navigation rail', 'core.activity': 'Activity', 'core.apps': 'Apps', 'core.settings': 'Settings' }[id] ?? id)
 const ORIGINS = { loam: 'Built into Loam', market: 'From the Market', yours: 'Made by you', link: 'From a link' }
@@ -259,6 +260,14 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         icon.chevronRight(12)), control),
       row.on && row.service && row.service.state !== 'running' ? serviceView(row) : null)
   }
+  const failedCovers = new Set()
+  function themeCover(row) {
+    const mode = theme.current, src = themeImageURL(row, mode)
+    if (!src || failedCovers.has(src)) return null
+    return h('img', { class: 'theme-cover', src, alt: '', loading: 'lazy', decoding: 'async',
+      width: 640, height: 427, style: { objectPosition: themeImagePosition(row, mode) },
+      onerror: () => { failedCovers.add(src); changed() } })
+  }
   function themeCard(row) {
     const name = row.name || row.id, origin = originOf(row)
     const inUse = row.effective && theme.value.theme === row.id
@@ -266,7 +275,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     return h('div', { class: 'plugin-theme-card', key: row.key },
       h('button', { type: 'button', class: 'plugin-theme-about', onclick: () => select(row),
         'aria-label': `About ${name}`, 'aria-description': `${meta(row, origin)} · ${state}` },
-        themePreview(row.id),
+        themePreview(row.id, {}, themeCover(row)),
         h('span', { class: 'plugin-theme-label' },
           h('span', { class: 'setrow-title', text: name }), icon.chevronRight(12)),
         h('span', { class: 'plugin-theme-origin', text: originText(origin) }),
@@ -312,7 +321,11 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   // tokens), else its screenshots, else nothing: its icon is already beside
   // its name.
   function picture(row) {
-    if (row.kind?.includes?.('theme')) return showcase.view({ key: `plugin-${row.id}`, look: row.id, name: row.name || row.id, options: row.options ?? [], palette: row.palette ?? [], from: 'installed' })
+    if (row.kind?.includes?.('theme')) {
+      const cover = themeCover(row)
+      return [cover ? h('div', { class: 'plugin-theme-cover' }, cover) : null,
+        showcase.view({ key: `plugin-${row.id}`, look: row.id, name: row.name || row.id, options: row.options ?? [], palette: row.palette ?? [], from: 'installed' })]
+    }
     const file = rel => `/api/plugins/${encodeURIComponent(row.id)}/files/${String(rel).split('/').map(encodeURIComponent).join('/')}`
     const shots = (row.screenshots ?? []).map(sh => ({ caption: sh.caption, src: file(sh.src), src_dark: sh.src_dark ? file(sh.src_dark) : null }))
     const gallery = pluginGallery({ shots, dark: theme.current === 'dark', name: row.name || row.id, key: `gallery:${row.id}`, failed: failedShots, redraw: changed })

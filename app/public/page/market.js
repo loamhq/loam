@@ -279,7 +279,7 @@ export function mount(host) {
   }
   function livePreview(entry, large) {
     const ready = themeState(entry.id) === 'ready'
-    return themePreview(ready ? entry.id : null, { cls: `market-preview${large ? ' market-preview-large' : ''}${ready ? '' : ' is-loading'}`, initial: (entry.name || entry.id).charAt(0).toUpperCase() })
+    return themePreview(ready ? entry.id : null, { cls: `market-preview${large ? ' market-preview-large' : ''}${themeState(entry.id) === 'loading' ? ' is-loading' : ''}`, initial: (entry.name || entry.id).charAt(0).toUpperCase() })
   }
   // A theme's picture in results (the best match's frame).
   const swatch = entry => h('span', { class: 'market-swatch', 'aria-hidden': 'true' }, picture(entry))
@@ -475,7 +475,7 @@ export function mount(host) {
     if (!entry) return [h('div', { class: 'market-note', role: 'status' }, st.list ? h('p', { text: 'This listing is no longer in the Market.' }) : h('p', { text: 'Reading the Market…' }))]
     const kind = kindOf(entry), body = d.body, theme = kind === 'theme'
     const cover = coverOf(entry)
-    const frame = cover ? coverImg(entry, cover) : theme && themeState(id) !== 'error' ? livePreview(entry, true) : null
+    const frame = cover ? coverImg(entry, cover) : theme ? livePreview(entry, true) : null
     const version = body?.version || entry.version
     const article = readme(entry, body)
     return [h('div', { class: `market-listing${frame ? ' has-cover' : ' no-cover'}`, key: `listing:${id}` },

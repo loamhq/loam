@@ -2438,6 +2438,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 @media (hover: hover) { .plugin-theme-about:hover { background:var(--paper-hover-alpha); } }
 .plugin-theme-about:focus-visible { outline:2px solid var(--paper-mark-active); outline-offset:2px; }
 .plugin-theme-about .theme-preview { width:100%; height:82px; margin-bottom:4px; border:1px solid var(--paper-rule); }
+.plugin-theme-cover { position:relative; aspect-ratio:2.6; overflow:hidden; border-radius:14px; }
 .plugin-theme-about .theme-miniature { padding:8px; }
 .plugin-theme-about .theme-miniature .pillbtn { min-height:26px; }
 .plugin-theme-about .theme-mini-body { display:none; }
