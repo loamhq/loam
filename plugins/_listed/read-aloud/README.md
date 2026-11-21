@@ -36,7 +36,7 @@ you chose for that agent. Your notes in Files can be read aloud too.
 
 Press the speaker under a reply or in Files and choose Listen. With no key, the player uses your browser’s voice and reads the fixed skip notices for tables and diagrams. A server key adds Brief and generated descriptions.
 
-Open Settings › Plugins › Read aloud to see the provider. Follow the free Gemini key link, sign in to Google AI Studio, create a key and paste it in the guide. Loam checks it and saves it in Settings › Connections › API keys for both plugins.
+Open Settings › Plugins › Read aloud to see the provider. When the plugin is using this browser, follow the free Gemini key link, sign in to Google AI Studio, create a key and paste it in the guide. Loam checks it and saves it in Settings › Connections › API keys for both plugins.
 
 ## What you need, and what leaves your server
 

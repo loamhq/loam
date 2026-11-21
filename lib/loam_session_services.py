@@ -44,7 +44,8 @@ def selected(view, target):
             continue
         prefix = update.prefix()
         if (prefix + "systemd/session/" + unit in changed
-                or (unit == API and any(p.startswith(prefix + "plugins/") for p in changed))):
+                or (unit == API and any(p.startswith(prefix + "plugins/")
+                    and not p.startswith(prefix + "plugins/_listed/") for p in changed))):
             chosen.add(unit)
             continue
         if not any(p.startswith(prefix + "lib/") or p == prefix + entry for p in changed):

@@ -57,7 +57,7 @@ Files keeps item dates, authors and expiry in the Markdown while you edit.
 If an agent edits the board during a Cards save, the app keeps the draft and
 shows the latest board with a button to reapply the edit.
 
-**Dictation and Read aloud.** These Market plugins work without a key in browsers that support speech recognition or speech synthesis, respectively. With a server key, they select Google first and OpenAI second. A provider error stays with that provider. Each plugin’s settings show the active provider and have a guide to creating, checking and saving a shared Gemini key. Record first and Polish, spoken Briefs and generated table descriptions need a server key.
+**Dictation and Read aloud.** These Market plugins work without a key in browsers that support speech recognition or speech synthesis, respectively. With a server key, they select Google first and OpenAI second. A provider error stays with that provider. Each plugin’s settings show the active provider. On browser fallback, a guide helps you create, check and save a shared Gemini key. Record first and Polish, spoken Briefs and generated table descriptions need a server key.
 
 The session host runs the provider and records its
 output as it arrives. The thread worker turns that output into the reply the

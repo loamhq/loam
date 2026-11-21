@@ -39,7 +39,7 @@ message or saving the file is still yours to do.
 
 Press the microphone in the composer or Files and speak. Press ✓ to keep the words. With no key, As you speak uses your browser’s recognition. Browser support varies. Record first and Polish use a server key.
 
-Open Settings › Plugins › Dictation to see the provider. Follow the free Gemini key link, sign in to Google AI Studio, create a key and paste it in the guide. Loam checks it and saves it in Settings › Connections › API keys for both plugins.
+Open Settings › Plugins › Dictation to see the provider. When the plugin is using this browser, follow the free Gemini key link, sign in to Google AI Studio, create a key and paste it in the guide. Loam checks it and saves it in Settings › Connections › API keys for both plugins.
 
 ## What you need, and what leaves your server
 

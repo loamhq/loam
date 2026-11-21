@@ -67,7 +67,7 @@ async function install(app, id) {
 // says which shots to take.
 async function scene(name, { plugins = [], title, messages = [], files = null, routes = {}, agents = null, storage = {}, setup = null }, act) {
   for (const mode of ['light', 'dark']) {
-    const app = await marketFixture({ mode, look: 'latte' }), errors = []
+    const app = await marketFixture({ mode, look: process.env.SHOT_THEME || 'latte' }), errors = []
     for (const id of plugins) await install(app, id)
     if (title) await app.f.api('PATCH', `/threads/${THREAD}`, { title })
     const record = await app.f.api('GET', `/threads/${THREAD}`)
@@ -317,22 +317,29 @@ for (const provider of ['google', 'openai', 'browser']) {
       await section.getByText(label, { exact: true }).waitFor()
       await section.scrollIntoViewIfNeeded()
       await shot('settings')
-      await section.locator('button').click()
-      await page.getByRole('dialog', { name: 'Use a Gemini key' }).waitFor()
-      await shot('guide')
+      if (await page.locator('html').getAttribute('data-look') !== (process.env.SHOT_THEME || 'latte')) throw new Error('Wrong capture theme')
       if (provider === 'browser') {
+        await section.locator('button').click()
+        const guide = page.getByRole('dialog', { name: 'Use a Gemini key' })
+        await guide.waitFor()
+        const box = await guide.boundingBox()
+        if (W < 700 && Math.abs(box.y + box.height - H) > 2) throw new Error('Guide did not dock at bottom of viewport')
+        await shot('guide')
         await page.route('**/api/keys/google', route => {
           const key = route.request().postDataJSON().values.GEMINI_API_KEY
           if (route.request().method() !== 'PUT' || key !== 'fixture-key') throw new Error('Expected a shared Settings save')
           selected = 'google'
           return route.fulfill({ json: { checked: { ok: true } } })
         })
-        await page.getByLabel('Gemini API key', { exact: true }).fill('fixture-key')
-        await page.getByRole('button', { name: 'Check and save' }).click()
-        await page.getByText('Google accepted your key.', { exact: false }).waitFor()
+        await guide.getByLabel('Gemini API key', { exact: true }).fill('fixture-key')
+        await guide.getByRole('button', { name: 'Check and save' }).click()
+        await guide.getByText('Google is connected', { exact: true }).waitFor()
         await section.getByText('Using Google', { exact: true }).waitFor({ state: 'attached' })
+        await shot('connected')
+        await guide.getByRole('button', { name: 'Done' }).click()
+        await guide.waitFor({ state: 'detached' })
       }
-      await page.getByRole('button', { name: 'Close', exact: true }).last().click()
+      if (await section.locator('.speech-key-link').count()) throw new Error('Owner with a key was offered a key')
       selected = provider
       if (provider === 'openai' && plugin === 'read-aloud') {
         await page.evaluate(() => __cap.page.goProfile('sprout'))

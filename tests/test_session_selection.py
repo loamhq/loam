@@ -111,4 +111,11 @@ with tempfile.TemporaryDirectory() as td:
     new = commit()
     assert services.selected({"host_revision": old, "api_revision": old}, new) == host
     check("unit template", {"systemd/session/" + services.HOST: "# unit\n"}, new, host)
+    for folder in ("plugins/_listed/reader", "plugins/reader"):
+        (repo / folder).mkdir(parents=True)
+    old = run("rev-parse", "HEAD")
+    old = check("Market reference copies do not replace either service",
+                {"plugins/_listed/reader/PLUGIN.md": "updated copy"}, old, set())
+    check("shipped plugin changes retain their API refresh",
+          {"plugins/reader/PLUGIN.md": "updated builtin"}, old, {services.API})
 print("ok: session service selection across Git revisions")
