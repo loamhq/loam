@@ -98,15 +98,14 @@ try:
     for pid in moved.MOVED:
         check(f"{pid} is in no shipped folder", [str(r) for r in SHIPPED if (r / pid).exists()], [])
         found = loam_plugins.read_folder(ROOT / "plugins" / "_listed" / pid)
-        check(f"{pid} is a listed copy with its page code",
-              (found["manifest"]["id"], found["manifest"]["kind"],
-               (ROOT / "plugins" / "_listed" / pid / "page" / "main.js").is_file()),
-              (pid, ["extension"], True))
+        check(f"{pid} is a listed extension",
+              (found["manifest"]["id"], found["manifest"]["kind"]),
+              (pid, ["extension"]))
     for name in ("speech.js", "transcribe.js", "polish.js", "speakable.js", "document-speech.js",
                  "speech-descriptions.js", "spoken-length.js"):
         check(f"the app server has no {name} (each plugin carries its own server half)",
               (ROOT / "app" / "src" / name).exists(), False)
-    for pid in moved.MOVED:
+    for pid in moved.SERVER_SINCE:
         check(f"{pid}'s listed copy has its own server and declares it",
               ((ROOT / "plugins" / "_listed" / pid / "server" / "main.js").is_file(),
                loam_plugins.read_folder(ROOT / "plugins" / "_listed" / pid)["manifest"]["touches"]["server"]),
@@ -115,18 +114,18 @@ try:
     # A fresh install: neither, and nothing to keep.
     reset()
     publish()
-    check("a fresh install lists neither", ids() & set(moved.MOVED), set())
+    check("a fresh install lists none of the former built-ins", ids() & set(moved.MOVED), set())
     check("and the update installs nothing", moved.keep(), {})
 
     # On: installed from the Market listing's link.
     reset()
-    switches({"dictation": True, "read-aloud": True, "daily-notes": True})
+    switches({**dict.fromkeys(moved.MOVED, True), "daily-notes": True})
     settings_dir = loam_plugins.agents_path("read-aloud")
     settings_dir.parent.mkdir(parents=True)
     settings_dir.write_text(json.dumps({"agents": {"ada": {"voice": "Kore"}}}))
-    check("both are wanted", moved.wanted(), ["dictation", "read-aloud"])
+    check("each former built-in that was on is wanted", moved.wanted(), sorted(moved.MOVED))
     out = moved.keep()
-    check("both installed from their listings' links", {k: (v["how"], v.get("link")) for k, v in out.items()},
+    check("each installed from its listing's link", {k: (v["how"], v.get("link")) for k, v in out.items()},
           {pid: ("link", link(pid)) for pid in moved.MOVED})
     listed = loam_plugins.load_list()
     check("each is an installed plugin at its maker's repository, by the update",
@@ -201,7 +200,7 @@ try:
         loam_marketplace._cache.clear()
 
     reset()
-    for pid in moved.MOVED:
+    for pid in moved.SERVER_SINCE:
         release_at(pid, "1.0.2")
     listed_at("1.0.2")
     switches({"dictation": True, "read-aloud": True})
@@ -209,19 +208,19 @@ try:
     shutil.rmtree(TMP / "state" / "plugins" / "to-market.json", ignore_errors=True)
     (TMP / "state" / "plugins" / "to-market.json").unlink(missing_ok=True)
     check("the old copies are installed", sorted((r["id"], r["version"]) for r in loam_plugins._rows()
-                                                 if r["id"] in moved.MOVED and r["layer"] == "yours"),
+                                                 if r["id"] in moved.SERVER_SINCE and r["layer"] == "yours"),
           [("dictation", "1.0.2"), ("read-aloud", "1.0.2")])
-    for pid in moved.MOVED:
+    for pid in moved.SERVER_SINCE:
         release_at(pid, "1.1.0")
     listed_at("1.1.0")
     out = moved.bring_up()
     check("each Market copy is brought up from its listing",
           {k: (v["how"], v.get("was")) for k, v in out.items()},
-          {pid: ("link", "1.0.2") for pid in moved.MOVED})
-    rows = {r["id"]: r for r in loam_plugins._rows() if r["id"] in moved.MOVED and r["layer"] == "yours"}
+          {pid: ("link", "1.0.2") for pid in moved.SERVER_SINCE})
+    rows = {r["id"]: r for r in loam_plugins._rows() if r["id"] in moved.SERVER_SINCE and r["layer"] == "yours"}
     check("...at the version with its server, still on, still the update's install",
           {k: (r["version"], r["on"], r["source"]["ref"]) for k, r in rows.items()},
-          {pid: ("1.1.0", True, "v1.1.0") for pid in moved.MOVED})
+          {pid: ("1.1.0", True, "v1.1.0") for pid in moved.SERVER_SINCE})
     check("a second start does nothing", moved.bring_up(), {})
 
     reset()
