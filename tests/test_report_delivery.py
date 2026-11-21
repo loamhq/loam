@@ -168,6 +168,15 @@ repo = "test/loam"
         assert len(said) == 2 and "fixed in 1.0.1" in said[-1]
         assert sorted(r["fact"] for r in loam_attention.pending()) == sorted(said)
         print("PASS ", said[-1])
+        import loam_report_diagnostics as diagnostics
+        at = diagnostics.instant("2026-01-01T12:30:00Z")
+        response = subprocess.CompletedProcess([], 0, stdout=b'GET /private HTTP/1.1" 503\n',
+                                               stderr=b"")
+        with patch.object(diagnostics.subprocess, "run", return_value=response) as journal:
+            assert diagnostics.errors("conversation", "", "", at) == "broker HTTP 503"
+            args = journal.call_args.args[0]
+            assert args[args.index("--until") + 1] == f"@{int(at.timestamp())}"
+            assert args[args.index("--since") + 1] == f"@{int(at.timestamp()) - 3600}"
         with patch("loam_report_diagnostics.collect", return_value="x" * 7000):
             capped = fb.draft("bug", "Timer", "Stopped.")
         assert "x" * 4097 not in capped["body"]

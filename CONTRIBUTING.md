@@ -33,7 +33,9 @@ bot when a relay is available. Before it is shown to the owner, the report has t
 paths, their install's address, keys, and e-mail and IP addresses taken out.
 A fix that install's engineer made can come with it as a patch
 (`loam report bug --patch`). The templates in `.github/ISSUE_TEMPLATE/`
-ask the same questions for anyone filing by hand.
+ask the same questions for anyone filing by hand. When a report is fixed,
+close the issue and add `fixed-in:VERSION` using the release tag. Reporting
+installs can tell their owners once that tag exists.
 
 ## Everyone else opens a pull request
 

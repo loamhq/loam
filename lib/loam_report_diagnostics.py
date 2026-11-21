@@ -111,10 +111,12 @@ def errors(lane, agent, job, now):
     try:
         proc = subprocess.run(["journalctl", "--user", "-u", "loam-session-broker.service",
                                "-u", "loam-session-host.service", "--since",
-                               (now - timedelta(hours=1)).isoformat(timespec="seconds"),
-                               "--until", now.isoformat(timespec="seconds"), "-n", "80",
+                               f"@{int((now - timedelta(hours=1)).timestamp())}",
+                               "--until", f"@{int(now.timestamp())}", "-n", "80",
                                "-o", "cat", "--no-pager"],
                               capture_output=True, timeout=3)
+        if proc.returncode:
+            lines.append("broker journal unavailable")
         for line in proc.stdout.decode(errors="replace").splitlines():
             match = re.search(r'HTTP/1\.[01]" ([45]\d\d)\b', line)
             if match:
@@ -123,20 +125,17 @@ def errors(lane, agent, job, now):
                                     r"FileNotFoundError|BrokenPipeError):", line)):
                 lines.append(f"broker {match[1]}")
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        lines.append("broker journal unavailable")
     return "\n".join(lines[-5:]) or "no matching failures in the last hour"
 
 
 def collect(at=None):
-    from loam_feedback import _git
     import loam_update
 
     lane, agent, info, job = context()
     try:
         cur = loam_update.current()
-        dirty = _git("status", "--porcelain")
-        changes = ("yes" if cur["local_commits"] or dirty.stdout else "no"
-                   ) if dirty.returncode == 0 else "unknown"
+        changes = "yes" if cur["local_commits"] or loam_update.dirt(cur["kind"]) else "no"
     except (OSError, ValueError, RuntimeError, loam_update.Refusal, subprocess.SubprocessError):
         cur, changes = {}, "unknown"
     try:
