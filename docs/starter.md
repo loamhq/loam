@@ -5,7 +5,8 @@
 are `tests/test_starter.py`; the words are in `docs/starter/`
 (`docs/starter/README.md` says which file holds which). The words are the
 owner's approved starter of 2026-11-16, which replaced L11's placeholders.
-The hello conversation guidance and greeting were revised on 2026-11-19.*
+The greeting was revised on 2026-11-20 and the first-week guidance on
+2026-11-21.*
 
 ## What a blank install gets
 
@@ -39,10 +40,25 @@ one idea relevant. When they try it, she ticks the card in their words.
 Her daily reflection runs even while she is the only agent. Its identity
 check compares a phrase from her soul with one from the preset greeting.
 Once there are other agents it draws the second phrase from a sibling.
-On her nightly reflection she checks for seven quiet days since both the last
-owner message in Hello and the last board edit. Her invitation in the thread
-and a note in her memory carry over to the next wake. Deleting or setting
-aside the list ends the invitations. The person can ask her to bring it back.
+She does any overnight work she agreed to and leaves it in Files with a
+short message linking to it from the chat. After that she answers when
+spoken to and does work the owner leaves with her. The owner can set the
+board's list aside or ask her to bring it back.
+
+The `week_one` starter marker opts new installs into the one-week
+occasion. Seven calendar days after seeding, in the installation's time
+zone, the ordinary reflection prompt tells Iris the first week has ended.
+She writes one personal message in the original Hello. It is independent
+of chat and board activity. The message carries an occasion marker so a
+retried post or reflection on that date cannot send it twice. A missing or
+archived Hello, or one the owner has removed Iris from, is left alone.
+If no reflection runs on the anniversary, it passes quietly.
+
+When the Garden plugin is on, Iris can point it out when the owner first
+makes something or when she delivers their first morning's work. If
+they're looking for a place to try changing Loam, she can offer to change
+the Garden with them. Their own idea takes the lead.
+
 A first-weeks starter marker identifies this Hello as the place for release
 news, even if renamed. Older starters keep their original routing.
 

@@ -520,7 +520,8 @@ def render_message(msg: dict, quoted: dict | None = None) -> str:
     # models, recovered late replies, branch links, insertion anchors, steered message IDs
     # and runtime-authored presets through serialization.
     for key in ("persona", "engine", "model", "segments", "attachments", "late",
-                "link", "after", "steered", "preset", "journal_reply", "submission_id", "submission_hash"):
+                "link", "after", "steered", "preset", "journal_reply", "submission_id", "submission_hash",
+                "occasion"):
         if msg.get(key):
             meta[key] = msg[key]
     text = (msg.get("text") or "").strip()
@@ -878,7 +879,7 @@ def append_once(thread_id: str, author: str, text: str, kind: str = "message",
         extra.pop("reply_to", None)
     with locked(VAULT):
         meta, msgs, path = read(thread_id)
-        for field in ("journal_reply", "submission_id"):
+        for field in ("journal_reply", "submission_id", "occasion"):
             if extra.get(field):
                 existing = next((m for m in msgs if m["author"] == author
                                  and m.get(field) == extra[field]), None)

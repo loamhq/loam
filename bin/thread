@@ -2,7 +2,7 @@
 """Post into a Loam thread from a wake, a cron or a turn (2026-11-08).
 
     thread post <thread-id|general> <text> [--bulletin] [--by <persona>]
-                [--reply-to <message-id>]
+                [--reply-to <message-id>] [--starter-week]
     thread rename <thread-id> <title> [--by <persona>]
     thread branch <thread-id> <message-id> [--persona <p>] [--title <t>]
                   [--text <draft>] [--by <persona>]
@@ -78,6 +78,7 @@ def main() -> int:
     post.add_argument("text")
     post.add_argument("--bulletin", action="store_true")
     post.add_argument("--reply-to", default="")
+    post.add_argument("--starter-week", action="store_true")
     post.add_argument("--by", default=os.environ.get("LOAM_AGENT", ""))
     ren = sub.add_parser("rename")
     ren.add_argument("thread")
@@ -134,6 +135,23 @@ def main() -> int:
             return 0
         if not args.text.strip():
             raise threads.ThreadError(400, "the text is empty")
+        occasion = {}
+        if args.starter_week:
+            import loam_starter as starter  # noqa: PLC0415
+            if (os.environ.get("LOAM_WAKE") != "reflection"
+                    or os.environ.get("CLAUDE_PROJECT_DIR") != str(threads.AI_LABS / by)
+                    or args.bulletin):
+                raise threads.ThreadError(400, "the starter week is a reflection post")
+            try:
+                running = json.loads((threads.lc.STATE / "wake" / f"{by}.running").read_text())
+            except (OSError, ValueError):
+                running = {}
+            chat = None
+            if isinstance(running, dict) and running.get("lane") == "reflection":
+                chat = starter.week_one_chat(by, running.get("ts"))
+            if not chat or chat[0] != args.thread:
+                raise threads.ThreadError(409, "the starter week is not due in this chat")
+            occasion = {"occasion": starter.WEEK_ONE}
         meta, _, _ = threads.read(args.thread)
         if by not in meta["members"]:
             threads.update(args.thread, add=[by])
@@ -145,11 +163,12 @@ def main() -> int:
         text, images = threads.reply_images(text)
         if not text.strip() and not images:
             raise threads.ThreadError(400, "the text is empty")
-        msg = threads.append(args.thread, by, text,
-                             kind="bulletin" if args.bulletin else "message",
-                             **({"reply_to": reply_to} if reply_to else {}),
-                             **({"attachments": images} if images else {}))
-        told = None if args.bulletin else tell_broker(args.thread, msg["id"], by)
+        msg, made = threads.append_once(args.thread, by, text,
+                                        kind="bulletin" if args.bulletin else "message",
+                                        **({"reply_to": reply_to} if reply_to else {}),
+                                        **({"attachments": images} if images else {}),
+                                        **occasion)
+        told = tell_broker(args.thread, msg["id"], by) if made and not args.bulletin else None
         print(json.dumps({"ok": True, "thread": args.thread, "message": msg,
                           **({"woke": told.get("woke", [])} if told else {})}))
         return 0

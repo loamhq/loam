@@ -34,6 +34,7 @@ import loam_lock  # noqa: E402
 import loam_profile  # noqa: E402
 import loam_schedule  # noqa: E402
 import loam_session  # noqa: E402
+import loam_starter  # noqa: E402
 import loam_usage  # noqa: E402
 import loam_waiters  # noqa: E402
 from loam_account import AccountRefused, refusal  # noqa: E402
@@ -524,6 +525,9 @@ def lane_prompt(agent: str, vault: Path, started: str, cron: str | None,
     diff_block, head = vault_diff(vault, since, agent, last_wake)
     instruction = loam_cron.reflection_instruction(
         loam_schedule.reflection_text(project or loam_cron.AI_LABS / agent))
+    occasion = loam_starter.week_one_prompt(agent, started)
+    if occasion:
+        instruction = f"{instruction}\n{occasion}"
     return REFLECTION_PROMPT_TEMPLATE.format(
         timestamp=started, instruction=instruction,
         vault_block=vault_block(since, head, last_wake, diff_block)

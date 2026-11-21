@@ -100,12 +100,19 @@ before drafting.
 
 Hello’s board starts with six things to try in any order. Iris mentions it
 once, helps with what the owner came for, and offers an idea when it fits.
-As they try things she ticks the cards in their words. After a quiet week
-she may ask once about one they might like. They can set the list aside,
-delete it, or ask her to bring it back. Iris can also help bring over
-context from another AI. Iris can show the owner their About me in Files, then
-help with something for morning. Changing the app, building something or
-following the owner's own idea can be the whole first visit.
+As they try things she ticks the cards in their words. They can set the
+list aside, delete it, or ask her to bring it back. Iris can bring over
+context from another AI and show the owner their About me in Files.
+She can offer one small overnight job that fits what they told her, or
+think over what they shared and leave a short note. The morning work lives
+in Files, with a short message linking to it. Changing the app, building
+something or following the owner's own idea can be the whole first visit.
+
+On the newest starter, Iris answers when spoken to and does work the
+owner leaves with her, keeping the first two weeks quiet. At her
+reflection on the one-week anniversary, Loam gives her the occasion to
+send one personal message in Hello. When Garden is on and they're looking
+for a place to try making a change, Iris can offer to change it with them.
 
 **Wakes and crons.** An agent also runs by itself on a schedule, and each
 schedule is a file under its `crons/` saying when it runs (or once, at a set

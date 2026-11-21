@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -14,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="test-starter-"))
 CONFIG = TMP / "loam.toml"
 CONFIG.write_text(f'''
+timezone = "America/Los_Angeles"
 [owner]
 id = "sam"
 name = "Sam"
@@ -222,6 +225,49 @@ def main() -> int:
 
     check("retrying a seed preserves a person's board after they remove the list",
           threads.board_text(meta), personal)
+    check("an interrupted seed from before week-one support stays legacy",
+          st.status().get("week_one"), None)
+
+    # 03:00 UTC is still the previous date in the installation's zone.
+    with patch.object(lc, "TIMEZONE", "America/Los_Angeles"):
+        loam_agents._write_json(st.marker_path(), {**record, "at": "2026-11-21T03:00:00Z"})
+        tid = out["thread"]
+        threads.update(tid, title="Our first chat")
+        threads.append(tid, lc.OWNER_ID, "I've been here every day.")
+        wake = runpy.run_path(str(ROOT / "bin" / "wake"))
+        day6, day7, day8 = ("2026-11-27T07:59:59Z", "2026-11-27T08:00:00Z",
+                            "2026-11-28T08:00:00Z")
+
+        def occasion(at, cron=None):
+            return "The first week on Loam has ended." in wake["lane_prompt"](
+                "iris", lc.VAULT, at, cron, ws)[0]
+
+        check("ordinary reflection gets the anniversary in the installation's zone",
+              (occasion(day6), occasion(day7), occasion(day8), occasion(day7, "other")),
+              (False, True, False, False))
+        check("the occasion follows the original Hello even after a rename",
+              f" post {tid} " in st.week_one_prompt("iris", day7), True)
+        check("other agents get no occasion", st.week_one_prompt("other", day7), "")
+        threads.update(tid, archived=True)
+        check("archiving Hello ends the occasion", occasion(day7), False)
+        threads.update(tid, archived=False)
+
+        env = {**os.environ, "LOAM_WAKE": "reflection", "CLAUDE_PROJECT_DIR": str(ws)}
+        command = [str(ROOT / "bin" / "thread"), "post", tid, "--by", "iris",
+                   "--starter-week", "--", "One week of making together."]
+        outside = subprocess.run(command, env=env, capture_output=True, text=True)
+        check("the week-one post needs a running reflection", outside.returncode, 1)
+        wake["mark_running"]("iris", day7, lc.VAULT, "reflection")
+        try:
+            first = subprocess.run(command, env=env, capture_output=True, text=True)
+            retry = subprocess.run(command, env=env, capture_output=True, text=True)
+        finally:
+            wake["clear_running"]("iris")
+        marks = [m["text"] for m in threads.read(tid)[1] if m.get("occasion") == st.WEEK_ONE]
+        check("retried anniversary posts produce one stored message and no new prompt",
+              (first.returncode, retry.returncode, marks, occasion(day7)),
+              (0, 0, ["One week of making together."], False))
+
     threads.delete(out["thread"])
     st.seed(provision=fake_provision)
     check("a deleted Hello stays deleted", out["thread"] in threads.index(), False)

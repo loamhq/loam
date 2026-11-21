@@ -8,12 +8,14 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import loam_agents
 import loam_config as lc
 
 STARTER_DIR = Path(__file__).resolve().parent.parent / "docs" / "starter"
 MARKER = "starter.json"
+WEEK_ONE = "starter-week-one"
 # Additional workspace files referenced by the starter’s map.
 OWN_FILES = ("how-i-am-here.md", "nights.md")
 
@@ -65,6 +67,51 @@ def status() -> dict | None:
         return json.loads(marker_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def week_one_chat(agent: str, at: str | None) -> tuple[str, list[dict], Path] | None:
+    """The original Hello, on its one-week anniversary in the install's zone."""
+    import loam_threads as threads  # noqa: PLC0415
+
+    seeded = status()
+    if not (isinstance(seeded, dict) and seeded.get("week_one") is True
+            and seeded.get("agent") == agent and seeded.get("thread")):
+        return None
+    born = loam_agents._utc(seeded.get("at"))
+    now = loam_agents._utc(at)
+    zone = ZoneInfo(lc.TIMEZONE)
+    if not born or not now:
+        return None
+    if (now.astimezone(zone).date() - born.astimezone(zone).date()).days != 7:
+        return None
+    tid = seeded["thread"]
+    try:
+        meta, messages, path = threads.read(tid)
+    except threads.ThreadError as exc:
+        if exc.status != 404:
+            raise
+        return None
+    if meta.get("archived") or agent not in meta["members"]:
+        return None
+    return tid, messages, path
+
+
+def week_one_prompt(agent: str, at: str) -> str:
+    chat = week_one_chat(agent, at)
+    if not chat:
+        return ""
+    tid, messages, path = chat
+    if any(m.get("occasion") == WEEK_ONE and m["author"] == agent for m in messages):
+        return ""
+    return (
+        "\nThe first week on Loam has ended. Read your first-week guidance in "
+        "`nights.md` and use what you know of the person and the original Hello "
+        f"chat (`{path}`). This is the occasion for your one personal message "
+        "marking the week and encouraging them to keep shaping their Loam. "
+        "Use your own judgment about the content and wording. To send it, use "
+        f"`{lc.ROOT}/bin/thread post {tid} --by {agent} --starter-week -- <your message as one argument>`. "
+        "This posts once even if retried.\n"
+    )
 
 
 def first_use() -> list[str] | None:
@@ -165,11 +212,13 @@ def seed(*, root: Path | None = None, provision=None) -> dict:
                                    f"this install's, and its files are its own"}
         first_weeks = not done or done.get("first_weeks") is True
         first_minute = not done or done.get("first_minute") is True
+        week_one = not done or done.get("week_one") is True
         if not ws.exists():
             wake = loam_agents.free_wake()
             loam_agents._write_json(marker_path(), {"state": "making", "agent": agent,
                                                     "wake": wake, "first_weeks": first_weeks,
                                                     "first_minute": first_minute,
+                                                    "week_one": week_one,
                                                     "at": loam_agents.now_iso()})
             loam_agents.make(agent, d, wake, provision=provision)
         else:
@@ -194,6 +243,8 @@ def seed(*, root: Path | None = None, provision=None) -> dict:
             record["used_controls"] = []
         if first_weeks:
             record["first_weeks"] = True
+        if week_one:
+            record["week_one"] = True
         loam_agents._write_json(marker_path(), record)
         loam_agents.log({"kind": "starter", "agent": agent, "thread": tid,
                          "by": "loam", "wake": wake, **({"resumed": resumed} if resumed else {})})
