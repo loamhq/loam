@@ -1225,7 +1225,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
  * The same rows in two chromes: the popover the desktop anchors above the +,
  * and the phone's bottom sheet. What is here is the popover and the pieces both
  * of them share; the sheet is already dressed by the rules under "sheets". */
-.popscrim { position: fixed; inset: 0; z-index: 6; background: transparent; border: 0; }
+.popscrim { touch-action:none; position: fixed; inset: 0; z-index: 6; background: transparent; border: 0; }
 .popover {
   z-index: 7; width: 300px;
   background: var(--paper-page); border-radius: 22px; padding: 6px; box-shadow: var(--shadow-popover);
@@ -2792,7 +2792,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 
 /* Full-size image viewer. */
 html.image-view-open, html.image-view-open body { overflow:hidden; }
-.image-view { position:fixed; inset:0; z-index:1000; display:grid; grid-template-rows:auto 1fr; background:var(--image-view-scrim); color:var(--image-view-ink); animation:image-view-in .16s ease-out; touch-action:pan-y pinch-zoom; }
+.image-view { position:fixed; inset:0; width:auto; height:auto; max-width:none; max-height:none; margin:0; border:0; padding:0; z-index:1000; display:grid; grid-template-rows:auto 1fr; background:var(--image-view-scrim); color:var(--image-view-ink); animation:image-view-in .16s ease-out; touch-action:pinch-zoom; }
 @keyframes image-view-in { from { opacity:0; } to { opacity:1; } }
 @media (prefers-reduced-motion: reduce) { .image-view { animation:none; } }
 .image-view-top { display:flex; align-items:center; gap:8px; padding:max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left)); min-width:0; }

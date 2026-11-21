@@ -24,6 +24,37 @@ closing returns focus to the trigger. A nested picker returns to its button
 inside the parent. Text fields retain their own arrow-key editing. Existing
 phone sheet drag handlers are retained.
 
+## Outside taps
+
+The first tap outside a menu dismisses its topmost layer. A second tap can
+activate the exposed control. This applies to a menu’s own opener, a desktop
+rail button, an embedded file preview and controls inside a parent sheet.
+
+Each manual popover opens a transparent, full-viewport element in the browser’s
+top layer immediately before it opens its surface. Chromium gives the
+popover’s painted `::backdrop` a non-interactive hit target. The separate
+element owns the press through the click, including over an iframe. The
+controller dismisses on click when the press and release belong to the same
+layer. Feature-specific pointer-down listeners would break this ordering.
+
+Native Activity dialogs use their own backdrop. The image viewer opens as a
+modal dialog above its caller, including a plugin’s Settings sheet. Inline
+mention and Market suggestions keep keyboard focus in their editor. Their
+`data-menu-inputs` selector identifies the nearby controls that still belong
+to the open picker.
+
+The Playwright regression runs in the app suite when `LOAM_PLAYWRIGHT` points
+to the installed module. Run it on its own with
+`node --test test/outside-dismiss.test.js` and set `LOAM_CHROME` to the
+Chromium executable. It uses touch at 390 CSS pixels and mouse input at 1440.
+The phone uses the supported 75% interface size so a Chats row is visible
+above the Settings sheet. Each comparison shows the same gesture over General.
+
+| Viewport | Before and after the outside tap | Other tested surfaces |
+| --- | --- | --- |
+| Phone | [Light](evidence/outside-dismiss/gesture-390-light.webp) · [Dark](evidence/outside-dismiss/gesture-390-dark.webp) | [Light](evidence/outside-dismiss/surfaces-390-light.webp) · [Dark](evidence/outside-dismiss/surfaces-390-dark.webp) |
+| Desktop | [Light](evidence/outside-dismiss/gesture-1440-light.webp) · [Dark](evidence/outside-dismiss/gesture-1440-dark.webp) | [Light](evidence/outside-dismiss/surfaces-1440-light.webp) · [Dark](evidence/outside-dismiss/surfaces-1440-dark.webp) |
+
 ## Inventory before the change
 
 Initial discovery was against `95c62a7`, with the thread selection markers.

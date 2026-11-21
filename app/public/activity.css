@@ -50,7 +50,7 @@
 .activity-notice p { color: var(--danger); }
 .activity-more { margin: 18px 0; }
 .activity-confirm { border: 1px solid var(--paper-rule); padding: 0; width: min(460px, calc(100% - 32px)); max-height: calc((100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px) / var(--ui-scale, 1)); overflow: auto; overscroll-behavior: contain; }
-.activity-confirm::backdrop { background: var(--scrim); }
+.activity-confirm::backdrop { background: var(--scrim); touch-action:pinch-zoom; }
 .activity-confirm-body { padding: 26px; }
 .activity-confirm h2 { margin: 0 0 14px; font-size: 24px; }
 .activity-confirm p { line-height: 1.5; overflow-wrap: anywhere; }

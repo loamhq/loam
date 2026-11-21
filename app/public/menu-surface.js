@@ -56,7 +56,7 @@ export function createMenuSurfaces(root) {
   // DOM-only rendering (without a layout engine) still builds the same shell.
   if (!root.getBoundingClientRect) return { sync() {}, back() { return false }, active() { return false } }
   const opened = new Map()
-  let lastTrigger = null, frame = null
+  let lastTrigger = null, frame = null, completion = null
   const controls = (node) => [...node.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')]
     .filter((item) => item.getClientRects().length && !item.closest('[inert]') && item.getAttribute('aria-hidden') !== 'true')
   const initialTarget = (node, rows) => node.dataset.menuInitialFocus === 'heading'
@@ -77,7 +77,7 @@ export function createMenuSurfaces(root) {
     node.dispatchEvent(new Event('menudismiss'))
   }
   // Native confirmations can sit above a surface (End / Cancel in Activity).
-  const top = () => root.querySelector('dialog[open]') ? null : [...opened.keys()].filter((n) => n.isConnected).at(-1)
+  const top = () => opened.size && !document.querySelector('dialog[open]') ? [...opened.keys()].filter((n) => n.isConnected).at(-1) : null
   const identify = (button) => {
     if (!button) return null
     const attr = ['id', 'aria-label', 'title'].find((key) => button.getAttribute(key))
@@ -157,17 +157,70 @@ export function createMenuSurfaces(root) {
     for (const [node, entry] of opened) if (node.isConnected) place(node, entry)
   }
   function schedule() { if (frame === null) frame = requestAnimationFrame(update) }
+  function outside(event) {
+    // A modal dialog receives its own native backdrop events. Its padding
+    // targets the same element, so check the point before treating it as outside.
+    const dialog = event.target.closest?.('dialog[open]')
+    if (dialog) {
+      if (event.target !== dialog || !dialog.hasAttribute('data-menu-dialog')) return null
+      const box = dialog.getBoundingClientRect()
+      const inside = event.clientX >= box.left && event.clientX < box.right && event.clientY >= box.top && event.clientY < box.bottom
+      return inside ? null : dialog
+    }
+    const node = top()
+    if (node) return node.contains(event.target) ? null : node
+    // An inline autocomplete keeps its editor and toggle interactive.
+    if (!completion || completion.contains(event.target)) return null
+    const input = event.target.closest?.(completion.dataset.menuInputs)
+    return input && completion.parentElement.contains(input) ? null : completion
+  }
+  let pressedOutside = null
+  document.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !e.isPrimary) return // Leave browser buttons and pinch gestures alone.
+    pressedOutside = outside(e)
+    if (pressedOutside) { e.preventDefault(); e.stopImmediatePropagation() }
+  }, true)
   document.addEventListener('click', (e) => {
+    const pressed = pressedOutside
+    pressedOutside = null
+    const released = e.detail ? outside(e) : null
+    if (e.detail && (pressed || released)) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      if (pressed && released === pressed) dismiss(pressed)
+      return
+    }
     const candidate = e.target.closest?.('button, a, [role="button"]')
     if (candidate) lastTrigger = candidate
   }, true)
-  document.addEventListener('pointerdown', (e) => {
-    if (e.button === 3 || e.button === 4) return // Browser Back and Forward.
-    const node = top(), entry = opened.get(node)
-    if (!node || node.contains(e.target) || entry.trigger?.contains(e.target)) return
-    if (node.hasAttribute('data-menu-centered') && e.target.closest?.('.rail-foot button')) return
-    dismiss(node)
+  document.addEventListener('pointerup', e => {
+    if (e.isPrimary && e.button === 0 && pressedOutside) e.stopImmediatePropagation()
   }, true)
+  document.addEventListener('pointercancel', e => { if (e.isPrimary) pressedOutside = null }, true)
+  // A backdrop touch belongs to neither the sheet's drag handle nor the
+  // scroller underneath. Keep native pinch zoom available.
+  function backdropStart(e) {
+    if (pressedOutside) e.stopImmediatePropagation()
+  }
+  function backdropMove(e) {
+    if (pressedOutside && e.touches.length === 1) { e.preventDefault(); e.stopImmediatePropagation() }
+  }
+  function backdropWheel(e) {
+    if (!e.ctrlKey && outside(e)) { e.preventDefault(); e.stopImmediatePropagation() }
+  }
+  let scrollGuard = null
+  function guardScroll(active) {
+    if (active && !scrollGuard) {
+      scrollGuard = new AbortController()
+      const options = { capture: true, passive: false, signal: scrollGuard.signal }
+      document.addEventListener('wheel', backdropWheel, options)
+      document.addEventListener('touchmove', backdropMove, options)
+      document.addEventListener('touchstart', backdropStart, { ...options, passive: true })
+    } else if (!active && scrollGuard) {
+      scrollGuard.abort()
+      scrollGuard = null
+    }
+  }
   document.addEventListener('focusin', () => {
     const node = top()
     if (node?.hasAttribute('data-menu-centered') && !node.contains(document.activeElement)) initialTarget(node, controls(node)).focus({ preventScroll: true })
@@ -178,11 +231,11 @@ export function createMenuSurfaces(root) {
       if (candidate) lastTrigger = candidate
     }
     const node = top()
-    if (!node) return
-    if (e.key === 'Escape') {
-      if (e.target.closest?.('.run-confirm, .profile-editor')) return
-      e.preventDefault(); e.stopImmediatePropagation(); dismiss(node); return
+    if (e.key === 'Escape' && (node || completion)) {
+      if (e.target.closest?.('dialog[open], .run-confirm, .profile-editor')) return
+      e.preventDefault(); e.stopImmediatePropagation(); dismiss(node ?? completion); return
     }
+    if (!node) return
     const rows = controls(node), at = rows.indexOf(document.activeElement)
     const listbox = node.getAttribute('role') === 'listbox' && node.hasAttribute('data-menu-anchored')
     // A chip inside a parent sheet owns the key that opens its child listbox.
@@ -218,9 +271,10 @@ export function createMenuSurfaces(root) {
   window.visualViewport?.addEventListener('scroll', schedule)
   const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
   return {
-    active: () => Boolean(top()),
+    active: () => Boolean(top() || completion),
     back() {
       const node = top()
+      if (!node && completion) { dismiss(completion); return true }
       if (!node) return false
       opened.get(node).returnFocus = true
       node.dispatchEvent(new Event('menuback'))
@@ -228,10 +282,13 @@ export function createMenuSurfaces(root) {
     },
     sync() {
     const nodes = [...root.querySelectorAll('[data-menu-surface]')]
+    completion = root.querySelector('[data-menu-inputs]')
+    guardScroll(Boolean(nodes.length || completion || root.querySelector('[data-menu-dialog][open]')))
     const previous = [...opened.values()].at(-1)
     for (const [node, entry] of opened) if (!nodes.includes(node)) {
       clearTimeout(entry.outsideTimer)
       entry.stopGesture?.()
+      entry.backdrop?.remove()
       resize?.unobserve(node); if (entry.trigger) resize?.unobserve(entry.trigger)
       opened.delete(node)
       const target = resolve(entry.trigger, entry.selector) ?? resolve(entry.fallback, entry.fallbackSelector)
@@ -250,16 +307,26 @@ export function createMenuSurfaces(root) {
           fallbackSelector: identify(fallback) ?? previous?.fallbackSelector }
         opened.set(node, entry)
         entry.stopGesture = sheetGesture(node, () => dismiss(node))
-        // Manual top-layer popovers work with the existing explicit state and
-        // outside dismissal; no UA auto-dismiss can leave app state stale.
-        node.showPopover?.()
+        // Popover ::backdrop paints the scrim but the browser ignores hits on
+        // it. Put a transparent hit target in the same top layer, immediately
+        // below this surface, so a nested menu also covers its parent.
+        if (node.showPopover) {
+          entry.backdrop = h('div', { class: 'menu-backdrop', popover: 'manual', 'aria-hidden': 'true' })
+          document.body.append(entry.backdrop)
+          entry.backdrop.showPopover()
+          node.showPopover()
+        }
         resize?.observe(node); if (trigger?.isConnected) resize?.observe(trigger)
         place(node, entry)
         const rows = controls(node)
         ;initialTarget(node, rows).focus({ preventScroll: true })
         revealOption(node)
       } else {
-        if (node.showPopover && !node.matches(':popover-open')) node.showPopover()
+        if (node.showPopover && !node.matches(':popover-open')) {
+          entry.backdrop.hidePopover()
+          entry.backdrop.showPopover()
+          node.showPopover()
+        }
         place(node, entry)
         if (node === top() && !node.contains(document.activeElement)) {
           const rows = controls(node)
