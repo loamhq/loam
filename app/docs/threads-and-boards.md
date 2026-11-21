@@ -660,9 +660,8 @@ as its label until the catalog returns.
 The thread composer's @ button inserts a literal @ at the caret, with a space
 before it when needed, and opens the same picker as typing @. While open, the
 button says “Remove mention”; activating it removes the active @ and partial
-query. Deleting the @ closes the picker too. Escape, a pointer press outside
-the composer, or leaving the draft for anything except the picker or @ button
-closes it while keeping the text. A chosen agent replaces the active query and
+query. Deleting the @ closes the picker too. Escape or a completed tap outside the draft, picker and @ button closes the picker
+and keeps the text. Moving keyboard focus away from those controls also closes it. A chosen agent replaces the active query and
 returns focus to the draft. Thread hints show only the send chord on desktop;
 phones omit the hint row. Classic hints keep their existing reassurance.
 On both layouts the thread icon or actions menu opens details. The header has no persona stack or default-persona subtitle.

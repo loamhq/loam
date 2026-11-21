@@ -13,8 +13,15 @@
   border-radius: 30px 30px 0 0; padding: var(--space-lg) var(--space-xl) calc(var(--space-xl) + env(safe-area-inset-bottom, 0px) / var(--ui-scale, 1));
   overflow: auto; box-shadow: var(--shadow-popover); animation: menuSheetArrive var(--motion-normal) var(--ease-standard) backwards;
 }
+.menu-backdrop {
+  position:fixed; inset:0; width:auto; height:auto; max-width:none; max-height:none;
+  margin:0; padding:0; border:0; background:transparent; touch-action:pinch-zoom;
+  overflow:hidden; overscroll-behavior:contain;
+}
 [data-menu-surface]::backdrop { background: transparent; }
 [data-menu-surface][data-menu-layout="sheet"]::backdrop { background: var(--scrim); opacity:var(--sheet-scrim-opacity, 1); transition:var(--sheet-scrim-transition, none); }
+/* Embedded documents cannot bubble an outside tap to an inline picker. */
+:root:has([data-menu-inputs]) iframe { pointer-events:none; }
 /* The top-layer backdrop owns dimming; the shared handler owns outside taps. */
 :root:has([data-menu-layout="sheet"]:popover-open) .scrim { visibility:hidden; }
 .surface-heading { display:flex; align-items:center; justify-content:space-between; gap:var(--space-lg); padding:var(--space-xs) var(--space-xs) var(--space-lg); flex:none; }
@@ -40,7 +47,6 @@
 [data-menu-centered] { border-radius:24px; box-shadow:var(--shadow-popover); }
 [data-menu-centered]::backdrop { background:var(--scrim); }
 :root:has([data-menu-centered]:popover-open) .scrim { visibility:hidden; }
-:root:has([data-menu-centered]:popover-open) .rail-foot { position:relative; z-index:11; }
 [data-menu-centered] > .surface-handle { display:none; }
 [data-menu-centered].settings.twopane { height:720px; }
 [data-menu-centered].settings.twopane .setnav { width:220px; }

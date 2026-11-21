@@ -244,7 +244,7 @@
 .tt-danger { color:var(--danger); }
 .tt-delete-confirm { padding:16px; border-radius:18px; background:var(--paper-card); }
 .tt-delete-confirm button { margin-right:8px; }
-.tt-board-scrim { position:absolute; inset:0; z-index:7; border:0; background:var(--scrim); animation:loamFadeIn 160ms ease-out; }
+.tt-board-scrim { touch-action:none; position:absolute; inset:0; z-index:7; border:0; background:var(--scrim); animation:loamFadeIn 160ms ease-out; }
 .tt-board { position:absolute; z-index:8; right:12px; top:12px; bottom:12px; width:min(460px,calc(100% - 24px)); display:flex; flex-direction:column; background:var(--paper-pane); border-radius:28px; overflow:hidden; box-shadow:0 12px 40px var(--shadow-ink); animation:loamGrow 180ms cubic-bezier(.2,.8,.2,1); }
 .tt-board-files { display:inline-flex; align-items:center; gap:6px; min-height:44px; padding:0 9px; border:1px solid var(--paper-rule); border-radius:999px; color:var(--paper-ink-2); background:transparent; font:600 12px var(--font-body); white-space:nowrap; cursor:pointer; }
 .tt-board-files:hover { color:var(--paper-ink); background:var(--paper-card); }

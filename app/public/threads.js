@@ -150,13 +150,6 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (e.key === 'Escape') { e.preventDefault(); st.mention = null; redraw(); return true }
     return false
   }
-  document.addEventListener?.('pointerdown', (e) => {
-    const o = st.open
-    if (st.mention && !e.target.closest?.('.tt-composer, .tt-mentions')) { st.mention = null; redraw() }
-    if (o?.confirmDelete === 'header' && !e.target.closest?.('.tt-header-confirm') && !e.target.closest?.('[aria-label="Thread actions"]')) { o.confirmDelete = false; redraw() }
-    if (o?.headerMenu && !e.target.closest?.('.tt-header-menu') && !e.target.closest?.('[aria-label="Thread actions"]')) { o.headerMenu = false; redraw() }
-    if (st.listMenu && !e.target.closest?.('.tt-list-menu') && !e.target.closest?.('[aria-label="Thread list actions"]')) { st.listMenu = false; redraw() }
-  })
   document.addEventListener?.('focusout', (e) => {
     if (st.mention && e.target === compose.field() && !e.relatedTarget?.closest?.('.tt-mentions, .tt-mention-button')) { st.mention = null; redraw() }
   })
@@ -173,10 +166,6 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (focus) o.focusBoardAdd = o.addSection
     o.addSection = null; redraw()
   }
-  document.addEventListener?.('pointerdown', (e) => {
-    const o = st.open
-    if (o?.boardMenu != null && !e.target.closest?.('.tt-item-actions')) { o.boardMenu = null; redraw() }
-  })
   function rememberBoard(o, record) {
     const id = o.thread.id
     if (record) st.boardDrafts.set(id, record)
@@ -1790,7 +1779,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       disabled: o.sending || o.loading || o.refreshing || o.readFailed || o.creating || o.createFailed,
       readOnly: o.readFailed || o.sending || o.createFailed,
       placeholder: (!o.messages.length && o.promptPlaceholder) || (o.thread.default ? `Message ${name(o.thread.default)}` : o.creating ? 'A little room for your thought…' : 'Write a thought, or @mention someone'),
-      mentionPicker: st.mention ? h('div', { key: 'mentions', class: 'popover tt-mentions', role: 'listbox', 'aria-label': 'Mention an agent' }, ...mentionChoices().map((a, i) => settingsRow({ title: a.name, sub: a.sub, lead: a.everyone ? icon.users(24) : avatar(a.id, 24), onclick: () => insertMention(a), props: { type: 'button', role: 'option', 'aria-selected': String(i === (st.mention.index ?? 0)), class: `setrow${i === (st.mention.index ?? 0) ? ' on' : ''}` } }))) : null,
+      mentionPicker: st.mention ? h('div', { key: 'mentions', class: 'popover tt-mentions', role: 'listbox', 'aria-label': 'Mention an agent',
+        'data-menu-inputs': '.draft, .tt-mention-button', onmenudismiss: () => { st.mention = null; redraw() } }, ...mentionChoices().map((a, i) => settingsRow({ title: a.name, sub: a.sub, lead: a.everyone ? icon.users(24) : avatar(a.id, 24), onclick: () => insertMention(a), props: { type: 'button', role: 'option', 'aria-selected': String(i === (st.mention.index ?? 0)), class: `setrow${i === (st.mention.index ?? 0) ? ' on' : ''}` } }))) : null,
       modelControl: modelPill({ label: chosenModel?.name ?? 'Providers & models', lead: defaultMember?.engine ? providerMark(defaultMember.engine, 14) : icon.users(14),
         title: defaultMember?.engine ? chosenModel.title ?? `${name(defaultMember.persona)} · ${providerName(defaultMember)} · ${modelTitle(defaultMember)} · Settings for this thread` : 'Providers & models',
         disabled: Boolean(compose.dictating?.()) || o.loading || o.readFailed || o.creating || o.createFailed, onclick: () => openConfiguration(),

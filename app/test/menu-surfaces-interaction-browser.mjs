@@ -24,8 +24,9 @@ try {
    await page.evaluate(()=>__interaction.threads.open('a-quieter-week'));await settle()
    const trigger=page.getByRole('button',{name:'Thread actions',exact:true}), menu=page.locator('.tt-header-menu')
    await trigger.focus();await page.keyboard.press('Enter');await menu.waitFor();await near(trigger,menu)
-   assert.equal(await menu.getByRole('button',{name:'Thread details',exact:true}).evaluate(n=>n===document.activeElement),true)
-   await page.keyboard.press('ArrowDown');assert.equal(await menu.getByRole('button',{name:'Pin thread',exact:true}).evaluate(n=>n===document.activeElement),true)
+   const actions=menu.locator('.setrow')
+   assert.equal(await actions.first().evaluate(n=>n===document.activeElement),true)
+   await page.keyboard.press('ArrowDown');assert.equal(await actions.nth(1).evaluate(n=>n===document.activeElement),true)
    await page.keyboard.press('Escape');await menu.waitFor({state:'hidden'});assert.equal(await trigger.evaluate(n=>n===document.activeElement),true)
    await trigger.click();await menu.waitFor();await page.mouse.click(3,500);await menu.waitFor({state:'hidden'})
    // A live redraw preserves the actual surface and its animation/focus.
@@ -38,12 +39,12 @@ try {
    for(const next of [1920,640,1440,width]) {console.log(`Resize ${width} → ${next}`);await page.setViewportSize({width:next,height:1000});await near(trigger,menu)}
    await page.keyboard.press('Escape')
    if(width===1440) {
-    await trigger.click();await page.getByRole('button',{name:'Hide sidebar',exact:true}).click({force:true}).catch(async()=>{
-      // The outside click correctly closes the menu before collapsing. Open
-      // it again after the layout transition and check the same header anchor.
-      await page.evaluate(()=>{__interaction.state.collapsed=true;__interaction.schedule()})
-    });await settle()
-    if(await menu.count()===0) await trigger.click()
+    await trigger.click();await menu.waitFor()
+    const collapse=page.getByRole('button',{name:/^Hide sidebar/}).first()
+    const box=await collapse.boundingBox()
+    await page.mouse.click(box.x+box.width/2,box.y+box.height/2)
+    await menu.waitFor({state:'hidden'})
+    await collapse.click();await settle();await trigger.click()
     await near(trigger,menu);await page.keyboard.press('Escape')
    }
    // The provider control also opens with a keyboard, with no prior click.

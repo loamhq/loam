@@ -353,9 +353,9 @@ export function createActivity({ registry = createCoreRegistry(), api, redraw, a
 
   function detailNodes() {
     if (!st.detail) return []
-    if (!detailDialog) detailDialog = h('dialog', { class: 'activity-confirm activity-detail', 'aria-labelledby': 'activity-detail-title',
+    if (!detailDialog) detailDialog = h('dialog', { 'data-menu-dialog': '', class: 'activity-confirm activity-detail', 'aria-labelledby': 'activity-detail-title',
       oncancel: (event) => { event.preventDefault(); closeDetail() },
-      onclick: (event) => { if (event.target === detailDialog) closeDetail() } })
+      onmenudismiss: closeDetail })
     const item = st.items.find((i) => i.id === st.detail.item.id) ?? st.detail.item
     const words = activityWords(item)
     morph(detailDialog, [h('div', { class: 'activity-confirm-body' },
@@ -376,7 +376,7 @@ export function createActivity({ registry = createCoreRegistry(), api, redraw, a
 
   function dialogNodes() {
     if (!st.confirm) return detailNodes()
-    if (!dialog) dialog = h('dialog', { class: 'activity-confirm', 'aria-labelledby': 'activity-confirm-title',
+    if (!dialog) dialog = h('dialog', { 'data-menu-dialog': '', class: 'activity-confirm', 'aria-labelledby': 'activity-confirm-title',
       oncancel: (event) => { event.preventDefault(); dismiss() },
       onkeydown: (event) => {
         if (event.key !== 'Tab') return
@@ -385,7 +385,7 @@ export function createActivity({ registry = createCoreRegistry(), api, redraw, a
         event.preventDefault()
         buttons[(at + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus()
       },
-      onclick: (event) => { if (event.target === dialog) dismiss() } })
+      onmenudismiss: dismiss })
     const { job, queued, busy, error } = st.confirm
     morph(dialog, [h('div', { class: 'activity-confirm-body' },
       h('h2', { id: 'activity-confirm-title', class: 'display', text: `Cancel ${queued ? 'queued ' : ''}job?` }),

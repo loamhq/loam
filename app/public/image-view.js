@@ -42,7 +42,11 @@ export function openImageView(items, index = 0, { download = true, label = 'Imag
   }
   const step = (d) => (e) => { e?.stopPropagation(); show(at + d) }
   const close = h('button', { class: 'iconbtn image-view-close image-view-stop', type: 'button', 'aria-label': 'Close', title: 'Close', onclick: (e) => { e.stopPropagation(); closeImageView() } }, icon.close(16))
-  const root = h('div', { class: 'image-view', role: 'dialog', 'aria-modal': 'true', 'aria-label': label, onclick: (e) => { if (e.target === root || e.target.classList.contains('image-view-stage')) closeImageView() } },
+  const root = h('dialog', {
+    class: 'image-view', role: 'dialog', 'aria-modal': 'true', 'aria-label': label,
+    oncancel: e => { e.preventDefault(); closeImageView() },
+    onclick: e => { if (e.target === root || e.target.classList.contains('image-view-stage')) closeImageView() },
+  },
     h('div', { class: 'image-view-top' }, h('div', { class: 'image-view-title' }, name, count), save, close),
     h('div', { class: 'image-view-stage' }, img),
     many ? h('button', { class: 'iconbtn image-view-step prev image-view-stop', type: 'button', 'aria-label': 'Previous image', onclick: step(-1) }, icon.chevronLeft(18)) : null,
@@ -72,5 +76,6 @@ export function openImageView(items, index = 0, { download = true, label = 'Imag
   document.addEventListener('keydown', keys, true)
   document.documentElement.classList.add('image-view-open')
   document.body.append(root)
+  root.showModal?.()
   close.focus({ preventScroll: true })
 }
