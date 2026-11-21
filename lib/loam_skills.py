@@ -408,6 +408,17 @@ Loam's with the same name, and an agent's own skill (in its workspace's
 """
 
 
+def seed_dictation_terms(system: Path) -> bool:
+    """Create the shared vocabulary note without changing an owner's terms."""
+    note = system / "Dictation terms.md"
+    try:
+        with note.open("x", encoding="utf-8") as out:
+            out.write("# Dictation terms\n\n%% Add one name or term per line. %%\n")
+    except FileExistsError:
+        return False
+    return True
+
+
 def seed_vault(vault: Path, folders: dict[str, str] | None = None,
                library: Path | None = None) -> list[str]:
     """The starter vault a blank install gets, at ``vault``: the folders
@@ -427,6 +438,8 @@ def seed_vault(vault: Path, folders: dict[str, str] | None = None,
         if not path.is_dir():
             path.mkdir(parents=True)
             made.append(f[key] + "/")
+    if seed_dictation_terms(vault / f["system"]):
+        made.append(f"{f['system']}/Dictation terms.md")
     shelf = vault / f["system"] / OWN_DIR
     if not shelf.is_dir():
         shelf.mkdir(parents=True)
