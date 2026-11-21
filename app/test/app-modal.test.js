@@ -17,6 +17,14 @@ test('modal addresses retain thread/file path, other query keys and fragment; de
   assert.equal(modalFromURL(original + '&modal=unknown'), null)
 })
 
+test('Back from the reviewer returns to the page that opened it after a reload', () => {
+  const url = 'https://app.example/apps'
+  const sheet = { kind: 'settings', page: 'agents', detail: { kind: 'reviewer', id: 'reviewer' } }
+  const restored = modalFromURL(modalURL(url, { ...sheet, fromReviewerPlugin: true }))
+  assert.deepEqual(settingsParent(restored), { kind: 'settings', page: 'plugins', provider: 'reviewer' })
+  assert.deepEqual(settingsParent(modalFromURL(modalURL(url, sheet))), { kind: 'settings', page: 'agents' })
+})
+
 function fixture() {
   const entries = [{ url: 'https://app.example/threads/notes', state: null }], listeners = []
   let at = 0, current = null

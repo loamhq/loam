@@ -111,7 +111,9 @@ const githubAccounts = createGithubAccounts({ state: () => host.state.github, ap
 const gitIdentity = createGitIdentity({ api: (...args) => host.api(...args), changed: () => host.schedule() })
 function settingsBody(sheet, back) {
   const page = settingsHome(sheet.page, sheet.provider)
-  if (page === 'agents' && sheet.detail) return [settingsBack('Agents', 'agents'), ...(sheet.detail.kind === 'agent'
+  if (page === 'agents' && sheet.detail) return [sheet.fromReviewerPlugin
+    ? settingsBack('The reviewer', 'plugins', { 'aria-label': 'Back to The reviewer' }, 'reviewer')
+    : settingsBack('Agents', 'agents'), ...(sheet.detail.kind === 'agent'
     ? host.settingsProfileUI.body(sheet.detail.id) : host.settingsProfileUI.settingsDetail())]
   if (page === 'provider') return settingsProvider(sheet.provider)
   if (page === 'integration') return settingsIntegration(sheet.provider, sheet.account)
@@ -247,14 +249,14 @@ function syncSettingsPlugin(provider) {
     if (sheet?.kind !== 'settings' || sheet.page !== 'plugins' || sheet.provider !== provider) return
     const rows = host.pluginLoader?.st.rows ?? []
     const row = rows.find(r => r.id === provider && (r.effective || r.broken)) ?? rows.find(r => r.id === provider)
-    if (row && host.pluginSettingsUI?.st.selected?.key !== row.key) host.pluginSettingsUI?.open(row)
+    if (row && (provider === 'reviewer' || host.pluginSettingsUI?.st.selected?.key !== row.key)) host.pluginSettingsUI?.open(row)
   }
   if (host.pluginLoader?.st.rows.some(r => r.id === provider)) openPlugin()
   else host.pluginLoader?.refresh()?.then(openPlugin).catch(() => {})
 }
 
-function settingsBack(label, page, props) {
-  return h('button', { class: 'backbtn', ...props, onclick: () => goSettings(page) }, icon.chevronLeft(18), label)
+function settingsBack(label, page, props, provider = null) {
+  return h('button', { class: 'backbtn', ...props, onclick: () => goSettings(page, provider) }, icon.chevronLeft(18), label)
 }
 
 function backInSettings() {
@@ -395,7 +397,8 @@ function settingsFiles({ back = true } = {}) {
 // The personas the host has, and how many chats this screen knows of each.
 // Tapping one opens its profile, which is where its chats are.
 function goSettingsDetail(kind, id, options) {
-  host.state.sheet = { kind: 'settings', page: 'agents', detail: { kind, id } }
+  host.state.sheet = { kind: 'settings', page: 'agents', detail: { kind, id },
+    ...(options?.fromReviewerPlugin ? { fromReviewerPlugin: true } : {}) }
   host.settingsProfiles.load(kind, id, options)
   if (kind === 'agent' || kind === 'engineer' && id !== 'default') {
     host.engineerActivity.st.agent = kind === 'agent' ? id : ''
@@ -915,6 +918,7 @@ return Object.defineProperties({}, {
     settingsFiles: { enumerable: true, get: () => settingsFiles },
     settingsAgents: { enumerable: true, get: () => settingsAgents },
     goSettingsDetail: { enumerable: true, get: () => goSettingsDetail },
+    openReviewerSettings: { enumerable: true, get: () => () => goSettingsDetail('reviewer', 'reviewer', { fromReviewerPlugin: true }) },
     syncSettingsPlugin: { enumerable: true, get: () => syncSettingsPlugin },
     settingsProviders: { enumerable: true, get: () => settingsProviders },
     settingsApiKey: { enumerable: true, get: () => settingsApiKey },

@@ -5,7 +5,7 @@ import { settingsSection } from './app-shape.js'
 // The Market (2026-11-18) is an overlay of its own: `listing`, `kind`, `q`,
 // and `install` (a GitHub link: the install-from-link sheet opens over it,
 // read and shown, never installed without the person's yes).
-const keys = ['modal', 'section', 'provider', 'account', 'profile', 'profile_id', 'archived', 'listing', 'q', 'install']
+const keys = ['modal', 'section', 'provider', 'account', 'profile', 'profile_id', 'reviewer_from_plugin', 'archived', 'listing', 'q', 'install']
 const marketKind = url => url.pathname === '/panel' ? 'marketKind' : 'kind'
 function baseURL(url) {
   const base = new URL(url)
@@ -26,6 +26,7 @@ export function modalFromURL(url) {
   if (kind !== 'settings') return null
   return { kind, page: q.get('section') || 'root', provider: q.get('provider'), account: q.get('account'),
     ...(q.get('archived') === '1' ? { archivedAgents: true } : {}),
+    ...(q.get('profile') === 'reviewer' && q.get('reviewer_from_plugin') === '1' ? { fromReviewerPlugin: true } : {}),
     ...(['agent', 'engineer', 'reviewer'].includes(q.get('profile')) && q.get('profile_id') ? { detail: { kind: q.get('profile'), id: q.get('profile_id') } } : {}) }
 }
 export function modalURL(url, sheet) {
@@ -43,12 +44,14 @@ export function modalURL(url, sheet) {
     if (sheet.account) next.searchParams.set('account', sheet.account)
     if (sheet.archivedAgents) next.searchParams.set('archived', '1')
     if (sheet.detail) { next.searchParams.set('profile', sheet.detail.kind); next.searchParams.set('profile_id', sheet.detail.id) }
+    if (sheet.fromReviewerPlugin) next.searchParams.set('reviewer_from_plugin', '1')
   }
   return next
 }
 export function settingsParent(sheet) {
   const page = settingsSection(sheet.page)
   if (page === 'root') return null
+  if (sheet.detail?.kind === 'reviewer' && sheet.fromReviewerPlugin) return { kind: 'settings', page: 'plugins', provider: 'reviewer' }
   if (sheet.detail || sheet.archivedAgents || (page === 'plugins' && sheet.provider)) return { kind: 'settings', page }
   if (sheet.page === 'integration' && sheet.account) return { kind: 'settings', page: 'integration', provider: sheet.provider }
   return { kind: 'settings', page: page === sheet.page ? 'root' : page }
