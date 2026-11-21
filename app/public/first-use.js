@@ -1,4 +1,4 @@
-// Each action has its own key, even when two menus have the caption “More”.
+// Each action has its own key, even when two buttons have the caption “Details”.
 let active = false
 const used = new Set()
 const pending = new Set()
@@ -19,18 +19,13 @@ function persistUse(key) {
 export function firstUseActive() { return active }
 
 const captions = {
-  Back: 'Back', Board: 'Board', Activity: 'Activity', Settings: 'Settings',
-  'New thread': 'New chat', 'Search threads': 'Search', 'Thread list actions': 'More',
-  'Thread actions': 'More', 'Hide sidebar for a focused view': 'Hide list', 'Show sidebar': 'Show list',
-  'Back to threads': 'Chats', 'Return to open panel': 'Open panel', 'Close board': 'Close',
-  'Attach a file': 'Attach', 'Mention an agent': 'Mention', 'Write this in a bigger window': 'Expand',
-  Send: 'Send', Reply: 'Reply', Copy: 'Copy', 'Branch into a new thread': 'Branch',
-  'Open to the side': 'Side panel', 'This folder': 'More', 'Add to this folder': 'Add',
-  'This file': 'More', Download: 'Download', 'Thread details': 'Details',
-  'Close search': 'Close', 'Close Activity': 'Close', 'Close settings': 'Close',
-  Edit: 'Edit', Source: 'Source', Preview: 'Preview', 'Open in new tab': 'Open',
-  'fs-rowmenu': 'More', 'fs-shortcutmenu': 'More', 'fs-copylink': 'Copy link',
-  'tt-card-menu': 'More', 'apps-details-button': 'Details',
+  Board: 'Board',
+  'Thread details': 'Details',
+  'apps-details-button': 'Details',
+  'Branch into a new thread': 'Branch',
+  Activity: 'Activity',
+  Settings: 'Settings',
+  'Hide sidebar for a focused view': 'Hide list',
 }
 
 // Draw the caption as part of the control. Its accessible name and its

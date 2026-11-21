@@ -80,8 +80,10 @@ honors later edits to it.
 
 On a fresh install, a phone opens Chats with an unread Hello. A wide screen
 opens Hello. Iris greets the owner by name and shows how Chats, Files and Apps
-fit together. Empty places explain their purpose until they fill. Icon labels
-on the first screens fold away as the owner uses each control.
+fit together. Empty places explain their purpose until they fill. Board,
+Details, Branch, Activity, Settings and the desktop's Hide list show a
+caption until the owner uses that control. Chats, Files and Apps keep
+their tab names.
 When the owner starts designing an agent in Hello or any other thread, Iris
 asks one question about what they're looking for and hears the answer
 before drafting.

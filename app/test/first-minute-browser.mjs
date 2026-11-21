@@ -20,6 +20,17 @@ try {
   const page = await browser.newPage(options)
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
+  const caption = async (name, word, title) => {
+    const control = page.getByRole('button', { name, exact: true }).first()
+    await control.waitFor()
+    assert.equal(await control.getAttribute('data-caption'), word, name)
+    if (title) assert.equal(await control.getAttribute('title'), title, name)
+  }
+  const checkList = async () => {
+    for (const name of ['New thread', 'Search threads', 'Thread list actions']) {
+      await caption(name, null, name)
+    }
+  }
   const shot = async name => {
     await page.evaluate(() => document.fonts.ready)
     await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, mode)
@@ -33,14 +44,34 @@ try {
     assert.equal(await page.locator('.tt-stream:visible').count(), 0)
     const listing = await (await page.request.get(new URL('api/threads', origin).href)).json()
     assert.equal(listing.threads.find(t => t.hello).unread, 1)
+    await checkList()
     await shot('first-screen')
     await list.click()
   }
   const diagram = page.getByRole('img', { name: /^Chats\. Talk with your agents\./ })
   await diagram.waitFor()
   assert.ok((await page.request.get(new URL('three-places.svg', origin).href)).ok())
+  await caption('Board', 'Board', 'Board')
+  assert.equal(await page.getByTitle('Thread details', { exact: true }).getAttribute('data-caption'), 'Details')
+  await caption('Branch into a new thread', 'Branch')
+  await caption('Settings', 'Settings', 'Settings')
+  for (const name of ['Thread actions', 'Attach a file', 'Mention an agent', 'Send']) {
+    await caption(name, null, name)
+  }
+  for (const name of ['Reply', 'Copy']) await caption(name, null, phone ? null : name)
+  const tabs = page.locator(phone ? '.navpill .navbtn' : '.rail-tabs .railtab')
+  assert.deepEqual(await tabs.allTextContents(), ['Chats', 'Files', 'Apps'])
+  if (phone) {
+    const back = page.locator('.tt-head button[title^="Back"]')
+    await back.waitFor()
+    assert.ok(await back.getAttribute('aria-label'))
+    assert.equal(await back.getAttribute('data-caption'), null)
+  } else {
+    await checkList()
+    await caption('Activity', 'Activity', 'Activity')
+    await caption('Hide sidebar for a focused view', 'Hide list', 'Hide sidebar for a focused view')
+  }
   const board = page.getByRole('button', { name: 'Board', exact: true }).first()
-  assert.equal(await board.getAttribute('data-caption'), 'Board')
   if (!phone) await shot('first-screen')
   await shot('hello')
   await board.click()
@@ -55,5 +86,5 @@ try {
   assert.equal(await nextBoard.getAttribute('data-caption'), null)
   assert.equal(await other.getByRole('button', { name: 'Settings', exact: true }).first().getAttribute('data-caption'), 'Settings')
   assert.deepEqual(errors, [])
-  console.log('PASS', device, mode, 'landing, diagram, Board dismissal in another browser context, Settings still labelled')
+  console.log('PASS', device, mode, 'landing, diagram, captions and accessible controls, tab names, Board dismissal across browsers')
 } finally { await browser.close() }
