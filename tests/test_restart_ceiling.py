@@ -175,6 +175,31 @@ for field, value in (("idle_since", "2026-10-01T11:59:59Z"),
 for field, value in (("opening", 1), ("opening", None), ("turns", None), ("sessions", None)):
     check("partial or busy live response holds: " + field, allows({**snapshot, field: value}), False)
 
+# A fenced API can claim zero while a provider still belongs to its systemd unit.
+import tempfile
+import loam_session_services as services
+with tempfile.TemporaryDirectory() as tmp:
+    group = Path(tmp)
+    procs = group / "cgroup.procs"
+    def alone():
+        try:
+            services.host_alone(group, 100)
+        except services.Deferred:
+            return False
+        return True
+    check("missing process inventory holds", alone(), False)
+    procs.write_text("100\n101\n")
+    check("hidden resident holds even with an empty API list", alone(), False)
+    procs.write_text("100\n")
+    check("only host remains", alone(), True)
+    nested = group / "child"
+    nested.mkdir()
+    check("unreadable subgroup holds", alone(), False)
+    (nested / "cgroup.events").write_text("populated 1\n")
+    check("resident in a subgroup holds", alone(), False)
+    (nested / "cgroup.events").write_text("populated 0\n")
+    check("empty subgroup clears", alone(), True)
+
 # -- 4. all idle --------------------------------------------------------------
 idle = World(lambda t, locked: {"sessions": [row("ada", "idle"), row("iris", "idle")],
                                 "turns": []})

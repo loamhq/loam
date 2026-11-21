@@ -64,6 +64,21 @@ def selected(view, target):
     return chosen
 
 
+def host_alone(group, host_pid):
+    """Read the kernel's independent inventory of everything the unit would stop."""
+    if not host_pid:
+        raise Deferred("the provider host PID could not be read")
+    try:
+        members = {int(p) for p in (group / "cgroup.procs").read_text().split()}
+        if members != {host_pid}:
+            raise Deferred("the provider service still has children or its PID changed")
+        for child in group.iterdir():
+            if child.is_dir() and "populated 0" not in (child / "cgroup.events").read_text().splitlines():
+                raise Deferred("the provider service has an occupied subgroup")
+    except (OSError, ValueError) as exc:
+        raise Deferred("the provider service process list could not be read") from exc
+
+
 def idle():
     view = loam_live.broker_live()
     if not view or not all(view.get(k) is True for k in ("admission_closed", "host_admission_closed")):
@@ -71,6 +86,15 @@ def idle():
     reasons = loam_live.planned_restart_blockers(view)
     if reasons:
         raise Deferred(", ".join(reasons))
+    if view["sessions"]:
+        raise Deferred("waiting for the idle reaper to retire resident providers")
+    unit = HOST if view.get("host_pid") != view.get("api_pid") else API
+    control_group = ctl("show", "-p", "ControlGroup", "--value", unit)
+    if not control_group.startswith("/") or control_group == "/":
+        raise Deferred("the provider service cgroup could not be read")
+    host_alone(Path("/sys/fs/cgroup") / control_group.lstrip("/"), view.get("host_pid"))
+    print(f"fenced at {view.get('at')}: API and host admission closed, 0 sessions, "
+          f"0 turns, 0 openings, only host PID {view['host_pid']} in its service", flush=True)
 
 
 def healthy(split, old, replaced, timeout=75):

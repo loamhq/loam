@@ -221,6 +221,7 @@ commits), plus the folders listed:
   turns and pending provider work, then replaces the host. A resident provider
   must also have exhausted its normal idle window since its most recent activity
   or event (ten minutes for a thread member, thirty for a classic session).
+  The fenced controller waits for the idle reaper and verifies the service has only its host process left.
   Missing session, turn, start or idle evidence defers replacement. A busy install
   defers. The old executable and unit are restored if the replacement fails
   its process identity and health check. Rollback to a combined release
