@@ -760,7 +760,7 @@ def entries() -> list[Entry]:
 # `api()` allowlist), exactly as written there, and what it carries. A list
 # is the entries above; a string is why it carries no setting.
 PAGE_RELAY: dict[str, list[str] | str] = {
-    "/^\\/threads(?:\\/([^/]+)(?:\\/(messages|events|board|attachments|steps))?)?$/": [
+    "/^\\/threads(?:\\/([^/]+)(?:\\/(messages|events|board|attachments|steps|answer))?)?$/": [
         "thread.title", "thread.icon", "thread.default", "thread.members.add",
         "thread.members.remove", "thread.engine", "thread.model",
         "thread.pinned", "thread.archived", "thread.seen", "thread.board",

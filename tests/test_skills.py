@@ -141,7 +141,7 @@ def main() -> int:
     made = sk.seed_vault(numbered, folders)
     check("numbered folder names are used as configured, nothing else made",
           made, ["00_INBOX/", "00_INBOX/boards/", "15_CONVERSATIONS/", "40_PROJECTS/",
-                 "98_ATTACHMENTS/", "99_SYSTEM/skills/", "99_SYSTEM/Loam/ (installed)"])
+                 "98_ATTACHMENTS/", "99_SYSTEM/Dictation terms.md", "99_SYSTEM/skills/", "99_SYSTEM/Loam/ (installed)"])
     check("...and an existing vault gets no About me.md",
           (numbered / "About me.md").exists(), False)
     check("...an existing vault's own folders and README are untouched",
@@ -158,7 +158,7 @@ def main() -> int:
     check("...and replaces the folder whole", sk.library_diff(),
           {"added": [], "removed": [], "changed": []})
     check("...leaving no temporary folder beside it",
-          sorted(p.name for p in loam.parent.iterdir()), ["Loam", "skills"])
+          sorted(p.name for p in loam.parent.iterdir()), ["Dictation terms.md", "Loam", "skills"])
 
     # -- who wins a name ----------------------------------------------------------------
     own = lc.VAULT / "System" / "skills"
