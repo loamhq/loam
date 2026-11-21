@@ -162,7 +162,7 @@
 .tt-quote-thread { color:var(--paper-ink-3); font:inherit; font-weight:400; }
 .tt-quote span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tt-quote-missing { cursor:default; }
-.tt-bubble .tt-quote { color:var(--paper-ink-3); background:var(--paper-pane); padding:6px 10px; border-radius:6px; margin-bottom:10px; }
+.tt-bubble .tt-quote { color:var(--paper-ink-3); background:var(--paper-pane); padding:6px 10px; border-radius:6px; margin-bottom:10px; text-decoration:none; }
 .tt-quote:focus-visible { outline:2px solid var(--signal-crema); outline-offset:3px; border-radius:3px; }
 @media (hover:hover) { .tt-quote:hover { background:var(--paper-hover-alpha); } }
 .tt-swipe-reply { position:absolute; top:20px; left:-28px; display:grid; place-items:center; width:26px; height:26px; color:var(--paper-mark-ink); opacity:0; transform:scale(.7); transition:transform 150ms ease,color 150ms ease; pointer-events:none; }
