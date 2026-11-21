@@ -435,10 +435,10 @@ function settingsAgents({ back = true } = {}) {
       h('button', { class: 'pillbtn', disabled: st.directoryBusy, text: 'Restore', 'aria-label': `Restore ${agent.name}`, onclick: () => host.settingsProfiles.restore(agent.id) })))) : emptyState({ object: 'archive', title: 'No archived agents', body: 'Agents you archive wait here, ready to restore.' })]
   const systemRows = [
     ...(st.engineers ? [
-      ...[...st.engineers.engineers].sort((a, b) => Number(b.platform) - Number(a.platform) || a.project.localeCompare(b.project)).map(row => settingsRow({ title: row.project, sub: 'Engineer', lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(row) }), onclick: () => detail('engineer', row.project) })),
-      settingsRow({ title: 'Every other project', sub: 'Default engineer', lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(st.engineers.default) }), onclick: () => detail('engineer', 'default') }),
+      ...[...st.engineers.engineers].sort((a, b) => Number(b.platform) - Number(a.platform) || a.project.localeCompare(b.project)).map(row => settingsRow({ title: row.project, sub: row.platform ? 'Builds and repairs Loam itself' : `Changes code for ${row.project}`, lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(row) }), onclick: () => detail('engineer', row.project) })),
+      settingsRow({ title: 'Every other project', sub: 'Engineer settings for the things you build', lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(st.engineers.default) }), onclick: () => detail('engineer', 'default') }),
     ] : []),
-    ...(st.reviewer ? [settingsRow({ title: st.reviewer.name, sub: st.reviewer.plain, lead: tile(icon.clock(18)), onclick: () => detail('reviewer', 'reviewer') })] : []),
+    ...(st.reviewer ? [settingsRow({ title: st.reviewer.name, sub: st.reviewer.on === false ? 'Reviews are off' : 'Reads one agent’s work and leaves a note', lead: tile(icon.clock(18)), onclick: () => detail('reviewer', 'reviewer') })] : []),
   ]
   return [back ? settingsBack('Settings', 'root') : null, settingsHead('Agents'),
     h('div', { class: 'agent-directory-actions' }, h('button', { class: 'pillbtn primary', disabled: st.directoryBusy, 'aria-label': 'New agent', onclick: async () => {
@@ -455,7 +455,11 @@ function settingsAgents({ back = true } = {}) {
     st.directoryError ? h('div', {}, h('p', { class: 'schedule-error', role: 'alert', text: st.directoryError }), h('button', { class: 'pillbtn', text: 'Try again', onclick: () => host.settingsProfiles.directory() })) : null,
     systemRows.length ? h('section', { class: 'profile-group profile-group-system', 'aria-label': 'System' },
       h('h3', { class: 'kicker', text: 'System' }),
-      h('p', { class: 'note profile-system-note', text: 'The engineers who build and the nightly reviewer. Their settings are yours to change too.' }),
+      h('details', { class: 'profile-system-help', open: Boolean(host.state.sheet?.systemHelp),
+        ontoggle: e => { if (e.currentTarget.isConnected && host.state.sheet) host.state.sheet.systemHelp = e.currentTarget.open } },
+        h('summary', { text: 'About these helpers' }),
+        h('p', { text: 'Talk to your agent when you want to change code. It asks an engineer to do the work. Loam has its own engineer. The other engineers build things for you and share a setting unless you choose one for them.' }),
+        h('p', { text: 'Each night the reviewer reads one agent’s workspace and leaves that agent a note. You can turn the reviewer off in Settings → Plugins.' })),
       h('div', { class: 'rows' }, systemRows)) : null]
 }
 

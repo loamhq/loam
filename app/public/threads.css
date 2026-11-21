@@ -423,3 +423,7 @@
 /* One 80px row at every state; quiet titles take the subtitle's space. */
 .tt-row { height:80px; }
 .tt-quiet .srow-title { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
+
+.profile-system-help { font-size: .88rem; color: var(--paper-ink-2); margin: 0 0 .8rem; line-height: 1.45; }
+.profile-system-help summary { cursor: pointer; width: fit-content; }
+.profile-system-help p { max-width: 58ch; margin: .6rem 0; }
