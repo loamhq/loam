@@ -3030,6 +3030,15 @@ session, and every persona already has the vault as a working directory. The
 day is in the path because a folder of every file anybody ever attached is a
 folder nobody can read; the app is in it so two front ends never collide.
 
+Agent replies and `thread post` save up to three referenced local images in
+the same dated `loam-ui` store, with unique names. The writer can read
+images from the vault, AI Spaces (including scratch), `/tmp`, and engineer
+job `captures/` folders. Each attachment keeps its Markdown destinations
+in `refs` for placement and points to its saved copy for download. Files
+keeps its usual visibility rules. On an existing installation, run
+`bin/backfill-thread-images --dry-run` to see what can be recovered, then
+`bin/backfill-thread-images` to update attachment metadata in place.
+
 - **The name is sanitised into a name.** Directory parts go (both separators —
   a Windows browser sends backslashes), anything that is not a letter, digit,
   dot, dash or underscore becomes a dash, and leading dots go, so an upload

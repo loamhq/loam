@@ -122,5 +122,13 @@ test('a file that cannot be read becomes a calm frame, and a tap does nothing', 
   assert.ok(figure.getAttribute('class').includes('missing'))
   const link = byClass(nodes, 'reply-image')[0]
   assert.equal(link.getAttribute('href'), null)
-  assert.equal(all(figure, 'reply-image-missing').length, 1)
+  assert.equal(all(figure, 'reply-image-missing')[0].textContent, 'Image no longer available')
+  assert.equal(all(figure, 'reply-caption')[0].textContent, 'a fox')
+})
+
+test('a legacy temporary reference shows its caption without requesting the old path', () => {
+  const { nodes } = render('![Dashboard preview](/tmp/probe/gone.png)', { attachments: [] })
+  assert.equal(byClass(nodes, 'reply-image-missing')[0].textContent, 'Image no longer available')
+  assert.equal(byClass(nodes, 'reply-caption')[0].textContent, 'Dashboard preview')
+  assert.ok(!deep(nodes).some((n) => n.tag === 'img'))
 })

@@ -126,7 +126,11 @@ try {
       for (let i = 0; i < 20; i++) { await page.evaluate(() => __drawFailure()); await page.waitForTimeout(30) }
       const failedRequests = requests.filter(p => p.endsWith('/missing.png')).length
       const chip = await page.locator('#failure-probe').innerText()
-      if (!probe) { assert.equal(failedRequests, 1); assert.equal(chip, 'missing.png'); assert.equal(await page.locator('#failure-probe .attachment-chip.sent').count(), 1) }
+      if (!probe) {
+        assert.equal(failedRequests, 1)
+        assert.match(chip, /Image no longer available\s*missing\.png/)
+        assert.equal(await page.locator('#failure-probe .message-image.missing').count(), 1)
+      }
       results.push({ width, look, mode, loads, film: film.map(({ timestamp }, i) => ({ timestamp, file: `paint-${width}-${look}-${mode}-${i}.png` })), images, successfulRequests, failedRequests, chip, successErrors, errors })
       console.log(`${probe ? 'PROBE' : 'PASS'} ${width} ${look} ${mode}: cold/reload paint; ${successfulRequests.length} image requests; ${failedRequests} failed-image requests across 20 redraws`)
     } finally { await context.close(); await app.close() }

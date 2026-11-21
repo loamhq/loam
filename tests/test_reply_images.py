@@ -6,13 +6,15 @@ Run: python3 tests/test_reply_images.py
 """
 
 import os
+import re
 import struct
 import sys
 import tempfile
 import zlib
 from pathlib import Path
 
-TMP = Path(tempfile.mkdtemp(prefix="loam-reply-images-"))
+scratch = tempfile.TemporaryDirectory(prefix="loam-reply-images-")
+TMP = Path(scratch.name)
 VAULT, SPACES = TMP / "vault", TMP / "ai-labs"
 os.environ["LOAM_VAULT"] = str(VAULT)
 os.environ["LOAM_AI_LABS"] = str(SPACES)
@@ -21,6 +23,11 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_threads as threads  # noqa: E402
 import loam_thread_engine as engine  # noqa: E402
+import loam_broker as cfg  # noqa: E402
+import loam_files as files  # noqa: E402
+
+cfg.VAULT, cfg.AI_LABS = VAULT, SPACES
+threads.lc.JOBS = TMP / "jobs"
 
 results = []
 
@@ -62,11 +69,16 @@ for rel, data in FILES.items():
     (VAULT / rel).parent.mkdir(parents=True, exist_ok=True)
     (VAULT / rel).write_bytes(data)
 (SPACES / "iris" / "art").mkdir(parents=True)
+(SPACES / "iris" / "agent.json").write_text("{}")
 (SPACES / "iris" / "art" / "cover.png").write_bytes(png(8, 5))
 conv = VAULT / "15_CONVERSATIONS"
 conv.mkdir()
 (conv / "x.png").write_bytes(png(1, 1))
 (TMP / "outside.png").write_bytes(png(1, 1))
+(TMP / "link.png").symlink_to(TMP / "outside.png")
+blocked_job = threads.lc.JOBS / "123" / "private.png"
+blocked_job.parent.mkdir(parents=True)
+blocked_job.write_bytes(png(1, 1))
 
 said = f"Here it is.\n\n![a fox at dawn]({VAULT}/Images/a fox.png)\n\nWhat do you think?"
 text, found = threads.reply_images(said)
@@ -99,7 +111,8 @@ check("at most three; the fourth is not attached and stays text",
 for label, ref in (("a web address", "https://example.com/x.png"),
                    ("not an image", "notes.md"),
                    ("a missing file", "Images/none.png"),
-                   ("outside the vault and workspaces", str(TMP / "outside.png")),
+                   ("a symbolic link", str(TMP / "link.png")),
+                   ("a job file outside captures", str(blocked_job)),
                    ("the conversations folder", f"{conv}/x.png"),
                    ("a way out by ..", "../outside.png")):
     t = f"![x]({ref})"
@@ -157,6 +170,70 @@ check("an agent reading the thread sees the words and where the files are",
       and str(VAULT / "Images" / "b.jpg") in threads.transcript(msgs))
 check("the conversation file itself carries the reference as Markdown",
       "![light](Images/a fox.png)" in path.read_text())
+
+
+def downloaded(root, path):
+    try:
+        fd, size, _ = files.download(root, path)
+    except files.FilesError as exc:
+        return exc.status, b""
+    with os.fdopen(fd, "rb") as f:
+        return 200, f.read(size)
+
+
+scratch_image = SPACES / "iris" / "scratch" / "cover.png"
+scratch_image.parent.mkdir()
+payload = png(16, 9)
+scratch_image.write_bytes(payload)
+scratch_reply = f"Preview below.\n\n![Scratch preview]({scratch_image})"
+text, extra = engine.reply_images(scratch_reply, {})
+posted = threads.append(thread, "iris", text, **extra)
+scratch_image.unlink()
+_, msgs, _ = threads.read(thread)
+back = threads.find(msgs, posted["id"])["attachments"][0]
+check("a posted scratch image still loads from Files after its source is removed",
+      back["root"] == "vault"
+      and downloaded(back["root"], back["path"]) == (200, payload)
+      and back["refs"] == [str(scratch_image)], back)
+
+scratch_image.write_bytes(payload)
+check("Files still hides the scratch source",
+      downloaded("spaces", "iris/scratch/cover.png")[0] == 404)
+
+legacy = threads.create(title="Legacy pictures")["id"]
+gone = {"path": "iris/scratch/gone.png", "root": "spaces", "type": "image/png",
+        "alt": "Lost view"}
+old = {**gone, "path": "iris/scratch/cover.png", "alt": "Scratch preview"}
+first = threads.append(legacy, "iris", scratch_reply, attachments=[old, gone])
+capture = blocked_job.parent / "captures" / "cover.png"
+capture.parent.mkdir()
+capture.write_bytes(payload)
+temp_image = TMP / "temporary.png"
+temp_image.write_bytes(payload)
+second = threads.append(legacy, "iris", f"![Capture]({capture})\n\n![Temp]({temp_image})",
+                        reply_to=first["id"])
+owner = threads.append(legacy, threads.OWNER, "Owner attachment", attachments=[old])
+record = threads.record_path(legacy)
+before = record.read_bytes()
+check("dry-run finds the recoverable images without editing the record",
+      threads.backfill_reply_images(legacy, dry_run=True) == [("m1", 1, 1), ("m2", 2, 0)]
+      and record.read_bytes() == before)
+check("backfill repairs existing attachments and previously ignored captures",
+      threads.backfill_reply_images(legacy) == [("m1", 1, 1), ("m2", 2, 0)])
+after = record.read_bytes()
+comments = rb"(?m)^<!-- loam [^\n]+$"
+check("backfill preserves every byte outside the metadata comments",
+      re.sub(comments, b"", before) == re.sub(comments, b"", after))
+_, msgs, _ = threads.read(legacy)
+first, second, owner = msgs
+copies = [first["attachments"][0], *second["attachments"]]
+check("backfilled images load, including two sources with the same filename",
+      len({a["path"] for a in copies}) == 3
+      and all(downloaded(a["root"], a["path"]) == (200, payload) for a in copies))
+check("missing source and owner upload metadata are preserved",
+      first["attachments"][1] == gone and owner["attachments"] == [old])
+check("running the backfill twice leaves the record unchanged on the second run",
+      threads.backfill_reply_images(legacy) == [("m1", 0, 1)] and record.read_bytes() == after)
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

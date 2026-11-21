@@ -158,12 +158,11 @@ days, month/day/time beyond that (adding the year when different). The tooltip
 contains the full date, time and time zone. Pending/streaming messages and
 missing/invalid dates get no invented timestamp.
 
-Sent image attachments use the authenticated Files download route with a
-vault-relative path. A stored absolute path under `98_ATTACHMENTS/` uses that
-subtree's suffix; the message's original path remains unchanged. Unknown
-absolute paths remain filename chips. Gallery nodes and load/failure state
-survive redraws: a failed image becomes a filename chip and is not retried by
-stream or clock updates. [Evidence and request-count checks](evidence/message-media-boot/README.md).
+Sent images use the authenticated Files download route. The thread writer
+saves agent images under the vault's attachment folder before storing the
+message and keeps the original Markdown references for placement. Gallery
+nodes and load state survive redraws. If an image fails to load, its frame
+keeps its size and shows **Image no longer available** with its caption.
 
 The former bottom model label was the full record's `result` passing through
 Classic's turn renderer. Threads now gathers those recorded facts into a

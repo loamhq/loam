@@ -153,6 +153,10 @@ export function segmentedControl({ label, options, value, choose, props = {} }) 
 // hidden failed image also used to reveal it and restart the lazy load.
 // Weak keys release the DOM when its attachment record is no longer retained.
 const fileViews = new WeakMap()
+function imageMissing() {
+  return h('span', { class: 'reply-image-missing' }, icon.image(16),
+    h('span', { text: 'Image no longer available' }))
+}
 // A thread read again hands over a new attachments array for the same
 // message (2026-11-18): with `key` (the message's own), the gallery is found
 // by message and contents, so the pictures are not rebuilt and do not start
@@ -160,7 +164,7 @@ const fileViews = new WeakMap()
 const keyedViews = new Map(), KEYED_MAX = 300
 export function messageFiles(files = [], key = null) {
   if (!files?.length) return null
-  const signature = JSON.stringify(files.map(({ path, name, type, root }) => [path, name, type, root]))
+  const signature = JSON.stringify(files.map(({ path, name, type, root, alt, missing }) => [path, name, type, root, alt, missing]))
   const cached = fileViews.get(files) ?? (key !== null ? keyedViews.get(key) : undefined)
   if (cached?.signature === signature) { fileViews.set(files, cached); return kept(cached.view) }
   // The images, in order, for the full view a tap opens (2026-11-18). The
@@ -171,7 +175,7 @@ export function messageFiles(files = [], key = null) {
     // Only host-stored paths are read, through the existing authenticated,
     // inert Files download route. Never treat an attachment path as a URL.
     const path = attachmentFilePath(file.path)
-    const image = isImage(file.type) && path !== null
+    const image = isImage(file.type)
     const root = file.root === 'spaces' ? 'spaces' : 'vault'
     const href = `/api/files/download?${new URLSearchParams({ root, path })}`
     if (path && file.type?.startsWith('video/')) {
@@ -180,23 +184,25 @@ export function messageFiles(files = [], key = null) {
         h('figcaption', {}, h('a', { href, download: name, text: name })))
     }
     if (!image) return h('span', { class: 'attachment-chip sent', key: `f${i}`, title: file.path ?? '' },
-      isImage(file.type) ? icon.image(13) : icon.file(13), h('span', { class: 'chip-name', text: name }))
-    const at = shown.push({ src: href, href, name }) - 1
-    const label = h('span', { class: 'message-image-name', text: name })
-    const link = h('a', { class: 'message-image', key: `f${i}`, href, title: name, 'aria-label': `Open ${name}`, onclick: (e) => {
+      icon.file(13), h('span', { class: 'chip-name', text: name }))
+    const words = file.alt || name
+    const loadable = path !== null && !file.missing
+    const at = loadable ? shown.push({ src: href, href, name }) - 1 : -1
+    const link = h('a', { class: `message-image${loadable ? '' : ' missing'}`, key: `f${i}`, href: loadable ? href : null,
+      title: name, 'aria-label': loadable ? `Open ${words}` : null, onclick: (e) => {
       // A plain tap opens it full size; a modified click keeps the browser's own.
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button > 0) return
-      if (link.className !== 'message-image') return
+      if (!link.hasAttribute('href')) return
       e.preventDefault()
       e.stopPropagation()
       openImageView(shown.filter((_, j) => !failed.has(j)), shown.slice(0, at + 1).filter((_, j) => !failed.has(j)).length - 1)
     } },
-      h('img', { src: href, alt: file.alt ?? '', loading: 'lazy', decoding: 'async', onerror: (e) => {
+      loadable ? h('img', { src: href, alt: file.alt ?? '', loading: 'lazy', decoding: 'async', onerror: () => {
         failed.add(at)
-        e.target.hidden = true
-        link.className = 'attachment-chip sent'
-        label.className = 'chip-name'
-      } }), label)
+        mark(link, 'missing')
+        link.removeAttribute('href')
+        link.removeAttribute('aria-label')
+      } }) : null, imageMissing(), h('span', { class: 'message-image-name', text: words }))
     return link
   }))
   fileViews.set(files, { signature, view })
@@ -235,10 +241,15 @@ const refPath = (dest) => {
   try { path = decodeURIComponent(path) } catch { /* as written */ }
   return path
 }
+const volatilePicture = (dest) => {
+  const path = refPath(dest)
+  return LOCAL_PICTURE.test(path) &&
+    (path.startsWith('/tmp/') || /^\/[^\n]*\/jobs\/\d{8}-\d{6}-[a-f0-9]{8}\/captures\//.test(path))
+}
 export function replyImages(message, key = null, { streaming = false } = {}) {
   const presetImage = hasPlacesGreeting(message)
   const all = (message?.attachments ?? []).filter((file) => file && typeof file === 'object')
-  const pictures = all.filter((file) => isImage(file.type) && attachmentFilePath(file.path) !== null)
+  const pictures = all.filter((file) => isImage(file.type))
   const placed = pictures.some((file) => Array.isArray(file.refs))
   const find = (dest) => {
     const written = String(dest ?? '').trim()
@@ -246,30 +257,33 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
     const path = refPath(written)
     return pictures.find((file) => path === file.path || path.endsWith(`/${file.path}`)) ?? null
   }
-  const src = (file) => `/api/files/download?${new URLSearchParams({ root: file.root === 'spaces' ? 'spaces' : 'vault', path: attachmentFilePath(file.path) })}`
+  const src = (file) => {
+    const path = attachmentFilePath(file.path)
+    return file.missing || path === null ? null : `/api/files/download?${new URLSearchParams({ root: file.root === 'spaces' ? 'spaces' : 'vault', path })}`
+  }
   const failed = new Set()
-  const gallery = () => pictures.filter((file) => !failed.has(file)).map((file) => ({ src: src(file), href: src(file), name: file.alt || file.name || '' }))
   const open = (file) => {
-    const items = gallery(), at = pictures.filter((f) => !failed.has(f)).indexOf(file)
-    if (at >= 0) openImageView(items, at)
+    const available = pictures.filter((f) => src(f) && !failed.has(f)), at = available.indexOf(file)
+    if (at >= 0) openImageView(available.map((f) => ({ src: src(f), href: src(f), name: f.alt || f.name || '' })), at)
   }
   function figure(file, alt) {
     const ratio = file.width > 0 && file.height > 0 ? file.width / file.height : null
-    const words = String(alt ?? '').trim()
+    const words = String(alt || file.alt || '').trim()
+    const href = src(file)
     const cacheKey = key === null ? null : `${key}|${file.root}|${file.path}|${words}`
     const signature = JSON.stringify([src(file), file.width, file.height, words])
     const had = cacheKey === null ? null : figureViews.get(cacheKey)
-    if (had?.signature === signature) { had.open = open; had.failed = failed; if (had.missing) failed.add(file); return had.stub }
-    const record = { signature, open, failed, missing: false }
-    const node = h('figure', { class: 'reply-figure', style: { '--ratio': ratio ? ratio.toFixed(4) : '1.3333' } })
-    const view = h('a', { class: 'reply-image', href: src(file), 'aria-label': words ? `Open image: ${words}` : 'Open image', onclick: (e) => {
+    if (had?.signature === signature) { had.open = open; had.failed = failed; had.file = file; if (had.missing) failed.add(file); return had.stub }
+    const record = { signature, open, failed, file, missing: !href }
+    const node = h('figure', { class: `reply-figure${href ? '' : ' missing'}`, style: { '--ratio': ratio ? ratio.toFixed(4) : '1.3333' } })
+    const view = h(href ? 'a' : 'span', { class: 'reply-image', href, 'aria-label': href ? (words ? `Open image: ${words}` : 'Open image') : null, onclick: (e) => {
       // A plain tap opens it full size; a modified click keeps the browser's own.
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button > 0) return
       e.preventDefault()
       e.stopPropagation()
-      if (!record.missing) record.open(file)
+      if (!record.missing) record.open(record.file)
     } },
-    h('img', { src: src(file), alt: words, width: file.width > 0 ? String(file.width) : null, height: file.height > 0 ? String(file.height) : null,
+    href ? h('img', { src: href, alt: words, width: file.width > 0 ? String(file.width) : null, height: file.height > 0 ? String(file.height) : null,
       loading: 'lazy', decoding: 'async',
       onload: (e) => {
         const img = e.target
@@ -278,12 +292,12 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
       },
       onerror: () => {
         record.missing = true
-        record.failed.add(file)
+        record.failed.add(record.file)
         mark(node, 'missing')
         view.removeAttribute('href')
-        view.setAttribute('aria-label', 'Image unavailable')
-      } }),
-    h('span', { class: 'reply-image-missing', 'aria-hidden': 'true' }, icon.image(16), h('span', { text: 'Image unavailable' })))
+        view.removeAttribute('aria-label')
+      } }) : null,
+    imageMissing())
     node.append(view)
     if (words) node.append(h('figcaption', { class: 'reply-caption', text: words }))
     record.stub = kept(node)
@@ -299,12 +313,14 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
     node.__ratio = 4 / 3
     return node
   }
+  const missingReference = (dest) => !streaming && pictures.length < 3 && volatilePicture(dest)
   const images = {
     draw(alt, dest) {
       if (presetImage && dest === placesImage) return placesDiagram(alt)
       const file = find(dest)
-      if (!file) return streaming && LOCAL_PICTURE.test(String(dest ?? '').trim()) ? waiting() : null
-      return placed ? figure(file, alt) : false
+      if (file) return Array.isArray(file.refs) ? figure(file, alt) : false
+      if (streaming && LOCAL_PICTURE.test(String(dest ?? '').trim())) return waiting()
+      return missingReference(dest) ? figure({ path: refPath(dest), missing: true }, alt) : null
     },
     group(nodes) {
       if (presetImage && nodes.length === 1 && nodes[0].getAttribute?.('class') === 'hello-places') return nodes[0]
@@ -316,19 +332,19 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
   return {
     images,
     streaming,
-    signature: JSON.stringify([placed, streaming, pictures.map((f) => [f.root, f.path, f.refs, f.width, f.height])]),
+    signature: JSON.stringify([placed, streaming, pictures.map((f) => [f.root, f.path, f.refs, f.width, f.height, f.alt, f.missing])]),
     // The attachments that have no place in these texts: drawn under the
     // words, as every attachment was before.
     rest(texts) {
       if (!placed) return all
       const dests = new Set(texts.flatMap((text) => imageRefs(text ?? '').map((ref) => ref.dest.trim())))
-      return all.filter((file) => !pictures.includes(file) || !file.refs.some((ref) => dests.has(ref)))
+      return all.filter((file) => !pictures.includes(file) || !file.refs?.some((ref) => dests.has(ref)))
     },
     // The text as words: what Copy takes and a plain placeholder shows.
     // A picture's reference goes; one that is only text stays.
     words(text) {
       if (typeof text !== 'string' || !text.includes('![')) return text
-      const out = text.replace(PICTURE_REF, (raw, alt, dest) => (presetImage && dest === placesImage) || find(dest) || (streaming && LOCAL_PICTURE.test(dest.trim())) ? '\u0000' : raw)
+      const out = text.replace(PICTURE_REF, (raw, alt, dest) => (presetImage && dest === placesImage) || find(dest) || missingReference(dest) || (streaming && LOCAL_PICTURE.test(dest.trim())) ? '\u0000' : raw)
       if (!out.includes('\u0000')) return text
       return out.split('\n').filter((line) => line.replace(/\u0000/g, '').trim() || !line.includes('\u0000'))
         .map((line) => line.replace(/[ \t]?\u0000/g, '')).join('\n').replace(/\n{3,}/g, '\n\n').trim()
