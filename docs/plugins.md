@@ -1554,14 +1554,14 @@ reader off the request thread or cache its result.
 | projects | Visible direct folders in the configured projects folder, with name, vault-relative path and recursive file count |
 | files | Regular visible vault files outside project folders, boards, system and conversation records. Links are skipped |
 | chats | Rows with id, name, messages and updated, newest activity first. Counts exclude system records |
-| apps | Apps made here, with name, url and opens_28d. An open is a selection in Apps recorded by this host version |
+| apps | Apps made here, with name, url and opens, its cumulative number of recorded selections in Apps. Existing installations start from every retained daily count |
 | local-plugins | Effective non-app plugins built here, with id and name |
 | installation | first_weeks_at, the starter timestamp for a first-weeks install, otherwise null |
 | public-work | Publications in the chosen GitHub account’s own Market repositories, issues filed and merged pull requests in the configured upstream. Each has id, name and url. An issue's shipped flag requires a shipped label. A null collection means unavailable. No install count is available |
 
 The optional public-work group requires both api.github.com and
 raw.githubusercontent.com in touches.network. It uses the explicitly chosen
-GitHub identity and unauthenticated public data. Results are cached for an hour.
+GitHub identity and unauthenticated public data. Successful collections are refreshed hourly. If a refresh fails or is partial, the previous verified collection for that identity and source remains available.
 File and chat contents stay on the host.
 
 Page modules can register at `thread.list.line`. Return a single compact

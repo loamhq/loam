@@ -1,7 +1,6 @@
 """Local, read-only projections for plugins. Never return file or message bodies."""
 import os
 import sqlite3
-import time
 from contextlib import closing
 from pathlib import Path
 
@@ -47,13 +46,27 @@ def db():
     return conn
 
 
+def app_totals(conn):
+    """Seed once and count writes from an older API that is still serving during rollout."""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_opens'").fetchone():
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_opens'").fetchone():
+        conn.execute("CREATE TABLE app_opens (url TEXT PRIMARY KEY, opens INTEGER NOT NULL)")
+        conn.execute("INSERT INTO app_opens SELECT url,sum(opens) FROM app_use GROUP BY url")
+        for event, delta in (("INSERT", "NEW.opens"), ("UPDATE OF opens", "NEW.opens-OLD.opens")):
+            conn.execute(f"""CREATE TRIGGER app_use_{event.split()[0]} AFTER {event} ON app_use
+                             BEGIN INSERT INTO app_opens VALUES (NEW.url, {delta})
+                             ON CONFLICT(url) DO UPDATE SET opens=opens+excluded.opens; END""")
+    conn.commit()
+
+
 def record_open(url):
     if not isinstance(url, str) or url not in {a["url"] for a in apps.listing()["apps"]}:
         raise ValueError("Choose an app in the catalog.")
-    day = int(time.time() // 86400)
     with closing(db()) as conn, conn:
-        conn.execute("DELETE FROM app_use WHERE day < ?", (day-27,))
-        conn.execute("INSERT INTO app_use VALUES (?, ?, 1) ON CONFLICT(url,day) DO UPDATE SET opens=opens+1", (url, day))
+        app_totals(conn)
+        conn.execute("INSERT INTO app_opens VALUES (?, 1) ON CONFLICT(url) DO UPDATE SET opens=opens+1", (url,))
     return {"recorded": True}
 
 
@@ -104,9 +117,9 @@ def collect(groups):
         out["chats"] = chat_rows()
     if "apps" in groups:
         with closing(db()) as conn:
-            use = dict(conn.execute("SELECT url,sum(opens) FROM app_use WHERE day>=? GROUP BY url",
-                                    (int(time.time() // 86400)-27,)))
-        out["apps"] = [{"name": a["name"], "url": a["url"], "opens_28d": use.get(a["url"], 0)}
+            app_totals(conn)
+            use = dict(conn.execute("SELECT url, opens FROM app_opens"))
+        out["apps"] = [{"name": a["name"], "url": a["url"], "opens": use.get(a["url"], 0)}
                        for a in apps.listing()["apps"] if a["source"] == "yours"]
     if "local-plugins" in groups:
         out["local-plugins"] = [{"id": p["id"], "name": p["name"]} for p in plugins._rows()

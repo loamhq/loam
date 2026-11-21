@@ -1,4 +1,6 @@
 """Public, attributable work. No token, file names or chat content leave this host."""
+import fcntl
+import http.client
 import json
 import os
 import re
@@ -42,18 +44,34 @@ def read():
     root = config.STATE / "activity-facts"
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     path = root / "public-work.json"
+    with (root / "public-work.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return cached_work(path, key, result)
+
+
+def cached_work(path, key, result):
+    login, repo, url = key
     try:
         cache = json.loads(path.read_text())
-        if cache["key"] == key and time.time() < cache["until"]:
-            return cache["value"]
-    except (OSError, KeyError, ValueError):
+        if cache["key"] == key:
+            for kind in result:
+                if isinstance(cache["value"].get(kind), list):
+                    result[kind] = cache["value"][kind]
+            if time.time() < cache["until"]:
+                return result
+    except (OSError, KeyError, TypeError, ValueError, AttributeError):
         pass
     if url and url.startswith("https://raw.githubusercontent.com/"):
         try:
-            rows, _ = market.parse(json.dumps(get(url)))
+            catalog = get(url)
+            if not isinstance(catalog, dict) or not isinstance(catalog.get("plugins"), list):
+                raise ValueError("Incomplete Market catalog")
+            rows, skipped = market.parse(json.dumps(catalog))
+            if skipped:
+                raise ValueError("Incomplete Market entries")
             result["publications"] = [dict(id=p["id"], name=p["name"], url=p["link"])
                                       for p in rows if p["repo"].split("/")[0].lower() == login.lower()]
-        except (OSError, ValueError, KeyError):
+        except (OSError, http.client.HTTPException, ValueError, KeyError, TypeError, AttributeError):
             pass
     for kind, query in (("reports", "is:issue"), ("contributions", "is:pr is:merged")):
         try:
@@ -69,9 +87,9 @@ def read():
                 if len(items) >= body["total_count"]:
                     result[kind] = items
                     break
-        except (OSError, ValueError, KeyError):
+        except (OSError, http.client.HTTPException, ValueError, KeyError, TypeError, AttributeError):
             pass
-    with tempfile.NamedTemporaryFile("w", dir=root, delete=False) as fh:
+    with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False) as fh:
         json.dump(dict(key=key, value=result, until=time.time()+3600), fh)
     os.replace(fh.name, path)
     return result

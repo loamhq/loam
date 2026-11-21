@@ -1,3 +1,4 @@
+import time
 import sys
 import tempfile
 import unittest
@@ -55,16 +56,45 @@ class ActivityFacts(unittest.TestCase):
             with self.assertRaises(ValueError):
                 initial.install([pin])
 
-    def test_usage_counts_url_and_expires(self):
-        catalog = {"apps": [{"name": "Notebook", "url": "/x/notebook/", "source": "yours"}]}
+    def test_usage_counts_survive_vacation_and_upgrade(self):
+        url = "/x/notebook/"
+        catalog = {"apps": [{"name": "Notebook", "url": url, "source": "yours"}]}
         with tempfile.TemporaryDirectory() as tmp, patch.object(facts.config, "STATE", Path(tmp)), patch.object(facts.apps, "listing", return_value=catalog):
-            with patch.object(facts.time, "time", return_value=86400):
-                facts.record_open("/x/notebook/")
-                self.assertEqual(facts.collect(["apps"])["apps"][0]["opens_28d"], 1)
+            from contextlib import closing
+            with closing(facts.db()) as old, old:
+                old.executemany("INSERT INTO app_use VALUES (?,?,?)", [(url, 1, 5), (url, 2, 3)])
+                old.commit()
+                def count():
+                    return facts.collect(["apps"])["apps"][0]["opens"]
+                self.assertEqual(count(), 8)
+                facts.record_open(url)
+                # The pre-upgrade writer can prune and update while the new API comes up.
+                old.execute("DELETE FROM app_use WHERE day=1")
+                old.execute("UPDATE app_use SET opens=opens+1 WHERE day=2")
+                old.execute("INSERT INTO app_use VALUES (?,3,1)", (url,))
+                old.commit()
+                with patch.object(time, "time", return_value=93*86400):
+                    self.assertEqual(count(), 11)
                 with self.assertRaises(ValueError):
                     facts.record_open("https://unknown.example/")
-            with patch.object(facts.time, "time", return_value=29*86400):
-                self.assertEqual(facts.collect(["apps"])["apps"][0]["opens_28d"], 0)
+
+    def test_offline_public_collections_keep_last_success_for_identity(self):
+        import json
+        import loam_public_work as work
+        values = {k: [{"id": k}] for k in ("publications", "reports", "contributions")}
+        url = "https://raw.githubusercontent.com/example/list/main/list.json"
+        key = ["tester", "example/core", url]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "public-work.json"
+            path.write_text(json.dumps(dict(key=key, value=values, until=0)))
+            def empty():
+                return dict.fromkeys(values)
+            with patch.object(work, "get", side_effect=OSError("offline")), patch.object(time, "time", return_value=90*86400):
+                self.assertEqual(work.cached_work(path, key, empty()), values)
+                self.assertEqual(work.cached_work(path, ["other", *key[1:]], empty()), empty())
+            path.write_text(json.dumps(dict(key=key, value=values, until=0)))
+            with patch.object(work, "get", side_effect=[{}, {"incomplete_results": True}, {"total_count": 0, "items": []}]):
+                self.assertEqual(work.cached_work(path, key, empty()), {**values, "contributions": []})
 
 
 if __name__ == "__main__":
