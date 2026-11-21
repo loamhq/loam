@@ -319,7 +319,7 @@ def log_line(payload: dict) -> None:
 # The platform engineer is built in: its root is `agents/engineer/`, its jobs
 # live beside it, and it has the vault and ai-labs because the runtime is its
 # project. Every other engineer is a PROJECT engineer, registered by
-# `bin/provision --project` as one JSON file under `agents/projects/`, and
+# `bin/provision --project` as one JSON file in local state, and
 # read from disk on every call so a project provisioned an hour ago is
 # accepted by a server started yesterday. The registry file is the record;
 # it carries no secret -- the deploy key it names lives in ~/.ssh, and the
@@ -340,8 +340,9 @@ def log_line(payload: dict) -> None:
 # so a real job can be run on a runtime no registered project is on without
 # a record in this repository. Nothing in a unit or generator sets it; the
 # launcher hands it into the job's unit when its caller had it.
-PROJECTS_DIR = Path(os.environ.get("LOAM_PROJECTS_DIR") or AGENTS / "projects")
 PROJECT_STATE = lc.STATE / "projects"
+PROJECTS_DIR = Path(os.environ.get("LOAM_PROJECTS_DIR") or PROJECT_STATE / "registry")
+LEGACY_PROJECTS_DIR = AGENTS / "projects"
 PROJECT_CHECKOUTS = lc.PROJECTS
 PROJECT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
@@ -640,7 +641,25 @@ def platform_project() -> Project:
 
 
 def project_record_path(name: str) -> Path:
-    return PROJECTS_DIR / f"{name}.json"
+    path = PROJECTS_DIR / f"{name}.json"
+    if not path.exists() and reads_legacy_registry():
+        legacy = LEGACY_PROJECTS_DIR / path.name
+        if legacy.is_file():
+            return legacy
+    return path
+
+
+def reads_legacy_registry() -> bool:
+    return (PROJECTS_DIR == PROJECT_STATE / "registry"
+            and not os.environ.get("LOAM_PROJECTS_DIR"))
+
+
+def project_record_paths() -> list[Path]:
+    """Read new local records alongside existing checkout-local records."""
+    records = {path.name: path for path in LEGACY_PROJECTS_DIR.glob("*.json")} \
+        if reads_legacy_registry() else {}
+    records.update((path.name, path) for path in PROJECTS_DIR.glob("*.json"))
+    return sorted(records.values(), key=lambda path: path.name)
 
 
 def load_project_record(path: Path) -> Project:
@@ -714,13 +733,12 @@ def projects() -> dict[str, Project]:
     scope, by project name. Read from disk each time, never cached, for the
     reason above. ``engineers()`` is the same without the scope."""
     found = {"Loam": platform_project()}
-    if PROJECTS_DIR.is_dir():
-        for path in sorted(PROJECTS_DIR.glob("*.json")):
-            try:
-                project = load_project_record(path)
-            except (OSError, ValueError, KeyError):
-                continue   # a half-written record is check-drift's finding
-            found[project.name] = project
+    for path in project_record_paths():
+        try:
+            project = load_project_record(path)
+        except (OSError, ValueError, KeyError):
+            continue   # a half-written record is check-drift's finding
+        found[project.name] = project
     lane = app_lane(found)
     if lane is not None:
         found[lane.name] = lane

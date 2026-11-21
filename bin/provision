@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -1747,29 +1748,19 @@ def provision_project(name: str, repo_arg: str, project_file: Path | None,
 ADOPT_CLASHES = HARNESS_PATHS + (".codex/",)
 
 
-def record_target(record_path: Path) -> Path:
-    """Write to the live registry during provisioning. Inside a job, stage registry changes
-    in its tree for the tested landing."""
-    tree = os.environ.get("LOAM_JOB_TREE")
-    try:
-        record_path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
-    if tree and not os.access(record_path.parent, os.W_OK):
-        return Path(tree) / "projects" / record_path.name
-    return record_path
-
-
 def write_record(record_path: Path, record: dict) -> Path:
-    """Write a registry record where record_target says; the path written."""
-    target = record_target(record_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    if target != record_path:
-        print(f"  {record_path.parent} is read-only in this job; wrote the "
-              f"record to {target}. Commit it: the project is registered when "
-              f"this job lands.")
-    return target
+    """Publish a complete local registry record without staging it in git."""
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                     dir=record_path.parent, delete=False) as handle:
+        pending = Path(handle.name)
+        try:
+            handle.write(json.dumps(record, indent=2) + "\n")
+            handle.close()
+            pending.replace(record_path)
+        finally:
+            pending.unlink(missing_ok=True)
+    return record_path
 
 
 def commit_identity(login: str, name: str | None = None,

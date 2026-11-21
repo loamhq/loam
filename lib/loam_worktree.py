@@ -2469,7 +2469,7 @@ REASONS = {
     "conflict": "merging it into main conflicts",
     "merged_tests": "it merges cleanly, but the tests fail on the merged tree",
     "no_tests": "the project has no test command registered "
-                "(`test_command` in agents/projects/<name>.json), and nothing "
+                "(`test_command` in the project's registry record), and nothing "
                 "lands untested",
     "canonical": "the canonical checkout would not take it",
     "diverged": "the canonical main and its remote have diverged",

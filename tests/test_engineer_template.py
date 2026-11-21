@@ -155,14 +155,14 @@ root = Path(tempfile.mkdtemp(prefix="loam-projects-test-"))
 saved = eng.PROJECTS_DIR
 try:
     eng.PROJECTS_DIR = root
-    check("platform engineer alone", sorted(eng.projects()), ["Loam"])
+    check("platform engineer alone", sorted(eng.engineers()), ["Loam"])
     (root / "probe.json").write_text(json.dumps({
         "name": "probe", "repo": "o/probe", "remote": "git@github.com:o/probe.git",
         "checkout": str(root / "checkout"), "deploy_key": str(root / "key"),
     }))
     (root / "half.json").write_text("{")
     known = eng.projects()
-    check("registered project appears", sorted(known), ["Loam", "probe"])
+    check("registered project appears", sorted(eng.engineers()), ["Loam", "probe"])
     check("half-written record is skipped", "half" in known, False)
     probe = known["probe"]
     check("project lock is its own", probe.lock_name, "engineer-probe")
@@ -181,6 +181,24 @@ finally:
     eng.PROJECTS_DIR = saved
     import shutil
     shutil.rmtree(root, ignore_errors=True)
+
+# New records go to state, while old records continue to resolve from the checkout.
+with tempfile.TemporaryDirectory() as tmp:
+    local = Path(tmp)
+    saved = eng.PROJECTS_DIR, eng.PROJECT_STATE, eng.LEGACY_PROJECTS_DIR
+    try:
+        eng.PROJECT_STATE = local / "state"
+        eng.PROJECTS_DIR = eng.PROJECT_STATE / "registry"
+        eng.LEGACY_PROJECTS_DIR = local / "legacy"
+        legacy = eng.LEGACY_PROJECTS_DIR / "old.json"
+        prov.write_record(legacy, {"name": "old", "checkout": str(local)})
+        fresh = eng.project_record_path("new")
+        prov.write_record(fresh, {"name": "new", "checkout": str(local)})
+        check("new records are in state", fresh, eng.PROJECT_STATE / "registry/new.json")
+        check("existing records keep their path", eng.project_record_path("old"), legacy)
+        check("both registries are read", sorted(eng.engineers()), ["Loam", "new", "old"])
+    finally:
+        eng.PROJECTS_DIR, eng.PROJECT_STATE, eng.LEGACY_PROJECTS_DIR = saved
 
 # Refuse retirement while a deployment record still exists.
 with tempfile.TemporaryDirectory() as tmp:

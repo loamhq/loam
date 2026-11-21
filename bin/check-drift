@@ -438,7 +438,7 @@ def check_projects(findings: list, prov) -> list[str]:
     """
     import loam_engineer as eng  # noqa: PLC0415
     names: list[str] = []
-    for path in sorted(eng.PROJECTS_DIR.glob("*.json")) if eng.PROJECTS_DIR.is_dir() else []:
+    for path in eng.project_record_paths():
         try:
             project = eng.load_project_record(path)
         except (OSError, ValueError, KeyError) as exc:

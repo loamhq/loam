@@ -1,7 +1,7 @@
 """A landing that reports GitHub's checks instead of running its own (since 2026-10-13).
 
 A project that lands by pull request may set ``"github_checks": true`` in its
-registry record (``projects/<name>.json``). Off unless set: a project's own
+registry record. Off unless set: a project's own
 call, never a Loam-wide policy (the owner's word when it was built for the
 first project that wanted it).
 

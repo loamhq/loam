@@ -337,31 +337,24 @@ try:
            if c[1] == "/app/installations/555/access_tokens"][-1],
           {"contents": "read", "metadata": "read"})
 
-    # Registration in a job stages the record in its tree because the live registry is
-    # read-only.
+    # Registration in a job publishes to local state, outside the job's git tree.
     remotes["acme-health/frontend"] = remote_for("frontend", "main")
     job_tree = root / "job-tree"
     saved_tree = os.environ.get("LOAM_JOB_TREE")
     os.environ["LOAM_JOB_TREE"] = str(job_tree)
-    eng.PROJECTS_DIR.chmod(0o555)
     try:
         prov.adopt_project("acme-frontend", "acme-health/frontend", None, None)
     finally:
-        eng.PROJECTS_DIR.chmod(0o755)
         if saved_tree is None:
             os.environ.pop("LOAM_JOB_TREE")
         else:
             os.environ["LOAM_JOB_TREE"] = saved_tree
-    in_tree = job_tree / "projects" / "acme-frontend.json"
-    check("test_adopt_in_a_job_writes_the_record_to_the_job_tree",
-          (in_tree.is_file() and json.loads(in_tree.read_text())["landing"],
-           eng.project_record_path("acme-frontend").exists(),
+    record_path = eng.project_record_path("acme-frontend")
+    check("test_adopt_in_a_job_keeps_the_record_out_of_git",
+          ((job_tree / "projects").exists(), json.loads(record_path.read_text())["landing"],
            (eng.PROJECT_STATE / "acme-frontend" / "jobs").is_dir()),
-          ("pull_request", False, True))
+          (False, "pull_request", True))
     shutil.rmtree(eng.PROJECT_CHECKOUTS / "acme-frontend")
-    check("...and a writable registry is written in place, even inside a job",
-          prov.record_target(eng.project_record_path("x")),
-          eng.project_record_path("x"))
 
     try:
         prov.adopt_project("acme-dashboard", "acme-health/dashboard", None, None)
