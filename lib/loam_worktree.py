@@ -1054,6 +1054,12 @@ def wall_paths(project: eng.Project, record: dict, job_dir: Path) -> dict:
     the order they are applied. Directories that do not exist are dropped."""
     repo, tree = canonical(project), Path(record["path"])
     rw = [tree, job_dir]
+    vault_dir = project.vault_write_dir()
+    ro = [repo]
+    if project.record.get("vault_write") is True:
+        ro.append(eng.VAULT)
+    if vault_dir:
+        rw.append(vault_dir)
     if not is_clone(tree):
         # A legacy worktree (made before git isolation, still running): its
         # commits need the shared git directory's parts, as they always did.
@@ -1070,7 +1076,7 @@ def wall_paths(project: eng.Project, record: dict, job_dir: Path) -> dict:
              if project.platform else [])
     ro_after = [WORKTREES, project.jobs]
     keep = lambda paths: [p for p in paths if p.is_dir()]  # noqa: E731
-    return {"ro": keep([repo]), "rw_broad": keep(broad),
+    return {"ro": keep(ro), "rw_broad": keep(broad),
             "ro_after": keep(ro_after), "rw": keep(rw)}
 
 
@@ -1139,6 +1145,8 @@ def wall_env() -> dict[str, str]:
 def wall_check(project: eng.Project, record: dict, job_dir: Path) -> str | None:
     """Raise the wall around a probe before the session: why it cannot be
     raised, or None. A job whose wall fails does not run unwalled."""
+    if project.record.get("vault_write") is True and project.vault_write_dir() is None:
+        return "the project's writable vault folder is missing or has moved"
     tree = Path(record["path"])
     probe = (f"touch {_q(str(tree / '.loam-wall-probe'))} && "
              f"rm {_q(str(tree / '.loam-wall-probe'))} && "

@@ -178,7 +178,7 @@ READ_ONLY_NOTE = """
 This brief is read-only: its `involvement` opens with "Read-only". When your \
 session ends the launcher lands nothing, pushes nothing and opens no pull \
 request, and removes your tree whatever is in it; there is nothing to commit \
-and no `pull-request.md` to write. Your receipt is the deliverable."""
+and no `pull-request.md` to write."""
 
 
 # Name the job's scratch directory in the prompt as well as TMPDIR. Literal paths in
@@ -471,6 +471,12 @@ def preflight(project: eng.Project, p: dict[str, Path], brief_meta: dict) -> str
             f"{project.root} is not there. The registry at "
             f"{eng.project_record_path(project.name)} names it; if the "
             f"project was retired, the record should have gone with it."
+        )
+    if project.record.get("vault_write") is True and project.vault_write_dir() is None:
+        return (
+            f"Refused before starting: {project.name}'s writable vault folder "
+            "is missing or is outside the configured vault projects folder. "
+            "Check the project's registry record and restore the folder."
         )
     try:
         # Resolve a folder project's harness relative to its folder.
@@ -2512,6 +2518,11 @@ def run_inner(project: eng.Project, job_id: str) -> int:
 
     note = tree_note(project, record, meta["title"])
     note += SCRATCH_NOTE.format(scratch=eng.scratch_dir(job_id))
+    vault_dir = project.vault_write_dir()
+    vault_dirs = [vault_dir] if vault_dir else []
+    if vault_dir:
+        note += (f"\nYou can write deliverables named in the brief under {vault_dir}. "
+                 "The launcher keeps them there even for read-only briefs.")
     if project.platform:
         note += ("\nIf this job fixes a defect in Loam itself, end the receipt with the exact "
                  "scrubbed report preview, including `loam report bug --patch BASE..FIX` "
@@ -2519,6 +2530,8 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                  "once using loam-filing-a-bug-or-feature. Only the owner can approve sending.")
     if meta["read_only"]:
         note += READ_ONLY_NOTE
+        if not vault_dir:
+            note += " Your receipt is the deliverable."
     # A pull-request project cuts no release: no tag is pushed to a
     # repository Loam does not own.
     release_note = ("" if lands_by_pr(project)
@@ -2555,6 +2568,8 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         # the session is granted it here, per job, rather than by a path in
         # the repo's own settings that would name this box.
         argv += ["--add-dir", str(p["dir"])]
+        if vault_dir:
+            argv += ["--add-dir", str(vault_dir)]
         if resume_from:
             # The previous job's directory, so a continued session can still
             # read the brief it was working from. Its own receipt is in there
@@ -2587,7 +2602,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             instructions, encoding="utf-8")
         argv = codex_job.argv(
             workdir=workdir, tree=tree, job_dir=p["dir"], prompt=prompt,
-            extra_dirs=[], fork_from=resume_from,
+            extra_dirs=vault_dirs, fork_from=resume_from,
             instructions_text=instructions,
             model=job_model, effort=job_effort,
             mcp_servers=contributions.lane_servers("engineer"),
@@ -2619,7 +2634,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                 prompt=agy_job.prompt_arg(p["dir"], agy_job.compose(instructions, text)),
                 job_dir=p["dir"], conversation=resume_from,
                 model=model, effort=effort,
-                extra_dirs=[*platform_dirs,
+                extra_dirs=[*platform_dirs, *vault_dirs,
                             *([paths(project, continue_job)["dir"]] if resume_from else [])])
             return wt.walled(project, record, p["dir"], line, protect=protect)
         argv = agy_argv(job_model, job_effort)

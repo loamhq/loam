@@ -132,7 +132,8 @@ def toml_string(text: str) -> str:
 HARNESS = ("CLAUDE.md", "role.md", "project.md", ".claude")
 
 
-def profile(tree: Path, job_dir: Path, protected: list[Path]) -> str:
+def profile(tree: Path, job_dir: Path, protected: list[Path],
+            extra_dirs: list[Path] = ()) -> str:
     """The job's permission profile, as one TOML inline table: everything
     readable, as it is to a Claude engineer; the tree, its ``.git`` (which
     ``workspace-write`` would otherwise hold read-only), the job directory
@@ -140,6 +141,7 @@ def profile(tree: Path, job_dir: Path, protected: list[Path]) -> str:
     path wins (engineer/memory, 2026-10-01)."""
     paths = {"/": "read", str(tree): "write", str(tree / ".git"): "write",
              str(job_dir): "write", "/tmp": "write"}
+    paths.update({str(p): "write" for p in extra_dirs})
     paths.update({str(p): "read" for p in protected})
     return "{" + ",".join(f"{toml_string(k)}={toml_string(v)}"
                           for k, v in paths.items()) + "}"
@@ -167,7 +169,7 @@ def argv(*, workdir: Path, tree: Path, job_dir: Path, prompt: str,
             "-c", "sandbox_workspace_write.writable_roots="
                   + json.dumps([str(p) for p in writable]),
             "-c", 'default_permissions="engineer"',
-            "-c", f"permissions.engineer.filesystem={profile(tree, job_dir, list(protected))}",
+            "-c", f"permissions.engineer.filesystem={profile(tree, job_dir, list(protected), extra_dirs)}",
             "-c", "permissions.engineer.network.enabled=true",
         ]
     flags = [

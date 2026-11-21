@@ -450,6 +450,9 @@ def check_projects(findings: list, prov) -> list[str]:
             continue   # the Loam engineer's app-only scope: check_app_scope
         for finding in runtime_findings(project):
             findings.append((f"project {project.name} runtime", str(path), finding))
+        if project.record.get("vault_write") is True and project.vault_write_dir() is None:
+            findings.append((f"project {project.name} writable vault folder", str(path),
+                             "missing or outside the configured vault projects folder."))
         root = project.root
         if not root.is_dir():
             findings.append((f"project {project.name} checkout", str(root),

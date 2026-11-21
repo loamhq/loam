@@ -36,6 +36,10 @@ def check(label: str, got, want) -> None:
 
 STUB = """#!/bin/sh
 if echo canon > "$LOAM_JOB_CANONICAL/canon.txt" 2>/dev/null; then W=wrote; else W=refused; fi
+vault="$(dirname "$LOAM_JOB_CANONICAL")/vault"
+if (echo outside > "$vault/40_PROJECTS/outside.txt") 2>/dev/null; then exit 1; fi
+mkdir "$vault/40_PROJECTS/Walled/spec" || exit 1
+echo 'Project deliverable' > "$vault/40_PROJECTS/Walled/spec/example.md" || exit 1
 cd "$LOAM_JOB_TREE" && echo stub >> lines.txt && git add -A && git commit -qm "Stub edit"
 printf 'Stub receipt. Walled: %s. Canonical write: %s.\\n' "$LOAM_WALLED" "$W" > "$LOAM_JOB_DIR/receipt.md"
 echo '{"type":"result","subtype":"success","num_turns":1,"result":"done"}'
@@ -52,8 +56,11 @@ try:
                  ["config", "user.email", "t@t"], ["add", "-A"],
                  ["commit", "-qm", "start"]):
         subprocess.run(["git", "-C", str(repo), *argv], check=True)
+    vault_project = root / "vault" / "40_PROJECTS" / "Walled"
+    vault_project.mkdir(parents=True)
     project = eng.Project("walled", repo, root / "jobs", platform=False,
-                          record={"test_command": "true"})
+                          record={"test_command": "true", "vault_folder": "Walled",
+                                  "vault_write": True})
     job_id = "20261002-130000-0a11ed00"
     jdir = root / "jobs" / job_id
     jdir.mkdir(parents=True)
@@ -94,6 +101,12 @@ try:
           ("landed", "Stub edit"))
     check("the vault copy carries the same receipt",
           "Canonical write: refused." in Path(result["vault_receipt"]).read_text(), True)
+    check("the receipt uses the named vault folder",
+          Path(result["vault_receipt"]).parent, vault_project / "receipts")
+    check("the session wrote a project deliverable",
+          (vault_project / "spec" / "example.md").read_text(), "Project deliverable\n")
+    check("the wall held for the vault outside the project folder",
+          (vault_project.parent / "outside.txt").exists(), False)
 finally:
     shutil.rmtree(root, ignore_errors=True)
 

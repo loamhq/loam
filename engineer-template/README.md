@@ -43,3 +43,9 @@ and for an excluded harness also checks the five lines are in
 `.git/info/exclude`. Edit the template or the role, then
 `bin/provision --project <name> --rerender` (CLAUDE.md, role.md and
 settings; never project.md or the memory); never edit a rendered copy.
+
+For an existing private repository, connect it with
+`bin/provision --project <name> --repo <url>`. An explicit
+`--vault-folder <Folder>` routes receipts to that folder in the vault's
+projects area. Add `--vault-write` to let jobs write deliverables in the
+existing folder. The job's repository can still be read-only for landing.

@@ -435,6 +435,19 @@ class Project:
         folder = self.record.get("vault_folder") or self.name
         return vault / lc.vault_folder("projects") / folder / "receipts"
 
+    def vault_write_dir(self) -> Path | None:
+        """Return the existing project folder explicitly opened for job deliverables."""
+        folder = self.record.get("vault_folder")
+        if self.platform or self.record.get("vault_write") is not True:
+            return None
+        if not isinstance(folder, str) or folder in ("", ".", "..") or "/" in folder:
+            return None
+        top = VAULT / lc.vault_folder("projects")
+        path = top / folder
+        if path.is_dir() and path.resolve() == VAULT.resolve() / lc.vault_folder("projects") / folder:
+            return path
+        return None
+
     def __repr__(self) -> str:
         return f"Project({self.name!r}, root={str(self.root)!r})"
 

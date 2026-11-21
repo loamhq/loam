@@ -14,6 +14,7 @@ Usage: provision <agent> [<wake HH:MM>] [--dry-run]
        provision --codex [<agent>...] [--dry-run]
        provision --antigravity [<agent>...] [--dry-run]
        provision --project <name> --repo new|<url> [--project-file <path>]
+           [--vault-folder <Folder> [--vault-write]]
        provision --project <name> --rerender
 """
 
@@ -1582,7 +1583,8 @@ def _parse_repo(url: str) -> tuple[str, str]:
 
 
 def provision_project(name: str, repo_arg: str, project_file: Path | None,
-                      dry: bool = False) -> None:
+                      dry: bool = False, *, vault_folder: str | None = None,
+                      vault_write: bool = False) -> None:
     """Create or connect the repo, key it, render the engineer into the
     checkout (excluded from the repository), start an empty repo with a
     README stub, register.
@@ -1608,6 +1610,17 @@ def provision_project(name: str, repo_arg: str, project_file: Path | None,
         die(f"{key} already exists; refusing to overwrite a key")
     if project_file is not None and not project_file.is_file():
         die(f"no project file at {project_file}")
+    explicit_folder = vault_folder
+    vault_folder = vault_folder_for(name, vault_folder)
+    vault_record = {"vault_folder": vault_folder} if vault_folder else {}
+    if vault_write:
+        if not explicit_folder:
+            die("--vault-write requires an explicit --vault-folder")
+        vault_record = {"vault_folder": explicit_folder, "vault_write": True}
+        project = eng.Project(name, checkout, checkout, platform=False, record=vault_record)
+        if project.vault_write_dir() is None:
+            die(f"--vault-write needs an existing directory under "
+                f"{lc.vault_folder('projects')}/: {explicit_folder!r}")
 
     me = gh.whoami()
     owner = me["login"]
@@ -1628,6 +1641,8 @@ def provision_project(name: str, repo_arg: str, project_file: Path | None,
               f"{target}, key {key}, checkout {checkout}, register {record_path}")
         for path, content in files.items():
             print(f"  [dry-run] {path}: {len(content):,} chars (excluded)")
+        if vault_record:
+            print(f"  [dry-run] vault folder {explicit_folder!r}, job write={vault_write}")
         print(f"  [dry-run] README.md: {len(readme_stub(name)):,} chars "
               f"(the only commit, if the repo is empty)")
         return
@@ -1722,6 +1737,7 @@ def provision_project(name: str, repo_arg: str, project_file: Path | None,
         "deploy_key_id": dk["id"],
         "role_source_rev": rev,
         "provisioned": date,
+        **vault_record,
     }
     # Preserve the project's test command across reprovisioning. Landing requires it.
     if record_path.is_file():
@@ -2065,6 +2081,8 @@ def main() -> None:
                                     opt("--commit-email"))
                     if opt("--commit-as") else None)
         if "--adopt" in argv:
+            if "--vault-write" in argv:
+                die("--vault-write is available with --repo")
             pf = opt("--project-file")
             adopt_project(name, opt("--adopt") or die("--adopt <owner>/<name>"),
                           Path(pf) if pf else None, opt("--test-command"), dry,
@@ -2075,7 +2093,7 @@ def main() -> None:
             return
         repo_arg = opt("--repo") or die(
             "usage: provision --project <name> --repo new|<url> "
-            "[--project-file <path>] [--dry-run]\n"
+            "[--project-file <path>] [--vault-folder <Folder> [--vault-write]] [--dry-run]\n"
             "       provision --project <name> --adopt <owner>/<name> "
             "[--project-file <path>] [--test-command <cmd>] [--vault-folder <Folder>]\n"
             "           [--commit-as <github-login> [--commit-name <name>] "
@@ -2085,7 +2103,8 @@ def main() -> None:
             "       provision --project <name> --retire [--delete-repo] [--force]\n"
             "       provision --project <name> --rerender")
         pf = opt("--project-file")
-        provision_project(name, repo_arg, Path(pf) if pf else None, dry)
+        provision_project(name, repo_arg, Path(pf) if pf else None, dry,
+                          vault_folder=opt("--vault-folder"), vault_write="--vault-write" in argv)
         return
     if "--migrate-persona-maps" in sys.argv:
         if args or dry:

@@ -140,14 +140,15 @@ try:
     check("argv: instructions as a TOML string",
           'developer_instructions="say \\"hi\\"\\n"' in argv, True)
     check("argv: prompt last", argv[-1], "P")
-    prot = cj.argv(workdir=ws, tree=ws, job_dir=jd, prompt="P", extra_dirs=[],
+    deliverables = root / "deliverables"
+    prot = cj.argv(workdir=ws, tree=ws, job_dir=jd, prompt="P", extra_dirs=[deliverables],
                    fork_from=None, instructions_text="x",
                    protected=[ws / "role.md"])
     table = next(a for a in prot if a.startswith("permissions.engineer.filesystem="))
-    check("profile: the tree and .git write, role.md read",
+    check("profile: the tree, .git and added directory write, role.md read",
           all(f'"{k}"="{v}"' in table for k, v in (
               (ws, "write"), (ws / ".git", "write"), (jd, "write"),
-              ("/", "read"), (ws / "role.md", "read"))), True)
+              (deliverables, "write"), ("/", "read"), (ws / "role.md", "read"))), True)
     check("profile: selected", 'default_permissions="engineer"' in prot, True)
     fork = cj.argv(workdir=ws, tree=ws, job_dir=jd, prompt="P", extra_dirs=[],
                    fork_from="T-1", instructions_text="x")

@@ -226,6 +226,12 @@ overwrites a change of theirs. A job that changes how Loam works updates
 this library in the same job, so these pages stay the one description of
 Loam.
 
+Each project engineer works with one repository. Provisioning keeps the registry
+in local runtime state. A project can be given write access to its own folder in
+the vault's projects area. Its briefs can name deliverables there, including
+when the brief is read-only for the repository. The launcher files receipts
+under that project's vault folder.
+
 Engineer job commits and landing merges carry the person named in the
 project record, or the owner's identity from Settings ›
 GitHub › **Your name on agents' work**. The default uses the owner's connected
