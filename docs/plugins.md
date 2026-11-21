@@ -1540,6 +1540,9 @@ direct yes on github.com; nothing here changes a repository's visibility.
 
 ## Activity summaries and the Chats line
 
+Four plugin interfaces are new and may change in a later release: `touches.facts`,
+`thread.list.line`, `apps.icon` and `chat.draft`.
+
 An enabled plugin server or persona tool can execute the program named by
 `LOAM_PLUGIN_FACTS`. It prints one JSON object containing only its declared
 `touches.facts` groups. The install sheet displays these reads and an update
