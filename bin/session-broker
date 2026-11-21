@@ -1255,6 +1255,15 @@ class Server:
 
         # Read app and site entries from deployment records so changes are visible on the next
         # listing.
+        if parts == ["v1", "apps", "open"] and method == "POST":
+            import loam_activity_facts
+            try:
+                value = await asyncio.to_thread(loam_activity_facts.record_open, payload.get("url"))
+            except ValueError as exc:
+                raise BrokerError(400, str(exc))
+            writer.write(response(200, value, "Cache-Control: no-store\r\n"))
+            await writer.drain()
+            return
         if parts == ["v1", "apps"]:
             nocache = "Cache-Control: no-store\r\n"
             if method != "GET":

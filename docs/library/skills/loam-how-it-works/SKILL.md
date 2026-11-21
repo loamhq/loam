@@ -254,3 +254,7 @@ make Loam…") when the owner sends it: an agent writes it with personal
 details taken out, shows every word, and on the owner's yes gives them a
 link that files it as an issue on Loam's GitHub from their own account
 (`loam-filing-a-bug-or-feature`).
+
+Plugins can add a single update line above the agents in Chats and draw
+their own icon in Apps. A new install can receive ordinary removable Market
+plugins pinned to the commits reviewed for that release.

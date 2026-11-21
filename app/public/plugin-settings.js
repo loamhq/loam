@@ -26,6 +26,8 @@ export function touchSentences(declaration = {}) {
   for (const network of touches.network ?? []) lines.push(network.host === 'browser-managed' ? `Uses the browser’s speech recognition service: ${network.why}` : `Contacts ${network.host}: ${network.why}`)
   if (touches.record && touches.record !== 'none') lines.push(touches.record === 'read' ? 'Reads conversation records.' : 'Reads and changes conversation records.')
   if (touches.memory && touches.memory !== 'none') lines.push(touches.memory === 'read' ? 'Reads shared memory.' : 'Reads and changes shared memory.')
+  const facts = { agents: 'agent names and workspace file counts', projects: 'project folders and their file counts', files: 'the number of personal files', chats: 'chat titles, dates and lengths', apps: 'apps made here and their recent opens', 'local-plugins': 'plugins made here', installation: 'the starter date', 'public-work': 'public Market listings, reports and merged contributions for your chosen GitHub account' }
+  for (const group of touches.facts ?? []) lines.push(`Reads ${facts[group] ?? group}.`)
   if (touches.server) lines.push('Contains code for the host.')
   // Shared keys (2026-11-18): the providers whose keys it is given, from
   // Settings › Connections › API keys. A plugin is handed no key it did not declare here.

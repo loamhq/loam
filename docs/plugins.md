@@ -1522,3 +1522,41 @@ answers the install link, and says when the repository is still private.
 Only that folder changes in the repository; a tag that exists is refused, so
 a new share is a new version. Making the repository public is the owner's
 direct yes on github.com; nothing here changes a repository's visibility.
+
+## Activity summaries and the Chats line
+
+An enabled plugin server or persona tool can execute the program named by
+`LOAM_PLUGIN_FACTS`. It prints one JSON object containing only its declared
+`touches.facts` groups. The install sheet displays these reads and an update
+that adds one widens its declaration. Treat these as snapshots. Run the
+reader off the request thread or cache its result.
+
+| Group | JSON value |
+|---|---|
+| agents | Rows with id, name, archived and visible workspace file count |
+| projects | Visible direct folders in the configured projects folder, with name, vault-relative path and recursive file count |
+| files | Regular visible vault files outside project folders, boards, system and conversation records. Links are skipped |
+| chats | Rows with id, name, messages and updated, newest activity first. Counts exclude system records |
+| apps | Apps made here, with name, url and opens_28d. An open is a selection in Apps recorded by this host version |
+| local-plugins | Effective non-app plugins built here, with id and name |
+| installation | first_weeks_at, the starter timestamp for a first-weeks install, otherwise null |
+| public-work | Publications in the chosen GitHub account’s own Market repositories, issues filed and merged pull requests in the configured upstream. Each has id, name and url. An issue's shipped flag requires a shipped label. A null collection means unavailable. No install count is available |
+
+The optional public-work group requires both api.github.com and
+raw.githubusercontent.com in touches.network. It uses the explicitly chosen
+GitHub identity and unauthenticated public data. Results are cached for an hour.
+File and chat contents stay on the host.
+
+Page modules can register at `thread.list.line`. Return a single compact
+accessible row above the agents or null. The first nonempty registration in
+ordinary registry order is visible. The host leaves archived lists alone.
+At `apps.icon`, a plugin can render the picture for its own enabled Apps
+row. Returning null uses the usual app picture. Both registrations go away
+when the plugin is disabled. Use `chat.draft` with `{agent,text}` to open
+a composer with an editable suggestion. Sending remains the person's action.
+
+The fresh installer consumes the release's `lib/loam_preinstall.py:PINS`
+during its starter step. Each entry identifies the plugin, GitHub repository,
+folder and full reviewed commit. The installer previews and confirms that
+exact package through the regular Market installer. The installed copy can
+be switched off, updated and removed in Settings. The list is empty for now.

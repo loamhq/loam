@@ -449,6 +449,7 @@ export function createApp({
       if (method !== 'GET') return sendJson(res, 405, { error: 'The owner is read only.' })
       return await relayJson(res, 'GET', '/v1/owner', undefined, { signal: AbortSignal.timeout(5000) })
     }
+    if (rest === '/apps/open' && method === 'POST') return await relayJson(res, method, '/v1/apps/open', await readBody(req))
     if (rest === '/apps' && method === 'GET') return await relayJson(res, 'GET', '/v1/apps')
     if (['/apps/media', '/apps/media/image', '/apps/icon'].includes(rest) && method === 'GET') {
       const href = url.searchParams.get('url')
