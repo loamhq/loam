@@ -133,6 +133,7 @@ def plugin_rows() -> list[dict]:
             "icon": (f"/v1/plugins/{row['id']}/files/{row['icon']}"
                      if row.get("icon") else None),
             "plugin": row["id"],
+            **({"dynamic_icon": True} if "apps.icon" in row.get("places", []) else {}),
             "on": bool(row.get("on")),
             "state": svc.get("state"),
         })

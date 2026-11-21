@@ -38,3 +38,16 @@ test('reserved places stay reserved and undeclared component replacements are al
   plugin.places.message.footer.action.add({ id: 'extra', slot: 'row', order: 10, when: c => c.slot === 'row', render: c => [...c.view, 'extra'] })
   assert.deepEqual(registry.reduce('message.footer.action', { slot: 'row', defaultView: () => ['base'] }, []), ['base', 'extra'])
 })
+
+test('the Chats line falls through empty registrations and releases its place on disable', () => {
+  const registry = createCoreRegistry()
+  const a = registry.scope({ id: 'almanac' }), b = registry.scope({ id: 'journal' })
+  let quiet = true
+  a.places['thread.list.line'].add({ id: 'arrival', render: () => quiet ? null : 'new arrival' })
+  b.places['thread.list.line'].add({ id: 'today', render: () => 'today' })
+  assert.equal(registry.draw('thread.list.line')[0], 'today')
+  quiet = false
+  assert.equal(registry.draw('thread.list.line')[0], 'new arrival')
+  a.dispose()
+  assert.equal(registry.draw('thread.list.line')[0], 'today')
+})
