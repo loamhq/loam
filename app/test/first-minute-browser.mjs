@@ -14,7 +14,7 @@ await mkdir(out, { recursive: true })
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright')
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox'] })
 const phone = device === 'phone'
-const options = { viewport: { width: phone ? 390 : 1440, height: phone ? 844 : 960 }, colorScheme: mode,
+const options = { viewport: { width: phone ? 390 : 1440, height: phone ? 844 : 900 }, colorScheme: mode,
   isMobile: phone, hasTouch: phone, reducedMotion: 'reduce', serviceWorkers: 'block' }
 try {
   const page = await browser.newPage(options)
@@ -77,7 +77,11 @@ try {
   if (!phone) await shot('first-screen')
   await shot('hello')
   await board.click()
-  await page.locator('.tt-board').getByText('Things to try', { exact: true }).first().waitFor()
+  const panel = page.getByRole('complementary', { name: 'Thread board' })
+  await panel.getByRole('heading', { name: 'Nothing here yet' }).waitFor()
+  await panel.getByText('Keep what matters from this chat here.', { exact: true }).waitFor()
+  assert.equal(await panel.locator('.tt-board-list-head').count(), 0)
+  await shot('empty-hello-board')
   await page.getByRole('button', { name: 'Close board', exact: true }).last().click()
   assert.equal(await board.getAttribute('data-caption'), null)
   await shot('board-icon-used')
@@ -89,5 +93,5 @@ try {
   if (phone) await other.locator('.tt-head button[title^="Back"]').click()
   assert.equal(await other.getByRole('button', { name: 'Settings', exact: true }).first().getAttribute('data-caption'), 'Settings')
   assert.deepEqual(errors, [])
-  console.log('PASS', device, mode, 'landing, diagram, captions and accessible controls, tab names, Board dismissal across browsers')
+  console.log('PASS', device, mode, 'landing, diagram, captions, empty Hello board, Board dismissal across browsers')
 } finally { await browser.close() }

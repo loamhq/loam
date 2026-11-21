@@ -729,7 +729,7 @@ def member_engine(meta: dict, persona: str) -> str | None:
 def create(persona: str | None = None, title: str | None = None, *,
            thread_id: str | None = None, members: list[str] | None = None,
            pinned: bool = False, extra: dict | None = None,
-           initial_board: str | None = None, draft: str | None = None,
+           draft: str | None = None,
            draft_reply: dict | None = None) -> dict:
     """Create a thread with optional extra frontmatter, including branch metadata. Without
     a persona it has no members or default. An untagged message is recorded without an
@@ -753,8 +753,6 @@ def create(persona: str | None = None, title: str | None = None, *,
                 if thread_id == GENERAL_ID else _unique_path(title))
         if thread_id == GENERAL_ID and path.exists():
             raise ThreadError(409, "General exists")
-        if initial_board is not None and not (VAULT / meta["board"]).exists():
-            _write_atomic(VAULT / meta["board"], initial_board)
         _write_atomic(path, render_front(meta))
         idx = index()
         idx[thread_id] = path.name
@@ -1319,6 +1317,10 @@ def unread(thread_id: str, msgs: list[dict]) -> int:
 
 # -- boards --------------------------------------------------------------------
 
+def empty_board(meta: dict) -> str:
+    return f"# {meta['title']} — board\n\n"
+
+
 def board_text(meta: dict, create_missing: bool = True) -> str:
     path = VAULT / meta["board"]
     try:
@@ -1328,7 +1330,7 @@ def board_text(meta: dict, create_missing: bool = True) -> str:
             return ""
         with locked(path):
             if not path.exists():
-                _write_atomic(path, f"# {meta['title']} — board\n\n")
+                _write_atomic(path, empty_board(meta))
             return path.read_bytes().decode("utf-8")
 
 
@@ -1348,28 +1350,33 @@ def write_board(meta: dict, markdown: str, revision: str) -> dict:
         raise ThreadError(400, "A board save needs markdown and its base revision")
     path = VAULT / meta["board"]
     with locked(path):
+        _replace_board(path, markdown, revision)
+        return board_snapshot(meta, markdown)
+
+
+def _replace_board(path: Path, markdown: str, revision: str) -> None:
+    """Replace a board with the thread lock already held."""
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        raise ThreadError(409, "The board moved or was removed") from None
+    # File tools need not take the runtime lock. Stage the replacement
+    # first so the revision check sits immediately beside the rename.
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.",
+                                     delete=False) as handle:
+        tmp = Path(handle.name)
+    try:
+        tmp.write_bytes(markdown.encode("utf-8"))
+        tmp.chmod(mode)
         try:
-            mode = stat.S_IMODE(path.stat().st_mode)
+            current = path.read_bytes()
         except FileNotFoundError:
             raise ThreadError(409, "The board moved or was removed") from None
-        # File tools need not take the runtime lock. Stage the replacement
-        # first so the revision check sits immediately beside the rename.
-        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.",
-                                         delete=False) as handle:
-            tmp = Path(handle.name)
-        try:
-            tmp.write_bytes(markdown.encode("utf-8"))
-            tmp.chmod(mode)
-            try:
-                current = path.read_bytes()
-            except FileNotFoundError:
-                raise ThreadError(409, "The board moved or was removed") from None
-            if _board_revision(current) != revision:
-                raise ThreadError(409, "The board changed since you opened it")
-            os.replace(tmp, path)
-        finally:
-            tmp.unlink(missing_ok=True)
-        return board_snapshot(meta, markdown)
+        if _board_revision(current) != revision:
+            raise ThreadError(409, "The board changed since you opened it")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def item_meta(line: str) -> list[str]:

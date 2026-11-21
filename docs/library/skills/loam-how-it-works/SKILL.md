@@ -98,11 +98,9 @@ When the owner starts designing an agent in Hello or any other thread, Iris
 asks one question about what they're looking for and hears the answer
 before drafting.
 
-Hello’s board starts with six things to try in any order. Iris mentions it
-once, helps with what the owner came for, and offers an idea when it fits.
-As they try things she ticks the cards in their words. They can set the
-list aside, delete it, or ask her to bring it back. Iris can bring over
-context from another AI and show the owner their About me in Files.
+Hello’s board starts empty. Iris helps with what the owner came for and
+offers an idea when it fits. She can bring over context from another AI
+and show the owner their About me in Files.
 She can offer one small overnight job that fits what they told her, or
 think over what they shared and leave a short note. The morning work lives
 in Files, with a short message linking to it. Changing the app, building
@@ -140,7 +138,7 @@ update) goes to the one agent the owner chose in
 Settings › Agents (the first agent, unless they change it), as the input of
 a run of its own, told once. That agent decides what to do: it can brief
 the engineer, and it tells the owner in General, in its own words, only if
-they need to know. On installs with the Things to try starter, release news
+they need to know. On installs with the first-weeks starter, release news
 worth sharing goes to the original Hello thread. If the owner deletes Hello,
 the chosen agent shares news in General. The failure log and Activity keep the quiet record.
 

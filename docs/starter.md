@@ -32,18 +32,14 @@ is an ordinary agent: the person can change her, rename her or archive her.
 Then it writes the hello thread: a thread with Iris as its default and only
 member, pinned, with `hello: true` in its frontmatter, and one message, the
 body of `docs/starter/hello.md` with `{owner}` filled from the install's
-owner name. Loam posts it as Iris and marks it preset.
+owner name. Loam posts it as Iris and marks it preset. Its board starts empty.
 
-Hello’s board opens with the six checkboxes in `docs/starter/hello-board.md`.
-Iris mentions the board once and waits for something the person says to make
-one idea relevant. When they try it, she ticks the card in their words.
 Her daily reflection runs even while she is the only agent. Its identity
 check compares a phrase from her soul with one from the preset greeting.
 Once there are other agents it draws the second phrase from a sibling.
 She does any overnight work she agreed to and leaves it in Files with a
 short message linking to it from the chat. After that she answers when
-spoken to and does work the owner leaves with her. The owner can set the
-board's list aside or ask her to bring it back.
+spoken to and does work the owner leaves with her.
 
 The `week_one` starter marker opts new installs into the one-week
 occasion. From seven through thirteen calendar days after seeding, in the
@@ -62,6 +58,14 @@ the Garden with them. Their own idea takes the lead.
 
 A first-weeks starter marker identifies this Hello as the place for release
 news, even if renamed. Older starters keep their original routing.
+
+An update from an older starter replaces a byte-for-byte stock board with
+the ordinary empty board if the install is unclaimed or the owner has sent
+no message in Hello. When it clears the board, it also refreshes any of Iris's
+two guidance files that still match a shipped copy. Existing edits and the
+workspaces of people keeping their board stay as they are. The old source at
+`docs/starter/hello-board.md` serves requests from earlier Iris workspaces that
+refer to that path.
 
 **Once per install.** A marker, `<state>/agents/starter.json` (the agent,
 the thread, the message, when), makes every later run a no-op, so a person

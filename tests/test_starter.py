@@ -154,15 +154,14 @@ def main() -> int:
     check("the hello thread: titled, pinned, hello, Iris its default and member",
           (meta["title"], meta.get("pinned"), meta.get("hello"), meta["default"], meta["members"]),
           ("Hello", True, True, "iris", ["iris"]))
+    ordinary = threads.create("iris", "Ordinary chat")
+    check("Hello materializes its board on first read like an ordinary thread",
+          [(threads.VAULT / row["board"]).exists() for row in (meta, ordinary)], [False, False])
     board = threads.board_snapshot(meta)
-    cards = [line for line in board["markdown"].splitlines() if line.startswith("- [ ] ")]
-    check("Hello seeds six ordinary Markdown checkboxes with the starter's exact words",
-          (board["markdown"], len(cards), st.status().get("first_weeks")),
-          ((st.STARTER_DIR / "hello-board.md").read_text(), 6, True))
-    ticked = board["markdown"].replace("- [ ]", "- [x]", 1)
-    check("...an ordinary board save can tick the first card",
-          threads.write_board(meta, ticked, board["revision"])["markdown"], ticked)
-    board = threads.board_snapshot(meta)
+    check("Hello's board contains only the ordinary file heading",
+          (board["markdown"], threads.board_text(ordinary), st.status().get("first_weeks")),
+          ("# Hello — board\n\n", "# Ordinary chat — board\n\n", True))
+    threads.delete(ordinary["id"])
     check("...holding one message, by Iris, the starter's text, marked preset",
           [(m["id"], m["author"], m["kind"], m.get("preset"), m["text"]) for m in msgs],
           [("m1", "iris", "message", True, st.read_hello()[1])])
@@ -223,7 +222,7 @@ def main() -> int:
           (sum(1 for t in threads.rebuild_index() if threads.read(t)[0].get("hello")),
            len(threads.read(out["thread"])[1])), (1, 1))
 
-    check("retrying a seed preserves a person's board after they remove the list",
+    check("retrying a seed preserves a person's board",
           threads.board_text(meta), personal)
     check("an interrupted seed from before week-one support stays legacy",
           st.status().get("week_one"), None)
@@ -309,8 +308,76 @@ def main() -> int:
     check("...and no thread is made", sorted(threads.index()), before)
     check("...and no marker written", st.status(), None)
 
+    check_retirement(ws)
+
     print(f"\n{'OK' if not FAILURES else f'{FAILURES} FAILED'}")
     return 1 if FAILURES else 0
+
+
+def check_retirement(ws: Path) -> None:
+    from unittest.mock import patch
+    import loam_agents
+    import loam_deploy
+    import loam_update
+    from loam_starter_update import LIST_STARTERS, retire_hello_board
+
+    prefix = loam_update.prefix() + "docs/starter/"
+
+    def stock(rev, path):
+        return loam_update.show(rev, prefix + path)
+
+    def previous_hello(rev):
+        hello = threads.create("iris", "Hello again", extra={"hello": True})
+        threads.append(hello["id"], "iris", "Welcome.", preset=True)
+        loam_agents._write_json(st.marker_path(), {"agent": "iris", "thread": hello["id"],
+                                                 "first_weeks": True})
+        board = threads.VAULT / hello["board"]
+        board.write_bytes(stock(rev, "hello-board.md").encode())
+        for name in st.OWN_FILES:
+            (ws / name).write_bytes(st.fill(stock(rev, "iris/" + name)).encode())
+        return hello, board
+
+    for rev in LIST_STARTERS:
+        hello, board = previous_hello(rev)
+        original = dict(st.status())
+        thread = threads.record_path(hello["id"])
+        conversation = thread.read_bytes()
+        with patch.object(loam_deploy, "unclaimed", return_value=True):
+            check(f"untouched starter {rev[:7]} updates to an ordinary empty board",
+                  (retire_hello_board(), board.read_bytes(), retire_hello_board()),
+                  (True, "# Hello again — board\n\n".encode(), False))
+        check("the update refreshes only the stock guidance and keeps the marker and chat",
+              ({name: (ws / name).read_text() for name in st.OWN_FILES}, st.status(), thread.read_bytes()),
+              (st.own_files(), original, conversation))
+        threads.delete(hello["id"])
+
+    rev = LIST_STARTERS[2]  # the 0.2.18 starter
+    hello, board = previous_hello(rev)
+    guidance = {name: (ws / name).read_bytes() for name in st.OWN_FILES}
+    original = board.read_bytes()
+    threads.append(hello["id"], "old-sam", "Hello Iris.")
+    with patch.object(lc, "LEGACY_OWNER_IDS", ("old-sam",)), patch.object(loam_deploy, "unclaimed", return_value=False):
+        check("claimed Hello with an owner's message keeps the stock board and installed guidance",
+              (retire_hello_board(), board.read_bytes(), {name: (ws / name).read_bytes() for name in st.OWN_FILES}),
+              (False, original, guidance))
+    check("earlier installed guidance can still read its source board",
+          (str(lc.ROOT / "docs/starter/hello-board.md") in guidance["how-i-am-here.md"].decode(),
+           (ROOT / "docs/starter/hello-board.md").read_bytes()), (True, original))
+    threads.delete(hello["id"])
+
+    hello, board = previous_hello(rev)
+    board.write_bytes(original + b"\n")
+    with patch.object(loam_deploy, "unclaimed", return_value=True):
+        check("one extra newline protects even an unclaimed Hello board and its guidance",
+              (retire_hello_board(), board.read_bytes(), {name: (ws / name).read_bytes() for name in st.OWN_FILES}),
+              (False, original + b"\n", guidance))
+    board.write_bytes(original)
+    custom = guidance["how-i-am-here.md"] + b"\nSam's own note.\n"
+    (ws / "how-i-am-here.md").write_bytes(custom)
+    with patch.object(loam_deploy, "unclaimed", return_value=False):
+        check("a claimed install before the first message gets an empty board and keeps custom guidance",
+              (retire_hello_board(), board.read_text(), (ws / "how-i-am-here.md").read_bytes()),
+              (True, "# Hello again — board\n\n", custom))
 
 
 if __name__ == "__main__":

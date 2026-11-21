@@ -232,9 +232,7 @@ def seed(*, root: Path | None = None, provision=None) -> dict:
         title, text = read_hello(root)
         tid = _hello_thread(agent)
         if tid is None:
-            board = ((root or STARTER_DIR) / "hello-board.md").read_text(encoding="utf-8") if first_weeks else None
-            tid = threads.create(agent, title, pinned=True, extra={"hello": True},
-                                 initial_board=board)["id"]
+            tid = threads.create(agent, title, pinned=True, extra={"hello": True})["id"]
         _, msgs, _ = threads.read(tid)
         preset = next((m for m in msgs if m.get("preset")), None)
         msg_id = (preset or threads.append(tid, agent, text, preset=True))["id"]

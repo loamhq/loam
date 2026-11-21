@@ -19,7 +19,6 @@ guidance on 2026-11-21.
 | `iris/map.md` | her `map.md`, the one file of her own that loads on every run: it points at the two below |
 | `iris/how-i-am-here.md` | her conversation guidance, including the first visit and when to offer the Garden; her map tells her to read it before her first reply |
 | `iris/nights.md` | her nightly wake, including the first morning and the one-week occasion; her map tells her to read it when she wakes |
-| `hello-board.md` | the six things to try on Hello’s board, also available when the person asks for the list back |
 | `hello.md` | the hello thread's title (frontmatter) and Iris's first message (the body), which greets the owner by name |
 
 In the text, `{owner}` is the owner's name and `@VAULT@`, `@WORKSPACES@` and

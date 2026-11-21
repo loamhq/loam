@@ -50,7 +50,8 @@ def main(argv: list[str]) -> int:
         # Its library step calls this release's command after moving the tree.
         import loam_update  # noqa: PLC0415
         pending = loam_update.read_json("pending.json")
-        if pending and pending.get("to_commit") == loam_update.head():
+        updating = pending and pending.get("to_commit") == loam_update.head()
+        if updating:
             provision = Path(__file__).with_name("provision")
             subprocess.run([sys.executable, str(provision), "--migrate-persona-maps"],
                            check=True)
@@ -61,6 +62,12 @@ def main(argv: list[str]) -> int:
                                check=True)
         for line in sk.refresh():
             print(f"  {line}")
+        if (updating and pending.get("from_commit")
+                and loam_update.show(pending["from_commit"], loam_update.prefix()
+                                     + "lib/loam_starter_update.py") is None):
+            from loam_starter_update import retire_hello_board  # noqa: PLC0415
+            if retire_hello_board():
+                print("  Retired the unvisited Hello board's stock content")
         return 0
     if cmd == "seed-vault" and len(rest) <= 1:
         vault = Path(rest[0]) if rest else lc.VAULT

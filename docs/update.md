@@ -286,10 +286,10 @@ The update never shows the person a changelog. It leaves a notice in
   its `note` what it comes with. Nothing is posted in General or anywhere
   else automatically. That agent decides what the owner needs to hear.
 
-For installs seeded with the Things to try board, available and applied
+For installs with the first-weeks starter marker, available and applied
 release notices name the original Hello by its thread ID. Renaming Hello
-or deleting its list keeps news there. Deleting the thread sends subsequent
-news to General. Older installs keep their previous delivery instructions.
+keeps news there. Deleting the thread sends subsequent news to General.
+Older installs keep their previous delivery instructions.
 The note names `<state>/update/notes/<version>.md`. The agent reads it and
 gets the **For your agent** section inline when the release has one. It
 looks at what the owner uses and has asked for, then shares one short
