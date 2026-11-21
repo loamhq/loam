@@ -483,7 +483,7 @@ function goActivity() {
 function openPhoneActivity() { return goActivity() }
 
 function activityScreen() {
-  return h('section', { class: 'screen activity-screen', key: 'screen:activity', role: 'dialog', 'aria-label': 'Activity', 'aria-modal': 'true' }, activityPanel(), page.nav())
+  return h('section', { class: 'screen activity-screen', key: 'screen:activity', role: 'dialog', 'aria-label': 'Activity', 'aria-modal': 'true' }, activityPanel())
 }
 
 function activityPanel() {
@@ -830,7 +830,7 @@ function render() {
   let screen = authExpired() ? signInAgain()
     : welcoming ? welcomeScreen({ checking: onboarding.checking, providers: state.providers, signIn: page.providerSignIn, continueWith: continueWelcome, retry: loadProviders, error: state.providersError })
     : state.wide ? page.desk(beside) : section?.frame === 'full' ? content : h('div', { class: 'screen plugin-screen' },
-      state.mainItem?.kind === 'directory' ? null : backButton('main'), state.screen === 'item' ? renderPanel({ host: page, item: state.mainItem }) : content, page.nav())
+      state.mainItem?.kind === 'directory' ? null : backButton('main'), state.screen === 'item' ? renderPanel({ host: page, item: state.mainItem }) : content, state.mainItem ? null : page.nav())
   if (!state.wide && state.mainItem && !welcoming && !authExpired()) {
     const browsing = workspaceHistory.state.front === 'list'
     const section = registry.entries('rail.section').find(entry => entry.id === state.navigator && !entry.component)
@@ -842,8 +842,7 @@ function render() {
       else list = h('div', { class: 'screen plugin-screen' }, section && registry.invoke(section, 'render', { wide: false }), page.nav())
     }
     screen = h('div', { class: 'phone-workspace', key: 'phone-workspace' },
-      h('div', { class: 'phone-panel', key: 'phone-panel', 'data-panel': 'main', hidden: browsing, inert: browsing }, screen,
-        ['file', 'thread', 'app'].includes(state.mainItem.kind) ? page.nav() : null),
+      h('div', { class: 'phone-panel', key: 'phone-panel', 'data-panel': 'main', hidden: browsing, inert: browsing }, screen),
       list ? h('div', { class: 'phone-list', key: 'phone-list' }, list) : null)
   }
   const notice = state.editor || state.sheet?.kind === 'settings' ? null : runNotice()

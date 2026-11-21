@@ -321,6 +321,8 @@ try {
         await page.goForward(); await list.filter({ hasText: 'plan.md' }).waitFor()
         await list.filter({ hasText: 'plan.md' }).click(); await docReady()
         await docBack.click(); await list.filter({ hasText: 'plan.md' }).waitFor()
+        await docBack.click(); await list.filter({ hasText: /^Notes/ }).first().waitFor()
+        await docBack.click(); await vault.waitFor()
         await selectTab('Files'); await vault.waitFor()
         await noBack(); await backStops()
         await vault.click()
@@ -340,6 +342,10 @@ try {
           await page.goForward(); await docReady()
           await page.goForward(); await main.locator('.fs-livehead').waitFor()
         }
+      }
+      if (!wide && !before) {
+        await docBack.click(); await list.filter({ hasText: /^Notes/ }).first().waitFor()
+        await docBack.click(); await vault.waitFor()
       }
       await selectTab('Apps')
       await page.locator('.apps-row').first().waitFor()

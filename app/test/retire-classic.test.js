@@ -40,12 +40,23 @@ test('the relay reserves imported before thread IDs, passes only session, and pr
   } finally { await app.close() }
 })
 
-const app = await retirementFixture(), page = browser(app.url)
+const app = await retirementFixture(), page = browser(app.url, { innerWidth: 390 })
 globalThis.location = { pathname: '/', href: `${app.url}/`, search: '' }
 page.watch(); await import('../public/app.js'); page.unwatch()
 test.after(async () => { page.stop(); await app.close(); setImmediate(() => process.exit(process.exitCode ?? 0)) })
 const root = page.root, click = (n) => { assert.ok(n, 'control exists'); n.fire('click', { preventDefault() {}, stopPropagation() {} }) }
 const buttons = (name) => all(root, 'iconbtn').find((n) => n.getAttribute('aria-label') === name)
+
+test('phone tabs leave with the Chats list and return on Back', async () => {
+  const row = await until(() => find(root, 'tt-row'))
+  assert.ok(find(root, 'navpill'))
+  click(row)
+  await until(() => find(root, 'tt-head'))
+  assert.equal(all(root, 'nav').length, 0, 'open thread')
+  click(buttons('Back'))
+  await until(() => find(root, 'tt-row'))
+  assert.ok(find(root, 'navpill'))
+})
 
 test('Settings, archive, search and imported thread use threads exclusively', async () => {
   await until(() => all(root, 'tt-row').length === 4)
@@ -56,6 +67,7 @@ test('Settings, archive, search and imported thread use threads exclusively', as
   click(buttons('Thread list actions')); await until(() => find(root, 'tt-list-menu'))
   click(all(find(root, 'tt-list-menu'), 'setrow').find(n => /Archived threads/.test(text(n))))
   await until(() => all(root, 'tt-row').length === 50)
+  assert.equal(all(root, 'nav').length, 0, 'Archived chats')
   for (const count of [100, 150, 153]) {
     click(find(root, 'tt-archive-more')); await until(() => all(root, 'tt-row').length === count)
   }

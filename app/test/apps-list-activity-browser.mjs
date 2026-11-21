@@ -144,7 +144,8 @@ try {
         await side.waitFor({ state: 'detached' })
         await page.setViewportSize({ width: 1180, height: 900 }); await side.locator('iframe').waitFor()
         await side.getByRole('button', { name: 'Close side panel' }).click(); await side.waitFor({ state: 'detached' })
-        // Reproduce the former full-page desktop path by widening phone Activity.
+        // Reveal the Apps list with Notebook still mounted, then open Activity on phone.
+        await appsTab().click()
         await page.setViewportSize({ width: 390, height: 844 })
         await page.waitForFunction(() => !__layout.state.wide)
         await page.locator('.settings-utility').click(); await page.locator('.settings-place .setrow').click()

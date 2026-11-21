@@ -78,15 +78,16 @@ try {
     page.press('Escape'); await until(() => !find(root, 'settings'))
   }
 
-  if (width < 1100) { click(utility('Settings')); await until(() => setting('Activity')); click(setting('Activity')) }
-  else click(utility('Activity'))
-  await until(() => find(root, 'activity-feed') && find(root, 'run-row'))
   for (const label of width < 1100 ? ['Settings'] : ['Settings', 'Activity']) {
     const button = utility(label)
     assert.equal(find(button, 'activity-live'), null, `${label} has no work indicator while a session is working`)
     assert.equal(button.childNodes.length, 1, `${label} contains only its icon`)
     assert.equal(button.firstChild.nodeName.toLowerCase(), 'svg')
   }
+  if (width < 1100) { click(utility('Settings')); await until(() => setting('Activity')); click(setting('Activity')) }
+  else click(utility('Activity'))
+  await until(() => find(root, 'activity-feed') && find(root, 'run-row'))
+  if (width < 1100) assert.equal(all(root, 'nav').length, 0)
   assert.match(text(root), /Server resources[\s\S]*16 GiB of 32 GiB[\s\S]*Room for about 12 more sessions[\s\S]*Running now[\s\S]*A quieter week[\s\S]*256 MB[\s\S]*History/)
   for (const cls of ['activity-count', 'activity-unread', 'tt-unread']) assert.equal(find(find(root, 'activity-page'), cls), null)
   assert.doesNotMatch(text(root), /Mark all seen|unseen/)
@@ -98,7 +99,7 @@ try {
   assert.ok(app.broker.seen.some(row => row.method === 'DELETE' && row.path === '/v1/sessions/resident'))
   assert.equal(app.broker.seen.some(row => row.path.endsWith('/seen')), false)
 
-  if (width >= 1100) { page.press('Escape'); await until(() => !find(root, 'activity-page')) }
+  page.press('Escape'); await until(() => !find(root, 'activity-page'))
 
   click(section('Files')); await until(() => all(root, 'fs-rootcard').length === 2)
   assert.deepEqual(all(root, 'fs-rootname').map(text), ['Vault', 'AI Spaces'])
@@ -106,6 +107,10 @@ try {
   click(all(root, 'fs-rootcard')[1]); await until(() => text(root).includes('Nothing here yet'))
   assert.equal(find(root, 'fs-host-records'), null)
 
+  if (width < 1100) {
+    assert.equal(all(root, 'nav').length, 0)
+    click(find(root, 'panel-history-back')); await until(() => section('Apps'))
+  }
   click(section('Apps')); await until(() => all(root, 'apps-row').length === 2)
   assert.equal(all(root, 'apps-group').length, 1)
   click(all(root, 'apps-row')[0])

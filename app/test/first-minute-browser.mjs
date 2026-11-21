@@ -45,6 +45,8 @@ try {
     const listing = await (await page.request.get(new URL('api/threads', origin).href)).json()
     assert.equal(listing.threads.find(t => t.hello).unread, 1)
     await checkList()
+    await caption('Settings', 'Settings', 'Settings')
+    assert.deepEqual(await page.locator('.navpill .navbtn').allTextContents(), ['Chats', 'Files', 'Apps'])
     await shot('first-screen')
     await list.click()
   }
@@ -54,19 +56,19 @@ try {
   await caption('Board', 'Board', 'Board')
   assert.equal(await page.getByTitle('Thread details', { exact: true }).getAttribute('data-caption'), 'Details')
   await caption('Branch into a new thread', 'Branch')
-  await caption('Settings', 'Settings', 'Settings')
+  if (!phone) await caption('Settings', 'Settings', 'Settings')
   for (const name of ['Thread actions', 'Attach a file', 'Mention an agent', 'Send']) {
     await caption(name, null, name)
   }
   for (const name of ['Reply', 'Copy']) await caption(name, null, phone ? null : name)
-  const tabs = page.locator(phone ? '.navpill .navbtn' : '.rail-tabs .railtab')
-  assert.deepEqual(await tabs.allTextContents(), ['Chats', 'Files', 'Apps'])
   if (phone) {
+    assert.equal(await page.locator('.nav').count(), 0)
     const back = page.locator('.tt-head button[title^="Back"]')
     await back.waitFor()
     assert.ok(await back.getAttribute('aria-label'))
     assert.equal(await back.getAttribute('data-caption'), null)
   } else {
+    assert.deepEqual(await page.locator('.rail-tabs .railtab').allTextContents(), ['Chats', 'Files', 'Apps'])
     await checkList()
     await caption('Activity', 'Activity', 'Activity')
     await caption('Hide sidebar for a focused view', 'Hide list', 'Hide sidebar for a focused view')
@@ -84,6 +86,7 @@ try {
   const nextBoard = other.getByRole('button', { name: 'Board', exact: true }).first()
   await nextBoard.waitFor()
   assert.equal(await nextBoard.getAttribute('data-caption'), null)
+  if (phone) await other.locator('.tt-head button[title^="Back"]').click()
   assert.equal(await other.getByRole('button', { name: 'Settings', exact: true }).first().getAttribute('data-caption'), 'Settings')
   assert.deepEqual(errors, [])
   console.log('PASS', device, mode, 'landing, diagram, captions and accessible controls, tab names, Board dismissal across browsers')

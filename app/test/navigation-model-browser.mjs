@@ -85,23 +85,43 @@ try {
       app.routes['GET /v1/files/read'] = (req, res, url) => url.searchParams.get('path') === outline.path
         ? json(res, readAnswer(outline, '# Meeting outline\n\nDecide what to carry into next week.', 'sha256:outline')) : readRoute(req, res, url)
 
+      const checkNav = async (root, screen) => {
+        assert.equal(await page.locator('.nav:visible').count(), !wide && root ? 1 : 0, screen)
+        assert.equal(await page.locator('.rail-tabs:visible').count(), wide ? 1 : 0, screen)
+      }
+      // A section command can reveal a list while keeping the phone panel mounted.
+      const revealList = name => wide || before ? tab(name) : page.evaluate(id => navTest.page.commands.run('section.open', { id }), name.toLowerCase())
+
       // A chat stays mounted through Files → Vault → Notes → Old.
-      await start('/'); await thread(); await chatLink.waitFor()
+      await start('/')
+      await page.locator('.tt-row').first().waitFor()
+      await snap('chats-root')
+      if (!before) await checkNav(true, 'Chats root')
+      await thread(); await chatLink.waitFor()
       await snap('chat')
+      if (!before) await checkNav(false, 'open thread')
       const chatId = await page.evaluate(() => {
         window.firstChat = navTest.threads.st.open
         return firstChat.thread.id
       })
       if (!wide && before) await panelBack()
-      await tab('Files'); await chooseNotes(); await folder('Old').click(); await folder('outline.md').waitFor()
+      await revealList('Files'); await vault.waitFor()
+      if (!before) {
+        await checkNav(true, 'Files root')
+        if (!wide) await button('Return to open panel').waitFor()
+      }
+      await snap('files-root')
+      await chooseNotes(); await folder('Old').click(); await folder('outline.md').waitFor()
       await snap('browse')
       if (!before) {
+        await checkNav(false, 'nested folder')
         assert.equal(await page.evaluate(() => firstChat === navTest.threads.st.open), true)
         if (wide) await chatLink.waitFor()
       }
       // Open the new document in main, then walk only main.
       await folder('outline.md').click(); await preview.getByText('Meeting outline').waitFor()
       await snap('file')
+      if (!before) await checkNav(false, 'open file')
       await panelBack()
       if (!before) {
         await chatLink.waitFor()
@@ -152,6 +172,10 @@ try {
         await chatLink.waitFor()
       }
       // Settings → agent file → native Back restores the foreground panel.
+      if (!wide && !before) {
+        await revealList('Chats')
+        await page.locator('.phone-list .tt-row').first().waitFor()
+      }
       await button('Settings').click(); await settings.waitFor()
       await settings.getByRole('button', { name: /^Agents(?: |$)/ }).click()
       await settings.locator('section[aria-label="Agents"] .setrow').first().click()
@@ -160,8 +184,14 @@ try {
       await profile.getByRole('button', { name: /^Soul(?: |$)/ }).click()
       await preview.getByText('Make space for thoughtful work.', { exact: true }).waitFor()
       await snap('settings-file')
+      if (!before) await checkNav(false, 'file opened from Settings')
       await nativeBack()
       if (!before) {
+        if (!wide) {
+          await button('Return to open panel').waitFor()
+          await checkNav(true, 'Back from Settings file')
+          await button('Return to open panel').click()
+        }
         await chatLink.waitFor()
         await settings.waitFor({ state: 'detached' })
         if (wide) {
@@ -187,29 +217,64 @@ try {
         await listBack(); await folder('Notes').waitFor()
         await listBack(); await vault.waitFor(); await noBack()
         await tab('Chats'); await thread(); await chatLink.waitFor()
-        await tab('Files'); await chooseNotes()
+        await revealList('Files'); await chooseNotes()
         await folder('plan.md').click(); await preview.waitFor()
         await page.reload(); await preview.waitFor()
         await nativeBack(); await chatLink.waitFor()
         await nativeBack(); await folder('Notes').waitFor()
         if (wide) await chatLink.waitFor()
         else {
+          await listBack(); await vault.waitFor()
           await button('Settings').click(); await settings.waitFor()
           await settings.getByRole('button', { name: /^Agents(?: |$)/ }).click()
           await settings.locator('section[aria-label="Agents"] .setrow').first().click()
           await profile.getByRole('tab', { name: 'Files', exact: true }).click()
           await profile.getByRole('button', { name: /^Soul(?: |$)/ }).click()
           await preview.waitFor(); await panelBack()
-          await folder('Notes').waitFor()
+          await vault.waitFor()
           await button('Return to open panel').click(); await chatLink.waitFor()
         }
       }
-      await start('/threads/a-quieter-week'); await chatLink.waitFor()
-      if (!wide && before) await panelBack()
+      await start('/'); await thread(); await chatLink.waitFor()
+      if (!wide) {
+        await panelBack(); await page.locator('.tt-row').first().waitFor()
+        if (!before) await checkNav(true, 'Back from thread')
+      }
       await tab('Apps'); await page.locator('.apps-row').first().waitFor()
       if (!before && wide) await chatLink.waitFor()
       if (!before && !wide) assert.equal(await page.locator('.panel-history-back:visible').count(), 0)
       await snap('apps')
+      if (!before) {
+        await checkNav(true, 'Apps root')
+        // Phone rows launch a browser tab. An embedded app can be carried
+        // onto the phone layout by narrowing an open desktop workspace.
+        if (!wide) await page.setViewportSize({ width: 1440, height: 900 })
+        await button('Open Notebook').click()
+        const frame = page.frameLocator('iframe[title=Notebook]')
+        await frame.getByText('Friday review').waitFor()
+        if (!wide) await page.setViewportSize({ width, height: 844 })
+        await page.locator(wide ? '.pane .apps-frame' : '.phone-panel .apps-frame').waitFor()
+        await checkNav(false, 'open app')
+        await snap('app-panel')
+        await panelBack(); await page.locator('.apps-row').first().waitFor()
+        await checkNav(true, 'Back from app')
+
+        await start('/?chats=archived')
+        await button('Back to Chats').waitFor()
+        await page.getByText('No archived threads', { exact: true }).waitFor()
+        await checkNav(false, 'Archived chats')
+        await snap('archived')
+
+        await start('/panel?kind=profile&id=sprout')
+        await page.locator('.profile-body').waitFor()
+        await checkNav(false, 'agent profile')
+        await snap('profile')
+
+        await start('/?modal=activity')
+        await button('Close Activity').waitFor()
+        await checkNav(false, 'Activity')
+        await snap('activity')
+      }
       assert.deepEqual(errors, [])
       console.log(`${width} ${mode} passed`)
     } finally { await context.close(); await app.close() }

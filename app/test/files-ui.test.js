@@ -128,6 +128,7 @@ test('a markdown file previews safely, and a link to a heading lands on it', asy
   await until(() => find(root, 'fs-preview'))
   assert.equal(pushed.at(-1), '/files/vault/Notes/plan.md')
   const preview = find(root, 'fs-preview')
+  assert.equal(all(root, 'nav').length, 0, 'open file')
   assert.match(text(preview), /<script>alert\(1\)<\/script>/, 'markup in a note is characters')
   assert.match(text(preview), /\[bad\]\(javascript:alert\(1\)\)/, 'a javascript: link is not a link')
   clearWrites()
@@ -539,6 +540,8 @@ test('a folder the host cannot list says so in its own words, with a way to try 
 const composer = () => find(find(root, 'composer-box'), 'draft-row').childNodes.find((n) => n.className === 'draft')
 
 test('files picked for a thread upload and go with its next message', async () => {
+  popTo('/files')
+  await until(() => find(root, 'navbtn'))
   click(all(root, 'navbtn')[0])
   await until(() => !find(root, 'files') && all(root, 'persona').length > 0)
   click(all(root, 'persona')[0])

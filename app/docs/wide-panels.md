@@ -111,9 +111,11 @@ system Back. Focus controls keyboard shortcuts and pane styling.
 | Browser Back, Android system Back or history gesture | Handle an open overlay first. Otherwise undo the newest remaining navigation step across all surfaces, even if focus has moved. At a list root a remaining panel step is still eligible. With all three histories at root, Back stays in place within the app document. Navigation to another document is browser-owned. |
 | Cmd+[ / Cmd+] or Ctrl+[ / Ctrl+] | Walk Back or Forward in the surface containing focus. Text fields and embedded sites handle their own editing shortcuts. |
 
-On the phone the main panel fills the column. Its tabs can reveal a fresh list
-while the panel stays mounted. The panel button beside the tabs returns to that
-open item. Moving between these presentations adds no visit. Opening a file
+On the phone the main panel fills the column. The floating tabs and Settings
+button appear at the selected list’s root. Opening an item, browsing a folder,
+or entering Archived chats hides them. Back to the root restores them. If
+a panel is still mounted behind the root list, the round button beside the
+tabs returns to that item. Moving between these presentations adds no visit. Opening a file
 from a nested folder pushes main. At the bottom of main's stack, its arrow
 reveals the same tab and folder. The list arrow then walks the folder steps.
 Phone app rows that launch an external browser tab keep that behavior.
@@ -240,3 +242,5 @@ interactive checks run with `node test/panel-history-browser.mjs` when
 
 The [chat link and preview gallery](evidence/chat-file-links/README.md) compares
 the chat links, file previews and file actions at phone and desktop widths.
+
+The [phone tab bar comparisons](evidence/phone-tab-bar/README.md) show the list roots and full-screen details at 390 and 1440 pixels.

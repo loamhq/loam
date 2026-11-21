@@ -11,12 +11,15 @@ export function mount(host) {
 
 // The phone's destinations; the round button opens Settings as a bottom sheet.
 function nav() {
+  const { navigator, sheet } = host.state
+  if (host.workspaceHistory.state.front !== 'list' || sheet?.kind === 'activity') return null
+  if ((navigator === 'files' && host.files.st.root) || (navigator === 'chats' && host.threads.st.archived)) return null
   return h(
     'div',
     // `swap` once selection has been used: the tab bar coming back in place of
     // the selection's bar is the same change the other way.
     { class: 'nav', key: 'nav' },
-    !host.state.wide && host.state.mainItem && host.workspaceHistory.state.front === 'list' ?
+    host.state.mainItem ?
       h('button', { class: 'roundbtn', 'aria-label': 'Return to open panel', title: 'Return to open panel',
         onclick: () => { host.workspaceHistory.front('main'); host.schedule() } }, icon.panelRight(20)) : null,
     h(
@@ -29,7 +32,7 @@ function nav() {
     ),
     h(
       'button',
-      { class: `roundbtn settings-utility${['settings', 'activity'].includes(host.state.sheet?.kind) ? ' on' : ''}`, 'aria-current': host.state.sheet?.kind === 'activity' ? 'page' : null, 'aria-expanded': String(host.state.sheet?.kind === 'settings'), title: 'Settings', 'aria-label': 'Settings', onclick: () => host.openSheet({ kind: 'settings', page: 'root' }) },
+      { class: `roundbtn settings-utility${sheet?.kind === 'settings' ? ' on' : ''}`, 'aria-expanded': String(sheet?.kind === 'settings'), title: 'Settings', 'aria-label': 'Settings', onclick: () => host.openSheet({ kind: 'settings', page: 'root' }) },
       icon.sliders(20),
     ),
   )
@@ -47,7 +50,6 @@ function profileScreen() {
     h('div', { class: 'profile-head' }, host.backButton('main')),
     host.registry.draw('app.overlay', { slot: 'player' }),
     h('div', { class: 'profile-body' }, ...profileBody(host.state.profileAgent)),
-    nav(),
   )
 }
 
