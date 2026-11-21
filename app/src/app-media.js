@@ -101,7 +101,8 @@ export function createAppMedia({ dir = '/storage/app-media', chrome = 'chromium'
     await sweep().catch(() => {})
   }
   async function resolve(app, { origin }) {
-    if (!await ready) return descriptor(app, null)
+    // A stateful icon owns the tile. A headless visit would mark the app opened.
+    if (app.dynamic_icon || !await ready) return descriptor(app, null)
     const note = await noteFor(app)
     if (note?.fingerprint === fingerprint(app) && note.until > now()) return descriptor(app, note)
     if (!tasks.has(app.url) && tasks.size < 64) {

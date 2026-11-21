@@ -6,7 +6,7 @@ import tempfile
 import time
 from pathlib import Path
 from urllib.parse import urlencode
-from urllib.request import urlopen, Request
+from urllib.request import build_opener, HTTPRedirectHandler, Request
 
 import loam_config as config
 import loam_feedback as feedback
@@ -14,9 +14,15 @@ import loam_git_identity as identity
 import loam_marketplace as market
 
 
+class NoRedirect(HTTPRedirectHandler):
+    # A redirect may point outside the hosts named in the declaration.
+    def redirect_request(self, *args):
+        return None
+
+
 def get(url):
     request = Request(url, headers={"User-Agent": "Loam-activity-facts"})
-    with urlopen(request, timeout=5) as answer:
+    with build_opener(NoRedirect).open(request, timeout=5) as answer:
         data = answer.read(2_000_001)
     if len(data) > 2_000_000:
         raise ValueError("Public response too large")
