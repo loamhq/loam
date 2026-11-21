@@ -10,6 +10,7 @@ import json
 import os
 import re
 import unicodedata
+from collections import Counter
 from pathlib import Path
 
 import loam_config as lc
@@ -52,11 +53,9 @@ ENGINEER_PROVIDERS = ("claude-code", "codex", "antigravity")
 # 2026-11-13 (lib/loam_codex_wake.py). Antigravity is not one yet; see
 # ``lane_choice``.
 LANE_PROVIDERS = ("claude-code", "codex")
-# The reviewer's providers (bin/review): Antigravity since 2026-11-15, a
-# choice beside Claude Code, chosen by nobody until the owner says so. On
-# Antigravity its model is an id `agy models` lists, its thinking level in
-# the id (lib/loam_antigravity.py, LEVEL_RE), so there is no separate effort.
-REVIEWER_PROVIDERS = ("claude-code", "antigravity")
+# The reviewer supports the same CLIs as project engineering. Antigravity
+# carries its thinking level in the model ID, with no separate effort.
+REVIEWER_PROVIDERS = ENGINEER_PROVIDERS
 REVIEWER_AGY_MODEL = os.environ.get("LOAM_AGY_REVIEWER_MODEL", "gemini-4-hydrogen-high")
 
 
@@ -134,23 +133,50 @@ def reviewer_stored() -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def reviewer_provider() -> str | None:
-    """The reviewer's explicit setting, or the first connected eligible CLI."""
+# Default thread providers are what the Agents settings show for each persona.
+def automatic_reviewer(connected: list[str]) -> tuple[str | None, str | None]:
+    if len(connected) < 2:
+        return (connected[0], "only_connected") if connected else (None, None)
+    import loam_threads as threads  # noqa: PLC0415
+    counts = Counter(threads.default_engine(agent) for agent in threads.roster())
+    selected = min(connected, key=counts.__getitem__)
+    if not any(counts[p] for p in connected):
+        return selected, None
+    return selected, "different" if not counts[selected] else "fewest"
+
+
+def reviewer_routing(stored: dict) -> tuple[str | None, dict]:
+    connected = [p for p in REVIEWER_PROVIDERS if providers.available(p)[0]]
+    automatic, reason = automatic_reviewer(connected)
     pinned = os.environ.get("LOAM_REVIEWER_PROVIDER")
-    if pinned in REVIEWER_PROVIDERS:
-        return pinned
-    value = reviewer_stored().get("provider")
-    return value if value in REVIEWER_PROVIDERS else providers.automatic(REVIEWER_PROVIDERS)
+    configured = stored.get("provider")
+    fallback = configured in REVIEWER_PROVIDERS and configured not in connected
+    effective = configured if configured in connected else automatic
+    return (pinned if pinned in REVIEWER_PROVIDERS else effective,
+            {"provider": automatic, "reason": reason, "fallback": fallback})
+
+
+def reviewer_provider() -> str | None:
+    """The next run's provider. A disconnected choice stays saved."""
+    return reviewer_routing(reviewer_stored())[0]
 
 
 def reviewer_choice(model: str, pinned: bool = False,
-                    provider: str | None = None) -> tuple[str | None, str | None]:
+                    provider: str | None = None, *,
+                    stored: dict | None = None) -> tuple[str | None, str | None]:
     """The reviewer's model and effort for the selected provider."""
-    provider = provider or reviewer_provider()
+    stored = reviewer_stored() if stored is None else stored
+    provider = provider or reviewer_routing(stored)[0]
     if not provider:
         return None, None
-    stored = reviewer_stored()
     choice = providers.agent_choice(stored, provider)
+    if provider == "codex":
+        import loam_engineer as eng  # noqa: PLC0415
+        default_model, default_effort = providers.compatible_defaults(
+            provider, eng.CODEX_ENGINEER_MODEL, eng.CODEX_ENGINEER_EFFORT)
+        if pinned or choice["model"]:
+            return (model if pinned else choice["model"]), choice["effort"]
+        return default_model, choice["effort"] or default_effort
     if provider == "antigravity":
         if pinned or choice["model"]:
             return (model if pinned else choice["model"]), None
@@ -778,8 +804,9 @@ def reviewer(persona_fallback: str = "fable") -> dict:
     instructions = "Reviewer/CLAUDE.md"
     source = Path(files_api.SYSTEM_BASE) / files_api.SYSTEM_FILES[instructions]
     stored = reviewer_stored()
-    provider = reviewer_provider()
-    model, effort = reviewer_choice(persona_fallback, provider=provider)
+    provider, automatic = reviewer_routing(stored)
+    model, effort = (reviewer_choice(persona_fallback, provider=provider, stored=stored)
+                     if provider else (None, None))
     choices = providers.agent_choice(stored, provider)
     words = reviewer_schedule()
     try:
@@ -798,6 +825,7 @@ def reviewer(persona_fallback: str = "fable") -> dict:
         "running_since": timer.get("running_since"),
         "provider": stored.get("provider"),
         "providers": list(REVIEWER_PROVIDERS),
+        "automatic": automatic,
         "model": choices["model"], "effort": choices["effort"],
         "effective": {"provider": provider, "model": model, "effort": effort},
         "instructions": {"root": "system", "path": instructions,
@@ -866,7 +894,7 @@ def update_reviewer(patch: dict, check) -> dict:
     for field in ("model", "effort"):
         if field in patch:
             if patch[field] is not None and provider is None:
-                provider = providers.automatic(REVIEWER_PROVIDERS)
+                provider = reviewer_routing({})[0]
                 if provider is None:
                     raise ProfileError(providers.SETUP, 409)
                 clean["provider"] = provider

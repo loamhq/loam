@@ -31,12 +31,9 @@ the build was *"only hard-code the areas where it's necessary"*:
                    outbox, the memory pages that changed), never from what
                    it says.
 
-    the provider   Claude Code, or Antigravity since 2026-11-15 (the owner,
-                   in chat 11-15: "make all engineers and the reviewer
-                   Antigravity"; built as a choice, switched on his word).
-                   The lane, the facts, the prompt, the delivery and the
-                   record are this file's either way; only the session
-                   differs, and on Antigravity the reach the Claude
+    the provider   Claude Code, Codex or Antigravity. The lane, the facts,
+                   the prompt, the delivery and the record are this file's
+                   on every provider. On Antigravity the reach the Claude
                    reviewer's settings give it is rebuilt from the same
                    lines (``agy_*`` below): a custom agent whose tools are
                    file read, write and edit and nothing else (no shell, no
@@ -47,8 +44,9 @@ the build was *"only hard-code the areas where it's necessary"*:
                    outside its state directory and every read of
                    `15_CONVERSATIONS/` (caused: a deny holds under
                    --dangerously-skip-permissions), the history server, and
-                   mcp/files_server.py for listing and search, which that
-                   agent is not given on Antigravity.
+                   mcp/files_server.py for listing and search. Codex runs
+                   without a shell in a read-only sandbox. Its file server
+                   also handles text reads and writes to memory and outbox.
 
 It is a static timer-fired unit like the persona wakes, not a transient one
 like the engineer's job: the engineer's transient form answers a waiter that
@@ -86,11 +84,14 @@ import loam_engineer as eng  # noqa: E402
 import loam_agy_files as agy_files  # noqa: E402
 import loam_agy_job as agy_job  # noqa: E402
 import loam_antigravity as agy  # noqa: E402
+import loam_codex as codex  # noqa: E402
+import loam_codex_job as codex_job  # noqa: E402
 import loam_lock  # noqa: E402
 import loam_profile  # noqa: E402
 import loam_session  # noqa: E402
 from loam_inbox import record_ledger  # noqa: E402
 from loam_permissions import PERMISSION_MODE  # noqa: E402  every lane's, one home
+from loam_provider_memory import CODEX_OVERRIDES  # noqa: E402
 
 AGENTS = lc.ROOT
 AI_LABS = lc.WORKSPACES
@@ -121,9 +122,11 @@ MODEL = os.environ.get("LOAM_REVIEWER_MODEL", "fable")
 # model, for a probe, still wins.
 # The provider likewise (since 2026-11-15): the owner's setting, or
 # LOAM_REVIEWER_PROVIDER for a probe or a one-off run.
-PROVIDER = loam_profile.reviewer_provider()
-MODEL, EFFORT = loam_profile.reviewer_choice(
-    MODEL, pinned=bool(os.environ.get("LOAM_REVIEWER_MODEL")), provider=PROVIDER)
+_stored = loam_profile.reviewer_stored()
+PROVIDER, _automatic = loam_profile.reviewer_routing(_stored)
+MODEL, EFFORT = (loam_profile.reviewer_choice(
+    MODEL, pinned=bool(os.environ.get("LOAM_REVIEWER_MODEL")), provider=PROVIDER, stored=_stored)
+    if PROVIDER else (None, None))
 MAX_TURNS = (int(os.environ["LOAM_REVIEWER_MAX_TURNS"])
              if os.environ.get("LOAM_REVIEWER_MAX_TURNS") else None)
 WALL_SECONDS = (int(os.environ["LOAM_REVIEWER_WALL_S"])
@@ -203,15 +206,23 @@ AGY_PROVIDER_LINE = (
     "refusal is the design working, so do not route around one.")
 
 
-def agy_instructions() -> str:
+CODEX_PROVIDER_LINE = (
+    "You are running as Loam's reviewer on Codex, unattended. The reviewer "
+    "instructions below apply to this run. Use the files MCP server's read, "
+    "list and grep tools for Read, Glob and Grep. Use its write tool with the "
+    "complete Markdown text to write or edit a memory page or your outbox note. "
+    "Use the history MCP server as described. You have no shell, web, browser "
+    "or subagents.")
+
+
+def provider_instructions(line: str) -> str:
     text = (REVIEWER / "CLAUDE.md").read_text(encoding="utf-8").strip()
     words = contributions.lane_prompt("reviewer")
-    return AGY_PROVIDER_LINE + "\n\n" + text + (f"\n\n{words}" if words else "")
+    return line + "\n\n" + text + (f"\n\n{words}" if words else "")
 
 
-def agy_servers() -> dict:
-    """The reviewer's MCP servers on Antigravity: its committed `.mcp.json`
-    (history), the plugins' for its lane, and the files server."""
+def reviewer_servers() -> dict:
+    """History, the lane's plugin contributions and the files server."""
     try:
         servers = dict(json.loads(MCP_FILE.read_text(encoding="utf-8"))
                        .get("mcpServers") or {})
@@ -285,12 +296,12 @@ def agy_workspace(run_dir: Path) -> Path:
         "Your instructions are in the message you are given.\n",
         encoding="utf-8")
     (ws / ".agents" / "mcp_config.json").write_text(
-        json.dumps({"mcpServers": agy_servers()}, indent=2) + "\n", encoding="utf-8")
+        json.dumps({"mcpServers": reviewer_servers()}, indent=2) + "\n", encoding="utf-8")
     return ws
 
 
 def agy_argv(run_dir: Path, prompt: str) -> list[str]:
-    text = agy_job.compose(agy_instructions(), prompt)
+    text = agy_job.compose(provider_instructions(AGY_PROVIDER_LINE), prompt)
     # A file, not inline: the deny list is a line per entry beside the way
     # down to the state directory, longer than one argv string may be.
     settings = run_dir / AGY_DIR / "settings.json"
@@ -305,6 +316,26 @@ def agy_argv(run_dir: Path, prompt: str) -> list[str]:
     for d in (AI_LABS, VAULT, STATE):
         line += ["--add-dir", str(d)]
     return line
+
+
+def codex_argv(prompt: str, outbox: Path) -> list[str]:
+    servers = reviewer_servers()
+    servers["files"]["env"].update(LOAM_REVIEWER_MEMORY=str(MEMORY.resolve()),
+                                   LOAM_REVIEWER_OUTBOX=str(outbox.resolve()))
+    disabled = (*codex_job.DISABLED_FEATURES, "hooks", "shell_tool", "unified_exec",
+                "multi_agent", "multi_agent_v2")
+    return [
+        codex.CODEX, "exec", "--json", "--strict-config", "--ignore-user-config",
+        "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only",
+        "-c", 'approval_policy="never"', "-c", 'web_search="disabled"',
+        *[f for name in disabled for f in ("--disable", name)],
+        *[f for override in CODEX_OVERRIDES for f in ("-c", override)],
+        *[f for name, spec in sorted(servers.items()) for f in codex_job.mcp_flags(name, spec)],
+        "-c", "developer_instructions=" + codex_job.toml_string(provider_instructions(CODEX_PROVIDER_LINE)),
+        *(["--model", MODEL] if MODEL else []),
+        *(["-c", "model_reasoning_effort=" + codex_job.toml_string(EFFORT)] if EFFORT else []),
+        prompt,
+    ]
 
 
 def now_utc() -> datetime:
@@ -596,12 +627,31 @@ def preflight() -> str | None:
         return f"{REVIEWER}/.claude/settings.json is missing: `bin/provision --reviewer` renders it"
     if not roster():
         return f"no persona under {AI_LABS} carries an agent.json; nothing to review"
-    if PROVIDER == "antigravity" and not probe_seconds():
-        if not os.access(agy.AGY, os.X_OK):
-            return f"the reviewer's provider is Antigravity and {agy.AGY} is not installed"
+    if PROVIDER in ("antigravity", "codex") and not probe_seconds():
+        binary = agy.AGY if PROVIDER == "antigravity" else codex.CODEX
+        if not shutil.which(binary):
+            return f"the reviewer's provider is {PROVIDER} and {binary} is not installed"
         if not FILES_SERVER.is_file():
-            return f"{FILES_SERVER} is missing: the reviewer on Antigravity lists and searches through it"
+            return f"{FILES_SERVER} is missing: the reviewer on {PROVIDER} needs its file tools"
     return None
+
+
+def claude_argv(prompt: str) -> list[str]:
+    argv = [
+        CLAUDE, "-p", prompt, "--model", MODEL,
+        *(["--effort", EFFORT] if EFFORT else []),
+        "--permission-mode", PERMISSION_MODE,
+        *(["--max-turns", str(MAX_TURNS)] if MAX_TURNS else []),
+        "--output-format", "json",
+        "--disallowed-tools", *DISALLOWED_TOOLS,
+    ]
+    plugin_mcp = contributions.lane_mcp_file("reviewer")
+    if plugin_mcp:
+        argv += ["--mcp-config", str(plugin_mcp)]
+    plugin_words = contributions.lane_prompt("reviewer")
+    if plugin_words:
+        argv += ["--append-system-prompt", plugin_words]
+    return argv
 
 
 def run(pinned: str | None) -> int:
@@ -643,40 +693,23 @@ def run(pinned: str | None) -> int:
     before = memory_snapshot()
 
     antigravity = PROVIDER == "antigravity"
-    argv = [
-        CLAUDE, "-p", prompt, "--model", MODEL,
-        *(["--effort", EFFORT] if EFFORT else []),
-        "--permission-mode", PERMISSION_MODE,
-        *(["--max-turns", str(MAX_TURNS)] if MAX_TURNS else []),
-        "--output-format", "json",
-        "--disallowed-tools", *DISALLOWED_TOOLS,
-    ]
-    # What plugins that are on give the reviewer (2026-11-14, first release
-    # L4), at launch: its committed reviewer/ files never name a plugin.
-    plugin_mcp = contributions.lane_mcp_file("reviewer")
-    if plugin_mcp:
-        argv += ["--mcp-config", str(plugin_mcp)]
-    plugin_words = contributions.lane_prompt("reviewer")
-    if plugin_words:
-        argv += ["--append-system-prompt", plugin_words]
-    workdir = REVIEWER
-    if antigravity:
-        workdir = agy_workspace(run_dir)
-        argv = agy_argv(run_dir, prompt)
-        (run_dir / "runtime").write_text("antigravity\n", encoding="utf-8")
+    on_codex = PROVIDER == "codex"
     envelope: dict = {}
     returncode = -1
     timed_out = False
     agy_run = None
+    codex_run = None
     probe = probe_seconds()
     try:
         if probe:
             time.sleep(probe)
             returncode = 0
         elif antigravity:
+            workdir = agy_workspace(run_dir)
+            (run_dir / "runtime").write_text("antigravity\n", encoding="utf-8")
             before_files = agy_files.snapshot()
             returncode, agy_run, timed_out = agy_job.run(
-                argv, str(workdir), WALL_SECONDS, run_dir,
+                agy_argv(run_dir, prompt), str(workdir), WALL_SECONDS, run_dir,
                 run_dir / "session-stderr.log")
             envelope = {"session_id": agy_run.conversation_id,
                         "subtype": "success" if not agy_run.failed else "error",
@@ -687,9 +720,17 @@ def run(pinned: str | None) -> int:
             except OSError as exc:
                 print(f"review: the Antigravity files record was not written: "
                       f"{exc}", file=sys.stderr)
+        elif on_codex:
+            workdir = run_dir / "codex"
+            workdir.mkdir()
+            (run_dir / "runtime").write_text("codex\n", encoding="utf-8")
+            returncode, codex_run, timed_out = codex_job.run(
+                codex_argv(prompt, outbox), str(workdir), WALL_SECONDS, run_dir,
+                run_dir / "session-stderr.log", max_turns=MAX_TURNS or 0)
+            envelope = {"session_id": codex_run.thread_id, "num_turns": codex_run.turns}
         else:
             result = subprocess.run(
-                argv, cwd=str(REVIEWER), capture_output=True, text=True,
+                claude_argv(prompt), cwd=str(REVIEWER), capture_output=True, text=True,
                 check=False, timeout=WALL_SECONDS, stdin=subprocess.DEVNULL,
             )
             returncode = result.returncode
@@ -716,17 +757,20 @@ def run(pinned: str | None) -> int:
 
     subtype = envelope.get("subtype")
     num_turns = envelope.get("num_turns")
-    api_turns = (agy_run.round_trips if agy_run
+    session = agy_run or codex_run
+    api_turns = (session.round_trips if session
                  else loam_session.round_trips(envelope.get("session_id")))
     cost = envelope.get("total_cost_usd")
     if timed_out:
         outcome = "cut off at the wall clock"
-    elif agy_run and agy_run.capped:
+    elif session and session.capped:
         outcome = f"cut off at the {MAX_TURNS}-round-trip cap"
     elif agy_run and (returncode != 0 or agy_run.failed):
         outcome = (f"exited {returncode} (antigravity: "
                    f"{'out of quota: ' if agy_run.quota else ''}"
                    f"{agy_run.failed or 'no error in its result'})")
+    elif codex_run and (returncode != 0 or codex_run.failed):
+        outcome = f"exited {returncode} (codex: {codex_run.failed or 'CLI exited with an error'})"
     elif loam_session.turn_cap_hit(envelope):
         outcome = f"cut off at the {MAX_TURNS}-round-trip cap"
     elif returncode != 0 or (subtype and subtype != "success"):
@@ -753,6 +797,7 @@ def run(pinned: str | None) -> int:
         "total_cost_usd": cost, "provider": PROVIDER, "model": MODEL,
         "effort": EFFORT, "ai_labs_head": head,
         "agy_usage": agy_run.usage if agy_run else None,
+        "codex_usage": codex_run.usage if codex_run else None,
         "returncode": returncode, "probe_seconds": probe or None,
         "session_id": envelope.get("session_id"),
         "candidates": [r["name"] for r in rows],
@@ -763,7 +808,7 @@ def run(pinned: str | None) -> int:
     log_line(record)
 
     if not ok:
-        cause = (None if probe or antigravity
+        cause = (None if probe or antigravity or on_codex
                  else loam_session.api_error(envelope.get("session_id")))
         notice(f"{LANE} run {run_id}: {outcome}"
                + (f" — {cause[:300]}" if cause else "")
@@ -805,7 +850,7 @@ def main() -> int:
     if loam_claim_start.unclaimed():
         return 0
     if PROVIDER is None:
-        print("review: Connect Claude Code or Antigravity to run the reviewer.", file=sys.stderr)
+        print("review: Connect a provider in Settings › Connections to run the reviewer.", file=sys.stderr)
         return 0
     refusal = preflight()
     if refusal:

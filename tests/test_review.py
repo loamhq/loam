@@ -20,6 +20,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 AGENTS = Path(__file__).resolve().parent.parent
 # Use the first-party reviewer plugin with scratch user plugin state.
@@ -164,6 +165,7 @@ def main() -> int:
 
         # Run on Antigravity
         on_antigravity(rv, tmp, check)
+        on_codex(rv, tmp, check)
 
         print(f"\n{'ALL PASSED' if not failures else f'{failures} FAILED'}")
         return 1 if failures else 0
@@ -263,10 +265,13 @@ def on_antigravity(rv, tmp: Path, check) -> None:
     # gemini-4-hydrogen-high, with no effort; a Claude model is not carried over.
     saved_env = os.environ.pop("LOAM_REVIEWER_PROVIDER", None)
     saved_stored = loam_profile.reviewer_stored
+    saved_available = loam_profile.providers.available
     try:
+        loam_profile.providers.available = lambda provider: (provider == "claude-code", None)
         loam_profile.reviewer_stored = lambda: {}
         check(loam_profile.reviewer_provider() == "claude-code",
-              "unset, the reviewer's provider is Claude Code")
+              "with only Claude Code connected, the reviewer uses it")
+        loam_profile.providers.available = lambda provider: (provider != "codex", None)
         loam_profile.reviewer_stored = lambda: {"provider": "antigravity"}
         check(loam_profile.reviewer_provider() == "antigravity"
               and loam_profile.reviewer_choice("fable") == ("gemini-4-hydrogen-high", None),
@@ -285,6 +290,7 @@ def on_antigravity(rv, tmp: Path, check) -> None:
               "LOAM_REVIEWER_PROVIDER names one for a one-off run")
     finally:
         loam_profile.reviewer_stored = saved_stored
+        loam_profile.providers.available = saved_available
         os.environ.pop("LOAM_REVIEWER_PROVIDER", None)
         if saved_env is not None:
             os.environ["LOAM_REVIEWER_PROVIDER"] = saved_env
@@ -384,6 +390,38 @@ def on_antigravity(rv, tmp: Path, check) -> None:
     check(code == 4 and "out of quota: RESOURCE_EXHAUSTED" in record["outcome"]
           and not record["ok"],
           "a failed Antigravity session is a failed run, and says why")
+
+
+def on_codex(rv, tmp: Path, check) -> None:
+    def launch(argv, cwd, timeout, run_dir, stderr, **kwargs):
+        check(argv[:2] == [rv.codex.CODEX, "exec"] and
+              argv[argv.index("--sandbox") + 1] == "read-only" and
+              {"shell_tool", "unified_exec", "multi_agent_v2"} <= set(argv) and
+              argv[argv.index("--model") + 1] == "gpt-fixture" and
+              Path(cwd) == run_dir / "codex",
+              "Codex starts the requested model in the read-only reviewer lane")
+        check(any(arg.startswith('mcp_servers.files.env=') and
+                  "LOAM_REVIEWER_OUTBOX" in arg and "LOAM_FILES_EXCLUDE" in arg
+                  for arg in argv)
+              and any(arg.startswith("mcp_servers.history.command=") for arg in argv),
+              "Codex has the reviewer's file and history servers")
+        outbox = run_dir / "outbox" / "alpha"
+        outbox.mkdir()
+        (outbox / "codex-finding.md").write_text("# Codex finding\n\nOne scoped note\n")
+        result = rv.codex_job.Run()
+        result.read('{"type":"thread.started","thread_id":"codex-fixture"}')
+        result.read('{"type":"turn.completed","usage":{"output_tokens":21}}')
+        return 0, result, False
+
+    with patch.multiple(rv, PROVIDER="codex", MODEL="gpt-fixture", EFFORT="high",
+                        RUNS=tmp / "codex-runs"), patch.object(rv.codex_job, "run", launch):
+        check(rv.run("alpha") == 0, "Codex finishes a review through the shared launcher")
+        record = json.loads(next(rv.RUNS.glob("*/run.json")).read_text())
+        check(record["provider"] == "codex" and record["outcome"] == "completed"
+              and record["session_id"] == "codex-fixture"
+              and record["codex_usage"]["output_tokens"] == 21
+              and Path(record["delivered"]).read_text().endswith("One scoped note\n"),
+              "Codex records its usage and delivers its note through the usual inbox")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only listing and search of the reviewer's reach, as an MCP server.
+"""Listing and search of the reviewer's reach, as an MCP server.
 
 Built for the reviewer on Antigravity (2026-11-15, bin/review). The
 reviewer reads a workspace whole, so it must be able to list a folder and
@@ -12,7 +12,8 @@ and searching go through `run_command`, the shell, which the reviewer must
 not have (reviewer/CLAUDE.md, "Your reach": a shell cannot be made read-only).
 So listing and search come through this server, as history comes through
 mcp/history_server.py: fixed code, pure Python, no subprocess, nothing here
-writes.
+writes on Antigravity. Codex has no native file tools in this lane, so the
+launcher also enables text reads and Markdown writes to its memory and outbox.
 
     list    the entries under a folder, or the files matching a glob, with
             each one's size
@@ -31,6 +32,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -211,6 +213,73 @@ def grep(pattern: str, path: str, glob: str | None = None,
     text = "\n".join(out) + ("\n" if out else "")
     return {**_page(text or "(no match)\n", offset), "path": str(base),
             "files_searched": files}
+
+
+def read(path: str, offset: int = 0) -> dict[str, Any]:
+    """Read a UTF-8 text file in the reviewer's reach. Use next_offset to continue."""
+    source = _resolve(path)
+    if source is None or not source.is_file():
+        return _error("Choose a file inside the reviewer's reach.")
+    try:
+        with source.open(encoding="utf-8") as handle:
+            text = handle.read(GREP_FILE_MAX + 1)
+    except (OSError, UnicodeError) as exc:
+        return _error(str(exc))
+    if len(text) > GREP_FILE_MAX:
+        return _error("This file exceeds the text read limit.")
+    return _page(text, offset)
+
+
+def write(path: str, text: str) -> dict[str, Any]:
+    """Write or replace a Markdown file in memory or outbox; supply its full text."""
+    target = Path(path)
+    memory, outbox = (Path(os.environ[key]).resolve()
+                      for key in ("LOAM_REVIEWER_MEMORY", "LOAM_REVIEWER_OUTBOX"))
+    if ".." in target.parts or target.suffix != ".md":
+        return _error("Choose a Markdown file in memory or outbox/<persona>/.")
+    if target.parent == memory:
+        root, persona = memory, None
+    elif target.parent.parent == outbox:
+        root, persona = outbox, target.parent.name
+    else:
+        return _error("Choose a Markdown file in memory or outbox/<persona>/.")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        root_fd = os.open(root, flags)
+        try:
+            folder_fd = root_fd
+            if persona:
+                try:
+                    os.mkdir(persona, dir_fd=root_fd)
+                except FileExistsError:
+                    pass
+                folder_fd = os.open(persona, flags, dir_fd=root_fd)
+            try:
+                # A replacement never writes through an existing symlink or hard link.
+                temp = f".{uuid.uuid4().hex}.tmp"
+                fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=folder_fd)
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                        handle.write(text)
+                    os.replace(temp, target.name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
+                finally:
+                    try:
+                        os.unlink(temp, dir_fd=folder_fd)
+                    except FileNotFoundError:
+                        pass
+            finally:
+                if folder_fd != root_fd:
+                    os.close(folder_fd)
+        finally:
+            os.close(root_fd)
+    except (OSError, UnicodeError) as exc:
+        return _error(str(exc))
+    return {"ok": True, "path": path}
+
+
+if os.environ.get("LOAM_REVIEWER_MEMORY") and os.environ.get("LOAM_REVIEWER_OUTBOX"):
+    mcp.tool(name="read", description=read.__doc__, annotations={"readOnlyHint": True})(read)
+    mcp.tool(name="write", description=write.__doc__)(write)
 
 
 if __name__ == "__main__":
