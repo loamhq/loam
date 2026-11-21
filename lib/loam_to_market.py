@@ -141,7 +141,10 @@ def _from_release(pid: str) -> None:
     source = release_copy(pid)
     if not (source / "PLUGIN.md").is_file():
         raise FileNotFoundError(f"{source} is not in this release")
+    contributions = loam_plugins.read_folder(source, pid)["manifest"]["contributes"]
     loam_plugins.seed_release_copy(source, pid)
+    if contributions.get("agent.tool") or contributions.get("agent.prompt"):
+        loam_plugins._contributions_follow(f"{pid} kept from this release")
 
 
 def keep(install=None, from_release=None, link_of=None) -> dict:

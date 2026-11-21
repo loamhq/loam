@@ -184,9 +184,11 @@ class HetznerTest(unittest.TestCase):
         def listing_unavailable(_pid):
             raise LookupError("offline fixture")
 
-        migrated = loam_to_market.keep(
-            from_release=lambda pid: plugins.seed_release_copy(ROOT / "plugins" / "_listed" / pid, pid),
-            link_of=listing_unavailable)
+        with patch.object(loam_to_market, "release_copy",
+                          return_value=ROOT / "plugins" / "_listed" / pid), \
+                patch.object(plugins, "_contributions_follow") as reconcile:
+            migrated = loam_to_market.keep(link_of=listing_unavailable)
+        reconcile.assert_called_once_with(f"{pid} kept from this release")
         self.assertEqual(migrated[pid]["how"], "release")
         self.assertEqual(loam_to_market.keep(), {})
         row = plugins.one(pid)["plugin"]
