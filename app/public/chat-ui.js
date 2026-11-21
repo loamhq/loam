@@ -153,6 +153,7 @@ export function segmentedControl({ label, options, value, choose, props = {} }) 
 // hidden failed image also used to reveal it and restart the lazy load.
 // Weak keys release the DOM when its attachment record is no longer retained.
 const fileViews = new WeakMap()
+let mediaViewSerial = 0
 function imageMissing() {
   return h('span', { class: 'reply-image-missing' }, icon.image(16),
     h('span', { text: 'Image no longer available' }))
@@ -170,7 +171,7 @@ export function messageFiles(files = [], key = null) {
   // The images, in order, for the full view a tap opens (2026-11-18). The
   // owner's files are the vault's; an agent's may be a workspace's (`root`).
   const shown = [], failed = new Set()
-  const view = h('div', { class: 'bubble-files' }, ...files.map((file, i) => {
+  const view = h('div', { class: 'bubble-files', key: `files:${++mediaViewSerial}` }, ...files.map((file, i) => {
     const name = file.name ?? file.path
     // Only host-stored paths are read, through the existing authenticated,
     // inert Files download route. Never treat an attachment path as a URL.
@@ -275,7 +276,8 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
     const had = cacheKey === null ? null : figureViews.get(cacheKey)
     if (had?.signature === signature) { had.open = open; had.failed = failed; had.file = file; if (had.missing) failed.add(file); return had.stub }
     const record = { signature, open, failed, file, missing: !href }
-    const node = h('figure', { class: `reply-figure${href ? '' : ' missing known-missing'}`, style: { '--ratio': ratio ? ratio.toFixed(4) : '1.3333' } })
+    // Insert the kept figure itself when it takes the streaming frame's place.
+    const node = h('figure', { key: `figure:${++mediaViewSerial}`, class: `reply-figure${href ? '' : ' missing known-missing'}`, style: { '--ratio': ratio ? ratio.toFixed(4) : '1.3333' } })
     const view = h(href ? 'a' : 'span', { class: 'reply-image', href, 'aria-label': href ? (words ? `Open image: ${words}` : 'Open image') : null, onclick: (e) => {
       // A plain tap opens it full size; a modified click keeps the browser's own.
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button > 0) return
