@@ -3,6 +3,7 @@
 Run: python3 tests/run-all test_plugin_updates.py
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -70,6 +71,52 @@ class Updates(unittest.TestCase):
         preview = plugins.install(request)
         plugins.install({**request, "confirm": preview["confirm"]})
         self.assertTrue(plugins.one("notes")["plugin"]["auto_update"])
+
+    def legacy_install(self, **prefs):
+        self.install()
+        data = plugins.load_list()
+        # The pre-v2 installer hashed the path, a NUL and the binary SHA-256
+        # of each file. Compute this fixture's install record independently.
+        content = (self.repo / "PLUGIN.md").read_bytes()
+        old = hashlib.sha256(b"PLUGIN.md\0" + hashlib.sha256(content).digest()).hexdigest()
+        data["plugins"]["notes"].update(files=old, **prefs)
+        plugins._save_list(data)
+        return old
+
+    def test_clean_legacy_install_migrates_on_first_list_without_network(self):
+        self.legacy_install()
+        with patch.object(plugins, "_remote", side_effect=AssertionError("unexpected network")):
+            row, = plugins.listing()["plugins"]
+            self.assertFalse(row["edited"] or row["updates_paused"])
+            self.assertTrue(row["auto_update"])
+            saved = json.loads((self.yours / plugins.LIST_FILE).read_text())["plugins"]["notes"]
+            self.assertEqual(saved["files"], plugins.fingerprint(self.yours / "notes"))
+            self.assertNotIn("updates_paused", saved)
+        self.release("1.1.0")
+        self.listing("1.1.0")
+        self.assertFalse(updates.check(nightly=True)["errors"])
+        self.assertEqual(plugins.one("notes")["plugin"]["version"], "1.1.0")
+        self.tell.assert_not_called()
+
+    def test_clean_legacy_install_preserves_owner_preference(self):
+        self.legacy_install(auto_update=False, updates_paused=True)
+        row = plugins.one("notes")["plugin"]
+        self.assertFalse(row["edited"] or row["auto_update"])
+        self.assertTrue(row["updates_paused"])
+
+    def test_edited_legacy_install_remains_protected(self):
+        old = self.legacy_install()
+        edit = self.yours / "notes" / "draft.txt"
+        edit.write_text("personal")
+        self.release("1.1.0")
+        self.listing("1.1.0")
+        self.assertTrue(updates.check(nightly=True)["plugins"]["notes"]["personal"])
+        row = plugins.one("notes")["plugin"]
+        self.assertTrue(row["edited"] and row["updates_paused"])
+        self.assertFalse(row["auto_update"])
+        self.assertEqual(plugins.load_list()["plugins"]["notes"]["files"], old)
+        self.assertEqual(edit.read_text(), "personal")
+        self.tell.assert_called_once()
 
     def test_reviewed_commit_wins_even_if_tag_moves_and_feed_records_once(self):
         self.install()

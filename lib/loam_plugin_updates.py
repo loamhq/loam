@@ -119,17 +119,6 @@ def check(nightly=False):
             cache = {}
         with plugins.locked():
             listed = plugins.load_list()
-            for pid, line in listed["plugins"].items():
-                if (plugins.ID.fullmatch(pid) and isinstance(line, dict)
-                        and (line.get("source") or {}).get("kind") == "link"
-                        and len(line.get("files") or "") == 64):
-                    try:
-                        base = {"id": pid, "version": line["version"],
-                                "source": line["source"], "files": line["files"]}
-                        line["files"] = review.digest(review.materialize(base))
-                        plugins._save_list(listed)
-                    except (plugins.PluginError, OSError):
-                        pass  # Unverified files stay protected.
             recognise_copies(listed)
             plugins._remember_pauses(listed)
         lines = {pid: line for pid, line in listed["plugins"].items()

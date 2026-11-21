@@ -77,6 +77,7 @@ FIELDS = ("id", "name", "version", "author", "api", "kind", "places",
           # Settings > Plugins. A Loam before them keeps them as `extra`
           # with a warning, and the plugin still installs and shows.
           "description", "screenshots", "palette")
+SHA256 = re.compile(r"[a-f0-9]{64}")
 LIST_FILE = "installed.json"
 STAGING = ".staging"
 # The Yours layer's default: its own folder and git repository, beside the
@@ -1384,7 +1385,7 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def load_list(strict: bool = True) -> dict:
+def _read_list(strict: bool) -> dict:
     """``installed.json``: the installed list and every switch anyone set.
 
     A file that cannot be read is a 500 for a write (nothing is written over
@@ -1450,6 +1451,69 @@ def _save_list(data: dict) -> None:
     tmp = target.with_name(target.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(tmp, target)
+
+
+def legacy_fingerprint(folder: Path) -> str | None:
+    """Verify the pre-v2 hash of paths and bytes for an existing install."""
+    if not folder.is_dir() or folder.is_symlink():
+        return None
+    h, total = hashlib.sha256(), 0
+
+    def failed(exc):
+        raise exc
+
+    try:
+        for parent, dirs, files in os.walk(folder, onerror=failed):
+            dirs[:] = sorted(d for d in dirs if d != ".git")
+            linked_dirs = [d for d in dirs if (Path(parent) / d).is_symlink()]
+            for name in sorted(files + linked_dirs):
+                path = Path(parent) / name
+                if path.is_symlink():
+                    content = ("link:" + os.readlink(path)).encode()
+                elif path.is_file() and path.stat().st_size <= HASH_MAX - total:
+                    content = path.read_bytes()
+                else:
+                    return None
+                total += len(content)
+                if total > HASH_MAX:
+                    return None
+                h.update(path.relative_to(folder).as_posix().encode() + b"\0"
+                         + hashlib.sha256(content).digest())
+    except (OSError, UnicodeError):
+        return None
+    return h.hexdigest()
+
+
+def load_list(strict: bool = True) -> dict:
+    """Upgrade verified legacy install records before any caller interprets their preferences."""
+    listed = _read_list(strict)
+    verified = {}
+    for pid, line in listed["plugins"].items():
+        if not ID.fullmatch(pid) or not isinstance(line, dict):
+            continue
+        old = line.get("files")
+        if (not isinstance(old, str) or not SHA256.fullmatch(old)
+                or (line.get("source") or {}).get("kind") != "link"):
+            continue
+        folder = yours_root() / pid
+        digest = fingerprint(folder)
+        if digest and legacy_fingerprint(folder) == old:
+            verified[pid] = (line, digest)
+    if not verified:
+        return listed
+    with locked():
+        # Re-read under the writer lock. Preserve intervening installs and every
+        # preference; compare the exact tree again in case an editor was saving.
+        current = _read_list(strict)
+        changed = False
+        for pid, (prior, digest) in verified.items():
+            line = current["plugins"].get(pid)
+            if line == prior and fingerprint(yours_root() / pid) == digest:
+                line["files"] = digest
+                changed = True
+        if changed:
+            _save_list(current)
+        return current
 
 
 def fingerprint(folder: Path) -> str | None:
@@ -1526,10 +1590,6 @@ def _remember_pauses(listed: dict) -> None:
         if not isinstance(line, dict) or not ID.fullmatch(pid) or not line.get("source"):
             continue
         pref = update_preference(pid, line)
-        # Old hashes lacked mode and file-type information. Discovery verifies
-        # the pinned original before deciding whether these installs need a pause.
-        if re.fullmatch("[a-f0-9]{64}", line.get("files") or ""):
-            continue
         if pref["updates_paused"] and not line.get("updates_paused"):
             line.update(auto_update=False, updates_paused=True)
             line.pop("update_consent", None)
