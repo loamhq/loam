@@ -812,6 +812,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "/^\\/plugins\\/([^/]+)$/": ["plugin.on", "plugin.auto_update", "plugin.remove"],
     "/^\\/plugins\\/([^/]+)\\/files\\/(.+)$/":
         "a read: a plugin's page/ and assets/ files, theme.css and PLUGIN.md",
+    "rest === '/owner/used-controls'": "records that the owner used a labelled control during onboarding",
     "rest === '/apps'": "a read: the Apps section's list, GET /v1/apps "
                         "(2026-11-12; broker/README.md, \"Apps\")",
     "rest === '/apps/icon'": "a read: an app's site icon for the Apps "

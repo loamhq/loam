@@ -1,4 +1,5 @@
-import { welcomeScreen, untouchedHello } from './onboarding.js'
+import { syncFirstUse, usedControl } from './first-use.js'
+import { welcomeScreen, untouchedHello, hasPlacesGreeting } from './onboarding.js'
 import { createDailyNotes } from './daily-notes.js'
 import { createSecretSettings } from './plugin-secrets.js'
 import { isOwner, ownerInitial, setOwner } from './owner.js'
@@ -798,12 +799,13 @@ function put(url, body, onProgress) {
   })
 }
 
+document.addEventListener('click', usedControl, true)
 const onboarding = { checking: true, needed: false, hello: null }
 async function continueWelcome() {
   if (!state.providers.some(p => ['claude-code', 'codex', 'antigravity'].includes(p.id) && p.connected)) return
   page.providerSignIn.cancel()
   onboarding.needed = false
-  await threads.open(onboarding.hello)
+  if (isWide() || !onboarding.listOnPhone) await threads.open(onboarding.hello)
   schedule()
 }
 function render() {
@@ -1372,8 +1374,13 @@ const pageHeartbeat = setInterval(() => {
 // Activity also refreshes on the heartbeat because its interface is JSON.
 const loginHeartbeat = setInterval(() => page.providerSignIn.poll(), 1000)
 
-try { setOwner(await api('GET', '/owner')) } catch { /* Unknown owner stays unknown; focus retries the runtime. */ }
-window.addEventListener('focus', () => api('GET', '/owner').then(value => { setOwner(value); schedule() }).catch(() => {}))
+async function loadOwner() {
+  const value = await api('GET', '/owner')
+  setOwner(value)
+  syncFirstUse(value.used_controls, control => api('POST', '/owner/used-controls', { control }))
+}
+try { await loadOwner() } catch { /* Unknown owner stays unknown; focus retries the runtime. */ }
+window.addEventListener('focus', () => loadOwner().then(schedule).catch(() => {}))
 loadHealth()
 loadAgentAvailability()
 running.start()
@@ -1384,16 +1391,17 @@ if (landingURL.searchParams.get('threads') === 'fixture') threads.preview()
 else {
   const listing = threads.load()
   // Use the runtime's starter marker, never a browser-local setup flag. A
-  // A finished hello stays put, and an explicit address keeps its destination.
+  // finished hello stays put, and an explicit address keeps its destination.
   await Promise.all([listing, loadProviders()])
   const hello = threads.st.threads.find(row => row.hello === true)
   if (hello) {
     try {
-      const record = await api('GET', `/threads/${encodeURIComponent(hello.id)}`)
+      const record = await api('GET', `/threads/${encodeURIComponent(hello.id)}?seen=0`)
       if (untouchedHello(record)) {
+        onboarding.listOnPhone = record.messages.some(hasPlacesGreeting)
         onboarding.hello = hello.id
         onboarding.needed = !state.providers.some(p => ['claude-code', 'codex', 'antigravity'].includes(p.id) && p.connected)
-        if (!onboarding.needed && !workspaceHistory.restored && landingURL.pathname === '/' && !landingURL.search && !landingURL.hash) await threads.open(hello.id)
+        if (!onboarding.needed && (isWide() || !onboarding.listOnPhone) && !workspaceHistory.restored && landingURL.pathname === '/' && !landingURL.search && !landingURL.hash) await threads.open(hello.id)
       }
     } catch { /* An unavailable starter leaves ordinary Chats accessible. */ }
   }

@@ -1,3 +1,4 @@
+import { firstUseActive } from './first-use.js'
 import { installation } from './installation.js'
 import { createCoreRegistry } from './core-registrations.js'
 import { formatCalendarDate } from './time.js'
@@ -217,7 +218,7 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
       appUnavailable(app) ? h('div', { class: 'apps-empty', role: 'status' }, h('p', { text: `${app.name} · ${appUnavailable(app)}` }), h('p', { class: 'note', text: 'Manage this plugin in Settings › Plugins.' }))
         : h('iframe', { class: 'apps-embed', key: app.url, src: appURL(app.url), title: app.name, referrerpolicy: 'strict-origin-when-cross-origin', sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads' }))
     const none = st.loaded && !st.apps.length && !st.error
-    const noApps = () => emptyState({ object: 'window', title: 'No apps yet', body: 'An agent can build an app for you.',
+    const noApps = () => emptyState({ object: 'window', title: 'No apps yet', body: firstUseActive() ? 'The apps you build and install live here.' : 'An agent can build an app for you.',
       action: h('button', { class: 'pillbtn primary', text: 'Build an app', onclick: newThread }), props: { class: 'apps-empty' } })
     if (!list && wide()) return h('div', { class: 'pane-body', key: 'pane:apps:empty' }, none ? noApps() :
       h('div', { class: 'pane-nothing apps-rest' },

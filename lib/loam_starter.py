@@ -6,6 +6,7 @@ agent or a deliberately removed thread. See docs/starter.md."""
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import loam_agents
@@ -64,6 +65,27 @@ def status() -> dict | None:
         return json.loads(marker_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def first_use() -> list[str] | None:
+    """Only new installs keep the owner's dismissed icon captions."""
+    marker = status()
+    used = marker.get("used_controls") if isinstance(marker, dict) else None
+    return used if isinstance(used, list) else None
+
+
+def use_control(control: str) -> None:
+    if not isinstance(control, str) or not re.fullmatch(r"[A-Za-z][A-Za-z -]{0,63}", control):
+        raise ValueError("Use a short control name.")
+    with loam_agents.locked():
+        marker = status()
+        used = marker.get("used_controls") if isinstance(marker, dict) else None
+        if not isinstance(used, list) or control in used:
+            return
+        if len(used) >= 128:
+            raise ValueError("The list of used controls is full.")
+        used.append(control)
+        loam_agents._write_json(marker_path(), marker)
 
 
 def inherit_legacy_hello() -> bool:
@@ -142,10 +164,12 @@ def seed(*, root: Path | None = None, provision=None) -> dict:
                 return {"skipped": f"{ws} exists: an agent named {agent} is already "
                                    f"this install's, and its files are its own"}
         first_weeks = not done or done.get("first_weeks") is True
+        first_minute = not done or done.get("first_minute") is True
         if not ws.exists():
             wake = loam_agents.free_wake()
             loam_agents._write_json(marker_path(), {"state": "making", "agent": agent,
                                                     "wake": wake, "first_weeks": first_weeks,
+                                                    "first_minute": first_minute,
                                                     "at": loam_agents.now_iso()})
             loam_agents.make(agent, d, wake, provision=provision)
         else:
@@ -166,6 +190,8 @@ def seed(*, root: Path | None = None, provision=None) -> dict:
         msg_id = (preset or threads.append(tid, agent, text, preset=True))["id"]
         record = {"agent": agent, "thread": tid, "message": msg_id,
                   "at": loam_agents.now_iso()}
+        if first_minute:
+            record["used_controls"] = []
         if first_weeks:
             record["first_weeks"] = True
         loam_agents._write_json(marker_path(), record)

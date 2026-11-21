@@ -1,14 +1,14 @@
 # The starter: Iris and the hello thread
 
 A blank Loam install ships one agent, Iris, and one thread: the hello
-thread, where the person lands after signing in. Everything here is copied
+thread. After sign-in a phone shows Hello unread in Chats, and a wide screen opens it. Everything here is copied
 into the install once, by `bin/library seed-starter` (lib/loam_starter.py),
 and from then on belongs to the person. They can change, rename or archive
 Iris. Her soul, config and map load on every run.
 
 The words are the owner's approved starter (2026-11-16), which replaced the
 placeholders of 2026-11-14. The source is the design note "Starter Iris: soul
-and hello". The hello greeting and guidance were revised on 2026-11-19.
+and hello". The greeting and first-session guidance were revised on 2026-11-20.
 
 | File | What it becomes |
 |---|---|

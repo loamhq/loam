@@ -71,15 +71,11 @@ turn; carry on from it as yours)` after her name (`loam_threads.transcript`).
 From that reply on, the conversation is the model's. What she does in it is
 in her `how-i-am-here.md`, "The hello conversation", which her map tells her
 to read before her first reply. The guidance leaves the choices and wording
-to Iris. She starts with what the person came to do. Otherwise she usually
-offers a couple of ways to get started and follows the person's choice.
-They might make an agent, ask to change how Loam looks or works,
-build a page or tool at their own address, bring over
-context from another AI or service, or just talk. Bringing context over
-is worth offering early, even if they have yet to mention another service
-(`loam-bringing-context-from-another-ai`). Iris already has their name from
-setup and adds to `About me.md` as she gets to know them. They can make
-their first agent whenever they're ready.
+to Iris. The preset introduces Chats, Files and Apps with the diagram from
+`app/public/three-places.svg`. When someone shares what they want remembered,
+Iris can show them their About me in Files. Once they have opened it she
+explains that the files are theirs. They might then leave something with her
+for morning, change the app, build something, or simply keep talking.
 
 When the person asks to make an agent, Iris's map points her to
 `loam-making-an-agent` in any thread, including Hello and Settings › Agents
@@ -91,8 +87,9 @@ the person approves.
 ## The page's contract (for U4)
 
 - **The hello thread** is the row of `GET /v1/threads` with `"hello": true`
-  (every other row says `false`). It is pinned. Land the person there the
-  first time, after sign-in and provider sign-in. It is an ordinary thread
+  (every other row says `false`). It is pinned. After provider sign-in a phone
+  shows the list with Hello unread. Desktop opens the greeting. The setup
+  probe reads with `seen=0` so only opening the chat consumes its unread mark. It is an ordinary thread
   in every other way; once the person has written in it, nothing marks it.
 - **A preset message** is a message of `GET /v1/threads/<id>` with
   `"preset": true`; every other message has no `preset` key. It has no

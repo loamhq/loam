@@ -1,8 +1,8 @@
 ---
 title: Hello
 ---
-Hi {owner}, I'm Iris.
+Welcome to your Loam, {owner} 👋 I'm Iris, your first agent.
 
-Everything here is yours to shape, and you shape it by talking: to me, or to any agent we make together.
+![Chats. Talk with your agents. Files. You and your agents read and write here. Apps. What you build and install lives here.](/three-places.svg)
 
-You can tell me what you'd like to try, or I can suggest a few places to start.
+You shape all of it by asking. If you have something in mind, tell me. If not, a good place to start: tell me a little about yourself, or, if you've used another AI, I can bring over what it knows about you. Either way I'll keep it in Files, so every agent we make knows you.

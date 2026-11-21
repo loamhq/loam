@@ -87,7 +87,8 @@ try {
     await shot('welcome-provider-connected')
     await meet.click()
   }
-  await page.locator('[data-message-id="m1"]').getByText(/Hi Sam,/).waitFor()
+  if (width === 390) await page.locator('.tt-row').filter({ hasText: 'Hello' }).click()
+  await page.locator('[data-message-id="m1"]').getByText(/Welcome to your Loam, Sam/).waitFor()
   await page.locator('.welcome').waitFor({ state: 'detached' })
   const screens = await page.evaluate(() => [...window.onboardingScreens])
   assert.deepEqual(screens.filter(screen => screen !== 'Making room for you…'),
@@ -97,7 +98,6 @@ try {
   await shot(`${entry}-hello`)
 
   if (entry === 'already-connected') {
-    if (width === 390) await page.getByRole('button', { name: 'Back to threads' }).click()
     await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
     await page.getByRole('button', { name: /^Plugins\b/ }).first().click()
     const backup = page.getByRole('button', { name: 'About Git backup' })

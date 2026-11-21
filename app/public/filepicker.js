@@ -1,3 +1,4 @@
+import { firstUseActive } from './first-use.js'
 // "Attach from Files": the picker the composer's "Pick from Files" opens, over
 // the chat rather than instead of it, so a draft that has no session yet keeps
 // its words while files are picked for it.
@@ -112,7 +113,7 @@ export function pickerSheet(picker, { agentName = null } = {}) {
         ),
       )
     }
-  } else if (st.rows.length === 0) rows.push(emptyState({ object: 'folder', size: 'small', level: 'h3', title: 'Nothing here yet', props: { class: 'fs-quiet' } }))
+  } else if (st.rows.length === 0) rows.push(emptyState({ object: 'folder', size: 'small', level: 'h3', title: 'Nothing here yet', body: firstUseActive() ? 'Keep files here with your agents.' : null, props: { class: 'fs-quiet' } }))
   else {
     for (const row of st.rows) {
       const key = `${row.root}:${row.path}`

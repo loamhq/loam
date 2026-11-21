@@ -456,6 +456,9 @@ export function createApp({
       if (method !== 'GET') return sendJson(res, 405, { error: 'The server is read only.' })
       return sendJson(res, 200, serverFacts())
     }
+    if (rest === '/owner/used-controls' && method === 'POST') {
+      return await relayJson(res, method, '/v1/owner/used-controls', await readBody(req))
+    }
     if (rest === '/owner') {
       if (method !== 'GET') return sendJson(res, 405, { error: 'The owner is read only.' })
       return await relayJson(res, 'GET', '/v1/owner', undefined, { signal: AbortSignal.timeout(5000) })
