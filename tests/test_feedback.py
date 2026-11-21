@@ -103,6 +103,9 @@ try:
           {"your name": 1, "an agent's name": 1, "a key or a token": 3,
            "an e-mail address": 1, "an IP address": 1, "the name of a note": 2})
 
+    check("an IP at the end of a sentence is scrubbed",
+          fb.scrub("Stopped at 192.0.2.10.")[0], "Stopped at <ip>.")
+
     # -- the draft and its link ----------------------------------------------------
     subprocess.run(["git", "init", "-q", "-b", "main", str(CHECKOUT)], check=True)
     (CHECKOUT / "manifest.json").write_text('{"version": "1.0.0"}\n')
