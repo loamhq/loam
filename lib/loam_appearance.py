@@ -1,5 +1,5 @@
-"""Store host-wide phone and desktop appearance settings and an optional shared
-location for Sun mode. Validate modes and theme options against the app and
+"""Store the owner's theme, mode, options and optional Sun location, plus
+phone and desktop size and transition. Validate choices against the app and
 installed plugins. Preserve stored theme IDs when a plugin is unavailable. Serialize
 patches under the shared settings lock.
 """
@@ -17,6 +17,7 @@ import loam_broker as cfg
 
 KINDS = ("phone", "desktop")
 LOCATION = "location"
+ACCOUNT = "account"
 # The modes the page has always drawn, for when loam-ui's handoff cannot be
 # read; the declared list is `modes()`.
 BASE_MODES = ("light", "dark", "system")
@@ -234,41 +235,59 @@ def _stored_options(row: dict) -> dict[str, dict[str, str]]:
     return out
 
 
+def _merge_options(target: dict, patch: dict) -> None:
+    for theme, options in patch.items():
+        target.setdefault(theme, {}).update(options)
+
+
 def _fill(stored) -> dict:
-    """Mode, transition, size and theme of each kind, defaults where the file has nothing
-    (or nonsense), and the kind's stored option choices as stored."""
+    """Read the account record, or derive it from legacy rows until the first write.
+
+    Desktop wins over phone where both legacy rows name the same field or
+    option. Retain the legacy rows on disk and only update the account copy.
+    """
     stored = stored if isinstance(stored, dict) else {}
+    account = {"mode": DEFAULT["mode"], "theme": DEFAULT["theme"], "options": {}}
     out = {}
     for kind in KINDS:
         row = stored.get(kind) if isinstance(stored.get(kind), dict) else {}
         out[kind] = {
-            # Kept if id-shaped, declared or not: only a write is held to modes().
-            "mode": row["mode"] if _theme_shaped(row.get("mode")) else DEFAULT["mode"],
+            **row,
             "transition": (row["transition"] if row.get("transition") in TRANSITIONS
                            else DEFAULT["transition"]),
             "size": row["size"] if _valid_size(row.get("size")) else DEFAULT["size"],
-            "theme": (row["theme"] if _theme_shaped(row.get("theme"))
-                      else DEFAULT["theme"]),
-            "options": _stored_options(row),
         }
+    saved = stored.get(ACCOUNT)
+    for row in [saved] if isinstance(saved, dict) else [out[kind] for kind in KINDS]:
+        for name in ("mode", "theme"):
+            if _theme_shaped(row.get(name)):
+                account[name] = row[name]
+        _merge_options(account["options"], _stored_options(row))
+    out[ACCOUNT] = account
     out[LOCATION] = _stored_location(stored.get(LOCATION))
     return out
+
+
+def _device_values(value: dict) -> dict:
+    account = value[ACCOUNT]
+    return {kind: {"mode": account["mode"], "theme": account["theme"],
+                   "size": value[kind]["size"],
+                   "transition": value[kind]["transition"]} for kind in KINDS}
 
 
 def _public(value: dict, cat: dict) -> dict:
     """The reading: each installed theme with options, each of its options
     the stored choice where the theme still offers it, else its default."""
-    out = {}
-    for kind in KINDS:
-        row = dict(value[kind])
-        stored = row.get("options") or {}
-        row["options"] = {
-            theme: {opt: (stored.get(theme, {}).get(opt)
-                          if stored.get(theme, {}).get(opt) in spec["choices"]
-                          else spec["default"])
-                    for opt, spec in opts.items()}
-            for theme, opts in cat.items()}
-        out[kind] = row
+    stored = value[ACCOUNT]["options"]
+    options = {
+        theme: {opt: (stored.get(theme, {}).get(opt)
+                      if stored.get(theme, {}).get(opt) in spec["choices"]
+                      else spec["default"])
+                for opt, spec in opts.items()}
+        for theme, opts in cat.items()}
+    out = _device_values(value)
+    for row in out.values():
+        row["options"] = options
     out[LOCATION] = value.get(LOCATION)
     return out
 
@@ -276,9 +295,7 @@ def _public(value: dict, cat: dict) -> dict:
 def read_base() -> dict:
     """Mode, transition, size and theme of each kind, without reading the theme catalog
     (the plugin list's in-use themes)."""
-    value = _fill(_load_all().get("appearance"))
-    return {kind: {k: v for k, v in value[kind].items() if k != "options"}
-            for kind in KINDS}
+    return _device_values(_fill(_load_all().get("appearance")))
 
 
 def read() -> dict:
@@ -371,17 +388,16 @@ def update(patch) -> dict:
     with _lock:
         data = _load_all()
         value = _fill(data.get("appearance"))
-        for kind, fields in clean.items():
-            if kind == LOCATION:
-                value[LOCATION] = fields
-                continue
-            for name, v in fields.items():
-                if name != "options":
-                    value[kind][name] = v
-                    continue
-                # Leaf by leaf: a theme's other options, and other themes', stay.
-                for theme, opts in v.items():
-                    value[kind]["options"].setdefault(theme, {}).update(opts)
+        if LOCATION in clean:
+            value[LOCATION] = clean[LOCATION]
+        # The existing device keys remain aliases for shared fields. If an
+        # older client sends both rows with conflicting values, desktop wins.
+        for kind in KINDS:
+            for name, v in clean.get(kind, {}).items():
+                if name == "options":
+                    _merge_options(value[ACCOUNT]["options"], v)
+                else:
+                    value[ACCOUNT if name in ("mode", "theme") else kind][name] = v
         data["appearance"] = value
         target = path()
         target.parent.mkdir(parents=True, exist_ok=True)

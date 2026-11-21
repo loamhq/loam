@@ -323,8 +323,14 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   function picture(row) {
     if (row.kind?.includes?.('theme')) {
       const cover = themeCover(row)
+      const installed = row.effective && !row.broken && theme.installed.find(item => item.id === row.id)
+      const value = theme.value, status = theme.status
+      const settings = installed ? { mode: value.mode, options: value.options?.[row.id], set: theme.set } : undefined
       return [cover ? h('div', { class: 'plugin-theme-cover' }, cover) : null,
-        showcase.view({ key: `plugin-${row.id}`, look: row.id, name: row.name || row.id, options: row.options ?? [], palette: row.palette ?? [], from: 'installed' })]
+        showcase.view({ key: `plugin-${row.id}`, look: row.id, name: row.name || row.id,
+          options: (installed || row).options ?? [], palette: row.palette ?? [], from: 'installed', settings }),
+        settings && status.error ? h('div', { class: 'appearance-status err', role: 'status' }, status.error,
+          button('Try again', () => status.saving ? theme.save() : theme.refresh(), 'quietlink')) : null]
     }
     const file = rel => `/api/plugins/${encodeURIComponent(row.id)}/files/${String(rel).split('/').map(encodeURIComponent).join('/')}`
     const shots = (row.screenshots ?? []).map(sh => ({ caption: sh.caption, src: file(sh.src), src_dark: sh.src_dark ? file(sh.src_dark) : null }))
