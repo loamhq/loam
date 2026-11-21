@@ -9,6 +9,7 @@ import { speechProviders } from '../../plugins/_listed/read-aloud/server/provide
 import { narrate } from '../../plugins/_listed/read-aloud/server/openai-speech.js'
 import { openAIVoices } from '../../plugins/_listed/read-aloud/page/openai-voices.js'
 import { PREBUILT_VOICES } from '../../plugins/_listed/read-aloud/page/document-speech.js'
+import { voiceGender } from '../../plugins/_listed/read-aloud/page/voices.js'
 import { BrowserAudio } from '../../plugins/_listed/read-aloud/page/browser-audio.js'
 
 test('one recording stays with its selected provider, including polish and refusals', async () => {
@@ -59,6 +60,12 @@ test('Read aloud rechecks declared keys and refuses a stale selection before syn
 
 test('OpenAI narration maps every profile voice, collects PCM, and names a refused request', async () => {
   assert.deepEqual(Object.keys(openAIVoices).sort(), [...PREBUILT_VOICES].sort())
+  const families = new Map()
+  for (const [profile, mapped] of Object.entries(openAIVoices)) {
+    const gender = voiceGender(profile)
+    if (families.has(mapped)) assert.equal(families.get(mapped), gender, mapped + ' crosses profile voice groups')
+    families.set(mapped, gender)
+  }
   let socket
   class Socket extends EventTarget {
     constructor(url, options) { super(); socket = this; assert.match(url, /api\.openai\.com/); assert.equal(options.headers.authorization, 'Bearer test') }

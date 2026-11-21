@@ -1,6 +1,6 @@
 # Dictation and Read aloud 1.2.0
 
-Real Chromium captures using a demo account with fictional conversations. The viewport is 390 × 844 on phone and 1120 × 700 on desktop. Provider status and key verification in these pictures use fixtures. The browser player and microphone use Chromium’s native speech APIs.
+Chrome and Chromium captures using a demo account with fictional conversations. The viewport is 390 × 844 on phone and 1120 × 700 on desktop. Provider status and key verification in these pictures use fixtures. The device player uses native speech synthesis. The microphone error came from headless Chromium. The spoken transcript and draft came from Google Chrome using its native recognition and a virtual system microphone playing a garden note. The capture checks that keeping the words does not post a recording to Loam.
 
 | Screen | Plugin and provider | Phone light | Phone dark | Desktop light | Desktop dark |
 | --- | --- | --- | --- | --- | --- |
@@ -21,3 +21,5 @@ Real Chromium captures using a demo account with fictional conversations. The vi
 | Browser Listen menu | Read aloud · browser | [View](phone/read-aloud-device-menu.webp) | [View](phone/read-aloud-device-menu-dark.webp) | [View](desktop/read-aloud-device-menu.webp) | [View](desktop/read-aloud-device-menu-dark.webp) |
 | Browser player | Read aloud · browser | [View](phone/read-aloud-device-player.webp) | [View](phone/read-aloud-device-player-dark.webp) | [View](desktop/read-aloud-device-player.webp) | [View](desktop/read-aloud-device-player-dark.webp) |
 | Browser Files reader | Read aloud · browser | [View](phone/read-aloud-device-files.webp) | [View](phone/read-aloud-device-files-dark.webp) | [View](desktop/read-aloud-device-files.webp) | [View](desktop/read-aloud-device-files-dark.webp) |
+| Browser transcript | Dictation · browser | [View](phone/dictation-spoken-heard.webp) | [View](phone/dictation-spoken-heard-dark.webp) | [View](desktop/dictation-spoken-heard.webp) | [View](desktop/dictation-spoken-heard-dark.webp) |
+| Transcript kept in draft | Dictation · browser | [View](phone/dictation-spoken-draft.webp) | [View](phone/dictation-spoken-draft-dark.webp) | [View](desktop/dictation-spoken-draft.webp) | [View](desktop/dictation-spoken-draft-dark.webp) |

@@ -26,7 +26,11 @@ await mkdir(out, { recursive: true })
 const dirs = JSON.parse(process.env.PLUGIN_DIRS || '{}')
 const ROOT = new URL('../../', import.meta.url).pathname
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright')
-const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox', '--enable-speech-dispatcher', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', ...(process.env.DEMO_SPEECH ? [`--use-file-for-fake-audio-capture=${process.env.DEMO_SPEECH}`] : []), '--autoplay-policy=no-user-gesture-required'] })
+// The online speech proof uses a virtual system microphone fed the demo WAV.
+const systemMic = process.env.SHOT_SYSTEM_MIC === '1'
+const deviceArgs = systemMic ? [] : ['--use-fake-device-for-media-stream',
+  ...(process.env.DEMO_SPEECH ? [`--use-file-for-fake-audio-capture=${process.env.DEMO_SPEECH}`] : [])]
+const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox', '--enable-speech-dispatcher', '--use-fake-ui-for-media-stream', ...deviceArgs, '--autoplay-policy=no-user-gesture-required'] })
 const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8')
 const W = Number(process.env.SHOT_WIDTH || 1120), H = W < 600 ? 844 : 700, CLIP = 640, CLIP_H = 400, AT = '2026-11-19T16:40:00Z', THREAD = 'a-quieter-week'
 const json = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
@@ -72,7 +76,7 @@ async function scene(name, { plugins = [], title, messages = [], files = null, r
     app.routes[`GET /v1/threads/${THREAD}/steps`] = (req, res) => json(res, { error: 'No full record' }, 404)
     if (agents) for (const [r, fn] of Object.entries(agents)) app.routes[r] = fn
     if (setup) setup(app)
-    const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 2, colorScheme: mode, reducedMotion: 'reduce', timezoneId: 'America/Los_Angeles' })
+    const ctx = await browser.newContext({ ...(systemMic ? { permissions: ['microphone'] } : {}), viewport: { width: W, height: H }, deviceScaleFactor: 2, colorScheme: mode, reducedMotion: 'reduce', timezoneId: 'America/Los_Angeles' })
     await ctx.route('**/app.js', r => r.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__cap={page,state,schedule,threads};' }))
     for (const [pattern, handler] of Object.entries(routes)) await ctx.route(pattern, handler)
     // A person's own device preferences for the scene (localStorage).
@@ -243,6 +247,25 @@ if (speechFile) await run('read-aloud', { setup: profileRoutes, plugins: ['read-
   await page.waitForTimeout(500)
   await page.mouse.move(0, 0)
   await shot('voice', "() => document.querySelector('.agent-voice-picker')", { align: 'top', pad: 70 })
+})
+
+// Optional online proof. Point SHOT_SYSTEM_MIC=1 and PULSE_SOURCE at a
+// virtual microphone playing the garden recording. Chrome produces the
+// result and Dictation handles it without a server key.
+if (systemMic && only.includes('dictation-spoken')) await run('dictation-spoken', {
+  plugins: ['dictation'], title: 'Spring garden', messages: GARDEN,
+  routes: { '**/x/dictation/status': r => r.fulfill({ json: { provider: 'browser' } }) },
+}, async ({ page, open, shot }) => {
+  let posts = 0
+  page.on('request', req => { if (new URL(req.url()).pathname === '/x/dictation/transcribe') posts++ })
+  await open()
+  await page.locator('.roundmic').first().click()
+  await page.locator('.take .said').filter({ hasText: /garden/i }).waitFor({ timeout: 30000 })
+  await shot('heard')
+  await page.locator('.takebtn.keep').first().click()
+  await page.waitForFunction(() => [...document.querySelectorAll('textarea,[contenteditable=true]')].some(n => /garden/i.test(n.value ?? n.textContent)))
+  await shot('draft')
+  if (posts) throw new Error('Browser dictation posted a recording to Loam')
 })
 
 // Exercise the same fallback controls in a thread and in Files.
