@@ -179,6 +179,16 @@ async def main():
           (rc, told[0][0], told[0][1]), (0, f"/v1/threads/{tid}/posted",
                                          {"message": printed["message"]["id"], "by": "ada"}))
     check("...and says who was woken", printed.get("woke"), ["cleo"])
+    out = io.StringIO()
+    sys.argv = ["thread", "post", tid, "@cleo from the command", "--by", "ada"]
+    with contextlib.redirect_stdout(out):
+        repeat_rc = cli.main()
+    repeat = json.loads(out.getvalue())
+    check("identical ordinary posts are both stored and delivered",
+          (repeat_rc, repeat["message"]["id"] != printed["message"]["id"],
+           [m["text"] for m in threads.read(tid)[1]
+            if m["text"] == "@cleo from the command"], len(told)),
+          (0, True, ["@cleo from the command", "@cleo from the command"], 2))
     stub.shutdown()
 
 
