@@ -23,6 +23,7 @@ import loam_provider_memory as provider_memory
 import loam_broker as cfg
 from loam_provider_session import configure_thread
 import loam_thread_steps as steps
+from loam_thread_summaries import Summaries, prior as prior_summary
 import loam_session_fence as fence
 import loam_thread_inputs as inputs
 import loam_threads as threads
@@ -520,6 +521,7 @@ class ThreadEngine:
 
     def __init__(self, broker) -> None:
         self.broker = broker
+        self.handoffs = Summaries(self)
         self._system_turns: dict | None = None   # read on first use
         self._marks: dict | None = None          # read on first use
         self.queues: dict[tuple[str, str], asyncio.Queue] = {}
@@ -906,6 +908,7 @@ class ThreadEngine:
         The input is written to the member's list on disk first
         (2026-11-19, ``loam_thread_inputs``), so a restart loses none of it;
         ``persist`` is False only for input read back from that list."""
+        self.handoffs.preempt(turn.key)
         if persist and turn.input_id is None:
             turn.queued_at = threads.now_iso()
             try:
@@ -1472,7 +1475,7 @@ class ThreadEngine:
         # exchange, and on a fresh session its own summary too; on a resumed
         # one, what in that exchange is new to it.
         window = threads.recent_window(msgs)
-        summary, unshown = None, 0
+        summary, summary_through, unshown = None, None, 0
         if kept:
             cut = threads._num(kept.get("through"))
             unseen = [m for m in msgs if threads._num(m.get("id")) > cut
@@ -1482,9 +1485,10 @@ class ThreadEngine:
             unshown = len(unseen) - len(news)
         else:
             news = window
-            summary = threads.read_summary(turn.persona, turn.thread_id)
+            summary, summary_through, _ = prior_summary(turn.key)
         prompt = threads.turn_prompt(meta, turn.persona, news, fresh=kept is None,
-                                     record=msgs, summary=summary, unshown=unshown)
+                                     record=msgs, summary=summary, unshown=unshown,
+                                     summary_through=summary_through)
         if turn.note:
             prompt += "\n\n" + turn.note
         held = held_line(turn)
@@ -1878,8 +1882,9 @@ class ThreadEngine:
             seen = (kept or {}).get("through") or "m0"
             steps.log(f"{turn.thread_id} {turn.persona}: turn ended ({ended}) "
                       f"before any reply; its messages stay new to the next turn")
+        due = self.summary_due(turn, session) if ended in ("result", "handed") else None
         threads.remember_session(turn.thread_id, turn.persona, session.id,
-                                 engine, seen, seq=turn.cursor,
+                                 engine, seen, seq=turn.cursor, summary_due=due,
                                  context=session_context(session),
                                  watch=ended == "result" and getattr(self.broker, "remote", False))
         if ended == "handed":
@@ -2354,6 +2359,20 @@ class ThreadEngine:
         steps.log(f"{turn.thread_id} {turn.persona}: {len(reply.did)} step(s) and no "
                   f"words ({why}); kept in the full record only")
 
+    def summary_due(self, turn, session):
+        # Once the threshold is known the next message can replace this session.
+        now = time.time()
+        due = now + threads.PAUSE_S
+        # Persistent providers have an earlier, known idle reap. Antigravity
+        # releases its process on every turn and keeps a resumable conversation.
+        last = getattr(session, "last_activity", None)
+        if session.provider != "antigravity" and isinstance(last, (int, float)):
+            due = min(due, last + cfg.THREAD_IDLE_S)
+        if over_threshold(session_context(session)):
+            due = now
+        self.handoffs.arm(turn.key, due)
+        return due
+
     def post_reply(self, turn: Turn, session, reply: "Reply", engine: str,
                    model: str | None, why: str, mentions: bool = True) -> dict:
         """One reply into the readable record, its full steps beside it, and
@@ -2390,7 +2409,8 @@ class ThreadEngine:
         read = turn.read_through or (threads.session_for(*turn.key) or {}).get("through") \
             or msg["id"]
         threads.remember_session(turn.thread_id, turn.persona, session.id,
-                                 engine, read, seq=seq if seq is not None else getattr(session, "seq", None))
+                                 engine, read, seq=seq if seq is not None else getattr(session, "seq", None),
+                                 context=session_context(session), summary_due=self.summary_due(turn, session))
         self.publish(turn.thread_id, {"type": "message.done", "message": msg})
         if reply.launched:
             self.stamp_launched(turn.key, reply, msg)

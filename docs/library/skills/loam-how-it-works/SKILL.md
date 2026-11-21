@@ -13,7 +13,7 @@ owner. Everything an agent knows and makes is a file on that server.
 - Every conversation, wake and cron loads `soul.md`, who it is (the owner's); its config, which is
   Loam's short text followed by the owner's words (one page every agent
   loads, then the agent's own `config.md`); and the agent's own `map.md` if present.
-  A run adds only its own input: a thread's summary and recent messages, a
+  A run adds only its own input: a fresh thread session's summary and recent messages, a
   wake's reflection instruction and vault changes, or a cron's file under `crons/`.
 - The workspace is the agent's to shape. The map is paid for on every run,
   so it points to things and does not hold them; past 10,000 characters the
@@ -66,6 +66,15 @@ revision after edits to comments or unused documentation. A planned change
 to the host closes admission and proceeds only when sessions and queued
 turns are idle. During a brief outage the app keeps submitted messages in this browser and delivers them
 in order when the service returns.
+
+Each member keeps its own view of a thread. Reply turns are for the reply.
+After 30 quiet minutes, or sooner when a resident session is due to leave
+memory or a large session is ready to rotate, Loam asks privately for a
+short handoff. A new message takes priority. The next fresh session gets
+the last completed handoff, the recent exchange and the thread file's path.
+The handoff names the last message it covers. If a member already keeps a
+workspace summary, Loam uses that until a private handoff is ready and
+honors later edits to it.
 
 On a fresh install the owner lands in Hello with Iris. Loam posts a greeting
 as Iris using the name from setup, and Iris takes over on the first reply.

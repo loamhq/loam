@@ -15,6 +15,7 @@ from pathlib import Path
 import loam_adopt as adoption
 import loam_session_fence as fence
 import loam_broker as cfg
+import loam_private_summary
 from loam_provider_session import BrokerError, Session, first_words, parse_iso, session_class
 from loam_session_records import backfill_records, normalise, prune_fork_duplicates, sync_titles
 
@@ -93,6 +94,7 @@ class SessionHost:
         self._scanned = 0.0
         # Reserve memory and a seat until each admitted process finishes starting.
         self._starting: set[str] = set()
+        self._summaries: dict[str, asyncio.Task] = {}
         self._opening: dict[str, tuple[str, str, asyncio.Task]] = {}
         # Subscribers watch the whole catalog across session arrivals and departures.
         self.record_subscribers: set[asyncio.Queue] = set()
@@ -292,6 +294,21 @@ class SessionHost:
         task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
         return await asyncio.shield(task)
 
+    async def private_summary(self, sid, prompt):
+        """Reserve without reclaiming a seat. Disconnecting the API cancels its private child."""
+        session = self.load(sid)
+        if self.stopping or session.busy() or sid in self._summaries or not self.room()["ok"]:
+            raise BrokerError(429, "private summary deferred")
+        task = asyncio.current_task()
+        self._summaries[sid] = task
+        reservation = "summary/" + sid
+        self._starting.add(reservation)
+        try:
+            return await loam_private_summary.ask(session, prompt)
+        finally:
+            self._starting.discard(reservation)
+            self._summaries.pop(sid, None)
+
     def seats_taken(self) -> int:
         """Sessions in RAM and starts in flight: what the backstop counts."""
         return len(self.live()) + len(self._starting)
@@ -326,6 +343,12 @@ class SessionHost:
             room = self.room()
             if room["ok"]:
                 return
+            if self._summaries:
+                # Foreground work gets the seat before any resident is evicted.
+                task = next(iter(self._summaries.values()))
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                continue
             now = time.time()
             idle = sorted((s for s in self.live() if s.busy() is None
                            and now - s.last_activity >= cfg.EVICT_GRACE_S),

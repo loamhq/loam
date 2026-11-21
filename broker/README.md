@@ -5418,12 +5418,11 @@ into the last.
 **The turn's input** (`threads.turn_prompt`, chosen in
 `ThreadEngine.run_turn`) is, and nothing else from the thread:
 
-1. **The persona's own summary of the thread**, on a fresh session: the file
-   `ai-labs/<persona>/threads/<thread id>.md`, shown whole inside
-   `<your-summary>` (past `SUMMARY_CHARS`, 8,000, cut with where the rest
-   is). A resumed session is not handed it again: it was given it when it
-   began, and keeps it itself. **Missing means a first turn**: the prompt says
-   there is none yet, names the path, and asks for one before the turn ends.
+1. **The member's own summary**, on a fresh session, inside `<your-summary>`.
+   A private handoff names the last message it covers. A workspace summary
+   at `ai-labs/<persona>/threads/<thread id>.md` supplies the first handoff
+   if present. The prompt says when no summary exists. It directs the member
+   to use newer messages and consult the record for any intervening history.
 2. **The recent exchange** (`threads.recent_window`): from the newest message
    in the record back to the last real pause -- a gap of more than 30
    minutes (`PAUSE_S`) between two consecutive messages -- or 20 messages
@@ -5445,15 +5444,38 @@ into the last.
    under its id. Read it when you need something from before what is shown
    here.]`
 
-**The summary is the persona's.** The broker only reads it
-(`threads.read_summary`); it never creates the file, its folder or anything
-else in a persona's workspace. Every turn's prompt says the file exists (or
-not), that it is theirs, what it is for -- a few lines on what the thread is
-about from their perspective, the decisions made, what is open, anything
-they want to remember -- and to update it before the turn ends when
-something material changed. Each persona in a thread keeps its own, so two
-members of one thread hold two views of it. Summaries are not served by any
-route and not shown in the app.
+**Private thread summaries.** Ordinary turns end with the reply. A completed
+turn (including a quiet one), or a late reply, makes a handoff due for that
+member. Each turn moves the deadline to the end of the same 30-minute pause
+used for the recent exchange. A Claude or Codex session with a known idle
+reap gets an earlier deadline at its ten-minute idle boundary. Reaping leaves
+the provider history resumable. Reaching the rotation threshold requests a
+handoff immediately. Explicit session ends, a change of thread provider and
+archiving a thread also request any pending handoff. A foreground turn always
+takes priority, including one that needs a fresh session immediately.
+Provider-internal compaction can first be reported after it happens.
+
+Claude Code and Codex fork the saved provider session for a private print
+turn. The fork has no thread journal, watcher, permission stream or posting
+route. Antigravity can resume only in place. It writes its handoff in a
+separate print turn from the previous summary and up to 20,000 characters of
+recent exchange, in a temporary directory with commands, writes and MCP
+calls denied. A lost provider history or failed request leaves the last
+completed handoff usable. Newly addressed input cancels the private turn.
+The host checks memory before launching, gives a foreground start priority
+under pressure, and owns the private process only until it exits or its API
+reader disconnects. A pending timer holds no admission lock or seat.
+
+The API restores dirty deadlines from `threads/sessions.json` after restart.
+It stores the member's returned text, its source session, message boundary
+and completion time in private runtime state at `threads/handoffs.json`.
+A newer edit to the workspace summary takes precedence. The API journal
+records `<thread> <member>: private summary saved through <message> (<provider>)`
+or a deferral. To watch, run
+`journalctl --user -fu loam-session-broker.service --grep='private summary'`.
+No summary runs are queued for pre-existing sessions until another turn.
+The thread, board, unread marker and app event streams receive no housekeeping
+output.
 
 **Sessions rotate instead of growing.** A member's session for a thread is
 resumed while it is small. Its size is the last `context.used` it stated

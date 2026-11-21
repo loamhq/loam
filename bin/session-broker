@@ -1661,6 +1661,7 @@ class Server:
                 # Mark the turn as explicitly stopped before ending its process so partial output
                 # survives.
                 thread_id = self.threads.mark_ended(session_id)
+                self.threads.handoffs.expedite(self._thread_of().get(session_id))
                 await session.stop()
                 record = session.meta()
                 if thread_id:
@@ -1854,6 +1855,7 @@ class Server:
         not carrying a thread's turn. Never one that is working, asking or
         waiting on background work: each is asked again just before its stop."""
         ended, kept = [], []
+        bindings = self._thread_of()
         for session in list(self.broker.live()):
             state = loam_live.state_of(session.busy())
             why = None
@@ -1868,6 +1870,7 @@ class Server:
             if why:
                 kept.append({"id": session.id, "agent": session.agent, "why": why})
                 continue
+            self.threads.handoffs.expedite(bindings.get(session.id))
             if getattr(self.broker, "remote", False):
                 try:
                     await session.stop(idle=True)
@@ -2086,6 +2089,10 @@ class Server:
                                pinned=payload.get("pinned"),
                                archived=payload.get("archived"), **changes)
             after = threads_rec.read(thread_id)[0]
+            for persona in before["members"]:
+                if (after["engines"].get(persona) != before["engines"].get(persona)
+                        or (after.get("archived") and not before.get("archived"))):
+                    engine.handoffs.expedite((thread_id, persona))
             if after["default"] != before["default"]:
                 # Changing the default changes who receives unaddressed messages.
                 said = (f"{who} made {threads_rec.display(after['default'])} "
@@ -3543,6 +3550,7 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
               f"dropped", file=sys.stderr, flush=True)
     except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
         print(f"inputs: resuming failed ({exc!r})", file=sys.stderr, flush=True)
+    server.threads.handoffs.restore()
     # Results owed to a thread, given to its persona as input.
     asyncio.create_task(server.deliver_owed())
     # Usage reads while anything is live, and once as each job ends.
@@ -3579,6 +3587,7 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
           f"sessions)", file=sys.stderr, flush=True)
     async with tcp:
         await stop.wait()
+    await server.threads.handoffs.close()
     if remote_path:
         # Cancel the workers before closing readers. Cancellation preserves
         # their bound inputs; an EOF would instead file an interrupted turn.

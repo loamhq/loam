@@ -211,6 +211,12 @@ class SessionSocket:
 
 
     async def session_request(self, op, req, sid, reader, writer):
+        if op == "private_summary":
+            async def answer():
+                text = await self.host.private_summary(sid, req["prompt"])
+                await write_frame(writer, {"ok": text})
+            await until_disconnect(reader, answer())
+            return
         if op == "start":
             # A fresh call always names its id. A replacement API can
             # join an in-flight launch under that same binding.

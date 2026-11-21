@@ -1034,7 +1034,7 @@ def delete(thread_id: str) -> dict:
         idx = index()
         idx.pop(thread_id, None)
         save_state("index.json", idx)
-        for name in ("threads.json", "sessions.json"):
+        for name in ("threads.json", "sessions.json", "handoffs.json"):
             data = load_state(name)
             if data.pop(thread_id, None) is not None:
                 save_state(name, data)
@@ -1319,7 +1319,8 @@ def session_for(thread_id: str, persona: str) -> dict | None:
 
 def remember_session(thread_id: str, persona: str, session_id: str,
                      engine: str, through: str, seq: int | None = None,
-                     context: dict | None = None, watch: bool | None = None) -> None:
+                     context: dict | None = None, watch: bool | None = None,
+                     summary_due: float | None = None) -> None:
     """Save the last recorded session sequence so the next turn can recover a late reply.
     Keep the last context usage and window for rotation after the session leaves memory.
     """
@@ -1331,6 +1332,10 @@ def remember_session(thread_id: str, persona: str, session_id: str,
         if isinstance(context, dict) and isinstance(context.get("used"), int):
             row["context"] = {"used": context["used"], "window": context.get("window")}
         previous = data.get(thread_id, {}).get(persona, {})
+        if summary_due is not None:
+            row["summary_due"] = summary_due
+        elif previous.get("session_id") == session_id and "summary_due" in previous:
+            row["summary_due"] = previous["summary_due"]
         if watch or (watch is None and previous.get("watch") and previous.get("session_id") == session_id):
             row["watch"] = True
         data.setdefault(thread_id, {})[persona] = row
@@ -1698,7 +1703,7 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
                 now: datetime | None = None,
                 record: list[dict] | None = None,
                 summary: str | None = None,
-                unshown: int = 0) -> str:
+                unshown: int = 0, summary_through: str | None = None) -> str:
     """One turn's input. ``msgs`` is the window the engine chose (the recent
     exchange on a fresh session; on a resumed one, what in it is new to this
     persona); ``record`` the whole thread, where a ``reply_to`` is looked up;
@@ -1725,14 +1730,15 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
         if summary is not None:
             shown = summary
             if len(shown) > SUMMARY_CHARS:
-                shown = (shown[:SUMMARY_CHARS].rstrip() + f"\n[… cut at "
-                         f"{SUMMARY_CHARS} of {len(summary)} characters; the rest "
-                         f"is in {mine}]")
-            head += (f"Your summary of this thread, as you last wrote it in {mine}:\n"
-                     f"<your-summary>\n{shown}\n</your-summary>\n\n")
+                shown = shown[:SUMMARY_CHARS].rstrip() + f"\n[… the rest is in {mine}]"
+            source = (f"through {summary_through}" if summary_through else
+                      f"as you last wrote it in {mine}")
+            head += (f"Your summary of this thread, {source}:\n"
+                     f"<your-summary>\n{shown}\n</your-summary>\n"
+                     "Later messages may change this account. Use the recent exchange "
+                     "below and read the thread file for any intervening messages.\n\n")
         else:
-            head += (f"You have no summary of this thread yet ({mine} does not "
-                     f"exist): write one before you end this turn.\n\n")
+            head += "You have no summary of this thread yet.\n\n"
         # A branch's first prompt includes its source window and points to the full record.
         branched = branch_context(meta)
         head += branched or (
@@ -1749,13 +1755,8 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
     pointer = (f"\n\n[Earlier history is in the thread file, {where}: every "
                f"message under its id. Read it when you need something from "
                f"before what is shown here.]")
-    tail = (f"\n\nYour summary of this thread is {mine}. It is yours: a few lines "
-            "on what this thread is about from your perspective, the decisions "
-            "made, what is open, and anything you want to remember. Loam only "
-            "reads it, to hand it to your next fresh session here, and it is never "
-            "shown in the app. Before you end this turn, update it if something "
-            "material changed (make its folder if it is missing)."
-            "\n\nWhatever you write now is posted to the thread as your message. "
+    tail = ("\n\nWrite your reply to the thread. All your words around tool calls "
+            "are part of that reply. Finish when you have answered. "
             "Mention a peer with @Name only when you are sure it adds a lot. "
             "To show an image (at most three), put ![a few words](its path) "
             "on a line of its own where you want it: a file in the vault or "

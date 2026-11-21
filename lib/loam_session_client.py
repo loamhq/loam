@@ -257,6 +257,9 @@ class RemoteRegistry:
     async def inspect(self, sid):
         return RemoteSession(self.client, await self.client.call("inspect", session_id=sid))
 
+    async def private_summary(self, sid, prompt):
+        return await self.client.call("private_summary", session_id=sid, prompt=prompt)
+
     async def start_session(self, agent, session_id=None, resume=False, provider=None,
                             model=None, effort=None, start_key=None):
         sid = session_id or str(uuid.uuid5(uuid.NAMESPACE_URL, start_key) if start_key else uuid.uuid4())

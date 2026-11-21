@@ -7,6 +7,7 @@ from pathlib import Path
 import stat
 import sys
 import tempfile
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import loam_broker as cfg
@@ -61,6 +62,33 @@ async def check():
             assert (await anext(replay))["through"] == 83
             assert [(await anext(replay))["event"]["n"] for _ in range(80)] == list(range(80))
             assert (await anext(replay)) == {"caught_up": 83}
+
+        # Drop the private RPC while its provider is still working. No event
+        # enters the session journal, and no seat is held after disconnect.
+        started, reaped = asyncio.Event(), asyncio.Event()
+        async def private_child(source, prompt):
+            assert source.id == session.id and prompt == "private fixture"
+            started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                reaped.set()
+        with patch("loam_private_summary.ask", side_effect=private_child):
+            with patch.object(host, "room", return_value={"ok": False}):
+                try:
+                    await client.call("private_summary", session_id=session.id, prompt="private fixture")
+                    raise AssertionError("private turn admitted without memory")
+                except BrokerError as exc:
+                    assert exc.status == 429 and not started.is_set()
+            async with client.request("private_summary", session_id=session.id,
+                                      prompt="private fixture"):
+                await started.wait()
+                assert host.seats_taken() == 1 and session.busy() is None
+                assert session.seq == 83
+            await reaped.wait()
+            assert host.seats_taken() == 0 and session.seq == 83
+        print("PASS hidden RPC honors memory, leaves journal and status alone, "
+              "cancels on disconnect and releases its reservation")
 
         written = asyncio.Event()
         finish = asyncio.Event()

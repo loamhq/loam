@@ -210,6 +210,13 @@ async def main():
     # -- a first turn with no summary ------------------------------------------
     server = broker_mod.Server.__new__(broker_mod.Server)
     fake = Broker()
+    # The provider can speak freely on the private pipe. These words would
+    # wake Iris if they ever reached normal reply or mention handling.
+    private_calls = []
+    async def summarize(sid, prompt):
+        private_calls.append((sid, prompt))
+        return "Private handoff: @Iris should remember the beds."
+    fake.private_summary = summarize
     server.broker = fake
     server.threads = engine_mod.ThreadEngine(fake)
     labs = TMP / "ai-labs"
@@ -223,17 +230,17 @@ async def main():
     ada = next(s for s in fake.sessions.values() if s.agent == "ada")
     first = ada.prompts[0]
     mine = threads.summary_path("ada", tid)
-    check("no summary yet: the first turn says so and where it goes",
-          ("You have no summary of this thread yet" in first, str(mine) in first),
-          (True, True))
+    check("no summary yet: the first turn says so",
+          "You have no summary of this thread yet" in first, True)
     check("...the recent exchange is in: the message and the 19 before it",
           ("hello ada" in first, "old 11" in first, "old 10" in first),
           (True, True, False))
     check("...with the thread file's path for the rest",
           f"Earlier history is in the thread file, {threads.record_path(tid)}" in first,
           True)
-    check("...and the tail says the summary is theirs and to keep it",
-          "It is yours" in first and "update it if something" in first, True)
+    check("...and asks only for the reply, including on the first turn",
+          ("Finish when you have answered" in first, "update it" in first,
+           "write one before" in first), (True, False, False))
     check("...and the broker wrote no summary", mine.exists(), False)
 
     # -- reply_to outside the window -------------------------------------------
@@ -338,6 +345,85 @@ async def main():
     await settle(server, tid)
     check("a session no longer resident rotates on its remembered context",
           threads.session_for(tid, "ada")["session_id"] not in (new, ada.id), True)
+
+    # -- hidden turns, their timer, collisions and restart recovery ---------------
+    import time
+    from loam_thread_summaries import Summaries
+    engine = server.threads
+    hk = engine.handoffs
+    key = (tid, "ada")
+    # Rotation above may have obtained an early handoff. This next turn
+    # resets the quiet clock. Two quick real turns buy only one summary.
+    n = len(private_calls)
+    await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "new detail"})
+    await settle(server, tid)
+    await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "one more detail"})
+    await settle(server, tid)
+    due = threads.session_for(*key)["summary_due"]
+    check("ordinary replies debounce for 30 minutes", (len(private_calls) == n,
+          1798 < due - time.time() <= 1800, list(hk.timers) == [key]), (True, True, True))
+
+    # Restart the timer owner with time advanced rather than waiting half an hour.
+    from unittest.mock import patch
+    await hk.close()
+    engine.handoffs = hk = Summaries(engine)
+    row = engine.summary(tid)
+    count = len(threads.read(tid)[1])
+    stream = engine.listen(tid)
+    with patch("loam_thread_summaries.time.time", return_value=due + 1):
+        hk.restore()
+        await asyncio.sleep(.02)
+    check("overdue work resumes once, on the bound session",
+          (len(private_calls), private_calls[-1][0],
+           "one more detail" in private_calls[-1][1]),
+          (n + 1, threads.session_for(*key)["session_id"], True))
+    check("housekeeping produces no event, message, unread or working change",
+          (stream.empty(), len(threads.read(tid)[1]), engine.summary(tid)), (True, count, row))
+    hk.restore()
+    check("clean sessions restore no timers", not hk.timers, True)
+
+    started, cancelled = asyncio.Event(), asyncio.Event()
+    async def slow_summary(sid, prompt):
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.set()
+    fake.private_summary = slow_summary
+    await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "before collision"})
+    await settle(server, tid)
+    hk.expedite(key)
+    await asyncio.wait_for(started.wait(), 1)
+    check("private run is absent from the active turns and working members",
+          (engine.active, engine.summary(tid)["working"]), ({}, 0))
+    await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "real message wins"})
+    await settle(server, tid)
+    check("new input preempts the private run and gets a normal answer",
+          (cancelled.is_set(), threads.read(tid)[1][-1]["text"]), (True, "ok"))
+    saved = threads.load_state("handoffs.json")[tid]["ada"]
+    check("interruption keeps the last completed checkpoint", saved["text"],
+          "Private handoff: @Iris should remember the beds.")
+    # Rotation is already due when this real input arrives. It goes directly
+    # to a fresh session; its prompt explicitly covers the stale-summary gap.
+    old = fake.sessions[threads.session_for(*key)["session_id"]]
+    old.turns = [{"context": {"used": 150_000, "window": 1_000_000}}]
+    await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "after checkpoint"})
+    await settle(server, tid)
+    prompt = fake.sessions[threads.session_for(*key)["session_id"]].prompts[-1]
+    check("fresh session gets the checkpoint boundary, stale guidance and newest input",
+          all(part in prompt for part in [saved["text"], "through " + saved["through"],
+              "intervening messages", "after checkpoint", str(threads.record_path(tid))]), True)
+    engine.unlisten(tid, stream)
+    new_session = fake.sessions[threads.session_for(*key)["session_id"]]
+    new_session.last_activity = time.time()
+    fixture_turn = engine_mod.Turn(*key, 0, "fixture")
+    due = engine.summary_due(fixture_turn, new_session)
+    check("resident session is due at its planned idle reap", round(due - new_session.last_activity),
+          cfg.THREAD_IDLE_S)
+    new_session.turns = [{"context": {"used": 150_000}}]
+    check("a known rotation is due immediately", engine.summary_due(fixture_turn, new_session)
+          <= time.time(), True)
+    await hk.close()
 
     # -- the broker never writes into a persona workspace ------------------------
     after_tree = tree(labs)
