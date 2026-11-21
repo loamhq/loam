@@ -219,7 +219,8 @@ turns its own timer off. `loam status` then shows the claim link as ready.
 
 ## The claim
 
-While `/etc/loam/claimed` does not exist, the app's host is one block:
+Until the owner has made a sign-in and Authelia is ready, Caddy serves
+the apex through `bin/loam-claim` (`loam-claim.service`, root, loopback):
 
 ```
 <domain> {
@@ -228,50 +229,39 @@ While `/etc/loam/claimed` does not exist, the app's host is one block:
 }
 ```
 
-outside the login, served by `bin/loam-claim` (`loam-claim.service`, root,
-loopback). The other hosts are rendered as ever, behind the gate, and
-Authelia is not started: it has no user (`gen-deploy` says so and skips it).
+The other hosts keep their usual gate. On an unclaimed install,
+`gen-deploy` leaves Authelia stopped until a user exists.
 
-- The link is `https://<domain>/claim#<token>`. The token rides in the
-  fragment, which a browser never sends, so no access log line or proxy
-  carries it; the page reads it and posts it.
-- `POST /claim {token, username, password}`: a wrong token is a 403 after a
-  second's pause, and twenty wrong ones in ten minutes are refused for the
-  rest of the window (the token is 192 bits; this is manners). The
-  username is 2 to 32 lowercase letters, digits, `-` or `_`; the password at
-  least 10 characters. The password is hashed by Authelia's own CLI with
-  argon2id, handed in on stdin. Then the users file is written into the
-  `authelia-data` volume, `/etc/loam/claimed` is written and the token
-  deleted, and the answer names the portal with the app as its return
-  address. A moment later the claim service runs `gen-deploy`, which renders
-  the app's host behind the login and starts Authelia.
-- After that, `GET /claim` is a 410 ("This Loam already has its owner"),
-  and no route reaches it: the Caddyfile has none.
-- Without the token, whoever reached the name first could own the box.
-  With it, the person who ran the install (the owner, for a friend) hands
-  the link over.
+- The link is `https://<domain>/claim#<token>`. The page takes the fragment
+  out of the address bar and sends the token only in the body of the
+  same-origin submission.
+- `POST /claim` takes JSON with `token`, `username` and `password`. A wrong
+  token is a 403 after a second's pause. Twenty wrong attempts in ten
+  minutes are refused for the rest of the window. Usernames have 2 to 32
+  letters, digits, hyphens or underscores and start with a letter. They
+  are saved in lowercase and matched without regard to case by Authelia.
+  Passwords have at least 10 characters.
+- **202** accepts the submission. A worker runs Authelia's Argon2id hash
+  with the password supplied on stdin, writes the admin to the
+  `authelia-data` volume, records `/etc/loam/claimed` and removes the
+  token. Simultaneous submissions receive **409** while the worker is
+  saving and **410** once the account exists.
+- `GET /claim?status` gives the stage of setup without account details.
+  If saving fails, the welcome link can be used again. Once sign-in is
+  saved, the browser can be closed. A restart of the service resumes
+  activation when the claim route is still on disk.
+- `gen-deploy` starts Authelia and waits for its health endpoint before
+  replacing the claim route with the gated app. The browser sees the new
+  gate redirect and goes to the apex, which takes the owner to sign-in.
+  A failed reload keeps the claim route on disk so activation can be
+  retried. `loam status` gives the operator recovery steps if those
+  retries run out.
 
-### The page contract for the claim (U4)
-
-The claim page is the one page outside the login. `bin/loam-claim` serves
-the app's own **`public/claim.html`** at `GET /claim` when the app's build
-folder has one (`<checkout>/<app_context>/public/claim.html`), and its own
-plain page otherwise. Nothing else of the app is served outside the login:
-
-- the page is **one self-contained file**: inline CSS and JS, no images,
-  fonts or scripts from anywhere (its CSP is `default-src 'none';
-  style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src
-  'self'; form-action 'self'; frame-ancestors 'none'`);
-- it reads the token from `location.hash` (and should take it out of the
-  address bar, `history.replaceState`);
-- it posts `application/json` to `/claim`: `{"token", "username",
-  "password"}`;
-- **200** `{"ok": true, "username", "next", "wait_seconds"}`: say it worked,
-  wait `wait_seconds` (the login is starting), then go to `next`, the
-  portal, which returns to the app after sign-in;
-- **400** / **403** / **429** / **500** `{"error": "<a sentence for the
-  person>"}`: show the sentence; 403 is a wrong or incomplete link;
-- **410** `{"error"}`: already claimed; offer a link to `https://<domain>/`.
+`bin/loam-claim` serves `app/public/claim.html` from its release. The
+page is self-contained, with inline CSS and JavaScript and two embedded
+fonts. It shows the saved lowercase username, the current setup stage,
+and what to do if setup takes unusually long or fails. It begins polling
+once the person submits and shows sign-in as ready once the gate answers.
 
 ### The relay: a passkey without a shell (option a)
 

@@ -7,15 +7,12 @@ app's host and on nothing else (lib/loam_deploy.py, `[edge]`):
 
   /claim                  OUTSIDE the login, rendered only while the install
                           is unclaimed (/etc/loam/claim exists).
-    GET                   the claim page (the app's `public/claim.html` when
-                          it ships one, otherwise the page below)
+    GET                   the self-contained claim page
+    GET ?status           the stage of setup, without account information
     POST {token, username, password}
-                          the token from the link's fragment; the username and
-                          password become the login's one user. Then the token
-                          is deleted and /etc/loam/claimed written, the
-                          Caddyfile is rendered without this
-                          route, the login starts, and the answer says where
-                          to sign in.
+                          validate the one-time link and start setup. The
+                          account is saved and the login started in a worker;
+                          once the gated app takes over, this route is gone.
 
   /_loam/login-code       BEHIND the login, ahead of the browser's subnet.
     GET                   the newest one-time code the login wrote to its
@@ -75,6 +72,9 @@ MAX_BODY = 8192
 FAILS: list[float] = []
 FAIL_WINDOW, FAIL_LIMIT = 600, 20
 LOCK = threading.Lock()
+# The durable boundary is CLAIMED_FILE. In-memory stages only describe the
+# current worker or a failure that the next submission or startup can retry.
+CLAIM_STAGE = "open"
 CODE_MAX_AGE = 15 * 60   # a code older than this is not shown
 
 
@@ -145,22 +145,43 @@ def write_users(username: str, display: str, digest: str) -> None:
         raise RuntimeError(f"writing the users file failed: {res.stderr.strip()[:300]}")
 
 
-def finish_claim(first_wait: float = 1) -> bool:
-    """After the answer has gone: render without the claim route, which also
-    starts the login now that it has a user. Tried a few times, and again
-    whenever this service starts and finds the claim made but the Caddyfile
-    still unclaimed (unfinished_claim), so a person is never left claimed
-    and unable to sign in."""
-    time.sleep(first_wait)
+def finish_claim() -> None:
+    """Start the portal and switch the edge. Startup retries an unfinished claim."""
+    global CLAIM_STAGE
     for attempt in range(1, 6):
-        res = run([sys.executable, str(ROOT / "bin" / "gen-deploy")], timeout=900)
-        log(f"gen-deploy after the claim (try {attempt}): exit {res.returncode}")
-        if res.returncode == 0:
-            return True
-        log((res.stdout[-1500:] + res.stderr[-1500:]).strip())
-        time.sleep(10 * attempt)
-    return False
+        try:
+            res = run([sys.executable, str(ROOT / "bin" / "gen-deploy")], timeout=900)
+            log(f"gen-deploy after the claim (try {attempt}): exit {res.returncode}")
+            if res.returncode == 0:
+                return  # The browser sees the now-gated /claim redirect.
+            log((res.stdout[-1500:] + res.stderr[-1500:]).strip())
+        except (OSError, subprocess.SubprocessError) as exc:
+            log(f"gen-deploy after the claim (try {attempt}): {exc}")
+        if attempt < 5:
+            time.sleep(10 * attempt)
+    CLAIM_STAGE = "finish_failed"
 
+
+def save_claim(username: str, password: str) -> None:
+    global CLAIM_STAGE
+    try:
+        write_users(username, lc.OWNER_NAME, hash_password(password))
+        when = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+        temp = dep.CLAIMED_FILE.with_suffix(".new")
+        temp.write_text(json.dumps({"username": username, "at": when}) + "\n", encoding="utf-8")
+        temp.replace(dep.CLAIMED_FILE)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        log(f"could not save claim: {exc}")
+        CLAIM_STAGE = "save_failed"
+        return
+
+    try:
+        li.CLAIM_FILE.unlink(missing_ok=True)
+    except OSError as exc:
+        log(f"could not remove the spent claim token: {exc}")
+    log("claim saved, starting sign-in")
+    CLAIM_STAGE = "starting_login"
+    finish_claim()
 
 def unfinished_claim() -> bool:
     """Claimed, but the live Caddyfile still carries the claim block."""
@@ -168,7 +189,7 @@ def unfinished_claim() -> bool:
         live = dep.CADDYFILE.read_text(encoding="utf-8")
     except OSError:
         return False
-    return not dep.unclaimed() and "# UNCLAIMED:" in live
+    return not dep.unclaimed() and dep.CLAIM_MARKER in live
 
 
 # ---------------------------------------------------------------------------
@@ -306,95 +327,8 @@ def remove_passkey(cookie: str, cred: str, host: str | None, client: str | None,
 # ---------------------------------------------------------------------------
 
 def page() -> bytes:
-    apps = [a for a in dep.records() if a.apex]
-    if apps and apps[0].checkout:
-        shipped = apps[0].checkout / (apps[0].context or "") / "public" / "claim.html"
-        try:
-            return shipped.read_bytes()
-        except OSError:
-            pass
-    return CLAIM_PAGE.replace("{{OWNER}}", _html(lc.OWNER_NAME)).encode()
-
-
-def _html(text: str) -> str:
-    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            .replace('"', "&quot;"))
-
-
-CLAIM_PAGE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer">
-<title>Welcome to Loam</title>
-<style>
- :root { color-scheme: light dark; --fg:#1d1b18; --bg:#f6f3ee; --card:#fff; --muted:#6b655c; --accent:#3f6b4f; --bad:#a3352b; }
- @media (prefers-color-scheme: dark) { :root { --fg:#ece8e1; --bg:#171614; --card:#22201d; --muted:#a39d93; --accent:#7fb08f; --bad:#e0796f; } }
- * { box-sizing: border-box }
- body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg);
-        font: 17px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 24px }
- main { width:100%; max-width:420px; background:var(--card); border-radius:16px; padding:32px 28px;
-        box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.06) }
- h1 { font-size:1.5rem; margin:0 0 8px }
- p { margin: 0 0 16px; color: var(--muted) }
- label { display:block; font-weight:600; margin: 16px 0 6px }
- .hint { font-weight:400; color:var(--muted); font-size:.9rem }
- input { width:100%; font:inherit; padding:12px 14px; border-radius:10px; border:1px solid #bbb3a6; background:transparent; color:inherit }
- button { margin-top:24px; width:100%; font:inherit; font-weight:600; padding:14px; border:0; border-radius:10px;
-          background:var(--accent); color:#fff; cursor:pointer }
- button[disabled] { opacity:.6; cursor:default }
- #error { color:var(--bad); margin-top:16px; min-height:1.5em }
-</style></head>
-<body><main>
- <div id="form-view">
-  <h1>Welcome to Loam</h1>
-  <p>This is your own Loam. Choose the name and password you will sign in with. Only you will have them.</p>
-  <form id="claim" autocomplete="on">
-   <label for="username">Username <span class="hint">lowercase letters and numbers</span></label>
-   <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required pattern="[a-z][a-z0-9_-]{1,31}">
-   <label for="password">Password <span class="hint">at least 10 characters</span></label>
-   <input id="password" name="password" type="password" autocomplete="new-password" minlength="10" required>
-   <label for="again">The same password again</label>
-   <input id="again" type="password" autocomplete="new-password" minlength="10" required>
-   <button id="go" type="submit">Make my sign-in</button>
-   <div id="error" role="alert"></div>
-  </form>
- </div>
- <div id="no-link" hidden>
-  <h1>This link is not complete</h1>
-  <p>Open the whole link the installer printed, the part after <b>#</b> included. If you no longer have it, whoever set up this server can see it again by typing <b>loam status</b> on it.</p>
- </div>
- <div id="done-view" hidden>
-  <h1>You're in</h1>
-  <p>Your sign-in is made. Next, sign in with it. Taking you there…</p>
- </div>
-</main>
-<script>
-const token = decodeURIComponent(location.hash.slice(1));
-history.replaceState(null, '', location.pathname);
-const $ = (id) => document.getElementById(id);
-if (!token) { $('form-view').hidden = true; $('no-link').hidden = false; }
-$('claim').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  $('error').textContent = '';
-  const username = $('username').value.trim().toLowerCase();
-  const password = $('password').value;
-  if (password !== $('again').value) { $('error').textContent = 'The two passwords are not the same.'; return; }
-  $('go').disabled = true;
-  try {
-    const res = await fetch('/claim', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token, username, password }) });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) { $('error').textContent = body.error || 'Something went wrong. Try again.'; $('go').disabled = false; return; }
-    $('form-view').hidden = true; $('done-view').hidden = false;
-    setTimeout(() => { location.href = body.next; }, (body.wait_seconds || 8) * 1000);
-  } catch (e) {
-    $('error').textContent = 'Could not reach your Loam. Check the connection and try again.';
-    $('go').disabled = false;
-  }
-});
-</script>
-</body></html>
-"""
+    # Use the page from this release so it and the service share a protocol.
+    return (ROOT / "app" / "public" / "claim.html").read_bytes()
 
 
 # ---------------------------------------------------------------------------
@@ -427,9 +361,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send(status, json.dumps(obj).encode())
 
     def do_GET(self):  # noqa: N802
-        path = self.path.split("?")[0]
+        path, _, query = self.path.partition("?")
         if path == dep.CLAIM_PATH:
-            if not dep.unclaimed():
+            if query == "status":
+                return self.json(200, {"stage": CLAIM_STAGE})
+            if not dep.unclaimed() and CLAIM_STAGE == "open":
                 return self.json(410, {"error": "This Loam already has its owner. Sign in instead."})
             return self.send(200, page(), "text/html; charset=utf-8")
         if path == dep.RELAY_PATH:
@@ -488,8 +424,22 @@ class Handler(BaseHTTPRequestHandler):
         return self.json(200, newest_code())
 
     def do_POST(self):  # noqa: N802
+        global CLAIM_STAGE
         if self.path.split("?")[0] != dep.CLAIM_PATH:
             return self.json(404, {"error": "not found"})
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 < length <= MAX_BODY:
+                raise ValueError
+            body = json.loads(self.rfile.read(length))
+            token, username, password = (body[k] for k in ("token", "username", "password"))
+            if not all(isinstance(field, str) for field in (token, username, password)):
+                raise ValueError
+            token_bytes = token.encode()
+            password.encode()  # Reject lone Unicode surrogates before starting a worker.
+        except (KeyError, ValueError, TypeError):
+            return self.json(400, {"error": "That did not arrive whole. Try again."})
+
         with LOCK:
             if not dep.unclaimed():
                 return self.json(410, {"error": "This Loam already has its owner. Sign in instead."})
@@ -497,47 +447,29 @@ class Handler(BaseHTTPRequestHandler):
             FAILS[:] = [t for t in FAILS if now - t < FAIL_WINDOW]
             if len(FAILS) >= FAIL_LIMIT:
                 return self.json(429, {"error": "Too many tries. Wait ten minutes, then open the link again."})
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-                if length > MAX_BODY:
-                    raise ValueError
-                body = json.loads(self.rfile.read(length) or b"{}")
-                token, username, password = (str(body.get(k) or "") for k in
-                                             ("token", "username", "password"))
-            except (ValueError, TypeError):
-                return self.json(400, {"error": "That did not arrive whole. Try again."})
             want = li.claim_token() or ""
-            if not want or not hmac.compare_digest(token.encode(), want.encode()):
+            if not want or not hmac.compare_digest(token_bytes, want.encode()):
                 FAILS.append(now)
                 time.sleep(1)
                 return self.json(403, {"error": "This link is not the right one for this Loam. "
                                                 "Open the whole link the installer printed."})
+            if CLAIM_STAGE == "saving":
+                return self.json(409, {"error": "A sign-in is already being saved."})
             username = username.strip().lower()
-            if not USERNAME_RE.match(username):
-                return self.json(400, {"error": "A username is 2 to 32 lowercase letters, numbers, "
-                                                "- or _, starting with a letter."})
+            if not USERNAME_RE.fullmatch(username):
+                return self.json(400, {"error": "Use 2 to 32 letters, numbers, hyphens or underscores "
+                                                "for your username, starting with a letter."})
             if len(password) < MIN_PASSWORD:
                 return self.json(400, {"error": f"Choose a password of at least {MIN_PASSWORD} characters."})
             if len(password) > 256:
                 return self.json(400, {"error": "That password is longer than Loam accepts (256)."})
-            try:
-                write_users(username, lc.OWNER_NAME, hash_password(password))
-            except (RuntimeError, subprocess.SubprocessError) as exc:
-                log(str(exc))
-                return self.json(500, {"error": "Your sign-in could not be saved. Try again in a minute."})
-            when = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
-            dep.CLAIMED_FILE.write_text(json.dumps({"username": username, "at": when}) + "\n",
-                                        encoding="utf-8")
-            li.CLAIM_FILE.unlink(missing_ok=True)
-            log(f"claimed by {username}")
-        domain = dep.domain()
-        auth = dep.config()["auth_host"]
-        threading.Thread(target=finish_claim, daemon=True).start()
-        self.json(200, {"ok": True, "username": username, "wait_seconds": 8,
-                        "next": f"https://{auth}.{domain}/?rd=https%3A%2F%2F{domain}%2F"})
+            CLAIM_STAGE = "saving"
+            threading.Thread(target=save_claim, args=(username, password), daemon=True).start()
+        self.json(202, {"ok": True})
 
 
 def main() -> int:
+    global CLAIM_STAGE
     if os.geteuid() != 0:
         print("loam-claim: runs as root (loam-claim.service)", file=sys.stderr)
         return 2
@@ -546,7 +478,8 @@ def main() -> int:
         f"({'unclaimed' if dep.unclaimed() else 'claimed'})")
     if unfinished_claim():
         log("the claim was made but its render did not finish; finishing it")
-        threading.Thread(target=finish_claim, args=(0,), daemon=True).start()
+        CLAIM_STAGE = "starting_login"
+        threading.Thread(target=finish_claim, daemon=True).start()
     server.serve_forever()
     return 0
 

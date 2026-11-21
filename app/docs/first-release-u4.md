@@ -9,10 +9,10 @@ assets; `font-src data:` permits only embedded fonts. The host supplies
 `frame-ancestors 'none'`; the document repeats the
 remaining policy in a meta tag. It consumes the fragment token immediately,
 removes the fragment before a request, and sends the token, username and password
-only to same-origin `/claim`. Refusal sentences are shown verbatim; 410 offers
-Open Loam at this origin's HTTPS root. Success clears the password, waits the
-host's `wait_seconds`, and opens the returned portal URL. The app server does
-not implement or proxy account creation.
+only to same-origin `/claim`. The page shows setup immediately, follows
+`/claim?status` while the account is saved and the portal starts, and clears
+the password once saved. The newly gated route tells the browser when to go
+to sign-in. The claim service owns account creation.
 
 The runtime marks the starter summary `hello: true`. Before showing its ordinary
 workspace, the page reads that thread and the provider catalog. A complete

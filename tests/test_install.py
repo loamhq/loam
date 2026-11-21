@@ -38,12 +38,14 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import tempfile
 import time
 from contextlib import redirect_stdout
+from http.client import HTTPConnection
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="test-install-"))
@@ -86,6 +88,124 @@ def main() -> int:
         for k, v in saved.items():
             setattr(dep, k, v)
         shutil.rmtree(TMP, ignore_errors=True)
+
+
+def exercise_claim(claim, unclaimed_render: str) -> None:
+    dep.CLAIMED_FILE.unlink()
+    with patch.object(li, "CLAIM_FILE", TMP / "claim-token"), \
+         patch.object(dep, "CADDYFILE", TMP / "claim-Caddyfile"):
+        li.CLAIM_FILE.write_text(json.dumps({"token": "fixture-token"}))
+        dep.CADDYFILE.write_text(unclaimed_render)
+        saving = threading.Event()
+        writing = threading.Event()
+        starting = threading.Event()
+
+        def hash_password(_password):
+            saving.set()
+            if not writing.wait(5):
+                raise RuntimeError("fixture never released password hashing")
+            return "fixture-hash"
+
+        def finish():
+            starting.set()
+
+        with patch.object(claim, "hash_password", side_effect=hash_password), \
+             patch.object(claim, "write_users") as write_users, \
+             patch.object(claim, "finish_claim", side_effect=finish):
+            server = claim.ThreadingHTTPServer(("127.0.0.1", 0), claim.Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+
+            def request(method, path, body=None):
+                conn = HTTPConnection(*server.server_address, timeout=5)
+                try:
+                    conn.request(method, path, json.dumps(body) if body is not None else None)
+                    res = conn.getresponse()
+                    content = res.read()
+                    return res.status, json.loads(content) if res.headers["Content-Type"] == "application/json" else content
+                finally:
+                    conn.close()
+
+            body = {"token": "fixture-token", "username": "PageTester", "password": "fixture password"}
+            try:
+                check("claim status begins open and contains no account information",
+                      request("GET", "/claim?status"), (200, {"stage": "open"}))
+                check("claim refuses a malformed body", request("POST", "/claim", [])[0], 400)
+                check("password validation happens before starting the worker",
+                      request("POST", "/claim", {**body, "password": "short"})[0], 400)
+                check("valid claim is accepted while the password hash is still running",
+                      request("POST", "/claim", body), (202, {"ok": True}))
+                check("the worker entered the hashing step", saving.wait(5))
+                check("status is responsive while hashing",
+                      request("GET", "/claim?status"), (200, {"stage": "saving"}))
+                check("a second submission cannot replace an in-flight password",
+                      request("POST", "/claim", {**body, "password": "another password"})[0], 409)
+                check("token is kept until the admin is saved", li.CLAIM_FILE.exists())
+                writing.set()
+                check("the worker advances even after the POST connection closed", starting.wait(5))
+                check("the admin is saved once under the lowercase username",
+                      write_users.call_args.args, ("pagetester", lc.OWNER_NAME, "fixture-hash"))
+                check("the claim marker matches the user's stored name",
+                      json.loads(dep.CLAIMED_FILE.read_text())["username"], "pagetester")
+                check("the spent token is removed", li.CLAIM_FILE.exists(), False)
+                check("the page can be reopened while the portal starts", request("GET", "/claim")[0], 200)
+                check("status reports sign-in startup without revealing the username",
+                      request("GET", "/claim?status"), (200, {"stage": "starting_login"}))
+                check("the claim cannot be repeated", request("POST", "/claim", body)[0], 410)
+                check("a restart would resume the unfinished claim", claim.unfinished_claim())
+            finally:
+                writing.set()
+                server.shutdown()
+                server.server_close()
+                thread.join()
+
+        dep.CLAIMED_FILE.unlink()
+        li.CLAIM_FILE.write_text(json.dumps({"token": "fixture-token"}))
+        with patch.object(claim, "hash_password", side_effect=RuntimeError("fixture failure")):
+            claim.save_claim("pagetester", "fixture password")
+        check("save failure leaves the welcome link usable",
+              (claim.CLAIM_STAGE, dep.CLAIMED_FILE.exists(), li.CLAIM_FILE.exists()),
+              ("save_failed", False, True))
+        dep.CLAIMED_FILE.write_text("{}")
+        with patch.object(claim, "run", return_value=Mock(returncode=1, stdout="", stderr="failed")), \
+             patch.object(claim.time, "sleep"):
+            claim.finish_claim()
+        check("exhausted activation retries report a saved sign-in that still needs help",
+              (claim.CLAIM_STAGE, claim.unfinished_claim()), ("finish_failed", True))
+
+
+def exercise_claim_edge(unclaimed: str, claimed: str) -> None:
+    gen = load_cmd("gen-deploy")
+    caddyfile = TMP / "generator-Caddyfile"
+    secrets = TMP / "authelia-secrets"
+    secrets.touch()
+    caddyfile.write_text(unclaimed)
+    files = {caddyfile: claimed, dep.SUDOERS: "", dep.AUTHELIA_CONFIG: ""}
+    with patch.multiple(dep, CADDYFILE=caddyfile, AUTHELIA_SECRETS=secrets,
+                        generated=lambda: files, records=lambda: [], preview_sysctl_live=lambda: True,
+                        sight_wall_missing=lambda: [], inbound_wall_status=lambda: ""), \
+         patch.multiple(gen, ensure_access_log_dir=Mock(), validate_caddyfile=Mock(),
+                        validate_sudoers=Mock(), validate_authelia=Mock(), ensure_static_roots=Mock(),
+                        warn_unresolved=Mock(), write_root=lambda path, text, *_: path.write_text(text),
+                        diff=Mock(side_effect=lambda path, _new: path == caddyfile),
+                        compose=Mock(return_value=Mock(returncode=0)), run=Mock(return_value=Mock(returncode=0)),
+                        wait_for_login=Mock(side_effect=SystemExit(1))):
+        try:
+            gen.generate(False)
+        except SystemExit as exc:
+            check("generator defers edge change when login health fails", exc.code, 1)
+        check("health failure leaves the claim route on disk", caddyfile.read_text(), unclaimed)
+        check("health failure never reloads Caddy", gen.run.call_count, 0)
+        gen.wait_for_login.side_effect = None
+        gen.run.return_value = Mock(returncode=1, stderr="reload refused")
+        try:
+            gen.generate(False)
+        except SystemExit as exc:
+            check("generator surfaces a claim reload failure", exc.code, 1)
+        check("reload failure also keeps the claim route on disk", caddyfile.read_text(), unclaimed)
+        gen.run.return_value = Mock(returncode=0)
+        check("after Authelia is ready, the generator completes the claim", gen.generate(False), 0)
+        check("the live render is persisted once Caddy accepts it", caddyfile.read_text(), claimed)
 
 
 def cases() -> int:
@@ -168,6 +288,9 @@ def cases() -> int:
           {"domain": ["sam.loam-proof.test", "*.sam.loam-proof.test"], "policy": "one_factor"} in rules)
     # No one reads an install's file notifier, so its sign-in page offers no
     # password reset that would wait for an email (the first-day walk).
+    check("Authelia itself matches usernames without regard to case",
+          __import__("yaml").safe_load(dep.authelia_config())["authentication_backend"]["file"]["search"],
+          {"case_insensitive": True})
     reset = lambda: __import__("yaml").safe_load(dep.authelia_config())[  # noqa: E731
         "authentication_backend"]["password_reset"]["disable"]
     check("an install's sign-in page offers no password reset", reset(), True)
@@ -409,6 +532,9 @@ def cases() -> int:
     fake = _Fake()
     claim.Handler.send(fake, 200, b"{}")
     check("...and JSON answers carry no CSP", "Content-Security-Policy" in fake.headers, False)
+
+    exercise_claim(claim, unclaimed)
+    exercise_claim_edge(unclaimed, claimed)
 
     inst = load_cmd("loam-install")
     # Test the OS gate with a different, deterministic preflight failure next.

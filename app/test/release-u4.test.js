@@ -54,37 +54,108 @@ test('passkey codes stay in the page, age out, stop on dismissal and ignore a la
   assert.equal(authSettingsURL('https://example.test/threads/one'), 'https://auth.example.test/settings')
 })
 
-test('claim is self-contained; token leaves the address; exact refusals and already-claimed link are drawn', async () => {
+test('claim is self-contained and follows server progress to sign-in', async () => {
   const { readFile } = await import('node:fs/promises'), { runInNewContext } = await import('node:vm')
   const source = await readFile('public/claim.html', 'utf8'), script = source.match(/<script>([\s\S]*?)<\/script>/)[1]
   assert.doesNotMatch(source, /<(?:script\s+src|link|img|iframe)\b|@import/i)
   const urls = [...source.matchAll(/url\(([^)]+)\)/g)].map(([, url]) => url)
   assert.equal(urls.length, 2, 'only the two embedded Latin faces load')
   for (const url of urls) assert.match(url, /^data:font\/woff2;base64,[A-Za-z0-9+/=]+$/)
-  assert.match(source, /font-src data:;/, 'font policy permits data only')
+  assert.match(source, /font-src data:;/)
   assert.match(source, /default-src 'none'/)
-  function fixture(status, hash = '#fixture-token') {
-    const nodes = new Map(), calls = [], redirects = [], waits = [], next = [], windowEvents = {}, reloads = []
-    const node = () => ({ hidden: false, value: '', disabled: false, events: {}, addEventListener(name, fn) { this.events[name] = fn }, setAttribute() {}, appendChild(child) { next.push(child) } })
-    const get = id => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id) }
-    const location = { hash, host: 'example.test', pathname: '/claim', search: '', href: 'https://example.test/claim' + hash, assign(value) { redirects.push(value) }, reload() { reloads.push(location.hash) } }
-    runInNewContext(script, { addEventListener(name, fn) { windowEvents[name] = fn }, document: { getElementById: get, createElement: node }, location, history: { replaceState(...args) { calls.push(args) } }, URL, URLSearchParams, setTimeout(fn, delay) { waits.push({ fn, delay }) }, fetch: async (path, options) => { calls.push({ path, body: JSON.parse(options.body), type: options.headers['content-type'] }); return { status, ok: status === 200, json: async () => status === 200 ? { ok: true, username: 'person', next: 'https://auth.example.test/', wait_seconds: 3 } : { error: `The exact refusal for ${status}.` } } } })
-    get('username').value = 'person'; get('password').value = 'synthetic-password'
-    return { get, calls, waits, redirects, location, windowEvents, reloads, submit: () => get('claim-form').events.submit({ preventDefault() {} }) }
+
+  const settle = () => new Promise(resolve => setImmediate(resolve))
+  function fixture({ code = 202, hash = '#token=fixture-token', firstStage = 'open' } = {}) {
+    const nodes = new Map(), posts = [], redirects = [], waits = [], windowEvents = {}, reloads = []
+    const node = () => ({
+      hidden: true, value: '', textContent: '', href: 'https://example.test/', events: {},
+      addEventListener(name, fn) { this.events[name] = fn }, setAttribute() {}, focus() {},
+    })
+    const get = id => {
+      if (!nodes.has(id)) nodes.set(id, node())
+      return nodes.get(id)
+    }
+    const location = { hash, pathname: '/claim', search: '', assign(value) { redirects.push(value) }, reload() { reloads.push(this.hash) } }
+    let stage = firstStage, pagePath, now = 0
+    runInNewContext(script, {
+      addEventListener(name, fn) { windowEvents[name] = fn },
+      document: { getElementById: get }, location, URLSearchParams, AbortSignal,
+      Date: { now: () => now },
+      history: { replaceState(_state, _title, path) { pagePath = path } },
+      setTimeout(fn, delay) { waits.push({ fn, delay }) },
+      async fetch(path, options) {
+        if (options.method === 'POST') {
+          posts.push(JSON.parse(options.body))
+          return { status: code, ok: code < 300, json: async () => ({ error: `The exact refusal for ${code}.` }) }
+        }
+        assert.equal(path, '/claim?status')
+        assert.equal(options.redirect, 'manual')
+        return stage === 'ready' ? { type: 'opaqueredirect' } : { ok: true, json: async () => ({ stage }) }
+      },
+    })
+    assert.equal(pagePath, '/claim', 'the token leaves the address')
+    get('username').value = 'PageTester'
+    get('password').value = 'synthetic-password'
+    return {
+      get, posts, redirects, waits, location, windowEvents, reloads,
+      submit: () => get('claim-form').events.submit({ preventDefault() {} }),
+      async tick(value, elapsed = 1000) { stage = value; now += elapsed; waits.shift().fn(); await settle() },
+    }
   }
-  for (const status of [400, 403, 429, 500, 410]) {
-    const f = fixture(status); assert.equal(f.calls[0][2], '/claim'); await f.submit()
-    assert.equal(f.get('error').textContent, `The exact refusal for ${status}.`)
-    assert.equal(f.calls[1].type, 'application/json'); assert.equal(f.calls[1].body.token, 'fixture-token')
-    if (status === 410) { assert.equal(f.get('claim-form').hidden, true); assert.equal(f.get('next').href, 'https://example.test/'); assert.equal(f.get('password').value, '') }
+
+  for (const code of [400, 403, 429, 500]) {
+    const f = fixture({ code })
+    await settle()
+    await f.submit()
+    assert.equal(f.get('error').textContent, `The exact refusal for ${code}.`)
+    assert.equal(f.get('claim-form').hidden, false)
+    assert.equal(f.posts[0].token, 'fixture-token')
   }
-  const success = fixture(200, '#token=fixture-token'); await success.submit()
-  assert.equal(success.get('password').value, ''); assert.equal(success.waits[0].delay, 3000); assert.equal(success.redirects.length, 0)
-  success.waits[0].fn(); assert.equal(success.redirects[0], 'https://auth.example.test/')
-  const missing = fixture(403, ''); assert.equal(missing.get('claim-form').hidden, true); await missing.submit(); assert.equal(missing.calls.length, 1)
-  // The full link pasted into a tab already on /claim changes only the fragment: the page reads it again.
-  missing.location.hash = '#fixture-token'; missing.windowEvents.hashchange(); assert.deepEqual(missing.reloads, ['#fixture-token'])
-  missing.location.hash = ''; missing.windowEvents.hashchange(); assert.equal(missing.reloads.length, 1, 'an emptied fragment reloads nothing')
+  const success = fixture()
+  await settle()
+  success.get('username').events.input()
+  assert.match(success.get('username-hint').textContent, /Saved as pagetester/)
+  const submitted = success.submit()
+  assert.equal(success.get('progress').hidden, false)
+  assert.match(success.get('progress-note').textContent, /Keep this page open/)
+  await settle()
+  await success.tick('saving', 31000)
+  assert.match(success.get('delay-note').textContent, /taking longer/)
+  assert.deepEqual(success.redirects, [], 'time passing alone never goes to sign-in')
+  await success.tick('starting_login')
+  assert.match(success.get('progress-note').textContent, /You can close this page/)
+  assert.equal(success.get('password').value, '')
+  await success.tick('ready')
+  await submitted
+  assert.equal(success.get('next').hidden, false)
+  success.waits.shift().fn()
+  assert.deepEqual(success.redirects, ['https://example.test/'])
+  assert.equal(success.posts[0].username, 'PageTester')
+
+  const failed = fixture()
+  await settle()
+  const failedSubmit = failed.submit()
+  await settle()
+  await failed.tick('save_failed')
+  await failedSubmit
+  assert.equal(failed.get('claim-form').hidden, false)
+  assert.match(failed.get('error').textContent, /Try again/)
+  const resumed = fixture({ hash: '', firstStage: 'starting_login' })
+  await settle()
+  assert.equal(resumed.get('claim-form').hidden, true)
+  assert.match(resumed.get('step-text').textContent, /Getting sign-in ready/)
+  await resumed.tick('finish_failed')
+  assert.match(resumed.get('progress-note').textContent, /run loam status/)
+  assert.equal(resumed.get('check').hidden, false)
+
+  const missing = fixture({ hash: '' })
+  await settle()
+  await missing.submit()
+  assert.equal(missing.posts.length, 0)
+  assert.equal(missing.get('claim-form').hidden, true)
+  missing.location.hash = '#fixture-token'
+  missing.windowEvents.hashchange()
+  assert.deepEqual(missing.reloads, ['#fixture-token'])
 })
 
 test('an available release with no System/Loam changes draws no empty file list', async () => {

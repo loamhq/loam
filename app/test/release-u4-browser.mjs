@@ -18,7 +18,14 @@ try {
       if (url.origin !== appURL) { external.push(url.href); return route.abort() }
       if (url.pathname === '/app.js') return route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__u4={state,threads,goSettings,schedule,theme};' })
       if (url.pathname === '/claim') {
-        if (route.request().method() === 'POST') { claimBody = route.request().postDataJSON(); claimed = true; return route.fulfill({ json: { ok: true, username: claimBody.username, next: appURL, wait_seconds: .2 } }) }
+        if (route.request().method() === 'POST') {
+          claimBody = route.request().postDataJSON(); claimed = true
+          return route.fulfill({ status: 202, json: { ok: true } })
+        }
+        if (url.search === '?status') {
+          if (claimed) return route.fulfill({ status: 302, headers: { location: appURL } })
+          return route.fulfill({ json: { stage: 'open' } })
+        }
         return route.fulfill({ contentType: 'text/html', headers: { 'Content-Security-Policy': claim.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)[1] + "; frame-ancestors 'none'" }, body: claim })
       }
       if (url.pathname === '/_loam/login-code') {
@@ -37,7 +44,7 @@ try {
       await page.getByLabel('Choose a username').fill('new-person')
       await page.getByLabel('Choose a password', { exact: true }).fill('a synthetic password only')
       await page.getByRole('button', { name: 'Make this my Loam', exact: true }).click()
-      await page.getByText('It’s yours.', { exact: true }).waitFor(); await shot('claim-success')
+      await page.getByRole('heading', { name: 'Your Loam is ready' }).waitFor(); await shot('claim-success')
       await page.getByRole('heading', { name: 'Welcome to Loam', exact: true }).waitFor()
       assert.equal(claimed, true); assert.equal(claimBody.token, 'fixture-claim')
       assert.equal(await page.getByRole('button', { name: 'Meet your first agent', exact: true }).isDisabled(), true)

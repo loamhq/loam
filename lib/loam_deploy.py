@@ -177,6 +177,7 @@ CLAIM_FILE = ETC / "claim"                       # root-only: the claim's token
 CLAIMED_FILE = ETC / "claimed"                   # who claimed the install, and when
 CLAIM_PORT = 8934                                # the claim service, loopback
 CLAIM_PATH = "/claim"
+CLAIM_MARKER = "# UNCLAIMED:"
 RELAY_PATH = "/_loam/login-code"
 # Relay the signed-in user's passkey operations through the app shell to the login
 # service.
@@ -1559,7 +1560,7 @@ def caddy_claim_block(fq: str) -> str:
     log line carries it; the page posts it. Gone at the next render after
     the claim, which deletes CLAIM_FILE."""
     return "\n".join([
-        f"# UNCLAIMED: no {CLAIMED_FILE} yet, so the login has no user. The claim",
+        f"{CLAIM_MARKER} no {CLAIMED_FILE} yet, so the login has no user. The claim",
         "# page answers outside the login until the person claims this install.",
         f"{fq} {{",
         access_log_line(fq),
@@ -1887,7 +1888,8 @@ def authelia_config() -> str:
             # An install without mail delivery cannot offer working password-reset emails.
             "password_reset": {"disable": bool(EDGE)},
             "password_change": {"disable": False},
-            "file": {"path": "/data/users_database.yml", "watch": True},
+            "file": {"path": "/data/users_database.yml", "watch": True,
+                     "search": {"case_insensitive": True}},
         },
         "access_control": {"default_policy": "deny", "rules": rules},
         "session": {

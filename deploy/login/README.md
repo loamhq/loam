@@ -54,6 +54,10 @@ Change it, then `sudo bin/gen-deploy`. Only the Caddyfile changes; the
 rendered files stay, so switching either way takes effect at Caddy's reload
 and signs nobody out.
 
+Authelia's file backend matches usernames without regard to case and
+keeps the stored account identifier. Passkey sign-in uses the account
+linked to the credential and needs no typed username.
+
 Whatever the setting, `?authelia=1` on a portal route reaches Authelia's own
 page. That is where what this page leaves out still is: setting up or
 removing an authenticator app (TOTP), renaming a passkey, choosing a

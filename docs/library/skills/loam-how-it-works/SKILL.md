@@ -88,6 +88,13 @@ branch. The answering agent gets the original words, author, time and IDs
 with the source thread's name and file path, so it can read further back
 when it needs to. The owner's opening supplies the title.
 
+On a fresh install, the welcome link is where the owner makes a sign-in.
+The page shows when the sign-in is saved and sends the owner to sign-in
+once Loam is ready. Once it says the sign-in is saved, the owner can
+close the page and return to the same address. Usernames are saved in
+lowercase and work with any capitalization. A passkey signs in to the
+same account without typing the username.
+
 On a fresh install, a phone opens Chats with an unread Hello. A wide screen
 opens Hello. Iris greets the owner by name and shows how Chats, Files and Apps
 fit together. Empty places explain their purpose until they fill. Board,

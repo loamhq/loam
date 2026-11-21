@@ -47,6 +47,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
@@ -198,6 +199,36 @@ def ensure_static_roots(dry: bool) -> None:
             os.chown(root, owner.st_uid, owner.st_gid)
 
 
+def wait_for_login() -> None:
+    """Leave the claim page reachable until Authelia can accept sign-ins."""
+    url = f"http://127.0.0.1:{dep.AUTHELIA_PORT}/api/health"
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                if response.status == 200:
+                    return
+        except OSError:
+            pass
+        time.sleep(0.5)
+    die("authelia did not become healthy. The claim page is still up.")
+
+
+def switch_claim_edge(content: str) -> None:
+    """Apply the new edge before persisting it. A failed reload leaves the
+    old claim route in service and on disk for the next attempt."""
+    staged = dep.CADDYFILE.with_name(".loam-claim.Caddyfile")
+    try:
+        write_root(staged, content)
+        res = run(["caddy", "reload", "--config", str(staged), "--adapter", "caddyfile", "--force"])
+        if res.returncode:
+            die(f"caddy could not switch from claim to sign-in: {res.stderr.strip()}")
+        write_root(dep.CADDYFILE, content)
+        print("  caddy: the sign-in is ready and the claim route is removed")
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def generate(dry: bool) -> int:
     files = dep.generated()
     ensure_access_log_dir(dry)
@@ -206,6 +237,11 @@ def generate(dry: bool) -> int:
     validate_authelia(files[dep.AUTHELIA_CONFIG])
     ensure_static_roots(dry)
     warn_unresolved()
+    caddy = files[dep.CADDYFILE]
+    switching_claim = (dep.CADDYFILE.exists()
+                       and dep.CLAIM_MARKER in dep.CADDYFILE.read_text(encoding="utf-8")
+                       and dep.CLAIM_MARKER not in caddy
+                       and dep.edge_ready() and not dep.unclaimed())
     changed: list[Path] = []
     for path, content in files.items():
         d = diff(path, content)
@@ -220,7 +256,8 @@ def generate(dry: bool) -> int:
         print("  [dry-run] nothing written, nothing reloaded")
         return 0
     for path in changed:
-        write_root(path, files[path], dep.MODES.get(path, 0o644))
+        if path != dep.CADDYFILE or not switching_claim:
+            write_root(path, files[path], dep.MODES.get(path, 0o644))
 
     # Apply. Each of these is idempotent and each says what it did.
     # Before Caddy: the previews' listener binds an address docker may not
@@ -236,7 +273,7 @@ def generate(dry: bool) -> int:
         res = run(["systemctl", "daemon-reload"])
         print(f"  {dep.SERVICE_UNIT.name}: daemon-reload (exit {res.returncode}); "
               f"running instances pick it up at their next `bin/deploy <app> up`")
-    if dep.CADDYFILE in changed:
+    if dep.CADDYFILE in changed and not switching_claim:
         res = run(["systemctl", "reload", "caddy"])
         print(f"  caddy reloaded (exit {res.returncode}){': ' + res.stderr.strip() if res.stderr.strip() else ''}")
     if dep.DAEMON_JSON in changed:
@@ -253,11 +290,18 @@ def generate(dry: bool) -> int:
         res = compose(dep.AUTHELIA_COMPOSE, *args)
         print(f"  authelia: compose up (exit {res.returncode})")
         if res.returncode:
+            if switching_claim:
+                die(f"authelia could not start: {res.stderr.strip()}")
             print(res.stderr.strip())
+    elif switching_claim:
+        die("authelia has no secrets. The claim page is still up.")
     else:
         print(f"  authelia: {dep.AUTHELIA_SECRETS} is absent; run --init-login "
               f"<user> first. The gate still holds: forward_auth to a dead "
               f"upstream answers 502, not the app.")
+    if switching_claim:
+        wait_for_login()
+        switch_claim_edge(caddy)
     res = compose(dep.BROWSER_COMPOSE, "up", "-d", "--remove-orphans")
     print(f"  browser: compose up (exit {res.returncode})")
     if res.returncode:

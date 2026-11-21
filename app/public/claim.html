@@ -27,21 +27,31 @@
 /* claim-fonts:end */
 :root{color-scheme:light dark;--ground:#e6e1da;--ink:#2a2521;--muted:#66605a;--surface:#efebe5;--primary:#4a3a2e;--on:#f3eee8;--rule:#bdb3a8;--error:#a8362a}
 @media(prefers-color-scheme:dark){:root{--ground:#1a1715;--ink:#e6dfd6;--muted:#b3a89c;--surface:#231f1c;--primary:#cda57f;--on:#1c1410;--rule:#65594e;--error:#e08a7c}}
-*{box-sizing:border-box}body{margin:0;background:var(--ground);color:var(--ink);font:17px/1.5 Figtree,system-ui,sans-serif}main{min-height:100svh;display:grid;align-content:center;padding:40px 24px}.claim{width:100%;max-width:440px;margin:auto}.mark{font-size:52px;color:var(--primary);line-height:1}.kicker{font-size:11px;text-transform:uppercase;letter-spacing:.14em;font-weight:700;margin:25px 0 12px;color:var(--muted)}h1{font:400 clamp(36px,8vw,48px)/1.1 Caprasimo,Georgia,serif;letter-spacing:-.025em;margin:0 0 18px}p{margin:0 0 24px}.intro{color:var(--muted)}label{display:block;font-weight:650;margin:20px 0 8px}input{width:100%;min-height:50px;border:1px solid var(--rule);border-radius:16px;background:var(--surface);color:var(--ink);padding:12px 16px;font:inherit}input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid var(--primary);outline-offset:4px}.password{display:flex;gap:8px;align-items:center}.password input{min-width:0}.show{background:transparent;color:var(--primary);border:0;padding:12px;min-height:48px;font:inherit;cursor:pointer}.hint{font-size:14px;color:var(--muted);margin:8px 0 24px}.primary{display:block;text-align:center;background:var(--primary);color:var(--on);border:0;border-radius:999px;padding:15px 24px;font:400 17px/1.2 Caprasimo,Georgia,serif;cursor:pointer;width:100%;text-decoration:none;min-height:50px;margin:24px 0 0}button:disabled{opacity:.6;cursor:wait}.error{color:var(--error);font-size:15px;margin:20px 0 0;overflow-wrap:anywhere}.privacy{font-size:13px;color:var(--muted);text-align:center;margin:18px 0 0}[hidden]{display:none!important}.success{padding:24px 0}.success .mark{margin-bottom:24px}
+*{box-sizing:border-box}body{margin:0;background:var(--ground);color:var(--ink);font:17px/1.5 Figtree,system-ui,sans-serif}main{min-height:100svh;display:grid;align-content:center;padding:40px 24px}.claim{width:100%;max-width:440px;margin:auto}.mark{font-size:52px;color:var(--primary);line-height:1}.kicker{font-size:11px;text-transform:uppercase;letter-spacing:.14em;font-weight:700;margin:25px 0 12px;color:var(--muted)}h1{font:400 clamp(36px,8vw,48px)/1.1 Caprasimo,Georgia,serif;letter-spacing:-.025em;margin:0 0 18px}p{margin:0 0 24px}.intro{color:var(--muted)}label{display:block;font-weight:650;margin:20px 0 8px}input{width:100%;min-height:50px;border:1px solid var(--rule);border-radius:16px;background:var(--surface);color:var(--ink);padding:12px 16px;font:inherit}input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid var(--primary);outline-offset:4px}.password{display:flex;gap:8px;align-items:center}.password input{min-width:0}.show{background:transparent;color:var(--primary);border:0;padding:12px;min-height:48px;font:inherit;cursor:pointer}.hint{font-size:14px;color:var(--muted);margin:8px 0 24px}.primary{display:block;text-align:center;background:var(--primary);color:var(--on);border:0;border-radius:999px;padding:15px 24px;font:400 17px/1.2 Caprasimo,Georgia,serif;cursor:pointer;width:100%;text-decoration:none;min-height:50px;margin:24px 0 0}button:disabled{opacity:.6;cursor:wait}.error{color:var(--error);font-size:15px;margin:20px 0 0;overflow-wrap:anywhere}.privacy{font-size:13px;color:var(--muted);text-align:center;margin:18px 0 0}[hidden]{display:none!important}.progress{margin-top:24px}.progress h1:focus{outline:none}.step{display:flex;align-items:center;gap:10px;margin:0 0 16px;font-weight:650}.spinner{flex:none;width:16px;height:16px;border:2px solid var(--rule);border-top-color:var(--primary);border-radius:50%;animation:spin 1.25s linear infinite}.progress .hint{margin:16px 0 0}.quiet{display:inline-block;color:var(--primary);margin-top:20px;text-underline-offset:3px}.progress .primary{margin-top:20px}
+@keyframes spin{to{transform:rotate(1turn)}}@media(prefers-reduced-motion:reduce){.spinner{animation:none}}
 </style>
 </head>
 <body>
 <main><div class="claim">
-<div id="opening"><div class="mark" aria-hidden="true">✳</div><div class="kicker">Your own little corner</div><h1>Welcome to Loam</h1><p class="intro">A place for you and your agents. Create your sign-in to make it yours.</p></div>
-<form id="claim-form">
-<label for="username">Choose a username</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+<div class="mark" aria-hidden="true">✳</div>
+<div id="opening"><div class="kicker">Your own little corner</div><h1>Welcome to Loam</h1><p class="intro">A place for you and your agents. Create your sign-in to make it yours.</p></div>
+<form id="claim-form" method="post" action="/claim" hidden>
+<label for="username">Choose a username</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="username-hint" required>
+<p class="hint" id="username-hint">Saved in lowercase. You can sign in with any capitalization.</p>
 <label for="password">Choose a password</label><div class="password"><input id="password" name="password" type="password" autocomplete="new-password" aria-describedby="password-hint" required><button class="show" type="button" id="show" aria-label="Show password" aria-pressed="false">Show</button></div>
 <p class="hint" id="password-hint">At least 10 characters. Keep both somewhere safe: you’ll use them to sign in on your other devices.</p>
-<button class="primary" id="submit" type="submit">Make this my Loam</button><p class="privacy">This sign-in belongs to your Loam.</p>
+<button class="primary" type="submit">Make this my Loam</button><p class="privacy">This sign-in belongs to your Loam.</p>
 </form>
 <p id="error" class="error" role="alert" hidden></p>
-<div id="settled" class="success" role="status" hidden></div>
-<a id="next" class="primary" hidden>Go to sign-in</a>
+<noscript><p class="intro">Turn on JavaScript to set up your Loam.</p></noscript>
+<div id="progress" class="progress" hidden>
+<h1 id="progress-title" tabindex="-1">Setting up your Loam</h1>
+<p id="step" class="step" role="status"><span class="spinner" aria-hidden="true"></span><span id="step-text"></span></p>
+<p id="progress-note" class="intro"></p>
+<p id="delay-note" class="hint" role="status"></p>
+<a id="next" class="primary" href="/" hidden>Go to sign-in</a>
+<a id="check" class="quiet" href="/claim" hidden>Check again</a>
+</div>
 </div></main>
 <script>
 (() => {
@@ -51,35 +61,152 @@
   history.replaceState(null, '', location.pathname + location.search)
   // A new claim link in the current tab changes only the fragment. Reload to read its token.
   addEventListener('hashchange', () => { if (location.hash.length > 1) location.reload() })
-  const form = document.getElementById('claim-form'), error = document.getElementById('error'), submit = document.getElementById('submit'), password = document.getElementById('password'), next = document.getElementById('next'), settled = document.getElementById('settled')
-  function problem(words) { error.textContent = words; error.hidden = false }
-  function already(words) {
-    form.hidden = true; problem(words); next.href = 'https://' + location.host + '/'; next.textContent = 'Open Loam'; next.hidden = false
+
+  const byId = (id) => document.getElementById(id)
+  const opening = byId('opening'), form = byId('claim-form'), error = byId('error')
+  const username = byId('username'), usernameHint = byId('username-hint'), password = byId('password')
+  const progress = byId('progress'), title = byId('progress-title')
+  const step = byId('step'), stepText = byId('step-text')
+  const note = byId('progress-note'), delayNote = byId('delay-note'), next = byId('next'), check = byId('check')
+  const incomplete = 'Open the full welcome link you were given to set up Loam.'
+  const saveAgain = 'We couldn’t save your sign-in. Try again in a minute.'
+  const noAnswer = 'We couldn’t confirm that setup started. Check your connection and try again.'
+  let watching = false
+
+  function showForm(words = '') {
+    opening.hidden = false
+    form.hidden = !token
+    progress.hidden = true
+    error.textContent = words || (token ? '' : incomplete)
+    error.hidden = !error.textContent
+    watching = false
   }
-  if (!token) { form.hidden = true; problem('This link is incomplete. Open the full welcome link you were given to set up Loam.') }
-  document.getElementById('show').addEventListener('click', event => {
+
+  function showProgress() {
+    watching = true
+    opening.hidden = true
+    form.hidden = true
+    error.hidden = true
+    progress.hidden = false
+    delayNote.textContent = ''
+    title.focus()
+  }
+
+  function showStage(stage) {
+    const saved = stage === 'starting_login'
+    title.textContent = 'Setting up your Loam'
+    stepText.textContent = saved ? 'Getting sign-in ready' : 'Saving your sign-in'
+    note.textContent = saved
+      ? 'You can close this page. Setup will keep going. Return to this address when you’re ready to sign in.'
+      : 'Keep this page open until your sign-in is saved. We’ll take you to sign-in when it’s ready.'
+    if (saved) password.value = ''
+  }
+
+  async function status() {
+    // The gated app redirects an anonymous request only after the edge switches.
+    const response = await fetch('/claim?status', {
+      redirect: 'manual', credentials: 'omit', cache: 'no-store',
+      headers: { Accept: 'text/html' }, signal: AbortSignal.timeout(5000),
+    })
+    if (response.type === 'opaqueredirect') return 'ready'
+    if (!response.ok) throw new Error('Setup status unavailable')
+    return (await response.json()).stage
+  }
+
+  function done() {
+    password.value = ''
+    title.textContent = 'Your Loam is ready'
+    step.hidden = true
+    note.textContent = 'Sign in to meet your agents. We’ll take you there now.'
+    delayNote.textContent = ''
+    next.hidden = false
+    setTimeout(() => location.assign(next.href), 1600)
+  }
+
+  async function watch(firstStage) {
+    const started = Date.now()
+    let stage = firstStage
+    let lostContact = false
+    let displayedStage = ''
+    while (true) {
+      if (stage === 'ready') { done(); return }
+      if (stage === 'open') { showForm(token ? noAnswer : incomplete); return }
+      if (stage === 'save_failed') {
+        showForm(token ? saveAgain : 'We couldn’t save your sign-in. Open your welcome link to try again.')
+        return
+      }
+      if (stage === 'finish_failed') {
+        password.value = ''
+        title.textContent = 'Sign-in isn’t ready yet'
+        step.hidden = true
+        note.textContent = 'Your sign-in is saved. Ask whoever set up this Loam to run loam status to see what needs attention.'
+        delayNote.textContent = ''
+        check.hidden = false
+        return
+      }
+      if (stage !== displayedStage && (stage === 'saving' || stage === 'starting_login')) {
+        showStage(stage)
+        displayedStage = stage
+      }
+      const slow = Date.now() - started >= 30000
+      const delay = lostContact
+        ? 'We lost contact with Loam. This page will keep checking.'
+        : slow ? 'This is taking longer than usual. This page will keep checking.' : ''
+      if (delay !== delayNote.textContent) delayNote.textContent = delay
+      await new Promise(resolve => setTimeout(resolve, slow ? 2500 : 800))
+      try { stage = await status(); lostContact = false }
+      catch { lostContact = true }
+    }
+  }
+
+  username.addEventListener('input', () => {
+    const typed = username.value.trim(), saved = typed.toLowerCase()
+    usernameHint.textContent = typed !== saved && /^[a-z][a-z0-9_-]{1,31}$/.test(saved)
+      ? 'Saved as ' + saved + '. You can sign in with any capitalization.'
+      : 'Saved in lowercase. You can sign in with any capitalization.'
+  })
+
+  byId('show').addEventListener('click', event => {
     const showing = password.type === 'password'
-    password.type = showing ? 'text' : 'password'; event.currentTarget.textContent = showing ? 'Hide' : 'Show'; event.currentTarget.setAttribute('aria-label', showing ? 'Hide password' : 'Show password'); event.currentTarget.setAttribute('aria-pressed', String(showing))
+    password.type = showing ? 'text' : 'password'
+    event.currentTarget.textContent = showing ? 'Hide' : 'Show'
+    event.currentTarget.setAttribute('aria-label', showing ? 'Hide password' : 'Show password')
+    event.currentTarget.setAttribute('aria-pressed', String(showing))
   })
+
   form.addEventListener('submit', async event => {
-    event.preventDefault(); if (submit.disabled || !token) return
-    submit.disabled = true; submit.textContent = 'Making room for you…'; error.hidden = true
+    event.preventDefault()
+    if (watching || !token) return
+    showProgress()
+    showStage('saving')
     try {
-      const response = await fetch('/claim', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, username: document.getElementById('username').value.trim(), password: password.value }) })
-      const answer = await response.json()
-      if (response.status === 410) { token = ''; password.value = ''; already(answer.error); return }
-      if (!response.ok) { problem(answer.error || 'We couldn’t finish setting up your sign-in. Try again.'); return }
-      if (answer.ok !== true) throw new Error('incomplete answer')
-      token = ''; password.value = ''; form.hidden = true; document.getElementById('opening').hidden = true; settled.hidden = false
-      const heading = document.createElement('h1'); heading.textContent = 'It’s yours.'; settled.appendChild(heading)
-      const words = document.createElement('p'); words.textContent = 'Your sign-in is ready, ' + answer.username + '. We’re getting the sign-in page ready for you.'; settled.appendChild(words)
-      const url = new URL(answer.next, location.href)
-      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('invalid next page')
-      next.href = url.href
-      setTimeout(() => { next.hidden = false; words.textContent = 'Sign in with your new username and password. We’ll meet you inside.'; location.assign(url.href) }, Math.max(0, Number(answer.wait_seconds) || 0) * 1000)
-    } catch { problem('We couldn’t reach Loam. Check your connection, then try again.') }
-    finally { submit.disabled = false; submit.textContent = 'Make this my Loam' }
+      const response = await fetch('/claim', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token, username: username.value.trim(), password: password.value }),
+        signal: AbortSignal.timeout(10000),
+      })
+      if (response.status === 200 && (await response.json()).ok) {
+        // An updated checkout can briefly still have the previous service running.
+        await watch('starting_login')
+        return
+      }
+      if (!response.ok && ![409, 410].includes(response.status)) {
+        const answer = await response.json()
+        if (answer.error) { showForm(answer.error); return }
+      }
+    } catch {
+      // The worker may have accepted the request even if the answer was lost.
+    }
+    await watch()
   })
+
+  if (token) showForm()
+  status().then((stage) => {
+    if (watching) return
+    if (stage === 'open' || (stage === 'save_failed' && token)) { showForm(); return }
+    showProgress()
+    return watch(stage)
+  }).catch(() => { if (!watching) showForm(token ? '' : 'We couldn’t check setup. Reload this page to try again.') })
 })()
 </script>
 </body>
