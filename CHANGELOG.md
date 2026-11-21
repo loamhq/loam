@@ -3,6 +3,8 @@
 Find each release's notes in `docs/releases/<version>.md`. Loam gives the
 notes to the person's agent, who decides what is worth sharing with them.
 
+- [0.2.23](docs/releases/0.2.23.md), 2026-11-21: Enter sends by default,
+  agent draft revisions have a reply prompt, and theme covers show in Plugins.
 - [0.2.22](docs/releases/0.2.22.md), 2026-11-21: start the first day at claim,
   refresh unchanged starter files, and provision the nightly reviewer.
 - [0.2.21](docs/releases/0.2.21.md), 2026-11-21: the claim page shows
