@@ -446,3 +446,5 @@
 .message-video figcaption { margin-top: .35rem; font-size: .8rem; overflow-wrap: anywhere; }
 
 .video-chip .attachment-chip-sub { white-space: normal; }
+
+.reviewer-document { padding: 0 1rem 1rem; overflow-wrap: anywhere; }

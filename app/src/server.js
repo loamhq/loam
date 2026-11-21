@@ -422,6 +422,14 @@ export function createApp({
       if (!out.stream || method === 'HEAD') { out.stream?.destroy(); return res.end() }
       return await new Promise((resolve, reject) => { out.stream.on('error', reject); res.on('close', () => { out.stream.destroy(); resolve() }); out.stream.pipe(res); res.on('finish', resolve) })
     }
+    if (rest === '/system/reviewer/instructions' && method === 'GET') {
+      // Settings can read this one generated document. The general Files routes
+      // keep the retired System tree hidden.
+      const out = await broker.json('GET', '/v1/files/read?root=system&path=Reviewer%2FCLAUDE.md')
+      if (out.status === 404) return sendJson(res, 200, { text: null })
+      if (out.status !== 200) return sendJson(res, out.status, { error: 'Reviewer instructions are unavailable.' })
+      return sendJson(res, 200, { text: safeJson(out.body)?.text ?? null })
+    }
     const profileRoute = /^\/agents\/([^/]+)$/.test(rest) || /^\/engineers(?:\/([^/]+))?$/.test(rest) || rest === '/system/reviewer' || rest === '/system/persona' || /^\/plugins\/([^/]+)\/agents(?:\/([^/]+))?$/.test(rest)
     if (profileRoute) {
       if (!['GET', 'PATCH'].includes(method)) return sendJson(res, 405, { error: 'Use GET or PATCH for profile settings.' })
