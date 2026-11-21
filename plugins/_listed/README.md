@@ -24,10 +24,7 @@ is tested against what people wear.
 **Dictation and Read aloud** (`dictation/`, `read-aloud/`) were built into
 Loam until 0.2.9, as page plugins in the app's `public/plugins/`. They are
 Market plugins now, each in its maker's own repository (linked from its
-Market page), where a new version is made and tagged. The copies here are at
-1.0.0, the last version Loam shipped; the makers' repositories went on from
-1.0.1, which added only the README, the licence, an icon and the maker's
-name. They are here because the app's tests drive them
+Market page), where a new version is made and tagged. The 1.2.0 copies here support Google, OpenAI and native browser speech. They are here because the app's tests drive them
 (`app/test/audio-plugins.mjs`), because the app server keeps two of Read
 aloud's modules as its own (`app/src/speakable.js`, `document-speech.js`,
 held equal by `tests/test_to_market.py`), and as the release's fallback when

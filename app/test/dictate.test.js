@@ -1021,7 +1021,7 @@ test('a take that fails: the field is kept, the quiet line offers one Retry, and
   const before = buzzes.length
   keep().fire('click')
   await until(() => notice())
-  assert.equal(text(notice()), 'Couldn’t clean that take · Retry')
+  assert.match(text(notice()), /Gemini could not transcribe this .*Retry/)
   assert.equal(take(), null)
   assert.equal(f.value, 'Keep me', 'a failed take touched the field')
   assert.equal(buzzes.length, before, 'a manual stop buzzed')
@@ -1046,7 +1046,7 @@ test('a take that fails: the field is kept, the quiet line offers one Retry, and
   await until(() => offer())
   offer().fire('click')
   await until(() => notice() && !offer())
-  assert.equal(text(notice()), 'Couldn’t clean that take')
+  assert.match(text(notice()), /Gemini could not transcribe this/)
   assert.equal(f.value, 'Keep me Ship it tonight.')
 
   // Any other action drops it: here, typing.
@@ -1703,4 +1703,27 @@ test('Live makes the next press the browser’s recogniser, and Record and clean
   assert.equal(globalThis.SpeechRecognition.last, heardBy, 'Record and clean started the recogniser')
   discard().fire('click')
   await until(() => !take())
+})
+
+test('removing the last key sends the next mic press to browser recognition and keeps the Record first preference', async () => {
+  const key = dictation.config.geminiApiKey
+  dictation.config.geminiApiKey = ''
+  try {
+    await openDictation()
+    await until(() => text(find(root, 'speech-provider')).includes('Using this browser'))
+    assert.equal(find(card('Polish'), 'segmented'), null)
+    assert.equal(held().mode, 'record')
+    await closeSettings()
+    field().value = ''
+    field().fire('input')
+    const before = FakeRecorder.last, calls = heard.length
+    mic().fire('click')
+    await until(() => takeClass() === 'take live recording')
+    const result = Object.assign([{ transcript: 'The sunflowers are growing.' }], { isFinal: true })
+    globalThis.SpeechRecognition.last.emit('result', { resultIndex: 0, results: [result] })
+    keep().fire('click')
+    await until(() => field()?.value.includes('The sunflowers are growing.'))
+    assert.equal(FakeRecorder.last, before)
+    assert.equal(heard.length, calls)
+  } finally { dictation.config.geminiApiKey = key }
 })

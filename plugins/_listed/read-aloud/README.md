@@ -1,61 +1,96 @@
-# Voice choices and samples
+# Read aloud
 
-Agent profile → Settings → Read aloud → Voice shows the thirty Gemini voices
-with Male/Female labels from [Google's Chirp 3 HD voice table](https://docs.cloud.google.com/text-to-speech/docs/chirp3-hd).
-These are the same voice names. Only the bare id (for example, `Charon`) is
-stored. The host-backed setting remains available to personas:
+<!-- loam:hero -->
+**Listen to your agents instead of reading them, each in a voice of its own.**
+<!-- /loam:hero -->
 
-```http
-PATCH /api/plugins/read-aloud/agents/<agent>
-Content-Type: application/json
+A plugin for [Loam](https://github.com/loamhq/loam). Press the speaker under
+an agent's reply and hear it, or a short spoken summary of it, in the voice
+you chose for that agent. Your notes in Files can be read aloud too.
 
-{"values":{"voice":"Charon"}}
-```
+<!-- loam:gallery -->
+![Listen to any reply as written, or hear a short Brief of it](assets/shots/read-aloud-menu.webp)
+*Listen to any reply as written, or hear a short Brief of it.*
 
-The picker separates choosing a voice from previewing it. A sample starts on
-one tap, stops on a second tap or another sample, and stops on selection,
-dismissal, leaving the profile, recording, or disabling the plugin. Listening
-does not change the saved voice. A failed save keeps the picker open and shows
-the host's refusal. The shared menu supplies phone sheets, desktop anchoring,
-Escape, focus restoration and viewport constraints.
+![It plays under the reply, and keeps going while you move around](assets/shots/read-aloud-playing.webp)
+*It plays under the reply, and keeps going while you move around.*
 
-**Recording status: the sample set is not yet recorded.** This checkout has an
-empty `page/voice-samples.js` index. Its sample controls are disabled and the
-picker explains why. Browser evidence uses a fixture tone to verify native
-playback; that tone is not shipped and is not a Gemini voice recording.
+![Choose a Google voice and hear its sample](assets/shots/read-aloud-voice.webp)
+*Choose a Google voice and hear its sample.*
+![Add one shared Gemini key in Settings](assets/shots/read-aloud-guide.webp)
+*Add one shared Gemini key in Settings.*
+<!-- /loam:gallery -->
 
-To record the real samples, provide the existing read-aloud plugin key through
-the broker's server-only secret store. With `BROKER_URL` and `BROKER_TOKEN`
-in the process environment and `ffmpeg` on PATH:
+## What you can do
 
-```sh
-SPEECH_DIR="$TMPDIR/voice-sample-cache" node tools/record-voice-samples.mjs --record
-```
+- **Hear any reply.** Press Listen and it's read to you in the selected voice, or the device voice without a key.
+- **Get the gist in seconds.** Brief turns a long reply into a short spoken
+  summary.
+- **Listen to your notes.** Any note in Files can be read aloud, and the
+  player keeps going while you move around Loam.
+- **A voice for each agent.** Google has thirty sampled voices. OpenAI maps those choices to its smaller voice set and shows the voice it will use. Files has a voice of its own.
+- **Tables and diagrams, explained.** Instead of reading cells out, it tells
+  you what they show (or skips them, if you prefer).
 
-The script makes paid calls using `createSpeech`, so model selection (including
-`SPEECH_TTS_MODEL`), the Full reply style (`informative, natural conversational
-pace, even and clear`), validation, loudness normalization and mono 64 kbit/s
-MP3 encoding stay on the existing path. It reads the existing key in memory;
-the browser, output files and logs receive no key. The neutral sentence is
-the same for every voice: “Hello. This is how I sound reading your notes aloud.”
+## How to use it
 
-All thirty takes must succeed and last 3–5 seconds before the index is
-published. Inspect and listen to every resulting MP3, then commit `samples/`
-and the generated `page/voice-samples.js` together. Scratch contains the
-ordinary synthesis cache, which lets an interrupted run resume without paying
-again for completed takes. An out-of-range take blocks publication; review it
-before retrying with a fresh scratch cache. The shipped picker only reads static
-files; preview playback has no synthesis request and requires no provider key.
+Press the speaker under a reply or in Files and choose Listen. With no key, the player uses your browser’s voice and reads the fixed skip notices for tables and diagrams. A server key adds Brief and generated descriptions.
 
-Verification:
+Open Settings › Plugins › Read aloud to see the provider. Follow the free Gemini key link, sign in to Google AI Studio, create a key and paste it in the guide. Loam checks it and saves it in Settings › Connections › API keys for both plugins.
 
-```sh
-node --test test/voice-picker.test.js test/agent-profile.test.js test/audio-plugin-lifecycle.test.js
-npm test
-VOICE_EVIDENCE="$TMPDIR/voice-evidence" node test/voice-picker-browser.mjs
-```
+## What you need, and what leaves your server
 
-The browser check needs separately installed Playwright/Chromium, optionally
-named by `LOAM_PLAYWRIGHT` and `LOAM_CHROME`. It checks 390/1440, light/dark,
-native fixture playback, absent recordings, stop/switch/selection/dismissal,
-plugin disable, scrolling, bare-id PATCH and persona-route persistence.
+Loam uses a Google key first, then an OpenAI key, then the browser. A provider error stays with that provider. Listen sends reply or file text to the selected provider. Browser voices can be local or use a browser-managed speech service. Server-generated audio is cached on your server. Browser speech is played on demand.
+
+Eligible projects can use Google’s free quota without setting up billing. Google may use free-tier inputs and outputs to improve its products. Quotas vary by project and model. Google restricts API use to eligible regions and professional or business development. Serving users in the EEA, Switzerland or the UK requires paid services. [Google terms](https://aistudio.google.com/docs/terms) · [Available regions](https://aistudio.google.com/docs/available-regions) · [Project limits](https://aistudio.google.com/rate-limit)
+
+---
+
+Version 1.2 adds an optional OpenAI key and a connection to api.openai.com. Browser voices may contact their own speech service. Loam asks you to review this new access when updating.
+
+## Technical details
+
+### What it touches
+
+- **api.openai.com** handles reply or file text for narration, summaries and descriptions when OpenAI is selected.
+- **generativelanguage.googleapis.com** when Google is selected: the text of a reply or a note goes
+  there from this plugin's own server on your Loam, which holds the key,
+  only when you ask to hear it. The server supplies the key on that request.
+- **Browser speech services** may receive text when the device voice needs a network connection.
+- **Conversation records, read only**: the replies it reads.
+- **Each agent's voice**, kept by your Loam with the agent's profile, so
+  your agents can change it too.
+
+### Settings
+
+Settings › Plugins › Read aloud: when Listen and Brief are offered (Listen
+from 50 words, Brief from 200, unless you change them), the reading rate, the
+Files voice and whether tables and diagrams are described. They are kept in
+this browser, so each device has its own, and they stay if you turn the
+plugin off and on again. A take is made once and kept, so playing it again
+is instant. Agent voices are on each agent's profile.
+
+### Install from the Market
+
+Open Settings › Market and search for **Read aloud**. The listing links to the maker’s repository and shows the exact version available.
+
+### For builders
+
+[PLUGIN.md](PLUGIN.md) is its manifest, with the voices as an
+`agent_settings` field. Plain ES modules with no build step and no
+dependency: `page/main.js` registers the reply footer, the Files action, the
+player and the settings through Loam's plugin interface (API 0). `server/` is
+its own small server (Node's standard library and `ffmpeg`), which Loam runs
+while the plugin is on and reaches at `/x/read-aloud/`: it makes the speech,
+keeps the audio for a while in the plugin's private folder, and holds the
+key; the page holds none. Each agent's voice is the one chosen on its
+profile, else the `voices` setting (`agent=Voice:character;…`, under
+Advanced). `samples/` holds the voice samples the profile plays, one short
+take per voice. Needs Loam 0.2.3 or later. Loam's own repository runs this
+plugin's tests against its copy in `plugins/_listed/read-aloud/`. The
+pictures are from Loam's demo world (`app/tools/capture-plugin-shots.mjs`;
+the demo lowers Brief's threshold to 100 words).
+
+## License
+
+Under the AGPL-3.0 ([LICENSE](LICENSE)), as Loam is.

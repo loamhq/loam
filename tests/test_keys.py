@@ -392,8 +392,9 @@ daemon.server_close()
 for name in ("read-aloud", "dictation"):
     data, _ = lp.parse_frontmatter((AGENTS / "plugins" / "_listed" / name / "PLUGIN.md").read_text())
     man, _ = lp.manifest_of(data, name)
-    check(f"{name} declares Google's key", [x["provider"] for x in man.get("keys") or []]
-          == ["google"], man.get("keys"))
+    check(f"{name} declares optional Google and OpenAI keys in preference order",
+          [(x["provider"], x["optional"]) for x in man["keys"]] == [("google", True), ("openai", True)],
+          man["keys"])
     # 1.1.0 dropped the settings.secret of the same name (kept through
     # 0.2.3): the listing said "Asks for a key of its own" beside the key.
     check(f"{name}: no pasted secret beside the provider's key",

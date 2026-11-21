@@ -29,7 +29,7 @@ export function shippedManifest(text) {
   if (defaultOn !== undefined && !['true', 'false'].includes(defaultOn)) throw new Error('default_on must be true or false.')
   const network = [...header.matchAll(/^    - host:\s*(.+)\r?\n      why:\s*(.+)$/gm)].map(([, host, why]) => ({ host, why }))
   // The providers whose keys it uses (2026-11-18), as `keys:` lists them.
-  const keys = [...header.matchAll(/^  - provider:\s*(\S+)\r?\n    why:\s*(.+)$/gm)].map(([, provider, why]) => ({ provider, why }))
+  const keys = [...header.matchAll(/^  - provider:\s*(\S+)\r?\n(?:    optional: (true|false)\r?\n)?    why:\s*(.+)$/gm)].map(([, provider, optional, why]) => ({ provider, why, ...(optional === 'true' ? { optional: true } : {}) }))
   return { ...(defaultOn === undefined ? {} : { default_on: defaultOn === 'true' }), id: field('id'), name: field('name'), version: field('version'), author: field('author'), api: Number(field('api')), kind: list('kind'), ...themeImage({ image: field('image'), image_position: field('image_position'), image_dark: field('image_dark'), image_position_dark: field('image_position_dark') }), ...(field('contributes') ? { contributes: JSON.parse(field('contributes')) } : {}), ...(field('options') ? { options: JSON.parse(field('options')) } : {}), ...(field('agent_settings') ? { agent_settings: JSON.parse(field('agent_settings')) } : {}), places: list('places'), overrides: list('overrides'), ...(keys.length ? { keys } : {}),
     ...(field('description') ? { description: unquote(field('description')) } : {}),
     ...(flowList(header, 'screenshots').length ? { screenshots: flowList(header, 'screenshots') } : {}),
