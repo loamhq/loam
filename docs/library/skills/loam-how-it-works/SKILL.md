@@ -33,7 +33,9 @@ connected provider is enough for the first hello and any agent that uses
 automatic selection. With several, conversations prefer Claude Code,
 then Codex, then Antigravity. An explicit choice in Settings › Agents or
 a thread's Providers & models stays selected if its sign-in stops working.
-A thread using the agent's default inherits it on the next turn. An
+A thread using the agent's default inherits it on the next turn. Changing
+a member's model applies to its next turn. Claude Code's acknowledgement
+stays in the session journal, and the thread waits for the agent's reply. An
 automatic choice stays empty until a provider connects. Models and
 thinking levels belong to their provider. Loam uses the selected provider's
 defaults when a different provider's settings do not apply. Each CLI gets

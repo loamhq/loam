@@ -12,8 +12,9 @@ import time
 from pathlib import Path
 
 import loam_threads as threads
+from loam_session import local_command_output
 
-SKIPPED = ("stream_event",)
+SKIPPED = ("stream_event", "broker.local_command")
 
 # The writer's own counts, served on GET /v1/threads/writer: a reply that
 # was dropped or merged is loud now, never silent (2026-11-10).
@@ -74,7 +75,8 @@ def mark_session(session_id: str, thread_id: str) -> None:
 
 
 def keep(event: dict) -> bool:
-    return isinstance(event, dict) and event.get("type") not in SKIPPED
+    return (isinstance(event, dict) and event.get("type") not in SKIPPED
+            and not local_command_output(event))  # backfills also read raw older journals
 
 
 def build(events: list[dict]) -> list[dict]:

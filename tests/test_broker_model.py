@@ -180,6 +180,21 @@ async def main() -> None:
     check("...and the record on disk agrees",
           (stored["model"], stored["effort"]), ("haiku", "low"))
 
+    # Old journals must retain every sequence on the host socket. A genuine
+    # CLI error can also have model <synthetic> and still closes a turn.
+    legacy = ended(broker)
+    synthetic = {"type": "assistant", "message": {"model": "<synthetic>"}}
+    events = [{**synthetic, "local_command_source": "<local-command-stdout>High</local-command-stdout>"},
+              {"type": "result", "local_command": "effort"},
+              {**synthetic, "error": "authentication_failed"},
+              {"type": "result", "is_error": True}]
+    for event in events:
+        await legacy.emit(event)
+    check("replay keeps command positions and the genuine error boundary",
+          [(e["seq"], e["type"]) for e in legacy.replay(0)],
+          [(1, "broker.local_command"), (2, "broker.local_command"),
+           (3, "assistant"), (4, "result")])
+
     # -- 3. what is refused ------------------------------------------------
     def refused(payload):
         try:

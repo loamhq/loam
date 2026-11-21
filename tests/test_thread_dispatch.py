@@ -68,6 +68,67 @@ def steer_provider():
             emit("result", num_turns=1)
 
 
+def model_provider():
+    """Hold /model output until the owner's next message is on stdin."""
+    folder = Path(os.environ["TMPDIR"])
+    model = "opus"
+    for line in sys.stdin:
+        event = json.loads(line)
+        if event["type"] != "user":
+            continue
+        content = event["message"]["content"]
+        if content.startswith("/model "):
+            model = content.split()[1]
+            continue
+        if model == "fable":
+            print(json.dumps({"type": "assistant", "local_command_run": {"command": "model", "args": model},
+                              "message": {"model": "<synthetic>", "content": [{"type": "text", "text": "Set model"}]}}))
+            print(json.dumps({"type": "result", "local_command": "model", "result": "Set model",
+                              "subtype": "success", "is_error": False, "num_turns": 0}), flush=True)
+            while not (folder / "finish-model").exists():
+                time.sleep(.01)
+        print(json.dumps({"type": "assistant", "message": {"model": model,
+                          "content": [{"type": "text", "text": f"Reply on {model}"}]}}))
+        print(json.dumps({"type": "result", "num_turns": 1}), flush=True)
+
+
+async def model_switch(host, cli, folder):
+    import loam_thread_inputs as inputs
+    import loam_threads as threads
+    from loam_thread_engine import ThreadEngine
+
+    cli.write_text(f"#!/bin/sh\nexec '{sys.executable}' '{__file__}' model\n")
+    tid = threads.create("iris", "model switch")["id"]
+    threads.update(tid, models={"iris": "opus"})
+    key = tid, "iris"
+    engine = ThreadEngine(host)
+    engine._memory_pins = AsyncMock()
+    engine.post_person(tid, "First question")
+    await engine.workers[key]
+    session = host.sessions[threads.session_for(*key)["session_id"]]
+    try:
+        threads.update(tid, models={"iris": "fable"})
+        engine.post_person(tid, "Second question")
+        async with asyncio.timeout(5):
+            while not any(e.get("local_command") == "model" for e in session.replay(0)):
+                await asyncio.sleep(.01)
+        assert session.status() == "working" and len(session.turns) == 1
+        assert session.last_message == "Reply on opus" and inputs.items(*key)
+        assert [m["id"] for m in threads.read(tid)[1]] == ["m1", "m2", "m3"]
+        (folder / "finish-model").touch()
+        await engine.workers[key]
+        replies = [m for m in threads.read(tid)[1] if m["author"] == "iris"]
+        assert [(m["text"], m["model"]) for m in replies] == [
+            ("Reply on opus", "opus"), ("Reply on fable", "fable")]
+        assert len(session.turns) == 2 and inputs.items(*key) == []
+        print("PASS resident /model acknowledgement after dispatch keeps the input pending; "
+              "one real reply on each model")
+    finally:
+        (folder / "finish-model").touch()
+        engine.stop_all_tails()
+        await session.stop()
+
+
 async def notification_during_ack(host, cli, folder):
     """A notification arriving while a final steer settles stays subscribed."""
     from loam_thread_engine import ThreadEngine
@@ -309,6 +370,7 @@ async def host():
             await session.proc.wait()
     await steering(host, cli, folder)
     await notification_during_ack(host, cli, folder)
+    await model_switch(host, cli, folder)
 
 
 if __name__ == "__main__":
@@ -316,6 +378,8 @@ if __name__ == "__main__":
         provider()
     elif sys.argv[1:2] == ["steers"]:
         steer_provider()
+    elif sys.argv[1:2] == ["model"]:
+        model_provider()
     elif sys.argv[1:2] == ["worker"]:
         asyncio.run(worker(*sys.argv[2:]))
     elif sys.argv[1:2] == ["host"]:

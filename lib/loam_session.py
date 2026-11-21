@@ -60,6 +60,14 @@ _SET_MODEL = re.compile(r"<local-command-stdout>Set model to `?([^`\n<]+?)`?(?: 
 _SYNTHETIC = "<synthetic>"
 
 
+def local_command_output(event: dict) -> bool:
+    """Claude marks both halves of a local command on the stream. Synthetic
+    provider errors have no such markers and still belong to the turn."""
+    if event.get("type") == "assistant":
+        return bool(event.get("local_command_run") or event.get("local_command_source"))
+    return event.get("type") == "result" and bool(event.get("local_command"))
+
+
 def chosen_name(value: str) -> str:
     """A model as ``/model`` announced it, in the form ``model_matches``
     takes: ``Opus 5`` -> ``opus-5`` (the family ``opus``), and an id stays an

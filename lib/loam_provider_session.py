@@ -25,6 +25,7 @@ import loam_broker as cfg
 import loam_clock
 import loam_codex as codex
 import loam_questions as questions_fmt
+from loam_session import local_command_output
 import loam_skills
 import loam_transcript
 import loam_waiters
@@ -1160,6 +1161,11 @@ class Session:
         await self._reap()
 
     async def _handle(self, obj: dict) -> None:
+        if local_command_output(obj):
+            # Preserve the CLI diagnostic and its journal position. It can arrive
+            # after dispatch, while an unrelated model reply is still in flight.
+            await self.emit({**obj, "type": "broker.local_command"})
+            return
         kind = obj.get("type")
         if kind == "system" and obj.get("subtype") == "init":
             model = obj.get("model")
@@ -1721,6 +1727,10 @@ class Session:
                 except json.JSONDecodeError:
                     continue
                 if event.get("seq", 0) > since:
+                    # Older journals stored command output as assistant/result.
+                    # Socket readers require every sequence, including these.
+                    if local_command_output(event):
+                        event["type"] = "broker.local_command"
                     yield event
         return
 
