@@ -879,6 +879,8 @@ def append_once(thread_id: str, author: str, text: str, kind: str = "message",
         extra.pop("reply_to", None)
     with locked(VAULT):
         meta, msgs, path = read(thread_id)
+        if extra.get("occasion") and (meta.get("archived") or author not in meta["members"]):
+            raise ThreadError(409, "This chat is closed to this occasion.")
         for field in ("journal_reply", "submission_id", "occasion"):
             if extra.get(field):
                 existing = next((m for m in msgs if m["author"] == author

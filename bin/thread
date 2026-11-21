@@ -152,9 +152,10 @@ def main() -> int:
             if not chat or chat[0] != args.thread:
                 raise threads.ThreadError(409, "the starter week is not due in this chat")
             occasion = {"occasion": starter.WEEK_ONE}
-        meta, _, _ = threads.read(args.thread)
-        if by not in meta["members"]:
-            threads.update(args.thread, add=[by])
+        else:
+            meta, _, _ = threads.read(args.thread)
+            if by not in meta["members"]:
+                threads.update(args.thread, add=[by])
         text, marked = threads.take_reply_mark(args.text)
         reply_to = args.reply_to.strip() or marked
         if not reply_to:

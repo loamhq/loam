@@ -250,6 +250,12 @@ def main() -> int:
         check("other agents get no occasion", st.week_one_prompt("other", day7), "")
         threads.update(tid, archived=True)
         check("archiving Hello ends the occasion", occasion(day7), False)
+        try:
+            threads.append_once(tid, "iris", "One week.", occasion=st.WEEK_ONE)
+            refused = False
+        except threads.ThreadError as exc:
+            refused = exc.status == 409
+        check("the append lock also checks an archived chat", refused, True)
         threads.update(tid, archived=False)
 
         env = {**os.environ, "LOAM_WAKE": "reflection", "CLAUDE_PROJECT_DIR": str(ws)}
