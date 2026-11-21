@@ -1,6 +1,6 @@
 # Speech plugin settings and key guide, 1.2.1
 
-Chromium rendered both plugin releases in a demo install. Provider and verification responses use fixtures. The browser flow checks the saved-key confirmation, closes the guide, and verifies that the offer disappears. The live installation captures below show the origin on this box.
+Chromium rendered both plugin releases in a demo install. Provider and verification responses use fixtures. The browser flow checks the saved-key confirmation, closes the guide, and verifies that the offer disappears. At 390 and 1440 CSS pixels, each settings capture also checks that the On label, provider label and adjacent preference labels line up to within one pixel. The live installation captures below show the origin on this box.
 
 ## Latte
 

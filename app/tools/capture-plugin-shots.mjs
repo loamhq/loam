@@ -317,6 +317,10 @@ for (const provider of ['google', 'openai', 'browser']) {
       await section.getByText(label, { exact: true }).waitFor()
       await section.scrollIntoViewIfNeeded()
       await shot('settings')
+      const left = await section.locator('.setrow-title').evaluate(node => node.getBoundingClientRect().left)
+      const neighbors = page.locator('.plugin-enable .setrow-title, .plugin-preferences > .card > .kicker, .plugin-preferences > .rows > .setrow .setrow-title')
+      const offsets = await neighbors.evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().left))
+      if (!offsets.length || offsets.some(x => Math.abs(x - left) > 1)) throw new Error('Provider and settings labels have different insets')
       if (await page.locator('html').getAttribute('data-look') !== (process.env.SHOT_THEME || 'latte')) throw new Error('Wrong capture theme')
       if (provider === 'browser') {
         await section.locator('button').click()

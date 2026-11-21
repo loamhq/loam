@@ -2560,6 +2560,10 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-preferences { display:flex; flex-direction:column; gap:16px; min-width:0; margin:20px 0; }
 .plugin-preferences > .note { margin:0; }
 .plugin-preferences > .card { margin:0; }
+/* A labeled status card and its adjacent settings rows share a text inset.
+   The grouped rows already supply 4px of their own padding. */
+.plugin-enable:has(~ .plugin-preferences > .rows > .setrow-title) > .setrow,
+.plugin-preferences:has(> .rows > .setrow-title) > .rows > .setrow { padding-inline-start:calc(var(--space-xl) - 4px); }
 .plugin-declaration { margin:24px 0; }
 .plugin-declaration > .kicker { margin-bottom:10px; }
 .plugin-declaration ul { padding-left:20px; margin:0; }
