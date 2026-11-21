@@ -110,8 +110,8 @@ const githubAccounts = createGithubAccounts({ state: () => host.state.github, ap
 const gitIdentity = createGitIdentity({ api: (...args) => host.api(...args), changed: () => host.schedule() })
 function settingsBody(sheet, back) {
   const page = settingsHome(sheet.page, sheet.provider)
-  if (page === 'agents' && sheet.detail) return sheet.detail.kind === 'agent'
-    ? [settingsBack('Agents', 'agents'), ...host.settingsProfileUI.body(sheet.detail.id)] : host.settingsProfileUI.settingsDetail()
+  if (page === 'agents' && sheet.detail) return [settingsBack('Agents', 'agents'), ...(sheet.detail.kind === 'agent'
+    ? host.settingsProfileUI.body(sheet.detail.id) : host.settingsProfileUI.settingsDetail())]
   if (page === 'provider') return settingsProvider(sheet.provider)
   if (page === 'integration') return settingsIntegration(sheet.provider, sheet.account)
   if (page === 'api-key') return sheet.provider ? settingsApiKey() : settingsConnections({ back })
@@ -224,18 +224,7 @@ function goSettings(page, provider = null) {
   const sheet = { kind: 'settings', page, provider, ...(group ? { group } : {}) }
   host.registry.emit('sheet.changing', { previous: host.state.sheet, sheet })
   host.state.sheet = sheet
-  if (page === 'plugins') {
-    host.pluginSettingsUI?.checkUpdates?.()
-    if (provider) {
-      const openPlugin = () => {
-        if (host.state.sheet?.kind !== 'settings' || settingsHome(host.state.sheet.page) !== 'plugins') return
-        const row = host.pluginLoader?.st.rows?.find(r => r.id === provider && (r.effective || r.broken)) ?? host.pluginLoader?.st.rows?.find(r => r.id === provider)
-        if (row) host.pluginSettingsUI?.open(row)
-      }
-      if (host.pluginLoader?.st.rows?.some(r => r.id === provider)) openPlugin()
-      else host.pluginLoader?.refresh()?.then(openPlugin).catch(() => {})
-    } else host.pluginLoader?.refresh()
-  }
+  if (page === 'plugins') syncSettingsPlugin(provider)
   if (page === 'account') { passkey.loadPasskeys(); loadAccount() }
   if (page === 'about') loadServer()
   if (page === 'connections' || page === 'api-key' || page === 'root') apiKeys.load(page === 'connections')
@@ -244,8 +233,28 @@ function goSettings(page, provider = null) {
   host.schedule()
 }
 
-function settingsBack(label, page) {
-  return h('button', { class: 'backbtn', onclick: () => goSettings(page) }, icon.chevronLeft(18), label)
+function syncSettingsPlugin(provider) {
+  host.pluginSettingsUI?.checkUpdates?.()
+  if (!provider) {
+    host.pluginSettingsUI?.clear()
+    host.pluginLoader?.refresh()
+    return
+  }
+  const openPlugin = () => {
+    const sheet = host.state.sheet
+    if (sheet?.kind !== 'settings' || sheet.page !== 'plugins' || sheet.provider !== provider) return
+    const rows = host.pluginLoader?.st.rows ?? []
+    const row = rows.find(r => r.id === provider && (r.effective || r.broken)) ?? rows.find(r => r.id === provider)
+    if (row && host.pluginSettingsUI?.st.selected?.key !== row.key) host.pluginSettingsUI?.open(row)
+  }
+  if (host.pluginLoader?.st.rows.some(r => r.id === provider)) openPlugin()
+  else host.pluginLoader?.refresh()?.then(openPlugin).catch(() => {})
+}
+
+function settingsBack(label, page, props) {
+  return h('button', { class: 'backbtn', ...props, onclick: () => {
+    if (!host.appModalHistory?.backToSettings(page)) goSettings(page)
+  } }, icon.chevronLeft(18), label)
 }
 
 function settingsHead(title, why) {
@@ -874,6 +883,7 @@ return Object.defineProperties({}, {
     settingsFiles: { enumerable: true, get: () => settingsFiles },
     settingsAgents: { enumerable: true, get: () => settingsAgents },
     goSettingsDetail: { enumerable: true, get: () => goSettingsDetail },
+    syncSettingsPlugin: { enumerable: true, get: () => syncSettingsPlugin },
     settingsProviders: { enumerable: true, get: () => settingsProviders },
     settingsApiKey: { enumerable: true, get: () => settingsApiKey },
     settingsAccount: { enumerable: true, get: () => settingsAccount },

@@ -10,8 +10,10 @@ have never met.
 - **Panel history** uses native browser entries for main. Side navigation
   replaces the side descriptor in the current URL. Browser traversal carries
   the live side into the destination entry, and side shortcuts use its local
-  trail. Keep the navigation listener ahead of modal and document routing so
-  failed saves can return to the actual source entry. See the
+  trail. A tab or rail switch sets a new main boundary, and Settings adds its
+  own boundary over the current document. Keep the navigation listener ahead
+  of modal and document routing so blocked traversals and failed saves can
+  return to the actual source entry. See the
   [panel navigation guide](../docs/wide-panels.md#back-and-forward).
 - **The app holds no authority.** It reaches agents only through the
   session broker's narrow, authenticated interface (`broker/README.md` at

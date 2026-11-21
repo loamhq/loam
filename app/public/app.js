@@ -410,14 +410,16 @@ const threads = mountConversation(page, { messageState, dom: panelDOM('main'),
     const url = new URL(globalThis.location?.href ?? threadHref(threads.st.open.thread.id), 'http://placeholder')
     if (view) url.searchParams.set('view', view)
     else url.searchParams.delete('view')
-    if (!view && traverse && globalThis.history?.state?.threadView) mainHistory.go(-1)
-    else page.pushAddress({ threadView: Boolean(view) }, '', url.pathname + url.search)
+    const entry = globalThis.history?.state
+    if (!view && traverse && entry?.threadView) {
+      if (!mainHistory.go(-1)) mainHistory.replace({ ...entry, threadView: false }, '', url)
+    } else page.pushAddress({ threadView: Boolean(view) }, '', url.pathname + url.search)
   },
   address: (id) => {
     if (id) state.mainItem = { kind: 'thread', id }
     else if (state.mainItem?.kind === 'thread') state.mainItem = null
     const href = id ? threadHref(id) : '/'
-    if ((id || threadFromPath(page.herePath())) && page.herePath() !== href) page.pushAddress(null, '', href)
+    if ((id || threadFromPath(page.herePath())) && page.herePath() !== href) page.pushAddress(null, '', href, { root: !id && !isWide() })
   },
   enter: item => { importRequest++; closeThread(); state.screen = 'threads'; state.mainItem = item; if (!state.wide) state.navigator = 'chats'; page.closeSheet(); schedule() },
   leave: goChats,
@@ -435,7 +437,7 @@ function goApps({ push = true } = {}) {
     page.files.closeFile()
   }
   importRequest++; page.closeSheet(); threads.close({ navigate: false }); closeThread()
-  if (push && (page.herePath() !== '/apps' || globalThis.location?.search?.includes('url='))) page.pushAddress(null, '', '/apps')
+  if (push) page.pushAddress(null, '', '/apps', { root: true })
   apps.st.selected = null
   state.navigator = 'apps'
   state.mainItem = null
@@ -482,8 +484,8 @@ function goChats() {
     if (!page.files.guard(null)) { page.files.st.sheet.proceed = page.proceedThen(goChats); return }
     page.leaveFiles(); return
   }
-  threads.close({ navigate: false }); goHome(); threads.load({ quiet: true })
-  if (withSide(globalThis.location?.href ?? page.herePath(), null) !== '/') page.pushAddress(null, '', '/')
+  threads.close({ navigate: false }); page.closeSheet(); goHome(); threads.load({ quiet: true })
+  page.pushAddress(null, '', '/', { root: true })
 }
 
 
@@ -985,12 +987,14 @@ const mainHistory = createMainHistory({
   },
   syncSide: () => syncSideAddress(panels.st.side),
 })
-const appModalHistory = createAppModalHistory({ push: mainHistory.push, wide: isWide, sheet: () => state.sheet,
+const appModalHistory = createAppModalHistory({ navigation: mainHistory, wide: isWide, sheet: () => state.sheet,
   changed: schedule, close: () => page.closeSheet(), restore: sheet => {
     if (sheet.kind === 'market') { modules.market.openMarket({ kind: sheet.k, q: sheet.q, id: sheet.id }); if (sheet.install) modules.market.openLinkInstall({ link: sheet.install }); return }
-    page.openSheet(sheet)
+    page.openSheet(sheet, { restoring: true })
     if (sheet.kind === 'activity') activity.load()
     if (sheet.detail) modules.settings.goSettingsDetail(sheet.detail.kind, sheet.detail.id, { tab: restoredProfileTab(sheet.detail.id) })
+    if (sheet.archivedAgents) settingsProfiles.archived()
+    if (sheet.kind === 'settings' && sheet.page === 'plugins') modules.settings.syncSettingsPlugin(sheet.provider)
   } })
 modules.files = mountFiles(page)
 // A cross-document Back routes the document first. Its enter handler closes
@@ -1047,7 +1051,7 @@ const mainPanel = {
 }
 
 function syncSideAddress(side) {
-  if (!globalThis.location?.href || !globalThis.history?.replaceState) return
+  if (!globalThis.location?.href || !globalThis.history?.replaceState || !mainHistory.atCurrent()) return
   const href = withSide(location.href, side)
   if (href !== location.pathname + location.search + location.hash) history.replaceState(history.state, '', href)
 }
@@ -1060,7 +1064,7 @@ function recoverMissingThread(id) {
   if (!url || threadFromPath(page.herePath()) !== id) return
   // Repair this entry in place so Forward cannot reopen the dead address.
   const home = modalURL(new URL('/', url), modal)
-  globalThis.history?.replaceState?.(globalThis.history.state, '', withSide(home, panels.st.side))
+  mainHistory.replace(globalThis.history?.state, '', withSide(home, panels.st.side), { root: !modal && !isWide() })
 }
 
 function restoredProfileTab(id) {

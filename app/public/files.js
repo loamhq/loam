@@ -1678,7 +1678,7 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
     !historyBack && parent !== null
       ? h(
           'button',
-          { class: 'backbtn fs-back', title: `Back to ${parent}`, onclick: () => go(st.path === '' ? null : st.root, parentOf(st.path)) },
+          { class: 'backbtn fs-back', title: `Back to ${parent}`, onclick: () => go(st.path === '' ? null : st.root, parentOf(st.path), { isFile: false, up: true }) },
           icon.chevronLeft(20),
           h('span', { text: parent }),
         )

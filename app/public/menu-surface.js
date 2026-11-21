@@ -161,6 +161,7 @@ export function createMenuSurfaces(root) {
     if (candidate) lastTrigger = candidate
   }, true)
   document.addEventListener('pointerdown', (e) => {
+    if (e.button === 3 || e.button === 4) return // Browser Back and Forward.
     const node = top(), entry = opened.get(node)
     if (!node || node.contains(e.target) || entry.trigger?.contains(e.target)) return
     if (node.hasAttribute('data-menu-centered') && e.target.closest?.('.rail-foot button')) return

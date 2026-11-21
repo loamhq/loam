@@ -1,8 +1,9 @@
 import { h, icon, blob } from "../ui.js"
 import { emptyState } from "../empty-state.js"
 import { agentLook } from "../sessions.js"
-import { folderView, fileView } from "../files.js"
+import { filesHref, folderView, fileView } from "../files.js"
 import { renderPanel } from '../panel-items.js'
+import { modalURL } from '../app-modal-history.js'
 import { panelHeader } from "../chat-ui.js"
 
 // Mounted once. Cross-module state and operations are explicit host services.
@@ -135,9 +136,16 @@ function filesList(collapse) {
   return folderView(host.files, { go: host.goFiles, wide: true, home: host.filesHome(), collapse })
 }
 
-// No panel reads the navigator. A rail move has exactly one destination: list.
 function browseSection(id) {
   host.closeSheet()
+  if (id !== host.state.navigator && globalThis.location?.href) {
+    const holdingItem = Boolean(host.state.mainItem)
+    const { appModal, appModalDepth, settingsRoot, settingsParent, ...entry } = globalThis.history?.state ?? {}
+    const home = id === 'chats' ? '/' : id === 'apps' ? '/apps' : id === 'files' ? filesHref(host.files.st.root, host.files.st.path) : '/?screen=' + encodeURIComponent(`plugin:${id}`)
+    const list = id === 'files' ? { files: true, folder: true } : null
+    host.pushAddress({ ...(holdingItem ? entry : list), desktopCarry: { id, home } },
+      '', holdingItem ? modalURL(location.href, null) : home, { root: true })
+  }
   setCollapsed(false)
   host.state.navigator = id
   const section = host.registry.entries('rail.section').find(entry => !entry.component && entry.id === id)

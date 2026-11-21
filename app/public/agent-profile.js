@@ -311,8 +311,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
   function loading() { return [...notices(), st.loading ? h('p', { class: 'note', role: 'status', text: 'Loading…' }) : h('button', { class: 'pillbtn', text: 'Try again', onclick: () => c.load(st.target.kind, st.target.id) })] }
   function settingsDetail() {
     const { target, data } = st
-    return [h('button', { class: 'backbtn', onclick: () => { host.state.sheet = { kind: 'settings', page: 'agents' }; c.directory(); host.schedule() } }, icon.chevronLeft(18), 'Agents'),
-      ...(!data ? loading() : [host.settingsHead(target.kind === 'engineer' ? data.project === 'default' ? 'Every other project' : `${data.project} engineer` : data.name), ...notices(),
+    return [...(!data ? loading() : [host.settingsHead(target.kind === 'engineer' ? data.project === 'default' ? 'Every other project' : `${data.project} engineer` : data.name), ...notices(),
         ...(target.kind === 'engineer' ? [runs(data, 'engineer'), data.project === 'default' ? h('p', { class: 'footnote', text: 'Used by projects without their own settings.' }) : null,
           data.deploy_on_land != null ? group('When a job lands', switchRow(data.deploy_label || 'Deploy when a job lands', null, data.deploy_on_land, value => c.patch({ deploy_on_land: value }))) : null,
           data.project !== 'default' ? group('Instructions', file('Project instructions', data.instructions, null, null, { unavailable: "Kept in the project's code, outside Files" })) : null,

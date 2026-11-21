@@ -19,7 +19,7 @@ globalThis.history = {
     globalThis.location.pathname = String(href).split('?')[0]
     globalThis.location.href = `http://example.com${href}`
   },
-  replaceState(data, title, href) {
+  replaceState(data, title, href = globalThis.location.pathname + globalThis.location.search) {
     globalThis.location.pathname = String(href).split('?')[0]
     globalThis.location.href = `http://example.com${href}`
   },
