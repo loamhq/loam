@@ -30,6 +30,8 @@ const fileOptions = {
   onCloseFile: rememberFilePlace,
   onRead: (row) => host.schedules.seeFile(row),
   onRename: (answer, offered) => followRename(answer, true, offered),
+  deleteResource: resource => host.deleteWorkspaceFile(resource),
+  hasFileDraft: resource => host.hasFileDraft(resource),
   onResolveTo: (root, path, isFile, row) => goFiles(root, path, { isFile, row }),
   // Through `put()`, the one place that can say how far an upload has got.
   sendForm: (href, form, onProgress) => host.put(href, form, onProgress),
@@ -523,6 +525,7 @@ function filesHome(browser = files) {
 return Object.defineProperties({}, {
     directoryView: { enumerable: true, get: () => directoryView },
     sheetFiles: { enumerable: true, get: () => sheetFiles },
+    filesControllers: { enumerable: true, get: () => () => directory ? [files, directory] : [files] },
     restoreFilePlace: { enumerable: true, get: () => restoreFilePlace },
     herePath: { enumerable: true, get: () => herePath },
     files: { enumerable: true, get: () => files },

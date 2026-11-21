@@ -98,7 +98,9 @@ function pickerNodes() {
 
 function filesSheetNodes() {
   const files = host.sheetFiles()
+  const deleting = files.st.sheet?.kind === 'delete'
   const close = () => {
+    if (files.st.sheet?.kind === 'delete' && files.st.sheet.busy) return
     files.st.sheet = null
     host.schedule()
   }
@@ -109,8 +111,9 @@ function filesSheetNodes() {
   }
   const body = addSheet(files, { close, nameField: kept(host.fileNameField), nameValue: () => host.fileNameField.value, chooseUpload: host.chooseUpload, uploadChooser: kept(host.filesUploadChooser) })
   if (!body) return []
-  const card = h('div', { class: 'sheet fs-sheet' }, sheetHandle(close), ...body)
-  const surface = menuSurface(card, { title: files.st.sheet.name ?? 'File actions', close, heading: false, width: 520,
+  const card = h('div', { class: `sheet fs-sheet${deleting ? ' fs-delete-confirm' : ''}`, 'aria-modal': deleting ? 'true' : null }, sheetHandle(close), ...body)
+  const surface = menuSurface(card, { title: deleting ? `Delete ${files.st.sheet.name}?` : files.st.sheet.name ?? 'File actions',
+    close, heading: false, centered: deleting && host.state.wide, width: deleting ? 420 : 520,
     fallbackPlacement: files.st.sheet.kind === 'leave' ? 'center' : null })
   const node = host.state.wide ? h('div', { class: 'dialog fs-dialog', onclick: (e) => { if (e.target === e.currentTarget) close() } }, surface) : surface
   node.__key = `sheet:files:${files.st.sheet.kind}`

@@ -43,7 +43,7 @@ import { authenticatedFetch as fetch, authExpired, expireAuth, failureSentence }
 
 import { blockView, toolSummary, foldFacts, foldsAsStep, contextWords, compactionWords, modelShortName } from './transcript.js'
 import { richField, readField, caretPoint, setMarkdown } from './compose.js'
-import { createFiles, folderView, fileView, fitPreviewTables, addSheet, parseFilesPath, listFromURL, filesHref, FILES_LOCATION_HIDDEN, isFolder, nameOf as fileNameOf, resolveOf, missingSentence, externalHref, vaultUrlRef, formatText, uploadAccept, ROOT_LOOK, parentOf, drawnTypeOf, bytesAre, downloadHref } from './files.js'
+import { createFiles, folderView, fileView, fitPreviewTables, addSheet, parseFilesPath, listFromURL, filesHref, FILES_LOCATION_HIDDEN, isFolder, nameOf as fileNameOf, resolveOf, missingSentence, externalHref, vaultUrlRef, formatText, uploadAccept, ROOT_LOOK, parentOf, drawnTypeOf, bytesAre, downloadHref, sameFileAddress } from './files.js'
 import { createActivity } from './activity.js'
 import { createApps, canFrame, buildAppThread } from './apps.js'
 import { SETTINGS_SECTIONS, settingsHome } from './app-shape.js'
@@ -58,7 +58,7 @@ import { sentenceOf } from './link.js'
 
 
 import { departureLine } from './asks.js'
-import { createStore } from './store.js'
+import { createStore, fileShortcuts, toggleFileShortcut } from './store.js'
 
 import { createSchedules, schedulePanel } from './schedules.js'
 import { createTheme } from './theme.js'
@@ -234,7 +234,7 @@ async function api(method, path, body) {
 // Lazy getters preserve initialization order without duplicating a state owner.
 const modules = Object.create(null)
 const moved = Object.fromEntries(Object.entries({
-  files: "directoryView sheetFiles restoreFilePlace herePath files filesUploadChooser chooseUpload fileField fileNameField fileFieldFor goFiles proceedThen openFileRef refNotice vaultUrls picker pickFromFiles applyTool embeds embedFor loadEmbed fileDictation filesScreen filesHome",
+  files: "directoryView sheetFiles filesControllers restoreFilePlace herePath files filesUploadChooser chooseUpload fileField fileNameField fileFieldFor goFiles proceedThen openFileRef refNotice vaultUrls picker pickFromFiles applyTool embeds embedFor loadEmbed fileDictation filesScreen filesHome",
   accounts: "loadGithub githubStep keepGithub setupGithub connectOrg installGithub refreshGithub disconnectGithub githubReturn providerSignIn connectKeys orgField orgAppField",
   composer: "DRAFT_MAX_PX MAC draft editorDraft openEditor closeEditor sendFromEditor fileChooser imageChooser growDraft submitDraft attachStrip chipSub loginNotice activeThread composer expandGlyph editorNodes menuPage menuRootOf menuOpen openPage openMenu togglePlus closeMenus composerMenu menuRow menuSheet menuGroups menuPopover",
   transcript: "lineKeys lineCount keyOf MINE_MAX_PX MINE_SLACK_PX fitMine COPIED_MS copied copyWithCue copyButton stepItems stepChildren itemNode foldCard stepNode askLine openBlocks longToolDetails toggleOpen toolNode toolDetail fitToolOutputs answeredLine openTurns toggleTurn turnModelName turnFacts turnLine",
@@ -256,6 +256,8 @@ const shell = Object.defineProperties({}, {
   panelId: { get: () => 'main' },
   panelDOM: { get: () => panelDOM('main') },
   panelHosts: { get: () => () => [page, sidePanel.host] },
+  hasFileDraft: { get: () => hasFileDraft },
+  deleteWorkspaceFile: { get: () => deleteWorkspaceFile },
   recordingAny: { get: () => () => [page, sidePanel.host].some(host => ['draft', 'editor', 'file'].some(target => host.fieldActivity(target)?.phase === 'recording')) },
   provide: { get: () => provide },
   fieldActivity: { get: () => target => registry.draw('composer.tool', { slot: 'state', target, host: page }).at(-1) ?? null },
@@ -847,7 +849,8 @@ function render() {
   }
   const notice = state.editor || state.sheet?.kind === 'settings' ? null : runNotice()
   if (!state.wide && state.sheet?.kind === 'activity') screen.setAttribute('inert', '')
-  morph(root, authExpired() || welcoming ? [screen] : [notice, screen, ...registry.draw('app.overlay', { slot: 'overlay', screen: state.screen, wide: state.wide })])
+  const deleted = deletedFileNotice ? h('div', { class: 'listnotice fs-delete-toast', role: 'status', key: 'file-deleted', text: deletedFileNotice }) : null
+  morph(root, authExpired() || welcoming ? [screen] : [notice, screen, deleted, ...registry.draw('app.overlay', { slot: 'overlay', screen: state.screen, wide: state.wide })])
   page.fitToolOutputs(); if (modern || state.wide && state.navigator === 'chats') threads.afterRender()
   if (panels.visible()) sidePanel.afterRender()
   page.restoreFilePlace(); if (panels.visible()) sidePanel.host.restoreFilePlace()
@@ -1074,6 +1077,61 @@ function recoverMissingThread(id) {
   if (workspaceHistory.current('main')?.href && threadFromPath(new URL(workspaceHistory.current('main').href, 'http://placeholder').pathname) !== id) return
   workspaceHistory.forget(step => step.surface === 'main' && threadFromPath(new URL(step.href, 'http://placeholder').pathname) === id)
   mainPanel.clear(); workspaceHistory.save(); restoreSurface('main')
+  appModalHistory.sync()
+}
+
+const filesControllers = () => page.panelHosts().flatMap(host => host.filesControllers())
+function hasFileDraft(resource) {
+  return filesControllers().some(files => sameFileAddress(files.st.file, resource) && files.dirty())
+}
+
+let fileDeleteInFlight = false
+let deletedFileNotice = '', deletedFileNoticeTimer
+async function deleteWorkspaceFile(resource) {
+  if (fileDeleteInFlight) throw new Error('A file is already being deleted. Try again in a moment.')
+  fileDeleteInFlight = true
+  const controllers = filesControllers()
+  let finish
+  const flight = new Promise(resolve => { finish = resolve })
+  const holds = controllers.map(files => files.holdSavesForDelete(resource, flight)).filter(Boolean)
+  try {
+    await Promise.all(holds.map(hold => hold.ready))
+    const { root, path } = resource
+    const result = await api('POST', '/files/delete', { root, path })
+    if (result?.ok !== true) throw new Error('The server did not confirm the deletion.')
+
+    const offered = controllers.flatMap(files => files.st.roots.shortcuts)
+    if (fileShortcuts(store.files, offered).some(shortcut => sameFileAddress(shortcut, resource))) {
+      store.files = toggleFileShortcut(store.files, offered, root, path, 'file')
+    }
+    for (const files of controllers) files.removeDeletedFile(resource)
+    recoverDeletedFile(resource)
+    deletedFileNotice = `Deleted ${resource.name ?? fileNameOf(path)}.`
+    clearTimeout(deletedFileNoticeTimer)
+    deletedFileNoticeTimer = setTimeout(() => { deletedFileNotice = ''; schedule() }, 5000)
+  } finally {
+    for (const hold of holds) hold.release()
+    finish()
+    fileDeleteInFlight = false
+  }
+}
+
+function recoverDeletedFile(resource) {
+  const matches = step => {
+    if (!step || step.surface === 'list') return false
+    const item = step.data.item ?? itemFromURL(step.href)
+    return item?.kind === 'file' && sameFileAddress(item, resource)
+  }
+  const main = workspaceHistory.current('main'), side = workspaceHistory.current('side')
+  const restoreMain = matches(main), restoreSide = matches(side)
+  workspaceHistory.forget(matches)
+  if (restoreMain && main.data.returnToList) workspaceHistory.state.front = 'list'
+  workspaceHistory.save()
+  if (restoreMain) restoreSurface('main')
+  if (restoreSide) {
+    sidePanel.clear()
+    restoreSurface('side')
+  }
   appModalHistory.sync()
 }
 function restoredProfileTab(id) {

@@ -11,7 +11,7 @@ import { authenticatedFetch as fetch } from './auth.js'
 // read and edited through the host.
 //
 // **Every rule is the host's.** Which roots exist, what a row may do
-// (`capabilities: {read, download, write, create, rename}`), why it may not
+// (`capabilities: {read, download, write, create, rename, delete}`), why it may not
 // (`authority`), the revision a save has to name, what a save actually stored —
 // each is an answer, and this page draws it. Nothing here decides that a file
 // is writable: a Save appears where the host said `write`, a "+" where it said
@@ -273,6 +273,14 @@ export function capsOf(row) {
   return { read: c.read === true, download: c.download === true, write: c.write === true, create: c.create === true, rename: c.rename === true }
 }
 
+function canDeleteFile(row) {
+  return row?.root === 'vault' && row.kind === 'file' && row.capabilities?.delete === true
+}
+
+export function sameFileAddress(a, b) {
+  return Boolean(a && b && a.root === b.root && a.path === b.path)
+}
+
 // The returned `from` is authoritative, including for a folder's descendants.
 export function renamedResource(resource, answer) {
   const from = answer?.from
@@ -520,6 +528,8 @@ export function createFiles({
   onRead = null,
   onCloseFile = null,
   onRename = null,
+  deleteResource = null,
+  hasFileDraft = () => false,
   fetchBytes = (href) => fetch(href, { credentials: 'same-origin' }),
   urls = globalThis.URL,
   sendForm = fetchForm,
@@ -586,7 +596,7 @@ export function createFiles({
     return registry.entries('files.root', {}).find(r => `@${r.id}` === root) ?? null
   }
 
-  async function loadFolder(more = false) {
+  async function loadFolder(more = false, keepRows = false) {
     if (!st.root) return
     const own = pluginRoot()
     if (!own && st.root.startsWith('@')) {
@@ -604,19 +614,20 @@ export function createFiles({
       return
     }
     const key = `${st.root}:${st.path}`
-    if (!more) st.listing = { key, rows: [], folder: null, cursor: null, total: null, loading: true, error: '', status: null }
+    if (!more) st.listing = { key, rows: keepRows ? st.listing.rows : [], folder: keepRows ? st.listing.folder : null, cursor: null, total: null, loading: true, error: '', status: null }
     else st.listing.loading = true
+    const listing = st.listing
     schedule()
     try {
       const body = await api('GET', `/files/list?${q({ root: st.root, path: st.path, cursor: more ? st.listing.cursor : null, limit: PAGE })}`)
-      if (st.listing.key !== key) return
+      if (st.listing !== listing || st.listing.key !== key) return
       st.listing.rows = more ? [...st.listing.rows, ...rowsOf(body)] : rowsOf(body)
       st.listing.cursor = nextOf(body)
       st.listing.total = Number.isInteger(body?.total) ? body.total : null
       st.listing.folder = isRow(body?.folder) ? body.folder : st.listing.folder
       st.listing.loading = false
     } catch (err) {
-      if (st.listing.key !== key) return
+      if (st.listing !== listing || st.listing.key !== key) return
       st.listing.loading = false
       st.listing.error = err.message
       st.listing.status = err.status
@@ -1004,6 +1015,56 @@ export function createFiles({
     schedule()
   }
 
+  function beginDelete(resource) {
+    if (!deleteResource || !canDeleteFile(resource)) return
+    st.sheet = { kind: 'delete', resource, name: resource.name ?? nameOf(resource.path), dirty: hasFileDraft(resource), error: '', busy: false }
+    schedule()
+  }
+
+  async function confirmDelete() {
+    const sheet = st.sheet
+    if (sheet?.kind !== 'delete' || sheet.busy) return
+    sheet.busy = true
+    sheet.error = ''
+    schedule()
+    try {
+      await deleteResource(sheet.resource)
+      if (st.sheet === sheet) st.sheet = null
+    } catch (error) {
+      sheet.error = error.message
+      sheet.busy = false
+    }
+    schedule()
+  }
+
+  function holdSavesForDelete(resource, flight) {
+    const file = st.file
+    if (!sameFileAddress(file, resource)) return null
+    file.deleteFlight = flight
+    return {
+      ready: file.inflight,
+      release() {
+        file.deleteFlight = null
+        if (st.file === file && !file.failed && dirty()) soon(file)
+      },
+    }
+  }
+
+  function removeDeletedFile(resource) {
+    const listing = st.listing
+    const rows = listing.rows.filter(row => !sameFileAddress(row, resource))
+    if (rows.length !== listing.rows.length) {
+      listing.rows = rows
+      if (listing.total !== null) listing.total--
+    }
+    // A listing already in flight can contain the removed row. Refresh from
+    // the first page so a cursor from before the deletion cannot skip a row.
+    if (st.root === resource.root && st.path === parentOf(resource.path) && (listing.loading || listing.cursor)) loadFolder(false, true)
+    if (sameFileAddress(st.sheet?.resource, resource)) st.sheet = null
+    if (sameFileAddress(st.renaming?.resource, resource)) st.renaming = null
+    if (sameFileAddress(st.file, resource)) closeFile()
+  }
+
   function beginRename(resource, slot = 'row') {
     if (!capsOf(resource).rename || st.renaming?.busy) return
     if (st.file?.root === resource.root && st.file.path === resource.path) {
@@ -1148,7 +1209,7 @@ export function createFiles({
   function soon(file, ms = AUTOSAVE_MS) {
     if (file.timer) timers.clear(file.timer)
     file.timer = null
-    if (!file.caps.write || file.conflict || file.renaming || !dirty()) return
+    if (!file.caps.write || file.conflict || file.renaming || file.deleteFlight || !dirty()) return
     file.timer = timers.set(() => {
       file.timer = null
       if (st.file === file) save()
@@ -1184,6 +1245,7 @@ export function createFiles({
   // confirmed it. If the file moves again, that save is refused too.
   async function save({ over = null } = {}) {
     const file = st.file
+    if (file?.deleteFlight) return file.deleteFlight.then(() => st.file === file ? save({ over }) : undefined)
     if (file?.owner?.save) return file.owner.save()
     if (!file || !file.caps.write || (file.view === 'html' && !file.textLoaded)) return
     if (file.renaming) return file.renameFlight.then(() => st.file === file ? save({ over }) : undefined)
@@ -1459,7 +1521,7 @@ export function createFiles({
     }
   }
 
-  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function triggerBrowserDownload(href, filename) {
@@ -2079,6 +2141,18 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
   const s = files.st.sheet
   // A save on the way out is quiet: the header already says "Saving…".
   if (!s || s.kind === 'saving') return null
+  if (s.kind === 'delete') {
+    return [
+      h('h2', { class: 'display sheettitle', text: 'Delete file?' }),
+      h('p', { class: 'fs-delete-copy' }, h('strong', { text: s.name }), ' will be permanently deleted from the vault.'),
+      s.dirty ? h('p', { class: 'fs-delete-copy', text: 'Unsaved changes will be discarded.' }) : null,
+      s.error ? h('p', { class: 'fs-delete-error', role: 'alert', text: s.error }) : null,
+      h('div', { class: 'fs-actions fs-delete-actions', 'aria-busy': String(s.busy) },
+        h('button', { class: 'pillbtn', type: 'button', disabled: s.busy, text: 'Cancel', onclick: close }),
+        h('button', { class: 'pillbtn primary fs-delete-submit', type: 'button', disabled: s.busy, text: s.busy ? 'Deleting…' : 'Delete file', onclick: files.confirmDelete }),
+      ),
+    ]
+  }
   if (s.kind === 'leave') {
     return [
       h('div', { class: 'display sheettitle', text: 'Leave without saving?' }),
@@ -2136,6 +2210,7 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
         s.resource && !isFolder(s.resource) ? h('div', { class: 'icon-tile', style: { background: tileOf(s.name).bg, color: tileOf(s.name).fg } }, icon.file(18), h('span', { text: tileOf(s.name).label })) : h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18)),
         h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: s.on ? 'Remove from shortcuts' : 'Add to shortcuts' }), h('div', { class: 'fs-meta', text: s.on ? 'It leaves the Files home; the original stays.' : 'It appears on the Files home, after the others.' })),
       ),
+      s.kind === 'resource' && canDeleteFile(s.resource) ? h('button', { class: 'sheetrow fs-menu-delete danger', type: 'button', onclick: () => files.beginDelete(s.resource) }, icon.trash(18), h('span', { text: 'Delete' })) : null,
     ]
   }
   if (s.kind === 'add') {
