@@ -999,6 +999,7 @@ const workspaceHistory = createWorkspaceHistory({
   apply: restoreSurface,
   guard: (surface, retry) => surface === 'list' || (surface === 'side' ? sidePanel : mainPanel).guard(retry),
   overlay: overlayBack,
+  restoreModal: modal => appModalHistory.restore(modal),
 })
 const appModalHistory = createAppModalHistory({ navigation: workspaceHistory, sheet: () => state.sheet, restore: sheet => {
     if (sheet.kind === 'market') { modules.market.openMarket({ kind: sheet.k, q: sheet.q, id: sheet.id }); if (sheet.install) modules.market.openLinkInstall({ link: sheet.install }); return }
@@ -1006,7 +1007,10 @@ const appModalHistory = createAppModalHistory({ navigation: workspaceHistory, sh
     if (sheet.kind === 'activity') activity.load()
     if (sheet.detail) modules.settings.goSettingsDetail(sheet.detail.kind, sheet.detail.id, { tab: restoredProfileTab(sheet.detail.id) })
     if (sheet.archivedAgents) settingsProfiles.archived()
-    if (sheet.kind === 'settings' && sheet.page === 'plugins') modules.settings.syncSettingsPlugin(sheet.provider)
+    if (sheet.kind === 'settings' && sheet.page === 'plugins') {
+      if (pluginSettingsUI.st.selected?.id === sheet.provider) pluginSettingsUI.opened()
+      else modules.settings.syncSettingsPlugin(sheet.provider)
+    }
   } })
 modules.files = mountFiles(page)
 modules.accounts = mountAccounts(page)
@@ -1063,7 +1067,7 @@ function recordMain(item) {
   if (item.view) url.searchParams.set('view', item.view)
   if (item.message) url.searchParams.set('message', item.message)
   if (item.fragment) url.hash = item.fragment
-  pushAddress({ item: itemDescriptor(item), returnToList: item.returnToList, boardThread: item.boardThread, threadView: Boolean(item.view) }, '', url, item.fromOverlay)
+  pushAddress({ item: itemDescriptor(item), returnToList: item.returnToList, returnModal: item.returnModal, boardThread: item.boardThread, threadView: Boolean(item.view) }, '', url, item.fromOverlay)
 }
 function sideItem() {
   return workspaceHistory.current('side')?.data.item ?? null

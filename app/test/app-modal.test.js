@@ -38,6 +38,7 @@ function fixture() {
   }
   const navigation = createWorkspaceHistory({ win, guard: () => true, apply() {},
     address: () => navigation.current('main')?.href ?? navigation.current('list')?.href ?? 'https://app.example/threads/notes',
+    restoreModal: value => { history.restore(value); history.sync() },
     overlay: () => current ? () => { current = current.kind === 'settings' ? settingsParent(current) : null; history.sync() } : null })
   navigation.start('chats', win.location.href)
   const history = createAppModalHistory({ window: win, navigation, sheet: () => current, restore: value => { current = value } })
@@ -68,6 +69,17 @@ test('opening a file from Settings clears the overlay from the source before lea
   assert.equal(f.pop(1).stopped, true)
   assert.equal(f.current, null)
   assert.equal(f.win.location.href, 'https://app.example/threads/notes')
+})
+test('Back from a file can restore the Settings page that opened it', () => {
+  const f = fixture()
+  const returnModal = { kind: 'settings', page: 'plugins', provider: 'dictation' }
+  f.current = returnModal; f.history.sync()
+  f.history.leave()
+  f.current = null
+  f.navigation.visit('main', 'https://app.example/files/vault/Dictation%20terms.md', { returnModal })
+  f.navigation.go(-1, 'main')
+  assert.deepEqual(f.current, returnModal)
+  assert.equal(new URL(f.win.location.href).searchParams.get('provider'), 'dictation')
 })
 test('tab selection discards folder steps and leaves the main trail available to Back and Forward', () => {
   const f = fixture(), nav = f.navigation

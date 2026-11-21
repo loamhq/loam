@@ -65,8 +65,7 @@ export function createAppModalHistory({ navigation, sheet, restore, window: win 
   return {
     sync() { if (ready) write(sheet()) },
     leave() { write(null) },
-    restore() {
-      const value = win?.location?.href && modalFromURL(win.location.href)
+    restore(value = win?.location?.href && modalFromURL(win.location.href)) {
       if (value) restore(value)
       ready = true
     },

@@ -3,7 +3,7 @@ import { h, icon } from './ui.js'
 
 // Each visit belongs to one surface. Their order is also the system Back
 // order. Removing a list's visits on tab selection leaves both panels intact.
-export function createWorkspaceHistory({ win = globalThis, address, apply, guard, overlay }) {
+export function createWorkspaceHistory({ win = globalThis, address, apply, guard, overlay, restoreModal }) {
   const history = win.history
   const saved = history?.state?.workspace
   const state = saved ?? { tab: 'chats', front: 'list', visits: [], forward: [], serial: 0 }
@@ -50,15 +50,16 @@ export function createWorkspaceHistory({ win = globalThis, address, apply, guard
     dest.push(step)
     if (step.surface !== 'side') state.front = step.surface === 'main' && current('main') ? 'main' : 'list'
     if (delta < 0 && step.data.returnToList) state.front = 'list'
-    return step.surface
+    return step
   }
   function go(delta, surface) {
     if (!next(Math.sign(delta), surface) || request || returning) return false
     const branch = delta > 0 && index >= furthest
     if (!history?.go || branch) {
       if (guard(next(delta, surface).surface, () => go(delta, surface))) {
-        const changed = walk(delta, surface)
-        write(branch); apply(changed)
+        const step = walk(delta, surface)
+        write(branch); apply(step.surface)
+        if (delta < 0 && step.data.returnModal) restoreModal?.(step.data.returnModal)
       }
     } else {
       request = { surface }
@@ -99,10 +100,15 @@ export function createWorkspaceHistory({ win = globalThis, address, apply, guard
       }
     }
     const changed = new Set()
-    for (let i = 0; i < count && next(delta, surface); i++) changed.add(walk(delta, surface))
+    let step
+    for (let i = 0; i < count && next(delta, surface); i++) {
+      step = walk(delta, surface)
+      changed.add(step.surface)
+    }
     index = at
     write()
     for (const target of changed) apply(target)
+    if (delta < 0 && step?.data.returnModal) restoreModal?.(step.data.returnModal)
   }, true)
   return { state, current, visit, forget, clear, select, go, can: (delta, surface) => Boolean(next(delta, surface)), atCurrent,
     save: () => write(), front: surface => { state.front = surface; write() },
