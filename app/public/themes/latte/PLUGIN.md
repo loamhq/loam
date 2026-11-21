@@ -35,8 +35,8 @@ light and in dark.
   where each agent's face is poured into a cup, in a mug or not, with a pour
   or its initials.
 
-Choose it, and its options, in Settings › Appearance, separately for your
-phone and your desktop.
+Choose it and its options in Settings › Appearance. You can also change its
+options in Settings › Plugins › Latte & Newspaper.
 
 ---
 

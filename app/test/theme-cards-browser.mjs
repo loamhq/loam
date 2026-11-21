@@ -8,7 +8,36 @@ const out = process.env.THEME_CARD_EVIDENCE || path.join(process.env.TMPDIR, 'th
 await mkdir(out, { recursive: true })
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
 const source = await readFile('public/app.js', 'utf8'), results = []
+const openLatte = async page => {
+  await page.evaluate(() => __cards.goSettings('plugins'))
+  await page.getByRole('button', { name: 'About Latte & Newspaper', exact: true }).click()
+  return page.getByRole('group', { name: 'Agent shapes', exact: true }).getByRole('button', { name: 'Rounded square', exact: true })
+}
 try {
+  const app = await pluginHostFixture()
+  const open = async context => {
+    await context.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__cards={goSettings};' }))
+    const page = await context.newPage()
+    await page.goto(app.url)
+    await page.waitForFunction(() => globalThis.__cards)
+    return page
+  }
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const desktop = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+  try {
+    const page = await open(phone)
+    const rounded = await openLatte(page)
+    await Promise.all([
+      page.waitForResponse(r => r.url().endsWith('/api/settings/appearance') && r.request().method() === 'PATCH' && r.ok(), { timeout: 4000 }),
+      rounded.click(),
+    ])
+    await page.reload()
+    await page.waitForFunction(() => globalThis.__cards)
+    assert.equal(await (await openLatte(page)).getAttribute('aria-pressed'), 'true')
+    const fresh = await open(desktop)
+    assert.equal(await (await openLatte(fresh)).getAttribute('aria-pressed'), 'true')
+    console.log('PASS: installed theme settings save through the relay and retain a choice on reload and in a fresh desktop context.')
+  } finally { await phone.close(); await desktop.close(); await app.close() }
   for (const width of [390, 1440]) for (const mode of ['light', 'dark']) {
     const app = await pluginHostFixture({ mode }), errors = [], context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: mode, isMobile: width === 390, hasTouch: width === 390, reducedMotion: 'reduce' })
     try {

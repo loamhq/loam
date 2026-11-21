@@ -4339,12 +4339,11 @@ command `bin/settings`, the tool `mcp__engineer__settings`, and the route
 `GET /v1/settings` answers the table. The inventory, the reach of each
 setting and what `by` does on each route are in [settings.md](settings.md).
 
-Appearance (2026-11-11): `GET`/`PATCH /v1/settings/appearance`, a mode,
-a size and (2026-11-12) a theme for the phone and the desktop, kept in
-`state/broker/settings.json` by `lib/loam_appearance.py`; the theme ids are
-the theme plugins of the plugin host's list (`lib/loam_plugins.py`), not
-listed here; and (2026-11-12) each theme's option choices, per kind, from
-the themes' manifests. See settings.md, "Appearance".
+Appearance uses `GET`/`PATCH /v1/settings/appearance`. The owner account
+stores mode, active theme and each theme's option choices. Phone and desktop
+keep their own size and Sun transition. These values live in
+`state/broker/settings.json` and the plugin host reads theme IDs and options
+from installed manifests. [Appearance settings](settings.md#appearance-the-one-setting-kept-on-the-host-for-nobody-but-the-owner-2026-11-11).
 
 Plugins (2026-11-12): `GET`/`POST /v1/plugins` (the list; install from a
 GitHub link, a preview and then a confirm), `GET`/`PATCH`/`DELETE

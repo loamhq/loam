@@ -1,15 +1,11 @@
 # Theme options: host handoff
 
-The web half supports manifest-defined theme options. Host persistence and persona
-registry integration remain unverified. In the implementation job, neither
-`BROKER_URL` nor `BROKER_TOKEN` was configured and no connected settings tool was
-available. No live host request or host repository inspection was possible.
-[Probe result](evidence/theme-options/host-check.json). This is a contract to
-integrate, not a claim of installed host support.
+The browser and persona settings API use the same broker route for the
+owner's manifest-defined theme options.
 
 ## Wire value and merge
 
-Extend the existing authenticated, no-store `GET/PATCH /v1/settings/appearance`.
+Use the authenticated, no-store `GET/PATCH /v1/settings/appearance`.
 GET and successful PATCH return 200 with the whole value, filling defaults:
 
 ```json
@@ -25,17 +21,16 @@ GET and successful PATCH return 200 with the whole value, filling defaults:
 }
 ```
 
-A PATCH names only edited leaves. Merge atomically by device, then theme, then
-option. **Never replace the whole options map or the whole theme's options.**
+A PATCH names only edited leaves. Either device row edits the same account
+options. The broker merges atomically by theme and option.
 
 ```json
 { "desktop": { "options": { "latte": { "agent-shapes": "circle" } } } }
 ```
 
-This preserves the desktop agent colours, mode, size and theme, and every phone
-value. Switching to Plain preserves the saved Latte options; switching back
-restores them. Preferences are shared across browsers of the same device kind,
-as with mode and size. Keep them in the existing settings store.
+This changes the shape on every device and preserves agent colours, mode, size
+and theme. Switching to Plain preserves the saved Latte options. Mode and active
+theme also sync across devices. Size and Sun transition still follow device kind.
 
 Validate all leaves against the installed manifests. The shipped catalog is:
 
@@ -86,8 +81,8 @@ node tools/appearance-registry.js --check
 ## Acceptance to run on the host
 
 1. GET old records: all defaults appear; size/mode/theme survive migration.
-2. PATCH one desktop option, then the other. GET retains both and the untouched
-   phone values, including under concurrent writes to different leaves.
+2. PATCH one desktop option, then a different phone option. GET returns both
+   leaves for both devices, including under concurrent writes.
 3. Choose Plain, then Latte: the two Latte choices remain.
 4. Restart the host and open a fresh browser: the correct shape/colour choice is
    present at first paint, with no preference in browser storage.
@@ -104,9 +99,9 @@ the host's sentence and offer retry. If a host returns 200 while dropping an
 option, the controller detects it and says that the host has not saved the theme
 options. No browser preference cache masks the missing integration.
 
-The fixture proves nested merge, serialization, retries, device separation,
-fresh-navigation persistence and first paint. It cannot prove host installation
-or persona-tool parity. See [browser evidence](evidence/theme-options/README.md).
+The browser fixture tests boot, retries and fresh navigation. The broker's
+settings tests cover concurrent merges, legacy records and persona-tool parity.
+[Browser evidence](evidence/theme-options/README.md).
 
 
 ## Latte art extension
@@ -124,6 +119,4 @@ validation should discard hidden values. PATCH, for example:
 } } } }
 ```
 
-A persona writes those exact same leaves, never a second setting. The local
-browser suite proves the web-side merge and reload behavior with a synthetic
-host. Live host acceptance and persona-tool verification remain outstanding.
+A persona writes those same shared leaves through either device alias.

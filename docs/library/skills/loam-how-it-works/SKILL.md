@@ -216,7 +216,14 @@ Agents use `delete_file` and `restore_file` for the same vault operations.
 
 **Settings › Plugins** shows installed themes and extensions and where each
 copy came from. About opens the Market listing for a Market plugin and shows
-the folder for a locally made one. Use the Market to find more themes and
+the folder for a locally made one. An installed theme's Mode and option controls
+save to the owner's account. Settings › Appearance chooses the active theme,
+and Loam applies the saved theme, mode and options before the page draws on
+every device. Each theme keeps its own options. System mode follows the device.
+An agent changes the same values with `bin/settings set appearance.desktop.theme`,
+`appearance.desktop.mode` or `appearance.desktop.options.<theme>.<option>`.
+The corresponding `appearance.phone` keys change the same account settings.
+Use the Market to find more themes and
 extensions. A Market listing shows GitHub’s release-file downloads, updated
 nightly and including updates. On installation Loam verifies the release file
 against the reviewed commit and uses Git if the file cannot be verified.
