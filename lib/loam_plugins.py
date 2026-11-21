@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1430,25 +1431,35 @@ def _save_list(data: dict) -> None:
 def fingerprint(folder: Path) -> str | None:
     """A hash of a folder's files and their paths (``.git`` aside), so the
     list can say a plugin installed from a link has been edited since."""
+    if not folder.is_dir() or folder.is_symlink():
+        return None
     h, total = hashlib.sha256(), 0
-    for dirpath, dirnames, filenames in os.walk(folder):
-        dirnames[:] = sorted(d for d in dirnames if d != ".git")
-        linked_dirs = [d for d in dirnames if (Path(dirpath) / d).is_symlink()]
-        for name in sorted(filenames + linked_dirs):
-            p = Path(dirpath) / name
-            rel = p.relative_to(folder).as_posix()
-            try:
-                if p.is_symlink():
-                    data = ("link:" + os.readlink(p)).encode()
+
+    def failed(exc):
+        raise exc
+
+    try:
+        for parent, dirs, files in os.walk(folder, onerror=failed):
+            dirs.sort()
+            for name in sorted(dirs + files):
+                path = Path(parent) / name
+                mode = path.lstat().st_mode
+                if stat.S_ISLNK(mode):
+                    content = os.fsencode(os.readlink(path))
+                elif stat.S_ISDIR(mode):
+                    content = b""
+                elif stat.S_ISREG(mode) and path.stat().st_size <= HASH_MAX - total:
+                    content = path.read_bytes()
                 else:
-                    data = p.read_bytes()
-            except OSError:
-                return None
-            total += len(data)
-            if total > HASH_MAX:
-                return None
-            h.update(rel.encode() + b"\0" + hashlib.sha256(data).digest())
-    return h.hexdigest()
+                    return None
+                total += len(content)
+                if total > HASH_MAX:
+                    return None
+                h.update(os.fsencode(path.relative_to(folder)) + b"\0")
+                h.update(str(mode).encode() + b"\0" + hashlib.sha256(content).digest())
+    except OSError:
+        return None
+    return "v2:" + h.hexdigest()
 
 
 def _appearance_in_use() -> dict[str, list[str]]:
@@ -1476,11 +1487,9 @@ def update_preference(pid: str, line: dict) -> dict:
     folder = yours_root() / pid
     digest = fingerprint(folder) if folder.is_dir() and not folder.is_symlink() else None
     edited = not digest or digest != line.get("files")
-    copied = copy_folder(pid).exists()
-    consent = line.get("update_consent") or {}
+    copied = os.path.lexists(copy_folder(pid))
     changed = edited or copied
-    approved = bool(digest) and consent == {"files": digest, "copy": copied}
-    paused = (changed and not approved) or line.get("updates_paused", False)
+    paused = changed or line.get("updates_paused", False)
     return {"auto_update": bool(line.get("auto_update", True) and not paused),
             "updates_paused": bool(paused), "edited": bool(edited),
             "custom_copy": copied, "digest": digest}
@@ -1512,12 +1521,7 @@ def set_auto_update(pid: str, on, replace_changes=False) -> dict:
         pref = update_preference(pid, line)
         line.pop("update_consent", None)
         if on and (pref["edited"] or pref["custom_copy"]):
-            if replace_changes is not True:
-                raise PluginError("The next update replaces changes in the installed folder. "
-                                  "A separate custom copy stays yours. Confirm to resume.", 409)
-            if not pref["digest"]:
-                raise PluginError("Loam cannot verify this folder. Review the next update manually.", 409)
-            line["update_consent"] = {"files": pref["digest"], "copy": pref["custom_copy"]}
+            raise PluginError("Your changes stay yours. Review a new version with your agent.", 409)
         line.update(auto_update=on, updates_paused=False)
         _save_list(listed)
     return one(pid)
@@ -2399,23 +2403,27 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                     f"{preview['confirm']}). Nothing was installed; read the "
                     f"answer under `preview` and confirm it if it is a yes", 409,
                     {"preview": preview})
+            if mine and (replaces["edited"] or mine.get("custom_copy") or mine.get("broken")):
+                raise PluginError("Your changes stay yours. Review this version with your agent.", 409)
             if automatic is not None:
                 pref = update_preference(pid, previous)
                 if (pid != automatic["id"] or previous.get("source") != automatic["base"]
                         or source["commit"] != automatic["commit"] or not prior
                         or preview["added"] or not pref["auto_update"] or not pref["digest"]):
                     raise PluginError("The install or its update preference changed. Review the update.", 409)
+            shutil.rmtree(folder / ".git", ignore_errors=True)
             files = fingerprint(folder)
             target = yours_root() / pid
             trash = None
-            shutil.rmtree(folder / ".git", ignore_errors=True)
             if target.exists() or target.is_symlink():
                 trash = work / "replaced"
                 os.replace(target, trash)
             try:
-                if automatic is not None and (not trash or fingerprint(trash) != pref["digest"]
-                        or copy_folder(pid).exists() != pref["custom_copy"]):
-                    raise PluginError("The plugin changed during the update. Your files were kept.", 409)
+                if ((trash is not None) != bool(mine)
+                        or trash and (not previous.get("files")
+                                      or fingerprint(trash) != previous["files"])
+                        or os.path.lexists(copy_folder(pid))):
+                    raise PluginError("Your changes stay yours. Review this version with your agent.", 409)
                 os.replace(folder, target)
             except BaseException:
                 if trash:
@@ -2432,9 +2440,6 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                 "files": files, "auto_update": previous.get("auto_update", True)}
             if previous.get("updates_paused"):
                 listed["plugins"][pid]["updates_paused"] = True
-            if (not listed["plugins"][pid].get("updates_paused")
-                    and previous.get("update_consent") and copy_folder(pid).exists()):
-                listed["plugins"][pid]["update_consent"] = {"files": files, "copy": True}
             if automatic is not None:
                 import uuid
                 listed.setdefault("update_history", []).append({

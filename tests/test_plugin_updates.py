@@ -115,9 +115,10 @@ class Updates(unittest.TestCase):
         updates.check(nightly=True)
         self.assertEqual(edit.read_text(), "mine")
         self.assertFalse(plugins.one("notes")["plugin"]["auto_update"])
-        with self.assertRaisesRegex(plugins.PluginError, "replaces changes"):
+        with self.assertRaisesRegex(plugins.PluginError, "agent"):
             plugins.set_auto_update("notes", True)
-        self.assertTrue(plugins.set_auto_update("notes", True, True)["plugin"]["auto_update"])
+        with self.assertRaisesRegex(plugins.PluginError, "agent"):
+            plugins.set_auto_update("notes", True, True)
         edit.write_text("a different edit")
         updates.check(nightly=True)
         self.assertFalse(plugins.one("notes")["plugin"]["auto_update"])

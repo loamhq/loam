@@ -664,6 +664,13 @@ check("a tag moved between the two calls: 409, nothing installed",
       ok and row("pet", "yours")["version"] == "1.0.0", said)
 git("tag", "-f", "-a", "v2.0.0", "-m", "two", C2, cwd=BARE)
 up = P.install({"url": V2})
+ok, said = refuses(lambda: P.install({"url": V2, "confirm": up["confirm"]}), "agent")
+check("a confirmed install preserves a local edit", ok and
+      (YOURS / "pet/page/main.js").read_text() == "// my change\n", said)
+# Restore the installed bytes to exercise the ordinary update below.
+(YOURS / "pet/page/main.js").write_bytes(subprocess.check_output(
+    ["git", "show", f"{C1}:plugins/pet-folder/page/main.js"], cwd=BARE))
+up = P.install({"url": V2})
 done = P.install({"url": V2, "confirm": up["confirm"]}, "iris")
 pet = row("pet", "yours")
 check("the update installs on its own yes: version 2, server/ listed, not run",
