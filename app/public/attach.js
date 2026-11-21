@@ -230,9 +230,9 @@ export function filesFrom(transfer) {
 // The images on a clipboard, and nothing else on it. A paste carrying text is
 // text and is the field's business; a paste carrying a screenshot is a file and
 // is this app's, and a paste carrying both does both.
-export function imagesFrom(transfer, { now = Date.now() } = {}) {
+export function mediaFrom(transfer, { now = Date.now() } = {}) {
   return filesIn(transfer)
-    .filter((file) => isImage(file?.type))
+    .filter(file => isImage(file?.type) || file?.type?.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(file?.name))
     .map((file) => ({ file, name: file.name || pastedName(file.type, now) }))
 }
 
@@ -249,6 +249,7 @@ function extensionOf(type) {
   const sub = String(type ?? '')
     .split('/')[1]
     ?.split('+')[0]
+  if (type === 'video/quicktime') return 'mov'
   if (!sub) return 'png'
   return sub === 'jpeg' ? 'jpg' : sub.replace(/[^a-z0-9]/gi, '') || 'png'
 }

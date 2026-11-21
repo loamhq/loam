@@ -360,7 +360,9 @@ export function createApp({
       const target = `/v1/threads${id ? `/${encodeURIComponent(dec(id))}` : ''}${action ? `/${action}` : ''}${query.size ? `?${query}` : ''}`
       if (action === 'events') return await relayEvents(req, res, target)
       if (action === 'attachments') {
-        const out = await broker.upload(target, { contentType: req.headers['content-type'], body: await readRaw(req) })
+        const raw = await readRaw(req, FILES_UPLOAD_BODY)
+        if (!raw) return sendJson(res, 413, { error: 'Attachments can be up to 10 MiB each.' })
+        const out = await broker.upload(target, { contentType: req.headers['content-type'], body: raw })
         noteBrokerError(res, out)
         res.writeHead(out.status, { 'content-type': out.contentType, 'cache-control': 'no-store' })
         return res.end(out.body)
@@ -635,6 +637,7 @@ export function createApp({
     if (rest === '/files/download' && (method === 'GET' || method === 'HEAD')) {
       const query = filesQuery(url, FILES_PARAMS.download)
       if (query.error) return sendJson(res, 400, { error: query.error })
+      if (req.headers.range) query.set('range', String(req.headers.range))
       return await relayDownload(res, `/v1/files/download${query.search}`)
     }
     if (rest === '/files/archive') {
@@ -797,7 +800,9 @@ export function createApp({
       'cache-control': 'private, no-store',
     }
     if (out.length) headers['content-length'] = out.length
-    res.writeHead(200, headers)
+    if (out.contentRange) headers['content-range'] = out.contentRange
+    if (out.acceptRanges) headers['accept-ranges'] = out.acceptRanges
+    res.writeHead(out.status, headers)
     if (!out.stream) return res.end()
     out.stream.on('error', () => res.destroy())
     out.stream.pipe(res)
@@ -1019,7 +1024,7 @@ const FILES_TEXT_BODY = 13 * (1 << 20)
 
 // Types a browser draws without running anything. Everything else a download
 // carries goes out as bytes.
-const INERT_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'application/pdf', 'text/plain', 'audio/mpeg', 'audio/mp4', 'video/mp4'])
+const INERT_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'application/pdf', 'text/plain', 'audio/mpeg', 'audio/mp4', 'video/mp4', 'video/quicktime', 'video/webm'])
 
 // The query a Files route is relayed with, rebuilt from the names it takes. A
 // path is the host's to resolve, but one with a `.` or `..` segment, a

@@ -2673,8 +2673,24 @@ class Server:
                 fd, size, headers = await asyncio.to_thread(
                     files_api.download, q.get("root", ""), q.get("path"))
                 try:
+                    status = "200 OK"
+                    if headers["Content-Type"].startswith("video/"):
+                        headers["Accept-Ranges"] = "bytes"
+                        if q.get("range"):
+                            match = re.fullmatch(r"bytes=(\d{0,18})-(\d{0,18})", q["range"])
+                            if not match or not any(match.groups()):
+                                raise files_api.FilesError(416, "Use one byte range.")
+                            first, last = match.groups()
+                            start = int(first) if first else max(0, size - int(last))
+                            end = min(size - 1, int(last)) if first and last else size - 1
+                            if not 0 <= start <= end:
+                                raise files_api.FilesError(416, "Range outside this video.")
+                            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+                            size = end - start + 1
+                            os.lseek(fd, start, os.SEEK_SET)
+                            status = "206 Partial Content"
                     head = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
-                    writer.write((f"HTTP/1.1 200 OK\r\nContent-Length: {size}\r\n"
+                    writer.write((f"HTTP/1.1 {status}\r\nContent-Length: {size}\r\n"
                                   f"Connection: close\r\n{head}\r\n").encode())
                     sent = 0
                     while sent < size:

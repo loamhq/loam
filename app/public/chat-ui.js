@@ -172,10 +172,15 @@ export function messageFiles(files = [], key = null) {
     // inert Files download route. Never treat an attachment path as a URL.
     const path = attachmentFilePath(file.path)
     const image = isImage(file.type) && path !== null
-    if (!image) return h('span', { class: 'attachment-chip sent', key: `f${i}`, title: file.path ?? '' },
-      isImage(file.type) ? icon.image(13) : icon.file(13), h('span', { class: 'chip-name', text: name }))
     const root = file.root === 'spaces' ? 'spaces' : 'vault'
     const href = `/api/files/download?${new URLSearchParams({ root, path })}`
+    if (path && file.type?.startsWith('video/')) {
+      return h('figure', { class: 'message-video', key: `f${i}` },
+        h('video', { src: href, controls: true, playsinline: true, preload: 'metadata', 'aria-label': name }),
+        h('figcaption', {}, h('a', { href, download: name, text: name })))
+    }
+    if (!image) return h('span', { class: 'attachment-chip sent', key: `f${i}`, title: file.path ?? '' },
+      isImage(file.type) ? icon.image(13) : icon.file(13), h('span', { class: 'chip-name', text: name }))
     const at = shown.push({ src: href, href, name }) - 1
     const label = h('span', { class: 'message-image-name', text: name })
     const link = h('a', { class: 'message-image', key: `f${i}`, href, title: name, 'aria-label': `Open ${name}`, onclick: (e) => {

@@ -92,6 +92,8 @@ export function createBroker(config, { fetchImpl = fetch } = {}) {
         status: res.status,
         contentType: res.headers.get('content-type'),
         disposition: res.headers.get('content-disposition'),
+        contentRange: res.headers.get('content-range'),
+        acceptRanges: res.headers.get('accept-ranges'),
         length: res.headers.get('content-length'),
         stream: res.body ? Readable.fromWeb(res.body) : null,
       }

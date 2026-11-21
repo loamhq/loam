@@ -676,6 +676,8 @@ ATTACHMENT_TYPES = {
     "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
     "gif": "image/gif", "webp": "image/webp",
 
+    "mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/webm",
+
     "pdf": "application/pdf",
     "docx": ("application/vnd.openxmlformats-officedocument"
              ".wordprocessingml.document"),

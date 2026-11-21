@@ -195,6 +195,12 @@ async def main() -> None:
                                raw=body_bytes, content_type=ctype)
     check("an upload to a thread nobody has is a 404", status, 404)
 
+    for ext, mime in (("mp4", "video/mp4"), ("mov", "video/quicktime"), ("webm", "video/webm")):
+        ctype, body_bytes = multipart([("file", "clip." + ext, "application/octet-stream", b"video")])
+        status, out = await route(server, "POST", upload, raw=body_bytes, content_type=ctype)
+        check("video type comes from the stored extension: " + ext,
+              (status, out["attachments"][0]["type"]), (201, mime))
+
     # -- 2, 3. the sanitising, the path, the bytes --------------------------
 
     ctype, body_bytes = multipart([

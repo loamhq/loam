@@ -1487,7 +1487,11 @@ UPLOAD_MAGIC = {
 def _magic_ok(ext: str, data: bytes) -> bool:
     if ext == "webp":
         return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
-    if ext in ("heic", "heif"):
+    if ext == "webm":
+        return data.startswith(b"\x1a\x45\xdf\xa3")
+    if ext == "mov":
+        return data[4:8] in (b"ftyp", b"moov", b"mdat", b"wide", b"free")
+    if ext in ("heic", "heif", "mp4"):
         return data[4:8] == b"ftyp"
     if ext == "pdf":
         # The header may follow a little junk; readers look in the first KiB.

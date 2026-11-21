@@ -2506,6 +2506,8 @@ class AntigravitySession(Session):
             for item in attachments:
                 lines.append(f"- {item['path']} ({item['type']}, "
                              f"{human_size(item['size'])})")
+                if (item.get("type") or "").startswith("video/"):
+                    lines.append("Use read_file on this video to see its contents.")
         prompt = agy.prompt_arg(self.id, "\n".join(lines))
         self.last_activity = time.time()
         self._turn_active = True

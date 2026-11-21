@@ -1,3 +1,4 @@
+import { listeningRecipients } from "../thread-identity.js"
 import { isMac } from "../keys.js"
 import { richField } from "../compose.js"
 import { h, icon, kept } from "../ui.js"
@@ -202,7 +203,7 @@ const imageChooser = h('input', {
   id: host.panelId === 'side' ? 'side-pick-image' : 'pick-image',
   class: 'picker',
   type: 'file',
-  accept: 'image/*',
+  accept: 'image/*,video/mp4,video/quicktime,video/webm,.mov',
   multiple: true,
   onchange: () => host.picked(imageChooser),
 })
@@ -273,6 +274,15 @@ function attachStrip() {
 // Under the name: why it will not go, how far it has got, or how big it is.
 function chipSub(item) {
   if (item.error) return item.error
+  if (item.path && (item.type?.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(item.name))) {
+    const thread = activeThread()?.thread
+    const agents = host.state.agents.list
+    const recipients = thread ? listeningRecipients(thread, draft.value || ' ', true, agents) : []
+    const unable = recipients.filter(id => ['codex', 'claude-code'].includes(thread.members.find(m => m.persona === id)?.engine))
+    if (unable.length) return `${unable.map(id => agents.find(a => a.id === id)?.name || id).join(', ')} cannot watch this video. The file stays in Files.`
+    return recipients.length && recipients.every(id => thread.members.find(m => m.persona === id)?.engine === 'antigravity')
+      ? 'Ready to watch with Antigravity' : 'Antigravity can watch. Other agents receive the file.'
+  }
   if (item.path) return bytes(item.size)
   if (item.progress > 0) return `${Math.round(item.progress * 100)}% sent`
   return 'sending…'
@@ -630,14 +640,14 @@ function composerMenu() {
           {
             key: 'file',
             title: 'Upload a file',
-            sub: 'Anything on this device',
+            sub: 'Documents, images, code and video',
             glyph: icon.file(18),
             run: () => host.chooseFiles(fileChooser),
           },
           {
             key: 'image',
-            title: 'Upload an image',
-            sub: 'From the camera or the gallery',
+            title: 'Photo or video',
+            sub: 'Photos, MP4, MOV and WebM',
             glyph: icon.image(18),
             run: () => host.chooseFiles(imageChooser),
           },
@@ -653,7 +663,7 @@ function composerMenu() {
     ],
     // The host's number, said before anything is chosen. It is the broker's cap
     // and this app keeps no copy of it — see `/api/limits`.
-    note: cap ? `Up to ${bytes(cap)} each. The agent reads them from its own workspace.` : null,
+    note: cap ? `Up to ${bytes(cap)} per file.` : null,
   }
 }
 

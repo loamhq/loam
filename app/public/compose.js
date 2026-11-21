@@ -33,7 +33,7 @@ import { composing } from './keys.js'
 // arithmetic of it is pure and is tested (`visibleCaret`); the placing of it is
 // a `Range` on a real selection, and there is no selection in the fixture.
 
-import { imagesFrom } from './attach.js'
+import { mediaFrom } from './attach.js'
 
 // A line that is a bullet, and a line that is numbered. The space after the
 // mark is required: `-5` is a number a person typed, not a list.
@@ -497,7 +497,7 @@ export function richField(el, { sends = () => false, changed = () => {}, send = 
     // chosen from the + menu does. It is handed out rather than handled here:
     // this module knows what a field holds and nothing about uploads, and a
     // paste carrying an image *and* text is both things, in that order.
-    const images = imagesFrom(event.clipboardData)
+    const images = mediaFrom(event.clipboardData)
     if (images.length > 0) files(images)
     if (said === '') return
     const point = caretPoint(el)
@@ -523,7 +523,7 @@ export function richField(el, { sends = () => false, changed = () => {}, send = 
   el.addEventListener('beforeinput', (event) => {
     const type = String(event.inputType ?? '')
     if (type !== 'insertFromPaste' && type !== 'insertFromDrop') return
-    const images = imagesFrom(event.dataTransfer)
+    const images = mediaFrom(event.dataTransfer)
     if (images.length === 0) return
     // There is a file in it, so this event is the attachment and not text: the
     // default would drop an `<img>` into the field, which is the one node in

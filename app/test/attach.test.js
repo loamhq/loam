@@ -19,7 +19,7 @@ import {
   attachmentList,
   carriesFiles,
   filesFrom,
-  imagesFrom,
+  mediaFrom,
   pastedName,
   isImage,
   fileName,
@@ -185,14 +185,14 @@ test('a paste takes the images on the clipboard and leaves everything else', () 
       { kind: 'file', type: 'text/csv', getAsFile: () => csv },
     ],
   }
-  const taken = imagesFrom(clipboard, { now: NOW })
+  const taken = mediaFrom(clipboard, { now: NOW })
   assert.deepEqual(taken.map((entry) => entry.name), ['pasted-20260922T190639Z.png'])
   assert.equal(taken[0].file, shot)
 
   // A name on the clipboard is the name it keeps: an image file copied in a
   // file manager arrives with one, and renaming it would be this app telling a
   // person their file is called something else.
-  const named = imagesFrom({ files: [{ name: 'diagram.png', size: 10, type: 'image/png' }] }, { now: NOW })
+  const named = mediaFrom({ files: [{ name: 'diagram.png', size: 10, type: 'image/png' }] }, { now: NOW })
   assert.deepEqual(named.map((entry) => entry.name), ['diagram.png'])
 
   // The extension is the type's own, and the fallback is a PNG rather than
