@@ -17,10 +17,37 @@ in Settings › Plugins. For a shipped plugin, copy it to `<owner plugins>/<id>/
 For a Market or link install, copy it to `<owner plugins>/_copies/<id>/`.
 Keep the folder name and manifest id to take over. If the owner wants both
 side by side, use a new folder directly under the owner’s plugins folder
-and give its manifest the same new id. Edit the copy. Editing a Market or
-link install in place pauses automatic updates, and the next update would
-replace those edits. Tell the owner in one sentence, “Your copy won’t
-update by itself, and I’ll check the original for newer versions when you ask.”
+and give its manifest the same new id. Run `loam plugin track COPY_ID ORIGINAL_ID`
+as soon as you make the copy. This remembers the exact starting version for a
+Market, linked, preinstalled or shipped original. For an older copy, use
+`--link URL` with the exact starting release if the original has moved.
+Keep its `forked_from: original-id@version` in the manifest when sharing it.
+Loam recognises edits to an installed folder and same-id Market copies.
+A renamed copy made before tracking needs its original identified.
+
+**When a newer version is available**, Loam tells the owner's chosen attention
+agent. Run `loam plugin prepare COPY_ID`. It returns the starting folder,
+the person's folder as it was when you began, the incoming folder and a
+separate editable `folder`. The file lists show each side's changes, overlap
+and choices still to make. Read the files, using `git diff --no-index`
+between the snapshots for detail. Separate changes are already in the draft.
+For overlapping text, resolve the marked lines in the draft. For a binary,
+deletion or type change that needs a choice, the draft starts with the person's
+version. Preserve the copy's own id, theme selectors and settings. Try the
+draft's normal entry point. Run `loam plugin preview COPY_ID` to validate it
+and see any added access. Review that access with the owner too.
+
+Bring this to the owner in one chat. Say what they would see, what would
+stay theirs, and what you need them to choose. For example, “The new version
+adds reading tips. You chose green paper and the maker chose lavender.
+Shall I add the tips and keep your green, or leave everything as it is?”
+On their yes, finish the agreed draft, preview again, and run
+`loam plugin apply COPY_ID CONFIRM` with the returned token. Check the
+plugin in Settings and try it. If the files changed since the conversation,
+prepare or preview again and confirm any new choices. The response names
+the recovery folder containing the exact previous plugin and its record.
+On no, run `loam plugin skip COPY_ID VERSION`. The same version stays quiet.
+Either choice keeps the connection to the original for future releases.
 
 A plugin is a folder whose name is its id. Its `PLUGIN.md` is the manifest
 (frontmatter) and the guide (the body, for a person and an agent).

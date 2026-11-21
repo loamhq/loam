@@ -624,9 +624,7 @@ ENTRIES: list[Entry] = [
     Entry("plugin.auto_update", "setting", "Update this Market or link plugin automatically",
           "PATCH /api/plugins/{plugin}", route="PATCH /v1/plugins/{plugin}",
           target="plugin id", options="plugins", unattended=False,
-          values='true or false. After local changes, explain that the next update replaces '
-                 'edits in the installed folder. On the owner’s yes send '
-                 '{"auto_update":true,"replace_changes":true}.',
+          values="true or false. Local changes are reviewed with the owner using loam plugin.",
           body=lambda v, m: v if isinstance(v, dict) and set(v) <= {"auto_update", "replace_changes"}
           and "auto_update" in v else {"auto_update": v},
           read="GET /v1/plugins/{plugin}", pick=lambda a, m: a["plugin"].get("auto_update")),

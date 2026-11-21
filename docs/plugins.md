@@ -842,9 +842,28 @@ automatic update with its previous and new version.
 Market and link installs default to automatic updates. About and
 `bin/settings set plugin.auto_update` change that preference. Editing the
 installed folder or placing a same-id copy in `<plugins>/_copies/<id>/`
-pauses updates. The copy takes precedence and remains separate when the
-original updates. Removing the copy restores the original. A different-id
+pauses updates. The copy takes precedence. All install routes recheck local files at the
+swap, including mode, type and content. A changed copy waits for review. Removing the copy restores the original. A different-id
 plugin directly in the owner's plugins folder can run alongside the original.
+
+`loam plugin track COPY ORIGINAL` records a copy’s starting release, including
+shipped plugins. An older copy can supply its starting release with `--link`.
+Automatic discovery recognises `forked_from: id@version` when the corresponding
+original is available at that version. The broker stores each copy's lineage
+and version decisions under `copies` in `installed.json`. Exact original trees
+live under `_versions/` in the plugins repository. Discovery uses the original
+id and the last accepted upstream pin, independent of the copy's own version.
+
+The selected attention agent receives the command `loam plugin prepare ID`.
+It returns both sets of changed paths, overlaps, choices, the three source
+folders and a draft. The agent describes the visible choices and any newly
+requested access to the owner. `loam plugin preview ID` validates the draft.
+`loam plugin apply ID TOKEN` checks the local files and that exact draft again,
+saves the previous folder and its installation record in `_history/`, then
+installs the agreed result. `loam plugin skip ID VERSION` keeps the files and
+suppresses further offers for that version. Each command uses the broker’s
+`PATCH /v1/plugins/<id>` with a `review` action. The private working folder
+is under `.staging/` and stays out of automatic backups.
 
 ## Server plugins (2026-11-13)
 
@@ -1084,10 +1103,8 @@ Request `{"on": false}`; answer as `GET /api/plugins/<id>`. Refusals, each
 - 409 `"dusk is broken, so it cannot be turned on or off: …"`
 - 400 for an unknown setting, or 404 for an unknown id.
 
-A Market or link installation also accepts `{"auto_update": false}`. To
-resume after edits the owner confirms `{"auto_update": true,
-"replace_changes": true}`. The acknowledgement covers the current files.
-Another edit pauses updates again.
+A Market or link installation also accepts `{"auto_update": false}`. Automatic updates can resume for an unedited install. A changed copy uses
+the review commands above.
 
 ### `POST /api/plugins` — install from a link
 

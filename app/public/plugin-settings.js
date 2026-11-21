@@ -66,7 +66,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   const failedIcons = new Set()
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, text, onclick, ...props })
   const notice = (text, bad = true) => text ? h('p', { class: `plugin-notice${bad ? ' err' : ''}`, role: bad ? 'alert' : 'status', text }) : null
-  let updates = null, checking = null, updateWrite = null, resume = null
+  let updates = null, checking = null, updateWrite = null, reviewAnswer = null
   async function checkUpdates() {
     if (checking) return checking
     checking = host.api('GET', '/plugin-updates').then(out => {
@@ -80,25 +80,25 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   const reviewKnown = () => ['listed', 'empty'].includes(updates?.market_state ?? host.marketState?.list?.state)
   const status = row => {
     const info = updates?.plugins?.[row.id]
-    return info?.version && info.version !== (row.installed?.version ?? row.version) ? info : null
+    return info?.personal || (info?.version && info.version !== (row.installed?.version ?? row.version)) ? info : null
   }
   const originOf = row => row.source?.kind === 'link' && updates?.plugins?.[row.id]?.via === 'market'
     ? 'market' : pluginOrigin(row, marketEntry(row))
   function updateLine(row) {
     const info = status(row)
+    if (info?.personal) return `Version ${info.version} is available for your copy.`
     const words = []
     if (row.updates_paused) words.push('Changed here · updates paused')
     if (info) words.push(info.held ? 'Update needs your yes' : 'Update available', info.version)
     return words.join(' · ')
   }
-  async function setAuto(row, replace = false) {
+  async function setAuto(row) {
     if (updateWrite) return
     const on = !row.auto_update
-    if (on && (row.edited || row.custom_copy) && !replace) { resume = row.key; changed(); return }
-    updateWrite = row.key; resume = null; st.error = ''; changed()
+    updateWrite = row.key; st.error = ''; changed()
     try {
       const out = await host.api('PATCH', `/plugins/${encodeURIComponent(row.id)}`,
-        { auto_update: on, ...(replace ? { replace_changes: true } : {}) })
+        { auto_update: on })
       loader.st.rows = loader.st.rows.map(current => current.key === row.key ? { ...current, ...out.plugin } : current)
     } catch (error) { st.error = error.message }
     finally { updateWrite = null; changed() }
@@ -106,6 +106,24 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   function updateControls(row) {
     if (typeof row.auto_update !== 'boolean') return null
     const info = status(row), words = updateLine(row)
+    if (row.edited || row.custom_copy || row.personal || info?.personal) {
+      async function decide(review) {
+        if (updateWrite) return
+        updateWrite = row.key; st.error = ''; changed()
+        try {
+          const out = await host.api('PATCH', `/plugins/${encodeURIComponent(row.id)}`, { review, version: info.version })
+          reviewAnswer = { key: row.key, version: info.version, text: out.skipped ? 'Keeping your version.' : 'Your agent has the update.' }
+          await checkUpdates()
+        } catch (error) { st.error = error.message }
+        finally { updateWrite = null; changed() }
+      }
+      const answer = reviewAnswer?.key === row.key && (!info || info.version === reviewAnswer.version) ? reviewAnswer.text : null
+      return h('section', { class: 'rows plugin-updates', 'aria-label': 'Plugin updates' },
+        h('div', { class: 'setrow' }, h('span', { class: 'setrow-who', role: 'status', text: answer || (info ? words : 'Your changes are kept when Loam checks for updates.') })),
+        info?.personal ? h('div', { class: 'setrow' },
+          button('Ask my agent', () => decide('ask'), 'pillbtn primary', { disabled: Boolean(updateWrite) }),
+          button('Keep my version', () => decide('skip'), 'pillbtn', { disabled: Boolean(updateWrite) })) : null)
+    }
     const review = () => info.via === 'market'
       ? host.openMarketInstall(row.id, { ...marketEntry(row), id: row.id, name: row.name, kind: row.kind, pinned_link: info.link })
       : host.openLinkInstall({ link: info.link })
@@ -116,9 +134,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         h('div', { class: 'setrow-title', text: 'Update automatically' }),
         h('div', { class: 'setrow-sub', text: row.custom_copy ? 'Updates apply to the original. Your copy stays yours.' : 'Updates that ask for more access wait for your yes.' })),
         h('button', { type: 'button', class: 'schedule-switch', role: 'switch', 'aria-label': 'Update automatically',
-          'aria-checked': String(row.auto_update), disabled: updateWrite === row.key, onclick: () => setAuto(row) }, h('span'))),
-      resume === row.key ? h('div', { class: 'plugin-resume' }, h('p', { class: 'note', text: 'The next update replaces changes in the installed folder. A separate custom copy stays yours.' }),
-        button('Keep paused', () => { resume = null; changed() }), button('Resume updates', () => setAuto(row, true), 'pillbtn primary')) : null)
+          'aria-checked': String(row.auto_update), disabled: updateWrite === row.key, onclick: () => setAuto(row) }, h('span'))))
   }
   const originText = origin => origin === 'link' && reviewKnown() ? `${ORIGINS.link} · ${UNREVIEWED}` : ORIGINS[origin]
   const meta = (row, origin) => [row.author, row.version, originText(origin)].filter(Boolean).join(' · ')
@@ -134,7 +150,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   }
   const select = row => host.appModalHistory ? host.goSettings('plugins', row.id) : open(row)
   async function open(row) {
-    hostSettings = null; secretSettings = null; resume = null
+    hostSettings = null; secretSettings = null; reviewAnswer = null
     st.selected = row; st.detail = null; st.detailError = ''; st.opening = true; st.guide = false; st.remove = false; st.error = ''; st.focusDetail = true; changed()
     opened()
     // Whether its keys are saved, for whether it is set up (below).
