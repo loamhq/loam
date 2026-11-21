@@ -78,6 +78,14 @@ The handoff names the last message it covers. If a member already keeps a
 workspace summary, Loam uses that until a private handoff is ready and
 honors later edits to it.
 
+**Branch from a message.** Choose the agent who should answer. The new
+composer opens empty with the source message attached as a quote. Write an
+opening or remove the quote to start a plain thread. A sent quote goes back
+to the original message, and a small link beneath that message opens the
+branch. The answering agent gets the original words, author, time and IDs
+with the source thread's name and file path, so it can read further back
+when it needs to. The owner's opening supplies the title.
+
 On a fresh install, a phone opens Chats with an unread Hello. A wide screen
 opens Hello. Iris greets the owner by name and shows how Chats, Files and Apps
 fit together. Empty places explain their purpose until they fill. Board,

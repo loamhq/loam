@@ -1030,9 +1030,8 @@ const mainPanel = {
     if (item.push !== false) recordMain(item)
     if (item.kind === 'thread') {
       files.closeFile(); apps.st.selected = null
-      const pending = threads.open(item.id, { routed: true, push: false, listing: item.listing, board: item.board })
+      const pending = threads.open(item.id, { routed: true, push: false, listing: item.listing, board: item.board, message: item.message })
       if (item.view) threads.setView(item.view)
-      if (item.message && threads.st.open) Object.assign(threads.st.open, { replyJump: item.message, jumpKind: 'quote' })
       return pending
     }
     if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false, list: item.list, boardThread: item.boardThread })

@@ -510,6 +510,10 @@ def render_message(msg: dict, quoted: dict | None = None) -> str:
     meta = {k: msg[k] for k in ("id", "author", "at", "kind") if k in msg}
     if msg.get("reply_to"):
         meta["reply_to"] = msg["reply_to"]
+    source = msg.get("reply_source")
+    if source:
+        meta["reply_source"] = source
+        quoted = source
     if msg.get("did"):
         meta["did"] = msg["did"]
     # Preserve ordered text and tool steps in segments. Carry attachments and chosen
@@ -526,7 +530,10 @@ def render_message(msg: dict, quoted: dict | None = None) -> str:
     # markdown; as `--\u003e` it is the same JSON.
     comment = json.dumps(meta, ensure_ascii=False).replace("-->", "--\\u003e")
     if msg.get("reply_to") and quoted is not None:
-        text = f"{quote_line(quoted)}\n\n{text}"
+        line = quote_line(quoted)
+        if source:
+            line += f" · in {json.dumps(source['title'], ensure_ascii=False)}"
+        text = f"{line}\n\n{text}"
     return f"\n{head}\n<!-- loam {comment} -->\n\n{text}\n"
 
 
@@ -721,7 +728,8 @@ def member_engine(meta: dict, persona: str) -> str | None:
 def create(persona: str | None = None, title: str | None = None, *,
            thread_id: str | None = None, members: list[str] | None = None,
            pinned: bool = False, extra: dict | None = None,
-           initial_board: str | None = None) -> dict:
+           initial_board: str | None = None, draft: str | None = None,
+           draft_reply: dict | None = None) -> dict:
     """Create a thread with optional extra frontmatter, including branch metadata. Without
     a persona it has no members or default. An untagged message is recorded without an
     answer.
@@ -751,7 +759,12 @@ def create(persona: str | None = None, title: str | None = None, *,
         idx[thread_id] = path.name
         save_state("index.json", idx)
         threads_state = load_state("threads.json")
-        threads_state.setdefault(thread_id, {})["placeholder_title"] = placeholder
+        row = threads_state.setdefault(thread_id, {})
+        row["placeholder_title"] = placeholder
+        if draft and draft.strip():
+            row["draft"] = draft
+        if draft_reply:
+            row["draft_reply"] = draft_reply
         save_state("threads.json", threads_state)
     return meta
 
@@ -871,9 +884,15 @@ def append_once(thread_id: str, author: str, text: str, kind: str = "message",
                                  and m.get(field) == extra[field]), None)
                 if existing is not None:
                     return existing, False
-        # Validate reply targets against this thread's current record under the lock.
-        quoted = (check_reply_to(msgs, extra["reply_to"], thread_id)
-                  if "reply_to" in extra else None)
+        # Cross-thread quotes are resolved before journaling an opening. Local replies
+        # still validate against this record under the append lock.
+        if extra.get("reply_source"):
+            if any(is_owner(m.get("author")) for m in msgs):
+                raise ThreadError(409, "A branch quote belongs on the opening message.")
+            quoted = None
+        else:
+            quoted = (check_reply_to(msgs, extra["reply_to"], thread_id)
+                      if "reply_to" in extra else None)
         last = max((int(m["id"][1:]) for m in msgs
                     if str(m.get("id", "")).startswith("m")
                     and m["id"][1:].isdigit()), default=0)
@@ -1052,18 +1071,13 @@ def title_from_first(thread_id: str, text: str) -> None:
             update(thread_id, title=line)
 
 
-# A branch records its source message and starting window so either thread can point
-# back to the other.
-
-# The window ending at the chosen message: back to the last real pause (a
+# Legacy branches carried a window ending at the chosen message: back to the last real pause (a
 # gap over BRANCH_PAUSE_S between two messages), or BRANCH_MAX messages,
 # whichever comes first, and never fewer than BRANCH_MIN when the thread has
 # them. System lines are not part of it.
 BRANCH_PAUSE_S = 30 * 60
 BRANCH_MAX = 12
 BRANCH_MIN = 3
-# How many words the summarizer's draft may run to.
-BRANCH_DRAFT_WORDS = 90
 
 
 def _when(msg: dict) -> datetime | None:
@@ -1106,75 +1120,27 @@ def branch_window(msgs: list[dict], msg_id: str, thread_id: str = "") -> list[di
     return out
 
 
-def branch_people(meta: dict) -> list[str]:
-    """Who a branch can be started with, in the sheet's order: the source
-    thread's members (its default first), then everyone else."""
-    people = roster()
-    first = ([meta["default"]] if meta.get("default") in people else []) + [
-        p for p in meta.get("members") or [] if p in people and p != meta.get("default")]
-    return first + [p for p in people if p not in first]
+def branch_quote(source_id: str, msg_id: str) -> dict:
+    """Resolve a cross-thread reply against the source and snapshot its words."""
+    meta, msgs, path = read(source_id)
+    target = check_reply_to(msgs, msg_id, source_id)
+    if target.get("kind") == "system":
+        raise ThreadError(400, "a branch starts from a message")
+    return {"thread": meta["id"], "title": meta["title"], "path": str(path),
+            "id": target["id"], "author": target["author"], "at": target["at"],
+            "text": _said(target, verbatim=True),
+            **({"attachments": target["attachments"]} if target.get("attachments") else {})}
 
 
-def _excerpt(window: list[dict]) -> str:
-    out = []
-    for m in window:
-        who = "Loam" if m.get("author") == "system" else display(m["author"])
-        out.append(f"[{local_stamp(m.get('at', ''))}] {who} ({m.get('id')}):\n"
-                   f"{_said(m)}")
-    return "\n\n".join(out)
+def clear_draft_reply(thread_id: str) -> None:
+    with locked(VAULT):
+        data = load_state("threads.json")
+        if data.get(thread_id, {}).pop("draft_reply", None) is not None:
+            save_state("threads.json", data)
 
 
-def branch_prompt(meta: dict, window: list[dict], persona: str | None) -> dict:
-    """Build system_instruction and input for a branch summary. Expect a single JSON object
-    with title and draft.
-    """
-    to = display(persona) if persona else "the agent"
-    instruction = "\n".join([
-        f"{lc.OWNER_NAME} is branching part of a conversation off into a new thread of "
-        f"its own, with {to}. You write the opening message of that new "
-        f"thread, in {lc.OWNER_NAME}'s own voice: first person, plain, the way they "
-        "type to a colleague.",
-        "The excerpt is the stretch of the old thread that led up to the "
-        "message they branched from, which is the last one. That last message "
-        "is what the new thread is about.",
-        "Write one line saying what this thread is about. Then the essential "
-        "context from the excerpt in a few short sentences: what was found "
-        "or decided, and the specific names, files, errors and numbers it "
-        "needs. Leave out anything the new thread does not need.",
-        "End with a final line that is left open for them to finish in their "
-        "own words, for example one ending with a colon. Do not answer it.",
-        f"At most {BRANCH_DRAFT_WORDS} words. No greeting, no sign-off, no "
-        "@mentions, and nothing the excerpt does not say.",
-        "Also give the thread a title of three to seven words, with no "
-        "quotation marks and no full stop.",
-        'Answer with only a JSON object: {"title": "...", "draft": "..."}.',
-    ])
-    text = (f"The old thread is called \"{meta.get('title')}\".\n"
-            f"The new thread is with {to}.\n\nThe excerpt:\n\n{_excerpt(window)}")
-    return {"system_instruction": instruction, "input": text,
-            "answer": {"title": "string", "draft": "string"}}
-
-
-def fallback_branch(meta: dict, window: list[dict]) -> dict:
-    """A plain title and draft from the record alone, for a caller whose
-    summarizer failed or that has none: the source's title and the chosen
-    message's opening, and an open line."""
-    said = " ".join((_said(window[-1]) or "").split())
-    if len(said) > 160:
-        said = (said[:160].rsplit(" ", 1)[0] or said[:160]) + "…"
-    who = display(window[-1]["author"]) if not lc.is_owner(window[-1].get("author")) else "I"
-    lead = (f'Branching off "{meta.get("title")}", where {who} said: "{said}"'
-            if who != "I" else f'Branching off "{meta.get("title")}", where I said: "{said}"')
-    title = f"From {meta.get('title')}"
-    return {"title": clean_title(title)[:80], "draft": f"{lead}\n\n"}
-
-
-def draft_for(thread_id: str) -> str | None:
-    """The opening a thread's composer starts with, if it has one: a
-    convenience kept beside the record (``state/threads/threads.json``),
-    like the placeholder-title flag, not in it."""
-    got = load_state("threads.json").get(thread_id, {}).get("draft")
-    return got if isinstance(got, str) and got.strip() else None
+def draft_reply_for(thread_id: str) -> dict | None:
+    return load_state("threads.json").get(thread_id, {}).get("draft_reply")
 
 
 def set_draft(thread_id: str, text: str | None) -> None:
@@ -1183,11 +1149,19 @@ def set_draft(thread_id: str, text: str | None) -> None:
         row = data.setdefault(thread_id, {})
         if text and text.strip():
             row["draft"] = text
-        elif "draft" in row:
-            row.pop("draft")
-        else:
+        elif row.pop("draft", None) is None:
             return
         save_state("threads.json", data)
+
+
+def clear_opening_draft(thread_id: str) -> None:
+    with locked(VAULT):
+        data = load_state("threads.json")
+        row = data.get(thread_id, {})
+        draft = row.pop("draft", None)
+        reply = row.pop("draft_reply", None)
+        if draft is not None or reply is not None:
+            save_state("threads.json", data)
 
 
 def insert_after(thread_id: str, msg_id: str, author: str, text: str,
@@ -1235,52 +1209,15 @@ def insert_after(thread_id: str, msg_id: str, author: str, text: str,
 
 
 def branch(source_id: str, msg_id: str, persona: str | None = None, *,
-           title: str | None = None, draft: str | None = None,
-           by: str | None = None) -> dict:
-    """Branch ``source_id`` at ``msg_id`` into a new thread with ``persona``
-    (the source's default when not given) as its default and only member.
-
-    The new thread is titled ``title`` (or by the draft's first line, or
-    after its source), holds ``draft`` as its composer's opening, and records
-    where it came from (``branched_*``). Its first line is a system line
-    linking back to the message; the source gets one under that message
-    linking forward. ``by`` is the persona that branched, when it was not
-    the owner. Returns ``{"meta", "from", "into", "window"}``."""
-    smeta, smsgs, spath = read(source_id)
-    window = branch_window(smsgs, msg_id, source_id)
-    persona = persona or smeta.get("default")
+           title: str | None = None, draft: str | None = None) -> dict:
+    """Open a composer with a source quote. The source gains a link after the
+    owner sends the opening with the quote still attached."""
+    quote = branch_quote(source_id, msg_id)
+    if not persona:
+        persona = read(source_id)[0].get("default")
     if not persona:
         raise ThreadError(400, "who is the new thread with? pass `persona`")
-    if persona not in roster():
-        raise ThreadError(404, f"no persona named {persona!r}")
-    first_line = next((l.strip() for l in (draft or "").splitlines() if l.strip()), "")
-    if len(first_line) > 60:
-        first_line = (first_line[:60].rsplit(" ", 1)[0] or first_line[:60]) + "…"
-    name = clean_title(title or first_line or fallback_branch(smeta, window)["title"])
-    meta = create(persona, name, extra={
-        "branched_from": source_id, "branched_message": msg_id,
-        "branched_window": [m["id"] for m in window]})
-    who = display(by) if by and not lc.is_owner(by) else None
-    source_title = smeta["title"]
-    back = append(meta["id"], "system",
-                  f"{who} branched this from {source_title}" if who
-                  else f"Branched from {source_title}",
-                  kind="system",
-                  link={"thread": source_id, "message": msg_id, "title": source_title})
-    into = insert_after(source_id, msg_id, "system",
-                        f"{who} branched into {meta['title']}" if who
-                        else f"Branched into {meta['title']}",
-                        link={"thread": meta["id"], "title": meta["title"]})
-    if draft and draft.strip():
-        set_draft(meta["id"], draft)
-    # A branch notice inserted under an already read source must not mark the thread
-    # unread.
-    seen = load_state("threads.json").get(source_id, {}).get("seen")
-    last_before = max((_num(m.get("id")) for m in smsgs), default=0)
-    if seen and _num(seen) >= last_before:
-        mark_seen(source_id, into["id"])
-    return {"meta": meta, "from": back, "into": into,
-            "window": [m["id"] for m in window], "record": str(spath)}
+    return create(persona, title, draft=draft, draft_reply=quote)
 
 
 def branch_context(meta: dict) -> str:
@@ -1505,6 +1442,9 @@ def summary(thread_id: str, running=None) -> dict:
     last = shown[-1] if shown else None
     board = board_text(meta, create_missing=False)
     spoke = last_spoke(msgs)
+    opening = next((m for m in msgs if is_owner(m.get("author"))), {})
+    source = opening.get("reply_source")
+    draft = load_state("threads.json").get(thread_id, {})
     return {
         "id": meta["id"], "title": meta["title"], "default": meta["default"],
         "icon": meta.get("icon"),
@@ -1527,11 +1467,11 @@ def summary(thread_id: str, running=None) -> dict:
         # Return the source session and transcript for an imported thread.
         "imported_from": meta.get("imported_from"),
         "source": meta.get("source"),
-        # Include the branch origin and its opening draft until sent or cleared.
-        "branched_from": ({"thread": meta["branched_from"],
-                           "message": meta.get("branched_message")}
+        "branched_from": ({"thread": source["thread"], "message": opening["reply_to"],
+                           "reply": True} if source else
+                          {"thread": meta["branched_from"], "message": meta.get("branched_message")}
                           if meta.get("branched_from") else None),
-        "draft": draft_for(thread_id),
+        "draft": draft.get("draft"),
         # Identify the starter thread used for the first visit.
         "hello": bool(meta.get("hello")),
     }
@@ -1586,9 +1526,9 @@ def clock_line(now: datetime | None = None) -> str:
             f"same zone.")
 
 
-def _said(m: dict) -> str:
+def _said(m: dict, *, verbatim: bool = False) -> str:
     # Include earlier text segments as well as the reply's closing words.
-    said = [seg["text"].strip() for seg in (m.get("segments") or [])
+    said = [seg["text"] if verbatim else seg["text"].strip() for seg in (m.get("segments") or [])
             if isinstance(seg, dict) and isinstance(seg.get("text"), str)
             and seg["text"].strip()]
     return "\n\n".join(said + [m["text"]]) if said else m["text"]
@@ -1602,6 +1542,19 @@ def replied_block(m: dict, record: list[dict] | None,
     if not m.get("reply_to"):
         return ""
     who = display(m["author"])
+    source = m.get("reply_source")
+    if source:
+        try:
+            meta, _, path = read(source["thread"])
+            title, path = meta["title"], str(path)
+        except (ThreadError, OSError):
+            title, path = source["title"], source["path"]
+        quoted = "\n".join("> " + line if line else ">" for line in source["text"].split("\n"))
+        return (f'{who} is replying to {display(source["author"])}\'s message '
+                f'{source["id"]} of [{local_stamp(source["at"])}] in the thread '
+                f'"{title}" (id {source["thread"]}). You may read earlier messages '
+                f'in the source thread file {path} if you need them.\n'
+                f"{quoted}\n{who}'s words in reply:\n")
     target = find(record or [], m["reply_to"])
     if target is None:
         return (f"{who} is replying to message {m['reply_to']}, which is no "
@@ -1739,7 +1692,7 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
                      "below and read the thread file for any intervening messages.\n\n")
         else:
             head += "You have no summary of this thread yet.\n\n"
-        # A branch's first prompt includes its source window and points to the full record.
+        # Older branches keep the source-window context they were created with.
         branched = branch_context(meta)
         head += branched or (
             "The recent exchange (back to the last pause of more than "

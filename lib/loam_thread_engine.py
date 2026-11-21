@@ -762,13 +762,13 @@ class ThreadEngine:
                     attachments: list[dict] | None = None,
                     model: str | None = None,
                     reply_to: str | None = None, submission_id: str | None = None,
-                    signature: str | None = None) -> dict:
+                    signature: str | None = None, reply_thread: str | None = None) -> dict:
         """Store the message and attachments before scheduling its recipients. Mentions
         take precedence over the default member. A thread with neither retains the
         message for future turns. A per-message model overrides the member choice."""
         text = (text or "").strip()
         attachments = attachments or []
-        if not text and not attachments:
+        if not text and (reply_thread is not None or not attachments):
             raise threads.ThreadError(400, "a `text` is required")
         self.finish_pending_submission(thread_id)
         meta, msgs, _ = threads.read(thread_id)
@@ -784,7 +784,7 @@ class ThreadEngine:
                    "first": not any(threads.is_owner(m.get("author")) for m in msgs)}
         if submission_id:
             request["submission_hash"] = signature or self.submission_hash(
-                text, [f["path"] for f in attachments], reply_to, model)
+                text, [f["path"] for f in attachments], reply_to, model, reply_thread)
             prior = self.accepted_submission(msgs, submission_id, request["submission_hash"])
             if prior:
                 return prior
@@ -792,8 +792,15 @@ class ThreadEngine:
                 clean = re.sub(r"^(?:@[\w-]+\s*)+", "", text).strip()
                 request["opening_title"] = (clean[:59].rstrip() + "…" if len(clean) > 60
                                             else clean or "New thread")
-            if reply_to:
+            if reply_to and reply_thread is None:
                 threads.check_reply_to(msgs, reply_to, thread_id)
+        if reply_thread is not None:
+            if not isinstance(reply_thread, str) or not reply_thread or reply_thread == thread_id:
+                raise threads.ThreadError(400, "Choose a source message in another thread.")
+            if not request["first"]:
+                raise threads.ThreadError(409, "A branch quote belongs on the opening message.")
+            request["reply_source"] = threads.branch_quote(reply_thread, reply_to)
+        if submission_id:
             threads._write_atomic(self._submission_path(thread_id), json.dumps(request))
         return self._finish_submission(request)
 
@@ -808,9 +815,11 @@ class ThreadEngine:
             self._finish_submission(json.loads(pending.read_text()))
 
     @staticmethod
-    def submission_hash(text, paths, reply_to, model):
-        data = json.dumps([text.strip(), paths, reply_to or None, model],
-                          separators=(",", ":"), ensure_ascii=False)
+    def submission_hash(text, paths, reply_to, model, reply_thread=None):
+        fields = [text.strip(), paths, reply_to or None, model]
+        if reply_thread is not None:
+            fields.append(reply_thread)
+        data = json.dumps(fields, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod
@@ -829,14 +838,15 @@ class ThreadEngine:
         extra = {"attachments": attachments} if attachments else {}
         if request["reply_to"]:
             extra["reply_to"] = request["reply_to"]
+        if request.get("reply_source"):
+            extra["reply_source"] = request["reply_source"]
         if key:
             extra.update(submission_id=key, submission_hash=request["submission_hash"])
         msg = threads.append(thread_id, threads.OWNER, text, **extra)
         meta = threads.read(thread_id)[0]
         self.publish(thread_id, {"type": "message.done", "message": msg})
         self.clear_mark(thread_id, "")
-        # A branch's prepared opening (2026-11-11) is spent once he writes.
-        threads.set_draft(thread_id, None)
+        threads.clear_opening_draft(thread_id)
         if meta.get("archived") and meta.get("imported_from"):
             # A classic chat imported as an archived thread (2026-11-11) is
             # history until the owner writes in it; then it is a thread like

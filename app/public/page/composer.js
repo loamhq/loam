@@ -332,7 +332,7 @@ function builtinComposer(ctx) {
   // the page is holding. A message that is nothing but a file is an ordinary
   // message, so either kind is something to send.
   const carrying = stored(host.state.attach).length > 0 || heldFiles(host.state.attach).length > 0
-  const has = (draft.value.trim() !== '' || carrying) && !going && !ctx.disabled
+  const has = (draft.value.trim() !== '' || (carrying && !ctx.requiresText)) && !going && !ctx.disabled
   // A take in the field: row one is the take, and row two goes quiet — every
   // control in it disabled and the send gone — so the only two things that can
   // be pressed are the ✕ and the ✓ inside the field.

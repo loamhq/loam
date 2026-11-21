@@ -81,23 +81,19 @@ The web tests prove catalog parsing and client preservation, not this external
 host persistence behavior. This is a staging dependency, not a reason to
 infer freshness in the browser or send corrective PATCHes.
 
-## Branching without a vendor key
+## Branching from a message
 
-No provider or new broker route is needed. The existing branch read includes
-the runtime's context-based `{title, draft}` fallback, which remains editable
-and creates an unsent thread draft. Without a Read aloud plugin key, the app returns
-that opening without a model call. A broker-supplied plugin key still enables the existing
-optional polish; vendor errors fall back the same way. This preserves existing
-behavior and requires no login/key on a new installation.
+Branching uses the [thread's reply quote](threads-and-boards.md#branching-from-a-message).
+The app opens an empty composer and the owner writes the new thread's opening.
 
 ## Checks and staging
 
-`npm test` runs the installation, plugin-state and no-key branch checks alongside
+`npm test` runs the installation, plugin-state and branch relay checks alongside
 the existing suite. [Evidence](evidence/install-configuration/README.md) records
 the commands, counts and produced branch. These are synthetic brokers and DOM
 interaction checks, not a live runtime walk or browser layout capture.
 
 Staging should verify owner name/initial and old-author aliases, existing audio
-preferences, Apps framing, Files note dates/folders and no-key branching. The
+preferences, Apps framing, Files note dates/folders and branching from a message. The
 runtime handoff above must be settled for fresh installs. Deployment was not
 part of this change.

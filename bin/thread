@@ -25,11 +25,10 @@ m12 of that thread, as the app's reply does; a text opening with ``↩ m12``
 means the same, the marker taken off. An id the thread does not hold is
 refused. Ids are Loam's linkage: the app shows the quoted words, and a
 post names an earlier message by its words, never by its id (2026-11-17). ``branch`` (2026-11-11) is the app's Branch into a new thread:
-a new thread with ``--persona`` (the source's default if not given) as its
-default, titled ``--title`` (or the draft's first line), its first line
-linking back to the message and a line under the message linking forward,
-and ``--text`` waiting in its composer for the owner, unsent; with no
-``--text`` it waits with a plain opening made from the message. Prints one
+a new thread with ``--persona`` (the source's default if not given) and the
+source message attached to the owner's composer. An explicit ``--text`` can
+be left there unsent. The source gains a link when the owner sends with the
+quote still attached. Prints one
 JSON object. ``mcp__engineer__thread`` calls this.
 """
 
@@ -109,23 +108,14 @@ def main() -> int:
         if args.action == "branch":
             source = args.thread.strip()
             persona = args.persona.strip().lower() or None
-            text = args.text
-            if not text.strip():
-                smeta, smsgs, _ = threads.read(source)
-                text = threads.fallback_branch(
-                    smeta, threads.branch_window(smsgs, args.message.strip(), source))["draft"]
-            made = threads.branch(source, args.message.strip(), persona,
-                                  title=args.title.strip() or None, draft=text, by=by)
-            meta = made["meta"]
-            print(f"thread: {by} branched {source} at {args.message} into "
-                  f"{meta['id']} {meta['title']!r}", file=sys.stderr)
+            meta = threads.branch(source, args.message.strip(), persona,
+                                   title=args.title.strip() or None, draft=args.text)
+            print(f"thread: {by} opened a branch composer from {source} at {args.message} "
+                  f"in {meta['id']}", file=sys.stderr)
             print(json.dumps({"ok": True, "thread": meta["id"], "title": meta["title"],
                               "persona": meta["default"], "from": source,
                               "message": args.message.strip(),
-                              "window": made["window"],
-                              "record": str(threads.record_path(meta["id"])),
-                              "lines": {"from": made["from"]["id"],
-                                        "into": made["into"]["id"]}}))
+                              "record": str(threads.record_path(meta["id"]))}))
             return 0
         if args.action == "rename":
             if args.thread.strip().lower() == threads.GENERAL_ID:

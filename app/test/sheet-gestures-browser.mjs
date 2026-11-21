@@ -26,7 +26,6 @@ record.messages.push({ id: 'long-reply', author: 'sprout', kind: 'message', text
 record.thread.members[0].background = 1
 record.thread.members[0].background_tasks = [{ id: 'layout', description: 'Check sheet gestures', started_at: new Date().toISOString() }]
 app.routes['GET /v1/threads/a-quieter-week'] = (req, res) => json(res, record)
-app.routes['GET /v1/threads/a-quieter-week/branch'] = (req, res) => json(res, { persona: 'sprout', people: ['sprout', 'quill'], fallback: { title: 'A calmer week', draft: 'Make room for a calmer week.' } })
 app.routes['GET /v1/speech/health'] = (req, res) => json(res, { available: true })
 try {
  for (const theme of ['light', 'dark']) {

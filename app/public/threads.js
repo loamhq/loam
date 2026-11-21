@@ -406,8 +406,8 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     const o = st.open
     if (unsentHere(o)) globalThis.fetch?.(`/api${path(o.thread.id)}`, { method: 'DELETE', keepalive: true, credentials: 'same-origin' })?.catch?.(() => {})
   })
-  async function open(id, { push = true, listing = null, routed = false, board = false } = {}) {
-    if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing, board })
+  async function open(id, { push = true, listing = null, routed = false, board = false, message = null } = {}) {
+    if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing, board, message })
     close({ navigate: false }); enter({ kind: 'thread', id })
     clearReturn()
     const ticket = generation
@@ -419,6 +419,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       typing: new Set(), permissions: new Map(), after: null, steps: new Map(), has_more: savedVisit?.has_more ?? false,
       board: savedVisit?.board ?? { markdown: '', path: '' }, boardBusy: false, boardOpen: board, focusBoard: board }
     const o = st.open
+    if (message) Object.assign(o, { replyJump: message, jumpKind: 'quote', savedAnchor: null, landing: false, atEnd: false })
     if (push && !st.fixture) address(id)
     attachReplySteps(st.open)
     attachProse(o, savedVisit?.proseCache)
@@ -439,7 +440,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
         await (listing ?? load({ quiet: true }))
         if (ticket !== generation) return
         const listed = st.threads.find((t) => t.id === id)
-        if (listed) { o.thread = listed; o.openingUnread = listed.unread ?? 0; if (!savedVisit) o.atEnd = !(o.openingUnread > 0) }
+        if (listed) { o.thread = listed; o.openingUnread = listed.unread ?? 0; if (!savedVisit && !o.replyJump) o.atEnd = !(o.openingUnread > 0) }
         redraw()
       }
       const body = readThreadRecord(await transport('GET', `${path(id)}?limit=${OPENING_MESSAGES}`), id)
@@ -467,7 +468,10 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       readJobs(o, body.thread)
       // A broker-created opening survives reloads and other devices. An edited
       // page-local draft, including an intentionally empty one, takes priority.
-      if (!st.drafts.has(id)) draft.value = typeof body.thread.draft === 'string' ? body.thread.draft : ''
+      if (!st.drafts.has(id)) {
+        draft.value = typeof body.thread.draft === 'string' ? body.thread.draft : ''
+        o.replyTo = body.draft_reply ?? null
+      }
       o.firstUnseen = body.first_unseen_message_id ?? o.firstUnseen
       updateOpening(o)
       if (st.open.latestSummary) { st.open.thread = st.open.latestSummary; delete st.open.latestSummary }
@@ -634,69 +638,27 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     }
     for (const key of ['drafts', 'boardDrafts', 'quickDrafts']) if (st[key].has(id)) target.st[key].set(id, st[key].get(id))
   }
-  async function beginBranch(m) {
-    const o = st.open
-    if (!o || !canReply(m) || o.branch?.starting) return
-    const b = o.branch = { message: m.id, persona: o.thread.default ?? null, people: [], loading: true, title: '', text: '' }
+  function beginBranch(message) {
+    if (!st.open || !canReply(message) || st.open.branch) return
+    st.open.branch = message
     redraw()
-    await loadBranch(o, b)
-  }
-  async function loadBranch(o, b) {
-    b.loading = true; b.error = ''; redraw()
-    try {
-      const body = await transport('GET', `${path(o.thread.id)}/branch?message=${encodeURIComponent(b.message)}`)
-      if (st.open !== o || o.branch !== b) return
-      if (typeof body.draft !== 'string' || typeof body.title !== 'string' || !Array.isArray(body.people)) throw new Error('The thread opening could not be loaded.')
-      b.title = body.title; b.text = body.draft; b.people = body.people
-      b.field = h('textarea', { id: 'thread-branch-opening', class: 'tt-branch-opening', rows: 6,
-        oninput: () => { b.text = b.field.value; redraw() } })
-      b.field.value = b.text
-      // A tap made during generation wins over the response's initial choice.
-      if (!b.picked) b.persona = body.persona ?? null
-      b.ready = true
-    } catch (error) { if (st.open === o && o.branch === b) b.error = error.message }
-    finally { b.loading = false; if (st.open === o && o.branch === b) redraw() }
   }
   function closeBranch() {
     if (st.open) st.open.branch = null
     redraw()
   }
-  async function startBranch() {
-    const o = st.open, b = o?.branch
-    if (!b?.ready || b.loading || b.starting || !b.text.trim()) return
-    b.starting = true; b.error = ''; redraw()
-    try {
-      const answer = await transport('POST', `${path(o.thread.id)}/branch`, { message: b.message, persona: b.persona, title: b.title, draft: b.text })
-      const thread = readThreadSummary(answer.thread)
-      // The durable source notice may already have arrived over SSE.
-      if (answer.into?.id) applyThreadEvent(o, { type: 'message.done', message: answer.into })
-      updateRow(thread)
-      if (st.open !== o || o.branch !== b) return
-      o.branch = null
-      st.drafts.set(thread.id, { text: b.text, attachments: [], replyTo: null })
-      await open(thread.id)
-      if (st.open?.thread.id === thread.id) { st.open.focusBranchDraft = true; compose.changed(); redraw() }
-    } catch (error) { if (st.open === o && o.branch === b) b.error = error.message }
-    finally { b.starting = false; redraw() }
-  }
   function branchPanel() {
-    const o = st.open, b = o?.branch
-    if (!b) return null
-    const members = o.thread.members.map((m) => m.persona)
-    const ids = b.people.length ? b.people : [...new Set([o.thread.default, ...members, ...catalog().map((a) => a.id)].filter(Boolean))]
-    if (b.field) b.field.disabled = Boolean(b.starting)
-    return menuSurface(h('section', { key: `branch:${b.message}`, class: 'tt-branch-panel', role: 'dialog', 'aria-modal': 'true' },
-      h('div', { class: 'tt-branch-people', role: 'group', 'aria-label': 'Choose an agent for the new thread' },
-        ...ids.map((id) => button([avatar(id, 42), h('span', { text: name(id) })], () => { b.persona = id; b.picked = true; redraw() },
-          { class: 'tt-branch-person', 'aria-label': name(id), 'aria-pressed': String(b.persona === id), disabled: b.starting }))),
-      h('label', { class: 'tt-branch-label', for: 'thread-branch-opening', text: 'Opening message' }),
-      b.loading ? h('div', { class: 'tt-branch-loading', role: 'status', 'aria-label': 'Drafting an opening', 'aria-busy': 'true' },
-        ...[0, 1, 2, 3].map(() => h('span', { 'aria-hidden': 'true' }))) : b.ready ?
-        kept(b.field) : null,
-      b.error ? h('div', { class: 'tt-branch-error', role: 'alert' }, b.error,
-        !b.ready ? button('Try again', () => loadBranch(o, b), { class: 'quietlink', disabled: b.loading }) : null) : null,
-      button(b.starting ? 'Starting thread…' : 'Start thread', startBranch, { class: 'pillbtn primary tt-branch-start', disabled: !b.ready || b.loading || b.starting || !b.text.trim() })),
-    { title: 'New thread with', width: 420, anchor: `[data-message-id=${JSON.stringify(b.message)}] .tt-footer-branch`, close: closeBranch })
+    const o = st.open, message = o?.branch
+    if (!message) return null
+    const active = new Set(catalog().map((agent) => agent.id))
+    const people = [...new Set([o.thread.default, ...o.thread.members.map((m) => m.persona), ...active])].filter((id) => active.has(id))
+    const source = { ...message, thread: o.thread.id, title: o.thread.title }
+    return menuSurface(h('section', { key: `branch:${message.id}`, class: 'tt-branch-panel', role: 'dialog', 'aria-modal': 'true' },
+      people.length ? h('div', { class: 'tt-branch-people', role: 'group', 'aria-label': 'Choose an agent for the new thread' },
+        ...people.map((id) => button([avatar(id, 42), h('span', { text: name(id) })], () => create(id, { source }),
+          { class: 'tt-branch-person', 'aria-label': name(id) })))
+        : h('p', { class: 'muted', text: 'No agents are available.' })),
+    { title: 'New thread with', width: 420, anchor: `[data-message-id=${JSON.stringify(message.id)}] .tt-footer-branch`, close: closeBranch })
   }
   async function followThreadLink(e, link) {
     if (e.altKey && side()?.available()) {
@@ -704,8 +666,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     }
     if (e.button > 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     e.preventDefault()
-    await open(link.thread)
-    if (st.open?.thread.id === link.thread && link.message) { st.open.replyJump = link.message; st.open.jumpKind = 'quote'; redraw() }
+    await open(link.thread, { message: link.message })
   }
   function create(persona = null, options = {}) {
     if (st.creating) return
@@ -714,14 +675,19 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     const o = st.open = { thread: { id: 'new-thread', title: 'New thread', default: persona, members: persona ? [{ persona, engine: null }] : [] },
       messages: [], loading: false, creating: true, typing: new Set(), permissions: new Map(), steps: new Map(),
       board: { markdown: '', path: '' }, boardBusy: false, boardOpen: false,
+      replyTo: options.source ?? null,
       promptTitle: options.promptTitle ?? null, promptBody: options.promptBody ?? null, promptPlaceholder: options.placeholder ?? null }
     // Pre-fill the composer and leave sending to the person.
     if (typeof options.draft === 'string' && options.draft) draft.value = options.draft
     redraw(); setTimeout(() => { draft.focus(); if (options.draft) draft.setSelectionRange(draft.value.length) }, 0)
-    return transport('POST', '/threads', persona ? { persona } : {}).then((body) => {
+    const source = options.source
+    return transport('POST', source ? `${path(source.thread)}/branch` : '/threads',
+      source ? { persona, message: source.id } : persona ? { persona } : {}).then((body) => {
       const thread = readThreadSummary(body)
       // Left before it was made: nothing can have been sent, so it goes.
       if (ticket !== generation) { transport('DELETE', path(thread.id)).catch(() => {}).finally(() => refreshList()); return }
+      if (source && !body.draft_reply) throw new Error('The runtime hasn’t opened a branch composer. Try again after it updates.')
+      if (source && o.replyTo) o.replyTo = body.draft_reply
       o.thread = thread; o.board.path = thread.board ?? ''; o.creating = false; o.madeHere = true; o.ordered_submissions = thread.ordered_submissions
       attachReplySteps(o)
       o.needsInitialBoard = true
@@ -769,19 +735,20 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   }
   async function send() {
     const o = st.open, text = draft.value.trim(), attachments = compose.files()
-    if (!o || (!text && !attachments.length) || o.sending || o.loading || o.refreshing || o.readFailed || o.creating || o.createFailed || compose.busy()) return
+    if (!o || (!text && (o.replyTo?.thread || !attachments.length)) || o.sending || o.loading || o.refreshing || o.readFailed || o.creating || o.createFailed || compose.busy()) return
     const cleanTitle = o.thread.title === 'New thread' && !o.messages.some((m) => m.kind !== 'system') && /^\s*@/u.test(text) ? firstMessageTitle(text) : null
     o.listenerSendingUntil = Date.now() + 260
     clearTimeout(o.listenerSendTimer)
     o.listenerSendTimer = setTimeout(() => { if (st.open === o) redraw() }, 260)
-    const reply_to = o.replyTo?.id
+    const reply_to = o.replyTo?.id, reply_thread = o.replyTo?.thread
+    const reference = reply_to ? { reply_to, ...(reply_thread ? { reply_thread } : {}) } : {}
     if (o.ordered_submissions && !st.fixture) {
       o.sending = true
       o.error = ''
       try {
         connectOutbox()
         const body = { submission_id: crypto.randomUUID(), text,
-          ...(reply_to ? { reply_to } : {}),
+          ...reference,
           ...(attachments.length ? { attachments: attachments.map(f => f.path) } : {}) }
         await outbox.add(o.thread.id, body, attachments, o.replyTo ?? null)
         st.drafts.delete(o.thread.id)
@@ -793,13 +760,13 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       finally { o.sending = false; redraw() }
       return
     }
-    o.sending = true; o.pending = { id: 'pending-send', author: owner().id, kind: 'message', text, attachments, reply_to }; o.atEnd = true; o.error = ''; st.mention = null; redraw()
+    o.sending = true; o.pending = { id: 'pending-send', author: owner().id, kind: 'message', text, attachments, reply_to, reply_source: reply_thread ? o.replyTo : null }; o.atEnd = true; o.error = ''; st.mention = null; redraw()
     o.readingPosition = null; o.openingBoundary = null; o.replyAnchor = null; o.landAt = null; o.landing = false
     let accepted = false
     // Keep the draft until acceptance. A lost response never auto-resends a
     // message: Retry is an explicit act and the durable record is readable.
     try {
-      const answer = await transport('POST', `${path(o.thread.id)}/messages`, { text, ...(reply_to ? { reply_to } : {}), ...(attachments.length ? { attachments: attachments.map((f) => f.path) } : {}) })
+      const answer = await transport('POST', `${path(o.thread.id)}/messages`, { text, ...reference, ...(attachments.length ? { attachments: attachments.map((f) => f.path) } : {}) })
       accepted = true
       const message = readAcceptedMessage(answer)
       if (cleanTitle) {
@@ -1093,12 +1060,12 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     clearTimeout(o.taskEmpty); o.taskEmpty = null
     redraw()
   }
-  function showTaskReply(id) {
+  function showTaskReply(id, kind = 'task') {
     const o = st.open
     closeTasks()
     o.focusTasksReturn = false
     clearTimeout(o.replyHighlightTimer)
-    Object.assign(o, { replyJump: id, jumpKind: 'task', highlightedReply: null, savedAnchor: null, landAt: null,
+    Object.assign(o, { replyJump: id, jumpKind: kind, highlightedReply: null, savedAnchor: null, landAt: null,
       openingBoundary: null, replyAnchor: null, taskReplyAnchor: null, landing: false, atEnd: false, needsContext: false, historyError: '', error: '' })
     follow.release()
     redraw()
@@ -1116,24 +1083,41 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     saveCompose(); redraw()
   }
   function cancelReply() {
-    if (!st.open || st.open.sending) return
-    rememberReading(st.open)
-    st.open.replyTo = null; st.open.focusReplyDraft = true
+    const o = st.open
+    if (!o || o.sending || o.creating) return
+    rememberReading(o)
+    const source = o.replyTo?.thread
+    o.replyTo = null; o.focusReplyDraft = true
     saveCompose(); redraw()
+    if (source) patch({ draft_reply: null })
+  }
+  const quoteThread = (source) => st.threads.find((row) => row.id === source.thread)?.title ?? source.title
+  function quoteHeading(message, { composing = false, source = null } = {}) {
+    return h('strong', {}, composing ? `Replying to ${replyAuthor(message)}` : replyAuthor(message),
+      source ? h('small', { class: 'tt-quote-thread', text: ` · ${quoteThread(source)}` }) : null)
   }
   function composingReply() {
-    const m = st.open.replyTo
-    return m ? h('div', { class: 'tt-reply-chip', key: 'reply-chip', role: 'group', 'aria-label': `Replying to ${replyAuthor(m)}`, style: { '--quote-tone': replyTone(m) } },
-      replyFace(m), h('div', { class: 'tt-quote-copy' }, h('strong', { text: `Replying to ${replyAuthor(m)}` }), h('span', { text: quoteLine(m) })),
-      round('Cancel reply', icon.close(12), cancelReply, { onpointerdown: (e) => e.preventDefault(), disabled: st.open.sending })) : null
+    const o = st.open, m = o.replyTo
+    return m ? h('div', { class: 'tt-reply-chip', key: 'reply-chip', role: 'group',
+      'aria-label': `Replying to ${replyAuthor(m)}`, style: { '--quote-tone': replyTone(m) } },
+      replyFace(m), h('div', { class: 'tt-quote-copy' }, quoteHeading(m, { composing: true, source: m.thread ? m : null }), h('span', { text: quoteLine(m) })),
+      round(m.thread ? 'Remove quote' : 'Cancel reply', icon.close(12), cancelReply, { onpointerdown: (e) => e.preventDefault(), disabled: o.sending || o.creating })) : null
   }
   function messageQuote(message) {
     if (!message.reply_to) return null
-    const o = st.open, original = o.messages.find((m) => m.id === message.reply_to) ?? o.quotes?.get(message.reply_to)
+    const o = st.open, source = message.reply_source
+    const original = source ?? o.messages.find((m) => m.id === message.reply_to) ?? o.quotes?.get(message.reply_to)
     if (!canReply(original)) return h('div', { class: 'tt-quote tt-quote-missing', text: 'Earlier message' })
-    return button([h('strong', { text: replyAuthor(original) }), h('span', { text: quoteLine(original) })], () => {
-      showTaskReply(original.id); o.jumpKind = 'quote'
-    }, { class: 'tt-quote', 'aria-label': `Jump to ${replyAuthor(original)}: ${quoteLine(original)}`, style: { '--quote-tone': replyTone(original) } })
+    const contents = [quoteHeading(original, { source }), h('span', { text: quoteLine(original) })]
+    const props = { class: 'tt-quote', 'aria-label': `Jump to ${replyAuthor(original)}${source ? ` in ${quoteThread(source)}` : ''}: ${quoteLine(original)}`, style: { '--quote-tone': replyTone(original) } }
+    return source
+      ? h('a', { ...props, href: `${path(source.thread)}?message=${encodeURIComponent(original.id)}`, onclick: (e) => followThreadLink(e, { thread: source.thread, message: original.id }) }, contents)
+      : button(contents, () => showTaskReply(original.id, 'quote'), props)
+  }
+  function branchLinks(message) {
+    const links = st.open.branches.filter((row) => row.branched_from.message === message.id)
+    return links.length ? h('div', { class: 'tt-branch-links' }, ...links.map((row) =>
+      h('a', { key: row.id, class: 'tt-branch-link', href: path(row.id), onclick: (e) => followThreadLink(e, { thread: row.id }), text: `branched → ${row.title}` }))) : null
   }
   async function copyMessage(message) {
     const o = st.open
@@ -1270,7 +1254,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     }
     const leading = canReply(m) ? h('span', { class: 'tt-footer-leading' },
       registry.draw('message.footer.action', { slot: 'reply', message: m, thread: st.open.thread, defaultView: () => action('Reply', icon.reply(15), () => startReply(m), { disabled: st.open.sending, onpointerdown: (e) => e.preventDefault() }) }),
-      registry.draw('message.footer.action', { slot: 'branch', message: m, thread: st.open.thread, defaultView: () => action('Branch into a new thread', icon.branch(15), () => beginBranch(m), { class: 'tt-footer-action tt-footer-branch', 'aria-haspopup': 'dialog', 'aria-expanded': String(st.open.branch?.message === m.id), disabled: st.open.branch?.starting }) }),
+      registry.draw('message.footer.action', { slot: 'branch', message: m, thread: st.open.thread, defaultView: () => action('Branch into a new thread', icon.branch(15), () => beginBranch(m), { class: 'tt-footer-action tt-footer-branch', 'aria-haspopup': 'dialog', 'aria-expanded': String(st.open.branch?.id === m.id) }) }),
       registry.draw('message.footer.action', { slot: 'copy', message: m, thread: st.open.thread, defaultView: () => action('Copy', st.open.copiedMessage === m.id ? icon.check(15) : icon.copy(15), () => copyMessage(m), { 'data-copied': st.open.copiedMessage === m.id ? '' : null }) }),
       registry.draw('message.footer.action', { slot: 'leading', message: m, thread: st.open.thread })) : null
     const rows = registry.reduce('message.footer.action', { slot: 'row', message: m, mine, leading, trailing, thread: st.open.thread, agent: catalog().find(a => a.id === m.author), agentName: name(m.author), defaultView: () => leading || trailing ? [h('div', { class: 'turnrow' }, leading, trailing)] : [] }, [])
@@ -1356,7 +1340,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       generating && replyHasContent(m) && (!m.text || st.open.waiting?.has(m.author) || st.open.steps?.get(m.author)?.waiting) ? waitingLine(m.author) : null,
       !mine && lastText < 0 ? files : null, !mine && lastText < 0 ? footer : null,
       load?.status === 'error' ? h('div', { class: 'tt-steps-retry muted', role: 'status' }, 'Steps couldn’t be loaded. ', button('Try again', () => st.open.replySteps.ensure(m.id, true), { class: 'quietlink' })) : null,
-      ...permissions.map(permission))
+      ...permissions.map(permission), branchLinks(m))
   }
   // A turn that failed with the provider's error is a system line, not the
   // agent speaking it: what happened, where to fix it, the raw words behind
@@ -1768,6 +1752,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     if (!o) return emptyThread()
     if (st.manage) return details()
     const general = o.thread.general || o.thread.id === 'general'
+    o.branches = st.threads.filter((row) => row.branched_from?.reply && row.branched_from.thread === o.thread.id)
     syncTasks(o)
     const count = boardLines(o.board.markdown).filter((l) => l.unseen).length
     const defaultMember = o.thread.members.find((m) => m.persona === o.thread.default)
@@ -1789,6 +1774,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     const renderedComposer = compose.render({ sharedThread: true, record: { session_id: `thread:${o.thread.id}` }, agentId: o.thread.default,
       disabled: o.sending || o.loading || o.refreshing || o.readFailed || o.creating || o.createFailed,
       readOnly: o.readFailed || o.sending || o.createFailed,
+      requiresText: Boolean(o.replyTo?.thread),
       placeholder: (!o.messages.length && o.promptPlaceholder) || (o.thread.default ? `Message ${name(o.thread.default)}` : o.creating ? 'A little room for your thought…' : 'Write a thought, or @mention someone'),
       mentionPicker: st.mention ? h('div', { key: 'mentions', class: 'popover tt-mentions', role: 'listbox', 'aria-label': 'Mention an agent' }, ...mentionChoices().map((a, i) => settingsRow({ title: a.name, sub: a.sub, lead: a.everyone ? icon.users(24) : avatar(a.id, 24), onclick: () => insertMention(a), props: { type: 'button', role: 'option', 'aria-selected': String(i === (st.mention.index ?? 0)), class: `setrow${i === (st.mention.index ?? 0) ? ' on' : ''}` } }))) : null,
       modelControl: modelPill({ label: chosenModel?.name ?? 'Providers & models', lead: defaultMember?.engine ? providerMark(defaultMember.engine, 14) : icon.users(14),
@@ -1799,7 +1785,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     // Place player rows before asking for the bar: visible rows own playback.
     const pending = pendingRows(o).map(item => ({
       id: `pending-${item.body.submission_id}`, author: owner().id, kind: 'message',
-      text: item.body.text, reply_to: item.body.reply_to, attachments: item.attachments, queued: item,
+      text: item.body.text, reply_to: item.body.reply_to, reply_source: item.body.reply_thread ? item.reply : null, attachments: item.attachments, queued: item,
     }))
     const messages = pending.length ? withPending(o.messages, pending) : withPending(o.messages, o.pending)
     const messageRows = [
@@ -1847,7 +1833,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
             agentDraftController.view(o.thread.id))),
         chatDock(h('div', { class: 'tt-composer' },
           listeners,
-          o.error ? h('div', { class: 'banner', role: 'alert' }, o.error, o.createFailed ? button('Try creating again', () => create(o.thread.default, { promptTitle: o.promptTitle, promptBody: o.promptBody, placeholder: o.promptPlaceholder })) : button('Refresh thread', () => open(o.thread.id))) : null,
+          o.error ? h('div', { class: 'banner', role: 'alert' }, o.error, o.createFailed ? button('Try creating again', () => create(o.thread.default, { promptTitle: o.promptTitle, promptBody: o.promptBody, placeholder: o.promptPlaceholder, draft: draft.value, source: o.replyTo?.thread ? o.replyTo : null })) : button('Refresh thread', () => open(o.thread.id))) : null,
           o.connection ? h('div', { class: 'noticerow', role: 'status', text: o.connection }) : null,
           composingReply(), renderedComposer), composerHint({ wide: st.wide, chord: sendHint(isMac(globalThis.navigator)), thread: true }))),
       o.boardOpen ? h('button', { class: 'tt-board-scrim', title: 'Dismiss board panel', tabindex: '-1', onclick: () => chooseView(null) }) : null,
@@ -1926,12 +1912,6 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     }
     selection.paint()
     gesture.paint()
-    if (st.open?.focusBranchDraft) {
-      const field = compose.field()
-      field.focus({ preventScroll: true }); draft.setSelectionRange(draft.value.length)
-      field.scrollTop = field.scrollHeight
-      st.open.focusBranchDraft = false
-    }
     if (st.open?.focusReplyDraft) { compose.field().focus({ preventScroll: true }); st.open.focusReplyDraft = false }
     leanFaces()
     const boardOpen = st.open
