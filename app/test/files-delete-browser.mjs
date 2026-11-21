@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { deleteHost } from './fixtures/files-delete.js'
@@ -8,6 +8,7 @@ const baseline = process.env.FILES_DELETE_BASELINE
 const fixtureModule = baseline ? pathToFileURL(join(baseline, 'test/one-product-fixture.mjs')) : './one-product-fixture.mjs'
 const { oneProductFixture } = await import(fixtureModule)
 const out = process.env.FILES_DELETE_EVIDENCE
+const docComments = new URL('../../plugins/doc-comments/', import.meta.url)
 if (out) await mkdir(out, { recursive: true })
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright')
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
@@ -122,6 +123,62 @@ try {
         await button('Actions for Taken.md').waitFor()
         await button('Actions for plan.md').waitFor()
       }
+
+      app.routes['GET /v1/plugins'] = (_, res) => res.end(JSON.stringify({
+        plugins: [{ id: 'doc-comments', version: '1.0.0', api: 0, layer: 'shipped', switch: 'plugin', effective: true, on: true, has: { page_main: true } }],
+      }))
+      for (const path of await readdir(docComments, { recursive: true })) {
+        if (!/^(page|assets)\/.*\.(js|css)$/.test(path)) continue
+        app.routes['GET /v1/plugins/doc-comments/files/' + path] = async (_, res) => {
+          res.setHeader('content-type', path.endsWith('.css') ? 'text/css' : 'text/javascript')
+          res.end(await readFile(new URL(path, docComments)))
+        }
+      }
+      await page.route('**/x/doc-comments/**', route => {
+        const url = new URL(route.request().url())
+        return route.fulfill({ json: { reach: 'everywhere', text: host.texts.get(url.searchParams.get('path')) ?? '',
+          revision: 'r1', notes: [], links: [], can: { edit: true, comment: true } } })
+      })
+      const more = button('More')
+      const docMenu = page.locator('.dc-menu[role="menu"]')
+      const deleteItem = docMenu.getByRole('menuitem', { name: 'Delete', exact: true })
+      await page.goto(`${app.url}/files/vault/Notes`)
+      await row('pinned.md').click()
+      await more.click()
+      await docMenu.waitFor()
+      assert.equal(await deleteItem.count(), 0)
+
+      await page.goto(`${app.url}/files/vault/Notes`)
+      await row('plan.md').click()
+      await more.click()
+      await deleteItem.waitFor()
+      assert.equal(await docMenu.getByRole('menuitem').last().innerText(), 'Delete')
+      assert.equal(await deleteItem.evaluate(node => {
+        const danger = getComputedStyle(node.querySelector('b')).color
+        return danger === getComputedStyle(node.querySelector('svg')).color && danger !== getComputedStyle(node).color
+      }), true)
+      await shot('markdown-header-menu')
+      await docMenu.getByRole('menuitem', { name: 'This file…', exact: true }).click()
+      await menu.locator('.fs-menu-copy').waitFor()
+      assert.equal(await menu.locator('.fs-menu-delete').count(), 0)
+      await page.keyboard.press('Escape')
+      await menu.waitFor({ state: 'detached' })
+
+      await more.click()
+      await deleteItem.click()
+      await confirm.waitFor()
+      await docMenu.waitFor({ state: 'detached' })
+      assert.match(await confirm.innerText(), /plan\.md/)
+      assert.equal(await button('Cancel').evaluate(node => document.activeElement === node), true)
+      await shot('markdown-header-confirm')
+      await button('Delete file').click()
+      await page.waitForURL('**/files/vault/Notes')
+      await page.getByText('Deleted plan.md.', { exact: true }).waitFor()
+      assert.equal(host.entries.has('Notes/plan.md'), false)
+      await button('Undo').click()
+      await page.getByText('Restored plan.md.', { exact: true }).waitFor()
+      await row('plan.md').waitFor()
+      assert.equal(host.entries.has('Notes/plan.md'), true)
     } finally {
       await context.close()
       await app.close()

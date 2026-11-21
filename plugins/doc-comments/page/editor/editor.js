@@ -2094,7 +2094,7 @@ export function createDocEditor(opts) {
     }))
   }
 
-  function moreMenu() {
+  function moreMenu(deleteFile) {
     const det = detached().length
     return h('div', { class: 'dc-menu', role: 'menu' },
       det && opts.history !== false ? h('button', { class: 'dc-mi dc-mi-lost', type: 'button', role: 'menuitem', onclick: () => openDrawer('history', { detached: true }) },
@@ -2109,8 +2109,11 @@ export function createDocEditor(opts) {
       h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('resolved') },
         icon('resolved', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Resolved' })), h('span', { class: 'dc-ct', text: String(st.resolved || 0) }), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))),
       ...(opts.menuExtras?.() || []).map(x => h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); x.run() } }, icon(x.icon || 'file', 17), h('span', { class: 'dc-l' }, h('b', { text: x.label })))),
-      fileMenu ? h('div', { class: 'dc-msep' }) : null,
-      fileMenu ? h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); fileMenu() } }, icon('file', 17), h('span', { class: 'dc-l' }, h('b', { text: 'This file…' }), h('small', { text: 'Rename, move, copy link, download' }))) : null,
+      fileMenu || deleteFile ? h('div', { class: 'dc-msep', role: 'separator' }) : null,
+      fileMenu ? h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); fileMenu() } },
+        icon('file', 17), h('span', { class: 'dc-l' }, h('b', { text: 'This file…' })), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
+      deleteFile ? h('button', { class: 'dc-mi dc-mi-delete', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); deleteFile() } },
+        icon('trash', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Delete' }))) : null,
     )
   }
 
@@ -2124,11 +2127,12 @@ export function createDocEditor(opts) {
   // under the pointer once let a click on ⋯ land on a detached button.
   let headKey = null, headNodes = []
   function renderHead() {
+    const deleteFile = opts.fileDelete?.()
     const mic = canType() && opts.micInHead?.() ? opts.mic?.() || null : null
     const extras = [...(opts.headExtras?.() || []), ...(mic ? [mic] : []), null, ...(opts.headEnd?.() || [])]
     const sw = saveWordNode()
     const key = JSON.stringify([st.mode, st.menu, st.phone, sw?.textContent || '', sw?.className || '', (opts.crumbs || []).map(c => c.label), opts.titleBar || null, opts.back?.label || null,
-      st.authors, st.resolved, detached().length, st.can, (opts.menuExtras?.() || []).map(x => x.label), Boolean(fileMenu), st.phone && toc.active()])
+      st.authors, st.resolved, detached().length, st.can, (opts.menuExtras?.() || []).map(x => x.label), Boolean(fileMenu), Boolean(deleteFile), st.phone && toc.active()])
     const cls = `dc-head${scroll.scrollTop > 4 ? ' scd' : ''}${head.classList.contains('tight') ? ' tight' : ''}`
     if (head.className !== cls) head.className = cls
     // A host's own buttons may be made afresh on every call (Share is):
@@ -2163,7 +2167,7 @@ export function createDocEditor(opts) {
       ...extras.slice(0, extras.indexOf(null)),
       // Only Viewing allowed: a quiet word, no menu.
       !st.can.edit && !st.can.suggest ? h('span', { class: 'dc-mpill dc-mpill-only' }, icon('eye', 15), h('span', { text: 'Viewing' })) : menuWrap('mode', pill, modeMenu()),
-      menuWrap('more', dots, moreMenu()),
+      menuWrap('more', dots, moreMenu(deleteFile)),
       ...extras.slice(extras.indexOf(null) + 1),
     )
     fitHead()

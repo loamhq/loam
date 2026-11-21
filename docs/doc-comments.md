@@ -47,8 +47,9 @@ adds and does not rewrite (below, "What step 2 adds").
 - **⋯** holds Show authors (tints the text by who wrote it, off by default),
   History (every save, newest first; a click opens that version, marked where
   it differs from now, with Restore there; and the Detached notes, each
-  re-attachable), Resolved, and This file… (Files' own menu: rename, move,
-  copy link, download).
+  re-attachable), Resolved, and **This file…** for actions like copying the
+  link or downloading. **Delete** is the last item for a deletable vault
+  note. It opens the Files trash confirmation directly.
 - **A note whose words changed since** shows a small glyph at rest and, when
   focused, says so in a quiet line with the words it was about. On the
   phone, the thread's sheet scrolls its passage into view above it.

@@ -120,7 +120,8 @@ export function activate(loam) {
         crumbs: crumbs(file, entry.options.go || host.goFiles),
         back: entry.options.backToThread ? { label: 'Back to board', go: entry.options.backToThread }
           : entry.options.close ? { label: entry.options.closeLabel || 'Back', go: entry.options.close } : null,
-        fileMenu: files.resourceMenu ? () => files.resourceMenu({ ...file.row, root: file.root, path: file.path, kind: 'file' }, entry.options.home, { openFolder: entry.options.returnBack ? entry.options.close : null }) : null,
+        fileMenu: files.resourceMenu ? () => files.resourceMenu({ ...entry.file.row }, entry.options.home, { openFolder: entry.options.returnBack ? entry.options.close : null, includeDelete: false }) : null,
+        fileDelete: () => files.canDeleteFile?.(entry.file.row) ? () => files.beginDelete(entry.file.row) : null,
         headExtras: () => [entry.options.readAloud?.glyph || null].filter(Boolean),
         // Dictation's mic: the editor draws it only while the doc takes typed
         // text from this person (never in Viewing, never on a read-only file),

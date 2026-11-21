@@ -1,9 +1,11 @@
 # Deleting a vault file
 
-The Files list row and file header share a ⋯ menu. It ends with **Delete** when
-the broker reports `capabilities.delete: true` on a vault file row. A phone
-opens a bottom sheet and desktop opens a centered dialog. Both confirmations
-name the file, focus **Cancel**, and keep the file and the broker’s error in
+The Files row and the open file's header ⋯ menus end with **Delete** when
+the broker reports `capabilities.delete: true` on a vault file row. In the
+Comments & suggestions editor, **This file…** opens the other file actions.
+The confirmation opens as a bottom sheet on phones and a centered dialog
+on desktop. Both versions name the file, focus **Cancel**, and keep the
+file and the broker’s error in
 view if deletion fails. An open draft is called out in the confirmation.
 
 After the broker confirms deletion, the app removes the file row and any

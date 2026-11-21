@@ -159,10 +159,11 @@ step where there is one, and clears it when agents can run again. A fresh instal
 the owner's agents know about them: the agents add to it, and it is the
 owner's to read and edit.
 
-In Files, open the ⋯ menu on a vault file's row or header and choose **Delete**
-to move that file to trash. **Undo** is available in the status message for
-five seconds and restores the saved file to its original path if the name is
-free. Trash stays on the vault disk until restored or cleared by the operator.
+In Files, **Delete** is the last item in the ⋯ menu on a deletable vault
+file's row or open header. Confirm to move the file to trash. **Undo** is
+available in the status message for five seconds and restores the saved file
+to its original path if the name is free. Trash stays on the vault disk
+until restored or cleared by the operator.
 Agents use `delete_file` and `restore_file` for the same vault operations.
 
 **Settings › Plugins** shows installed themes and extensions and where each

@@ -25,3 +25,9 @@ node test/files-delete-browser.mjs
 
 For the before captures, set `FILES_DELETE_BASELINE` to `app/` in an archive
 of the parent commit. Keep its `plugins/` alongside `app/` for the fixture.
+
+The same check opens Markdown in the Comments & suggestions plugin. It
+exercises **More → Delete** and **Undo**, checks that **This file…**
+still opens the other actions, and covers a note without delete permission.
+With captures enabled, look for `markdown-header-menu-*.png` and
+`markdown-header-confirm-*.png`.

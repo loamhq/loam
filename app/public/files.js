@@ -982,7 +982,7 @@ export function createFiles({
     schedule()
   }
 
-  function resourceMenu(resource, home, { openFolder = null, side = false, htmlActions = false } = {}) {
+  function resourceMenu(resource, home, { openFolder = null, side = false, htmlActions = false, includeDelete = true } = {}) {
     let file = null
     if (st.file?.root === resource.root && st.file.path === resource.path) {
       file = st.file
@@ -996,7 +996,7 @@ export function createFiles({
     st.notice = ''
     if (!st.archive?.busy) st.archive = null
     st.sheet = { kind: 'resource', resource, name: resource.name ?? nameOf(resource.path), on: home?.isShortcut(resource.root, resource.path),
-      file, side, htmlActions, toggle: () => home?.toggleShortcut(resource.root, resource.path, resource.kind ?? 'file') }
+      file, side, htmlActions, includeDelete, toggle: () => home?.toggleShortcut(resource.root, resource.path, resource.kind ?? 'file') }
     st.sheet.openFolder = openFolder
     schedule()
   }
@@ -1525,7 +1525,7 @@ export function createFiles({
     }
   }
 
-  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, canDeleteFile, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function triggerBrowserDownload(href, filename) {
@@ -2214,7 +2214,7 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
         s.resource && !isFolder(s.resource) ? h('div', { class: 'icon-tile', style: { background: tileOf(s.name).bg, color: tileOf(s.name).fg } }, icon.file(18), h('span', { text: tileOf(s.name).label })) : h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18)),
         h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: s.on ? 'Remove from shortcuts' : 'Add to shortcuts' }), h('div', { class: 'fs-meta', text: s.on ? 'It leaves the Files home; the original stays.' : 'It appears on the Files home, after the others.' })),
       ),
-      s.kind === 'resource' && canDeleteFile(s.resource) ? h('button', { class: 'sheetrow fs-menu-delete danger', type: 'button', onclick: () => files.beginDelete(s.resource) }, icon.trash(18), h('span', { text: 'Delete' })) : null,
+      s.kind === 'resource' && s.includeDelete && canDeleteFile(s.resource) ? h('button', { class: 'sheetrow fs-menu-delete danger', type: 'button', onclick: () => files.beginDelete(s.resource) }, icon.trash(18), h('span', { text: 'Delete' })) : null,
     ]
   }
   if (s.kind === 'add') {
