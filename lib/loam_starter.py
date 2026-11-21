@@ -70,7 +70,7 @@ def status() -> dict | None:
 
 
 def week_one_chat(agent: str, at: str | None) -> tuple[str, list[dict], Path] | None:
-    """The original Hello, on its one-week anniversary in the install's zone."""
+    """The original Hello from day seven through thirteen in the install's zone."""
     import loam_threads as threads  # noqa: PLC0415
 
     seeded = status()
@@ -82,7 +82,8 @@ def week_one_chat(agent: str, at: str | None) -> tuple[str, list[dict], Path] | 
     zone = ZoneInfo(lc.TIMEZONE)
     if not born or not now:
         return None
-    if (now.astimezone(zone).date() - born.astimezone(zone).date()).days != 7:
+    days = (now.astimezone(zone).date() - born.astimezone(zone).date()).days
+    if not 7 <= days <= 13:
         return None
     tid = seeded["thread"]
     try:

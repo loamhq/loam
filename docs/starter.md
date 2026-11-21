@@ -46,13 +46,14 @@ spoken to and does work the owner leaves with her. The owner can set the
 board's list aside or ask her to bring it back.
 
 The `week_one` starter marker opts new installs into the one-week
-occasion. Seven calendar days after seeding, in the installation's time
-zone, the ordinary reflection prompt tells Iris the first week has ended.
+occasion. From seven through thirteen calendar days after seeding, in the
+installation's time zone, the ordinary reflection prompt tells Iris the
+first week has ended until she sends the message.
 She writes one personal message in the original Hello. It is independent
 of chat and board activity. The message carries an occasion marker so a
-retried post or reflection on that date cannot send it twice. A missing or
+retried post or reflection cannot send it twice. A missing or
 archived Hello, or one the owner has removed Iris from, is left alone.
-If no reflection runs on the anniversary, it passes quietly.
+If no reflection runs during that window, the occasion passes quietly.
 
 When the Garden plugin is on, Iris can point it out when the owner first
 makes something or when she delivers their first morning's work. If

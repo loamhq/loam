@@ -235,16 +235,19 @@ def main() -> int:
         threads.update(tid, title="Our first chat")
         threads.append(tid, lc.OWNER_ID, "I've been here every day.")
         wake = runpy.run_path(str(ROOT / "bin" / "wake"))
-        day6, day7, day8 = ("2026-11-27T07:59:59Z", "2026-11-27T08:00:00Z",
-                            "2026-11-28T08:00:00Z")
+        day6 = "2026-11-27T07:59:59Z"
+        days = [f"2026-{month}-{day:02d}T08:00:00Z"
+                for month, day in [(11, 27), (11, 28), (11, 29), (11, 30),
+                                   (12, 1), (12, 2), (12, 3), (12, 4)]]
+        day7, day8, day14 = days[0], days[1], days[-1]
 
         def occasion(at, cron=None):
             return "The first week on Loam has ended." in wake["lane_prompt"](
                 "iris", lc.VAULT, at, cron, ws)[0]
 
-        check("ordinary reflection gets the anniversary in the installation's zone",
-              (occasion(day6), occasion(day7), occasion(day8), occasion(day7, "other")),
-              (False, True, False, False))
+        check("the unsent occasion reaches ordinary reflections on local days seven through thirteen",
+              [occasion(day6), *[occasion(day) for day in days], occasion(day7, "other")],
+              [False, *([True] * 7), False, False])
         check("the occasion follows the original Hello even after a rename",
               f" post {tid} " in st.week_one_prompt("iris", day7), True)
         check("other agents get no occasion", st.week_one_prompt("other", day7), "")
@@ -271,8 +274,23 @@ def main() -> int:
             wake["clear_running"]("iris")
         marks = [m["text"] for m in threads.read(tid)[1] if m.get("occasion") == st.WEEK_ONE]
         check("retried anniversary posts produce one stored message and no new prompt",
-              (first.returncode, retry.returncode, marks, occasion(day7)),
-              (0, 0, ["One week of making together."], False))
+              (first.returncode, retry.returncode, marks, occasion(day7), occasion(day8)),
+              (0, 0, ["One week of making together."], False, False))
+        # Independently exercise a missed anniversary at both ends of the window.
+        post_results = []
+        for at in (day8, days[6], day14):
+            existing = next((m["id"] for m in threads.read(tid)[1]
+                             if m.get("occasion") == st.WEEK_ONE), None)
+            if existing:
+                threads.replace_message(tid, existing, [])
+            wake["mark_running"]("iris", at, lc.VAULT, "reflection")
+            try:
+                post_results.append(subprocess.run(
+                    command, env=env, capture_output=True, text=True).returncode)
+            finally:
+                wake["clear_running"]("iris")
+        check("a missed occasion can post on days eight and thirteen, but not fourteen",
+              post_results, [0, 0, 1])
 
     threads.delete(out["thread"])
     st.seed(provision=fake_provision)

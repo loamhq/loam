@@ -109,9 +109,9 @@ in Files, with a short message linking to it. Changing the app, building
 something or following the owner's own idea can be the whole first visit.
 
 On the newest starter, Iris answers when spoken to and does work the
-owner leaves with her, keeping the first two weeks quiet. At her
-reflection on the one-week anniversary, Loam gives her the occasion to
-send one personal message in Hello. When Garden is on and they're looking
+owner leaves with her, keeping the first two weeks quiet. From the one-week
+anniversary through day thirteen, Loam gives her the occasion at her
+reflection to send one personal message in Hello. When Garden is on and they're looking
 for a place to try making a change, Iris can offer to change it with them.
 
 **Wakes and crons.** An agent also runs by itself on a schedule, and each
