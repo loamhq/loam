@@ -37,9 +37,16 @@
 .apps-row.in-side .apps-preview { outline:1px solid var(--paper-rule-strong); outline-offset:3px; }
 .apps-empty { display:flex; min-height:45vh; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; }
 .apps-empty p { margin:0; color:var(--paper-ink-2); }
-.apps-frame { display:flex; flex-direction:column; overflow:hidden; }
-.apps-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-md); padding:var(--space-lg) var(--space-xl); border-bottom:1px solid var(--paper-rule); }
-.apps-frame-address { flex:1; min-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--paper-ink-2); font-size:14px; }
+.apps-frame { container-type:inline-size; position:relative; display:flex; flex-direction:column; overflow:hidden; }
+.apps-toolbar { display:flex; align-items:center; flex-wrap:nowrap; gap:var(--space-md); padding:var(--space-lg) var(--space-xl); border-bottom:1px solid var(--paper-rule); }
+.apps-frame-name { flex:1; min-width:0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--paper-ink-2); font-size:14px; }
+.apps-toolbar .apps-frame-action { flex:none; gap:6px; }
+.apps-toolbar .apps-copy-status:not(:empty) { position:absolute; z-index:1; top:64px; right:12px; padding:6px 10px; border-radius:8px; background:var(--paper-raised); }
+@container (max-width:540px) {
+  .apps-toolbar { gap:4px; padding:4px 8px; }
+  .apps-toolbar .apps-frame-action { width:44px; height:44px; padding:0; }
+  .apps-toolbar .apps-frame-action span { display:none; }
+}
 .apps-copy-status { font-size:12px; color:var(--paper-ink-2); }
 .apps-copy-status:empty { display:none; }
 .apps-frame iframe { flex:1; width:100%; min-height:0; border:0; background:var(--reading-ground); }

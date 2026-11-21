@@ -90,6 +90,7 @@ test('wide framing keeps one iframe, names it, and offers copy and browser escap
   apps.open(catalog.apps[0])
   const view = apps.view(), frame = all(view, 'apps-embed')[0]
   assert.ok(frame); assert.equal(frame.getAttribute('title'), 'Garden')
+  assert.equal(text(all(view, 'apps-frame-name')[0]), 'Garden')
   assert.equal(frame.getAttribute('src'), catalog.apps[0].url)
   assert.match(text(view), /Open in browserCopy link/)
   await apps.copyLink(); assert.deepEqual(copied, [catalog.apps[0].url]); assert.match(text(apps.view()), /Copied/)

@@ -1565,7 +1565,9 @@ GitHub identity and unauthenticated public data. Results are cached for an hour.
 File and chat contents stay on the host.
 
 Page modules can register at `thread.list.line`. Return a single compact
-accessible row above the agents or null. The first nonempty registration in
+accessible row above the agents or null. Its renderer may return icons, counts
+and controls together. Keep the group on one line and label its values for
+screen readers. The first nonempty registration in
 ordinary registry order is visible. The host leaves archived lists alone.
 At `apps.icon`, a plugin can render the picture for its own enabled Apps
 row. Returning null uses the usual app picture. Both registrations go away
