@@ -1,6 +1,6 @@
 // Trusted plugin CSS is ordinary CSS. Its layer is a cascade ordering promise,
 // not a selector allowlist. One ordered set of links follows Loam's sheets.
-export function createPluginStyles(doc = globalThis.document) {
+export function createPluginStyles(doc = globalThis.document, changed = () => {}) {
   const entries = new Set()
   let serial = 0, revision = 0
   function order() {
@@ -24,7 +24,11 @@ export function createPluginStyles(doc = globalThis.document) {
     link.rel = 'stylesheet'
     link.href = local && row.local ? new URL('../' + file, new URL(row.local, globalThis.location?.href ?? 'http://localhost')).pathname : `/api/plugins/${encodeURIComponent(row.id)}/files/${file.split('/').map(encodeURIComponent).join('/')}`
     link.dataset.plugin = row.id
-    const entry = { row, link, fresh: true, pending: null, serial: ++serial }; entries.add(entry); order()
+    const entry = { row, link, fresh: true, loading: true, pending: null, serial: ++serial }
+    link.onload = link.onerror = () => {
+      if (entries.has(entry) && entry.loading) { entry.loading = false; changed() }
+    }
+    entries.add(entry); order()
     return { remove() { if (!entries.delete(entry)) return; entry.link.remove(); entry.pending?.remove() } }
   }
   function refresh() {
@@ -39,10 +43,12 @@ export function createPluginStyles(doc = globalThis.document) {
       next.onload = () => {
         if (!entries.has(entry) || entry.pending !== next) return
         entry.link.remove(); entry.link = next; entry.pending = null; order()
+        if (entry.loading) { entry.loading = false; changed() }
       }
       next.onerror = () => { if (entry.pending === next) entry.pending = null; next.remove() }
     }
     order()
   }
-  return { add, order, refresh }
+  const loading = id => [...entries].some(entry => entry.row.id === id && entry.loading)
+  return { add, order, refresh, loading }
 }

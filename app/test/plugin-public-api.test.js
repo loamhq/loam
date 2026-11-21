@@ -114,6 +114,23 @@ test('device preference migration retains old keys and failed storage retains no
   broken.value = 9; assert.equal(broken.value, 9)
 })
 
+test('the initial stylesheet settles once on success or failure, and later refreshes keep it ready', () => {
+  const { nodes, doc } = styleDocument()
+  let draws = 0
+  const styles = createPluginStyles(doc, () => draws++)
+  styles.add({ id: 'example', layer: 'yours' }, 'page/style.css')
+  assert.equal(styles.loading('example'), true)
+  nodes[0].onload()
+  assert.equal(styles.loading('example'), false)
+  styles.refresh(); styles.refresh()
+  assert.equal(styles.loading('example'), false)
+  nodes[1].onerror()
+  styles.add({ id: 'other', layer: 'yours' }, 'page/style.css')
+  nodes.at(-1).onerror()
+  assert.equal(styles.loading('other'), false)
+  assert.equal(draws, 2)
+})
+
 test('CSS refresh keeps the loaded sheet until success and cannot restore a removed personal override', () => {
   const { nodes, moves, doc } = styleDocument()
   const styles = createPluginStyles(doc), handle = styles.add({ id: 'personal', layer: 'yours' }, 'custom.css'), original = nodes[0]

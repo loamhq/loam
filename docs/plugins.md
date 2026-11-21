@@ -1566,7 +1566,7 @@ Page modules can register at `thread.list.line`. Return a single compact
 accessible row above the agents or null. Its renderer may return icons, counts
 and controls together. Keep the group on one line and label its values for
 screen readers. The first nonempty registration in
-ordinary registry order is visible. The host leaves archived lists alone.
+ordinary registry order is visible. On a return to Chats, a previously visible line gets a short startup interval to restore its contents and load its stylesheet before the list appears. Plugins can keep the display values in device settings and reconcile current facts after activation. The host leaves archived lists alone.
 At `apps.icon`, a plugin can render the picture for its own enabled Apps
 row. Returning null uses the usual app picture. Both registrations go away
 when the plugin is disabled. Use `chat.draft` with `{agent,text}` to open

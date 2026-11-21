@@ -35,7 +35,7 @@ import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuot
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
-export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, openBoardFile, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
+export function createThreads({ registry = createCoreRegistry(), linePending = () => false, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, openBoardFile, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -989,12 +989,33 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     { title: agent.name, heading: false, width: 340, anchor: `[data-agent-menu=${JSON.stringify(agent.id)}]`, close })
   }
   function list(...args) { return registry.component('core.thread-list', { args, state: st, defaultView: () => builtinList(...args) }) }
+  // Remember presence only. A returning list waits for its provider and initial
+  // style before exposing rows under it. A stalled catalog cannot strand Chats.
+  const lineKey = 'loam.chats.hadLine'
+  let hadLine = false, listStarted = false, lineTimer
+  try { hadLine = localStorage.getItem(lineKey) === '1' } catch {}
   function builtinList(wide = st.wide) {
     st.wide = wide
 
     const rows = [...st.threads].sort((a, b) => compareThreads(a, b, { pinned: !st.archived })).filter((t) => Boolean(t.archived) === Boolean(st.archived)).filter((t) => `${t.title} ${t.last?.text ?? ''}`.toLowerCase().includes(st.query.toLowerCase()))
     if (archiveQuery !== st.query) { archiveQuery = st.query; archiveLimit = archivePage; st.resetListScroll = true }
     const visible = st.archived ? rows.slice(0, archiveLimit) : rows
+    const pending = !st.archived && linePending()
+    const line = !st.archived && !pending ? registry.draw('thread.list.line')[0] : null
+    const wait = pending && hadLine && !listStarted
+    if (wait) {
+      lineTimer ??= setTimeout(() => { listStarted = true; redraw() }, 3000)
+    } else if (!st.archived) {
+      listStarted = true
+      clearTimeout(lineTimer)
+      if (!pending && Boolean(line) !== hadLine) {
+        hadLine = Boolean(line)
+        try {
+          if (hadLine) localStorage.setItem(lineKey, '1')
+          else localStorage.removeItem(lineKey)
+        } catch {}
+      }
+    }
     return h('section', { class: `${st.wide ? 'listcol' : 'screen home'} tt-list${st.wide && collapsed() ? ' away' : ''}`, inert: st.wide && collapsed() ? true : null, 'aria-hidden': st.wide && collapsed() ? 'true' : null, 'aria-label': 'Threads' },
       listHeading({ wide: st.wide, title: st.archived ? 'Archived' : 'Chats',
         leading: st.archived ? historyButton('Back to Chats', 'list') ?? round('Back to Chats', icon.chevronLeft(18), () => { if (!archiveAddress(false)) showArchived(false) }) : null,
@@ -1008,8 +1029,9 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
         settingsRow({ title: 'Archived threads', lead: icon.folder(18), right: h('span', { class: 'muted', text: String(st.threads.filter(t => t.archived).length) }), onclick: () => { if (!archiveAddress(true)) showArchived(true) } })), { title: 'Thread list actions', anchor: '[aria-label="Thread list actions"]', close: () => { st.listMenu = false; redraw() } }) : null,
       st.fixture ? h('div', { class: 'tt-fixture' }, 'Design preview · sample threads', button('Exit', exitPreview, { class: 'quietlink tt-preview-exit' })) : null,
       !st.wide ? registry.draw('app.overlay', { slot: 'player' }) : null,
-      h('div', { class: 'scroll', key: 'thread-list-scroll' },
-        !st.archived ? registry.draw('thread.list.line')[0] : null,
+      wait ? h('div', { class: 'scroll', role: 'status' }, emptyConversation({ title: 'Opening chats…', body: null }))
+        : h('div', { class: 'scroll', key: 'thread-list-scroll' },
+        line,
         !st.archived && !st.personasHidden ? personaGrid({ agents: catalog(), loading: fixtureAgents === null && runtimeAgents === null && !agentsReady(), wide: st.wide, look, disabled: st.creating,
           onclick: (a) => { st.listMenu = false; st.personaMenu = st.personaMenu === a.id ? null : a.id; redraw() }, label: (a) => `${a.name} menu`,
           buttonProps: (a) => ({ type: 'button', 'data-agent-menu': a.id, 'aria-haspopup': 'dialog', 'aria-expanded': String(st.personaMenu === a.id), 'aria-controls': st.personaMenu === a.id ? 'thread-persona-menu' : null }),

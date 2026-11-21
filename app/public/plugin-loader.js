@@ -41,7 +41,7 @@ export function createPluginLoader({ registry, request, ui, changed = () => {}, 
   // by a flash of core's (Files' Markdown preview before an editor plugin).
   const settling = new Set()
   const active = new Map(), settings = new Map(), css = new Map()
-  const styles = globalThis.document?.head ? createPluginStyles() : null
+  const styles = globalThis.document?.head ? createPluginStyles(globalThis.document, changed) : null
   let flight = null, reread = false, serial = 0, disposed = false
   const rowKey = (row, index) => `${row.layer}:${row.id ?? index}:${row.folder ?? ''}`
   function scope(row, local = false) {
@@ -159,14 +159,11 @@ export function createPluginLoader({ registry, request, ui, changed = () => {}, 
   }
   // Whether a place may still get a plugin's view: before the catalog is read
   // at all, or while a plugin that names the place is starting.
-  function pending(place) {
+  function pending(place, { includeStyles = false } = {}) {
     if (disposed) return false
     if (!st.known) return true
-    for (const id of settling) {
-      const row = st.rows.find(r => r.id === id && r.effective !== false)
-      if (row && Array.isArray(row.places) && row.places.includes(place)) return true
-    }
-    return false
+    return st.rows.some(row => row.effective !== false && row.on && row.places?.includes(place)
+      && (settling.has(row.id) || includeStyles && styles?.loading(row.id)))
   }
   return { st, refresh, failed, scope, pending,
     toggle: (id, on) => write('PATCH', `/plugins/${segment(id)}`, { on }),

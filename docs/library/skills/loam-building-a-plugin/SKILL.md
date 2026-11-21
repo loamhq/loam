@@ -140,7 +140,7 @@ A page plugin can add one compact update above the agents in Chats with
 `thread.list.line`, draw its own Apps picture with `apps.icon`, and open an
 unsent composer with the `chat.draft` command. A server can declare activity
 groups under `touches.facts` and run `LOAM_PLUGIN_FACTS` to read their JSON.
-The full groups and the privacy declaration are in docs/plugins.md.
+The full groups and the privacy declaration are in docs/plugins.md. On a return visit, Chats briefly waits for a previously visible line and its stylesheet before showing the rows. Restore saved display values during activation and refresh them in the background.
 
 ### Your Market downloads
 
