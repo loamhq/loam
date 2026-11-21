@@ -28,6 +28,7 @@
 // the listing's page, whose way back is the thread. An id the Market does not
 // list is the link's words, plain.
 import { h, icon, kept, blob, on as onNode } from '../ui.js'
+import { personalUpdate, skippedUpdate } from '../market-card.js'
 import { agentLook } from '../sessions.js'
 import { menuSurface } from '../menu-surface.js'
 import { sheetHandle } from '../chat-ui.js'
@@ -883,13 +884,13 @@ export function mount(host) {
           { review, link: p.source.url, via: link ? 'link' : 'market', version: p.version })
         if (st.install !== job) return
         job.phase = 'answered'
-        job.answer = out.skipped ? 'Keeping your version.' : 'Your agent has the update.'
+        job.answer = out.skipped ? skippedUpdate(out.skipped) : 'Your agent has the update.'
       } catch (error) { job.phase = 'ready'; job.error = error.message }
       host.schedule()
     }
     const card = h('div', { class: `sheet market-install${link ? ' market-link-found' : ''}`, key: `install:${job.id}` }, sheetHandle(closeInstall),
       personal ? [h('h2', { class: 'display sheet-title', tabindex: '-1', text: name }),
-        h('p', { class: 'note', role: 'status', text: job.answer || `Version ${p.version} is available for your copy.` }),
+        h('p', { class: 'note', role: 'status', text: job.answer || personalUpdate(p.version) }),
         job.error ? h('p', { role: 'alert', text: job.error }) : null,
         h('div', { class: 'market-install-acts' }, job.answer ? button('Done', closeInstall, 'pillbtn primary') : [
           button('Keep my version', () => decide('skip'), 'pillbtn', { disabled: job.phase !== 'ready' }),

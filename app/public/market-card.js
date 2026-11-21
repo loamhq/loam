@@ -37,6 +37,9 @@ const LINE = /^\s{0,3}\[([^\[\]\n]{1,120})\]\(\s*<?(https?:\/\/[^\s()<>]+?)>?\s*
 
 // The address of a listing's page in the app, for an origin.
 export const listingAddress = (origin, id) => `${String(origin).replace(/\/+$/, '')}/?modal=market&listing=${id}`
+export const personalUpdate = version => `Loam paused this update because you’ve changed the plugin, and your agent can bring in version ${version} while keeping your edits.`
+export const skippedUpdate = version => `Version ${version} skipped. Your agent will ask again when a newer version is available.`
+
 export const linkAddress = (origin, link) => `${String(origin).replace(/\/+$/, '')}/?modal=market&install=${encodeURIComponent(link)}`
 const GITHUB_LINK = /^(?:https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:[/?#]\S*)?|[\w-][\w.-]*\/[\w.-]+)$/
 

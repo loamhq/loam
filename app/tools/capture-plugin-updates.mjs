@@ -56,7 +56,7 @@ try {
       title: 'Reading list', ts: new Date().toISOString(), from_version: '1.0.2', version: '1.0.3',
       outcome: 'updated automatically to 1.0.3' }
     app.routes['GET /v1/activity'] = (req, res) => json(res, { items: [event], jobs: { slots: [], queue: [], landing: [] }, total: 1, next_offset: null })
-    const ctx = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: mode,
+    const ctx = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, colorScheme: mode,
       isMobile: width === 390, hasTouch: width === 390, reducedMotion: 'reduce' })
     try {
       await ctx.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript',
@@ -74,7 +74,9 @@ try {
       await page.locator('.tt-row').first().waitFor()
       await page.evaluate(() => __review.goSettings('plugins'))
       await page.getByText('Update available · 1.0.4', { exact: true }).waitFor()
-      await page.getByText('Version 1.0.4 is available for your copy.', { exact: true }).waitFor()
+      const reason = 'Loam paused this update because you’ve changed the plugin, and your agent can bring in version 1.0.4 while keeping your edits.'
+      const skipped = 'Version 1.0.4 skipped. Your agent will ask again when a newer version is available.'
+      await page.getByText(reason, { exact: true }).scrollIntoViewIfNeeded()
       await shot('plugins')
       await page.getByRole('button', { name: 'About Pocket Sync' }).click()
       await page.getByRole('button', { name: 'Review update' }).waitFor()
@@ -86,17 +88,24 @@ try {
       await page.getByRole('button', { name: 'Back to Plugins' }).click()
       await page.getByRole('button', { name: 'About Field notes' }).click()
       await page.getByRole('button', { name: 'Ask my agent' }).waitFor()
+      const actions = page.locator('.plugin-updates button')
+      assert.deepEqual(await actions.allTextContents(), ['Keep my version', 'Ask my agent'])
       await shot('personal')
       await page.getByRole('button', { name: 'Ask my agent' }).click()
       await page.getByText('Your agent has the update.', { exact: true }).waitFor()
       await page.getByRole('button', { name: 'Keep my version' }).click()
-      await page.getByText('Keeping your version.', { exact: true }).waitFor()
+      await page.getByText(skipped, { exact: true }).waitFor()
+      await shot('personal-skipped')
       assert.deepEqual(patches, [{ review: 'ask', version: '1.0.4' }, { review: 'skip', version: '1.0.4' }])
       await page.evaluate(() => __review.modules.market.openLinkInstall({ link: 'https://github.com/ada-park/field-notes/tree/v1.0.4' }))
       await page.getByRole('button', { name: 'Ask my agent' }).waitFor()
+      const sheet = page.locator('.market-install')
+      assert.deepEqual(await sheet.locator('.market-install-acts button').allTextContents(), ['Keep my version', 'Ask my agent'])
+      await sheet.getByText(reason, { exact: true }).waitFor()
       await shot('personal-install')
-      await page.getByRole('button', { name: 'Ask my agent' }).click()
-      await page.getByText('Your agent has the update.', { exact: true }).waitFor()
+      await sheet.getByRole('button', { name: 'Keep my version' }).click()
+      await sheet.getByText(skipped, { exact: true }).waitFor()
+      await shot('personal-install-skipped')
       await page.getByRole('button', { name: 'Done', exact: true }).click()
       await page.evaluate(() => { __review.closeSheet(); __review.goActivity() })
       await page.getByText('updated automatically to 1.0.3', { exact: true }).first().click()

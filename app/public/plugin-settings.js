@@ -3,7 +3,7 @@ import { createSecretSettings } from './plugin-secrets.js'
 import { pluginGallery } from './plugin-gallery.js'
 import { createThemeShowcase } from './theme-showcase.js'
 import { themePreview } from './theme-preview.js'
-import { listingAddress } from './market-card.js'
+import { listingAddress, personalUpdate, skippedUpdate } from './market-card.js'
 const label = id => ({ 'core.message': 'the message bubble', 'core.thread-list': 'the thread list', 'core.composer': 'the composer', 'core.files.viewer': 'the Files viewer', 'core.files.editor': 'the Files editor', 'core.rail': 'the navigation rail', 'core.activity': 'Activity', 'core.apps': 'Apps', 'core.settings': 'Settings' }[id] ?? id)
 const ORIGINS = { loam: 'Built into Loam', market: 'From the Market', yours: 'Made by you', link: 'From a link' }
 const UNREVIEWED = 'Unreviewed by Loam'
@@ -86,7 +86,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     ? 'market' : pluginOrigin(row, marketEntry(row))
   function updateLine(row) {
     const info = status(row)
-    if (info?.personal) return `Version ${info.version} is available for your copy.`
+    if (info?.personal) return personalUpdate(info.version)
     const words = []
     if (row.updates_paused) words.push('Changed here · updates paused')
     if (info) words.push(info.held ? 'Update needs your yes' : 'Update available', info.version)
@@ -112,7 +112,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         updateWrite = row.key; st.error = ''; changed()
         try {
           const out = await host.api('PATCH', `/plugins/${encodeURIComponent(row.id)}`, { review, version: info.version })
-          reviewAnswer = { key: row.key, version: info.version, text: out.skipped ? 'Keeping your version.' : 'Your agent has the update.' }
+          reviewAnswer = { key: row.key, version: info.version, text: out.skipped ? skippedUpdate(out.skipped) : 'Your agent has the update.' }
           await checkUpdates()
         } catch (error) { st.error = error.message }
         finally { updateWrite = null; changed() }
@@ -121,8 +121,8 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       return h('section', { class: 'rows plugin-updates', 'aria-label': 'Plugin updates' },
         h('div', { class: 'setrow' }, h('span', { class: 'setrow-who', role: 'status', text: answer || (info ? words : 'Your changes are kept when Loam checks for updates.') })),
         info?.personal ? h('div', { class: 'setrow' },
-          button('Ask my agent', () => decide('ask'), 'pillbtn primary', { disabled: Boolean(updateWrite) }),
-          button('Keep my version', () => decide('skip'), 'pillbtn', { disabled: Boolean(updateWrite) })) : null)
+          button('Keep my version', () => decide('skip'), 'pillbtn', { disabled: Boolean(updateWrite) }),
+          button('Ask my agent', () => decide('ask'), 'pillbtn primary', { disabled: Boolean(updateWrite) })) : null)
     }
     const review = () => info.via === 'market'
       ? host.openMarketInstall(row.id, { ...marketEntry(row), id: row.id, name: row.name, kind: row.kind, pinned_link: info.link })
