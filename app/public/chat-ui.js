@@ -275,7 +275,7 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
     const had = cacheKey === null ? null : figureViews.get(cacheKey)
     if (had?.signature === signature) { had.open = open; had.failed = failed; had.file = file; if (had.missing) failed.add(file); return had.stub }
     const record = { signature, open, failed, file, missing: !href }
-    const node = h('figure', { class: `reply-figure${href ? '' : ' missing'}`, style: { '--ratio': ratio ? ratio.toFixed(4) : '1.3333' } })
+    const node = h('figure', { class: `reply-figure${href ? '' : ' missing known-missing'}`, style: { '--ratio': ratio ? ratio.toFixed(4) : '1.3333' } })
     const view = h(href ? 'a' : 'span', { class: 'reply-image', href, 'aria-label': href ? (words ? `Open image: ${words}` : 'Open image') : null, onclick: (e) => {
       // A plain tap opens it full size; a modified click keeps the browser's own.
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button > 0) return

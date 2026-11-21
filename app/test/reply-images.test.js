@@ -120,6 +120,7 @@ test('a file that cannot be read becomes a calm frame, and a tap does nothing', 
   const img = deep(nodes).find((n) => n.tag === 'img')
   img.__on.error({ target: img })
   assert.ok(figure.getAttribute('class').includes('missing'))
+  assert.ok(!figure.getAttribute('class').includes('known-missing'), 'the loaded frame keeps its size')
   const link = byClass(nodes, 'reply-image')[0]
   assert.equal(link.getAttribute('href'), null)
   assert.equal(all(figure, 'reply-image-missing')[0].textContent, 'Image no longer available')
@@ -128,6 +129,7 @@ test('a file that cannot be read becomes a calm frame, and a tap does nothing', 
 
 test('a legacy temporary reference shows its caption without requesting the old path', () => {
   const { nodes } = render('![Dashboard preview](/tmp/probe/gone.png)', { attachments: [] })
+  assert.equal(byClass(nodes, 'known-missing').length, 1)
   assert.equal(byClass(nodes, 'reply-image-missing')[0].textContent, 'Image no longer available')
   assert.equal(byClass(nodes, 'reply-caption')[0].textContent, 'Dashboard preview')
   assert.ok(!deep(nodes).some((n) => n.tag === 'img'))
