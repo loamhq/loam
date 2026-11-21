@@ -1292,7 +1292,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 .message-image.missing { cursor:default; }
 .message-image.missing img { visibility:hidden; }
 .message-image.missing .reply-image-missing { grid-area:1 / 1; display:flex; border:1px solid var(--paper-rule); border-radius:12px; background:var(--paper-hover-alpha); }
-.message-image.missing:not(:has(img)) .reply-image-missing { aspect-ratio:4 / 3; }
+.message-image.missing:not(:has(img)) .reply-image-missing { min-height:80px; }
 .message-image-name { grid-row:2; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .message-image:focus-visible { outline: 2px solid var(--paper-mark-active); outline-offset: 2px; border-radius: 12px; }
 .attachment-chip.sent {
@@ -2845,6 +2845,9 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
 .reply-figure.missing .reply-image { cursor:default; }
 .reply-figure.missing img { display:none; }
 .reply-figure.missing .reply-image-missing { position:absolute; inset:0; display:flex; }
+/* A reference with no source can use a compact frame from its first paint. */
+.reply-figure.known-missing { flex:0 1 auto; width:min(100%, 260px); }
+.reply-figure.known-missing .reply-image { aspect-ratio:auto; min-height:80px; }
 /* While the reply is still being written, its picture's place, held. */
 .reply-figure.waiting .reply-image { cursor:default; }
 @container (max-width: 480px) {
