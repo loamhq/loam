@@ -269,7 +269,11 @@ overwrites a change of theirs. A job that changes how Loam works updates
 this library in the same job, so these pages stay the one description of
 Loam.
 
-Read the nightly reviewer’s instructions in Settings › Agents › Nightly reviewer.
+Find the nightly reviewer’s instructions and choose its provider and model in
+Settings › Agents › Nightly reviewer. The reviewer plugin’s Runs on row
+opens the same page. Automatic picks the connected provider used by the fewest
+active agents. When only one provider is connected, the reviewer uses it. A
+disconnected explicit choice stays saved and resumes when it reconnects.
 
 Each project engineer works with one repository. Provisioning keeps the registry
 in local runtime state. A project can be given write access to its own folder in

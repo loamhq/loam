@@ -520,10 +520,10 @@ ENTRIES: list[Entry] = [
            f'words, like "daily at 04:20 {lc.ZONE_TOKEN}" (the schedules\' grammar); null for '
            '04:20'),
           ("provider", "The reviewer's provider",
-           "claude-code or antigravity, or null to select a connected provider automatically"),
+           "claude-code, codex or antigravity, or null to choose the connected "
+           "provider used by the fewest active agents"),
           ("model", "The reviewer's model",
-           "a model its provider lists, or null for its default (fable on "
-           "Claude Code, gemini-4-hydrogen-high on Antigravity)"),
+           "a model its provider lists, or null for its default"),
           ("effort", "The reviewer's thinking level",
            "low, medium, high, xhigh or max, or null"))],
 

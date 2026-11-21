@@ -199,10 +199,10 @@ export function mountProfile(host, { controller = host.profiles, activity = host
         : h('p', { class: 'note', role: 'status', text: reading.loading ? 'Reading instructions…' : 'Instructions are unavailable.' })),
     ]
   }
-  function select(label, value, choices, choose, { fixed = false, hint = null, hintId = null } = {}) {
+  function select(label, value, choices, choose, { fixed = false, hint = null, hintId = null, disabled = false } = {}) {
     if (fixed) return h('div', { class: 'profile-choice', key: label }, h('span', { class: 'setrow-title', text: label }), h('span', { class: 'profile-fixed', text: choices.find(o => o.id === value)?.name || value }))
     return h('label', { class: `profile-choice${label === 'Provider' ? ' profile-choice-provider' : ''}${hint ? ' profile-choice-hinted' : ''}`, key: label }, h('span', { class: 'setrow-title', text: label }),
-      h('span', { class: 'settings-select' }, h('select', { 'aria-label': label, 'aria-describedby': hintId, disabled: st.busy || fixed, onchange: e => choose(e.target.value || null) },
+      h('span', { class: 'settings-select' }, h('select', { 'aria-label': label, 'aria-describedby': hintId, disabled: st.busy || disabled, onchange: e => choose(e.target.value || null) },
         choices.map(o => h('option', { value: o.id ?? '', selected: (o.id ?? '') === (value ?? ''), disabled: o.disabled, text: o.name || o.label || o.id }))), icon.chevronDown(14)),
       hint ? h('span', { class: 'setrow-sub profile-choice-hint', id: hintId, text: hint }) : null)
   }
@@ -213,12 +213,18 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     const allowed = kind === 'agent' ? ['claude-code', 'codex', 'antigravity'] : data.providers || [effective.provider].filter(Boolean)
     const configured = own.provider ?? (effective.source === 'record' ? effective.provider : null)
     const inherited = effective.source === 'default' ? 'Default' : 'Automatic'
+    const reviewer = kind === 'reviewer' ? data.automatic : null
+    const automaticProvider = reviewer ? reviewer.provider : effective.provider
+    const fallback = reviewer?.fallback
+    const providerHint = fallback
+      ? `${providerName(configured)} is disconnected. ${automaticProvider ? 'Using Automatic until it reconnects.' : 'Connect a provider to resume reviews.'}`
+      : !configured ? ({ only_connected: 'Your only connected provider.', different: 'A different provider from your agents.', fewest: 'The provider used by the fewest agents.' })[reviewer?.reason] : null
     const providerOptions = [
-      { id: '', name: effective.provider ? `${inherited} · ${providerName(effective.provider)}` : 'No provider connected' },
+      { id: '', name: automaticProvider ? `${inherited} · ${providerName(automaticProvider)}` : 'No provider connected' },
       ...allowed.map(id => ({ id, name: providerName(id), disabled: !host.state.providers.find(p => p.id === id)?.connected })),
     ]
     const models = modelsOf(provider), efforts = effortsOf(provider, effective.model)
-    const automatic = [{ id: '', name: `Default${!own.model && effective.model ? ` · ${models.find(m => m.id === effective.model)?.name || effective.model}` : ''}` }]
+    const automatic = [{ id: '', name: `Default${(!own.model || fallback) && effective.model ? ` · ${models.find(m => m.id === effective.model)?.name || effective.model}` : ''}` }]
     const choices = [...automatic, ...models]
     if (own.model && !models.some(m => m.id === own.model)) choices.push({ id: own.model, name: own.model, disabled: true })
     const levels = [{ id: '', name: `Default${!own.effort && effective.effort ? ` · ${effective.effort}` : ''}` }, ...efforts]
@@ -226,8 +232,9 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     const applies = kind === 'agent' ? 'The default for new threads, wakes and scheduled runs. Any thread can still choose its own.'
       : kind === 'engineer' ? 'Applies to the next job. Running jobs keep their settings.' : 'Applies to the next run.'
     return group('Runs on', [
-      select('Provider', configured, providerOptions, value => c.patch({ provider: value })),
-      effective.provider ? select('Model', own.model, choices, value => c.patch({ model: value, ...(!effortFits(provider, value, own.effort) ? { effort: null } : {}) })) : null,
+      select('Provider', configured, providerOptions, value => c.patch({ provider: value }),
+        { hint: providerHint, hintId: providerHint ? 'reviewer-provider-hint' : null }),
+      effective.provider ? select('Model', fallback ? null : own.model, choices, value => c.patch({ model: value, ...(!effortFits(provider, value, own.effort) ? { effort: null } : {}) }), { disabled: fallback }) : null,
       kind === 'engineer' && effective.provider ? ['quick', 'standard', 'hard'].map(tier => {
         const setting = effective.tiers?.[tier], value = setting?.from === 'tier' ? setting.model : null
         const options = [{ id: '', name: `Default${setting?.from === 'model' && setting.model ? ` · ${models.find(m => m.id === setting.model)?.name || setting.model}` : ''}` }, ...models]
@@ -236,7 +243,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
           hint: { quick: 'Small mechanical jobs', standard: 'Most work', hard: 'Design-heavy and subtle work' }[tier], hintId: `engineer-tier-${tier}-hint`,
         })
       }) : null,
-      effective.provider && (kind === 'agent' || effective.provider !== 'antigravity') ? select('Thinking', own.effort, levels, value => c.patch({ effort: value })) : null,
+      effective.provider && (kind === 'agent' || effective.provider !== 'antigravity') ? select('Thinking', fallback ? null : own.effort, levels, value => c.patch({ effort: value }), { disabled: fallback }) : null,
       kind === 'engineer' && data.own && data.project !== 'default' ? settingsRow({ title: data.platform ? 'Use the built-in settings' : 'Use the default engineer settings', onclick: () => c.patch({ provider: null }) }) : null,
     ], applies, defaults.not_honoured?.[0] ?? null)
   }
@@ -344,8 +351,8 @@ export function mountProfile(host, { controller = host.profiles, activity = host
             editor('reviewer-time', '', value => c.patch({ schedule: data.schedule.replace(/at \d\d:\d\d/, `at ${value}`) }), { time: true, label: 'Time (PT)' }),
             settingsRow({ title: 'Recurrence', sub: data.schedule, onclick: () => edit('reviewer-schedule', data.schedule) }), editor('reviewer-schedule', '', value => c.patch({ schedule: value }), { label: 'Schedule (PT)', help: 'Daily, weekdays, weekends, or Mondays and Thursdays at 05:00 PT.' })]),
           data.on === false ? h('p', { class: 'note', text: 'The nightly reviewer is off. You can turn it on in Settings → Plugins.' })
-            : !host.state.providers.some(p => p.connected && p.id === data.effective?.provider)
-              ? h('p', { class: 'note', role: 'status', text: 'The reviewer needs Claude Code or Antigravity. Connect one in Settings → Connections and select it below.' }) : null,
+            : !data.effective?.provider && !data.automatic?.fallback
+              ? h('p', { class: 'note', role: 'status', text: 'Connect a provider in Settings → Connections to run the reviewer.' }) : null,
           runs(data, 'reviewer'), group('Last run', h('p', { class: 'note profile-empty', text: when(data.last_fire, true) || 'No run yet' })), group('Instructions', reviewerDocument(data.instructions)),
         ])])]
   }

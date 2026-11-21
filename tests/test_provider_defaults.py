@@ -135,7 +135,7 @@ def fixture(root):
 async def exercise(case, root, baseline=False):
     import importlib.machinery
     import importlib.util
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, patch
 
     config, home, connect, credentials = fixture(root)
     for key in list(os.environ):
@@ -255,8 +255,29 @@ async def exercise(case, root, baseline=False):
         assert settings["defaults"]["wakes"]["provider"] == (
             "codex" if expected == "codex" else
             "claude-code" if expected == "claude-code" else None)
-        assert profile.reviewer_provider() == (expected if expected in profile.REVIEWER_PROVIDERS
-                                               else "claude-code" if case == "explicit" else None)
+        reviewer_expected = {"several": "codex", "explicit": "claude-code"}.get(case, expected)
+        review = await route("GET", "/system/reviewer")
+        assert profile.reviewer_provider() == review["effective"]["provider"] == reviewer_expected
+        assert review["providers"] == list(PROVIDERS)
+        if case == "several":
+            assert review["automatic"] == {"provider": "codex", "reason": "different",
+                                           "fallback": False}
+            review = await route("PATCH", "/system/reviewer", {"provider": "codex"})
+            assert review["provider"] == review["effective"]["provider"] == "codex"
+            credentials["codex"].unlink()
+            review = await route("GET", "/system/reviewer")
+            assert review["provider"] == "codex"
+            assert review["effective"]["provider"] == "antigravity"
+            assert review["automatic"]["fallback"]
+            connect("codex")
+            review = await route("GET", "/system/reviewer")
+            assert review["provider"] == review["effective"]["provider"] == "codex"
+            assert not review["automatic"]["fallback"]
+            assignments = {str(i): provider for i, provider in enumerate(
+                ["claude-code", "claude-code", "codex", "codex", "antigravity"])}
+            with patch.object(threads, "roster", lambda: list(assignments)), \
+                    patch.object(threads, "default_engine", assignments.__getitem__):
+                assert profile.automatic_reviewer(list(PROVIDERS)) == ("antigravity", "fewest")
         assert eng.platform_project().runtime == (
             "claude" if case in ("several", "explicit", "claude-code") else expected)
         project = eng.Project("Example", root, root / "jobs", platform=False)

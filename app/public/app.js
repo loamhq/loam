@@ -238,7 +238,7 @@ const moved = Object.fromEntries(Object.entries({
   accounts: "loadGithub githubStep keepGithub setupGithub connectOrg installGithub refreshGithub disconnectGithub githubReturn providerSignIn connectKeys orgField orgAppField",
   composer: "DRAFT_MAX_PX MAC draft editorDraft openEditor closeEditor sendFromEditor fileChooser imageChooser growDraft submitDraft attachStrip chipSub loginNotice activeThread composer expandGlyph editorNodes menuPage menuRootOf menuOpen openPage openMenu togglePlus closeMenus composerMenu menuRow menuSheet menuGroups menuPopover",
   transcript: "lineKeys lineCount keyOf MINE_MAX_PX MINE_SLACK_PX fitMine COPIED_MS copied copyWithCue copyButton stepItems stepChildren itemNode foldCard stepNode askLine openBlocks longToolDetails toggleOpen toolNode toolDetail fitToolOutputs answeredLine openTurns toggleTurn turnModelName turnFacts turnLine",
-  settings: "backInSettings settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance settingsChats goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsApiKey settingsAccount settingsConnections settingsAbout apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks",
+  settings: "backInSettings settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance settingsChats goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsApiKey settingsAccount settingsConnections settingsAbout apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks openReviewerSettings",
   layout: "nav profileScreen profileBody desk rail filesList listColumn setCollapsed mainPane profilePane filesPane",
   sheets: "openSheet closeSheet sheetTop SHEET_SETTLE_MS pickerNodes filesSheetNodes sheetNodes",
   market: "backMarketOverlay marketCards marketState openMarket openMarketInstall openLinkInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore marketLinkDoor loadMarket"
@@ -1005,7 +1005,7 @@ const appModalHistory = createAppModalHistory({ navigation: workspaceHistory, sh
     if (sheet.kind === 'market') { modules.market.openMarket({ kind: sheet.k, q: sheet.q, id: sheet.id }); if (sheet.install) modules.market.openLinkInstall({ link: sheet.install }); return }
     page.openSheet(sheet, { restoring: true })
     if (sheet.kind === 'activity') activity.load()
-    if (sheet.detail) modules.settings.goSettingsDetail(sheet.detail.kind, sheet.detail.id, { tab: restoredProfileTab(sheet.detail.id) })
+    if (sheet.detail) modules.settings.goSettingsDetail(sheet.detail.kind, sheet.detail.id, { tab: restoredProfileTab(sheet.detail.id), fromReviewerPlugin: sheet.fromReviewerPlugin })
     if (sheet.archivedAgents) settingsProfiles.archived()
     if (sheet.kind === 'settings' && sheet.page === 'plugins') {
       if (pluginSettingsUI.st.selected?.id === sheet.provider) pluginSettingsUI.opened()
@@ -1452,7 +1452,7 @@ const pageHeartbeat = setInterval(() => {
     sidePanel.threads.tick(panels.visible() && sidePanel.host.state.screen === 'threads')
     activity.tick(state.sheet?.kind === 'activity')
     if (state.screen === 'profile') { profileActivity.tick(true); profiles.refresh() }
-    if (state.sheet?.detail?.kind === 'agent') settingsProfiles.refresh()
+    if (['agent', 'reviewer'].includes(state.sheet?.detail?.kind)) settingsProfiles.refresh()
     if (state.sheet?.detail?.kind === 'engineer' || state.sheet?.detail?.kind === 'agent' && settingsProfiles.st.tab === 'Activity') engineerActivity.tick(true)
     schedules.tick(state.screen === 'profile' && profiles.st.manageSchedules || state.sheet?.detail?.kind === 'agent' && settingsProfiles.st.manageSchedules)
   }
