@@ -989,33 +989,54 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     { title: agent.name, heading: false, width: 340, anchor: `[data-agent-menu=${JSON.stringify(agent.id)}]`, close })
   }
   function list(...args) { return registry.component('core.thread-list', { args, state: st, defaultView: () => builtinList(...args) }) }
-  // Remember presence only. A returning list waits for its provider and initial
-  // style before exposing rows under it. A stalled catalog cannot strand Chats.
-  const lineKey = 'loam.chats.hadLine'
-  let hadLine = false, listStarted = false, lineTimer
-  try { hadLine = localStorage.getItem(lineKey) === '1' } catch {}
+  const lineKey = 'loam.chats.lineHeight.'
+  function readLineHeight(layout) {
+    try {
+      const height = Number(localStorage.getItem(lineKey + layout))
+      if (Number.isFinite(height) && height > 0) return height
+    } catch {}
+    return 0
+  }
+  const lineHeights = { compact: readLineHeight('compact'), wide: readLineHeight('wide') }
+  function rememberLineHeight(layout, height) {
+    if (lineHeights[layout] === height) return
+    lineHeights[layout] = height
+    try {
+      if (height) localStorage.setItem(lineKey + layout, String(height))
+      else localStorage.removeItem(lineKey + layout)
+    } catch {}
+  }
+  let observedLine, lineObserver
+  function observeLine(slot) {
+    if (observedLine === slot) return
+    lineObserver?.disconnect()
+    observedLine = slot
+    if (!slot || !globalThis.ResizeObserver) return
+    lineObserver ??= new ResizeObserver(([{ target }]) => {
+      const layout = target.dataset.lineLayout
+      if (!target.isConnected || !layout) return
+      const height = layoutPixels(target.getBoundingClientRect().height)
+      // Keep enough precision to recover the same edge after CSS zoom.
+      if (height > 0) rememberLineHeight(layout, Math.ceil(height * 1000) / 1000)
+    })
+    lineObserver.observe(slot)
+  }
+  function listLine() {
+    const layout = st.wide ? 'wide' : 'compact'
+    const pending = linePending()
+    const line = pending ? null : registry.draw('thread.list.line')[0]
+    if (!pending && !line) rememberLineHeight(layout, 0)
+    // The rows can paint while the provider and its initial CSS settle. Only
+    // an empty slot needs a fixed height. A live one can size to its contents.
+    return h('div', { class: 'tt-chats-line', key: 'thread-list-line', 'data-line-layout': line ? layout : null,
+      'aria-hidden': line ? null : 'true', style: line ? null : { height: `${lineHeights[layout]}px` } }, line)
+  }
   function builtinList(wide = st.wide) {
     st.wide = wide
 
     const rows = [...st.threads].sort((a, b) => compareThreads(a, b, { pinned: !st.archived })).filter((t) => Boolean(t.archived) === Boolean(st.archived)).filter((t) => `${t.title} ${t.last?.text ?? ''}`.toLowerCase().includes(st.query.toLowerCase()))
     if (archiveQuery !== st.query) { archiveQuery = st.query; archiveLimit = archivePage; st.resetListScroll = true }
     const visible = st.archived ? rows.slice(0, archiveLimit) : rows
-    const pending = !st.archived && linePending()
-    const line = !st.archived && !pending ? registry.draw('thread.list.line')[0] : null
-    const wait = pending && hadLine && !listStarted
-    if (wait) {
-      lineTimer ??= setTimeout(() => { listStarted = true; redraw() }, 3000)
-    } else if (!st.archived) {
-      listStarted = true
-      clearTimeout(lineTimer)
-      if (!pending && Boolean(line) !== hadLine) {
-        hadLine = Boolean(line)
-        try {
-          if (hadLine) localStorage.setItem(lineKey, '1')
-          else localStorage.removeItem(lineKey)
-        } catch {}
-      }
-    }
     return h('section', { class: `${st.wide ? 'listcol' : 'screen home'} tt-list${st.wide && collapsed() ? ' away' : ''}`, inert: st.wide && collapsed() ? true : null, 'aria-hidden': st.wide && collapsed() ? 'true' : null, 'aria-label': 'Threads' },
       listHeading({ wide: st.wide, title: st.archived ? 'Archived' : 'Chats',
         leading: st.archived ? historyButton('Back to Chats', 'list') ?? round('Back to Chats', icon.chevronLeft(18), () => { if (!archiveAddress(false)) showArchived(false) }) : null,
@@ -1029,9 +1050,8 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
         settingsRow({ title: 'Archived threads', lead: icon.folder(18), right: h('span', { class: 'muted', text: String(st.threads.filter(t => t.archived).length) }), onclick: () => { if (!archiveAddress(true)) showArchived(true) } })), { title: 'Thread list actions', anchor: '[aria-label="Thread list actions"]', close: () => { st.listMenu = false; redraw() } }) : null,
       st.fixture ? h('div', { class: 'tt-fixture' }, 'Design preview · sample threads', button('Exit', exitPreview, { class: 'quietlink tt-preview-exit' })) : null,
       !st.wide ? registry.draw('app.overlay', { slot: 'player' }) : null,
-      wait ? h('div', { class: 'scroll', role: 'status' }, emptyConversation({ title: 'Opening chats…', body: null }))
-        : h('div', { class: 'scroll', key: 'thread-list-scroll' },
-        line,
+      h('div', { class: 'scroll', key: 'thread-list-scroll' },
+        st.archived ? null : listLine(),
         !st.archived && !st.personasHidden ? personaGrid({ agents: catalog(), loading: fixtureAgents === null && runtimeAgents === null && !agentsReady(), wide: st.wide, look, disabled: st.creating,
           onclick: (a) => { st.listMenu = false; st.personaMenu = st.personaMenu === a.id ? null : a.id; redraw() }, label: (a) => `${a.name} menu`,
           buttonProps: (a) => ({ type: 'button', 'data-agent-menu': a.id, 'aria-haspopup': 'dialog', 'aria-expanded': String(st.personaMenu === a.id), 'aria-controls': st.personaMenu === a.id ? 'thread-persona-menu' : null }),
@@ -1908,6 +1928,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     }
     if (systemChanged) redraw()
     const list = dom.querySelector('.tt-list .scroll')
+    observeLine(st.wide && collapsed() ? null : list?.querySelector('.tt-chats-line[data-line-layout]'))
     if (list && st.resetListScroll) { list.scrollTop = 0; st.resetListScroll = false }
     if (st.focusList) {
       const target = dom.querySelector(st.archived ? '[aria-label="Back to Chats"]' : '[aria-label="Thread list actions"]')

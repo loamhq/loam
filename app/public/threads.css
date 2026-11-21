@@ -5,6 +5,10 @@
 .tt-list { position:relative; }
 .tt-list .scroll { padding-bottom:24px; }
 .tt-shell:not(.desk) .tt-list .scroll { padding-bottom:120px; }
+.tt-chats-line { display:flow-root; }
+@media (prefers-reduced-motion:no-preference) {
+  .tt-chats-line[aria-hidden] { transition:height 160ms ease-out; }
+}
 .tt-list-menu { min-width:230px; }
 .tt-persona-card { display:flex; flex-direction:column; gap:var(--space-xl); }
 [data-menu-surface].tt-persona-card[data-menu-layout="anchored"] { padding:24px; }
