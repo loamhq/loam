@@ -851,6 +851,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "rest === '/files/delete'": ["files.write"],
     "rest === '/files/restore'": ["files.write"],
     "rest === '/system/persona'": ["system.persona"],
+    "rest === '/system/reviewer/instructions'": "a read",
     "rest === '/system/reviewer'": ["reviewer.schedule", "reviewer.provider",
                                     "reviewer.model", "reviewer.effort"],
     "rest === '/integrations/github/accounts'": ["integration.github"],
