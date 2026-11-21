@@ -11,6 +11,7 @@ import { all } from './browser.js'
 installDom()
 const { markdown, strip, imageRefs } = await import('../public/markdown.js')
 const { replyImages } = await import('../public/chat-ui.js')
+const { h, morph } = await import('../public/ui.js')
 
 const fox = { path: 'Images/fox.png', root: 'vault', name: 'fox.png', type: 'image/png', size: 9, width: 1600, height: 900, alt: 'a fox', refs: ['Images/fox.png'] }
 const owl = { path: 'iris/owl.jpg', root: 'spaces', name: 'owl.jpg', type: 'image/jpeg', size: 9, width: 600, height: 800, refs: ['/home/x/ai-labs/iris/owl.jpg'] }
@@ -133,4 +134,24 @@ test('a legacy temporary reference shows its caption without requesting the old 
   assert.equal(byClass(nodes, 'reply-image-missing')[0].textContent, 'Image no longer available')
   assert.equal(byClass(nodes, 'reply-caption')[0].textContent, 'Dashboard preview')
   assert.ok(!deep(nodes).some((n) => n.tag === 'img'))
+})
+
+test('a completed image survives replacing the streaming frame and redrawing', () => {
+  const host = h('div'), text = '![a fox](Images/fox.png)'
+  const draw = (streaming) => {
+    const pictures = replyImages({ attachments: streaming ? [] : [fox] }, 't:streamed-image', { streaming })
+    morph(host, markdown(text, { images: pictures.images }))
+  }
+  draw(true)
+  assert.equal(all(host, 'waiting').length, 1)
+  draw(false)
+  const frame = all(host, 'reply-figure')[0]
+  const img = deep([frame]).find(n => n.tag === 'img')
+  assert.ok(img)
+  img.__on.load({ target: img })
+  draw(false)
+  assert.equal(all(host, 'reply-figure')[0], frame)
+  assert.ok(frame.getAttribute('class').includes('loaded'))
+  assert.equal(deep([frame]).find(n => n.tag === 'img'), img)
+  assert.equal(all(frame, 'reply-caption')[0].textContent, 'a fox')
 })

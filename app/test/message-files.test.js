@@ -57,5 +57,8 @@ test('a thread read again keeps a message’s pictures: same message, same files
   assert.equal(all(host, 'message-image')[0].firstChild, image)
   const changed = [{ path: 'Images/b.png', name: 'b.png', type: 'image/png' }]
   morph(host, messageFiles(changed, 't:m2'))
-  assert.match(all(host, 'message-image')[0].firstChild.getAttribute('src'), /b\.png/, 'other files are drawn as themselves')
+  const replacement = all(host, 'message-image')[0].firstChild
+  assert.match(replacement.getAttribute('src'), /b\.png/, 'other files are drawn as themselves')
+  morph(host, messageFiles(changed, 't:m2'))
+  assert.equal(all(host, 'message-image')[0].firstChild, replacement)
 })
