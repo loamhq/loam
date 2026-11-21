@@ -141,7 +141,12 @@ A page plugin can add one compact update above the agents in Chats with
 unsent composer with the `chat.draft` command. A server can declare activity
 groups under `touches.facts` and run `LOAM_PLUGIN_FACTS` to read their JSON.
 These four interfaces are new and may change in a later release.
-The full groups and the privacy declaration are in docs/plugins.md. On a return visit, Chats briefly waits for a previously visible line and its stylesheet before showing the rows. Restore saved display values during activation and refresh them in the background.
+The full groups and the privacy declaration are in docs/plugins.md.
+
+Chats shows its rows as soon as they are ready. While a returning line starts,
+the host reserves its last measured height in that browser for the current
+layout. The space closes if the plugin returns no line. Restore saved display
+values during activation and refresh them in the background.
 
 ### Your Market downloads
 

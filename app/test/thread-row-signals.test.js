@@ -9,13 +9,43 @@ const agents = [{ id: 'sprout', name: 'Sprout' }, { id: 'quill', name: 'Quill' }
 const member = (extra = {}) => ({ persona: 'sprout', engine: 'claude-code', working: false, background: 0, ...extra })
 const row = (extra = {}) => ({ id: 'one', title: 'A thought', default: 'sprout', members: [member()], unread: 0, background: 0,
   last: { author: 'sprout', text: 'This preview must stay off the row', at: '2026-11-11T04:30:00Z' }, ...extra })
-function setup(t) {
+function setup(t, options = {}) {
   installDom(); globalThis.innerWidth = 1440; globalThis.innerHeight = 1000
   const threads = createThreads({ redraw() {}, agents: () => agents, api: async () => ({}), rail: () => null, nav: () => null,
-    compose: { field: () => ({ value: '' }), render: () => h('div'), dictating: () => false, files: () => [], dragProps: () => ({}) } })
+    compose: { field: () => ({ value: '' }), render: () => h('div'), dictating: () => false, files: () => [], dragProps: () => ({}) },
+    ...options })
   t.after(() => threads.pause())
   return threads
 }
+test('Chats renders rows while the line starts and releases an unused saved height', (t) => {
+  const key = 'loam.chats.lineHeight.wide'
+  const saved = new Map([[key, '62.265625'], ['loam.chats.hadLine', '1']])
+  const storage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: name => saved.get(name) ?? null,
+    removeItem: name => saved.delete(name),
+  } })
+  t.after(() => {
+    if (storage) Object.defineProperty(globalThis, 'localStorage', storage)
+    else delete globalThis.localStorage
+  })
+
+  let pending = true
+  const threads = setup(t, { linePending: () => pending })
+  threads.st.threads = [row()]
+  const wide = threads.list(true)
+  assert.ok(find(wide, 'tt-row'))
+  assert.equal(find(wide, 'tt-chats-line').style.height, '62.265625px')
+  assert.equal(find(threads.list(false), 'tt-chats-line').style.height, '0px')
+  threads.st.archived = true
+  assert.equal(find(threads.list(true), 'tt-chats-line'), null)
+  assert.equal(saved.get(key), '62.265625')
+
+  threads.st.archived = false
+  pending = false
+  assert.equal(find(threads.list(true), 'tt-chats-line').style.height, '0px')
+  assert.equal(saved.has(key), false)
+})
 test('every thread state, including General, puts unread below time and keeps state on the icon', (t) => {
   const threads = setup(t)
   for (const general of [false, true]) for (const [extra, subtitle, layer] of [

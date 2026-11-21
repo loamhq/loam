@@ -1568,8 +1568,16 @@ File and chat contents stay on the host.
 Page modules can register at `thread.list.line`. Return a single compact
 accessible row above the agents or null. Its renderer may return icons, counts
 and controls together. Keep the group on one line and label its values for
-screen readers. The first nonempty registration in
-ordinary registry order is visible. On a return to Chats, a previously visible line gets a short startup interval to restore its contents and load its stylesheet before the list appears. Plugins can keep the display values in device settings and reconcile current facts after activation. The host leaves archived lists alone.
+screen readers. The first nonempty registration in ordinary registry order is
+visible. Chats shows its rows as soon as they are ready. While a line provider
+starts and its initial styles load, the host reserves the last height measured
+in that browser for the compact or wide layout. A layout with no measured line
+starts with zero space. A returning line fills the space, and the space closes
+if startup finishes without a line. The live line sizes to its contents.
+Plugins can keep display values in device settings, restore them during
+activation, and reconcile current facts in the background. The host leaves
+archived lists alone.
+
 At `apps.icon`, a plugin can render the picture for its own enabled Apps
 row. Returning null uses the usual app picture. Both registrations go away
 when the plugin is disabled. Use `chat.draft` with `{agent,text}` to open
