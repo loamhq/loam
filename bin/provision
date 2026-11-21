@@ -188,6 +188,7 @@ def settings(workspace: Path) -> dict:
                 "Grep",
                 "mcp__loam__read_epub",
                 "mcp__loam__delete_file",
+                "mcp__loam__restore_file",
                 "mcp__loam__move_file",
                 "mcp__composition__generate_pdf",
                 "mcp__composition__typst_fonts",

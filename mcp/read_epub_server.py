@@ -26,6 +26,7 @@ outside them is refused before the archive is opened.
 
 from __future__ import annotations
 
+import asyncio
 import errno
 import os
 import re
@@ -36,6 +37,7 @@ from typing import Any
 import sys as _sys
 _sys.path.append(str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402  constants only; nothing here holds state
+from loam_settings import SettingsError, call as broker_call  # noqa: E402
 
 from bs4 import BeautifulSoup
 from ebooklib import ITEM_DOCUMENT, epub
@@ -70,6 +72,16 @@ mcp = MCPServer("loam-epub")
 
 def _error(error: str, detail: str | None = None) -> dict[str, Any]:
     return {"ok": False, "error": error, "detail": detail}
+
+
+async def _vault_file_operation(action: str, **fields) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(broker_call, "POST", f"/v1/files/{action}",
+                                       {"root": "vault", **fields})
+    except SettingsError as exc:
+        code = {400: "validation", 403: "boundary", 404: "not_found",
+                409: "conflict"}.get(exc.status, "broker_error")
+        return _error(code, exc.message)
 
 
 def _resolve_under_roots(path: str) -> Path | None:
@@ -332,7 +344,9 @@ def _link_on_path(path: str) -> Path | None:
 @mcp.tool(
     name="delete_file",
     description=(
-        "Delete a single file, or an EMPTY directory, at an absolute path. "
+        "Delete at an absolute path. In the vault, only eligible regular files "
+        "can be deleted. The broker moves them to trash and returns a restore_id. "
+        "Outside the vault, delete a single file, a symlink, or an EMPTY directory. "
         "The target must exist. A directory with anything in it is refused, "
         "and a symlink is removed itself, never its target. There is no "
         "recursive delete: "
@@ -346,7 +360,19 @@ def _link_on_path(path: str) -> Path | None:
 async def delete_file(path: str) -> dict[str, Any]:
     if not path or not Path(path).is_absolute():
         return _error("validation", f"path must be absolute; got {path!r}")
+    raw = Path(path)
     link = Path(os.path.abspath(path))
+    if raw.is_relative_to(VAULT):
+        result = await _vault_file_operation("delete", path=raw.relative_to(VAULT).as_posix())
+        if result.get("ok") is True:
+            result.update(deleted=str(link), kind="file")
+        return result
+    try:
+        parent = link.parent.resolve()
+    except (OSError, RuntimeError) as exc:
+        return _error("boundary", f"could not resolve {path!r}: {exc}")
+    if (parent / link.name).is_relative_to(VAULT):
+        return _error("boundary", "use the file's path inside the vault directly")
     if link.is_symlink():
         # The link is the target, never its referent: resolving it first is
         # how a vault-root README.md -> overview.md deleted overview.md on
@@ -354,9 +380,6 @@ async def delete_file(path: str) -> dict[str, Any]:
         # link, so a link pointing anywhere at all -- outside every writable
         # tree, or nowhere -- is removable where it stands and its referent
         # is never touched.
-        parent, why = _mutable(str(link.parent), "Delete")
-        if parent is None:
-            return _error("boundary", why or "target is out of bounds")
         try:
             (parent / link.name).unlink()
         except OSError as exc:
@@ -365,6 +388,8 @@ async def delete_file(path: str) -> dict[str, Any]:
     resolved, why = _mutable(path, "Delete")
     if resolved is None:
         return _error("boundary", why or "target is out of bounds")
+    if resolved.is_relative_to(VAULT):
+        return _error("boundary", "use the file's path inside the vault directly")
     if not resolved.exists():
         # Surfaced rather than treated as a no-op: better the agent learns it
         # had the path wrong than that a delete silently did nothing.
@@ -403,6 +428,18 @@ async def delete_file(path: str) -> dict[str, Any]:
     except OSError as exc:
         return _error("os_error", f"{type(exc).__name__}: {exc}")
     return {"ok": True, "deleted": str(resolved), "kind": "file"}
+
+
+@mcp.tool(
+    name="restore_file",
+    description=(
+        "Restore a deleted vault file to its original path using the restore_id "
+        "returned by delete_file. The original parent must still exist and the "
+        "filename must be available."
+    ),
+)
+async def restore_file(restore_id: str) -> dict[str, Any]:
+    return await _vault_file_operation("restore", restore_id=restore_id)
 
 
 @mcp.tool(

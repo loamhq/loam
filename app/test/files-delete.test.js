@@ -30,10 +30,32 @@ test('file deletion relays only a vault address and preserves the broker respons
     state.refuse = false
     const confirmed = await post({ ...address, by: 'ignored' })
     assert.equal(confirmed.status, 200)
-    assert.deepEqual(await confirmed.json(), { ok: true })
+    const deleted = await confirmed.json()
+    assert.equal(deleted.ok, true)
+    assert.match(deleted.restore_id, /^[0-9a-f]{32}$/)
     const call = broker.seen.at(-1)
     assert.equal(call.auth, `Bearer ${TOKEN}`)
     assert.deepEqual(JSON.parse(call.body), address)
+  } finally { await closing(app, broker)() }
+})
+
+test('Undo relays only a vault restore token and preserves the restored row', async () => {
+  const { routes } = deleteHost()
+  const broker = await fakeBroker(routes)
+  const app = await appAgainst(broker)
+  const address = { root: 'vault', path: 'Notes/plan.md' }
+  try {
+    const deleted = await fetch(`${app.url}/api/files/delete`, { method: 'POST', body: JSON.stringify(address) }).then(res => res.json())
+    const restoreUrl = `${app.url}/api/files/restore`
+    const restore = (body, headers = {}) => fetch(restoreUrl, { method: 'POST', headers, body: JSON.stringify(body) })
+    const undo = { root: 'vault', restore_id: deleted.restore_id }
+    assert.equal((await restore({ ...undo, restore_id: '../somewhere' })).status, 400)
+    assert.equal((await restore(undo, { origin: 'https://example.com' })).status, 403)
+    const restored = await restore({ ...undo, path: 'ignored' })
+    assert.equal(restored.status, 200)
+    assert.equal((await restored.json()).path, address.path)
+    assert.equal(broker.seen.at(-1).auth, `Bearer ${TOKEN}`)
+    assert.deepEqual(JSON.parse(broker.seen.at(-1).body), undo)
   } finally { await closing(app, broker)() }
 })
 
@@ -67,7 +89,7 @@ test('a save settles before deletion and a queued save cannot write the deleted 
   assert.equal(files.st.file, null)
 })
 
-test('Files shows one confirmation, keeps a refused file, then removes it and restores the previous panel', async () => {
+test('Files keeps a refused file, returns to the previous panel on deletion, and restores the row on Undo', async () => {
   const host = deleteHost()
   const app = await oneProductFixture()
   Object.assign(app.routes, host.routes)
@@ -129,8 +151,15 @@ test('Files shows one confirmation, keeps a refused file, then removes it and re
     assert.equal(host.state.calls.length, 2)
     assert.equal(host.entries.has('Notes/plan.md'), false)
     assert.equal(open('Taken.md') !== undefined, true)
-    assert.equal(text(find(page.root, 'fs-delete-toast')), 'Deleted plan.md.')
+    assert.equal(text(find(page.root, 'listnotice-text')), 'Deleted plan.md.')
     assert.ok(!history.state.workspace.visits.some(step => step.href.includes('/plan.md')))
+    const undo = find(find(page.root, 'fs-delete-toast'), 'listnotice-act')
+    assert.equal(text(undo), 'Undo')
+    click(undo)
+    await until(() => open('plan.md'))
+    assert.equal(host.state.restores.length, 1)
+    assert.equal(text(find(page.root, 'listnotice-text')), 'Restored plan.md.')
+    assert.match(location.pathname, /Taken\.md$/)
   } finally {
     page.stop()
     await app.close()

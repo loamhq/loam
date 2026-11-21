@@ -13,9 +13,8 @@
 # internals, which are not vault content, and on the owner's word
 # (2026-09-09: "hide the conversations and the syncing items ... the other
 # major folders can be accessible via the web") the transcripts and
-# the sync tool's version store. Both stay readable on disk. Nothing else is
-# hidden.
+# the sync tool's version store. Loam's Files trash stays on disk as well.
 
 exposure = "private"
 static_root = "@VAULT@"
-hide = [".git", "15_CONVERSATIONS", ".stversions"]
+hide = [".git", "15_CONVERSATIONS", ".stversions", "loam-files-trash"]

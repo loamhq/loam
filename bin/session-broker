@@ -2623,7 +2623,9 @@ class Server:
         writes = {("text", "PUT"): (200, files_api.save_text),
                   ("file", "POST"): (201, files_api.create_file),
                   ("folder", "POST"): (201, files_api.create_folder),
-                  ("rename", "POST"): (200, files_api.rename)}
+                  ("rename", "POST"): (200, files_api.rename),
+                  ("delete", "POST"): (200, files_api.delete),
+                  ("restore", "POST"): (200, files_api.restore)}
         try:
             if len(tail) == 1 and method == "GET" and tail[0] in reads:
                 body = await asyncio.to_thread(reads[tail[0]])

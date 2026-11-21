@@ -1059,10 +1059,14 @@ export function createFiles({
     }
     // A listing already in flight can contain the removed row. Refresh from
     // the first page so a cursor from before the deletion cannot skip a row.
-    if (st.root === resource.root && st.path === parentOf(resource.path) && (listing.loading || listing.cursor)) loadFolder(false, true)
+    if (listing.loading || listing.cursor) refreshContainingFolder(resource)
     if (sameFileAddress(st.sheet?.resource, resource)) st.sheet = null
     if (sameFileAddress(st.renaming?.resource, resource)) st.renaming = null
     if (sameFileAddress(st.file, resource)) closeFile()
+  }
+
+  function refreshContainingFolder(resource) {
+    if (st.root === resource.root && st.path === parentOf(resource.path)) return loadFolder(false, true)
   }
 
   function beginRename(resource, slot = 'row') {
@@ -1521,7 +1525,7 @@ export function createFiles({
     }
   }
 
-  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function triggerBrowserDownload(href, filename) {
@@ -2144,7 +2148,7 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
   if (s.kind === 'delete') {
     return [
       h('h2', { class: 'display sheettitle', text: 'Delete file?' }),
-      h('p', { class: 'fs-delete-copy' }, h('strong', { text: s.name }), ' will be permanently deleted from the vault.'),
+      h('p', { class: 'fs-delete-copy' }, h('strong', { text: s.name }), ' will be moved to trash.'),
       s.dirty ? h('p', { class: 'fs-delete-copy', text: 'Unsaved changes will be discarded.' }) : null,
       s.error ? h('p', { class: 'fs-delete-error', role: 'alert', text: s.error }) : null,
       h('div', { class: 'fs-actions fs-delete-actions', 'aria-busy': String(s.busy) },

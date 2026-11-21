@@ -152,7 +152,7 @@ on everything but `/up`.
 | `GET /v1/sessions/live/events` | SSE: `sessions.live`, the whole answer above, on open, within a second of any record change, and every 10 s when the numbers moved |
 | `POST /v1/sessions/end-idle` | ends every live session that is idle → `{ended: [{id, agent}], kept: [{id, agent, why}]}`. Never one that is working, asking, waiting on background work or carrying a thread's turn, nor one active in the last 15 s |
 | `GET /v1/files/roots`, `list`, `stat`, `read`, `download`, `archive`, `resolve` | the vault, the agents' spaces and the runtime's documents, by root and path -- "Files" below |
-| `PUT /v1/files/text`, `POST /v1/files/file`, `POST /v1/files/folder`, `POST /v1/files/rename` | The owner's saves, creations and renames, revision-conditional, never deleting or replacing -- "Files" below |
+| `PUT /v1/files/text`, `POST /v1/files/file`, `POST /v1/files/folder`, `POST /v1/files/rename`, `POST /v1/files/delete`, `POST /v1/files/restore` | The owner's saves, creations, renames, and moves to and from vault trash |
 | `GET /v1/apps` | the Apps section's list: every agent site, every project's deployed container and every app plugin, each with its URL, owner, access, expiry, what it serves and whether the page may frame it → `{apps, sources}`, `Cache-Control: no-store`; **`503`** naming the record when one cannot be read; **`405`** to anything but `GET` -- "Apps" below |
 
 ### The classic chat routes, retired (2026-11-12)
@@ -3165,7 +3165,7 @@ swapped for a link between a listing and a read is refused at the read
  "kind": "file", "size": 1203, "modified": "2026-10-02T19:20:11Z",
  "media_type": "text/markdown", "authority": "user",
  "capabilities": {"read": true, "download": true, "write": true, "create": false,
-                  "rename": true},
+                  "rename": true, "delete": true},
  "link": "/files/vault/40_PROJECTS/Loam/state.md"}
 ```
 
@@ -3174,6 +3174,7 @@ swapped for a link between a listing and a read is refused at the read
 the host; the page draws from it and never infers from a name. `write` means a
 text save in place; `create` (folders only) means new files and folders in it;
 `rename` (2026-11-13) means `POST /v1/files/rename` will rename or move it.
+`delete: true` means `POST /v1/files/delete` will move that vault file to trash.
 `authority` says whose the file is:
 
 | authority | where | through Files |
@@ -3184,9 +3185,8 @@ text save in place; `create` (folders only) means new files and folders in it;
 | `persona` | everything else in a workspace (`map.md`, `skills/`, `memory/`, notes, the `crons/` folder itself), and `commons/**` | read-only: the persona edits its own, with its own tools |
 | `runtime` | `spaces/<agent>/CLAUDE.md`, `agent.json`, `.mcp.json`, `.claude/**`, `.codex/**`, `spaces/README.md`; all of `system` | read-only: rendered by `bin/provision` or kept by the runtime, so an edit here would be reverted |
 
-A persona's authority is not touched by any of this: Files writes are the
-broker's, on the owner's behalf, and a persona still writes only through its
-own tools under its own guard.
+Files writes go through the broker on the owner's behalf. Persona tools
+run under their own guard and use the broker for vault deletion and restoration.
 
 **`link`** is the app's deep link, `/files/<root>/<path>` with each name
 percent-encoded on its own, the same shape the resolver reads back.
@@ -3400,10 +3400,28 @@ Exactly one of `name` and `to`. `200` answers the row at its new place, plus
   be renamed.
 - **Links are absent**, here as everywhere in Files: a symbolic link as the
   source, or on the way to it or to `to`, is `404 {"error": "nothing at
-  …"}`, and nothing it points at is touched. (The persona tools' `move_file`
-  and `delete_file` refuse links since 2026-10-13, after a link's target was
-  deleted through one on 10-02.) A path outside the root, by `..` or
+  …"}`, and nothing it points at is touched. A path outside the root, by `..` or
   otherwise, is `400` before the disk is touched.
+
+#### Deleting and restoring a vault file
+
+Both operations require the broker bearer token. `POST /v1/files/delete`
+takes `{"root":"vault","path":"Inbox/draft.md"}` and answers `200` with
+`{"ok":true,"restore_id":"…"}`. Only regular files with `delete: true`
+are eligible. Delete uses the same visibility, no-symlink walk, authority,
+and pinned-path rules as rename.
+
+`POST /v1/files/restore` takes `{"root":"vault","restore_id":"…"}` and
+answers `200` with the original Files row and `"ok":true`. The token names
+one deletion and is consumed by a successful restore. The original parent
+must exist and the name must be free. If the name is occupied, restore
+answers `409` and keeps the file in trash.
+
+The broker moves the file by rename into `.trash/loam-files-trash/` on the
+vault disk. It keeps the file and original path together until restoration
+or operator cleanup. The trash directory is hidden from Files and the vault
+web host. The persona tools `delete_file` and `restore_file` call these
+same routes for vault files.
 
 #### Uploading a file into a vault folder
 

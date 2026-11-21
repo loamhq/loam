@@ -13,7 +13,8 @@ have never met.
 - **Vault file deletion** requires the broker capability and endpoint in
   [the Files deletion contract](../docs/files-deletion.md). After confirmation
   from the broker, remove the file from both panels’ visit trails so Back and
-  Forward can still restore the surviving visits.
+  Forward can still restore the surviving visits. Undo refreshes the file's
+  containing folder while keeping the restored panel on its current visit.
 
 - **The app holds no authority.** It reaches agents only through the
   session broker's narrow, authenticated interface (`broker/README.md` at

@@ -674,8 +674,8 @@ ENTRIES: list[Entry] = [
           ("files_shortcuts", "Files home's shortcuts and its two folders"))],
 
     # -- Files ---------------------------------------------------------------
-    Entry("files.write", "action", "Edit, create, upload, rename in Files",
-          "PUT /api/files/text, POST /api/files/file|folder|upload|rename",
+    Entry("files.write", "action", "Edit, create, upload, rename, delete and restore in Files",
+          "PUT /api/files/text, POST /api/files/file|folder|upload|rename|delete|restore",
           reach=OWN_TOOLS, why=OWN_TOOLS_WHY),
 ]
 
@@ -839,6 +839,8 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     # carried them (loam-ui 8e8f98a and earlier). The relay spells the
     # account route's refresh group as a capturing one, `(\/refresh)?`.
     "rest === '/files/rename'": ["files.write"],
+    "rest === '/files/delete'": ["files.write"],
+    "rest === '/files/restore'": ["files.write"],
     "rest === '/system/persona'": ["system.persona"],
     "rest === '/system/reviewer'": ["reviewer.schedule", "reviewer.provider",
                                     "reviewer.model", "reviewer.effort"],

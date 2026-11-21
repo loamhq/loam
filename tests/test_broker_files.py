@@ -267,7 +267,7 @@ def test_read(c: Client, t: dict) -> None:
     check("read: a sha256 revision", body["revision"].startswith("sha256:"), True)
     check("read: capabilities", body["capabilities"],
           {"read": True, "download": True, "write": True, "create": False,
-           "rename": True})
+           "rename": True, "delete": True})
     check("read: the deep link", body["link"], "/files/vault/40_PROJECTS/Loam/state.md")
 
     status, body, _ = c.get("read", root="vault",
@@ -1008,7 +1008,7 @@ def test_upload(c: Client, t: dict) -> None:
     check("...capabilities: read and download, no text write",
           row.get("capabilities"),
           {"read": True, "download": True, "write": False, "create": False,
-           "rename": True})
+           "rename": True, "delete": True})
     check("...revision is the sha256 of the bytes sent",
           row.get("revision"), files.revision(PNG))
     check("...on disk byte for byte", (up / "IMG_2041.png").read_bytes() == PNG, True)
@@ -1392,6 +1392,64 @@ def test_rename(c: Client, t: dict) -> None:
           ["Renamed folder", "dangling.md", "link.md", "taken.md"])
 
 
+def test_trash(c: Client, t: dict) -> None:
+    vault = t["vault"]
+    path = "20_ATLAS/Delete me.md"
+    note = vault / path
+    note.write_bytes(b"# Keep these bytes\n")
+    note.chmod(0o640)
+    os.utime(note, (1_700_000_000, 1_700_000_000))
+    before = note.stat()
+
+    def post(action, fields, token=None):
+        status, body, _ = c.json("POST", f"/v1/files/{action}", fields, token=token)
+        return status, body
+
+    address = {"root": "vault", "path": path}
+    check("delete: no token", post("delete", address, token="")[0], 401)
+    check("refusal keeps the file", note.exists(), True)
+    for route, query in (("stat", address), ("read", address),
+                         ("list", {**address, "path": "20_ATLAS"})):
+        _, row, _ = c.get(route, **query)
+        if route == "list":
+            row = next(r for r in row["entries"] if r["path"] == path)
+        check(f"{route}: delete capability", row["capabilities"].get("delete"), True)
+    for root, refused, want in (
+            ("vault", "20_ATLAS", 400), ("vault", "../outside/passwd", 400),
+            ("vault", "link-to-passwd.md", 404), ("vault", "deploy.env", 404),
+            ("vault", "15_CONVERSATIONS/2026-10-02 chat.md", 403),
+            ("vault", "00_INBOX/from-agents/comms.md", 403),
+            ("spaces", "ada/soul.md", 403), ("system", "Deployment.md", 403)):
+        check(f"delete refuses {root}/{refused}",
+              post("delete", {"root": root, "path": refused})[0], want)
+
+    status, result = post("delete", address)
+    check("delete: success and original address is gone",
+          (status, result.get("ok"), note.exists()), (200, True, False))
+    restore_id = result["restore_id"]
+    entry = vault / files.TRASH_PARENT / files.TRASH / restore_id
+    check("trash contains the original file", (entry / "file").stat().st_ino, before.st_ino)
+    check("trash stays invisible in Files", c.get("stat", root="vault",
+          path=entry.relative_to(vault).as_posix())[0], 404)
+    undo = {"root": "vault", "restore_id": restore_id}
+    check("restore: no token", post("restore", undo, token="")[0], 401)
+    check("restore rejects traversal tokens",
+          post("restore", {**undo, "restore_id": "../outside"})[0], 400)
+    note.symlink_to(t["outside"] / "missing")
+    check("restore refuses to replace a dangling link", post("restore", undo)[0], 409)
+    check("collision keeps link and trash", (note.is_symlink(), (entry / "file").exists()),
+          (True, True))
+    note.unlink()
+    status, row = post("restore", {**undo, "path": "another.md"})
+    check("restore only to the original path", (status, row.get("ok"), row.get("path")),
+          (200, True, path))
+    check("restore keeps bytes, mode and modified time",
+          (note.read_bytes(), note.stat().st_mode, note.stat().st_mtime_ns),
+          (b"# Keep these bytes\n", before.st_mode, before.st_mtime_ns))
+    check("a restored token cannot be reused", post("restore", undo)[0], 404)
+    check("restoring consumes the trash entry", entry.exists(), False)
+
+
 def fetch_archive(c: Client, query: str, token=None):
     """GET /v1/files/archive, read as far as the broker sends it. Returns the
     status, the headers, the bytes received, and whether the body ended as
@@ -1612,6 +1670,7 @@ def main() -> int:
             test_system_pointers(c)
             test_upload(c, t)
             test_rename(c, t)
+            test_trash(c, t)
             test_archive(c, t)
         finally:
             ready["loop"].call_soon_threadsafe(ready["stop"].set_result, None)

@@ -94,9 +94,14 @@ try {
       assert.equal(host.entries.has('Notes/plan.md'), false)
       assert.equal(host.state.calls.length, 2)
       assert.equal(await page.evaluate(() => [...history.state.workspace.visits, ...history.state.workspace.forward].some(step => step.href.endsWith('/plan.md'))), false)
+      await shot('header-undo')
+      await button('Undo').click()
+      await page.getByText('Restored plan.md.', { exact: true }).waitFor()
+      assert.equal(host.entries.has('Notes/plan.md'), true)
+      assert.match(new URL(page.url()).pathname, /Taken\.md$/)
 
       if (width === 1440) {
-        await button('Actions for plan.md').waitFor({ state: 'detached' })
+        await button('Actions for plan.md').waitFor()
         await row('page.html').click({ modifiers: ['Alt'] })
         const side = page.getByRole('region', { name: 'Side panel' })
         await side.locator('.side-heading strong').getByText('page.html', { exact: true }).waitFor()
@@ -115,7 +120,7 @@ try {
       } else {
         await page.goBack()
         await button('Actions for Taken.md').waitFor()
-        await button('Actions for plan.md').waitFor({ state: 'detached' })
+        await button('Actions for plan.md').waitFor()
       }
     } finally {
       await context.close()

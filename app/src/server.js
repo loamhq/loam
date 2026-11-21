@@ -759,6 +759,15 @@ export function createApp({
       }
       return await relayJson(res, 'POST', '/v1/files/delete', { root: body.root, path: body.path })
     }
+    if (rest === '/files/restore') {
+      if (method !== 'POST') return sendJson(res, 405, { error: 'Use POST to restore a file.' })
+      const body = await readBody(req).catch((err) => err)
+      if (body instanceof Error) return sendJson(res, body.tooLarge ? 413 : 400, { error: body.message })
+      if (body?.root !== 'vault' || typeof body.restore_id !== 'string' || !/^[0-9a-f]{32}$/.test(body.restore_id)) {
+        return sendJson(res, 400, { error: 'Choose a deleted file to restore.' })
+      }
+      return await relayJson(res, 'POST', '/v1/files/restore', { root: body.root, restore_id: body.restore_id })
+    }
     const filesCreate = /^\/files\/(file|folder)$/.exec(rest)
     if (filesCreate && method === 'POST') {
       const body = await readBody(req, FILES_TEXT_BODY).catch((err) => err)

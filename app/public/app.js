@@ -849,7 +849,10 @@ function render() {
   }
   const notice = state.editor || state.sheet?.kind === 'settings' ? null : runNotice()
   if (!state.wide && state.sheet?.kind === 'activity') screen.setAttribute('inert', '')
-  const deleted = deletedFileNotice ? h('div', { class: 'listnotice fs-delete-toast', role: 'status', key: 'file-deleted', text: deletedFileNotice }) : null
+  const deletion = deletedFileNotice
+  const deleted = deletion ? h('div', { class: 'listnotice fs-delete-toast', key: 'file-deleted' },
+    h('span', { class: 'listnotice-text', role: 'status', text: deletion.text }),
+    deletion.restoreId ? h('button', { class: 'listnotice-act', type: 'button', text: 'Undo', disabled: deletion.busy, onclick: () => undoFileDeletion(deletion) }) : null) : null
   morph(root, authExpired() || welcoming ? [screen] : [notice, screen, deleted, ...registry.draw('app.overlay', { slot: 'overlay', screen: state.screen, wide: state.wide })])
   page.fitToolOutputs(); if (modern || state.wide && state.navigator === 'chats') threads.afterRender()
   if (panels.visible()) sidePanel.afterRender()
@@ -1086,7 +1089,30 @@ function hasFileDraft(resource) {
 }
 
 let fileDeleteInFlight = false
-let deletedFileNotice = '', deletedFileNoticeTimer
+let deletedFileNotice = null, deletedFileNoticeTimer
+function showFileDeletionNotice(notice) {
+  deletedFileNotice = notice
+  clearTimeout(deletedFileNoticeTimer)
+  deletedFileNoticeTimer = setTimeout(() => { deletedFileNotice = null; schedule() }, 5000)
+  schedule()
+}
+
+async function undoFileDeletion(notice) {
+  if (notice !== deletedFileNotice || notice.busy) return
+  notice.busy = true
+  clearTimeout(deletedFileNoticeTimer)
+  schedule()
+  const { resource, restoreId, name } = notice
+  try {
+    const result = await api('POST', '/files/restore', { root: resource.root, restore_id: restoreId })
+    if (result?.ok !== true) throw new Error('The server did not confirm the restore.')
+    for (const files of filesControllers()) files.refreshContainingFolder(resource)
+    if (notice === deletedFileNotice) showFileDeletionNotice({ text: `Restored ${name}.` })
+  } catch (error) {
+    if (notice === deletedFileNotice) showFileDeletionNotice({ ...notice, text: error.message, busy: false })
+  }
+}
+
 async function deleteWorkspaceFile(resource) {
   if (fileDeleteInFlight) throw new Error('A file is already being deleted. Try again in a moment.')
   fileDeleteInFlight = true
@@ -1106,9 +1132,8 @@ async function deleteWorkspaceFile(resource) {
     }
     for (const files of controllers) files.removeDeletedFile(resource)
     recoverDeletedFile(resource)
-    deletedFileNotice = `Deleted ${resource.name ?? fileNameOf(path)}.`
-    clearTimeout(deletedFileNoticeTimer)
-    deletedFileNoticeTimer = setTimeout(() => { deletedFileNotice = ''; schedule() }, 5000)
+    const name = resource.name ?? fileNameOf(path)
+    showFileDeletionNotice({ text: `Deleted ${name}.`, name, resource, restoreId: result.restore_id })
   } finally {
     for (const hold of holds) hold.release()
     finish()

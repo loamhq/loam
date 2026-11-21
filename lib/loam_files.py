@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ctypes
 import errno
+import fcntl
 import fnmatch
 import hashlib
 import mimetypes
@@ -20,7 +21,9 @@ import struct
 import time
 import unicodedata
 import zipfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 
 import loam_config as lc
@@ -305,11 +308,13 @@ def capabilities(root: str, parts: list[str], kind: str) -> dict:
     text = kind == "file" and _ext(parts[-1] if parts else "") in TEXT_TYPES
     if root == "vault":
         writable = owner == "user"
-        return {"read": True, "download": kind == "file",
+        renameable = writable and bool(parts) and pinned(root, parts, kind) is None
+        caps = {"read": True, "download": kind == "file",
                 "write": writable and text,
-                "create": writable and kind == "folder",
-                "rename": writable and bool(parts)
-                          and pinned(root, parts, kind) is None}
+                "create": writable and kind == "folder", "rename": renameable}
+        if renameable and kind == "file":
+            caps["delete"] = True
+        return caps
     if root == "spaces":
         return {"read": True, "download": kind == "file",
                 "write": owner in ("user", "schedule") and text,
@@ -1011,6 +1016,22 @@ def _settle(dfd: int, root: str, parts: list[str]) -> dict:
     return _entry(root, parts, st)
 
 
+def _vault_mutation(operation):
+    """Serialize vault saves and renames with trash moves across API workers."""
+    @wraps(operation)
+    def run(payload: dict) -> dict:
+        if payload.get("root") != "vault":
+            return operation(payload)
+        fd = _walk("vault", [])
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            return operation(payload)
+        finally:
+            os.close(fd)
+    return run
+
+
+@_vault_mutation
 def save_text(payload: dict) -> dict:
     """Replace a text file the owner may edit, only if it is still the revision
     they read. ``{root, path, text, base_revision, by?}``: ``by`` names the
@@ -1204,6 +1225,7 @@ def rename_name(raw, what: str = "`name`") -> str:
     return name
 
 
+@_vault_mutation
 def rename(payload: dict) -> dict:
     """Rename or move a vault file or folder, never over anything.
     ``{root, path, name}`` renames it in its folder; ``{root, path, to}``
@@ -1286,6 +1308,158 @@ def rename(payload: dict) -> dict:
     out["from"] = {"root": root, "path": "/".join(parts),
                    "link": link(root, parts)}
     return out
+
+
+# --- Trash -------------------------------------------------------------------
+
+TRASH_PARENT = ".trash"
+TRASH = "loam-files-trash"
+_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _trash_target(payload: dict) -> tuple[str, list[str]]:
+    root, parts = _write_target(payload)
+    if root != "vault" or authority(root, parts) != "user":
+        raise _readonly(root, parts)
+    check_visible(root, parts)
+    why = pinned(root, parts, "file")
+    if why:
+        raise FilesError(403, f"vault/{'/'.join(parts)} stays in place: {why}",
+                         authority="user", pinned=True)
+    return root, parts
+
+
+@contextmanager
+def _trash_root(create: bool = False):
+    vault = _walk("vault", [])
+    try:
+        parent = _open_trash_directory(vault, TRASH_PARENT, create)
+        try:
+            trash = _open_trash_directory(parent, TRASH, create)
+            try:
+                yield trash
+            finally:
+                os.close(trash)
+        finally:
+            os.close(parent)
+    finally:
+        os.close(vault)
+
+
+def _open_trash_directory(parent: int, name: str, create: bool) -> int:
+    if create:
+        try:
+            os.mkdir(name, mode=0o700, dir_fd=parent)
+        except FileExistsError:
+            pass
+        else:
+            os.fsync(parent)
+    return os.open(name, _DIRECTORY, dir_fd=parent)
+
+
+def _sync_moved_file(*directories: int) -> None:
+    for fd in directories:
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+
+
+def _discard_trash_entry(trash: int, entry: int, restore_id: str) -> None:
+    """Best-effort cleanup once the entry no longer contains a file."""
+    try:
+        os.unlink("path", dir_fd=entry)
+    except OSError:
+        pass
+    try:
+        os.rmdir(restore_id, dir_fd=trash)
+        os.fsync(trash)
+    except OSError:
+        pass
+
+
+@_vault_mutation
+def delete(payload: dict) -> dict:
+    """Move a visible, unpinned vault file into trash by atomic rename."""
+    root, parts = _trash_target(payload)
+    where = "/".join(parts)
+    name = parts[-1]
+    source = _walk(root, parts[:-1])
+    try:
+        try:
+            st = os.stat(name, dir_fd=source, follow_symlinks=False)
+        except OSError:
+            raise _missing(root, parts) from None
+        if stat.S_ISDIR(st.st_mode):
+            raise FilesError(400, "only files can be deleted here")
+        if not stat.S_ISREG(st.st_mode):
+            raise _missing(root, parts)
+        with _trash_root(create=True) as trash:
+            restore_id = secrets.token_hex(16)
+            os.mkdir(restore_id, mode=0o700, dir_fd=trash)
+            entry = os.open(restore_id, _DIRECTORY, dir_fd=trash)
+            try:
+                # Make the original pathname durable before the file moves.
+                os.rename(_tmp_in(entry, os.fsencode(where), 0o600), "path",
+                          src_dir_fd=entry, dst_dir_fd=entry)
+                os.fsync(entry)
+                os.fsync(trash)
+                _renameat2(source, name, entry, "file")
+                _sync_moved_file(source, entry)
+            except BaseException:
+                _discard_trash_entry(trash, entry, restore_id)
+                raise
+            finally:
+                os.close(entry)
+    except FileNotFoundError:
+        raise _missing(root, parts) from None
+    except OSError as exc:
+        raise FilesError(409, f"could not move vault/{where} to trash: {exc.strerror}") from None
+    finally:
+        os.close(source)
+    return {"ok": True, "restore_id": restore_id}
+
+
+@_vault_mutation
+def restore(payload: dict) -> dict:
+    """Restore a trash entry only to its original, still available name."""
+    if payload.get("root") != "vault":
+        raise FilesError(400, "only vault files can be restored")
+    restore_id = payload.get("restore_id")
+    if not isinstance(restore_id, str) or not re.fullmatch(r"[0-9a-f]{32}", restore_id):
+        raise FilesError(400, "`restore_id` must come from a file deletion")
+    try:
+        with _trash_root() as trash:
+            entry = os.open(restore_id, _DIRECTORY, dir_fd=trash)
+            try:
+                fd = os.open("path", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                             | os.O_CLOEXEC, dir_fd=entry)
+                try:
+                    path = os.fsdecode(_read_all(fd, 64 * 1024))
+                finally:
+                    os.close(fd)
+                root, parts = _trash_target({"root": "vault", "path": path})
+                dest = _walk(root, parts[:-1])
+                try:
+                    if not stat.S_ISREG(os.stat("file", dir_fd=entry, follow_symlinks=False).st_mode):
+                        raise FilesError(404, "that deletion is no longer in the vault trash")
+                    try:
+                        _renameat2(entry, "file", dest, parts[-1])
+                    except FileExistsError:
+                        raise FilesError(409, f"vault/{path} already exists; "
+                                              "the deleted file is still in trash") from None
+                    row = _settle(dest, root, parts)
+                    _sync_moved_file(entry)
+                finally:
+                    os.close(dest)
+                _discard_trash_entry(trash, entry, restore_id)
+            finally:
+                os.close(entry)
+    except FileNotFoundError:
+        raise FilesError(404, "that deletion is no longer in the vault trash") from None
+    except OSError as exc:
+        raise FilesError(409, f"could not restore the vault file: {exc.strerror}") from None
+    return {**row, "ok": True}
 
 
 # --- Uploading ---------------------------------------------------------------
