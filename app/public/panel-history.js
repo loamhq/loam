@@ -6,26 +6,47 @@ import { h, icon } from './ui.js'
 export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, sideKey }) {
   const history = win.history
   const index = () => history?.state?.panelIndex ?? 0
-  let current = index(), furthest = current, rollback = null
+  const rootIndex = () => history?.state?.panelRoot ?? index()
+  const floor = () => Math.max(rootIndex(), history?.state?.settingsRoot ?? 0)
+  let current = index(), boundary = floor(), furthest = current, rollback = null, dismissal = null, returning = false
+  if (win.location?.href && history?.state?.panelRoot == null) {
+    history?.replaceState?.({ ...history.state, panelIndex: current, panelRoot: current }, '')
+  }
   // If an item was moved to side, visiting its old address must not steal it
   // back. Each entry knows how far back the preceding run of that item began.
   const occupied = href => href && href === sideKey()
   function backSteps() {
     const back = history?.state?.panelBack
-    if (!back || !occupied(back.item)) return index() ? 1 : 0
-    return back.first > 0 ? index() - back.first + 1 : 0
+    if (index() <= floor()) return 0
+    if (!back || !occupied(back.item)) return 1
+    return back.first > floor() ? index() - back.first + 1 : 0
   }
-  const push = (data, title, url) => {
-    const next = index() + 1
-    const item = itemAt(win.location?.href ?? win.location?.pathname ?? '/')
-    const previous = history?.state?.panelBack
-    const panelBack = { item, first: previous?.item === item ? previous.first : index() }
-    history?.pushState?.({ ...data, panelIndex: next, panelBack, panelVisit: win.crypto?.randomUUID?.() ?? String(Math.random()) }, title, url)
-    furthest = current = index()
+  const write = (data, title, url, { root = false, replace = false } = {}) => {
+    const next = index() + (replace ? 0 : 1)
+    const panelRoot = root ? next : rootIndex()
+    let panelBack = history?.state?.panelBack
+    if (root) panelBack = null
+    else if (!replace) {
+      const item = itemAt(win.location?.href ?? win.location?.pathname ?? '/')
+      panelBack = { item, first: panelBack?.item === item ? panelBack.first : index() }
+    }
+    history?.[replace ? 'replaceState' : 'pushState']?.({
+      ...data, panelIndex: next, panelRoot, panelBack,
+      panelVisit: replace && !root ? history.state?.panelVisit : win.crypto?.randomUUID?.() ?? String(Math.random()),
+    }, title, url)
+    current = index()
+    if (!replace) furthest = current
+    boundary = floor()
   }
-  const go = delta => {
-    const steps = delta < 0 ? -backSteps() : delta
+  const push = (data, title, url, options) => write(data, title, url, options)
+  const replace = (data, title, url, options) => write(data, title, url, { ...options, replace: true })
+  const go = (delta, { dismissModal = false } = {}) => {
+    const steps = delta < 0 && !dismissModal ? -backSteps() : delta
     if (!history?.go || !steps) return false
+    if (dismissModal) {
+      if (index() + steps < rootIndex()) return false
+      dismissal = index() + steps
+    }
     history.go(steps)
     return true
   }
@@ -34,6 +55,11 @@ export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, s
   // after both that return and the existing save/discard guard have finished.
   win.addEventListener?.('popstate', event => {
     if (!win.location?.href || !history?.go) return
+    if (returning && index() === current) {
+      returning = false
+      event.stopImmediatePropagation()
+      return
+    }
     if (rollback && index() === rollback.from) {
       event.stopImmediatePropagation()
       rollback.returned = true
@@ -43,6 +69,16 @@ export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, s
     const delta = index() - current
     rollback = null
     if (delta) {
+      const dismissing = dismissal === index()
+      dismissal = null
+      if (index() < boundary && !dismissing) {
+        // The browser already moved. Return before routing the abandoned tab
+        // or disturbing a mounted pane, including an unsaved editor.
+        event.stopImmediatePropagation()
+        returning = true
+        history.go(-delta)
+        return
+      }
       const destination = itemAt(win.location.href)
       if (occupied(destination)) {
         event.stopImmediatePropagation()
@@ -63,10 +99,11 @@ export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, s
       }
     }
     current = index()
+    boundary = floor()
     furthest = Math.max(furthest, current)
     syncSide()
   }, true)
-  return { push, go, canBack: () => backSteps() > 0 }
+  return { push, replace, go, atCurrent: () => index() === current, canBack: () => backSteps() > 0 }
 }
 
 export function historyBackButton(action) {

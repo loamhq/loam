@@ -25,6 +25,25 @@ synthetic conversation and file contents.
 | Phone folder | — | — | [390 light](folder-390-light.webp) | [390 dark](folder-390-dark.webp) |
 | Phone Chats list | — | — | [390 light](chats-list-390-light.webp) | [390 dark](chats-list-390-dark.webp) |
 
+## Tab and rail switches
+
+These comparisons show the results of selecting each destination by its
+visible navigation control. On desktop, the selected rail changes while the
+open pane stays in place. Settings uses its Close control at its root.
+
+| Destination | Desktop light | Desktop dark | Phone light | Phone dark |
+| --- | --- | --- | --- | --- |
+| Chats | [1440 light](tab-chats-1440-light.webp) | [1440 dark](tab-chats-1440-dark.webp) | [390 light](tab-chats-390-light.webp) | [390 dark](tab-chats-390-dark.webp) |
+| Files | [1440 light](tab-files-1440-light.webp) | [1440 dark](tab-files-1440-dark.webp) | [390 light](tab-files-390-light.webp) | [390 dark](tab-files-390-dark.webp) |
+| Apps | [1440 light](tab-apps-1440-light.webp) | [1440 dark](tab-apps-1440-dark.webp) | [390 light](tab-apps-390-light.webp) | [390 dark](tab-apps-390-dark.webp) |
+| Settings | [1440 light](tab-settings-1440-light.webp) | [1440 dark](tab-settings-1440-dark.webp) | [390 light](tab-settings-390-light.webp) | [390 dark](tab-settings-390-dark.webp) |
+
+The left frame uses the app at `d5c3dd6`. The right frame uses the updated trail
+boundaries. The browser test also sends Chromium's Back mouse input at both
+viewport sizes.
+
+## Earlier panel navigation comparisons
+
 The two board rows compare the cards-only board at `9dff3ff` (left) with the
 merged panel history behavior (right). On desktop, Open in Files reveals the
 chat and opens the document beside it. Back can reopen the board while the

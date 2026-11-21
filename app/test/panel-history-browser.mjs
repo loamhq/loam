@@ -22,7 +22,8 @@ try {
     try {
       Object.assign(app.routes, Object.fromEntries(Object.entries(filesHost({ texts: { 'vault:Notes/plan.md': text } }).routes).filter(([path]) => path.includes('/files/'))))
       const notebook = { name: 'Notebook', url: 'https://notebook.example.com/', owner: 'you', frame: true, source: 'yours', access: 'private' }
-      app.routes['GET /v1/apps'] = (_, res) => res.end(JSON.stringify({ apps: [notebook], sources: ['yours'] }))
+      const calendar = { ...notebook, name: 'Calendar', url: 'https://notebook.example.com/calendar' }
+      app.routes['GET /v1/apps'] = (_, res) => res.end(JSON.stringify({ apps: [notebook, calendar], sources: ['yours'] }))
       await context.route(/^https:\/\/(preview|notebook)\.example\.com\//, r => r.fulfill({ contentType: 'text/html', body: `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><style>:root{color-scheme:light dark}body{font:17px/1.6 system-ui;margin:clamp(24px,6vw,84px);color:light-dark(#32372f,#e4e6d9);background:light-dark(#f7f8f2,#262923)}h1{font:2.4em/1.1 Georgia}li{margin:12px 0}</style><h1>Friday review</h1><p>Questions for the weekly planning meeting.</p><ul><li>Which part of the draft needs another read?</li><li>What can we finish before Friday?</li><li>What should we carry into next week?</li></ul>` }))
       const records = await app.f.api('GET', '/threads/a-quieter-week')
       const last = records.messages.at(-1)
@@ -42,6 +43,10 @@ try {
       }
       const page = await context.newPage()
       page.setDefaultTimeout(8000)
+      await page.addInitScript(() => {
+        window.traversals = 0
+        window.addEventListener('popstate', () => { window.traversals++ }, true)
+      })
       const errors = []
       page.on('pageerror', e => { errors.push(e.message); console.error(e.message) })
       await page.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.testPage = page;' }))
@@ -59,6 +64,24 @@ try {
       const stream = main.locator('.tt-stream')
       const docBack = main.getByRole('button', { name: 'Back', exact: true })
       const docReady = () => main.locator('.cm-content').waitFor()
+      const nativeBack = async () => {
+        const mouse = await context.newCDPSession(page)
+        try {
+          for (const type of ['mousePressed', 'mouseReleased']) {
+            await mouse.send('Input.dispatchMouseEvent', { type, button: 'back', buttons: type === 'mousePressed' ? 8 : 0, x: 2, y: 2, clickCount: 1 })
+          }
+        } finally { await mouse.detach() }
+      }
+      const backStops = async () => {
+        const url = page.url()
+        const count = await page.evaluate(() => traversals)
+        await nativeBack()
+        await page.waitForFunction(({ url, count }) => location.href === url && traversals >= count + 2, { url, count })
+          .catch(async error => {
+            const actual = await page.evaluate(() => ({ url: location.href, count: traversals, state: history.state }))
+            throw new Error(`Back did not stop at ${url} from traversal ${count}. Received ${JSON.stringify(actual)}`, { cause: error })
+          })
+      }
       await open('/')
       await page.locator('.tt-row[title="A little room for the week"]').click()
       await chatReady()
@@ -192,9 +215,11 @@ try {
         await main.locator('.tt-board').waitFor()
         await main.getByRole('button', { name: 'Close board', exact: true }).click()
         await page.waitForURL('**/threads/general')
-        await page.evaluate(() => testPage.openSheet({ kind: 'settings', page: 'root' }))
+        if (wide) await page.getByRole('button', { name: 'Settings', exact: true }).click()
+        else await page.evaluate(() => testPage.openSheet({ kind: 'settings', page: 'root' }))
         await page.waitForURL('**/*modal=settings*')
-        await page.goBack()
+        await backStops()
+        await page.keyboard.press('Escape')
         await page.locator('.sheet.settings').waitFor({ state: 'detached' })
         assert.match(page.url(), /threads\/general$/)
 
@@ -247,8 +272,9 @@ try {
           await page.evaluate(() => testPage.panels.openSide({ kind: 'file', root: 'vault', path: 'Notes/page.html' }))
           await page.keyboard.press('Control+]')
           await side.locator('.fs-htmlframe').waitFor()
-          await main.getByRole('button', { name: 'Back', exact: true }).click()
-          await main.locator('.tt-details-head').waitFor()
+          await docBack.click()
+          await main.getByText('Pick an app', { exact: true }).waitFor()
+          await backStops()
         }
       }
       await open('/threads/general')
@@ -269,6 +295,106 @@ try {
         await page.evaluate(() => testPage.goChats())
         await page.locator('.tt-row').first().waitFor()
         await capture('chats-list')
+      }
+
+      // Use the visible navigation controls so the browser receives the same
+      // activation it gets from a tab tap or a rail click.
+      await open('/')
+      const tabs = page.locator(wide ? '.rail-tabs' : '.navpill')
+      const selectTab = name => tabs.getByRole('button', { name, exact: true }).click()
+      const noBack = async () => assert.equal(await main.locator('.panel-history-back').count(), 0)
+      const vault = page.getByRole('button', { name: /Vault Your notes/ })
+      if (wide) {
+        await page.locator('.tt-row[title="A little room for the week"]').click()
+        await chatReady()
+        await main.getByRole('button', { name: 'Board', exact: true }).click()
+        await main.locator('.tt-board').waitFor()
+      }
+      await selectTab('Files')
+      await vault.waitFor()
+      await capture('tab-files')
+      if (!before) { await noBack(); await backStops() }
+      await vault.click()
+      await list.filter({ hasText: /^Notes/ }).first().click()
+      await list.filter({ hasText: 'plan.md' }).waitFor()
+      if (!wide && !before) {
+        await nativeBack(); await list.filter({ hasText: /^Notes/ }).first().waitFor()
+        await page.goForward(); await list.filter({ hasText: 'plan.md' }).waitFor()
+        await list.filter({ hasText: 'plan.md' }).click(); await docReady()
+        await docBack.click(); await list.filter({ hasText: 'plan.md' }).waitFor()
+        await selectTab('Files'); await vault.waitFor()
+        await noBack(); await backStops()
+        await vault.click()
+        await list.filter({ hasText: /^Notes/ }).first().click()
+        await list.filter({ hasText: 'plan.md' }).waitFor()
+      }
+      if (wide) {
+        await list.filter({ hasText: 'plan.md' }).click(); await docReady()
+        await list.filter({ hasText: 'page.html' }).click()
+        await main.locator('.fs-livehead').waitFor()
+        if (!before) {
+          await docBack.click(); await docReady()
+          await docBack.click(); await main.getByText('Pick a file', { exact: true }).waitFor()
+          await list.filter({ hasText: 'plan.md' }).waitFor()
+          await backStops()
+          await page.goForward(); await docReady()
+          await page.goForward(); await main.locator('.fs-livehead').waitFor()
+        }
+      }
+      await selectTab('Apps')
+      await page.locator('.apps-row').first().waitFor()
+      await capture('tab-apps')
+      if (!before) { await noBack(); await backStops() }
+      if (wide) {
+        await page.getByRole('button', { name: 'Open Notebook', exact: true }).click()
+        await main.locator('iframe[title=Notebook]').waitFor()
+        if (!before) {
+          await docBack.click(); await main.getByText('Pick an app', { exact: true }).waitFor()
+          await noBack(); await backStops()
+          await page.goForward(); await main.locator('iframe[title=Notebook]').waitFor()
+          await page.getByRole('button', { name: 'Open Calendar', exact: true }).click()
+          await main.locator('iframe[title=Calendar]').waitFor()
+          await docBack.click(); await main.locator('iframe[title=Notebook]').waitFor()
+        }
+      }
+      await selectTab('Chats')
+      await page.locator('.tt-row[title="A little room for the week"]').waitFor()
+      await capture('tab-chats')
+      if (!before) {
+        await noBack(); await backStops()
+        await page.locator('.tt-row[title="A little room for the week"]').click()
+        await chatReady()
+        if (!wide) {
+          await nativeBack()
+          await page.locator('.tt-row[title="A little room for the week"]').waitFor()
+          await noBack(); await backStops()
+        }
+      }
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.locator('.sheet.settings')
+      await settings.waitFor()
+      await capture('tab-settings')
+      if (!before) {
+        assert.equal(await settings.locator('.backbtn').count(), 0)
+        await settings.getByRole('button', { name: /^Connections/ }).click()
+        await page.waitForURL('**/*section=connections')
+        await settings.locator('#connections-providers .setrow').filter({ hasText: 'Claude Code' }).click()
+        await page.waitForURL('**/*section=provider*')
+        await nativeBack(); await page.waitForURL('**/*section=connections')
+        if (wide) { await nativeBack(); await page.waitForURL('**/*modal=settings') }
+        else { await settings.getByRole('button', { name: 'Settings', exact: true }).click(); await page.waitForURL('**/*modal=settings') }
+        await backStops()
+        await page.goForward(); await page.waitForURL('**/*section=connections')
+        await page.keyboard.press('Escape')
+        await settings.waitFor({ state: 'detached' })
+        assert.equal(new URL(page.url()).searchParams.has('modal'), false)
+        if (!wide) {
+          await selectTab('Apps')
+          await page.reload()
+          await page.locator('.apps-row').first().waitFor()
+          await noBack()
+          await backStops()
+        }
       }
       assert.deepEqual(errors, [])
       console.log(width, mode, 'passed')

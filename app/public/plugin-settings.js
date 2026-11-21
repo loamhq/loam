@@ -126,6 +126,11 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     const row = loader.st.rows.find(row => row.key === st.selected?.key)
     if (row?.on) host.registry?.emit('plugin.settings.opened', { id: row.id })
   }
+  function clear() {
+    st.selected = null; st.detail = null; st.error = ''
+    changed()
+  }
+  const select = row => host.appModalHistory ? host.goSettings('plugins', row.id) : open(row)
   async function open(row) {
     hostSettings = null; secretSettings = null; resume = null
     st.selected = row; st.detail = null; st.detailError = ''; st.opening = true; st.guide = false; st.remove = false; st.error = ''; st.focusDetail = true; changed()
@@ -221,7 +226,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     const unreviewed = origin === 'link' && reviewKnown()
     const control = pluginSwitch(row) ?? (row.switch === 'listed' ? null : h('span', { class: 'plugin-state', text: 'Unavailable' }))
     return h('div', { class: 'plugin-list-item', key: row.key }, h('div', { class: 'plugin-list-row' },
-      h('button', { type: 'button', class: 'setrow plugin-row', onclick: () => open(row), 'aria-label': `About ${row.name || row.id}`, 'aria-description': meta(row, origin) },
+      h('button', { type: 'button', class: 'setrow plugin-row', onclick: () => select(row), 'aria-label': `About ${row.name || row.id}`, 'aria-description': meta(row, origin) },
         pluginIcon(row),
         h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: row.name || row.id }), h('div', { class: 'setrow-sub', text: row.description || (row.on ? 'Enabled' : row.id === 'git-backup' ? 'Off-box backup is off' : 'Disabled') }),
           // Backup off is a state worth saying under its promise (f8d860d).
@@ -236,7 +241,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     const inUse = row.effective && theme.value.theme === row.id
     const state = row.broken ? 'Unavailable' : inUse ? 'In use' : 'Not in use'
     return h('div', { class: 'plugin-theme-card', key: row.key },
-      h('button', { type: 'button', class: 'plugin-theme-about', onclick: () => open(row),
+      h('button', { type: 'button', class: 'plugin-theme-about', onclick: () => select(row),
         'aria-label': `About ${name}`, 'aria-description': `${meta(row, origin)} · ${state}` },
         themePreview(row.id),
         h('span', { class: 'plugin-theme-label' },
@@ -351,7 +356,8 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       ontoggle: event => { if (event.currentTarget.isConnected) st.how[row.id] = event.currentTarget.open } },
       h('summary', { class: 'plugin-how-summary' }, h('span', { text: 'How it works' }), icon.chevronDown(14)),
       shots, plain ? h('div', { class: 'md plugin-about' }, ...[host.markdown?.(plain, { soft: true }) ?? h('p', { text: plain })].flat()) : null) : null
-    return [h('button', { class: 'backbtn plugin-back', 'aria-label': 'Back to Plugins', onclick: () => { st.selected = null; st.detail = null; st.error = ''; changed() } }, icon.chevronLeft(18), 'Plugins'),
+    const back = { class: 'backbtn plugin-back', 'aria-label': 'Back to Plugins' }
+    return [host.appModalHistory ? host.settingsBack('Plugins', 'plugins', back) : h('button', { ...back, onclick: clear }, icon.chevronLeft(18), 'Plugins'),
       h('header', { class: 'plugin-hero' }, pluginIcon(row),
         h('div', { class: 'plugin-hero-words' }, host.settingsHead(row.name || row.id),
           aboutOrigin(row), row.description ? h('p', { class: 'plugin-promise', text: row.description }) : null)),
@@ -427,5 +433,5 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       }
     }
   }
-  return { st, view, open, opened, sync, checkUpdates }
+  return { st, view, open, clear, opened, sync, checkUpdates }
 }

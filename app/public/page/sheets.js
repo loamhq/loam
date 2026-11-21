@@ -19,10 +19,10 @@ function closeActivityDialogs(sheet) {
   if (controller?.st.detail) controller.closeDetail()
 }
 
-function openSheet(sheet) {
+function openSheet(sheet, { restoring = false } = {}) {
   if (sheet.kind === 'running' || (sheet.kind === 'settings' && sheet.page === 'running')) { host.goActivity(); host.running.load(); return }
   if (sheet.kind === 'settings') { if (CONNECTIONS_GROUP[sheet.page]) sheet.group = CONNECTIONS_GROUP[sheet.page]; sheet.page = settingsHome(sheet.page, sheet.provider) }
-  if (host.state.wide && sheet.kind === 'settings' && sheet.page === 'root' && host.state.sheet?.kind === 'settings') { closeSheet({ historyBack: true }); return }
+  if (!restoring && host.state.wide && sheet.kind === 'settings' && sheet.page === 'root' && host.state.sheet?.kind === 'settings') { closeSheet({ historyBack: true }); return }
   if (host.state.sheet?.kind === 'settings' && sheet.kind !== 'settings') host.providerSignIn.cancel()
   if (host.state.sheet?.kind !== sheet.kind) closeActivityDialogs(host.state.sheet)
   host.registry.emit('sheet.changing', { previous: host.state.sheet, sheet })

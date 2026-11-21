@@ -108,7 +108,18 @@ reloadable address.
 
 Each header has a leading Back chevron when its panel has a previous location.
 On a phone, a direct link uses the view’s existing way up to its chat or file
-list. Desktop rail browsing still chooses a list independently of main.
+list. Selecting Chats, Files, or Apps on the tab bar starts a new trail at that
+tab's main page. Browser Back at that boundary leaves the tab in place when
+the earlier entry belongs to this page. A browser can still leave a cold
+link for the page that opened it. A link from a chat, board, or profile to a
+file stays in the trail where the link was opened.
+
+Desktop rail browsing still chooses a list independently of the main pane.
+Switching sections ends the main pane's earlier trail and keeps its contents
+visible while you browse. The first item you open in the new section can go
+Back to that section's list. Settings has its own root and Back trail.
+Use Close to dismiss Settings from any level.
+
 Boards and thread details can be reopened with browser Forward or a direct
 thread link with `?view=board` or `?view=details`.
 

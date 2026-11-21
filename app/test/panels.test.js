@@ -213,7 +213,7 @@ test('side history truncates a forward branch, skips main, and ends when the pan
   assert.equal(panels.canSideBack(), false)
 })
 
-test('panel history restores reading positions in the browser and keeps edits behind the save guard', { skip: !process.env.LOAM_PLAYWRIGHT, timeout: 120000 }, async t => {
+test('browser Back stops at the tab boundary and preserves reading positions and the save guard', { skip: !process.env.LOAM_PLAYWRIGHT, timeout: 120000 }, async t => {
   const { stdout } = await promisify(execFile)(process.execPath, ['test/panel-history-browser.mjs'], { timeout: 110000 })
   assert.match(stdout, /390 dark passed/)
   t.diagnostic(stdout.trim())
