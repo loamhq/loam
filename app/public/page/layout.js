@@ -16,6 +16,9 @@ function nav() {
     // `swap` once selection has been used: the tab bar coming back in place of
     // the selection's bar is the same change the other way.
     { class: 'nav', key: 'nav' },
+    !host.state.wide && host.state.mainItem && host.workspaceHistory.state.front === 'list' ?
+      h('button', { class: 'roundbtn', 'aria-label': 'Return to open panel', title: 'Return to open panel',
+        onclick: () => { host.workspaceHistory.front('main'); host.schedule() } }, icon.panelRight(20)) : null,
     h(
       'div',
       { class: 'navpill' },
@@ -132,10 +135,8 @@ function listColumn() {
 }
 
 function filesList(collapse) {
-  const go = (root, path, options) => host.goFiles(root, path, { ...options, browse: true })
-  Object.assign(go, host.goFiles)
-  const historyBack = host.state.mainItem ? null : host.backButton('main')
-  return folderView(host.files, { go, wide: true, home: host.filesHome(), collapse, historyBack, showParent: Boolean(host.state.mainItem) })
+  return folderView(host.files, { go: host.goFiles, wide: true, home: host.filesHome(), collapse,
+    historyBack: host.backButton('list'), showParent: false })
 }
 
 // Hidden or shown, and remembered on this device — like the theme and unlike a
@@ -149,13 +150,10 @@ function setCollapsed(value) {
 
 function mainPane() {
   const at = host.state.mainItem
-  const filesListOpen = !at && host.state.screen === 'files' && host.state.navigator === 'files'
-  const folderInPane = !at && host.state.screen === 'files' && !filesListOpen
-  const appsInPane = !at && host.state.screen === 'apps' && host.state.navigator !== 'apps'
-  const empty = at ? null : folderInPane ? folderView(host.files, { go: host.goFiles, wide: false, home: host.filesHome(), historyBack: host.backButton('main'), showParent: false })
-    : appsInPane ? host.apps.view({ list: true }) : host.state.navigator === 'files' ? filesPane(true)
-      : host.state.navigator === 'apps' ? host.apps.view({ empty: true }) : host.threads.pane({ empty: true })
-  const back = !filesListOpen && !folderInPane && (!at || !['file', 'thread', 'profile', 'app'].includes(at.kind) || (at.kind === 'app' && !host.apps.st.selected)) ? host.backButton('main') : null
+  const empty = at ? null : h('div', { class: 'pane-body', key: 'empty-main' },
+    host.registry.draw('app.overlay', { slot: 'player' }),
+    emptyState({ object: 'window', title: 'Choose an item', body: 'Open a chat, file or app from the list.' }))
+  const back = at && (!['file', 'thread', 'profile', 'app', 'directory'].includes(at.kind) || (at.kind === 'app' && !host.apps.st.selected)) ? host.backButton('main') : null
   return renderPanel({ host, item: at, empty, header: back ? h('header', { class: 'panel-history-head' }, back) : null,
     before: host.state.collapsed ? [h('button', { class: 'iconbtn showbar', key: 'show-sidebar', title: 'Show sidebar', onclick: () => setCollapsed(false) }, icon.panelLeft(18))] : [] })
 }

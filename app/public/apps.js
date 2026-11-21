@@ -70,7 +70,7 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
   openBrowser = url => globalThis.open(url, '_blank', 'noopener,noreferrer'), copy, side = () => null, navigate = null, isCurrent = () => true, leave = null, historyButton = () => null }) {
   const st = { details: null, media: new Map(), readyImages: new Set(), failedImages: new Set(), apps: [], loaded: false, loading: false, error: '', selected: null, copied: false, copyError: '' }
   let request = 0, returnTo = null, mediaRequest = 0, mediaTimer, pressTimer, press, suppressedURL, suppressedUntil = 0
-  async function load() {
+  async function load({ list = false } = {}) {
     const ticket = ++request
     st.loading = true; st.error = ''; redraw()
     try {
@@ -79,14 +79,14 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
       st.apps = apps; st.loaded = true
       if (st.details) st.details = apps.find(app => app.url === st.details.url) ?? null
       loadMedia()
-      if (st.selected) st.selected = apps.find(app => app.url === st.selected.url) ?? null
+      if (!list && st.selected) st.selected = apps.find(app => app.url === st.selected.url) ?? null
     } catch (error) {
       if (ticket === request) st.error = [404, 405].includes(error.status) ? 'Apps are not available from this host yet.' : error.message
     } finally { if (ticket === request) { st.loading = false; redraw() } }
   }
   function open(app, node, { routed = false } = {}) {
     if (appUnavailable(app) && !wide()) return
-    if (!wide() || !canFrame(app)) return openBrowser(appURL(app.url))
+    if ((!wide() && !routed) || !canFrame(app)) return openBrowser(appURL(app.url))
     if (navigate && !routed) return navigate({ kind: 'app', app })
     st.selected = app; st.copied = false; st.copyError = ''; returnTo = node; redraw()
   }
@@ -204,9 +204,9 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
       { title: app.name, width: 360, anchor: `[data-app-details=${JSON.stringify(app.url)}]`, close: () => { st.details = null; redraw() } })
   }
   function view(options = {}) { return registry.component('core.apps', { args: [options], variant: options.list ? 'list' : 'pane', state: st, defaultView: () => builtinView(options) }) }
-  function builtinView({ list = false, collapse = null, empty = false } = {}) {
+  function builtinView({ list = false, collapse = null, empty = false, embedded = false } = {}) {
     const app = empty ? null : st.selected
-    if (!list && app && wide()) return h('div', { class: 'apps-frame', key: `app:${app.url}`, 'aria-label': app.name },
+    if (!list && app && (wide() || embedded)) return h('div', { class: 'apps-frame', key: `app:${app.url}`, 'aria-label': app.name },
       h('div', { class: 'apps-toolbar' },
         historyButton(),
         h('span', { class: 'apps-frame-address', text: appAddress(app.url), title: app.url }),
@@ -216,8 +216,6 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
         h('span', { class: 'apps-copy-status', role: 'status', text: st.copyError || (st.copied ? 'Copied' : '') })),
       appUnavailable(app) ? h('div', { class: 'apps-empty', role: 'status' }, h('p', { text: `${app.name} · ${appUnavailable(app)}` }), h('p', { class: 'note', text: 'Manage this plugin in Settings › Plugins.' }))
         : h('iframe', { class: 'apps-embed', key: app.url, src: appURL(app.url), title: app.name, referrerpolicy: 'strict-origin-when-cross-origin', sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads' }))
-    // No apps at all: on a wide screen the pane says so, with its one action,
-    // and the list column beside it does not say it twice.
     const none = st.loaded && !st.apps.length && !st.error
     const noApps = () => emptyState({ object: 'window', title: 'No apps yet', body: 'An agent can build an app for you.',
       action: h('button', { class: 'pillbtn primary', text: 'Build an app', onclick: newThread }), props: { class: 'apps-empty' } })
@@ -227,16 +225,16 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
         h('div', { class: 'display', text: 'Pick an app' }),
         st.error ? h('div', { class: 'why', text: st.error }) : null))
     return h(list ? 'div' : 'main', { class: `apps-page${list ? ' apps-list' : ''}`, key: 'apps', 'aria-label': 'Apps' },
-      list ? h('div', { class: 'list-head' }, h('h1', { class: 'display', text: 'Apps' }), collapse) : h('header', { class: 'apps-list-heading' }, historyButton(), h('h1', { class: 'display', text: 'Apps' })),
+      list ? h('div', { class: 'list-head' }, h('h1', { class: 'display', text: 'Apps' }), collapse) : h('header', { class: 'apps-list-heading' }, h('h1', { class: 'display', text: 'Apps' })),
       h('div', { class: list ? 'scroll apps-list-scroll' : 'apps-catalog' },
-      st.error ? h('div', { class: 'apps-notice', role: 'alert' }, h('p', { text: st.error }), h('button', { class: 'pillbtn content-mark', text: 'Try again', disabled: st.loading, onclick: load })) : null,
+      st.error ? h('div', { class: 'apps-notice', role: 'alert' }, h('p', { text: st.error }), h('button', { class: 'pillbtn content-mark', text: 'Try again', disabled: st.loading, onclick: () => load({ list: true }) })) : null,
       !st.loaded && st.loading ? h('p', { class: 'muted', role: 'status', text: 'Loading apps…' }) : null,
       ...registry.draw('apps.source', { apps: st.apps, row, open, defaultView: (source, title) => {
         const apps = st.apps.filter(app => app.source === source)
         return apps.length ? h('section', { key: source, class: 'apps-group', 'aria-label': title },
           new Set(st.apps.map(app => app.source)).size > 1 ? h('h2', { class: 'kicker', text: title }) : null, h('div', { class: 'apps-group-list' }, ...apps.map(row))) : null
       } }),
-      none && !(list && wide()) ? noApps() : null), detailsView())
+      none ? noApps() : null), detailsView())
   }
   return { st, load, open, back, copyLink, view }
 }

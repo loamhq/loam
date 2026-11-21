@@ -292,9 +292,9 @@ try {
       await page.goBack(); await page.waitForFunction(a => __panels.threads.st.open.thread.id === a, a)
       assert.equal(await page.evaluate(() => __panels.panels.st.side.id), b)
       await page.goForward(); await page.waitForFunction(() => __panels.threads.st.open.thread.id === 'general')
-      // Selecting the side item in the main slot moves it and closes side.
+      // An ordinary open targets only the selected panel.
       await page.evaluate(b => __panels.threads.open(b), b)
-      await side.waitFor({ state: 'detached' })
+      await side.locator('.tt-thread').waitFor()
       assert.equal(await page.evaluate(() => __panels.threads.st.open.thread.id), b)
       await page.evaluate(a => __panels.threads.open(a), a)
       await page.evaluate(b => __panels.panels.openSide({ kind: 'thread', id: b }), b)
@@ -356,7 +356,7 @@ try {
       await settledSplit(56)
       await page.emulateMedia({ reducedMotion: 'reduce' })
       // Files rows and their existing menu use exactly the same destination
-      // rule as a thread row, including the duplicate-item swap.
+      // rule as a thread row, including when both select the same file.
       await page.evaluate(() => __panels.goFiles('vault', 'Notes', { isFile: false }))
       if (width < 1700) await main.getByRole('button', { name: 'Show sidebar', exact: true }).click()
       await page.locator('.listcol .fs-entry').filter({ hasText: 'plan.md' }).getByRole('button', { name: 'Open to the side', exact: true }).click()
@@ -368,11 +368,10 @@ try {
       await main.getByRole('button', { name: 'This file', exact: true }).click()
       await page.locator('.fs-sheet').getByRole('button', { name: 'Open to the side', exact: true }).click()
       await page.waitForFunction(() => __panels.sidePanel.host.files.st.file?.path === 'Notes/page.html')
-      await main.locator('.fs-preview').waitFor()
+      await main.locator('.fs-iframe').waitFor()
       assert.equal(await page.evaluate(() => __panels.sidePanel.host.panels.st.side.path), 'Notes/page.html')
-      assert.equal(await main.locator('.fs-preview').count(), 1)
       await page.goto(`${app.url}/files/vault/Notes/page.html`); await page.waitForFunction(() => globalThis.__panels)
-      await main.locator('.fs-iframe').waitFor(); assert.equal(await side.count(), 0, 'a cold link to the held side file moves it into main')
+      await main.locator('.fs-iframe').waitFor(); assert.equal(await side.count(), 0, 'a cold link without a side opens main alone')
       await main.locator('.fs-iframe').contentFrame().getByRole('button', { name: 'Plant a thought' }).click()
       await page.evaluate(b => __panels.panels.openSide({ kind: 'thread', id: b }), b)
       await side.locator('.tt-thread').waitFor()

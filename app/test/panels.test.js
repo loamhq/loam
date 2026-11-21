@@ -28,19 +28,19 @@ test('plain list navigation changes main while the explicitly chosen side stays 
   assert.deepEqual(main.item(), thread('another'))
   assert.deepEqual(side.item(), file('Notes/plan.md'))
 })
-test('the side gesture fills the side; opening its item in main moves it and closes side', () => {
+test('opening the same item in main keeps the side mounted', () => {
   const { panels, main, side } = fixture(), chosen = file('Notes/plan.md')
   panels.openSide(chosen)
   assert.deepEqual(side.item(), chosen); assert.deepEqual(main.item(), thread('main'))
   panels.openMain(chosen)
-  assert.deepEqual(main.item(), chosen); assert.equal(side.item(), null); assert.equal(panels.visible(), false)
+  assert.deepEqual(main.item(), chosen); assert.deepEqual(side.item(), chosen); assert.equal(panels.visible(), true)
 })
-test('sending main to an occupied side swaps; sending it to an empty side leaves main empty', () => {
+test('opening the main item in an occupied or empty side changes only side', () => {
   const { panels, main, side } = fixture()
   panels.openSide(file('Notes/plan.md')); panels.openSide(thread('main'))
-  assert.deepEqual(main.item(), file('Notes/plan.md')); assert.deepEqual(side.item(), thread('main'))
+  assert.deepEqual(main.item(), thread('main')); assert.deepEqual(side.item(), thread('main'))
   panels.close(); panels.openSide(main.item())
-  assert.equal(main.item(), null); assert.deepEqual(side.item(), file('Notes/plan.md'))
+  assert.deepEqual(main.item(), thread('main')); assert.deepEqual(side.item(), thread('main'))
 })
 test('promote and swap preserve at most two different items', () => {
   const { panels, main, side } = fixture()
@@ -112,11 +112,11 @@ test('an unsaved edit holds the navigation and its original panel until its guar
   const { panels, main, side } = fixture()
   panels.openSide(file('Notes/plan.md'))
   let retry
-  side.guard = go => { retry = go; return false }
+  main.guard = go => { retry = go; return false }
   assert.equal(panels.openMain(file('Notes/plan.md')), false)
   assert.deepEqual(main.item(), thread('main')); assert.deepEqual(side.item(), file('Notes/plan.md'))
-  side.guard = () => true; retry()
-  assert.deepEqual(main.item(), file('Notes/plan.md')); assert.equal(side.item(), null)
+  main.guard = () => true; retry()
+  assert.deepEqual(main.item(), file('Notes/plan.md')); assert.deepEqual(side.item(), file('Notes/plan.md'))
 })
 test('moving a thread carries unsaved Board edits, attachments and its reading anchor without old prose callbacks', t => {
   installDom()
@@ -152,24 +152,6 @@ test('chat file links and HTML preview actions work on phone and desktop in Chro
   const { stdout } = await promisify(execFile)(process.execPath, ['test/chat-file-links-browser.mjs'], { timeout: 80000 })
   assert.deepEqual(stdout.trim().split('\n'), ['390 light passed', '390 dark passed', '1440 light passed', '1440 dark passed'])
   t.diagnostic(stdout.trim())
-})
-
-test('side history truncates a forward branch, skips main, and ends when the pane closes', () => {
-  const { panels, main, side } = fixture()
-  const first = thread('one'), second = thread('two'), third = thread('three')
-  panels.openSide(first)
-  assert.equal(panels.canSideBack(), false)
-  panels.openSide(second); panels.openSide(third)
-  panels.openMain(second)
-  assert.ok(panels.goSide(-1))
-  assert.equal(itemKey(side.item()), itemKey(first))
-  assert.equal(itemKey(main.item()), itemKey(second))
-  assert.ok(panels.goSide(1))
-  assert.equal(itemKey(side.item()), itemKey(third))
-  panels.goSide(-1); panels.openSide(file('Notes/outline.md'))
-  assert.equal(panels.goSide(1), false)
-  panels.close(); panels.openSide(first)
-  assert.equal(panels.canSideBack(), false)
 })
 
 test('browser Back stops at the tab boundary and preserves reading positions and the save guard', { skip: !process.env.LOAM_PLAYWRIGHT, timeout: 120000 }, async t => {

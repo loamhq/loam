@@ -1040,7 +1040,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     const visible = st.archived ? rows.slice(0, archiveLimit) : rows
     return h('section', { class: `${st.wide ? 'listcol' : 'screen home'} tt-list${st.wide && collapsed() ? ' away' : ''}`, inert: st.wide && collapsed() ? true : null, 'aria-hidden': st.wide && collapsed() ? 'true' : null, 'aria-label': 'Threads' },
       listHeading({ wide: st.wide, title: st.archived ? 'Archived' : 'Chats',
-        leading: st.archived ? historyButton('Back to Chats') ?? round('Back to Chats', icon.chevronLeft(18), () => { if (!archiveAddress(false)) showArchived(false) }) : !st.wide ? historyButton() : null,
+        leading: st.archived ? historyButton('Back to Chats', 'list') ?? round('Back to Chats', icon.chevronLeft(18), () => { if (!archiveAddress(false)) showArchived(false) }) : null,
         props: { class: `${st.wide ? 'list-head' : 'home-head'}${st.archived ? ' tt-archived-head' : ''}` }, actions: [
         !st.archived ? round('New thread', icon.pencil(18), () => create(), { class: `iconbtn${listIsMain() && !st.open && !st.personaMenu ? ' secondary' : ''}`, disabled: st.creating }) : null,
         round('Search threads', icon.search(18), () => { st.searchOpen = !st.searchOpen; st.focusSearch = st.searchOpen; redraw() }, { 'aria-expanded': String(Boolean(st.searchOpen)) }),

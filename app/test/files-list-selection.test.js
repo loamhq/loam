@@ -86,7 +86,7 @@ test('a different file open in the side panel gets a quieter side mark, and prom
 })
 
 test('navigating back into a folder containing the open file scrolls the marked row into view', async () => {
-  click(find(root, 'fs-back'))
+  click(find(find(root, 'workspace-list'), 'panel-history-back'))
   await until(() => entryNamed('Notes') && !entryNamed('page.html'))
 
   clearWrites()
@@ -112,9 +112,9 @@ test('shortcut rows mark open main and side files the same way', async () => {
   await until(() => find(root, 'side-pane') && hasClass(entryNamed('plan.md'), 'in-side'))
 
   // Navigate up to Vault, then up to Files home where Shortcuts live.
-  click(find(root, 'fs-back'))
+  click(find(find(root, 'workspace-list'), 'panel-history-back'))
   await until(() => text(find(root, 'fs-title')) === 'Vault')
-  click(find(root, 'fs-back'))
+  click(find(find(root, 'workspace-list'), 'panel-history-back'))
   await until(() => find(root, 'fs-shortcuts'))
 
   const shortcuts = find(root, 'fs-shortcuts')

@@ -88,6 +88,7 @@ try {
         await page.evaluate(() => document.fonts.ready)
         await page.screenshot({ path: join(out, `${name}-${width}-${mode}.png`), animations: 'disabled' })
       }
+      const launch = async () => { await page.goto('about:blank'); await page.goto(app.url) }
       const openSettingsProfile = async () => {
         await button('Settings').click()
         await page.locator('.sheet.settings').getByRole('button', { name: /^Agents(?: |$)/ }).click()
@@ -105,7 +106,7 @@ try {
         ['skills', 'Skills', files.skills, true],
       ]
       for (const [key, label, destination, folder] of cases) {
-        await page.goto(app.url)
+        await launch()
         await ready()
         if (!wide) await back()
         const panel = new URL(page.url()).pathname
@@ -141,7 +142,7 @@ try {
 
       const openThreadFile = name => page.getByRole('link', { name, exact: true }).click(wide ? { modifiers: ['Control'] } : {})
       for (const [key, name] of [['soul', 'soul file'], ['config', 'config file'], ['map', 'memory map']]) {
-        await page.goto(app.url)
+        await launch()
         await ready()
         await openThreadFile(name)
         await fileReady()
@@ -155,7 +156,7 @@ try {
       }
 
       if (wide) {
-        await page.goto(app.url)
+        await launch()
         await ready()
         await page.getByRole('link', { name: 'soul file', exact: true }).click()
         const side = page.getByRole('region', { name: 'Side panel' })
@@ -168,7 +169,7 @@ try {
         await capture('thread-side-back')
       }
 
-      await page.goto(app.url)
+      await launch()
       await ready()
       await openThreadFile('soul file')
       await fileReady()
@@ -177,7 +178,7 @@ try {
       if (baseline) await page.getByRole('alert').filter({ hasText: 'This thread was deleted.' }).waitFor()
       else {
         await page.waitForURL(url => url.pathname === '/')
-        await page.getByText(wide ? 'Good things start here.' : 'Room for a new thought', { exact: true }).waitFor()
+        await page.getByText(wide ? 'Choose an item' : 'Room for a new thought', { exact: true }).waitFor()
         await page.goForward()
         await fileReady()
         await page.goBack()
@@ -205,7 +206,7 @@ try {
           await back()
           await page.waitForURL(url => url.pathname === '/' && !url.searchParams.has('modal'))
           await profile.waitFor({ state: 'detached' })
-          await page.getByText('Good things start here.', { exact: true }).waitFor()
+          await page.getByText('Choose an item', { exact: true }).waitFor()
         }
         assert.deepEqual(errors, [])
       }

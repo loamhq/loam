@@ -10,8 +10,8 @@ export function mount(host, options = {}) {
     changedAgent: agent => host.changedAgent?.(agent), agents: () => host.state.agents.list, agentsReady: () => host.state.agentsReady, providers: () => host.state.providers,
     running: host.running, rail: host.rail, nav: host.nav, openProfile: host.goProfile, openSettings: (page, provider) => host.goSettings?.(page, provider),
     listIsMain: () => ['home', 'threads'].includes(host.state.screen),
-    visitId: () => host.panelId === 'side' ? host.panels.sideVisit() : globalThis.history?.state?.panelVisit ?? 'initial',
-    historyButton: label => host.backButton(host.panelId, label),
+    visitId: () => host.panelId === 'side' ? host.workspaceHistory.current('side')?.id : globalThis.history?.state?.panelVisit ?? 'initial',
+    historyButton: (label, surface = host.panelId) => host.backButton(surface, label),
     messageState: options.messageState ?? createMessageState(),
     renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event, { chat: extra.chatLinks }) }),
     openBoardFile: (path, id) => {

@@ -189,7 +189,7 @@ test('profile file actions open structured host roots and paths directly', () =>
   const nodes = mountProfile(host).body('test'), view = nodes[0]
   all(view, 'setrow').find(n => text(n) === 'Soul').fire('click', {})
   all(view, 'setrow').find(n => text(n) === 'Open workspace').fire('click', {})
-  assert.deepEqual(opened, [['spaces', 'test/soul.md', { isFile: true }], ['spaces', 'test', { isFile: false, routed: true }]])
+  assert.deepEqual(opened, [['spaces', 'test/soul.md', { isFile: true }], ['spaces', 'test', { isFile: false, panelLink: true }]])
 })
 
 test('profile status refresh preserves the selected tab and cannot overwrite a later edit', async () => {

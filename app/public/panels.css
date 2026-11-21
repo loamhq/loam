@@ -132,3 +132,8 @@
 @container pane (max-width:760px) {
   .fs-custom-view > .panel-history-back { top:6px; }
 }
+
+.phone-workspace, .phone-list, .phone-panel { flex:1; min-height:0; display:flex; flex-direction:column; }
+.phone-panel[hidden] { display:none; }
+.phone-panel > .nav { position:static; flex:none; padding:4px 12px max(6px,env(safe-area-inset-bottom)); }
+#app[data-keyboard=open] .phone-panel > .nav { display:none; }

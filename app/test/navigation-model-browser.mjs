@@ -3,7 +3,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { profileHost } from './agent-profile-host.mjs'
 import { filesHost } from './files-host.js'
-import { readAnswer, row } from './fixtures/files-contract.js'
+import { listAnswer, readAnswer, row } from './fixtures/files-contract.js'
 
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright')
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox'] })
@@ -46,11 +46,9 @@ try {
       const button = (name, scope = page) => scope.getByRole('button', { name, exact: true })
       const tab = name => button(name, page.locator(wide ? '.rail-tabs' : '.navpill').filter({ visible: true })).click()
       const settings = page.locator('.sheet.settings')
-      const enroute = path => page.waitForURL(url => url.pathname === path)
       const thread = () => page.locator('.tt-row[title="A little room for the week"]').click()
       const folder = name => page.locator('.fs-entry .setrow').filter({ has: page.locator('.fs-name').filter({ hasText: name }) }).first()
       const vault = page.getByRole('button', { name: /Vault Your notes/ }).first()
-      const back = () => button('Back', wide ? page.locator('.desk') : main).click()
       const noBack = () => page.locator('.panel-history-back:visible').first().waitFor({ state: 'hidden' })
       const snap = async name => {
         if (!out) return
@@ -74,150 +72,144 @@ try {
       }
       const preview = main.locator('.fs-preview')
       const chatLink = main.getByRole('link', { name: 'the weekly plan', exact: true })
-      const path = () => new URL(page.url()).pathname
       const chooseNotes = async () => { await vault.click(); await folder('Notes').click(); await folder('plan.md').waitFor() }
 
-      await start('/')
-      await tab('Files'); await chooseNotes()
-      if (wide) { await folder('plan.md').click(); await preview.waitFor() }
-      await tab('Apps'); await page.locator('.apps-row').first().waitFor()
-      await snap('place-apps')
-      if (!before) {
-        await noBack(); await blockedBack(); assert.equal(path(), '/apps')
-        if (wide) {
-          await button('Open Notebook').click(); await main.locator('iframe[title=Notebook]').waitFor()
-          await button('Open Calendar').click(); await main.locator('iframe[title=Calendar]').waitFor()
-          await back(); await main.locator('iframe[title=Notebook]').waitFor()
-          await nativeBack(); await main.getByText('Pick an app', { exact: true }).waitFor()
-        } else {
-          const opened = context.waitForEvent('page')
-          await button('Open Notebook in browser').click()
-          const external = await opened
-          await external.waitForURL('https://notebook.example.com/Notebook')
-          await external.close()
-          assert.equal(path(), '/apps')
-        }
-      }
-      await tab('Chats'); await page.locator('.tt-row').first().waitFor()
-      await snap('place-chats')
-      if (!before) { await noBack(); await blockedBack(); assert.equal(path(), '/') }
-      await tab('Files')
-      if (!before || !wide) await vault.waitFor()
-      await snap('place-files')
-      if (!before) { await noBack(); await blockedBack(); assert.equal(path(), '/files') }
-      if (before && wide) await start('/files/vault/Notes')
-      else await chooseNotes()
-      await folder('plan.md').waitFor()
-      await snap('files-folder')
-      if (!before) {
-        await back(); await enroute('/files/vault'); await folder('Notes').waitFor()
-        await nativeBack(); await enroute('/files'); await vault.waitFor(); await noBack()
-        await chooseNotes()
-      }
-      await folder('plan.md').click(); await preview.waitFor()
-      if (!before) {
-        await page.reload(); await preview.waitFor()
-        await back(); await enroute('/files/vault/Notes'); await folder('plan.md').waitFor()
-      } else if (!wide) { await page.goto(app.url + '/files/vault/Notes'); await folder('plan.md').waitFor() }
+      const list = wide ? page.locator('.workspace-list') : page.locator('#app')
+      const listBack = () => button('Back', list).click()
+      const panelBack = () => button('Back', main).click()
+      const old = row('vault', 'Notes/Old')
+      const outline = row('vault', 'Notes/Old/outline.md')
+      const listRoute = app.routes['GET /v1/files/list'], readRoute = app.routes['GET /v1/files/read']
+      app.routes['GET /v1/files/list'] = (req, res, url) => url.searchParams.get('path') === old.path
+        ? json(res, listAnswer(old, [outline])) : listRoute(req, res, url)
+      app.routes['GET /v1/files/read'] = (req, res, url) => url.searchParams.get('path') === outline.path
+        ? json(res, readAnswer(outline, '# Meeting outline\n\nDecide what to carry into next week.', 'sha256:outline')) : readRoute(req, res, url)
 
-      if (wide) { await tab('Chats'); await thread(); await chatLink.waitFor() }
-      const panelBefore = path()
-      const historyBefore = await page.evaluate(() => history.length)
-      const entryBefore = await page.evaluate(() => history.state?.panelIndex)
+      // A chat stays mounted through Files → Vault → Notes → Old.
+      await start('/'); await thread(); await chatLink.waitFor()
+      await snap('chat')
+      const chatId = await page.evaluate(() => {
+        window.firstChat = navTest.threads.st.open
+        return firstChat.thread.id
+      })
+      if (!wide && before) await panelBack()
+      await tab('Files'); await chooseNotes(); await folder('Old').click(); await folder('outline.md').waitFor()
+      await snap('browse')
+      if (!before) {
+        assert.equal(await page.evaluate(() => firstChat === navTest.threads.st.open), true)
+        if (wide) await chatLink.waitFor()
+      }
+      // Open the new document in main, then walk only main.
+      await folder('outline.md').click(); await preview.getByText('Meeting outline').waitFor()
+      await snap('file')
+      await panelBack()
+      if (!before) {
+        await chatLink.waitFor()
+        assert.equal(await page.evaluate(() => navTest.state.mainItem.id), chatId)
+      }
+      await snap('panel-back')
+      if (before) {
+        if (wide) await start('/threads/a-quieter-week')
+        else await start('/files/vault/Notes')
+      }
+      if (wide) {
+        if (before) { await tab('Files'); await chooseNotes() }
+        const target = before ? folder('plan.md') : folder('outline.md')
+        await target.click({ modifiers: ['Alt'] })
+        const side = page.locator('[data-panel=side]')
+        await side.locator('.fs-preview').waitFor()
+        if (!before) {
+          await chatLink.waitFor()
+          await page.evaluate(() => navTest.panels.openSide({kind: 'thread', id: 'general'}))
+          await side.locator('.tt-head').waitFor()
+          await main.locator('.tt-stream').click()
+          await nativeBack(); await side.locator('.fs-preview').waitFor()
+          await chatLink.waitFor()
+        }
+        if (!before) {
+          await page.reload(); await side.locator('.fs-preview').waitFor(); await chatLink.waitFor()
+          await side.getByRole('button', { name: 'Back', exact: true }).click()
+          await side.waitFor({ state: 'hidden' }); await chatLink.waitFor()
+          await folder('outline.md').click({ modifiers: ['Alt'] })
+          await side.locator('.fs-preview').waitFor()
+        }
+        await snap('side')
+        await page.evaluate(() => navTest.panels.openSide({ kind: 'profile', id: 'sprout' }))
+        await side.locator('.profile-body').waitFor()
+        if (!before) {
+          await side.getByRole('tab', { name: 'Files' }).click()
+          await side.getByRole('button', { name: /^Soul(?: |$)/ }).click()
+          await side.locator('.fs-preview').waitFor()
+          await side.getByRole('button', { name: 'Back', exact: true }).click()
+          await side.getByRole('button', { name: /^Soul(?: |$)/ }).waitFor()
+          await chatLink.waitFor()
+        }
+        await snap('side-profile')
+        await button('Close side panel', side).click()
+      } else if (!before) {
+        assert.equal(await page.getByRole('button', { name: 'Open to the side', exact: true }).count(), 0)
+        assert.equal(await page.evaluate(() => navTest.panels.openSide({ kind: 'thread', id: 'general' })), false)
+        await chatLink.waitFor()
+      }
+      // Settings → agent file → native Back restores the foreground panel.
       await button('Settings').click(); await settings.waitFor()
       await settings.getByRole('button', { name: /^Agents(?: |$)/ }).click()
       await settings.locator('section[aria-label="Agents"] .setrow').first().click()
       const profile = page.locator('.agent-profile')
-      await profile.waitFor()
-      await snap('settings-agent')
-      if (!before) assert.equal(await page.evaluate(() => history.length), historyBefore)
       await profile.getByRole('tab', { name: 'Files', exact: true }).click()
       await profile.getByRole('button', { name: /^Soul(?: |$)/ }).click()
       await preview.getByText('Make space for thoughtful work.', { exact: true }).waitFor()
-      if (!before) assert.equal(await page.evaluate(() => history.state.panelIndex), entryBefore + 1)
       await snap('settings-file')
       await nativeBack()
       if (!before) {
-        await enroute(panelBefore)
-        await settings.waitFor({ state: 'detached' })
-        assert.equal(new URL(page.url()).searchParams.has('modal'), false)
-        if (wide) await chatLink.waitFor()
-        else await folder('plan.md').waitFor()
-        assert.equal(await page.evaluate(() => history.state.panelIndex), entryBefore)
-      } else await profile.waitFor()
-      await snap('settings-file-back')
-
-      if (!before) {
-        await start('/threads/a-quieter-week')
         await chatLink.waitFor()
-        await chatLink.click(wide ? { modifiers: ['Control'] } : {})
-        await preview.waitFor(); await enroute('/files/vault/Notes/plan.md')
-        await preview.getByRole('link', { name: 'planning chat' }).click()
-        await enroute('/threads/a-quieter-week'); await chatLink.waitFor()
-        await nativeBack(); await preview.waitFor()
-        await back(); await chatLink.waitFor()
-        await button('Board', main).click()
-        await main.getByRole('link', { name: 'Read the outline' }).click()
-        await preview.waitFor(); await nativeBack()
-        await main.locator('.tt-board').waitFor()
-        await back(); await chatLink.waitFor()
-        await nativeBack(); await enroute('/'); await page.locator('.tt-row').first().waitFor(); await noBack()
-
+        await settings.waitFor({ state: 'detached' })
         if (wide) {
-          await thread(); await chatLink.click()
-          const side = page.locator('[data-panel=side]')
-          await side.locator('.fs-preview').waitFor()
-          await page.evaluate(() => navTest.panels.openSide({ kind: 'thread', id: 'general' }))
-          await side.locator('.tt-head').waitFor()
-          await nativeBack()
-          await side.locator('.fs-preview').waitFor()
-          assert.equal(path(), '/threads/a-quieter-week')
-          await button('Close side panel', side).click()
-          await back(); await enroute('/')
+          await tab('Files'); await chooseNotes()
+          await panelBack()
+          await main.locator('.fs-preview,.tt-head').waitFor({state:'hidden'})
+          await folder('plan.md').waitFor()
+          await nativeBack(); await folder('Notes').waitFor()
         }
+      }
 
-        await button('Settings').click(); await settings.waitFor()
-        const count = await page.evaluate(() => history.length)
-        await settings.getByRole('button', { name: /^Connections/ }).click()
-        await settings.locator('#connections-providers .setrow').filter({ hasText: 'Claude Code' }).first().click()
-        await page.waitForURL('**/*section=provider*')
-        await nativeBack(); await page.waitForURL('**/*section=connections')
-        await nativeBack(); await page.waitForURL('**/*modal=settings')
-        await nativeBack(); await settings.waitFor({ state: 'detached' })
-        assert.equal(await page.evaluate(() => history.length), count)
-        assert.equal(path(), '/')
-      }
-      await start('/files/vault/Notes/plan.md')
-      await preview.waitFor()
-      await snap('deep-file')
+      // Cold file → reload → folder → Vault → Files, where Back stops.
+      await start('/files/vault/Notes/plan.md'); await preview.waitFor()
+      await page.reload(); await preview.waitFor()
+      await panelBack(); await folder('plan.md').waitFor()
+      await snap('deep-back')
+      await listBack(); await folder('Notes').waitFor()
+      await nativeBack(); await vault.waitFor()
       if (!before) {
+        await noBack(); await blockedBack(); await vault.waitFor()
+        await chooseNotes(); await folder('plan.md').click(); await preview.waitFor()
+        await panelBack(); await folder('plan.md').waitFor()
+        await listBack(); await folder('Notes').waitFor()
+        await listBack(); await vault.waitFor(); await noBack()
+        await tab('Chats'); await thread(); await chatLink.waitFor()
+        await tab('Files'); await chooseNotes()
+        await folder('plan.md').click(); await preview.waitFor()
         await page.reload(); await preview.waitFor()
-        await back(); await enroute('/files/vault/Notes'); await folder('plan.md').waitFor()
-        await nativeBack(); await enroute('/files/vault'); await folder('Notes').waitFor()
-        await nativeBack(); await enroute('/files'); await vault.waitFor(); await noBack()
-        await blockedBack(); assert.equal(path(), '/files')
+        await nativeBack(); await chatLink.waitFor()
+        await nativeBack(); await folder('Notes').waitFor()
+        if (wide) await chatLink.waitFor()
+        else {
+          await button('Settings').click(); await settings.waitFor()
+          await settings.getByRole('button', { name: /^Agents(?: |$)/ }).click()
+          await settings.locator('section[aria-label="Agents"] .setrow').first().click()
+          await profile.getByRole('tab', { name: 'Files', exact: true }).click()
+          await profile.getByRole('button', { name: /^Soul(?: |$)/ }).click()
+          await preview.waitFor(); await panelBack()
+          await folder('Notes').waitFor()
+          await button('Return to open panel').click(); await chatLink.waitFor()
+        }
       }
-      await start('/threads/a-quieter-week?view=board')
-      await main.locator('.tt-board').waitFor()
-      await snap('deep-board')
-      await start('/?modal=settings&section=connections')
-      await settings.getByRole('heading', { name: 'Connections', exact: true }).waitFor()
-      await snap('settings-section')
-      await page.keyboard.press('Escape')
-      await settings.waitFor({ state: 'detached' })
-      const count = await page.evaluate(() => history.length)
-      if (wide) await button('Activity').click()
-      else {
-        await button('Settings').click(); await settings.waitFor()
-        await settings.getByRole('button', { name: /^Activity/ }).click()
-      }
-      await page.locator('.activity-page').waitFor()
-      await snap('activity')
-      if (!before) {
-        await nativeBack()
-        await page.locator('.activity-page').waitFor({ state: 'detached' })
-        assert.equal(await page.evaluate(() => history.length), count)
-      }
+      await start('/threads/a-quieter-week'); await chatLink.waitFor()
+      if (!wide && before) await panelBack()
+      await tab('Apps'); await page.locator('.apps-row').first().waitFor()
+      if (!before && wide) await chatLink.waitFor()
+      if (!before && !wide) assert.equal(await page.locator('.panel-history-back:visible').count(), 0)
+      await snap('apps')
       assert.deepEqual(errors, [])
       console.log(`${width} ${mode} passed`)
     } finally { await context.close(); await app.close() }

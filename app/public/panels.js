@@ -24,9 +24,10 @@ export function readPanels(storage = deviceStorage()) {
 
 // Attention is transient view state, independent of navigation destinations.
 // Each mounted view retains its own field, transport, selections and position.
-export function createPanels({ main, side, width = () => layoutPixels(globalThis.innerWidth ?? 0), changed, address = () => {}, beforeOpen = () => {}, storage = deviceStorage() }) {
+export function createPanels({ main, side, width = () => layoutPixels(globalThis.innerWidth ?? 0), changed, address = () => {}, revealMain = () => {}, initialSide, beforeOpen = () => {}, storage = deviceStorage() }) {
   const saved = readPanels(storage)
-  const st = { side: saved.side, split: saved.split, sidebar: saved.sidebar, loaded: false, version: 0, focused: saved.side ? 'side' : 'main' }
+  const initial = initialSide === undefined ? saved.side : initialSide
+  const st = { side: initial, split: saved.split, sidebar: saved.sidebar, loaded: false, version: 0, focused: initial ? 'side' : 'main' }
   let closing = null
   let dragging = false
   let storedValue = null
@@ -45,36 +46,14 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
     if (value === storedValue) return
     try { storage?.setItem(key, value); storedValue = value } catch {}
   }
-  // Side changes replace the side query in the current browser entry. Its
-  // local trail belongs to this mount and ends when the pane closes.
-  let trail = [], cursor = -1, serial = 0
-  function recordSide() {
-    const at = itemDescriptor(st.side)
-    if (!at) { trail = []; cursor = -1; return }
-    if (itemKey(trail[cursor]) === itemKey(at) && trail[cursor]?.view === (st.side.view || null)) return
-    trail.splice(++cursor, Infinity, { ...at, view: st.side.view || null, visit: ++serial })
-  }
-  function sideTarget(delta) {
-    let next = cursor + delta
-    // An item moved into main is still open. Skip it to preserve ownership.
-    while (trail[next] && itemKey(trail[next]) === itemKey(main.item())) next += delta
-    return trail[next] ? next : -1
-  }
-  function goSide(delta) {
-    const next = sideTarget(delta)
-    if (next < 0 || !visible()) return false
-    if (!guard(side, () => goSide(delta))) return true
-    cursor = next
-    openSide(trail[next])
-    return true
-  }
-  function notify() { recordSide(); persist(); address(st.side); changed() }
+  function notify() { persist(); changed() }
+  function sideChanged() { address(st.side); notify() }
   function guard(endpoint, retry) { return endpoint.guard?.(retry) !== false }
   function transfer(from, to, item) { if (item?.kind === 'thread') from.transfer?.(to, item.id) }
   function close() {
     if (!guard(side, close)) return false
     cancelClose()
-    side.clear(); st.side = null; st.loaded = false; st.sidebar = false; st.focused = 'main'; st.version++; notify(); return true
+    side.clear(); st.side = null; st.loaded = false; st.sidebar = false; st.focused = 'main'; st.version++; sideChanged(); return true
   }
   function closeAnimated() {
     if (!guard(side, closeAnimated) || st.closing) return false
@@ -83,41 +62,33 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
   }
   function openMain(item) {
     if (!itemKey(item)) return false
-    beforeOpen()
-    if (!guard(main, () => openMain(item))) return false
-    if (itemKey(item) === itemKey(st.side)) {
-      if (!guard(side, () => openMain(item))) return false
-      if (item.kind === 'file' && side.item()?.mode) item = { ...item, mode: side.item().mode }
-      cancelClose(); transfer(side, main, item); side.clear(); st.side = null; st.loaded = false; st.sidebar = false
+    const source = beforeOpen()
+    if (source) item = { ...item, ...source }
+    if (!item.message && !item.fragment && !item.mode && itemKey(item) === itemKey(main.item()) && (!item.view || item.view === main.item().view)) {
+      revealMain(item); st.focused = 'main'; notify(); return true
     }
-    if (!item.message && !item.fragment && !item.mode && itemKey(item) === itemKey(main.item())) { st.focused = 'main'; notify(); return true }
+    if (!guard(main, () => openMain(item))) return false
+    if (item.kind === 'file' && itemKey(item) === itemKey(main.item()) && !item.fromOverlay) {
+      revealMain(item)
+      item = { ...item, push: false }
+    }
     main.open(item); st.focused = 'main'; st.version++; notify(); return true
   }
   function openSide(item) {
-    if (!available() || !itemKey(item)) return false
+    if (!available() || !itemKey(item) || (main.pending?.() && itemKey(item) === itemKey(main.item()))) return false
     beforeOpen()
     if (!guard(side, () => openSide(item))) return false
     cancelClose()
-    const current = main.item()
-    if (itemKey(item) === itemKey(current)) {
-      if (main.pending?.()) return false
-      if (!guard(main, () => openSide(item))) return false
-      if (item.kind === 'file' && current.mode) item = { ...item, mode: current.mode }
-      const previous = st.side
-      transfer(main, side, current); transfer(side, main, previous)
-      main.clear(); side.clear()
-      if (previous) main.open(previous)
-      else main.emptyAddress?.()
-    }
     if (itemKey(item) === itemKey(side.item()) && !item.message && !item.fragment && !item.mode) {
-      side.setView?.(item.view); st.side = side.item(); st.focused = 'side'; notify(); return true
+      side.setView?.(item.view); st.side = side.item(); st.focused = 'side'; sideChanged(); return true
     }
     if (!st.side) st.sidebar = false
-    st.side = item; st.loaded = true; side.open(item); st.focused = 'side'; st.version++; notify(); return true
+    st.side = item; st.loaded = true; side.open(item); st.focused = 'side'; st.version++; sideChanged(); return true
   }
+  const sameItem = () => Boolean(st.side) && itemKey(st.side) === itemKey(main.item())
   function swap() {
     const current = main.item(), previous = st.side
-    if (!previous || main.pending?.() || side.pending?.() || !guard(main, swap) || !guard(side, swap)) return false
+    if (!previous || sameItem() || main.pending?.() || side.pending?.() || !guard(main, swap) || !guard(side, swap)) return false
     cancelClose()
     transfer(main, side, current); transfer(side, main, previous)
     main.clear(); side.clear(); main.open(previous)
@@ -125,26 +96,30 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
     if (current) side.open(current)
     else st.sidebar = false
     st.swap = st.swap === 1 ? 2 : 1
-    st.version++; notify(); return true
+    st.version++; sideChanged(); return true
   }
-  function promote() { if (st.side) return openMain(st.side) }
+  function promote() {
+    if (!st.side || sameItem() || !guard(main, promote) || !guard(side, promote)) return false
+    const previous = side.item()
+    transfer(side, main, previous)
+    close()
+    return openMain(previous)
+  }
   function restore() {
     if (!st.side || st.loaded || !available()) return
-    if (itemKey(st.side) === itemKey(main.item())) { st.side = null; notify(); return }
-    recordSide(); st.loaded = true; side.open(st.side)
+    st.loaded = true; side.open(st.side)
   }
   function sync() {
     if (st.loaded && side.empty?.()) { close(); return }
     const current = side.item()
     if (st.loaded && current) st.side = current
-    recordSide()
-    persist(); address(st.side)
+    persist()
   }
   function tucked() { return visible() && !st.closing && width() < SIDEBAR_MIN && !st.sidebar }
   function showSidebar() { st.sidebar = true; notify() }
   function split(value) { st.split = Math.max(32, Math.min(68, value)); notify() }
   const action = (label, glyph, run, disabled = false) => h('button', { class: 'iconbtn ghost', type: 'button', title: label, 'aria-label': label, onclick: run, disabled }, glyph)
-  function controls() { return [action('Open as the main panel', icon.arrowLeft(18), promote), action('Swap the two panels', icon.swap(18), swap, main.pending?.() || side.pending?.()), action('Close side panel', icon.close(16), closeAnimated)] }
+  function controls() { return [action('Open as the main panel', icon.arrowLeft(18), promote, sameItem()), action('Swap the two panels', icon.swap(18), swap, sameItem() || main.pending?.() || side.pending?.()), action('Close side panel', icon.close(16), closeAnimated)] }
   function affordance(item) {
     if (!available()) return null
     return action('Open to the side', icon.panelRight(16), event => { event.stopPropagation(); openSide(item) })
@@ -158,7 +133,7 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
       onkeydown: event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'Enter'].includes(event.key)) return; event.preventDefault(); split(event.key === 'Home' || event.key === 'Enter' ? DEFAULT_SPLIT : st.split + (event.key === 'ArrowLeft' ? -2 : 2)) },
     }, h('span', { 'aria-hidden': 'true' }))
   }
-  return { st, available, visible, focused, focus, goSide, sideVisit: () => trail[cursor]?.visit, canSideBack: () => sideTarget(-1) >= 0, tucked, showSidebar, openMain, openSide, swap, promote, close, restore, sync, split, controls, affordance, divider, persist }
+  return { st, available, visible, focused, focus, tucked, showSidebar, openMain, openSide, swap, promote, close, restore, sync, split, controls, affordance, divider, persist }
 }
 
 // Selectors used by an instance must never borrow another instance's stream,

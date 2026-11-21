@@ -149,9 +149,9 @@ try {
             }
           }
           await docBack.focus()
-          await mouseNavigate('back', 8); await chatReady()
-          assert.equal(await side.locator('iframe').evaluate(n => n.contentWindow === window.sideFrame), true)
-          await mouseNavigate('forward', 16); await docReady()
+          await mouseNavigate('back', 8); await side.locator('.tt-head').waitFor()
+          await docReady()
+          await mouseNavigate('forward', 16); await side.locator('iframe').waitFor()
           await mouse.detach()
         }
         await page.evaluate(() => testPage.panels.close())
@@ -186,10 +186,10 @@ try {
       await capture('web')
       if (wide) {
         await page.evaluate(() => testPage.panels.openSide({ kind: 'file', root: 'vault', path: 'Notes/page.html' }))
-        await page.locator('[data-panel=main] .empty-state, [data-panel=main] .pane-nothing').first().waitFor()
+        await page.locator('[data-panel=main] .fs-htmlframe').waitFor()
         await capture('empty')
         if (!before) {
-          // The former main item now lives in side. The main arrow skips it.
+          // Both panes show the file. Main Back leaves its side copy mounted.
           await main.getByRole('button', { name: 'Back', exact: true }).click()
           await docReady()
           await page.locator('[data-panel=side] .fs-htmlframe').waitFor()
@@ -270,8 +270,7 @@ try {
           await page.keyboard.press('Control+]')
           await side.locator('.fs-htmlframe').waitFor()
           await docBack.click()
-          await main.getByText('Pick an app', { exact: true }).waitFor()
-          await backStops()
+          await main.locator('.tt-details-head').waitFor()
         }
       }
       await open('/threads/general')
@@ -296,12 +295,14 @@ try {
 
       // Use the visible navigation controls so the browser receives the same
       // activation it gets from a tab tap or a rail click.
+      await page.goto('about:blank')
       await open('/')
-      const tabs = page.locator(wide ? '.rail-tabs' : '.navpill')
+      const tabs = page.locator(wide ? '.rail-tabs' : '.navpill:visible')
       const selectTab = name => tabs.getByRole('button', { name, exact: true }).click()
-      const noBack = async () => assert.equal(await main.locator('.panel-history-back').count(), 0)
+      const noBack = async () => assert.equal(await main.locator('.panel-history-back:visible').count(), 0)
       const vault = page.getByRole('button', { name: /Vault Your notes/ })
       if (wide) {
+        await selectTab('Chats')
         await page.locator('.tt-row[title="A little room for the week"]').click()
         await chatReady()
         await main.getByRole('button', { name: 'Board', exact: true }).click()
@@ -310,7 +311,8 @@ try {
       await selectTab('Files')
       await vault.waitFor()
       await capture('tab-files')
-      if (!before) { await noBack(); await backStops() }
+      if (!before && !wide) { await noBack(); await backStops() }
+      if (wide) await main.locator('.tt-board').waitFor()
       await vault.click()
       await list.filter({ hasText: /^Notes/ }).first().click()
       await list.filter({ hasText: 'plan.md' }).waitFor()
@@ -331,10 +333,10 @@ try {
         await main.locator('.fs-livehead').waitFor()
         if (!before) {
           await docBack.click(); await docReady()
-          await docBack.click(); await main.getByText('Pick a file', { exact: true }).waitFor()
+          await docBack.click(); await main.locator('.tt-board').waitFor()
           await list.filter({ hasText: 'plan.md' }).waitFor()
-          await nativeBack(); await page.waitForURL('**/files/vault')
-          await page.goForward(); await page.waitForURL('**/files/vault/Notes')
+          await nativeBack(); await list.filter({ hasText: /^Notes/ }).first().waitFor()
+          await page.goForward(); await list.filter({ hasText: 'plan.md' }).waitFor()
           await page.goForward(); await docReady()
           await page.goForward(); await main.locator('.fs-livehead').waitFor()
         }
@@ -342,13 +344,12 @@ try {
       await selectTab('Apps')
       await page.locator('.apps-row').first().waitFor()
       await capture('tab-apps')
-      if (!before) { await noBack(); await backStops() }
+      if (!before && !wide) { await noBack(); await backStops() }
       if (wide) {
         await page.getByRole('button', { name: 'Open Notebook', exact: true }).click()
         await main.locator('iframe[title=Notebook]').waitFor()
         if (!before) {
-          await docBack.click(); await main.getByText('Pick an app', { exact: true }).waitFor()
-          await noBack(); await backStops()
+          await docBack.click(); await main.locator('.fs-livehead').waitFor()
           await page.goForward(); await main.locator('iframe[title=Notebook]').waitFor()
           await page.getByRole('button', { name: 'Open Calendar', exact: true }).click()
           await main.locator('iframe[title=Calendar]').waitFor()
@@ -359,7 +360,7 @@ try {
       await page.locator('.tt-row[title="A little room for the week"]').waitFor()
       await capture('tab-chats')
       if (!before) {
-        await noBack(); await backStops()
+        if (!wide) { await noBack(); await backStops() }
         await page.locator('.tt-row[title="A little room for the week"]').click()
         await chatReady()
         if (!wide) {

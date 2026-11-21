@@ -53,8 +53,8 @@ try {
       if (!baseline && kind === 'app' && width === 1440) {
         await page.evaluate(() => __opening.page.goChats())
         await page.locator('.rail-tabs [title=Apps]').click()
-        await page.getByText('Pick an app', { exact: true }).waitFor()
-        assert.equal(await page.locator('[data-panel=main] iframe').count(), 0, 'an empty main cannot borrow a previously selected app')
+        await page.locator('[data-panel=main] iframe').waitFor()
+        assert.equal(await page.evaluate(() => __opening.state.mainItem.kind), 'app', 'returning to Apps keeps the mounted app')
         await page.evaluate(() => localStorage.setItem('loam.panels', JSON.stringify({ main: { kind: 'app', url: 'https://garden.example.com/' }, side: { kind: 'thread', id: 'small-details' }, split: 61, sidebar: true })))
         await page.goto(app.url + '/')
         await page.waitForFunction(() => globalThis.__opening)

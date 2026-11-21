@@ -6,7 +6,7 @@ export function registerPage(loam) {
   for (const section of [
     { id: 'chats', frame: 'full', screens: ['home', 'threads'], render: () => host.threads.view(false), list: () => host.threads.list(true), load: () => host.threads.load({ quiet: true }), title: 'Chats', icon: 'chat' },
     { id: 'files', frame: 'full', screens: ['files'], render: () => host.filesScreen(), list: context => host.filesList(context.collapse), load: () => { if (!host.files.st.roots.loaded) host.files.loadRoots() }, title: 'Files', icon: 'folder' },
-    { id: 'apps', frame: 'full', screens: ['apps'], render: () => host.appsScreen(), list: context => host.apps.view({ list: true, collapse: context.collapse }), title: 'Apps', icon: 'apps' },
+    { id: 'apps', frame: 'full', screens: ['apps'], render: () => host.appsScreen(), list: context => host.apps.view({ list: true, collapse: context.collapse }), load: () => { if (!host.apps.st.loading) host.apps.load({ list: true }) }, title: 'Apps', icon: 'apps' },
   ]) {
     const open = () => host.openPlace(section.id)
     loam.places.rail.section.add({ ...section, open })
@@ -16,7 +16,9 @@ export function registerPage(loam) {
     { id: 'thread', render: ({ host }) => host.threads.pane() },
     { id: 'file', render: ({ host, panel, fileTools }) => panel === 'main' ? host.filesPane() : host.filePanelView(fileTools) },
     { id: 'app', render: ({ host }) => host.apps.view() },
-    { id: 'profile', render: () => host.profilePane() },
+    { id: 'directory', render: ({ host, item }) => host.directoryView(item.id) },
+    { id: 'catalog', render: ({ host }) => host.apps.view({ list: true }) },
+    { id: 'profile', render: ({ host }) => host.profilePane() },
   ]) loam.places.panel.item.add(entry)
   loam.commands.register({ id: 'panel.open', title: 'Open an item', run: ({ item, panel = 'main' }) => host.panels[panel === 'side' ? 'openSide' : 'openMain'](item) })
   loam.places.rail.section.add({ id: 'activity', hidden: true, open: () => host.goActivity() })

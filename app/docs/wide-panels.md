@@ -19,8 +19,8 @@ side panel when the layout has room. ⌘-click on Mac or Ctrl-click elsewhere
 opens it in main. On a phone the file fills the screen and Back returns to
 the chat. Ordinary web links open in a new tab. Links in a Files preview
 navigate the containing panel.
-Opening side's item in main moves it there and closes side. Sending main's
-item to an occupied side swaps; sending it to an empty side leaves main empty.
+Either pane can open the same item independently. Promote and Swap are available for distinct destinations. Opening a row in main
+leaves the side document mounted, even when both now show that row.
 The side header offers Promote, Swap, item actions and Close. The file menu
 contains view modes, copy and download actions where available. For HTML
 previews it also offers **Reload**, plus **Open in new tab** when a live URL
@@ -29,13 +29,12 @@ was opened from chat. Thread Board and Tasks are in the thread actions menu.
 Selected rows still mean main. A quiet panel mark identifies the visible side item.
 
 Apps uses the same list column as Chats and Files. Its grouped inventory stays
-on the left while a chosen app fills main; with no app chosen, main says
-“Pick an app”. The selected row identifies main and a quiet panel mark identifies
-side. Moving main's app to an empty side leaves the Apps list and empty main in
-place. A site which could not be embedded in main cannot be embedded in side.
+on the left while a chosen app fills main. An empty main panel offers the same
+invitation to choose an item across all lists. The selected row identifies main and a quiet panel mark identifies
+side. Opening main's app in side creates an independently mounted frame. A site which could not be embedded in main cannot be embedded in side.
 Phone Apps retains its catalog and browser-tab behavior.
 On desktop, Activity and Settings open as app-wide dialogs above both panels.
-Their links out use main-panel navigation and its uniqueness/save rules.
+Their links out use main-panel navigation and its save guard.
 Board and Tasks retain their existing sheet components.
 
 With two panes, Latte action tiers follow the last-used pane. Pointer down or
@@ -67,8 +66,7 @@ list used to choose the next item. Chats, Files and Apps choose the list while
 the current main document stays mounted: revealing or switching lists does
 not close its thread, file or app, change its address, or ask to leave an
 unsaved file. Selecting an actual item still navigates main through its usual
-save and uniqueness rules. With no document open, a section uses its ordinary
-empty state. The list choice is transient view state; it adds no saved setting.
+save guard. The browser entry remembers the list choice for reload.
 Promotion uses a left arrow, distinct from
 the sidebar and swap marks. A side file's second header line names its folder
 as spaced breadcrumbs, without repeating the filename in the title.
@@ -97,70 +95,54 @@ the destination.
 
 ## Back and Forward
 
-Selecting **Chats**, **Files**, or **Apps** starts at that place's main page on
-both phone and desktop. One tap always means the same thing and leaves a
-visible way to reopen a previous item from its list. The desktop starts with
-the selected list and an empty main pane. An explicitly opened side pane stays
-beside it. Files can still browse the sidebar while a file is open. Those
-folder moves are recorded with the file, so Back can restore the list location
-without reopening the file.
+The workspace has three histories. The selected tab owns the list history.
+Main and side each own a panel history. Each navigation step names its surface,
+destination and visit ID. The order of these steps is also the order for
+system Back. Focus controls keyboard shortcuts and pane styling.
 
-Links open in the active trail, even when the destination is a different kind
-of item. A chat's file link, a file's chat link, a board's linked card, and the
-Market's Apps link all follow this rule. A link from Settings first dismisses
-the popup. Back from the destination restores the view that was underneath it.
-Side actions keep their existing choice of pane.
+| Action | Result |
+| --- | --- |
+| Select Chats, Files, Apps or a plugin section | Reveal that list at its root. Discard the previous list trail. Both panel histories, mounted contents, drafts and reading positions stay in place. Selecting the current tab also returns its list to root. |
+| Enter a folder or Archived chats from the list | Add one list step. The list arrow returns to the previous listing. At the tab root it disappears. |
+| Open a row, item link, Board, or Thread details | Add a step to the chosen panel. Its arrow restores the preceding panel visit. From its first item, main returns to empty and side closes. |
+| Open the same item in the other pane | The receiving pane opens its own view. Use **Open as the main panel** to promote, **Swap** to exchange contents, or **Close side panel** to end that side trail. |
+| Open Settings, Activity, the Market, a menu, picker or sheet | Keep all three histories. Back follows the overlay's local parent or dismisses it. Closing a viewer, confirmation or expanded composer reveals the same workspace. |
+| Follow a link out of an overlay | Close the overlay and open the item in main. A linked workspace directory or Apps catalog can also be a panel destination. Its browser or listing stays separate from the tab list. Back restores the previous panel and, on phone, the surface that was visible underneath the overlay. |
+| Browser Back, Android system Back or history gesture | Handle an open overlay first. Otherwise undo the newest remaining navigation step across all surfaces, even if focus has moved. At a list root a remaining panel step is still eligible. With all three histories at root, Back stays in place within the app document. Navigation to another document is browser-owned. |
+| Cmd+[ / Cmd+] or Ctrl+[ / Ctrl+] | Walk Back or Forward in the surface containing focus. Text fields and embedded sites handle their own editing shortcuts. |
 
-The Back arrow, browser Back and system Back use the same trail. With the
-side pane focused, Back walks its visits. With an overlay open, Back first
-uses its local parent or dismisses it. After that the next press continues in
-the focused pane. At a place's main page, Back stays there when the browser
-would otherwise visit another entry from the same app document. The browser
-still owns navigation to other documents. Cmd+[ and Cmd+] on Mac, or Ctrl+[
-and Ctrl+] elsewhere, traverse the focused pane. Text fields and embedded sites
-keep their own shortcuts.
+On the phone the main panel fills the column. Its tabs can reveal a fresh list
+while the panel stays mounted. The panel button beside the tabs returns to that
+open item. Moving between these presentations adds no visit. Opening a file
+from a nested folder pushes main. At the bottom of main's stack, its arrow
+reveals the same tab and folder. The list arrow then walks the folder steps.
+Phone app rows that launch an external browser tab keep that behavior.
 
-A pasted file link builds its folder ancestors, and a pasted board or thread
-details link starts with Chats and its conversation beneath it. An embedded-app
-link starts from Apps at widths where it can be shown. Reload keeps the trail
-that led to the current view. An address that names Settings, Activity, or the
-Market can also reopen that overlay on reload. Drafts and visit reading
-positions are held by their existing panel controllers.
+A main file, thread or app keeps its shareable address on desktop while the
+list changes. On phone the address follows the visible surface. The current
+browser entry also stores the selected tab, the phone presentation, and the
+ordered visits and Forward steps for the three surfaces. Reload can therefore
+restore a chat, its companion and a folder unrelated to either. A pasted URL
+starts a new workspace. A file opens above its folder ancestry, including its
+originating plugin list when supplied. A board or details URL starts above
+its conversation. A directory URL opens the list at that directory. The
+`side` query opens the companion. An overlay query can restore an explicitly
+addressed popup.
 
-The file leave/save confirmation still runs before a guarded Back. Keeping
-edits restores the original browser entry and keeps Forward available. A
-confirmed missing thread repairs its entry to the active place's main page.
-If the item being restored is already open in the other pane, Back skips its
-old visit.
+### Implementation
 
-### Back affordances in core
+`panel-history.js` owns visits and native traversal. An arrow removes the
+newest visit for the requested surface. Browser Back removes the newest visit
+overall. Forward reapplies an undone visit. Tab selection removes only list
+visits. A native traversal that needs a save decision returns to its source
+entry until the panel's guard finishes. A refused save keeps its editor and
+draft. A confirmed missing thread is removed from its panel's trail.
 
-| Surface | Back destination or behavior | Change |
-| --- | --- | --- |
-| Place main pages | No arrow. An explicit tab or rail selection begins here. | The desktop rail starts with the new list and an empty main pane. |
-| Chat, Archived threads, Thread details, Board, linked board card, agent profile | The preceding place visit. | Archived threads and deep links get real ancestors. The board owns one visible arrow, and opening its file beside it keeps the board in view. |
-| Files folders, text and HTML files, plugin file viewers | The preceding visit. The sidebar's parent-folder control browses the list. | Desktop folders join the trail. A linked file uses visit history for its arrow. |
-| Linked Apps list, embedded app, registered panel item | The preceding place visit. | The Apps Close control returns to that visit when available. |
-| Side thread, board, file or embedded app | The preceding side visit. Close side ends the side trail. | Browser Back follows the same trail when the side pane is focused. |
-| Settings sections and detail pages, including Agents, Connections and plugin preferences | Their Settings parent. At Settings root, Back or Close dismisses Settings. | These steps stay within the popup. |
-| Market pages, install-from-link details, composer model and effort menus, task details, file picker | Their local parent or the underlying view at the popup's root. | Browser Back uses the local action. |
-| Full-screen composer, Activity, image viewer, confirmations and other sheets | Return to the underlying view. Image arrows are for the image carousel. | Browser Back dismisses the overlay. Activity uses Close at both sizes. |
-
-## Panel ownership
-
-`state.navigator` names the selected place and its list. `state.mainItem` names
-main's typed identity, and the side mount owns its own typed identity.
-`state.screen` is the foreground view. Its kind can differ from the selected
-place when a link opens an item.
-
-`page/layout.js` builds one workspace with permanent list and panel-pair slots.
-It no longer adapts whole section frames by searching and moving their DOM.
-`panel-items.js` renders either panel through `panel.item` registrations and
-provides identity/address serialization. The existing conversation, Files and
-Apps controllers still own their transports, drafts, editors and views. A rail
-command uses the same guarded place selection as the phone tab. File picks and
-links use the current visit's place, and side moves use the existing pane
-ownership checks.
+`app.js` projects the visits onto the list, main and side controllers.
+`page/layout.js` keeps stable desktop slots and `panels.js` owns side mounting,
+focus, sizing, Promote and Swap. A list change never calls a panel's open or
+clear operation. `panel-items.js` describes and renders items. Editors,
+transports, selection and scroll positions stay with the mounted controller.
 
 Core and plugins register `rail.section.list({host,wide,collapse})` and
 `panel.item.render({host,item,panel,wide})` through the same public registry.
@@ -189,7 +171,7 @@ page integration still assumed one open item:
 | Sidebar hidden is one boolean | Manual hidden state is preserved; automatic tuck and its override are panel view state. |
 | The desktop breakpoint alone determines content layout | The window controls availability; named pane containers control split content. |
 
-`panels.js` owns destination and uniqueness rules; `panel-items.js` owns panel rendering and addresses. The side runtime composes
+`panels.js` owns explicit panel placement; `panel-items.js` owns panel rendering and addresses. The side runtime composes
 the existing page mounts and delegates shared host facts, settings and audio
 to the application. It does not reproduce a reduced transcript, editor or
 composer. No new provider-specific interpretation or broker vocabulary was
@@ -198,7 +180,7 @@ added.
 ## Verification
 
 `node --test test/panels.test.js` covers main/side navigation, moves, swaps,
-uniqueness, guarded edits, width boundaries, sidebar tuck and device restore.
+independent duplicate opens, guarded edits, width boundaries, sidebar tuck and device restore.
 The optional Chromium test in that suite runs `test/panels-browser.mjs`.
 
 The browser matrix covers 1180, 1440 and 1920, Latte and Plain, light and dark,
@@ -239,6 +221,8 @@ app-wide dialogs.
 The [Apps list and Activity checks](evidence/apps-list-activity/README.md)
 cover app selection/moves/swaps/reload, external tabs, all desktop Activity
 entry points and conversion from phone Activity when the window widens.
+
+The [independent-surface gallery](evidence/workspace-navigation/README.md) pairs the previous and current behavior at 390 and 1440 in both modes.
 
 The [sidebar/main captures](evidence/sidebar-main/README.md) record the earlier
 rail behavior. The [navigation comparison](evidence/navigation-model/README.md)

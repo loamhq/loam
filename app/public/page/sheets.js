@@ -97,22 +97,23 @@ function pickerNodes() {
 }
 
 function filesSheetNodes() {
+  const files = host.sheetFiles()
   const close = () => {
-    host.files.st.sheet = null
+    files.st.sheet = null
     host.schedule()
   }
   close.redraw = host.schedule
-  if (host.files.st.sheet?.kind === 'name' && host.fileNameField.__for !== host.files.st.sheet) {
+  if (files.st.sheet?.kind === 'name' && host.fileNameField.__for !== files.st.sheet) {
     host.fileNameField.value = ''
-    host.fileNameField.__for = host.files.st.sheet
+    host.fileNameField.__for = files.st.sheet
   }
-  const body = addSheet(host.files, { close, nameField: kept(host.fileNameField), nameValue: () => host.fileNameField.value, chooseUpload: host.chooseUpload, uploadChooser: kept(host.filesUploadChooser) })
+  const body = addSheet(files, { close, nameField: kept(host.fileNameField), nameValue: () => host.fileNameField.value, chooseUpload: host.chooseUpload, uploadChooser: kept(host.filesUploadChooser) })
   if (!body) return []
   const card = h('div', { class: 'sheet fs-sheet' }, sheetHandle(close), ...body)
-  const surface = menuSurface(card, { title: host.files.st.sheet.name ?? 'File actions', close, heading: false, width: 520,
-    fallbackPlacement: host.files.st.sheet.kind === 'leave' ? 'center' : null })
+  const surface = menuSurface(card, { title: files.st.sheet.name ?? 'File actions', close, heading: false, width: 520,
+    fallbackPlacement: files.st.sheet.kind === 'leave' ? 'center' : null })
   const node = host.state.wide ? h('div', { class: 'dialog fs-dialog', onclick: (e) => { if (e.target === e.currentTarget) close() } }, surface) : surface
-  node.__key = `sheet:files:${host.files.st.sheet.kind}`
+  node.__key = `sheet:files:${files.st.sheet.kind}`
   return [h('button', { class: 'scrim', key: 'scrim:files', title: 'Close', onclick: close }), node]
 }
 

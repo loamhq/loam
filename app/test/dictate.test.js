@@ -1187,7 +1187,7 @@ test('the screen is held while a take records, and let go by ✓, ✕, Escape, a
 
   // Leaving the chat with a take going.
   await start()
-  all(root, 'iconbtn').find((b) => b.getAttribute('title') === 'Back' || b.getAttribute('aria-label') === 'Back to threads').fire('click')
+  all(root, 'iconbtn').find((b) => b.getAttribute('aria-label') === 'Back' || b.getAttribute('aria-label') === 'Back to threads').fire('click')
   await until(() => heldLocks().length === 0)
   assert.equal(locks.at(-1).by, 'page')
   await openChat()
@@ -1290,7 +1290,7 @@ const held = () => JSON.parse(globalThis.localStorage.getItem('loam-ui.dictation
 // Settings is opened from the home screen, so the chat is left for it and
 // opened again after: the mic is a composer's, and the composer is a chat's.
 async function openDictation() {
-  const back = all(root, 'iconbtn').find((b) => b.getAttribute('title') === 'Back' || b.getAttribute('aria-label') === 'Back to threads')
+  const back = all(root, 'iconbtn').find((b) => b.getAttribute('aria-label') === 'Back' || b.getAttribute('aria-label') === 'Back to threads')
   if (back) back.fire('click')
   await until(() => all(root, 'roundbtn').some((b) => b.getAttribute('title') === 'Settings'))
   all(root, 'roundbtn').find((b) => b.getAttribute('title') === 'Settings').fire('click')

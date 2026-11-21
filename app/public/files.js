@@ -776,7 +776,7 @@ export function createFiles({
 
   async function openFile(root, path, row = null, { fragment = null, mode = null } = {}) {
     if (typeof root === 'string' && root.startsWith('@')) return openPluginFile(root, path, row, { fragment })
-    const known = isRow(row) ? row : st.listing.rows.find((x) => x.path === path)
+    const known = isRow(row) ? row : st.listing.rows.find((x) => x.root === root && x.path === path)
     const r = known ?? { root, path, name: nameOf(path), kind: 'file' }
     const view = viewOf(r)
     closeFile({ remember: st.file?.root !== root || st.file.path !== path })

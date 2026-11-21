@@ -16,6 +16,8 @@ export function itemDescriptor(item) {
 export function itemHref(item) {
   const at = itemDescriptor(item)
   if (!at) return '/'
+  if (at.kind === 'directory' && parseFilesPath(at.id)) return at.id
+  if (at.kind === 'catalog' && at.id === 'apps') return '/apps'
   if (at.kind === 'thread') return threadHref(at.id)
   if (at.kind === 'file') return filesHref(at.root, at.path)
   if (at.kind === 'app') return `/apps?url=${encodeURIComponent(at.url)}`

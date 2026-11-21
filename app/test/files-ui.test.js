@@ -63,10 +63,10 @@ globalThis.history = {
 }
 point()
 const popTo = pathname => {
-  const at = entries.findLastIndex((entry, i) => i <= cursor && entry.url.pathname === pathname && entry.state?.panelIndex >= history.state.panelRoot)
+  const at = entries.findLastIndex((entry, i) => i <= cursor && entry.url.pathname === pathname && entry.state?.workspace && entry.state.panelIndex > 0)
   if (at >= 0 && at !== cursor) history.go(at - cursor)
   else if (at < 0) {
-    history.pushState({ panelPlace: 'files', panelIndex: history.state.panelIndex + 1, panelRoot: history.state.panelRoot }, '', pathname)
+    history.replaceState({ panelIndex: history.state.panelIndex }, '', pathname)
     popped()
   }
 }

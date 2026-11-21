@@ -108,6 +108,8 @@ try {
         await rail('Apps').click(); await listShown('Apps')
         assert.equal(await page.locator('.apps-list .apps-row[aria-current=page]').count(), 0)
         await rail('Files').click(); await listShown('Files')
+        await page.getByRole('button', { name: /Vault Your notes/ }).click()
+        await page.locator('.listcol .fs-entry .setrow').filter({ hasText: /^Notes/ }).first().click()
         await page.locator('.listcol .fs-entry .setrow').filter({ hasText: 'plan.md' }).click(); await ready('files')
         assert.equal(await page.evaluate(() => __sidebar.state.navigator), 'files')
         if (beside) assert.equal(await side.frameLocator('iframe').locator('#counter').innerText(), '1')
@@ -141,11 +143,11 @@ try {
         await page.evaluate(app => __sidebar.panels.openSide({ kind: 'app', app }), apps[1])
         await select('files')
         await page.evaluate(app => __sidebar.panels.openSide({ kind: 'app', app }), apps[0])
-        await page.goBack(); await ready('chats')
-        await page.waitForFunction(() => (__sidebar.panels.st.side.app?.url ?? __sidebar.panels.st.side.url).includes('garden'))
+        await page.goBack(); await ready('files')
+        await page.waitForFunction(url => (__sidebar.panels.st.side.app?.url ?? __sidebar.panels.st.side.url) === url, apps[1].url)
         await page.goForward(); await ready('files')
         await page.waitForFunction(() => (__sidebar.panels.st.side.app?.url ?? __sidebar.panels.st.side.url).includes('garden'))
-        checks.push('Back/Forward preserves the current side item while traversing main')
+        checks.push('Browser Back and Forward walk the latest side step while main keeps its file')
       }
       const registerNotes = () => {
         const scope = __sidebar.page.registry.scope({ id: 'fixture-notes' })

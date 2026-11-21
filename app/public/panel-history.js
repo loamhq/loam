@@ -1,108 +1,114 @@
 import { isMac } from './keys.js'
 import { h, icon } from './ui.js'
 
-// Only entries pushed by this page count. A cold link may have another site
-// behind it, so history.length cannot decide whether to show a Back button.
-export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, sideKey, intercept = () => null }) {
+// Each visit belongs to one surface. Their order is also the system Back
+// order. Removing a list's visits on tab selection leaves both panels intact.
+export function createWorkspaceHistory({ win = globalThis, address, apply, guard, overlay }) {
   const history = win.history
-  const index = () => history?.state?.panelIndex ?? 0
-  const rootIndex = () => history?.state?.panelRoot ?? index()
-  let current = index(), boundary = rootIndex(), furthest = current, rollback = null, returning = null
-  let requested = false
-  // If an item was moved to side, visiting its old address must not steal it
-  // back. Each entry knows how far back the preceding run of that item began.
-  const occupied = href => href && href === sideKey()
-  function backSteps() {
-    const back = history?.state?.panelBack
-    if (index() <= rootIndex()) return 0
-    if (!back || !occupied(back.item)) return 1
-    return back.first > rootIndex() ? index() - back.first + 1 : 0
+  const saved = history?.state?.workspace
+  const state = saved ?? { tab: 'chats', front: 'list', visits: [], forward: [], serial: 0 }
+  let index = history?.state?.panelIndex ?? 0
+  let furthest = history?.state?.furthest ?? index
+  let request = null, returning = null
+  const current = surface => state.visits.findLast(step => step.surface === surface)
+  const next = (delta, surface) => (delta < 0 ? state.visits : state.forward).findLast(step => !surface || step.surface === surface)
+  const atCurrent = () => !history?.go || index === (history.state?.panelIndex ?? 0)
+  function write(push = false, href = address(state)) {
+    if (push) furthest = ++index
+    const main = current('main')
+    history?.[push ? 'pushState' : 'replaceState']?.({
+      ...main?.data, panelVisit: main?.id, panelIndex: index, furthest, workspace: state,
+    }, '', href)
   }
-  const write = (data, title, url, { root = false, replace = false } = {}) => {
-    const next = index() + (replace ? 0 : 1)
-    const panelRoot = root ? next : rootIndex()
-    let panelBack = history?.state?.panelBack
-    if (root) panelBack = null
-    else if (!replace) {
-      const item = itemAt(win.location?.href ?? win.location?.pathname ?? '/')
-      panelBack = { item, first: panelBack?.item === item ? panelBack.first : index() }
+  function visit(surface, href, data = {}, repeat = false) {
+    if (surface !== 'side') state.front = surface
+    if (!repeat && current(surface)?.href === href) { write(); return }
+    const previous = current('main')
+    if (previous && history?.state?.profileReturn) previous.data.profileReturn = history.state.profileReturn
+    state.visits.push({ surface, href, data, id: ++state.serial })
+    state.forward = state.forward.filter(step => step.surface !== surface)
+    write(true)
+  }
+  function forget(predicate) {
+    state.visits = state.visits.filter(step => !predicate(step))
+    state.forward = state.forward.filter(step => !predicate(step))
+    if (!current('main')) state.front = 'list'
+  }
+  function clear(surface) { forget(step => step.surface === surface) }
+  function select(tab) {
+    clear('list')
+    state.tab = tab
+    state.front = 'list'
+    write()
+  }
+  function walk(delta, surface) {
+    const source = delta < 0 ? state.visits : state.forward
+    const dest = delta < 0 ? state.forward : state.visits
+    const step = next(delta, surface)
+    if (!step) return
+    source.splice(source.indexOf(step), 1)
+    dest.push(step)
+    if (step.surface !== 'side') state.front = step.surface === 'main' && current('main') ? 'main' : 'list'
+    if (delta < 0 && step.data.returnToList) state.front = 'list'
+    return step.surface
+  }
+  function go(delta, surface) {
+    if (!next(Math.sign(delta), surface) || request || returning) return false
+    const branch = delta > 0 && index >= furthest
+    if (!history?.go || branch) {
+      if (guard(next(delta, surface).surface, () => go(delta, surface))) {
+        const changed = walk(delta, surface)
+        write(branch); apply(changed)
+      }
+    } else {
+      request = { surface }
+      history.go(delta)
     }
-    history?.[replace ? 'replaceState' : 'pushState']?.({
-      ...data, panelIndex: next, panelRoot, panelBack,
-      panelVisit: replace && !root ? history.state?.panelVisit : win.crypto?.randomUUID?.() ?? String(Math.random()),
-    }, title, url)
-    current = index()
-    if (!replace) furthest = current
-    boundary = rootIndex()
-  }
-  const push = (data, title, url, options) => write(data, title, url, options)
-  const replace = (data, title, url, options) => write(data, title, url, { ...options, replace: true })
-  const canForward = () => index() < furthest || Boolean(win.navigation?.canGoForward)
-  const start = (data, title, url) => write(data, title, url, { root: true, replace: index() === rootIndex() && win.navigation?.canGoForward === false && !canForward() })
-  const go = delta => {
-    const steps = delta < 0 ? -backSteps() : delta
-    if (!history?.go || !steps) return false
-    requested = steps < 0 || canForward()
-    history.go(steps)
     return true
   }
-  // Native gestures move the browser before the app can ask about edits.
-  // Return to the actual source entry while saving. Replay the traversal only
-  // after both that return and the existing save/discard guard have finished.
   win.addEventListener?.('popstate', event => {
-    if (!win.location?.href || !history?.go) return
-    if (returning && index() === current) {
-      const run = returning
-      returning = null
+    const at = history?.state?.panelIndex ?? 0
+    if (!win.location?.href || !history?.go || !history.state?.workspace) return
+    if (returning && at === index) {
       event.stopImmediatePropagation()
-      run()
+      const done = returning; returning = null; done()
       return
     }
-    if (rollback && index() === rollback.from) {
-      event.stopImmediatePropagation()
-      rollback.returned = true
-      if (rollback.accepted) history.go(rollback.delta)
+    const distance = at - index
+    if (!distance) return
+    const surface = request?.surface, delta = Math.sign(distance)
+    const dismiss = !request && overlay()
+    request = null
+    event.stopImmediatePropagation()
+    const bounce = action => { returning = action; history.go(-distance) }
+    if (dismiss || !next(delta, surface)) {
+      bounce(delta < 0 && dismiss ? dismiss : () => {})
       return
     }
-    const delta = index() - current
-    const ownTraversal = requested || rollback?.accepted
-    requested = false
-    rollback = null
-    if (delta) {
-      const action = ownTraversal ? null : intercept(delta)
-      if (action || index() < boundary) {
-        // The browser already moved. Return before routing the abandoned tab
-        // or disturbing a mounted pane, including an unsaved editor.
-        event.stopImmediatePropagation()
-        returning = action ?? (() => {})
-        history.go(-delta)
-        return
-      }
-      const destination = itemAt(win.location.href)
-      if (occupied(destination)) {
-        event.stopImmediatePropagation()
-        const step = delta < 0 ? -backSteps() : canForward() ? 1 : 0
-        history.go(step || -delta)
-        return
-      }
-      const attempt = { from: current, delta }
-      const retry = () => {
-        attempt.accepted = true
-        if (rollback === attempt && attempt.returned) history.go(delta)
-      }
-      if (!guard(retry)) {
-        rollback = attempt
-        event.stopImmediatePropagation()
-        history.go(-delta)
+    // A native gesture has already moved the browser. Restore the source
+    // entry before a save/discard decision can replay the requested motion.
+    const count = Math.abs(distance)
+    const affected = (delta < 0 ? state.visits : state.forward)
+      .filter(step => !surface || step.surface === surface).slice(-count)
+    for (const target of new Set(affected.map(step => step.surface))) {
+      let accepted = false, backAtSource = false
+      const retry = () => { accepted = true; if (backAtSource) go(distance, surface) }
+      if (!guard(target, retry)) {
+        bounce(() => { backAtSource = true; if (accepted) go(distance, surface) })
         return
       }
     }
-    current = index()
-    boundary = rootIndex()
-    furthest = Math.max(furthest, current)
-    syncSide()
+    const changed = new Set()
+    for (let i = 0; i < count && next(delta, surface); i++) changed.add(walk(delta, surface))
+    index = at
+    write()
+    for (const target of changed) apply(target)
   }, true)
-  return { push, replace, start, go, atCurrent: () => index() === current, canBack: () => backSteps() > 0 }
+  return { state, current, visit, forget, clear, select, go, can: (delta, surface) => Boolean(next(delta, surface)), atCurrent,
+    save: () => write(), front: surface => { state.front = surface; write() },
+    // Keep an app-owned entry below the root for Back on a popup at root.
+    start(tab, href) { state.tab = tab; write(false, href); write(true, href) },
+    restored: Boolean(saved) }
 }
 
 export function historyBackButton(action) {

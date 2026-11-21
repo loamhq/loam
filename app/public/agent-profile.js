@@ -162,15 +162,20 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
 
 export function mountProfile(host, { controller = host.profiles, activity = host.profileActivity } = {}) {
   const c = controller, { st } = c
+  const surface = host.panelId === 'side' ? 'side' : c === host.profiles ? 'page' : 'settings'
+  const prefix = surface === 'page' ? 'profile' : `${surface}-profile`
   const providerName = id => host.state.providers.find(p => p.id === id)?.name || id
   const group = (title, rows, foot = null, limitNote = null) => h('section', { class: 'profile-group', 'aria-label': title }, h('h3', { class: 'kicker', text: title }), h('div', { class: 'rows' }, rows), foot ? h('p', { class: 'footnote', text: foot }) : null, limitNote ? h('p', { class: 'footnote profile-limit-note', text: limitNote }) : null)
   const open = (ref, { folder = false } = {}) => {
     if (!ref?.root || ref.exists === false) return
-    if (c === host.profiles && st.target?.kind === 'agent') {
+    if (surface === 'side' && st.target?.kind === 'agent') {
+      const item = host.workspaceHistory.current('side')?.data.item
+      if (item) { item.profileTab = st.tab; host.workspaceHistory.save() }
+    } else if (c === host.profiles && st.target?.kind === 'agent') {
       const history = globalThis.history
       history?.replaceState?.({ ...history.state, profileReturn: { id: st.target.id, tab: st.tab } }, '')
     }
-    host.goFiles(ref.root, ref.path || '', folder ? { isFile: false, routed: true } : { isFile: true })
+    host.goFiles(ref.root, ref.path || '', folder ? { isFile: false, panelLink: true } : { isFile: true })
   }
   const file = (title, ref, sub = null, right = null, { folder = false, unavailable = 'Not reachable from Files' } = {}) => ref?.root && ref.exists !== false
     ? settingsRow({ title, sub, right, lead: (folder ? icon.folder : icon.file)(18), onclick: () => open(ref, { folder }) })
@@ -224,8 +229,8 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     if (st.edit?.field !== field) return null
     const e = st.edit
     return h('form', { class: 'profile-editor', key: `edit:${field}`, onsubmit: event => { event.preventDefault(); save(e.value) } },
-      h('label', { for: `profile-${field}`, text: label }),
-      h('input', { id: `profile-${field}`, class: 'field-input', type: time ? 'time' : 'text', value: e.value, disabled: st.busy, required: time, onkeydown: event => { if (event.key === 'Escape' && !st.busy) { event.preventDefault(); event.stopPropagation(); st.edit = null; st.error = ''; host.schedule() } }, maxlength: field === 'display' ? 40 : undefined, oninput: event => { e.value = event.target.value } }),
+      h('label', { for: `${prefix}-${field}`, text: label }),
+      h('input', { id: `${prefix}-${field}`, class: 'field-input', type: time ? 'time' : 'text', value: e.value, disabled: st.busy, required: time, onkeydown: event => { if (event.key === 'Escape' && !st.busy) { event.preventDefault(); event.stopPropagation(); st.edit = null; st.error = ''; host.schedule() } }, maxlength: field === 'display' ? 40 : undefined, oninput: event => { e.value = event.target.value } }),
       help ? h('p', { class: 'note', text: help }) : null,
       h('div', { class: 'profile-actions' }, h('button', { class: 'pillbtn primary', type: 'submit', disabled: st.busy, text: st.busy ? 'Saving…' : 'Save' }), h('button', { class: 'pillbtn', type: 'button', disabled: st.busy, text: 'Cancel', onclick: () => { st.edit = null; st.error = ''; host.schedule() } })))
   }
@@ -269,13 +274,13 @@ export function mountProfile(host, { controller = host.profiles, activity = host
       h('header', { class: 'profile-hero' },
         upload,
         h('div', { class: 'profile-identity' },
-          h('button', { class: 'profile-face', disabled: st.busy, 'data-profile-face': c === host.profiles ? 'page' : 'settings', 'aria-label': `Change ${name}’s face`, 'aria-haspopup': 'dialog', 'aria-expanded': String(Boolean(st.faceMenu)), onclick: () => { st.menu = false; st.faceMenu = !st.faceMenu; host.schedule() } }, blob({ ...look, imageSrc: faceSrc }, { size: 64, font: 28 })),
+          h('button', { class: 'profile-face', disabled: st.busy, 'data-profile-face': surface, 'aria-label': `Change ${name}’s face`, 'aria-haspopup': 'dialog', 'aria-expanded': String(Boolean(st.faceMenu)), onclick: () => { st.menu = false; st.faceMenu = !st.faceMenu; host.schedule() } }, blob({ ...look, imageSrc: faceSrc }, { size: 64, font: 28 })),
           h('div', {}, st.edit?.field === 'display' ? editor('display', name, value => c.patch({ display: value }), { label: 'Display name' }) : h('button', { class: 'profile-name display', disabled: st.busy, 'aria-label': `Rename ${name}`, text: name, onclick: () => edit('display', name) }),
             h('p', { class: 'profile-status note', text: isArchived ? 'Archived' : profileStatus(data.status) })),
-          h('button', { class: 'iconbtn profile-menu-button', 'data-profile-actions': c === host.profiles ? 'page' : 'settings', 'aria-label': 'Agent actions', 'aria-haspopup': 'menu', 'aria-expanded': String(Boolean(st.menu)), onclick: () => { st.faceMenu = false; st.menu = !st.menu; host.schedule() } }, icon.dots(20))),
+          h('button', { class: 'iconbtn profile-menu-button', 'data-profile-actions': surface, 'aria-label': 'Agent actions', 'aria-haspopup': 'menu', 'aria-expanded': String(Boolean(st.menu)), onclick: () => { st.faceMenu = false; st.menu = !st.menu; host.schedule() } }, icon.dots(20))),
         st.menu ? menuSurface(h('div', { class: 'popover profile-actions-menu', role: 'menu', key: 'profile-menu' },
           settingsRow({ title: 'Archive agent', onclick: () => { st.menu = false; st.confirmArchive = true; host.schedule() }, props: { role: 'menuitem', disabled: st.busy || isArchived } })),
-          { title: 'Agent actions', heading: false, anchored: true, width: 220, anchor: `[data-profile-actions="${c === host.profiles ? 'page' : 'settings'}"]`, close: () => { st.menu = false; host.schedule() } }) : null,
+          { title: 'Agent actions', heading: false, anchored: true, width: 220, anchor: `[data-profile-actions="${surface}"]`, close: () => { st.menu = false; host.schedule() } }) : null,
         st.faceMenu ? menuSurface(h('div', { class: 'popover profile-face-menu', key: 'profile-face-menu' },
           h('div', { class: 'profile-face-preview', 'aria-hidden': 'true' },
             blob({ ...look, imageSrc: faceSrc }, { size: 96, font: 40 })),
@@ -283,7 +288,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
           h('div', { class: 'profile-face-menu-actions', role: 'menu', 'aria-label': `${name}’s face options` },
             settingsRow({ title: 'Upload a picture', lead: icon.image(18), onclick: () => { st.faceMenu = false; upload.click(); host.schedule() }, props: { role: 'menuitem', disabled: st.busy } }),
             data.identity.face ? settingsRow({ title: 'Use the theme’s face', lead: icon.refresh(18), onclick: () => { st.faceMenu = false; c.face() }, props: { role: 'menuitem', disabled: st.busy } }) : null)),
-          { title: `${name}’s face`, heading: false, width: 280, anchor: `[data-profile-face="${c === host.profiles ? 'page' : 'settings'}"]`, close: () => { st.faceMenu = false; host.schedule() } }) : null,
+          { title: `${name}’s face`, heading: false, width: 280, anchor: `[data-profile-face="${surface}"]`, close: () => { st.faceMenu = false; host.schedule() } }) : null,
         st.soul ? h('blockquote', { class: 'profile-soul', cite: data.files.soul?.path }, h('p', { text: st.soul }), h('cite', { text: 'From the soul' })) : null,
         st.soulError ? h('p', { class: 'note', role: 'status', text: st.soulError }) : null,
         h('div', { class: 'profile-actions' },
@@ -294,8 +299,8 @@ export function mountProfile(host, { controller = host.profiles, activity = host
         st.confirmArchive ? h('div', { class: 'profile-archive-confirm', role: 'alertdialog', 'aria-label': `Archive ${name}?` },
           h('p', { text: `${name} will leave Chats, pickers and mentions. Schedules will stop. Threads and files stay. You can restore this agent from Settings → Agents → Archived.` }),
           h('div', { class: 'profile-actions' }, h('button', { class: 'pillbtn danger', disabled: st.busy, text: st.busy ? 'Archiving…' : 'Archive', onclick: async () => { const target = st.target; if (await c.archive() && st.target === target && (c === host.profiles ? host.state.screen === 'profile' && host.state.profileAgent === agent : host.state.sheet?.detail?.id === agent)) { host.state.sheet = null; host.goHome() } } }), h('button', { class: 'pillbtn', disabled: st.busy, text: 'Cancel', onclick: () => { st.confirmArchive = false; host.schedule() } }))) : null),
-      h('div', { class: 'profile-tabs', role: 'tablist', 'aria-label': `${name} profile` }, tabs.map(tab => h('button', { class: 'profile-tab', role: 'tab', id: `profile-tab-${tab}`, 'aria-selected': String(st.tab === tab), 'aria-controls': 'profile-content', tabindex: st.tab === tab ? '0' : '-1', text: tab, onclick: () => chooseTab(tab), onkeydown: e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); const at = tabs.indexOf(tab); const next = e.key === 'Home' ? tabs[0] : e.key === 'End' ? tabs.at(-1) : tabs[(at + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]; chooseTab(next); queueMicrotask(() => document.getElementById(`profile-tab-${next}`)?.focus()) } } }))),
-      h('div', { class: 'profile-tab-content', key: st.tab, role: 'tabpanel', id: 'profile-content', 'aria-labelledby': `profile-tab-${st.tab}`, tabindex: '0' },
+      h('div', { class: 'profile-tabs', role: 'tablist', 'aria-label': `${name} profile` }, tabs.map(tab => h('button', { class: 'profile-tab', role: 'tab', id: `${prefix}-tab-${tab}`, 'aria-selected': String(st.tab === tab), 'aria-controls': `${prefix}-content`, tabindex: st.tab === tab ? '0' : '-1', text: tab, onclick: () => chooseTab(tab), onkeydown: e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); const at = tabs.indexOf(tab); const next = e.key === 'Home' ? tabs[0] : e.key === 'End' ? tabs.at(-1) : tabs[(at + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]; chooseTab(next); queueMicrotask(() => document.getElementById(`${prefix}-tab-${next}`)?.focus()) } } }))),
+      h('div', { class: 'profile-tab-content', key: st.tab, role: 'tabpanel', id: `${prefix}-content`, 'aria-labelledby': `${prefix}-tab-${st.tab}`, tabindex: '0' },
         st.tab === 'Threads' ? [threads.length ? h('div', { class: 'rows profile-threads' }, threads.slice((st.page - 1) * pageSize, st.page * pageSize).map(t => host.threads.row(t))) : emptyState({ object: 'speech', size: 'small', level: 'h3', title: 'No threads yet', body: `Threads with ${name} show up here.`, props: { class: 'profile-empty' } }),
           pages > 1 ? h('nav', { class: 'profile-pagination', 'aria-label': 'Thread pages' }, h('button', { class: 'pillbtn', disabled: st.page === 1, text: 'Previous', onclick: () => { st.page--; host.schedule() } }), h('span', { text: `${st.page} / ${pages}` }), h('button', { class: 'pillbtn', disabled: st.page === pages, text: 'Next', onclick: () => { st.page++; host.schedule() } })) : null]
         : st.tab === 'Activity' ? activity.view({ embedded: true })
@@ -324,7 +329,7 @@ export function mountProfile(host, { controller = host.profiles, activity = host
   }
   return { body, settingsDetail, syncFocus() {
     if (!st.focusField) return
-    const input = globalThis.document?.getElementById(`profile-${st.focusField}`)
+    const input = globalThis.document?.getElementById(`${prefix}-${st.focusField}`)
     if (!input) return
     input.focus({ preventScroll: true }); if (input.type === 'text') input.select?.()
     st.focusField = null

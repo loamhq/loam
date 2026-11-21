@@ -1,12 +1,11 @@
 import { fileEditor } from '../file-editor.js'
-import { createFiles, listFromURL, renamedResource, uploadAccept, FILES_LOCATION_HIDDEN, filesHref, vaultUrlRef, missingSentence, resolveOf, isFolder, externalHref, parseFilesPath, downloadHref, nameOf as fileNameOf, formatText, drawnTypeOf, bytesAre, folderView, fileView, ROOT_LOOK } from "../files.js"
+import { parentOf, createFiles, renamedResource, uploadAccept, filesHref, vaultUrlRef, missingSentence, resolveOf, isFolder, externalHref, parseFilesPath, downloadHref, nameOf as fileNameOf, formatText, drawnTypeOf, bytesAre, folderView, fileView, ROOT_LOOK } from "../files.js"
 import { h, kept, icon } from "../ui.js"
 import { setFileLinks, setVaultUrls } from "../markdown.js"
 import { createPicker } from "../filepicker.js"
 import { sessionFromAddress } from "../imported-threads.js"
-import { threadFromPath } from "../thread-opening.js"
 import { authenticatedFetch as fetch } from "../auth.js"
-import { withSide } from '../panel-items.js'
+import { itemDescriptor } from '../panel-items.js'
 import { fileShortcuts, toggleFileShortcut } from '../store.js'
 
 // Mounted once. Cross-module state and operations are explicit host services.
@@ -24,16 +23,7 @@ function herePath() {
   return globalThis.location?.pathname ?? '/'
 }
 
-// The path and the list it was opened from (`?list=`), what a Files address
-// is made of; the side panel's `?side=` is not part of it.
-function hereAddress() {
-  const list = listFromURL(globalThis.location?.search ?? '')
-  return herePath() + (list ? `?list=${encodeURIComponent(list)}` : '')
-}
-
-const pushAddress = (...args) => host.pushAddress(...args)
-
-const files = createFiles({
+const fileOptions = {
   registry: host.registry,
   api: host.api,
   schedule: host.schedule,
@@ -43,7 +33,30 @@ const files = createFiles({
   onResolveTo: (root, path, isFile, row) => goFiles(root, path, { isFile, row }),
   // Through `put()`, the one place that can say how far an upload has got.
   sendForm: (href, form, onProgress) => host.put(href, form, onProgress),
-})
+}
+const files = createFiles(fileOptions)
+// An explicit directory link (for example, a profile's workspace) is a panel
+// visit. Its folder controller never borrows the navigator's listing or sheet.
+let directory = null
+function directoryGo(root, path, options = {}) {
+  if (options.isFile) return goFiles(root, path, options)
+  return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain']({ kind: 'directory', id: filesHref(root, path) })
+}
+directoryGo.redraw = host.schedule
+directoryGo.side = () => host.panels
+function directoryView(href) {
+  if (!directory) {
+    directory = createFiles({ ...fileOptions, onRename: (answer, offered) => { files.applyRename(answer); followRename(answer, true, offered) }, onResolveTo: (root, path, isFile, row) => directoryGo(root, path, { isFile, row }) })
+    directory.side = () => host.panels
+
+  }
+  directory.st.upload = files.st.upload
+  const at = parseFilesPath(href)
+  if (at && (!directory.st.turn || directory.st.root !== at.root || directory.st.path !== at.path))
+    directory.show(at.root, at.path, { isFile: false })
+  return folderView(directory, { go: directoryGo, wide: false, home: filesHome(directory), historyBack: host.panelId === 'side' ? null : host.backButton('main'), showParent: false })
+}
+function sheetFiles() { return directory?.st.sheet && host.state.mainItem?.kind === 'directory' ? directory : files }
 files.side = () => host.panels
 
 // Other tabs on this origin follow the same host answer; there is no second
@@ -68,11 +81,24 @@ function followRename(answer, broadcast = true, offered = []) {
     hiddenShortcuts: [...held.hiddenShortcuts.flatMap(s => { const next = renamedResource(s, answer); return next === s ? [s] : [s, next] }), ...followed.map(({ root, path }) => ({ root, path }))],
     inbox: folder(held.inbox),
   }
-  if (host.state.mainItem?.kind === 'file') host.state.mainItem = renamedResource(host.state.mainItem, answer)
-  const at = parseFilesPath(herePath())
-  if (navigation && at) {
+  directory?.applyRename(answer)
+  const renamedHref = href => {
+    const url = new URL(href, 'http://placeholder')
+    const at = parseFilesPath(url.pathname)
     const next = renamedResource(at, answer)
-    if (next !== at) globalThis.history?.replaceState?.({ ...globalThis.history.state, files: true }, '', withSide(filesHref(next.root, next.path) + (globalThis.location?.hash ?? ''), host.panels?.st.side))
+    if (next === at) return href
+    return filesHref(next.root, next.path) + url.search + url.hash
+  }
+  const renamedItem = item => item?.kind === 'directory' ? { ...item, id: renamedHref(item.id) }
+    : item?.kind === 'file' ? itemDescriptor(renamedResource(item, answer)) : item
+  host.state.mainItem = renamedItem(host.state.mainItem)
+  if (navigation) {
+    const history = host.workspaceHistory
+    for (const step of [...history.state.visits, ...history.state.forward]) {
+      step.href = renamedHref(step.href)
+      if (step.data.item) step.data.item = renamedItem(step.data.item)
+    }
+    history.save()
   }
   if (broadcast) renameChannel?.postMessage(answer)
   host.schedule()
@@ -90,12 +116,12 @@ const filesUploadChooser = h('input', {
   onchange: () => {
     const chosen = [...(filesUploadChooser.files ?? [])]
     filesUploadChooser.value = ''
-    files.upload(chosen)
+    sheetFiles().upload(chosen)
   },
 })
 
 function chooseUpload() {
-  filesUploadChooser.accept = uploadAccept(files.st.upload)
+  filesUploadChooser.accept = uploadAccept(sheetFiles().st.upload)
   filesUploadChooser.value = ''
   filesUploadChooser.click()
 }
@@ -144,7 +170,7 @@ function restoreFilePlace() {
   if (!file || file.loading) return
   files.resumeOwner()
   if (mountedFile === file) return
-  const visit = host.panelId === 'side' ? host.panels.sideVisit() : globalThis.history?.state?.panelVisit ?? 'initial'
+  const visit = host.panelId === 'side' ? host.workspaceHistory.current('side')?.id : globalThis.history?.state?.panelVisit ?? 'initial'
   const saved = places.get(visit)
   if (saved?.root === file.root && saved.path === file.path && !file.fragment) {
     if (saved.mode !== file.mode) { files.setMode(saved.mode); return }
@@ -189,65 +215,37 @@ function builtinFileFieldFor(f, { readOnly, mono }) {
 // Go to a folder or a file. `push: false` is for an address the browser has
 // already moved to — a load, or Back.
 let fileDestination = 0
-function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null, list = null, boardThread = null, browse = false } = {}) {
+function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null, list = null, boardThread = null, panelLink = false } = {}) {
   const destination = ++fileDestination
-  if (navigation && isFile === null && root && root !== 'system' && path) {
-    const request = ++host.importRequest
-    host.api('GET', `/files/stat?${new URLSearchParams({ root, path })}`).then(resource => {
-      if (destination === fileDestination && request === host.importRequest) goFiles(root, path, { isFile: !isFolder(resource), row: resource, push, fragment, mode, list, boardThread, browse })
-    }).catch(() => {
-      if (destination === fileDestination && request === host.importRequest) goFiles(root, path, { isFile: false, push, routed, browse })
-    })
+  if (isFile === null && path && root?.startsWith('@')) isFile = true
+  if (isFile === null && path && root && root !== 'system') {
+    const request = host.importRequest
+    const open = (isFile, row) => {
+      if (destination === fileDestination && request === host.importRequest)
+        goFiles(root, path, { isFile, row, push, fragment, mode, list, boardThread, panelLink })
+    }
+    files.stat(root, path).then(row => open(!isFolder(row), row), () => open(false, null))
     return true
   }
-  // Expose a panel's save guard before routing can pause this navigation.
-  if (navigation && push && host.state.sheet) host.closeSheet()
-  const beside = host.panels?.st.side
-  const heldFile = beside?.kind === 'file' && beside.root === root && beside.path === path
-  // The file already open in the main panel, opened again from a plugin's
-  // list: nothing reopens, but its address now names the list it is in.
-  const mainHere = host.state.mainItem?.kind === 'file' && host.state.mainItem.root === root && host.state.mainItem.path === path && files.st.file?.root === root && files.st.file?.path === path
-  if (navigation && !routed && isFile === true && list && mainHere && host.panelId !== 'side' && !heldFile) {
-    if (files.st.root === list && hereAddress() !== filesHref(root, path, list)) globalThis.history?.replaceState?.({ ...globalThis.history.state, files: true }, '', withSide(filesHref(root, path, list), host.panels?.st.side))
-    host.schedule(); return true
+  if (!isFile || root === 'system') {
+    if (root !== 'system' && (host.state.sheet || panelLink) && push) return directoryGo(root, path)
+    if (host.state.sheet) host.closeSheet()
+    host.browseFiles(root === 'system' ? null : root, root === 'system' ? '' : path, { push, hidden: root === 'system' })
+    return true
   }
-  if (!routed && (isFile === true || (isFile === null && heldFile)) && host.panels) return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain']({ kind: 'file', root, path, row, fragment, mode, push, list, boardThread })
-  const hidden = root === 'system'
-  if (hidden) { root = null; path = ''; isFile = false; row = null; fragment = null }
-  if (navigation && browse && host.state.wide && host.state.mainItem && isFile !== true) {
-    if (push && (root !== files.st.root || path !== files.st.path)) {
-      const entry = globalThis.history?.state
-      pushAddress({ ...entry, filesList: { root, path } }, '', globalThis.location?.href ?? herePath())
-    }
-    files.show(root, path, { isFile, row, fragment, mode, keepFile: true })
-    host.schedule(); return true
-  }
-  const leavingFile = files.st.file && !(isFile && files.st.file.root === root && files.st.file.path === path)
-  if (leavingFile && !files.guard(null)) {
-    // The page's own sheet asks; going on from it comes back here, clean.
-    files.st.sheet.proceed = proceedThen(() => goFiles(hidden ? 'system' : root, path, { isFile, row, fragment, mode, list, push, routed, boardThread, browse }))
-    return false
-  }
-  if (navigation && host.state.wide && !isFile && host.state.collapsed) host.setCollapsed(false)
-  host.state.mainItem = isFile !== false && root && path ? { kind: 'file', root, path } : null
-  // Browsing a folder starts a Files navigation path of its own. Merely having
-  // a chat to return to must not replace that folder's ordinary back button.
-  const chat = host.activeThread()
-  files.st.chatFile = Boolean(isFile && (boardThread || chat || (host.state.screen === 'files' && files.st.chatFile)))
+  const item = { kind: 'file', root, path, row, fragment, mode, push, list, boardThread }
+  if (!routed) return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain'](item)
+  files.st.chatFile = Boolean(boardThread || host.activeThread() || (host.state.screen === 'files' && files.st.chatFile))
   if (host.state.screen !== 'files') {
     host.importRequest++
     host.threads.close({ navigate: false })
     host.state.profileAgent = null
-    host.state.screen = 'files'
   }
-  if (leavingFile && !isFile) files.closeFile()
-  if (!root) files.st.chatFile = false
-  // `show` keeps the list only for what turns out to be a file.
-  files.show(root, path, { isFile, row, fragment, mode, list })
-  if (hidden) files.st.notice = FILES_LOCATION_HIDDEN
-  const href = filesHref(root, path, isFile === false ? null : list)
-  if (navigation && hidden && herePath() !== href) globalThis.history?.replaceState?.({ ...globalThis.history.state, files: true }, '', href)
-  else if (navigation && push && hereAddress() !== href) pushAddress({ files: true, folder: isFile !== true, ...(boardThread ? { boardThread } : {}) }, '', href)
+  host.state.mainItem = { kind: 'file', root, path }
+  host.state.screen = 'files'
+  const current = files.st.file
+  if (!current || current.root !== root || current.path !== path) files.openFile(root, path, row, { fragment, mode })
+  else if (fragment) current.fragment = fragment
   host.schedule()
   return true
 }
@@ -298,7 +296,7 @@ async function openFileRef(ref, from = null, event = null, { chat = false } = {}
       if (toSide) return host.panels.openSide(item)
       if (fullView && host.panelId === 'side') return host.panels.openMain(item)
     }
-    return goFiles(row.root, row.path, { isFile, row, fragment })
+    return goFiles(row.root, row.path, { isFile, row, fragment, panelLink: true })
   }
   if (answer.status === 'found') return go(answer.resource)
   if (answer.status === 'ambiguous') {
@@ -344,7 +342,7 @@ if (navigation) setFileLinks((ref, from, event) => openFileRef(ref, from, event)
 if (navigation) globalThis.addEventListener?.('popstate', () => {
   const session = sessionFromAddress(globalThis.location?.href ?? herePath() + (globalThis.location?.search ?? ''))
   if (session) { host.openImportedSession(session); return }
-  if (globalThis.location?.href) host.routePanels()
+  if (globalThis.location?.href) host.followPanelAddress(globalThis.location.href)
 })
 
 // A tab closed or reloaded over an unsaved edit asks first, as every other way
@@ -469,16 +467,16 @@ function fileDictation() {
 
 }
 
-function filesScreen() {
-  const f = files.st.file
+function filesScreen({ list = false } = {}) {
+  const f = !list && files.st.file
   if (f) {
     return h(
       'section',
       { class: 'screen files', key: 'screen:files:file' },
       fileView(files, {
-        openFolder: files.st.chatFile ? () => goFiles(files.st.root, files.st.path, { isFile: false }) : null,
+        openFolder: files.st.chatFile ? () => goFiles(f.root, parentOf(f.path), { isFile: false }) : null,
         historyBack: host.backAction('main', globalThis.history?.state?.boardThread ? 'Back to board' : undefined),
-        closeLabel: files.pluginRoot() ? files.pluginRoot().name : files.st.path === '' ? (ROOT_LOOK[f.root]?.name ?? f.root) : fileNameOf(files.st.path),
+        closeLabel: files.pluginRoot(f.root)?.name ?? (parentOf(f.path) ? fileNameOf(parentOf(f.path)) : ROOT_LOOK[f.root]?.name ?? f.root),
         wide: false,
         htmlActionsInMenu: files.st.chatFile,
         field: fileFieldFor,
@@ -495,7 +493,7 @@ function filesScreen() {
     'section',
     { class: 'screen files', key: 'screen:files' },
     host.registry.draw('app.overlay', { slot: 'player' }),
-    folderView(files, { go: goFiles, wide: false, historyBack: host.backButton('main'), showParent: false, home: filesHome() }),
+    folderView(files, { go: goFiles, wide: false, historyBack: host.backButton('list'), showParent: false, home: filesHome() }),
     host.nav(),
   )
 }
@@ -504,9 +502,9 @@ function filesScreen() {
 
 // The Files home's own things: the person's shortcuts and the two folders its actions
 // write into, from `store.files` (see there for why they are this device's).
-function filesHome() {
+function filesHome(browser = files) {
   const held = host.store.files
-  const shortcuts = fileShortcuts(held, files.st.roots.shortcuts)
+  const shortcuts = fileShortcuts(held, browser.st.roots.shortcuts)
   const has = (root, path) => shortcuts.some((s) => s.root === root && s.path === path)
   return {
     shortcuts,
@@ -514,15 +512,17 @@ function filesHome() {
     daily: host.dailyNotes?.st.on ? host.dailyNotes.st.folder : null,
     isShortcut: has,
     toggleShortcut: (root, path, kind = 'folder') => {
-      host.store.files = toggleFileShortcut(host.store.files, files.st.roots.shortcuts, root, path, kind)
+      host.store.files = toggleFileShortcut(host.store.files, browser.st.roots.shortcuts, root, path, kind)
       host.schedule()
     },
-    onInbox: () => files.newInbox(held.inbox),
-    onDaily: async () => { await host.dailyNotes.refresh(); if (host.dailyNotes.st.on && host.dailyNotes.st.folder !== null) files.openDaily(host.dailyNotes.st.folder) },
+    onInbox: () => browser.newInbox(held.inbox),
+    onDaily: async () => { await host.dailyNotes.refresh(); if (host.dailyNotes.st.on && host.dailyNotes.st.folder !== null) browser.openDaily(host.dailyNotes.st.folder) },
   }
 }
 
 return Object.defineProperties({}, {
+    directoryView: { enumerable: true, get: () => directoryView },
+    sheetFiles: { enumerable: true, get: () => sheetFiles },
     restoreFilePlace: { enumerable: true, get: () => restoreFilePlace },
     herePath: { enumerable: true, get: () => herePath },
     files: { enumerable: true, get: () => files },
