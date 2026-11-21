@@ -22,7 +22,7 @@ test('message downloads use root-relative paths without changing attachment reco
   assert.equal(files[0].path, `/some/root/${suffix}`)
 })
 
-test('redraws retain loaded image nodes and a failure remains a filename chip', () => {
+test('redraws retain image nodes and the frame and caption after a failure', () => {
   installDom()
   const host = h('div'), files = [{ path: '98_ATTACHMENTS/preview/one.png', name: 'one.png', type: 'image/png' }]
   morph(host, messageFiles(files))
@@ -34,10 +34,12 @@ test('redraws retain loaded image nodes and a failure remains a filename chip', 
   image.__on.error({ target: image })
   clearWrites()
   for (let i = 0; i < 20; i++) morph(host, messageFiles(files))
-  assert.equal(image.hidden, true)
-  assert.equal(all(host, 'message-image').length, 0)
-  assert.equal(all(host, 'attachment-chip')[0], link)
-  assert.equal(all(host, 'chip-name')[0].textContent, 'one.png')
+  assert.equal(all(host, 'message-image')[0], link)
+  assert.equal(link.firstChild, image)
+  assert.equal(link.getAttribute('href'), null)
+  assert.ok(link.getAttribute('class').includes('missing'))
+  assert.equal(all(host, 'reply-image-missing')[0].textContent, 'Image no longer available')
+  assert.equal(all(host, 'message-image-name')[0].textContent, 'one.png')
   assert.deepEqual(sinceSettled(), [])
   // A changed record updates its displayed name rather than retaining stale DOM.
   files[0].name = 'renamed.png'

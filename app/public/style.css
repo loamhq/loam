@@ -1287,10 +1287,13 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 .bubble-files { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
 .bubble-files:has(.message-image) { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,104px),1fr)); align-items:start; }
 .bubble-files:has(.message-image:only-child) { max-width:320px; }
-.message-image { min-height:44px; min-width:0; display:flex; flex-direction:column; gap:4px; color:var(--paper-mark-ink); text-decoration:none; }
-.message-image img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: contain; border-radius: 12px; }
-.message-image img[hidden] { display:none; }
-.message-image-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.message-image { min-height:44px; min-width:0; display:grid; grid-template-columns:minmax(0,1fr); gap:4px; color:var(--paper-mark-ink); text-decoration:none; }
+.message-image img { grid-area:1 / 1; display:block; width:100%; height:auto; aspect-ratio:4 / 3; object-fit:contain; border-radius:12px; }
+.message-image.missing { cursor:default; }
+.message-image.missing img { visibility:hidden; }
+.message-image.missing .reply-image-missing { grid-area:1 / 1; display:flex; border:1px solid var(--paper-rule); border-radius:12px; background:var(--paper-hover-alpha); }
+.message-image.missing:not(:has(img)) .reply-image-missing { aspect-ratio:4 / 3; }
+.message-image-name { grid-row:2; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .message-image:focus-visible { outline: 2px solid var(--paper-mark-active); outline-offset: 2px; border-radius: 12px; }
 .attachment-chip.sent {
   padding: 5px 0; background: transparent; border:0; color: var(--paper-mark-ink);
@@ -2836,19 +2839,17 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
 @media (hover: hover) { .reply-figure.loaded .reply-image:hover img { filter:brightness(.97); } }
 .reply-image:focus-visible { outline:2px solid var(--paper-mark-active); outline-offset:2px; }
 .reply-caption { margin:6px 2px 0; color:var(--paper-ink-3); font-size:var(--type-small); line-height:1.4; overflow-wrap:anywhere; }
-.reply-image-missing { display:none; }
-/* A file that could not be read: a small calm frame where it would be. */
-.reply-figure.missing { flex:0 1 auto; width:min(100%, 260px); }
-.reply-figure.missing .reply-image { aspect-ratio:auto; height:88px; cursor:default; background:var(--paper-hover-alpha); }
-.reply-figure.missing .reply-image::after { box-shadow:inset 0 0 0 1px var(--paper-rule); }
+.reply-image-missing { display:none; align-items:center; justify-content:center; gap:8px; padding:6px; text-align:center; font-size:var(--type-small); line-height:1.3; color:var(--paper-ink-3); }
+.reply-image-missing svg { flex:none; }
+/* Keep the same frame while loading and if the file cannot be read. */
+.reply-figure.missing .reply-image { cursor:default; }
 .reply-figure.missing img { display:none; }
-.reply-figure.missing .reply-image-missing { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:8px; font-size:var(--type-small); color:var(--paper-ink-3); }
+.reply-figure.missing .reply-image-missing { position:absolute; inset:0; display:flex; }
 /* While the reply is still being written, its picture's place, held. */
 .reply-figure.waiting .reply-image { cursor:default; }
 @container (max-width: 480px) {
   .reply-figures-row { flex-direction:column; max-width:none; }
   .reply-figure { flex:none; width:min(100%, calc(var(--ratio) * var(--figure-h))); }
-  .reply-figure.missing { width:min(100%, 260px); }
 }
 @media (max-width: 600px) { .reply-figures { --figure-h:min(520px, 70vh); } }
 @media (prefers-reduced-motion: reduce) { .reply-image img { transition:none; transform:none; } }

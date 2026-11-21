@@ -212,9 +212,22 @@ def _walk(root: str, parts: list[str]) -> int:
     """A descriptor on the folder ``parts`` names, opened one component at a
     time without following a link. The caller closes it."""
     try:
-        fd = os.open(root_path(root), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        fd = _open_directory(root_path(root))
     except OSError:
         raise FilesError(404, f"the {root} root is not on this box") from None
+    try:
+        return _walk_from(fd, parts)
+    except OSError:
+        # ENOENT, ENOTDIR, ELOOP (a link) and EACCES all answer alike: what
+        # Files cannot reach does not exist for the asker.
+        raise _missing(root, parts) from None
+
+
+def _open_directory(base: Path) -> int:
+    return os.open(base, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+
+
+def _walk_from(fd: int, parts: list[str]) -> int:
     try:
         for part in parts:
             nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -223,9 +236,7 @@ def _walk(root: str, parts: list[str]) -> int:
             fd = nfd
     except OSError:
         os.close(fd)
-        # ENOENT, ENOTDIR, ELOOP (a link) and EACCES all answer alike: what
-        # Files cannot reach does not exist for the asker.
-        raise _missing(root, parts) from None
+        raise
     return fd
 
 
@@ -235,19 +246,35 @@ def _open_file(root: str, parts: list[str]) -> tuple[int, os.stat_result]:
         raise FilesError(400, "that is a folder; read a file in it")
     dfd = _walk(root, parts[:-1])
     try:
-        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
-                     | os.O_NONBLOCK, dir_fd=dfd)
+        return _open_regular(dfd, parts[-1])
+    except IsADirectoryError:
+        raise FilesError(400, f"{root}/{'/'.join(parts)} is a folder; list it") from None
     except OSError:
         raise _missing(root, parts) from None
     finally:
         os.close(dfd)
-    st = os.fstat(fd)
-    if stat.S_ISDIR(st.st_mode):
+
+
+def open_regular_at(base: Path, parts: list[str]) -> tuple[int, os.stat_result]:
+    """Open a regular file beneath a trusted directory, following no links."""
+    dfd = _walk_from(_open_directory(base), parts[:-1])
+    try:
+        return _open_regular(dfd, parts[-1])
+    finally:
+        os.close(dfd)
+
+
+def _open_regular(dfd: int, name: str) -> tuple[int, os.stat_result]:
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=dfd)
+    try:
+        st = os.fstat(fd)
+        if stat.S_ISDIR(st.st_mode):
+            raise IsADirectoryError(name)
+        if not stat.S_ISREG(st.st_mode):
+            raise OSError("expected a regular file")
+    except OSError:
         os.close(fd)
-        raise FilesError(400, f"{root}/{'/'.join(parts)} is a folder; list it")
-    if not stat.S_ISREG(st.st_mode):
-        os.close(fd)
-        raise _missing(root, parts)
+        raise
     return fd, st
 
 

@@ -351,11 +351,11 @@ def check_reply_to(msgs: list[dict], reply_to, thread_id: str) -> dict:
     return target
 
 
-# Keep inline image references in the message. Attach matching workspace or vault
-# files with their original destinations and dimensions when available. Older
-# attachments without refs render after the text. Unresolved references remain text.
+# Keep inline image references in the message. The record writer saves copies of
+# matching files and keeps the original destinations for placement in the app.
 REPLY_IMAGES_MAX = 3
 REPLY_IMAGE_BYTES = 40 * 1024 * 1024
+REPLY_ATTACHMENTS = Path(lc.vault_folder("attachments")) / "loam-ui"
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif"}
 IMAGE_REF_RE = re.compile(r"!\[([^\]\n]{0,300})\]\(\s*(<[^>\n]+>|[^)\n]+?)\s*\)")
@@ -417,7 +417,7 @@ def image_size(path: Path) -> tuple[int, int] | None:
     return (w, h) if 0 < w <= 100_000 and 0 < h <= 100_000 else None
 
 
-def _image_file(raw: str) -> dict | None:
+def _image_reference(raw: str) -> Path | None:
     from urllib.parse import unquote  # noqa: PLC0415
     raw = raw.strip()
     if raw.startswith("<") and raw.endswith(">"):
@@ -427,29 +427,71 @@ def _image_file(raw: str) -> dict | None:
     if re.match(r"^[a-z][a-z0-9+.-]*:", raw, re.I) and not raw.lower().startswith("file:"):
         return None                                 # a web address: not a file here
     raw = unquote(raw[7:] if raw.lower().startswith("file://") else raw)
-    path = Path(raw) if raw.startswith("/") else VAULT / raw
-    try:
-        path = path.resolve()
-        vault, spaces = VAULT.resolve(), AI_LABS.resolve()
-    except OSError:
+    return VAULT / raw
+
+
+def _image_location(path: Path) -> tuple[str, Path, list[str]] | None:
+    """The allowed sources for an explicitly posted image."""
+    import loam_files as files  # noqa: PLC0415
+    if path.suffix.lower() not in IMAGE_TYPES:
         return None
-    if path.suffix.lower() not in IMAGE_TYPES or not path.is_file():
+    if path.is_relative_to(VAULT / CONVERSATIONS):
         return None
-    conversations = vault / lc.vault_folder("conversations")
-    if path.is_relative_to(vault) and not path.is_relative_to(conversations):
-        root, rel = "vault", path.relative_to(vault)
-    elif path.is_relative_to(spaces):
-        root, rel = "spaces", path.relative_to(spaces)
+    if path.is_relative_to(VAULT):
+        root, base = "vault", VAULT
+    elif path.is_relative_to(AI_LABS):
+        root, base = "spaces", AI_LABS
+    elif path.is_relative_to(lc.JOBS):
+        job = path.relative_to(lc.JOBS).parts
+        if len(job) < 3 or job[1] != "captures":
+            return None
+        root, base = "local", lc.JOBS
+    elif path.is_relative_to("/tmp"):
+        root, base = "local", Path("/tmp")
     else:
         return None
     try:
-        size = path.stat().st_size
+        parts = files.parse_path(str(path.relative_to(base)))
+    except files.FilesError:
+        return None
+    if not parts:
+        return None
+    agents = None
+    if root == "spaces":
+        import loam_agents  # noqa: PLC0415
+        agents = set(loam_agents.every(AI_LABS))
+    for i, part in enumerate(parts):
+        if root == "spaces" and i > 0 and part == "scratch":
+            continue
+        if not files.visible(root, parts[:i], part, agents):
+            return None
+    return root, base, parts
+
+
+def _open_image(path: Path) -> tuple[int, os.stat_result, str, str]:
+    import loam_files as files  # noqa: PLC0415
+    location = _image_location(path)
+    if location is None:
+        raise OSError("image outside the allowed sources")
+    root, base, parts = location
+    fd, info = files.open_regular_at(base, parts)
+    if info.st_size > REPLY_IMAGE_BYTES or (root == "local" and info.st_uid != os.getuid()):
+        os.close(fd)
+        raise OSError("image is oversized or belongs to another user")
+    return fd, info, root, str(path if root == "local" else path.relative_to(base))
+
+
+def _image_file(raw: str) -> dict | None:
+    path = _image_reference(raw)
+    if path is None:
+        return None
+    try:
+        fd, info, root, rel = _open_image(path)
     except OSError:
         return None
-    if size > REPLY_IMAGE_BYTES:
-        return None
-    out = {"path": str(rel), "root": root, "name": path.name,
-           "type": IMAGE_TYPES[path.suffix.lower()], "size": size}
+    os.close(fd)
+    out = {"path": rel, "root": root, "name": path.name,
+           "type": IMAGE_TYPES[path.suffix.lower()], "size": info.st_size}
     dims = image_size(path)
     if dims:
         out["width"], out["height"] = dims
@@ -499,6 +541,37 @@ def attachment_path(a: dict) -> str:
     if path.startswith("/"):
         return path
     return str((AI_LABS if a.get("root") == "spaces" else VAULT) / path)
+
+
+def _save_reply_image(attachment: dict, day: str) -> dict:
+    """Publish a complete, uniquely named copy before the record refers to it."""
+    import loam_broker as cfg  # noqa: PLC0415
+    source = Path(attachment_path(attachment))
+    fd, _, root, rel = _open_image(source)
+    if root == "vault" and Path(rel).is_relative_to(REPLY_ATTACHMENTS):
+        os.close(fd)
+        return {**attachment, "root": root, "path": rel}
+    with os.fdopen(fd, "rb") as image:
+        data = image.read(REPLY_IMAGE_BYTES + 1)
+    if len(data) > REPLY_IMAGE_BYTES:
+        raise OSError("image grew past the attachment limit")
+    directory = cfg.attachment_dir("loam-ui", day, root=VAULT / REPLY_ATTACHMENTS.parent)
+    if directory.resolve() != VAULT.resolve() / directory.relative_to(VAULT):
+        raise OSError("the attachment directory contains a link")
+    directory.mkdir(parents=True, exist_ok=True)
+    name = Path(cfg.sanitise_name(source.name))
+    target = directory / f"{name.stem}-{secrets.token_hex(8)}{source.suffix.lower()}"
+    with tempfile.NamedTemporaryFile(dir=directory) as tmp:
+        tmp.write(data)
+        tmp.flush()
+        os.link(tmp.name, target)
+    saved = {**attachment, "root": "vault", "path": str(target.relative_to(VAULT)),
+             "size": len(data)}
+    saved.pop("width", None)
+    saved.pop("height", None)
+    if dims := image_size(target):
+        saved["width"], saved["height"] = dims
+    return saved
 
 
 def render_message(msg: dict, quoted: dict | None = None) -> str:
@@ -899,6 +972,17 @@ def append_once(thread_id: str, author: str, text: str, kind: str = "message",
                     and m["id"][1:].isdigit()), default=0)
         msg = {"id": f"m{last + 1}", "author": author, "at": now_iso(),
                "kind": kind, "text": text.strip(), "did": did or [], **extra}
+        if author != "system" and not is_owner(author) and msg.get("attachments"):
+            saved = []
+            for attachment in msg["attachments"]:
+                if not attachment.get("refs"):
+                    saved.append(attachment)
+                    continue
+                try:
+                    saved.append(_save_reply_image(attachment, msg["at"][:10]))
+                except OSError:
+                    saved.append({**attachment, "missing": True})
+            msg["attachments"] = saved
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(render_message(msg, quoted))
     return msg, True
@@ -941,6 +1025,89 @@ def replace_message(thread_id: str, msg_id: str, new: list[dict]) -> list[dict]:
         # the same clock tick would read as unchanged.
         _CACHE.pop(str(path), None)
     return out
+
+
+def backfill_reply_images(thread_id: str, *, dry_run: bool = False) -> list[tuple[str, int, int]]:
+    """Repair agent attachment metadata under the record writer's lock.
+
+    Only metadata comments change. Return (message id, recoverable, unavailable)
+    per affected message, with recoverable meaning written when applying.
+    """
+    import loam_files as files  # noqa: PLC0415
+    changes = []
+    with locked(VAULT):
+        path = record_path(thread_id, save_index=False)
+        raw = path.read_bytes().decode("utf-8")
+        _, body = split_front(raw)
+        messages = {m.get("id"): m for m in parse_messages(body)}
+        lines = raw.split("\n")
+        for i in range(1, len(lines)):
+            match = META_RE.match(lines[i]) if lines[i - 1].startswith("### ") else None
+            if not match:
+                continue
+            try:
+                meta = json.loads(match.group(1))
+            except json.JSONDecodeError:
+                continue
+            author, mid = meta.get("author"), meta.get("id")
+            if not author or author == "system" or is_owner(author) or mid not in messages:
+                continue
+            attachments = meta.get("attachments") or []
+            refs = {ref for a in attachments if isinstance(a, dict) for ref in a.get("refs") or []}
+            segments = [s["text"] for s in meta.get("segments") or []
+                        if isinstance(s, dict) and isinstance(s.get("text"), str)]
+            _, inline = reply_images("\n\n".join([*segments, messages[mid]["text"]]))
+            inline_refs = {(a["root"], a["path"]): a["refs"] for a in inline}
+            # Old writers only recognized vault and workspace files. Recover
+            # still-present temporary references that never had an attachment.
+            local = [a for a in inline if a["root"] == "local" and refs.isdisjoint(a["refs"])]
+            candidates = [*attachments, *local[:max(0, REPLY_IMAGES_MAX - len(attachments))]]
+            day = str(meta.get("at", ""))[:10]
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                day = now_iso()[:10]
+            saved, fixed, unavailable = [], 0, 0
+            for attachment in candidates:
+                if (not isinstance(attachment, dict) or attachment.get("type") not in IMAGE_TYPES.values()
+                        or not isinstance(attachment.get("path"), str)):
+                    saved.append(attachment)
+                    continue
+                source = Path(attachment_path(attachment))
+                root = attachment.get("root") or "vault"
+                base = AI_LABS if root == "spaces" else VAULT
+                if root in ("vault", "spaces") and source.is_relative_to(base) and not attachment.get("missing"):
+                    try:
+                        fd, _, _ = files.download(root, str(source.relative_to(base)))
+                        os.close(fd)
+                        saved.append(attachment)
+                        continue
+                    except files.FilesError:
+                        pass
+                try:
+                    if dry_run:
+                        fd, _, _, _ = _open_image(source)
+                        os.close(fd)
+                    else:
+                        repaired = _save_reply_image(attachment, day)
+                        if not repaired.get("refs") and (original := inline_refs.get((root, attachment["path"]))):
+                            repaired["refs"] = original
+                        repaired.pop("missing", None)
+                        saved.append(repaired)
+                    fixed += 1
+                except OSError:
+                    if attachment not in local:
+                        saved.append(attachment)
+                    unavailable += 1
+            if fixed:
+                meta["attachments"] = saved
+                if not dry_run:
+                    lines[i] = (lines[i][:match.start(1)] + json.dumps(meta, ensure_ascii=False)
+                                + lines[i][match.end(1):])
+            if fixed or unavailable:
+                changes.append((mid, fixed, unavailable))
+        if not dry_run and any(fixed for _, fixed, _ in changes):
+            _write_atomic(path, "\n".join(lines))
+            _CACHE.pop(str(path), None)
+    return changes
 
 
 _UNSET = object()

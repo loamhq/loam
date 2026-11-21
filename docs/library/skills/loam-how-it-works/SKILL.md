@@ -57,6 +57,12 @@ limit is 10 MiB per file. The video stays in Files and can play in the thread
 when the browser supports its codec. Antigravity can read the video. Claude
 Code and Codex receive its path.
 
+When an agent adds a local image to a thread with `![caption](path)`,
+Loam saves a copy in the vault's attachments folder and shows it where the
+agent wrote it. The image stays with the thread after the working file is
+removed. An unavailable image keeps its caption and shows **Image no
+longer available**.
+
 Each thread has a board, a Markdown file of items for the
 owner in the vault's inbox. Open **Board** in the thread header. Tap a card to edit its words, or use
 **Add a note** in any section. New cards show their date and author. Drag a

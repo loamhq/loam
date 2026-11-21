@@ -744,12 +744,12 @@ def sanitise_name(raw: str) -> str:
     return name
 
 
-def attachment_dir(app: str, day: str | None = None) -> Path:
+def attachment_dir(app: str, day: str | None = None, *, root: Path | None = None) -> Path:
     """Where today's uploads from one front end go. The day is in the path
     because a folder of every file anyone ever attached is a folder nobody can
     read; the app is in it because two front ends must not collide."""
     day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return ATTACHMENT_ROOT / sanitise_name(app) / day
+    return (ATTACHMENT_ROOT if root is None else root) / sanitise_name(app) / day
 
 
 def free_path(directory: Path, name: str) -> Path:

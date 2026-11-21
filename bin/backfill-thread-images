@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Recover existing agent images through the thread record writer."""
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_threads as threads  # noqa: E402
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("thread", nargs="*", help="thread IDs (default: all threads)")
+    args = parser.parse_args()
+    fixed = unavailable = failures = 0
+    for thread_id in args.thread or sorted(threads.index()):
+        try:
+            changes = threads.backfill_reply_images(thread_id, dry_run=args.dry_run)
+        except (OSError, UnicodeError, threads.ThreadError) as exc:
+            print(f"{thread_id}: {exc}", file=sys.stderr)
+            failures += 1
+            continue
+        for message_id, repaired, missing in changes:
+            print(f"{thread_id}/{message_id}: {repaired} recoverable, {missing} unavailable")
+            fixed += repaired
+            unavailable += missing
+    action = "would copy" if args.dry_run else "copied"
+    print(f"{action} {fixed} image(s); {unavailable} unavailable; {failures} thread error(s)")
+    return int(bool(failures))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
