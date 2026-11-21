@@ -3,6 +3,8 @@
 Find each release's notes in `docs/releases/<version>.md`. Loam gives the
 notes to the person's agent, who decides what is worth sharing with them.
 
+- [0.2.22](docs/releases/0.2.22.md), 2026-11-21: start the first day at claim,
+  refresh unchanged starter files, and provision the nightly reviewer.
 - [0.2.21](docs/releases/0.2.21.md), 2026-11-21: the claim page shows
   setup progress, and sign-in accepts usernames in any capitalization.
 - [0.2.20](docs/releases/0.2.20.md), 2026-11-21: fresh installs start with
