@@ -465,6 +465,10 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       })] : []
       Object.assign(o, body, { messages, has_more: retained.length && messages.length ? savedVisit.has_more : body.has_more,
         loading: false, refreshing: false, connection: '', after: body.messages.at(-1)?.id ?? null })
+      const latestOwner = messages.findLast(m => isOwner(m.author))
+      if (!o.thread.default && latestOwner?.unaddressed && !messages.some(m => m.answer_for === latestOwner.id)) {
+        o.note ??= { id: latestOwner.id, teach: false }
+      }
       readJobs(o, body.thread)
       // A broker-created opening survives reloads and other devices. An edited
       // page-local draft, including an intentionally empty one, takes priority.

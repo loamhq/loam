@@ -52,8 +52,8 @@ def main(argv: list[str]) -> int:
         pending = loam_update.read_json("pending.json")
         updating = pending and pending.get("to_commit") == loam_update.head()
         if updating:
-            if "def seed_dictation_terms(" not in (loam_update.show(
-                    pending.get("from_commit") or "HEAD", loam_update.prefix() + "lib/loam_skills.py") or ""):
+            if pending.get("from_commit") and "def seed_dictation_terms(" not in (loam_update.show(
+                    pending["from_commit"], loam_update.prefix() + "lib/loam_skills.py") or ""):
                 sk.seed_dictation_terms(lc.VAULT / lc.vault_folder("system"))
             provision = Path(__file__).with_name("provision")
             subprocess.run([sys.executable, str(provision), "--migrate-persona-maps"],

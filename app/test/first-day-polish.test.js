@@ -339,7 +339,7 @@ test('7. Settings › Agents: the person’s agents first, the engineers and the
   const system = groups[1]
   assert.ok(system.classList.contains('profile-group-system'))
   assert.deepEqual(all(system, 'setrow-title').map(text), ['loam', 'loam-ui', 'Every other project', 'Reviewer'])
-  assert.match(text(find(system, 'profile-system-note')), /Their settings are yours to change too/)
+  assert.match(text(find(system, 'profile-system-help')), /About these helpers/)
   assert.equal(all(system, 'setrow').every((row) => typeof row.fire === 'function' && row.nodeName === 'BUTTON'), true, 'every row still opens its settings')
 })
 

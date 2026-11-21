@@ -112,7 +112,7 @@ def main() -> int:
     shape = [p for p in tree(lc.VAULT) if "/skills/loam-" not in p and "skills/loam-" not in p]
     check("a blank install's vault: the plain folders, the README, both shelves",
           shape, ["About me.md", "Attachments/", "Conversations/", "Inbox/", "Inbox/boards/", "Projects/",
-                  "README.md", "System/", "System/Loam/", "System/Loam/README.md",
+                  "README.md", "System/", "System/Dictation terms.md", "System/Loam/", "System/Loam/README.md",
                   "System/Loam/skills/", "System/skills/", "System/skills/README.md"])
     check("...and Loam's shelf is the library, file for file",
           sk.library_diff(), {"added": [], "removed": [], "changed": []})
