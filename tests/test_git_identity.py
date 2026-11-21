@@ -429,6 +429,13 @@ try:
     check("gated: the deny list still holds the owner's name in a message",
           (result["state"], result["reason"], git(origin_g, "rev-parse", "main")),
           ("not_landed", "gate", landed))
+    r = start(proj_g, "20261118-110000-0000000a")
+    commit(r, "retry.txt", "Landed before the push recovered", who=neutral)
+    git(proj_g.root, "fetch", "-q", r["path"], r["branch"])
+    git(proj_g.root, "merge", "--quiet", "--ff-only", "FETCH_HEAD")
+    check("gated: a retry resolves the owner for a pending push",
+          (wt.push_origin(proj_g), people(origin_g), git(origin_g, "rev-parse", "main^")),
+          (True, [f"{want} / {want}"], landed))
     proj_rp, _ = make("repo-default", ident=("Ada Repo", "ada@repo.example"))
     check("repo fallback: the GitHub default wins over a repository identity",
           start(proj_rp, "20261118-110000-00000008")["attribution"]["source"], "owner")

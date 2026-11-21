@@ -12,13 +12,14 @@ checks both tips under the project lock before advancing `main` and pushing.
 If either tip moves during testing, it builds and tests a fresh candidate.
 Repeated races move testing under the lock so a busy project can still land.
 Commits made in the job during a test stay on its branch for the next landing.
-Maintainer commits use the platform engineer's repository identity.
+Maintainer job commits and landing merges use the resolved job identity.
+See [Git attribution](docs/attribution.md).
 
 Before any push to this repository, the landing's push gate checks every
-commit the repository does not have yet: it must carry that identity, and
-nothing it adds, no path it touches and nothing in its message may match the
-install's deny list of private names. A commit that fails is held on the
-install, not pushed (`push_gate` in `lib/loam_worktree.py`). A hold that
+commit the repository does not have yet. Its author and committer must
+match the resolved identity. The gate scans added lines, paths and commit
+messages against the install's deny list of private names. The landing
+holds a commit that fails (`push_gate` in `lib/loam_worktree.py`). A hold that
 names only the engineer's memory note or a commit's message is not the
 work's: the change lands as one commit without them, and the note is kept
 beside the job (`land` in the same file).

@@ -113,7 +113,7 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
 - **A checkout whose `origin` is shared turns the push gate on**
   (`git config loam.pushGate true`, and `loam.pushDeny` naming a deny list in
   `bin/scrub-check`'s format, kept outside the repository). Every commit
-  `origin` lacks must then be the checkout's own identity, with no denied
+  `origin` lacks must then carry the resolved job identity, with no denied
   word in what it adds, its paths or its message; otherwise the push is held
   and `main` stays landed locally. A word added and later removed is still
   held: the history keeps it.
@@ -1816,11 +1816,12 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   refused by `--strict-config`, and `[features]` accepts any key silently, so
   a `features.*` pin proves nothing. Hence the clone's `commit-msg` hook and
   the landing's `settle_commits`, which hold whatever a provider does.
-- **A gated checkout keeps its own identity.** The push gate compares every
-  new commit with the checkout's `user.name`/`user.email`, so the owner's name
-  there would be a held push; and a deny list may name the owner's handle on
-  purpose. The order in `resolve()` puts the repository's own identity before
-  the owner's for that reason.
+- **A gated checkout uses the same identity as its jobs** (2026-11-20).
+  The project's named person wins, then the owner, then the checkout's
+  fallback. Landing resolves once for commit normalization, the merge and
+  the push. Recovery resolves the same way when retrying a pending push.
+  A deny list can still hold the owner's name in a commit message, a path
+  or an added line even when their name is approved for author metadata.
 - **The landing never re-makes a pull-request branch**: its head may already
   be on the remote, and a re-made commit would not fast-forward it, which
   `settle_head` answers with a new pull request.

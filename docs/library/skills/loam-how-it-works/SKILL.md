@@ -182,6 +182,13 @@ overwrites a change of theirs. A job that changes how Loam works updates
 this library in the same job, so these pages stay the one description of
 Loam.
 
+Engineer job commits and landing merges carry the person named in the
+project record, or the owner's identity from Settings ›
+GitHub › **Your name on agents' work**. The default uses the owner's connected
+GitHub account and its no-reply address when the account is unambiguous.
+The checkout's identity is the fallback when Loam has no effective owner
+identity. Job commits omit provider attribution.
+
 **Temporary storage.** The launcher clears an engineer job's scratch when
 the job ends. Nightly housekeeping sweeps leftovers and removes generated
 Python bytecode for vanished source directories, along with bytecode left
