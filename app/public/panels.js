@@ -24,7 +24,7 @@ export function readPanels(storage = deviceStorage()) {
 
 // Attention is transient view state, independent of navigation destinations.
 // Each mounted view retains its own field, transport, selections and position.
-export function createPanels({ main, side, width = () => layoutPixels(globalThis.innerWidth ?? 0), changed, address = () => {}, storage = deviceStorage() }) {
+export function createPanels({ main, side, width = () => layoutPixels(globalThis.innerWidth ?? 0), changed, address = () => {}, beforeOpen = () => {}, storage = deviceStorage() }) {
   const saved = readPanels(storage)
   const st = { side: saved.side, split: saved.split, sidebar: saved.sidebar, loaded: false, version: 0, focused: saved.side ? 'side' : 'main' }
   let closing = null
@@ -83,6 +83,7 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
   }
   function openMain(item) {
     if (!itemKey(item)) return false
+    beforeOpen()
     if (!guard(main, () => openMain(item))) return false
     if (itemKey(item) === itemKey(st.side)) {
       if (!guard(side, () => openMain(item))) return false
@@ -94,6 +95,7 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
   }
   function openSide(item) {
     if (!available() || !itemKey(item)) return false
+    beforeOpen()
     if (!guard(side, () => openSide(item))) return false
     cancelClose()
     const current = main.item()

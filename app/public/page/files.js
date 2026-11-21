@@ -6,8 +6,7 @@ import { createPicker } from "../filepicker.js"
 import { sessionFromAddress } from "../imported-threads.js"
 import { threadFromPath } from "../thread-opening.js"
 import { authenticatedFetch as fetch } from "../auth.js"
-import { itemFromURL, withSide } from '../panel-items.js'
-import { itemKey } from '../panels.js'
+import { withSide } from '../panel-items.js'
 import { fileShortcuts, toggleFileShortcut } from '../store.js'
 
 // Mounted once. Cross-module state and operations are explicit host services.
@@ -32,23 +31,7 @@ function hereAddress() {
   return herePath() + (list ? `?list=${encodeURIComponent(list)}` : '')
 }
 
-function pushAddress(data, title, href, options) {
-  const url = globalThis.location?.href
-  const address = value => host.panels && url ? withSide(value, host.panels.st.side) : value
-  const next = address(href)
-  const carry = globalThis.history?.state?.desktopCarry
-  // The rail leaves the old pane visible until a new item is picked. Its
-  // first new item can go Back to the list that opened it.
-  if (!options?.root && carry && host.state.wide) {
-    if (itemKey(itemFromURL(url)) === itemKey(itemFromURL(next))) data = { ...data, desktopCarry: carry }
-    else {
-      const folder = carry.id === 'files'
-      const home = address(folder ? filesHref(files.st.root, files.st.path) : carry.home)
-      if (home !== address(url)) host.mainHistory.push(folder ? { files: true, folder: true } : null, '', home, { root: true })
-    }
-  }
-  host.mainHistory.push(data, title, next, options)
-}
+const pushAddress = (...args) => host.pushAddress(...args)
 
 const files = createFiles({
   registry: host.registry,
@@ -206,17 +189,19 @@ function builtinFileFieldFor(f, { readOnly, mono }) {
 // Go to a folder or a file. `push: false` is for an address the browser has
 // already moved to — a load, or Back.
 let fileDestination = 0
-function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null, list = null, boardThread = null, up = false } = {}) {
+function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null, list = null, boardThread = null, browse = false } = {}) {
   const destination = ++fileDestination
-  if (navigation && host.state.wide && !routed && isFile === null && root && path) {
+  if (navigation && isFile === null && root && root !== 'system' && path) {
     const request = ++host.importRequest
     host.api('GET', `/files/stat?${new URLSearchParams({ root, path })}`).then(resource => {
-      if (destination === fileDestination && request === host.importRequest) goFiles(root, path, { isFile: !isFolder(resource), row: resource, push, fragment, mode, list, boardThread, up })
-    }).catch(() => { if (destination === fileDestination && request === host.importRequest) files.show(root, path, { keepFile: true }) })
+      if (destination === fileDestination && request === host.importRequest) goFiles(root, path, { isFile: !isFolder(resource), row: resource, push, fragment, mode, list, boardThread, browse })
+    }).catch(() => {
+      if (destination === fileDestination && request === host.importRequest) goFiles(root, path, { isFile: false, push, routed, browse })
+    })
     return true
   }
   // Expose a panel's save guard before routing can pause this navigation.
-  if (navigation && push && ['settings', 'activity'].includes(host.state.sheet?.kind)) host.closeSheet()
+  if (navigation && push && host.state.sheet) host.closeSheet()
   const beside = host.panels?.st.side
   const heldFile = beside?.kind === 'file' && beside.root === root && beside.path === path
   // The file already open in the main panel, opened again from a plugin's
@@ -227,70 +212,48 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
     host.schedule(); return true
   }
   if (!routed && (isFile === true || (isFile === null && heldFile)) && host.panels) return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain']({ kind: 'file', root, path, row, fragment, mode, push, list, boardThread })
-  if (!routed && host.panelId !== 'side') host.state.navigator = 'files'
   const hidden = root === 'system'
   if (hidden) { root = null; path = ''; isFile = false; row = null; fragment = null }
-  if (navigation && host.state.wide && !routed && isFile !== true) {
+  if (navigation && browse && host.state.wide && host.state.mainItem && isFile !== true) {
+    if (push && (root !== files.st.root || path !== files.st.path)) {
+      const entry = globalThis.history?.state
+      pushAddress({ ...entry, filesList: { root, path } }, '', globalThis.location?.href ?? herePath())
+    }
     files.show(root, path, { isFile, row, fragment, mode, keepFile: true })
     host.schedule(); return true
   }
   const leavingFile = files.st.file && !(isFile && files.st.file.root === root && files.st.file.path === path)
   if (leavingFile && !files.guard(null)) {
     // The page's own sheet asks; going on from it comes back here, clean.
-    files.st.sheet.proceed = proceedThen(() => goFiles(hidden ? 'system' : root, path, { isFile, row, fragment, mode, list, push, routed, boardThread, up }))
+    files.st.sheet.proceed = proceedThen(() => goFiles(hidden ? 'system' : root, path, { isFile, row, fragment, mode, list, push, routed, boardThread, browse }))
     return false
   }
-  if (navigation && routed && isFile === false) {
-    host.state.navigator = 'files'
-    if (push && host.state.wide && host.state.collapsed) host.setCollapsed(false)
-  }
+  if (navigation && host.state.wide && !isFile && host.state.collapsed) host.setCollapsed(false)
   host.state.mainItem = isFile !== false && root && path ? { kind: 'file', root, path } : null
   // Browsing a folder starts a Files navigation path of its own. Merely having
   // a chat to return to must not replace that folder's ordinary back button.
   const chat = host.activeThread()
   files.st.chatFile = Boolean(isFile && (boardThread || chat || (host.state.screen === 'files' && files.st.chatFile)))
-  if (boardThread) files.st.returnTo = { id: boardThread, board: true }
   if (host.state.screen !== 'files') {
     host.importRequest++
-    if (chat && !boardThread) files.st.returnTo = { id: chat.thread.id }
     host.threads.close({ navigate: false })
     host.state.profileAgent = null
     host.state.screen = 'files'
   }
   if (leavingFile && !isFile) files.closeFile()
-  if (!root) { files.st.returnTo = null; files.st.chatFile = false }
+  if (!root) files.st.chatFile = false
   // `show` keeps the list only for what turns out to be a file.
   files.show(root, path, { isFile, row, fragment, mode, list })
   if (hidden) files.st.notice = FILES_LOCATION_HIDDEN
   const href = filesHref(root, path, isFile === false ? null : list)
   if (navigation && hidden && herePath() !== href) globalThis.history?.replaceState?.({ ...globalThis.history.state, files: true }, '', href)
-  else if (navigation && push && (!root || hereAddress() !== href)) pushAddress({ files: true, folder: isFile === false || !path, ...(boardThread ? { boardThread } : {}) }, '', href, { root: !root || up })
+  else if (navigation && push && hereAddress() !== href) pushAddress({ files: true, folder: isFile !== true, ...(boardThread ? { boardThread } : {}) }, '', href)
   host.schedule()
   return true
 }
 
 goFiles.redraw = host.schedule
 goFiles.side = () => host.panels
-
-
-
-// Out of Files, to the chats — or straight back to the chat it was opened
-// from, which is what "Back to chat" says.
-function leaveFiles({ toChat = false, push = true } = {}) {
-  if (!files.guard(null)) {
-    files.st.sheet.proceed = proceedThen(() => leaveFiles({ toChat, push }))
-    return false
-  }
-  const back = files.st.returnTo
-  if (toChat && back?.board && push && globalThis.history?.state?.boardThread === back.id && host.mainHistory.go(-1)) return true
-  files.closeFile()
-  if (toChat && back?.board) { host.threads.open(back.id, { push, board: true }); return true }
-  host.state.screen = 'home'
-  if (push && (!toChat || herePath() !== '/')) pushAddress(null, '', '/', { root: !toChat })
-  if (toChat && back?.id) host.threads.open(back.id)
-  else host.goHome()
-  return true
-}
 
 
 
@@ -377,45 +340,12 @@ if (navigation) setFileLinks((ref, from, event) => openFileRef(ref, from, event)
 
 
 
-// Back and Forward, through Files addresses and out of them.
+// The app owns browser routing. Standalone controllers do not write history.
 if (navigation) globalThis.addEventListener?.('popstate', () => {
   const session = sessionFromAddress(globalThis.location?.href ?? herePath() + (globalThis.location?.search ?? ''))
   if (session) { host.openImportedSession(session); return }
-  if (globalThis.location?.href && host.routePanels) { host.routePanels(); return }
-  const thread = threadFromPath(herePath())
-  if (thread) {
-    const board = globalThis.history?.state?.board === thread
-    if (host.state.screen === 'files') {
-      if (!files.guard(null)) {
-        const f = files.st.file
-        if (f) pushAddress({ files: true }, '', filesHref(f.root, f.path, files.st.root))
-        files.st.sheet.proceed = proceedThen(() => host.threads.open(thread, { board }))
-        host.schedule(); return
-      }
-      files.closeFile()
-    }
-    host.threads.open(thread, { push: false, board }); return
-  }
-  if (host.threads.st.open) { host.threads.close({ navigate: false }); host.schedule() }
-  const at = parseFilesPath(herePath())
-  if (at) {
-    const boardThread = globalThis.history?.state?.boardThread
-    if (!goFiles(at.root, at.path, { push: false, isFile: boardThread ? true : null, boardThread, list: listFromURL(globalThis.location?.search ?? '') })) {
-      // The sheet is asking: until it is answered the address stays on the file
-      // the person is still on, and leaving from it goes where Back was going.
-      const f = files.st.file
-      if (f) pushAddress({ files: true }, '', filesHref(f.root, f.path, files.st.root))
-      files.st.sheet.proceed = proceedThen(() => goFiles(at.root, at.path))
-    }
-    return
-  }
-  if (host.state.screen === 'files' && !leaveFiles({ toChat: true, push: false })) {
-    const f = files.st.file
-    if (f) pushAddress({ files: true }, '', filesHref(f.root, f.path, files.st.root))
-  }
+  if (globalThis.location?.href) host.routePanels()
 })
-
-
 
 // A tab closed or reloaded over an unsaved edit asks first, as every other way
 // out of one does.
@@ -546,8 +476,8 @@ function filesScreen() {
       'section',
       { class: 'screen files', key: 'screen:files:file' },
       fileView(files, {
-        close: () => goFiles(files.st.root, files.st.path, { isFile: false, up: true }),
-        historyBack: host.backAction('main'),
+        openFolder: files.st.chatFile ? () => goFiles(files.st.root, files.st.path, { isFile: false }) : null,
+        historyBack: host.backAction('main', globalThis.history?.state?.boardThread ? 'Back to board' : undefined),
         closeLabel: files.pluginRoot() ? files.pluginRoot().name : files.st.path === '' ? (ROOT_LOOK[f.root]?.name ?? f.root) : fileNameOf(files.st.path),
         wide: false,
         htmlActionsInMenu: files.st.chatFile,
@@ -557,8 +487,7 @@ function filesScreen() {
         onTool: applyTool,
         embed: embedFor,
         ...fileDictation(),
-        returnBack: files.st.chatFile ? returnToChatButton({ compact: true }) : null,
-        backToThread: globalThis.history?.state?.boardThread && files.st.returnTo?.board ? () => leaveFiles({ toChat: true }) : null,
+
       }),
     )
   }
@@ -566,7 +495,7 @@ function filesScreen() {
     'section',
     { class: 'screen files', key: 'screen:files' },
     host.registry.draw('app.overlay', { slot: 'player' }),
-    folderView(files, { go: goFiles, wide: false, historyBack: files.st.root ? host.backButton('main') : null, returnBack: files.st.root ? returnToChatButton() : null, home: filesHome() }),
+    folderView(files, { go: goFiles, wide: false, historyBack: host.backButton('main'), showParent: false, home: filesHome() }),
     host.nav(),
   )
 }
@@ -593,17 +522,9 @@ function filesHome() {
   }
 }
 
-function returnToChatButton({ compact = false } = {}) {
-  const back = files.st.returnTo
-  if (!back?.id) return null
-  const label = back.board ? 'Board' : 'Chat'
-  const backLabel = `Back to ${label.toLowerCase()}`
-  return h('button', { class: compact ? 'backbtn fs-return fs-chatback' : 'pillbtn fs-return', 'aria-label': backLabel, onclick: () => leaveFiles({ toChat: true }), text: compact ? null : backLabel }, compact ? icon.chevronLeft(20) : null, compact ? h('span', { text: label }) : null)
-}
 return Object.defineProperties({}, {
     restoreFilePlace: { enumerable: true, get: () => restoreFilePlace },
     herePath: { enumerable: true, get: () => herePath },
-    pushAddress: { enumerable: true, get: () => pushAddress },
     files: { enumerable: true, get: () => files },
     filesUploadChooser: { enumerable: true, get: () => filesUploadChooser },
     chooseUpload: { enumerable: true, get: () => chooseUpload },
@@ -613,7 +534,6 @@ return Object.defineProperties({}, {
     fileNameField: { enumerable: true, get: () => fileNameField },
     fileFieldFor: { enumerable: true, get: () => fileFieldFor },
     goFiles: { enumerable: true, get: () => goFiles },
-    leaveFiles: { enumerable: true, get: () => leaveFiles },
     proceedThen: { enumerable: true, get: () => proceedThen },
     openFileRef: { enumerable: true, get: () => openFileRef },
     refNotice: { enumerable: true, get: () => refNotice },
@@ -627,6 +547,5 @@ return Object.defineProperties({}, {
     fileDictation: { enumerable: true, get: () => fileDictation },
     filesScreen: { enumerable: true, get: () => filesScreen },
     filesHome: { enumerable: true, get: () => filesHome },
-    returnToChatButton: { enumerable: true, get: () => returnToChatButton }
 })
 }

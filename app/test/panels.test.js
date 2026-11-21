@@ -7,7 +7,6 @@ import { createThreads } from '../public/threads.js'
 import { installDom } from './fakedom.js'
 import { createCoreRegistry } from '../public/core-registrations.js'
 import { registerPage } from '../public/page/registrations.js'
-import { mount as mountLayout } from '../public/page/layout.js'
 
 const thread = id => ({ kind: 'thread', id })
 const file = path => ({ kind: 'file', root: 'vault', path })
@@ -74,31 +73,6 @@ test('the sidebar tucks below 1700, explicit Show wins, and automatic tuck ends 
   panels.openSide(thread('other')); assert.equal(panels.tucked(), true)
   panels.close(); assert.equal(panels.tucked(), false)
 })
-test('choosing a rail section while tucked shows its list and keeps the side item', () => {
-  for (const id of ['files', 'chats', 'apps']) {
-    const { panels, side } = fixture(), registry = createCoreRegistry()
-    panels.openSide(thread('other'))
-    const host = { registry, panels, state: { wide: true, collapsed: panels.tucked(), screen: 'threads' },
-      store: { sidebarHidden: false }, schedule() {}, closeSheet() {},
-      threads: { st: { open: { thread: { id: 'main' } } }, load() {} },
-      files: { st: { roots: { loaded: true } } }, apps: { st: { loaded: true } },
-      goFiles: () => assert.fail('a rail choice must not replace the main document'),
-      goChats: () => assert.fail('a rail choice must not close the main thread'),
-      goApps: () => assert.fail('a rail choice must not clear main for the catalog') }
-    Object.assign(host, mountLayout(host))
-    const scope = registry.scope({ id: '@core' })
-    registerPage({ ...scope, ui: { host } })
-    assert.equal(host.state.collapsed, true)
-    scope.commands.run('section.open', { id })
-    assert.equal(host.state.screen, 'threads')
-    assert.equal(host.state.navigator, id)
-    assert.deepEqual(host.threads.st.open, { thread: { id: 'main' } })
-    assert.equal(host.state.collapsed, false, `${id} must reveal its list in the same action`)
-    assert.equal(panels.tucked(), false, 'the explicit rail choice must survive the next redraw')
-    assert.deepEqual(side.item(), thread('other'))
-    scope.dispose()
-  }
-})
 test('reload restores side and split using an address descriptor without file capabilities', () => {
   const f = fixture()
   f.panels.openSide({ ...file('Notes/plan.md'), row: { revision: 'stale', capabilities: { write: true } } }); f.panels.split(61)
@@ -111,31 +85,16 @@ test('reload restores side and split using an address descriptor without file ca
   restored.split(1); assert.equal(restored.st.split, 32)
   restored.split(99); assert.equal(restored.st.split, 68)
 })
-test('desktop core list commands preserve a manually focused file or app; phone commands keep their navigation', () => {
-  for (const kind of ['files', 'apps']) {
-    const registry = createCoreRegistry(), navigated = [], document = { path: 'Notes/plan.md', url: 'https://garden.example/' }
-    const host = { registry, state: { wide: true, screen: kind, collapsed: true },
-      store: { sidebarHidden: true }, schedule() {}, closeSheet() {},
-      threads: { st: { open: null }, load() {} },
-      files: { st: { file: kind === 'files' ? document : null, roots: { loaded: true } } },
-      apps: { st: { selected: kind === 'apps' ? document : null, loaded: true } },
-      goChats: () => navigated.push('chats'), goFiles: () => navigated.push('files'), goApps: () => navigated.push('apps') }
-    Object.assign(host, mountLayout(host))
+test('core rail and tab commands use the same place selection', () => {
+  for (const wide of [false, true]) {
+    const registry = createCoreRegistry(), opened = []
     const scope = registry.scope({ id: '@core' })
-    registerPage({ ...scope, ui: { host } })
+    registerPage({ ...scope, ui: { host: { registry, state: { wide }, openPlace: id => opened.push(id) } } })
     for (const id of ['chats', 'files', 'apps']) {
-      host.state.collapsed = true; host.store.sidebarHidden = true
       scope.commands.run(`core.${id}`)
-      assert.equal(host.state.screen, kind)
-      assert.equal(host.state.navigator, id)
-      assert.equal(host.state.collapsed, false)
-      assert.equal(host.store.sidebarHidden, false)
-      assert.equal(kind === 'files' ? host.files.st.file : host.apps.st.selected, document)
+      scope.commands.run('section.open', { id })
     }
-    assert.deepEqual(navigated, [])
-    host.state.wide = false
-    for (const id of ['chats', 'files', 'apps']) scope.commands.run(`core.${id}`)
-    assert.deepEqual(navigated, ['chats', 'files', 'apps'])
+    assert.deepEqual(opened, ['chats', 'chats', 'files', 'files', 'apps', 'apps'])
     scope.dispose()
   }
 })
@@ -216,5 +175,11 @@ test('side history truncates a forward branch, skips main, and ends when the pan
 test('browser Back stops at the tab boundary and preserves reading positions and the save guard', { skip: !process.env.LOAM_PLAYWRIGHT, timeout: 120000 }, async t => {
   const { stdout } = await promisify(execFile)(process.execPath, ['test/panel-history-browser.mjs'], { timeout: 110000 })
   assert.match(stdout, /390 dark passed/)
+  t.diagnostic(stdout.trim())
+})
+
+test('one navigation model covers Places, links, overlays, deep links and reloads in Chromium', { skip: !process.env.LOAM_PLAYWRIGHT, timeout: 120000 }, async t => {
+  const { stdout } = await promisify(execFile)(process.execPath, ['test/navigation-model-browser.mjs'], { timeout: 110000 })
+  assert.deepEqual(stdout.trim().split('\n'), ['1440 light passed', '1440 dark passed', '390 light passed', '390 dark passed'])
   t.diagnostic(stdout.trim())
 })

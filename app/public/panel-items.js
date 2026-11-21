@@ -30,6 +30,37 @@ export function itemFromURL(value) {
   if (url.pathname === '/panel') return itemDescriptor({ kind: url.searchParams.get('kind'), id: url.searchParams.get('id') })
   return null
 }
+
+export function placeHref(place) {
+  if (place === 'chats') return '/'
+  if (place === 'files') return '/files'
+  if (place === 'apps') return '/apps'
+  return '/?screen=' + encodeURIComponent(`plugin:${place}`)
+}
+
+export function placeFromURL(url) {
+  if (parseFilesPath(url.pathname)) return 'files'
+  if (url.pathname === '/apps') return 'apps'
+  const screen = url.searchParams.get('screen')
+  return screen?.startsWith('plugin:') ? screen.slice(7) : 'chats'
+}
+
+// A pasted address gets the same ancestors as a visit from its own place.
+// A reload of an existing visit keeps the route the reader actually took.
+export function panelAncestors(url) {
+  if (url.pathname === '/' && url.searchParams.get('chats') === 'archived') return ['/']
+  const folder = parseFilesPath(url.pathname)
+  if (folder?.root === 'system') return []
+  if (folder?.root) {
+    const parts = folder.path.split('/').filter(Boolean)
+    return [filesHref(null), ...parts.map((_, i) => filesHref(folder.root, parts.slice(0, i).join('/')))]
+  }
+  const item = itemFromURL(url)
+  if (item?.kind === 'thread') return ['/', ...(['board', 'details'].includes(url.searchParams.get('view')) ? [threadHref(item.id)] : [])]
+  if (item) return [placeHref(placeFromURL(url))]
+  return []
+}
+
 export function sideFromURL(value) {
   try { return itemDescriptor(JSON.parse(new URL(value, 'http://placeholder').searchParams.get('side'))) } catch { return null }
 }

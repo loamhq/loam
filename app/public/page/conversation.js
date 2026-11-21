@@ -11,13 +11,13 @@ export function mount(host, options = {}) {
     running: host.running, rail: host.rail, nav: host.nav, openProfile: host.goProfile, openSettings: (page, provider) => host.goSettings?.(page, provider),
     listIsMain: () => ['home', 'threads'].includes(host.state.screen),
     visitId: () => host.panelId === 'side' ? host.panels.sideVisit() : globalThis.history?.state?.panelVisit ?? 'initial',
-    historyButton: () => host.backButton(host.panelId),
+    historyButton: label => host.backButton(host.panelId, label),
     messageState: options.messageState ?? createMessageState(),
     renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event, { chat: extra.chatLinks }) }),
-    openBoardFile: (path, id, close) => {
+    openBoardFile: (path, id) => {
       const item = { kind: 'file', root: 'vault', path, mode: 'edit' }
       if (host.panels.available()) {
-        if (host.panels[options.sidePanel ? 'openMain' : 'openSide'](item)) close()
+        host.panels.openSide(item)
       } else {
         globalThis.history?.replaceState?.({ ...globalThis.history.state, board: id }, '')
         host.panels.openMain({ ...item, boardThread: id })

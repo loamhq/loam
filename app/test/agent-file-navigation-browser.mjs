@@ -108,6 +108,7 @@ try {
         await page.goto(app.url)
         await ready()
         if (!wide) await back()
+        const panel = new URL(page.url()).pathname
         await openSettingsProfile()
         if (key !== 'read-soul') await filesTab.click()
         await profile.getByRole('button', { name: new RegExp(`^${label}(?: |$)`) }).click()
@@ -118,15 +119,24 @@ try {
         if (folder && wide && baseline) await page.goBack()
         else if (key === 'config') await page.goBack()
         else await back()
-        const restored = await visible(profile)
+        if (baseline) await visible(profile)
+        else {
+          await page.waitForURL(url => url.pathname === panel && !url.searchParams.has('modal'))
+          await profile.waitFor({ state: 'detached' })
+          if (wide) await ready()
+          else await page.locator('.tt-row').first().waitFor()
+        }
         if (key === 'read-soul' || key === 'workspace') await capture(`settings-${key}-back`)
-        if (restored) {
-          if (!baseline) assert.equal(await filesTab.getAttribute('aria-selected'), key === 'read-soul' ? 'false' : 'true')
-          if (wide) await page.locator('.setmain').getByRole('button', { name: 'Agents', exact: true }).click()
-          else await back()
-          await visible(agentRow)
-        } else if (baseline && key === 'read-soul') await page.goBack()
         if (key === 'read-soul') await capture('settings-read-soul-back-again')
+      }
+
+      if (!baseline) {
+        await page.goto(`${app.url}/panel?kind=profile&id=iris`)
+        await filesTab.click()
+        await profile.getByRole('button', { name: /^Soul(?: |$)/ }).click()
+        await fileReady(); await back()
+        await profile.waitFor()
+        assert.equal(await filesTab.getAttribute('aria-selected'), 'true')
       }
 
       const openThreadFile = name => page.getByRole('link', { name, exact: true }).click(wide ? { modifiers: ['Control'] } : {})
@@ -193,10 +203,9 @@ try {
           await fileReady()
           state.deleted = true
           await back()
-          await profile.waitFor()
-          await page.waitForURL(url => url.pathname === '/' && url.searchParams.get('profile_id') === 'iris')
-          await page.locator('.setmain').getByRole('button', { name: 'Agents', exact: true }).click()
-          await agentRow.waitFor()
+          await page.waitForURL(url => url.pathname === '/' && !url.searchParams.has('modal'))
+          await profile.waitFor({ state: 'detached' })
+          await page.getByText('Good things start here.', { exact: true }).waitFor()
         }
         assert.deepEqual(errors, [])
       }

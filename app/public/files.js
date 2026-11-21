@@ -1650,7 +1650,7 @@ function homeActions(home) {
 // The header, the title and the list of one folder — the phone's whole Files
 // screen and the desktop's list column. `go(root, path, opts)` is the app's,
 // because going somewhere is also writing an address.
-export function folderView(files, { go, wide, collapse = null, historyBack = null, returnBack = null, home = null }) {
+export function folderView(files, { go, wide, collapse = null, historyBack = null, returnBack = null, home = null, showParent = true }) {
   const { st } = files
   const atRoot = !st.root
   const own = files.pluginRoot?.() ?? null
@@ -1675,10 +1675,10 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
     'div',
     { class: 'fs-head' },
     historyBack ?? returnBack,
-    !historyBack && parent !== null
+    showParent && !historyBack && parent !== null
       ? h(
           'button',
-          { class: 'backbtn fs-back', title: `Back to ${parent}`, onclick: () => go(st.path === '' ? null : st.root, parentOf(st.path), { isFile: false, up: true }) },
+          { class: 'backbtn fs-back', title: wide ? `Open parent folder: ${parent}` : `Back to ${parent}`, onclick: () => go(st.path === '' ? null : st.root, parentOf(st.path), { isFile: false }) },
           icon.chevronLeft(20),
           h('span', { text: parent }),
         )
@@ -1802,18 +1802,18 @@ export function fileView(files, options) {
   return files.registry.component('core.files.viewer', context)
 }
 
-function builtinFileView(files, { close, closeLabel, historyBack = null, wide, side = false, htmlActionsInMenu = false, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null }) {
+function builtinFileView(files, { close, closeLabel, historyBack = null, wide, side = false, htmlActionsInMenu = false, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null, openFolder = returnBack ? close : null }) {
   const back = backToThread ? { label: 'Back to board', title: historyBack?.title ?? 'Back to board',
     go: historyBack?.go ?? backToThread, shortcut: Boolean(historyBack) } : historyBack
   const context = { files, file: files.st.file, options: { close, closeLabel, wide, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
   const custom = files.registry.entries('files.viewer', context).findLast(entry => !entry.component && entry.slot === 'viewer')
   if (custom) {
-    if (files.st.file) files.st.file.openFolder = close
+    if (files.st.file) files.st.file.openFolder = openFolder ?? close
     // A kept editor may outlive a history entry or a phone/desktop resize.
     // The shell owns this slot so neither change requires remounting it.
     const up = close && { title: `Back to ${closeLabel}`, go: close, label: `Back to ${closeLabel}` }
     const leading = historyBackButton(back ?? up)
-    const content = files.registry.invoke(custom, 'render', { ...context, options: { ...context.options, close: null, returnBack: null, openFolder: close } })
+    const content = files.registry.invoke(custom, 'render', { ...context, options: { ...context.options, close: null, returnBack: null, openFolder: openFolder ?? close } })
     return h('div', { class: 'fs-custom-view', key: `viewer:${files.st.file.root}:${files.st.file.path}` },
       leading, h('div', { class: 'fs-custom-content', key: 'viewer-content' }, content))
   }
@@ -1839,7 +1839,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
   const modeLabel = f.mode === 'preview' ? (editable ? 'Edit' : 'Source') : 'Preview'
   const modeToggle = tabs ? h('button', { class: 'iconbtn fs-mode-toggle', title: modeLabel, 'aria-label': modeLabel, onclick: () => files.setMode(f.mode === 'preview' ? 'edit' : 'preview') }, f.mode === 'preview' ? icon.pencil(18) : icon.file(18)) : null
   // Live HTML has no title/path area, so its folder is reached through ⋯ too.
-  const openMenu = () => files.resourceMenu({ ...f.row, root: f.root, path: f.path, kind: 'file' }, home, { openFolder: returnBack ? close : null, htmlActions: htmlActionsInMenu })
+  const openMenu = () => files.resourceMenu({ ...f.row, root: f.root, path: f.path, kind: 'file' }, home, { openFolder, htmlActions: htmlActionsInMenu })
   // The toolbar: in the header on a desktop, and on a phone in a bar of its
   // own under the field, which the viewport keeps above the keyboard.
   const tools =
@@ -1949,7 +1949,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
       'div',
       { class: 'fs-titles' },
       renameTitle(files, f.row, f.view === 'markdown' ? name.replace(/\.(?:md|markdown)$/i, '') : name, 'display fs-edtitle'),
-      returnBack && close ? h('button', { class: 'fs-location', title: 'Open folder', 'aria-label': `Open folder: ${closeLabel}`, onclick: close }, icon.folder(14), h('span', { text: `${ROOT_LOOK[f.root]?.name ?? f.root}${parentOf(f.path) ? ` / ${parentOf(f.path)}` : ''}` })) : null,
+      openFolder ? h('button', { class: 'fs-location', title: 'Open folder', 'aria-label': `Open folder: ${closeLabel}`, onclick: openFolder }, icon.folder(14), h('span', { text: `${ROOT_LOOK[f.root]?.name ?? f.root}${parentOf(f.path) ? ` / ${parentOf(f.path)}` : ''}` })) : null,
       h('div', { class: 'fs-sub', text: metaOf(f.row) }),
       (!wide || side) && (saveWord || readOnly) ? h('div', { class: 'fs-filestate' }, saveWord, readOnly) : null,
       !editable && !f.loading && reason ? h('div', { class: 'fs-reason', text: reason }) : null,

@@ -42,7 +42,7 @@ import { authenticatedFetch as fetch, authExpired, expireAuth, failureSentence }
 
 import { blockView, toolSummary, foldFacts, foldsAsStep, contextWords, compactionWords, modelShortName } from './transcript.js'
 import { richField, readField, caretPoint, setMarkdown } from './compose.js'
-import { createFiles, folderView, fileView, fitPreviewTables, addSheet, parseFilesPath, listFromURL, filesHref, FILES_LOCATION_HIDDEN, isFolder, nameOf as fileNameOf, resolveOf, missingSentence, externalHref, vaultUrlRef, formatText, uploadAccept, ROOT_LOOK, drawnTypeOf, bytesAre, downloadHref } from './files.js'
+import { createFiles, folderView, fileView, fitPreviewTables, addSheet, parseFilesPath, listFromURL, filesHref, FILES_LOCATION_HIDDEN, isFolder, nameOf as fileNameOf, resolveOf, missingSentence, externalHref, vaultUrlRef, formatText, uploadAccept, ROOT_LOOK, parentOf, drawnTypeOf, bytesAre, downloadHref } from './files.js'
 import { createActivity } from './activity.js'
 import { createApps, canFrame, buildAppThread } from './apps.js'
 import { SETTINGS_SECTIONS, settingsHome } from './app-shape.js'
@@ -73,10 +73,11 @@ import { markdown, strip } from './markdown.js'
 import { copyText } from './clipboard.js'
 import { appFrame, sameFrame } from './viewport.js'
 import { layoutPixels } from './scale.js'
-import { renderPanel, itemDescriptor, itemHref, itemFromURL, sideFromURL, withSide, migratePanelURL } from './panel-items.js'
+import { renderPanel, itemDescriptor, itemHref, itemFromURL, placeHref, placeFromURL, panelAncestors, sideFromURL, withSide, migratePanelURL } from './panel-items.js'
 import { createPanels, panelDOM, itemKey, readPanels } from './panels.js'
 import { mount as mountConversation } from './page/conversation.js'
 import { mountSidePanel } from './page/side-panel.js'
+import { closeImageView } from './image-view.js'
 
 import { h, morph, kept, blob, icon, wave, loamMark, on as onNode } from './ui.js'
 
@@ -89,14 +90,13 @@ const root = document.getElementById('app')
 const menuSurfaces = createMenuSurfaces(root)
 
 const state = {
-  screen: 'home', // 'home' | 'threads' | 'profile' | 'files' | 'activity'
+  screen: 'home', // The foreground view inside the active place.
   // Shared settings, attachments, Running now, Files controls and integrations.
   sheet: null,
   agents: createAgents([]), // the host's agents: id, name — see sessions.js
   agentsReady: false,
   providers: [],
   profileAgent: null,
-  backToThread: null,
   profileTab: 'activity',
   // What the composer is carrying, and the host's cap on it. The attachments
   // belong to the chat that is open and go with it when it closes.
@@ -111,7 +111,7 @@ const state = {
   // that has to remember which side it was on.
   wide: false,
   collapsed: store.sidebarHidden,
-  navigator: 'chats', // desktop list only; never selects panel contents
+  navigator: 'chats', // The active place and its list. Links can open any item here.
   mainItem: null, // typed panel identity, independent of the navigator
   // The + menu, where the desktop draws it: a popover anchored above the +,
   // with two sub-pages it drills into. The phone draws the same content as the
@@ -233,17 +233,19 @@ async function api(method, path, body) {
 // Lazy getters preserve initialization order without duplicating a state owner.
 const modules = Object.create(null)
 const moved = Object.fromEntries(Object.entries({
-  files: "restoreFilePlace herePath pushAddress files filesUploadChooser chooseUpload fileField fileNameField fileFieldFor goFiles leaveFiles proceedThen openFileRef refNotice vaultUrls picker pickFromFiles applyTool embeds embedFor loadEmbed fileDictation filesScreen filesHome returnToChatButton",
+  files: "restoreFilePlace herePath files filesUploadChooser chooseUpload fileField fileNameField fileFieldFor goFiles proceedThen openFileRef refNotice vaultUrls picker pickFromFiles applyTool embeds embedFor loadEmbed fileDictation filesScreen filesHome",
   accounts: "loadGithub githubStep keepGithub setupGithub connectOrg installGithub refreshGithub disconnectGithub githubReturn providerSignIn connectKeys orgField orgAppField",
   composer: "DRAFT_MAX_PX MAC draft editorDraft openEditor closeEditor sendFromEditor fileChooser imageChooser growDraft submitDraft attachStrip chipSub loginNotice activeThread composer expandGlyph editorNodes menuPage menuRootOf menuOpen openPage openMenu togglePlus closeMenus composerMenu menuRow menuSheet menuGroups menuPopover",
   transcript: "lineKeys lineCount keyOf MINE_MAX_PX MINE_SLACK_PX fitMine COPIED_MS copied copyWithCue copyButton stepItems stepChildren itemNode foldCard stepNode askLine openBlocks longToolDetails toggleOpen toolNode toolDetail fitToolOutputs answeredLine openTurns toggleTurn turnModelName turnFacts turnLine",
-  settings: "settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsApiKey settingsAccount settingsConnections settingsAbout apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks",
-  layout: "nav profileScreen profileBody desk rail filesList listColumn browseSection setCollapsed mainPane profilePane backToChat filesPane",
+  settings: "backInSettings settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsApiKey settingsAccount settingsConnections settingsAbout apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks",
+  layout: "nav profileScreen profileBody desk rail filesList listColumn setCollapsed mainPane profilePane filesPane",
   sheets: "openSheet closeSheet sheetTop SHEET_SETTLE_MS pickerNodes filesSheetNodes sheetNodes",
-  market: "marketCards marketState openMarket openMarketInstall openLinkInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore marketLinkDoor loadMarket"
+  market: "backMarketOverlay marketCards marketState openMarket openMarketInstall openLinkInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore marketLinkDoor loadMarket"
 }).flatMap(([group, names]) => names.split(' ').map(name => [name, group])))
 const shell = Object.defineProperties({}, {
   mainHistory: { get: () => mainHistory },
+  openPlace: { get: () => openPlace },
+  pushAddress: { get: () => pushAddress },
   backAction: { get: () => backAction },
   backButton: { get: () => backButton },
   routePanels: { get: () => routePanels },
@@ -399,12 +401,17 @@ const settingsProfileUI = mountProfile(page, { controller: settingsProfiles, act
 const messageState = createMessageState()
 const longMine = messageState.long
 const running = createRunning({ api, redraw: schedule, agents: () => state.agents.list, providers: () => state.providers,
-  openPanel: () => { if (isWide() ? state.sheet?.kind !== 'activity' : state.screen !== 'activity') goActivity() },
+  openPanel: () => { if (state.sheet?.kind !== 'activity') goActivity() },
   openConversation: (row) => { page.closeSheet(); if (row.kind === 'thread') openActivityThread(row.threadId); else openImportedSession(row.id) },
 })
 const threads = mountConversation(page, { messageState, dom: panelDOM('main'),
   navigate: (item) => panels.openMain(item),
   missing: recoverMissingThread,
+  archiveAddress: value => {
+    if (value) return Boolean(globalThis.history?.go) && followPanelAddress('/?chats=archived')
+    if (new URLSearchParams(globalThis.location?.search).get('chats') === 'archived') return mainHistory.go(-1)
+    return false
+  },
   side: () => panels,
   viewAddress: (view, { traverse = true } = {}) => {
     const url = new URL(globalThis.location?.href ?? threadHref(threads.st.open.thread.id), 'http://placeholder')
@@ -421,7 +428,7 @@ const threads = mountConversation(page, { messageState, dom: panelDOM('main'),
     const href = id ? threadHref(id) : '/'
     if ((id || threadFromPath(page.herePath())) && page.herePath() !== href) page.pushAddress(null, '', href, { root: !id && !isWide() })
   },
-  enter: item => { importRequest++; closeThread(); state.screen = 'threads'; state.mainItem = item; if (!state.wide) state.navigator = 'chats'; page.closeSheet(); schedule() },
+  enter: item => { importRequest++; closeThread(); state.screen = 'threads'; state.mainItem = item; page.closeSheet(); schedule() },
   leave: goChats,
 })
 const apps = createApps({ registry, api, redraw: schedule, wide: () => state.wide,
@@ -429,19 +436,16 @@ const apps = createApps({ registry, api, redraw: schedule, wide: () => state.wid
   side: () => panels, navigate: item => panels.openMain(item),
   avatar: (id, { size = 40, font = 18 } = {}) => isOwner(id) ? blob({ initial: ownerInitial(), color: 'var(--latte-espresso)', ink: 'var(--latte-espresso-ink)', shape: '50%' }, { size, font }) : blob(agentLook(id, state.agents), { size, font }),
   agentName: id => isOwner(id) ? 'you' : state.agents.list.find(agent => agent.id === id)?.name ?? id ?? 'Unknown',
-  newThread: () => buildAppThread(threads, state.agents.list), copy: copyText, leave: () => goApps(),
+  newThread: () => buildAppThread(threads, state.agents.list), copy: copyText, leave: () => mainHistory.go(-1) || openPlace(state.navigator),
 })
-function goApps({ push = true } = {}) {
-  if (state.screen === 'files') {
-    if (!page.files.guard(null)) { page.files.st.sheet.proceed = page.proceedThen(goApps); return }
-    page.files.closeFile()
-  }
-  importRequest++; page.closeSheet(); threads.close({ navigate: false }); closeThread()
-  if (push) page.pushAddress(null, '', '/apps', { root: true })
+function goApps({ push = true, link = false } = {}) {
+  if (push && !link) return openPlace('apps')
+  if (link) return followPanelAddress('/apps')
+  state.screen = 'apps'
   apps.st.selected = null
-  state.navigator = 'apps'
-  state.mainItem = null
-  state.screen = 'apps'; const pending = apps.load(); schedule(); return pending
+  const pending = apps.load()
+  schedule()
+  return pending
 }
 function appsScreen() { return h('div', { class: 'screen apps-screen', key: 'screen:apps' }, apps.view(), page.nav()) }
 
@@ -477,79 +481,24 @@ async function openImportedSession(id) {
   }
 }
 
-function goChats() {
-  importRequest++
-  threads.showArchived(false)
-  if (state.screen === 'files') {
-    if (!page.files.guard(null)) { page.files.st.sheet.proceed = page.proceedThen(goChats); return }
-    page.leaveFiles(); return
-  }
-  threads.close({ navigate: false }); page.closeSheet(); goHome(); threads.load({ quiet: true })
-  page.pushAddress(null, '', '/', { root: true })
-}
+function goChats() { return openPlace('chats') }
 
-
-function goActivity({ push = true } = {}) {
-  if (isWide()) {
-    if (state.sheet?.kind === 'activity') { page.closeSheet({ historyBack: true }); return }
-    page.openSheet({ kind: 'activity' })
-    activity.load()
-    return
-  }
-  if (state.screen !== 'activity') rememberActivityReturn()
-  if (state.screen === 'files') {
-    if (!page.files.guard(null)) {
-      page.files.st.sheet.proceed = page.proceedThen(goActivity)
-      return
-    }
-    page.files.closeFile()
-  }
-  if (push && state.screen !== 'activity') page.pushAddress(null, '', '/?screen=activity')
-  page.closeSheet()
-  threads.close({ navigate: false })
-  closeThread()
-  state.profileAgent = null
-  state.screen = 'activity'
+function goActivity() {
+  if (state.sheet?.kind === 'activity') { page.closeSheet({ animate: true }); return }
+  page.openSheet({ kind: 'activity' })
   activity.load()
-  schedule()
 }
 
-
-
-let activityReturn = null
-function openPhoneActivity() {
-  return goActivity()
-}
-
-function rememberActivityReturn() {
-  if (state.screen !== 'activity') {
-    const file = page.files.st.file
-    activityReturn = { screen: state.screen, profileAgent: state.profileAgent,
-      thread: state.screen === 'threads' ? threads.st.open?.thread.id : null,
-      file: state.screen === 'files' ? { root: file?.root ?? page.files.st.root, path: file?.path ?? page.files.st.path, isFile: Boolean(file) } : null }
-  }
-}
-
-function returnFromActivity() {
-  const back = activityReturn
-  activityReturn = null
-  page.closeSheet()
-  if (!back && !isWide()) { goChats(); return }
-  if (back?.file) { page.goFiles(back.file.root, back.file.path, { isFile: back.file.isFile }); return }
-  if (back?.thread) { threads.open(back.thread); return }
-  state.screen = back?.screen ?? 'home'
-  state.profileAgent = back?.profileAgent ?? null
-  schedule()
-}
+function openPhoneActivity() { return goActivity() }
 
 function activityScreen() {
-  return h('div', { class: 'screen activity-screen', key: 'screen:activity' }, activityPanel(), page.nav())
+  return h('section', { class: 'screen activity-screen', key: 'screen:activity', role: 'dialog', 'aria-label': 'Activity', 'aria-modal': 'true' }, activityPanel(), page.nav())
 }
 
 function activityPanel() {
   return h('div', { class: 'activity-panel' },
     !state.wide ? h('div', { class: 'activity-return' },
-      backButton('main') ?? h('button', { class: 'backbtn', 'aria-label': 'Back from Activity', onclick: returnFromActivity }, icon.chevronLeft(18), 'Back')) : null,
+      h('button', { class: 'iconbtn ghost', 'aria-label': 'Close Activity', onclick: () => page.closeSheet() }, icon.close(18))) : null,
     activity.view())
 }
 const schedules = createSchedules({ api, redraw: schedule, openFile: ({ root, path }) => page.goFiles(root, path, { isFile: true }) })
@@ -676,13 +625,11 @@ function goHome() {
   schedule()
 }
 
-function goProfile(agent, { push = true } = {}) {
+function goProfile(agent, { push = true, routed = false } = {}) {
+  if (push && !routed) return panels.openMain({ kind: 'profile', id: agent })
   importRequest++
-  state.backToThread = page.activeThread()?.thread.id ?? null
+  files.closeFile()
   threads.close({ navigate: false })
-  // Which chat "Back to chat" goes back to on the desktop's profile pane. The
-  // thread is closed either way — a profile is not a chat with a header on it
-  // — so what is kept is the id, not the connection.
   closeThread()
   state.screen = 'profile'
   state.mainItem = { kind: 'profile', id: agent }
@@ -876,11 +823,6 @@ async function continueWelcome() {
 function render() {
   registry.emit('rendering', {})
   state.wide = isWide()
-  if (!state.wide && state.sheet?.kind === 'activity') openPhoneActivity()
-  if (state.wide && state.screen === 'activity') {
-    returnFromActivity()
-    page.openSheet({ kind: 'activity' })
-  }
   appModalHistory.sync()
   panels.sync()
   state.collapsed = store.sidebarHidden || panels.tucked()
@@ -902,6 +844,7 @@ function render() {
     : state.wide ? page.desk(beside) : section?.frame === 'full' ? content : h('div', { class: 'screen plugin-screen' },
       backButton('main'), state.screen === 'item' ? renderPanel({ host: page, item: state.mainItem }) : content, page.nav())
   const notice = state.editor || state.sheet?.kind === 'settings' ? null : runNotice()
+  if (!state.wide && state.sheet?.kind === 'activity') screen.setAttribute('inert', '')
   morph(root, authExpired() || welcoming ? [screen] : [notice, screen, ...registry.draw('app.overlay', { slot: 'overlay', screen: state.screen, wide: state.wide })])
   page.fitToolOutputs(); if (modern || state.wide && state.navigator === 'chats') threads.afterRender()
   if (panels.visible()) sidePanel.afterRender()
@@ -976,7 +919,60 @@ function fitViewport() {
 }
 
 
-// Run the history guard and modal-only traversal before the document router.
+function pushAddress(data, title, href, { root = false } = {}) {
+  // Strip the popup from the source entry before recording the destination.
+  // This also covers controllers that closed their sheet before the next draw.
+  appModalHistory.leave()
+  const address = globalThis.location?.href ? withSide(modalURL(new URL(href, location.href), null), panels.st.side) : href
+  const entry = { ...data, panelPlace: state.navigator }
+  if (root) mainHistory.start(entry, title, address)
+  else mainHistory.push(entry, title, address)
+}
+
+function openPlace(id) {
+  if (state.sheet) page.closeSheet()
+  if (!mainPanel.guard(() => openPlace(id))) return false
+  if (isWide()) page.setCollapsed(false)
+  panels.focus('main')
+  state.navigator = id
+  pushAddress(id === 'files' ? { files: true, folder: true } : null, '', placeHref(id), { root: true })
+  showPlace(id)
+  return true
+}
+
+function showPlace(id) {
+  importRequest++
+  mainPanel.clear()
+  state.profileAgent = null
+  if (id === 'chats') {
+    state.screen = 'home'
+    threads.showArchived(false)
+  } else if (id === 'files') {
+    page.goFiles(null, '', { push: false, routed: true })
+  } else if (id === 'apps') {
+    return goApps({ push: false })
+  } else state.screen = `plugin:${id}`
+  const section = registry.entries('rail.section').find(entry => entry.id === id && !entry.component)
+  if (section?.load) registry.invoke(section, 'load', { host: page })
+  schedule()
+}
+
+function overlayBack() {
+  if (document.documentElement.classList?.contains('image-view-open')) return closeImageView
+  const dialog = document.querySelector?.('dialog[open]')
+  if (dialog) return () => {
+    if (dialog.requestClose) dialog.requestClose()
+    else if (dialog.dispatchEvent(new Event('cancel', { cancelable: true }))) dialog.close?.()
+  }
+  if (menuSurfaces.active()) return menuSurfaces.back
+  if (state.sheet?.kind === 'market') return modules.market.backMarketOverlay
+  if (state.sheet) return () => page.closeSheet()
+  const host = panels.focused() === 'side' ? sidePanel.host : page
+  if (host.state.editor) return host.closeEditor
+  return null
+}
+
+// Handle a browser traversal before it can reroute the underlying document.
 const mainHistory = createMainHistory({
   itemAt: url => itemKey(itemFromURL(url)),
   sideKey: () => itemKey(panels.st.side),
@@ -986,9 +982,14 @@ const mainHistory = createMainHistory({
     return mainPanel.guard(retry)
   },
   syncSide: () => syncSideAddress(panels.st.side),
+  intercept: delta => {
+    const back = overlayBack()
+    if (back) return delta < 0 ? back : () => {}
+    if (panels.focused() === 'side') return () => panels.goSide(Math.sign(delta))
+    return null
+  },
 })
-const appModalHistory = createAppModalHistory({ navigation: mainHistory, wide: isWide, sheet: () => state.sheet,
-  changed: schedule, close: () => page.closeSheet(), restore: sheet => {
+const appModalHistory = createAppModalHistory({ navigation: mainHistory, sheet: () => state.sheet, restore: sheet => {
     if (sheet.kind === 'market') { modules.market.openMarket({ kind: sheet.k, q: sheet.q, id: sheet.id }); if (sheet.install) modules.market.openLinkInstall({ link: sheet.install }); return }
     page.openSheet(sheet, { restoring: true })
     if (sheet.kind === 'activity') activity.load()
@@ -997,9 +998,6 @@ const appModalHistory = createAppModalHistory({ navigation: mainHistory, wide: i
     if (sheet.kind === 'settings' && sheet.page === 'plugins') modules.settings.syncSettingsPlugin(sheet.provider)
   } })
 modules.files = mountFiles(page)
-// A cross-document Back routes the document first. Its enter handler closes
-// the old sheet, so restore any sheet in the destination after that handler.
-globalThis.addEventListener?.('popstate', appModalHistory.restore)
 modules.accounts = mountAccounts(page)
 modules.composer = mountComposer(page)
 modules.transcript = mountTranscript(page)
@@ -1020,7 +1018,7 @@ const mainPanel = {
   },
   transfer: (to, id) => threads.transferTo(to.threads, id),
   clear: () => { state.mainItem = null; threads.close({ navigate: false }); files.closeFile(); apps.st.selected = null; closeThread(); if (state.screen !== 'apps') state.screen = 'home' },
-  emptyAddress: () => { if (page.herePath() !== '/') page.pushAddress(null, '', '/') },
+  emptyAddress: () => page.pushAddress(null, '', placeHref(state.navigator)),
   open: item => {
     if (item.kind === 'thread') {
       files.closeFile(); apps.st.selected = null
@@ -1030,8 +1028,11 @@ const mainPanel = {
       return pending
     }
     if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false, list: item.list, boardThread: item.boardThread })
-    if (item.kind === 'app' && !state.wide && item.push === false) return goApps({ push: false })
-    if (item.kind === 'profile') return goProfile(item.id, { push: item.push !== false })
+    if (item.kind === 'app' && !isWide()) {
+      mainPanel.clear()
+      return goApps({ push: false })
+    }
+    if (item.kind === 'profile') return goProfile(item.id, { push: item.push !== false, routed: true })
     const ticket = ++importRequest
     threads.close({ navigate: false }); files.closeFile(); closeThread(); page.closeSheet()
     state.mainItem = itemDescriptor(item)
@@ -1057,14 +1058,13 @@ function syncSideAddress(side) {
 }
 function recoverMissingThread(id) {
   const url = globalThis.location?.href
-  const modal = url && modalFromURL(url), sheet = state.sheet
-  threads.close({ navigate: false })
-  goHome()
-  if (modal && sheet?.kind === modal.kind) state.sheet = sheet
-  if (!url || threadFromPath(page.herePath()) !== id) return
+  if (url && threadFromPath(page.herePath()) !== id) return
+  const place = state.navigator, modal = url && modalFromURL(url)
+  showPlace(place)
+  if (!url) return
   // Repair this entry in place so Forward cannot reopen the dead address.
-  const home = modalURL(new URL('/', url), modal)
-  mainHistory.replace(globalThis.history?.state, '', withSide(home, panels.st.side), { root: !modal && !isWide() })
+  const home = modalURL(new URL(placeHref(place), url), modal)
+  mainHistory.replace({ panelPlace: place }, '', withSide(home, panels.st.side), { root: true })
 }
 
 function restoredProfileTab(id) {
@@ -1072,58 +1072,116 @@ function restoredProfileTab(id) {
   return profile?.id === id ? profile.tab : undefined
 }
 
-const panels = createPanels({ main: mainPanel, side: sidePanel, changed: schedule, address: syncSideAddress })
-function backAction(panel) {
+const panels = createPanels({ main: mainPanel, side: sidePanel, changed: schedule, address: syncSideAddress, beforeOpen: () => { if (state.sheet) page.closeSheet() } })
+function backAction(panel, label) {
   if (panel === 'side') return panels.canSideBack() ? { title: backTitle(), go: () => panels.goSide(-1) } : null
-  return mainHistory.canBack() ? { title: backTitle(), go: () => mainHistory.go(-1) } : null
+  return mainHistory.canBack() ? { title: label ?? backTitle(), label, shortcut: true, go: () => mainHistory.go(-1) } : null
 }
-function backButton(panel) { return historyBackButton(backAction(panel)) }
-// Initial load restores both slots from the address. Traversal keeps side mounted.
-if (globalThis.location?.href) {
-  const migrated = migratePanelURL(location.href, readPanels())
-  if (globalThis.history?.replaceState && migrated !== location.pathname + location.search + location.hash) history.replaceState(history.state, '', migrated)
-  panels.st.side = sideFromURL(location.href)
+function backButton(panel, label) { return historyBackButton(backAction(panel, label)) }
+// Every fresh address establishes one place. Browser entries written by this
+// router keep their original place and visit IDs through a reload.
+function prepareLanding() {
+  if (!globalThis.location?.href) return
+  const saved = readPanels()
+  const url = new URL(migratePanelURL(location.href, saved), location.href)
+  const history = globalThis.history
+  panels.st.side = sideFromURL(url)
+  if (history?.state?.panelPlace) {
+    state.navigator = history.state.panelPlace
+    return
+  }
+  if (url.searchParams.get('screen') === 'activity') {
+    url.searchParams.delete('screen')
+    url.searchParams.set('modal', 'activity')
+  }
+  if (!isWide() && url.pathname === '/apps') url.searchParams.delete('url')
+  state.navigator = placeFromURL(url)
+  if (!history?.go) return
+  const place = state.navigator
+  const entry = history.state
+  const ancestors = panelAncestors(url)
+  const address = value => withSide(value, panels.st.side)
+  // The entry beneath the root handles Back on a popup over the root as
+  // well as Back at the root itself. It cannot be routed as an app step.
+  mainHistory.replace({ panelPlace: place }, '', address(placeHref(place)), { root: true })
+  ancestors.forEach((href, i) => mainHistory.push({ panelPlace: place, ...(place === 'files' ? { files: true, folder: true } : {}) }, '', address(href), { root: i === 0 }))
+  mainHistory.push({ panelPlace: place, files: entry?.files, folder: entry?.folder, boardThread: entry?.boardThread,
+    threadView: ['board', 'details'].includes(url.searchParams.get('view')) }, '', address(url), { root: !ancestors.length })
 }
+prepareLanding()
+
 function routePanels(value = globalThis.location?.href) {
   if (!value) return
   const url = new URL(value), item = itemFromURL(value)
+  let fragment = url.hash.slice(1) || null
+  if (fragment) { try { fragment = decodeURIComponent(fragment) } catch { /* Keep a legacy literal fragment. */ } }
   const entry = globalThis.history?.state
-  if (state.wide && entry?.profileReturn?.navigator) state.navigator = entry.profileReturn.navigator
+  state.navigator = entry?.panelPlace ?? placeFromURL(url)
   const at = parseFilesPath(url.pathname)
-  if (at && (!state.wide || !item || entry?.folder || !entry?.files)) {
-    if (itemKey(item) !== itemKey(mainPanel.item())) mainPanel.clear()
-    if (state.wide && !item) state.navigator = 'files'
-    page.goFiles(at.root, at.path, { push: false, routed: entry?.folder === true, isFile: entry?.boardThread ? true : entry?.folder ? false : null, list: listFromURL(value), boardThread: entry?.boardThread })
+  if (at && (!item || entry?.folder || !entry?.files)) {
+    page.goFiles(at.root, at.path, { push: false, routed: Boolean(entry?.folder || !at.path), isFile: entry?.boardThread ? true : entry?.folder ? false : null, list: listFromURL(value), boardThread: entry?.boardThread,
+      fragment })
     return
   }
   if (item) {
-    panels.openMain({ ...item, list: listFromURL(value), boardThread: entry?.boardThread, push: false })
+    panels.openMain({ ...item, list: listFromURL(value), boardThread: entry?.boardThread, push: false,
+      fragment: item.kind === 'file' ? fragment : null,
+      message: item.kind === 'thread' ? url.searchParams.get('message') : null })
     if (item.kind === 'thread') threads.setView(url.searchParams.get('view') ?? (entry?.board === item.id ? 'board' : null))
+    if (entry?.filesList) files.show(entry.filesList.root, entry.filesList.path, { isFile: false, keepFile: true })
+    else if (item.kind === 'file' && state.navigator === 'files' && files.st.file) {
+      files.show(listFromURL(value) ?? item.root, listFromURL(value) ? '' : parentOf(item.path), { isFile: false, keepFile: true })
+    }
     return
   }
-  mainPanel.clear()
-  if (url.pathname === '/apps') goApps({ push: false })
-  else if (url.searchParams.get('screen') === 'activity') goActivity({ push: false })
-  else if (url.searchParams.get('screen')?.startsWith('plugin:')) state.screen = url.searchParams.get('screen')
-  else { state.screen = 'home'; if (!state.wide) state.navigator = 'chats' }
-  schedule()
+  showPlace(placeFromURL(url))
+  if (url.searchParams.get('chats') === 'archived') threads.showArchived(true)
+  if (url.searchParams.get('screen') === 'activity') goActivity()
+}
+
+function followPanelAddress(value) {
+  if (!globalThis.location?.href) return false
+  if (state.sheet) page.closeSheet()
+  if (!mainPanel.guard(() => followPanelAddress(value))) return false
+  pushAddress(null, '', value)
+  routePanels()
+  return true
 }
 
 panels.sideHost = sidePanel.host
+// Markdown and ordinary in-app links use the route of the pane they came
+// from. File references with their own resolver have already handled click.
+root.addEventListener('click', event => {
+  if (event.defaultPrevented || event.button || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !globalThis.location?.href) return
+  const link = event.target?.closest?.('a[href]')
+  if (!link || link.hasAttribute('download') || (link.target && link.target !== '_self' && !link.closest('.md, .fs-preview, .tt-stream'))) return
+  let url
+  try { url = new URL(link.href, location.href) } catch { return }
+  if (url.origin !== location.origin || modalFromURL(url)) return
+  const item = itemFromURL(url)
+  if (!item && !parseFilesPath(url.pathname) && url.pathname !== '/apps') return
+  event.preventDefault()
+  if (link.closest('[data-panel=side]') && item) {
+    panels.openSide({ ...item, view: url.searchParams.get('view'), message: url.searchParams.get('message') })
+  } else followPanelAddress(url)
+})
 // Capture before a control can stop propagation. This observes interaction
 // without moving keyboard focus, changing navigation or rebuilding a mount.
 function focusPanel(target) {
   const pane = target?.closest?.('.panel-pair > [data-panel]')
   if (pane) panels.focus(pane.getAttribute('data-panel'))
+  else if (target?.closest?.('.workspace-list, .rail')) panels.focus('main')
 }
-root.addEventListener('pointerdown', event => focusPanel(event.target), true)
+root.addEventListener('pointerdown', event => {
+  if (event.button !== 3 && event.button !== 4) focusPanel(event.target)
+}, true)
 root.addEventListener('focusin', event => focusPanel(event.target), true)
 // Embedded apps and file previews own another document (often cross-origin).
 // Their events cannot bubble here; entering one focuses its iframe element.
 window.addEventListener('blur', () => {
   if (document.activeElement?.tagName === 'IFRAME') focusPanel(document.activeElement)
 })
-const { herePath, pushAddress, files, filesUploadChooser, chooseUpload, fileField, fileNameField, fileFieldFor, goFiles, leaveFiles, proceedThen, openFileRef, refNotice, picker, pickFromFiles, applyTool, embeds, embedFor, loadEmbed, fileDictation, filesScreen, filesHome, returnToChatButton, loadGithub, githubStep, keepGithub, setupGithub, connectOrg, installGithub, refreshGithub, disconnectGithub, githubReturn, providerSignIn, connectKeys, orgField, orgAppField, DRAFT_MAX_PX, MAC, draft, editorDraft, openEditor, closeEditor, sendFromEditor, fileChooser, imageChooser, growDraft, submitDraft, attachStrip, chipSub, loginNotice, activeThread, composer, expandGlyph, editorNodes, menuPage, menuRootOf, menuOpen, openPage, openMenu, togglePlus, closeMenus, composerMenu, menuRow, menuSheet, menuGroups, menuPopover, lineKeys, keyOf, MINE_MAX_PX, MINE_SLACK_PX, fitMine, COPIED_MS, copyWithCue, copyButton, stepItems, stepChildren, itemNode, foldCard, stepNode, askLine, openBlocks, longToolDetails, toggleOpen, toolNode, toolDetail, fitToolOutputs, answeredLine, openTurns, toggleTurn, turnModelName, turnFacts, turnLine, settingsBody, settingsSheet, settingsItems, settingsDialog, settingsPlugins, settingsAppearance, goSettings, settingsBack, settingsHead, tile, settingsRoot, filesFolderFields, settingsFiles, settingsAgents, settingsProviders, settingsProvider, usageCard, providersWarn, integrationsWarn, listWords, settingsIntegrations, githubOutcome, connectCard, githubCard, GH_PILLS, githubPills, githubConfirm, githubLinks, nav, profileScreen, profileBody, desk, rail, listColumn, setCollapsed, mainPane, profilePane, backToChat, filesPane, openSheet, closeSheet, sheetTop, SHEET_SETTLE_MS, pickerNodes, filesSheetNodes, sheetNodes } = page
+const { herePath, files, filesUploadChooser, chooseUpload, fileField, fileNameField, fileFieldFor, goFiles, proceedThen, openFileRef, refNotice, picker, pickFromFiles, applyTool, embeds, embedFor, loadEmbed, fileDictation, filesScreen, filesHome, loadGithub, githubStep, keepGithub, setupGithub, connectOrg, installGithub, refreshGithub, disconnectGithub, githubReturn, providerSignIn, connectKeys, orgField, orgAppField, DRAFT_MAX_PX, MAC, draft, editorDraft, openEditor, closeEditor, sendFromEditor, fileChooser, imageChooser, growDraft, submitDraft, attachStrip, chipSub, loginNotice, activeThread, composer, expandGlyph, editorNodes, menuPage, menuRootOf, menuOpen, openPage, openMenu, togglePlus, closeMenus, composerMenu, menuRow, menuSheet, menuGroups, menuPopover, lineKeys, keyOf, MINE_MAX_PX, MINE_SLACK_PX, fitMine, COPIED_MS, copyWithCue, copyButton, stepItems, stepChildren, itemNode, foldCard, stepNode, askLine, openBlocks, longToolDetails, toggleOpen, toolNode, toolDetail, fitToolOutputs, answeredLine, openTurns, toggleTurn, turnModelName, turnFacts, turnLine, settingsBody, settingsSheet, settingsItems, settingsDialog, settingsPlugins, settingsAppearance, goSettings, settingsBack, settingsHead, tile, settingsRoot, filesFolderFields, settingsFiles, settingsAgents, settingsProviders, settingsProvider, usageCard, providersWarn, integrationsWarn, listWords, settingsIntegrations, githubOutcome, connectCard, githubCard, GH_PILLS, githubPills, githubConfirm, githubLinks, nav, profileScreen, profileBody, desk, rail, listColumn, setCollapsed, mainPane, profilePane, filesPane, openSheet, closeSheet, sheetTop, SHEET_SETTLE_MS, pickerNodes, filesSheetNodes, sheetNodes } = page
 
 registerPage({ ...coreScope, ui: { host: page } })
 let previousSection = null
@@ -1188,7 +1246,9 @@ fitViewport()
 // It acts only when something is open, so the Escape that cancels an inline
 // rename is still the field's own and is not answered twice.
 document.addEventListener('keydown', event => historyShortcut(event, delta => {
-  if (state.sheet && !globalThis.history?.state?.appModal) return false
+  const back = delta < 0 && overlayBack()
+  if (back) { back(); return true }
+  if (state.sheet) return true
   if (panels.focused() === 'side' && !state.sheet) {
     panels.goSide(delta)
     return true // A side boundary must not fall through to browser navigation.
@@ -1218,7 +1278,7 @@ document.addEventListener('keydown', (event) => {
     // here to discard.
     target.closeEditor()
   } else if (!event.defaultPrevented && ['home', 'threads'].includes(state.screen) && threads.st.archived && (state.wide || !threads.st.open)) {
-    threads.showArchived(false)
+    if (!mainHistory.go(-1)) threads.showArchived(false)
   } else return
   event.preventDefault?.()
 })
@@ -1278,7 +1338,7 @@ const pageHeartbeat = setInterval(() => {
     loadAgentAvailability()
     threads.tick(['threads', 'home', 'activity', 'profile'].includes(state.screen) || state.wide && state.navigator === 'chats')
     sidePanel.threads.tick(panels.visible() && sidePanel.host.state.screen === 'threads')
-    activity.tick(state.screen === 'activity' || state.sheet?.kind === 'activity')
+    activity.tick(state.sheet?.kind === 'activity')
     if (state.screen === 'profile') { profileActivity.tick(true); profiles.refresh() }
     if (state.sheet?.detail?.kind === 'agent') settingsProfiles.refresh()
     if (state.sheet?.detail?.kind === 'engineer' || state.sheet?.detail?.kind === 'agent' && settingsProfiles.st.tab === 'Activity') engineerActivity.tick(true)
@@ -1320,9 +1380,9 @@ else {
     threads.open(landedThread, { push: false, listing })
     threads.setView(landingURL.searchParams.get('view') ?? (globalThis.history?.state?.board === landedThread ? 'board' : null))
   }
-  else if (landingItem?.kind === 'app') { state.navigator = 'apps'; panels.openMain({ ...landingItem, push: false }) }
+  else if (landingItem?.kind === 'app') panels.openMain({ ...landingItem, push: false })
   else if (landingURL.pathname === '/apps') goApps({ push: false })
-  else if (landingURL.searchParams.has('screen')) routePanels()
+  else if (landingURL.searchParams.has('screen') || landingURL.searchParams.get('chats') === 'archived') routePanels()
   else if (landingURL.pathname === '/panel') panels.openMain({ ...landingItem, push: false })
   else {
     const session = sessionFromAddress(landingURL) ?? (!onboarding.hello && !parseFilesPath(landingURL.pathname) ? lastClassicSession : null)
@@ -1341,12 +1401,11 @@ page.githubReturn()
 // choices, and a pre-retirement stored session is resolved once into its
 // imported thread above before the obsolete storage key is forgotten.
 const landedOn = parseFilesPath(page.herePath())
-if (landedOn) {
-  const { boardThread, folder } = globalThis.history?.state ?? {}
+if (landedOn && globalThis.location?.href) routePanels()
+else if (landedOn) {
   state.navigator = 'files'
-  page.goFiles(landedOn.root, landedOn.path, { push: false, routed: folder === true, isFile: boardThread ? true : folder ? false : null, boardThread, list: listFromURL(globalThis.location?.search ?? '') })
-}
-else render()
+  page.goFiles(landedOn.root, landedOn.path, { push: false })
+} else render()
 // Initial main routing may finish after the saved side was mounted during
 // startup. With no interaction yet, the restored side owns attention.
 if (panels.st.side) panels.focus('side')

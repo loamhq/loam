@@ -1,4 +1,5 @@
 import { createUpdate } from '../update.js'
+import { settingsParent } from '../app-modal-history.js'
 import { createPasskey } from '../passkey.js'
 import { settingsHome, settingsSection, CONNECTIONS_GROUP } from "../app-shape.js"
 import { owner, ownerInitial } from "../owner.js"
@@ -137,8 +138,8 @@ function builtinSettingsDialog(sheet) {
     settingsNav({ title: 'Settings', items: settingsItems(), active: settingsSection(page), choose: item => goSettings(item.id), footer: host.marketDoor({ nav: true }) }),
     h('div', { class: 'setmain' },
       h('header', { class: 'app-modal-head settings-modal-close' },
-        h('button', { class: 'iconbtn ghost', title: 'Close', 'aria-label': 'Close settings', onclick: () => host.closeSheet({ historyBack: true }) }, icon.close(14))),
-      h('div', { class: 'app-modal-body', key: `settings:${page}:${sheet.detail?.kind ?? ''}:${sheet.detail?.id ?? ''}:${sheet.provider ?? ''}:${sheet.account ?? ''}` }, host.runNotice(), ...settingsBody({ ...sheet, page }, false))))
+        h('button', { class: 'iconbtn ghost', title: 'Close', 'aria-label': 'Close settings', onclick: () => host.closeSheet({ animate: true }) }, icon.close(14))),
+      h('div', { class: 'app-modal-body', key: `settings:${page}:${sheet.detail?.kind ?? ''}:${sheet.detail?.id ?? ''}:${sheet.provider ?? ''}:${sheet.account ?? ''}` }, host.runNotice(), ...settingsBody({ ...sheet, page }, sheet.page !== 'root'))))
 }
 
 function settingsPlugins(options = {}) { return host.pluginSettingsUI.view(options) }
@@ -252,9 +253,15 @@ function syncSettingsPlugin(provider) {
 }
 
 function settingsBack(label, page, props) {
-  return h('button', { class: 'backbtn', ...props, onclick: () => {
-    if (!host.appModalHistory?.backToSettings(page)) goSettings(page)
-  } }, icon.chevronLeft(18), label)
+  return h('button', { class: 'backbtn', ...props, onclick: () => goSettings(page) }, icon.chevronLeft(18), label)
+}
+
+function backInSettings() {
+  const sheet = host.state.sheet
+  const parent = sheet?.kind === 'settings' && settingsParent(sheet)
+  if (!parent) return false
+  goSettings(parent.page, parent.provider)
+  return true
 }
 
 function settingsHead(title, why) {
@@ -423,7 +430,7 @@ function settingsAgents({ back = true } = {}) {
     } }, icon.plus(16), st.directoryBusy ? 'Opening…' : 'New agent'), h('button', { class: 'pillbtn', text: 'Archived', onclick: () => { host.state.sheet.archivedAgents = true; host.settingsProfiles.archived(); host.schedule() } })),
     group('Agents', host.state.agents.list.length ? host.state.agents.list.map(agent => settingsRow({ key: agent.id,
       lead: blob(agentLook(agent.id, host.state.agents), { size: 40, font: 18 }), title: agent.name,
-      onclick: () => { if (host.state.wide) detail('agent', agent.id); else { host.closeSheet(); host.goProfile(agent.id) } } })) : h('p', { class: 'note profile-empty', text: host.state.agentsReady ? 'No agents are available yet.' : 'Agents could not be loaded.' })),
+      onclick: () => detail('agent', agent.id) })) : h('p', { class: 'note profile-empty', text: host.state.agentsReady ? 'No agents are available yet.' : 'Agents could not be loaded.' })),
     attentionRow(st),
     st.directoryLoading ? h('p', { class: 'note', role: 'status', text: 'Loading system…' }) : null,
     st.directoryError ? h('div', {}, h('p', { class: 'schedule-error', role: 'alert', text: st.directoryError }), h('button', { class: 'pillbtn', text: 'Try again', onclick: () => host.settingsProfiles.directory() })) : null,
@@ -876,6 +883,7 @@ return Object.defineProperties({}, {
     settingsAppearance: { enumerable: true, get: () => settingsAppearance },
     goSettings: { enumerable: true, get: () => goSettings },
     settingsBack: { enumerable: true, get: () => settingsBack },
+    backInSettings: { enumerable: true, get: () => backInSettings },
     settingsHead: { enumerable: true, get: () => settingsHead },
     tile: { enumerable: true, get: () => tile },
     settingsRoot: { enumerable: true, get: () => settingsRoot },

@@ -22,7 +22,7 @@ function closeActivityDialogs(sheet) {
 function openSheet(sheet, { restoring = false } = {}) {
   if (sheet.kind === 'running' || (sheet.kind === 'settings' && sheet.page === 'running')) { host.goActivity(); host.running.load(); return }
   if (sheet.kind === 'settings') { if (CONNECTIONS_GROUP[sheet.page]) sheet.group = CONNECTIONS_GROUP[sheet.page]; sheet.page = settingsHome(sheet.page, sheet.provider) }
-  if (!restoring && host.state.wide && sheet.kind === 'settings' && sheet.page === 'root' && host.state.sheet?.kind === 'settings') { closeSheet({ historyBack: true }); return }
+  if (!restoring && host.state.wide && sheet.kind === 'settings' && sheet.page === 'root' && host.state.sheet?.kind === 'settings') { closeSheet({ animate: true }); return }
   if (host.state.sheet?.kind === 'settings' && sheet.kind !== 'settings') host.providerSignIn.cancel()
   if (host.state.sheet?.kind !== sheet.kind) closeActivityDialogs(host.state.sheet)
   host.registry.emit('sheet.changing', { previous: host.state.sheet, sheet })
@@ -43,11 +43,11 @@ function openSheet(sheet, { restoring = false } = {}) {
 }
 
 let closing = null
-function closeSheet({ historyBack = false, settled = false } = {}) {
+function closeSheet({ animate = false, settled = false } = {}) {
   host.providerSignIn.cancel()
   const sheet = host.state.sheet
-  if (historyBack && !sheet) return
-  if (historyBack && !settled && host.state.wide && !globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+  if (animate && !sheet) return
+  if (animate && !settled && host.state.wide && !globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
     if (closing === sheet) return
     const surface = host.root.querySelector?.('[data-menu-centered]')
     if (surface?.animate) {
@@ -58,7 +58,7 @@ function closeSheet({ historyBack = false, settled = false } = {}) {
       animation.finished.catch(() => {}).then(() => {
         animation.cancel()
         closing = null
-        if (host.state.sheet === sheet) closeSheet({ historyBack, settled: true })
+        if (host.state.sheet === sheet) closeSheet({ animate, settled: true })
       })
       return
     }
@@ -67,7 +67,6 @@ function closeSheet({ historyBack = false, settled = false } = {}) {
   closeActivityDialogs(sheet)
   host.registry.emit('sheet.changing', { previous: sheet, sheet: null })
   host.state.sheet = null
-  if (historyBack) host.appModalHistory.dismiss()
   host.schedule()
 }
 
@@ -80,7 +79,7 @@ function closeSheet({ historyBack = false, settled = false } = {}) {
 // does: the shared sheet gesture closes it when dragged down. The row is its own line rather than a button laid over
 // the header, so a long title never runs under the ✕. The desktop's dialogs
 // hide the row and keep their own Close.
-function sheetTop() { return sheetHandle(() => closeSheet({ historyBack: host.state.sheet?.kind === 'settings' })) }
+function sheetTop() { return sheetHandle(() => closeSheet({ animate: host.state.sheet?.kind === 'settings' })) }
 
 
 
@@ -91,7 +90,7 @@ function pickerNodes() {
   const body = pickerSheet(host.picker, { agentName: host.picker.st.agent ? agentLook(host.picker.st.agent, host.state.agents).name || host.picker.st.agent : null })
   const close = () => host.picker.close()
   const card = h('div', { class: 'sheet fs-sheet fs-picker' }, sheetHandle(close), ...body)
-  const surface = menuSurface(card, { title: 'Choose files', close, heading: false, width: 520 })
+  const surface = menuSurface(card, { title: 'Choose files', close, back: () => host.picker.back() || close(), heading: false, width: 520 })
   const node = host.state.wide ? h('div', { class: 'dialog fs-dialog', onclick: (e) => { if (e.target === e.currentTarget) close() } }, surface) : surface
   node.__key = 'sheet:picker'
   return [h('button', { class: 'scrim', key: 'scrim:picker', title: 'Close', onclick: close }), node]
@@ -121,9 +120,10 @@ function sheetNodes() {
   const sheet = host.state.sheet
   if (!sheet) return host.picker.st.open ? pickerNodes() : filesSheetNodes()
   if (sheet.kind === 'market') return host.marketNodes(sheet)
+  if (sheet.kind === 'activity' && !host.state.wide) return [host.activityScreen()]
   if (!['settings', 'activity', 'menu'].includes(sheet.kind)) return host.registry.draw('app.overlay', { slot: 'sheet', sheet })
   const centered = host.state.wide && ['settings', 'activity'].includes(sheet.kind)
-  const close = () => closeSheet({ historyBack: centered || sheet.kind === 'settings' })
+  const close = () => closeSheet({ animate: centered || sheet.kind === 'settings' })
   const scrim = h('button', { class: 'scrim', key: 'scrim', title: 'Close', 'aria-label': 'Close', onclick: close })
   const body = sheet.kind === 'settings' ? host.state.wide ? host.settingsDialog(sheet) : host.settingsSheet(sheet)
     : sheet.kind === 'activity' ? h('div', { class: 'sheet app-modal activity-modal' },
@@ -131,7 +131,13 @@ function sheetNodes() {
         h('button', { class: 'iconbtn ghost', 'aria-label': 'Close Activity', onclick: close }, icon.close(14))), host.activity.view())
     : host.menuSheet(sheet)
   const titles = { menu: host.composerMenu(sheet.page)?.title ?? 'Attach', settings: 'Settings', activity: 'Activity' }
-  const surface = menuSurface(body, { centered, anchor: sheet.kind === 'settings' && !centered ? '.settings-utility' : null, fallbackPlacement: sheet.kind === 'settings' ? 'center' : null, title: titles[sheet.kind] ?? 'Options', close, initialFocus: centered || sheet.kind === 'settings' ? 'heading' : null, width: centered ? 960 : sheet.kind === 'settings' ? 760 : body.classList.contains('actions-sheet') ? 340 : 480,
+  const back = () => {
+    if (sheet.kind === 'settings' && host.backInSettings()) return
+    const menuBack = sheet.kind === 'menu' && host.composerMenu(sheet.page)?.back
+    if (menuBack) menuBack.run()
+    else close()
+  }
+  const surface = menuSurface(body, { centered, anchor: sheet.kind === 'settings' && !centered ? '.settings-utility' : null, fallbackPlacement: sheet.kind === 'settings' ? 'center' : null, title: titles[sheet.kind] ?? 'Options', close, back, initialFocus: centered || sheet.kind === 'settings' ? 'heading' : null, width: centered ? 960 : sheet.kind === 'settings' ? 760 : body.classList.contains('actions-sheet') ? 340 : 480,
     heading: !['settings', 'activity'].includes(sheet.kind) && !body.querySelector('.display') })
   const node = host.state.wide ? h('div', { class: `dialog ${sheet.kind}`, onclick: (e) => { if (e.target === e.currentTarget) close() } }, surface) : surface
   node.__key = `sheet:${sheet.kind}`

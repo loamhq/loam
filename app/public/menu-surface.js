@@ -5,7 +5,7 @@ import { sheetGesture } from './sheet-gesture.js'
 
 // One shell for menus and sheets. Content stays in its reconciled tree; the
 // browser's top layer lets it escape scroll containers without a DOM portal.
-export function menuSurface(node, { title, close, heading = true, anchor = null, width = 360, initialFocus = null, fallbackPlacement = null, centered = false, anchored = false }) {
+export function menuSurface(node, { title, close, back = close, heading = true, anchor = null, width = 360, initialFocus = null, fallbackPlacement = null, centered = false, anchored = false }) {
   node.setAttribute('data-menu-surface', '')
   node.setAttribute('data-menu-title', title)
   node.setAttribute('data-menu-width', String(width))
@@ -25,6 +25,7 @@ export function menuSurface(node, { title, close, heading = true, anchor = null,
   node.setAttribute('aria-label', title)
   if (!node.hasAttribute('role')) node.setAttribute('role', 'dialog')
   on(node, 'menudismiss', close)
+  on(node, 'menuback', back)
   if (heading) node.insertBefore(h('div', { class: 'surface-heading' },
     h('h2', { class: 'display', text: title }),
     h('button', { class: 'iconbtn ghost surface-close', type: 'button', 'aria-label': `Close ${title}`, onclick: close }, icon.close(14))), node.firstChild)
@@ -53,7 +54,7 @@ export function menuPosition(anchor, size, viewport, gap = 8, inset = 12) {
 
 export function createMenuSurfaces(root) {
   // DOM-only rendering (without a layout engine) still builds the same shell.
-  if (!root.getBoundingClientRect) return { sync() {} }
+  if (!root.getBoundingClientRect) return { sync() {}, back() { return false }, active() { return false } }
   const opened = new Map()
   let lastTrigger = null, frame = null
   const controls = (node) => [...node.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')]
@@ -216,7 +217,16 @@ export function createMenuSurfaces(root) {
   window.visualViewport?.addEventListener('resize', schedule)
   window.visualViewport?.addEventListener('scroll', schedule)
   const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
-  return { sync() {
+  return {
+    active: () => Boolean(top()),
+    back() {
+      const node = top()
+      if (!node) return false
+      opened.get(node).returnFocus = true
+      node.dispatchEvent(new Event('menuback'))
+      return true
+    },
+    sync() {
     const nodes = [...root.querySelectorAll('[data-menu-surface]')]
     const previous = [...opened.values()].at(-1)
     for (const [node, entry] of opened) if (!nodes.includes(node)) {

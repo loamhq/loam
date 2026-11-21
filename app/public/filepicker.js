@@ -73,7 +73,12 @@ export function createPicker({ api, schedule }) {
     if (rows.length > 0) onPick?.(rows)
   }
 
-  return { st, open, close, go, toggle, attach }
+  function back() {
+    if (!st.root) return false
+    go(st.path === '' ? null : st.root, parentOf(st.path))
+    return true
+  }
+  return { st, open, close, go, back, toggle, attach }
 }
 
 export function pickerSheet(picker, { agentName = null } = {}) {
@@ -86,7 +91,7 @@ export function pickerSheet(picker, { agentName = null } = {}) {
     rows.push(
       h(
         'button',
-        { class: 'setrow fs-pickup', key: 'pick:up', onclick: () => picker.go(st.path === '' ? null : st.root, parentOf(st.path)) },
+        { class: 'setrow fs-pickup', key: 'pick:up', onclick: picker.back },
         h('div', { class: 'icon-tile fs-foldertile' }, icon.chevronLeft(16)),
         h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: st.path === '' ? 'Files' : splitPath(parentOf(st.path)).at(-1) ?? rootName(st.root) }), h('div', { class: 'fs-meta', text: 'Back' })),
       ),

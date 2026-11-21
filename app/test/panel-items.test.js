@@ -1,9 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { itemDescriptor, itemHref, itemFromURL, sideFromURL, withSide, migratePanelURL, renderPanel } from '../public/panel-items.js'
+import { itemDescriptor, itemHref, itemFromURL, sideFromURL, withSide, migratePanelURL, renderPanel, placeFromURL, panelAncestors } from '../public/panel-items.js'
 import { createCoreRegistry } from '../public/core-registrations.js'
-import { registerPage } from '../public/page/registrations.js'
-import { mount as mountLayout } from '../public/page/layout.js'
 import { installDom } from './fakedom.js'
 import { h } from '../public/ui.js'
 
@@ -21,30 +19,17 @@ test('addresses round trip main and side identities, independently of navigator 
   assert.equal(sideFromURL('/?side=broken'), null)
   assert.equal(itemFromURL('/panel?id=missing-kind'), null)
 })
-test('a rail move never changes a panel: every ordered pair renders every main kind through the same slot', () => {
-  installDom()
-  for (const main of items) for (const from of ['chats', 'files', 'apps', 'notes']) for (const to of ['chats', 'files', 'apps', 'notes']) {
-    const registry = createCoreRegistry(), side = items.find(item => item.kind !== main.kind)
-    const host = { registry, panelId: 'main', state: { wide: true, screen: 'obsolete-screen', navigator: from, mainItem: main, collapsed: true },
-      store: { sidebarHidden: true }, backButton: () => null, closeSheet() {}, schedule() {},
-      panels: { st: { side }, tucked: () => false },
-      threads: { load() {} }, files: { st: { roots: { loaded: true } } }, apps: { st: { loaded: true } } }
-    Object.assign(host, mountLayout(host))
-    const scope = registry.scope({ id: '@core' })
-    registerPage({ ...scope, ui: { host } })
-    const plugin = registry.scope({ id: 'notes' })
-    plugin.places.rail.section.add({ id: 'notes', list: () => h('div', {}, 'Note list') })
-    plugin.places.panel.item.add({ id: main.kind, render: ({ item, panel }) => h('article', {}, `${panel}:${item.kind}:${item.id ?? item.url}`) })
-    const before = renderPanel({ host, item: host.state.mainItem }).textContent
-    scope.commands.run('section.open', { id: to })
-    assert.equal(host.state.navigator, to)
-    assert.equal(host.state.mainItem, main)
-    assert.equal(host.panels.st.side, side)
-    assert.equal(host.state.screen, 'obsolete-screen')
-    assert.equal(host.state.collapsed, false)
-    assert.equal(renderPanel({ host, item: host.state.mainItem }).textContent, before)
-    assert.equal(host.mainPane().textContent, before)
-    plugin.dispose(); scope.dispose()
+test('a cold link gets the ancestors of its place and includes the chat behind a board', () => {
+  for (const [path, place, ancestors] of [
+    ['/files/vault/Notes/plan.md', 'files', ['/files', '/files/vault', '/files/vault/Notes']],
+    ['/threads/week?view=board', 'chats', ['/', '/threads/week']],
+    ['/panel?kind=profile&id=reader', 'chats', ['/']],
+    ['/apps?url=https%3A%2F%2Fgarden.example', 'apps', ['/apps']],
+    ['/?modal=settings', 'chats', []],
+  ]) {
+    const url = new URL(path, 'https://example.com')
+    assert.equal(placeFromURL(url), place)
+    assert.deepEqual(panelAncestors(url), ancestors)
   }
 })
 test('plugin item renderers receive the owning panel, and disappear with their registration', () => {

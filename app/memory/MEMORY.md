@@ -7,14 +7,12 @@ have never met.
 - **No dependencies, no build.** The app is Node's standard library
   (`package.json` has no dependencies), served from `src/server.js`, with
   the page in `public/`. `npm test` runs `test/` and `tools/*.test.js`.
-- **Panel history** uses native browser entries for main. Side navigation
-  replaces the side descriptor in the current URL. Browser traversal carries
-  the live side into the destination entry, and side shortcuts use its local
-  trail. A tab or rail switch sets a new main boundary, and Settings adds its
-  own boundary over the current document. Keep the navigation listener ahead
-  of modal and document routing so blocked traversals and failed saves can
-  return to the actual source entry. See the
-  [panel navigation guide](../docs/wide-panels.md#back-and-forward).
+- **Panel history** uses browser entries for the active place and a local trail
+  for the focused side pane. Tabs and rail selections establish a fresh root.
+  Links keep their source place. Overlays can serialize their address onto the
+  active entry. Clear that query before committing a panel navigation. The
+  capture listener dispatches native Back to the overlay or focused pane before
+  the document router sees it. See the [navigation guide](../docs/wide-panels.md#back-and-forward).
 - **The app holds no authority.** It reaches agents only through the
   session broker's narrow, authenticated interface (`broker/README.md` at
   the repository's root); it never sees a path of the server or a

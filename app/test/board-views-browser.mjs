@@ -95,9 +95,8 @@ try {
       if (phone) {
         assert.match(page.url(), /\/files\/vault\//)
       } else {
-        assert.match(page.url(), /\/threads\/general\?side=/)
-        await page.locator('[data-panel="main"] .tt-composer').waitFor()
-        assert.equal(await page.locator('[data-panel="main"] .tt-conversation[inert]').count(), 0)
+        assert.match(page.url(), /\/threads\/general\?view=board&side=/)
+        await page.locator('[data-panel="main"] .tt-board').waitFor()
       }
       const edit = async (line, words) => {
         await editor.locator('.cm-line').filter({ hasText: line }).click()
@@ -130,11 +129,11 @@ try {
         await page.getByRole('complementary', { name: 'Thread board' }).getByRole('button', { name: 'Open in Files' }).waitFor()
       } else {
         await editor.evaluate(node => { window.boardEditor = node })
-        await page.goBack()
-        await page.locator('[data-panel="main"] .tt-board').waitFor()
+        await page.getByRole('button', { name: 'Close board', exact: true }).click()
+        await page.locator('[data-panel="main"] .tt-board').waitFor({ state: 'detached' })
         assert.equal(await editor.evaluate(node => node === window.boardEditor), true)
         await page.goForward()
-        await page.locator('[data-panel="main"] .tt-board').waitFor({ state: 'detached' })
+        await page.locator('[data-panel="main"] .tt-board').waitFor()
         assert.equal(await editor.evaluate(node => node === window.boardEditor), true)
         await inPanel.getByRole('button', { name: 'Open as the main panel' }).click()
         await page.locator('[data-panel="main"] .cm-content').waitFor()

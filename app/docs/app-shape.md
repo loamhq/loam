@@ -5,8 +5,8 @@ Desktop puts **Activity** and **Settings** at the foot of the rail. The phone
 has four bottom-bar controls: the same three tabs and Settings. Activity is
 the first Settings row, above and apart from the settings sections, with a
 live work summary. Neither Settings nor Activity carries a notification
-indicator. Settings stays selected while phone Activity is open; its Back button
-returns to the previous destination (including the Files location). Appearance
+indicator. Settings stays selected while phone Activity is open. Close reveals
+the same panel, including the Files location. Appearance
 is reached through Settings; its former rail toggle is removed.
 
 The settings sections are declared in `public/app-shape.js`:

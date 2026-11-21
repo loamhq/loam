@@ -154,7 +154,7 @@ export function mount(host) {
     host.schedule()
   }
   function close() {
-    host.closeSheet({ historyBack: true })
+    host.closeSheet({ animate: true })
   }
   function toSettings() {
     const s = sheet()
@@ -250,7 +250,7 @@ export function mount(host) {
   function act(entry, what) {
     if (what === 'install') return openInstall(entry.id)
     if (what === 'use') { host.theme.try(null); host.theme.set({ theme: entry.id }); host.schedule(); return }
-    if (what === 'open') { close(); host.goApps(); return }
+    if (what === 'open') { close(); host.goApps({ link: true }); return }
   }
   // Try it: a theme only, and not the one being worn. Over a photograph it
   // is glass (`glass`); on a listing's page it reads "Try it first".
@@ -900,13 +900,15 @@ export function mount(host) {
         theme && host.theme.value.theme !== job.id ? button('Done', () => { closeInstall() }, 'pillbtn') : null,
         theme && host.theme.value.theme !== job.id ? button('Wear it now', () => { host.theme.try(null); host.theme.set({ theme: job.id }); closeInstall() }, 'pillbtn primary') : null,
         kind === 'app' ? button('Done', closeInstall, 'pillbtn') : null,
-        kind === 'app' ? button('Open Apps', () => { closeInstall(); close(); host.goApps() }, 'pillbtn primary') : null,
+        kind === 'app' ? button('Open Apps', () => { closeInstall(); close(); host.goApps({ link: true }) }, 'pillbtn primary') : null,
         !theme && kind !== 'app' ? button(`See it in ${home}`, () => { closeInstall(); host.goSettings(home === 'Plugins' ? 'plugins' : home.toLowerCase(), job.id) }, 'pillbtn') : null,
         !theme && kind !== 'app' || theme && host.theme.value.theme === job.id ? button('Done', closeInstall, 'pillbtn primary') : null]
         : job.phase === 'error' ? [button('Close', closeInstall, 'pillbtn'), button('Try again', () => openInstall(job.id), 'pillbtn primary')]
         : [link ? button([icon.chevronLeft(14), job.choose ? 'Pick another' : 'Change link'], backToLink, 'pillbtn market-link-back', { disabled: job.phase === 'installing' }) : button('Not now', closeInstall, 'pillbtn', { disabled: job.phase === 'installing' }),
           p?.installable === false ? null : button(job.phase === 'installing' ? (theme ? 'Getting…' : 'Installing…') : update ? 'Update' : theme ? 'Get it' : 'Install', confirmInstall, 'pillbtn primary', { disabled: job.phase !== 'ready' || !p?.confirm })]))])
-    const surface = menuSurface(card, { title: `${verb} ${name}`, close: () => { if (job.phase !== 'installing') closeInstall() }, heading: false, centered: host.state.wide, width: link ? 520 : 480, initialFocus: 'heading' })
+    const close = () => { if (job.phase !== 'installing') closeInstall() }
+    const back = link && !['installing', 'done', 'error'].includes(job.phase) ? backToLink : close
+    const surface = menuSurface(card, { title: `${verb} ${name}`, close, back, heading: false, centered: host.state.wide, width: link ? 520 : 480, initialFocus: 'heading' })
     const node = host.state.wide ? h('div', { class: 'dialog market-install-dialog', onclick: e => { if (e.target === e.currentTarget && job.phase !== 'installing') closeInstall() } }, surface) : surface
     node.__key = 'sheet:market-install'
     return [h('button', { class: 'scrim market-install-scrim', key: 'scrim:market-install', 'aria-label': 'Close', tabindex: '-1', onclick: () => { if (job.phase !== 'installing') closeInstall() } }), node]
@@ -991,7 +993,7 @@ export function mount(host) {
       : h('button', { type: 'button', class: 'pillbtn small secondary market-card-act',
         'aria-label': a.action === 'view' ? `See ${entry.name}` : `${a.label} ${entry.name}`,
         onclick: () => a.action === 'install' ? openInstall(entry.id) : a.action === 'view' ? openIt()
-          : a.action === 'use' ? (host.theme.set({ theme: entry.id }), host.schedule()) : host.goApps() }, a.label)
+          : a.action === 'use' ? (host.theme.set({ theme: entry.id }), host.schedule()) : host.goApps({ link: true }) }, a.label)
     return h('article', { class: `market-card market-card-${kind}${a.action === 'none' || a.action === 'use' || a.action === 'open' ? ' is-here' : ''}`, key: `card:${entry.id}`, role: 'listitem', 'aria-label': `${entry.name}, ${KIND_ONE[kind].toLowerCase()} in the Market` },
       tile(entry, 'md', { cover: true }),
       h('div', { class: 'market-card-words' },
@@ -1003,5 +1005,12 @@ export function mount(host) {
       h('div', { class: 'market-card-acts' }, act))
   }
 
-  return { marketCards: cardsFor, marketState: st, openMarket, openMarketInstall: openInstall, openLinkInstall, marketNodes, marketInstallNodes: installNodes, marketSync: sync, marketDoor: settingsDoor, marketFindMore: findMore, marketLinkDoor: linkDoor, loadMarket: load }
+  function backMarketOverlay() {
+    if (st.picking) { st.picking = false; host.schedule(); return }
+    const current = sheet()
+    if (current?.view !== 'front') back()
+    else if (current.back) toSettings()
+    else close()
+  }
+  return { backMarketOverlay, marketCards: cardsFor, marketState: st, openMarket, openMarketInstall: openInstall, openLinkInstall, marketNodes, marketInstallNodes: installNodes, marketSync: sync, marketDoor: settingsDoor, marketFindMore: findMore, marketLinkDoor: linkDoor, loadMarket: load }
 }

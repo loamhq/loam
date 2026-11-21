@@ -1,9 +1,8 @@
 import { h, icon, blob } from "../ui.js"
 import { emptyState } from "../empty-state.js"
 import { agentLook } from "../sessions.js"
-import { filesHref, folderView, fileView } from "../files.js"
+import { folderView, fileView } from "../files.js"
 import { renderPanel } from '../panel-items.js'
-import { modalURL } from '../app-modal-history.js'
 import { panelHeader } from "../chat-ui.js"
 
 // Mounted once. Cross-module state and operations are explicit host services.
@@ -21,13 +20,13 @@ function nav() {
       'div',
       { class: 'navpill' },
       ...host.registry.entries('rail.section').filter(entry => !entry.component && !entry.hidden).map(section => h('button', {
-        class: `navbtn${(host.state.wide ? host.state.navigator === section.id : section.selected?.() || host.state.screen === `plugin:${section.id}`) ? ' on' : ''}`, text: section.title,
+        class: `navbtn${host.state.navigator === section.id || section.selected?.() ? ' on' : ''}`, text: section.title,
         onclick: () => host.commands.run('section.open', { id: section.id }),
       })),
     ),
     h(
       'button',
-      { class: `roundbtn settings-utility${host.state.sheet?.kind === 'settings' || host.state.screen === 'activity' ? ' on' : ''}`, 'aria-current': host.state.screen === 'activity' ? 'page' : null, 'aria-expanded': String(host.state.sheet?.kind === 'settings'), title: 'Settings', 'aria-label': 'Settings', onclick: () => host.openSheet({ kind: 'settings', page: 'root' }) },
+      { class: `roundbtn settings-utility${['settings', 'activity'].includes(host.state.sheet?.kind) ? ' on' : ''}`, 'aria-current': host.state.sheet?.kind === 'activity' ? 'page' : null, 'aria-expanded': String(host.state.sheet?.kind === 'settings'), title: 'Settings', 'aria-label': 'Settings', onclick: () => host.openSheet({ kind: 'settings', page: 'root' }) },
       icon.sliders(20),
     ),
   )
@@ -42,7 +41,7 @@ function profileScreen() {
   return h(
     'section',
     { class: 'screen profile', key: 'screen:profile' },
-    h('div', { class: 'profile-head' }, host.backButton('main') ?? h('button', { class: 'backbtn', onclick: host.goChats }, icon.chevronLeft(20), 'Back')),
+    h('div', { class: 'profile-head' }, host.backButton('main')),
     host.registry.draw('app.overlay', { slot: 'player' }),
     h('div', { class: 'profile-body' }, ...profileBody(host.state.profileAgent)),
     nav(),
@@ -106,13 +105,13 @@ function builtinRail() {
     { class: 'rail' },
     h('img', { class: 'brand', src: '/icon.svg', alt: 'Loam' }),
     h('div', { class: 'rail-tabs' }, ...host.registry.entries('rail.section').filter(entry => !entry.component && !entry.hidden).map(section =>
-      h('button', { class: `railtab${(host.state.wide ? host.state.navigator === section.id : section.selected?.() || host.state.screen === `plugin:${section.id}`) ? ' on' : ''}`, title: section.title,
+      h('button', { class: `railtab${host.state.navigator === section.id || section.selected?.() ? ' on' : ''}`, title: section.title,
         onclick: () => host.commands.run('section.open', { id: section.id }) },
         typeof section.icon === 'function' ? section.icon(20) : (icon[section.icon] ?? icon.apps)(20), h('span', { text: section.title })))),
     h(
       'div',
       { class: 'rail-foot' },
-      h('button', { class: `iconbtn railround${host.state.sheet?.kind === 'activity' || host.state.screen === 'activity' && host.state.sheet?.kind !== 'settings' ? ' on' : ''}`, title: 'Activity', 'aria-expanded': String(host.state.sheet?.kind === 'activity'),
+      h('button', { class: `iconbtn railround${host.state.sheet?.kind === 'activity' ? ' on' : ''}`, title: 'Activity', 'aria-expanded': String(host.state.sheet?.kind === 'activity'),
         'aria-label': 'Activity', onclick: host.goActivity },
         icon.clock(20)),
       h('button', { class: `iconbtn railround settings-utility${host.state.sheet?.kind === 'settings' ? ' on' : ''}`, 'aria-expanded': String(host.state.sheet?.kind === 'settings'), title: 'Settings', 'aria-label': 'Settings', onclick: settings }, icon.sliders(20)),
@@ -133,26 +132,11 @@ function listColumn() {
 }
 
 function filesList(collapse) {
-  return folderView(host.files, { go: host.goFiles, wide: true, home: host.filesHome(), collapse })
+  const go = (root, path, options) => host.goFiles(root, path, { ...options, browse: true })
+  Object.assign(go, host.goFiles)
+  const historyBack = host.state.mainItem ? null : host.backButton('main')
+  return folderView(host.files, { go, wide: true, home: host.filesHome(), collapse, historyBack, showParent: Boolean(host.state.mainItem) })
 }
-
-function browseSection(id) {
-  host.closeSheet()
-  if (id !== host.state.navigator && globalThis.location?.href) {
-    const holdingItem = Boolean(host.state.mainItem)
-    const { appModal, appModalDepth, settingsRoot, settingsParent, ...entry } = globalThis.history?.state ?? {}
-    const home = id === 'chats' ? '/' : id === 'apps' ? '/apps' : id === 'files' ? filesHref(host.files.st.root, host.files.st.path) : '/?screen=' + encodeURIComponent(`plugin:${id}`)
-    const list = id === 'files' ? { files: true, folder: true } : null
-    host.pushAddress({ ...(holdingItem ? entry : list), desktopCarry: { id, home } },
-      '', holdingItem ? modalURL(location.href, null) : home, { root: true })
-  }
-  setCollapsed(false)
-  host.state.navigator = id
-  const section = host.registry.entries('rail.section').find(entry => !entry.component && entry.id === id)
-  if (section?.load) host.registry.invoke(section, 'load', { host })
-  host.schedule()
-}
-
 
 // Hidden or shown, and remembered on this device — like the theme and unlike a
 // pin, because it is how one screen is being looked at.
@@ -164,9 +148,14 @@ function setCollapsed(value) {
 }
 
 function mainPane() {
-  const empty = host.state.mainItem ? null : host.state.navigator === 'files' ? filesPane(true) : host.state.navigator === 'apps' ? host.apps.view({ empty: true }) : host.threads.pane({ empty: true })
   const at = host.state.mainItem
-  const back = !at || !['file', 'thread', 'profile', 'app'].includes(at.kind) || (at.kind === 'app' && !host.apps.st.selected) ? host.backButton('main') : null
+  const filesListOpen = !at && host.state.screen === 'files' && host.state.navigator === 'files'
+  const folderInPane = !at && host.state.screen === 'files' && !filesListOpen
+  const appsInPane = !at && host.state.screen === 'apps' && host.state.navigator !== 'apps'
+  const empty = at ? null : folderInPane ? folderView(host.files, { go: host.goFiles, wide: false, home: host.filesHome(), historyBack: host.backButton('main'), showParent: false })
+    : appsInPane ? host.apps.view({ list: true }) : host.state.navigator === 'files' ? filesPane(true)
+      : host.state.navigator === 'apps' ? host.apps.view({ empty: true }) : host.threads.pane({ empty: true })
+  const back = !filesListOpen && !folderInPane && (!at || !['file', 'thread', 'profile', 'app'].includes(at.kind) || (at.kind === 'app' && !host.apps.st.selected)) ? host.backButton('main') : null
   return renderPanel({ host, item: at, empty, header: back ? h('header', { class: 'panel-history-head' }, back) : null,
     before: host.state.collapsed ? [h('button', { class: 'iconbtn showbar', key: 'show-sidebar', title: 'Show sidebar', onclick: () => setCollapsed(false) }, icon.panelLeft(18))] : [] })
 }
@@ -176,17 +165,13 @@ function profilePane() {
   return h(
     'div',
     { class: 'pane-body', key: 'pane:profile' },
-    panelHeader({ back, actions: back ? [] : [h('button', { class: 'iconbtn ghost', title: 'Close profile', 'aria-label': 'Close profile', onclick: backToChat }, icon.close(16))] }),
+    panelHeader({ back }),
     host.registry.draw('app.overlay', { slot: 'player' }),
     h('div', { class: 'profile-body' }, ...profileBody(host.state.profileAgent)),
   )
 }
 
 
-
-// Back to the chat the profile was opened from, or to nothing in particular if
-// it was opened from the list.
-function backToChat() { if (host.state.backToThread) host.threads.open(host.state.backToThread); else host.goChats() }
 
 function filesPane(empty = false) {
   const f = empty ? null : host.files.st.file
@@ -213,11 +198,9 @@ return Object.defineProperties({}, {
     rail: { enumerable: true, get: () => rail },
     filesList: { enumerable: true, get: () => filesList },
     listColumn: { enumerable: true, get: () => listColumn },
-    browseSection: { enumerable: true, get: () => browseSection },
     setCollapsed: { enumerable: true, get: () => setCollapsed },
     mainPane: { enumerable: true, get: () => mainPane },
     profilePane: { enumerable: true, get: () => profilePane },
-    backToChat: { enumerable: true, get: () => backToChat },
     filesPane: { enumerable: true, get: () => filesPane }
 })
 }

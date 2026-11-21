@@ -735,7 +735,7 @@ function menuPopover() {
       : null,
     ...inside,
     menu.note ? h('div', { class: 'note popnote', text: menu.note }) : null,
-  ), { title: menu.title, close: closeMenus })
+  ), { title: menu.title, close: closeMenus, back: menu.back?.run })
 }
 return Object.defineProperties({}, {
     DRAFT_MAX_PX: { enumerable: true, get: () => DRAFT_MAX_PX },

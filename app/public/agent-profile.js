@@ -166,9 +166,9 @@ export function mountProfile(host, { controller = host.profiles, activity = host
   const group = (title, rows, foot = null, limitNote = null) => h('section', { class: 'profile-group', 'aria-label': title }, h('h3', { class: 'kicker', text: title }), h('div', { class: 'rows' }, rows), foot ? h('p', { class: 'footnote', text: foot }) : null, limitNote ? h('p', { class: 'footnote profile-limit-note', text: limitNote }) : null)
   const open = (ref, { folder = false } = {}) => {
     if (!ref?.root || ref.exists === false) return
-    if (st.target?.kind === 'agent') {
+    if (c === host.profiles && st.target?.kind === 'agent') {
       const history = globalThis.history
-      history?.replaceState?.({ ...history.state, profileReturn: { id: st.target.id, tab: st.tab, navigator: host.state.navigator } }, '')
+      history?.replaceState?.({ ...history.state, profileReturn: { id: st.target.id, tab: st.tab } }, '')
     }
     host.goFiles(ref.root, ref.path || '', folder ? { isFile: false, routed: true } : { isFile: true })
   }

@@ -25,25 +25,50 @@ threadPage(routes, { sent: host.sent, started: host.started })
 const broker = await fakeBroker(routes)
 const app = await appAgainst(broker)
 
-const pushed = []
-globalThis.location = { pathname: '/files/vault/Notes', search: '' }
-globalThis.history = {
-  pushState(data, title, href) {
-    pushed.push(href)
-    globalThis.location.pathname = href
-  },
-  replaceState(data, title, href) {
-    globalThis.location.pathname = href
-  },
-}
+const pushed = [], entries = [{ url: new URL('/files/vault/Notes', app.url), state: null }]
+let cursor = 0
 const winListeners = new Map()
 globalThis.addEventListener = (type, fn) => {
   if (!winListeners.has(type)) winListeners.set(type, [])
   winListeners.get(type).push(fn)
 }
-const popTo = (pathname) => {
-  globalThis.location.pathname = pathname
-  for (const fn of winListeners.get('popstate') ?? []) fn({})
+function point() { globalThis.location = entries[cursor].url }
+function popped() {
+  let stopped = false
+  const event = { stopImmediatePropagation() { stopped = true } }
+  for (const listener of winListeners.get('popstate') ?? []) {
+    listener(event)
+    if (stopped) break
+  }
+}
+globalThis.history = {
+  get state() { return entries[cursor].state },
+  pushState(state, title, href) {
+    const url = new URL(href, location)
+    pushed.push(url.pathname + url.search + url.hash)
+    entries.splice(cursor + 1, Infinity, { url, state })
+    cursor++
+    point()
+  },
+  replaceState(state, title, href = '') {
+    entries[cursor] = { url: new URL(href, location), state }
+    point()
+  },
+  go(delta) {
+    if (!delta || !entries[cursor + delta]) return
+    cursor += delta
+    point()
+    popped()
+  },
+}
+point()
+const popTo = pathname => {
+  const at = entries.findLastIndex((entry, i) => i <= cursor && entry.url.pathname === pathname && entry.state?.panelIndex >= history.state.panelRoot)
+  if (at >= 0 && at !== cursor) history.go(at - cursor)
+  else if (at < 0) {
+    history.pushState({ panelPlace: 'files', panelIndex: history.state.panelIndex + 1, panelRoot: history.state.panelRoot }, '', pathname)
+    popped()
+  }
 }
 // The browser's own dialog is never the way an unsaved edit asks.
 const nativeAsked = []
@@ -84,7 +109,7 @@ test('an address loaded cold is asked about, listed from rows, and paged by next
   await until(() => rowNamed('plan.md'))
   assert.ok(broker.seen.some((s) => s.path === '/v1/files/stat' && s.search === '?root=vault&path=Notes'))
   assert.equal(text(find(root, 'fs-title')), 'Notes')
-  assert.equal(text(find(root, 'fs-back')), 'Vault')
+  assert.equal(find(root, 'panel-history-back').getAttribute('aria-label'), 'Back')
   assert.deepEqual(all(root, 'fs-name').map(text), ['Old', 'page.html', 'pic.png', 'fake.png', 'plan.md'])
   assert.equal(text(find(rowNamed('Old'), 'fs-meta')).split(' · ')[0], 'Folder', 'a folder has no count')
   assert.match(text(find(rowNamed('plan.md'), 'fs-meta')), /^2 KB/)
@@ -210,7 +235,7 @@ test('leaving an edit saves it on the way out; one that cannot be saved asks in 
   await until(() => fileField())
   const puts = host.puts.length
   type('saved on leaving')
-  click(find(root, 'fs-back'))
+  click(find(root, 'panel-history-back'))
   await until(() => !find(root, 'fs-file') && text(find(root, 'fs-title')) === 'Notes')
   assert.equal(host.puts.length, puts + 1)
   assert.equal(host.puts[puts].text, 'saved on leaving')
@@ -221,7 +246,7 @@ test('leaving an edit saves it on the way out; one that cannot be saved asks in 
   await until(() => fileField())
   host.revision = 'sha256:moved-under'
   type('unsaved words')
-  click(find(root, 'fs-back'))
+  click(find(root, 'panel-history-back'))
   const sheet = await until(() => find(root, 'fs-sheet'))
   assert.equal(text(find(sheet, 'sheettitle')), 'Leave without saving?')
   assert.match(text(sheet), /plan\.md has changes that are not saved/)
@@ -343,7 +368,7 @@ test('an image is drawn from checked bytes through an object URL, and given back
   const src = img.getAttribute('src')
   assert.match(src, /^blob:/)
   assert.ok(host.downloads.includes('Notes/pic.png'))
-  click(find(root, 'fs-back'))
+  click(find(root, 'panel-history-back'))
   await until(() => !find(root, 'fs-file'))
   assert.ok(revoked.includes(src), 'the object URL was not revoked')
 })
@@ -354,7 +379,7 @@ test('a file whose bytes are not the picture its name says is not drawn', async 
   assert.equal(find(root, 'fs-img'), null)
   assert.match(text(fallback), /not the picture its name says/)
   assert.ok(find(root, 'fs-dlbtn'))
-  click(find(root, 'fs-back'))
+  click(find(root, 'panel-history-back'))
   await until(() => !find(root, 'fs-file'))
 })
 
@@ -367,7 +392,7 @@ test('a PDF is framed from an object URL with no scripts and no same-origin, and
   assert.match(frame.getAttribute('src'), /^blob:/)
   assert.match(text(find(root, 'fs-pdf')), /will not show PDFs in a sandbox/)
   assert.equal(find(root, 'fs-dlbtn').getAttribute('href'), '/api/files/download?root=vault&path=Notes%2Freport.pdf')
-  click(find(root, 'fs-back'))
+  click(find(root, 'panel-history-back'))
   await until(() => !find(root, 'fs-file'))
 })
 
@@ -378,14 +403,14 @@ test('a binary file is a download; a text file the host cannot read as text says
   const fallback = await until(() => find(root, 'fs-media'))
   assert.ok(find(fallback, 'fs-dlbtn'))
   assert.ok(!broker.seen.some((s) => s.path === '/v1/files/read' && s.search.includes('sheet.bin')), 'a binary is not read as text')
-  click(find(root, 'fs-back'))
+  click(find(root, 'panel-history-back'))
   await until(() => !find(root, 'fs-file'))
   click(rowNamed('odd.txt'))
   await until(() => find(root, 'banner-retry'))
   assert.match(text(find(root, 'banner-retry')), /Text view unavailable/)
   assert.match(text(find(root, 'banner-retry')), /can’t be shown as text/)
   assert.ok(find(find(root, 'banner-retry'), 'fs-dlbtn'))
-  click(find(root, 'fs-back'))
+  click(find(root, 'panel-history-back'))
   await until(() => !find(root, 'fs-file'))
 })
 
@@ -401,7 +426,7 @@ test('an HTML file previews from the isolated preview route in a sandboxed frame
   assert.equal(text(find(root, 'segmented').childNodes[1]), 'Source')
   assert.match(fileField().value, /<script>/)
   assert.equal(find(root, 'fs-tools'), null, 'the formatting bar is for Markdown')
-  click(find(root, 'fs-back'))
+  click(find(root, 'panel-history-back'))
   await until(() => !find(root, 'fs-file'))
 })
 

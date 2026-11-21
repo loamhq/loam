@@ -19,9 +19,11 @@ the workspace, Soul, Config, memory files named by their loading time and Skills
 The header stays above each tab's independent scroller on phones and desktop,
 including the desktop Settings dialog.
 
-Back from a file or folder returns to the profile and the tab it was opened
-from. From a Settings profile, the Agents chevron on desktop and Back on a
-phone return to the Agents list. See the [browser captures](evidence/agent-file-navigation/README.md).
+Back from a file or folder opened from a main-pane profile returns to the
+profile and the tab it was opened from. Settings profiles stay inside the
+Settings popup at both sizes. A file opened from a Settings profile returns to
+the underlying panel on Back. Use the Agents chevron within Settings to return
+to the Agents list.
 
 Tap the face for image upload or removal. Uploaded faces come
 from the host card, have digest-addressed URLs, and take priority over every

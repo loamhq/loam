@@ -87,80 +87,80 @@ credentials are persisted there. Apps are looked up again on reload; removed
 or no-longer-frameable apps show an explanation. A missing or invalid device
 store falls back to the ordinary single pane.
 
-The address bar follows main's item, never the navigator. Threads and files
-retain their paths; apps use `/apps?url=<encoded app URL>`. Plugin items use
-`/panel?kind=<kind>&id=<id>`. The `side` query is a JSON identity descriptor,
-encoded by `URLSearchParams`; it contains no app inventory or file capabilities.
-Side actions replace the current entry's query; choosing a new main item pushes
-an entry carrying the current side. Resizing and rail browsing add no entries.
-Reload opens the two items in the address. Browser Back and Forward traverse
-main and carry the currently open side item into the destination URL. Its live
-chat, editor or iframe stays mounted. Modal-only entries preserve both mounts.
-When Back crosses from a document to an entry with Settings or another modal,
-the document routes first, then the modal restores over it.
-Copy-link actions use the item owning that action.
-The former main-app fallback in device storage becomes a one-time upgrade:
-old app/side identities are converted to URLs before the new store format is
-written. After that, `/` means an empty main and an app has its own shareable,
-reloadable address.
+The address bar follows the main view. Threads and Files retain their paths.
+Apps use `/apps?url=<encoded app URL>`, and plugin items use
+`/panel?kind=<kind>&id=<id>`. The `side` query identifies the side item. The
+active place and each main visit are stored in the browser entry. Opening or
+closing an overlay can update its query on the current entry. When a link
+leaves the underlying view, the app clears that overlay query before it records
+the destination.
 
 ## Back and Forward
 
-Each header has a leading Back chevron when its panel has a previous location.
-On a phone, a direct link uses the view’s existing way up to its chat or file
-list. Selecting Chats, Files, or Apps on the tab bar starts a new trail at that
-tab's main page. Browser Back at that boundary leaves the tab in place when
-the earlier entry belongs to this page. A browser can still leave a cold
-link for the page that opened it. A link from a chat, board, or profile to a
-file stays in the trail where the link was opened.
+Selecting **Chats**, **Files**, or **Apps** starts at that place's main page on
+both phone and desktop. One tap always means the same thing and leaves a
+visible way to reopen a previous item from its list. The desktop starts with
+the selected list and an empty main pane. An explicitly opened side pane stays
+beside it. Files can still browse the sidebar while a file is open. Those
+folder moves are recorded with the file, so Back can restore the list location
+without reopening the file.
 
-Desktop rail browsing still chooses a list independently of the main pane.
-Switching sections ends the main pane's earlier trail and keeps its contents
-visible while you browse. The first item you open in the new section can go
-Back to that section's list. Settings has its own root and Back trail.
-Use Close to dismiss Settings from any level.
+Links open in the active trail, even when the destination is a different kind
+of item. A chat's file link, a file's chat link, a board's linked card, and the
+Market's Apps link all follow this rule. A link from Settings first dismisses
+the popup. Back from the destination restores the view that was underneath it.
+Side actions keep their existing choice of pane.
 
-Boards and thread details can be reopened with browser Forward or a direct
-thread link with `?view=board` or `?view=details`.
+The Back arrow, browser Back and system Back use the same trail. With the
+side pane focused, Back walks its visits. With an overlay open, Back first
+uses its local parent or dismisses it. After that the next press continues in
+the focused pane. At a place's main page, Back stays there when the browser
+would otherwise visit another entry from the same app document. The browser
+still owns navigation to other documents. Cmd+[ and Cmd+] on Mac, or Ctrl+[
+and Ctrl+] elsewhere, traverse the focused pane. Text fields and embedded sites
+keep their own shortcuts.
 
-The main button, browser buttons and native back gesture traverse the same
-session history entries. Cmd+[ and Cmd+] on Mac, or Ctrl+[ and Ctrl+] elsewhere,
-traverse the focused panel. Text fields, composers and editors retain their
-shortcuts. An embedded site handles keys within its own document.
+A pasted file link builds its folder ancestors, and a pasted board or thread
+details link starts with Chats and its conversation beneath it. An embedded-app
+link starts from Apps at widths where it can be shown. Reload keeps the trail
+that led to the current view. An address that names Settings, Activity, or the
+Market can also reopen that overlay on reload. Drafts and visit reading
+positions are held by their existing panel controllers.
 
-A confirmed missing thread falls back to Chats in main and closes an
-unavailable side panel. Main repairs the current history entry, so returning
-through it skips another read of the missing thread. This keeps an open Settings
-profile accessible even when the thread underneath it has been deleted.
+The file leave/save confirmation still runs before a guarded Back. Keeping
+edits restores the original browser entry and keeps Forward available. A
+confirmed missing thread repairs its entry to the active place's main page.
+If the item being restored is already open in the other pane, Back skips its
+old visit.
 
-Opening a side item starts a trail for that pane. Side navigation replaces
-only its descriptor in the address. Closing side ends the trail. A new
-destination after Back discards its Forward branch. If an earlier item has
-since moved to the other panel, traversal skips that item. File changes use
-the same save and discard prompt as navigation from a row. Keeping edits
-returns to the original browser entry, including its Forward history.
+### Back affordances in core
 
-Within the open page, conversations remember their message anchor and drafts.
-File visits remember the scroll offset, mode and selection when their viewer
-exposes them. Browser entries hold an identifier for the visit. Document text
-and drafts stay in their existing controllers.
+| Surface | Back destination or behavior | Change |
+| --- | --- | --- |
+| Place main pages | No arrow. An explicit tab or rail selection begins here. | The desktop rail starts with the new list and an empty main pane. |
+| Chat, Archived threads, Thread details, Board, linked board card, agent profile | The preceding place visit. | Archived threads and deep links get real ancestors. The board owns one visible arrow, and opening its file beside it keeps the board in view. |
+| Files folders, text and HTML files, plugin file viewers | The preceding visit. The sidebar's parent-folder control browses the list. | Desktop folders join the trail. A linked file uses visit history for its arrow. |
+| Linked Apps list, embedded app, registered panel item | The preceding place visit. | The Apps Close control returns to that visit when available. |
+| Side thread, board, file or embedded app | The preceding side visit. Close side ends the side trail. | Browser Back follows the same trail when the side pane is focused. |
+| Settings sections and detail pages, including Agents, Connections and plugin preferences | Their Settings parent. At Settings root, Back or Close dismisses Settings. | These steps stay within the popup. |
+| Market pages, install-from-link details, composer model and effort menus, task details, file picker | Their local parent or the underlying view at the popup's root. | Browser Back uses the local action. |
+| Full-screen composer, Activity, image viewer, confirmations and other sheets | Return to the underlying view. Image arrows are for the image carousel. | Browser Back dismisses the overlay. Activity uses Close at both sizes. |
 
 ## Panel ownership
 
-`state.navigator` names the desktop list. `state.mainItem` names main's typed
-identity, and the side mount owns its own typed identity. `state.screen` remains
-the phone route and a compatibility lifecycle label for existing controllers;
-it never chooses the desktop shell or panel contents.
+`state.navigator` names the selected place and its list. `state.mainItem` names
+main's typed identity, and the side mount owns its own typed identity.
+`state.screen` is the foreground view. Its kind can differ from the selected
+place when a link opens an item.
 
 `page/layout.js` builds one workspace with permanent list and panel-pair slots.
 It no longer adapts whole section frames by searching and moving their DOM.
 `panel-items.js` renders either panel through `panel.item` registrations and
 provides identity/address serialization. The existing conversation, Files and
 Apps controllers still own their transports, drafts, editors and views. A rail
-command only sets the navigator, reveals its list and calls that section's
-optional loader. No occupied-item inference or leave/save guard runs there.
-Files folders browse that list without closing a main file or changing its
-address. Actual file picks and links still use the panel's guard.
+command uses the same guarded place selection as the phone tab. File picks and
+links use the current visit's place, and side moves use the existing pane
+ownership checks.
 
 Core and plugins register `rail.section.list({host,wide,collapse})` and
 `panel.item.render({host,item,panel,wide})` through the same public registry.
@@ -240,9 +240,9 @@ The [Apps list and Activity checks](evidence/apps-list-activity/README.md)
 cover app selection/moves/swaps/reload, external tabs, all desktop Activity
 entry points and conversion from phone Activity when the window widens.
 
-The [sidebar/main regression and before/after captures](evidence/sidebar-main/README.md)
-reproduce the subsequent rail-clearing bug in all three core lists and check
-that list visibility and main-document navigation now remain independent.
+The [sidebar/main captures](evidence/sidebar-main/README.md) record the earlier
+rail behavior. The [navigation comparison](evidence/navigation-model/README.md)
+shows the fresh place roots and the overlay handoff on phone and desktop.
 
 The [panel ownership record](evidence/panel-items/README.md) supersedes the
 section-owned desktop frame described in earlier implementation notes. It

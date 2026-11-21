@@ -3,23 +3,20 @@ import { h, icon } from './ui.js'
 
 // Only entries pushed by this page count. A cold link may have another site
 // behind it, so history.length cannot decide whether to show a Back button.
-export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, sideKey }) {
+export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, sideKey, intercept = () => null }) {
   const history = win.history
   const index = () => history?.state?.panelIndex ?? 0
   const rootIndex = () => history?.state?.panelRoot ?? index()
-  const floor = () => Math.max(rootIndex(), history?.state?.settingsRoot ?? 0)
-  let current = index(), boundary = floor(), furthest = current, rollback = null, dismissal = null, returning = false
-  if (win.location?.href && history?.state?.panelRoot == null) {
-    history?.replaceState?.({ ...history.state, panelIndex: current, panelRoot: current }, '')
-  }
+  let current = index(), boundary = rootIndex(), furthest = current, rollback = null, returning = null
+  let requested = false
   // If an item was moved to side, visiting its old address must not steal it
   // back. Each entry knows how far back the preceding run of that item began.
   const occupied = href => href && href === sideKey()
   function backSteps() {
     const back = history?.state?.panelBack
-    if (index() <= floor()) return 0
+    if (index() <= rootIndex()) return 0
     if (!back || !occupied(back.item)) return 1
-    return back.first > floor() ? index() - back.first + 1 : 0
+    return back.first > rootIndex() ? index() - back.first + 1 : 0
   }
   const write = (data, title, url, { root = false, replace = false } = {}) => {
     const next = index() + (replace ? 0 : 1)
@@ -36,17 +33,16 @@ export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, s
     }, title, url)
     current = index()
     if (!replace) furthest = current
-    boundary = floor()
+    boundary = rootIndex()
   }
   const push = (data, title, url, options) => write(data, title, url, options)
   const replace = (data, title, url, options) => write(data, title, url, { ...options, replace: true })
-  const go = (delta, { dismissModal = false } = {}) => {
-    const steps = delta < 0 && !dismissModal ? -backSteps() : delta
+  const canForward = () => index() < furthest || Boolean(win.navigation?.canGoForward)
+  const start = (data, title, url) => write(data, title, url, { root: true, replace: index() === rootIndex() && win.navigation?.canGoForward === false && !canForward() })
+  const go = delta => {
+    const steps = delta < 0 ? -backSteps() : delta
     if (!history?.go || !steps) return false
-    if (dismissModal) {
-      if (index() + steps < rootIndex()) return false
-      dismissal = index() + steps
-    }
+    requested = steps < 0 || canForward()
     history.go(steps)
     return true
   }
@@ -56,8 +52,10 @@ export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, s
   win.addEventListener?.('popstate', event => {
     if (!win.location?.href || !history?.go) return
     if (returning && index() === current) {
-      returning = false
+      const run = returning
+      returning = null
       event.stopImmediatePropagation()
+      run()
       return
     }
     if (rollback && index() === rollback.from) {
@@ -67,22 +65,23 @@ export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, s
       return
     }
     const delta = index() - current
+    const ownTraversal = requested || rollback?.accepted
+    requested = false
     rollback = null
     if (delta) {
-      const dismissing = dismissal === index()
-      dismissal = null
-      if (index() < boundary && !dismissing) {
+      const action = ownTraversal ? null : intercept(delta)
+      if (action || index() < boundary) {
         // The browser already moved. Return before routing the abandoned tab
         // or disturbing a mounted pane, including an unsaved editor.
         event.stopImmediatePropagation()
-        returning = true
+        returning = action ?? (() => {})
         history.go(-delta)
         return
       }
       const destination = itemAt(win.location.href)
       if (occupied(destination)) {
         event.stopImmediatePropagation()
-        const step = delta < 0 ? -backSteps() : index() < furthest || win.navigation?.canGoForward ? 1 : 0
+        const step = delta < 0 ? -backSteps() : canForward() ? 1 : 0
         history.go(step || -delta)
         return
       }
@@ -99,11 +98,11 @@ export function createMainHistory({ win = globalThis, guard, syncSide, itemAt, s
       }
     }
     current = index()
-    boundary = floor()
+    boundary = rootIndex()
     furthest = Math.max(furthest, current)
     syncSide()
   }, true)
-  return { push, replace, go, atCurrent: () => index() === current, canBack: () => backSteps() > 0 }
+  return { push, replace, start, go, atCurrent: () => index() === current, canBack: () => backSteps() > 0 }
 }
 
 export function historyBackButton(action) {

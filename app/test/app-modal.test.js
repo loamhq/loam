@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { modalFromURL, modalURL, createAppModalHistory } from '../public/app-modal-history.js'
+import { modalFromURL, modalURL, settingsParent, createAppModalHistory } from '../public/app-modal-history.js'
 import { createMainHistory } from '../public/panel-history.js'
 import { mount as mountSettings } from '../public/page/settings.js'
 import { installDom } from './fakedom.js'
@@ -19,7 +19,7 @@ test('modal addresses retain thread/file path, other query keys and fragment; de
 
 function fixture() {
   const entries = [{ url: 'https://app.example/threads/notes', state: null }], listeners = []
-  let at = 0, current = null, restored = 0, closed = 0, width = 1440
+  let at = 0, current = null
   const win = { location: { href: entries[0].url }, addEventListener: (type, listener) => listeners.push(listener) }
   function move(index) { at = index; win.location.href = entries[at].url; return { stopped: false, stopImmediatePropagation() { this.stopped = true } } }
   function pop(index) {
@@ -36,63 +36,36 @@ function fixture() {
     replaceState(state, _, url = win.location.href) { entries[at] = { url: String(url), state }; move(at) },
     go(delta) { pop(at + delta) },
   }
-  const navigation = createMainHistory({ win, itemAt: url => new URL(url).pathname, sideKey: () => null, guard: () => true, syncSide() {} })
-  const history = createAppModalHistory({ window: win, navigation, wide: () => width >= 1100, sheet: () => current,
-    restore: value => { restored++; current = value }, close: () => { closed++; current = null }, changed() {} })
+  const navigation = createMainHistory({ win, itemAt: url => new URL(url).pathname, sideKey: () => null, guard: () => true, syncSide() {},
+    intercept: delta => delta < 0 && current ? () => { current = current.kind === 'settings' ? settingsParent(current) : null; history.sync() } : null })
+  const history = createAppModalHistory({ window: win, navigation, sheet: () => current, restore: value => { current = value } })
   history.restore()
-  return { history, navigation, win, entries, get current() { return current }, set current(v) { current = v },
-    get closed() { return closed }, get restored() { return restored }, narrow() { width = 1099 },
-    pop }
+  return { history, navigation, win, entries, pop, get current() { return current }, set current(v) { current = v } }
 }
-test('opening a modal adds an entry and replacing its root reuses it', () => {
+test('a popup and its pages replace the current entry, and Back closes it before leaving the panel', () => {
   const f = fixture()
-  f.current = { kind: 'settings', page: 'root' }; f.history.sync()
+  f.navigation.push(null, '', 'https://app.example/threads/next')
+  f.current = { kind: 'settings', page: 'provider', provider: 'claude-code' }; f.history.sync()
   assert.equal(f.entries.length, 2)
-  f.current = { kind: 'activity' }; f.history.sync()
-  assert.equal(f.entries.length, 2)
-  assert.equal(f.pop(0).stopped, true); assert.equal(f.current, null)
-  assert.equal(f.pop(1).stopped, true); assert.deepEqual(f.current, { kind: 'activity' })
-  f.history.dismiss(); assert.equal(f.current, null)
-})
-test('a link out removes the modal query, and Back to a different document reaches the normal router', () => {
-  const f = fixture()
-  f.current = { kind: 'activity' }; f.history.sync()
-  f.current = null
-  f.navigation.push(null, '', 'https://app.example/threads/another')
-  f.history.sync()
-  assert.equal(f.win.location.href, 'https://app.example/threads/another')
-  assert.equal(f.pop(0).stopped, false)
-})
-test('document-only Back before the next redraw still reaches the document router', () => {
-  const f = fixture()
-  f.navigation.push(null, '', 'https://app.example/threads/another')
-  assert.equal(f.pop(0).stopped, false)
-  assert.equal(f.closed, 0)
-})
-test('Settings Back stops at its own root, and Close returns to the same document', () => {
-  const f = fixture(); f.narrow(); f.current = { kind: 'settings', page: 'agents' }; f.history.sync()
-  assert.equal(f.entries.length, 3)
-  assert.equal(f.pop(1).stopped, true)
-  assert.equal(f.current.page, 'root')
   assert.equal(f.pop(0).stopped, true)
-  assert.equal(f.current.page, 'root')
-  assert.match(f.win.location.href, /\?modal=settings$/)
-  assert.equal(f.pop(2).stopped, true)
-  assert.equal(f.current.page, 'agents')
-  f.history.dismiss()
+  assert.deepEqual(f.current, { kind: 'settings', page: 'connections' })
+  assert.equal(f.pop(0).stopped, true)
+  assert.deepEqual(f.current, { kind: 'settings', page: 'root' })
+  assert.equal(f.pop(0).stopped, true)
+  assert.equal(f.current, null)
+  assert.equal(f.win.location.href, 'https://app.example/threads/next')
+  assert.equal(f.pop(0).stopped, false)
+})
+test('opening a file from Settings clears the overlay from the source before leaving', () => {
+  const f = fixture()
+  f.current = { kind: 'settings', page: 'agents', detail: { kind: 'agent', id: 'test-agent' } }; f.history.sync()
+  f.history.leave()
+  f.current = null
+  f.navigation.push(null, '', 'https://app.example/files/vault/Notes/plan.md')
+  assert.equal(f.entries.length, 2)
+  assert.equal(f.pop(0).stopped, false)
   assert.equal(f.current, null)
   assert.equal(f.win.location.href, 'https://app.example/threads/notes')
-})
-test('replacing a Settings detail with Activity leaves only the new overlay in history', () => {
-  const f = fixture()
-  f.current = { kind: 'settings', page: 'provider', provider: 'claude-code' }; f.history.sync()
-  assert.equal(f.entries.length, 4)
-  f.current = { kind: 'activity' }; f.history.sync()
-  assert.equal(f.entries.length, 2)
-  assert.equal(f.pop(0).stopped, true)
-  assert.equal(f.current, null)
-  assert.equal(f.pop(1).stopped, true)
-  assert.equal(f.current.kind, 'activity')
 })
 test('changing tabs abandons the old trail while retaining Back and Forward inside the new tab', () => {
   const f = fixture()
@@ -115,7 +88,7 @@ test('typed modal link restores its destination and closes without requiring an 
   f.win.history.replaceState(null, '', 'https://app.example/threads/notes?modal=settings&section=providers')
   f.history.restore()
   assert.equal(f.current.page, 'providers')
-  f.history.dismiss(); f.current = null; f.history.sync()
+  f.current = null; f.history.sync()
   assert.equal(f.entries.length, 1)
   assert.equal(f.win.location.href, 'https://app.example/threads/notes')
 })
@@ -123,8 +96,7 @@ test('normalizing a direct Activity URL keeps unrelated query and fragment witho
   const f = fixture()
   f.win.history.replaceState(null, '', 'https://app.example/threads/notes?modal=activity&keep=yes#next')
   f.history.restore(); f.history.sync()
-  assert.equal(f.win.history.state.appModal, false)
-  f.history.dismiss(); f.current = null; f.history.sync()
+  f.current = null; f.history.sync()
   assert.equal(f.win.location.href, 'https://app.example/threads/notes?keep=yes#next')
   assert.equal(f.entries.length, 1)
 })

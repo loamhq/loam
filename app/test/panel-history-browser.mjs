@@ -148,6 +148,7 @@ try {
                 x: header.x + header.width / 2, y: header.y + header.height / 2, clickCount: 1 })
             }
           }
+          await docBack.focus()
           await mouseNavigate('back', 8); await chatReady()
           assert.equal(await side.locator('iframe').evaluate(n => n.contentWindow === window.sideFrame), true)
           await mouseNavigate('forward', 16); await docReady()
@@ -199,14 +200,11 @@ try {
         await page.goto('about:blank')
         await open('/files/vault/Notes/plan.md')
         await docReady()
-        assert.equal(await docBack.count(), 0)
-        if (!wide) {
-          await main.getByRole('button', { name: 'Back to Notes', exact: true }).click()
-          await list.filter({ hasText: 'plan.md' }).waitFor()
-        }
+        await docBack.click()
+        await list.filter({ hasText: 'plan.md' }).waitFor()
         await open('/threads/general')
         await chatReady()
-        assert.equal(await docBack.count(), 0)
+        assert.equal(await docBack.count(), 1)
         await main.getByRole('button', { name: 'Board', exact: true }).click()
         await page.waitForURL('**/threads/general?view=board')
         await main.locator('.tt-board-head').getByRole('button', { name: 'Back', exact: true }).click()
@@ -218,8 +216,7 @@ try {
         if (wide) await page.getByRole('button', { name: 'Settings', exact: true }).click()
         else await page.evaluate(() => testPage.openSheet({ kind: 'settings', page: 'root' }))
         await page.waitForURL('**/*modal=settings*')
-        await backStops()
-        await page.keyboard.press('Escape')
+        await nativeBack()
         await page.locator('.sheet.settings').waitFor({ state: 'detached' })
         assert.match(page.url(), /threads\/general$/)
 
@@ -336,7 +333,8 @@ try {
           await docBack.click(); await docReady()
           await docBack.click(); await main.getByText('Pick a file', { exact: true }).waitFor()
           await list.filter({ hasText: 'plan.md' }).waitFor()
-          await backStops()
+          await nativeBack(); await page.waitForURL('**/files/vault')
+          await page.goForward(); await page.waitForURL('**/files/vault/Notes')
           await page.goForward(); await docReady()
           await page.goForward(); await main.locator('.fs-livehead').waitFor()
         }
@@ -383,9 +381,7 @@ try {
         await nativeBack(); await page.waitForURL('**/*section=connections')
         if (wide) { await nativeBack(); await page.waitForURL('**/*modal=settings') }
         else { await settings.getByRole('button', { name: 'Settings', exact: true }).click(); await page.waitForURL('**/*modal=settings') }
-        await backStops()
-        await page.goForward(); await page.waitForURL('**/*section=connections')
-        await page.keyboard.press('Escape')
+        await nativeBack()
         await settings.waitFor({ state: 'detached' })
         assert.equal(new URL(page.url()).searchParams.has('modal'), false)
         if (!wide) {

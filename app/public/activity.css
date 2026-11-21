@@ -75,6 +75,7 @@
 }
 
 .activity-return { padding:8px 20px 0; }
+.activity-screen { position: absolute; inset: 0; z-index: 3; background: var(--paper-page); }
 .activity-filters { flex-wrap:wrap; gap:var(--space-md); }
 .activity-chips { flex:1; min-width:0; }
 .activity-chips button { flex:1; min-width:44px; padding:8px; white-space:nowrap; display:flex; align-items:center; justify-content:center; }

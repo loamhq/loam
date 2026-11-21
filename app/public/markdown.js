@@ -1008,6 +1008,7 @@ export function safeHref(raw) {
   // A control character inside the scheme is how `java&#9;script:` gets past a
   // check that only looks at the front of the string, so they come out first.
   const cleaned = url.replace(/[ - ]/g, '')
+  if (/^\/(?:threads\/[^/?#\\]+|apps|panel)\/?(?:[?#].*)?$/.test(cleaned)) return cleaned
   const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(cleaned)
   if (!scheme) return null
   const name = scheme[1].toLowerCase()
@@ -1255,7 +1256,7 @@ function renderInline(nodes) {
         out.push(
           h(
             'a',
-            { href: node.href, target: '_blank', rel: 'noopener noreferrer' },
+            { href: node.href, ...(node.href.startsWith('/') ? {} : { target: '_blank', rel: 'noopener noreferrer' }) },
             ...renderInline(node.children),
           ),
         )

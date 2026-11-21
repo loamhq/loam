@@ -34,7 +34,7 @@ import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuot
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
-export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, openBoardFile, address = () => {}, viewAddress = () => {}, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
+export function createThreads({ registry = createCoreRegistry(), api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, openBoardFile, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -1040,7 +1040,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     const visible = st.archived ? rows.slice(0, archiveLimit) : rows
     return h('section', { class: `${st.wide ? 'listcol' : 'screen home'} tt-list${st.wide && collapsed() ? ' away' : ''}`, inert: st.wide && collapsed() ? true : null, 'aria-hidden': st.wide && collapsed() ? 'true' : null, 'aria-label': 'Threads' },
       listHeading({ wide: st.wide, title: st.archived ? 'Archived' : 'Chats',
-        leading: st.archived ? round('Back to Chats', icon.chevronLeft(18), () => showArchived(false)) : !st.wide ? historyButton() : null,
+        leading: st.archived ? historyButton('Back to Chats') ?? round('Back to Chats', icon.chevronLeft(18), () => { if (!archiveAddress(false)) showArchived(false) }) : !st.wide ? historyButton() : null,
         props: { class: `${st.wide ? 'list-head' : 'home-head'}${st.archived ? ' tt-archived-head' : ''}` }, actions: [
         !st.archived ? round('New thread', icon.pencil(18), () => create(), { class: `iconbtn${listIsMain() && !st.open && !st.personaMenu ? ' secondary' : ''}`, disabled: st.creating }) : null,
         round('Search threads', icon.search(18), () => { st.searchOpen = !st.searchOpen; st.focusSearch = st.searchOpen; redraw() }, { 'aria-expanded': String(Boolean(st.searchOpen)) }),
@@ -1048,7 +1048,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
         st.wide && !st.archived ? round('Hide sidebar for a focused view', icon.panelLeft(18), () => collapse(true)) : null] }),
 
       st.listMenu ? menuSurface(h('div', { class: 'tt-list-menu popover', key: 'thread-list-menu', role: 'menu' }, settingsRow({ title: st.personasHidden ? 'Show agents' : 'Hide agents', lead: icon.users(18), onclick: () => { st.personasHidden = !st.personasHidden; st.listMenu = false; redraw() } }), settingsRow({ title: 'New thread', lead: icon.pencil(18), onclick: () => { st.listMenu = false; create() } }),
-        settingsRow({ title: 'Archived threads', lead: icon.folder(18), right: h('span', { class: 'muted', text: String(st.threads.filter(t => t.archived).length) }), onclick: () => showArchived(true) })), { title: 'Thread list actions', anchor: '[aria-label="Thread list actions"]', close: () => { st.listMenu = false; redraw() } }) : null,
+        settingsRow({ title: 'Archived threads', lead: icon.folder(18), right: h('span', { class: 'muted', text: String(st.threads.filter(t => t.archived).length) }), onclick: () => { if (!archiveAddress(true)) showArchived(true) } })), { title: 'Thread list actions', anchor: '[aria-label="Thread list actions"]', close: () => { st.listMenu = false; redraw() } }) : null,
       st.fixture ? h('div', { class: 'tt-fixture' }, 'Design preview · sample threads', button('Exit', exitPreview, { class: 'quietlink tt-preview-exit' })) : null,
       !st.wide ? registry.draw('app.overlay', { slot: 'player' }) : null,
       h('div', { class: 'scroll', key: 'thread-list-scroll' },
@@ -1175,6 +1175,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
   function taskPanel() {
     const o = st.open, { count, tasks } = workFor(o), visible = count || tasks.length
     const selected = tasks.find((task) => task.kind !== 'job' && task.id === o.selectedTask?.id && task.persona === o.selectedTask.persona)
+    const back = selected ? () => { o.selectedTask = null; o.focusTaskRow = `${selected.persona}:${selected.id}`; redraw() } : closeTasks
     const date = (value) => taskElapsed(value) === null ? null : formatDateTime(value)
     if (visible && tasks.some((task) => task.kind === 'job' || date(task.started_at)) && !o.taskClock) {
       o.taskClock = setTimeout(() => { o.taskClock = null; if (st.open === o && o.tasksOpen) redraw() }, 60000)
@@ -1189,7 +1190,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
             else if (!e.shiftKey && at === controls.length - 1) { e.preventDefault(); controls[0]?.focus() }
           }
         } }, !st.wide ? sheetHandle(closeTasks) : null,
-        h('div', { class: 'tt-tasks-head' }, selected ? round('Back to task list', icon.chevronLeft(18), () => { o.selectedTask = null; o.focusTaskRow = `${selected.persona}:${selected.id}`; redraw() }) : null,
+        h('div', { class: 'tt-tasks-head' }, selected ? round('Back to task list', icon.chevronLeft(18), back) : null,
           h('h2', { class: 'display', tabindex: '-1', text: selected ? 'Task details' : 'Tasks' }),
           st.wide ? round('Close tasks', icon.close(14), closeTasks) : null),
         h('div', { class: 'tt-tasks-body' }, !visible ? h('p', { class: 'tt-tasks-empty', role: 'status', text: 'Nothing running' }) : selected ?
@@ -1205,7 +1206,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
             ], () => { o.selectedTask = { id: task.id, persona: task.persona }; o.focusTasks = true; redraw() }, { class: 'tt-task-row', key: `${task.persona}:${task.id}`, 'data-task': `${task.persona}:${task.id}` })))),
           ...tasks.filter((task) => task.kind === 'job').map(jobRow),
           count > tasks.filter((task) => task.state !== 'finished').length ? h('p', { class: 'tt-tasks-note', role: 'status', text: tasks.length ? 'Waiting for the remaining results…' : 'Waiting for results…' }) : null,
-        ])), { title: 'Tasks', width: 420, heading: false, anchor: '.tt-tasks-button', close: closeTasks })]
+        ])), { title: 'Tasks', width: 420, heading: false, anchor: '.tt-tasks-button', close: closeTasks, back })]
   }
   function jobRow(job) {
     const elapsed = jobElapsed(job), link = job.state === 'finished' && job.receipt && openRef
@@ -1772,7 +1773,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
     const unmatched = [...o.permissions.values()].filter((p) => !o.messages.some((m) => m.id === p.message_id))
     const closeMenu = (act) => () => { o.headerMenu = false; act(); redraw() }
     const header = chatHeader({ wide: st.wide,
-      back: historyButton() ?? (st.wide ? null : round('Back to threads', icon.chevronLeft(20), () => { close(); refreshList(); redraw() }, { class: 'iconbtn ghost tt-back' })),
+      back: o.boardOpen ? null : historyButton() ?? (st.wide ? null : round('Back to threads', icon.chevronLeft(20), () => { close(); refreshList(); redraw() }, { class: 'iconbtn ghost tt-back' })),
       face: threadFace(o.thread, st.wide ? 42 : 40), onIdentity: showDetails, identityTitle: 'Thread details',
       title: o.thread.title || 'New thread', subtitle: null,
       onRename: general ? null : beginRename, renameLabel: 'Rename thread', titleField: o.renaming ? kept(title) : null,
