@@ -6,12 +6,13 @@
   loam report idea --title "…" [--body …] [--json]     anything else: I wish, I love, this confused me
   loam report scrub [--json] < text      what would be taken out of a text
 
-Nothing is sent. The report comes back as it would go: its title and body
-with personal details taken out (the owner's name, agents' names, paths,
-the install's address, keys, e-mail and IP addresses), a list of what was
-taken out, and a link to GitHub's new-issue page for Loam with all of it
-filled in. Show the owner every word; on their yes, give them the link. They
-open it signed in to their own GitHub account and press Submit.
+Drafts are saved locally. Show the exact saved preview, then ask the owner.
+  loam report preview ID [--json]
+  loam report send ID --yes       approved frozen preview, when the relay is configured
+  loam report track ID ISSUE_URL  after the owner submits the GitHub form
+  loam report offer TOPIC         one offer per topic (including a Market offer)
+  loam report decline TOPIC       remember the decision
+  loam report check               check submitted issues for news
 
 `--patch` adds the diff of this checkout's own commits since the running
 release (or of RANGE), for a bug this install's engineer has fixed already.
@@ -23,17 +24,28 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-import loam_feedback as fb  # noqa: E402
+import loam_config as lc
+import loam_feedback as fb
+import loam_report_delivery as delivery
+from loam_report_diagnostics import instant
 
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="loam report", description=__doc__.split("\n\n")[0])
-    ap.add_argument("kind", choices=["bug", "feature", "idea", "scrub"])
+    ap.add_argument("kind", choices=[*fb.KINDS, "scrub", "preview", "send", "track", "offer", "decline", "check"])
+    ap.add_argument("values", nargs="*")
+    ap.add_argument("--yes", action="store_true", help="the owner approved this exact preview")
+    ap.add_argument("--diagnostics", action=argparse.BooleanOptionalAction, default=None,
+                    help="include runtime diagnostics (default for bugs)")
+    ap.add_argument("--at", help="hour ending at this ISO time with zone, for recent errors")
     ap.add_argument("--title")
     ap.add_argument("--body")
     ap.add_argument("--body-file")
@@ -41,6 +53,27 @@ def main(argv: list[str]) -> int:
                     help="add this checkout's own commits since the release (or RANGE)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
+
+    expected = {"preview": 1, "send": 1, "track": 2, "offer": 1, "decline": 1}
+    if len(args.values) != expected.get(args.kind, 0):
+        ap.error("wrong number of arguments for " + args.kind)
+    if args.kind == "preview":
+        with closing(delivery.database()) as db:
+            report = delivery.saved(db, args.values[0])
+        print(json.dumps(report, indent=2) if args.json else fb.show(report))
+        return 0
+    if args.kind == "send":
+        print(delivery.send(args.values[0], args.yes))
+        return 0
+    if args.kind == "track":
+        print(delivery.track(*args.values))
+        return 0
+    if args.kind in {"offer", "decline"}:
+        print(delivery.offer(args.values[0], args.kind == "decline"))
+        return 0
+    if args.kind == "check":
+        delivery.check()
+        return 0
 
     if args.kind == "scrub":
         text, removed = fb.scrub(sys.stdin.read())
@@ -57,14 +90,21 @@ def main(argv: list[str]) -> int:
         body = Path(args.body_file).read_text(encoding="utf-8")
     elif body is None and not sys.stdin.isatty():
         body = sys.stdin.read()
-    try:
-        report = fb.draft(args.kind, args.title or "", body or "", patch=args.patch)
-    except ValueError as exc:
-        print(f"loam report: {exc}", file=sys.stderr)
-        return 2
+    at = instant(args.at) if args.at else None
+    report = delivery.save(fb.draft(args.kind, args.title or "", body or "", patch=args.patch,
+                                    diagnostics=args.diagnostics, at=at))
     print(json.dumps(report, indent=2) if args.json else fb.show(report))
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    if os.geteuid() == 0 and lc.UID != 0:
+        os.initgroups(lc.USER, lc.GID)
+        os.setgid(lc.GID)
+        os.setuid(lc.UID)
+        os.environ.update(HOME=str(lc.HOME), XDG_RUNTIME_DIR=str(lc.RUNTIME_DIR))
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        print(f"loam report: {exc}", file=sys.stderr)
+        sys.exit(2)

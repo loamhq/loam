@@ -1,22 +1,7 @@
 """Telling Loam's makers: a bug, a feature request or an idea, upstream.
 
-Added 2026-11-17. An agent on any install can hand a defect in Loam's core to
-the people who make Loam, not only to its own engineer (which fixes that one
-box's copy and tells nobody). The route needs no credential on the box: the
-agent writes the report, this module takes the personal things out of it,
-the agent shows the owner exactly what would be sent, and on their yes gives
-them a link to GitHub's new-issue page for the upstream repository with the
-title and body already filled in. The owner opens it, signed in to their own
-GitHub account, and presses Submit. Nothing leaves the box by itself, and the
-owner's yes is the press.
-
-**Why not file it directly through the owner's connected GitHub.** The
-Integrations connection is a GitHub App the owner registered for their own
-account (lib/loam_github_app.py). Its user token reaches only the
-repositories that app is installed on, and it is never installed on the
-upstream repository, so GitHub refuses to open an issue there with it. A
-direct route would need a different credential (a token of the owner's with
-public-repository scope), which no install has today.
+Draft locally. The GitHub link and the optional makers' relay use the same
+scrubbed words. The CLI freezes the preview before asking for consent.
 
 **What is taken out** (``scrub``), by name where the install knows the name
 and by shape where it cannot:
@@ -42,7 +27,7 @@ with its fix: ``draft(..., patch=True)`` appends the diff of the checkout's
 own commits since the running release (or a range given), scrubbed the same
 way. A real pull request would need a fork and a push from the owner's
 account, which needs the same credential the direct route lacks; until then
-the patch in the issue is what a maintainer applies.
+maintainers can use the patch to understand the change.
 
 The upstream repository is ``feedback.repo`` in loam.toml (default
 ``loamhq/loam``). The tests are tests/test_feedback.py.
@@ -53,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import os
 import re
 import socket
 import subprocess
@@ -175,9 +161,9 @@ SECRET = re.compile(
 HEXISH = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")     # commits and hashes stay
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?!\d|\.\d)")
-IPV6 = re.compile(r"(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{1,4}(?![0-9A-Fa-f:])")
+IPV6 = re.compile(r"(?<![\w:])(?=[0-9A-Fa-f:]*:[0-9A-Fa-f:]*:)[0-9A-Fa-f:]{2,39}(?![\w:])")
 HOME_PATH = re.compile(r"(/home/|/Users/)(?!<user>)[^/\s'\"`)]+")
-QUERY = re.compile(r"(https?://[^\s?#'\"`)>]+)\?[^\s#'\"`)>]+")
+QUERY = re.compile(r"(https?://[^\s?#'\"`)>]+)\?(?!<query>)[^\s#'\"`)>]+")
 WIKILINK = re.compile(r"\[\[[^\]]+\]\]")
 KEYED = re.compile(r"(?i)\b(token|secret|password|passwd|api[_-]?key|authorization|bearer)"
                    r"(\s*[:=]\s*|\s+)(['\"]?)[^\s'\",;]{6,}\3")
@@ -271,11 +257,11 @@ def scrub(text: str, names: list[tuple[str, str]] | None = None,
     count("a path on this server", n)
     text, n = VAULT_PATH.subn(_vault_path, text)
     count("the name of a note", n)
+    text, n = EMAIL.subn("<email>", text)
+    count("an e-mail address", n)
     if domain:
         text, n = re.subn(r"(?i)(?:[a-z0-9-]+\.)*" + re.escape(domain), "<domain>", text)
         count("this install's web address", n)
-    text, n = EMAIL.subn("<email>", text)
-    count("an e-mail address", n)
 
     def ip(m: re.Match) -> str:
         try:
@@ -302,8 +288,8 @@ def scrub(text: str, names: list[tuple[str, str]] | None = None,
 # The report
 # ---------------------------------------------------------------------------
 
-def _git(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(lc.ROOT), *args], capture_output=True,
+def _git(*args: str, root=None) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root or lc.ROOT), *args], capture_output=True,
                           text=True, timeout=60)
 
 
@@ -333,11 +319,17 @@ def local_patch(spec: str | None = None) -> tuple[str, list[str]]:
             raise ValueError("this checkout has no release tag to measure its own "
                              "commits from; name a range, e.g. `--patch 0.2.1..main`")
         spec = f"refs/tags/{base}..HEAD"
-    log = _git("log", "--no-merges", "--format=%s", spec)
+    if spec.startswith("-"):
+        raise ValueError("a patch needs a git revision or range")
+    root = None
+    tree = os.getenv("LOAM_JOB_TREE")
+    if tree and os.getenv("LOAM_JOB_CANONICAL") == str(lc.ROOT):
+        root = Path(tree)
+    log = _git("log", "--no-merges", "--format=%s", spec, "--", root=root)
     if log.returncode:
         raise ValueError(f"git log {spec}: {log.stderr.strip()[:200]}")
     diff = _git("diff", spec.replace("..", "...", 1) if ".." in spec and "..." not in spec
-                else spec)
+                else spec, "--", root=root)
     if diff.returncode:
         raise ValueError(f"git diff {spec}: {diff.stderr.strip()[:200]}")
     return diff.stdout, [s for s in log.stdout.splitlines() if s.strip()]
@@ -350,7 +342,7 @@ def issue_url(title: str, body: str, kind: str, repository: str | None = None) -
 
 
 def draft(kind: str, title: str, body: str, *, patch: bool | str = False,
-          names=None, paths=None, domain=False) -> dict:
+          names=None, paths=None, domain=False, diagnostics: bool | None = None, at=None) -> dict:
     """The report as it would be sent: its scrubbed title and body, what
     was taken out, and the link that opens it on GitHub. Nothing is sent."""
     if kind not in KINDS:
@@ -376,14 +368,23 @@ def draft(kind: str, title: str, body: str, *, patch: bool | str = False,
                      + f"\n```diff\n{shown}\n```"
                      + (f"\n\n(The diff is cut at {PATCH_LINES} of its {len(lines)} lines.)"
                         if cut else ""))
-    parts.append(f"---\n{install_line()}. Written by an agent on a Loam install and "
-                 f"sent by its owner, with personal details taken out.")
-    full = "\n\n".join(parts)
-    clean_title, removed_t = scrub(title, names, paths, domain)
-    clean_body, removed_b = scrub(full, names, paths, domain)
-    removed = dict(removed_t)
-    for k, v in removed_b.items():
-        removed[k] = removed.get(k, 0) + v
+    if diagnostics is None:
+        diagnostics = kind == "bug"
+    clean_title, removed = scrub(title, names, paths, domain)
+
+    def clean(part):
+        value, counts = scrub(part, names, paths, domain)
+        for key, n in counts.items():
+            removed[key] = removed.get(key, 0) + n
+        return value
+
+    sections = [clean("\n\n".join(parts))]
+    if diagnostics:
+        import loam_report_diagnostics as diag
+        sections.append(diag.bounded(clean(diag.collect(at)), diag.LIMIT))
+    sections.append(clean(f"---\n{install_line()}. Written by an agent on a Loam install and "
+                          "sent by its owner, with personal details taken out."))
+    clean_body = "\n\n".join(sections)
     url = issue_url(clean_title, clean_body, kind)
     fits = len(url) <= URL_LIMIT
     if not fits:
@@ -397,8 +398,8 @@ def draft(kind: str, title: str, body: str, *, patch: bool | str = False,
         "removed": removed,
         "url": url,
         "fits": fits,
-        "patch": subjects if patch else None,
-        "id": hashlib.sha256((clean_title + "\0" + clean_body).encode()).hexdigest()[:12],
+        "patch": [scrub(s, names, paths, domain)[0] for s in subjects] if patch else None,
+        "id": hashlib.sha256("\0".join((repo(), kind, clean_title, clean_body)).encode()).hexdigest()[:12],
     }
 
 
@@ -410,6 +411,12 @@ def show(report: dict) -> str:
     lines = [f"To Loam's makers, as {'an' if report['kind'] == 'idea' else 'a'} "
              f"{report['kind']}:", "",
              f"Title: {report['title']}", "", report["body"], "", taken, ""]
+    if report.get("relay"):
+        lines.append(f"Send it? On approval, use the saved preview {report['id']} "
+                     f"with loam report send {report['id']} --yes. The owner can also file from their GitHub account.")
+    else:
+        lines.append("Sending without a GitHub account is not available on this install yet. "
+                     "The owner can file from their GitHub account.")
     if report["fits"]:
         lines.append("On the owner's yes, give them this link: it opens the report on "
                      "GitHub filled in, and it is sent when they press Submit, signed "
@@ -420,5 +427,10 @@ def show(report: dict) -> str:
                      "title; they paste the body above into it and press Submit, "
                      "signed in to their own account:")
     lines.append(report["url"])
+    lines.append(f"Saved preview: {report['id']}")
+    if report.get("relay"):
+        lines.append(f"Relay: {report['relay']} → {report['repo']}. "
+                     f"Labels: {report['label']}, sent-from-Loam. "
+                     "The relay also receives a random install ID for rate limiting.")
     return "\n".join(lines)
 

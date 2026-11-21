@@ -181,3 +181,31 @@ CLI, and on `bin/provider-memory check`. A store that grew is told once to
 the agent that hears when something in Loam needs attention
 (lib/loam_attention.py, 2026-11-19); never in a conversation's thread
 (2026-11-16) nor on the board.
+
+### Makers' report relay
+
+`feedback.relay` is the full HTTPS intake URL. Leave it absent until a
+maintainer operates an approved endpoint. The default preview offers the
+owner's GitHub link. For a private rehearsal use HTTP on loopback.
+
+On the maintainers’ install, `bin/report-relay` binds only to 127.0.0.1
+and prints its URL. It dry-runs issue creation by default.
+`--file-issues` switches to the GitHub App installation for
+`feedback.repo` and requests only issues-write for that one repository.
+The upstream labels are the report kind and `sent-from-Loam`. The relay
+accepts a versioned Loam preview, rechecks privacy, and limits the UTF-8
+request to 64 KiB, five submissions per random install ID per day and
+200 total per day. A public client format cannot authenticate an install.
+No route, service, or DNS entry is created by installing Loam.
+
+Requests are recorded in the maintainer's state under `report-relay/`.
+A retry returns the original issue. If GitHub's response was lost, the
+relay holds the request for verification. Reconcile the issue against
+GitHub before clearing a pending row or recording its issue URL.
+
+The install keeps approved issue links in `reports/reports.sqlite3` in
+its own state. Nightly housekeeping reads the public issue and comments
+without credentials. A closed issue labelled `fixed-in:0.2.19` yields
+release news when the matching version tag exists. Ordinary closes stay
+quiet. A new comment from a repository owner, member or collaborator
+produces one notice with a link to the reply.

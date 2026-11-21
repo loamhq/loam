@@ -2512,6 +2512,11 @@ def run_inner(project: eng.Project, job_id: str) -> int:
 
     note = tree_note(project, record, meta["title"])
     note += SCRATCH_NOTE.format(scratch=eng.scratch_dir(job_id))
+    if project.platform:
+        note += ("\nIf this job fixes a defect in Loam itself, end the receipt with the exact "
+                 "scrubbed report preview, including `loam report bug --patch BASE..FIX` "
+                 "for just that fix and the saved preview ID. The briefing agent offers it "
+                 "once using loam-filing-a-bug-or-feature. Only the owner can approve sending.")
     if meta["read_only"]:
         note += READ_ONLY_NOTE
     # A pull-request project cuts no release: no tag is pushed to a

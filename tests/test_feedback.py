@@ -174,7 +174,7 @@ try:
            d["url"].startswith("https://github.com/loamhq/loam/issues/new?")),
           (0, "idea", "idea", True))
     check("and is shown as an idea", "To Loam's makers, as an idea:" in fb.show(d), True)
-    check("there is no other way to send it: `send` is not a command",
+    check("an unknown preview cannot be sent",
           report("send", "0123456789ab").returncode, 2)
     sc = report("scrub", "--json", stdin="Wren at sam.example.test\n")
     check("loam report scrub", json.loads(sc.stdout)["text"], "<agent> at <domain>\n")
