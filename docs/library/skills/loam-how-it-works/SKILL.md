@@ -184,7 +184,10 @@ Agents use `delete_file` and `restore_file` for the same vault operations.
 **Settings › Plugins** shows installed themes and extensions and where each
 copy came from. About opens the Market listing for a Market plugin and shows
 the folder for a locally made one. Use the Market to find more themes and
-extensions. Loam checks the Market listing or the linked repository’s release
+extensions. A Market listing shows GitHub’s release-file downloads, updated
+nightly and including updates. On installation Loam verifies the release file
+against the reviewed commit and uses Git if the file cannot be verified.
+Loam checks the Market listing or the linked repository’s release
 tags daily. About lets you review an update and turn automatic updates on or
 off. Nightly updates are on by default and appear in Activity. An update
 that asks for more access waits for the owner’s yes. An agent changes the

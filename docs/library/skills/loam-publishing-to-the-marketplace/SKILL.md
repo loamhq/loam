@@ -108,3 +108,12 @@ with `mcp__engineer__market` and `link` (or `loam market link <link>`): any
 shape works, nothing is installed, and the answer's `card` line offers it the
 same way. Nothing listed yet is the normal state for a new marketplace, not an
 error: offer to build it instead.
+
+### Download counts
+
+Sharing attaches the plugin folder to the GitHub release. After review, a
+confirmed Market install or update downloads that file and verifies it
+against the reviewed commit. GitHub counts the download. The Market collects
+the totals nightly. They include direct downloads and updates. Git fallbacks,
+older installs and update checks add nothing. A failed share after tagging can
+be retried at the same version with the same files.

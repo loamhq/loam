@@ -1557,7 +1557,7 @@ reader off the request thread or cache its result.
 | apps | Apps made here, with name, url and opens, its cumulative number of recorded selections in Apps. Existing installations start from every retained daily count |
 | local-plugins | Effective non-app plugins built here, with id and name |
 | installation | first_weeks_at, the starter timestamp for a first-weeks install, otherwise null |
-| public-work | Publications in the chosen GitHub account’s own Market repositories, issues filed and merged pull requests in the configured upstream. Each has id, name and url. An issue's shipped flag requires a shipped label. A null collection means unavailable. No install count is available |
+| public-work | Publications in the chosen GitHub account’s own Market repositories, issues filed and merged pull requests in the configured upstream. Each has id, name and url. An issue's shipped flag requires a shipped label. A null collection means unavailable. A publication also carries downloads, the nightly total of release-file downloads including updates (zero if observed, null or absent if unknown) |
 
 The optional public-work group requires both api.github.com and
 raw.githubusercontent.com in touches.network. It uses the explicitly chosen

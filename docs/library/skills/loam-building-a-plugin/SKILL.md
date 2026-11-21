@@ -141,3 +141,12 @@ A page plugin can add one compact update above the agents in Chats with
 unsent composer with the `chat.draft` command. A server can declare activity
 groups under `touches.facts` and run `LOAM_PLUGIN_FACTS` to read their JSON.
 The full groups and the privacy declaration are in docs/plugins.md.
+
+### Your Market downloads
+
+A plugin declaring `public-work` in `touches.facts`, with `api.github.com`
+and `raw.githubusercontent.com` in `touches.network`, can read
+`public-work.publications`. Each listing in the owner’s chosen GitHub account
+has an `id`, `name`, `url` and `downloads`. The total includes updates and
+direct GitHub release-file downloads. Zero means none recorded. A missing or
+null value means the total is unavailable. The Market refreshes it nightly.

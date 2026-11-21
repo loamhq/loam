@@ -52,6 +52,9 @@ def extras(e: dict) -> list[str]:
     """The creator's links and the cover, a line each, when a listing has them."""
     links = (e.get("creator") or {}).get("links") or []
     out = [f"{e['author']}: " + ", ".join(f"{x['label']} {x['url']}" for x in links)] if links else []
+    if e.get("downloads"):
+        n = e["downloads"]
+        out.append(f"{n:,} download" + ("s" if n != 1 else ""))
     cover = e.get("cover_url") or e.get("cover")
     if cover and cover.startswith("https://"):
         out.append(f"cover: {cover}")
