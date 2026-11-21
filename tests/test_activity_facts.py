@@ -54,3 +54,18 @@ class ActivityFacts(unittest.TestCase):
             preview["source"]["commit"] = "b"*40
             with self.assertRaises(ValueError):
                 initial.install([pin])
+
+    def test_usage_counts_url_and_expires(self):
+        catalog = {"apps": [{"name": "Notebook", "url": "/x/notebook/", "source": "yours"}]}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(facts.config, "STATE", Path(tmp)), patch.object(facts.apps, "listing", return_value=catalog):
+            with patch.object(facts.time, "time", return_value=86400):
+                facts.record_open("/x/notebook/")
+                self.assertEqual(facts.collect(["apps"])["apps"][0]["opens_28d"], 1)
+                with self.assertRaises(ValueError):
+                    facts.record_open("https://unknown.example/")
+            with patch.object(facts.time, "time", return_value=29*86400):
+                self.assertEqual(facts.collect(["apps"])["apps"][0]["opens_28d"], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
