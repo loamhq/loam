@@ -100,13 +100,13 @@ test('plugin key metadata renders broker sentences; refuses never replace the sa
   assert.ok(text(c.view()).includes(why)); assert.ok(!JSON.stringify(c.st).includes('synthetic'))
 })
 
-test('both voice plugins (Market plugins since 0.2.9) declare the shared Google key', async () => {
+test('both voice plugins (Market plugins since 0.2.9) declare both optional shared speech keys', async () => {
   const voice = await Promise.all(AUDIO_PLUGINS.map(listedManifest))
   assert.equal(voice.length, 2)
   // Since 1.1.0 the key is declared once, by provider: the pasted
   // `settings.secret` of the same name (kept through 0.2.3) made the Market
   // listing say both "Uses your Google Gemini key" and "Asks for a key of its own".
-  for (const p of voice) { assert.deepEqual(p.keys.map(k => k.provider), ['google']); assert.equal(p.contributes?.['settings.secret'], undefined) }
+  for (const p of voice) { assert.deepEqual(p.keys.map(k => k.provider).sort(), ['google', 'openai']); assert.ok(p.keys.every(k => k.optional)); assert.equal(p.contributes?.['settings.secret'], undefined) }
 })
 
 test('browser key routes relay metadata and refusals, and never expose the server-only value route', async t => {

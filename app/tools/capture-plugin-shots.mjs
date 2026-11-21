@@ -16,6 +16,8 @@
 import { execFileSync } from 'node:child_process'
 import { mkdir, readFile, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { filesHost } from '../test/files-host.js'
+import { readAnswer, row as fileRow } from '../test/fixtures/files-contract.js'
 import { marketFixture } from '../test/market-fixture.mjs'
 
 const out = process.env.SHOTS_OUT
@@ -24,9 +26,9 @@ await mkdir(out, { recursive: true })
 const dirs = JSON.parse(process.env.PLUGIN_DIRS || '{}')
 const ROOT = new URL('../../', import.meta.url).pathname
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright')
-const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', ...(process.env.DEMO_SPEECH ? [`--use-file-for-fake-audio-capture=${process.env.DEMO_SPEECH}`] : []), '--autoplay-policy=no-user-gesture-required'] })
+const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox', '--enable-speech-dispatcher', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', ...(process.env.DEMO_SPEECH ? [`--use-file-for-fake-audio-capture=${process.env.DEMO_SPEECH}`] : []), '--autoplay-policy=no-user-gesture-required'] })
 const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8')
-const W = 1120, H = 700, CLIP = 640, CLIP_H = 400, AT = '2026-11-19T16:40:00Z', THREAD = 'a-quieter-week'
+const W = Number(process.env.SHOT_WIDTH || 1120), H = W < 600 ? 844 : 700, CLIP = 640, CLIP_H = 400, AT = '2026-11-19T16:40:00Z', THREAD = 'a-quieter-week'
 const json = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 const TYPES = { js: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', webp: 'image/webp', png: 'image/png', json: 'application/json', md: 'text/markdown', mp3: 'audio/mpeg', wav: 'audio/wav' }
 
@@ -163,6 +165,7 @@ const GARDEN = [
 ]
 const SAID = 'Could we add a little bench by the herbs, facing the sunflowers? Somewhere to sit with a coffee in the morning.'
 const dictationRoutes = {
+  '**/x/dictation/status': r => r.fulfill({ json: { provider: 'google' } }),
   '**/x/dictation/terms': r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ found: true, path: 'Loam/dictation terms.md', terms: ['Sprout', 'Quill', 'sunflowers'] }) }),
   '**/x/dictation/transcribe': async r => { await new Promise(res => setTimeout(res, 1800)); return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ text: SAID, polish: { ran: true, level: 'light' } }) }) },
 }
@@ -185,7 +188,9 @@ await run('dictation', { plugins: ['dictation'], title: 'Spring garden', message
   await page.evaluate(() => { const n = document.querySelector('.plugin-preferences'); const sc = n.closest('.app-modal-body') ?? n.closest('.setmain'); sc.scrollTop += n.getBoundingClientRect().top - sc.getBoundingClientRect().top - 24 })
   await page.waitForTimeout(400)
   await page.mouse.move(0, 0)
-  await shot('polish', "() => document.querySelector('.plugin-preferences')", { align: 'top', pad: 16, x: 'left' })
+  const polishCard = page.locator('.card').filter({ has: page.getByText('Polish', { exact: true }) }).last()
+  await polishCard.scrollIntoViewIfNeeded()
+  await shot('polish', "() => [...document.querySelectorAll('.card')].find(n => n.querySelector('.kicker')?.textContent === 'Polish')", { x: 'left' })
 })
 
 // ---------------------------------------------------------------- Read aloud
@@ -219,7 +224,6 @@ if (speechFile) await run('read-aloud', { setup: profileRoutes, plugins: ['read-
   await glyph.waitFor()
   await glyph.click()
   await page.locator('.speakmenu').waitFor()
-  await page.waitForTimeout(300)
   await shot('menu', "() => document.querySelector('.speakmenu')", { align: 'bottom', pad: 70 })
   await page.locator('.speakmenu button', { hasText: 'Brief' }).first().click()
   await page.locator('.playerline').first().waitFor()
@@ -227,7 +231,6 @@ if (speechFile) await run('read-aloud', { setup: profileRoutes, plugins: ['read-
   await page.evaluate(() => { const n = document.querySelector('.playerline'), pane = n?.closest('.tt-stream'); if (pane) pane.scrollTop += n.getBoundingClientRect().bottom - pane.getBoundingClientRect().bottom + 140 })
   await page.waitForTimeout(400)
   await page.locator('button', { hasText: 'Show the brief' }).first().click().catch(() => {})
-  await page.waitForTimeout(300)
   await page.evaluate(() => { const n = document.querySelector('.playerline'), pane = n?.closest('.tt-stream'); if (pane) pane.scrollTop = pane.scrollHeight })
   await page.waitForTimeout(400)
   await page.mouse.move(0, 0)
@@ -242,4 +245,80 @@ if (speechFile) await run('read-aloud', { setup: profileRoutes, plugins: ['read-
   await shot('voice', "() => document.querySelector('.agent-voice-picker')", { align: 'top', pad: 70 })
 })
 
+// Exercise the same fallback controls in a thread and in Files.
+await run('read-aloud-device', { plugins: ['read-aloud'], title: 'Spring garden', messages: LONG,
+  setup: app => {
+    Object.assign(app.routes, filesHost().routes)
+    app.routes['GET /v1/files/read'] = (_req, res) => json(res, readAnswer(fileRow('vault', 'Notes/plan.md'), LONG[1].text, 'sha256:fixture'))
+  }, routes: { '**/x/read-aloud/status': route => route.fulfill({ json: { provider: 'browser', speech: false } }) } },
+async ({ page, open, shot }) => {
+  const sent = []
+  page.on('request', req => { if (new URL(req.url()).pathname.startsWith('/x/read-aloud/speech')) sent.push(req.method()) })
+  await open()
+  await page.locator('[data-message-id="m2"] .speakbtn').click()
+  await page.locator('.speakmenu .speech-key-link').waitFor()
+  if (await page.locator('.speakmenu').getByText('Brief', { exact: true }).count()) throw new Error('Browser offered Brief')
+  await shot('menu')
+  await page.locator('.speakmenu .setrow').first().click()
+  await page.locator('.playerline').getByText('Browser voice').first().waitFor()
+  await shot('player')
+  await page.evaluate(() => __cap.page.goFiles('vault', 'Notes/plan.md'))
+  await page.locator('.fs-speak').click()
+  await page.locator('.file-speech-action').waitFor()
+  await shot('files')
+  await page.locator('.file-speech-action').click()
+  await page.locator('.fs-player').getByText('Browser voice').first().waitFor()
+  if (sent.length) throw new Error('Browser playback contacted the server')
+})
+
+await run('dictation-device', { plugins: ['dictation'], title: 'Spring garden', messages: GARDEN,
+  routes: { '**/x/dictation/status': route => route.fulfill({ json: { provider: 'browser' } }) } },
+async ({ page, open, shot }) => {
+  await open()
+  await page.locator('.roundmic').first().click()
+  await page.getByText(/This browser could not recognise speech|This browser has no speech recognition|This browser needs microphone permission/).first().waitFor()
+  await shot('microphone')
+})
+
+// Speech provider settings and the shared-key form in a neutral demo install.
+for (const provider of ['google', 'openai', 'browser']) {
+  for (const plugin of ['dictation', 'read-aloud']) {
+    let selected = provider
+    const label = { google: 'Using Google', openai: 'Using OpenAI', browser: 'Using this browser' }[provider]
+    const name = `${plugin}-${provider}`
+    await run(name, { plugins: [plugin], title: 'Spring garden', messages: LONG, setup: plugin === 'read-aloud' ? profileRoutes : null,
+      routes: { ...dictationRoutes, ...readRoutes, [`**/x/${plugin}/status`]: route => route.fulfill({ json: { provider: selected, speech: selected !== 'browser' } }) } },
+    async ({ page, shot }) => {
+      await page.evaluate(id => __cap.page.goSettings('plugins', id), plugin)
+      const section = page.locator('.speech-provider')
+      await section.getByText(label, { exact: true }).waitFor()
+      await section.scrollIntoViewIfNeeded()
+      await shot('settings')
+      await section.locator('button').click()
+      await page.getByRole('dialog', { name: 'Use a Gemini key' }).waitFor()
+      await shot('guide')
+      if (provider === 'browser') {
+        await page.route('**/api/keys/google', route => {
+          const key = route.request().postDataJSON().values.GEMINI_API_KEY
+          if (route.request().method() !== 'PUT' || key !== 'fixture-key') throw new Error('Expected a shared Settings save')
+          selected = 'google'
+          return route.fulfill({ json: { checked: { ok: true } } })
+        })
+        await page.getByLabel('Gemini API key', { exact: true }).fill('fixture-key')
+        await page.getByRole('button', { name: 'Check and save' }).click()
+        await page.getByText('Google accepted your key.', { exact: false }).waitFor()
+        await section.getByText('Using Google', { exact: true }).waitFor({ state: 'attached' })
+      }
+      await page.getByRole('button', { name: 'Close', exact: true }).last().click()
+      selected = provider
+      if (provider === 'openai' && plugin === 'read-aloud') {
+        await page.evaluate(() => __cap.page.goProfile('sprout'))
+        await page.locator('.profile-tab', { hasText: 'Settings' }).click()
+        await page.locator('.voice-picker-trigger').click()
+        await page.locator('.agent-voice-picker').waitFor()
+        await shot('voices')
+      }
+    })
+  }
+}
 await browser.close()

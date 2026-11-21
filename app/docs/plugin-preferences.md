@@ -28,8 +28,7 @@ and renders manifest-declared secret fields once. See the
 | Files voice and voice picker | Plugins → Read aloud | `loam-ui.read-aloud.voice`, browser |
 | Describe tables and diagrams | Plugins → Read aloud | `loam-ui.read-aloud.describeTablesAndDiagrams`, browser |
 | Prepare / Play / Pause sample | Plugins → Read aloud | Existing speech routes/cache; no new preference |
-| Dictation Gemini key status, Save, Check again, Forget | Plugins → Dictation | Existing `/api/plugins/dictation/secrets/GEMINI_API_KEY` operations |
-| Read aloud Gemini key status, Save, Check again, Forget | Plugins → Read aloud | Existing `/api/plugins/read-aloud/secrets/GEMINI_API_KEY` operations |
+| Shared Google key guide | Both plugin settings and browser speech controls | `PUT /api/keys/google` checks and saves the shared key |
 
 No data migration is needed: plugin preference adapters still read the exact
 same keys on first activation. No defaults overwrite stored values. The
@@ -40,13 +39,7 @@ reading voices remain in agent profiles and use the existing host-backed
 
 ## Credentials and shared values
 
-Despite the matching `GEMINI_API_KEY` name, each manifest declares a separate
-plugin-scoped credential. The app reads the Dictation credential for
-transcription/polish and Read aloud’s for speech/descriptions. Either can report
-the host’s existing `source: box` fallback. That shared fallback stays on the
-host; this change creates no shared credential or duplicate field. Each plugin
-detail renders its existing key controls exactly once. No API keys page or
-credential storage changes are needed for this move.
+Both manifests declare optional Google and OpenAI keys. Loam resolves each declared key on the server. The plugins use Google first, OpenAI second and browser speech when neither key is set. The key guide uses the same checked write as Connections and refreshes both plugins after saving. An existing plugin-specific override still takes precedence for that provider.
 
 ## Outstanding host contract: persona parity
 

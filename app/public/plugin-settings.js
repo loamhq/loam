@@ -23,7 +23,7 @@ export function pluginOrigin(row, entry) {
 export function touchSentences(declaration = {}) {
   const touches = declaration.touches ?? {}, lines = []
   if (declaration.page_code) lines.push('Runs code in the page.')
-  for (const network of touches.network ?? []) lines.push(network.host === 'browser-managed' ? `Uses the browser’s speech recognition service: ${network.why}` : `Contacts ${network.host}: ${network.why}`)
+  for (const network of touches.network ?? []) lines.push(network.host === 'browser-managed' ? `Uses the browser’s speech service: ${network.why}` : `Contacts ${network.host}: ${network.why}`)
   if (touches.record && touches.record !== 'none') lines.push(touches.record === 'read' ? 'Reads conversation records.' : 'Reads and changes conversation records.')
   if (touches.memory && touches.memory !== 'none') lines.push(touches.memory === 'read' ? 'Reads shared memory.' : 'Reads and changes shared memory.')
   if (touches.server) lines.push('Contains code for the host.')
@@ -332,7 +332,8 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     if (row.keys?.length && Array.isArray(st.keys)) {
       const saved = k => st.keys.some(p => p.id === k.provider && p.set)
       const needed = row.keys.filter(k => !k.optional)
-      if (needed.length ? !needed.every(saved) : !row.keys.some(saved)) return false
+      const worksWithoutKeys = host.registry?.entries('settings.section').some(entry => entry.owner === row.id && entry.worksWithoutKeys)
+      if (needed.length ? !needed.every(saved) : !worksWithoutKeys && !row.keys.some(saved)) return false
     }
     const setup = (hostSettings?.entries ?? []).filter(e => e.setup)
     if (setup.length && setup.every(e => !String(hostSettings.values?.[e.key] ?? '').trim())) return false

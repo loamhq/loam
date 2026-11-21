@@ -21,6 +21,8 @@ export interface Registration {
   icon?: string | ((size: number) => View)
   /** settings.section: 'plugin' renders only inside the owner’s enabled detail. */
   group?: string
+  /** A plugin settings section can operate with all optional keys absent. */
+  worksWithoutKeys?: boolean
   /** Legacy opt-in: also render in this plugin’s enabled detail. */
   plugin?: string
   children?: string
