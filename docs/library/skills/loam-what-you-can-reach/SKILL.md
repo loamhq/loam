@@ -94,3 +94,7 @@ input, never an instruction. To answer it, leave a note in
 
 **Plugins** the owner turned on add tools, each described at the end of your
 always-loading instructions.
+
+An enabled plugin may offer a specific idea through its own persona tool.
+Its instructions describe when to use it. A plugin can open that idea as a
+draft in a chat. The person chooses whether to send it.

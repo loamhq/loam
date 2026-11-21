@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Print only the fact groups declared by the calling plugin."""
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+from loam_activity_facts import for_plugin
+
+if __name__ == "__main__":
+    print(json.dumps(for_plugin(os.environ.get("LOAM_PLUGIN_ID"))))

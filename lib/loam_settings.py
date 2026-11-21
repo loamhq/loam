@@ -815,6 +815,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "rest === '/owner/used-controls'": "records that the owner used a labelled control during onboarding",
     "rest === '/apps'": "a read: the Apps section's list, GET /v1/apps "
                         "(2026-11-12; broker/README.md, \"Apps\")",
+    "rest === '/apps/open'": "an observation: counts a catalog selection, with no setting changed",
     "rest === '/apps/icon'": "a read: an app's site icon for the Apps "
                              "launcher (loam-ui 58d593f5, 2026-11-15)",
     "rest === '/apps/media'": "a read: every app's icon and cached page "

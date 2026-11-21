@@ -475,6 +475,7 @@ def _env(plugin: dict, secrets: list[str] | None = None) -> dict[str, str]:
            "LOAM_PLUGIN_SETTINGS_DIR": str(plugin["settings"]),
            "LOAM_PLUGIN_DATA": str(plugin["data"]),
            "LOAM_PLUGIN_PRIVATE": str(private_dir(plugin["id"])),
+           "LOAM_PLUGIN_FACTS": str(lc.ROOT / "bin" / "plugin-facts"),
            "LOAM_LIB": str(lc.ROOT / "lib"),
            "PYTHONPYCACHEPREFIX": str(lc.PYCACHE)}
     if secrets:

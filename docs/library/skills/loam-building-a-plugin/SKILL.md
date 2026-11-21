@@ -108,3 +108,9 @@ it done.
 If a change needs Loam itself to change, because no plugin can reach it, it
 is a feature: report it to Loam's makers, and fix it here only if it cannot
 wait (`loam-filing-a-bug-or-feature`).
+
+A page plugin can add one compact update above the agents in Chats with
+`thread.list.line`, draw its own Apps picture with `apps.icon`, and open an
+unsent composer with the `chat.draft` command. A server can declare activity
+groups under `touches.facts` and run `LOAM_PLUGIN_FACTS` to read their JSON.
+The full groups and the privacy declaration are in docs/plugins.md.

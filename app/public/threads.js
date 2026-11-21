@@ -1009,6 +1009,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       st.fixture ? h('div', { class: 'tt-fixture' }, 'Design preview · sample threads', button('Exit', exitPreview, { class: 'quietlink tt-preview-exit' })) : null,
       !st.wide ? registry.draw('app.overlay', { slot: 'player' }) : null,
       h('div', { class: 'scroll', key: 'thread-list-scroll' },
+        !st.archived ? registry.draw('thread.list.line')[0] : null,
         !st.archived && !st.personasHidden ? personaGrid({ agents: catalog(), loading: fixtureAgents === null && runtimeAgents === null && !agentsReady(), wide: st.wide, look, disabled: st.creating,
           onclick: (a) => { st.listMenu = false; st.personaMenu = st.personaMenu === a.id ? null : a.id; redraw() }, label: (a) => `${a.name} menu`,
           buttonProps: (a) => ({ type: 'button', 'data-agent-menu': a.id, 'aria-haspopup': 'dialog', 'aria-expanded': String(st.personaMenu === a.id), 'aria-controls': st.personaMenu === a.id ? 'thread-persona-menu' : null }),

@@ -139,3 +139,20 @@ test('only safe URL protocols open; framing is limited to the CSP’s allowed or
   assert.equal(canFrame(catalog.apps[0]), true)
   for (const url of ['https://example.com.evil.org', 'https://example.com', 'http://garden.example.com', 'https://garden.example.com:8080', 'https://unrelated.example.org']) assert.equal(canFrame({ frame: true, url }), false)
 })
+
+test('a plugin supplies its own picture and opens in the phone workspace', async () => {
+  installDom()
+  const { createCoreRegistry } = await import('../public/core-registrations.js')
+  const registry = createCoreRegistry(), calls = [], selected = []
+  const paint = id => registry.scope({ id }).places['apps.icon'].add({ id: 'picture', render: () => h('span', { text: id }) })
+  paint('other'); paint('journal')
+  const app = { name: 'Journal', kind: 'plugin', source: 'yours', plugin: 'journal', on: true, state: 'running', url: '/x/journal/' }
+  const list = createApps({ registry, api: async (method, path, body) => {
+    calls.push([method, path, body]); return { apps: [app], sources: ['yours'] }
+  }, wide: () => false, redraw() {}, avatar() {}, agentName() {}, navigate: item => selected.push(item) })
+  await list.load()
+  assert.equal(text(all(list.view({ list: true }), 'apps-icon')[0]), 'journal')
+  list.open(app)
+  assert.deepEqual(selected, [{ kind: 'app', app }])
+  assert.deepEqual(calls.at(-1), ['POST', '/apps/open', { url: app.url }])
+})

@@ -823,6 +823,7 @@ def step_starter(a, ans: dict) -> None:
     # The engineer, which makes changes to Loam itself when an agent briefs
     # it (2026-11-18): its role and project file are seeded into the vault
     # from this release and rendered beside the code (bin/provision).
+    as_user(cfg, ["python3", f"{cfg['root']}/bin/preinstall-plugins"])
     with progress("Setting up the engineer", "Engineer ready to make changes your agents ask for."):
         res = as_user(cfg, ["python3", f"{cfg['root']}/bin/provision", "--engineer"],
                       check=False)

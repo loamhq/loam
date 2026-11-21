@@ -87,7 +87,9 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
   }
   function open(app, node, { routed = false } = {}) {
     if (appUnavailable(app) && !wide()) return
-    if ((!wide() && !routed) || !canFrame(app)) return openBrowser(appURL(app.url))
+    if (!routed && !appUnavailable(app)) Promise.resolve(api('POST', '/apps/open', { url: app.url })).catch(() => {})
+    const embeddedPlugin = app.kind === 'plugin' && canFrame(app) && navigate
+    if ((!wide() && !routed && !embeddedPlugin) || !canFrame(app)) return openBrowser(appURL(app.url))
     if (navigate && !routed) return navigate({ kind: 'app', app })
     st.selected = app; st.copied = false; st.copyError = ''; returnTo = node; redraw()
   }
@@ -123,6 +125,11 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
     } catch { /* The designed tile stays; media never blocks opening an app. */ }
   }
   function appPicture(app) {
+    if (app.plugin && app.on) {
+      const entry = registry.entries('apps.icon', { app }).find(item => item.owner === app.plugin)
+      const picture = entry && registry.invoke(entry, 'render', { app })
+      if (picture) return h('span', { class: 'apps-icon apps-preview', 'aria-hidden': 'true' }, picture)
+    }
     const media = st.media.get(app.url), src = media?.preview
     // Resolve palette collisions deterministically within this catalog. Names
     // in one family keep different accent colours even if every capture fails.
@@ -170,7 +177,7 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
     const inSide = side()?.visible() && side().st.side?.kind === 'app' && (side().st.side.app?.url ?? side().st.side.url) === app.url
     return h('div', { class: 'apps-entry', key: app.url },
       h('button', { class: `apps-row${selected ? ' on' : ''}${inSide ? ' in-side' : ''}`, 'aria-current': selected ? 'page' : null,
-        'aria-label': `Open ${app.name}${!wide() || !canFrame(app) ? ' in browser' : ''}`, title: app.name,
+        'aria-label': `Open ${app.name}${(!wide() && app.kind !== 'plugin') || !canFrame(app) ? ' in browser' : ''}`, title: app.name,
         oncontextmenu: event => { event.preventDefault(); cancelPress(); suppressedURL = app.url; suppressedUntil = Date.now() + 1200; showDetails(app) },
         onpointerdown: event => startPress(app, event), onpointerup: cancelPress, onpointercancel: cancelPress, onpointerleave: cancelPress,
         onpointermove: event => { if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) cancelPress() },

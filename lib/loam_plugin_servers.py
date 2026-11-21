@@ -142,7 +142,8 @@ def environment(pid: str, want: dict, port: int) -> dict[str, str]:
         # Since 2026-11-18 (shared keys): the file of its declared providers'
         # keys, resolved; absent when it declares none (lib/loam_keys.py).
         "LOAM_PLUGIN_KEYS": str(private / "keys.env"),
-        "LOAM_LIB": str(lc.ROOT / "lib"),
+        "LOAM_PLUGIN_FACTS": str(lc.ROOT / "bin" / "plugin-facts"),
+           "LOAM_LIB": str(lc.ROOT / "lib"),
         "LOAM_BROKER_URL": f"http://{cfg.BIND_ADDR}:{cfg.PORT}",
         "LOAM_BROKER_TOKEN_FILE": str(cfg.TOKEN_PATH),
         "LOAM_API": str(plugins.API),

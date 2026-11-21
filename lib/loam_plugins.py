@@ -49,7 +49,7 @@ PLACES = (
     "rail.section", "app.overlay", "settings.section", "thread.list.decoration",
     "thread.header.action", "thread.kind", "message.renderer",
     "message.footer.action", "composer.tool", "files.viewer", "files.action", "files.root",
-    "activity.kind", "apps.source", "command",
+    "activity.kind", "apps.source", "apps.icon", "thread.list.line", "command",
     "provider", "compute", "publishing", "agent.tool", "route", "schedule.kind",
     # An agent's profile (2026-11-13): a row or a section a plugin adds to
     # Settings > Agents > <agent>. Every plugin may, first-party or not
@@ -770,6 +770,11 @@ def touches_of(value, warnings: list[str]) -> dict:
                 row = {"host": item["host"].strip(), "why": why}
                 row.update({k: x for k, x in item.items() if k not in ("host", "why")})
                 out["network"].append(row)
+        elif key == "facts":
+            from loam_activity_facts import GROUPS
+            if not isinstance(v, list) or any(item not in GROUPS for item in v):
+                raise ManifestError("touches.facts names groups from " + ", ".join(GROUPS))
+            out[key] = list(dict.fromkeys(v))
         elif key == "record":
             if v not in RECORD:
                 raise ManifestError(f"`touches.record` is one of {', '.join(RECORD)}")
@@ -785,6 +790,10 @@ def touches_of(value, warnings: list[str]) -> dict:
         else:
             warnings.append(f"touches.{key} is not in spec v0; listed as given")
             out[key] = v
+    if "public-work" in out.get("facts", []):
+        hosts = {entry["host"] for entry in out["network"]}
+        if not {"api.github.com", "raw.githubusercontent.com"}.issubset(hosts):
+            raise ManifestError("public-work needs api.github.com and raw.githubusercontent.com in touches.network")
     return out
 
 
